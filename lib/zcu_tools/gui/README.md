@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-14，runtime 安裝可選取的 QMessageBox 文字
+**Last updated:** 2026-10-14，可選取的 QMessageBox 文字與資料值 label
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -207,6 +207,11 @@ the process then lets users select its main text, informative text and detailed
 text with the mouse or keyboard. Call sites keep using plain `QMessageBox`; all
 four launchers get the filter because runtime is their only `QApplication`
 factory.
+
+A `QLabel` that shows a data value (device address, name, path, computed value,
+status or error message) calls `make_label_selectable(label)` from the same
+module, so users can select and copy it with the mouse. Labels for field names,
+hints, placeholders and decoration stay unselectable.
 
 ## Project / Result Scope
 
