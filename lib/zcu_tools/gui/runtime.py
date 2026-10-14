@@ -209,11 +209,15 @@ def _initialize_rendering(app: GuiApplication) -> None:
 def _get_or_create_qapplication() -> GuiApplication:
     from qtpy.QtWidgets import QApplication
 
+    from zcu_tools.gui.widgets.selectable_text import install_selectable_message_boxes
+
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
     if not isinstance(app, QApplication):
         raise RuntimeError("existing Qt application is not a QApplication")
+    # Process-wide Qt behavior shared by every launcher that runs on this runtime.
+    install_selectable_message_boxes(app)
     return cast(GuiApplication, app)
 
 
