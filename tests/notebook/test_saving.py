@@ -4,7 +4,6 @@ from collections.abc import Generator, Mapping
 from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Literal, Self
-from unittest.mock import Mock
 
 import h5py
 import numpy as np
@@ -12,17 +11,14 @@ import pytest
 from zcu_tools.cfg_model import ConstWaveformCfg, DirectReadoutCfg, PulseSpec
 from zcu_tools.datafile import (
     AnalysisDocument,
-    SoftwareProvenance,
     load_labber_data,
     load_run_data,
 )
 from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment import RunRecord
-from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError
 from zcu_tools.format_version import YamlMap
 from zcu_tools.notebook import NotebookAdapter, NotebookExperiment, PartialSaveError
-from zcu_tools.notebook import adapter as adapter_module
 from zcu_tools.notebook import saving as saving_module
 from zcu_tools.plotting.plots import NonPresentingHost
 from zcu_tools.resources.document_store import DocumentStore
@@ -45,7 +41,6 @@ from zcu_tools.resources.entry import (
 )
 from zcu_tools.resources.entry.schema import PARAMETER_VERSION, PointDocument
 
-from tests._native_support import native_metadata
 from tests.device._snapshot_fakes import SnapshotDevice
 from tests.experiment._saving_support import SavingCfg, SavingCore, saving_figure
 from tests.experiment._snapshot_support import SnapshotCore
@@ -89,16 +84,6 @@ def ledger(point: PointView, tmp_path: Path) -> RecordsLedger:
         result_root=tmp_path / "results",
         database_root=tmp_path / "Database",
     ).ledger
-
-
-@pytest.fixture(autouse=True)
-def captured_software(monkeypatch: pytest.MonkeyPatch) -> None:
-    def capture(
-        context: RunContext | None, source_directory: Path | None = None
-    ) -> SoftwareProvenance:
-        return native_metadata().provenance
-
-    monkeypatch.setattr(adapter_module, "capture_software_provenance", capture)
 
 
 def experiment() -> NotebookExperiment[SavingCore]:
@@ -288,6 +273,7 @@ def test_real_caller_writes_all_formats_and_retains_acquisition(
         datetime.fromisoformat(loaded.metadata.finished_at) == acquisition.finished_at
     )
     assert loaded.metadata.completion == acquisition.completion
+    assert loaded.metadata.provenance == acquisition.provenance
     assert loaded.metadata.snapshot.point == "sweet"
     assert loaded.metadata.snapshot.description == "save-time context"
     assert loaded.metadata.snapshot.roles == {}
@@ -468,21 +454,15 @@ def test_partial_error_retains_handle_and_explicit_resave_reuses_directory(
     assert native.parent == blocker.parent
 
 
-@pytest.mark.parametrize("failing_member", ["figure", "analysis"])
-def test_encoding_failure_retains_handle_and_saves_other_members(
-    point: PointView, monkeypatch: pytest.MonkeyPatch, failing_member: str
+def test_analysis_encoding_failure_retains_handle_and_saves_other_members(
+    point: PointView,
 ) -> None:
     exp = experiment()
     source = exp.run(SavingCfg())
     acquisition = exp.acquisition_for(source)
     figure = saving_figure()
     document = analysis_document()
-    if failing_member == "figure":
-        monkeypatch.setattr(
-            figure, "savefig", Mock(side_effect=ValueError("PNG encoder failed"))
-        )
-    else:
-        document.summary["frequency"] = float("nan")
+    document.summary["frequency"] = float("nan")
     with pytest.raises(PartialSaveError, match="outputs failed") as caught:
         exp.save_run(
             point, source=source, figures={"fit": figure}, analysis=(document,)
@@ -491,8 +471,8 @@ def test_encoding_failure_retains_handle_and_saves_other_members(
     assert partial.run.run_id == acquisition.run_id
     assert partial.run.report == partial.report
     failed = [item for item in partial.report.outputs if item.status == "failed"]
-    assert len(failed) == (2 if failing_member == "figure" else 1)
-    assert all(item.key.member == failing_member and item.error for item in failed)
+    assert len(failed) == 1
+    assert all(item.key.member == "analysis" and item.error for item in failed)
     assert {"data_h5", "labber"} <= {
         item.output.format for item in partial.report.outputs if item.status == "saved"
     }

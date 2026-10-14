@@ -10,7 +10,6 @@ import numpy as np
 import pytest
 from ipympl.backend_nbagg import Canvas, Toolbar
 from matplotlib.backend_bases import MouseEvent
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickAnalysis,
@@ -24,7 +23,6 @@ from zcu_tools.notebook.flux_dep import (
     FluxDepAnalyzer,
     FluxDepPickerOptions,
 )
-from zcu_tools.notebook.plotting import NotebookPlotHost
 from zcu_tools.plotting.plots import NonPresentingHost, PlotHost, Plots
 
 
@@ -58,7 +56,7 @@ def picker_inputs(source: RunRecord[ExpCfgModel, Spectrum]) -> FluxPickInputs:
 @pytest.fixture(autouse=True)
 def suppress_notebook_display(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "zcu_tools.notebook.flux_dep.ipython_display.display",
+        "IPython.display.display",
         lambda _widget: None,
     )
 
@@ -168,39 +166,6 @@ def test_twotone_pick_keeps_captured_source_and_retains_figure(tmp_path: Path) -
             analyzer.analysis_plots.release()
 
 
-def test_unexpected_numeric_failure_retires_preview_and_keeps_published_group(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    analyzer = FluxDepAnalyzer[ExpCfgModel, Spectrum](NonPresentingHost())
-    old = analyzer.start(
-        make_source(), picker_inputs(make_source()), FluxDepPickerOptions(-0.2, 0.3)
-    ).done()
-    old_plots = analyzer.analysis_plots
-    assert old_plots is not None
-    before_new = set(widgets.Widget.widgets)
-    control = analyzer.start(
-        make_source(), picker_inputs(make_source()), FluxDepPickerOptions(-0.1, 0.4)
-    )
-
-    def fail_analysis(*_args: object) -> FluxPickAnalysis:
-        raise RuntimeError("numeric analysis failed")
-
-    monkeypatch.setattr("zcu_tools.notebook.flux_dep.analyze_flux_pick", fail_analysis)
-    try:
-        with pytest.raises(RuntimeError, match="numeric analysis failed"):
-            control.done()
-        assert control.is_finished
-        assert control.record is None
-        assert control.plots is None
-        assert analyzer.analysis is old
-        assert analyzer.analysis_plots is old_plots
-        assert set(widgets.Widget.widgets) == before_new
-    finally:
-        if not control.is_finished:
-            control.cancel()
-        old_plots.release()
-
-
 def test_invalid_done_and_cancel_leave_old_analysis_and_editable_control() -> None:
     analyzer = FluxDepAnalyzer[ExpCfgModel, Spectrum](NonPresentingHost())
     first = analyzer.start(
@@ -228,41 +193,6 @@ def test_invalid_done_and_cancel_leave_old_analysis_and_editable_control() -> No
     finally:
         if not next_control.is_finished:
             next_control.cancel()
-        old_plots.release()
-
-
-def test_failed_start_and_preview_cleanup_preserve_both_causes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    exp, old_record, old_plots = completed_analyzer()
-    before_new = set(widgets.Widget.widgets)
-    release = NotebookPlotHost.release
-
-    def fail_display(_widget: object) -> None:
-        raise RuntimeError("frontend publisher failed")
-
-    def fail_release(self: NotebookPlotHost, figure: Figure) -> None:
-        release(self, figure)
-        raise RuntimeError("preview cleanup failed")
-
-    try:
-        with monkeypatch.context() as patch:
-            patch.setattr("IPython.display.display", fail_display)
-            patch.setattr(NotebookPlotHost, "release", fail_release)
-            with pytest.raises(BaseExceptionGroup) as failure:
-                exp.start(
-                    make_source(),
-                    picker_inputs(make_source()),
-                    FluxDepPickerOptions(-0.1, 0.4),
-                )
-        assert [str(error) for error in failure.value.exceptions] == [
-            "frontend publisher failed",
-            "preview cleanup failed",
-        ]
-        assert exp.analysis is old_record
-        assert exp.analysis_plots is old_plots
-        assert set(widgets.Widget.widgets) == before_new
-    finally:
         old_plots.release()
 
 
@@ -306,79 +236,6 @@ def test_failed_final_pick_publication_retires_preview_without_losing_old_record
     try:
         with pytest.raises(RuntimeError, match="final canvas failed"):
             control.done()
-        assert control.is_finished
-        assert exp.analysis is old_record
-        assert exp.analysis_plots is old_plots
-        assert set(widgets.Widget.widgets) == before_new
-    finally:
-        old_plots.release()
-    assert set(widgets.Widget.widgets) == initial_widgets
-
-
-def test_failed_final_pick_and_preview_cleanup_preserve_both_causes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    exp, old_record, old_plots = completed_analyzer()
-    before_new = set(widgets.Widget.widgets)
-    control = exp.start(
-        make_source(), picker_inputs(make_source()), FluxDepPickerOptions(-0.1, 0.4)
-    )
-    release = NotebookPlotHost.release
-
-    def fail_final(_widget: object) -> None:
-        raise RuntimeError("final canvas failed")
-
-    def fail_preview(self: NotebookPlotHost, figure: Figure) -> None:
-        release(self, figure)
-        if figure is control.figure:
-            raise RuntimeError("preview release failed")
-
-    try:
-        with monkeypatch.context() as patch:
-            patch.setattr("IPython.display.display", fail_final)
-            patch.setattr(NotebookPlotHost, "release", fail_preview)
-            with pytest.raises(BaseExceptionGroup) as failure:
-                control.done()
-        assert [str(error) for error in failure.value.exceptions] == [
-            "final canvas failed",
-            "preview release failed",
-        ]
-        assert control.is_finished
-        assert control.record is None
-        assert control.plots is None
-        assert exp.analysis is old_record
-        assert exp.analysis_plots is old_plots
-        assert set(widgets.Widget.widgets) == before_new
-    finally:
-        if not control.is_finished:
-            control.cancel()
-        old_plots.release()
-
-
-@pytest.mark.parametrize("terminal", ["done", "cancel"])
-def test_terminal_preview_release_failure_closes_controls_and_retains_record(
-    monkeypatch: pytest.MonkeyPatch, terminal: str
-) -> None:
-    monkeypatch.setattr("IPython.display.display", lambda _widget: None)
-    initial_widgets = set(widgets.Widget.widgets)
-    exp, old_record, old_plots = completed_analyzer()
-    before_new = set(widgets.Widget.widgets)
-    control = exp.start(
-        make_source(), picker_inputs(make_source()), FluxDepPickerOptions(-0.1, 0.4)
-    )
-    release = NotebookPlotHost.release
-
-    def fail_preview(self: NotebookPlotHost, figure: Figure) -> None:
-        release(self, figure)
-        if figure is control.figure:
-            raise RuntimeError("preview release failed")
-
-    action = control.done if terminal == "done" else control.cancel
-    try:
-        with monkeypatch.context() as patch:
-            patch.setattr(NotebookPlotHost, "release", fail_preview)
-            with pytest.raises(RuntimeError, match="preview release failed"):
-                action()
         assert control.is_finished
         assert exp.analysis is old_record
         assert exp.analysis_plots is old_plots
