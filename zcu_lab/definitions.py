@@ -47,15 +47,23 @@ from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.gui import (
     SsT1ToneSweepFreqAdapter,
     SsT1ToneSweepGainAdapter,
 )
+from zcu_lab.v2.twotone.allxy.form import FORM as TWOTONE_ALLXY_FORM
 from zcu_lab.v2.twotone.allxy.gui import AllXYAdapter
+from zcu_lab.v2.twotone.ckp.form import FORM as TWOTONE_CKP_FORM
 from zcu_lab.v2.twotone.ckp.gui import CKPAdapter
+from zcu_lab.v2.twotone.fluxdep.form import FORM as TWOTONE_FLUX_DEP_FORM
 from zcu_lab.v2.twotone.fluxdep.gui import FluxDepAdapter
 from zcu_lab.v2.twotone.freq.form import FORM as TWOTONE_FREQ_FORM
 from zcu_lab.v2.twotone.freq.gui import FreqAdapter
+from zcu_lab.v2.twotone.irb.form import FORM as TWOTONE_IRB_FORM
 from zcu_lab.v2.twotone.irb.gui import IRBAdapter
+from zcu_lab.v2.twotone.power_dep.form import FORM as TWOTONE_POWER_DEP_FORM
 from zcu_lab.v2.twotone.power_dep.gui import PowerDepAdapter
+from zcu_lab.v2.twotone.rabi.amp_rabi.form import FORM as TWOTONE_AMP_RABI_FORM
 from zcu_lab.v2.twotone.rabi.amp_rabi.gui import AmpRabiAdapter
+from zcu_lab.v2.twotone.rabi.len_rabi.form import FORM as TWOTONE_LEN_RABI_FORM
 from zcu_lab.v2.twotone.rabi.len_rabi.gui import LenRabiAdapter
+from zcu_lab.v2.twotone.rb.form import FORM as TWOTONE_RB_FORM
 from zcu_lab.v2.twotone.rb.gui import RBAdapter
 from zcu_lab.v2.twotone.reset.bath.freq.form import FORM as RESET_BATH_FREQ_FORM
 from zcu_lab.v2.twotone.reset.bath.freq.gui import BathFreqGainAdapter
@@ -95,10 +103,16 @@ from zcu_lab.v2.twotone.ro_optimize.length.form import FORM as RO_OPT_LENGTH_FOR
 from zcu_lab.v2.twotone.ro_optimize.length.gui import RoOptLengthAdapter
 from zcu_lab.v2.twotone.ro_optimize.power.form import FORM as RO_OPT_POWER_FORM
 from zcu_lab.v2.twotone.ro_optimize.power.gui import RoOptPowerAdapter
+from zcu_lab.v2.twotone.time_domain.t1.form import FORM as TWOTONE_T1_FORM
 from zcu_lab.v2.twotone.time_domain.t1.gui import T1Adapter
+from zcu_lab.v2.twotone.time_domain.t2echo.form import FORM as TWOTONE_T2ECHO_FORM
 from zcu_lab.v2.twotone.time_domain.t2echo.gui import T2EchoAdapter
+from zcu_lab.v2.twotone.time_domain.t2ramsey.form import FORM as TWOTONE_T2RAMSEY_FORM
 from zcu_lab.v2.twotone.time_domain.t2ramsey.gui import T2RamseyAdapter
+from zcu_lab.v2.twotone.zigzag.form import FORM as TWOTONE_ZIGZAG_FORM
 from zcu_lab.v2.twotone.zigzag.gui import ZigZagAdapter
+from zcu_lab.v2.twotone.zigzag_sweep.form import FREQ_FORM as TWOTONE_ZIGZAG_FREQ_FORM
+from zcu_lab.v2.twotone.zigzag_sweep.form import GAIN_FORM as TWOTONE_ZIGZAG_GAIN_FORM
 from zcu_lab.v2.twotone.zigzag_sweep.gui import (
     ZigZagScanFreqAdapter,
     ZigZagScanGainAdapter,
@@ -170,6 +184,20 @@ FORMS: dict[str, Form[ConfigBase]] = {
     "onetone/power_dep": ONETONE_POWER_DEP_FORM,
     "onetone/flux_dep": ONETONE_FLUX_DEP_FORM,
     "twotone/freq": TWOTONE_FREQ_FORM,
+    "twotone/allxy": TWOTONE_ALLXY_FORM,
+    "twotone/ckp": TWOTONE_CKP_FORM,
+    "twotone/flux_dep": TWOTONE_FLUX_DEP_FORM,
+    "twotone/irb": TWOTONE_IRB_FORM,
+    "twotone/power_dep": TWOTONE_POWER_DEP_FORM,
+    "twotone/rabi/amp_rabi": TWOTONE_AMP_RABI_FORM,
+    "twotone/rabi/len_rabi": TWOTONE_LEN_RABI_FORM,
+    "twotone/rb": TWOTONE_RB_FORM,
+    "twotone/t1": TWOTONE_T1_FORM,
+    "twotone/t2echo": TWOTONE_T2ECHO_FORM,
+    "twotone/t2ramsey": TWOTONE_T2RAMSEY_FORM,
+    "twotone/zigzag": TWOTONE_ZIGZAG_FORM,
+    "twotone/zigzag_scan/gain": TWOTONE_ZIGZAG_GAIN_FORM,
+    "twotone/zigzag_scan/freq": TWOTONE_ZIGZAG_FREQ_FORM,
     "twotone/reset/single_tone/freq": RESET_SINGLE_TONE_FREQ_FORM,
     "twotone/reset/single_tone/length": RESET_SINGLE_TONE_LENGTH_FORM,
     "twotone/reset/dual_tone/freq": RESET_DUAL_TONE_FREQ_FORM,

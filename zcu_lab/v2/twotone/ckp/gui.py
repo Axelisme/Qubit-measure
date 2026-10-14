@@ -68,9 +68,9 @@ class CKPAdapter(BaseAdapter[CKP_Cfg, CKPRunResult, CKPAnalyzeResult, NoAnalyzeP
             "pi_pulse template fallback; both probe pulses are fresh inline templates."
         ),
         typical_writeback=(
-            "Proposes fitted chi into parameter context 'chi', fitted kappa into "
-            "'rf_w', and fitted readout frequency into 'readout_f'. No ModuleLibrary "
-            "writeback."
+            "Proposes fitted chi into '$qubit.ext.chi', fitted kappa into "
+            "'$resonator.kappa', and fitted readout frequency into '$resonator.freq'. "
+            "No ModuleLibrary writeback."
         ),
         recommended=(
             "Run only after qubit frequency, pi pulse, resonator frequency, and "
@@ -107,17 +107,17 @@ class CKPAdapter(BaseAdapter[CKP_Cfg, CKPRunResult, CKPAnalyzeResult, NoAnalyzeP
         result = req.analyze_result
         return [
             ParameterWriteback(
-                target_name="chi",
+                target_name="$qubit.ext.chi",
                 description="Dispersive shift chi (MHz)",
                 proposed_value=result.chi,
             ),
             ParameterWriteback(
-                target_name="rf_w",
+                target_name="$resonator.kappa",
                 description="Resonator linewidth kappa (MHz)",
                 proposed_value=result.kappa,
             ),
             ParameterWriteback(
-                target_name="readout_f",
+                target_name="$resonator.freq",
                 description="Readout frequency (MHz)",
                 proposed_value=result.res_freq,
             ),
