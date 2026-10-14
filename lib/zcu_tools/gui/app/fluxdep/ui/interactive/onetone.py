@@ -12,6 +12,7 @@ from qtpy import QtCore, QtWidgets
 from zcu_tools.analysis.fluxdep.onetone import analyze_onetone_pick
 from zcu_tools.gui.app.fluxdep.interactive import OneTonePickContext
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.plotting.fluxdep.onetone import OneTonePickPlot
 
 from .base import InteractiveMplWidget, picker_object_name
@@ -64,6 +65,7 @@ class OneToneWidget(InteractiveMplWidget):
         self._undo.clicked.connect(lambda: self._execute(context.session.undo))
         self.controls_layout.addWidget(self._undo)
         self._info = QtWidgets.QLabel()
+        make_label_selectable(self._info)
         self._info.setObjectName(picker_object_name("status"))
         self._info.setWordWrap(True)
         self.controls_layout.addWidget(self._info)

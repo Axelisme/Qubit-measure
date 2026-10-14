@@ -40,6 +40,7 @@ from zcu_tools.gui.session.ui.component_editing import (
     set_red,
     show_error,
 )
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.entry import (
     FieldValueKind,
     component_field_specs,
@@ -137,6 +138,7 @@ class ComponentTreeWidget(QWidget):
         self._tree = self._build_tree()
         layout.addWidget(self._tree, stretch=1)
         self._error = QLabel()
+        make_label_selectable(self._error)
         self._error.setObjectName("component_error")
         self._error.setWordWrap(True)
         set_red(self._error, red=True)

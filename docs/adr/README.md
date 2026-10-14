@@ -6,6 +6,10 @@
 
 ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立對應 contract，並在本文寫出 contract ID。沒有 contract 的依賴規則只能靠判斷維持，視為 ADR 未完成。
 
+## Module Boundaries
+
+- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：各 package 的定位、五層、穩定工具與有狀態模組的分類、core 共用 waveform 格式、cfg_model 契約與債務清單。分層、無循環與 core 只依賴 utils 由 .importlinter C8–C13／C19 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；離線遷移專用程式只放 `migrations/`。剩餘債務以 `ignore_imports` 記帳。
+
 ## Concurrency / Lifecycle
 
 - [0066 — Operation 執行、取消與關閉](0066-operation-lifecycle.md)：guard／lease／handle、runner、互動、shutdown 與 device disconnect 的跨 owner 責任；尚未落實的核准目標見 [Operation draft](draft/operation-lifecycle-boundaries.md)。
@@ -63,13 +67,11 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 
 ## Draft
 
+- [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：核准方向、尚未實作。啟動固定 Python environment，FTF 用 YAML 調參；同步 acquire 固定量測要求、逐 round 捕捉環境，backend 固定輸入輸出。物理與依賴邊界已定，具體型別、schema、遷移與驗收待完成。
+
 - [Measure 表單從 core cfg 推導](draft/measure-form-derivation.md)：表單形狀從 core 的 pydantic cfg 推導，欄位說明用 `Annotated[..., FieldMeta]` 放 core，起始值與偏差寫在每個實驗的 `form.py` 樹；module 節點只有 `Slot` 與 `Template`，角色表改為組合根注入的範本目錄；`dev` 改為 core 的具名裝置欄位。設計已採用，measure-form task 實作完成後轉正式 ADR。
 
 - [Pydantic 表單、輸入與宿主提交](draft/pydantic-form-tool.md)：Qt-free core 與 editor 分離，共用 defaults hook、evaluator 與 complex codec。Expression 保存在 input，Engine journal 只記普通值。不遷移 CfgSchema／Measure。
-
-- [具名 workflows 與可丟棄的步驟執行](draft/workflows-engine.md)：新 engine、workflow／experiment、宿主、取消與保存分工的期 0 候選。顧問 review 與使用者 CP-A 通過前不實作，不取代既有 autofluxdep 契約。
-
-- [模組定位與依賴邊界](draft/module-boundaries.md)：各 package 的定位、五層、穩定工具與有狀態模組的分類、core 共用 waveform 格式、cfg_model 契約與債務清單。分層、無循環與 core 只依賴 utils 由 .importlinter C8–C13/C19 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；其餘債務尚未清除。
 
 - [Agent 介面分層](draft/agent-interface-layers.md)：L0 實驗環境、L1 GUI／Notebook、L2 recipe、L3 workflow 與跨實驗分析的定位；L1 由 agent 決定在哪一步介入，L2 recipe 與 L3 workflow 由自己決定在哪裡 yield；自動推導歸 recipe、workflow 內部或 GUI adapter 的初始參數生成；層間以共享狀態交接，選層由上而下。Workflow yield 由進行中的重構實作；無人回應時停在 yield，預設決定與 L0 強制有需求再設計。
 - [GUI 事件收合](draft/remote-event-coalescing.md)：GUI 訂閱端依 payload type 與 tab 的 per-tick 收合尚未落實；cfg 表單 snapshot 收合已實作。
@@ -80,6 +82,7 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 
 ## Retired
 
+- [具名 workflows 與可丟棄的步驟執行](retired/workflows-engine.md)：期 0 候選草稿，workflow 執行契約由 0062 接替。
 - [0018 — Autofluxdep resolver builder](retired/0018-autofluxdep-orchestrator-requirement-resolver-builder-currying.md) 與 [Autofluxdep 逐項宣告依賴與 predictor 載入](retired/autofluxdep-explicit-dependencies.md)：autofluxdep 已於 04799f2f2 移除。
 
 以下舊篇保留原號與正文；現行 GUI 決策見 0067，Operation 見 0066，Remote／Transport 見 0068，Persistence 見 0063，workflow 見 0062，process startup 見 0064。Cfg 來源篇尚有有效局部契約，未整篇退役。

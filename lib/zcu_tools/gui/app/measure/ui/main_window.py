@@ -36,6 +36,7 @@ from zcu_tools.gui.project import nearest_existing
 from zcu_tools.gui.session.context_types import CommandOrigin, SavedPoint
 from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
 from zcu_tools.gui.widgets.control_indicator import ControlIndicator
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.entry import RoleResolutionError
 
 from .exp_tab_widget import ExpTabWidget, TabActions
@@ -165,9 +166,8 @@ class MainWindow(QMainWindow):
         self._refresh_empty_hint()
 
         # --- status bar ---
-        self._status_bar = QStatusBar()
+        self._status_bar = self._build_status_bar()
         self.setStatusBar(self._status_bar)
-        self._status_bar.showMessage("Ready")
 
         self._events.bind(self._ctrl.get_bus())
         self._control_indicator = ControlIndicator(self._ctrl.control_identity, self)
@@ -223,15 +223,27 @@ class MainWindow(QMainWindow):
         for tab in self._tab_widgets.values():
             tab.set_writable(writable=writable)
 
+    def _build_status_bar(self) -> QStatusBar:
+        """Create the status bar and its selectable message label (``Ready``)."""
+        status_bar = QStatusBar()
+        # A label, not showMessage(): QStatusBar paints its own message text,
+        # which users cannot select or copy.
+        self._status_label = QLabel("Ready")
+        make_label_selectable(self._status_label)
+        status_bar.addWidget(self._status_label, 1)
+        return status_bar
+
     def _build_context_bar(self) -> QHBoxLayout:
         """Assemble the persistent entry/point controls."""
         ctx_bar = QHBoxLayout()
         ctx_bar.addWidget(QLabel("Entry:"))
         self._entry_label = QLabel("No entry open")
+        make_label_selectable(self._entry_label)
         self._entry_label.setObjectName("current_entry")
         ctx_bar.addWidget(self._entry_label)
         ctx_bar.addWidget(QLabel("Point:"))
         self._point_label = QLabel("No point selected")
+        make_label_selectable(self._point_label)
         self._point_label.setObjectName("current_point")
         ctx_bar.addWidget(self._point_label)
         ctx_bar.addStretch()
@@ -594,7 +606,7 @@ class MainWindow(QMainWindow):
 
     def show_status_message(self, message: str) -> None:
         logger.info("status: %s", message)
-        self._status_bar.showMessage(message)
+        self._status_label.setText(message)
 
     def show_error_dialog(self, title: str, message: str) -> None:
         self._dialog_presenter.critical(self, title, message)
@@ -999,7 +1011,7 @@ class MainWindow(QMainWindow):
             "tab_ids": state_tab_ids,
             "entry_label": self._entry_label.text(),
             "point_label": self._point_label.text(),
-            "status": self._status_bar.currentMessage() if self._status_bar else "",
+            "status": self._status_label.text(),
             "open_dialogs": [name.value for name in self.list_open_dialogs()],
         }
 

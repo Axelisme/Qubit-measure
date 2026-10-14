@@ -6,6 +6,8 @@ import logging
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
+
 logger = logging.getLogger(__name__)
 
 _ACTIVITY_MARKER_PREFIX = "● "
@@ -79,9 +81,11 @@ class _FakeDevicePanel(QWidget):
         form = QFormLayout(self)
 
         self._type_label = QLabel()
+        make_label_selectable(self._type_label)
         form.addRow("Type:", self._type_label)
 
         self._address_label = QLabel()
+        make_label_selectable(self._address_label)
         form.addRow("Address:", self._address_label)
 
         self._output_combo = QComboBox()
@@ -142,12 +146,15 @@ class _YOKOGS200Panel(QWidget):
         form = QFormLayout(self)
 
         self._type_label = QLabel()
+        make_label_selectable(self._type_label)
         form.addRow("Type:", self._type_label)
 
         self._address_label = QLabel()
+        make_label_selectable(self._address_label)
         form.addRow("Address:", self._address_label)
 
         self._mode_label = QLabel()
+        make_label_selectable(self._mode_label)
         form.addRow("Mode:", self._mode_label)
 
         self._output_combo = QComboBox()
@@ -196,9 +203,11 @@ class _SGS100APanel(QWidget):
         form = QFormLayout(self)
 
         self._type_label = QLabel()
+        make_label_selectable(self._type_label)
         form.addRow("Type:", self._type_label)
 
         self._address_label = QLabel()
+        make_label_selectable(self._address_label)
         form.addRow("Address:", self._address_label)
 
         self._output_combo = QComboBox()
@@ -251,12 +260,15 @@ class _MemoryDevicePanel(QWidget):
         form = QFormLayout(self)
 
         self._type_label = QLabel()
+        make_label_selectable(self._type_label)
         form.addRow("Type:", self._type_label)
 
         self._name_label = QLabel()
+        make_label_selectable(self._name_label)
         form.addRow("Name:", self._name_label)
 
         self._addr_label = QLabel()
+        make_label_selectable(self._addr_label)
         form.addRow("Address:", self._addr_label)
 
         note = QLabel("Not connected. Press Reconnect to connect.")
@@ -398,6 +410,7 @@ class DeviceDialog(QDialog):
         add_form.addRow(self._add_btn)
 
         self._add_status = QLabel("")
+        make_label_selectable(self._add_status)
         self._add_status.setWordWrap(True)
         add_form.addRow(self._add_status)
 

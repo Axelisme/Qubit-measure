@@ -289,7 +289,7 @@ def test_qt_load_status_reports_one_overall_disposition(
         load_button.click,
         [(RunLoadDialog, open_file), (QFileDialog, choose_file)],
     )
-    assert window.statusBar().currentMessage() == expected
+    assert window.get_view_snapshot()["status"] == expected
 
 
 def test_reload_captures_backfilled_config_not_retired_editor(app):

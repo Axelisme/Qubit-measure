@@ -1,8 +1,4 @@
----
-status: draft
----
-
-# 模組定位與依賴邊界
+# 0072 — 模組定位與依賴邊界
 
 ## 脈絡
 
@@ -10,7 +6,7 @@ status: draft
 
 例子是 `experiment/base.py` 的 `PersistableExperiment`。它呼叫 `datafile`，卻自己實作 Labber 版面、讀回驗證、通道型別與 comment 編碼，這些都屬於 `datafile` 的責任。另一個例子是能力模組之間的兩個循環：`resources → program → simulate → resources`，以及 `resources → program → analysis → simulate → resources`。
 
-本篇規定每個 package 負責什麼、可以依賴誰，並把規則投影成 `.importlinter` contract。定位由使用者在 2026-10-04 的討論中決定。本篇是目標設計：分層與 contract 已生效，債務清單列出尚未達成的部分。
+本篇規定每個 package 負責什麼、可以依賴誰，並把規則投影成 `.importlinter` contract。定位由使用者在 2026-10-04 的討論中決定。分層與 contract 已生效，債務清單列出仍以 `ignore_imports` 記帳或尚未搬移的部分。
 
 ## 決策
 
@@ -18,7 +14,7 @@ status: draft
 
 | package | 負責 | 不負責 |
 |---|---|---|
-| `datafile` | 量測資料檔的儲存工具：Labber、`data.h5`、streaming、grouped。包括版面慣例、讀回時依 schema 驗證、通道型別與 metadata 編碼 | 存檔位置與批次（D46）；實驗語意 |
+| `datafile` | 量測資料檔的儲存工具：Labber、`data.h5`、streaming、grouped。包括版面慣例、讀回時依 schema 驗證、通道型別與 metadata 編碼 | 存檔位置與批次（見 ADR-0063）；實驗語意 |
 | `device` | 各 pyvisa 儀器的定義與控制介面 | 實驗流程 |
 | `program` | 控制 ZCU216 與底層 QICK 的工具和類別，包括模擬板 | 參數與資產的保存 |
 | `analysis` | 分析工具 | 檔案讀寫；畫圖 |
@@ -26,14 +22,14 @@ status: draft
 | `simulate` | 數值模擬 | 讀取資料容器；呼叫端傳入數值 |
 | `resources` | 實驗領域資料容器與 YAML、JSON、CSV 的讀寫；waveform 資產的命名、formula 語意與 NPZ 實體 I/O | 量測資料檔；program 的執行機制；重複 waveform codec |
 | `core` | 共用的無狀態型別與格式。`core.waveform_format` 驗證 samples、編解碼 NPZ 與 opaque JSON recipe | 檔案 I/O、formula 語意、GUI、資源 scope 或硬體 |
-| `cfg_model` | 配置 schema 與注入依賴契約，見下節。之後搬進 core | 執行行為與 I/O |
+| `cfg_model` | 配置 schema 與注入依賴契約，見下節。搬進 core 尚未排定 | 執行行為與 I/O |
 | `utils` | 無法歸入任何其他類別的雜項 | 任何能歸入其他類別的東西 |
 | `progress_bar`、`qick_remote` | 照字面 | — |
 | `experiment` | 實驗框架：實驗介面、AxesSpec、RunRecord、RunContext、runtime 與註冊機制 | 檔案格式；具體實驗 |
-| `gui` | 各 GUI app 的框架 | 具體實驗的 adapter（D75） |
+| `gui` | 各 GUI app 的框架 | 具體實驗的 adapter |
 | `notebook` | Notebook 特化的工具集合 | 通用分析；具體實驗 |
-| `mcp` | 各 MCP 的框架 | 具體 recipe（D72、D80） |
-| `zcu_lab`（repo 根目錄） | 具體實驗、recipes 與其 gui、notebook 附件（D75、D80） | — |
+| `mcp` | 各 MCP 的框架 | 具體 recipe |
+| `zcu_lab`（repo 根目錄） | 具體實驗、recipes 與其 gui、notebook 附件 | 離線遷移的對照與宣告（放 `migrations/`） |
 
 放置新程式碼時，先找最貼近的類別；所有類別都不合，才放 `utils`。
 
@@ -106,26 +102,23 @@ Datafile／resources → core 的方向由 C8、C9、C12 約束。此函式只�
 | C16 | `forbidden` | `zcu_tools` 不 import `zcu_lab` |
 | C19 | `forbidden` | `core` 在 repo 內只依賴 `utils` |
 
-`zcu_tools`、`zcu_lab`、離線 `migrations` 與 repo 的 `mcp_servers` 都是 import-linter 的 root packages。組合根顯式注入 measure registry、workflow 註冊清單與 MCP recipes，framework 不反向載入使用者定義。Tests 的 lab 獨立性由刪除 `zcu_lab/` 後的整套 pytest 驗收，不新增 tests import contract。
+`zcu_tools`、`zcu_lab`、離線 `migrations` 與 repo 的 `mcp_servers` 都是 import-linter 的 root packages。只為離線遷移存在的程式與對照表放在 `migrations/`，`zcu_lab` 與 `zcu_tools` 不 import 它，遷移完成後可整個刪除。使用者於 2026-10-14 裁定：「我自己會預期，我遷移完後刪除migrations就可以了」。組合根顯式注入 measure registry、workflow 註冊清單與 MCP recipes，framework 不反向載入使用者定義。Tests 的 lab 獨立性由刪除 `zcu_lab/` 後的整套 pytest 驗收，不新增 tests import contract。
 
 債務以確切的 module 對逐條列在 `ignore_imports`，不用萬用字元，每組註解寫明「債務，由誰移除」。萬用字元只用於合法例外，例如 C1 的 `cfg_editing → gui.cfg`，註解寫明「不是債務」。`ignore_imports` 只減不增。
 
 ## 債務
 
-| 債務 | 移除方式 | 負責 |
+| 債務 | 移除方式 | 記帳位置 |
 |---|---|---|
-| `program → resources` | `program` 改依賴核心 Protocol（第 1 階段） | backlog |
-| `resources → program` | cfg schema 抽到核心，`build()` 改為 program 端 builder（第 2 階段） | storage-redesign 的 module library；`zcu_lab` 搬家 |
-| `simulate → resources` | `predict` 改由呼叫端傳入數值 | backlog |
-| `experiment/base.py` 的格式處理 | 移入 `datafile` 的 reader／writer | storage-redesign（D53、#15） |
-| `notebook/analysis` | 通用分析移到 `analysis`；實驗專屬 helpers 已由 `zcu_lab` 附件擁有 | backlog |
-| `utils` 的 `shot_classification`、`tomography` | 移到 `analysis` | backlog |
-| `utils/datasaver/` | 空目錄，刪除 | backlog |
-| `analysis/fluxdep/io.py`、`search.py` 直接用 h5py | 檔案讀寫移到 `datafile` | backlog |
-| `mcp → gui.logging_setup` | logging 設定改由 `mcp` 自己或共用的非 GUI 模組提供 | backlog |
+| `program → resources` | `program` 改依賴 `cfg_model` 的 Protocol | C10 `ignore_imports`：`program.v2.modules*` → `resources.context` |
+| `simulate → resources` | `predict` 改由呼叫端傳入數值 | C10、C12 `ignore_imports`：`simulate.fluxonium.predict` → `resources.qubit_params` |
+| `notebook/analysis` | 通用分析移到 `analysis`；實驗專屬 helpers 已由 `zcu_lab` 附件擁有 | 尚未搬移 |
+| `utils` 的 `shot_classification`、`tomography` | 移到 `analysis` | 尚未搬移 |
+| `analysis/fluxdep/io.py` 直接用 h5py | 檔案讀寫移到 `datafile` | 尚未搬移 |
+
+已清除的債務不再列出：`resources → program`、`experiment/base.py` 的 Labber 格式處理（已改用 `datafile`）、`utils/datasaver/`、`mcp → gui.logging_setup`。
 
 ## 後果
 
 - 增減功能時依賴圖的形狀不變：工具之間的邊很少變，有狀態模組之間沒有邊。兩個有狀態模組要合作，做法固定是 Protocol 或上移組合。
 - 新增跨 package 依賴會被 contract 擋下或在 review 中出現，不會靜默成為先例。
-- 第 2 階段的 cfg 抽離牽涉約 77 處 `.build(` 呼叫，大多在要搬到 `zcu_lab` 的實驗，所以跟搬家一起做。

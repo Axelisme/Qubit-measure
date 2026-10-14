@@ -19,6 +19,7 @@ from zcu_tools.gui.app.fluxdep.ui.interactive.base import (
     picker_object_name,
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.plotting.fluxdep.pick import configure_flux_pick_axes
 
 __all__ = ["LinePickerWidget", "find_best_mirror_position", "fold_initial_lines"]
@@ -88,6 +89,7 @@ class LinePickerWidget(InteractiveMplWidget):
         )
         self._undo = self._add_button("Undo", "undo", context.session.undo)
         self._info = QtWidgets.QLabel()
+        make_label_selectable(self._info)
         self._info.setObjectName(picker_object_name("status"))
         self._info.setWordWrap(True)
         self.controls_layout.addWidget(self._info)

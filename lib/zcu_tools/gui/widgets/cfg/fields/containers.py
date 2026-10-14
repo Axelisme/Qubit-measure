@@ -22,6 +22,7 @@ from zcu_tools.gui.cfg import (
     make_custom_reference_key,
 )
 from zcu_tools.gui.cfg.binding import ReferenceField
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 from ..registry import FieldRenderContext
 from .reference_shared import (
@@ -146,6 +147,7 @@ class ReferenceInputWidget(QWidget):
         header.addWidget(self._convert)
         layout.addLayout(header)
         self._missing_ref_hint = QLabel()
+        make_label_selectable(self._missing_ref_hint)
         self._missing_ref_hint.setObjectName("missingRefHint")
         self._missing_ref_hint.setStyleSheet("color: #b00020; font-size: 11px;")
         # Wrap within the form instead of being clipped at its right edge.

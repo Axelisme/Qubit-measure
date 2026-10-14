@@ -27,6 +27,7 @@ from zcu_tools.analysis.fluxdep.stroke import (
 from zcu_tools.gui.app.fluxdep.interactive import CrossSelectionContext
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.plotting.fluxdep.cross_selection import CrossSelectionPlot
 
 from .base import InteractiveMplWidget
@@ -133,6 +134,7 @@ class SelectorWidget(InteractiveMplWidget):
         self._show_changes.toggled.connect(self._render)
         self.controls_layout.addWidget(self._show_changes)
         self._status = QtWidgets.QLabel()
+        make_label_selectable(self._status)
         self._status.setAccessibleName("Status")
         self._status.setWordWrap(True)
         self.controls_layout.addWidget(self._status)

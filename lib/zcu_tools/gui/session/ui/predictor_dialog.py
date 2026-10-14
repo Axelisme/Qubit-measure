@@ -47,6 +47,7 @@ from zcu_tools.gui.session.ui.predictor_cache import (
     PredictorSnapshotCodec,
 )
 from zcu_tools.gui.session.ui.predictor_canvas import PredictorCurveCanvas
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.gui.widgets.spinbox import FiniteFloatSpinBox, TrimDoubleSpinBox
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.parameters import ModelParams
@@ -200,6 +201,7 @@ class PredictorDialog(QDialog):
 
         # ── status label ──────────────────────────────────────────────────
         self._status_label = QLabel("")
+        make_label_selectable(self._status_label)
         self._status_label.setObjectName("predictor_status")
         left_layout.addWidget(self._status_label)
 

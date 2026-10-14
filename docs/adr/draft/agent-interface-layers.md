@@ -5,7 +5,7 @@ status: draft
 # Agent 介面分層
 
 **狀態：** 使用者已說明定位，本篇待 review 後轉為 accepted。本篇整理既有入口的定位，不新增工具、不改 method policy，也不授權硬體操作。
-**關聯：** [[0068]] 的 remote 與 measure 固定工具、[[0062]] 的 workflow run、[[0063]] 的保存權威、[[0069]] 的核心與前端；控制權見 [[0070]]，workflow engine 見 [workflows draft](workflows-engine.md)。
+**關聯：** [[0068]] 的 remote 與 measure 固定工具、[[0062]] 的 workflow run、[[0063]] 的保存權威、[[0069]] 的核心與前端；控制權見 [[0070]]，workflow engine 見 [[0062]]。
 
 ## 問題
 
