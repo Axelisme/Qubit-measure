@@ -54,7 +54,7 @@
 - 絕對單位由 SI LC energy lifetime 與 raw scqubits regressions 驗證，fast／slow 相等不是唯一 oracle。半通量附近 matrix element 可能因 parity 消失，應比較接近零的 rate，不能只比較巨大 T1 的相對差。
 - `calculate_purcell_t1_vs_flux(..., progress=True)` 回傳 resonator thermal-averaged qubit e→g escape lifetime，單位 ns。這不是 equilibrium relaxation `1/(Γeg+Γge)`。
   - `kappa` 是 linewidth κ/(2π)，單位 GHz；rate 使用 `2π kappa`，單位 ns⁻¹。
-  - 熱人口使用 `hν/(k_B T)`。依 dressed-state energy difference 篩選方向，上升用 `a† n_B` 的矩陣元與熱權重，下降用 `a (n_B+1)`，零溫仍保有允許通道的 spontaneous decay。
+  - 熱人口使用 `hν/(k_B T)`。依 dressed-state energy difference 篩選方向。上升取 a† 的矩陣元平方並乘 n_B，下降取 a 的矩陣元平方並乘 n_B+1；零溫仍保有允許通道的 spontaneous decay。
   - 保留原 frequency-selected bath 模型，不改成完整 `X=a+a†`。Creation／annihilation 的矩陣元取絕對值平方，熱因子另乘在 rate 上。
   - `progress=False` 暫時關閉 scqubits sweep progress，結束後恢復。
 - 單位與模型取捨見 [ADR-0071](../../../../docs/adr/0071-coherence-units.md)。舊 fitted Q／x_qp 需重新擬合或審核，不自動換算歷史資料。
