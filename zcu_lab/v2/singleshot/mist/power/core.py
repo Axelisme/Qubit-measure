@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -13,7 +13,7 @@ from zcu_tools.analysis.singleshot import (
     correct_populations,
     raw_population_signal,
 )
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     IDENTITY,
     AxesSpec,
@@ -51,22 +51,22 @@ class PowerResult:
 
 
 class PowerModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    init_pulse: PulseCfg | None = None
-    probe_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init Pulse")] = None
+    probe_pulse: Annotated[PulseCfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class PowerSweepCfg(ConfigBase):
-    gain: SweepCfg
+    gain: Annotated[SweepCfg, FieldMeta(label="Probe gain", unit="a.u.")]
 
 
 class PowerCfg(ProgramV2Cfg, ExpCfgModel):
     modules: PowerModuleCfg
     sweep: PowerSweepCfg
-    g_center: complex
-    e_center: complex
-    radius: float
+    g_center: Annotated[complex, FieldMeta(label="Ground center")]
+    e_center: Annotated[complex, FieldMeta(label="Excited center")]
+    radius: Annotated[float, FieldMeta(label="Classification radius")]
 
     @field_serializer("g_center", "e_center")
     def serialize_center(self, value: complex) -> str:

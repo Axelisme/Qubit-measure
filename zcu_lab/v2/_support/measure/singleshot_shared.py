@@ -12,12 +12,10 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.core.complex_codec import decode_complex
 from zcu_tools.format_version import YamlValue
-from zcu_tools.gui.cfg import EvalValue, ScalarValue, SweepValue
 
 from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.adapter import SessionEnv
     from zcu_tools.gui.session.parameters import ParameterContext
 
 
@@ -81,24 +79,6 @@ def read_chi_kappa(parameters: ParameterContext | None) -> tuple[float, float]:
     return (
         _require_float(parameters, "$qubit.ext.chi"),
         _require_float(parameters, "$resonator.kappa"),
-    )
-
-
-def readout_probe_freq(ctx: SessionEnv) -> ScalarValue:
-    """Store $resonator.freq without reading ctx; missing calibration is Invalid."""
-    del ctx
-    return EvalValue(expr="$resonator.freq")
-
-
-def readout_probe_freq_range(
-    ctx: SessionEnv, expts: int, *, span_factor: float = 1.5
-) -> SweepValue:
-    """Store $resonator.freq ± span_factor*$resonator.kappa without reading ctx."""
-    del ctx
-    return SweepValue(
-        start=EvalValue(f"$resonator.freq - {span_factor} * $resonator.kappa"),
-        stop=EvalValue(f"$resonator.freq + {span_factor} * $resonator.kappa"),
-        expts=expts,
     )
 
 
