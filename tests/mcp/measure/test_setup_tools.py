@@ -1,12 +1,10 @@
 """Setup progress, uncertainty and native-only working values through public tools."""
 
-from collections.abc import Iterator
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 import pytest
-from qtpy.QtWidgets import QApplication
 from zcu_tools.gui.app.measure.services import app_services
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
@@ -80,19 +78,6 @@ class SetupGui:
         else:
             raise AssertionError(f"Unexpected GUI method: {method}")
         return response
-
-
-@pytest.fixture(scope="session")
-def qapp() -> Iterator[QApplication]:
-    """Keep a headless Qt owner alive for this module's real GUI seam."""
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setenv("QT_QPA_PLATFORM", "offscreen")
-        patch.setenv("QT_QPA_PLATFORMTHEME", "generic")
-        app = QApplication.instance()
-        if app is None:
-            app = QApplication([])
-        assert isinstance(app, QApplication)
-        yield app
 
 
 @pytest.fixture

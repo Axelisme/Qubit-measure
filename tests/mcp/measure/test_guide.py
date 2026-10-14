@@ -1,30 +1,15 @@
 """Markdown delivery from a registered adapter through RPC and MCP."""
 
-from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import ClassVar
 
 import pytest
-from qtpy.QtWidgets import QApplication
 
 from tests.gui.app.measure._synthetic import SampleAdapter
 from tests.gui.app.measure.remote._helpers import Fixture, mcp_client
 
 from ._pipeline_recipe import PIPELINE
-
-
-@pytest.fixture(scope="session")
-def qapp() -> Iterator[QApplication]:
-    """Keep a headless Qt owner alive for this module's real GUI seam."""
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setenv("QT_QPA_PLATFORM", "offscreen")
-        patch.setenv("QT_QPA_PLATFORMTHEME", "generic")
-        app = QApplication.instance()
-        if app is None:
-            app = QApplication([])
-        assert isinstance(app, QApplication)
-        yield app
 
 
 @pytest.mark.parametrize("declared", [True, False])
@@ -41,6 +26,8 @@ def test_recipe_guide_delivers_markdown_from_registered_adapter(
     fixture = Fixture(empty_project=True, headless=True)
     fixture.registry.register("guide-test", GuideAdapter)
     port = fixture.start()
+    # Only guide delivery is observed, so the bridge is unused; the request
+    # finalizer registered by mcp_client closes the MCP session.
     _, call = mcp_client(
         port,
         tmp_path,
