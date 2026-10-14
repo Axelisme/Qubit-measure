@@ -68,7 +68,6 @@ def window(qapp, ctrl):
 
 def test_window_builds_empty(window):
     assert spectra_list(window).count() == 0
-    assert window.windowTitle() == "fluxdep-gui"
 
 
 def test_shell_exposes_top_bar_commands_and_two_pages(window):

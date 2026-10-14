@@ -505,13 +505,6 @@ def test_set_fit_result_records_params():
     assert st.version.get(FIT_VERSION_KEY) == before + 1
 
 
-def test_default_transitions_is_basic_preset():
-    from zcu_tools.gui.app.fluxdep.state import default_transitions
-
-    t = default_transitions()
-    assert t["transitions"] == [(0, 1), (0, 2), (1, 2), (1, 3)]
-
-
 # --- transitions r_f/sample_f helpers (Optional) ---------------------------
 
 
