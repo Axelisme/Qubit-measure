@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import html
 import io
-import re
-import string
+from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from matplotlib import mathtext
+from markdown_it import MarkdownIt
+from markdown_it.renderer import RendererProtocol
+from markdown_it.token import Token
+from markdown_it.utils import EnvType, OptionsDict
+from matplotlib import mathtext, rc_context
 from matplotlib.font_manager import FontProperties
+from mdit_py_plugins.dollarmath import dollarmath_plugin
 from qtpy.QtCore import QUrl
 from qtpy.QtGui import (
     QDesktopServices,
@@ -26,51 +31,46 @@ from qtpy.QtWidgets import QTextBrowser, QWidget
 from zcu_tools.gui.app.measure.adapter import AdapterGuide
 
 _IMAGE_RESOURCE = QTextDocument.ResourceType.ImageResource.value
-_MARKDOWN_FEATURES = (
-    QTextDocument.MarkdownFeature.MarkdownDialectGitHub
-    | QTextDocument.MarkdownFeature.MarkdownNoHTML
-)
 # Rendered formulas are served from memory under this URL scheme.
 _MATH_SCHEME = "mathtext"
 _LOCAL_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg"})
-
-_FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
-_DISPLAY_MATH = re.compile(r"^(\s*)\$\$([^$]*\S[^$]*)\$\$\s*$")
-# Leftmost-first alternation: code spans and backslash escapes are consumed
-# before a dollar can open math, so `$x$` in code and \$ stay literal. An
-# opening $ is followed by a non-space, a closing $ follows a non-space that is
-# not a backslash and is not followed by a digit.
-_INLINE_TOKEN = re.compile(
-    r"(?P<code>(?P<ticks>`+)(?!`).*?(?<!`)(?P=ticks)(?!`))"
-    r"|(?P<escape>\\.)"
-    r"|(?P<double>\$\$)"
-    r"|\$(?P<math>[^\s$\\]|[^\s$][^$]*[^\s$\\])\$(?!\d)"
-)
+# Qt's HTML importer draws tables without borders; this only styles the HTML
+# that markdown-it-py produced.
+_STYLESHEET = """
+table { border-collapse: collapse; border-width: 1px; border-style: solid;
+        border-color: #888888; margin: 6px 0; }
+th, td { border-width: 1px; border-style: solid; border-color: #888888;
+         padding: 4px 8px; }
+pre { background-color: rgba(127, 127, 127, 40); padding: 6px; }
+blockquote { margin-left: 16px; }
+"""
 
 
 class GuideView(QTextBrowser):
     """Read-only Markdown view of one adapter's ``AdapterGuide``.
 
-    The view renders ``guide.markdown`` once at construction with the GitHub
-    Markdown dialect; raw HTML tags show as literal text. A clicked link goes
-    to ``QDesktopServices.openUrl`` unchanged and never navigates this view.
+    The view renders ``guide.markdown`` once at construction with markdown-it-py
+    (CommonMark plus tables, raw HTML shown as literal text) and shows the
+    resulting HTML. Code spans, fenced and indented code blocks, link
+    destinations and autolinks keep their text as written. A clicked link goes
+    to ``QDesktopServices.openUrl`` unchanged and never navigates this view; a
+    bare URL is plain text, not a link.
 
-    TeX between ``$...$`` inside a line, and a line holding only ``$$...$$``,
-    renders through matplotlib mathtext as an image in the view's font size and
-    text color. An opening ``$`` must be followed by a non-space; a closing
-    ``$`` must follow a non-space and must not be followed by a digit. ``\\$``
-    is a literal dollar. Expressions mathtext rejects, ``$$`` inside a line,
-    and dollars in code spans or fenced code blocks stay as written. Indented
-    code blocks are not recognised, because list continuations use the same
-    indentation.
+    TeX between ``$...$`` inside a line, and a ``$$...$$`` block on its own
+    lines, renders through matplotlib mathtext as an image in the view's font
+    size and text color. An opening ``$`` must be followed by a non-space and
+    must not follow a digit; a closing ``$`` must follow a non-space and must
+    not be followed by a digit. ``\\$`` is a literal dollar. Expressions
+    mathtext rejects and ``$$...$$`` inside a line stay as written.
 
     A relative image path that names a PNG or JPG file directly inside
-    ``guide.resource_dir`` is shown, scaled down to the view width when wider
-    and kept at its own size otherwise. Every other image stays unloaded and
-    the rest of the guide still renders: a missing file, another directory,
-    SVG or any other suffix, a URL with a scheme, or any image when
-    ``resource_dir`` is None. Guide content never raises; Qt and matplotlib
-    errors other than a mathtext rejection propagate from construction.
+    ``guide.resource_dir`` is shown, with or without alt text, scaled down to
+    the view width when wider and kept at its own size otherwise. Every other
+    image stays unloaded and the rest of the guide still renders: a missing
+    file, another directory, SVG or any other suffix, a URL with a scheme, or
+    any image when ``resource_dir`` is None. Guide content never raises; Qt and
+    matplotlib errors other than a mathtext rejection propagate from
+    construction.
     """
 
     def __init__(self, guide: AdapterGuide, parent: QWidget | None = None) -> None:
@@ -81,7 +81,17 @@ class GuideView(QTextBrowser):
         self.anchorClicked.connect(self._open_link)
         document = self._document()
         document.setUndoRedoEnabled(False)
-        document.setMarkdown(self._replace_math(guide.markdown), _MARKDOWN_FEATURES)
+        document.setDefaultStyleSheet(_STYLESHEET)
+        parser = MarkdownIt("commonmark", {"html": False}).enable("table")
+        parser.use(
+            dollarmath_plugin,
+            allow_space=False,
+            allow_digits=False,
+            double_inline=True,
+            renderer=self._math_html,
+        )
+        parser.add_render_rule("math_inline_double", _inline_double_source)
+        self.setHtml(parser.render(guide.markdown))
         self._fit_images()
 
     def loadResource(self, type: int, name: QUrl) -> Any:
@@ -120,56 +130,33 @@ class GuideView(QTextBrowser):
         path = self._resource_dir / relative.name
         return path if path.is_file() else None
 
-    def _replace_math(self, markdown: str) -> str:
-        """Return ``markdown`` with renderable formulas replaced by image links."""
-        lines: list[str] = []
-        fence: str | None = None
-        for line in markdown.split("\n"):
-            if fence is not None:
-                if _closes_fence(line, fence):
-                    fence = None
-                lines.append(line)
-                continue
-            opened = _FENCE_OPEN.match(line)
-            if opened is not None:
-                fence = opened.group(1)
-                lines.append(line)
-                continue
-            display = _DISPLAY_MATH.match(line)
-            if display is not None:
-                indent, expression = display.groups()
-                lines.append(indent + self._math_or_literal(expression, line.strip()))
-                continue
-            lines.append(_INLINE_TOKEN.sub(self._inline_token, line))
-        return "\n".join(lines)
-
-    def _inline_token(self, match: re.Match[str]) -> str:
-        expression = match.group("math")
-        if expression is None:
-            return match.group(0)
-        return self._math_or_literal(expression, match.group(0))
-
-    def _math_or_literal(self, expression: str, source: str) -> str:
-        image = self._render_math(expression)
+    def _math_html(self, content: str, options: dict[str, Any]) -> str:
+        """Render one dollarmath token as an image tag, or its source text."""
+        display = bool(options["display_mode"])
+        image = self._render_math(content)
         if image is None:
-            return _literal_markdown(source)
+            delimiter = "$$" if display else "$"
+            return html.escape(f"{delimiter}{content}{delimiter}")
         key = str(len(self._math_images))
         self._math_images[key] = image
-        # Qt's Markdown importer drops images with empty alt text.
-        return f"![math]({_MATH_SCHEME}:{key})"
+        align = "" if display else ' style="vertical-align: middle"'
+        return f'<img src="{_MATH_SCHEME}:{key}" alt="math"{align}>'
 
     def _render_math(self, expression: str) -> QImage | None:
         ratio = self.devicePixelRatioF()
         buffer = io.BytesIO()
         try:
-            mathtext.math_to_image(
-                f"${expression}$",
-                buffer,
-                prop=FontProperties(size=QFontInfo(self.font()).pointSizeF()),
-                dpi=self.logicalDpiY() * ratio,
-                format="png",
-                color=self.palette().color(QPalette.ColorRole.Text).name(),
-            )
+            # math_to_image saves an opaque white figure by default, which
+            # shows as a box on non-white palettes.
+            with rc_context({"savefig.transparent": True}):
+                mathtext.math_to_image(
+                    f"${expression}$",
+                    buffer,
+                    prop=FontProperties(size=QFontInfo(self.font()).pointSizeF()),
+                    dpi=self.logicalDpiY() * ratio,
+                    format="png",
+                    color=self.palette().color(QPalette.ColorRole.Text).name(),
+                )
         except ValueError:
             # mathtext rejects unsupported or malformed TeX with ValueError;
             # the caller shows the source text instead.
@@ -220,12 +207,17 @@ class GuideView(QTextBrowser):
             cursor.setCharFormat(image_format)
 
 
-def _closes_fence(line: str, fence: str) -> bool:
-    """Return whether ``line`` closes a code fence opened by ``fence``."""
-    closing = re.match(rf"^ {{0,3}}({re.escape(fence[0])}+)\s*$", line)
-    return closing is not None and len(closing.group(1)) >= len(fence)
+def _inline_double_source(
+    _renderer: RendererProtocol,
+    tokens: Sequence[Token],
+    idx: int,
+    _options: OptionsDict,
+    _env: EnvType,
+) -> str:
+    """markdown-it render rule that shows ``$$...$$`` inside a line as written.
 
-
-def _literal_markdown(text: str) -> str:
-    """Escape every ASCII punctuation character so Markdown shows ``text`` as is."""
-    return "".join(f"\\{char}" if char in string.punctuation else char for char in text)
+    dollarmath tokenizes inline ``$$`` only so its dollars cannot pair as
+    ``$...$`` math; display math is a ``$$`` block on its own lines.
+    """
+    token = tokens[idx]
+    return html.escape(f"{token.markup}{token.content}{token.markup}")
