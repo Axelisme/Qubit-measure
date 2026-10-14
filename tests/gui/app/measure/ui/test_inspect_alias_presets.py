@@ -43,6 +43,7 @@ class _Composed:
 def composed(qapp: QApplication, tmp_path: Path) -> Generator[_Composed]:
     """Assemble the shipped measure composition without remote control."""
     hooks = sys.excepthook, threading.excepthook
+    controller: Controller | None = None
     window: MainWindow | None = None
     try:
         behavior = MeasureGuiBehavior(
@@ -53,10 +54,14 @@ def composed(qapp: QApplication, tmp_path: Path) -> Generator[_Composed]:
         )
         assembly = behavior.assemble(None)
         assert isinstance(assembly.controller, Controller)
+        controller = assembly.controller
         assert isinstance(assembly.window, MainWindow)
         window = assembly.window
-        yield _Composed(assembly.controller, window)
+        yield _Composed(controller, window)
     finally:
+        if controller is not None:
+            # Drain the Controller-owned runner before its Qt views are deleted.
+            vars(controller)["_background_svc"].quiesce()
         if window is not None:
             for dialog in window.findChildren(InspectDialog):
                 # hide() skips closeEvent, so a loaded draft asks nothing here.
