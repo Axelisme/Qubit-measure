@@ -1,6 +1,6 @@
 # Measure adapter authoring
 
-**Last updated:** 2026-10-11，參數容器 guide 名稱
+**Last updated:** 2026-10-15，make_form 與持久範本
 
 `zcu_lab/v2/<實驗>/gui.py` 把同資料夾的 core 包成 GUI adapter，供框架層 `zcu_tools.gui.app.measure` 驅動。Adapter 依賴框架契約 `ExpAdapterProtocol`。框架不 import 使用者套件，也不含實驗領域知識。
 
@@ -8,10 +8,15 @@
 
 ## 目錄佈局
 
-實驗的 leaf layout 見[套件 README](README.md)。`../definitions.py` 明列可重載的 adapter catalog，`../templates.py` 組合 startup-only template catalog。Private `_support/measure/` 保存跨 adapter 的 builder、typed seeds 與 role defaults。
+實驗的 leaf layout 見[套件 README](README.md)。`../definitions.py` 明列 adapter catalog，
+`../templates.py` 提供注入 Registry 的持久範本目錄。Private `_support/measure/` 只放跨 adapter
+共用的 analysis、writeback 與 context mechanics。
 
+每個實驗在 `core.py` 定義 cfg 與 FieldMeta，在 `form.py` 提供 Qt-free `make_form(ctx)`。
+`gui.py` 把這個 factory 接到 BaseAdapter，並擁有 Run、analysis、writeback 與 operator guide。
+Form 從 core 型別推導形狀；tree 只宣告初值、Slot／Template、鎖定與隱藏。
+完整作者契約見 [ADR-0073](../../docs/adr/0073-measure-form-derivation.md)。
 
-共用 `BaseAdapter` 位於 `gui/app/measure/adapter/base.py`。它的 authoring hook 回傳 `AdapterCfgDefinition`，並呼叫 instantiate 產生 fresh cfg。靜態 spec 留在 authoring contract，framework 不依賴 builder 或 Seed。
 通用 source loader 位於 `gui/app/measure/catalog_loader.py`，由 launcher 宣告來源與重載範圍。
 它支援明確的多個 source package，回傳尚未發布的 Registry。框架契約見
 [Experiment reload](../../lib/zcu_tools/gui/app/measure/README.md#experiment-reload)。組合根重載 `zcu_lab.v2` 與 `zcu_lab.definitions`，包含 package exports。它保留 `zcu_lab.templates`、`_support` 下的 measure／singleshot 支援家族，以及所有框架 identity。Notebook 的 flux picker helper 引用 core 型別，隨 core 重載。`BaseAdapter` 位於重載範圍之外。新增 adapter 必須明列於 `../definitions.py`，不靠 class 掃描註冊。
@@ -30,90 +35,29 @@ Reload 是開發便利功能，依賴處理採 best-effort。允許函式內 imp
 
 每個實驗的 `gui.py` 是其 GUI policy 的修改入口。至少被兩個 adapter 共用的 mechanics 才放進 private `_support/measure/`。單一實驗的 policy 留在原檔。
 
-每個 adapter 實作 context-free `cfg_definition()`（static shape + deferred fresh-default recipe）、
-`run` / `analyze` / `get_writeback_items`，並在同一 class 以
-`guide_text: ClassVar[AdapterGuide]` 宣告 operator-facing prose；framework-facing `guide()`
-入口由 `BaseAdapter` 統一提供。每個 adapter 都透過 Base 具備 mandatory
-`validate_run_request(req, raw_cfg)` preflight；只有需要 SoC-dependent
-但可預測的 run-time cfg 檢查時才覆寫，並維持純 preflight
-（例如 `len_rabi` 先確認 length sweep 在 ZCU 時間格點上不會量化成 zero-step）。詳細框架契約見
-`../../lib/zcu_tools/gui/app/measure/README.md`。
+Adapter 以 `guide_text: ClassVar[AdapterGuide]` 宣告 operator prose，BaseAdapter 提供 guide()。
+只有需要純 preflight 的實驗才覆寫 `validate_run_request(req, cfg)`。框架把 Form 輸出原樣
+交給這個 hook 與 Run，不重新驗型別或 lower。Run 不重新讀目前的 point、library 或 alias。
 
-`GuardService.acquire_run_permit` 在 Run 接受時凍結已呈現的 resolved cfg；
-`run(req, raw_cfg)` 不重新讀取 live md/ml 或 lower schema。`BaseAdapter.build_exp_cfg`
-把這份 raw cfg 交給 `zcu_tools.experiment.cfg_assembler.assemble_experiment_cfg`，
-使用 `ml=None` 與 `RunRequest.device_snapshot`。不要把 active `ml/md` 綁進
-長壽 service object，也不要讓 `ModuleLibrary` store 擁有 live device snapshot。
-generic model/default/inheritance與validation/lowering直接從`zcu_tools.gui.cfg`匯入；measure
-entry point只組current md expression、measure module shape與`SweepCfg` ports。measure adapter
-facade只提供framework contract、request/result/writeback/analyze params與session signature
-vocabulary，不forward shared generic names。role/module conversion policy仍在使用者的measure
-domain，不下沉到shared core。template registration同時攜帶context-free fresh shape factory與eval-aware
-value factory；named template沿用`ROLE_FACTORIES.shape`，blank template直接依`experiment.cfg_editing` closed catalog
-順序產生。cfg role seed與library adopt policy仍由使用者套件擁有
-（ADR-0065；catalog 詳見 `../../lib/zcu_tools/experiment/cfg_editing/README.md`）。
+Make_form 只在 Open／Reset 執行。`ctx.has(ref)` 用固定來源選 Slot 或 Template，
+缺參照回 False，來源故障 raise。字串是 literal，Expr 才是運算式。
+初值 expression 在建立 input 時求成 direct 值；使用者輸入的 expression 保留原文。
+必要來源缺少時留 Invalid，不補數字 fallback。Reset 重新捕捉並可換形狀，Run 使用畫面上的值。
 
-Adapter的module/waveform domain helpers保留可讀名稱，但回傳shared
-`ReferenceSpec(kind="module" | "waveform")`與`ReferenceValue`。kind由domain factory顯式
-設定，role/default assembly不再依兩套平行shared class分派。
+持久範本目錄由組合根以 Registry(templates=TEMPLATES) 注入，也供 Library 新建選單使用。
+範本儲存 Spec defaults 與 seeds，不維護另一份角色 shape／blank／ref 表。
+Library、writeback 與 Inspect 的獨立 editor 仍使用 CfgSchema／cfg_editing；
+adapter facade 不 forward shared generic cfg names。這些 retained editor 不是 measure tab 的入口。
 
-Adapter cfg由context-free `MeasureCfgBuilder`單段宣告；builder不接`SessionEnv`，只有
-`MeasureCfgDefinition.instantiate(ctx)`解析fresh defaults。`pulse/readout/reset`的
-`ModuleInit.SMART`優先引用ModuleLibrary calibrated entry，required miss退回inline blank、optional
-miss產生`None`；`ModuleInit.INLINE`永遠使用fresh blank；`ModuleInit.DISABLED`只允許optional ref且
-永遠產生`None`。
+Adapter 如需不同於 core 的欄位，Form 明列 extras 與具名 lower，或直接回傳 adapter 自己的
+型別。Runtime 與 extras 的解讀屬 adapter，框架不知道它是不是實驗 cfg。
+`onetone/freq` 的 sampling_mode 與 homophasal 是正式 cfg 欄位。Linear 模式忽略合法校正值，
+但不忽略 expression 錯誤；homophasal 在 device I/O 前驗必要欄位與正值，不從 live point 補值。
+`twotone/time_domain/t1` 的 uniform 隨 RunRecord 保存。False 保原 start／stop／expts 視窗，
+由 runtime 在硬體量化前配置 delay；格點 collision 提示擴大 span 或減少 points，不靜默減點。
 
-module declaration同地保存`blank_overrides`、unconditional `overrides`與`locked`。
-`blank_overrides`只修改custom/fallback blank；`overrides`也作用於linked snapshot；所有paths先完整
-preflight，locked不得與override重疊，因此失敗不留下partial mount。Spec/Value資料模型仍分離，
-但adapter作者只描述一次；shared `CfgSchemaAssembler`同步materialize兩棵樹並對齊literal。
-
-deferred defaults使用小型typed Seed vocabulary：raw/literal、`md`、`scaled_md`、`value_source`、
-少數具名range factory與單一純函式`custom` escape hatch。recipe只在fresh cfg建立時解析；restore與
-使用者編輯不reseed。不得掃描任意library name或依field name猜domain數值。
-
-Adapter defaults 以 notebook bring-up seed 與目前 parameter context 校準值共同定義：有可信 md 時保持
-md-linked expression，缺校準時退回保守 notebook seed；guide prose 需描述這個 operator-facing
-fallback policy，而不是臆測固定硬體值。
-
-qubit 類 Pulse role 的 channel seed 依 setup alias fallback `qub_ch → qub_1_4_ch → qub_4_5_ch`
-解析，最後才退回 `0`。Rabi 專用 drive pulse 預設採 ModuleLibrary `pi_len → pi_amp`，讓
-`len_rabi` / `amp_rabi` 優先沿用已校準的 pi pulse，再由各 adapter 的 spec lock 覆寫 sweep-owned
-欄位（`len_rabi` 覆寫 waveform length，`amp_rabi` 覆寫 gain）；library 缺項時才由
-`blank_overrides`套用blank pulse的notebook fallback seed。一般 state-prep pi pulse role維持
-`pi_amp → pi_len`。Pi/2 pulse role
-只採 `pi2_amp → pi2_len`，不降級到 pi pulse role。
-
-`bath_reset` role 的 `cavity_tone_cfg`、`qubit_tone_cfg`、`pi2_cfg` 都是 nested pulse refs：
-前兩者預設為 custom pulse 並由 bath reset seed/md 填值，`pi2_cfg` 預設採 pi/2 pulse role
-（`pi2_amp → pi2_len`）讓 reset tomography pulse 可直接引用既有校準 module。
-
-`twotone/freq` 的 qubit-drive module 是 spectroscopy probe，不是 state-prep init pulse；
-UI label 使用 `Probe Pulse`，欄位 key 仍維持 runtime/notebook contract 的 `qub_pulse`。
-
-adapter-defined top-level knobs以generic scalar/`field` verb按GUI顯示順序宣告；它們可以是正式
-ExpCfg欄位，也可以是run-only adapter欄位。正式欄位正常lower到
-ExpCfg；run-only 欄位由 adapter 在 `build_exp_cfg()` 或 custom `run()` 內讀取後 pop 掉。
-`onetone/freq` 的 `sampling_mode` 是正式 `FreqCfg` 欄位，GUI 維持既有 `sweep.freq`
-結構。`homophasal.r_f` / `rf_w` / `theta0` 是正式校正 cfg 欄位，預設為
-合法空值；可輸入 direct value 或 expression。linear 模式忽略合法校正值，
-但兩種模式都不忽略 expression 解析錯誤。homophasal 模式在 device I/O 前
-驗證必要欄位及正值條件，不從 live md 隱藏注入。
-`twotone/time_domain/t1` 的 `uniform` 是會隨 RunRecord 保存的 typed cfg 欄位：預設 `True` 使用線性 delay
-sweep；設為 `False` 時 adapter 仍保持同一個 cfg start/stop/expts 視窗，底層在硬體量化前
-沿 normalized T1 decay curve 等弧長配置 delay。內部 lifetime model 不成為 GUI 欄位；cycle
-conversion 保留點數與順序，格點 collision 直接提示擴大 span 或減少 points，而不靜默減點。
-
-跨session狀態的少數default走`value_source(key, target_type, fallback?)` Seed，於definition
-instantiate時透過`ctx.values` resolve once，成功後寫入普通direct value，不把lazy ref放進cfg
-tree。role default table的同類入口是`Source(key, type_name?)` seed；只用於來源多變、
-強型別 helper 反而會拉寬依賴的情境。device source 只發布具名 device 資訊，不推論 flux
-語義；`twotone/flux_dep` 的 `dev.flux_dev` 以 `device.flux.name`
-為預設（也就是名為 `flux` 的 registered device），無可用來源時 fallback 到 `flux_yoko`。
-
-Role default characterization golden 跟隨 `ROLE_TABLE` 與 `make_default_value` 產出的完整 value tree；
-調整 seed 或 default-value policy 時，更新 `tests/zcu_lab/v2/_support/measure/_role_default_golden.json`
-才是契約變更的紀錄，不在 runtime builder 內保留舊 fixture 相容邏輯。
+Core 用具名裝置欄位，例如 flux_dev、jpa_flux_dev。Form 的 AliasName("flux_dev") 在 Open／Reset
+選 direct 名稱，core 只以 context.devices 查 driver。Flux_unit 獨立保存，recipe 不改單位政策。
 
 `BaseAdapter.load` 是 GUI load path 的 canonical result seam：預設建構 `exp_cls()` 並呼
 `exp.load(Path(filepath))`，與 `BaseAdapter.save` 的 canonical persistence 對稱。需要 constructor
@@ -121,8 +65,7 @@ Role default characterization golden 跟隨 `ROLE_TABLE` 與 `make_default_value
 adapter 必須 override `load()` 或讓預設路徑以明確 `NotImplementedError` fast-fail。
 adapter 不提供 legacy 單檔案的轉換或 fallback；canonical `exp.load()` 拒絕的資料
 直接回報原始錯誤。`BaseAdapter.load` 只讀取結果，不修改 tab cfg；GUI
-`LoadService.load_result` 只從 loaded RunRecord.cfg 嘗試回填 tab 與 Config editor。
-缺失或不可採用的 cfg 不撤回有效資料，tab cfg 保持不變。Adapters 用 RunRecord 配對 cfg 與純 Result，分析不讀 current cfg。OneTone／TwoTone FluxDep 的互動分析由 frontend 擁有。
+`LoadService.load_result` 保留 tab input 與固定來源，不從 loaded RunRecord.cfg 回填表單。Adapters 用 RunRecord 配對 cfg 與純 Result，分析不讀 current cfg。OneTone／TwoTone FluxDep 的互動分析由 frontend 擁有。
 
 `BaseAdapter` 在 class definition/import 時驗證 `AdapterCapabilities` 與 lifecycle method 是否
 一致。`analysis=FIT` 必須實作 `analyze()` 且不得實作 interactive plugin hooks；
@@ -243,10 +186,10 @@ tab creation 與 remote adapter listing（`view.adapter_list`）因此直接列�
 
 | 順序 | adapter | 角色 |
 | --- | --- | --- |
-| 1 | `jpa/freq` | 找 JPA pump frequency（FIT analysis，寫回 `best_jpa_freq`） |
-| 2 | `jpa/flux` | 找 JPA flux sweet spot（FIT analysis，寫回 `best_jpa_flux`） |
-| 3 | `jpa/power` | 找 JPA pump power（FIT analysis，寫回 `best_jpa_power`） |
-| 4 | `jpa/auto_optimize` | 聯合最佳化 flux/freq/power（FIT analysis，一次提出三個 `best_jpa_*`） |
+| 1 | `jpa/freq` | 找 JPA pump frequency（FIT analysis，寫回 `$jpa.pump_freq`） |
+| 2 | `jpa/flux` | 找 JPA flux sweet spot（FIT analysis，寫回 `$jpa.flux`） |
+| 3 | `jpa/power` | 找 JPA pump power（FIT analysis，寫回 `$jpa.pump_power`） |
+| 4 | `jpa/auto_optimize` | 聯合最佳化 flux/freq/power（FIT analysis，一次提出`$jpa.flux`、`$jpa.pump_freq` 與 `$jpa.pump_power`） |
 | 5 | `jpa/flux_onetone` | flux × readout frequency 2D survey（`analysis=NONE`，無 writeback） |
 | 6 | `jpa/check` | pump off/on 比較診斷（figure-only analysis，無 writeback） |
 
@@ -306,12 +249,12 @@ IQ centers與confusion matrix。Amp固定無衰減／零相位，提供Initial S
 
 ### cfg seed 與純量累積
 
-Run cfg 建立時，七個 default readers 從固定 capture 的 `$qubit.ext.*` 降低 seed。
+Open／Reset 建表單時，form.py 從固定 capture 的 `$qubit.ext.*` 求初值。
 SingleToneFreq 用 reset_f ±1.5 reset_fwhm 建立 201 點頻率窗。SingleToneLength 用
 reset_f。DualToneFreq 用 reset_gain1/2 和 reset_f1/2，兩個頻率軸各為中心 ±50 MHz、
 201 點。DualToneLength 用兩頻率及兩 gain，DualTonePower 用兩頻率。
 BathLength 與 BathPhase 用 reset_bath_freq/gain。BathFreqGain 保留 resonator.freq 與
-qubit.ext.rabi_freq 的原 seed。Missing、null 或 invalid scalar 沿既有 lowering 失敗，
+qubit.ext.rabi_freq 的原 seed。Missing、null 或 invalid scalar 沿 Form 驗證失敗，
 不代用 fallback 數字。
 
 本次分析值直接形成 `ParameterWriteback`。五個 caller 保留以下順序：

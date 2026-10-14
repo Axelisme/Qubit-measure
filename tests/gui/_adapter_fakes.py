@@ -24,7 +24,6 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
     WritebackRequest,
 )
-from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
@@ -78,10 +77,6 @@ class DummyAdapter:
             typical_writeback="dummy",
             recommended="dummy",
         )
-
-    def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
-        del ctx
-        return CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
 
     @classmethod
     def analyze_params_cls(cls) -> type:

@@ -186,7 +186,30 @@ def test_measure_reference_missing_then_relinks_with_embedded_snapshot() -> None
 def _calibration_schema(mode: str) -> tuple[CalibrationAdapter, SessionEnv, CfgSchema]:
     adapter = CalibrationAdapter()
     ctx = SessionEnv(parameters=parameter_capture(), soc=None, soccfg=None)
-    schema = adapter.make_default_cfg(ctx)
+    schema = CfgSchema(
+        CfgSectionSpec(
+            fields={
+                "mode": ScalarSpec("Mode", str, choices=["plain", "calibrated"]),
+                "calibration": CfgSectionSpec(
+                    fields={
+                        name: ScalarSpec(name, float, optional=True)
+                        for name in ("frequency", "width", "phase")
+                    }
+                ),
+            }
+        ),
+        CfgSectionValue(
+            fields={
+                "mode": DirectValue("plain"),
+                "calibration": CfgSectionValue(
+                    fields={
+                        name: DirectValue(None)
+                        for name in ("frequency", "width", "phase")
+                    }
+                ),
+            }
+        ),
+    )
     schema.value.fields["mode"] = DirectValue(mode)
     return adapter, ctx, schema
 

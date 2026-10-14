@@ -59,7 +59,7 @@ class SingleToneFreqAdapter(
             "pulse-reset tone and sweeps its frequency, fitting the qubit "
             "response (Lorentzian) to find the reset sideband frequency and "
             "its linewidth. Runs on real hardware. Typically run after an "
-            "init pulse excites the qubit, to locate the f01+f12 (r_f - q_f) "
+            "init pulse excites the qubit, to locate the f01+f12 ($resonator.freq - $qubit.freq) "
             "sideband at which the reset pulse dumps the excitation."
         ),
         expects_md=(
@@ -93,7 +93,7 @@ class SingleToneFreqAdapter(
         recommended=(
             "A sweep of ~201 points spanning a couple of linewidths around "
             "the expected sideband captures the dip cleanly; widen the span "
-            "if reset_f is only a rough resonator-minus-qubit estimate. The reset-pulse "
+            "if $qubit.ext.reset_f is only a rough resonator-minus-qubit estimate. The reset-pulse "
             "length is held fixed here — sweep it separately afterwards."
         ),
     )

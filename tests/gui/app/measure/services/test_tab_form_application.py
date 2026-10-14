@@ -10,7 +10,6 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
-    AdapterCfgDefinition,
     AnalysisMode,
     ExpAdapterProtocol,
     RunRequest,
@@ -42,10 +41,6 @@ class TraceAdapter(BaseAdapter[TraceCfg, TraceCfg]):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.NONE, load_data=False, requires_soc=False
     )
-
-    @classmethod
-    def cfg_definition(cls) -> AdapterCfgDefinition:
-        raise AssertionError("The tab must use Form, not the old cfg definition")
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return "trace"

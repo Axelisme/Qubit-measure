@@ -1,4 +1,4 @@
-"""SMART module defaults shared by library creation and deferred cfg seeds."""
+"""Fixed-source module reference defaults for independent library creation."""
 
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy

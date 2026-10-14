@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, runtime_checkable
 
-from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 if TYPE_CHECKING:
@@ -31,34 +30,10 @@ from .types import (
 )
 
 __all__ = [
-    "AdapterCfgDefinition",
     "ExpAdapterProtocol",
     "NoAnalysisResult",
     "NoAnalyzeParams",
 ]
-
-
-class AdapterCfgDefinition(Protocol):
-    """Context-free cfg authoring contract consumed by ``BaseAdapter``.
-
-    Implementations own field policy and deferred defaults. The framework does
-    not inspect declarations or seeds and validates the instantiated schema
-    through its existing finished-cfg validator.
-    """
-
-    @property
-    def spec(self) -> CfgSectionSpec:
-        """Return an isolated copy of the static field shape, labels and locks."""
-        ...
-
-    def instantiate(self, ctx: SessionEnv) -> CfgSchema:
-        """Resolve fresh defaults from ``ctx`` without changing the static spec.
-
-        ``ctx`` supplies metadata, module-library and value-source lookups.
-        Return an independently mutable schema. Propagate default-resolution
-        failures; do not change this definition or the supplied context.
-        """
-        ...
 
 
 @runtime_checkable

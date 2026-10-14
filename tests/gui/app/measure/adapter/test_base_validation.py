@@ -7,7 +7,6 @@ import pytest
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
-    AdapterCfgDefinition,
     AnalysisMode,
     NoAnalysisResult,
     NoAnalyzeParams,
@@ -15,8 +14,6 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-
-from tests.gui.app.measure.adapter._cfg_fakes import StaticCfgDefinition
 
 
 class _MinimalNoAnalysisAdapter(
@@ -26,10 +23,6 @@ class _MinimalNoAnalysisAdapter(
         analysis=AnalysisMode.NONE
     )
     exp_cls: ClassVar[type[object]] = object
-
-    @classmethod
-    def cfg_definition(cls) -> AdapterCfgDefinition:
-        return StaticCfgDefinition()
 
     def make_filename_stem(self, ctx: Any) -> str:
         del ctx
@@ -86,10 +79,6 @@ def test_fit_requires_analyze_params_hook_when_params_need_values() -> None:
             )
             exp_cls: ClassVar[type[object]] = object
 
-            @classmethod
-            def cfg_definition(cls) -> AdapterCfgDefinition:
-                return StaticCfgDefinition()
-
             def make_filename_stem(self, ctx: Any) -> str:
                 del ctx
                 return "bad"
@@ -107,10 +96,6 @@ def test_fit_allows_base_analyze_params_hook_when_params_all_have_defaults() -> 
             analysis=AnalysisMode.FIT
         )
         exp_cls: ClassVar[type[object]] = object
-
-        @classmethod
-        def cfg_definition(cls) -> AdapterCfgDefinition:
-            return StaticCfgDefinition()
 
         def make_filename_stem(self, ctx: Any) -> str:
             del ctx

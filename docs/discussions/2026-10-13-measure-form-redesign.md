@@ -3,7 +3,7 @@ date: 2026-10-13
 status: active
 superseded_by: null
 related:
-  - docs/adr/draft/measure-form-derivation.md
+  - docs/adr/0073-measure-form-derivation.md
   - docs/adr/0012-cfgbuilder-value-layer-fluent-assembly.md
   - docs/adr/0065-cfg-editing.md
   - docs/adr/draft/module-boundaries.md
@@ -16,7 +16,7 @@ basis:
 
 ## 結論
 
-決策見 [measure-form ADR draft](../adr/draft/measure-form-derivation.md)，實作驗收後轉正式 ADR。本篇記推導過程與被否決的路。
+決策見 [measure-form ADR draft](../adr/0073-measure-form-derivation.md)，實作驗收後轉正式 ADR。本篇記推導過程與被否決的路。
 
 - 表單形狀從 core 的 pydantic cfg 推導，adapter 不再用 builder 重述。
 - 欄位說明用 `Annotated[..., FieldMeta]` 放 core；起始值與偏差放每個實驗目錄的 `form.py`，是一棵對齊 cfg 的樹。

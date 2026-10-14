@@ -8,16 +8,9 @@ from typing import ClassVar, Literal
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import AnalysisDocument, RunMetadata
 from zcu_tools.experiment.native_persistence import PreparedRunData
-from zcu_tools.gui.app.measure.adapter import LoadDataRequest, SessionEnv
+from zcu_tools.gui.app.measure.adapter import LoadDataRequest
 from zcu_tools.gui.app.measure.catalog import CatalogReloadError, PreparedCatalogReload
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    DirectValue,
-    ScalarSpec,
-)
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from tests.gui._adapter_fakes import DummyAdapter
@@ -59,13 +52,6 @@ class OldAdapter(DummyAdapter):
         """Reject any result/comment; this fake has no persistence declaration."""
         del result, comment
         raise NotImplementedError("Reload fake does not prepare native data")
-
-    def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
-        del ctx
-        return CfgSchema(
-            spec=CfgSectionSpec(fields={"knob": ScalarSpec(label="Knob", type=int)}),
-            value=CfgSectionValue(fields={"knob": DirectValue(7)}),
-        )
 
 
 class NewAdapter(OldAdapter):

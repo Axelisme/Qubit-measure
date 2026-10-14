@@ -877,8 +877,14 @@ def _add_fake_tab(fx, tab_id: str) -> None:
     from tests.gui.app.measure._synthetic import SampleAdapter
 
     adapter = SampleAdapter()
-    cfg = adapter.make_default_cfg(fx.state.session_env)
-    fx.prepare_tab(tab_id, adapter, cfg)
+    from zcu_tools.cfg_model import Range
+    from zcu_tools.gui.form_adapter import Form
+
+    from tests.gui.app.measure._synthetic import SampleCfg
+
+    fx.prepare_tab(
+        tab_id, adapter, Form(SampleCfg, {"sweep": Range.between(5.0, 6.0, expts=11)})
+    )
 
 
 def test_tab_cfg_edit_blocked_while_owning_tab_runs(fx):

@@ -8,7 +8,7 @@ status: draft
 
 ## 脈絡與範圍
 
-Workflow plan 與 tunables 需要 sequence、nullable、tagged union、typed mapping、expression 和 library module reference。新表單用 Pydantic 表示普通值，用獨立的 input JSON 保存未填與 expression。它不擴充 CfgSchema，也不遷移 Measure。
+Workflow plan 與 tunables 需要 sequence、nullable、tagged union、typed mapping、expression 和 library module reference。新表單用 Pydantic 表示普通值，用獨立的 input JSON 保存未填與 expression。它不擴充 CfgSchema。Measure tab 使用這份工具，推導與宿主接線見 [[0073]]。
 
 保存與來源責任沿 [[0063]]，既有 cfg 機制沿 [[0065]]，GUI 與 remote 的共同 owner 入口沿 [[0067]]。本文描述新表單與 Engine 的分工，不承諾宿主整合或硬體驗收已完成。
 

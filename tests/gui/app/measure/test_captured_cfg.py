@@ -1,14 +1,9 @@
 """Fixed captures at measure binding and cross-tab publication seams."""
 
 from collections.abc import Generator, Mapping
-from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.services.tab import TabService
-from zcu_tools.gui.app.measure.services.tab_cfg import TabCfgResources
-from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
@@ -18,7 +13,7 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.gui.session.aliases import AliasRow, AliasTable
 from zcu_tools.gui.session.context_types import SavedPoint
-from zcu_tools.gui.session.types import ParameterContext, RoleBinding, SessionEnv
+from zcu_tools.gui.session.types import ParameterContext, RoleBinding
 from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry import ComponentSchema, RoleSpec, component_registry
@@ -118,56 +113,3 @@ def test_binding_snapshot_keeps_supplied_capture_after_live_selection_changes(
         ).evaluate_expression("$qubit.rate")
         == 20.0
     )
-
-
-def test_tab_refresh_preserves_distinct_captures_and_publishes_before_notification(
-    captures: tuple[ParameterContext, ParameterContext],
-) -> None:
-    first, second = captures
-    host = PublishedHost(first)
-    bindings = MeasureCfgBindings(host)
-    owner = TabCfgResources(mutation_allowed=lambda _tab: True)
-    one = owner.create(
-        "one",
-        expression_schema,
-        resolution=lambda: bindings.snapshot((), captured_values={}, parameters=first),
-    )
-    two = owner.create(
-        "two",
-        expression_schema,
-        resolution=lambda: bindings.snapshot((), captured_values={}, parameters=second),
-    )
-    observed = []
-
-    def subscriber(publication) -> None:
-        observed.append((one.observe(), two.observe()))
-
-    dispose = one.watch(subscriber)
-    observed.clear()
-    host.current = second
-    publications = owner.refresh_all()
-    dispose()
-    assert observed == [publications]
-    assert one.accept().values == {"value": 10.0}
-    assert two.accept().values == {"value": 20.0}
-
-
-def test_role_capture_failure_does_not_register_a_tab() -> None:
-    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
-    registry = MagicMock(spec=Registry)
-
-    def unavailable(_aliases: Mapping[str, str] | None) -> ParameterContext | None:
-        raise ValueError("role target is unavailable")
-
-    service = TabService(
-        state,
-        registry,
-        MagicMock(),
-        TabCfgResources(mutation_allowed=lambda _tab: True),
-        cfg_resolution=MagicMock(),
-        captured_parameters=unavailable,
-    )
-    with pytest.raises(ValueError, match="role target is unavailable"):
-        service.new_tab("capture")
-    assert state.list_tab_ids() == []
-    registry.create.return_value.make_default_cfg.assert_not_called()

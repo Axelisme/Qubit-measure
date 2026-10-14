@@ -100,7 +100,7 @@ class SsAcStarkAdapter(
         ),
         recommended=(
             "Set calibration cfg directly or seed it with 'singleshot/ge'; run after the "
-            "dispersive-shift experiment has set 'chi' / 'rf_w'. Sweep the Stark gain "
+            "dispersive-shift experiment has set '$qubit.ext.chi' / '$resonator.kappa'. Sweep the Stark gain "
             "across the onset and the probe frequency around the qubit line."
         ),
     )

@@ -18,7 +18,6 @@ from zcu_tools.experiment.native_persistence import (
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
-    AdapterCfgDefinition,
     AdapterGuide,
     AnalysisMode,
     AnalyzeRequest,
@@ -39,9 +38,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.app.measure.adapter.lowering import validate_schema
 from zcu_tools.gui.app.measure.adapter.types import AnalyzeResult
-from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.interactive import PluginDefinition, Session
 
@@ -301,16 +298,6 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     # -- experiment-specific contract (subclass must fill) -----------------
 
     @classmethod
-    def cfg_definition(cls) -> AdapterCfgDefinition:
-        """Return a legacy independent schema definition; not used by tab forms.
-
-        Adapters that still use make_default_cfg must declare this hook. The
-        core-derived tab path uses form instead. Missing legacy hooks raise
-        NotImplementedError rather than guessing a form/schema conversion.
-        """
-        raise NotImplementedError("Legacy cfg_definition is not declared")
-
-    @classmethod
     def guide(cls) -> AdapterGuide:
         """Static human-facing orientation guide.
 
@@ -447,18 +434,6 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         )
 
     # -- shared implementation (provided once) -----------------------------
-
-    def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
-        """Instantiate fresh defaults and validate their static input contract.
-
-        ctx supplies the fixed parameter capture. Unbound role defaults may
-        retain expressions and empty linked references for cfg Invalid
-        publication; they are not runnable. Definition, source and malformed
-        input failures propagate without fallback or context mutation.
-        """
-        schema = type(self).cfg_definition().instantiate(ctx)
-        validate_schema(schema, ctx.parameters)
-        return schema
 
     @classmethod
     def analyze_params_cls(cls) -> type:

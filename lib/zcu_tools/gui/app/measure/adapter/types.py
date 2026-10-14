@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 # ``ContextReadiness``, and ``SessionEnv`` are session-core value types — they live
 # in ``gui/session/types`` (no experiment cfg-tree coupling). They are re-exported
 # from the adapter package because ``ExpAdapterProtocol``'s signatures speak in
-# them (``make_default_cfg(ctx: SessionEnv)``, ``RunRequest.soc: SocHandle``).
+# them (``make_save_paths(ctx: SessionEnv)``, ``RunRequest.soc: SocHandle``).
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.session.types import SessionEnv, SocCfgHandle, SocHandle
 

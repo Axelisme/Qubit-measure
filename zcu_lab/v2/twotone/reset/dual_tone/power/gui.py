@@ -104,7 +104,7 @@ class DualTonePowerAdapter(
             "Sweep each gain across its full usable range. Analysis denoises "
             "the map before picking the optimum; wavelet smoothing is the "
             "default and Gaussian remains available for comparison. The "
-            "frequencies are held at 'reset_f1' / 'reset_f2', so calibrate "
+            "frequencies are held at '$qubit.ext.reset_f1' / '$qubit.ext.reset_f2', so calibrate "
             "those first."
         ),
     )

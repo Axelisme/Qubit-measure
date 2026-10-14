@@ -13,7 +13,6 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 from tests.experiment._snapshot_support import SnapshotRecordCore
-from tests.gui.app.measure.adapter._cfg_fakes import StaticCfgDefinition
 
 
 class SnapshotAdapter(BaseAdapter[SavingCfg, RunRecord[SavingCfg, SavingResult]]):
@@ -30,10 +29,6 @@ class SnapshotAdapter(BaseAdapter[SavingCfg, RunRecord[SavingCfg, SavingResult]]
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.NONE, load_data=False, requires_soc=False
     )
-
-    @classmethod
-    def cfg_definition(cls) -> StaticCfgDefinition:
-        return StaticCfgDefinition()
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return "snapshot"

@@ -373,7 +373,7 @@ class Controller(SessionControllerMixin):
         self._ctx_svc = services.context
         self._context_control = services.context_control
         self._setup_control = services.setup_control
-        self._tab_cfg = services.tab_cfg
+        self._tab_forms = services.tab_forms
         self._tab_svc = services.tab
         self._tab_control = services.tab_control
         self._run_analyze_control = services.run_analyze_control
@@ -558,7 +558,7 @@ class Controller(SessionControllerMixin):
     @property
     def cfg_resources(self) -> TabFormResources:
         """Return the tab Form owner pool; lookup rejects retired tab identities."""
-        return self._tab_cfg
+        return self._tab_forms
 
     @property
     def tab_control(self) -> TabControlPort:

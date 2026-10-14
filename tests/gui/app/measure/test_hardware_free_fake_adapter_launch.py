@@ -1,4 +1,4 @@
-"""Hardware-free fake-adapter Run tree and native writeback ledger presentation."""
+"""Hardware-free Form adapter Run and native writeback ledger presentation."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from collections.abc import Callable, Sequence
 
 import pytest
 from qtpy.QtCore import QEventLoop, QTimer
-from qtpy.QtWidgets import QApplication, QCheckBox, QLabel, QScrollArea, QTreeWidget
+from qtpy.QtWidgets import QApplication, QCheckBox, QLabel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import (
     ParameterWriteback,
@@ -116,56 +116,15 @@ def hw_fixture(qapp, tmp_path):
 
 
 def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
-    """Public tab creation mounts the tree and native 6100 MHz writeback ledger."""
+    """Public Form tab Run/analysis renders a native 6100 MHz writeback ledger."""
     ctrl, window = hw_fixture
     assert "fake/freq" in ctrl.get_adapter_names()
     assert ctrl.get_session_env().soc is None
     tab_id = ctrl.new_tab("fake/freq")
     QApplication.processEvents()
     (tab,) = window.findChildren(ExpTabWidget)
-    tree = tab.cfg_form.findChild(QTreeWidget)
-    assert tree is not None
-    assert tree.isHeaderHidden()
-    assert tree.indentation() == 10
-    assert tree.font().pixelSize() == 13
-    assert tab.analyze_form.font().pixelSize() == 13
-
-    def is_descendant(widget, ancestor):
-        current = widget
-        while current is not None:
-            if current is ancestor:
-                return True
-            current = current.parent()
-        return False
-
-    scroll = next(
-        scroll
-        for scroll in tab.findChildren(QScrollArea)
-        if is_descendant(tab.analyze_btn, scroll)
-    )
-    inner = scroll.widget()
-    assert inner is not None
-    assert is_descendant(tab.analyze_btn, inner)
-    layout = inner.layout()
-    assert layout is not None
-    widgets = [
-        layout.itemAt(i).widget()
-        for i in range(layout.count())
-        if layout.itemAt(i).widget() is not None
-    ]
-    idx_params = next(
-        i for i, widget in enumerate(widgets) if is_descendant(tab.analyze_form, widget)
-    )
-    idx_analyze = next(
-        i for i, widget in enumerate(widgets) if is_descendant(tab.analyze_btn, widget)
-    )
-    idx_writeback = widgets.index(tab.writeback_section)
-    assert idx_params < idx_analyze < idx_writeback
-
-    from zcu_tools.gui.cfg.resource import CfgEdit
-
     cfg = ctrl.cfg_resources.lookup(tab_id)
-    cfg.edit((CfgEdit(("rounds",), 1),))
+    cfg.write({("rounds",): 1})
     ctrl.start_run(tab_id)
 
     def wait_for(predicate: Callable[[], bool]) -> None:

@@ -14,6 +14,12 @@ from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.gui.cfg.binding import CfgDraft
 
+from tests.gui.app.measure._library_fakes import (
+    device_schema,
+    readout_schema,
+    sample_schema,
+)
+
 from ._helpers import Fixture, call, open_client
 
 
@@ -37,9 +43,8 @@ class _LiveFixture(Fixture):
 
     def __init__(self) -> None:
         super().__init__()
-        from tests.gui.app.measure._synthetic import SampleAdapter
 
-        cfg = SampleAdapter().make_default_cfg(self.state.session_env)
+        cfg = sample_schema()
         self._tab_id = self.ctrl.new_tab("fake")
         # Independent library editor; it never publishes tab cfg.
         self.editor_id, _ = self.ctrl.open_seeded_cfg_editor(
@@ -566,17 +571,12 @@ def test_tree_includes_immutable_literal_fields(qapp):
 
 
 def test_tree_device_scalar_has_value_and_dynamic_choices(qapp):
-    from zcu_tools.gui.app.measure.adapter import SessionEnv
     from zcu_tools.gui.app.measure.remote.cfg_observation import (
         build_cfg_observation,
     )
     from zcu_tools.gui.cfg.model import DirectValue
 
-    from tests.gui.app.measure._flux_adapter import SpectrumAdapter
-
-    cfg = SpectrumAdapter().make_default_cfg(
-        SessionEnv(parameters=None, soc=None, soccfg=None)
-    )
+    cfg = device_schema()
     devices = cfg.value.fields["dev"]
     assert isinstance(devices, CfgSectionValue)
     devices.fields["flux_dev"] = DirectValue("flux_yoko")
@@ -599,12 +599,8 @@ def test_tree_device_scalar_has_value_and_dynamic_choices(qapp):
 
 
 def _fakefreq_root():
-    from zcu_tools.gui.app.measure.adapter import SessionEnv
 
-    from tests.gui.app.measure._synthetic import PairAdapter
-
-    ctx = SessionEnv(parameters=None, soc=None, soccfg=None)
-    cfg = PairAdapter().make_default_cfg(ctx)
+    cfg = readout_schema()
     ctrl = MagicMock()
     return _make_draft(ctrl, cfg.spec, cfg.value)
 
@@ -657,12 +653,8 @@ def test_moduleref_tagged_key_passes_through(qapp):
 
 
 def _fluxdep_root(device_names: list[str]):
-    from zcu_tools.gui.app.measure.adapter import SessionEnv
 
-    from tests.gui.app.measure._flux_adapter import SpectrumAdapter
-
-    ctx = SessionEnv(parameters=None, soc=None, soccfg=None)
-    cfg = SpectrumAdapter().make_default_cfg(ctx)
+    cfg = device_schema()
     ctrl = MagicMock()
     ctrl.list_device_names.return_value = list(device_names)
     return _make_draft(ctrl, cfg.spec, cfg.value)

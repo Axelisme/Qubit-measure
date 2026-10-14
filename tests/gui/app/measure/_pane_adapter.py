@@ -27,7 +27,6 @@ from zcu_tools.plotting.plots import Plots
 
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 from tests.gui.app.measure._synthetic import EmptyParams
-from tests.gui.app.measure.adapter._cfg_fakes import StaticCfgDefinition
 
 
 @dataclass
@@ -61,10 +60,6 @@ class PaneAdapter(BaseAdapter[SavingCfg, SavingRun, PaneResult, PaneParams]):
         return Form(SavingCfg, {})
 
     experiment_tag: ClassVar[str | None] = "test/saving"
-
-    @classmethod
-    def cfg_definition(cls) -> StaticCfgDefinition:
-        return StaticCfgDefinition()
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return "panes"

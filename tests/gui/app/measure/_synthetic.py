@@ -22,18 +22,10 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-    ModuleInit,
-)
-from zcu_tools.gui.cfg import SweepSpec, SweepValue
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import SweepCfg
-
-from tests.gui.app.measure._templates import ROLE_FACTORIES
 
 ALIAS_PRESET = (
     AliasRow("qubit", ""),
@@ -77,22 +69,6 @@ class SampleAdapter(BaseAdapter[SampleCfg, SampleRun, SampleAnalysis, SamplePara
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         requires_soc=False, load_data=False
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(role_factories={})
-            .reps(100)
-            .rounds(10)
-            .field(
-                "sweep",
-                spec=SweepSpec(label="Sample"),
-                default=SweepValue(start=5.0, stop=6.0, expts=11),
-            )
-            .float("gain", label="Gain", default=0.1)
-            .float("noise_scale", label="Noise scale", default=0.1)
-            .build()
-        )
 
     def run(
         self,
@@ -140,24 +116,6 @@ class EmptyParams:
 
 class PairAdapter(SampleAdapter):
     """Config reference and two scalar proposals; no scientific fit involved."""
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(role_factories=ROLE_FACTORIES)
-            .readout(
-                init=ModuleInit.INLINE,
-                locked={"pulse_cfg.freq": 0.0, "ro_cfg.ro_freq": 0.0},
-            )
-            .sweep(
-                "freq",
-                label="Frequency",
-                default=SweepValue(start=6000.0, stop=6002.0, expts=3, step=0.5),
-            )
-            .reps(100)
-            .rounds(1)
-            .build()
-        )
 
     def get_writeback_items(
         self, req: WritebackRequest[SampleRun, SampleAnalysis]

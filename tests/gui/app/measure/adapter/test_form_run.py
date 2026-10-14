@@ -11,7 +11,7 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.services.tab_cfg import TabFormResource, TabFormSources
+from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
 from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots

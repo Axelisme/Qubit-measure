@@ -10,6 +10,7 @@ from zcu_tools.gui.app.measure.remote import ControlOptions
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.mcp.measure.session import GuiRpcError
 
+from tests.gui.app.measure._library_fakes import sample_schema
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
 
 from ._helpers import Fixture, call, mcp_client, observe_run_inputs, open_client
@@ -303,7 +304,7 @@ def test_edit_error_identifies_failed_path_and_index_without_committing(live_tab
 
 def test_library_editor_batch_retains_its_independent_prefix_contract(live_tab):
     fixture, _ = live_tab
-    schema = SampleAdapter().make_default_cfg(fixture.state.session_env)
+    schema = sample_schema()
     parameters = fixture.ctrl.read_context()
     editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(
         schema, parameters=parameters, gc=False
@@ -351,7 +352,7 @@ def test_independent_editor_batch_preserves_precondition_and_prior_prefix(
     from zcu_tools.gui.session.value_lookup import ProviderError, UnavailableValue
 
     fixture, _ = live_tab
-    schema = SampleAdapter().make_default_cfg(fixture.state.session_env)
+    schema = sample_schema()
     parameters = fixture.ctrl.read_context()
     editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(
         schema, parameters=parameters, gc=False

@@ -50,7 +50,6 @@ from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 from tests.gui.app.measure._form_fakes import make_form
-from tests.gui.app.measure.adapter._cfg_fakes import StaticCfgDefinition
 
 GUI_ORIGIN = CommandOrigin("gui")
 
@@ -86,10 +85,6 @@ class SavingAdapter(
         analysis=AnalysisMode.NONE, load_data=False, requires_soc=False
     )
     experiment_tag: ClassVar[str | None] = SavingCore().persistence_spec().tag
-
-    @classmethod
-    def cfg_definition(cls) -> StaticCfgDefinition:
-        return StaticCfgDefinition()
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return "saving"

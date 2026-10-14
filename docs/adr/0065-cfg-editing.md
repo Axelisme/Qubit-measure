@@ -18,7 +18,7 @@ Measure 的 `TabFormResource` 擁有一份 Qt-free `FormState` 與固定來源�
 
 `experiment.cfg_editing` 可依賴 Qt-free `gui.cfg`。Experiment package root 的公開 exports 按需載入，匯入 cfg_editing 不載入 experiment base、device 或 datafile。Library-entry conversion 與兩 app 的 normalization 尚未全部收斂，剩餘目標見 [cfg editing draft](draft/cfg-editing-boundaries.md)。
 
-實驗 adapter 宣告 `Form(core_cfg, tree)`。Core annotations 定義可編輯形狀，tree 定義起始值、Slot、Template 與 lock。Open 與 Reset 計算 defaults。Memento 保存 Form input，不保存來源覆寫。Definition 在資源 lifetime 中固定，需要另一份 definition 時由 app 建立新資源並撤銷舊 handle。
+實驗 adapter 宣告 `Form(core_cfg, tree)`。Core annotations 定義可編輯形狀，tree 定義起始值、Slot、Template 與 lock。Open 與 Reset 計算 defaults。Memento 保存 Form input，不保存來源覆寫。Make_form、範本與固定來源的契約見 [[0073]]。Reset 可在同一資源內更換形狀與初值；成功後舊 editor state 不再承接寫入。
 
 ## Measure tab 的 input 與使用
 
@@ -46,9 +46,9 @@ Form Slot 使用公開 ModuleRef/ModuleInline input。Key branch 保存 `{kind: 
 
 RecipeTab.read_field 回傳具名 RecipeFormField，包含 authored input、input_present、ordinary value、key/inline mode、actual key、Form lock、目前 child field names 與 directed errors。它不投影 CfgSchema kind，也不承諾 ref descendants 唯讀。Inline model 的路徑包含 module，例如 `modules.readout.module.pulse_cfg.freq`。Range count 的路徑是 n，set_sweep 的公開 expts 參數對到這個葉欄位。
 
-實驗 cfg 的 `dev` 只保存角色到 device 名稱的對應，不保存 DeviceInfo、設定 patch 或 snapshot。本段與下一段的 `dev` 對應將由 [measure-form draft](draft/measure-form-derivation.md) 的具名裝置欄位取代，measure-form task 完成前仍是現行格式。Adapter 不將 label lower 成裝置設定。使用 flux 的 cfg 必填 `flux_unit`，值為 A、V 或 native，core 與 Notebook 不提供隱含 default。呼叫者負責單位換算。GUI 表單提供 A／V／native 三選一，初始值為 A，使用者可改，不從 device cache 推測。`zcu_lab.recipes.helpers.use_flux_device(tab, name, unit=...)` 讀 `RecipeTab.read_device` 的 cached snapshot，明填 unit 必須完全相符，包括 native。成功後才寫 dev.flux_dev 與獨立 cfg.flux_unit，不換算、不連線或 setup，不改 recipe policy 或 alias capture。
+實驗 cfg 依 [[0073]] 使用具名裝置欄位，例如 flux_dev、jpa_flux_dev，不再保存 dev role mapping。Form 的 AliasName 在 Open／Reset 解析 direct 名稱。使用 flux 的 cfg 必填 flux_unit，值為 A、V 或 native。Core 與 Notebook 不提供隱含 default，GUI 的初始值為 A。Recipe helper 只比 cached unit，成功後寫 caller 指定的具名裝置欄位與獨立 flux_unit，不換算、不連線或 setup。
 
-Run 不預查 cfg.dev 名稱是否存在，cfg 格式與必填 unit 的驗證仍保留。Core 實際以 `context.devices[cfg.dev[role]]` 取 driver 時，缺名即報錯並指名 device。取得 driver 後由實驗層 helper 操作。RunContext 不提供 setters；操作分工見 [[0067]]，Run 前 snapshot 與保存見 [[0063]]。
+Core 以 context.devices[cfg.flux_dev] 等具名欄位取 driver。缺名由實際使用者報錯；RunContext 不提供 setters。操作分工見 [[0067]]，Run 前 snapshot 與保存見 [[0063]]。Measure 不保留舊跨 tab source refresh／Unavailable 恢復路徑；使用時綁範本與缺來源的語義由 [[0073]] 擁有。
 
 Form expression 的 `$alias` 與 `$alias.path` 沿固定 ParameterContext 解析，bare concrete paths 使用獨立 namespace。裸 `$alias` 是名稱字串，不參與數值算術或字串插值。缺列或未綁時 errors 指名 alias，不沿用舊解析值。Expression 不刷新來源。
 

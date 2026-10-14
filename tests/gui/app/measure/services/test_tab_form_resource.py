@@ -6,7 +6,7 @@ from inspect import signature
 import pytest
 from pydantic import JsonValue
 from zcu_tools.cfg_model import ConfigBase, Expr, Hidden, PulseSpec
-from zcu_tools.gui.app.measure.services import tab_cfg as resource_api
+from zcu_tools.gui.app.measure.services import tab_form as resource_api
 from zcu_tools.gui.cfg.resource import CfgPreconditionError, CfgPreconditionReason
 from zcu_tools.gui.form import FormEnv, FormErrors
 from zcu_tools.gui.form_adapter import Form, FormContext
@@ -383,3 +383,40 @@ def test_editor_state_borrows_the_same_input_for_reading_and_subscribing() -> No
     with pytest.raises(CfgPreconditionError) as caught:
         _ = resource.editor_state
     assert caught.value.reason is CfgPreconditionReason.RESOURCE_GONE
+
+
+def test_duplicate_create_does_not_replace_existing_resource() -> None:
+    """A duplicate public tab identity cannot replace its edited Form resource."""
+    pool = resource_api.TabFormResources(mutation_allowed=lambda _tab: True)
+    first = pool.create(
+        "tab",
+        lambda _ctx: Form(ScalarCore, {}),
+        capture=lambda _aliases: resource_api.TabFormSources(captured_env(2.0)),
+    )
+    first.write({("amount",): 4.0})
+    with pytest.raises(ValueError, match="already registered"):
+        pool.create(
+            "tab",
+            lambda _ctx: Form(ScalarCore, {"amount": 9.0}),
+            capture=lambda _aliases: resource_api.TabFormSources(captured_env(3.0)),
+        )
+    assert pool.lookup("tab") is first
+    assert first.result() == ScalarCore(amount=4.0)
+
+
+def test_failed_creation_does_not_reserve_tab_identity() -> None:
+    """A source failure before publication leaves the identity available."""
+    pool = resource_api.TabFormResources(mutation_allowed=lambda _tab: True)
+
+    def unavailable(_aliases: Mapping[str, str] | None) -> resource_api.TabFormSources:
+        raise ValueError("capture unavailable")
+
+    with pytest.raises(ValueError, match="capture unavailable"):
+        pool.create("tab", lambda _ctx: Form(ScalarCore, {}), capture=unavailable)
+    resource = pool.create(
+        "tab",
+        lambda _ctx: Form(ScalarCore, {}),
+        capture=lambda _aliases: resource_api.TabFormSources(captured_env(2.0)),
+    )
+    assert pool.lookup("tab") is resource
+    assert resource.result() == ScalarCore(amount=1.0)

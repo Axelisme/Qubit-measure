@@ -25,7 +25,7 @@ from zcu_tools.gui.app.measure.services.guard import RunInputs
 from zcu_tools.gui.app.measure.services.operation_gate import (
     OperationKind,
 )
-from zcu_tools.gui.app.measure.services.tab_cfg import TabFormResource, TabFormSources
+from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
 from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
