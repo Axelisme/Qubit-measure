@@ -4,9 +4,10 @@ from collections.abc import Mapping
 from typing import ClassVar
 
 import pytest
+from pydantic import JsonValue
 from qtpy.QtCore import QEventLoop, QTimer
 from qtpy.QtWidgets import QApplication
-from zcu_tools.cfg_model import Expr
+from zcu_tools.cfg_model import ConfigBase, Expr, PulseCfg, Template
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -14,13 +15,14 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterCfgDefinition,
     AnalysisMode,
+    ExpAdapterProtocol,
     RunRequest,
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
 from zcu_tools.gui.cfg.resource import CfgPreconditionError
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 
 from tests.gui.app.measure.remote._helpers import Fixture
 
@@ -54,6 +56,72 @@ class TraceAdapter(BaseAdapter[TraceCfg, TraceCfg]):
         context: RunContext,
     ) -> TraceCfg:
         return TraceCfg.model_validate(raw_cfg)
+
+
+class FactoryCfg(ConfigBase):
+    """A synthetic optional module exposes template binding at tab creation."""
+
+    pulse: PulseCfg | None = None
+    amount: float = 1.0
+
+
+@pytest.mark.parametrize("failure", ["template", "factory"])
+def test_tab_factory_errors_surface_at_use_and_reset_keeps_live_form(
+    qapp: QApplication, failure: str,
+) -> None:
+    assert hasattr(ExpAdapterProtocol, "make_form"), (
+        "Missing adapter factory contract for Open/Reset"
+    )
+    broken = True
+
+    class FactoryAdapter(BaseAdapter[FactoryCfg, FactoryCfg]):
+        capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
+            analysis=AnalysisMode.NONE, load_data=False, requires_soc=False
+        )
+
+        @staticmethod
+        def make_form(ctx: FormContext) -> Form[FactoryCfg]:
+            if broken:
+                if failure == "factory":
+                    raise RuntimeError("factory source failed")
+                return Form(FactoryCfg, {"pulse": Template("missing")})
+            return Form(FactoryCfg, {"amount": 3.0})
+
+        def make_filename_stem(self, ctx: SessionEnv) -> str:
+            return "factory"
+
+    application = Fixture(headless=True)
+    application.registry.register("factory", FactoryAdapter)
+    error = ValueError if failure == "template" else RuntimeError
+    match = "factory.*pulse" if failure == "template" else "factory source failed"
+    try:
+        before_tabs = application.ctrl.list_tab_ids()
+        with pytest.raises(error, match=match):
+            application.ctrl.new_tab("factory")
+        assert application.ctrl.list_tab_ids() == before_tabs
+        broken = False
+        tab_id = application.ctrl.new_tab("factory")
+        resource = application.ctrl.cfg_resources.lookup(tab_id)
+        resource.write({("amount",): 7.0})
+        state, env, authored = resource.editor_state, resource.env, resource.input.data
+        notifications: list[JsonValue] = []
+        resource.subscribe(lambda: notifications.append(resource.preview().values[("amount",)]))
+        broken = True
+        with pytest.raises(error, match=match):
+            resource.reset()
+        assert resource.editor_state is state
+        assert resource.env is env
+        assert resource.input.data == authored
+        assert resource.result() == FactoryCfg(amount=7.0)
+        assert notifications == []
+        broken = False
+        resource.reset()
+        assert resource.result() == FactoryCfg(amount=3.0)
+        assert notifications == [3.0]
+    finally:
+        application.stop()
+        for tab_id in tuple(application.ctrl.list_tab_ids()):
+            application.ctrl.close_tab(tab_id)
 
 
 def test_open_edit_run_reset_and_reopen_restore_use_public_form_authority(
