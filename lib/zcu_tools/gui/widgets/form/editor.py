@@ -53,8 +53,16 @@ class FormEditor[F: FormModel](QWidget):
     checked in Expression mode. form.input.<path> lists it in actions() and
     in its right-click menu, after the text field's standard items; the row
     tooltip says so. Triggering it switches the mode and writes the input
-    again: {"expr": <current text>} in Expression mode, the parsed text in
-    Direct mode. An Expression-mode input has a light tint of the palette's
+    again through the same write route as a commit. In Expression mode it
+    writes {"expr": <current text>}. In Direct mode it writes the value the
+    state's public preview computed for the shown text, when that text is
+    the state's committed, accepted Expression input. A computed value the
+    model rejects is still written, and validation shows its errors.
+    Uncommitted or host-rejected text never takes an older preview value.
+    Without a usable computed value, Direct mode parses the shown text as a
+    commit does: a numeric field keeps unparseable text as local input with
+    its parse error, and a str field writes the text as a literal.
+    An Expression-mode input has a light tint of the palette's
     highlight colour. Dropdown and checkbox fields have no form.mode.<path>.
     A one-value Literal has form.input.<path> as read-only QLineEdit text of
     its value, without form.mode or a dropdown. A float with Display decimals
