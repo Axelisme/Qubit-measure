@@ -204,6 +204,7 @@ def test_calculate_t1_restores_warning_when_fluxonium_raises(monkeypatch) -> Non
             raise RuntimeError("boom")
 
     monkeypatch.setattr(scq, "T1_DEFAULT_WARNING", True)
+    # Inject a physics failure to verify restoration of the external warning setting.
     monkeypatch.setattr(fluxonium_mod, "Fluxonium", FakeFluxonium)
     grid = S.generate_params_table(1.0, 1.0, 1.0)
     grid["esys"] = [None]
