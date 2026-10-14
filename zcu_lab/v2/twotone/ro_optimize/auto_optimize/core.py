@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Annotated, Any, cast
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -11,7 +11,7 @@ from numpy.typing import NDArray
 from pydantic import Field
 from skopt import Optimizer
 from skopt.space import Real
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import LabberPayload
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
@@ -108,22 +108,33 @@ class ReadoutOptimizer:
 
 
 class AutoOptModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    qub_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    qub_pulse: Annotated[PulseCfg, FieldMeta(label="Qubit pulse")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class AutoOptSweepCfg(ConfigBase):
-    freq: SweepCfg
-    gain: SweepCfg
-    length: SweepCfg
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(label="Readout freq", unit="MHz", group="Search bounds (min–max)"),
+    ]
+    gain: Annotated[
+        SweepCfg,
+        FieldMeta(label="Readout gain", unit="a.u.", group="Search bounds (min–max)"),
+    ]
+    length: Annotated[
+        SweepCfg,
+        FieldMeta(label="Readout length", unit="us", group="Search bounds (min–max)"),
+    ]
 
 
 class AutoOptCfg(ProgramV2Cfg, ExpCfgModel):
     modules: AutoOptModuleCfg
     sweep: AutoOptSweepCfg
-    skew_penalty: float = Field(default=0.0, ge=0.0)
-    num_points: int = Field(gt=0)
+    skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
+        default=0.0, ge=0.0
+    )
+    num_points: Annotated[int, FieldMeta(label="Optimizer points")] = Field(gt=0)
 
 
 RO_AUTO_READOUT_FREQ_VARIABLE = "readout_freq"

@@ -19,24 +19,15 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import scaled_path_seed
-from zcu_tools.gui.cfg import (
-    SweepValue,
-)
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
-from zcu_lab.v2._support.measure.seeds import res_freq_range
 from zcu_lab.v2._support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.auto_optimize.core import (
     AutoOptCfg,
     AutoOptExp,
     AutoOptResult,
 )
+from zcu_lab.v2.twotone.ro_optimize.auto_optimize.form import FORM
 
 RoOptAutoRunResult: TypeAlias = RunRecord[AutoOptCfg, AutoOptResult]
 
@@ -66,6 +57,7 @@ class RoOptAutoAdapter(
     experiment_tag: ClassVar[str | None] = AutoOptExp.persistence_tag()
     exp_cls = AutoOptExp
     ExpCfg_cls = AutoOptCfg
+    form = FORM
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -77,24 +69,31 @@ class RoOptAutoAdapter(
             "length one axis at a time."
         ),
         expects_md=(
-            "Reads from the parameter context (all optional): 'r_f' / 'best_ro_freq' — "
-            "resonator / chosen readout frequency centring the freq search "
-            "(~4000–8000 MHz); 'rf_w' — linewidth, scaling the freq search "
-            "range (~5–50 MHz); 'res_ch' / 'ro_ch' — drive / ADC channels; "
-            "'timeFly' — trigger-offset cable delay; 'q_f' / 'qub_ch' — qubit "
-            "frequency / channel for the g↔e pi pulse."
+            "Search bounds seed 51 frequency points at $resonator.freq +/- 0.2 * "
+            "$resonator.kappa, 51 gain points from 0.1 to 0.25, and 51 length points from "
+            "5.0 to 10.0 us. These are optimizer bounds, not an acquisition grid. Relax "
+            "delay reads 3.0 * $qubit.t1; optimizer points start at 1001. Open and Reset "
+            "evaluate starting expressions once into direct input using captured sources. "
+            "Inline qubit pulses read $qubit.freq and $qubit.wiring.L01.ch. Inline "
+            "readout reads $resonator.freq, $resonator.wiring.ch, $resonator.wiring.ro_ch "
+            "and $resonator.ext.time_of_fly + 0.05 us for trigger timing. Missing or "
+            "invalid required sources leave the affected fields empty and Invalid; supply "
+            "calibration or direct values before Run. No numeric calibration fallback is "
+            "supplied."
         ),
         expects_ml=(
-            "Needs a qubit-probe pulse module (typically a calibrated pi "
-            "pulse, e.g. 'pi_amp') and a pulse-readout module (e.g. "
-            "'readout_rf'); references a ModuleLibrary waveform 'ro_waveform' "
-            "when present. Optionally references a reset module."
+            "The qubit pulse uses $qubit.module.x180 as a captured library link, "
+            "otherwise a fresh pi_pulse template with a const waveform. "
+            "$qubit.module.readout selects a captured library link, otherwise a fresh "
+            "inline readout template with a const waveform. Its required parameter "
+            "sources must still be present. Optional $qubit.module.reset has no fallback: "
+            "an unset/dangling slot or unbound alias leaves it disabled and Valid."
         ),
         typical_writeback=(
-            "Proposes the optimizer's best readout frequency, gain and length "
-            "into parameter context 'best_ro_freq' (MHz), 'best_ro_gain' (a.u.) and "
-            "'best_ro_length' (us). When a cfg snapshot with pulse readout is "
-            "available, also proposes ModuleLibrary 'readout_dpm'."
+            "Proposes the optimizer's best readout frequency, gain and length into "
+            "parameter context $qubit.ext.best_ro_freq (MHz), $qubit.ext.best_ro_gain "
+            "(a.u.) and $qubit.ext.best_ro_length (us). When a cfg snapshot with pulse "
+            "readout is available, also proposes $qubit.readout.readout_dpm."
         ),
         recommended=(
             "The three sweep axes define the optimizer's SEARCH BOUNDS (min / "
@@ -106,49 +105,6 @@ class RoOptAutoAdapter(
             "point."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        sweep_label = "Search bounds (min–max)"
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("qub_pulse", role_id="pi_pulse")
-            .readout(
-                pulse_only=True,
-                locked={
-                    "pulse_cfg.freq": 0.0,
-                    "ro_cfg.ro_freq": 0.0,
-                    "pulse_cfg.gain": 0.0,
-                },
-            )
-            .relax_delay(scaled_path_seed("$qubit.t1", factor=3.0, fallback_value=30.5))
-            .sweep(
-                "freq",
-                label="Readout freq (MHz)",
-                default=res_freq_range(expts=51, span_factor=0.2),
-                section_label=sweep_label,
-            )
-            .sweep(
-                "gain",
-                label="Readout gain (a.u.)",
-                default=SweepValue(start=0.1, stop=0.25, expts=51),
-                section_label=sweep_label,
-            )
-            .sweep(
-                "length",
-                label="Readout length (us)",
-                default=SweepValue(start=5.0, stop=10.0, expts=51),
-                section_label=sweep_label,
-            )
-            .int("num_points", label="Optimizer points", default=1001)
-            .float("skew_penalty", label="Skew penalty", default=0.0, decimals=3)
-            .reps(1000)
-            .rounds(10)
-            .build()
-        )
 
     def run(
         self,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, Literal, TypeAlias
+from typing import Annotated, ClassVar, Literal, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
@@ -20,42 +20,17 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import Seed, custom, path_seed
-from zcu_tools.gui.cfg import (
-    EvalValue,
-    SweepValue,
-)
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.twotone.reset.dual_tone.freq.core import (
     FreqAnalyzeOptions,
     FreqCfg,
     FreqExp,
     FreqResult,
 )
+from zcu_lab.v2.twotone.reset.dual_tone.freq.form import FORM
 
 DualToneFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
-
-
-def _reset_freq_axis(
-    parameter: Literal["reset_f1", "reset_f2"],
-) -> Seed[SweepValue]:
-    """Store a 201-point ±50 MHz window around a calibrated dual-tone center."""
-    path = f"$qubit.ext.{parameter}"
-
-    def resolve(_ctx: SessionEnv) -> SweepValue:
-        return SweepValue(
-            start=EvalValue(f"{path} - 50.0"),
-            stop=EvalValue(f"{path} + 50.0"),
-            expts=201,
-        )
-
-    return custom(resolve, description=f"{path} reset frequency axis (201 points)")
 
 
 @dataclass
@@ -82,7 +57,8 @@ class DualToneFreqAdapter(
 ):
     experiment_tag: ClassVar[str | None] = FreqExp.persistence_tag()
     exp_cls = FreqExp
-    ExpCfg_cls: ClassVar[Any] = FreqCfg
+    ExpCfg_cls = FreqCfg
+    form = FORM
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -93,17 +69,25 @@ class DualToneFreqAdapter(
             "hardware in hard-sweep mode (both axes are QICK register sweeps)."
         ),
         expects_md=(
-            "Requires $qubit.ext.reset_f1/reset_f2 for the sweep centres "
-            "and $qubit.ext.reset_gain1/reset_gain2 for the tested gains. "
-            "Each frequency axis spans centre +/-50 MHz with 201 points. "
-            "Missing, null or invalid values fail cfg lowering. Other drive "
-            "defaults use captured qubit frequency and wiring."
+            "Seeds two 201-point axes at $qubit.ext.reset_f1 and $qubit.ext.reset_f2, "
+            "each +/- 50 MHz. Tested gains read $qubit.ext.reset_gain1 and "
+            "$qubit.ext.reset_gain2. Relax delay is 0.5 us. Open and Reset evaluate "
+            "starting expressions once into direct input using captured sources. Inline "
+            "qubit pulses read $qubit.freq and $qubit.wiring.L01.ch. Inline readout reads "
+            "$resonator.freq, $resonator.wiring.ch, $resonator.wiring.ro_ch and "
+            "$resonator.ext.time_of_fly + 0.05 us for trigger timing. Missing or invalid "
+            "required sources leave the affected fields empty and Invalid; supply "
+            "calibration or direct values before Run. No numeric calibration fallback is "
+            "supplied."
         ),
         expects_ml=(
-            "Builds the tested two-pulse-reset cfg from captured defaults and "
-            "needs a readout module. Optionally references an upstream reset and an "
-            "init pulse (a library pi pulse when present) — both disabled when "
-            "no library entry exists."
+            "Tested reset starts inline from the two_pulse_reset template. Optional init "
+            "pulse uses $qubit.module.x180 without fallback; an unset/dangling slot or "
+            "unbound alias leaves it disabled and Valid. $qubit.module.readout selects a "
+            "captured library link, otherwise a fresh inline readout template with a "
+            "const waveform. Its required parameter sources must still be present. "
+            "Optional $qubit.module.reset has no fallback: an unset/dangling slot or "
+            "unbound alias leaves it disabled and Valid."
         ),
         typical_writeback=(
             "Proposes the fitted frequencies to $qubit.ext.reset_f1 and "
@@ -118,46 +102,6 @@ class DualToneFreqAdapter(
             "Gaussian remains available for comparison."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("init_pulse", role_id="pi_pulse", optional=True)
-            .reset(
-                "tested_reset",
-                role_id="two_pulse_reset",
-                label="Tested Reset",
-                shape="two_pulse",
-                locked={"pulse1_cfg.freq": 0.0, "pulse2_cfg.freq": 0.0},
-                overrides={
-                    "pulse1_cfg.gain": path_seed(
-                        "$qubit.ext.reset_gain1", fallback=1.0
-                    ),
-                    "pulse2_cfg.gain": path_seed(
-                        "$qubit.ext.reset_gain2", fallback=1.0
-                    ),
-                },
-            )
-            .readout()
-            .relax_delay(0.5)
-            .sweep(
-                "freq1",
-                label="Freq 1 (MHz)",
-                default=_reset_freq_axis("reset_f1"),
-            )
-            .sweep(
-                "freq2",
-                label="Freq 2 (MHz)",
-                default=_reset_freq_axis("reset_f2"),
-            )
-            .reps(100)
-            .rounds(1000)
-            .build()
-        )
 
     def build_exp_cfg(
         self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest

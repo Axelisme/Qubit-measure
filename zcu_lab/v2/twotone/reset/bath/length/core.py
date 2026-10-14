@@ -3,12 +3,12 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from typing import Any
+from typing import Annotated, Any
 
 import numpy as np
 from numpy.typing import NDArray
 from qick.asm_v2 import QickSweep1D
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     IDENTITY,
     US_TO_S,
@@ -57,14 +57,14 @@ def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
 
 
 class LengthModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    init_pulse: PulseCfg | None = None
-    tested_reset: BathResetCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[BathResetCfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class LengthSweepCfg(ConfigBase):
-    length: SweepCfg
+    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
 
 
 class LengthCfg(ProgramV2Cfg, ExpCfgModel):

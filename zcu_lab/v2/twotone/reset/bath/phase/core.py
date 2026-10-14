@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Annotated
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting.base import cosfunc, fitcos
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     AxesSpec,
     Axis,
@@ -52,14 +53,14 @@ class PhaseAnalysis:
 
 
 class PhaseModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    init_pulse: PulseCfg | None = None
-    tested_reset: BathResetCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[BathResetCfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class PhaseSweepCfg(ConfigBase):
-    phase: SweepCfg
+    phase: Annotated[SweepCfg, FieldMeta(label="Phase", unit="deg")]
 
 
 class PhaseCfg(ProgramV2Cfg, ExpCfgModel):
