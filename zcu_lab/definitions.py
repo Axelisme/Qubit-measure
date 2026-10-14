@@ -2,22 +2,35 @@
 
 from typing import Any
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.resources.entry.registry import ComponentRegistry
 
 from zcu_lab.components import register_all as register_components
+from zcu_lab.v2.fake.freq.form import FORM as FAKE_FREQ_FORM
 from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter
+from zcu_lab.v2.jpa.auto_optimize.form import FORM as JPA_AUTO_OPTIMIZE_FORM
 from zcu_lab.v2.jpa.auto_optimize.gui import JpaAutoOptimizeAdapter
+from zcu_lab.v2.jpa.check.form import FORM as JPA_CHECK_FORM
 from zcu_lab.v2.jpa.check.gui import JpaCheckAdapter
+from zcu_lab.v2.jpa.flux.form import FORM as JPA_FLUX_FORM
 from zcu_lab.v2.jpa.flux.gui import JpaFluxAdapter
+from zcu_lab.v2.jpa.flux_onetone.form import FORM as JPA_FLUX_ONETONE_FORM
 from zcu_lab.v2.jpa.flux_onetone.gui import JpaFluxOneToneAdapter
+from zcu_lab.v2.jpa.freq.form import FORM as JPA_FREQ_FORM
 from zcu_lab.v2.jpa.freq.gui import JpaFreqAdapter
+from zcu_lab.v2.jpa.power.form import FORM as JPA_POWER_FORM
 from zcu_lab.v2.jpa.power.gui import JpaPowerAdapter
+from zcu_lab.v2.lookback.form import FORM as LOOKBACK_FORM
 from zcu_lab.v2.lookback.gui import LookbackAdapter
+from zcu_lab.v2.onetone.flux_dep.form import FORM as ONETONE_FLUX_DEP_FORM
 from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
+from zcu_lab.v2.onetone.freq.form import FORM as ONETONE_FREQ_FORM
 from zcu_lab.v2.onetone.freq.gui import OneToneFreqAdapter
+from zcu_lab.v2.onetone.power_dep.form import FORM as ONETONE_POWER_DEP_FORM
 from zcu_lab.v2.onetone.power_dep.gui import OneTonePowerDepAdapter
 from zcu_lab.v2.singleshot.ac_stark.gui import SsAcStarkAdapter
 from zcu_lab.v2.singleshot.amp_rabi.gui import SsAmpRabiAdapter
@@ -37,6 +50,7 @@ from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.gui import (
 from zcu_lab.v2.twotone.allxy.gui import AllXYAdapter
 from zcu_lab.v2.twotone.ckp.gui import CKPAdapter
 from zcu_lab.v2.twotone.fluxdep.gui import FluxDepAdapter
+from zcu_lab.v2.twotone.freq.form import FORM as TWOTONE_FREQ_FORM
 from zcu_lab.v2.twotone.freq.gui import FreqAdapter
 from zcu_lab.v2.twotone.irb.gui import IRBAdapter
 from zcu_lab.v2.twotone.power_dep.gui import PowerDepAdapter
@@ -124,6 +138,22 @@ ADAPTERS: dict[str, type[BaseAdapter[Any, Any, Any, Any]]] = {
     "jpa/check": JpaCheckAdapter,
 }
 
+# Core-derived forms of migrated adapters, registered with their adapter names.
+FORMS: dict[str, Form[ConfigBase]] = {
+    "lookback": LOOKBACK_FORM,
+    "fake/freq": FAKE_FREQ_FORM,
+    "onetone/freq": ONETONE_FREQ_FORM,
+    "onetone/power_dep": ONETONE_POWER_DEP_FORM,
+    "onetone/flux_dep": ONETONE_FLUX_DEP_FORM,
+    "twotone/freq": TWOTONE_FREQ_FORM,
+    "jpa/freq": JPA_FREQ_FORM,
+    "jpa/flux": JPA_FLUX_FORM,
+    "jpa/power": JPA_POWER_FORM,
+    "jpa/auto_optimize": JPA_AUTO_OPTIMIZE_FORM,
+    "jpa/flux_onetone": JPA_FLUX_ONETONE_FORM,
+    "jpa/check": JPA_CHECK_FORM,
+}
+
 
 def register_all(
     registry: Registry,
@@ -140,10 +170,12 @@ def register_all(
     component models and roles. Omit these startup receivers on reload to
     preserve identities. Duplicate entries and invalid definitions raise the
     receiving catalog's registration errors; duplicate adapters raise ValueError.
+    Each FORMS entry is registered with its adapter, binding registry.templates;
+    an unknown template id or incompatible seed raises ValueError naming them.
     """
     if components is not None:
         register_components(components)
     if template_catalog is not None:
         template_catalog.register_definitions(registry.templates)
     for name, cls in ADAPTERS.items():
-        registry.register(name, cls)
+        registry.register(name, cls, form=FORMS.get(name))

@@ -123,8 +123,31 @@ def twotone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
 
-    tab.set("modules.qub_pulse.gain", gain, source="explicit")
-    tab.set("modules.qub_pulse.waveform.length", pulse_length_us, source="explicit")
+    if (
+        gain is None
+        and pulse_length_us is None
+        and tab.read_field("modules.qub_pulse").mode == "key"
+    ):
+        # Key input has no inline leaves; report the library values instead.
+        tab.retain_module_source(
+            "modules.qub_pulse",
+            summary_field="modules.qub_pulse.module.gain",
+            value_path=("gain",),
+        )
+        tab.retain_module_source(
+            "modules.qub_pulse",
+            summary_field="modules.qub_pulse.module.waveform.module.length",
+            value_path=("waveform", "length"),
+        )
+    else:
+        if gain is not None or pulse_length_us is not None:
+            tab.use_inline("modules.qub_pulse")
+        tab.set("modules.qub_pulse.module.gain", gain, source="explicit")
+        tab.set(
+            "modules.qub_pulse.module.waveform.module.length",
+            pulse_length_us,
+            source="explicit",
+        )
     tab.set("reps", reps, source="explicit")
     tab.set("rounds", rounds, source="explicit")
 
@@ -170,15 +193,21 @@ DEFINITION = RecipeDefinition(
     adapter_name="twotone/freq",
     summary_parameters=(
         SummaryParameter(
-            "readout_frequency_mhz", "modules.readout.pulse_cfg.freq", "MHz"
+            "readout_frequency_mhz",
+            "modules.readout.module.pulse_cfg.module.freq",
+            "MHz",
         ),
-        SummaryParameter("ro_frequency_mhz", "modules.readout.ro_cfg.ro_freq", "MHz"),
+        SummaryParameter(
+            "ro_frequency_mhz", "modules.readout.module.ro_cfg.ro_freq", "MHz"
+        ),
         SummaryParameter("readout_ref", "modules.readout"),
         SummaryParameter("use_reset", "modules.reset"),
         SummaryParameter("reps", "reps"),
         SummaryParameter("rounds", "rounds"),
-        SummaryParameter("pulse_length_us", "modules.qub_pulse.waveform.length", "us"),
-        SummaryParameter("gain", "modules.qub_pulse.gain"),
+        SummaryParameter(
+            "pulse_length_us", "modules.qub_pulse.module.waveform.module.length", "us"
+        ),
+        SummaryParameter("gain", "modules.qub_pulse.module.gain"),
         SummaryParameter("frequency_sweep", "sweep.freq", "MHz"),
         SummaryParameter("drive_ref", "modules.qub_pulse"),
     ),

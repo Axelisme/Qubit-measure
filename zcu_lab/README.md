@@ -18,8 +18,9 @@
 
 `recipes.RECIPES` 明列使用者的 generator definitions。每個 recipe 模組同時擁有流程、手寫 input_schema 與 summary declarations。MCP 組合根把清單注入 framework，import 不執行量測或註冊。Recipes 保留 target 參數，明確以 `aliases={"qubit": target}` 交給 generic `RecipeSession.open_tab`。Target 省略時不覆寫。GUI adapters 不宣告 parameter roles，cfg 與 Run 直接讀固定的全域 alias 表。
 
-五個 Measure flux adapters 使用共用 `alias_name_seed` 建立 direct 初值：`onetone/flux_dep` 與
-`twotone/fluxdep` 的 `dev.flux_dev`，以及 `jpa/auto_optimize`、`jpa/flux_onetone`
+`onetone/flux_dep` 的 core 以具名欄位 `flux_dev: str` 宣告裝置，`form.py` 用 `AliasName("flux_dev")`
+在開分頁或 Reset 時解析成 direct 名稱。其餘四個 Measure flux adapters 仍使用共用 `alias_name_seed`
+建立 direct 初值：`twotone/fluxdep` 的 `dev.flux_dev`，以及 `jpa/auto_optimize`、`jpa/flux_onetone`
 與 `jpa/flux` 的 `dev.jpa_flux_dev`。Fresh cfg 或 default reset 建立時解析一次 `$flux_dev`，
 將名稱保存為 direct input。Alias 變更不更新既有 direct cfg／draft；新 cfg 或 reset 才讀新名稱。
 使用者仍可切成 eval，明填 `$flux_dev`。顯式 caller cfg 保留，不使用靜態 device 名稱 fallback，

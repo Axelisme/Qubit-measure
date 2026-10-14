@@ -3,12 +3,12 @@ from __future__ import annotations
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     US_TO_S,
     AxesSpec,
@@ -53,9 +53,9 @@ class LookbackAnalysis:
 
 
 class LookbackModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    init_pulse: PulseCfg | None = None
-    readout: PulseReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init pulse")] = None
+    readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
 
 
 class LookbackCfg(ProgramV2Cfg, ExpCfgModel):

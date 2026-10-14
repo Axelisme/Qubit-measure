@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, ClassVar, Literal
+from typing import Annotated, Any, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import model_validator
 from zcu_tools.analysis.fitting import HangerModel, TransmissionModel, get_proper_model
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
     AxesSpec,
@@ -60,18 +60,18 @@ class FreqAnalysis:
 
 
 class FreqModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    readout: PulseReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
 
 
 class FreqSweepCfg(ConfigBase):
-    freq: SweepCfg
+    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
 
 
 class HomophasalSamplingCfg(ConfigBase):
-    r_f: float
-    rf_w: float
-    theta0: float
+    r_f: Annotated[float, FieldMeta(label="Resonance frequency", unit="MHz")]
+    rf_w: Annotated[float, FieldMeta(label="Linewidth", unit="MHz")]
+    theta0: Annotated[float, FieldMeta(label="Phase offset", unit="rad")]
 
     @model_validator(mode="after")
     def _validate_positive_fit_params(self) -> HomophasalSamplingCfg:
@@ -89,8 +89,10 @@ class HomophasalSamplingCfg(ConfigBase):
 class FreqCfg(ProgramV2Cfg, ExpCfgModel):
     modules: FreqModuleCfg
     sweep: FreqSweepCfg
-    sampling_mode: SamplingMode = "linear"
-    homophasal: HomophasalSamplingCfg | None = None
+    sampling_mode: Annotated[SamplingMode, FieldMeta(label="Sampling mode")] = "linear"
+    homophasal: Annotated[
+        HomophasalSamplingCfg | None, FieldMeta(label="Homophasal")
+    ] = None
 
     @model_validator(mode="after")
     def _validate_sampling_cfg(self) -> FreqCfg:

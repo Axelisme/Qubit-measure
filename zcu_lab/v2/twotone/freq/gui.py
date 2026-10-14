@@ -21,69 +21,17 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import (
-    custom,
-    module_seed,
-    path_seed,
-)
-from zcu_tools.gui.app.measure.spec_helpers import (
-    make_pulse_module_spec,
-    make_pulse_readout_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
-)
-from zcu_tools.gui.cfg import (
-    ReferenceValue,
-    make_custom_reference_key,
-    make_default_value,
-)
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
-from zcu_lab.v2._support.measure.seeds import (
-    qub_freq_range,
-)
 from zcu_lab.v2.twotone.freq.core import (
     FreqAnalyzeOptions,
     FreqCfg,
     FreqExp,
     FreqResult,
 )
+from zcu_lab.v2.twotone.freq.form import FORM
 
 FreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
-
-
-def _blank_probe(ctx: SessionEnv) -> ReferenceValue:
-    value = make_default_value(make_pulse_module_spec().allowed[0])
-    value.with_field("freq", 0.0)
-    value.with_field("ch", path_seed("$qubit.wiring.L01.ch", fallback=0).resolve(ctx))
-    value.with_field("nqz", 2)
-    value.with_field("gain", 0.1)
-    value.with_field("waveform.length", 5.0)
-    return ReferenceValue(make_custom_reference_key("Pulse"), value)
-
-
-def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
-    value = make_default_value(make_pulse_readout_module_spec().allowed[0])
-    frequency = path_seed("$resonator.freq", fallback=6000.0).resolve(ctx)
-    value.with_field("pulse_cfg.freq", frequency)
-    value.with_field(
-        "pulse_cfg.ch", path_seed("$resonator.wiring.ch", fallback=0).resolve(ctx)
-    )
-    value.with_field("pulse_cfg.nqz", 2)
-    value.with_field("pulse_cfg.gain", 0.1)
-    value.with_field("pulse_cfg.waveform.length", 1.0)
-    value.with_field("ro_cfg.ro_freq", frequency)
-    value.with_field(
-        "ro_cfg.ro_ch", path_seed("$resonator.wiring.ro_ch", fallback=0).resolve(ctx)
-    )
-    value.with_field("ro_cfg.ro_length", 0.9)
-    value.with_field("ro_cfg.trig_offset", 0.55)
-    return ReferenceValue(make_custom_reference_key("Pulse Readout"), value)
 
 
 @dataclass
@@ -106,6 +54,7 @@ class FreqAdapter(
     experiment_tag: ClassVar[str | None] = FreqExp.persistence_tag()
     exp_cls = FreqExp
     ExpCfg_cls: ClassVar[Any] = FreqCfg
+    form = FORM
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -114,26 +63,31 @@ class FreqAdapter(
             "the qubit response (Lorentzian or sinc) to extract the qubit "
             "transition frequency and its linewidth. Runs on real hardware. "
             "In first bring-up, run it after onetone/flux_dep has found "
-            "'flx_int' and onetone/freq has re-calibrated the resonator at "
+            "$qubit.flux_int and onetone/freq has re-calibrated the resonator at "
             "that flux."
         ),
         expects_md=(
-            "Reads from the parameter context (all optional): 'q_f' — qubit frequency, "
-            "the sweep centre (~2000–6000 MHz); 'qf_w' — qubit linewidth, "
-            "setting the half-span as 1.5*qf_w (~1–50 MHz); 'qub_ch' — "
-            "qubit-drive channel; 'r_f' — resonator frequency for the readout "
-            "tone (~4000–8000 MHz); 'res_ch' / 'ro_ch' — readout drive / ADC "
-            "channels; 'timeFly' — readout trigger-offset cable delay (~0–1 us). "
-            "Absent 'q_f'/'qf_w' → a broad survey fallback around 5000 MHz "
-            "with ~GHz-scale span from the shared qubit-frequency helper; for "
-            "a first qubit search, still review the hardware-safe passband and "
-            "override the sweep if the line is expected elsewhere."
+            "Opening a tab or Reset evaluates Form starting expressions once "
+            "against captured parameters into direct input. Range.around seeds "
+            "301 points at $qubit.freq ± 1.5 * $qubit.kappa, in MHz. The fresh "
+            "probe reads $qubit.freq and $qubit.wiring.L01.ch; its gain is 0.1 "
+            "and waveform length is 5.0 us. The inline readout fallback reads "
+            "$resonator.freq, $resonator.wiring.ch and $resonator.wiring.ro_ch "
+            "for its tones and channels, and $resonator.ext.time_of_fly + "
+            "0.05 us for trigger timing. Missing or invalid required expression "
+            "sources leave the affected fields empty and Invalid. Supply valid "
+            "calibration or direct values before Run. There is no numeric "
+            "frequency-survey fallback; for a first qubit search, review the "
+            "hardware-safe passband and enter a user-approved wide sweep."
         ),
         expects_ml=(
-            "Needs a qubit-probe pulse module and a pulse-readout module; "
-            "references a ModuleLibrary waveform named 'ro_waveform' for the "
-            "readout shape when present. Optionally references a calibrated "
-            "reset module (disabled when none exists)."
+            "Starts with a fresh inline 'qub_probe' const pulse, not a calibrated "
+            "state-prep pulse. $qubit.module.readout resolves to a captured "
+            "library link; an unset/dangling slot or unbound alias uses a fresh "
+            "inline 'readout' template with a const waveform. That fallback "
+            "still needs its required parameter sources. $qubit.module.reset "
+            "is optional; an unset/dangling slot or unbound alias leaves Reset "
+            "disabled and Valid. Init Pulse stays disabled."
         ),
         typical_writeback=(
             "Proposes fitted qubit.freq and qubit.kappa (FWHM) in MHz. An "
@@ -143,7 +97,7 @@ class FreqAdapter(
             "is the intended qubit line."
         ),
         recommended=(
-            "Standard flow at a fresh 'flx_int': first run a wide survey over "
+            "Standard flow at a fresh $qubit.flux_int: first run a wide survey over "
             "the user-approved passband to find a real qubit feature, without "
             "using predictor output or simulator truth as the answer. Then "
             "run a narrower scan around the observed feature and fit it. "
@@ -164,43 +118,6 @@ class FreqAdapter(
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = FreqExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .field(
-                "modules.reset",
-                spec=make_reset_module_spec(optional=True),
-                default=module_seed("$qubit.module.reset", fallback=None),
-            )
-            .field(
-                "modules.qub_pulse",
-                spec=make_pulse_module_spec(label="Probe Pulse").lock_literal(
-                    "freq", 0.0
-                ),
-                default=custom(_blank_probe, description="inline probe pulse"),
-            )
-            .field(
-                "modules.readout",
-                spec=make_readout_module_spec(),
-                default=module_seed(
-                    "$qubit.module.readout",
-                    fallback=custom(_blank_readout, description="inline readout"),
-                ),
-            )
-            .relax_delay(1.0)
-            .sweep(
-                "freq",
-                label="Freq (MHz)",
-                default=qub_freq_range(expts=301),
-            )
-            .reps(1000)
-            .rounds(100)
-            .build()
-        )
 
     def analyze(
         self, req: AnalyzeRequest[FreqRunResult, FreqAnalyzeParams], *, plots: Plots

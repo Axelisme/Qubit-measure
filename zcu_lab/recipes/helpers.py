@@ -29,14 +29,21 @@ def _points(expts: object) -> None:
         raise ValueError("expts must be an integer of at least two")
 
 
-def _frequency_fields(tab: RecipeTab, field: str) -> tuple[list[str], str | None]:
+# A frequency leaf pairs its dotted Form leaf with its module-relative value path.
+# The Form leaf carries S2 inline envelopes (module); read_module values do not.
+type _FrequencyLeaf = tuple[str, tuple[str, ...]]
+
+
+def _frequency_fields(
+    tab: RecipeTab, field: str
+) -> tuple[list[_FrequencyLeaf], str | None]:
     parts = field.split(".")
     # Find the module before reading a leaf that does not exist in key input.
     for length in range(1, len(parts)):
         parent_path = ".".join(parts[:length])
         parent = tab.read_field(parent_path)
         if parent.mode in {"key", "inline"}:
-            return [field], parent_path
+            return [(field, _module_value_path(parent_path, field))], parent_path
     node = tab.read_field(field)
     if node.mode in {"key", "inline"}:
         fields = (
@@ -45,15 +52,19 @@ def _frequency_fields(tab: RecipeTab, field: str) -> tuple[list[str], str | None
             else tab.read_field(f"{field}.module").fields
         )
         if "ro_freq" in fields:
-            paths = [f"{field}.module.ro_freq"]
+            leaves = [(f"{field}.module.ro_freq", ("ro_freq",))]
         elif "pulse_cfg" in fields and "ro_cfg" in fields:
-            paths = [f"{field}.module.pulse_cfg.freq", f"{field}.module.ro_cfg.ro_freq"]
+            # Generated Forms wrap pulse_cfg in an inline envelope; ro_cfg is plain.
+            leaves = [
+                (f"{field}.module.pulse_cfg.module.freq", ("pulse_cfg", "freq")),
+                (f"{field}.module.ro_cfg.ro_freq", ("ro_cfg", "ro_freq")),
+            ]
         else:
             raise GuiRpcError("Unsupported readout shape", reason="invalid_cfg")
-        return paths, field
+        return leaves, field
     if node.fields:
         raise ValueError(f"Not a frequency field: {field}")
-    return [field], None
+    return [(field, ())], None
 
 
 def _module_value_path(module_field: str, field: str) -> tuple[str, ...]:
@@ -63,10 +74,13 @@ def _module_value_path(module_field: str, field: str) -> tuple[str, ...]:
     return tuple(field.removeprefix(prefix).split("."))
 
 
-def _usable_frequency(tab: RecipeTab, field: str, module_field: str | None) -> bool:
+def _usable_frequency(
+    tab: RecipeTab, leaf: _FrequencyLeaf, module_field: str | None
+) -> bool:
+    field, value_path = leaf
     if module_field is not None and tab.read_field(module_field).mode == "key":
         value: object = tab.read_module(module_field).value
-        for part in _module_value_path(module_field, field):
+        for part in value_path:
             if not isinstance(value, dict):
                 return False
             value = value.get(part)
@@ -78,16 +92,16 @@ def _usable_frequency(tab: RecipeTab, field: str, module_field: str | None) -> b
 def _write_frequency_fields(
     tab: RecipeTab,
     module_field: str | None,
-    paths: list[str],
+    leaves: list[_FrequencyLeaf],
     edits: list[RecipeFieldEdit],
 ) -> None:
     """Convert only for edits, apply one scalar batch, then verify all frequencies."""
     if edits and module_field is not None:
         tab.use_inline(module_field)
     tab.set_fields(edits)
-    for path in paths:
-        if not _usable_frequency(tab, path, module_field):
-            raise GuiRpcError(f"Invalid {path} frequency", reason="invalid_cfg")
+    for leaf in leaves:
+        if not _usable_frequency(tab, leaf, module_field):
+            raise GuiRpcError(f"Invalid {leaf[0]} frequency", reason="invalid_cfg")
 
 
 def set_frequency(
@@ -105,7 +119,10 @@ def set_frequency(
     Inline leaf paths include module, for example modules.qub_pulse.module.freq.
     Key input stays unchanged when retaining library values; explicit/calibrated
     writes first ask the owner to convert the whole module to inline.
-    Both pulse/readout and single-frequency readout shapes are supported.
+    A readout root supports the generated Form shapes of the selected readout:
+    pulse readout writes <root>.module.pulse_cfg.module.freq and
+    <root>.module.ro_cfg.ro_freq; direct readout writes <root>.module.ro_freq.
+    Other readout shapes raise GuiRpcError(invalid_cfg).
     calibration is a caller-owned logical scalar path (not a formula). required
     names the missing tool parameter when no source is usable. Explicit finite
     nonboolean frequency_mhz wins; otherwise prefer_library enables current
@@ -119,23 +136,24 @@ def set_frequency(
     """
     if frequency_mhz is not None and not _finite(frequency_mhz):
         raise ValueError("frequency_mhz must be finite and not boolean")
-    paths, module_field = _frequency_fields(tab, field)
+    leaves, module_field = _frequency_fields(tab, field)
     key = tab.read_field(module_field).key if module_field is not None else None
     library = (
         tab.read_library_root(key) if frequency_mhz is None and prefer_library else None
     )
     needs_calibration = frequency_mhz is None and any(
-        library is None or not _usable_frequency(tab, path, module_field)
-        for path in paths
+        library is None or not _usable_frequency(tab, leaf, module_field)
+        for leaf in leaves
     )
     calibrated = tab.read_value(calibration) if needs_calibration else None
     edits: list[RecipeFieldEdit] = []
-    retained: list[str] = []
-    for path in paths:
+    retained: list[_FrequencyLeaf] = []
+    for leaf in leaves:
+        path = leaf[0]
         if frequency_mhz is not None:
             edits.append(RecipeFieldEdit(path, frequency_mhz, "explicit"))
-        elif library is not None and _usable_frequency(tab, path, module_field):
-            retained.append(path)
+        elif library is not None and _usable_frequency(tab, leaf, module_field):
+            retained.append(leaf)
         elif _finite(calibrated):
             edits.append(
                 RecipeFieldEdit(path, RecipeExpression(expr=calibration), calibration)
@@ -145,13 +163,13 @@ def set_frequency(
                 required,
                 f"Provide an explicit frequency, valid library, or calibrated {calibration}",
             )
-    _write_frequency_fields(tab, module_field, paths, edits)
-    for path in retained:
+    _write_frequency_fields(tab, module_field, leaves, edits)
+    for path, value_path in retained:
         if module_field is not None:
             tab.retain_module_source(
                 module_field,
                 summary_field=path,
-                value_path=_module_value_path(module_field, path),
+                value_path=value_path,
             )
     return None
 
@@ -308,14 +326,14 @@ def use_flux_device(tab: RecipeTab, name: str, *, unit: str) -> None:
     tab is opened; name/unit are nonblank strings. unit must match snapshot unit
     exactly, including explicitly requested native. Missing/blank/none snapshot
     units or mismatch raise GuiRpcError(invalid_device); unknown-device errors
-    propagate from the owner. Validate before editing dev.flux_dev/flux_unit.
+    propagate from the owner. Validate before editing flux_dev/flux_unit.
     Never connect/setup a device, convert coordinates, or retry failures.
     """
     if not name or not name.strip():
         raise ValueError("flux device name must be non-empty")
     if not unit or not unit.strip():
         raise ValueError("flux unit must be non-empty")
-    tab.read_field("dev.flux_dev")
+    tab.read_field("flux_dev")
     observed = tab.read_device(name).unit
     if not isinstance(observed, str) or not observed.strip() or observed == "none":
         raise GuiRpcError(
@@ -325,5 +343,5 @@ def use_flux_device(tab: RecipeTab, name: str, *, unit: str) -> None:
         raise GuiRpcError(
             "Flux unit does not match the device coordinate", reason="invalid_device"
         )
-    tab.set("dev.flux_dev", name)
+    tab.set("flux_dev", name)
     tab.set("flux_unit", observed)

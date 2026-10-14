@@ -27,36 +27,12 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import custom
-from zcu_tools.gui.cfg import EvalValue, SweepValue
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.jpa.power.core import PowerCfg, PowerExp, PowerResult
+from zcu_lab.v2.jpa.power.form import FORM
 
 JpaPowerRunResult: TypeAlias = RunRecord[PowerCfg, PowerResult]
-
-_JPA_POWER_SWEEP_EXPTS = 101
-_JPA_POWER_SEED_SPAN_DB = 5.0
-
-
-def jpa_power_sweep_seed(
-    ctx: SessionEnv, *, expts: int = _JPA_POWER_SWEEP_EXPTS
-) -> SweepValue:
-    """Store a ±5 dB sweep around $jpa.pump_power without reading ctx.
-
-    Missing aliases/calibration become Invalid during cfg resolution.
-    """
-    del ctx  # Defaults retain expressions; the resource owns source reads.
-    return SweepValue(
-        start=EvalValue(expr=f"$jpa.pump_power - {_JPA_POWER_SEED_SPAN_DB}"),
-        stop=EvalValue(expr=f"$jpa.pump_power + {_JPA_POWER_SEED_SPAN_DB}"),
-        expts=expts,
-    )
 
 
 @dataclass
@@ -83,6 +59,7 @@ class JpaPowerAdapter(
     experiment_tag: ClassVar[str | None] = PowerExp.persistence_tag()
     exp_cls = PowerExp
     ExpCfg_cls: ClassVar[Any] = PowerCfg
+    form = FORM
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -95,22 +72,26 @@ class JpaPowerAdapter(
             "safety limits, and the run commands the selected device."
         ),
         expects_md=(
-            "Uses current aliases: qubit (qubit/*), resonator (resonator), and "
-            "jpa (amplifier/jpa). Add a jpa alias row in the global dialog, "
-            "for example $resonator.amplifier. Scalars use $jpa.pump_freq, "
-            "$jpa.pump_power, $jpa.flux and canonical qubit/resonator wiring. "
-            "Missing aliases or calibration leave cfg Invalid; no static fallback."
+            "Uses the qubit (qubit/*), resonator and jpa (amplifier/jpa) aliases. The "
+            "pump-power bounds use $jpa.pump_power. Select the connected JPA RF device "
+            "in the form. RF defaults capture jpa_rf_dev at Open or Reset; an unbound "
+            "alias leaves the optional field empty. Missing required aliases or "
+            "calibration leave the form "
+            "Invalid."
         ),
         expects_ml=(
-            "SMART modules use $qubit.module.x180, $qubit.module.readout and "
-            "optional $qubit.module.reset. Inline readout uses resonator scalar "
-            "and wiring calibration; module waveforms follow their module source."
+            "Module slots use $qubit.module.x180, $qubit.module.readout and optional "
+            "$qubit.module.reset. Missing pi/readout slots fall back to the "
+            "pi_pulse/readout templates. Inline pulse calibration uses $qubit.freq and "
+            "$qubit.wiring.L01.ch; inline readout uses resonator frequency/wiring and "
+            "$resonator.ext.time_of_fly + 0.05. An unset reset slot disables reset. "
+            "Missing required fallback calibration leaves the form Invalid."
         ),
         typical_writeback=(
-            "Proposes the signal-maximizing JPA pump power into parameter context "
-            "'best_jpa_power' (dBm) as a draft — it never writes it back "
-            "without your acceptance, never commands a device from the "
-            "writeback, and never touches 'cur_jpa_A'."
+            "Proposes the signal-maximizing JPA pump power into "
+            "$jpa.pump_power (dBm) as a draft. Nothing is written without your "
+            "acceptance. Writeback never commands a device or changes the "
+            "current-source value."
         ),
         recommended=(
             "Review the selected RF device and the power sweep bounds before "
@@ -119,36 +100,6 @@ class JpaPowerAdapter(
             "signal difference."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("pi_pulse", role_id="pi_pulse")
-            .readout()
-            .relax_delay(0.5)
-            .device(
-                "jpa_rf_dev",
-                label="JPA RF device",
-                default="",
-                required=False,
-            )
-            .sweep(
-                "jpa_power",
-                label="JPA pump power (dBm)",
-                default=custom(
-                    jpa_power_sweep_seed,
-                    description="jpa pump power range",
-                ),
-            )
-            .float("skew_penalty", label="Skew penalty", default=0.0, decimals=3)
-            .reps(10000)
-            .rounds(1)
-            .build()
-        )
 
     def run(
         self,
@@ -172,7 +123,7 @@ class JpaPowerAdapter(
     ) -> Sequence[WritebackItem]:
         return [
             ParameterWriteback(
-                target_name="best_jpa_power",
+                target_name="$jpa.pump_power",
                 description="Best JPA pump power (dBm)",
                 proposed_value=req.analyze_result.best_power,
             )
