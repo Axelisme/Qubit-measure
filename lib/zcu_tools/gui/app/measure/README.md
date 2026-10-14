@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-14, shared Inspect Aliases page and resource-owned editor option commands
+**Last updated:** 2026-10-14, named alias preset startup data and shared Inspect Aliases page
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -290,9 +290,11 @@ Run、Analyze、PostAnalyze 從回傳的 `SessionServices.runner` 取用同一 l
 progress owner。這個入口不改 operation policy、hardware exclusion、取消或
 owner-thread delivery，也不另建 infrastructure bundle。
 
-Measure launcher 從使用者套件的 `ALIAS_PRESET` 取得唯一的有序初值表，以
-`alias_preset` 經 `MeasureGuiBehavior`、`Controller` 與 `build_app_services` 注入 session。
-框架不宣告領域初值。獨立 caller 可提供自己的 rows，省略或空 tuple 都建立空表。
+Measure launcher 讀取使用者套件的具名 preset，以 `alias_presets` 經
+`MeasureGuiBehavior`、`Controller` 與 `build_app_services` 注入 default rows。
+Behavior 的公開 `alias_presets` 欄位保留完整名稱與有序表，供 dialog 組裝。
+框架不宣告領域初值，也不讀 preset 檔。Caller 省略或傳 None 時建立空表。
+顯式 mapping 必須含 default，否則 raise ValueError；default 的空 tuple 合法。
 ContextService 保留 authored softlinks 與空列，在第一份非空元件 snapshot 以
 role registry 的唯一候選填 primary 空列。每次開 entry 有 `aliases.yaml` 就載入。
 無檔才重設 preset，重新啟用 primary 初始化。已保存的空表與空列不自填。切 point 不重讀檔或換表，明確

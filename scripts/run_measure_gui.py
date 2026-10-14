@@ -103,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
     from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
     from zcu_tools.gui.runtime import launch_gui_runtime
 
-    from zcu_lab import ALIAS_PRESET
+    from zcu_lab import load_alias_presets
     from zcu_lab.components import params_for
 
     return launch_gui_runtime(
@@ -112,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
         extra_logging_namespaces=("zcu_lab",),
         registry_factory=_build_measure_catalogs,
         params_for=params_for,
-        alias_preset=ALIAS_PRESET,
+        alias_presets=load_alias_presets(),
         clean=args.clean,
         project_root=project_root,
     )

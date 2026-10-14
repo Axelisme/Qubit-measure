@@ -65,8 +65,6 @@ from zcu_lab.v2.twotone.zigzag_sweep.gui import (
     ZigZagScanGainAdapter,
 )
 
-from . import ALIAS_PRESET as ALIAS_PRESET
-
 ADAPTERS: dict[str, type[BaseAdapter[Any, Any, Any, Any]]] = {
     "lookback": LookbackAdapter,
     "fake/freq": FakeFreqAdapter,
