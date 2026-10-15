@@ -72,7 +72,7 @@ def test_mux_numeric_tones_and_order_survive_native_and_labber(tmp_path: Path):
     assert isinstance(restored.cfg.to_dict()["readout"]["tones"], list)
     assert [t["ro_ch"] for t in restored.cfg.to_dict()["readout"]["tones"]] == [4, 1]
 
-    prepared = prepare_run_data(record, spec=spec)
+    prepared = prepare_run_data(record, spec=spec, comment="")
     labber = tmp_path / "labber.h5"
     write_labber(labber, prepared.payload, cfg=prepared.cfg)
     loaded = load_labber_data(str(labber))
