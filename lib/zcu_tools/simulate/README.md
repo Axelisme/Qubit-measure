@@ -1,5 +1,7 @@
 # Numeric simulation tools
 
+**Last updated:** 2026-10-16 — independent evolution and ADC tools
+
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
 prediction tools remain separate. ADR-0072 defines the package dependency rules.
