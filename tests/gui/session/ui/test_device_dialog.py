@@ -32,6 +32,7 @@ from zcu_tools.gui.session.services.device import (
 )
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
+from zcu_tools.gui.widgets import error_colour
 
 from tests.gui.session.ui._parameter_fakes import make_parameters
 
@@ -1016,3 +1017,48 @@ def test_device_hint_hides_when_a_device_is_listed(qapp):
         assert hint is not None and not hint.isVisibleTo(dialog)
     finally:
         dialog.close()
+
+
+@pytest.mark.parametrize("failure", ["provider", "expression", "bounds", "snapshot"])
+def test_device_error_uses_theme_foreground(qapp, window_palette, failure):
+    from zcu_tools.device.fake import FakeDeviceInfo
+
+    ctrl = _make_ctrl_with_parameters()
+    ctrl.list_devices.return_value = [_entry("fd")]
+    info = FakeDeviceInfo(address="none")
+    ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
+    ctrl.get_device_info.return_value = info
+    dialog = _make_dialog(ctrl)
+    try:
+        dialog.setPalette(window_palette)
+        if failure == "snapshot":
+            ctrl.get_device_snapshot.return_value = DeviceSnapshot(
+                name="fd",
+                type_name="FakeDevice",
+                address="none",
+                status=DeviceStatus.CONNECTED,
+                info=info,
+                error="snapshot failed",
+            )
+        _listing(dialog).setCurrentRow(0)
+        if failure == "snapshot":
+            ctrl.get_bus().emit(DeviceChangedPayload(name="fd"))
+        else:
+            if failure == "provider":
+                ctrl.read_context.side_effect = RuntimeError("capture failed")
+            expression = "1e100" if failure == "bounds" else "unknown_name"
+            _field(_panel(dialog), "Value:", EvalNumericField).load_expression(
+                expression
+            )
+            _apply_button(dialog).click()
+        label = next(
+            label
+            for label in dialog.findChildren(QLabel)
+            if label.text().startswith("fd:") or label.text() == "snapshot failed"
+        )
+        label.ensurePolished()
+        assert label.palette().color(label.foregroundRole()) == error_colour(label)
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()

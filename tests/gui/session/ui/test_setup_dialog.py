@@ -41,6 +41,7 @@ from zcu_tools.gui.session.services.project_settings import (
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 from zcu_tools.gui.session.types import ContextReadiness, SessionEnv
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
+from zcu_tools.gui.widgets import error_colour
 
 
 def _prefs(
@@ -693,7 +694,8 @@ def test_missing_result_root_shows_hint_instead_of_error(
         status = dialog.findChild(QLabel, "setup_status")
         assert status is not None
         assert str(tmp_path / "result") in status.toolTip()
-        assert "red" not in status.styleSheet()
+        status.ensurePolished()
+        assert status.palette().color(status.foregroundRole()) != error_colour(status)
         assert entry_selector(dialog).count() == 0
         (tmp_path / "result").write_text("not a directory", encoding="utf-8")
         next(
@@ -701,9 +703,32 @@ def test_missing_result_root_shows_hint_instead_of_error(
             for b in dialog.findChildren(QPushButton)
             if b.toolTip() == "Refresh result entries"
         ).click()
-        assert "red" in status.styleSheet()
+        status.ensurePolished()
+        assert status.palette().color(status.foregroundRole()) == error_colour(status)
     finally:
         dialog.reject()
         controller.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("action", ["Open", "Connect"])
+def test_setup_error_uses_theme_foreground(qapp, window_palette, action):
+    ctrl = _make_ctrl()
+    ctrl.open_entry.side_effect = RuntimeError("entry failed")
+    ctrl.start_connect.side_effect = RuntimeError("connection failed")
+    dialog = SetupDialog(ctrl)
+    try:
+        dialog.setPalette(window_palette)
+        entry_selector(dialog).addItem("missing")
+        entry_selector(dialog).setCurrentText("missing")
+        entry_button(dialog, action).click()
+        label = next(
+            label for label in dialog.findChildren(QLabel) if "failed" in label.text()
+        )
+        label.ensurePolished()
+        assert label.palette().color(label.foregroundRole()) == error_colour(label)
+    finally:
+        dialog.close()
         dialog.deleteLater()
         qapp.processEvents()

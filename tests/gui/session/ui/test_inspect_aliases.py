@@ -35,6 +35,7 @@ from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
+from zcu_tools.gui.widgets import error_colour
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
@@ -340,7 +341,7 @@ def test_resolution_column_shows_owner_projection_and_read_only_cells(
     assert error is not None
     assert broken.text() == error
     assert broken.toolTip() == error
-    assert broken.foreground().color() == QColor("red")
+    assert broken.foreground().color() == error_colour(table)
     for row in range(table.rowCount()):
         assert not _cell(table, row, 2).flags() & Qt.ItemFlag.ItemIsEditable
     for column in (0, 1):
@@ -646,3 +647,16 @@ def test_read_only_blocks_loading_presets_but_keeps_rows_readable(
 
     dialog.set_read_only(read_only=False)
     assert _preset_button(page).isEnabled()
+
+
+def test_alias_resolution_error_uses_table_theme(resolved_session, window_palette):
+    page = _aliases_page(_open(resolved_session))
+    table = _table(page)
+    table.setPalette(window_palette)
+    _button(page, "apply").click()
+    broken = _cell(table, 3, 2)
+    assert (
+        broken.text()
+        == resolved_session.control.read_context().resolved_aliases()[3].error
+    )
+    assert broken.foreground().color() == error_colour(table)

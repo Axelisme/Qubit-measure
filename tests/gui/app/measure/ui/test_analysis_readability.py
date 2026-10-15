@@ -22,6 +22,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.services.writeback import WritebackValues
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
+from zcu_tools.gui.widgets import error_colour
 
 
 @pytest.fixture
@@ -330,4 +331,41 @@ def test_writeback_preview_failure_keeps_unavailable_reasons(qapp, pane):
     finally:
         tab.close()
         tab.deleteLater()
+        qapp.processEvents()
+
+
+def test_preview_error_uses_theme_foreground(qapp, window_palette):
+    widget = WritebackWidget(MagicMock(), tab_id="t")
+    try:
+        widget.setPalette(window_palette)
+        widget.show_preview_unavailable("source failed")
+        label = widget.findChild(QLabel, "writebackPreviewUnavailable")
+        assert label is not None
+        label.ensurePolished()
+        assert label.palette().color(label.foregroundRole()) == error_colour(widget)
+    finally:
+        widget.deleteLater()
+        qapp.processEvents()
+
+
+def test_preview_error_recolours_on_palette_change(qapp):
+    from qtpy.QtGui import QColor, QPalette
+
+    widget = WritebackWidget(MagicMock(), tab_id="t")
+    try:
+        palette = widget.palette()
+        palette.setColor(QPalette.ColorRole.Window, QColor("white"))
+        widget.setPalette(palette)
+        widget.show_preview_unavailable("source failed")
+        label = widget.findChild(QLabel, "writebackPreviewUnavailable")
+        assert label is not None
+        light_error = error_colour(widget)
+        palette.setColor(QPalette.ColorRole.Window, QColor("#202020"))
+        widget.setPalette(palette)
+        qapp.processEvents()
+        label.ensurePolished()
+        assert error_colour(widget) != light_error
+        assert label.palette().color(label.foregroundRole()) == error_colour(widget)
+    finally:
+        widget.deleteLater()
         qapp.processEvents()
