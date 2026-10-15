@@ -173,6 +173,8 @@ class TimelineInterpreter:
             LoadValue,
             LoadWord,
         ):
+            if not module.values:
+                return t
             index = self.register(module.idx_reg)
             if not 0 <= index < len(module.values):
                 raise ValueError(
