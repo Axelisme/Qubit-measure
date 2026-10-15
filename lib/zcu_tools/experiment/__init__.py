@@ -42,12 +42,15 @@ if TYPE_CHECKING:
         SynchronousExperiment,
     )
     from .native_persistence import (
+        CfgUnavailableWarning,
         PreparedRunData,
+        RestoredRun,
         RunSnapshot,
         load_run,
         load_run_with_metadata,
         native_schemas,
         prepare_run_data,
+        restore_run,
         save_run,
     )
     from .records import AnalysisRecord, RunRecord
@@ -64,6 +67,9 @@ __all__ = [
     "load_run",
     "native_schemas",
     "PreparedRunData",
+    "RestoredRun",
+    "CfgUnavailableWarning",
+    "restore_run",
     "prepare_run_data",
     "load_run_with_metadata",
     "AnalysisRecord",
@@ -107,6 +113,9 @@ _EXPORT_MODULES = {
     "load_run": ".native_persistence",
     "native_schemas": ".native_persistence",
     "PreparedRunData": ".native_persistence",
+    "RestoredRun": ".native_persistence",
+    "CfgUnavailableWarning": ".native_persistence",
+    "restore_run": ".native_persistence",
     "prepare_run_data": ".native_persistence",
     "load_run_with_metadata": ".native_persistence",
     "AnalysisRecord": ".records",

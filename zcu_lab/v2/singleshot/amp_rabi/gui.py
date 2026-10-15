@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,7 +12,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeResultBase,
     ParamMeta,
     RunRequest,
-    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -103,6 +101,3 @@ class SsAmpRabiAdapter(
         self, req: WritebackRequest[SsAmpRabiRunResult, SsAmpRabiAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         return rabi_calibration_writeback(req.analyze_result.fit_result.joint_fit)
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return f"{ctx.qub_name}_ss_amp_rabi_{time.strftime('%m%d')}"

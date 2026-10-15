@@ -86,9 +86,6 @@ class SavingAdapter(
     )
     experiment_tag: ClassVar[str | None] = SavingCore().persistence_spec().tag
 
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return "saving"
-
     def run(
         self,
         req: RunRequest,

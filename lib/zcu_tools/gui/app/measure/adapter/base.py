@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
-import os
-from abc import ABC, abstractmethod
+from abc import ABC
 from collections.abc import Callable, Sequence
 from inspect import signature
 from pathlib import Path
@@ -27,8 +26,6 @@ from zcu_tools.gui.app.measure.adapter import (
     PostAnalyzeResultBase,
     PostWritebackRequest,
     RunRequest,
-    SaveDataRequest,
-    SavePaths,
     SessionEnv,
     T_AnalyzeParams,
     T_AnalyzeResult,
@@ -107,10 +104,9 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     """Shared implementation for experiment adapters.
 
     Concrete adapters subclass this and fill in the experiment-specific knowledge
-    (``make_form``, ``make_filename_stem``
-    and — when the experiment supports analysis — ``get_analyze_params``/``analyze``).
-    Everything else (run delegation, save-path policy,
-    save) is provided here once.
+    (``make_form`` and — when the experiment supports analysis —
+    ``get_analyze_params``/``analyze``). Run delegation and persistence payload
+    preparation are provided here once.
 
     The class is generic over the four experiment types. Adapters without analysis
     omit the last two parameters (PEP 696 defaults fill in ``NoAnalysisResult`` /
@@ -322,10 +318,6 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         """
         del req, cfg
 
-    @abstractmethod
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        """Return the filename stem used by the default save path template."""
-
     # -- analysis (raising no-op default; override when analysis != NONE) --
 
     def get_analyze_params(self, result: T_Result, ctx: SessionEnv) -> T_AnalyzeParams:
@@ -524,32 +516,6 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         del req
         return []
 
-    def make_default_save_paths(self, ctx: SessionEnv) -> SavePaths:
-        """Default save path policy shared by most adapters."""
-        if not ctx.database_path:
-            raise RuntimeError("SessionEnv.database_path is required for save paths")
-        if not ctx.result_dir:
-            raise RuntimeError("SessionEnv.result_dir is required for save paths")
-        if not ctx.active_label:
-            raise RuntimeError("SessionEnv.active_label is required for save paths")
-
-        stem = self.make_filename_stem(ctx)
-        # ctx.database_path is already the dated data folder
-        # (Database/chip/qub/YYYY/MM/Data_MMDD; derive_project_paths owns the date),
-        # so join the filename directly — do NOT re-append the date here.
-        data_dir = ctx.database_path
-        image_dir = os.path.join(ctx.result_dir, "exps", ctx.active_label, "image")
-        # Data filename carries the flux label (single_qubit.md:
-        # '{stem}@{em.label}') so the same experiment at different flux points
-        # stays distinct within a day's data folder.
-        return SavePaths(
-            data_path=os.path.join(data_dir, f"{stem}@{ctx.active_label}"),
-            image_path=os.path.join(image_dir, f"{stem}.png"),
-        )
-
-    def make_save_paths(self, ctx: SessionEnv) -> SavePaths:
-        return self.make_default_save_paths(ctx)
-
     def capture_analysis_document(
         self,
         result: object,
@@ -596,6 +562,3 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         return prepare_run_data(
             result, spec=self.exp_cls().persistence_spec(), comment=comment
         )
-
-    def save(self, req: SaveDataRequest[T_Result]) -> None:
-        self.exp_cls().save(req.run_result, Path(req.data_path), comment=req.comment)

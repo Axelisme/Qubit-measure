@@ -16,8 +16,6 @@ from zcu_tools.gui.app.measure.adapter import (
     LoadDataRequest,
     NoAnalysisResult,
     NoAnalyzeParams,
-    SaveDataRequest,
-    SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 
@@ -49,9 +47,6 @@ class _LoadAdapter(BaseAdapter[_Cfg, _LoadedRecord, NoAnalysisResult, NoAnalyzeP
         analysis=AnalysisMode.NONE
     )
     exp_cls = _LoadExp
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return "load"
 
 
 class _NeedsArgsExp:
@@ -111,42 +106,3 @@ def test_base_adapter_load_raises_explicit_unsupported(adapter_cls: type[_LoadAd
 def test_base_adapter_load_preserves_constructor_internal_type_error() -> None:
     with pytest.raises(TypeError, match="constructor bug"):
         _InternalTypeErrorAdapter().load(_request())
-
-
-@pytest.mark.parametrize("missing_cfg", [False, True])
-def test_base_adapter_save_passes_explicit_record_to_override(
-    tmp_path: Path, missing_cfg: bool, qapp: QApplication
-) -> None:
-    received: list[tuple[_LoadedRecord, Path, str | None]] = []
-
-    class Saver(_LoadExp):
-        def save(
-            self,
-            source: _LoadedRecord,
-            destination: Path,
-            *,
-            comment: str | None = None,
-        ) -> None:
-            received.append((source, destination, comment))
-
-    class Adapter(_LoadAdapter):
-        exp_cls = Saver
-
-    source = RunRecord(
-        cfg=None if missing_cfg else _Cfg(),
-        result=_LoadedResult(path=tmp_path / "source.hdf5"),
-    )
-    destination = tmp_path / "exact.hdf5"
-    with native_save_session(tmp_path, qapp) as native:
-        request = SaveDataRequest(
-            run_result=source,
-            data_path=str(destination),
-            parameters=native.state.get_tab("tab").run.parameters,
-            storage=native.context.read_context().capture_storage(),
-            comment="override metadata",
-        )
-
-        Adapter().save(request)
-
-    assert received == [(source, destination, "override metadata")]
-    assert received[0][0] is source

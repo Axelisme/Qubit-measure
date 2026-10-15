@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, ClassVar, TypeAlias
@@ -14,7 +13,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeResultBase,
     ParamMeta,
     RunRequest,
-    SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
@@ -55,8 +53,6 @@ class _ZigZagScanBase(
 
     exp_cls = ZigZagScanExp
 
-    sweep_key: ClassVar[str]
-
     def run(
         self,
         req: RunRequest,
@@ -82,9 +78,6 @@ class _ZigZagScanBase(
         )
         return ZigZagScanAnalyzeResult(best_value=analysis.min_value)
 
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return f"{ctx.qub_name}_zigzag_scan_{self.sweep_key}_{time.strftime('%m%d')}"
-
 
 class ZigZagScanGainAdapter(_ZigZagScanBase):
     @staticmethod
@@ -93,7 +86,6 @@ class ZigZagScanGainAdapter(_ZigZagScanBase):
         return make_gain_form(ctx)
 
     experiment_tag: ClassVar[str | None] = ZigZagScanExp.persistence_tag()
-    sweep_key: ClassVar[str] = "gain"
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.gain.md")
 
@@ -105,6 +97,5 @@ class ZigZagScanFreqAdapter(_ZigZagScanBase):
         return make_freq_form(ctx)
 
     experiment_tag: ClassVar[str | None] = ZigZagScanExp.persistence_tag()
-    sweep_key: ClassVar[str] = "freq"
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.freq.md")

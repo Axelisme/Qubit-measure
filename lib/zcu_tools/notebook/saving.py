@@ -29,7 +29,6 @@ from zcu_tools.experiment.artifacts import (
     SaveReport,
     save_artifacts,
 )
-from zcu_tools.experiment.native_persistence import PreparedRunData
 from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.entry import (
     AcquiredPayload,
@@ -187,11 +186,6 @@ class SavedRun(Generic[CfgT, ResultT]):
                         run_id=self.run_id,
                         tab=self._metadata.experiment,
                         experiment=self._metadata.experiment,
-                        cfg_summary=(
-                            self._data.data.cfg.values
-                            if isinstance(self._data.data, PreparedRunData)
-                            else {}
-                        ),
                         point=self._metadata.snapshot.point,
                         roles=dict(self._metadata.snapshot.roles),
                     ),

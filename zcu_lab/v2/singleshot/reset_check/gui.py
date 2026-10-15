@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
@@ -12,7 +11,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeResultBase,
     NoAnalyzeParams,
     RunRequest,
-    SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
@@ -85,6 +83,3 @@ class SsResetCheckAdapter(
             analysis.worst_sample_gain,
             analysis.analyzed_reset_points,
         )
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return f"{ctx.qub_name}_ss_reset_check_{time.strftime('%m%d')}"

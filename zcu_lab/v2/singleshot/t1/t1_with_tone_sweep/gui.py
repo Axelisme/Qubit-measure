@@ -21,7 +21,6 @@ only in which outer sweep they declare + its default.
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
@@ -33,7 +32,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeResultBase,
     NoAnalyzeParams,
     RunRequest,
-    SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
@@ -80,7 +78,6 @@ class _SsT1ToneSweepBase(
 
     # Subclasses supply the Form, analysis axis label and filename token.
     outer_label: ClassVar[str]
-    filename_token: ClassVar[str]
 
     def run(
         self,
@@ -113,9 +110,6 @@ class _SsT1ToneSweepBase(
         )
         return SsT1ToneSweepAnalyzeResult()
 
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return f"{ctx.qub_name}_ss_t1_tone_sweep_{self.filename_token}_{time.strftime('%m%d')}"
-
 
 class SsT1ToneSweepGainAdapter(_SsT1ToneSweepBase):
     @staticmethod
@@ -125,7 +119,6 @@ class SsT1ToneSweepGainAdapter(_SsT1ToneSweepBase):
 
     experiment_tag: ClassVar[str | None] = T1WithToneSweepExp.persistence_tag()
     outer_label: ClassVar[str] = "Probe gain (a.u.)"
-    filename_token: ClassVar[str] = "gain"
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.gain.md")
 
@@ -138,6 +131,5 @@ class SsT1ToneSweepFreqAdapter(_SsT1ToneSweepBase):
 
     experiment_tag: ClassVar[str | None] = T1WithToneSweepExp.persistence_tag()
     outer_label: ClassVar[str] = "Probe frequency (MHz)"
-    filename_token: ClassVar[str] = "freq"
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.freq.md")

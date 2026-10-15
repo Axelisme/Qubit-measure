@@ -46,7 +46,6 @@ def acquired(
                 run_id=run_id,
                 tab="scan",
                 experiment=experiment,
-                cfg_summary={},
                 point=point,
                 roles={},
             ),

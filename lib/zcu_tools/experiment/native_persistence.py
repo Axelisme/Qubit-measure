@@ -1,12 +1,13 @@
 """Native typed-result persistence, with the caller supplying an explicit spec."""
 
+import warnings
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TypeVar
+from typing import Generic, TypeVar
 
 import numpy as np
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from zcu_tools.datafile import (
     CfgSnapshot,
@@ -15,9 +16,11 @@ from zcu_tools.datafile import (
     LabberMetadata,
     RunMetadata,
     RunSnapshot,
+    StoredRun,
     VariableSchema,
     load_run_data,
     save_run_data,
+    validate_cfg_snapshot,
     validate_experiment_payload,
 )
 
@@ -34,6 +37,24 @@ from .records import RunRecord
 
 CfgT = TypeVar("CfgT", bound=ExpCfgModel)
 ResultT = TypeVar("ResultT")
+RecordT = TypeVar("RecordT", covariant=True)
+
+
+class CfgUnavailableWarning(UserWarning):
+    """Valid run data was restored, but its historical cfg cannot be typed."""
+
+
+@dataclass(frozen=True)
+class RestoredRun(Generic[RecordT]):
+    """A restored result and an explicit historical configuration diagnostic.
+
+    record is the core's typed RunRecord or an adapter-owned opaque result.
+    cfg_issue is None when typed cfg is available, otherwise a nonempty readable
+    reason why it is unavailable. It never substitutes current or default cfg.
+    """
+
+    record: RecordT
+    cfg_issue: str | None
 
 
 @dataclass(frozen=True)
@@ -182,37 +203,54 @@ def load_run_with_metadata(
 
     source is an exact native file. Metadata retains its run identity, UTC
     times, completion, Labber path, snapshot and provenance without recapture.
-    Read through datafile once without capturing a full file image. Match tag,
-    cfg_type and cfg schema major; permit same-major minor. Select declared
-    variables, validate their schema and reconstruct Result in memory units.
-    Validate cfg with the supplied cfg model and extra="ignore" for typed known
-    projection, including nested models; before validators still see raw input.
-    Invalid cfg propagates its validation error, not a nullable cfg fallback.
-    Wrong tag/schema, missing variables or malformed native data raises a
+    Read through datafile once without capturing a full file image, then use
+    restore_run for typed conversion. Incompatible cfg type/schema or concrete
+    validation returns cfg=None and emits CfgUnavailableWarning. Valid arrays
+    remain available. Same-major minor and unknown cfg keys use known projection.
+    Wrong tag, missing variables or malformed native data/cfg envelope raises a
     located ValueError (format/version retain public subtypes). I/O errors
     propagate. No registry lookup, dynamic imports or Labber/legacy fallback.
     This typed tuple is not a lossless unknown-field rewrite envelope; callers
     needing that promise use datafile.load_run_data(preserve_unknown=True).
     """
     stored = load_run_data(source)
+    try:
+        restored = restore_run(stored, spec=spec)
+    except ValueError as error:
+        raise ValueError(f"{source}: {error}") from error
+    return restored.record, stored.metadata
+
+
+def restore_run(
+    stored: StoredRun,
+    *,
+    spec: AxesSpec[ResultT, CfgT] | GroupedAxesSpec[ResultT, CfgT],
+) -> RestoredRun[RunRecord[CfgT, ResultT]]:
+    """Convert already-read native data to a typed record without I/O.
+
+    stored supplies generic SI arrays and historical cfg/metadata; spec explicitly
+    declares the experiment tag, required variables, memory units and cfg model.
+    Validate tag and data before interpreting typed cfg. Missing variables, bad
+    axes/units/dtype/shape, invalid cfg envelope or rejected builder results raise
+    ValueError or TypeError. Extra variables are projected out. No registry or
+    dynamic imports are used, and raw cfg/metadata are not modified.
+
+    A valid cfg envelope with an incompatible cfg_type, schema major or concrete
+    model returns record.cfg=None and a readable cfg_issue, also emitted as one
+    CfgUnavailableWarning after successful reconstruction. Same-major minor and
+    unknown cfg keys use typed known projection; validators see isolated raw
+    values. This result is not a lossless rewrite envelope.
+    """
     if stored.metadata.experiment != spec.tag:
         raise ValueError(
-            f"{source}: /: experiment {stored.metadata.experiment!r} does not match {spec.tag!r}"
-        )
-    if stored.cfg.cfg_type != spec.cfg_type.__name__:
-        raise ValueError(f"{source}: /cfg: cfg_type must be {spec.cfg_type.__name__}")
-    if int(stored.cfg.schema_version.split(".")[0]) != int(
-        spec.cfg_schema_version.split(".")[0]
-    ):
-        raise ValueError(
-            f"{source}: /cfg: cfg_schema_version major does not match {spec.cfg_schema_version}"
+            f"/: experiment {stored.metadata.experiment!r} does not match {spec.tag!r}"
         )
     variables = _variable_specs(spec)
     missing = {
         variable.data_variable for variable in variables
     } - stored.payload.variables.keys()
     if missing:
-        raise ValueError(f"{source}: /data: missing variables {sorted(missing)}")
+        raise ValueError(f"/data: missing variables {sorted(missing)}")
     payload = ExperimentPayload(
         variables={
             variable.data_variable: stored.payload.variables[variable.data_variable]
@@ -221,20 +259,18 @@ def load_run_with_metadata(
         metadata=stored.payload.metadata,
         representation="grouped" if isinstance(spec, GroupedAxesSpec) else "single",
     )
-    try:
-        validate_experiment_payload(
-            payload, schema=tuple(variable.native_schema() for variable in variables)
-        )
-    except ValueError as error:
-        raise ValueError(f"{source}: {error}") from error
-    cfg = spec.cfg_type.model_validate(stored.cfg.values, extra="ignore")
+    validate_experiment_payload(
+        payload, schema=tuple(variable.native_schema() for variable in variables)
+    )
     loaded = {
         variable.data_variable: variable.loaded_from_payload(
             payload.variables[variable.data_variable],
-            context=f"{source}: /data/{variable.data_variable}",
+            context=f"/data/{variable.data_variable}",
         )
         for variable in variables
     }
+    validate_cfg_snapshot(stored.cfg)
+    cfg, cfg_issue = _restore_cfg(stored.cfg, spec=spec)
     if isinstance(spec, GroupedAxesSpec):
         result = spec.result_builder(
             GroupedLoadData(
@@ -255,7 +291,31 @@ def load_run_with_metadata(
         }
         fields[spec.z.field_name] = variable.z
         result = spec.result_type(**fields)
-    return RunRecord(cfg=cfg, result=result), stored.metadata
+    if cfg_issue is not None:
+        warnings.warn(cfg_issue, CfgUnavailableWarning, stacklevel=2)
+    return RestoredRun(record=RunRecord(cfg=cfg, result=result), cfg_issue=cfg_issue)
+
+
+def _restore_cfg(
+    cfg: CfgSnapshot,
+    *,
+    spec: AxesSpec[ResultT, CfgT] | GroupedAxesSpec[ResultT, CfgT],
+) -> tuple[CfgT | None, str | None]:
+    if cfg.cfg_type != spec.cfg_type.__name__:
+        return None, (
+            f"/cfg: cfg_type {cfg.cfg_type!r} does not match {spec.cfg_type.__name__!r}"
+        )
+    if int(cfg.schema_version.split(".")[0]) != int(
+        spec.cfg_schema_version.split(".")[0]
+    ):
+        return None, (
+            f"/cfg: schema major {cfg.schema_version!r} does not match "
+            f"{spec.cfg_schema_version!r} for {cfg.cfg_type}"
+        )
+    try:
+        return spec.cfg_type.model_validate(deepcopy(cfg.values), extra="ignore"), None
+    except ValidationError as error:
+        return None, f"/cfg: {cfg.cfg_type} validation failed: {error}"
 
 
 def _variable_specs(

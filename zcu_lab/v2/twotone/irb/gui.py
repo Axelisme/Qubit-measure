@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
@@ -14,7 +13,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeResultBase,
     NoAnalyzeParams,
     RunRequest,
-    SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
@@ -86,7 +84,3 @@ class IRBAdapter(BaseAdapter[IRBCfg, IRBRunResult, IRBAnalyzeResult, NoAnalyzePa
             bootstrap_successes=result.bootstrap_successes,
             warning=result.warning,
         )
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        """Return the qubit and date stem used by canonical result persistence."""
-        return f"{ctx.qub_name}_irb_{time.strftime('%m%d')}"

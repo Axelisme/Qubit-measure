@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -206,6 +205,3 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
                 proposed_value=result.confusion,
             ),
         ]
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return f"{ctx.qub_name}_sh_ge_{time.strftime('%m%d')}"

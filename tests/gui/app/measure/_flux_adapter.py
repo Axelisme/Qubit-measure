@@ -21,7 +21,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
     AnalyzeRequest,
     ParameterWriteback,
-    SessionEnv,
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -143,9 +142,6 @@ class SpectrumAdapter(
             ParameterWriteback("$qubit.flux_int", "Second line", result.flx_int),
             ParameterWriteback("$qubit.flux_period", "Distance", result.flx_period),
         ]
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return "spectrum"
 
 
 class PhaseSpectrumAdapter(SpectrumAdapter):
