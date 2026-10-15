@@ -205,13 +205,13 @@ def test_ref_family_only_limits_captured_keys_and_preserves_local_choices() -> N
         for o in options
         if isinstance(o.value, dict) and o.value.get("kind") == "ref"
     ] == ["Q.pulses.first", "Q.pulses.second"]
-    assert [o.label for o in options if o.label.startswith("Inline")] == [
-        "Inline: pulse",
-        "Inline: readout/pulse",
-        "Inline: reset/pulse",
-        "Inline: reset/two_pulse",
-        "Inline: reset/bath",
+    unrestricted_inline_labels = [
+        o.label for o in make_field().options(env) if o.label.startswith("Inline")
     ]
+    assert unrestricted_inline_labels
+    assert [
+        o.label for o in options if o.label.startswith("Inline")
+    ] == unrestricted_inline_labels
     state = FormState(
         FormInput(model, {"selection": {"kind": "ref", "name": "Q.pulses.second"}})
     )

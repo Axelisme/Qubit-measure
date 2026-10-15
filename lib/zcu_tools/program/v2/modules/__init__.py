@@ -21,6 +21,8 @@ from .pulse import Pulse, PulseCfg, TableLengthPulse
 from .readout import (
     AbsReadout,
     AbsReadoutCfg,
+    MuxReadout,
+    MuxReadoutCfg,
     PulseReadout,
     PulseReadoutCfg,
     Readout,

@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import numpy as np
-from zcu_tools.cfg_model import ModuleSpec, WaveformSpec
+from zcu_tools.cfg_model import CfgInputValue, ModuleSpec, WaveformSpec
 from zcu_tools.core.waveform_format import WaveformSamples
 
 
@@ -52,3 +52,19 @@ class Resolver:
         if path not in self.waveforms:
             raise KeyError(f"Missing waveform key: {path}")
         return self.waveforms[path].model_copy(deep=True)
+
+
+def mux_raw(count: int = 2) -> dict[str, CfgInputValue]:
+    """Return numeric mux input with deliberately descending frequency/channel order."""
+    return {
+        "type": "readout/mux",
+        "gen_ch": 9,
+        "nqz": 2,
+        "mixer_freq": 6000.0,
+        "length": 2.0,
+        "ro_length": 1.5,
+        "tones": [
+            {"freq": 6020.0 - i * 40.0, "gain": -0.1, "phase": 450.0, "ro_ch": 7 - i}
+            for i in range(count)
+        ],
+    }
