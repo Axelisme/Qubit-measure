@@ -167,3 +167,39 @@ def test_closed_acquire_round_flux_does_not_hit_an_old_dc_table(tmp_path):
         assert env.soc.binding.rounds[1].snapshot.values == (("bias", 0.4),)
     finally:
         env.devices.close_all_devices()
+
+
+def test_source_retains_each_round_group_actual_numeric_content_identity(tmp_path):
+    from dataclasses import replace
+    from zcu_tools.experiment.ftf import FTFSource, ftf
+    from zcu_tools.simulate.evolution import EvolutionLibrary
+
+    settings = parse_ftf(ftf_document())
+    env = ftf(settings)
+    try:
+        _program(env).acquire_decimated(env.soc, progress=False)
+        original = env.soc.binding.rounds[0]
+        timelines = original.acquire.timelines
+        second = timelines[1]
+        events = tuple(replace(event, phase_deg=90.) if event.gen_ch == 2 else event for event in second.events)
+        acquire = replace(original.acquire, timelines=(timelines[0], replace(second, events=events)))
+        request = replace(original, acquire=acquire)
+        source = FTFSource(settings, env.devices, library=EvolutionLibrary(tmp_path))
+        source.execute(request)
+        assert len(source.evaluations) == 2
+        first = source.evaluations
+        assert {item.round_index for item in first} == {0}
+        assert {item.group_index for item in first} == {0,1}
+        assert all(item.receipt.origin == "direct" for item in first)
+        assert first[0].receipt.content_identities != first[1].receipt.content_identities
+        source.execute(replace(request, index=1))
+        assert len(source.evaluations) == 4
+        for saved, repeated in zip(first, source.evaluations[2:], strict=True):
+            assert repeated.round_index == 1
+            assert repeated.receipt.origin == "direct-record"
+            assert repeated.receipt.content_identities == saved.receipt.content_identities
+        source.execute(replace(request, acquire=replace(acquire, sequence=acquire.sequence+1)))
+        assert len(source.evaluations) == 2
+        assert all(item.acquire_sequence == acquire.sequence+1 for item in source.evaluations)
+    finally:
+        env.devices.close_all_devices()
