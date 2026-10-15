@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import socket
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from queue import Queue
 from typing import cast
 from unittest.mock import MagicMock
 
@@ -133,102 +136,139 @@ def test_none_factory_result_enqueues_nothing_and_has_no_delivery_hook(
     delivered.assert_not_called()
 
 
-def test_unsubscribe_between_selection_and_delivery_prevents_late_push(
-    endpoint,
-) -> None:
-    link = _link("match", subscribed=True)
-    _register(endpoint, link)
-    factory_entered = threading.Event()
-    release_factory = threading.Event()
+class _SelectionRouter:
+    """Observe real endpoint admission and disconnect without a registry probe."""
 
-    def factory() -> bytes:
-        factory_entered.set()
-        assert release_factory.wait(timeout=2.0)
-        return b"old-event\n"
+    def __init__(self) -> None:
+        self.opened: Queue[ClientLink] = Queue()
+        self.closed: Queue[ClientLink] = Queue()
 
-    worker = threading.Thread(
-        target=endpoint.broadcast_lazy,
-        args=(factory, _matches),
-    )
-    worker.start()
-    assert factory_entered.wait(timeout=2.0)
+    def on_client_open(self, link: ClientLink) -> None:
+        link.app_ctx = set()
+        self.opened.put(link)
 
-    def unsubscribe() -> None:
-        subscriptions = link.app_ctx
-        if not isinstance(subscriptions, set):
-            raise TypeError("Expected a subscription set")
+    def on_client_close(self, link: ClientLink, *, on_owner_thread: bool) -> None:
+        self.closed.put(link)
+
+    def route(self, link: ClientLink, request: object) -> None:
+        raise AssertionError("selection clients send no RPCs")
+
+
+def _set_subscription(link: ClientLink, *, subscribed: bool) -> None:
+    subscriptions = link.app_ctx
+    if not isinstance(subscriptions, set):
+        raise TypeError("Expected a subscription set")
+    if subscribed:
+        subscriptions.add("subscribed")
+    else:
         subscriptions.discard("subscribed")
 
-    endpoint.client_state_transaction(link, unsubscribe)
-    release_factory.set()
-    worker.join(timeout=2.0)
 
-    assert not worker.is_alive()
-    assert _queued(link) == []
+@contextmanager
+def _selection_endpoint() -> Generator[tuple[NdjsonRpcEndpoint, _SelectionRouter]]:
+    router = _SelectionRouter()
+    server = NdjsonRpcEndpoint(
+        ControlOptions(port=0),
+        wire_version=1,
+        gui_version=1,
+        server_name="selection-test",
+        router=router,
+    )
+    server.start()
+    try:
+        yield server, router
+    finally:
+        server.stop()
 
 
-def test_disconnect_between_selection_and_delivery_prevents_late_push(endpoint) -> None:
-    link = _link("match", subscribed=True)
-    sock = _register(endpoint, link)
-    factory_entered = threading.Event()
-    release_factory = threading.Event()
+@contextmanager
+def _selected_broadcast(server: NdjsonRpcEndpoint) -> Generator[list[ClientLink]]:
+    """Hold the factory after selection; always release and surface worker errors."""
+    entered = threading.Event()
+    release = threading.Event()
+    delivered: list[ClientLink] = []
 
     def factory() -> bytes:
-        factory_entered.set()
-        assert release_factory.wait(timeout=2.0)
+        entered.set()
+        # The context's finally releases the selected factory, even on failure.
+        assert release.wait(timeout=30), "selected factory was not released"
         return b"old-event\n"
 
-    worker = threading.Thread(
-        target=endpoint.broadcast_lazy,
-        args=(factory, _matches),
-    )
-    worker.start()
-    assert factory_entered.wait(timeout=2.0)
-    with endpoint._clients_lock:
-        link.closing = True
-        endpoint._clients.pop(sock)
-    release_factory.set()
-    worker.join(timeout=2.0)
-
-    assert not worker.is_alive()
-    assert _queued(link) == []
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        worker = pool.submit(
+            server.broadcast_lazy, factory, _matches, on_delivered=delivered.append
+        )
+        try:
+            # A subscribed real client guarantees the scheduled factory is called.
+            assert entered.wait(timeout=30), "recipient selection did not finish"
+            yield delivered
+        finally:
+            release.set()
+            # Releasing the factory lets broadcast revalidate and finish.
+            worker.result(timeout=30)
 
 
-def test_subscribe_after_selection_does_not_receive_old_event(endpoint) -> None:
-    existing = _link("existing", subscribed=True)
-    late = _link("late")
-    _register(endpoint, existing)
-    _register(endpoint, late)
-    factory_entered = threading.Event()
-    release_factory = threading.Event()
+@pytest.mark.requires_loopback
+def test_unsubscribe_between_selection_and_delivery_prevents_late_push() -> None:
+    # Socket timeouts only guard delivery of explicitly enqueued frames.
+    with (
+        _selection_endpoint() as (server, router),
+        socket.create_connection(("127.0.0.1", server.port), timeout=30) as client,
+    ):
+        link = router.opened.get(timeout=30)  # accept invokes on_client_open
+        server.client_state_transaction(
+            link, lambda: _set_subscription(link, subscribed=True)
+        )
+        with _selected_broadcast(server) as delivered:
+            server.client_state_transaction(
+                link, lambda: _set_subscription(link, subscribed=False)
+            )
+        assert delivered == []
+        server.reply_ok(link, rid="barrier", result={})
+        with client.makefile("rb") as reader:
+            assert b'"id":"barrier"' in reader.readline()
 
-    def factory() -> bytes:
-        factory_entered.set()
-        assert release_factory.wait(timeout=2.0)
-        return b"old-event\n"
 
-    worker = threading.Thread(
-        target=endpoint.broadcast_lazy,
-        args=(factory, _matches),
-    )
-    worker.start()
-    assert factory_entered.wait(timeout=2.0)
+@pytest.mark.requires_loopback
+def test_disconnect_between_selection_and_delivery_prevents_late_push() -> None:
+    with (
+        _selection_endpoint() as (server, router),
+        socket.create_connection(("127.0.0.1", server.port), timeout=30) as client,
+    ):
+        link = router.opened.get(timeout=30)  # accept invokes on_client_open
+        server.client_state_transaction(
+            link, lambda: _set_subscription(link, subscribed=True)
+        )
+        with _selected_broadcast(server) as delivered:
+            client.shutdown(socket.SHUT_RDWR)
+            # EOF necessarily triggers the router's public cleanup callback.
+            assert router.closed.get(timeout=30) is link
+        assert delivered == []
 
-    def subscribe() -> None:
-        subscriptions = late.app_ctx
-        if not isinstance(subscriptions, set):
-            raise TypeError("Expected a subscription set")
-        subscriptions.add("subscribed")
 
-    endpoint.client_state_transaction(late, subscribe)
-    release_factory.set()
-    worker.join(timeout=2.0)
-
-    assert _queued(existing) == [b"old-event\n"]
-    assert _queued(late) == []
-    endpoint.broadcast_lazy(lambda: b"new-event\n", _matches)
-    assert _queued(existing) == [b"new-event\n"]
-    assert _queued(late) == [b"new-event\n"]
+@pytest.mark.requires_loopback
+def test_subscribe_after_selection_does_not_receive_old_event() -> None:
+    with (
+        _selection_endpoint() as (server, router),
+        socket.create_connection(("127.0.0.1", server.port), timeout=30) as first,
+        socket.create_connection(("127.0.0.1", server.port), timeout=30) as second,
+    ):
+        existing = router.opened.get(timeout=30)  # first accept callback
+        late = router.opened.get(timeout=30)  # second accept callback
+        server.client_state_transaction(
+            existing, lambda: _set_subscription(existing, subscribed=True)
+        )
+        with _selected_broadcast(server) as delivered:
+            server.client_state_transaction(
+                late, lambda: _set_subscription(late, subscribed=True)
+            )
+        assert delivered == [existing]
+        server.broadcast_lazy(lambda: b"new-event\n", _matches)
+        with first.makefile("rb") as reader:
+            assert reader.readline() == b"old-event\n"
+            assert reader.readline() == b"new-event\n"
+        with second.makefile("rb") as reader:
+            assert reader.readline() == b"new-event\n"
 
 
 def test_delivery_linearizes_before_later_unsubscribe_reply(endpoint) -> None:
