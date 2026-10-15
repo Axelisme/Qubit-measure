@@ -156,7 +156,14 @@ def _down_spectrum(gap: float, temperature: float, channel: LossChannel) -> floa
     factor = np.sqrt(np.pi / 2)
     if temperature > 0:
         x = H_OVER_K * gap / (2 * temperature)
-        factor = float(np.sqrt(x) * kve(0, x))
+        # Scipy's scaled Bessel implementation loses range at huge x. Its
+        # asymptotic expansion has relative remainder O(x^-3) here and preserves
+        # the T=0 limit without exp/sinh overflow or NaN-to-zero repair.
+        factor = (
+            float(np.sqrt(np.pi / 2) * (1 - 0.125 / x + (9 / 128) / x / x))
+            if x > 1e6
+            else float(np.sqrt(x) * kve(0, x))
+        )
     admittance = (
         np.sqrt(2 / np.pi)
         * 8
