@@ -12,7 +12,7 @@
 
 ## Window 版面
 
-`layout.py` 建一次控制項與版面，`session_strip.py` 的 `WorkflowSessionStrip` 顯示 session 列。最上面一列只有一個 Entry chip（`Entry: <entry> / <point>`），之後是 Setup…、Inspect…、Devices…、Prepare forms、Reload source。Qubit、裝置與 ZCU 不在 session 列：框架不認得 qubit，裝置與 ZCU 狀態由 Device 對話框或 workflow 自己的畫面呈現。Chip 只讀 services，收到 context 切換事件時刷新，Setup 關閉與 Prepare forms 後也刷新；過長的文字截斷，完整文字放在 tooltip，不撐寬視窗。Inspect… 與 Devices… 開啟與 measure GUI 相同的共用對話框。兩者在 run 中維持可開啟。宿主對 Inspect、Devices 與已開啟的 ARB Waveforms 都套用同一 run lock，從 Start 到 terminal delivery 呼叫 `set_read_only`，terminal delivery 後恢復編輯。ARB 開啟時也套用當下的鎖，保留原有入口限制。Prepare forms 與 Reload source 在這段期間停用。Setup… 維持可按；它改的是 session，不影響已 capture 的 run。Reload 另外要有 loader，且沒有要求重啟的 reload 失敗。
+`layout.py` 建一次控制項與版面，`session_strip.py` 的 `WorkflowSessionStrip` 顯示 session 列。最上面一列只有一個 Entry chip（`Entry: <entry> / <point>`），之後是 Setup…、Inspect…、Devices…、Prepare forms、Reload source。Qubit、裝置與 ZCU 不在 session 列：框架不認得 qubit，裝置與 ZCU 狀態由 Device 對話框或 workflow 自己的畫面呈現。Chip 只讀 services，收到 context 切換事件時刷新，Setup 關閉與 Prepare forms 後也刷新；過長的文字截斷，完整文字放在 tooltip，不撐寬視窗。Inspect… 與 Devices… 開啟與 measure GUI 相同的共用對話框。兩者在 run 中維持可開啟。宿主對 Inspect、Devices 與已開啟的 ARB Waveforms 都套用同一 run lock，從 Start 到 terminal delivery 呼叫 `set_read_only`，terminal delivery 後恢復編輯。ARB 開啟時也套用當下的鎖：run 中仍可從 Inspect 開啟，開出來就是唯讀。Prepare forms 與 Reload source 在這段期間停用。Setup… 維持可按；它改的是 session，不影響已 capture 的 run。Reload 另外要有 loader，且沒有要求重啟的 reload 失敗。
 
 下方是可拖動的 QSplitter。左欄依序是 workflow 選單、`Plan`／`Tunables` 兩個分頁與固定在底部的 Start／Pause／Resume／Stop。分頁內容放在 QScrollArea，所以表單展開多少都不影響視窗最小高度；切換 workflow、Prepare 與 Reload 換掉的 panel 放回同一個分頁。右欄依序是 run 狀態列（`run_status.py`）、診斷訊息列 `workflow.run.message` 與 `figure_area.py` 的 `WorkflowFigureArea`。版面只依 widget 結構，不依 workflow 名稱；既有 objectName 保持不變。
 

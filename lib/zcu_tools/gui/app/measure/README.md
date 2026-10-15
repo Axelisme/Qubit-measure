@@ -755,7 +755,7 @@ reload 後的新範本在下次開啟生效）、`Controller.arb_waveforms`、wi
 以及開 `DialogName.ARB_WAVEFORM` 的入口，讓 ARB 對話框保有具名管理與 remote screenshot，
 加上組合根的具名 alias preset catalog。
 Measure 不再有自己的 Inspect 子類別或 ARB 實作；行為與 Modules 分頁見
-[session README](../../session/README.md)。Inspect、Devices 與 ARB 的唯讀 mode 都由宿主在開啟時依控制權的 `writable` 設定。這三個對話框不加 run lock，也不追蹤開啟後的控制權變化。
+[session README](../../session/README.md)。Inspect、Devices 與 ARB 的唯讀 mode 都由宿主在開啟時依控制權的 `writable` 設定。從 Inspect 開的 ARB 沿用該 Inspect 的 `writable`。這三個對話框不加 run lock，也不追蹤開啟後的控制權變化。
 `SetupDialog` receives `setup_control`, so project/context/SoC bootstrap UI no
 longer depends on the concrete controller façade. The persistent measure
 `PredictorDialog` receives both `predictor_control` and `device_control`, so the

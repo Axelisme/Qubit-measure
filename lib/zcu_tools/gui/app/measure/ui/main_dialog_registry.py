@@ -126,7 +126,10 @@ class MainDialogRegistry:
                 templates=self._templates(),
                 arb_waveforms=self._ctrl.arb_waveforms,
                 # The named entry keeps the ARB dialog visible to screenshots.
-                open_arb_waveforms=lambda: self.open(DialogName.ARB_WAVEFORM),
+                # ARB opened from this Inspect follows the same writability.
+                open_arb_waveforms=lambda: self.open(
+                    DialogName.ARB_WAVEFORM, writable=writable
+                ),
                 dialog_presenter=self._dialog_presenter,
                 alias_presets=self._alias_presets,
                 parent=self._parent,
