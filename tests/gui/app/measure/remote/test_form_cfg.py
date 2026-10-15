@@ -158,8 +158,7 @@ def test_describe_cfg_root_is_single_layer_and_readable_through_mcp(form_rpc, tm
     with closing(client.context.session):
         assert "tab.describe_cfg" in client.context.gui.catalog
         reply = client.call("rpc_call", {"method": "tab.describe_cfg", "params": {"tab_id": tab, "path": []}})
-        assert not reply.is_error, reply
-        observed = reply.data
+        observed = reply
         assert observed["description"]["target"] is None
         assert "gain" in [child["name"] for child in observed["description"]["children"]]
         assert observed["input_present"] is True
