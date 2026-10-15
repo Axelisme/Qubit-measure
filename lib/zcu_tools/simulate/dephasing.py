@@ -38,7 +38,9 @@ def flux_dephasing(
     slopes, amplitudes = _channels(slopes_rad_per_us, amplitudes_phi0)
     difference = np.abs(slopes[:, :, None] - slopes[:, None, :])
     return (
-        np.sum(np.sqrt(np.log(2)) * amplitudes[:, None, None] * difference, axis=0)
+        np.sum(
+            flux_noise_gamma_phi_per_us(amplitudes[:, None, None], difference), axis=0
+        )
         / 1000
     )
 
@@ -62,10 +64,11 @@ def photon_dephasing(
     delta2 = (pulls[:, :, None] - pulls[:, None, :]) ** 2
     return (
         np.sum(
-            nth[:, None, None]
-            * kappa[:, None, None]
-            * delta2
-            / (kappa[:, None, None] ** 2 + delta2),
+            thermal_photon_gamma_phi_per_us(
+                nth[:, None, None],
+                kappa_over_2pi_mhz=kappa[:, None, None] / (2 * np.pi),
+                chi_over_2pi_mhz=np.sqrt(delta2) / (2 * np.pi),
+            ),
             axis=0,
         )
         / 1000
@@ -102,3 +105,45 @@ def dephasing_operators(rates_per_ns: RealArray) -> tuple[ComplexArray, ...]:
         for value, vector in zip(values, vectors.T, strict=True)
         if value > tolerance
     )
+
+
+def flux_noise_gamma_phi_per_us(
+    A_phi: float | RealArray,
+    domega_dflux: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Return first-order echo characteristic pure rate in 1/us.
+
+    A_phi is Phi0/sqrt(Hz) at 1 Hz; domega_dflux is rad/us/Phi0. Finite numeric
+    inputs broadcast with NumPy rules and return that array shape. Pairwise FTF
+    APIs validate nonnegative amplitudes; this scalar formula also serves fitting.
+    Does not add relaxation, convert to ns or implement a full 1/f envelope.
+    """
+    return (
+        np.sqrt(np.log(2.0))
+        * np.asarray(A_phi, dtype=np.float64)
+        * np.abs(np.asarray(domega_dflux, dtype=np.float64))
+    )
+
+
+def thermal_photon_gamma_phi_per_us(
+    n_th: float | NDArray[np.float64],
+    *,
+    kappa_over_2pi_mhz: float | RealArray,
+    chi_over_2pi_mhz: float | NDArray[np.float64],
+) -> float | NDArray[np.float64]:
+    """Readout thermal-photon shot-noise dephasing rate in 1/us.
+
+    Inputs use the common ``kappa/2pi`` and ``chi/2pi`` MHz convention. Since
+    1 MHz = 1 cycle/us, the angular rates are obtained by multiplying by 2*pi.
+    n_th is residual Bose occupation, chi is the full two-state pull difference.
+    Numeric inputs broadcast; a scalar returns float, arrays preserve broadcast
+    shape. Callers validate nonnegative finite nth and positive linewidth. No
+    driven-photon occupation or T1/2 is added.
+    """
+    kappa = 2.0 * np.pi * np.asarray(kappa_over_2pi_mhz, dtype=np.float64)
+    chi = 2.0 * np.pi * np.asarray(chi_over_2pi_mhz, dtype=np.float64)
+    gamma_per_photon = kappa * chi**2 / (kappa**2 + chi**2)
+    gamma = np.asarray(n_th, dtype=np.float64) * gamma_per_photon
+    if np.ndim(gamma) == 0:
+        return float(gamma)
+    return np.asarray(gamma, dtype=np.float64)

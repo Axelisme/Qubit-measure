@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-10-16 — independent evolution and ADC tools
+**Last updated:** 2026-10-16，FTF joint circuits and independent numeric tools
 
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
@@ -21,6 +21,7 @@ only the final density, not an internal-step trajectory. Pass the previous resul
 and the same full absolute `ControlSequence` when continuing a shot. A new shot
 must receive its own initial state. Instances do not remember quantum states.
 
+Model event times partition bath discontinuities alongside source events.
 The solver rounds all event coordinates to the nearest 2 ns from origin zero,
 with ties to even. It unions the coordinates before forming intervals. It never
 rounds interval lengths independently. Envelopes stay continuous in pulse-local
@@ -57,6 +58,8 @@ Populations refer to the earliest readout pulse start, or zero with no pulses.
 Earlier samples have zero physical field and do not advance the initial mixture.
 Receiver offset and noise still apply to those samples.
 
+`ADC.sample_windows` shares one initial-state draw across several per-execution
+windows, while receiver noise remains independent across windows.
 `ADC.sample` computes these conditional means once and draws one initial joint
 state per shot, then adds independent per-sample receiver noise. It does not draw
 jump times or solve an ODE per shot. The result includes float64 traces and their
@@ -69,3 +72,13 @@ and composes evolution, explicit populations and ADC. Program adapters still own
 channel order, QICK buffer shapes, nearest-even int64 conversion and acquisition
 normalization. These tools have no offline table, direct-record persistence,
 backend registry or GPU implementation.
+
+## FTF circuits and noise
+
+[`ftf`](ftf/README.md) builds the fixed-coordinate F1-SQUID-F2 joint model with
+full charge couplings, native-before-projection n², directional multilevel baths
+and parent virtual readout transitions. `baths` owns numeric GHz/ns/K loss spectra;
+`dephasing` owns both the shared Notebook pure-rate formulas and CP multilevel
+Markov dephasing. `lines.FilteredFlux` applies causal source delay/lowpass before
+loop mixing and retains passive tails within a shot. These tools do not read
+YAML, drivers or program Modules. `experiment.ftf` composes them for acquisition.

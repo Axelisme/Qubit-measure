@@ -11,196 +11,92 @@ jupyter:
     name: python3
 ---
 
-# Single-qubit run with a result entry
+# FTF acquisition with a shared environment
 
-This example uses a simulated SoC and synthetic parameters. It does not connect to hardware. All output goes to the caller-selected demo roots. Do not point these roots at real measurement data.
+This notebook replaces the former two-level single-qubit simulation. It uses the F1-SQUID-F2 environment, including finite microwave control, a coupler-flux excursion and live bias changes between software rounds. It does not connect to hardware or save into a real result directory.
 
-The flow opens or creates an entry, selects a point, resolves roles, edits its library, assembles a T1 cfg, and saves and accepts the result. Individual calibration, JPA, reset, readout optimization, coherence, singleshot, MIST, and fast-flux exploration cells from the former notebook are retired.
+## Load the environment
 
-## Imports and definitions
+Run from the repository root, or supply an absolute environment path. The GUI uses the same Python builder when launched with `--simulate notebook_md/simulation/environment.py`. Changing YAML requires restarting the GUI or rebuilding the Notebook environment. A bias change through the existing device controls does not reload YAML.
 
 ```python
-%matplotlib widget
 from pathlib import Path
 
-from zcu_lab.components import register_all
-from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp
-from zcu_tools.cfg_model import (
-    ConstWaveformCfg,
-    PulseReadoutSpec,
-    PulseSpec,
-)
-from zcu_tools.device import DeviceManager
-from zcu_tools.experiment.cfg_assembler import CfgEnv, make_cfg
-from zcu_tools.experiment.utils import make_sweep
+from zcu_tools.device.fake import FakeDevice
+from zcu_tools.experiment.simulation import load_environment
+from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.utils.device import set_flux
 from zcu_tools.notebook import NotebookAdapter
-from zcu_tools.program.v2 import make_mock_soc
-from zcu_tools.program.v2.sim import SimParams
-from zcu_tools.resources.entry import ResultEntry, component_registry
-from zcu_tools.simulate.fluxonium import FluxoniumPredictor
+from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2.modules.pulse import PulseCfg
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
-register_all(component_registry)
-```
-
-Run the registration cell once per kernel. Restart the kernel before repeating it; duplicate registration fails rather than silently replacing definitions.
-
-## Synthetic environment
-
-SimParams frequencies are GHz; pulse and component frequencies are MHz. Coherence and pulse lengths use microseconds. The simulated operating value is zero, at half flux for this model. Bind that value explicitly with set_flux_source; an unbound mock uses reduced flux 1.0, not this operating point.
-
-```python
-sim = SimParams(
-    EJ=8.0, EC=1.0, EL=0.5,
-    flux_half=0.0, flux_period=1.0,
-    T1=30.0, T2=40.0, T2_star=20.0,
-    bare_rf=7.0, g=0.1, Ql=5000.0, Qi=10000.0,
-    snr=100.0, pi_gain_len=0.1,
-    poll_latency=0.0, seed=42,
-)
-soc, soccfg = make_mock_soc(n_gens=2, n_readouts=1, sim=sim)
-soc.set_flux_source(lambda: 0.0)
-device_manager = DeviceManager()
+environment_path = Path("notebook_md/simulation/environment.py").resolve()
+env = load_environment(environment_path)
 nb_adapter = NotebookAdapter(
-    soc=soc, soccfg=soccfg, device_manager=device_manager,
+    soc=env.soc, soccfg=env.soccfg, device_manager=env.devices,
 )
-predictor = FluxoniumPredictor(
-    params=(sim.EJ, sim.EC, sim.EL),
-    flux_half=sim.flux_half,
-    flux_period=sim.flux_period,
-    flux_bias=sim.flux_bias,
+```
+
+`nb_adapter` can wrap caller-selected experiment instances through its normal `run`, `analyze` and persistence APIs. It shares this exact manager; it does not create or reconnect instruments. The acquisition below calls the public program API directly so its waveform and timing are visible without a lab experiment dependency.
+
+## Finite controls and terminal readout
+
+Program lengths and delays are us, frequencies MHz and phases degrees. Program gain is signed normalized DAC amplitude. YAML microwave coefficients multiply the full charge operator in GHz/gain, not a hidden calibrated pi-pulse value. These illustrative pulses are not a gate calibration.
+
+```python
+microwave = PulseCfg(
+    ch=2, nqz=1, freq=500.0, phase=90.0, gain=-0.1,
+    waveform=ConstWaveformCfg(length=0.016),
 )
-qubit_freq = predictor.predict_freq(0.0)
-```
-
-## Entry and setup
-
-Use `create_entry=True` only for a new destination. Creation rejects existing entry directories. To revisit this demo, set it to False. Open requires a complete new-format entry and does not convert old data.
-
-```python
-result_root = Path("demo_storage/results")
-database_root = Path("demo_storage/Database")
-entry_name = "single_qubit_demo"
-create_entry = True
-
-if create_entry:
-    entry = ResultEntry.create(
-        entry_name, result_root=result_root, database_root=database_root,
-    )
-    entry.setup.add_component(
-        "R1", kind="resonator", freq=sim.bare_rf * 1000.0,
-        wiring={"ch": 0, "ro_ch": 0},
-    )
-    entry.setup.add_component(
-        "Q1", kind="qubit/fluxonium", freq=qubit_freq, t1=sim.T1,
-        resonator="R1", wiring={"L01": {"ch": 1}},
-        flux_half=sim.flux_half, flux_period=sim.flux_period, flux_unit="A",
-    )
-else:
-    entry = ResultEntry.open(
-        entry_name, result_root=result_root, database_root=database_root,
-    )
-```
-
-Setup seeds new points. Editing it does not change an existing point. Entry names and point labels are single path segments; they do not encode a required physical quantity.
-
-## Point and roles
-
-Set `create_point=False` when reopening an existing point. A new point copies setup and starts with an empty library. To copy an existing point and its library instead, use `entry.new_point("other_label", clone_from=point_label)`.
-
-```python
-point_label = "half_flux"
-create_point = True
-
-if create_point:
-    point = entry.new_point(point_label, description="Synthetic T1 demo")
-    with point.edit() as draft:
-        draft.set("general.ext.flux_value", 0.0)
-        draft.set("general.ext.flux_unit", "A")
-else:
-    point = entry.use_point(point_label)
-
-roles = point.resolve(["qubit", "resonator"], focus="Q1")
-roles.qubit.freq, roles.resonator.freq
-```
-
-Role names stay bound to this point. Reads use its cached snapshot; `point.refresh()` explicitly reloads it. Component and general flux values must use the same unit. The container does not convert units.
-
-## Point-local library
-
-Library keys identify a component, family, and item. Persistent Specs may contain inline child Specs or concrete keys; the library materializes them through a fixed snapshot. These demo pulses are synthetic, not hardware calibration.
-
-```python
-library = entry.module_library(point_label)
-
-if create_point:
-    pi_spec = PulseSpec(
-        ch=roles.qubit.wiring.L01.ch, nqz=1,
-        freq=roles.qubit.freq, gain=1.0,
-        waveform=ConstWaveformCfg(length=0.1),
-    )
-    readout_spec = PulseReadoutSpec(
-        gen_ch=roles.resonator.wiring.ch,
-        nqz=2,
-        freq=roles.resonator.freq,
-        gain=0.05,
-        waveform=ConstWaveformCfg(length=1.0),
-        ro_ch=roles.resonator.wiring.ro_ch,
-        ro_length=0.9,
-        trig_offset=sim.timeFly,
-    )
-    with library.edit() as draft:
-        draft.set_module("Q1.pulses.pi", pi_spec)
-        draft.set_module("R1.readout.measure", readout_spec)
-
-ml = library.snapshot()
-ml.module_keys()
-```
-
-## Cfg and run
-
-Capture a new library snapshot after edits or a point switch. CfgEnv does not refresh the library or evaluate parameter expressions. Read parameter values explicitly when building raw cfg. Omit the optional reset module to use T1Cfg's None default; make_cfg expects each supplied module to be a Spec or library key.
-
-```python
-env = CfgEnv(ml=ml, device_manager=device_manager)
-cfg = make_cfg(
-    {
-        "modules": {
-            "pi_pulse": "Q1.pulses.pi",
-            "readout": "R1.readout.measure",
-        },
-        "sweep": {"length": make_sweep(0.0, 5.0 * roles.qubit.t1, 51)},
-        "relax_delay": 5.0 * roles.qubit.t1,
-    },
-    T1Cfg, env, overrides={"reps": 100, "rounds": 1},
+flux = PulseCfg(
+    ch=1, nqz=1, freq=0.0, gain=0.2,
+    waveform=ConstWaveformCfg(length=0.016), post_delay=0.016,
 )
-exp = nb_adapter(T1Exp())
-record = exp.run(cfg)
-analysis = exp.analyze(T1Exp.Options(dual_exp=False, skip=1), source=record)
-analysis.result.t1, analysis.result.t1_err
+readout = PulseReadoutCfg(
+    gen_ch=0, ro_ch=0, nqz=1, freq=6000.0, gain=0.1,
+    waveform=ConstWaveformCfg(length=0.08), ro_length=0.1,
+    trig_offset=-0.01,
+)
+program = ModularProgramV2(
+    env.soccfg, ProgramV2Cfg(reps=8, rounds=2),
+    modules=[microwave.build("microwave"), flux.build("flux"), readout.build("readout")],
+)
 ```
 
-## Save and accept
+One readout generator and one ADC serve both resonators on the shared reciprocal line. The negative trigger offset includes lookback. The two conditional resonator fields include relaxation and thermal transitions, then the receiver samples one joint initial state and adds I/Q noise for each shot. They are not quantum jump trajectories.
 
-`save_run` requires the same record returned by this adapter's latest successful run. Loaded, hand-built, or stale records are not acquisition evidence. The point and roles must have the same storage origin.
+The lowpass tail evolves through the idle time before readout. At the common readout pulse start the model freezes the actual flux, including its residual tail, and uses that Hro, basis, rates and pulls throughout the readout window. It ignores further tail changes in that window. A long tau can therefore change physical accuracy; the model does not claim the tail has vanished or reject it using a settling threshold. Active gate or bias pulses during/after readout are unsupported.
+
+## Change the live DC value between rounds
+
+The initial device value is applied only at startup. The next round reads the current value from the same manager. It does not restore YAML's initial value. The final average mixes the two conditions; this is not automatically a bias sweep.
 
 ```python
-saved = exp.save_run(
-    point, source=record, roles=roles, figures=analysis.figures,
-    comment="Synthetic single-qubit T1 demo",
-)
-saved.run_id, saved.paths, saved.report
+bias = env.devices.get_device("coupler_bias")
+if not isinstance(bias, FakeDevice):
+    raise TypeError("This example requires its explicitly built memory source")
+
+
+def next_bias(round_count, raw, cancel_flag):
+    if round_count == 1:
+        set_flux(bias, 0.12, unit="V", stop=StopSignal())
+
+
+averaged_iq = program.acquire(env.soc, progress=False, round_hook=next_bias)
+last_round_raw = program.get_raw()
+lookback_iq = program.acquire_decimated(env.soc, progress=False)
 ```
 
-The run has one identity. Native data, figures, and analysis use fixed run paths; each save produces a new Labber file. Output failures raise PartialSaveError with its SavedRun handle. Ledger errors propagate separately. No automatic retry or rollback occurs.
+Use I/Q and ordinary analysis to find working points. Normal GUI/MCP metadata exposes only the environment's public capabilities and opaque provenance ID. It does not expose populations, state labels or a calibrated working point. Environment authors may separately call `experiment.ftf.plan_point`, `Evolution.evolve` and `populations` to inspect numeric states, outside the operator calibration path.
 
-Review the fit before executing accept. The tuple carries a working-unit value and stderr. Notebook acceptance uses ordinary role-prefixed paths, such as `qubit.t1`, not GUI `$alias` expressions.
+The YAML example supplies native/local/global dimensions and solver tolerances explicitly. Check larger fixed parent spaces, thermal-state coverage and segment refinement for your sample. This model uses weak dispersive readout, Markov/secular baths and exponential echo-characteristic dephasing. It does not guarantee arbitrary truncations or reproduce a full 1/f Ramsey/echo envelope.
+
+## Close the shared manager
+
+After synchronous work has finished, close the exact returned manager. In a longer notebook, put acquisition in a `try/finally` block so failures also release resources. The GUI owns this cleanup after a successful builder return.
 
 ```python
-accepted_id = saved.accept(
-    parameter={"qubit.t1": (analysis.result.t1, analysis.result.t1_err)},
-)
-point.refresh()
-roles.qubit.t1, point.meta("Q1.t1"), entry.ledger.get(accepted_id)
+env.devices.close_all_devices()
 ```
-
-Accept appends an event before committing values. Items commit separately and stop at the first error; earlier items and the event can remain. It does not change setup or another point. To repeat an experiment, keep the existing SavedRun if it is still needed and use the new run's record for the next save.

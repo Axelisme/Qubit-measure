@@ -1,6 +1,6 @@
 # Device Note for `zcu_tools/device`
 
-**Last updated:** 2026-10-11 — stored flux value units
+**Last updated:** 2026-10-16，固定 FakeDevice V/A/native 座標
 
 這份筆記整理 `lib/zcu_tools/device` 的設計：以 VISA（pyvisa）為底層，抽出 `BaseDevice` + `BaseDeviceInfo` 的通用契約，再由 `DeviceManager` 管理 caller 明確建立的 registry。內建裝置包含 `YOKOGS200`（電流/電壓源）、`RohdeSchwarzSGS100A`（微波訊號源）與 `FakeDevice`（mock 測試）。
 
@@ -224,11 +224,11 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 
 `FakeDevice` 用於本地流程測試，不需要真實儀器連線：
 
-- **`__init__(fast_mode=False)` 不接受 `rm` 參數**；它呼叫 `BaseDevice.__init__("none", rm=None)`，並由 `_open_session()` override 回傳 `None`。因此 Fake 不開 pyvisa session、不呼叫 `connect_message()`，但仍取得 base locks/logger/session invariant。`fast_mode=True` 跳過 ramp 的 `time.sleep`（加速測試）。
-- `FakeDeviceInfo` 欄位：`type: Literal["FakeDevice"] = "FakeDevice"`、`output: Literal["on","off"] = "off"`、`value: float = 0.0`、`rampstep: float = 0.01`、`value_unit: Literal["native"] = "native"`。Native 是未換算的工作座標，其他單位在 model boundary 拒絕；dump 與 GUI snapshot 保留 native。RF 裝置的 Hz／dBm 量各有固定單位，不新增 `value_unit`。
+- **`__init__(fast_mode=False, *, value_unit="native")` 不接受 `rm` 參數**；value_unit 可為 native、V 或 A，建立後固定，不做數值換算。它呼叫 `BaseDevice.__init__("none", rm=None)`，並由 `_open_session()` override 回傳 `None`。因此 Fake 不開 pyvisa session、不呼叫 `connect_message()`，但仍取得 base locks/logger/session invariant。`fast_mode=True` 跳過 ramp 的 `time.sleep`（加速測試）。
+- `FakeDeviceInfo` 欄位：`type: Literal["FakeDevice"] = "FakeDevice"`、`output: Literal["on","off"] = "off"`、`value: float = 0.0`、`rampstep: float = 0.01`、`value_unit: Literal["native", "V", "A"] = "native"`。Value 與 rampstep 使用相同固定單位。Setup 單位不同時在任何寫入前拒絕；換單位須重建裝置。Dump 與 GUI snapshot 保留實際單位。RF 裝置的 Hz／dBm 量各有固定單位，不新增 `value_unit`。
 - 提供 `get_output/set_output/output_on/output_off` 與 `get_value/set_value` 方法（記憶體狀態操作）。
 - `_set_value_smart(value, progress, stop_event=None)`：以 `_rampstep` 為實際步長，透過同一個 private ramp helper 做 `np.linspace` stepping + make_pbar；Fake 保留跳過起始點的 mock 行為，每步前 check `stop_event.is_set()`，協作中止。
-- `_setup(cfg, *, progress, stop_event)` 呼叫 `set_output` + 更新 `_rampstep` + `_set_value_smart`（透傳 `stop_event`）。
+- `_setup(cfg, *, progress, stop_event)` 先驗證固定單位，再呼叫 `set_output` + 更新 `_rampstep` + `_set_value_smart`（透傳 `stop_event`）。
 - `get_info()` 回傳當前記憶體狀態。
 
 這個類別設計目標是「可被 `DeviceManager` 註冊」，模擬完整 ramp 行為（含 pbar + 協作取消）。

@@ -213,7 +213,7 @@ FTF環境目錄提供 `build_database.py` 類型的離線入口，直接讀取�
 
 ### 演化與 ADC 數值工具
 
-數值能力位於既有 `zcu_tools.simulate` 下的子模組，不新增頂層 package。Library 提供演化與 ADC 兩個可分別使用的工具，由 environment 作者組合，不強制綁成單一使用入口。具體子模組名稱與函式簽名尚待細化。
+數值能力位於既有 `zcu_tools.simulate` 下的子模組，不新增頂層 package。Library 提供演化與 ADC 兩個可分別使用的工具，由 environment 作者組合，不強制綁成單一使用入口。公開入口為 `simulate.evolution`、`simulate.adc` 與 `evolution.populations`。`resources.ftf` 擁有具名 YAML 與 field-path 診斷，`experiment.ftf` 組裝固定單位裝置、接線及逐 round snapshot，`simulate.ftf` 只收數值。依賴沿 C8、C9、C10、C12，不新增 ignore。
 
 2026-10-15，使用者裁決：「你剛剛不是設計成一個子module嗎？怎麼邊package? 1235認同 4我認為可以lib可以拆成兩個工具，分別處理演化與ADC，讓enviroment作者使用」。其中 1、2、3、5 分別是提供數值模型、保留連續控制描述、統一演化入口並內部選算法，以及模型／資料可常駐但每次明確傳入初態。
 
@@ -229,7 +229,7 @@ FTF環境目錄提供 `build_database.py` 類型的離線入口，直接讀取�
 
 ### 多體演化與讀出模型
 
-Readout 採弱讀出、dispersive、線性 resonator 與能量基底 QND mixture，不增加 resonator quantum Hilbert space。讀出 flux 固定，不加 qubit gate／bias sweep。二階 dispersive pulls 對所有可佔據 retained states 計算，virtual transitions 可來自較大的 parent space，不給 leakage／coupler states 任意零 pull。
+Readout 採弱讀出、dispersive、線性 resonator 與能量基底 QND mixture，不增加 resonator quantum Hilbert space。讀出前完整演化 filtered tail。共同 readout pulse 起點以當時含 DC、offset、殘餘 tail 的實際 flux 建一次 Hro、basis、rates／pulls，整個讀出窗固定使用。這個近似忽略窗內 tail 變化，不宣稱 tail 已消失或 ADC 支援時變 flux。只拒絕讀出期間仍執行的 qubit gate／bias 指令，不因被動 tail 或 tau>0 拒絕，也不設 settling 容差或警告。二階 dispersive pulls 對所有可佔據 retained states 計算，virtual transitions 可來自較大的 parent space，不給 leakage／coupler states 任意零 pull。
 
 2026-10-14，使用者提出：「readout_source/receiver一個就好，因為共用傳輸線。」對是否也只用一個 generator 與一個 ADC readout channel 的追問，確認：「是的，只有一個gen_ch與ro_ch」。FTF 的 readout_source 與 receiver 各一個，分別綁定 YAML 指定的 gen_ch 與 ro_ch；不合併 microwave／flux control 的其他 generators。兩 resonators 的分次換頻或同次多頻策略尚待收斂，不因本裁決擴大末端讀出時段的契約。
 
