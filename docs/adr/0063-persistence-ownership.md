@@ -23,13 +23,23 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 - SampleTable v2 是跨 producer／consumer 的座標交換契約。`resources.sample_table.schema` 擁有座標、單位及解析語意；條目樣本使用 append-only JSONL，讀取取每個 run_id 最後一整行，CSV 只作匯出。舊 CSV reader 留在 root `migrations/` 供離線轉換，runtime 不作 fallback。
 - Waveform asset 擁有播放 arrays、reference time axis 和 duration。Core waveform_format 驗證 samples 與編解碼 NPZ，只驗 recipe JSON 語法。Resources 管理 formula 語意、命名與實體 I/O。ModuleLibrary Spec 只保存 asset key。Native arb cfg 保存 key 與必填本機絕對 path，不另存播放長度或 provider。Program/sim 讀 path 的 samples，在完整 asset duration 取樣，不解讀 formula，也不查 global DB。
 
+### 設定快照與 acquired 事實
+
+設定快照的正本只在 `data.h5` 的 `/cfg`，以 CfgSnapshot 保存 values、cfg_type 與 schema_version。Labber 從同一份 prepared payload／snapshot 產生，供 Log Browser 使用，不是另一份讀回權威。Notebook 與 GUI 都讀 native `data.h5`。
+
+Ledger 的 acquired 只記 run_id、tab／tab_id、experiment、point、roles 與事件時間，不保存 cfg_summary，也不從 Form 或 RunRecord.cfg 序列化第二份設定。只量測未保存仍可追加 acquired，不建立 run 目錄。
+
+RecordsLedger 讀取 envelope 與依 kind 選出的 payload 時忽略未知欄位，包括舊 1.0 行的 cfg_summary。讀取不改寫原行或附檔，get 的 raw event_json 保留未知內容。已知欄位型別、必填欄位、格式 major、kind、entry identity 與 JSON 損壞仍按契約拒絕；append 仍驗證已知欄位。不升格式 major，也不做 strip／rewrite migration。
+
+使用者於 2026-10-14 對保存位置選擇「A」，正本只放資料檔。對前端讀回裁定：「Notebook與GUI應該都讀data.h5，只有log browser讀Labber檔。」2026-10-15 確認：「1可以，2採用忽略不支援欄位的方式，3同意，4一起做吧」。其中 ledger 採忽略未知欄位，不改寫歷史行；Labber-only 資料先離線遷移，Load 不回填表單。
+
 ### Run 輸出位置與 writer 權責
 
 `resources.entry.ResultEntry` 提供條目的不可變身分，以及 exact Result／Database paths 與 scoped ledger。小資料在 `results/<name>/`，量測輸出在 `Database/<name>/`。`SaveLayout` 根據這些 paths、run_id、保存時間與 artifact key 計算各格式的 exact outputs。它不建立目錄或寫檔，也不從舊的日期目錄猜 entry。C8 分層與 C9 無循環 contract 涵蓋 experiment 使用 datafile／resources 的方向。
 
 新 run 保存契約把資料夾綁定一次 acquisition。第一次 Save 才建立 `Database/<name>/runs/<run_id>/`。再次 Save 使用同一 run_id，更新其中的 `data.h5`、具名圖片與 `analysis/<pane>.json`。圖片另有 Result 的 point／全域副本，對等 paths 使用同一份 bytes。Labber 每次 Save 都在 `Database/<name>/Labber/YYYY/MM/Data_MMDD/` 取新檔名，一個 run 可以對應多個 Labber 檔。只量測不存檔時，acquired 事件不建立 run 資料夾。保存不改 acquisition 的開始、結束或完成狀態。
 
-`experiment.native_persistence.prepare_run_data` 從 typed RunRecord 與 axes spec 建立同一份 SI／離散 payload 和 cfg snapshot。Native 與 Labber writers 分別消費它，不先寫 native 再讀回轉成 Labber，也不互相呼叫。Datafile writer 只處理自己的格式與 caller 指定的目的地，不選路徑、不擷取 live context、不決定 batch。上層保存編排負責 artifact 選集、輸出順序與逐輸出失敗隔離，一個 writer 失敗不阻擋其他輸出。
+`experiment.native_persistence.prepare_run_data` 從 typed RunRecord 與 axes spec 建立同一份 SI／離散 payload 和 cfg snapshot。Native 與 Labber writers 分別消費它，不先寫 native 再讀回轉成 Labber，也不互相呼叫。Datafile writer 只處理自己的格式與 caller 指定的目的地，不選路徑、不擷取 live context、不決定 batch。`experiment.artifacts` 的共用保存編排負責 artifact 選集、輸出順序與逐輸出失敗隔離，一個 writer 失敗不阻擋其他輸出。
 
 RunMetadata 的 run_id、時間、completion、RunSnapshot 與 SoftwareProvenance 是 caller 提供的歷史事實。
 
@@ -41,11 +51,17 @@ Native writer 沿既有 `/device` 保存 snapshot，dataset 的 shape 是 `()`�
 
 Labber 成功後，保存編排才更新最近成功的 labber_path；本次失敗保留此前連結。輸出結果與 saved ledger 事件由保存編排產生，RecordsLedger 只驗證與追加事件。Ledger 追加失敗不能把已寫好的檔案改標為量測失敗，也不代表那些檔案已回滾。
 
-`datafile.AnalysisDocument` 與 encoder 擁有窗格 JSON 格式。`experiment.run_saving.save_artifacts` 接 typed data、Figure 與 AnalysisDocument，逐成員編碼一次，逐輸出隔離失敗，回傳一次 SaveReport 並追加 saved。`NotebookExperiment.save_run` 綁定 PointView，使用 entry owner 的 capture_point_storage，保存 adapter 驗證過的 acquisition source。SavedRun 固定該 run 的資料、context 與 evidence，PartialSaveError 保留同一 handle 供明確再存，不建立恢復收據或自動 retry。
+`datafile.AnalysisDocument` 與 encoder 擁有窗格 JSON 格式。`experiment.artifacts` 定義 ArtifactItem 與固定 DataItem／FigureItem／AnalysisItem。一次 SaveArtifact 包含多個 items，`save_artifacts` 依種類選 native／Labber／PNG／JSON，逐項編碼一次，對等目的地共用 bytes。
+
+DataItem 保留 typed run 準備成功或失敗的結果；cfg=None 或 producer 準備失敗只使對應 data outputs 失敗，同選集的圖與分析仍嘗試保存。每次呼叫回傳最新 SaveReport 並追加 saved；ledger 失敗向外傳遞，不 retry 或 rollback。共用核心不依賴 GUI 或 Qt，由 `.importlinter` 的 `artifacts-core-no-ui` contract 檢查。
+
+`NotebookExperiment.save_run` 綁定 PointView，使用 entry owner 的 capture_point_storage，保存 adapter 驗證過的 acquisition source。SavedRun 固定該 run 的資料、context 與 evidence，PartialSaveError 保留同一 handle 供明確再存，不建立恢復收據或自動 retry。
 
 GUI Save／Save All 與 MCP 保存使用這條 run 保存流程。Save All 包含已保存的 artifact，每次重寫全部選定成員。GUI 在 owner thread 同步完成並回傳完整 SaveReport，不建立 Save handle、worker 或 save-busy phase。Data pane 唯讀顯示每個 output 的 path、status 和 error，不讓使用者改目的地。Notebook 的本機單檔 save 保留原入口，不猜格式；`save_run` 使用 bound PointView 的公開 capability。C8 與 C9 涵蓋 notebook → experiment/datafile/resources 的依賴，C12 保持 datafile 不依賴 stateful resources。
 
-GUI Native Load 透過 experiment owner 一次還原 typed record 與完整 RunMetadata，保留原 run_id、時間、completion 和最近成功 Labber path，不產生 acquired。相同 opened entry 且可定位歷史 point 時，context owner 一次讀取檔案的 point 和已解析 alias names，固定 Load 時的持久值供 Analyze／Post／Writeback。檔案不保存原始 point／library 版本，不能把這份來源當成原始量測參數。跨 entry、EMPTY 或無歷史 point 時沒有 analysis source，不回退目前 alias。Save storage 在 Load request 時獨立捕捉；同 entry 沿歷史 point／run_id 保存，跨 entry 在 mapping 和 I/O 前拒絕。
+GUI Native Load 由 LoadService 呼叫 datafile.load_run_data 讀成 StoredRun 並比對 experiment tag，再交 adapter.restore(stored)。BaseAdapter 使用核心 from_stored，共用資料優先轉換見 [[0069]]。核心與 Notebook 保持 typed RunRecord，GUI 只持有 opaque record 與明示 cfg_issue，不探測 cfg／result。完整 RunMetadata 沿 StoredRun 保留原 run_id、時間、completion 和最近成功 Labber path，不產生 acquired。Load 不回填表單，不以目前 Form、library、default 或 live device 補回歷史 cfg；Inspect 仍檢視檔案的 raw cfg。
+
+相同 opened entry 且可定位歷史 point 時，context owner 一次讀取檔案的 point 和已解析 alias names，固定 Load 時的持久值供 Analyze／Post／Writeback。檔案不保存原始 point／library 版本，不能把這份來源當成原始量測參數。跨 entry、EMPTY 或無歷史 point 時沒有 analysis source，不回退目前 alias。Save storage 在 Load request 時獨立捕捉；同 entry 沿歷史 point／run_id 保存，跨 entry 在 mapping 和 I/O 前拒絕。
 
 Load Data 同時提供 File 選檔與 opened entry ledger 清單。清單按 run_id 合併 acquired／saved，只有成功 native 輸出能作為 data_path，取最近成功路徑。Recorded at 是首 acquired 或首 saved 的事件時間，不冒充量測開始時間。查詢不讀 data.h5、不 stat 或寫事件，損壞 ledger 明確失敗。
 

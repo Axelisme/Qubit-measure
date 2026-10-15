@@ -20,7 +20,7 @@ Setup 等 shared dialog 只依賴窄 control facet 表達一般能力（開啟 e
 
 Measure 的 library editor 交未 lower 的 schema 與固定 ParameterContext。ContextService 透過 app 注入的 callbacks 準備 ModuleSpec／WaveformSpec，再提交一筆 library structure change。Rename 不級聯修改其他引用。
 
-WritebackService 先以分析來源的固定 capture 解析與 lower 全部選定 proposals，再依提案順序交 concrete items 給 `ContextService.apply_writeback`。此入口驗證固定 SavedPoint、綁定資源並交 resources 共用 executor。未選工作點時，application 在 append 前沿 no_context 拒絕，提示先選或建立工作點。同 entry 選取其他 point 只允許命令開始，不改 captured SavedPoint 的寫入目的地；跨 entry 仍拒絕。Executor 追加 accepted 後逐項提交，首錯停止，保留成功前綴與事件，不提供跨檔 rollback 或 retry。Context owner 發布實際成功前綴。GUI 標記該前綴 applied 後原樣拋 producer cause，保留既有 wire 分類。Parameter 的 metadata 整份替換為 `{stderr: x}`，沒有 stderr 時為 `{}`，不寫 source、kind、run_id 或時間。Module／waveform 的 stderr 隨 accepted provenance 保存。Selected Apply 的版本接受與其他尚待整合義務見 [Cfg 編輯 draft](draft/cfg-editing-boundaries.md#observationrun-與-apply)。
+WritebackService 先以分析來源的固定 capture 解析與 lower 全部選定 proposals，再依提案順序交 concrete items 給 `ContextService.apply_writeback`。此入口驗證固定 SavedPoint、綁定資源並交 resources 共用 executor。未選工作點時，application 在 append 前沿 no_context 拒絕，提示先選或建立工作點。同 entry 選取其他 point 只允許命令開始，不改 captured SavedPoint 的寫入目的地；跨 entry 仍拒絕。Executor 追加 accepted 後逐項提交，首錯停止，保留成功前綴與事件，不提供跨檔 rollback 或 retry。Context owner 發布實際成功前綴。GUI 標記該前綴 applied 後原樣拋 producer cause，保留既有 wire 分類。Parameter 的 metadata 整份替換為 `{stderr: x}`，沒有 stderr 時為 `{}`，不寫 source、kind、run_id 或時間。Module 的 stderr 隨 accepted provenance 保存。Parameter／Module／Sample proposal、Form draft 與 selected Apply 的契約見 [[0008]]、[[0065]]；子模組搬遷不改成功前綴、權限、busy admission、欄位驗證或錯誤分類。
 
 全域有序 alias 表由 ContextService 擁有。元件與 device 共用同表，每列保存名稱或引用前列的 `$` 軟連結，不做 kind 或名稱可用性預驗。Caller 以 `alias_preset` 提供 Measure 初值，框架不宣告領域 preset，也不反向 import zcu_lab。使用者套件的唯一初值是 `ALIAS_PRESET`，flux_dev 空列不猜裝置或 cache。
 
@@ -55,6 +55,16 @@ Dialog 的試算參數是獨立 owner，不寫回元件。Service／remote 明�
 不讀 dialog。Calibrate 只計算候選 bias。Simulation coordinator 只組裝 SoC 與 devices。
 
 ## Adapter capability 與事件
+
+Measure 的 `artifacts` package 擁有 ArtifactTracker、SaveService、SaveControl、保存中心與 ArtifactHandover。Run result 是 adapter-owned opaque handle；RunService 不以 RunRecord 型別或 cfg／result 欄位推測其內容，acquired 沿固定 metadata 寫入，不保存 cfg。
+
+Adapter 的 data_item 與 analysis_item 只交框架固定內容，不選格式、路徑或寫檔。Figure 取已提交 pane 的具名原生圖。框架在 owner thread 同步編碼，資料準備失敗交共用 experiment.artifacts 報出對應 data outputs，其他圖與分析仍嘗試保存。
+
+LoadService 擁有 native 讀檔與 tag 比對，再呼叫 adapter.restore(stored)。BaseAdapter 委派核心 from_stored；框架只讀 RestoredRun 的 opaque record 與 cfg_issue，不探測歷史 cfg。cfg 不可用仍是成功 Load，reply 的 cfg_issue 是原因字串或 null，不再提供 has_cfg_snapshot。讀檔、restore 或歷史來源建立失敗時保留舊成果。Load 不回填表單，Inspect 保留 raw cfg 檢視；metadata、分析來源與 storage 分界見 [[0063]]，typed restore 見 [[0069]]。
+
+使用者於 2026-10-14 裁定：「擴充空間，那這兩個功能的定位應該是gui框架下的一個子模塊，對外解耦，對內可擴充。」並釐清：「Artifact目前，一個Artifact是一個寫入單位，但內部支援多個不同的項目。」對 adapter 只交內容、框架決定格式回答：「好，同意做法一」。
+
+GUI handover 與 Qt-free experiment 核心分層，依 GUI → experiment → datafile／resources 的 C8、C9 contracts；共用核心另由 artifacts-core-no-ui 禁止 GUI／Qt 依賴。2026-10-15 以「1可以，2採用忽略不支援欄位的方式，3同意，4一起做吧」確認 Load 不回填與兩個子模組一併實作。
 
 Measure 的 `writeback` package 擁有 Parameter／Module／Sample proposals、opaque draft、
 service、control 與 Qt widget。Adapter 公開入口再匯出 proposal 型別；resources.entry

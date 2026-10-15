@@ -15,7 +15,7 @@
 
 核心保留無跨次可變狀態的實驗 class。NotebookAdapter 先綁定 soc、soccfg、DeviceManager 與 plot host 引用，再由 `nb_adapter(core)` 建立各自保存 records 的 NotebookExperiment。Caller 建立 experiment instance，不要求零參數 constructor。同步實驗不各寫扁平參數 wrapper，caller 直接提供 typed config／options。GUI adapter 直接使用核心，兩前端不互相包裝。
 
-RunRecord 泛型組合 cfg 與實驗專屬 Result。Result 只表達資料，不攜帶 cfg_snapshot。AnalysisRecord 組合 explicit source RunRecord、實際 options、typed Analysis 與純具名 figures；cfg 與 result 從 source 取得，不另外保存一份可混用的來源。
+RunRecord 泛型組合 nullable typed cfg 與實驗專屬 Result。Typed cfg 的位置是 RunRecord.cfg；檔案的原始 CfgSnapshot envelope 由 StoredRun 保留，不把 typed record 當成 lossless rewrite envelope。AnalysisRecord 組合 explicit source RunRecord、實際 options、typed Analysis 與純具名 figures；cfg 與 result 從 source 取得，不另外保存一份可混用的來源。
 
 核心操作形狀為：
 
@@ -23,6 +23,7 @@ RunRecord 泛型組合 cfg 與實驗專屬 Result。Result 只表達資料，不
 run(config, *, context) -> Result
 save(source: RunRecord, destination) -> None
 load(source: Path) -> RunRecord
+from_stored(stored: StoredRun) -> RestoredRun[RunRecord]
 
 # Only synchronous analysis cores provide this operation.
 analyze(source: RunRecord, options, *, plots) -> Analysis
@@ -80,9 +81,15 @@ Notebook run／load 正常返回後更新目前 RunRecord，清空目前分析�
 
 ### 保存、發現與範圍
 
-實驗擁有 RunRecord 到檔案的映射，caller 指定 exact path；save 不依目前 run。預設編解碼沿用 AXES_SPEC／GroupedAxesSpec 與 canonical Labber HDF5，將 cfg envelope 與純 Result 資料分開。保留 inner-first axes、Result-native shape、SI disk units、roles、labels、dtype、comment／tag 與 complex calibration。既有目的地仍拒絕，不新增覆寫、跨程序鎖或原子保存保證。
+實驗透過 AXES_SPEC／GroupedAxesSpec 擁有 RunRecord 到保存資料的映射，datafile 擁有檔案格式。保留 inner-first axes、Result-native shape、SI disk units、roles、labels、dtype、comment／tag 與 complex calibration。Caller 指定 exact path，save 不依目前 run。本機單檔 save 是明示 Labber 匯出，load 只讀 native data.h5，兩者不是對稱格式。只有 Labber 的舊資料須先用既有 migrations 離線轉換，不提供執行期 fallback，也不代跑真實資料遷移。Run 保存與重存的 native replace、Labber 新檔及失敗語意由 [[0063]] 規定。
 
-RunRecord.cfg 允許 None。正常 run 保有有效快照，load 對缺少或無法驗證的 cfg 保留有效資料與既有診斷，不用目前設定補成來源。需要 cfg 的分析或操作在其 owner 入口拒絕；無需 cfg 的分析仍可使用，不由 NotebookAdapter 一律阻擋。預設 canonical saver 保留缺 cfg 時拒絕，GUI 回填／寫回保留 skip。Shape、units、roles、dtype 的資料完整性驗證不放寬。
+PersistableExperiment.from_stored 使用公開 restore_run(stored, spec=...)，不做 I/O、不查 registry 或動態匯入實驗。Notebook 的 load 只收 Path，先以 datafile 讀成 StoredRun，再經同一轉換回 typed RunRecord。GUI LoadService 讀檔後交 adapter.restore；GUI 只持有 adapter 的 opaque result。RestoredRun 以 record 型別為泛型，同時保留核心 typed record 與 GUI opaque handle 的型別資訊，cfg_issue 為 None 或非空的不可用原因。
+
+Restore 先驗證 native 格式、experiment tag、必要 variables、axes、unit、dtype、shape 與 builder result，再處理 typed cfg。缺 /cfg、非法 JSON 或非法 CfgSnapshot envelope 仍是格式錯誤。合法 envelope 的 cfg_type、schema major 或 concrete model values 不相容時，保留有效資料、令 RunRecord.cfg=None，並發出 CfgUnavailableWarning；cfg_issue 攜帶同一原因。同 major 的 minor 與未知 cfg keys 沿既有 known projection，StoredRun 保留 raw cfg JSON 與歷史 metadata，不重拍來源或裝置。
+
+GroupedLoadData.cfg_snapshot 允許 None，資料 builder 讀 variables，不拿目前 cfg 補值。正常 run 仍有有效 cfg。需要 cfg 的分析或 data 保存入口明確拒絕 cfg=None，不需要 cfg 的分析照常，不由 NotebookAdapter 一律阻擋。GUI Load 不回填表單，也不從 Form、library、default 或 live device 補回歷史 cfg。原始 cfg 由 Inspect 檢視。
+
+使用者於 2026-10-14 對框架讀檔後交 StoredRun 給 adapter 回答：「看起來沒問題」；對資料優先、cfg 可缺回答：「我認為可以」。2026-10-15 以「1可以，2採用忽略不支援欄位的方式，3同意，4一起做吧」確認 Load 不回填與 Labber-only 先離線遷移。
 
 一般實驗使用預設 save／load，作者可用相同 RunRecord 介面明確 override，不要求額外 experiment_codec，也不聲稱支援任意 Python 物件。Workflow streaming／grouped artifacts 保留自己的契約，不改成 one-shot record 格式。PersistableExperiment、RecordExperiment 與 NotebookAdapter 的 save／load 只接本機路徑，不公開 server_ip／port；獨立 datafile／workflow transport 保留自己的契約。
 
@@ -139,7 +146,7 @@ Notebook backend adapter 處理顯示與 close，避免 cell 結束重複顯示�
 
 同一份圖一旦保存成功，修改 artist、視圖或目的地不清除成功紀錄。不新增 dirty 通知或自動內容追蹤。新產物從未保存開始。
 
-部分失敗保留成功項，不宣稱整組已保存，也不承諾跨檔原子保存。Save All 只保存未保存項，Retry 只重試未完成項。明確再次匯出另行表達，retry 不構成覆寫原始資料的授權。
+部分失敗保留成功項，不宣稱整組已保存，也不承諾跨檔原子保存。Save All 包含已保存的 artifact，重寫選定的 native、PNG 與 JSON；Labber 每次產生新檔，失敗保留上次成功連結。每次呼叫回報本次結果，不自動 retry，保存權威與失敗邊界見 [[0063]]。
 
 ### G5：晚到結果
 
@@ -166,7 +173,7 @@ GUI application 統一使用插件定義的 typed 分析輸出與 plots，不另
 - [Experiment](../../lib/zcu_tools/experiment/README.md) 說明 RunRecord／AnalysisRecord、nullable cfg、RunContext 與 default／grouped persistence。核心不再保存前一次結果。
 - [Notebook](../../lib/zcu_tools/notebook/README.md) 說明 NotebookAdapter、GEPostAnalyzer 與 FluxDepAnalyzer。同步分析可省略 source，獨立互動工具仍接明確來源；Done／Cancel 與晚到成果保留各自來源。
 - [GUI plotting](../../lib/zcu_tools/gui/plotting/README.md) 說明原生 Figure 與 Qt presentation 的不同生命週期。Plots.finish 完成最後刷新，Plots.release 只釋放呈現。NamedFigures 保留完成後的原生圖。
-- Measure 的 ArtifactKey 以 stage 與圖名識別成果。ArtifactTracker 記錄每張圖是否曾成功保存，SaveService 捕捉本次保存來源與目的地。Save All 選尚未保存的成果，個別失敗不撤銷先前成功項。
+- Measure 的 ArtifactKey 以 stage 與圖名識別成果。`measure.artifacts` 擁有 ArtifactTracker 與 SaveService，捕捉本次保存來源與目的地。Save All 包含已保存成果，個別失敗不撤銷先前成功項。共用 `experiment.artifacts` 服務 GUI 與 Notebook，固定項目集中隱藏格式選擇、編碼與失敗隔離。Workflow 的單檔保存仍用共用 prepared writer，不強制改走 entry Save All。
 - [Session](../../lib/zcu_tools/gui/session/README.md) 說明 DeviceManager owner 與 Use Simulate Env coordinator。一般 SoC 連線不建立 FakeDevice，coordinator 先完成真實裝置斷線，再發布已綁定來源的 mock 環境。
 
 Standalone [liveplot](../../lib/zcu_tools/plotting/liveplot/README.md) 保留自己的 backend 與 close 契約，不等同於 Plots host。

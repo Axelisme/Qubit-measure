@@ -19,7 +19,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## GUI Service Architecture
 
-- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session、interactive 與單層 undo、owner、capability、domain fact、前端反應與 explicit plotting 責任。
+- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session、interactive 與單層 undo、owner、capability、domain fact、前端反應與 explicit plotting；Artifact／Writeback 子模組、opaque Run／Load 與 adapter 內容交接。
 - [0064 — GUI process startup 與 app composition](0064-process-startup.md)：launcher、runtime、app startup coordination、rendering 初始化與 remote 的責任分界。
 
 ## Cfg / Value Model
@@ -44,12 +44,12 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Persistence
 
-- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分各保存對象的 owner、完整性、失敗與引用邊界。SaveLayout 計算 run 輸出位置，獨立 writers 處理格式，上層編排 batch 與 ledger；參數容器使用工作單位與顯式定義注入；library 讀取可在同鎖內先備份再清理壞條目。
+- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分各保存對象的 owner、完整性、失敗與引用邊界。data.h5 擁有 cfg 正本，ledger acquired 只記事實且讀取忽略未知欄位；SaveLayout 計算位置，experiment.artifacts 編排固定項目與失敗，datafile 擁有格式；library 讀取可在同鎖內先備份再清理壞條目。
 
 ## Experiment runtime／Workflows
 
 - [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：新 workflows 的單一 run owner、一 run 一 operation、Pause／Resume 、每次 env.run 前的 connected device capture 與 workflow 自行保存 iteration 檔案。
-- [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：無跨次狀態的實驗核心、RunRecord／AnalysisRecord、NotebookAdapter 與 GUI adapter 分工、RunContext／CfgEnv、具名原生圖與多圖保存、instance DeviceManager 與模擬環境 coordinator。
+- [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：無跨次狀態的實驗核心、RunRecord／AnalysisRecord、共用 from_stored 與資料優先 nullable cfg、Notebook native load 與 Labber 匯出、GUI opaque result、具名原生圖及 RunContext／CfgEnv。
 
 
 ## Analysis / Simulation / Waveform
@@ -71,9 +71,6 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 - [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：核准方向、尚未實作。啟動固定 Python environment，FTF 用 YAML 調參；同步 acquire 固定量測要求、逐 round 捕捉環境，backend 固定輸入輸出。物理與依賴邊界已定，具體型別、schema、遷移與驗收待完成。
 
 
-- [量測成果 Artifact、設定快照與讀回](draft/artifact-persistence.md)：核准方向、尚未實作。設定快照正本只在 `data.h5`，ledger 不存 cfg，Notebook 與 GUI 都讀 `data.h5`。Artifact 與 Writeback 各成子模組，`experiment` 共用核心依項目種類決定格式，GUI 子模組管顯示與 adapter 介面。讀回經 `StoredRun` 與核心 `from_stored`，資料優先、cfg 可缺。待 measure-form 與 cfgschema-retire 落地後實作。
-
-
 - [Pydantic 表單、輸入與宿主提交](draft/pydantic-form-tool.md)：Qt-free core 與 editor 分離，共用 defaults hook、evaluator 與 complex codec。Expression 保存在 input，Engine journal 只記普通值。各宿主共用 FormEditor，Library／writeback 提交持久 Spec；Measure 推導見 [[0073]]。
 
 - [Agent 介面分層](draft/agent-interface-layers.md)：L0 實驗環境、L1 GUI／Notebook、L2 recipe、L3 workflow 與跨實驗分析的定位；L1 由 agent 決定在哪一步介入，L2 recipe 與 L3 workflow 由自己決定在哪裡 yield；自動推導歸 recipe、workflow 內部或 GUI adapter 的初始參數生成；層間以共享狀態交接，選層由上而下。Workflow yield 由進行中的重構實作；無人回應時停在 yield，預設決定與 L0 強制有需求再設計。
@@ -82,6 +79,8 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 - [Operation 關閉與 disconnect](draft/operation-lifecycle-boundaries.md)：shutdown 期限、無 handle 背景工作與 GUI device/factory owner 的未落實目標。
 
 ## Retired
+
+- [量測成果 Artifact、設定快照與讀回](draft/artifact-persistence.md)：已結案，由 0063、0069、0067 接替；保留原提案與討論連結供追溯。
 
 - [Cfg 編輯接縫與使用邊界](draft/cfg-editing-boundaries.md)：已結案並由 0065、0008、0073 接替，正文只供歷史追溯。
 - [Cfg 資源公開契約與同步發布](draft/cfg-resource-contract.md)：已結案並由 0065、0008、0073 接替，正文只供歷史追溯。
