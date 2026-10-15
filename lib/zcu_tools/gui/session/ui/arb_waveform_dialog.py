@@ -210,6 +210,7 @@ class ArbWaveformDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self._assets = assets
+        self._read_only = False
         self._current_data_key: str | None = None
         self._suppress_segment_change = False
         # Cheap path state: updated synchronously on every structure/data_key change.
@@ -254,6 +255,34 @@ class ArbWaveformDialog(QDialog):
         self._close_btn.clicked.connect(self.reject)
         self.refresh()
         self._reset_draft()
+
+    def set_read_only(self, *, read_only: bool) -> None:
+        """Lock or unlock editing and Save without replacing the current draft.
+
+        Asset selection, Refresh, preview and Close remain available. Repeated
+        calls are safe; unlocking restores Save only if validation allows it.
+        """
+        self._read_only = read_only
+        self._data_key_edit.setReadOnly(read_only)
+        self._segment_table.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers
+            if read_only
+            else self._segment_edit_triggers
+        )
+        # NoEditTriggers prevents new editors; an already open string editor
+        # must also stop accepting input without losing its uncommitted text.
+        for editor in self._segment_table.findChildren(QLineEdit):
+            editor.setReadOnly(read_only)
+        for control in (
+            self._rename_btn,
+            self._delete_btn,
+            self._insert_before_btn,
+            self._insert_after_btn,
+            self._delete_segment_btn,
+            self._normalize_check,
+        ):
+            control.setEnabled(not read_only)
+        self._apply_feedback()
 
     def refresh(self) -> None:
         selected = self._current_data_key
@@ -330,6 +359,7 @@ class ArbWaveformDialog(QDialog):
         layout.addLayout(key_row)
 
         self._segment_table = QTableWidget(0, 2)
+        self._segment_edit_triggers = self._segment_table.editTriggers()
         self._segment_table.setHorizontalHeaderLabels(["duration (us)", "formula"])
         segment_header = self._segment_table.horizontalHeader()
         assert segment_header is not None
@@ -411,14 +441,15 @@ class ArbWaveformDialog(QDialog):
         """Push consolidated error/warning to the UI; gate the Save button.
 
         Priority: data_key > structure > render (single warning label).
-        Save is enabled only when all three error slots are None.
+        Save is enabled only when writable and all three error slots are None.
         """
         message = (
             self._data_key_error or self._structure_error or self._render_error or ""
         )
         self._set_warning(message)
         self._save_btn.setEnabled(
-            self._data_key_error is None
+            not self._read_only
+            and self._data_key_error is None
             and self._structure_error is None
             and self._render_error is None
         )
@@ -472,7 +503,7 @@ class ArbWaveformDialog(QDialog):
         Re-reads UI state (avoids relying on a snapshot taken at edit time).
         On failure: clears _valid_data, sets _render_error, disables Save.
         On success: sets _valid_data, clears _render_error, enables Save, plots preview.
-        Invariant after settle: warning visible ⟺ Save disabled.
+        A render error shows a warning; read-only mode independently gates Save.
         """
         recipe = self._validate_structure()  # re-read; also updates _valid_recipe
         if recipe is None:
