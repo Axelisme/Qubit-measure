@@ -62,7 +62,6 @@ FOLDED_MARK = "\u25b8"
 EXPANDED_MARK = "\u25be"
 # Suffix of the option dropdown item that shows an input no option matches.
 MISSING_SUFFIX = " (missing)"
-_ERRORS_NOTE_STYLE = f"QLabel {{ color: {_ERROR_COLOUR.name()}; }}"
 # User input a read-only dropdown or checkbox drops. Tab and Backtab key
 # presses still pass, so focus can move on past the control.
 _BLOCKED_EVENTS = frozenset(
@@ -207,6 +206,12 @@ def _direct_input(value: FormValue) -> JsonValue:
     if isinstance(value, complex):
         return _JSON.validate_python(encode_complex(value))
     return _JSON.validate_python(value)
+
+
+def _error_colour(widget: QWidget) -> QColor:
+    """Keep error text and borders readable against the theme's Window."""
+    window = widget.palette().color(QPalette.ColorRole.Window)
+    return QColor("#ff8a80" if window.lightness() < 128 else "#b3261e")
 
 
 def _mixed(base: QColor, accent: QColor, share: float) -> QColor:
@@ -500,7 +505,9 @@ class FieldRow:
             self.label.setProperty("formError", invalid)
             palette = QPalette()
             if invalid:
-                palette.setColor(QPalette.ColorRole.WindowText, _ERROR_COLOUR)
+                palette.setColor(
+                    QPalette.ColorRole.WindowText, _error_colour(self.widget)
+                )
             self.label.setPalette(palette)
             return
         widget.setProperty("formError", invalid)
@@ -529,7 +536,7 @@ class FieldRow:
             # not the input's Base. Keep the Expression interior explicit.
             background = palette.color(QPalette.ColorRole.Base).name()
             style += (
-                f"QLineEdit {{ border: 1px solid {_ERROR_COLOUR.name()}; "
+                f"QLineEdit {{ border: 1px solid {_error_colour(self.widget).name()}; "
                 f"background-color: {background}; }}"
             )
         widget.setStyleSheet(style)
@@ -912,7 +919,6 @@ class GroupBlock:
         header.addWidget(self.label)
         layout.addWidget(self.body)
         self._errors_note = QLabel(GROUP_ERRORS_NOTE, self.widget)
-        self._errors_note.setStyleSheet(_ERRORS_NOTE_STYLE)
         self._errors_note.hide()
         header.addWidget(self._errors_note)
         # Keep the errors note beside the title instead of stretching it.
@@ -923,4 +929,6 @@ class GroupBlock:
 
         The fold does not change: a folded group stays folded.
         """
+        colour = _error_colour(self.widget)
+        self._errors_note.setStyleSheet(f"QLabel {{ color: {colour.name()}; }}")
         self._errors_note.setVisible(has_errors)
