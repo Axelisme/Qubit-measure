@@ -6,9 +6,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from pydantic import JsonValue
-from qtpy.QtCore import QEvent, QObject, Qt
+from qtpy.QtCore import QEvent, QObject, Qt, QTimer
 from qtpy.QtGui import QColor
 from qtpy.QtWidgets import (
+    QApplication,
     QDialog,
     QFormLayout,
     QGroupBox,
@@ -363,6 +364,35 @@ class _ModuleDialog(_EditDialog):
         buttons.addWidget(done)
         layout.addLayout(buttons)
         self._name.editingFinished.connect(self._commit_name)
+        self._observe_input_completion()
+
+    def _observe_input_completion(self) -> None:
+        # FormEditor publishes only validity transitions, not changes between
+        # two local-error sets. Observe input completion after its Qt handler,
+        # including controls created later by expanding a lazy form group.
+        self._feedback_timer = QTimer(self)
+        self._feedback_timer.setSingleShot(True)
+        self._feedback_timer.timeout.connect(self._refresh_errors)
+        self.finished.connect(self._feedback_timer.stop)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+            self.finished.connect(lambda: app.removeEventFilter(self))
+
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        if (
+            isinstance(a0, QWidget)
+            and a1 is not None
+            and a1.type()
+            in (
+                QEvent.Type.FocusOut,
+                QEvent.Type.KeyRelease,
+                QEvent.Type.MouseButtonRelease,
+            )
+            and self._editor.isAncestorOf(a0)
+        ):
+            self._feedback_timer.start(0)
+        return super().eventFilter(a0, a1)
 
     def _commit_name(self) -> bool:
         text = self._name.text().strip()
