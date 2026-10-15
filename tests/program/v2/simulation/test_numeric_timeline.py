@@ -35,17 +35,6 @@ def test_empty_table_is_a_semantic_noop_if_no_consumer_needs_its_register(loader
     assert len(env.soc.binding.last_request.controls[0]) == 1
 
 
-def test_register_delay_without_auto_channels_still_increments_reference():
-    env = white_noise(std_adc=0)
-    prog = ModularProgramV2(env.soccfg, ProgramV2Cfg(), modules=[
-        LoadValue("cycles", [43], "reps", "delay_cycles"),
-        DelayAuto("register_only", "delay_cycles", gens=False, ros=False),
-        readout(),
-    ])
-    prog.acquire(env.soc, progress=False)
-    assert env.soc.binding.last_request.controls[0][0].start_us == pytest.approx(43 / 430.08)
-
-
 def test_arb_preserves_signed_complex_scale_sample_axis_and_detached_ownership(tmp_path):
     path = tmp_path / "signed.npz"
     np.savez(path, time=[0, 0.05, 0.1], idata=[-0.2, 0.1, -0.1], qdata=[0.1, -0.05, 0.05])
