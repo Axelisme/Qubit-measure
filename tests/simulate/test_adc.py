@@ -6,7 +6,15 @@ from numpy.testing import assert_allclose
 from scipy.linalg import expm
 
 
-def readout(*, frequencies=None, rates=None, gain=1.0, phase=0.0, offset=(0.0, 0.0), covariance=None):
+def readout(
+    *,
+    frequencies=None,
+    rates=None,
+    gain=1.0,
+    phase=0.0,
+    offset=(0.0, 0.0),
+    covariance=None,
+):
     from zcu_tools.simulate.adc import ReadoutModel, Receiver
 
     return ReadoutModel(
@@ -17,7 +25,12 @@ def readout(*, frequencies=None, rates=None, gain=1.0, phase=0.0, offset=(0.0, 0
         kappa_internal_per_ns=np.array([0.03, 0.05]),
         kappa_external_per_ns=np.array([0.08, 0.06]),
         rates_per_ns=np.zeros((3, 3)) if rates is None else rates,
-        receiver=Receiver(gain, phase, np.array(offset), np.zeros((2, 2)) if covariance is None else covariance),
+        receiver=Receiver(
+            gain,
+            phase,
+            np.array(offset),
+            np.zeros((2, 2)) if covariance is None else covariance,
+        ),
     )
 
 
@@ -30,7 +43,9 @@ def signal_model(**kwargs):
 def pulse_and_grid():
     from zcu_tools.simulate.adc import ReadoutPulse, SampleGrid
 
-    return (ReadoutPulse(0, 20, 1.2 + 0.3j, 6.0),), SampleGrid(np.array([-4, 0, 4, 12, 20, 28, 40.0]), 6.0)
+    return (ReadoutPulse(0, 20, 1.2 + 0.3j, 6.0),), SampleGrid(
+        np.array([-4, 0, 4, 12, 20, 28, 40.0]), 6.0
+    )
 
 
 def test_shared_line_finite_pulse_ringdown_demodulation_and_receiver():
@@ -41,7 +56,9 @@ def test_shared_line_finite_pulse_ringdown_demodulation_and_receiver():
     pulses, grid = pulse_and_grid()
     response = ADC(m).response(pulses, grid)
     v = np.sqrt(np.array([0.08, 0.06]) / 2)
-    a = np.diag(np.array([0.03, 0.05]) / 2 + 2j * np.pi * np.array([0.001, 0.013])) + np.outer(v, v)
+    a = np.diag(
+        np.array([0.03, 0.05]) / 2 + 2j * np.pi * np.array([0.001, 0.013])
+    ) + np.outer(v, v)
     amplitude = 1.2 + 0.3j
     expected = []
     for t in grid.times_ns:
@@ -66,7 +83,11 @@ def test_directional_multilevel_cascade_and_finite_temperature():
     pulses = (ReadoutPulse(0, 40, 1.0, 6.0),)
     response = ADC(signal_model(rates=rates)).response(pulses, grid)
     decay = np.exp(-rate * 40)
-    assert_allclose(response.final_populations[2], [1 - decay * (1 + rate * 40), rate * 40 * decay, decay], atol=2e-9)
+    assert_allclose(
+        response.final_populations[2],
+        [1 - decay * (1 + rate * 40), rate * 40 * decay, decay],
+        atol=2e-9,
+    )
     up, down = 0.01, 0.03
     thermal = np.array([[0, down, 0], [up, 0, 0], [0, 0, 0]])
     result = ADC(signal_model(rates=thermal)).response(pulses, grid)
@@ -92,7 +113,9 @@ def test_state_conditioned_moments_match_independent_block_exponential():
     generator[3:, 3:] = np.kron(q, np.eye(2))
     for s in range(3):
         block = slice(3 + 2 * s, 5 + 2 * s)
-        a = np.diag(np.array([0.03, 0.05]) / 2 + 2j * np.pi * (frequencies[s] - 6.0)) + np.outer(v, v)
+        a = np.diag(
+            np.array([0.03, 0.05]) / 2 + 2j * np.pi * (frequencies[s] - 6.0)
+        ) + np.outer(v, v)
         generator[block, block] -= a
         generator[block, s] = v
     initial = np.zeros(9, complex)
@@ -105,7 +128,9 @@ def test_state_conditioned_moments_match_independent_block_exponential():
     assert_allclose(actual.traces[1], expected, atol=3e-8)
     # Wrong mean-frequency substitution has a visibly different response.
     mean_frequency = np.average(frequencies, axis=0, weights=[0.4, 0.5, 0.1])
-    wrong = ADC(readout(frequencies=np.tile(mean_frequency, (3, 1)))).response(pulses, grid)
+    wrong = ADC(readout(frequencies=np.tile(mean_frequency, (3, 1)))).response(
+        pulses, grid
+    )
     assert np.linalg.norm(actual.traces[1] - wrong.traces[1]) > 0.01
 
 
@@ -124,15 +149,23 @@ def test_shot_sampling_noise_reproducibility_and_sums_share_one_realization():
     assert first.sums.dtype == np.float64
     assert_allclose(first.traces, second.traces, atol=0, rtol=0)
     assert_allclose(first.sums, first.traces.sum(axis=1), atol=0, rtol=0)
-    assert_allclose(np.bincount(first.initial_states, minlength=3) / 40000, populations.values, atol=0.015)
+    assert_allclose(
+        np.bincount(first.initial_states, minlength=3) / 40000,
+        populations.values,
+        atol=0.015,
+    )
     deterministic = adc.response(pulses, grid).traces[0, 0]
     residual = first.traces[:, 0] - deterministic
     assert_allclose(np.cov(residual.T), covariance, atol=0.025)
-    changed = adc.sample(populations, pulses, grid, SamplingIdentity(789, (4, 2, 9)), shots=8)
+    changed = adc.sample(
+        populations, pulses, grid, SamplingIdentity(789, (4, 2, 9)), shots=8
+    )
     assert not np.array_equal(first.traces[:8], changed.traces)
 
 
-@pytest.mark.parametrize("covariance", [np.zeros((2, 2)), np.array([[0.04, 0.04], [0.04, 0.04]])])
+@pytest.mark.parametrize(
+    "covariance", [np.zeros((2, 2)), np.array([[0.04, 0.04], [0.04, 0.04]])]
+)
 def test_zero_gain_zero_or_singular_psd_noise_and_state_order(covariance):
     from zcu_tools.simulate.adc import ADC, PopulationInput, SamplingIdentity
 
@@ -148,17 +181,24 @@ def test_zero_gain_zero_or_singular_psd_noise_and_state_order(covariance):
 
 
 def test_demodulation_carrier_and_finite_complex_envelope():
-    from zcu_tools.simulate.adc import ADC, ReadoutPulse, SampleGrid
-
     # Zero external coupling isolates the direct transmitted incident field.
     from dataclasses import replace
+
+    from zcu_tools.simulate.adc import ADC, ReadoutPulse, SampleGrid
 
     m = replace(signal_model(), kappa_external_per_ns=np.zeros(2))
     pulse = ReadoutPulse(0, 20, 1 + 2j, 6.013, envelope=lambda t: 1 - t / 20)
     times = np.array([-2, 2, 6, 10, 24.0])
     grid = SampleGrid(times, 6.004, phase_rad=0.2)
     actual = ADC(m).response((pulse,), grid).traces[0]
-    values = np.where((times >= 0) & (times < 20), (1 + 2j) * (1 - times / 20) * np.exp(-2j * np.pi * 0.009 * times - 0.2j), 0)
+    values = np.asarray(
+        np.where(
+            (times >= 0) & (times < 20),
+            (1 + 2j) * (1 - times / 20) * np.exp(-2j * np.pi * 0.009 * times - 0.2j),
+            0,
+        ),
+        dtype=np.complex128,
+    )
     assert_allclose(actual, np.column_stack((values.real, values.imag)), atol=2e-8)
 
 

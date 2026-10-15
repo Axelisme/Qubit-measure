@@ -3,14 +3,15 @@
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose
+from numpy.typing import NDArray
 from scipy.integrate import quad, solve_ivp
 from scipy.linalg import expm
 
-X = np.array([[0, 1], [1, 0]], dtype=complex)
-Y = np.array([[0, -1j], [1j, 0]], dtype=complex)
-Z = np.diag([1, -1]).astype(complex)
-GROUND = np.diag([1, 0]).astype(complex)
-PLUS = np.ones((2, 2), dtype=complex) / 2
+X: NDArray[np.complex128] = np.array([[0, 1], [1, 0]], dtype=complex)
+Y: NDArray[np.complex128] = np.array([[0, -1j], [1j, 0]], dtype=complex)
+Z: NDArray[np.complex128] = np.diag([1, -1]).astype(complex)
+GROUND: NDArray[np.complex128] = np.diag([1, 0]).astype(complex)
+PLUS: NDArray[np.complex128] = np.full((2, 2), 0.5, dtype=np.complex128)
 
 
 def model(*, h=None, sources=(), collapse=()):
@@ -33,7 +34,9 @@ def run(m, rho, end=20.0, controls=None, start=0.0):
         SolverSettings,
     )
 
-    return Evolution(m, SolverSettings(rtol=1e-11, atol=1e-12, max_step_ns=0.25)).evolve(
+    return Evolution(
+        m, SolverSettings(rtol=1e-11, atol=1e-12, max_step_ns=0.25)
+    ).evolve(
         DensityState(m.basis, rho),
         ControlSequence() if controls is None else controls,
         start_ns=start,
@@ -50,9 +53,13 @@ def test_closed_evolution_explicit_initial_state_and_phase():
     result = engine.evolve(initial, start_ns=0, end_ns=20)
     u = expm(-2j * np.pi * 0.013 * Z * 20)
     assert_allclose(result.density, u @ PLUS @ u.conj().T, atol=2e-9)
-    assert_allclose(engine.evolve(initial, start_ns=0, end_ns=20).density, result.density)
+    assert_allclose(
+        engine.evolve(initial, start_ns=0, end_ns=20).density, result.density
+    )
     assert_allclose(initial.density, PLUS)
-    assert_allclose(engine.evolve(DensityState(m.basis, GROUND), end_ns=20).density, GROUND)
+    assert_allclose(
+        engine.evolve(DensityState(m.basis, GROUND), end_ns=20).density, GROUND
+    )
 
 
 @pytest.mark.parametrize("kind", ["relaxation", "dephasing", "thermal"])
@@ -119,11 +126,17 @@ def test_quantization_error_is_separate_from_solver_error():
     from zcu_tools.simulate.evolution import ControlPulse, ControlSequence, DriveSource
 
     controls = ControlSequence((ControlPulse("x", 0, 5.1),))
-    actual = run(model(sources=(DriveSource("x", 0.03 * X),)), GROUND, end=8, controls=controls)
+    actual = run(
+        model(sources=(DriveSource("x", 0.03 * X),)), GROUND, end=8, controls=controls
+    )
     quantized_u = expm(-2j * np.pi * 0.03 * X * 6)
     original_u = expm(-2j * np.pi * 0.03 * X * 5.1)
-    assert_allclose(actual.density, quantized_u @ GROUND @ quantized_u.conj().T, atol=2e-9)
-    assert np.linalg.norm(actual.density - original_u @ GROUND @ original_u.conj().T) > 0.1
+    assert_allclose(
+        actual.density, quantized_u @ GROUND @ quantized_u.conj().T, atol=2e-9
+    )
+    assert (
+        np.linalg.norm(actual.density - original_u @ GROUND @ original_u.conj().T) > 0.1
+    )
 
 
 def test_phase_reset_continuous_virtual_z_and_explicit_fragment_continuation():
@@ -156,7 +169,9 @@ def test_phase_reset_continuous_virtual_z_and_explicit_fragment_continuation():
 
     expected = PLUS.ravel()
     for a, b in zip((0, 8, 12, 20), (8, 12, 20, 28), strict=True):
-        expected = solve_ivp(rhs, (a, b), expected, rtol=1e-12, atol=1e-13, max_step=0.05).y[:, -1]
+        expected = solve_ivp(
+            rhs, (a, b), expected, rtol=1e-12, atol=1e-13, max_step=0.05
+        ).y[:, -1]
     whole = run(m, PLUS, end=28, controls=controls)
     first = run(m, PLUS, end=12, controls=controls)
     second = run(m, first.density, start=12, end=28, controls=controls)
@@ -172,17 +187,26 @@ def test_period_plus_tail_and_binary_integer_power():
         propagator_power,
     )
 
-    u = expm(-0.012j * X)
+    u = np.asarray(expm(-0.012j * X), dtype=np.complex128)
     assert_allclose(propagator_power(u, 0), np.eye(2))
-    assert_allclose(propagator_power(u, 1000003), expm(-0.012j * X * 1000003), atol=2e-9)
+    assert_allclose(
+        propagator_power(u, 1000003), expm(-0.012j * X * 1000003), atol=2e-9
+    )
     with pytest.raises(ValueError, match="nonnegative integer"):
         propagator_power(u, -1)
     f, strength, duration = 0.073, 0.011, 82.0
     controls = ControlSequence((ControlPulse("x", 0, duration, frequency_ghz=f),))
-    actual = run(model(sources=(DriveSource("x", strength * X),)), GROUND, end=duration, controls=controls)
+    actual = run(
+        model(sources=(DriveSource("x", strength * X),)),
+        GROUND,
+        end=duration,
+        controls=controls,
+    )
     area = np.sin(2 * np.pi * f * duration) / (2 * np.pi * f)
     expected_u = expm(-2j * np.pi * strength * area * X)
-    assert_allclose(actual.density, expected_u @ GROUND @ expected_u.conj().T, atol=2e-9)
+    assert_allclose(
+        actual.density, expected_u @ GROUND @ expected_u.conj().T, atol=2e-9
+    )
 
 
 def test_population_conversion_names_source_target_and_order():
@@ -207,6 +231,11 @@ def test_invalid_density_and_nonfinite_dynamic_model_fail_without_repair():
         DensityState(m.basis, np.diag([1.1, -0.1]).astype(complex))
     with pytest.raises(ValueError, match="trace"):
         DensityState(m.basis, 2 * GROUND)
-    bad = NumericModel("bad", m.basis, m.hamiltonian_ghz, hamiltonian_at=lambda t: np.full((2, 2), np.nan))
+    bad = NumericModel(
+        "bad",
+        m.basis,
+        m.hamiltonian_ghz,
+        hamiltonian_at=lambda t: np.full((2, 2), np.nan),
+    )
     with pytest.raises((ValueError, RuntimeError), match="finite"):
         Evolution(bad).evolve(DensityState(m.basis, GROUND), end_ns=4)

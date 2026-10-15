@@ -1,0 +1,248 @@
+"""Joint direct evolution with event geometry hidden behind one public call."""
+
+from dataclasses import dataclass
+from operator import index
+
+import numpy as np
+from scipy.integrate import solve_ivp
+from scipy.linalg import expm
+
+from .controls import ControlPulse, ControlSequence, quantize_ns
+from .model import NumericModel, SolverSettings, hermitian_matrix
+from .state import ComplexMatrix, DensityState, owned_matrix
+
+
+def propagator_power(propagator: ComplexMatrix, repetitions: int) -> ComplexMatrix:
+    """Return U**N by binary matrix multiplication; N=0 returns identity.
+
+    U is a finite square complex matrix, copied, never modified. N must be a
+    nonnegative Python/NumPy integer (not bool), otherwise ValueError. This tool
+    composes identical closed-system propagators, not dissipative evolution.
+    It does not certify unitarity or normalize the result.
+    """
+    try:
+        n = index(repetitions)
+    except TypeError as error:
+        raise ValueError("repetitions must be a nonnegative integer") from error
+    if isinstance(repetitions, (bool, np.bool_)) or n < 0:
+        raise ValueError("repetitions must be a nonnegative integer")
+    base = owned_matrix(propagator, "propagator").copy()
+    result = np.eye(base.shape[0], dtype=np.complex128)
+    while n:
+        if n & 1:
+            result = result @ base
+        n >>= 1
+        if n:
+            base = base @ base
+    if not np.isfinite(result).all():
+        raise RuntimeError("propagator power produced nonfinite values")
+    return result
+
+
+@dataclass(frozen=True)
+class _Interval:
+    controls: ControlSequence
+    pulses: tuple[ControlPulse, ...]
+    start: float
+    end: float
+
+    def time(self, t: float) -> float:
+        # Evaluate the left limit at the right endpoint: later frame events
+        # belong to the next interval, not the last Runge-Kutta stage here.
+        return min(t, float(np.nextafter(self.end, self.start)))
+
+
+class Evolution:
+    """Reusable pure-numeric model/solver owner, without hidden quantum memory.
+
+    model: fixed-coordinate NumericModel, reusable and never modified.
+    settings: internal algorithm accuracy controls; caller does not choose a
+        solver separately for every event interval. No tables or persistence.
+    Every evolve call requires its own initial density. Independent shots must
+    explicitly supply their own initial state. Explicit shot fragments may feed
+    the previous result to the next call with the complete absolute controls.
+    """
+
+    def __init__(self, model: NumericModel, settings: SolverSettings | None = None):
+        self.model = model
+        self.settings = SolverSettings() if settings is None else settings
+        self._sources = {s.name: s for s in model.sources}
+
+    def evolve(
+        self,
+        initial: DensityState,
+        controls: ControlSequence | None = None,
+        *,
+        start_ns: float = 0.0,
+        end_ns: float,
+    ) -> DensityState:
+        """Evolve an explicit density over an absolute nearest-2-ns interval.
+
+        initial must already use model.basis; source/target conversion is not
+        implicit. controls contains full carrier/frame history, including before
+        start_ns. start_ns/end_ns are rounded from common origin zero, ties even.
+        Return a new owned DensityState in model.basis; inputs are unchanged.
+        Source overlap evolves jointly, not as serial single-source rotations.
+        ValueError reports invalid inputs/callbacks; RuntimeError reports solver
+        failure or invalid output. No eigenvalue clipping or trace repair occurs.
+        """
+        controls = ControlSequence() if controls is None else controls
+        self._validate_inputs(initial, controls)
+        points = controls.boundaries_ns(start_ns=start_ns, end_ns=end_ns)
+        density = initial.density.copy()
+        for start, end in zip(points[:-1], points[1:], strict=True):
+            middle = (start + end) / 2
+            pulses = tuple(
+                p
+                for p in controls.pulses
+                if quantize_ns(p.start_ns) <= middle < quantize_ns(p.end_ns)
+            )
+            interval = _Interval(controls, pulses, start, end)
+            if self.model.collapse_operators or self.model.collapse_at is not None:
+                density = self._dissipative(density, interval)
+            else:
+                u = self._closed(interval)
+                density = u @ density @ u.conj().T
+        try:
+            return DensityState(self.model.basis, density)
+        except ValueError as error:
+            raise RuntimeError(
+                f"evolution produced invalid density: {error}"
+            ) from error
+
+    def _validate_inputs(
+        self, initial: DensityState, controls: ControlSequence
+    ) -> None:
+        basis = self.model.basis
+        if (
+            initial.basis.identity != basis.identity
+            or initial.basis.labels != basis.labels
+            or not np.array_equal(initial.basis.vectors, basis.vectors)
+        ):
+            raise ValueError("initial density must use the model basis")
+        names = {p.source for p in controls.pulses} | {
+            e.source for e in controls.phase_events
+        }
+        if names - self._sources.keys():
+            raise ValueError(
+                f"unbound numeric sources: {sorted(names - self._sources.keys())}"
+            )
+
+    def _hamiltonian(self, t: float, interval: _Interval) -> ComplexMatrix:
+        t = interval.time(t)
+        h = self.model.hamiltonian_ghz.copy()
+        if self.model.hamiltonian_at is not None:
+            extra = hermitian_matrix(
+                self.model.hamiltonian_at(t), "dynamic Hamiltonian"
+            )
+            if extra.shape != h.shape:
+                raise ValueError("dynamic Hamiltonian shape must match basis")
+            h += extra
+        for pulse in interval.pulses:
+            z = interval.controls.amplitude(pulse, t)
+            source = self._sources[pulse.source]
+            h += z.real * source.in_phase_ghz
+            if source.quadrature_ghz is not None:
+                h += z.imag * source.quadrature_ghz
+        return h
+
+    def _step(self, interval: _Interval) -> float:
+        frequencies = [abs(p.frequency_ghz) for p in interval.pulses]
+        carrier_limit = 1 / (16 * max(frequencies)) if any(frequencies) else np.inf
+        return min(self.settings.max_step_ns, carrier_limit)
+
+    def _integrate(
+        self, rhs, initial: ComplexMatrix, interval: _Interval
+    ) -> ComplexMatrix:
+        solution = solve_ivp(
+            rhs,
+            (interval.start, interval.end),
+            initial.ravel(),
+            method="DOP853",
+            rtol=self.settings.rtol,
+            atol=self.settings.atol,
+            max_step=self._step(interval),
+        )
+        if not solution.success or not np.isfinite(solution.y).all():
+            raise RuntimeError(f"evolution solver failed: {solution.message}")
+        return solution.y[:, -1].reshape(initial.shape)
+
+    def _unitary(self, interval: _Interval) -> ComplexMatrix:
+        n = len(self.model.basis.labels)
+
+        def rhs(t, flat):
+            return (
+                -2j * np.pi * self._hamiltonian(t, interval) @ flat.reshape(n, n)
+            ).ravel()
+
+        return self._integrate(rhs, np.eye(n, dtype=complex), interval)
+
+    def _period(self, interval: _Interval) -> float | None:
+        if self.model.hamiltonian_at is not None or any(
+            p.envelope.constant is None for p in interval.pulses
+        ):
+            return None
+        frequencies = [abs(p.frequency_ghz) for p in interval.pulses if p.frequency_ghz]
+        if not frequencies:
+            return None
+        fundamental = min(frequencies)
+        # Only exact integer ratios qualify. Never perturb the supplied carrier
+        # to manufacture periodicity for almost-commensurate sources.
+        if any(not (f / fundamental).is_integer() for f in frequencies):
+            return None
+        return 1 / fundamental
+
+    def _closed(self, interval: _Interval) -> ComplexMatrix:
+        if self.model.hamiltonian_at is None and all(
+            p.envelope.constant is not None and p.frequency_ghz == 0
+            for p in interval.pulses
+        ):
+            return np.asarray(
+                expm(
+                    -2j
+                    * np.pi
+                    * self._hamiltonian(interval.start, interval)
+                    * (interval.end - interval.start)
+                ),
+                dtype=np.complex128,
+            )
+        period = self._period(interval)
+        if period is None or interval.end - interval.start < period:
+            return self._unitary(interval)
+        count = int((interval.end - interval.start) // period)
+        first = _Interval(
+            interval.controls, interval.pulses, interval.start, interval.start + period
+        )
+        u = propagator_power(self._unitary(first), count)
+        tail_start = interval.start + count * period
+        if tail_start < interval.end:
+            tail = _Interval(
+                interval.controls, interval.pulses, tail_start, interval.end
+            )
+            u = self._unitary(tail) @ u
+        return u
+
+    def _dissipative(
+        self, density: ComplexMatrix, interval: _Interval
+    ) -> ComplexMatrix:
+        n = density.shape[0]
+
+        def rhs(t, flat):
+            h = self._hamiltonian(t, interval)
+            rho = flat.reshape(n, n)
+            derivative = -2j * np.pi * (h @ rho - rho @ h)
+            collapse = self.model.collapse_operators
+            if self.model.collapse_at is not None:
+                dynamic = tuple(
+                    owned_matrix(c, "dynamic collapse operator")
+                    for c in self.model.collapse_at(interval.time(t))
+                )
+                if any(c.shape != rho.shape for c in dynamic):
+                    raise ValueError("dynamic collapse shape must match basis")
+                collapse += dynamic
+            for c in collapse:
+                loss = c.conj().T @ c
+                derivative += c @ rho @ c.conj().T - (loss @ rho + rho @ loss) / 2
+            return derivative.ravel()
+
+        return self._integrate(rhs, density, interval)
