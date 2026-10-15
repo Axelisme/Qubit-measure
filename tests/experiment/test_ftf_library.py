@@ -127,3 +127,43 @@ def test_offline_cli_main_reads_yaml_and_resumes_partial(tmp_path):
     assert not EvolutionLibrary(tmp_path / "data").snapshot().tables
     assert main(args) == 0
     assert len(EvolutionLibrary(tmp_path / "data").snapshot().tables) == 1
+
+
+def test_closed_acquire_round_flux_does_not_hit_an_old_dc_table(tmp_path):
+    """First-green coverage of actual source changes against published U content."""
+    from zcu_tools.device.fake import FakeDevice
+    from zcu_tools.experiment.ftf import FTFBuildPlan, build_database, ftf
+    from zcu_tools.simulate.evolution import EvolutionLibrary
+
+    settings = parse_ftf(ftf_document())
+    coupler = settings.model.coupler.model_copy(update={"q_cap": None})
+    settings = settings.model_copy(
+        update={"model": settings.model.model_copy(update={"coupler": coupler})}
+    )
+    yaml_path = tmp_path / "ftf.yaml"
+    with yaml_path.open("w") as stream:
+        yaml.safe_dump(settings.model_dump(mode="json", exclude_none=True), stream)
+    path = tmp_path / "data"
+    build_database(
+        yaml_path,
+        path,
+        FTFBuildPlan(8.0, (1 + 0j,), -0.1, 0.1, 6),
+        tmp_path / "compiler",
+    )
+    library = EvolutionLibrary(path)
+    env = ftf(settings, library=library)
+    seen = []
+    try:
+        driver = env.devices.get_device("bias")
+        assert isinstance(driver, FakeDevice)
+
+        def change_bias(*_args, **_kwargs):
+            assert library.last_evaluation is not None
+            seen.append(library.last_evaluation.origin)
+            driver.set_value(0.4)
+
+        _program(env).acquire_decimated(env.soc, progress=False, round_hook=change_bias)
+        assert seen == ["table", "direct"]
+        assert env.soc.binding.rounds[1].snapshot.values == (("bias", 0.4),)
+    finally:
+        env.devices.close_all_devices()

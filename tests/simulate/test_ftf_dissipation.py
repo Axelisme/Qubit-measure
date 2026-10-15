@@ -78,3 +78,26 @@ def test_dynamic_joint_bath_segment_refinement_in_same_fixed_basis() -> None:
         np.testing.assert_allclose(rho, rho.conj().T, atol=1e-9)
         np.testing.assert_allclose(np.trace(rho), 1.0, atol=1e-9)
         assert np.linalg.eigvalsh(rho).min() > -1e-9
+
+
+def test_static_numeric_model_preserves_full_dynamic_baths_at_constant_flux() -> None:
+    """First-green coverage of the owner static path, not a historical red."""
+    from zcu_tools.simulate.evolution import DensityState
+
+    joint = _joint()
+    static = joint.fixed_numeric_model(joint.dc_flux, (), resonators=_resonators())
+    dynamic = joint.numeric_model(
+        lambda t: joint.dc_flux,
+        (),
+        end_ns=2.0,
+        bath_segment_ns=2.0,
+        resonators=_resonators(),
+    )
+    psi = np.ones(8, dtype=complex) / np.sqrt(8)
+    initial = DensityState(joint.basis, np.outer(psi, psi.conj()))
+    settings = SolverSettings(1e-10, 1e-12, 0.025)
+    actual = Evolution(static, settings).evolve(initial, end_ns=2.0)
+    reference = Evolution(dynamic, settings).evolve(initial, end_ns=2.0)
+    np.testing.assert_allclose(actual.density, reference.density, atol=1e-10, rtol=0)
+    # Populations alone would not detect dropped Markov pure dephasing.
+    assert np.max(np.abs(actual.density - initial.density)) > 0.01
