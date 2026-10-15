@@ -239,3 +239,35 @@ def test_invalid_density_and_nonfinite_dynamic_model_fail_without_repair():
     )
     with pytest.raises((ValueError, RuntimeError), match="finite"):
         Evolution(bad).evolve(DensityState(m.basis, GROUND), end_ns=4)
+
+
+def test_complex_multilevel_lindblad_matches_independent_generator_exponential():
+    from zcu_tools.simulate.evolution import Basis, DensityState, Evolution, NumericModel
+
+    h = np.array([[0.01, 0.003j, 0.004], [-0.003j, 0.02, 0.002j],
+                  [0.004, -0.002j, 0.03]], dtype=complex)
+    jumps = (
+        np.array([[0.03j, 0.05, 0], [0.01, 0.02, 0.04j], [0.02j, 0, 0.01]], complex),
+        np.array([[0.02, 0, 0.01j], [0.02j, 0.01, 0], [0, 0.03, -0.02]], complex),
+    )
+    vector = np.array([1, 1j, -1], complex) / np.sqrt(3)
+    initial = np.outer(vector, vector.conj())
+    # Independent generator: apply the definition to elementary density matrices,
+    # rather than constructing a production vectorization/Kronecker formula.
+    columns = []
+    for k in range(9):
+        elementary = np.zeros((3, 3), complex)
+        elementary.flat[k] = 1
+        action = -2j * np.pi * (h @ elementary - elementary @ h)
+        for jump in jumps:
+            adjoint = jump.conj().T
+            action += jump @ elementary @ adjoint
+            action -= (adjoint @ jump @ elementary + elementary @ adjoint @ jump) / 2
+        columns.append(action.ravel())
+    expected = (expm(8 * np.column_stack(columns)) @ initial.ravel()).reshape(3, 3)
+    basis = Basis("three-level", ("a", "b", "c"), np.eye(3, dtype=complex))
+    numeric = NumericModel("complex-jumps", basis, h, collapse_operators=jumps)
+    actual = Evolution(numeric).evolve(DensityState(basis, initial), end_ns=8).density
+    assert_allclose(actual, expected, atol=2e-10, rtol=0)
+    assert abs(np.trace(actual) - 1) <= 1e-10
+    assert np.linalg.eigvalsh(actual).min() >= -1e-10
