@@ -44,6 +44,14 @@ _Avoid_: persisted session preference, complete app state
 GUI 記住、用來預填 Setup 的條目名稱與連線位址。它不表示 entry 已開啟或儀器已連線。
 _Avoid_: active environment
 
+**Simulation Environment（模擬環境）**:
+供模擬量測使用的物理模型、模擬控制資源及其關係的組合。它描述模擬樣品與可操作環境，不等於前端的 SessionEnv 或某次實驗 cfg。
+_Avoid_: SessionEnv, RunContext
+
+**Simulation Preset（模擬範本）**:
+可重用、以參數建立模擬環境的具名組合，例如 FTF preset。它涵蓋整個模擬配置，不是單一 pulse 或 readout module 的起始範本。
+_Avoid_: ModuleLibrary Template
+
 ## 量測與保存
 
 **Experiment Run**:
@@ -51,8 +59,16 @@ _Avoid_: active environment
 _Avoid_: job, task run, measurement job
 
 **Device Snapshot**:
-一次 Experiment Run 開始前的全體已連線儀器設定記錄。它表示實驗前狀態，不是該次 sweep 的實際測點值。
+一次 Experiment Run 開始前的全體已連線儀器設定記錄。它表示實驗前狀態，不是該次 sweep 的實際測點值，也不是模擬每 round 的 Environment Snapshot。
 _Avoid_: cached observation, setup result, sweep values
+
+**Simulation Acquire Request（模擬量測要求）**:
+一次 acquire 內固定的控制與資料需求，描述要執行的量測，不包含逐 round 改變的環境值。
+_Avoid_: live program cfg, environment snapshot
+
+**Simulation Environment Snapshot（模擬環境快照）**:
+一個 round 執行時固定的環境值與設定識別。它與該次 acquire 的量測要求及 round 抽樣身份共同構成模擬輸入，見[模擬環境 ADR](adr/draft/simulation-environments.md#每-round-捕捉輸入不承接前次量子態)。
+_Avoid_: Run-level Device Snapshot, live device reference
 
 **Experiment Result**:
 一次 Experiment Run 的量測成果，包含分析該次量測所需的資料。

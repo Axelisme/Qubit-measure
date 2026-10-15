@@ -8,6 +8,11 @@
 - 2026-10-12 [Agent 介面分層的推導](2026-10-12-agent-interface-layers.md)：自動化往下推，agent 只在宣告的判斷交接處介入；決策見 Agent 介面分層 ADR draft。
 - 2026-10-12 [fluxdep MCP 的定位與介面重設計](2026-10-12-fluxdep-mcp-design.md)：MCP 依 agent 的六個決策點與能力清單組裝 RPC，每張譜各自保有 context，證據圖只在決策點回；並歸納出十條適用於全部 MCP 的設計範式。
 
+## 模擬量測環境
+
+- 2026-10-15 [離線GPU建庫、分段演化與插值重用](2026-10-15-offline-propagator-library.md)：固定模型採離線建庫存檔、模擬載入插值；CPU可行性已有證據，GPU建表與檔案載入仍待驗證，四階精度以量測用途評估。
+- 2026-10-13 [模擬量測環境、低能投影與 FTF preset 的討論](2026-10-13-simulation-environment-ftf-preset.md)：早期選項與 prototype 的歷史快照；後續決策以[模擬環境 ADR](../adr/draft/simulation-environments.md)為準，文末後記說明已定案與仍待完成的範圍。
+
 ## Cfg 與表單
 
 - 2026-10-13 [Measure 表單重設計：從 builder 重抄到 core cfg 推導](2026-10-13-measure-form-redesign.md)：表單形狀從 core cfg 推導、說明放 core、起始值寫在 form.py 樹，角色表退化成範本目錄，`dev` 改具名欄位；決策見 ADR draft `measure-form-derivation`。
