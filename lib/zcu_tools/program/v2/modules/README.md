@@ -96,3 +96,5 @@ Scalar and pre/post-delay timing keep their existing rules.
 - A module that loads a register does not by itself define how a later pulse,
   readout, or simulator interprets that register. Add explicit consuming module
   contracts for those cases instead of relying on name conventions.
+
+Readout 的跨 owner 契約見 [ADR-0074](../../../../../docs/adr/0074-flat-readout-module.md)。

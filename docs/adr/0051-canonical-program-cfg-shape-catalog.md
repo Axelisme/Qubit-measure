@@ -12,23 +12,21 @@ status: accepted
 ## 背景
 
 measure-gui 與 autofluxdep-gui 編輯同一套 program/v2 module/waveform cfg，但各自維護
-discriminator、label 與完整 Spec factory。兩份結構只有 Arb data option source 與 readout
-跨 shape inheritance 兩個真實差異；重複 owner 會讓 runtime vocabulary、reference label 與表單
-shape 漂移。
+discriminator、label 與完整 Spec factory。兩份結構共用 Readout 的平鋪欄位，只保留 Arb data option source 的差異。
+重複 owner 會讓 runtime vocabulary、reference label 與表單 shape 漂移。
 
 ## 決策
 
 `zcu_tools.experiment.cfg_editing` 是跨 app、Qt-free 的 program cfg GUI projection owner：
 
-- closed catalog 固定列出七種 module 與六種 waveform discriminator、label、fresh spec factory；
+- closed catalog 固定列出六種 module 與六種 waveform discriminator、label、fresh spec factory；
 - catalog 不做 runtime registration；模組本身只 import `zcu_tools.gui.cfg` 與同 package 的 specs，
   不 import program/v2、app、session、Qt 或 `resources`（資源家族）。package 位於
   `experiment` 之下，import 時會載入 `experiment` package 的 base 依賴（見 [[0065]]）；test 以顯式 runtime cfg class 集合驗 closed discriminator parity；
 - 每次 factory call 建立 deep-fresh Spec tree，包括 nested section、scalar choices 與
   `ReferenceSpec.allowed` mutable containers；
-- `ProgramSpecPolicy` 只有 `arb_data_choices_source` 與
-  `enable_readout_shape_inheritance` 兩欄。main policy 啟用 `arb_waveforms` choices 與 readout
-  inheritance；autoflux policy 保持 free-form Arb data 且不掛 inheritance hook；
+- `ProgramSpecPolicy` 只有 `arb_data_choices_source`。Readout 的 generator／ADC 欄位平鋪，
+  不掛跨 shape inheritance hook，也不從 Pulse 推導 ADC 欄位，見 [[0074]]；
 - explicit unknown discriminator 一律 Fast Fail。raw dict 缺少 waveform style 時既有 Const default
   屬 materialization policy，不等同 unknown explicit style；
 - pulse root label 可由 caller factory override，`Pulse 1` / `Pulse 2` 不形成額外 catalog entry。
@@ -42,7 +40,7 @@ blanket rejection。
 `experiment.cfg_editing.ProgramMaterializationPolicy`擁有program raw semantics：root `type/style`選shape、
 missing `ch/ro_ch`為0而其它scalar為None、missing/non-mapping nested section建立完整Spec default、
 required reference missing選`allowed[0]`，以及app可materialize subset。missing waveform style是Const；
-explicit unknown style/type Fast Fail。main policy支援完整七種module與六種waveform；autoflux只
+explicit unknown style/type Fast Fail。main policy支援完整六種module與六種waveform；autoflux只
 materialize Pulse / Pulse Readout module，但shape-label lookup仍辨識完整legal catalog。
 
 main `cfg_schemas`與autoflux `module_adapter`只正規化runtime object並綁定各自policy。Bath Reset
@@ -59,8 +57,8 @@ private factory map。generic cfg core仍不理解program discriminator，wire m
 
 ## 後果
 
-- module/waveform shape、label與factory只有一個 owner，兩個 app 的 normalized spec tree只剩兩個
-  可測 policy 差異。
+- module/waveform shape、label與factory只有一個 owner，兩個 app 的 normalized spec tree只剩 Arb data choices 的
+  policy 差異。
 - catalog import保持輕量，runtime vocabulary drift由測試在整合期 Fast Fail。
 - unknown explicit style不再在 main blank seam silent fallback成 Const；wire contract不變，GUI code
   revision增加。
@@ -75,7 +73,7 @@ private factory map。generic cfg core仍不理解program discriminator，wire m
 
 - **由 program/v2 reflection 自動註冊 GUI fields**：runtime knobs不等於刻意公開的 GUI subset，且會
   把 QICK/Pydantic runtime graph帶入輕量 catalog import。
-- **任意 spec mutator callback**：會讓 app重新取得 shape ownership，無法證明只有兩個 policy差異。
+- **任意 spec mutator callback**：讓 app 重新維護 catalog 欄位規則。
 - **把 catalog 放入 `gui.cfg` 或 `gui.session`**：generic mechanics與session lifecycle都不擁有
   program domain vocabulary。
 - **保留 main unknown → Const compatibility branch**：會把 corrupt explicit discriminator靜默改形。

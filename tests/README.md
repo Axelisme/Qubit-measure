@@ -439,7 +439,11 @@ Program v2 的 compile regression 先找 `test_modules_integration.py` 中同一
 from zcu_tools.cfg_model import ModuleCfgFactory   # 使用 schema owner 的 package 入口
 # 不要從 program runtime 或 schema leaf 匯入 factory
 
-cfg = ModuleCfgFactory.from_raw({"type": "readout/direct", "ro_ch": 0, ...})
+cfg = ModuleCfgFactory.from_raw({
+    "type": "readout/pulse", "gen_ch": 0, "nqz": 1, "freq": 6000.0,
+    "gain": 0.1, "waveform": {"style": "const", "length": 1.0},
+    "ro_ch": 0, "ro_length": 1.0,
+})
 ```
 
 呼叫 `ModuleCfgFactory.from_raw(raw, context=...)` 進行解析。`CfgValidationContext` 明示固定的 module resolver 與 asset capability；dependency-free inline cfg 可省略 context。

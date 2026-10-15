@@ -24,6 +24,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Cfg / Value Model
 
+- [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Readout 自有 generator／ADC 欄位、單一頻率、waveform 引用、runtime ADC matching 與表單路徑。
+
 - [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：make_form、固定捕捉、adapter 黑箱、持久範本與具名裝置欄位。
 - [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用機制、measure tab resource 的原子 publication／固定 Run acceptance、唯讀 ref／顯式 inline 轉換、Custom reference 繼承及獨立 draft 的現況分界；library conversion、selected Apply 與其他 app 的剩餘目標見 [Cfg draft](draft/cfg-editing-boundaries.md)，measure slice 的設計與驗收邊界見 [resource contract](draft/cfg-resource-contract.md)。
 - [0008 — Measure CfgEditor session](0008-cfg-editor-session.md)：measure headless session 與 opaque writeback 的局部契約仍有效；其中 tab auto-commit／雙樹不是共用目標。

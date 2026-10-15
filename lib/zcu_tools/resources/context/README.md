@@ -8,7 +8,7 @@
 
 `library.py` 擁有 `module_cfg.yaml` 的文件、查詢、編輯與來源。文件格式是 `zcu.module-library` 2.0。Header-only 文件表示合法空 library。
 
-Pulse Spec 刪除 mux_freqs、mux_gains、mux_phases、mask 與 outsel 後，以新 major 區分持久 schema（ADR-0072）。所有 1.0 library 都在 header 被拒絕，即使未使用這些欄位也一樣。不為 1.0 library 提供遷移或相容讀取。
+Library 使用既有 2.0 容器 header。Module／waveform 的欄位變動不升 library 版本，見 [ADR-0074](../../../../docs/adr/0074-flat-readout-module.md)。不同 major 的文件沿既有 reader 契約在 header 被拒絕，不提供遷移或相容讀取。
 
 Library 的設計是「元件 → 分組 → pydantic model」，分組名稱不是封閉清單。pulses、readout、reset 與 waveforms 是目前使用的四個分組。
 

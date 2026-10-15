@@ -62,12 +62,13 @@ measure adapter保留 `validate_schema(schema, ml)` 與
 `schema_to_raw_dict(schema, md, ml)` caller interface，並在呼叫內組 expression/reference/range
 ports；measure與autofluxdep adapter在validation/lowering前各自套用app-owned合法kind集合。
 autofluxdep使用獨立 local lowering adapter與 local pulse/readout/waveform conversion；
-defaults conversion只接受 `pulse`與`readout/pulse`，reference shape resolver透過 [[0051]] 的
+defaults conversion只接受 `pulse`與平鋪的 `readout/pulse`，reference shape resolver透過 [[0051]] 的
 closed catalog辨識所有合法 measure module discriminator，使合法但不允許的 shape由 shared core
 回報 unsupported spec。
 兩個app的pulse/waveform factory都顯式建立`ReferenceSpec(kind="module")`或
 `ReferenceSpec(kind="waveform")`，resolver/converter依`spec.kind`分派；shared core不import
-這些app policy。既有persisted `module_ref`/`waveform_ref` discriminator、payload shape與
+這些app policy。Readout factory 直接建立 generator／ADC 欄位及 waveform reference，
+不再組合 Pulse／DirectReadout 子樹，見 [[0074]]。既有persisted `module_ref`/`waveform_ref` discriminator、payload shape與
 missing/relink semantics保持不變。
 
 `NodeCfgSchema.logical_paths`、generation persistence、`OverridePlan`、Qt form/live model與

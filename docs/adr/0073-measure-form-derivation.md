@@ -86,7 +86,10 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
 Option label、value、fields 與 commands，不猜 union 或 library 結構。
 
 Module／waveform 使用持久 Spec 與 FieldMeta。硬體專屬的不支援欄位由生成器屏蔽；
-必填 ADC ro_ch 保留。List 推導與多 qubit 顯示不在本設計內。
+Readout 的 `gen_ch` 與 `ro_ch` 必填且可編輯，`freq` 是唯一 generator／ADC 頻率。
+Readout 的 waveform 仍可引用 key，不推導通道或補值，見 [[0074]]。
+例如 `Template("readout", set={"gain": 0.1, "ro_length": 2.0})` 直接覆寫平鋪路徑。
+List 推導與多 qubit 顯示不在本設計內。
 
 ### 捕捉來源與使用時驗證
 

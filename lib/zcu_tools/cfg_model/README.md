@@ -18,3 +18,5 @@ Caller 從 package root import 公開名稱。
 
 本 package 只依賴外部函式庫、utils 與 core.waveform_format，不 import `program`、`resources` 或 GUI。
 Asset provider 固定目錄，不凍結 bytes。每次讀取都反映該目錄內的當下內容。
+
+Readout 的跨 owner 契約見 [ADR-0074](../../../docs/adr/0074-flat-readout-module.md)。

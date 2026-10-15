@@ -398,3 +398,5 @@ Each soc keeps its own copied parameters and source binding.
 - `test_gate_sequences.py` — AllXY reports an injected 10 % gain error, the
   ZigZag gain scan recovers the pi gain, and the ZigZag frequency scan recovers
   the qubit frequency.
+
+Readout 的跨 owner 契約見 [ADR-0074](../../../../../docs/adr/0074-flat-readout-module.md)。

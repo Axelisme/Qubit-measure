@@ -44,3 +44,5 @@ Module、seed、Display 與 annotation 翻譯放在私有模組 `_modules.py`、
 `gui.form` 是通用 Pydantic 輸入核心，不認得 core cfg 推導。推導與 module materialization 放在本 package，不放回 `gui.form`。
 
 設計背景見 [ADR-0073 measure 表單推導](../../../../docs/adr/0073-measure-form-derivation.md) 與 [`gui/form` README](../form/README.md)。
+
+Readout 的跨 owner 契約見 [ADR-0074](../../../../docs/adr/0074-flat-readout-module.md)。

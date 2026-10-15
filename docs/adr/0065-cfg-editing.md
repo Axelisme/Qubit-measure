@@ -44,7 +44,7 @@ RecipeSession.open_tab 的公開 aliases/reuse 用法不變。新 tab 與 reuse 
 
 Form Slot 使用公開 ModuleRef/ModuleInline input。Key branch 保存 `{kind: ref, name: actual_library_key}`，inline branch 保存 `{kind: inline, module: Spec input}`。Nested key-or-inline 欄位用普通字串作 key。RecipeTab.use_library 寫實際 key，不建立舊 __ref editing intent。Locked Slot 只有 inline branch，use_library 在送 RPC 前拒絕選 key。
 
-RecipeTab.read_field 回傳具名 RecipeFormField，包含 authored input、input_present、ordinary value、key/inline mode、actual key、Form lock、目前 child field names 與 directed errors。它不投影 CfgSchema kind，也不承諾 ref descendants 唯讀。Inline model 的路徑包含 module，例如 `modules.readout.module.pulse_cfg.freq`。Range count 的路徑是 n，set_sweep 的公開 expts 參數對到這個葉欄位。
+RecipeTab.read_field 回傳具名 RecipeFormField，包含 authored input、input_present、ordinary value、key/inline mode、actual key、Form lock、目前 child field names 與 directed errors。它不投影 CfgSchema kind，也不承諾 ref descendants 唯讀。Inline model 的路徑包含 module，例如 `modules.readout.module.freq`。Range count 的路徑是 n，set_sweep 的公開 expts 參數對到這個葉欄位。
 
 實驗 cfg 依 [[0073]] 使用具名裝置欄位，例如 flux_dev、jpa_flux_dev，不再保存 dev role mapping。Form 的 AliasName 在 Open／Reset 解析 direct 名稱。使用 flux 的 cfg 必填 flux_unit，值為 A、V 或 native。Core 與 Notebook 不提供隱含 default，GUI 的初始值為 A。Recipe helper 只比 cached unit，成功後寫 caller 指定的具名裝置欄位與獨立 flux_unit，不換算、不連線或 setup。
 

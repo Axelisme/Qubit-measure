@@ -1,6 +1,6 @@
 # gui/form — Qt-free Pydantic input editing
 
-**Last updated:** 2026-10-14，統一 options schema 與 fresh defaults
+**Last updated:** 2026-10-15，統一 options schema 與 fresh defaults
 
 `static_defaults(model)` 接受普通 Pydantic BaseModel 或持久 Spec，產生 detached input JSON。必填欄位與 None 預設保持缺席，讓 before validator 能從其他欄位推導值。Default factory 每次呼叫重新執行。FormModel defaults 與普通 model 的分支切換共用這個入口。
 
@@ -36,7 +36,7 @@ FormState.preview 提供隔離的 ordinary leaf values 與完整 errors，供 vi
 
 WriteRejected 是 host 寫入入口拒絕一批輸入時 raise 的具名例外，message 由 host 寫給使用者看。Host 在寫入任何內容前 raise，FormState 維持原狀；model 會拒絕的值仍寫進 state，由 result 回報。Core 自己不 raise 它。Editor 收到時保留該欄輸入並顯示 message，其他例外照常拋出。
 
-Display 只承載欄位呈現資訊。順序依欄位宣告，段落依 nested model；collapsed 只用於子 model 欄位。`group` 把欄位歸到同一 model 層級內的具名畫面群組（例如 `"Advanced"`），空字串在建構時報錯；schema 只在宣告的 property 節點標 `x-form-group`，不改驗證、defaults、choices 或 input。`decimals` 是 float 欄位顯示的小數位數，只在宣告時進 schema，非 float 欄位宣告就報錯；它不改 input。`hidden=True` 的欄位不畫，值與預設留在 input、照常驗證，schema 仍列出它並標 `hidden`。巢狀 model 欄位沒有 label 時，schema title 是欄位名（底線換空白、只有首字母大寫，`ro_cfg` 是 `Ro cfg`），不是 Pydantic 帶進來的類別名。Model 不經 union selector 到達時，它身為 tagged union branch 的單值 tag 是固定的結構 tag，schema 標 `hidden`；branch 身分來自本表單與 ModuleInput 可達的 tagged union，含 branch 的子類別（inline readout 的 `ro_cfg.type`；`LinRange.kind` 即使沒有 union 也保持結構 tag）。Union 位置的 tag 仍是 selector。Editor、host 與 MCP 共用 core 行為，但不反向成為 core dependency。
+Display 只承載欄位呈現資訊。順序依欄位宣告，段落依 nested model；collapsed 只用於子 model 欄位。`group` 把欄位歸到同一 model 層級內的具名畫面群組（例如 `"Advanced"`），空字串在建構時報錯；schema 只在宣告的 property 節點標 `x-form-group`，不改驗證、defaults、choices 或 input。`decimals` 是 float 欄位顯示的小數位數，只在宣告時進 schema，非 float 欄位宣告就報錯；它不改 input。`hidden=True` 的欄位不畫，值與預設留在 input、照常驗證，schema 仍列出它並標 `hidden`。巢狀 model 欄位沒有 label 時，schema title 是欄位名（底線換空白、只有首字母大寫，`ro_cfg` 是 `Ro cfg`），不是 Pydantic 帶進來的類別名。Model 不經 union selector 到達時，它身為 tagged union branch 的單值 tag 是固定的結構 tag，schema 標 `hidden`；branch 身分來自本表單與 ModuleInput 可達的 tagged union，含 branch 的子類別（`LinRange.kind` 即使沒有 union 也保持結構 tag）。Union 位置的 tag 仍是 selector。Editor、host 與 MCP 共用 core 行為，但不反向成為 core dependency。
 
 掃描輸入只提供 `LinRange`，由表單 owner 在轉 cfg 時展開 start／stop／n。不提供 explicit-list 分支。
 
