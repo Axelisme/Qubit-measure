@@ -114,6 +114,23 @@ def test_read_field_reports_form_input_values_and_directed_errors(
         assert before.input == 3
 
 
+def test_read_field_queries_current_owner_once_and_detaches_reply(tmp_path: Path) -> None:
+    gui = FormGui()
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        gui.owner.write({("rounds",): 19})
+        before = len(client.transport.sent)
+        field = tab.read_field("rounds")
+        assert field.input == 19
+        assert field.value == 19
+        assert client.transport.sent[before:] == [
+            ("tab.describe_cfg", {"tab_id": "t", "path": ["rounds"]})
+        ]
+        gui.owner.write({("rounds",): 23})
+        assert field.input == 19
+        assert tab.read_field("rounds").value == 23
+
+
 def test_use_library_sets_actual_key_and_exposes_key_mode(tmp_path: Path) -> None:
     gui = FormGui()
     with recipe_client(tmp_path, gui) as client:

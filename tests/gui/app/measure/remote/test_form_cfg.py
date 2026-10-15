@@ -107,8 +107,62 @@ def test_get_cfg_returns_authored_input_and_ordinary_leaf_values(form_rpc) -> No
     assert {tuple(item["path"]): item["value"] for item in observed["values"]}[
         ("gain",)
     ] == 0.4
-    assert observed["schema"]["properties"]["gain"]
+    assert set(observed) == {"input", "values", "errors"}
     assert observed["errors"] == []
+
+
+def test_describe_cfg_reads_current_local_input_and_errors_as_observer(form_rpc) -> None:
+    fixture, tab, rpc = form_rpc
+    owner = fixture.ctrl.cfg_resources.lookup(tab)
+    owner.write({("gain",): {"expr": "1 / 0"}})
+    before = owner.input.data
+    fixture.ctrl.control_identity.reclaim_local()
+    fixture.state.set_tab_running(tab, running=True)
+    try:
+        reply = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["gain"]})
+        assert reply["ok"], reply
+        local = reply["result"]
+        assert local["description"]["target"]["expression"]
+        assert local["description"]["path"] == ["gain"]
+        assert local["description"]["children"] == []
+        assert local["input_present"] is True
+        assert local["input"] == {"expr": "1 / 0"}
+        assert local["value"] is None
+        assert local["errors"][0]["path"] == ["gain"]
+        assert owner.input.data == before
+    finally:
+        fixture.state.set_tab_running(tab, running=False)
+
+
+@pytest.mark.parametrize("path", [["missing"], ["gain", "child"], [1], "gain"])
+def test_describe_cfg_rejects_unknown_or_malformed_paths(form_rpc, path) -> None:
+    _, tab, rpc = form_rpc
+    reply = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": path})
+    assert not reply["ok"]
+    assert reply["error"]["code"] == "invalid_params", reply
+
+
+def test_describe_cfg_root_is_single_layer_and_readable_through_mcp(form_rpc, tmp_path) -> None:
+    from contextlib import closing
+
+    from tests.mcp.measure._support import make_client
+
+    _, tab, rpc = form_rpc
+
+    def respond(method, params):
+        reply = rpc.call(method, params)
+        assert reply["ok"], reply
+        return reply["result"]
+
+    client = make_client(tmp_path, respond)
+    with closing(client.context.session):
+        assert "tab.describe_cfg" in client.context.gui.catalog
+        reply = client.call("rpc_call", {"method": "tab.describe_cfg", "params": {"tab_id": tab, "path": []}})
+        assert not reply.is_error, reply
+        observed = reply.data
+        assert observed["description"]["target"] is None
+        assert "gain" in [child["name"] for child in observed["description"]["children"]]
+        assert observed["input_present"] is True
 
 
 def test_edit_cfg_commits_leaf_batch_and_returns_invalid_input_errors(form_rpc) -> None:
