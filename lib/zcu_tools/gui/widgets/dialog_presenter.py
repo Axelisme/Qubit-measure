@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Protocol
+from typing import Literal, Protocol
 
 from qtpy.QtWidgets import (
     QMessageBox,
@@ -13,9 +13,13 @@ from qtpy.QtWidgets import (
 
 from zcu_tools.gui.widgets.dialog_lifecycle import DialogRefStore
 
+# The answer to an unsaved-changes question: apply the changes first, drop
+# them, or abandon the action that asked.
+type SaveDiscardCancel = Literal["save", "discard", "cancel"]
+
 
 class DialogPresenter(Protocol):
-    """Small dialog port used by widgets that need scriptable test behavior."""
+    """Present messages and user decisions without prescribing a dialog backend."""
 
     def information(self, parent: QWidget, title: str, message: str) -> None: ...
 
@@ -42,6 +46,16 @@ class DialogPresenter(Protocol):
         default: bool = False,
     ) -> None: ...
 
+    def save_discard_cancel(
+        self, parent: QWidget, title: str, message: str
+    ) -> SaveDiscardCancel:
+        """Ask modally whether to save, discard or keep unsaved changes.
+
+        Blocks until the user answers and returns "save", "discard" or
+        "cancel"; closing the question answers "cancel", the default.
+        """
+        ...
+
     def destructive_confirm(
         self,
         parent: QWidget,
@@ -51,7 +65,14 @@ class DialogPresenter(Protocol):
         action_text: str,
         on_decision: Callable[[bool], None],
         default: bool = False,
-    ) -> None: ...
+        cancel_text: str = "Cancel",
+    ) -> None:
+        """Present a destructive action and a labelled non-destructive alternative.
+
+        Deliver True only for the explicit action; alternative or dismissal delivers
+        False. ``default`` selects the action instead of the alternative as default.
+        """
+        ...
 
 
 class QtDialogPresenter:
@@ -101,6 +122,21 @@ class QtDialogPresenter:
         )
         return answer == yes
 
+    def save_discard_cancel(
+        self, parent: QWidget, title: str, message: str
+    ) -> SaveDiscardCancel:
+        save = QMessageBox.StandardButton.Save
+        discard = QMessageBox.StandardButton.Discard
+        cancel = QMessageBox.StandardButton.Cancel
+        answer = QMessageBox.question(
+            parent, title, message, save | discard | cancel, cancel
+        )
+        if answer == save:
+            return "save"
+        if answer == discard:
+            return "discard"
+        return "cancel"
+
     def confirm_async(
         self,
         parent: QWidget,
@@ -129,14 +165,16 @@ class QtDialogPresenter:
         action_text: str,
         on_decision: Callable[[bool], None],
         default: bool = False,
+        cancel_text: str = "Cancel",
     ) -> None:
+        """Open the labelled action/alternative choice; dismissal delivers False."""
         box = self._message_box(parent, QMessageBox.Icon.Warning, title, message)
         action_button = self._require_button(
             box.addButton(action_text, QMessageBox.ButtonRole.DestructiveRole),
             action_text,
         )
         cancel_button = self._require_button(
-            box.addButton(QMessageBox.StandardButton.Cancel), "Cancel"
+            box.addButton(cancel_text, QMessageBox.ButtonRole.RejectRole), cancel_text
         )
         if default:
             box.setDefaultButton(action_button)

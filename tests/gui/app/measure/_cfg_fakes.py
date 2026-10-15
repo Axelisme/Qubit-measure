@@ -1,52 +1,12 @@
-"""Real cfg resources for application tests that do not mount a frontend."""
+"""Fixed parameter captures for application tests."""
 
 from collections.abc import Mapping
 
-from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.cfg.model import CfgSchema
-from zcu_tools.gui.cfg.resource import CfgResolution, CfgResource
-from zcu_tools.gui.session.aliases import AliasTable
 from zcu_tools.gui.session.context_types import SavedPoint
-from zcu_tools.gui.session.types import ParameterContext, SessionEnv
-from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
+from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.registry import component_registry
 from zcu_tools.resources.entry.schema import ComponentSchema, PointDocument
-
-
-class PublishedHost:
-    """Published option sources without live value or hardware reads."""
-
-    def __init__(self, state: State) -> None:
-        self.state = state
-
-    def read_context(
-        self, *, aliases: Mapping[str, str] | None = None
-    ) -> ParameterContext:
-        """Fix supplied authored rows with temporary named overrides."""
-        parameters = self.state.session_env.parameters
-        if parameters is None:
-            raise RuntimeError("Test context is unavailable")
-        table = AliasTable(parameters.aliases)
-        for alias, component in (aliases or {}).items():
-            table = table.with_override(alias, component)
-        return parameters.bind_aliases(table.rows, {})
-
-    def list_device_names(self) -> list[str]:
-        return [device.name for device in self.state.list_devices()]
-
-    @property
-    def arb_waveforms(self) -> "PublishedHost":
-        return self
-
-    def list_data_keys(self) -> list[str]:
-        return []
-
-    def read_value_source(
-        self, key: str, type_name: str | None = None
-    ) -> tuple[ValueInfo, ScalarValue]:
-        raise RuntimeError("Test sources do not query live values")
 
 
 def parameter_capture(
@@ -93,32 +53,11 @@ def parameter_capture(
         )
     if library is None:
         library = LibrarySnapshot(
-            ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+            ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
         )
     return ParameterContext(
         point=point,
         library=library,
         target=SavedPoint(entry_id="entry", point="working"),
         roles=None,
-    )
-
-
-def cfg_resolution(state: State, parameters: ParameterContext | None) -> CfgResolution:
-    """Snapshot current options and provenance with the supplied fixed capture."""
-    return MeasureCfgBindings(PublishedHost(state)).snapshot_from_state(
-        state, captured_values={}, parameters=parameters
-    )
-
-
-def make_cfg(schema: CfgSchema, *, state: State | None = None) -> CfgResource:
-    """Create a resource retaining the state's creation capture across refresh."""
-    sources = (
-        State(SessionEnv(parameters=None, soc=None, soccfg=None))
-        if state is None
-        else state
-    )
-    parameters = sources.session_env.parameters
-    return CfgResource(
-        lambda: schema,
-        resolution=lambda: cfg_resolution(sources, parameters),
     )

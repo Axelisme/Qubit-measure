@@ -15,11 +15,9 @@ from zcu_tools.gui.app.measure.catalog import (
 )
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.form import FormErrors
 
-from tests.gui.app.measure._library_fakes import sample_schema
 from tests.gui.app.measure._synthetic import SampleAdapter
 
 
@@ -32,10 +30,10 @@ def measure_gui(qapp: QApplication, tmp_path: Path) -> Iterator[Controller]:
         def load(self, plan: PreparedCatalogReload) -> Registry:
             raise RuntimeError("reload is not part of this composition test")
 
-    def registry_factory() -> tuple[Registry, TemplateCatalog, ExperimentCatalogLoader]:
+    def registry_factory() -> tuple[Registry, ExperimentCatalogLoader]:
         registry = Registry()
         registry.register("fake", SampleAdapter)
-        return registry, TemplateCatalog(), UnusedLoader()
+        return registry, UnusedLoader()
 
     previous_hook = sys.excepthook
     ctrl: Controller | None = None
@@ -54,7 +52,7 @@ def measure_gui(qapp: QApplication, tmp_path: Path) -> Iterator[Controller]:
     finally:
         sys.excepthook = previous_hook
         if ctrl is not None and window is not None:
-            ctrl._background_svc.quiesce()  # pyright: ignore[reportPrivateUsage] - fixture teardown
+            ctrl.close()
             window.deleteLater()
             qapp.processEvents()
 
@@ -98,25 +96,3 @@ def test_tab_cfg_and_revision_publish_without_viewer_timer(
     qapp.processEvents()
     assert ctrl.resources_versions()[key] == before.get(key, 0) + 2
     assert ctrl.resources_versions().get(other_key, 0) == before.get(other_key, 0)
-
-
-def test_non_tab_editor_does_not_publish_into_tab_state(
-    qapp: QApplication, measure_gui: Controller
-) -> None:
-    ctrl = measure_gui
-    tab_id = ctrl.new_tab("fake")
-    qapp.processEvents()
-    original = ctrl.get_tab_snapshot(tab_id).cfg_input
-    key = f"tab:{tab_id}:cfg"
-    before = ctrl.resources_versions().get(key, 0)
-    editor_id, _ = ctrl.open_seeded_cfg_editor(
-        sample_schema(),
-        parameters=ctrl.get_session_env().parameters,
-        owner_key="writeback-test",
-    )
-    try:
-        ctrl.cfg_editor_set_field(editor_id, "gain", 0.75)
-        assert ctrl.get_tab_snapshot(tab_id).cfg_input == original
-        assert ctrl.resources_versions().get(key, 0) == before
-    finally:
-        ctrl.teardown_cfg_editor(editor_id)

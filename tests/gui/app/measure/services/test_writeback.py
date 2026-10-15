@@ -1,34 +1,22 @@
-"""Persistent writeback drafts keep editor ownership and fixed destinations."""
+"""Persistent writeback drafts edit module proposals as Forms at a fixed capture."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
-from zcu_tools.gui.app.measure.adapter import (
-    ModuleWriteback,
-    ParameterWriteback,
-    WaveformWriteback,
-)
-from zcu_tools.gui.app.measure.cfg_schemas import (
-    module_cfg_to_value,
-    waveform_cfg_to_value,
-)
-from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
-from zcu_tools.gui.app.measure.services.ports import CfgEdit, CfgEditResult
+from zcu_tools.cfg_model import ArbWaveformCfg, ConstWaveformCfg, PulseSpec
+from zcu_tools.gui.app.measure.adapter import ModuleWriteback, ParameterWriteback
 from zcu_tools.gui.app.measure.services.writeback import (
     WritebackEdit,
     WritebackService,
     WritebackWritten,
 )
-from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import PointUseRequest
+from zcu_tools.gui.session.library_entry import LibraryEntryInvalid, ModuleEntryForm
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
@@ -37,19 +25,13 @@ from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
-
-def editor_service(editor: MagicMock) -> WritebackService:
-    """Isolate draft/editor lifecycle from context persistence."""
-    return WritebackService(editor, MagicMock())
+PULSE = "Q1.pulses.tuned"
+WAVEFORM = "Q1.waveforms.flat"
 
 
-def pulse_schema() -> CfgSchema:
-    spec, value = module_cfg_to_value(
-        PulseSpec(
-            ch=0, nqz=1, freq=5000.0, gain=0.2, waveform=ConstWaveformCfg(length=0.1)
-        ).model_dump(mode="python")
-    )
-    return CfgSchema(spec, value)
+def pulse_proposal(gain: float = 0.2) -> PulseSpec:
+    """Return a pulse proposal whose waveform is the library key WAVEFORM."""
+    return PulseSpec(ch=0, nqz=1, freq=5000.0, gain=gain, waveform=WAVEFORM)
 
 
 @pytest.fixture
@@ -74,120 +56,255 @@ def session(tmp_path: Path):
         control = ContextControlFacet(context=context)
         control.use_point(PointUseRequest("a"))
         control.add_component("Q1", "fake/drive/a", {})
-        editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
-        service = WritebackService(editor, control)
-        yield entry, control, editor, service
+        target = control.read_context().target
+        control.set_waveform(target, WAVEFORM, ConstWaveformCfg(length=0.1))
+        control.set_parameter(target, "general.ext.flux_value", 2.0)
+        service = WritebackService(control, arb_names=lambda: ())
+        yield entry, control, service
         assert registry_state() == installed
     finally:
         restore_registry(before)
 
 
-def test_create_draft_keeps_two_owners_independent_and_hides_editor_id():
-    editor = MagicMock()
-    editor.open_seeded.side_effect = [("editor-a", ()), ("editor-b", ())]
-    service = editor_service(editor)
-    draft_a = service.create_draft(
-        [ModuleWriteback("Q1.pulses.a", "a", edit_schema=MagicMock())],
+def test_module_preview_proposes_the_spec_in_the_current_shape(session):
+    _entry, control, service = session
+    control.set_module(control.read_context().target, PULSE, pulse_proposal())
+    capture = control.read_context()
+    draft = service.create_draft(
+        [ModuleWriteback(PULSE, "pulse", pulse_proposal(gain=0.4))],
+        parameters=capture,
+        experiment_name="test/writeback",
+    )
+    values = service.preview_values(draft)["ml-1"]
+    assert values.actual_path == PULSE
+    assert values.current == capture.library.entry_value(PULSE, kind="module")
+    assert values.proposed == pulse_proposal(gain=0.4).model_dump(mode="python")
+    assert isinstance(values.current, dict) and isinstance(values.proposed, dict)
+    assert values.proposed.keys() == values.current.keys()
+    assert [
+        key for key in values.proposed if values.proposed[key] != values.current[key]
+    ] == ["gain"]
+
+
+def test_module_form_edits_apply_the_edited_spec_and_keep_child_keys(session):
+    _entry, control, service = session
+    capture = control.read_context()
+    draft = service.create_draft(
+        [ModuleWriteback(PULSE, "pulse", pulse_proposal())],
+        parameters=capture,
+        experiment_name="test/writeback",
+    )
+    draft.edit(
+        "ml-1",
+        edits={
+            ("gain",): {"expr": "general.ext.flux_value / 10"},
+            ("freq",): 5100.0,
+        },
+    )
+    control.set_parameter(capture.target, "general.ext.flux_value", 8.0)
+    assert draft.apply()["applied_ids"] == ["ml-1"]
+    written = control.read_context().library.module_spec(PULSE)
+    assert isinstance(written, PulseSpec)
+    assert written.waveform == WAVEFORM
+    assert written.freq == 5100.0
+    assert written.gain == pytest.approx(0.2)
+    assert service.get_all_applied(draft) == {"ml-1": True}
+
+
+def test_invalid_module_edit_rejects_apply_with_field_paths(session):
+    entry, control, service = session
+    draft = service.create_draft(
+        [ModuleWriteback(PULSE, "pulse", pulse_proposal())],
+        parameters=control.read_context(),
+        experiment_name="test/writeback",
+    )
+    draft.edit("ml-1", edits={("gain",): "bad"})
+    count = len(entry.ledger.events())
+    with pytest.raises(LibraryEntryInvalid, match="gain") as error:
+        draft.apply()
+    assert set(error.value.errors.messages) == {("gain",)}
+    with pytest.raises(LibraryEntryInvalid):
+        service.preview_values(draft)
+    assert len(entry.ledger.events()) == count
+    assert PULSE not in control.read_context().library.module_keys()
+    assert service.get_all_applied(draft) == {"ml-1": False}
+
+
+def test_structural_module_edit_is_rejected_without_changing_the_form(session):
+    _entry, control, service = session
+    draft = service.create_draft(
+        [ModuleWriteback(PULSE, "pulse", pulse_proposal())],
+        parameters=control.read_context(),
+        experiment_name="test/writeback",
+    )
+    before = service.preview_values(draft)
+    with pytest.raises(InvalidInputError, match="ml-1"):
+        draft.edit("ml-1", edits={("gain",): 0.5, ("unknown",): 1.0})
+    assert service.preview_values(draft) == before
+
+
+def test_edits_require_a_module_item(session):
+    _entry, control, service = session
+    draft = service.create_draft(
+        [ParameterWriteback("general.ext.value", "value", proposed_value=1)],
+        parameters=control.read_context(),
+        experiment_name="test/writeback",
+    )
+    with pytest.raises(InvalidInputError, match="not a module item"):
+        draft.edit("param-1", edits={("gain",): 0.5})
+    assert service.get_all_applied(draft) == {"param-1": False}
+
+
+def test_context_free_module_draft_is_listed_but_not_editable(session):
+    _entry, _control, service = session
+    draft = service.create_draft(
+        [ModuleWriteback(PULSE, "pulse", pulse_proposal())],
         parameters=None,
         experiment_name="test/writeback",
     )
-    draft_b = service.create_draft(
-        [ModuleWriteback("Q1.pulses.b", "b", edit_schema=MagicMock())],
-        parameters=None,
+    assert [item.session_id for item in draft.preview()] == ["ml-1"]
+    with pytest.raises(FailedPreconditionError, match="captured context"):
+        draft.edit("ml-1", edits={("gain",): 0.5})
+    with pytest.raises(FailedPreconditionError, match="captured context"):
+        service.get_item_form(draft, "ml-1")
+
+
+def test_item_form_is_the_shared_draft_and_its_changes_mark_unapplied(session):
+    _entry, control, service = session
+    draft = service.create_draft(
+        [ModuleWriteback(PULSE, "pulse", pulse_proposal())],
+        parameters=control.read_context(),
         experiment_name="test/writeback",
     )
-    assert draft_a is not draft_b
-    assert [item.session_id for item in draft_a.preview()] == ["ml-1"]
-    assert [item.session_id for item in draft_b.preview()] == ["ml-1"]
-    assert not hasattr(draft_a.preview()[0], "editor_id")
-    draft_a.edit("ml-1", target_name="Q1.pulses.tuned")
-    assert draft_a.preview()[0].target_name == "Q1.pulses.tuned"
-    assert draft_b.preview()[0].target_name == "Q1.pulses.b"
-    assert editor.open_seeded.call_count == 2
-    assert (
-        editor.open_seeded.call_args_list[0].kwargs["owner_key"]
-        != editor.open_seeded.call_args_list[1].kwargs["owner_key"]
+    draft.apply()
+    assert service.get_all_applied(draft) == {"ml-1": True}
+    form = service.get_item_form(draft, "ml-1")
+    assert isinstance(form, ModuleEntryForm)
+    form.state.write({("gain",): 0.4}, form.env)
+    assert service.get_all_applied(draft) == {"ml-1": False}
+    proposed = service.preview_values(draft)["ml-1"].proposed
+    assert isinstance(proposed, dict) and proposed["gain"] == 0.4
+    draft.edit("ml-1", edits={("gain",): 0.6})
+    assert form.state.input.data["gain"] == 0.6
+
+
+def test_arb_names_are_captured_when_the_draft_is_created(session):
+    _entry, control, _service = session
+    names = ["first"]
+    service = WritebackService(control, arb_names=lambda: tuple(names))
+    proposal = PulseSpec(
+        ch=0, nqz=1, freq=5000.0, gain=0.2, waveform=ArbWaveformCfg(data="first")
     )
+    draft = service.create_draft(
+        [ModuleWriteback(PULSE, "pulse", proposal)],
+        parameters=control.read_context(),
+        experiment_name="test/writeback",
+    )
+    names.clear()
+    proposed = service.preview_values(draft)["ml-1"].proposed
+    assert isinstance(proposed, dict) and proposed["waveform"]["data"] == "first"
+    draft.edit("ml-1", edits={("waveform", "module", "data"): "second"})
+    with pytest.raises(LibraryEntryInvalid) as error:
+        service.preview_values(draft)
+    assert set(error.value.errors.messages) == {("waveform", "module", "data")}
 
 
-def test_create_draft_cleans_all_opened_sessions_when_a_later_item_fails():
-    editor = MagicMock()
-    editor.open_seeded.side_effect = [("editor-1", ()), RuntimeError("open failed")]
-    proposals = [
-        ModuleWriteback("Q1.pulses.a", "a", edit_schema=MagicMock()),
-        WaveformWriteback("Q1.waveforms.b", "b", edit_schema=MagicMock()),
+def test_ordered_write_rejects_invalid_module_before_context_apply(session):
+    entry, control, service = session
+    draft = service.create_draft(
+        [ModuleWriteback(PULSE, "pulse", pulse_proposal())],
+        parameters=control.read_context(),
+        experiment_name="test/writeback",
+    )
+    count = len(entry.ledger.events())
+    with pytest.raises(LibraryEntryInvalid, match="gain"):
+        service.write_draft(
+            draft, (WritebackEdit("ml-1", edits={("gain",): "invalid"}),)
+        )
+    assert len(entry.ledger.events()) == count
+    assert PULSE not in control.read_context().library.module_keys()
+
+
+def test_ordered_module_write_returns_spec_values(session):
+    _entry, control, service = session
+    control.set_module(control.read_context().target, PULSE, pulse_proposal())
+    draft = service.create_draft(
+        [ModuleWriteback(PULSE, "pulse", pulse_proposal())],
+        parameters=control.read_context(),
+        experiment_name="test/writeback",
+    )
+    result = service.write_draft(
+        draft, (WritebackEdit("ml-1", edits={("gain",): 0.7}),)
+    )
+    assert result == [
+        WritebackWritten(
+            "ml-1",
+            "module",
+            PULSE,
+            pulse_proposal().model_dump(mode="python"),
+            pulse_proposal(gain=0.7).model_dump(mode="python"),
+        )
     ]
-    with pytest.raises(RuntimeError, match="open failed"):
-        editor_service(editor).create_draft(
-            proposals, parameters=None, experiment_name="test/writeback"
-        )
-    editor.teardown.assert_called_once_with("editor-1")
-    assert not hasattr(proposals[0], "editor_id")
 
 
-def test_create_draft_rejects_proposal_with_dynamic_editor_identity():
-    @dataclass
-    class EditorOwnedProposal(ModuleWriteback):
-        editor_id: str = "legacy-editor"
+def test_apply_shared_flow_keeps_gui_selection_edits_and_failure_prefix(session):
+    from zcu_tools.resources.entry import writeback
 
-    proposal = EditorOwnedProposal("Q1.pulses.a", "a", edit_schema=MagicMock())
-    with pytest.raises(InvalidInputError, match="must not expose editor_id"):
-        editor_service(MagicMock()).create_draft(
-            [proposal], parameters=None, experiment_name="test/writeback"
-        )
+    entry, control, service = session
+    draft = service.create_draft(
+        [
+            ModuleWriteback(PULSE, "module", pulse_proposal()),
+            ParameterWriteback(
+                "general.ext.before", "parameter", proposed_value=1.0, stderr=0.3
+            ),
+            ParameterWriteback("general.description", "invalid", proposed_value=42),
+            ParameterWriteback("general.ext.after", "later", proposed_value=2.0),
+        ],
+        parameters=control.read_context(),
+        experiment_name="test/gui-fit",
+        run_id="run-fixed",
+    )
+    draft.edit("param-1", target_name="general.ext.tuned", proposed_value=3.0)
+    draft.edit("param-3", selected=False)
+    draft.edit("ml-1", edits={("gain",): 0.25})
+    with pytest.raises(ValueError, match="description"):
+        draft.apply()
+    event = entry.ledger.events()[-1]
+    assert service.get_all_applied(draft) == {
+        "ml-1": True,
+        "param-1": True,
+        "param-2": False,
+        "param-3": False,
+    }
+    current = control.read_context()
+    assert current.value("general.ext.tuned") == 3.0
+    assert not current.lookup("general.ext.after").present
+    assert current.library.module_spec(PULSE) == pulse_proposal(gain=0.25)
+    assert document_meta(current.document(), "general.ext.tuned") == {"stderr": 0.3}
+    assert isinstance(event.payload, writeback.AcceptedPayload)
+    assert [write.path for write in event.payload.writes] == [
+        PULSE,
+        "general.ext.tuned",
+        "general.description",
+    ]
 
 
-def test_draft_teardown_is_idempotent_even_when_cleanup_raises():
-    editor = MagicMock()
-    editor.open_seeded.return_value = ("editor-1", ())
-    editor.teardown.side_effect = RuntimeError("close failed")
-    draft = editor_service(editor).create_draft(
-        [ModuleWriteback("Q1.pulses.a", "a", edit_schema=MagicMock())],
-        parameters=None,
+def test_draft_teardown_is_idempotent(session):
+    _entry, control, service = session
+    draft = service.create_draft(
+        [ModuleWriteback(PULSE, "pulse", pulse_proposal())],
+        parameters=control.read_context(),
         experiment_name="test/writeback",
     )
     draft.teardown()
     draft.teardown()
     assert draft.is_active is False
-    editor.teardown.assert_called_once_with("editor-1")
-
-
-def test_draft_cfg_edits_use_owner_editor_session():
-    editor = MagicMock()
-    editor.open_seeded.return_value = ("editor-1", ())
-    editor.set_fields.return_value = CfgEditResult(valid=True)
-    draft = editor_service(editor).create_draft(
-        [ModuleWriteback("Q1.pulses.a", "a", edit_schema=MagicMock())],
-        parameters=None,
-        experiment_name="test/writeback",
-    )
-    result = draft.edit("ml-1", edits=[{"path": "freq", "value": 5000.0}])
-    assert result == {"valid": True, "removed": [], "added": []}
-    editor.set_fields.assert_called_once_with(
-        "editor-1", [CfgEdit("freq", 5000.0)], agent_edit=True
-    )
-
-
-def test_agent_writeback_edits_delegate_to_shared_aggregate_grammar():
-    editor = MagicMock()
-    editor.open_seeded.return_value = ("editor-1", ())
-    editor.set_fields.return_value = CfgEditResult(valid=True)
-    service = editor_service(editor)
-    draft = service.create_draft(
-        [ModuleWriteback("Q1.pulses.a", "d", edit_schema=MagicMock())],
-        parameters=None,
-        experiment_name="test/writeback",
-    )
-    sweep = {"start": 1.0, "stop": 2.0, "expts": 3}
-    result = service.edit_draft(draft, "ml-1", edits=[{"path": "freq", "value": sweep}])
-    assert result["valid"] is True
-    editor.set_fields.assert_called_once_with(
-        "editor-1", [CfgEdit("freq", sweep)], agent_edit=True
-    )
+    with pytest.raises(FailedPreconditionError):
+        service.preview_values(draft)
 
 
 def test_non_scalar_current_and_proposed_summaries_use_the_same_bounded_shape(session):
-    _entry, control, _editor, service = session
+    _entry, control, service = session
     matrix = [[0.95, 0.03, 0.02], [0.03, 0.95, 0.02], [0.0, 0.0, 1.0]]
     control.set_parameter(
         control.read_context().target, "general.ext.confusion_matrix", matrix
@@ -216,7 +333,7 @@ def test_non_scalar_current_and_proposed_summaries_use_the_same_bounded_shape(se
     ],
 )
 def test_sequence_proposals_have_bounded_shape_summaries(session, value, summary):
-    _entry, control, _editor, service = session
+    _entry, control, service = session
     draft = service.create_draft(
         [ParameterWriteback("general.ext.sequence", "sequence", proposed_value=value)],
         parameters=control.read_context(),
@@ -226,54 +343,8 @@ def test_sequence_proposals_have_bounded_shape_summaries(session, value, summary
     draft.teardown()
 
 
-@pytest.mark.parametrize("edit", [{"path": "freq"}, {"value": 5010.0}])
-def test_malformed_cfg_edits_leave_the_proposal_unchanged(session, edit):
-    _entry, control, _editor, service = session
-    draft = service.create_draft(
-        [ModuleWriteback("Q1.pulses.a", "pulse", edit_schema=pulse_schema())],
-        parameters=control.read_context(),
-        experiment_name="test/writeback",
-    )
-    before = service.preview_values(draft)
-    with pytest.raises(InvalidInputError, match="edits\\[0\\] must be an object"):
-        draft.edit("ml-1", edits=[edit])
-    assert service.preview_values(draft) == before
-    assert service.get_all_applied(draft) == {"ml-1": False}
-    draft.teardown()
-
-
-@pytest.mark.parametrize(
-    ("item", "session_id", "error", "message"),
-    [
-        (
-            ParameterWriteback("general.ext.value", "value", proposed_value=1),
-            "param-1",
-            InvalidInputError,
-            "not a module/waveform item",
-        ),
-        (
-            ModuleWriteback("Q1.pulses.a", "pulse"),
-            "ml-1",
-            FailedPreconditionError,
-            "has no editable cfg model",
-        ),
-    ],
-)
-def test_cfg_edits_require_an_editable_cfg_item(
-    session, item, session_id, error, message
-):
-    _entry, control, _editor, service = session
-    draft = service.create_draft(
-        [item], parameters=control.read_context(), experiment_name="test/writeback"
-    )
-    with pytest.raises(error, match=message):
-        draft.edit(session_id, edits=[])
-    assert service.get_all_applied(draft) == {session_id: False}
-    draft.teardown()
-
-
 def test_applied_state_follows_successful_writes_and_content_edits(session):
-    _entry, control, _editor, service = session
+    _entry, control, service = session
     draft = service.create_draft(
         [
             ParameterWriteback("general.ext.r_f", "d", proposed_value=1.0),
@@ -294,21 +365,8 @@ def test_applied_state_follows_successful_writes_and_content_edits(session):
     assert service.get_all_applied(draft)["param-1"] is False
 
 
-def test_direct_cfg_draft_change_marks_applied_item_unapplied(session):
-    _entry, control, _editor, service = session
-    draft = service.create_draft(
-        [ModuleWriteback("Q1.pulses.readout", "d", edit_schema=pulse_schema())],
-        parameters=control.read_context(),
-        experiment_name="test/writeback",
-    )
-    draft.apply()
-    assert service.get_all_applied(draft) == {"ml-1": True}
-    service.get_item_draft(draft, "ml-1").resolve_target("gain").set_value(0.4)
-    assert service.get_all_applied(draft) == {"ml-1": False}
-
-
 def test_duplicate_selected_destination_is_rejected_before_write(session):
-    entry, control, _editor, service = session
+    entry, control, service = session
     draft = service.create_draft(
         [
             ParameterWriteback("general.ext.same", "first", proposed_value=1.0),
@@ -326,7 +384,7 @@ def test_duplicate_selected_destination_is_rejected_before_write(session):
 
 
 def test_failed_and_empty_apply_do_not_mark_items_applied(session):
-    _entry, control, _editor, service = session
+    _entry, control, service = session
     draft = service.create_draft(
         [ParameterWriteback("general.description", "d", proposed_value=42)],
         parameters=control.read_context(),
@@ -341,7 +399,7 @@ def test_failed_and_empty_apply_do_not_mark_items_applied(session):
 
 
 def test_explicit_apply_ignores_selection_without_changing_checkboxes(session):
-    _entry, control, _editor, service = session
+    _entry, control, service = session
     draft = service.create_draft(
         [
             ParameterWriteback("general.ext.a", "d", proposed_value=1.0),
@@ -362,7 +420,7 @@ def test_explicit_apply_ignores_selection_without_changing_checkboxes(session):
 
 @pytest.mark.parametrize("item_ids", [("param-1", "missing"), ("param-1", "param-1")])
 def test_explicit_apply_rejects_invalid_ids_before_any_write(session, item_ids):
-    entry, control, _editor, service = session
+    entry, control, service = session
     draft = service.create_draft(
         [ParameterWriteback("general.ext.a", "d", proposed_value=1.0)],
         parameters=control.read_context(),
@@ -377,7 +435,7 @@ def test_explicit_apply_rejects_invalid_ids_before_any_write(session, item_ids):
 
 
 def test_explicit_empty_apply_does_not_fall_back_to_selected_items(session):
-    entry, control, _editor, service = session
+    entry, control, service = session
     draft = service.create_draft(
         [ParameterWriteback("general.ext.a", "d", proposed_value=1.0)],
         parameters=control.read_context(),
@@ -391,7 +449,7 @@ def test_explicit_empty_apply_does_not_fall_back_to_selected_items(session):
 
 
 def test_ordered_write_returns_actual_values_and_leaves_selection_alone(session):
-    _entry, control, _editor, service = session
+    _entry, control, service = session
     control.set_parameter(control.read_context().target, "general.ext.dest", [1])
     draft = service.create_draft(
         [
@@ -421,7 +479,7 @@ def test_ordered_write_returns_actual_values_and_leaves_selection_alone(session)
 
 
 def test_ordered_write_stops_on_unknown_item_and_preserves_draft_prefix(session):
-    entry, control, _editor, service = session
+    entry, control, service = session
     draft = service.create_draft(
         [
             ParameterWriteback("general.ext.a", "d", proposed_value=1),
@@ -448,75 +506,3 @@ def test_ordered_write_stops_on_unknown_item_and_preserves_draft_prefix(session)
     assert len(entry.ledger.events()) == count
     assert not control.read_context().lookup("general.ext.a").present
     assert service.get_all_applied(draft) == {"param-1": False, "param-2": False}
-
-
-def test_ordered_write_rejects_invalid_cfg_before_context_apply(session):
-    entry, control, _editor, _service = session
-    editor = MagicMock()
-    editor.open_seeded.return_value = ("editor", ())
-    editor.set_fields.return_value = CfgEditResult(valid=False)
-    service = WritebackService(editor, control)
-    draft = service.create_draft(
-        [ModuleWriteback("Q1.pulses.a", "d", edit_schema=MagicMock())],
-        parameters=control.read_context(),
-        experiment_name="test/writeback",
-    )
-    count = len(entry.ledger.events())
-    with pytest.raises(FailedPreconditionError, match="ml-1"):
-        service.write_draft(
-            draft,
-            (WritebackEdit("ml-1", edits=[{"path": "gain", "value": "invalid"}]),),
-        )
-    assert len(entry.ledger.events()) == count
-    assert "Q1.pulses.a" not in control.read_context().library.module_keys()
-
-
-def waveform_schema() -> CfgSchema:
-    spec, value = waveform_cfg_to_value(ConstWaveformCfg(length=0.1).to_dict())
-    return CfgSchema(spec, value)
-
-
-def test_apply_shared_flow_keeps_gui_selection_edits_and_failure_prefix(session):
-    from zcu_tools.resources.entry import writeback
-
-    entry, control, _editor, service = session
-    draft = service.create_draft(
-        [
-            WaveformWriteback(
-                "Q1.waveforms.base", "waveform", edit_schema=waveform_schema()
-            ),
-            ParameterWriteback(
-                "general.ext.before", "parameter", proposed_value=1.0, stderr=0.3
-            ),
-            ParameterWriteback("general.description", "invalid", proposed_value=42),
-            ParameterWriteback("general.ext.after", "later", proposed_value=2.0),
-        ],
-        parameters=control.read_context(),
-        experiment_name="test/gui-fit",
-        run_id="run-fixed",
-    )
-    draft.edit("param-1", target_name="general.ext.tuned", proposed_value=3.0)
-    draft.edit("param-3", selected=False)
-    draft.edit("wf-1", edits=[{"path": "length", "value": 0.25}])
-    with pytest.raises(ValueError, match="description"):
-        draft.apply()
-    event = entry.ledger.events()[-1]
-    assert service.get_all_applied(draft) == {
-        "wf-1": True,
-        "param-1": True,
-        "param-2": False,
-        "param-3": False,
-    }
-    current = control.read_context()
-    assert current.value("general.ext.tuned") == 3.0
-    assert not current.lookup("general.ext.after").present
-    assert current.library.waveform_spec("Q1.waveforms.base") == ConstWaveformCfg(
-        length=0.25
-    )
-    assert document_meta(current.document(), "general.ext.tuned") == {"stderr": 0.3}
-    assert isinstance(event.payload, writeback.AcceptedPayload)
-    assert [write.path for write in event.payload.writes] == [
-        "Q1.waveforms.base",
-        "general.ext.tuned",
-        "general.description",
-    ]

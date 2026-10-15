@@ -471,7 +471,7 @@ def analysis_panes(native_session: NativeSaveSession):
         parameters=_pane_capture(state.get_tab(tab_id).run.parameters),
     )
     bus = EventBus()
-    writeback = WritebackService(MagicMock(), MagicMock())
+    writeback = WritebackService(MagicMock(), arb_names=lambda: ())
     primary_service, primary_bg = _analyze_service(state, writeback, bus)
     params = PaneParams(initial_state="excited", length_ratio=0.01)
     fit_plots = Plots(NonPresentingHost())

@@ -36,7 +36,6 @@ from zcu_tools.resources.entry import AcquiredPayload, ArtifactKey
 
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 from tests.gui.app.measure._native_save_support import PaneParams, PaneSummary
-from tests.gui.app.measure.remote._helpers import FixtureController
 
 
 @dataclass
@@ -111,7 +110,7 @@ def opaque_host(
     registry.register("opaque", OpaqueAdapter)
     registry.register("failed_data", FailingDataAdapter)
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
-    controller = FixtureController(
+    controller = Controller(
         state=state,
         registry=registry,
         view=None,
@@ -127,7 +126,7 @@ def opaque_host(
     finally:
         for tab_id in tuple(state.list_tab_ids()):
             controller.close_tab(tab_id)
-        assert controller.quiesce()
+        controller.close()
         qapp.processEvents()
 
 

@@ -8,7 +8,6 @@ from .arb_waveform import METHODS as ARB_WAVEFORM_METHODS
 from .catalog import METHODS as CATALOG_METHODS
 from .connection_device import METHODS as CONNECTION_DEVICE_METHODS
 from .context import METHODS as CONTEXT_METHODS
-from .editor import METHODS as EDITOR_METHODS
 from .operation import METHODS as OPERATION_METHODS
 from .point import METHODS as POINT_METHODS
 from .predictor import METHODS as PREDICTOR_METHODS
@@ -32,5 +31,4 @@ METHOD_ENTRIES: tuple[RemoteMethodEntry, ...] = (
     *VIEW_METHODS,
     *PREDICTOR_METHODS,
     *WRITEBACK_METHODS,
-    *EDITOR_METHODS,
 )

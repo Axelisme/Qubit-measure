@@ -103,8 +103,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "parameter capture. Reset with aliases before querying overrides. "
             "Returns {values, modules}: absent values are "
             "omitted, null is retained; each module ref maps to an existing "
-            "canonical library root or null for missing/custom. Invalid paths, "
-            "unknown roles and source failures propagate.",
+            "canonical library root or null for missing slots/roots. Invalid key syntax, "
+            "invalid paths, unknown roles and source failures propagate.",
             (
                 required_string("tab_id"),
                 ParamSpec("paths", JsonType.ARRAY, required=True),

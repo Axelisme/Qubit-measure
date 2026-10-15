@@ -1,6 +1,6 @@
 # gui/form — Qt-free Pydantic input editing
 
-**Last updated:** 2026-10-14，統一 options schema 與 fresh defaults
+**Last updated:** 2026-10-15，共用表單核心與獨立宿主提交
 
 `static_defaults(model)` 接受普通 Pydantic BaseModel 或持久 Spec，產生 detached input JSON。必填欄位與 None 預設保持缺席，讓 before validator 能從其他欄位推導值。Default factory 每次呼叫重新執行。FormModel defaults 與普通 model 的分支切換共用這個入口。
 
@@ -40,4 +40,4 @@ Display 只承載欄位呈現資訊。順序依欄位宣告，段落依 nested m
 
 掃描輸入只提供 `LinRange`，由表單 owner 在轉 cfg 時展開 start／stop／n。不提供 explicit-list 分支。
 
-跨模組契約見 docs/adr/draft/pydantic-form-tool.md。這是共用表單工具，不改 CfgSchema。Core cfg 推導與 module materialization 由上層 `gui.form_adapter` 組合，不放進本 package。
+跨模組契約見 docs/adr/draft/pydantic-form-tool.md、ADR-0065 與 ADR-0008。Measure、Library／Inspect、writeback 與 workflows 共用本核心，各宿主持有 state 並決定 capture、Apply 與保存。Core cfg 推導與持久 Spec 投影由上層 `gui.form_adapter` 組合，不放進本 package。Complex codec 直接使用 `core.complex_codec`，不經舊 cfg owner。

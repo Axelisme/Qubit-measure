@@ -29,13 +29,6 @@ from tests.gui.app.measure._native_save_support import (
 )
 
 
-class _QuiescingController(Controller):
-    """Expose owned background teardown for this real-session view fixture."""
-
-    def quiesce(self) -> bool:
-        return self._background_svc.quiesce()
-
-
 class _UndeclaredSavingAdapter(AnalysisSavingAdapter):
     """Same adapter without a persistence declaration."""
 
@@ -52,7 +45,7 @@ def saving_view(
     with native_save_session(tmp_path, qapp) as session:
         registry = Registry()
         registry.register("saving", AnalysisSavingAdapter)
-        ctrl = _QuiescingController(
+        ctrl = Controller(
             session.state,
             registry,
             None,
@@ -68,7 +61,9 @@ def saving_view(
             metadata=session.metadata,
             parameters=original.run.parameters,
         )
-        window = MainWindow(ctrl, dialog_presenter=RecordingDialogPresenter())
+        window = MainWindow(
+            ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
+        )
         ctrl.add_view(window)
         window.add_tab_widget(tab_id, "saving")
         center = window.findChild(ArtifactSaveCenter)
@@ -80,7 +75,7 @@ def saving_view(
         try:
             yield session, ctrl, window, tab_id, center
         finally:
-            assert ctrl.quiesce()
+            ctrl.close()
             ctrl.tab_control.close_tab(tab_id)
             window.deleteLater()
             qapp.processEvents()

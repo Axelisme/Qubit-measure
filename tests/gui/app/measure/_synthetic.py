@@ -6,7 +6,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import Range
+from zcu_tools.cfg_model import PulseSpec, Range
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -14,6 +14,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalyzeRequest,
     AnalyzeResultBase,
+    ModuleWriteback,
     ParameterWriteback,
     ParamMeta,
     RunRequest,
@@ -91,6 +92,35 @@ class SampleAdapter(BaseAdapter[SampleCfg, SampleRun, SampleAnalysis, SamplePara
         return [
             ParameterWriteback(
                 "general.ext.fake_peak", "Sample peak", req.analyze_result.peak
+            )
+        ]
+
+
+MODULE_PROPOSAL_TARGET = "Q1.pulses.tuned"
+MODULE_PROPOSAL_WAVEFORM = "Q1.waveforms.flat"
+
+
+class ModuleProposalAdapter(SampleAdapter):
+    """Propose a pulse at MODULE_PROPOSAL_TARGET whose gain is the fitted peak.
+
+    The pulse waveform is the library key MODULE_PROPOSAL_WAVEFORM, so callers
+    install that waveform and a Q1 component before applying the proposal.
+    """
+
+    def get_writeback_items(
+        self, req: WritebackRequest[SampleRun, SampleAnalysis]
+    ) -> Sequence[WritebackItem]:
+        return [
+            ModuleWriteback(
+                MODULE_PROPOSAL_TARGET,
+                "Tuned pulse",
+                PulseSpec(
+                    ch=0,
+                    nqz=1,
+                    freq=5000.0,
+                    gain=req.analyze_result.peak,
+                    waveform=MODULE_PROPOSAL_WAVEFORM,
+                ),
             )
         ]
 

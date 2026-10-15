@@ -223,7 +223,7 @@ def test_main_window_follow_selects_subpane_on_already_selected_tab(
         analysis=AnalysisMode.FIT,
         post=True,
     )
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     try:
         window.add_tab_widget("tab-1", "fake")
         window.add_tab_widget("tab-2", "fake")
@@ -513,7 +513,7 @@ def test_analysis_terminal_restores_retained_figures_via_coordinator(
         analysis_figure=fig_a_retained,
         post_analysis_figure=fig_p_retained,
     )
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     try:
         # Tab must be constructed with the same capabilities as the snapshot the window will fetch
         # The mock's get_tab_snapshot returns a FIT+post snapshot; reuse those caps

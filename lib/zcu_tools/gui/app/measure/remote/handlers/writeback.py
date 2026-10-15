@@ -11,15 +11,16 @@ from zcu_tools.gui.app.measure.adapter import (
     ModuleWriteback,
     ParameterWriteback,
     SampleWriteback,
-    WaveformWriteback,
     WritebackItem,
 )
 from zcu_tools.gui.app.measure.services.writeback import WritebackEdit
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
+from ..form_observation import entry_invalid_to_remote, form_writes, observe_entry
 from ._common import follow_tab
 from ._wire_values import coerce_wire_value, context_wire_value
 
@@ -67,10 +68,8 @@ def _writeback_item_wire(item: WritebackItem) -> dict[str, object]:
     elif isinstance(item, SampleWriteback):
         base["kind"] = "sample"
         base["proposed_value"] = _writeback_wire_value(item.proposed_value)
-    elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
-        is_module = isinstance(item, ModuleWriteback)
-        base["kind"] = "module" if is_module else "waveform"
-        base["has_edit_schema"] = item.edit_schema is not None
+    elif isinstance(item, ModuleWriteback):
+        base["kind"] = "module"
         if item.role_id is not None:
             base["role_id"] = item.role_id
     else:
@@ -121,13 +120,16 @@ def h_tab_writeback_preview(
         pane = snap.post_analysis
     if pane is None:
         raise RemoteError(ErrorCode.INTERNAL, "snapshot has no requested pane")
-    values = (
-        adapter.writeback_control.get_writeback_values_for_pane(
-            tab_id, "analysis" if subtab_id == "analysis" else "post_analysis"
+    try:
+        values = (
+            adapter.writeback_control.get_writeback_values_for_pane(
+                tab_id, "analysis" if subtab_id == "analysis" else "post_analysis"
+            )
+            if pane.has_writeback_draft
+            else {}
         )
-        if pane.has_writeback_draft
-        else {}
-    )
+    except LibraryEntryInvalid as exc:
+        raise entry_invalid_to_remote(exc) from exc
     return {
         "has_draft": pane.has_writeback_draft,
         "unavailable_reasons": list(pane.unavailable_reasons),
@@ -145,30 +147,14 @@ def h_tab_writeback_preview(
     }
 
 
-def _pane_cfg_edits(raw: object) -> list[dict[str, object]]:
-    """Parse pane edits, preserving order and coercing paths to text.
-
-    Unlike batch writes, this surface permits extra fields and non-string paths.
-    Malformed lists or entries raise the pane-specific INVALID_PARAMS error.
-    """
-    if not isinstance(raw, list):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, "'edits' must be a list")
-    edits: list[dict[str, object]] = []
-    for i, edit in enumerate(raw):
-        if not isinstance(edit, dict) or "path" not in edit or "value" not in edit:
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS,
-                f"edits[{i}] must be an object with 'path' and 'value'",
-            )
-        edits.append({"path": str(edit["path"]), "value": edit["value"]})
-    return edits
-
-
 def h_tab_writeback_set(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     """Edit a pane's persistent writeback item by id — the single writeback editing
-    surface (ADR-0008). Requires (tab_id, subtab_id)."""
+    surface (ADR-0008). Requires (tab_id, subtab_id).
+
+    Module edits are one Form write batch of {path: [field, ...], value}; the
+    reply adds the item's Form observation (schema, input, values, errors)."""
     tab_id = str(params["tab_id"])
     subtab_id = str(params["subtab_id"])
     if subtab_id not in _VALID_WRITEBACK_SUBTABS:
@@ -199,27 +185,26 @@ def h_tab_writeback_set(
     if has_proposed and has_edits:
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
-            "'proposed_value' (parameter) and 'edits' (module/waveform) are "
-            "mutually exclusive",
+            "'proposed_value' (parameter) and 'edits' (module) are mutually exclusive",
         )
     if has_proposed:
         # Structured tags (e.g. {"__complex__": [re, im]}) coerce back to their
         # Python type so the applied md value matches what preview serialized.
         changes["proposed_value"] = coerce_wire_value(params["proposed_value"])
     if has_edits:
-        changes["edits"] = _pane_cfg_edits(params["edits"])
-    pane = subtab_id  # type: ignore[assignment]
-    agg = adapter.writeback_control.set_writeback_item_for_pane(
-        tab_id,
-        pane,  # type: ignore[arg-type]
-        session_id,
-        **changes,  # type: ignore[arg-type]
+        changes["edits"] = form_writes(params["edits"])
+    pane = "analysis" if subtab_id == "analysis" else "post_analysis"
+    adapter.writeback_control.set_writeback_item_for_pane(
+        tab_id, pane, session_id, **changes
     )
     # Echo the edited item so the agent sees the post-edit state in one round-trip.
-    item = _find_writeback_item_for_pane(adapter, tab_id, pane, session_id)  # type: ignore[arg-type]
+    item = _find_writeback_item_for_pane(adapter, tab_id, pane, session_id)
     reply: dict[str, object] = {"item": _writeback_item_wire(item)}
     if has_edits:
-        reply.update(agg)
+        form = adapter.writeback_control.get_writeback_item_form_for_pane(
+            tab_id, pane, session_id
+        )
+        reply.update(observe_entry(form))
     return reply
 
 
@@ -240,22 +225,6 @@ def _find_writeback_item_for_pane(
     )
 
 
-def _batch_cfg_edits(raw: object) -> list[dict[str, object]]:
-    if not isinstance(raw, list):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, "edits must be a list")
-    edits = []
-    for edit in raw:
-        if (
-            not isinstance(edit, dict)
-            or set(edit) != {"path", "value"}
-            or not isinstance(edit["path"], str)
-            or not edit["path"]
-        ):
-            raise RemoteError(ErrorCode.INVALID_PARAMS, "edits require path and value")
-        edits.append({"path": edit["path"], "value": edit["value"]})
-    return edits
-
-
 def _batch_change(raw: object) -> WritebackEdit:
     if not isinstance(raw, dict) or set(raw) - {"id", "target", "value", "edits"}:
         raise RemoteError(ErrorCode.INVALID_PARAMS, "invalid writeback item fields")
@@ -270,7 +239,7 @@ def _batch_change(raw: object) -> WritebackEdit:
     change = WritebackEdit(
         session_id,
         target_name=target,
-        edits=_batch_cfg_edits(raw["edits"]) if "edits" in raw else None,
+        edits=form_writes(raw["edits"]) if "edits" in raw else None,
     )
     if "value" in raw:
         change = replace(change, proposed_value=coerce_wire_value(raw["value"]))
@@ -292,7 +261,12 @@ def h_tab_writeback_write(
     changes = tuple(_batch_change(item) for item in raw)
     pane = "analysis" if subtab == "analysis" else "post_analysis"
     follow_tab(adapter, tab_id, pane)
-    result = adapter.writeback_control.write_writeback_for_pane(tab_id, pane, changes)
+    try:
+        result = adapter.writeback_control.write_writeback_for_pane(
+            tab_id, pane, changes
+        )
+    except LibraryEntryInvalid as exc:
+        raise entry_invalid_to_remote(exc) from exc
     return {"written": [_writeback_wire_value(asdict(item)) for item in result]}
 
 
@@ -321,11 +295,14 @@ def h_tab_writeback_apply(
                 ErrorCode.INVALID_PARAMS, "ids must be a list of nonempty strings"
             )
         item_ids = tuple(ids)
-    result = adapter.writeback_control.apply_writeback_for_pane(
-        tab_id,
-        pane,
-        item_ids=item_ids,
-    )
+    try:
+        result = adapter.writeback_control.apply_writeback_for_pane(
+            tab_id,
+            pane,
+            item_ids=item_ids,
+        )
+    except LibraryEntryInvalid as exc:
+        raise entry_invalid_to_remote(exc) from exc
     context_version = adapter.writeback_control.get_context_version()
     return {
         "applied_ids": list(result["applied_ids"]),

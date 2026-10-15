@@ -58,7 +58,6 @@ from tests.gui.app.measure._native_save_support import (
     PostSummary,
     declare_panes,
 )
-from tests.gui.app.measure.remote._helpers import FixtureController
 from tests.gui.app.measure.services._native_acquisition_support import RoleSavingAdapter
 
 
@@ -279,13 +278,13 @@ def role_controller(
     bus = BaseEventBus()
     registry = Registry()
     registry.register("role_saving", RoleSavingAdapter)
-    controller = FixtureController(
+    controller = Controller(
         state=state, registry=registry, view=None, bus=bus, project_root=str(tmp_path)
     )
     try:
         yield state, controller, bus
     finally:
-        assert controller.quiesce()
+        controller.close()
         qapp.processEvents()
 
 

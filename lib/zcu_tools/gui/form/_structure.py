@@ -524,7 +524,7 @@ def _compatible(info: FieldInfo, value: JsonValue, path: FormPath) -> bool:
         if expr_text(value) is not None:
             return True
         if set(value) == {"__complex__"} and complex in types:
-            from zcu_tools.gui.cfg.codec import decode_complex
+            from zcu_tools.core.complex_codec import decode_complex
 
             try:
                 decode_complex(value)

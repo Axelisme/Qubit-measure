@@ -10,7 +10,6 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
-    ModuleWriteback,
     NoAnalyzeParams,
     ParameterWriteback,
     RunRequest,
@@ -18,11 +17,10 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
-from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
+from zcu_lab.v2._support.measure.writeback_helpers import module_writeback
 from zcu_lab.v2.twotone.reset.bath.phase.core import PhaseCfg, PhaseExp, PhaseResult
 from zcu_lab.v2.twotone.reset.bath.phase.form import make_form
 
@@ -112,13 +110,12 @@ class BathPhaseAdapter(
             ("$qubit.reset.reset_bath", result.max_phase, "Bath reset to ground"),
             ("$qubit.reset.reset_bath_e", result.min_phase, "Bath reset to excited"),
         ):
-            spec, value = module_cfg_to_value(cfg.modules.tested_reset)
-            value.with_field("pi2_cfg.phase", phase)
             items.append(
-                ModuleWriteback(
-                    target_name=target,
+                module_writeback(
+                    cfg.modules.tested_reset,
+                    target=target,
                     description=description,
-                    edit_schema=CfgSchema(spec=spec, value=value),
+                    field_updates=(("pi2_cfg.phase", phase),),
                 )
             )
         items.append(

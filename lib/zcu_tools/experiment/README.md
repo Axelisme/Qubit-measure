@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-15，資料優先的 native restore、Notebook native load 與 Labber export 分離、固定 Artifact items 與逐項準備失敗
+**Last updated:** 2026-10-15，資料優先的 native restore、固定 Artifact items 與持久 Spec 邊界
 
 `experiment/` 定義實驗介面、Result 與保存資料之間的映射，以及實驗 cfg 的支援機制。這個位置不表示其現有程式碼均與 QICK 無關。`cfg_assembler.py` 只提供 Run mapping 的共用值型別，`utils/sweep.py` 使用 `program.v2` 的 `SweepCfg`。程式指令的建構與 acquire 由 [program/v2](../program/v2/README.md) 及 [experiment/v2/runtime](v2/runtime/README.md) 接合。
 
@@ -46,7 +46,8 @@ Workflow 的同步 `get_device_cfg(name)` 與完整 cfg `setup_device(name, cfg)
 
 ## 子模組入口
 
-Package root 保留公開 exports，只有存取對應名稱時才載入其 owner module。匯入 `cfg_editing` 不會因此載入 experiment base、device 或 datafile；直接使用 persistence exports 仍會載入其所需依賴。
+Package root 保留公開 exports，只有存取對應名稱時才載入其 owner module；直接使用 persistence exports 仍會載入其所需依賴。
+
+GUI 的 Library、Inspect 與 module writeback 共用 `gui.form` 與 `gui.form_adapter`，直接提交持久 Spec，不經 experiment 的第二套編輯樹。ModuleWriteback 的 proposal 是 ModuleSpec；experiment 仍只接收執行用 typed cfg。跨宿主契約見 ADR-0065、ADR-0008。
 
 - [v2](v2/README.md)：program/v2 的通用 runtime 與量化、SNR、tracker 工具。[runtime](v2/runtime/README.md) 說明 Schedule、buffer、ProgramBuilder 與 executor 的執行機制。具體實驗與前端附件由使用者套件提供，組合根注入 catalog，不由框架反向載入。
-- [cfg_editing](cfg_editing/README.md)：Qt-free 的實驗側 program cfg 編輯支援；與執行前 cfg 組裝分工。

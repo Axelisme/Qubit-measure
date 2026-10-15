@@ -10,34 +10,21 @@ from collections.abc import Callable, Iterator
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
     QScrollArea,
     QSizePolicy,
-    QWidget,
 )
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalysisMode,
 )
-from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    DirectValue,
-    ScalarSpec,
-)
 from zcu_tools.gui.control_identity import ControlIdentity
-from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-from zcu_tools.gui.widgets.cfg import CfgFormWidget, TreeCfgWidget
-from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.app.measure._form_fakes import configure_form_lookup
@@ -159,93 +146,6 @@ def exp_tab_widget(qapp, monkeypatch, make_ctrl):
             tab.deleteLater()
         owned_tabs.clear()
         monkeypatch.setattr(mod, "attach_existing_figure_to_container", orig_attach)
-
-
-def test_A2_sole_tree_has_no_structure_selector(qapp):
-    """A2: CfgFormWidget sole tree — no public structure selector, default is tree."""
-    # CfgFormWidget must reject a structure kwarg
-    with pytest.raises(TypeError):
-        CfgFormWidget(structure=object())  # type: ignore[call-arg]
-    import zcu_tools.gui.widgets.cfg as cfg_pkg
-
-    assert not hasattr(cfg_pkg, "form_structure")
-    assert not hasattr(cfg_pkg, "FormStructure")
-    assert not hasattr(cfg_pkg, "tree_structure")
-    # Default construction is tree
-    ctrl = MagicMock()
-    configure_form_lookup(ctrl)
-    ctrl.get_bus.return_value = EventBus()
-    ctrl.read_context.return_value = parameter_capture()
-    ctrl.get_current_ml.return_value = MagicMock(modules={}, waveforms={})
-    ctrl.arb_waveforms.list_data_keys.return_value = []
-    ctrl.list_device_names.return_value = []
-    schema = CfgSchema(
-        spec=CfgSectionSpec(fields={"reps": ScalarSpec(label="Reps", type=int)}),
-        value=CfgSectionValue(fields={"reps": DirectValue(10)}),
-    )
-    w = CfgFormWidget()
-    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
-    w.attach(draft)
-    assert isinstance(w._root_widget, TreeCfgWidget)
-    w.detach()
-    draft.close()
-
-
-def test_A4_cfg_viewport_expands_with_panel_height(qapp, exp_tab_widget, make_ctrl):
-    """A4: Run cfg tree viewport follows panel height, scrolls only when content exceeds viewport."""
-    ctrl = make_ctrl()
-    snap = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=False)
-    tab = exp_tab_widget("tab-1", ctrl, snap.capabilities)
-    tab.attach(snap, MagicMock())
-    qapp.processEvents()
-    form_scroll = next(
-        scroll
-        for scroll in tab.findChildren(QScrollArea)
-        if isinstance(scroll.widget(), FormEditor)
-    )
-    assert form_scroll.widgetResizable()
-    assert form_scroll.maximumHeight() >= 10000
-    assert form_scroll.minimumHeight() <= 50
-
-    ctrl2 = MagicMock()
-    ctrl2.get_bus.return_value = EventBus()
-    ctrl2.read_context.return_value = parameter_capture()
-    ctrl2.get_current_ml.return_value = MagicMock(modules={}, waveforms={})
-    ctrl2.arb_waveforms.list_data_keys.return_value = []
-    ctrl2.list_device_names.return_value = []
-    schema = CfgSchema(
-        spec=CfgSectionSpec(fields={"reps": ScalarSpec(label="Reps", type=int)}),
-        value=CfgSectionValue(fields={"reps": DirectValue(10)}),
-    )
-    w = CfgFormWidget()
-    draft = MeasureCfgBindings(ctrl2).new_draft(schema, parameters=None)
-    w.attach(draft)
-    assert w._scroll.verticalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
-    assert w._scroll.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
-    tree_w = w._root_widget
-    assert isinstance(tree_w, TreeCfgWidget)
-    assert tree_w._tree.verticalScrollBarPolicy() == Qt.ScrollBarAsNeeded
-    assert tree_w.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Expanding
-    assert tree_w._tree.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Expanding
-    assert w._inner_layout.count() == 2
-    assert w._inner_layout.stretch(0) == 1
-    assert w._inner_layout.stretch(1) == 0
-    parent = QWidget()
-    layout = QHBoxLayout(parent)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.addWidget(w, stretch=1)
-    parent.resize(400, 300)
-    parent.show()
-    qapp.processEvents()
-    h_small = w.height()
-    parent.resize(400, 600)
-    qapp.processEvents()
-    h_large = w.height()
-    assert h_large > h_small
-    parent.close()
-    w.detach()
-    draft.close()
-    tab.detach()
 
 
 def test_A5_Run_action_row_status_free_and_20_80_proportions(

@@ -8,12 +8,17 @@ backend is selected (i.e. when building the UI).
 """
 
 from zcu_tools.gui.widgets.dialog_lifecycle import DialogRefStore
-from zcu_tools.gui.widgets.dialog_presenter import DialogPresenter, QtDialogPresenter
+from zcu_tools.gui.widgets.dialog_presenter import (
+    DialogPresenter,
+    QtDialogPresenter,
+    SaveDiscardCancel,
+)
 from zcu_tools.gui.widgets.screenshot import widget_to_png_bytes
 
 __all__ = [
     "DialogPresenter",
     "DialogRefStore",
     "QtDialogPresenter",
+    "SaveDiscardCancel",
     "widget_to_png_bytes",
 ]

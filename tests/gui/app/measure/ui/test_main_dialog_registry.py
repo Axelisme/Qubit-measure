@@ -12,13 +12,22 @@ from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.ui.main_dialog_registry import MainDialogRegistry
 from zcu_tools.gui.widgets import DialogRefStore
 
+from tests.gui._dialog_fakes import RecordingDialogPresenter
+
 
 class _FactoryRegistry(MainDialogRegistry):
     def __init__(
         self, parent: QWidget, factory: Callable[[DialogName], QDialog]
     ) -> None:
         self.refs = DialogRefStore()
-        super().__init__(MagicMock(), parent=parent, dialog_refs=self.refs)
+        super().__init__(
+            MagicMock(),
+            parent=parent,
+            dialog_refs=self.refs,
+            templates=lambda: {},
+            dialog_presenter=RecordingDialogPresenter(),
+            alias_presets=None,
+        )
         self._factory = factory
 
     def _build_dialog(self, name: DialogName, *, writable: bool) -> QDialog:

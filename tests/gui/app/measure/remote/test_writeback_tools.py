@@ -13,6 +13,7 @@ from dataclasses import replace
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -38,12 +39,12 @@ def _items() -> list[WritebackItem]:
     mod = ModuleWriteback(
         target_name="readout_rf",
         description="readout module",
-        edit_schema=MagicMock(),
+        proposal=PulseSpec(
+            ch=0, nqz=1, freq=6000.0, gain=0.5, waveform=ConstWaveformCfg(length=1.0)
+        ),
         role_id="readout",
     )
     mod.session_id = "ml-1"
-    # A GUI-only attribute must not leak into the wire item.
-    vars(mod)["editor_id"] = "editor-9"
     return [md, mod]
 
 
@@ -114,14 +115,10 @@ def _ctrl() -> MagicMock:
             unit=None,
         ),
     }
-    wc.set_writeback_item_for_pane.return_value = {
-        "valid": True,
-        "removed": [],
-        "added": [],
-    }
+    wc.set_writeback_item_for_pane.return_value = None
     wc.apply_writeback_for_pane.return_value = {
         "applied_ids": ["param-1"],
-        "written": {"parameter": ["r_f"], "ml_modules": [], "ml_waveforms": []},
+        "written": {"parameter": ["r_f"], "ml_modules": []},
     }
     wc.get_tab_snapshot = ctrl.get_tab_snapshot
     # attach to ctrl for dispatch helper fallback
@@ -157,8 +154,6 @@ def test_preview_serializes_parameter_and_module():
     mod = items["ml-1"]
     assert mod["kind"] == "module"
     assert mod["target_name"] == "readout_rf"
-    assert "editor_id" not in mod
-    assert mod["has_edit_schema"] is True
     assert mod["role_id"] == "readout"
 
 
@@ -207,7 +202,6 @@ def test_apply_reads_persistent_draft():
     assert res["written"] == {
         "parameter": ["r_f"],
         "ml_modules": [],
-        "ml_waveforms": [],
     }
     assert res["context_version"] == 7
     assert "destination_context" in res
@@ -356,32 +350,6 @@ def test_set_edits_parameter_item():
     item = res["item"]
     assert isinstance(item, dict)
     assert item["id"] == "param-1"
-
-
-def test_set_module_cfg_edits_facet():
-    """The module/waveform-only ``edits`` facet forwards an ordered {path,value}
-    list to the service and folds the aggregated {valid, removed, added}; the
-    agent never supplies an editor_id (it is resolved internally, ADR-0008)."""
-    ctrl = _ctrl()
-    ctrl.writeback_control.set_writeback_item_for_pane.return_value = {
-        "valid": True,
-        "removed": ["readout_rf.old"],
-        "added": ["readout_rf.new"],
-    }
-    edits = [{"path": "readout_rf.freq", "value": 6012.3}]
-    res = _dispatch(
-        ctrl,
-        "tab.writeback_set",
-        {"tab_id": "t", "subtab_id": "analysis", "id": "ml-1", "edits": edits},
-    )
-    _, kwargs = ctrl.writeback_control.set_writeback_item_for_pane.call_args
-    assert kwargs["edits"] == edits
-    assert "editor_id" not in kwargs  # internalized — never on the wire
-    # The aggregate is folded into the reply alongside the echoed item.
-    assert res["item"]["id"] == "ml-1"  # type: ignore[index]
-    assert res["valid"] is True
-    assert res["removed"] == ["readout_rf.old"]
-    assert res["added"] == ["readout_rf.new"]
 
 
 def test_set_proposed_value_and_edits_mutually_exclusive():

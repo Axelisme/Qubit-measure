@@ -15,7 +15,7 @@ from typing import (
 from typing_extensions import TypeVar
 
 if TYPE_CHECKING:
-    from zcu_tools.cfg_model import CfgValidationContext, ConfigBase
+    from zcu_tools.cfg_model import CfgValidationContext, ConfigBase, ModuleSpec
     from zcu_tools.gui.session.parameters import ParameterContext
     from zcu_tools.resources.entry.ledger_models import JsonObject
 
@@ -24,8 +24,7 @@ if TYPE_CHECKING:
 # ``ContextReadiness``, and ``SessionEnv`` are session-core value types — they live
 # in ``gui/session/types`` (no experiment cfg-tree coupling). They are re-exported
 # from the adapter package because ``ExpAdapterProtocol``'s signatures speak in
-# them (``WritebackRequest.ctx: SessionEnv``, ``RunRequest.soc: SocHandle``).
-from zcu_tools.gui.cfg import CfgSchema
+# them (``RunRequest.soc: SocHandle``, ``RunRequest.soccfg: SocCfgHandle``).
 from zcu_tools.gui.session.types import SessionEnv, SocCfgHandle, SocHandle
 
 T_Result = TypeVar("T_Result")
@@ -270,16 +269,16 @@ class ParameterWriteback(WritebackItem):
 
 @dataclass
 class ModuleWriteback(WritebackItem):
-    edit_schema: CfgSchema | None = None
-    # Optional GUI/MCP role metadata for the proposed ModuleLibrary entry. This is
-    # not persisted by ModuleLibrary; it identifies which role template the writeback
-    # proposal represents while the user/agent reviews the draft.
-    role_id: str | None = None
+    """Propose a persistent module Spec for the library root target_name.
 
+    proposal is a concrete persistent ModuleSpec (pulse, readout or reset);
+    child library keys stay keys. The writeback draft edits a Form copy of it,
+    so the proposal object is never modified. role_id optionally names the
+    role template this proposal represents while it is reviewed; the library
+    does not persist it.
+    """
 
-@dataclass
-class WaveformWriteback(WritebackItem):
-    edit_schema: CfgSchema | None = None
+    proposal: ModuleSpec
     role_id: str | None = None
 
 

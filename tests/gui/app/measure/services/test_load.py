@@ -12,9 +12,12 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.native_persistence import RestoredRun
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, NoAnalyzeParams
+from zcu_tools.gui.app.measure.services.form_contracts import (
+    CfgPreconditionError,
+    CfgPreconditionReason,
+)
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
 from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
-from zcu_tools.gui.cfg.resource import CfgPreconditionError, CfgPreconditionReason
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import ExpectedErrorCategory, FailedPreconditionError
 from zcu_tools.gui.form_adapter import Form

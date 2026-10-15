@@ -6,12 +6,13 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.measure.artifacts import SaveControlFacet, SaveService
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess, ExperimentCatalogLoader
-from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.session.alias_presets import AliasPresets, validate_alias_presets
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.services.arb_waveform import ArbWaveformService
 from zcu_tools.gui.session.services.build import build_session_services
 from zcu_tools.gui.session.services.connection import SoCConnectionService
 from zcu_tools.gui.session.services.context import ContextService
@@ -23,9 +24,8 @@ from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from .analyze import AnalyzeService
-from .arb_waveform import ArbWaveformService
-from .cfg_editor import CfgEditorService
 from .experiment_reload import ExperimentReloadService
+from .form_contracts import source_basis
 from .guard import GuardService
 from .load import LoadService
 from .operation_control import OperationControlFacet
@@ -45,7 +45,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.registry import Registry
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-    from zcu_tools.gui.session.aliases import AliasRow
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.ports import OwnerScheduler, ProgressTransport
@@ -53,7 +52,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.setup_control import SetupControlPort
 
-    from .cfg_editor import CfgEditorHost
     from .operation_control import OperationControlPort
     from .run_analyze_control import RunAnalyzeControlPort, RunAnalyzeRenderHost
     from .tab_control import TabControlPort
@@ -106,7 +104,6 @@ class AppServices:
     writeback_control: WritebackControlPort
     workspace: WorkspaceService
     settings: ProjectSettingsService
-    cfg_editor: CfgEditorService
     arb_waveform: ArbWaveformService
 
 
@@ -115,7 +112,6 @@ def build_app_services(
     state: State,
     bus: EventBus,
     registry: Registry,
-    cfg_editor_ctrl: CfgEditorHost,
     progress_transport: ProgressTransport,
     resource_versions: Callable[[], Mapping[str, int]],
     render_host: Callable[[], RunAnalyzeRenderHost | None],
@@ -123,23 +119,22 @@ def build_app_services(
     project_root: str,
     catalog_loader: ExperimentCatalogLoader | None = None,
     params_for: ParamsFor | None = None,
-    alias_preset: tuple[AliasRow, ...] = (),
+    alias_presets: AliasPresets | None = None,
 ) -> AppServices:
     """Construct and wire every domain service into a frozen bundle.
 
-    ``cfg_editor_ctrl`` is the Controller itself (the CfgEditor session's
-    LiveModel env + ModuleLibrary registration surface). It is only stored, never
-    called during construction, so passing the still-initialising Controller is
-    safe and keeps the bundle complete (no service built outside this function).
-
-    ``alias_preset`` supplies ordered caller-owned session-memory rows. Omitted
-    or empty presets create an empty table. Softlinks and unbound rows are kept;
+    ``alias_presets`` maps names to ordered caller-owned rows. Omitted or None
+    means no catalog and an empty initial table. A supplied mapping must contain
+    "default" (possibly empty), or raise ValueError. All tables are validated;
+    default initializes entries only when no saved aliases exist. Saved empty
+    and nonempty tables take precedence. Softlinks and unbound rows are kept;
     the first nonempty component snapshot uses the role registry's unique focus
     candidate for the primary empty row. Explicit table edits disable that
     one-time initialization. Invalid syntax, duplicate aliases or forward links
     raise InvalidInputError(alias_invalid) during construction. No device or
     cache lookup is performed, and each bundle owns its own alias table.
     """
+    validate_alias_presets(alias_presets)
     access = ExperimentAccess()
     operation_gate = OperationGate(bus)
     handles = OperationHandles()
@@ -159,14 +154,12 @@ def build_app_services(
         runner=runner,
         bind_assets=ArbWaveformDatabase.info_at,
         project_root=project_root,
-        alias_rows=alias_preset,
+        alias_rows=() if alias_presets is None else alias_presets["default"],
         params_for=params_for,
     )
     context = session.context
     device = session.device
-    arb_waveform = ArbWaveformService(state)
-
-    bindings = MeasureCfgBindings(cfg_editor_ctrl)
+    arb_waveform = session.arb_waveform
 
     def captured_parameters(
         aliases: Mapping[str, str] | None,
@@ -187,23 +180,15 @@ def build_app_services(
                     if device.info is not None
                 },
             ),
-            source_basis=bindings.source_basis(state),
+            source_basis=source_basis(state),
         )
 
     tab_forms = TabFormResources(
         mutation_allowed=lambda tab_id: not state.is_tab_busy(tab_id),
     )
-    # Independent library/inspect/writeback drafts never publish tab cfg.
-    cfg_editor = CfgEditorService(
-        cfg_editor_ctrl,
-        read_port=cfg_editor_ctrl,
-        write_port=cfg_editor_ctrl,
-        versions=cfg_editor_ctrl,
-        bus=bus,
-    )
     writeback = WritebackService(
-        cfg_editor,
-        write_port=ContextControlFacet(context=context),
+        ContextControlFacet(context=context),
+        arb_names=arb_waveform.list_data_keys,
     )
     # TabService composes the tab render model and needs the writeback query port
     # (built above) — built after writeback (read-model dependency, ADR-0067).
@@ -315,6 +300,5 @@ def build_app_services(
         writeback_control=writeback_control,
         workspace=workspace,
         settings=session.settings,
-        cfg_editor=cfg_editor,
         arb_waveform=arb_waveform,
     )

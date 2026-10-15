@@ -144,7 +144,7 @@ def test_retired_view_stops_authority_projection(
     ctrl.attach_caretaker(create_persistence_caretaker(ctrl))
     tab_id = ctrl.new_tab("saving")
     dialogs = RecordingDialogPresenter(destructive_answers=[True, True])
-    window = MainWindow(ctrl, dialog_presenter=dialogs)
+    window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=dialogs)
     window.add_tab_widget(tab_id, "saving")
     window.show()
     widget = _RecordingInteractive()

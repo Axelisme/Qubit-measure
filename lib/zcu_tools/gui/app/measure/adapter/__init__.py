@@ -38,7 +38,6 @@ from .types import (
     T_PostAnalyzeParams,
     T_PostAnalyzeResult,
     T_Result,
-    WaveformWriteback,
     WritebackItem,
     WritebackRequest,
 )

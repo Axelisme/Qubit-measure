@@ -2,20 +2,21 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
-from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict
 
+from pydantic import JsonValue
+
+from zcu_tools.cfg_model import Template, TemplateDef
 from zcu_tools.gui.app.measure.catalog import ExperimentCatalogLoader
 from zcu_tools.gui.app.measure.services.experiment_reload import (
     ReloadPreview,
     ReloadReport,
 )
-from zcu_tools.gui.cfg import CfgSchema
-from zcu_tools.gui.cfg.binding import CfgDraft
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import EventOrigin
-from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.form import FormErrors, FormWritePath
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
@@ -23,6 +24,14 @@ from zcu_tools.gui.session.events import (
     DeviceOperationFinishedPayload,
     DeviceSetupFinishedPayload,
     GatePresence,
+)
+from zcu_tools.gui.session.library_entry import (
+    LibraryEntryInvalid,
+    LibraryKind,
+    ModuleEntryForm,
+    WaveformEntryForm,
+    new_library_entry,
+    open_library_entry,
 )
 from zcu_tools.gui.session.operation_handles import AwaitResult
 from zcu_tools.gui.session.services.connection import (
@@ -56,19 +65,16 @@ from .services import (
     TabSnapshot,
     build_app_services,
 )
-from .services.cfg_lowering import lower_module, lower_waveform
-from .services.ports import CfgEdit, CfgEditResult
 from .state import State
-from .template_catalog import TemplateCatalog
 from .ui.interactive_frontend import InteractiveFrontend, InteractiveFrontendEnv
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
     from zcu_tools.experiment.artifacts import SaveReport
-    from zcu_tools.gui.cfg.binding import SettableTarget
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
-    from zcu_tools.gui.session.aliases import AliasRow
+    from zcu_tools.gui.session.alias_presets import AliasPresets
+    from zcu_tools.gui.session.arb_waveform import ArbWaveformPort
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
@@ -78,10 +84,8 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.setup_control import SetupControlPort
 
-    from .arb_waveform import ArbWaveformPort
     from .artifacts import SaveControlPort
     from .services import AppServices
-    from .services.cfg_editor import ChangeListener
     from .services.operation_control import OperationControlPort
     from .services.run_analyze_control import RunAnalyzeControlPort
     from .services.tab_control import TabControlPort
@@ -90,6 +94,19 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+class TemplateMetadata(TypedDict):
+    """Discovery fields: unique role_id, dropdown label, family and name suggestion.
+
+    item_kind is module or waveform. default_name is an authored suggestion,
+    potentially containing component placeholders, or empty for no suggestion.
+    """
+
+    role_id: str
+    label: str
+    item_kind: LibraryKind
+    default_name: str
 
 
 # A View has two distinct down-channels from the Controller (ADR-0068):
@@ -251,19 +268,22 @@ class Controller(SessionControllerMixin):
         registry: Registry,
         view: ViewProtocol | None,
         bus: EventBus,
-        template_catalog: TemplateCatalog | None = None,
         progress_transport: ProgressTransport | None = None,
         project_root: str | None = None,
         catalog_loader: ExperimentCatalogLoader | None = None,
         owner_scheduler: OwnerScheduler | None = None,
         params_for: ParamsFor | None = None,
         *,
-        alias_preset: tuple[AliasRow, ...] = (),
+        alias_presets: AliasPresets | None = None,
     ) -> None:
         """Compose services for state/registry with an optional view and adapters.
 
-        ``alias_preset`` is the ordered caller-owned initial alias table, empty
-        when omitted. Softlinks and empty bindings stay authored. The session
+        ``alias_presets`` maps names to ordered caller-owned alias rows. None
+        or omission means no catalog and an empty initial table. A supplied
+        mapping must contain "default" (possibly empty), or raise ValueError.
+        Invalid table syntax raises InvalidInputError. Default rows initialize
+        entries without saved aliases; saved tables, including empty ones, win.
+        Softlinks and empty bindings stay authored. The session
         uses the role registry's unique focus candidate once for the primary
         empty row on the first nonempty component snapshot; later point changes
         do not reset rows. Explicit table edits disable that initialization.
@@ -288,16 +308,10 @@ class Controller(SessionControllerMixin):
         if view is not None:
             self.add_view(view)
         self._bus = bus
-        # User composition injects templates at startup. Bare controllers omit
-        # them; create_from_template fails fast when the catalog is absent.
-        self._template_catalog = template_catalog
+        self._registry = registry
 
         # Construct and wire every domain service into an immutable bundle, then
         # alias them onto self for the façade's call sites.
-        # ``cfg_editor_ctrl=self`` lets build_app_services build CfgEditorService
-        # in the same bundle: the session only stores the Controller (as its
-        # LiveModel env + ModuleLibrary registration surface) and never calls it
-        # during construction, so passing the still-initialising self is safe.
         # The progress transport is the Qt marshal (a driven adapter). Default to
         # the Qt one so GUI/agent processes (which run a Qt event loop) work
         # without the entry point wiring it; tests inject a synchronous fake.
@@ -319,7 +333,6 @@ class Controller(SessionControllerMixin):
             state=state,
             bus=bus,
             registry=registry,
-            cfg_editor_ctrl=self,
             progress_transport=transport,
             resource_versions=self.resources_versions,
             render_host=lambda: self._render_host,
@@ -327,7 +340,7 @@ class Controller(SessionControllerMixin):
             project_root=self._project_root,
             catalog_loader=catalog_loader,
             params_for=params_for,
-            alias_preset=alias_preset,
+            alias_presets=alias_presets,
         )
         self._bind_services(services)
         # App-level PersistenceCaretaker, injected by runtime behavior via
@@ -387,7 +400,6 @@ class Controller(SessionControllerMixin):
         self._writeback_control = services.writeback_control
         self._workspace_svc = services.workspace
         self._settings_svc = services.settings
-        self._cfg_editor_svc = services.cfg_editor
         self._arb_waveform_svc = services.arb_waveform
 
     def add_view(self, view: ViewProtocol) -> None:
@@ -749,6 +761,20 @@ class Controller(SessionControllerMixin):
         interactive) — Handles owns the lifecycle (ADR-0066)."""
         return self._operation_handles.live_count()
 
+    def close(self, timeout_ms: int = 5000) -> None:
+        """Permanently stop background admission and drain workers and deliveries.
+
+        Call on the Qt owner thread before releasing this Controller or its View.
+        ``timeout_ms`` is the drain wait in milliseconds. A failed drain raises
+        TimeoutError and leaves admission closed; retain the owner and retry close.
+        Successful repeated calls are harmless. This does not cancel operations,
+        decide whether to discard data, disconnect devices, or establish RF safety;
+        use begin_shutdown for operation cancellation before final teardown.
+        """
+        self._background_svc.stop_accepting()
+        if not self._background_svc.quiesce(timeout_ms):
+            raise TimeoutError("Controller background work did not drain in time")
+
     def begin_shutdown(self, on_closed: Callable[[], None]) -> None:
         """Cancel every live operation, wait (with a timeout) for them to stop,
         then run ``on_closed`` — the View's actual teardown.
@@ -833,20 +859,27 @@ class Controller(SessionControllerMixin):
         )
 
     # ------------------------------------------------------------------
-    # Writeback (TabService)
+    # Pane-qualified writeback commands
     # ------------------------------------------------------------------
 
-    def get_writeback_item_draft_for_pane(
+    def get_writeback_item_form_for_pane(
         self, tab_id: str, pane: WritebackPane, session_id: str
-    ) -> CfgDraft:
-        return self._writeback_control.get_writeback_item_draft_for_pane(
+    ) -> ModuleEntryForm:
+        """Admit access to a module item's shared editing Form for this pane.
+
+        Every call checks writeback permission, tab idle and current draft
+        ownership. Call again immediately before each state.write or
+        state.run_command; retaining a Form does not retain admission.
+        See WritebackService.get_item_form for the Form's editing effects.
+        """
+        return self._writeback_control.get_writeback_item_form_for_pane(
             tab_id, pane, session_id
         )
 
     def set_writeback_item_for_pane(
         self, tab_id: str, pane: WritebackPane, session_id: str, **changes: Any
-    ) -> dict[str, object]:
-        return self._writeback_control.set_writeback_item_for_pane(
+    ) -> None:
+        self._writeback_control.set_writeback_item_for_pane(
             tab_id, pane, session_id, **changes
         )
 
@@ -893,16 +926,11 @@ class Controller(SessionControllerMixin):
     ) -> None:
         """Commit one library structure command at the supplied fixed capture.
 
-        App lowering callbacks convert schemas to Spec; ContextService owns
+        Put/replace carry the persistent Spec to write. ContextService owns
         target validation, the single resource transaction and publication.
         Failed commands leave editor teardown to the caller.
         """
-        self._context_control.apply_library_change(
-            parameters,
-            change,
-            lower_module=lower_module,
-            lower_waveform=lower_waveform,
-        )
+        self._context_control.apply_library_change(parameters, change)
 
     # ------------------------------------------------------------------
     # Arbitrary waveform assets (qubit-scoped repository)
@@ -913,14 +941,34 @@ class Controller(SessionControllerMixin):
         return self._arb_waveform_svc
 
     # ------------------------------------------------------------------
-    # Templates: one-shot create for Inspect UI and context.ml_create_from_role.
+    # Templates: one-shot create for context.ml_create_from_role.
     # ------------------------------------------------------------------
 
-    def get_template_catalog(self) -> TemplateCatalog:
-        """Return the injected catalog; raise FailedPreconditionError if absent."""
-        if self._template_catalog is None:
-            raise FailedPreconditionError("No template catalog is wired up.")
-        return self._template_catalog
+    def get_template(self, template_id: str) -> TemplateDef:
+        """Return the Registry definition; an unknown ID raises KeyError."""
+        return self._registry.templates[template_id]
+
+    def template_kind(self, template_id: str) -> LibraryKind:
+        """Return the definition's library family; an unknown ID raises KeyError."""
+        definition = self.get_template(template_id)
+        return "module" if "type" in definition.module.model_fields else "waveform"
+
+    def list_templates(self) -> list[TemplateMetadata]:
+        """Return ordered discovery metadata with unchanged wire field names.
+
+        default_name is the authored suggestion, including component
+        placeholders; UI callers expand it against their selected capture.
+        An empty Registry catalog returns an empty list.
+        """
+        return [
+            {
+                "role_id": template_id,
+                "label": definition.label,
+                "item_kind": self.template_kind(template_id),
+                "default_name": definition.default_name,
+            }
+            for template_id, definition in self._registry.templates.items()
+        ]
 
     def get_session_env(self) -> SessionEnv:
         return self._ctx_svc.get_session_env()
@@ -929,19 +977,19 @@ class Controller(SessionControllerMixin):
         """Create a library root from a template using one fixed parameter capture.
 
         Kind must match the template; the concrete name must be nonempty and
-        unused in its library family. Factory, capture, schema, conflict and I/O
-        failures propagate without a write. Factory SessionEnv.parameters and
-        lowering use the same fixed alias-aware capture, with no consumer kind
-        checks or later current-source lookup.
+        unused in its library family. Template, capture, Form validation,
+        conflict and I/O failures propagate without a write. Expr seeds use
+        the fixed alias-aware capture, and bound Slots keep child library keys.
+        The new state uses template_input's specialized model.
         """
         if not name:
             raise FailedPreconditionError("Entry name must not be empty.")
-        entry = self.get_template_catalog().get(template_id)
+        template_kind = self.template_kind(template_id)
         if item_kind != "module" and item_kind != "waveform":
             raise FailedPreconditionError(f"Unknown library kind: {item_kind!r}")
-        if entry.item_kind != item_kind:
+        if template_kind != item_kind:
             raise FailedPreconditionError(
-                f"Template {template_id!r} is a {entry.item_kind}, not a {item_kind}."
+                f"Template {template_id!r} is a {template_kind}, not a {item_kind}."
             )
         parameters = self._context_control.read_context()
         keys = (
@@ -953,12 +1001,13 @@ class Controller(SessionControllerMixin):
             raise FailedPreconditionError(
                 f"A {item_kind} named {name!r} already exists."
             )
-        ctx = replace(self.get_session_env(), parameters=parameters)
-        ref = entry.make_value(ctx)
-        schema = CfgSchema(spec=entry.shape(), value=ref.value)
-        self.apply_library_change(
-            parameters, LibraryChange(item_kind, "put", name, schema=schema)
+        entry = new_library_entry(
+            parameters,
+            Template(template_id),
+            self._registry.templates,
+            arb_names=self._arb_waveform_svc.list_data_keys(),
         )
+        self.apply_library_change(parameters, entry.put(name))
 
     def has_ml_entry(self, item_kind: str, name: str) -> bool:
         """Query a concrete root in the selected library; invalid kind raises."""
@@ -970,107 +1019,90 @@ class Controller(SessionControllerMixin):
         raise FailedPreconditionError(f"Unknown library kind: {item_kind!r}")
 
     # ------------------------------------------------------------------
-    # CfgEditor sessions (CfgEditorService) — headless ml editing for RPC
+    # Library entry editing through the shared Form entry
     # ------------------------------------------------------------------
 
-    def open_cfg_editor(
-        self,
-        item_kind: str,
-        *,
-        from_name: str,
-        gc: bool = True,
-        owner_key: str | None = None,
-    ) -> tuple[str, tuple[SettableTarget, ...]]:
-        """Open a modify-only CfgEditor session for an existing ml entry."""
-        return self._cfg_editor_svc.open(
-            item_kind,
-            from_name=from_name,
-            gc=gc,
-            owner_key=owner_key,
-        )
+    def open_library_entry(
+        self, item_kind: LibraryKind, name: str
+    ) -> ModuleEntryForm | WaveformEntryForm:
+        """Open a selected library root as a Form at one fixed capture.
 
-    def open_seeded_cfg_editor(
-        self,
-        seed: CfgSchema,
-        *,
-        parameters: ParameterContext | None,
-        gc: bool = False,
-        owner_key: str | None = None,
-    ) -> tuple[str, tuple[SettableTarget, ...]]:
-        """Open a service-owned cfg model seeded from an existing CfgSchema.
-
-        parameters is the owner-supplied fixed expression/reference capture;
-        None permits pure math only. UI callers attach to get_cfg_editor_draft.
-        Seeded sessions cannot commit library structure writes. Invalid schema
-        and capture/reference failures propagate from the editor owner.
+        The capture is read once from the selected point; the form evaluates
+        expressions against it and submissions target it. Arb waveform data
+        options are the asset keys listed now. Child library keys stay keys.
+        No selection, an unknown kind or a missing root raises an ExpectedError.
+        The caller owns the returned form; writing and discarding it need no
+        controller call.
         """
-        return self._cfg_editor_svc.open_seeded(
-            seed, parameters=parameters, gc=gc, owner_key=owner_key
+        return open_library_entry(
+            self._context_control.read_context(),
+            item_kind,
+            name,
+            arb_names=self._arb_waveform_svc.list_data_keys(),
         )
 
-    def get_cfg_editor_draft(self, editor_id: str) -> CfgDraft:
-        """Return the service-owned CfgDraft for a widget to ``attach`` to."""
-        return self._cfg_editor_svc.get_draft(editor_id)
+    def commit_library_entry(
+        self, entry: ModuleEntryForm | WaveformEntryForm, name: str
+    ) -> None:
+        """Put entry's current Spec at root name in its captured library.
 
-    def teardown_cfg_editor(self, editor_id: str) -> None:
-        """Tear down a UI-owned (gc=False) cfg-editor session + its LiveModel."""
-        self._cfg_editor_svc.teardown(editor_id)
+        Invalid input raises LibraryEntryInvalid without writing. Target,
+        conflict and I/O failures from apply_library_change propagate.
+        """
+        self.apply_library_change(entry.parameters, entry.put(name))
 
-    def editor_id_for_owner(self, owner_key: str) -> str | None:
-        return self._cfg_editor_svc.editor_id_for_owner(owner_key)
+    def replace_library_entry(
+        self, entry: ModuleEntryForm | WaveformEntryForm, source: str, new_name: str
+    ) -> None:
+        """Atomically replace root source with entry's Spec, renaming to new_name.
 
-    def set_cfg_editor_change_listener(self, listener: ChangeListener | None) -> None:
-        """Wire the per-session push listener (remote layer injects this)."""
-        self._cfg_editor_svc.set_change_listener(listener)
+        Failures follow commit_library_entry; an occupied different new_name
+        or a missing source is rejected with the library unchanged.
+        """
+        self.apply_library_change(entry.parameters, entry.replace(source, new_name))
 
-    def bump_editor_version(self, editor_id: str) -> None:
-        """Bump draft version; teardown drops the key to invalidate stale guards."""
-        self._state.version.bump(f"editor:{editor_id}")
-
-    def drop_editor_version(self, editor_id: str) -> None:
-        """Forget an editor session's version on teardown (symmetric to tab/
-        device drop). A stale dependency on a gone editor then reads version 0,
-        so the guard treats it as stale rather than spuriously matching."""
-        self._state.version.drop_prefix(f"editor:{editor_id}")
-
-    def cfg_editor_set_field(
-        self, editor_id: str, path: str, value: object
-    ) -> CfgEditResult:
-        return self._cfg_editor_svc.set_field(editor_id, path, value)
-
-    def cfg_editor_set_fields(
-        self, editor_id: str, edits: list[CfgEdit], *, agent_edit: bool = False
-    ) -> CfgEditResult:
-        return self._cfg_editor_svc.set_fields(editor_id, edits, agent_edit=agent_edit)
-
-    def owner_of_editor(self, editor_id: str) -> str | None:
-        """The owner_key a cfg-editor session is keyed to (tab_id for tab cfg)."""
-        return self._cfg_editor_svc.owner_of_editor(editor_id)
-
-    def edit_library(
+    def edit_library_entry(
         self,
-        item_kind: str,
+        item_kind: LibraryKind,
         name: str,
-        edits: list[CfgEdit],
+        batch: Mapping[FormWritePath, JsonValue],
         *,
         save_as: str | None = None,
-    ) -> CfgEditResult:
-        return self._cfg_editor_svc.edit_library(
-            item_kind, name, edits, save_as=save_as
-        )
+    ) -> FormErrors | None:
+        """Apply one Form write batch to library root name and write it if valid.
 
-    def commit_cfg_editor(self, editor_id: str, name: str) -> None:
-        self._cfg_editor_svc.commit(editor_id, name)
-
-    def replace_cfg_editor(self, editor_id: str, old_name: str, new_name: str) -> None:
-        """Atomically replace an existing ModuleLibrary entry from a draft."""
-        self._cfg_editor_svc.replace(editor_id, old_name, new_name)
-
-    def discard_cfg_editor(self, editor_id: str) -> None:
-        self._cfg_editor_svc.discard(editor_id)
-
-    def discard_cfg_editors(self, editor_ids: list[str]) -> None:
-        self._cfg_editor_svc.discard_for_client(editor_ids)
+        The root opens as with open_library_entry. batch maps model-field leaf
+        paths to Form input values, such as {"expr": text} for an expression
+        or a plain key string for a child library entry, and is written in one
+        FormState.write. A valid result is put at save_as, which must be a
+        new root of this kind, or at name when save_as is None; save_as leaves
+        name unchanged. Returns None after the write, or the form's FormErrors
+        with the library unchanged. Unknown or overlapping paths, an existing
+        save_as root, an unknown kind or a missing root raise
+        InvalidInputError before any write. Target, conflict and I/O failures
+        from apply_library_change propagate.
+        """
+        entry = self.open_library_entry(item_kind, name)
+        if save_as is not None:
+            library = entry.parameters.library
+            keys = (
+                library.module_keys()
+                if item_kind == "module"
+                else library.waveform_keys()
+            )
+            if save_as in keys:
+                raise InvalidInputError(
+                    f"{item_kind} destination already exists: {save_as!r}"
+                )
+        try:
+            entry.state.write(batch, entry.env)
+        except ValueError as exc:
+            raise InvalidInputError(str(exc), reason_code="form_errors") from exc
+        try:
+            self.commit_library_entry(entry, name if save_as is None else save_as)
+        except LibraryEntryInvalid as exc:
+            return exc.errors
+        return None
 
     # ------------------------------------------------------------------
     # Device (DeviceService)

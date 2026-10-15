@@ -18,7 +18,6 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
-from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
 from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
 from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
@@ -223,13 +222,7 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
 
     monkeypatch.setattr(tab.adapter, "analyze", analyze)
     monkeypatch.setattr(tab.adapter, "get_writeback_items", proposals)
-    editor = CfgEditorService(
-        MagicMock(), control, MagicMock(), MagicMock(), session.bus
-    )
-    writeback = WritebackService(
-        editor,
-        write_port=control,
-    )
+    writeback = WritebackService(control, arb_names=lambda: ())
     runner = OperationRunner(
         None, session.handles, None, session.background, session.bus
     )
@@ -387,10 +380,7 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
         )
         session.save()
     control = ContextControlFacet(context=session.context)
-    editor = CfgEditorService(
-        MagicMock(), control, MagicMock(), MagicMock(), session.bus
-    )
-    writeback = WritebackService(editor, write_port=control)
+    writeback = WritebackService(control, arb_names=lambda: ())
     commands, wb = _native_controls(session, writeback, control)
     loaded = commands.load_tab_result("tab", str(path))
     assert loaded.has_analyze_params
@@ -438,10 +428,7 @@ def test_public_writeback_rejects_foreign_entry_without_acceptance_or_write(
     tab = session.state.get_tab("tab")
     parameters = tab.run.parameters
     assert parameters is not None and isinstance(parameters.target, SavedPoint)
-    editor = CfgEditorService(
-        MagicMock(), control, MagicMock(), MagicMock(), session.bus
-    )
-    writeback = WritebackService(editor, write_port=control)
+    writeback = WritebackService(control, arb_names=lambda: ())
     _, wb = _native_controls(session, writeback, control)
     draft = writeback.create_draft(
         [ParameterWriteback("$source_qubit.rate", "rate", 99.0)],

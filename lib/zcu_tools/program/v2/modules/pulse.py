@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable
 from copy import deepcopy
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BeforeValidator
 from qick.asm_v2 import QickParam, QickRawParam
@@ -36,11 +36,6 @@ class PulseCfg(AbsModuleCfg):
     post_delay: float | QickParam = 0.0
 
     mixer_freq: float | None = None
-    mux_freqs: list[float] | None = None
-    mux_gains: list[float] | None = None
-    mux_phases: list[float] | None = None
-    mask: list[int] | None = None
-    outsel: int | None = None
     ro_ch: int | None = None
 
     def build(self, name: str) -> Pulse:
@@ -93,24 +88,17 @@ class Pulse(Module):
             cfg.ch,
             nqz=cfg.nqz,
             mixer_freq=cfg.mixer_freq,
-            mux_freqs=cfg.mux_freqs,
-            mux_gains=cfg.mux_gains,
-            mux_phases=cfg.mux_phases,
             ro_ch=ro_ch,
         )
 
         self.waveform.create(prog, cfg.ch)
-        pulse_kwargs = dict[str, Any](freq=cfg.freq, phase=cfg.phase, gain=cfg.gain)
-        if cfg.mask is not None:
-            pulse_kwargs["mask"] = cfg.mask
-        if cfg.outsel is not None:
-            pulse_kwargs["outsel"] = cfg.outsel
-
         prog.add_pulse(
             cfg.ch,
             pulse_id,
             ro_ch=cfg.ro_ch,
-            **pulse_kwargs,
+            freq=cfg.freq,
+            phase=cfg.phase,
+            gain=cfg.gain,
             **self.waveform.to_wav_kwargs(),
         )
 

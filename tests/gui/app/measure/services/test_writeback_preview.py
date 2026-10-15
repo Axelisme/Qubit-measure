@@ -6,24 +6,14 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import Field
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
-from zcu_tools.gui.app.measure.adapter import (
-    ModuleWriteback,
-    ParameterWriteback,
-    WaveformWriteback,
-)
-from zcu_tools.gui.app.measure.cfg_schemas import (
-    module_cfg_to_value,
-    waveform_cfg_to_value,
-)
-from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
+from zcu_tools.gui.app.measure.adapter import ModuleWriteback, ParameterWriteback
 from zcu_tools.gui.app.measure.services.writeback import WritebackService
-from zcu_tools.gui.cfg import CfgSchema
-from zcu_tools.gui.cfg.binding.fields import ScalarField
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import PointUseRequest
+from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
@@ -62,15 +52,14 @@ def session(tmp_path: Path, component_kinds):
     control = ContextControlFacet(context=context)
     control.use_point(PointUseRequest("a"))
     control.add_component("Q1", "fake/drive/a", {})
-    editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
-    service = WritebackService(editor, control)
-    return entry, control, editor, service
+    service = WritebackService(control, arb_names=lambda: ())
+    return entry, control, service
 
 
 def test_static_unit_facts_follow_captured_target_and_retarget_without_conversion(
     session,
 ):
-    entry, control, _editor, service = session
+    entry, control, service = session
 
     class Measured(ComponentSchema):
         frequency: float = Field(default=19.8, json_schema_extra={"unit": "MHz"})
@@ -118,7 +107,7 @@ def test_static_unit_facts_follow_captured_target_and_retarget_without_conversio
 
 
 def test_values_follow_fixed_target_retarget_edits_and_actual_current_values(session):
-    entry, control, _editor, service = session
+    entry, control, service = session
     target = control.read_context().target
     control.set_parameter(target, "general.ext.value", [1, 2])
     capture = control.read_context()
@@ -151,120 +140,80 @@ def test_values_follow_fixed_target_retarget_edits_and_actual_current_values(ses
     assert draft.items[0].selected is True
 
 
-@pytest.mark.parametrize("kind", ["module", "waveform"])
-def test_cfg_preview_contains_complete_current_and_live_draft_values(
-    session, kind, monkeypatch
-):
-    _entry, control, editor, service = session
-    target = control.read_context().target
-    if kind == "module":
-        cfg = PulseSpec(
+def test_module_preview_contains_complete_current_and_live_form_values(session):
+    _entry, control, service = session
+    name = "Q1.pulses.target"
+    control.set_module(
+        control.read_context().target,
+        name,
+        PulseSpec(
             ch=0, nqz=1, freq=100.0, gain=0.5, waveform=ConstWaveformCfg(length=0.1)
-        )
-        name = "Q1.pulses.target"
-        control.set_module(target, name, cfg)
-        capture = control.read_context()
-        spec, value = module_cfg_to_value(capture.library.get_module(name))
-        proposal = ModuleWriteback(name, "d", edit_schema=CfgSchema(spec, value))
-        item_id, path, edited = "ml-1", "freq", 250.0
-    else:
-        name = "Q1.waveforms.target"
-        control.set_waveform(target, name, ConstWaveformCfg(length=0.1))
-        capture = control.read_context()
-        spec, value = waveform_cfg_to_value(capture.library.get_waveform(name))
-        proposal = WaveformWriteback(name, "d", edit_schema=CfgSchema(spec, value))
-        item_id, path, edited = "wf-1", "length", 0.2
+        ),
+    )
+    capture = control.read_context()
+    proposal = ModuleWriteback(name, "d", capture.library.module_spec(name))
     draft = service.create_draft(
         [proposal], parameters=capture, experiment_name="test/writeback"
     )
-    preview = service.preview_values(draft)[item_id]
+    preview = service.preview_values(draft)["ml-1"]
     assert preview.actual_path == name
     assert preview.unit is None
-    assert preview.current == capture.library.entry_value(name, kind=kind)
-    if kind == "module":
-        assert PulseSpec.model_validate(
-            preview.proposed
-        ) == capture.library.module_spec(name)
-    else:
-        assert preview.proposed == preview.current
-    service.edit_draft(draft, item_id, edits=[{"path": path, "value": edited}])
-    live = service.preview_values(draft)[item_id]
+    assert preview.current == capture.library.entry_value(name, kind="module")
+    assert preview.proposed == preview.current
+    service.edit_draft(draft, "ml-1", edits={("freq",): 250.0})
+    live = service.preview_values(draft)["ml-1"]
     assert isinstance(live.proposed, dict)
-    assert live.proposed[path] == edited
+    assert live.proposed["freq"] == 250.0
     assert live.current == preview.current
-    draft.edit(item_id, target_name=name.replace("target", "new"))
-    missing = service.preview_values(draft)[item_id]
+    draft.edit("ml-1", target_name=name.replace("target", "new"))
+    missing = service.preview_values(draft)["ml-1"]
     assert missing.actual_path == name.replace("target", "new")
     assert missing.unit is None
     assert missing.current is None
     assert missing.proposed == live.proposed
-    error = FailedPreconditionError("draft unavailable")
-
-    def fail_read(_editor_id):
-        raise error
-
-    with monkeypatch.context() as patch:
-        patch.setattr(editor, "get_draft", fail_read)
-        with pytest.raises(FailedPreconditionError) as caught:
-            service.preview_values(draft)
-        assert caught.value is error
     draft.teardown()
     with pytest.raises(FailedPreconditionError):
         service.preview_values(draft)
 
 
-@pytest.mark.parametrize("kind", ["module", "waveform"])
-def test_item_preview_excludes_invalid_siblings_but_bulk_remains_strict(session, kind):
-    _entry, control, _editor, service = session
+def test_item_preview_excludes_invalid_siblings_but_bulk_remains_strict(session):
+    _entry, control, service = session
     proposals = []
     for suffix in ("a", "b"):
-        if kind == "module":
-            module_cfg = PulseSpec(
-                ch=0,
-                nqz=1,
-                freq=100.0,
-                gain=0.5,
-                waveform=ConstWaveformCfg(length=0.1),
+        name = f"Q1.pulses.{suffix}"
+        control.set_module(
+            control.read_context().target,
+            name,
+            PulseSpec(
+                ch=0, nqz=1, freq=100.0, gain=0.5, waveform=ConstWaveformCfg(length=0.1)
+            ),
+        )
+        proposals.append(
+            ModuleWriteback(
+                name, name, control.read_context().library.module_spec(name)
             )
-            name = f"Q1.pulses.{suffix}"
-            control.set_module(control.read_context().target, name, module_cfg)
-            spec, value = module_cfg_to_value(
-                control.read_context().library.get_module(name)
-            )
-            proposals.append(
-                ModuleWriteback(name, name, edit_schema=CfgSchema(spec, value))
-            )
-            field_name, expected = "freq", 100.0
-        else:
-            waveform_cfg = ConstWaveformCfg(length=0.1)
-            name = f"Q1.waveforms.{suffix}"
-            control.set_waveform(control.read_context().target, name, waveform_cfg)
-            spec, value = waveform_cfg_to_value(waveform_cfg)
-            proposals.append(
-                WaveformWriteback(name, name, edit_schema=CfgSchema(spec, value))
-            )
-            field_name, expected = "length", 0.1
+        )
     draft = service.create_draft(
         proposals, parameters=control.read_context(), experiment_name="test/writeback"
     )
     try:
         first, second = draft.items
         second.selected = False
-        field = service.get_item_draft(draft, second.session_id).root.fields[field_name]
-        assert isinstance(field, ScalarField)
-        field.set_text("")
+        form = service.get_item_form(draft, second.session_id)
+        form.state.write({("freq",): ""}, form.env)
         selected = service.preview_values(draft, session_id=first.session_id)
         assert list(selected) == [first.session_id]
         fact = selected[first.session_id]
         assert fact.actual_path == first.target_name
-        assert fact.current[field_name] == fact.proposed[field_name] == expected
-        with pytest.raises(RuntimeError):
+        assert isinstance(fact.current, dict) and isinstance(fact.proposed, dict)
+        assert fact.current["freq"] == fact.proposed["freq"] == 100.0
+        with pytest.raises(LibraryEntryInvalid):
             service.preview_values(draft)
-        with pytest.raises(RuntimeError):
+        with pytest.raises(LibraryEntryInvalid):
             service.preview_values(draft, session_id=second.session_id)
         with pytest.raises(KeyError):
             service.preview_values(draft, session_id="missing")
-        field.set_text(str(expected))
+        form.state.write({("freq",): 100.0}, form.env)
         assert len(service.preview_values(draft)) == 2
         assert second.selected is False
     finally:
@@ -279,7 +228,7 @@ def test_item_preview_excludes_invalid_siblings_but_bulk_remains_strict(session,
 
 
 def test_preview_without_context_fails_instead_of_claiming_missing_targets():
-    service = WritebackService(MagicMock(), MagicMock())
+    service = WritebackService(MagicMock(), arb_names=lambda: ())
     draft = service.create_draft(
         [ParameterWriteback("general.ext.value", "d", proposed_value=1)],
         parameters=None,
