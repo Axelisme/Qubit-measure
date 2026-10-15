@@ -13,7 +13,7 @@ from pydantic.fields import FieldInfo
 from ._json import default_json
 from ._sources import local_choices
 from ._structure import alternatives, discriminator, intrinsic_tags, model_types
-from .model import FormEnv, FormModel, FormPath, FormWritePath
+from .model import FormEnv, FormModel, FormPath, FormPathError, FormWritePath
 from .options import Option
 
 
@@ -33,6 +33,32 @@ def literal_values(annotation: object) -> tuple[JsonValue, ...] | None:
     if nullable and None not in result:
         result.insert(0, None)
     return tuple(result)
+
+
+def _declaration_fixes(annotation: object, value: JsonValue) -> bool:
+    """Whether annotation fixes every leaf of a complete partial option value.
+
+    Only single categorical values and single non-null model branches qualify.
+    Missing object fields are not part of the option value being checked.
+    No dynamic declarations, defaults or validation participate.
+    """
+    values = literal_values(annotation)
+    if values is not None:
+        return (
+            len(values) == 1 and type(values[0]) is type(value) and values[0] == value
+        )
+    models = model_types(annotation)
+    if (
+        not isinstance(value, dict)
+        or len(alternatives(annotation)) != 1
+        or len(models) != 1
+    ):
+        return False
+    fields = models[0].model_fields
+    return all(
+        name in fields and _declaration_fixes(fields[name].annotation, item)
+        for name, item in value.items()
+    )
 
 
 def _option_path(model: type[BaseModel], path: FormPath) -> bool:
@@ -96,11 +122,8 @@ class Level:
     pinned: Mapping[str, JsonValue] = field(default_factory=dict)
 
     def field(self, name: str) -> Field:
-        """Resolve a direct field; unknown names raise with the full path."""
-        path = (*self.prefix, name)
-        info = self.model.model_fields.get(name)
-        if info is None:
-            raise ValueError(f"Unknown form field path: {path!r}")
+        """Resolve a declared direct field; undeclared names raise KeyError."""
+        info = self.model.model_fields[name]
         choices = self.choices.get((name,))
         options = self.options.get((name,))
         if options is None:
@@ -139,32 +162,73 @@ class Field:
             self.choices is not None or literal_values(self.info.annotation) is not None
         )
 
-    def children(self, env: FormEnv) -> Level | None:
-        """Resolve the active child model, or None without guessing a selection.
+    @property
+    def selection_fixed(self) -> bool:
+        """Whether annotation permits only one selector branch at this level.
+
+        A single non-null model branch qualifies without freezing any nested
+        selector or field. A categorical leaf must have just one intrinsic
+        value. No selector means False; dynamic menu size does not participate.
+        """
+        if self.options is None:
+            return False
+        values = literal_values(self.info.annotation)
+        if values is not None:
+            return len(values) == 1
+        return (
+            len(alternatives(self.info.annotation)) == 1
+            and len(model_types(self.info.annotation)) == 1
+        )
+
+    @property
+    def fixed_option(self) -> Option | None:
+        """First option whose complete value is fixed by annotation, or None.
+
+        Check every partial-value leaf against single declared categorical
+        values. This does not depend on input selection or dynamic menu size.
+        """
+        return next(
+            (
+                option
+                for option in self.options or ()
+                if _declaration_fixes(self.info.annotation, option.value)
+            ),
+            None,
+        )
+
+    @property
+    def active_model(self) -> type[BaseModel] | None:
+        """Return the structurally reachable child model without running hooks.
 
         Ordinary missing/invalid models retain their declared shape. Nullable
         models require an object; selectors require a matching option with
-        fields. Only the reached child's hooks run. No defaults or validation.
+        fields. A reachable model may have no displayed fields after expansion.
         """
         models = model_types(self.info.annotation)
         if not models:
             return None
-        value = self.level.data.get(self.name)
-        pinned = self.level.pinned.get(self.name)
         if self.options is not None:
-            if self.selected is None:
-                return None
-            option = self.options[self.selected]
-            model = option.fields
-            pinned = option.value
-        else:
-            model = models[0] if len(models) == 1 else None
-            if type(None) in alternatives(self.info.annotation) and not isinstance(
-                value, dict
-            ):
-                return None
+            return None if self.selected is None else self.options[self.selected].fields
+        if type(None) in alternatives(self.info.annotation) and not isinstance(
+            self.level.data.get(self.name), dict
+        ):
+            return None
+        return models[0] if len(models) == 1 else None
+
+    def children(self, env: FormEnv) -> Level | None:
+        """Resolve the active child model and read only that child's hooks.
+
+        Return None for structurally unreachable children, as active_model
+        defines. Apply inherited declarations and the child's local overrides
+        with fixed env, without defaults or validation.
+        """
+        model = self.active_model
         if model is None:
             return None
+        value = self.level.data.get(self.name)
+        pinned = self.level.pinned.get(self.name)
+        if self.options is not None and self.selected is not None:
+            pinned = self.options[self.selected].value
         choices = {
             path[1:]: values
             for path, values in self.level.choices.items()
@@ -207,18 +271,23 @@ def resolve(
     """Resolve one nonroot canonical path through active children only.
 
     Unknown fields, inactive descendants and traversal into whole leaves raise
-    ValueError naming the requested path. The target itself may be invalid.
+    FormPathError carrying the full requested path. The target itself may be
+    invalid. Noncanonical path shapes still raise ValueError.
     """
     validate_path(path)
     if not path:
         raise ValueError(f"Expected a nonroot model-field tuple: {path!r}")
     level = root_level(model, data, env)
     for index, name in enumerate(path):
+        if name not in level.model.model_fields:
+            raise FormPathError(path, f"Unknown form field path: {path!r}")
         target = level.field(name)
         if index == len(path) - 1:
             return target
         children = target.children(env)
         if children is None:
-            raise ValueError(f"Inactive or whole-leaf form field path: {path!r}")
+            raise FormPathError(
+                path, f"Inactive or whole-leaf form field path: {path!r}"
+            )
         level = children
-    raise ValueError(f"Unknown form field path: {path!r}")
+    raise FormPathError(path, f"Unknown form field path: {path!r}")
