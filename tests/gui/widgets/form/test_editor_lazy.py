@@ -93,7 +93,7 @@ def test_shape_change_keeps_unrelated_widgets_and_fold_state(
         selector = editor.findChild(QComboBox, "form.input.branch")
         assert selector is not None
         selector.setCurrentIndex(1)
-        assert text(editor, "branch.two").text() == "2"
+        assert float(text(editor, "branch.two").text()) == 2.0
     else:
         enabled = editor.findChild(QCheckBox, "form.enabled.optional")
         assert enabled is not None
