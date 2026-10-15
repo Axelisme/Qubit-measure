@@ -94,3 +94,19 @@ def test_corrupt_published_data_is_not_a_miss(tmp_path):
     snapshot.tables[0].path.write_bytes(b"broken file")
     with pytest.raises(ValueError, match="(corrupt|integrity)"):
         library.evaluate(_family(), 0.037, snapshot)
+
+
+def test_published_validation_reports_recovered_gate_scale_after_reload(tmp_path):
+    from zcu_tools.simulate.evolution import BuildPlan, EvolutionLibrary, IntelOpenCL
+
+    library = EvolutionLibrary(tmp_path / "data")
+    result = library.build(BuildPlan(_family(), -.1, .1, 6), IntelOpenCL(tmp_path / "compiler"))
+    assert result.validation.calibration_scale_abs <= 2e-5
+    assert result.validation.density_abs <= 2e-9
+    assert result.validation.long_abs <= 2e-7
+    assert result.validation.phase_abs <= 2e-8
+    assert result.validation.invariant_abs <= 2e-9
+    assert result.validation.gpu_node_abs <= 2e-11
+    assert result.published is not None
+    reread = EvolutionLibrary(tmp_path / "data").validation(result.published)
+    assert reread == result.validation
