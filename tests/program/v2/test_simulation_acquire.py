@@ -144,3 +144,60 @@ def test_unbound_channel_rejected():
     prog = program(env, channels=(1,))
     with pytest.raises(ValueError, match="bound|route"):
         prog.acquire(env.soc, progress=False)
+
+
+def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
+    from zcu_tools.core.simulation import (
+        ChannelSignals,
+        EnvironmentSnapshot,
+        RoundSignals,
+    )
+
+    env = environment(std_adc=0, seed=12, n_gens=2, n_readouts=2)
+    prog = program(env, reps=1, rounds=2, channels=(1, 0), samples=4)
+    other = program(env, reps=1)
+    value = 0.0
+    seen = []
+
+    def snapshot():
+        return EnvironmentSnapshot(
+            "synthetic-v1", "retained-model-v1", (("bias", value),)
+        )
+
+    def source(request):
+        seen.append(request)
+        bias = request.snapshot.values[0][1]
+        # Deliberately reverse backend channel order. The adapter must follow
+        # compiled ADC order, apply ties-to-even, then let QICK normalize once.
+        return RoundSignals(
+            tuple(
+                ChannelSignals(
+                    ch,
+                    np.array(
+                        [[[10 * (1 - ch) + bias + 0.5, 10 * (1 - ch) + bias + 1.5]]]
+                    ),
+                )
+                for ch in (0, 1)
+            )
+        )
+
+    def hook(count, data, stop):
+        nonlocal value
+        value = 2.0
+        with pytest.raises(RuntimeError, match="active|reentr"):
+            other.acquire(env.soc, progress=False)
+        # Acquiring does not recompile live cfg changes between rounds.
+        prog.modules[0].cfg.gain = 0.9
+
+    env.soc.binding.capture_snapshot = snapshot
+    env.soc.binding.execute = source
+    averaged = prog.acquire(env.soc, progress=False, round_hook=hook)
+    np.testing.assert_array_equal(raw_of(prog)[0], [[[2, 4]]])
+    np.testing.assert_array_equal(raw_of(prog)[1], [[[12, 14]]])
+    np.testing.assert_array_equal(averaged[0], [[0.25, 0.75]])
+    np.testing.assert_array_equal(averaged[1], [[2.75, 3.25]])
+    assert seen[0].acquire is seen[1].acquire
+    assert [r.snapshot.values for r in seen] == [(("bias", 0.0),), (("bias", 2.0),)]
+    assert [r.index for r in seen] == [0, 1]
+    maxv = env.soccfg.get_maxv(1)
+    assert seen[0].acquire.controls[0][0].gain == int(0.1 * maxv) / maxv
