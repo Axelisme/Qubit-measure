@@ -74,8 +74,11 @@ _SIM = SimParams(
 
 @pytest.fixture(autouse=True)
 def resonator_cache_guard() -> Iterator[None]:
+    # The fallback test patches calculate_dispersive_vs_flux_fast. Clear before
+    # each test so a cache hit cannot bypass that collaborator and its warning.
     readout._cached_resonator_freqs.cache_clear()
     yield
+    # Clear after each test so cached fallback values cannot leak into later cases.
     readout._cached_resonator_freqs.cache_clear()
 
 

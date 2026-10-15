@@ -1932,10 +1932,6 @@ def test_tab_moved_while_confirmation_pending_closes_captured_widget(
     control_factory, qapp
 ):
     """Scenario 3: Tab moved while confirmation prompt is open closes captured identity."""
-    window, ctrl = _setup_window_with_tabs(control_factory)
-    tab_a = _add_tab(window, "tab-a", has_run=True, saved=False)
-    _add_tab(window, "tab-b", has_run=False)
-
     decision_cb: list[Callable[[bool], None]] = []
 
     class _DeferredPresenter(RecordingDialogPresenter):
@@ -1960,17 +1956,21 @@ def test_tab_moved_while_confirmation_pending_closes_captured_widget(
             decision_cb.append(on_decision)
 
     deferred_presenter = _DeferredPresenter(destructive_answers=[True])
-    window._dialog_presenter = deferred_presenter
+    window, ctrl = _setup_window_with_tabs(control_factory, deferred_presenter)
+    tab_a = _add_tab(window, "tab-a", has_run=True, saved=False)
+    _add_tab(window, "tab-b", has_run=False)
 
+    tabs = window.findChild(QTabWidget)
+    assert tabs is not None
     # Request close on tab-a at index 0 via signal
-    window._tabs.tabCloseRequested.emit(0)
+    tabs.tabCloseRequested.emit(0)
     assert len(decision_cb) == 1
 
     # While dialog is pending, move tab-a to index 1
-    tab_bar = window._tabs.tabBar()
+    tab_bar = tabs.tabBar()
     assert tab_bar is not None
     tab_bar.moveTab(0, 1)
-    assert window._tabs.widget(1) is tab_a
+    assert tabs.widget(1) is tab_a
 
     # User confirms the dialog
     decision_cb[0](True)
@@ -1982,9 +1982,6 @@ def test_tab_close_suppresses_duplicate_prompt_while_decision_pending(
     control_factory, qapp
 ):
     """Scenario 2/3: Duplicate tab close requests for same tab are suppressed while prompt is open."""
-    window, ctrl = _setup_window_with_tabs(control_factory)
-    _add_tab(window, "tab-1", has_run=True, saved=False)
-
     decision_cb: list[Callable[[bool], None]] = []
 
     class _DeferredPresenter(RecordingDialogPresenter):
@@ -2009,14 +2006,17 @@ def test_tab_close_suppresses_duplicate_prompt_while_decision_pending(
             decision_cb.append(on_decision)
 
     deferred_presenter = _DeferredPresenter(destructive_answers=[True])
-    window._dialog_presenter = deferred_presenter
+    window, ctrl = _setup_window_with_tabs(control_factory, deferred_presenter)
+    _add_tab(window, "tab-1", has_run=True, saved=False)
 
+    tabs = window.findChild(QTabWidget)
+    assert tabs is not None
     # First request
-    window._tabs.tabCloseRequested.emit(0)
+    tabs.tabCloseRequested.emit(0)
     assert len(deferred_presenter.calls) == 1
 
     # Second request while prompt is pending
-    window._tabs.tabCloseRequested.emit(0)
+    tabs.tabCloseRequested.emit(0)
     assert len(deferred_presenter.calls) == 1
 
     # Confirm
@@ -2180,9 +2180,6 @@ def test_app_close_suppresses_duplicate_prompt_while_decision_pending(
     control_factory, qapp
 ):
     """Scenario 4: Duplicate app close requests while prompt is open are suppressed."""
-    window, ctrl = _setup_window_with_tabs(control_factory, active_operations=0)
-    _add_tab(window, "tab-1", has_run=True, saved=False)
-
     decision_cb: list[Callable[[bool], None]] = []
 
     class _DeferredPresenter(RecordingDialogPresenter):
@@ -2207,7 +2204,10 @@ def test_app_close_suppresses_duplicate_prompt_while_decision_pending(
             decision_cb.append(on_decision)
 
     deferred_presenter = _DeferredPresenter(destructive_answers=[True])
-    window._dialog_presenter = deferred_presenter
+    window, ctrl = _setup_window_with_tabs(
+        control_factory, deferred_presenter, active_operations=0
+    )
+    _add_tab(window, "tab-1", has_run=True, saved=False)
 
     # First close
     window.close()

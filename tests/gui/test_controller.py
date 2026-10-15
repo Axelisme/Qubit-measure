@@ -12,7 +12,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QCoreApplication
-from zcu_tools.device.fake import FakeDevice
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     ContextReadiness,
@@ -50,10 +49,6 @@ from zcu_tools.gui.session.services.device import (
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
-from tests.gui._completion_helpers import (
-    on_device_connected,
-    on_device_operation_failed,
-)
 from tests.gui._controller_adapter import (
     InteractiveAdapter,
     RecordingAdapter,
@@ -619,36 +614,24 @@ def test_run_rejected_while_soc_connect_lease_active(cf):
     cf.ctrl._operation_gate.release(1)
 
 
-def test_device_connect_handler_is_ui_only_no_persistence_coordination(cf):
-    """Persistence is now a State projection (ProjectSettingsService subscribes to
-    DEVICE_CHANGED). The Controller's connect handler must not itself coordinate
-    persistence — it only presents UI feedback."""
-    driver = FakeDevice()
-    cf.ctrl._dev_svc._driver_factory = lambda _type, _address: driver
-    cf.ctrl._settings_svc = MagicMock()
-    connected: list[object] = []
-    errors: list[str] = []
-    on_device_connected(cf.ctrl._dev_svc, connected.append)
-    on_device_operation_failed(
-        cf.ctrl._dev_svc, lambda _name, error: errors.append(error)
-    )
-
+def test_device_connect_updates_state_and_presents_ui_feedback(
+    cf: ControllerFixture,
+):
+    """The default FakeDevice connects through the public device control facet."""
     cf.ctrl.device_control.start_connect_device(
         ConnectDeviceRequest(type_name="FakeDevice", name="flux", address="addr")
     )
-    assert _wait_for(lambda: bool(connected or errors))
-    assert not errors
+    assert _wait_for(lambda: not cf.ctrl.device_control.get_active_device_operations())
 
-    # Controller no longer reaches into ProjectSettingsService for device persistence.
-    assert not cf.ctrl._settings_svc.method_calls
-    # On terminal success the device is committed to State as CONNECTED.
     dev = cf.state.get_device("flux")
     assert dev is not None and dev.status is DeviceStatus.CONNECTED
-    cf.view.show_status_message.assert_called()
-    cf.ctrl._dev_svc.start_disconnect_device(
+    cf.view.show_status_message.assert_any_call("Device connected: flux")
+
+    cf.ctrl.device_control.start_disconnect_device(
         DisconnectDeviceRequest(name="flux", remember=False)
     )
     assert _wait_for(lambda: cf.state.get_device("flux") is None)
+    cf.view.show_status_message.assert_any_call("Device disconnected: flux")
 
 
 def test_run_completion_prepares_pure_tab_snapshot(cf):
