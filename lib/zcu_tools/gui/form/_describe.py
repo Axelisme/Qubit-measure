@@ -3,9 +3,11 @@
 from collections.abc import Mapping
 from enum import Enum
 from re import Pattern
-from typing import get_origin
+from types import UnionType
+from typing import TypeAliasType, Union, get_args, get_origin
 
 from pydantic import BaseModel, JsonValue
+from pydantic.fields import FieldInfo
 
 from ._json import copy_json
 from ._selection import Field, Level, literal_values, resolve, root_level, validate_path
@@ -64,11 +66,38 @@ def _kind(target: Field) -> FormFieldKind:
     return "union" if len(members) > 1 else "unknown"
 
 
-def _number_hint(target: Field, name: str) -> int | float | None:
+def _constraint_metadata(target: Field) -> list[object]:
+    """Read inner-to-outer metadata through aliases and one non-null branch.
+
+    Pydantic keeps nullable member constraints inside the annotation. Use its
+    FieldInfo parser for Annotated, retaining outer field metadata precedence.
+    Multiple non-null branches keep only their common outer metadata.
+    """
+    metadata: list[object] = list(target.info.metadata)
+    annotation = target.info.annotation
+    while annotation is not None:
+        if isinstance(annotation, TypeAliasType):
+            annotation = annotation.__value__
+            continue
+        if get_origin(annotation) in (Union, UnionType):
+            members = [item for item in get_args(annotation) if item is not type(None)]
+            if len(members) != 1:
+                break
+            annotation = members[0]
+            continue
+        inner = FieldInfo.from_annotation(annotation)
+        metadata = [*inner.metadata, *metadata]
+        if inner.annotation is annotation:
+            break
+        annotation = inner.annotation
+    return metadata
+
+
+def _number_hint(metadata: list[object], name: str) -> int | float | None:
     value = next(
         (
             getattr(item, name)
-            for item in reversed(target.info.metadata)
+            for item in reversed(metadata)
             if getattr(item, name, None) is not None
         ),
         None,
@@ -76,16 +105,17 @@ def _number_hint(target: Field, name: str) -> int | float | None:
     return value if isinstance(value, int | float) else None
 
 
-def _length_hint(target: Field, name: str) -> int | None:
-    value = _number_hint(target, name)
+def _length_hint(metadata: list[object], name: str) -> int | None:
+    value = _number_hint(metadata, name)
     return value if isinstance(value, int) else None
 
 
 def _constraints(target: Field) -> FormConstraints:
+    metadata = _constraint_metadata(target)
     pattern = next(
         (
             getattr(item, "pattern", None)
-            for item in reversed(target.info.metadata)
+            for item in reversed(metadata)
             if getattr(item, "pattern", None) is not None
         ),
         None,
@@ -93,12 +123,12 @@ def _constraints(target: Field) -> FormConstraints:
     if isinstance(pattern, Pattern):
         pattern = pattern.pattern
     return FormConstraints(
-        ge=_number_hint(target, "ge"),
-        gt=_number_hint(target, "gt"),
-        le=_number_hint(target, "le"),
-        lt=_number_hint(target, "lt"),
-        min_length=_length_hint(target, "min_length"),
-        max_length=_length_hint(target, "max_length"),
+        ge=_number_hint(metadata, "ge"),
+        gt=_number_hint(metadata, "gt"),
+        le=_number_hint(metadata, "le"),
+        lt=_number_hint(metadata, "lt"),
+        min_length=_length_hint(metadata, "min_length"),
+        max_length=_length_hint(metadata, "max_length"),
         pattern=pattern if isinstance(pattern, str) else None,
     )
 

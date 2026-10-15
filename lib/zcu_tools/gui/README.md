@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-15，共用 Form 與舊 cfg 系統退休
+**Last updated:** 2026-10-15，單層 Form description 與舊 cfg 系統退休
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -207,7 +207,7 @@ cleanup runs.
 
 ## 共用 Qt Form editor
 
-`widgets/form` 擁有 FormEditor 與 `value_widgets.py` 的共用 scalar 控制項 helpers，analysis forms 也使用這些 helpers。Editor 只讀 input schema、preview 與 errors，不求值、不複製 Library，也不擁有 Apply。
+`widgets/form` 擁有 FormEditor 與 `value_widgets.py` 的共用 scalar 控制項 helpers，analysis forms 也使用這些 helpers。Editor 透過 `FormState.describe(path, env)` 讀取單層 description，首次展開才查下一層。Editor 讀取 preview 與 errors，不求值、不複製 Library，也不擁有 Apply。
 
 文字在 Enter 或失去焦點時提交，未解析文字留在 view，宿主提交前檢查 local_parse_errors。唯讀時仍能複製文字、折疊與捲動。選項與 Expression 的呈現、訂閱生命週期見 [FormEditor README](widgets/form/README.md)。
 

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-15，共用 Form／持久 Spec 與 terminal Controller close
+**Last updated:** 2026-10-15，單層 Form description／持久 Spec 與 terminal Controller close
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -242,7 +242,7 @@ pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 align
 
 Shared layers:
 
-- `zcu_tools.gui.form`：Qt-free input、FormState、schema、preview 與 result。
+- `zcu_tools.gui.form`：Qt-free input、FormState、按 model-field path 查詢的單層 description、preview 與 result。
 - `zcu_tools.gui.form_adapter`：core cfg／持久 Spec 推導、FieldMeta 呈現投影與 key-or-inline 轉換。
 - `zcu_tools.gui.widgets.form`：FormEditor 與共用 value-widget helpers。
 - `zcu_tools.gui.session`：context、SoC、device、project settings、predictor、operation
