@@ -15,7 +15,7 @@ from typing import (
     get_origin,
 )
 
-from pydantic import BaseModel, Field, JsonValue, create_model, model_validator
+from pydantic import BaseModel, Field, JsonValue, create_model
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
 from qick.asm_v2 import QickParam
@@ -25,7 +25,6 @@ from zcu_tools.cfg_model import (
     ConfigBase,
     ModuleCfgFactory,
     ModuleSpec,
-    PulseReadoutSpec,
     Slot,
     Template,
     TemplateDef,
@@ -236,7 +235,7 @@ def _copy_spec(
     }
 
 
-_UNSUPPORTED_FIELDS = frozenset({"desc", "mask", "outsel", "ro_ch"})
+_UNSUPPORTED_FIELDS = frozenset({"desc", "mask", "outsel"})
 
 
 def _unsupported(name: str, info: FieldInfo) -> bool:
@@ -343,7 +342,7 @@ def editable_spec(
     QickParam alternatives are removed. FieldMeta becomes Display metadata.
     str-or-model children become tagged ref/name or inline/module wrappers;
     persistent seed and lock paths still name Spec fields, without envelopes.
-    Optional desc, mask, outsel, ro_ch and mux_* fields are removed, so input,
+    Optional desc, mask, outsel and mux_* fields are removed, so input,
     schema and writes cannot set them; validating as the Spec restores defaults.
     The Spec's validators are inherited; the Spec class is not modified.
     """
@@ -403,10 +402,6 @@ def editable_spec(
 
     namespace["options"] = classmethod(options)
     namespace["defaults"] = classmethod(defaults)
-    if issubclass(model, PulseReadoutSpec):
-        namespace["_autoderive_ro_fields"] = model_validator(mode="before")(
-            _derive_readout_input
-        )
     bases = (model,) if issubclass(model, FormModel) else (FormModel, model)
     result = new_class(
         f"{model.__name__}Input", bases, exec_body=lambda ns: ns.update(namespace)
@@ -414,23 +409,6 @@ def editable_spec(
     if not issubclass(result, BaseModel):
         raise TypeError("Editable Spec must be a Pydantic model")
     return result
-
-
-def _derive_readout_input(cls: type[BaseModel], data: object) -> object:
-    """Reuse readout owner derivation while retaining malformed generated leaves."""
-    if not isinstance(data, dict):
-        return data
-    raw = persistent_input(cls, data)
-    derived = PulseReadoutSpec.derive_input_fields(raw)
-    # The owner only changes ro_cfg, whose persistent/input shapes are identical.
-    # Overlay those fields without the supported-field filter: invalid extras
-    # and unchanged malformed wrappers must still reach Pydantic for errors.
-    changed = {
-        name: value
-        for name, value in derived.items()
-        if name not in raw or value != raw[name]
-    }
-    return {**data, **changed}
 
 
 def _template_subtree(

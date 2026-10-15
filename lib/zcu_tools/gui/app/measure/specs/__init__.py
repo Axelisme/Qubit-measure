@@ -7,7 +7,6 @@ from zcu_tools.gui.cfg import CfgSectionSpec
 
 MAIN_PROGRAM_SPEC_POLICY = ProgramSpecPolicy(
     arb_data_choices_source="arb_waveforms",
-    enable_readout_shape_inheritance=True,
 )
 
 
@@ -23,10 +22,6 @@ def _waveform(style: str) -> CfgSectionSpec:
 
 def make_pulse_spec(label: str = "Pulse") -> CfgSectionSpec:
     return _module("pulse", label=label)
-
-
-def make_direct_readout_spec() -> CfgSectionSpec:
-    return _module("readout/direct")
 
 
 def make_pulse_readout_spec() -> CfgSectionSpec:
@@ -83,7 +78,6 @@ __all__ = [
     "make_bath_reset_spec",
     "make_const_waveform_spec",
     "make_cosine_waveform_spec",
-    "make_direct_readout_spec",
     "make_drag_waveform_spec",
     "make_flat_top_waveform_spec",
     "make_gauss_waveform_spec",

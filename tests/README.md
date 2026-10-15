@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-15，measure Form owner 與舊 builder 退休
+**Last updated:** 2026-10-15，measure Form owner、flat Readout 與舊 builder 退休
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -210,12 +210,12 @@ decimated trace 與 branch smoke。效能相關 regression 先找 public simulat
 
 ### Shared GUI cfg import ownership tests
 
-`tests/experiment/cfg_editing/`鎖定closed 7 module + 6 waveform discriminator/label/order、program/v2
+`tests/experiment/cfg_editing/`鎖定closed 6 module + 6 waveform discriminator/label/order、program/v2
 runtime parity、nested allowed sets、deep-fresh mutable containers、main及default policy差異、
 strict root-only Mapping/typed inspection、missing/non-string/unknown。materializer tests 另鎖 spec/value 完整對齊、scalar
 missing、nested complete default、required reference `allowed[0]`、missing style Const、explicit unknown與
 Bath ghost rejection。`tests/gui/cfg/test_materialization.py`只測domain-free Spec walk與policy ports；main
-全7+6由measure app cfg tests鎖定。app binding/lowering tests鎖
+全6+6由measure app cfg tests鎖定。app binding/lowering tests鎖
 shape lookup、converter與`to_dict()`精確call count；role tests鎖registration shape/value count、Controller
 value→shape順序，以及既有26-entry metadata/value golden。
 
