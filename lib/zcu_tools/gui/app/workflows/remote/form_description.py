@@ -58,11 +58,13 @@ class FormFieldReply(TypedDict):
     choices is a detached legal-value list or null when undeclared. options is
     the effective ordered selector list, null for non-selectors, [] for an empty
     override. selected is the core's first matching index, or null for missing/
-    no-match input. selection_fixed means the annotation permits one selector
-    branch at this level, without freezing inner choices; it does not depend on
-    menu size and carries no value. fixed says the declaration/selection fixes
-    the leaf or complete option value; fixed_value is meaningful only when fixed,
-    otherwise null. Both flags may be true. constraints carries leaf hints.
+    no-match input. selection_fixed means the annotation permits one non-null
+    selector branch at this level, without freezing inner choices. Null only
+    enables/disables the field; it is not another branch, even while disabled.
+    selection_fixed does not depend on menu size and carries no value.
+    fixed says the declaration/selection fixes the leaf or complete option value;
+    fixed_value is meaningful only when fixed, otherwise null. Both flags may be
+    true. constraints carries leaf hints.
     """
 
     path: list[str]

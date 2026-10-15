@@ -97,8 +97,9 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "or null. Full paths retain flattened wrappers. hidden/group/collapsed "
         "only affect presentation; constraints are hints, not validation. "
         "can_expand is structural and may expand to no children. selection_fixed "
-        "fixes only this branch, not inner choices; fixed/fixed_value fixes the "
-        "complete value. Invalid paths return invalid_params with reason=form_path "
+        "means one non-null selector branch, not frozen inner choices. Null is "
+        "enable/disable, not another branch, even while disabled. fixed/fixed_value "
+        "fixes the complete value. Invalid paths return invalid_params with reason=form_path "
         "and data.form_path; declaration failures remain controller_error. "
         "Uses workflow.form's run target, fixed env and non-submitting batch rules.",
         params=(
