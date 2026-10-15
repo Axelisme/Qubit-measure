@@ -246,12 +246,14 @@ def test_preparation_failure_retains_partial_handle_and_saves_files(
     source.result.signal = source.result.signal[:1]
     try:
         exp.save_run(
-            point, source=source, figures={"fit": saving_figure()},
+            point,
+            source=source,
+            figures={"fit": saving_figure()},
             analysis=(analysis_document(),),
         )
     except PartialSaveError as error:
         partial = error
-    except Exception as error:
+    except (TypeError, ValueError) as error:
         pytest.fail(f"Data preparation aborted independent files: {error}")
     else:
         pytest.fail("Invalid data must be reported as a partial save")

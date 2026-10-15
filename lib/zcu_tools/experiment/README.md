@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-13，Run mapping 型別與 core cfg 驗證
+**Last updated:** 2026-10-15，固定 Artifact items 與逐項準備失敗
 
 `experiment/` 定義實驗介面、Result 與保存資料之間的映射，以及實驗 cfg 的支援機制。這個位置不表示其現有程式碼均與 QICK 無關。`cfg_assembler.py` 只提供 Run mapping 的共用值型別，`utils/sweep.py` 使用 `program.v2` 的 `SweepCfg`。程式指令的建構與 acquire 由 [program/v2](../program/v2/README.md) 及 [experiment/v2/runtime](v2/runtime/README.md) 接合。
 
@@ -10,7 +10,7 @@
 - `base.py` 的 `PersistableExperiment` 透過 `AXES_SPEC` 提供 stateless `save(source, destination)`／`load(source)`，路徑使用本機 `Path`，公開介面不提供 server_ip／port。保存接明確 `RunRecord`，cfg 缺失時拒絕。載入回傳 `RunRecord`。Missing cfg 或非 envelope comment 使 cfg=None；recognized envelope 欄位型別錯誤報 ValueError。合法 envelope 的 cfg object 未通過 cfg model 時才 warning，並保留有效資料。核心不保存上次結果；NotebookExperiment 管理各實驗的便利引用，NotebookAdapter 只綁定可重用環境。
 - `native_persistence.py` 的 `prepare_run_data` 將明確 RunRecord/spec 映射為 `PreparedRunData`，提供同源 cfg 與 SI payload 給 native、Labber writer。Preparation 不做 I/O，保留 raw comment、single/grouped representation，驗證 typed cfg/result、schema 與 shape，不增加 Labber common-grid 限制。`PersistableExperiment.persistence_spec()` 公開 instance 的保存宣告，缺宣告明確失敗。`load_run_with_metadata` 讀回 typed record 與完整歷史 RunMetadata，延續 run 身分、時間、completion、context 與 provenance；舊 `load_run` 仍只回 snapshot。
 - `native_persistence.py` 的 `native_schemas` 由同一宣告投影出 datafile disk-unit schemas，供離線 caller 使用，不要求 caller 重組 axes／variable mapping。`save_run`／`load_run` 與 instance 同名入口使用顯式 AxesSpec／GroupedAxesSpec。框架把 Result 映射成 SI payload，再由 datafile 驗證與讀寫 native HDF5。Loader 核對 tag、cfg type 與 schema major，投影宣告的 variables 與 cfg，回傳 typed RunRecord 和歷史 RunSnapshot。Unknown cfg keys 留在 generic StoredRun，不塞進 typed cfg。明示的本機單檔 `save`／`load` 保留 Labber API，不猜 native 格式；GUI Load Data 使用 native `load_run_with_metadata`，bound-point 保存使用共用 run saver。
-- `run_saving.py` 的 `save_artifacts` 編排一次保存。正規資料寫入 `runs/<run_id>/data.h5`，每次另產 Labber 新檔。同 run 重存覆寫 native、PNG 與窗格 JSON，不覆寫 Labber。DataMember 共用同一 PreparedRunData，FileMember 交原生 Figure 或 AnalysisDocument，每成員編碼一次，對等路徑共用 bytes。輸出與編碼失敗各自隔離，每次呼叫回傳最新 SaveReport 並追加 saved 事件。Ledger 失敗直接傳播，已寫檔案保留，不 retry 或 rollback。`PersistableRecordExperiment` 結合 record core 與 persistence_spec，供正式 Notebook caller 保留 cfg／Result 配對。
+- `artifacts` 的 `save_artifacts` 編排一次保存。正規資料寫入 `runs/<run_id>/data.h5`，每次另產 Labber 新檔。同 run 重存覆寫 native、PNG 與窗格 JSON，不覆寫 Labber。固定 DataItem 共用同一 PreparedRunData，FigureItem 交原生 Figure，AnalysisItem 交 AnalysisDocument。框架每項編碼一次，對等路徑共用 bytes。DataItem.from_run 將 typed record 的準備錯誤保留為該項目的失敗，不假造 cfg；GUI producer hook 的準備錯誤也交給同一保存流程。輸出與編碼失敗各自隔離，每次呼叫回傳最新 SaveReport 並追加 saved 事件。Ledger 失敗直接傳播，已寫檔案保留，不 retry 或 rollback。共用核心不依賴 GUI 或 Qt，由 artifacts-core-no-ui import contract 約束。`PersistableRecordExperiment` 結合 record core 與 persistence_spec，供正式 Notebook caller 保留 cfg／Result 配對。
 - `acquisition.py` 集中 adapter 的 `AcquisitionEvidence`、UTC run identity 與兩種 capture。
   `capture_software_provenance` 只讀 package／Git／host 與已有的 SoC cached config，不查儀器。
   `capture_device_snapshot(devices)` 由 Run owner 在下述 checkpoint 呼叫，讀取全部 connected drivers 的設定並轉成隔離 JSON。

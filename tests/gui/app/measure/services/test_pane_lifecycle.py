@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ContextReadiness,

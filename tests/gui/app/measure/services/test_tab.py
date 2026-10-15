@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from matplotlib.figure import Figure
 from qtpy.QtWidgets import QApplication
-from zcu_tools.experiment.run_saving import ArtifactRef, SaveReport
+from zcu_tools.experiment.artifacts import ArtifactRef, SaveReport
 from zcu_tools.gui.app.measure.adapter import (
     ContextReadiness,
     SessionEnv,

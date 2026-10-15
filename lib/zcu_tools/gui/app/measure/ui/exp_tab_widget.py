@@ -29,7 +29,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.experiment.run_saving import ArtifactRef
+from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.experiment.run_saving import ArtifactRef
+from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.gui.app.measure.artifact_tracker import (
     ArtifactSectionSnapshot,
     ArtifactSnapshot,

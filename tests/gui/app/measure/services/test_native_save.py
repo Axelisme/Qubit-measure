@@ -17,7 +17,7 @@ from zcu_tools.datafile import (
     load_run_data,
 )
 from zcu_tools.experiment import RunRecord
-from zcu_tools.experiment.run_saving import ArtifactRef
+from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.artifact_tracker import (
     ArtifactSectionSnapshot,
@@ -73,13 +73,15 @@ def test_data_preparation_failure_reports_outputs_and_saves_other_artifacts(
         result.signal = result.signal[:1]
     source = RunRecord(cfg=None if failure == "missing_cfg" else cfg, result=result)
     session.state.update_tab_result(
-        "tab", source, metadata=session.metadata,
+        "tab",
+        source,
+        metadata=session.metadata,
         parameters=session.state.get_tab("tab").run.parameters,
     )
     declare_panes(session)
     try:
         report = session.save_artifacts()
-    except Exception as error:
+    except (TypeError, ValueError) as error:
         pytest.fail(f"Data preparation aborted independent artifacts: {error}")
     data = [item for item in report.outputs if item.key.member == "data"]
     other = [item for item in report.outputs if item.key.member != "data"]
@@ -554,7 +556,7 @@ def test_save_encoding_and_io_complete_on_owner_with_member_failure_isolation(
     native_session: NativeSaveSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from matplotlib.figure import Figure
-    from zcu_tools.experiment import run_saving
+    from zcu_tools.experiment.artifacts import saving as artifact_saving
     from zcu_tools.gui.app.measure.services import save as saving
 
     session = native_session
@@ -563,7 +565,7 @@ def test_save_encoding_and_io_complete_on_owner_with_member_failure_isolation(
     encoded: list[Figure] = []
     io_threads: list[int] = []
     render = saving.render_save_figure_png
-    native_write = run_saving.save_run_data
+    native_write = artifact_saving.save_run_data
 
     def encode(figure: Figure) -> bytes:
         assert threading.get_ident() == owner_id
@@ -592,7 +594,7 @@ def test_save_encoding_and_io_complete_on_owner_with_member_failure_isolation(
         )
 
     monkeypatch.setattr(saving, "render_save_figure_png", encode)
-    monkeypatch.setattr(run_saving, "save_run_data", write)
+    monkeypatch.setattr(artifact_saving, "save_run_data", write)
     completed = session.save_artifacts()
     assert encoded == [plots["fit"], plots["residual"]]
     assert io_threads and all(thread == owner_id for thread in io_threads)
@@ -712,7 +714,7 @@ def test_analysis_replacement_and_new_run_retire_saved_sections(
 def test_resave_all_failed_replaces_previous_success_evidence(
     native_session: NativeSaveSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from zcu_tools.experiment import run_saving
+    from zcu_tools.experiment.artifacts import saving as artifact_saving
 
     session = native_session
     first = session.save()
@@ -723,7 +725,7 @@ def test_resave_all_failed_replaces_previous_success_evidence(
     def fail_labber(*args: object, **kwargs: object) -> None:
         raise OSError("Labber denied")
 
-    monkeypatch.setattr(run_saving, "write_labber", fail_labber)
+    monkeypatch.setattr(artifact_saving, "write_labber", fail_labber)
     second = session.save()
     assert [item.status for item in second.outputs] == ["failed", "failed"]
     sections = session.state.get_artifact_snapshots("tab")

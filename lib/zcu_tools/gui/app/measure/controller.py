@@ -65,7 +65,7 @@ from .ui.interactive_frontend import InteractiveFrontend, InteractiveFrontendEnv
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
-    from zcu_tools.experiment.run_saving import SaveReport
+    from zcu_tools.experiment.artifacts import SaveReport
     from zcu_tools.gui.cfg.binding import SettableTarget
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
     from zcu_tools.gui.session.aliases import AliasRow

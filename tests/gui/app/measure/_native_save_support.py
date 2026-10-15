@@ -12,9 +12,9 @@ from zcu_tools.datafile import (
     RunSnapshot,
     SoftwareProvenance,
 )
+from zcu_tools.experiment.artifacts import ArtifactRef, SaveReport
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.run_saving import ArtifactRef, SaveReport
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,

@@ -15,9 +15,10 @@ from zcu_tools.datafile import (
     load_run_data,
 )
 from zcu_tools.experiment import (
+    AnalysisItem,
     ArtifactRef,
-    DataMember,
-    FileMember,
+    DataItem,
+    FigureItem,
     RunRecord,
     SaveArtifact,
     prepare_run_data,
@@ -76,15 +77,15 @@ def artifacts() -> tuple[SaveArtifact, ...]:
     return (
         SaveArtifact(
             ArtifactRef("run", "measurement_data"),
-            (DataMember(ArtifactKey("run", "measurement_data", "data"), prepared),),
+            (DataItem(ArtifactKey("run", "measurement_data", "data"), prepared),),
         ),
         SaveArtifact(
             ArtifactRef("analysis", "results"),
             (
-                FileMember(
+                FigureItem(
                     ArtifactKey("analysis", "results", "figure", "fit"), saving_figure()
                 ),
-                FileMember(
+                AnalysisItem(
                     ArtifactKey("analysis", "results", "analysis", "analysis"),
                     document,
                 ),
@@ -169,8 +170,8 @@ def test_nonfinite_analysis_isolates_the_member_and_records_other_outputs(
         SaveArtifact(
             ArtifactRef("analysis", "results"),
             (
-                FileMember(ArtifactKey("analysis", "results", "figure", "fit"), figure),
-                FileMember(
+                FigureItem(ArtifactKey("analysis", "results", "figure", "fit"), figure),
+                AnalysisItem(
                     ArtifactKey("analysis", "results", "analysis", "analysis"), document
                 ),
             ),
@@ -203,7 +204,7 @@ def test_injected_figure_encoder_runs_once_and_shares_png_bytes(tmp_path: Path) 
         member.content
         for artifact in selected
         for member in artifact.members
-        if isinstance(member, FileMember) and isinstance(member.content, Figure)
+        if isinstance(member, FigureItem)
     )
     calls: list[Figure] = []
     encoded: list[bytes] = []
@@ -243,7 +244,7 @@ def test_injected_encoder_failure_leaves_data_and_json_saved(tmp_path: Path) -> 
         member.content
         for artifact in selected
         for member in artifact.members
-        if isinstance(member, FileMember) and isinstance(member.content, Figure)
+        if isinstance(member, FigureItem)
     )
     calls: list[Figure] = []
 
@@ -286,17 +287,18 @@ def test_member_contract_rejects_invalid_identity_before_output_attempts() -> No
     with pytest.raises(ValueError, match="section|path|segment"):
         ArtifactRef("..", "bad")
     with pytest.raises(ValueError, match="figure|analysis|member"):
-        FileMember(ArtifactKey("run", "measurement_data", "data"), saving_figure())
-    document = AnalysisDocument(pane="analysis", parameters={}, summary={})
-    with pytest.raises(TypeError, match="Figure|figure|content"):
-        FileMember(ArtifactKey("analysis", "results", "figure", "fit"), document)
-    with pytest.raises(TypeError, match="AnalysisDocument|analysis|content"):
-        FileMember(
-            ArtifactKey("analysis", "results", "analysis", "analysis"), saving_figure()
-        )
-    member = FileMember(
+        FigureItem(ArtifactKey("run", "measurement_data", "data"), saving_figure())
+    member = FigureItem(
         ArtifactKey("analysis", "results", "figure", "fit"), saving_figure()
     )
+    document = AnalysisDocument(pane="analysis", parameters={}, summary={})
+    analysis = AnalysisItem(
+        ArtifactKey("analysis", "results", "analysis", "analysis"), document
+    )
+    with pytest.raises(TypeError, match="Figure|figure|content"):
+        replace(member, content=document)
+    with pytest.raises(TypeError, match="AnalysisDocument|analysis|content"):
+        replace(analysis, content=saving_figure())
     with pytest.raises(ValueError, match="matching|section|artifact|ref"):
         SaveArtifact(ArtifactRef("post_analysis", "results"), (member,))
     with pytest.raises(ValueError, match="duplicate|unique"):
