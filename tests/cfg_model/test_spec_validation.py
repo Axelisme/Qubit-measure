@@ -4,7 +4,6 @@ from types import MappingProxyType
 
 import numpy as np
 import pytest
-from pydantic import JsonValue
 from qick.asm_v2 import QickParam
 from zcu_tools.cfg_model import (
     ArbWaveformCfg,
@@ -39,55 +38,6 @@ def test_waveform_spec_preserves_concrete_ramp_key_and_isolates_input():
     assert spec.raise_waveform == "waveforms/ramp"
     spec.length = 3.0
     assert raw["length"] == 2.0
-
-
-@pytest.mark.parametrize("mode", ["derive", "explicit", "ref", "partial"])
-def test_public_readout_input_derivation_is_detached_and_preserves_leaves(
-    mode: str,
-) -> None:
-    raw: dict[str, JsonValue] = {
-        "pulse_cfg": {"ch": 2, "freq": 100.0, "gain": "invalid"},
-        "ro_cfg": {"ro_ch": 0},
-    }
-    if mode == "explicit":
-        raw["ro_cfg"] = {"ro_ch": 0, "gen_ch": 3, "ro_freq": 150.0}
-    if mode == "ref":
-        raw["pulse_cfg"] = "$unknown.pulse"
-    if mode == "partial":
-        raw.pop("ro_cfg")
-    assert hasattr(PulseReadoutSpec, "derive_input_fields"), (
-        "Missing public owner derivation"
-    )
-    derived = PulseReadoutSpec.derive_input_fields(raw)
-    assert derived["pulse_cfg"] == raw["pulse_cfg"]
-    if mode == "derive":
-        assert derived["ro_cfg"] == {"ro_ch": 0, "gen_ch": 2, "ro_freq": 100.0}
-        assert raw["ro_cfg"] == {"ro_ch": 0}
-    else:
-        assert derived == raw
-    assert derived is not raw
-
-
-def test_module_spec_derives_inline_readout_fields_without_mutating_input():
-    raw: CfgInputMap = {
-        "type": "readout/pulse",
-        "pulse_cfg": {
-            "type": "pulse",
-            "ch": 2,
-            "nqz": 1,
-            "freq": 4000.0,
-            "gain": 0.2,
-            "waveform": "waveforms/envelope",
-        },
-        "ro_cfg": {"type": "readout/direct", "ro_ch": 0, "ro_length": 1.0},
-    }
-
-    spec = module_spec_from_raw(raw)
-
-    assert isinstance(spec, PulseReadoutSpec)
-    assert spec.ro_cfg.gen_ch == 2
-    assert spec.ro_cfg.ro_freq == 4000.0
-    assert raw["ro_cfg"] == {"type": "readout/direct", "ro_ch": 0, "ro_length": 1.0}
 
 
 @pytest.mark.parametrize("readonly_root", [False, True])
@@ -127,47 +77,31 @@ def test_waveform_spec_validates_readonly_mappings_without_aliases(
 
 @pytest.mark.parametrize("readonly_root", [False, True])
 def test_module_spec_validates_readonly_mappings_without_aliases(readonly_root: bool):
-    pulse: dict[str, CfgInputValue] = {
-        "type": "pulse",
-        "ch": 2,
-        "nqz": 1,
-        "freq": 4000.0,
-        "gain": 0.2,
-        "waveform": "C1.waveforms.envelope",
-    }
-    readout: dict[str, CfgInputValue] = {
-        "type": "readout/direct",
-        "ro_ch": 0,
-        "ro_length": 1.0,
-    }
+    waveform: dict[str, CfgInputValue] = {"style": "const", "length": 0.5}
     fields: dict[str, CfgInputValue] = {
         "type": "readout/pulse",
-        "pulse_cfg": MappingProxyType(pulse),
-        "ro_cfg": MappingProxyType(readout),
+        "gen_ch": 2,
+        "nqz": 1,
+        "freq": 400.0,
+        "gain": 0.2,
+        "ro_ch": 0,
+        "ro_length": 1.0,
+        "waveform": MappingProxyType(waveform),
     }
     raw: CfgInputMap = MappingProxyType(fields) if readonly_root else fields
-
     spec = module_spec_from_raw(raw)
-
     assert isinstance(spec, PulseReadoutSpec)
-    assert isinstance(spec.pulse_cfg, PulseSpec)
-    assert spec.pulse_cfg.freq == 4000.0
-    assert spec.pulse_cfg.waveform == "C1.waveforms.envelope"
-    assert spec.ro_cfg.gen_ch == 2
-    assert spec.ro_cfg.ro_freq == 4000.0
-    assert readout == {"type": "readout/direct", "ro_ch": 0, "ro_length": 1.0}
-    pulse["freq"] = 5000.0
-    assert spec.pulse_cfg.freq == 4000.0
-    assert spec.ro_cfg.ro_freq == 4000.0
-    spec.pulse_cfg.gain = 0.6
+    assert isinstance(spec.waveform, ConstWaveformCfg)
+    assert spec.freq == 400.0
+    waveform["length"] = 0.75
+    fields["freq"] = 500.0
+    assert spec.freq == 400.0
+    assert spec.waveform.length == 0.5
+    spec.gain = 0.6
     fresh = module_spec_from_raw(raw)
     assert isinstance(fresh, PulseReadoutSpec)
-    assert isinstance(fresh.pulse_cfg, PulseSpec)
-    assert fresh.pulse_cfg.gain == 0.2
-    assert fresh.pulse_cfg.freq == 5000.0
-    assert fresh.ro_cfg.ro_freq == 5000.0
-    assert fresh.pulse_cfg.waveform == "C1.waveforms.envelope"
-    assert pulse["gain"] == 0.2
+    assert isinstance(fresh.waveform, ConstWaveformCfg)
+    assert (fresh.freq, fresh.gain, fresh.waveform.length) == (500.0, 0.2, 0.75)
 
 
 @pytest.mark.parametrize(

@@ -70,6 +70,7 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
         z=ZSpec("signals2D", "Signal", "a.u."),
         result_type=RB_Result,
         cfg_type=RBCfg,
+        cfg_schema_version="2.0",
         tag="twotone/ge/rb",
     )
 

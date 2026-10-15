@@ -154,7 +154,7 @@ analyze result 加上 current parameter context 補齊且皆為 finite number �
 ModuleLibrary `readout_dpm`，並以 writeback `role_id="readout_dpm"` 標示這個
 readout role proposal；缺值或 non-finite 值只略過 module writeback。
 `readout_dpm` 以 `source.cfg.modules.readout` 作為 template，將 readout
-pulse/readout 頻率設為 `best_ro_freq`、pulse gain 設為 `best_ro_gain`、pulse
+`freq` 設為 `best_ro_freq`、`gain` 設為 `best_ro_gain`、
 waveform length 設為 `best_ro_length + READOUT_DPM_PULSE_TAIL_US`（0.1 us tail）、
 ADC readout length 設為 `best_ro_length`。
 
@@ -163,7 +163,7 @@ ADC readout length 設為 `best_ro_length`。
 ModuleLibrary `readout_rf`，並以 writeback `role_id="readout"` 標示它是 Pulse
 readout role 的 proposal；`readout_rf` 是 target name，不是新的 role id。
 `readout_rf` 以該 snapshot readout 作為 template，只用 fitted `r_f` 覆寫
-`pulse_cfg.freq` / `ro_cfg.ro_freq`，gain、waveform length/style、channels、ADC
+平鋪的 `freq`，gain、waveform length/style、channels、ADC
 readout length、trigger timing 等欄位都沿用 snapshot。`source.cfg is None` 或
 readout 不是 pulse readout 時，module writeback graceful skip，只保留 parameter items。
 

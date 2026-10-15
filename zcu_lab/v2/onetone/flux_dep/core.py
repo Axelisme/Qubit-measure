@@ -90,7 +90,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
         result_type=FluxDepResult,
         cfg_type=FluxDepCfg,
         tag="onetone/flux_dep",
-        cfg_schema_version="2.0",  # dev mapping replaced by named flux_dev field
+        cfg_schema_version="3.0",
     )
 
     def run(
@@ -113,8 +113,8 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
             "freq",
             {
                 "soccfg": soccfg,
-                "gen_ch": modules.readout.pulse_cfg.ch,
-                "ro_ch": modules.readout.ro_cfg.ro_ch,
+                "gen_ch": modules.readout.gen_ch,
+                "ro_ch": modules.readout.ro_ch,
             },
         )
 

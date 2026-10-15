@@ -5,8 +5,8 @@ from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 # Options carry selection values, fields and commands; ref/inline input is
 # explicitly tagged and branch defaults never depend on a previous draft.
-WIRE_VERSION = 4
-GUI_VERSION = 4
+WIRE_VERSION = 5
+GUI_VERSION = 5
 
 _RUN_ID = ParamSpec(
     "run_id",

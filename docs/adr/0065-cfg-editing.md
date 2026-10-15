@@ -16,7 +16,7 @@ Library、Inspect 與 writeback 也使用 FormState／FormEditor，但各自持�
 
 共用 `gui.form` 擁有 input、schema、FormState、preview、result 與錯誤。`widgets/form` 的 FormEditor 依 schema 顯示欄位與選項，不解讀 library 或實驗語義。`gui.form_adapter` 從 core cfg 與持久 Spec 生成 Form，集中 FieldMeta 呈現投影、key-or-inline wrappers 與屏蔽欄位政策。Form core 不讀 FieldMeta。
 
-Library entry 表單由 session 擁有，固定 root 的具體 Spec family。初始 input 與提交都保留 child key，不能把既有 pulse 切成 readout；換 family 要新建 entry。Optional None 維持缺席。生成器略過選填的 desc 與 ro_ch，提交時以 Spec 預設補回，不保留原值；沒有預設的必填欄位仍可編輯。
+Library entry 表單由 session 擁有，固定 root 的具體 Spec family。初始 input 與提交都保留 child key，不能把既有 pulse 切成 readout；換 family 要新建 entry。Optional None 維持缺席。生成器略過選填的 desc，提交時以 Spec 預設補回，不保留原值；沒有預設的必填欄位仍可編輯。
 
 None、library keys 與各 Inline kind 在同一個合併下拉。Key 只顯示名稱，不展開唯讀 descendants。普通選 Inline 使用 fresh defaults，不繼承舊分支；明確的 to_inline 指令才從固定 library 複製內容。Advanced 群組預設折疊。Expression 只適用於文字欄位，下拉與勾選欄位不求值。
 
@@ -46,7 +46,7 @@ RecipeSession.open_tab 的公開 aliases/reuse 用法不變。新 tab 與 reuse 
 
 Form Slot 使用公開 ModuleRef/ModuleInline input。Key branch 保存 `{kind: ref, name: actual_library_key}`，inline branch 保存 `{kind: inline, module: Spec input}`。Nested key-or-inline 欄位用普通字串作 key。RecipeTab.use_library 寫實際 key，不建立舊 __ref editing intent。Locked Slot 只有 inline branch，use_library 在送 RPC 前拒絕選 key。
 
-RecipeTab.read_field 回傳具名 RecipeFormField，包含 authored input、input_present、ordinary value、key/inline mode、actual key、Form lock、目前 child field names 與 directed errors。它不投影 CfgSchema kind，也不承諾 ref descendants 唯讀。Inline model 的路徑包含 module，例如 `modules.readout.module.pulse_cfg.module.freq`。Range count 的路徑是 n，set_sweep 的公開 expts 參數對到這個葉欄位。
+RecipeTab.read_field 回傳具名 RecipeFormField，包含 authored input、input_present、ordinary value、key/inline mode、actual key、Form lock、目前 child field names 與 directed errors。它不投影 CfgSchema kind，也不承諾 ref descendants 唯讀。Inline model 的路徑包含 module，例如 `modules.readout.module.freq`。Range count 的路徑是 n，set_sweep 的公開 expts 參數對到這個葉欄位。
 
 實驗 cfg 依 [[0073]] 使用具名裝置欄位，例如 flux_dev、jpa_flux_dev，不再保存 dev role mapping。Form 的 AliasName 在 Open／Reset 解析 direct 名稱。使用 flux 的 cfg 必填 flux_unit，值為 A、V 或 native。Core 與 Notebook 不提供隱含 default，GUI 的初始值為 A。Recipe helper 只比 cached unit，成功後寫 caller 指定的具名裝置欄位與獨立 flux_unit，不換算、不連線或 setup。
 

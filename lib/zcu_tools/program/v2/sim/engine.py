@@ -63,11 +63,7 @@ from numpy.polynomial.legendre import leggauss
 from numpy.typing import NDArray
 
 from zcu_tools.program.acquisition import CancelFlagProtocol
-from zcu_tools.program.v2.modules.readout import (
-    AbsReadout,
-    DirectReadout,
-    PulseReadout,
-)
+from zcu_tools.program.v2.modules.readout import AbsReadout, PulseReadout
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 from . import bloch
@@ -636,54 +632,33 @@ class SimEngine:
         s_g = s21(self.sim, freqs, rf_g)
         s_e = s21(self.sim, freqs, rf_e)
 
-        readout_gain = (
-            lowered.readout.readout_gain
-            if lowered.readout.pulse_cfg is not None
-            else None
+        readout_gain = lowered.readout.readout_gain
+        n_crit = critical_photon_number(f_qubit_ghz, self.sim.bare_rf, self.sim.g)
+        backaction = readout_backaction(
+            readout_gain,
+            n_crit,
+            self.sim.readout_photons_per_gain2,
+            pulse_length_us=lowered.readout.pulse_length_us,
+            ro_length_us=lowered.readout.ro_length_us,
+            decay_rate_per_us=self.sim.readout_decay_rate_per_us,
+            decay_threshold_ratio=self.sim.readout_decay_threshold_ratio,
+            decay_exponent=self.sim.readout_decay_exponent,
         )
-        if readout_gain is None:
-            drive_amplitude = 1.0
-            gain_noise_drive_amplitude = 0.0
-            readout_q_signal_avg = 1.0
-            readout_q_post = 1.0
-        else:
-            pulse_length_us = lowered.readout.pulse_length_us
-            if pulse_length_us is None:
-                raise RuntimeError(
-                    "PulseReadout lowering did not resolve pulse_length_us"
-                )
-            n_crit = critical_photon_number(f_qubit_ghz, self.sim.bare_rf, self.sim.g)
-            backaction = readout_backaction(
-                readout_gain,
-                n_crit,
-                self.sim.readout_photons_per_gain2,
-                pulse_length_us=pulse_length_us,
-                ro_length_us=lowered.readout.ro_length_us,
-                decay_rate_per_us=self.sim.readout_decay_rate_per_us,
-                decay_threshold_ratio=self.sim.readout_decay_threshold_ratio,
-                decay_exponent=self.sim.readout_decay_exponent,
-            )
-            drive_amplitude = readout_gain
-            gain_noise_drive_amplitude = abs(readout_gain)
-            readout_q_signal_avg = backaction.q_signal_avg
-            readout_q_post = backaction.q_post
-        s_e_initial = s_g + readout_q_signal_avg * (s_e - s_g)
-        signal_sample_times = sample_times_us
-        if lowered.readout.pulse_cfg is not None:
-            signal_sample_times = (
-                sample_times_us
-                + lowered.readout.trig_offset_us
-                - self.sim.timeFly
-                - lowered.readout.pulse_pre_delay_us
-            )
-        signal_scale = drive_amplitude * effective_signal_samples(
-            lowered.readout.pulse_cfg,
+        s_e_initial = s_g + backaction.q_signal_avg * (s_e - s_g)
+        signal_sample_times = (
+            sample_times_us
+            + lowered.readout.trig_offset_us
+            - self.sim.timeFly
+            - lowered.readout.pulse_pre_delay_us
+        )
+        signal_scale = readout_gain * effective_signal_samples(
+            lowered.readout.generator_cfg,
             lowered.readout.pulse_length_us,
             signal_sample_times,
         )
         noise_std_scale = noise_std_sample_scale(n_samples)
-        gain_noise_std_scale = gain_noise_drive_amplitude * effective_noise_samples(
-            lowered.readout.pulse_cfg,
+        gain_noise_std_scale = abs(readout_gain) * effective_noise_samples(
+            lowered.readout.generator_cfg,
             lowered.readout.pulse_length_us,
             signal_sample_times,
         )
@@ -694,7 +669,7 @@ class SimEngine:
             signal_scale=signal_scale,
             noise_std_scale=noise_std_scale,
             gain_noise_std_scale=gain_noise_std_scale,
-            readout_q_post=readout_q_post,
+            readout_q_post=backaction.q_post,
         )
 
     def _point_evolution_props(
@@ -1059,12 +1034,7 @@ class SimEngine:
 
     # ------------------------------------------------------ decimated assembly
     def _readout_module(self) -> AbsReadout:
-        """The single readout module in the program (the decimated source).
-
-        Decimated/lookback timelines have exactly one readout; more than one (or
-        none) is unsupported, matching the accumulated single-channel invariant.
-        """
-
+        """Return the single decimated source; missing or multiple sources fail."""
         readouts = [m for m in self.program.modules if isinstance(m, AbsReadout)]
         if len(readouts) != 1:
             raise NotImplementedError(
@@ -1104,24 +1074,16 @@ class SimEngine:
         v_final = bloch.evolve(bloch.ground_state(equilibrium_pop), lowered.segments)
         p_e = float(np.clip(bloch.excited_population(v_final), 0.0, 1.0))
 
-        # Readout window geometry from the single readout module + compiled ro_chs.
         readout = self._readout_module()
-        if isinstance(readout, PulseReadout):
-            ro_pulse_cfg = readout.cfg.pulse_cfg
-            ro_cfg = readout.cfg.ro_cfg
-        elif isinstance(readout, DirectReadout):
-            raise NotImplementedError(
-                "SimEngine decimated path requires a PulseReadout (its pulse_cfg "
-                "defines the readout envelope shape); a DirectReadout has no pulse "
-                "envelope to render in the time domain"
-            )
-        else:
+        if not isinstance(readout, PulseReadout):
             raise NotImplementedError(
                 f"unsupported readout module {type(readout).__name__} for decimated"
             )
-
-        pulse_length = _resolve_scalar(ro_pulse_cfg.waveform.length, {}, point)
-        trig_offset = _resolve_scalar(ro_cfg.trig_offset, {}, point)
+        ro_pulse_cfg = lowered.readout.generator_cfg
+        # Preserve decimated model A's requested scalar geometry. Accumulated
+        # integration uses the hardware-quantized lengths from the lowered plan.
+        pulse_length = _resolve_scalar(readout.cfg.waveform.length, {}, point)
+        trig_offset = _resolve_scalar(readout.cfg.trig_offset, {}, point)
         n_crit = critical_photon_number(f_qubit_ghz, self.sim.bare_rf, self.sim.g)
         backaction = readout_backaction(
             lowered.readout.readout_gain,

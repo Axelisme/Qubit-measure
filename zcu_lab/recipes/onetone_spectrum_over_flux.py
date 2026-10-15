@@ -15,7 +15,7 @@ from .helpers import (
     FrequencySweepCalibration,
     set_flux_sweep,
     set_frequency_sweep,
-    set_nested_module_scalar,
+    set_module_scalar,
     use_flux_device,
 )
 
@@ -100,12 +100,10 @@ def onetone_spectrum_over_flux(  # noqa: PLR0913 - Preserve typed tool keywords.
     )
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
-    set_nested_module_scalar(
+    set_module_scalar(
         tab,
         "modules.readout",
-        "modules.readout.module.pulse_cfg",
-        RecipeFieldEdit("modules.readout.module.pulse_cfg.module.gain", gain),
-        ("pulse_cfg", "gain"),
+        RecipeFieldEdit("modules.readout.module.gain", gain),
     )
     tab.set("reps", reps)
     tab.set("rounds", rounds)
@@ -163,7 +161,7 @@ DEFINITION = RecipeDefinition(
     adapter_name="onetone/flux_dep",
     summary_parameters=(
         SummaryParameter("frequency_sweep", "sweep.freq", "MHz"),
-        SummaryParameter("gain", "modules.readout.module.pulse_cfg.module.gain"),
+        SummaryParameter("gain", "modules.readout.module.gain"),
         SummaryParameter("readout_ref", "modules.readout"),
         SummaryParameter("reps", "reps"),
         SummaryParameter("rounds", "rounds"),

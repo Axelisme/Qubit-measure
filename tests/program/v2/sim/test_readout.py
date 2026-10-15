@@ -41,7 +41,6 @@ from zcu_tools.program.v2.sim.readout import (
     mixed_signal,
     noise_std_sample_scale,
     readout_backaction,
-    readout_envelope_samples,
     readout_photon_ratio,
     resonator_freqs,
     s21,
@@ -240,9 +239,6 @@ class TestIntegrationHelpers:
         with pytest.raises(ValueError, match=error):
             critical_photon_number(f_qubit, resonator, g)
 
-    def test_readout_photon_ratio_defaults_direct_readout_to_zero(self) -> None:
-        assert readout_photon_ratio(None, n_crit=20.0, photons_per_gain2=20.0) == 0.0
-
     def test_readout_photon_ratio_uses_explicit_gain_calibration(self) -> None:
         assert readout_photon_ratio(0.5, n_crit=20.0, photons_per_gain2=20.0) == (
             pytest.approx(0.25)
@@ -392,14 +388,6 @@ class TestIntegrationHelpers:
                 decay_exponent=params["decay_exponent"],
             )
 
-    def test_effective_signal_samples_direct_readout_counts_window(self) -> None:
-        ts = np.linspace(0.0, 1.0, 11, endpoint=False, dtype=np.float64)
-        assert effective_signal_samples(None, None, ts) == pytest.approx(11.0)
-
-    def test_readout_envelope_samples_direct_readout_is_unity(self) -> None:
-        ts = np.linspace(0.0, 1.0, 11, endpoint=False, dtype=np.float64)
-        np.testing.assert_allclose(readout_envelope_samples(None, None, ts), 1.0)
-
     def test_effective_signal_samples_const_full_window(self) -> None:
         cfg = _const_readout_cfg(length=1.0)
         ts = np.linspace(0.0, 1.0, 11, endpoint=False, dtype=np.float64)
@@ -443,7 +431,7 @@ class TestIntegrationHelpers:
         self, sample_times: NDArray[np.float64], error: str
     ) -> None:
         with pytest.raises(ValueError, match=error):
-            effective_signal_samples(None, None, sample_times)
+            effective_signal_samples(_const_readout_cfg(length=1.0), 1.0, sample_times)
 
     @pytest.mark.parametrize("pulse_length", [0.0, -1.0, float("nan")])
     def test_effective_signal_samples_rejects_bad_pulse_length(

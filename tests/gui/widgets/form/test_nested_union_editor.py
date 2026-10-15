@@ -21,12 +21,12 @@ class DriveModule(BaseModel):
     gain: float = 0.5
 
 
-class DirectReadoutModule(BaseModel):
+class ShortReadoutModule(BaseModel):
     """Nested readout member without the pulse readout's gain."""
 
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal["readout/direct"] = "readout/direct"
+    type: Literal["sample/short"] = "sample/short"
     ro_length: float = 1.0
 
 
@@ -41,7 +41,7 @@ class PulseReadoutModule(BaseModel):
 
 
 type ReadoutModule = Annotated[
-    DirectReadoutModule | PulseReadoutModule, Field(discriminator="type")
+    ShortReadoutModule | PulseReadoutModule, Field(discriminator="type")
 ]
 """Named readout union nested in the module union on the same tag key."""
 
@@ -132,7 +132,7 @@ def test_nested_module_union_shows_and_edits_the_selected_inline_branch(
         assert selector(editor, name).currentText() == "inline", name
         combo = selector(editor, f"{name}.module")
         # The named nested union expands into its members, one option each.
-        assert labels(combo) == ["pulse", "readout/direct", "readout/pulse"], name
+        assert labels(combo) == ["pulse", "sample/short", "readout/pulse"], name
         for tag in ("kind", "module.type"):
             assert editor.findChild(QComboBox, f"form.input.{name}.{tag}") is None
     assert selector(editor, "readout.module").currentText() == "readout/pulse"
@@ -153,12 +153,12 @@ def test_nested_module_union_shows_and_edits_the_selected_inline_branch(
     assert result.readout.module == PulseReadoutModule(ro_length=3.0, ro_gain=0.3)
 
     combo = selector(editor, "readout.module")
-    combo.setCurrentIndex(combo.findText("readout/direct"))
+    combo.setCurrentIndex(combo.findText("sample/short"))
     result = state.result(env)
     assert isinstance(result, InlineModuleForm)
     assert isinstance(result.readout, ModuleInlineChoice)
     # The new member starts from its own defaults.
-    assert result.readout.module == DirectReadoutModule()
-    assert selector(editor, "readout.module").currentText() == "readout/direct"
+    assert result.readout.module == ShortReadoutModule()
+    assert selector(editor, "readout.module").currentText() == "sample/short"
     assert text(editor, "readout.module.ro_length").text() == "1.0"
     assert editor.findChild(QLineEdit, "form.input.readout.module.ro_gain") is None

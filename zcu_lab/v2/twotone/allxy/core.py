@@ -196,6 +196,7 @@ class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=AllXY_Result,
         cfg_type=AllXYCfg,
+        cfg_schema_version="2.0",
         tag="twotone/ge/allxy",
     )
 

@@ -7,7 +7,7 @@ from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.pulse import PulseCfg
-from zcu_tools.program.v2.modules.readout import DirectReadoutCfg
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.sim import SimParams
 from zcu_tools.program.v2.sim.readout import resonator_freqs
@@ -37,6 +37,10 @@ SIM = SimParams(
     Ql=5000.0,
     Qi=50000.0,
     snr=200.0,
+    # Isolate qubit evolution with an aligned, ideal full-window readout.
+    timeFly=0.0,
+    readout_decay_rate_per_us=0.0,
+    readout_gain_noise_per_gain=0.0,
     pi_gain_len=0.4,
     seed=12345,
 )
@@ -73,7 +77,15 @@ def ground_resonator_frequency_mhz() -> float:
 
 
 def readout(ro_freq_mhz: float) -> Module:
-    return DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=ro_freq_mhz).build("ro")
+    return PulseReadoutCfg(
+        ro_ch=0,
+        ro_length=1.0,
+        freq=ro_freq_mhz,
+        gen_ch=1,
+        nqz=1,
+        gain=1.0,
+        waveform=ConstWaveformCfg(length=1.0),
+    ).build("ro")
 
 
 def pi_pulse_program(relax_delay: float, *, reps: int = 4) -> ModularProgramV2:

@@ -11,7 +11,6 @@ from zcu_tools.cfg_model import (
     BathResetSpec,
     ConstWaveformCfg,
     CosineWaveformCfg,
-    DirectReadoutCfg,
     DragWaveformCfg,
     Expr,
     FlatTopWaveformSpec,
@@ -29,6 +28,7 @@ from zcu_tools.cfg_model import (
 _QUBIT_FREQ = Expr("{qubit}.freq")
 _QUBIT_CH = Expr("{qubit}.wiring.L01.ch")
 _RESONATOR_FREQ = Expr("{resonator}.freq")
+_RESONATOR_CH = Expr("{resonator}.wiring.ch")
 _RESONATOR_RO_CH = Expr("{resonator}.wiring.ro_ch")
 _TIME_OF_FLIGHT_PLUS_005_US = Expr("{resonator}.ext.time_of_fly + 0.05")
 
@@ -67,27 +67,29 @@ def pulse(
 
 def ro(
     *,
-    ro_freq: TemplateSeed = _RESONATOR_FREQ,
+    freq: TemplateSeed = _RESONATOR_FREQ,
+    gen_ch: TemplateSeed = _RESONATOR_CH,
     ro_ch: TemplateSeed = _RESONATOR_RO_CH,
     ro_length: TemplateSeed = 0.9,
     trig_offset: TemplateSeed = _TIME_OF_FLIGHT_PLUS_005_US,
-    at: str = "ro_cfg",
+    at: str = "",
 ) -> dict[str, TemplateSeed]:
-    """Return partial acquisition seeds relative to a persistent module root.
+    """Return partial flat readout seeds beneath the optional dotted path ``at``.
 
-    ``ro_freq`` is MHz, ``ro_ch`` is an ADC channel, and ``ro_length`` and
-    ``trig_offset`` are us. ``at`` is the dotted acquisition section path;
-    use an empty path for DirectReadoutCfg. The default trigger offset is the
-    resonator time of flight plus 0.05 us; missing calibration remains Invalid
-    in the consumer, rather than substituting a numeric fallback.
-    Wrap expressions in Expr; ordinary strings, numbers and bools are literal.
-    Strings and Expr may use ``{qubit}`` and ``{resonator}``, validated and
-    expanded by TemplateDef. This helper does not evaluate or read a library.
-    Seed paths and value compatibility are checked by the consuming catalog.
+    ``freq`` is the shared generator/ADC frequency in MHz. ``gen_ch`` and
+    ``ro_ch`` select generator and ADC channels. ``ro_length`` and
+    ``trig_offset`` are us. Waveform, gain and Nyquist zone remain caller-owned.
+    The default trigger offset is the resonator time
+    of flight plus 0.05 us; missing calibration remains Invalid in the consumer.
+    Expr seeds evaluate only in the consuming Form. Ordinary strings are literal;
+    TemplateDef validates and expands ``{qubit}`` and ``{resonator}`` placeholders.
+    This helper does not evaluate or read a library. The consuming catalog checks
+    seed paths and value compatibility.
     """
     prefix = f"{at}." if at else ""
     return {
-        f"{prefix}ro_freq": ro_freq,
+        f"{prefix}freq": freq,
+        f"{prefix}gen_ch": gen_ch,
         f"{prefix}ro_ch": ro_ch,
         f"{prefix}ro_length": ro_length,
         f"{prefix}trig_offset": trig_offset,
@@ -111,13 +113,11 @@ TEMPLATES: dict[str, TemplateDef] = {
         PulseReadoutSpec,
         "Pulse readout",
         {
-            **pulse(
-                freq=Expr("{resonator}.freq"),
-                ch=Expr("{resonator}.wiring.ch"),
-                length=1.0,
-                at="pulse_cfg",
-            ),
             **ro(),
+            "nqz": 2,
+            "gain": 0.1,
+            "waveform.style": "const",
+            "waveform.length": 1.0,
         },
         default_name="readout_rf",
     ),
@@ -125,22 +125,16 @@ TEMPLATES: dict[str, TemplateDef] = {
         PulseReadoutSpec,
         "Optimized readout (DPM)",
         {
-            **pulse(
-                freq=Expr("{qubit}.ext.best_ro_freq"),
-                ch=Expr("{resonator}.wiring.ch"),
-                gain=Expr("{qubit}.ext.best_ro_gain"),
-                length=Expr("{qubit}.ext.best_ro_length + 0.1"),
-                at="pulse_cfg",
-            ),
             **ro(
-                ro_freq=Expr("{qubit}.ext.best_ro_freq"),
+                freq=Expr("{qubit}.ext.best_ro_freq"),
                 ro_length=Expr("{qubit}.ext.best_ro_length"),
             ),
+            "nqz": 2,
+            "gain": Expr("{qubit}.ext.best_ro_gain"),
+            "waveform.style": "const",
+            "waveform.length": Expr("{qubit}.ext.best_ro_length + 0.1"),
         },
         default_name="readout_dpm",
-    ),
-    "direct_readout": TemplateDef(
-        DirectReadoutCfg, "Direct readout", ro(at=""), default_name="readout_direct"
     ),
     "qub_probe": TemplateDef(
         PulseSpec, "Qubit probe pulse", pulse(), default_name="qub_pulse"
@@ -206,28 +200,22 @@ TEMPLATES: dict[str, TemplateDef] = {
             "waveform.length": 0.0,
         },
     ),
-    "readout/direct:blank": TemplateDef(
-        DirectReadoutCfg,
-        "Blank: readout/direct",
-        {"ro_ch": 0, "ro_freq": 0.0, "ro_length": 0.0, "trig_offset": 0.0},
-    ),
     "readout/pulse:blank": TemplateDef(
         PulseReadoutSpec,
         "Blank: readout/pulse",
         {
-            "pulse_cfg.ch": 0,
-            "pulse_cfg.freq": 0.0,
-            "pulse_cfg.gain": 0.0,
-            "pulse_cfg.nqz": 1,
-            "pulse_cfg.phase": 0.0,
-            "pulse_cfg.pre_delay": 0.0,
-            "pulse_cfg.post_delay": 0.0,
-            "pulse_cfg.waveform.style": "const",
-            "pulse_cfg.waveform.length": 0.0,
-            "ro_cfg.ro_ch": 0,
-            "ro_cfg.ro_freq": 0.0,
-            "ro_cfg.ro_length": 0.0,
-            "ro_cfg.trig_offset": 0.0,
+            "gen_ch": 0,
+            "freq": 0.0,
+            "gain": 0.0,
+            "nqz": 1,
+            "phase": 0.0,
+            "pre_delay": 0.0,
+            "post_delay": 0.0,
+            "waveform.style": "const",
+            "waveform.length": 0.0,
+            "ro_ch": 0,
+            "ro_length": 0.0,
+            "trig_offset": 0.0,
         },
     ),
     "reset/none:blank": TemplateDef(

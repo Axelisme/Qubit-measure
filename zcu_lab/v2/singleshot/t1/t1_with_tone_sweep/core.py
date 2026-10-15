@@ -207,6 +207,7 @@ class T1WithToneSweepExp(
         z=ZSpec("signals", "Population", "a.u.", dtype=np.float64),
         result_type=T1WithToneSweepResult,
         cfg_type=T1WithToneSweepCfg,
+        cfg_schema_version="2.0",
         tag="singleshot/t1/t1_with_tone_sweep",
     )
 

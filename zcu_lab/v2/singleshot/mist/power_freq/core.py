@@ -98,6 +98,7 @@ class FreqPowerExp(PersistableExperiment[FreqPowerResult, FreqPowerCfg]):
         z=ZSpec("signals", "Population", "a.u.", dtype=np.float64),
         result_type=FreqPowerResult,
         cfg_type=FreqPowerCfg,
+        cfg_schema_version="2.0",
         tag="singleshot/mist/power_freq",
     )
 

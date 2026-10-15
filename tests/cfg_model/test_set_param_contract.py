@@ -8,7 +8,6 @@ from zcu_tools.cfg_model import (
     BathResetCfg,
     ConstWaveformCfg,
     CosineWaveformCfg,
-    DirectReadoutCfg,
     DragWaveformCfg,
     FlatTopWaveformCfg,
     GaussWaveformCfg,
@@ -32,10 +31,6 @@ def _pulse_cfg() -> PulseCfg:
     )
 
 
-def _direct_readout_cfg() -> DirectReadoutCfg:
-    return DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=6000.0)
-
-
 @pytest.mark.parametrize(
     "make_cfg",
     [
@@ -49,10 +44,14 @@ def _direct_readout_cfg() -> DirectReadoutCfg:
             raise_waveform=GaussWaveformCfg(length=0.2, sigma=0.05),
         ),
         _pulse_cfg,
-        _direct_readout_cfg,
         lambda: PulseReadoutCfg(
-            pulse_cfg=_pulse_cfg(),
-            ro_cfg=_direct_readout_cfg(),
+            gen_ch=0,
+            nqz=1,
+            freq=100.0,
+            gain=0.5,
+            waveform=ConstWaveformCfg(length=0.5),
+            ro_ch=0,
+            ro_length=1.0,
         ),
         lambda: NoneResetCfg(),
         lambda: PulseResetCfg(pulse_cfg=_pulse_cfg()),

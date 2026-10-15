@@ -6,7 +6,7 @@ import pytest
 from zcu_tools.cfg_model import (
     ConstWaveformCfg,
     Expr,
-    PulseReadoutSpec,
+    PulseResetSpec,
     PulseSpec,
     Slot,
     TemplateDef,
@@ -52,16 +52,13 @@ def controller(qapp, tmp_path: Path):
             },
             "{qubit}.pulses.probe",
         ),
-        "readout": TemplateDef(
-            PulseReadoutSpec,
-            "Readout",
+        "reset": TemplateDef(
+            PulseResetSpec,
+            "Reset",
             {
                 "pulse_cfg": Slot("{qubit}.pulses.probe"),
-                "ro_cfg.ro_ch": 1,
-                "ro_cfg.ro_freq": 100.0,
-                "ro_cfg.ro_length": 2.0,
             },
-            "{qubit}.readout.probe",
+            "{qubit}.reset.probe",
         ),
         "envelope": TemplateDef(ConstWaveformCfg, "Envelope", {"length": 0.5}, "base"),
     }
@@ -99,11 +96,11 @@ def test_registry_template_creation_evaluates_placeholder_and_keeps_bound_slot(
     assert pulse == PulseSpec(
         ch=2, nqz=1, freq=6123.0, gain=0.25, waveform=ConstWaveformCfg(length=0.4)
     )
-    controller.create_from_template("module", "readout", "Q1.readout.probe")
-    readout = controller.read_context().library.module_spec("Q1.readout.probe")
-    assert isinstance(readout, PulseReadoutSpec)
-    assert readout.pulse_cfg == "Q1.pulses.probe"
     controller.create_from_template("waveform", "envelope", "Q1.waveforms.base")
+    controller.create_from_template("module", "reset", "Q1.reset.probe")
+    reset = controller.read_context().library.module_spec("Q1.reset.probe")
+    assert isinstance(reset, PulseResetSpec)
+    assert reset.pulse_cfg == "Q1.pulses.probe"
     assert controller.read_context().library.waveform_spec(
         "Q1.waveforms.base"
     ) == ConstWaveformCfg(length=0.5)
@@ -169,10 +166,10 @@ def test_wire_discovery_and_creation_keep_reply_shapes(controller: Controller):
                 "default_name": "{qubit}.pulses.probe",
             },
             {
-                "role_id": "readout",
-                "label": "Readout",
+                "role_id": "reset",
+                "label": "Reset",
                 "item_kind": "module",
-                "default_name": "{qubit}.readout.probe",
+                "default_name": "{qubit}.reset.probe",
             },
             {
                 "role_id": "envelope",

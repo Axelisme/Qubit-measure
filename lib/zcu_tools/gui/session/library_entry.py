@@ -32,7 +32,6 @@ from zcu_tools.cfg_model import (
     ConfigBase,
     ConstWaveformCfg,
     CosineWaveformCfg,
-    DirectReadoutCfg,
     DragWaveformCfg,
     FlatTopWaveformSpec,
     GaussWaveformCfg,
@@ -69,7 +68,6 @@ LIBRARY_WRITE_ERRORS = (ExpectedError, KeyError, ValueError, OSError)
 
 _MODULE_SPECS = (
     PulseSpec,
-    DirectReadoutCfg,
     PulseReadoutSpec,
     NoneResetCfg,
     PulseResetSpec,
@@ -126,7 +124,7 @@ class LibraryEntryForm[S: ConfigBase](ABC):
 
         spec is a concrete persistent module or waveform Spec of this form's
         family; it is not modified. Child library keys stay keys. The shared
-        generator leaves out optional desc and ro_ch fields; the produced
+        generator leaves out optional desc fields; the produced
         Spec has their defaults, not spec's values. arb_names are the arb
         waveform asset keys captured by the host: every arb waveform data
         field in this Spec, at the root or inline, accepts only these names.

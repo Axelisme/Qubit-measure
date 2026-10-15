@@ -3,10 +3,9 @@
 Module input aliases describe generated ref/inline values, not persistent Specs.
 Always use the owning ModuleInputField.to_spec before native materialization;
 never inspect their module content through the static nominal type view.
-Inline module input has no mux_*, mask, outsel or desc fields and no optional
-pulse ro_ch; to_spec fills them from Spec defaults, and copying a library key
-to Inline drops the entry's values for them. DirectReadoutCfg.ro_ch stays
-required input.
+Inline module input omits desc; to_spec uses its Spec default, and copying a
+library key to Inline drops the entry's description. Pulse has no persistent
+ro_ch. Flat PulseReadoutCfg.ro_ch stays required input.
 """
 
 from collections.abc import Mapping
@@ -192,11 +191,10 @@ def calibration_seed(
     raise ValueError. No fit, capture, live source or device read occurs.
     """
     frequency = qub_pulse.freq
-    pulse = readout.pulse_cfg
     if (
         not isinstance(frequency, float)
-        or not isinstance(pulse.freq, float)
-        or not isinstance(pulse.gain, float)
+        or not isinstance(readout.freq, float)
+        or not isinstance(readout.gain, float)
     ):
         raise ValueError("Initial calibration requires scalar module frequency/gain")
-    return Calibrated(frequency, pi_length_us, pulse.freq, pulse.gain)
+    return Calibrated(frequency, pi_length_us, readout.freq, readout.gain)

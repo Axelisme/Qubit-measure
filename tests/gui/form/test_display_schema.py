@@ -5,7 +5,6 @@ from typing import Annotated, Literal
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
-from zcu_tools.cfg_model import DirectReadoutCfg
 from zcu_tools.gui.form import (
     Display,
     FormEnv,
@@ -155,7 +154,6 @@ def test_one_value_tags_outside_a_union_are_hidden_and_union_selectors_stay() ->
         alone: Alpha = Field(default_factory=Alpha)
         locked: LockedAlpha = Field(default_factory=LockedAlpha)
         sweep: LinRange = Field(default_factory=LinRange)
-        readout: DirectReadoutCfg | None = None
         fixed: Literal["fixed"] = "fixed"
 
     schema = TagForm.input_schema(FormEnv())
@@ -165,7 +163,6 @@ def test_one_value_tags_outside_a_union_are_hidden_and_union_selectors_stay() ->
         ("alone", "kind"),
         ("locked", "kind"),
         ("sweep", "kind"),
-        ("readout", "type"),
     ):
         assert node(schema, *path).get("hidden") is True, path
     # Selectors in a union position and one-value ordinary leaves stay visible.

@@ -99,8 +99,8 @@ class OneToneFreqAdapter(
         cfg = result.cfg
         if cfg is None:
             return None
-        res_ch = cfg.modules.readout.pulse_cfg.ch
-        ro_ch = cfg.modules.readout.ro_cfg.ro_ch
+        res_ch = cfg.modules.readout.gen_ch
+        ro_ch = cfg.modules.readout.ro_ch
         if (
             isinstance(res_ch, bool)
             or not isinstance(res_ch, Integral)
@@ -293,10 +293,7 @@ class OneToneFreqAdapter(
                 req.run_result.cfg,
                 target="$resonator.readout.readout_rf",
                 desc="Readout at fitted resonator frequency",
-                field_updates=(
-                    ("pulse_cfg.freq", float(result.freq)),
-                    ("ro_cfg.ro_freq", float(result.freq)),
-                ),
+                field_updates=(("freq", float(result.freq)),),
                 role_id="readout",
             )
         )

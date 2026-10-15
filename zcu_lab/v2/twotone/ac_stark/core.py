@@ -148,6 +148,7 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=AcStarkResult,
         cfg_type=AcStarkCfg,
+        cfg_schema_version="2.0",
         tag="twotone/ge/ac_stark",
     )
 
@@ -354,6 +355,7 @@ class AcStarkRamseyExp(PersistableExperiment[AcStarkRamseyResult, AcStarkRamseyC
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=AcStarkRamseyResult,
         cfg_type=AcStarkRamseyCfg,
+        cfg_schema_version="2.0",
         tag="twotone/ge/ac_stark_ramsey",
     )
 

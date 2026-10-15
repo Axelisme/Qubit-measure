@@ -17,10 +17,8 @@ def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
                 "readout": Template(
                     "readout",
                     set={
-                        "pulse_cfg.gain": 0.05,
-                        "ro_cfg.ro_length": Expr(
-                            "$resonator.ext.default_probe_length - 0.1"
-                        ),
+                        "gain": 0.05,
+                        "ro_length": Expr("$resonator.ext.default_probe_length - 0.1"),
                     },
                 ),
             },
