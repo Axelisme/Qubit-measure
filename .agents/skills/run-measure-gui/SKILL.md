@@ -7,11 +7,13 @@ description: 透過 measure-gui MCP 與使用者協作量測及校準。接收�
 
 你是自主實驗協作者。使用者提供目標與額外 policy，你在授權及資源限制內規劃、判讀、分析和迭代。把不確定性轉成可辨別的問題，不為了完成任務降低目標。
 
-`<repo>` 是量測 session 使用的 repo cwd，`<task-dir>` 是 `<repo>/.agent_state/measurement-tasks/<task-id>/`。`<repo>/measure_knowledge/` 是固定知識入口，可能是使用者建立的 symlink。Skill 的相對文件連結不以 `<repo>` 解析。
+`<repo>` 是量測 session 使用的 repo cwd，`<task-dir>` 是 `<repo>/.agent_state/measurement-tasks/<task-id>/`。Skill 的相對文件連結不以 `<repo>` 解析。
+
+判讀或沉澱經驗前，先讀 `<repo>/measure_knowledge/README.md`。
 
 ## 接收或恢復任務
 
-1. 新任務先取得目標、結果用途、額外 policy 及求助／通知條件，主動確認與任務相關的預算。只追問會改變可行動作的缺口。按 [任務紀錄](references/task-records.md) 建立當次紀錄，按 [經驗維護](references/knowledge.md) 核對知識入口，缺失時使用模板初始化。恢復任務時先讀紀錄說明及既有 INDEX，不從歷史目錄猜下一步。
+1. 新任務先取得目標、結果用途、額外 policy 及求助／通知條件，主動確認與任務相關的預算。只追問會改變可行動作的缺口。按 [任務紀錄](references/task-records.md) 建立當次紀錄，按 [知識入口初始化](references/knowledge.md) 核對入口，缺失時使用模板初始化。恢復任務時先讀紀錄說明及既有 INDEX，不從歷史目錄猜下一步。
 2. 操作前讀 measure-gui server instructions，取得目前 GUI 狀態與可用工具。核對實際 project、context、裝置及執行中操作。使用者可能已直接修改 GUI；task 文件只代表上次觀察。
 3. 在有硬體副作用前確認相關接線、裝置模式及適用限制。沿用仍有效的已確認資訊，缺少關鍵條件時詢問使用者。使用者授權與適用的安全限制不由舊經驗推翻。
 4. 把目標拆成戰略階段與近期戰術目標。細化近期動作，遠期保留條件分支。進入一種實驗時，透過 MCP 公開入口讀該 adapter guide，不以記憶中的工具名稱或參數代替現行契約。
@@ -50,7 +52,7 @@ Recipe、`tab_analyze` 與 `wait(execution)` 回傳同一摘要。先核對 `act
 
 ### 整合證據
 
-把新結果放回累積實驗中理解。需要判斷正常表現、品質、陌生症狀或改道時，按 [經驗維護](references/knowledge.md) 查找相關內容；仍適用且已讀的內容不必每輪重讀。判讀 T1 的時間窗口、尾端、參數誤差或 repeat，以及 Rabi 的週期、第一個峰或 fit 一致性時，從 `<repo>/measure_knowledge/routing.md` 進入相應條目。
+把新結果放回累積實驗中理解。需要判斷正常表現、品質、陌生症狀或改道時，查找與當前問題相關的判讀依據。
 
 分開描述直接觀察、暫定物理圖像與未解問題。物理圖像可以定性，也可以有多個候選解釋。說明哪些觀察支持它，以及什麼結果會迫使你修改它。
 
@@ -94,6 +96,6 @@ Python 分析使用 `uv run --directory <repo> --no-sync -- <command>`，沿用 
 
 ## 沉澱與交付
 
-取得可重用的方法、反例、適用限制或專家修正時，按 [經驗維護](references/knowledge.md) 更新知識。可以自主修訂專業方法；經驗不能擴張當次授權或改寫目標。
+取得可重用的方法、反例、適用限制或專家修正時，沉澱成可搜尋的經驗；當次數值與進度留在任務紀錄。
 
 任務完成時交付結果、證據位置、適用條件與剩餘不確定性。未完成時交付目前進度、阻礙、已排除路線與下一個必要輸入。按 [任務紀錄](references/task-records.md) 更新可接續的狀態，說明仍在運行的操作，不讓結束回覆掩蓋 live work。

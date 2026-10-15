@@ -156,9 +156,11 @@ def test_export_readiness_failure_precedes_output_creation(
     assert not path.parent.exists()
 
 
+@pytest.mark.parametrize("custom_path", [False, True])
 def test_params_export_merges_sections_and_uses_first_aligned_even_if_empty(
     route_harness: RouteHarness,
     tmp_path: Path,
+    custom_path: bool,
 ) -> None:
     state = route_harness.ctrl.state
     result_dir = tmp_path / "results"
@@ -171,8 +173,8 @@ def test_params_export_merges_sections_and_uses_first_aligned_even_if_empty(
     state.set_fit_params(
         "db", (1, 2), (2, 3), (3, 4), {"transitions1": [(0, 1)], "r_f": 6.2}, None, None
     )
-    state.set_fit_result((5, 1, 0.5))
-    path = result_dir / "params.json"
+    state.set_fit_result((5.123456789, 1, 0.5))
+    path = (tmp_path / "custom" if custom_path else result_dir) / "params.json"
     existing = QubitParams(str(path))
     existing.ensure_project(ParamsProject(chip_name="existing", qub_name="Q0"))
     existing.set_fluxdep_fit(
@@ -187,16 +189,21 @@ def test_params_export_merges_sections_and_uses_first_aligned_even_if_empty(
     for name in state.spectrums:
         assert route_harness.request(client, "spectrum.snapshot", name=name)["ok"]
     versions = state.version.snapshot()
-    for params in ({}, {"savepath": None}, {"savepath": str(path)}):
+    requests = [{"savepath": str(path)}] if custom_path else [{}, {"savepath": None}]
+    for params in requests:
         reply = route_harness.request(client, "fit.export_params", **params)
         assert reply["ok"]
         assert "result" in reply
-        assert reply["result"] == {"savepath": str(path)}
+        assert reply["result"] == {
+            "savepath": str(path),
+            "params": {"EJ": 5.123456789, "EC": 1, "EL": 0.5},
+            "alignment_from": "first-aligned",
+        }
         restored = QubitParams(str(path), readonly=True)
         assert restored.get_dispersive_fit() == independent
         assert restored.require_project().chip_name == "chip"
         fit = restored.require_fluxdep_fit()
-        assert fit.params == (5, 1, 0.5)
+        assert fit.params == (5.123456789, 1, 0.5)
         assert fit.flux_half == 1.4
         assert fit.flux_int == 2.4
         assert fit.flux_period == 2

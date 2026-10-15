@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-14，recipe inline 轉換共用 guarded 選項指令
+**Last updated:** 2026-10-14，recipe 欄位依選項 fields，library selection 原子拒絕
 
 # `zcu_tools/mcp/measure/`
 
@@ -10,7 +10,7 @@ Measure MCP 透過 GUI 的 loopback remote socket 操作同一份 GUI 狀態。G
 
 ## Setup 工具
 
-`recipe_guide(recipe)` 使用 registry 的 adapter mapping 讀原生 guide，不從 recipe 名稱猜 adapter。`simulation_initialize` 接現行 GUI coordinator，重用有效 simulation，切換時可能斷開真實裝置。它不套用 project，也不連真實硬體。Caller 仍須取得切換授權。Ready 只核對 MockSoc 與 connected fake_flux，不依賴 predictor。全域 status 不讀或投影 installed predictor。
+`recipe_guide(recipe)` 使用 registry 的 adapter mapping，回傳 recipe、adapter 與 `guide: {markdown, resource_dir}`，不從 recipe 名稱猜 adapter。Markdown 保留全文；resource_dir 是 GUI host 的絕對目錄字串，未宣告 guide 時是 null。Guide 中的圖片使用相對路徑，agent 需要時自行從該目錄讀取。工具不讀圖、不附圖；跨機 agent 可能無法存取這個路徑。`simulation_initialize` 接現行 GUI coordinator，重用有效 simulation，切換時可能斷開真實裝置。它不套用 project，也不連真實硬體。Caller 仍須取得切換授權。Ready 只核對 MockSoc 與 connected fake_flux，不依賴 predictor。全域 status 不讀或投影 installed predictor。
 
 `device_setup(name, cfg)` 接受 partial Info patch。工具先讀 before snapshot，合併 before.info 與 caller patch，再送一次完整 `device.setup(name, cfg)` RPC。YOKO patch 含 value 時，caller 必須明填 value_unit，不能借 before 的 unit。只改 output／rampstep 不需要 unit。欄位必填、extra、mode/unit 與 limits 由 RPC 的同一 Info model validator 拒絕，connected admission 由 GUI DeviceService 擁有。非 YOKO 沿各自的 Info 契約，不加 flux 規則或單位換算。
 
@@ -34,9 +34,9 @@ Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.conn
 
 ## Recipe 與 execution
 
-`RecipeTab.use_library` 選實際 library key，不建立舊 ref tree，也不複製內容。Slot 與 nested key 保存 tagged ref 的 kind/name，inline 保存 kind/module。持久 Spec 的 child key 仍是字串。Locked Slot 只有 inline branch，use_library 在送 RPC 前拒絕 key selection。
+`RecipeTab.use_library` 選實際 library key，不建立舊 ref tree，也不複製內容。Slot 與 nested key 保存 tagged ref 的 kind/name，inline 保存 kind/module。持久 Spec 的 child key 仍是字串。`use_library` 只寫清單中 value 恰為該 ref 的 Option，以一次整個欄位 write 選 key。未列出的 key 在 RPC 前拒絕，訊息指名欄位並列可用 keys。Locked Slot 的固定 inline tag 也在 RPC 前拒絕 key selection；沒有 captured library 的普通欄位不因此變成 locked。
 
-`read_field` 回傳具名 RecipeFormField。input 保留 Form JSON，input_present 區分未填與 null。value 是 ordinary leaf 或 subtree，不能作為有效性的證明。mode 是 key、inline 或 None，key 是實際 library key 或 None。locked 與 fields 來自公開 Form schema，errors 包含絕對 path/message。DTO 不含 CfgSchema kind 或 ref 子欄位 readonly 投影。Inline 路徑包含 module，例如 `modules.readout.module.pulse_cfg.module.freq`。Range 使用 start、stop、n，set_sweep 的公開 expts 寫入 n。
+`read_field` 回傳具名 RecipeFormField。input 保留 Form JSON，input_present 區分未填與 null。value 是 ordinary leaf 或 subtree，不能作為有效性的證明。mode 是 key、inline 或 None，key 是實際 library key 或 None。fields 只列選中 Option 的可編輯子欄位，不含 tag；ref 沒有 fields。MCP 依 value 葉的 JSON 型別和值匹配第一項，不從 union 猜 branch。mode 只讀公開 S2 input kind。locked 沿單一 model 的固定 kind.const 判斷，不因缺 key 選項而鎖定。errors 包含絕對 path/message。DTO 不含 CfgSchema kind 或 ref 子欄位 readonly 投影。Tag 葉不是 read_field 路徑。Inline 路徑包含 module，例如 `modules.readout.module.pulse_cfg.module.freq`。Range 使用 start、stop、n，set_sweep 的公開 expts 寫入 n。
 
 `RecipeTab.read_module(field)` 回傳具名 RecipeModuleValues，含 detached value、key／inline mode 與 source。Key mode 讀 Reset 的固定 library capture，source 是 library:<key>。Inline mode 只求該欄位的值，source 是 dotted core module path。其他欄位 invalid 不擋讀取，該 module 自身 invalid 才拒絕。值不含 extras lowering、整份 cfg 驗證或 native to_cfg。
 
@@ -46,7 +46,7 @@ Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.conn
 
 Recipe 將既有 GUI 操作串成有界實驗流程，不在 MCP 複製實驗核心或 cfg defaults。參數來源、缺參數與分析分支由個別 recipe 宣告。首次呼叫等待最多 300 秒；缺參數、失敗或互動需求會提早交付。仍執行時回傳 execution，背景接續不因等待逾時而停止。
 
-`onetone_spectrum_over_flux` 必填 `flux_device`、`flux_unit`、`flux_range` 與 `flux_points`，都不能為 null。Range 保留兩個 native endpoints，不換算數字。Unit 必須與 cached device snapshot 相同，native 也必須明填。Helper 成功後寫 cfg 的 dev.flux_dev 與独立 flux_unit，不把 unit 附在 sweep 上。其他不符情境在 Run 前拒絕，不由 recipe 連裝置或修改共用安全規則。
+`onetone_spectrum_over_flux` 必填 `flux_device`、`flux_unit`、`flux_range` 與 `flux_points`，都不能為 null。Range 保留兩個 native endpoints，不換算數字。Unit 必須與 cached device snapshot 相同，native 也必須明填。Helper 成功後寫 cfg 的 flux_dev 與独立 flux_unit，不把 unit 附在 sweep 上。其他不符情境在 Run 前拒絕，不由 recipe 連裝置或修改共用安全規則。
 
 `twotone_spectrum` 的 center_mhz／span_mhz／points 必填。三個 resonator spectrum 可省略 frequency range，domain helper 讀目前 frequency／linewidth 後寫數字 endpoints。正式 freq／power／flux 的 full-span 倍率為 3／3／2，省略 count 保留 GUI 值。四個 spectrum 摘要只保 sweep，不另計 center／span。Frequency／flux／unit policy 由 zcu_lab.recipes.helpers 擁有。
 

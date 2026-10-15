@@ -1,10 +1,10 @@
 # zcu_lab
 
-**Last updated:** 2026-10-14，具名 alias preset 啟動資料
+**Last updated:** 2026-10-15，make_form、具名裝置欄位與具名 alias preset 啟動資料整合
 
 `zcu_lab` 只放實驗定義、實驗室宣告與各 workflow 自己的小工具。`zcu_tools` 提供實驗與前端框架，不反向 import 這個套件。使用者 GUI 入口在 `scripts/`，agent MCP 組合根在 `mcp_servers/`，取得定義後顯式注入框架。
 
-`v2/` 放各實驗的 core 與前端附件，`recipes/` 放量測流程定義。`workflows/` 的 `coherence_fluxdep/`、`mist_fluxdep/`、`overnight/` 各自擁有流程、表單與科學工具，`common/` 只放真正共用的實驗步驟。`workflows/registry.py` 提供有序註冊清單。Window、App、RPC、MCP、表單協調、layout 與 input 保存都由 lib 宿主負責。實驗室宣告留在 root 的 components、definitions、templates 與 migration mapping 模組。
+`v2/` 放各實驗的 core 與前端附件，`recipes/` 放量測流程定義。`workflows/` 的 `coherence_fluxdep/`、`mist_fluxdep/`、`overnight/` 各自擁有流程、表單與科學工具，`common/` 只放真正共用的實驗步驟。`workflows/registry.py` 提供有序註冊清單。Window、App、RPC、MCP、表單協調、layout 與 input 保存都由 lib 宿主負責。實驗室宣告留在 root 的 components、definitions 與 templates 模組。
 
 `alias_presets/*.yaml` 定義具名 GUI alias preset，檔名就是名稱，格式使用 `zcu.aliases`。`default.yaml` 保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列。`load_alias_presets()` 重用 resources reader，讀出名稱到有序 rows 的完整資料，不提前載入實驗 catalog。兩個 launcher 以 `alias_presets` 注入 app，格式錯誤或缺 default 直接中止啟動，改檔後需重開 GUI。Behavior 保留完整資料供 dialog 組裝；底層 session 只收 default rows。框架不選裝置，也不從 cache 綁定 flux_dev。
 
@@ -14,19 +14,17 @@
 
 元件型別別名在既有 Field 附靜態 `json_schema_extra` 單位資料。Frequency 用 MHz，Duration 用 us，Energy 用 GHz，PumpPower 用 dBm。Qubit 的 flux_half／flux_period／flux_int 依 `general.ext.flux_unit` 解讀。Global flux 原值存於 `general.ext.flux_value`。Local 的 `Q1.flux_unit` 與 JPA 的 `J1.flux_unit` 各自維持原契約。Flux 不標固定單位。未宣告單位不代表無因次。Resources 以公開路徑查詢提供固定欄位的靜態 unit。GUI 的 WB 列只用查詢結果加標籤，不換算。Ext 與 flux 類欄位不顯示單位；run context 不消費這些標記。
 
-`storage_migration.build_mapping` 擁有舊 key、waveforms/modules envelope 裡的 module 候選與 R1/Q1/J1 profile。Kind 由 caller 明確指定，數字維持工作單位。舊 `flux_unit` 對應 `general.ext.flux_unit`，`cur_A` 對應 `general.ext.flux_value`。缺 flux 單位只 pending，不從舊 key 名稱推測單位。`migration_experiments` 明列 core 的 native declarations，以歷史 source_tag 與 cfg_type 配對 generic schema、concrete cfg validation 與 typed reader，另明示 canonical native_tag；Callback 重用 datafile 的完整 cfg 格式規則，再驗證隔離副本，不把派生欄位或 normalized model 回填歷史快照。不建構實驗 instance、不註冊或做動態 discovery。離線 CLI 在 `migrations/migrate_storage.py`，以 `python -m migrations.migrate_storage` 執行，正常 runtime 不使用 legacy fallback。
+離線遷移的具體對照（舊 key、module 候選、native declarations）不放在這裡，位於 `migrations/`；遷移完成後整個 `migrations/` 可刪。
 
 `recipes.RECIPES` 明列使用者的 generator definitions。每個 recipe 模組同時擁有流程、手寫 input_schema 與 summary declarations。MCP 組合根把清單注入 framework，import 不執行量測或註冊。Recipes 保留 target 參數，明確以 `aliases={"qubit": target}` 交給 generic `RecipeSession.open_tab`。Target 省略時不覆寫。GUI adapters 不宣告 parameter roles，cfg 與 Run 直接讀固定的全域 alias 表。
 
-五個 Measure flux adapters 使用共用 `alias_name_seed` 建立 direct 初值：`onetone/flux_dep` 與
-`twotone/fluxdep` 的 `dev.flux_dev`，以及 `jpa/auto_optimize`、`jpa/flux_onetone`
-與 `jpa/flux` 的 `dev.jpa_flux_dev`。Fresh cfg 或 default reset 建立時解析一次 `$flux_dev`，
-將名稱保存為 direct input。Alias 變更不更新既有 direct cfg／draft；新 cfg 或 reset 才讀新名稱。
-使用者仍可切成 eval，明填 `$flux_dev`。顯式 caller cfg 保留，不使用靜態 device 名稱 fallback，
-也不改 core 的 required dev／flux_unit。名稱不要求出現在 point 的元件表。
-Cfg editor 顯示 direct 名稱，缺列或未綁定時顯示指名 `flux_dev` alias 的 Invalid。
-Run 沿固定 capture 保存當次名稱，後續 Analyze／WB／Save 不重新解析目前表。
-裝置存在性由實際使用的 owner 檢查。
+Measure 的 `form.py` 提供 `make_form(ctx)`，在 Open／Reset 依固定來源選初值與形狀。
+`onetone/flux_dep` 與 `twotone/fluxdep` 的 core 用具名 `flux_dev: str`；
+JPA 使用具名 `jpa_flux_dev`。Form 以 `AliasName("flux_dev")` 解析 direct 裝置名稱。
+Alias 變更不更新既有 input；Open／Reset 才讀新名稱。缺列、未綁定或不在捕捉的
+候選清單時保持 Invalid，不使用靜態名稱 fallback。Core 透過 RunContext.devices
+取得 driver，不認得 alias。Analyze／WB／Save 使用 Run 的固定來源，不重讀目前表。
+具名欄位與範本契約見 [ADR-0073](../docs/adr/0073-measure-form-derivation.md)。
 
 Framework 的 `RecipeTab` 只提供通用 cfg 操作、expression／library／field 讀取與 cached device snapshot。
 `recipes.helpers` 使用這些公開介面，擁有 frequency／flux 的來源順序、校準範圍與 device unit policy。明填 frequency 優先，其次是有效 library leaf，再讀 caller 指定的 calibration。`FrequencySweepCalibration` 明列 frequency／linewidth 路徑與 full-span 倍率。三個 resonator spectrum 的預設倍率為 freq 3、power 3、flux 2，點數沿 GUI 的 301／201／101。Helper 讀目前數值，集中算 span 與 numeric start／stop。無效 linewidth 在 sweep edit／Run 前拒絕，不從 raw expression 抽倍率。Twotone 的 center_mhz／span_mhz／points 與 flux survey 的 flux_range／flux_points 必填且不能為 null。Flux helper 只比 snapshot unit，成功後寫 cfg 的 device identity 與獨立 flux_unit。它不換算 native 座標，也不連裝置。

@@ -1,10 +1,10 @@
 ---
-status: accepted
+status: superseded
 ---
 
 # Measure cfg definition — context-free single-pass authoring
 
-**狀態：** accepted（已實作）。目標設計見 [measure-form draft](draft/measure-form-derivation.md)：表單從 core cfg 推導、起始值寫在 form.py；measure-form task 完成前本篇仍是現行機制。
+**狀態：** superseded。Measure 表單與初值由 [[0073]] 的 make_form／Form／範本目錄接替。以下保留舊設計供追溯。
 **關聯：** Spec/Value 與 locked literal 見 [[0009]]；完整 value tree 見 [[0010]]；成品驗證見
 [[0011]]；resolve-once source 見 [[0037]]；shared cfg core ownership 見 [[0045]]。
 

@@ -123,7 +123,6 @@ def seeded_fallback_definitions(slot: str) -> dict[str, cfg_model.TemplateDef]:
             {
                 "pi2_cfg": cfg_model.Slot(
                     f"{{qubit}}.module.{slot}",
-                    fallback=cfg_model.Template("drive"),
                 )
             },
         ),

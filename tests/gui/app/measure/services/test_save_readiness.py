@@ -7,18 +7,19 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QApplication
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.events.tab import TabInteractionChangedPayload
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.app_services import build_app_services
 from zcu_tools.gui.app.measure.services.save import SaveService
 from zcu_tools.gui.app.measure.state import Session, State
-from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 
-from tests.gui.app.measure._cfg_fakes import make_cfg
+from tests.gui.app.measure._form_fakes import make_form
 from tests.gui.app.measure._native_save_support import (
     GUI_ORIGIN,
     native_save_session,
@@ -35,7 +36,7 @@ def _make_service(
         Session(
             adapter_name="fake",
             adapter=MagicMock(),
-            cfg=make_cfg(CfgSchema(CfgSectionSpec(), CfgSectionValue())),
+            cfg=make_form(Form(ConfigBase, {}), state=state),
         ),
     )
     state.update_tab_result("tab", object())

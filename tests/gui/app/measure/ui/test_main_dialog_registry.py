@@ -26,6 +26,7 @@ class _FactoryRegistry(MainDialogRegistry):
             dialog_refs=self.refs,
             templates=lambda: {},
             dialog_presenter=RecordingDialogPresenter(),
+            alias_presets=None,
         )
         self._factory = factory
 

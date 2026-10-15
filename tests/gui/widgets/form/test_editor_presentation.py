@@ -12,7 +12,6 @@ from qtpy.QtWidgets import (
     QComboBox,
     QLabel,
     QLineEdit,
-    QPushButton,
     QWidget,
 )
 from zcu_tools.gui.form import FormEnv, FormModel, FormState
@@ -21,6 +20,8 @@ from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+
+from tests.gui.widgets.form._text_input import commit_text
 
 
 class Inner(FormModel):
@@ -164,21 +165,21 @@ def test_expression_rows_show_the_resolved_value_or_the_error(
     view, state = editor
     mode(view, "amount").trigger()
     text = child(view, QLineEdit, "form.input.amount")
-    text.setText("general.ext.seed / 2")
+    commit_text(text, "general.ext.seed / 2")
     echo = child(view, QLabel, "form.value.amount")
     error = child(view, QLabel, "form.error.amount")
     assert not echo.isHidden()
     assert float(echo.text()) == 2.0
     assert error.isHidden()
 
-    text.setText("absent_name")
+    commit_text(text, "absent_name")
     assert echo.isHidden()
     assert echo.text() == ""
     assert not error.isHidden()
     assert error.text()
 
     mode(view, "amount").trigger()
-    child(view, QLineEdit, "form.input.amount").setText("3")
+    commit_text(child(view, QLineEdit, "form.input.amount"), "3")
     assert state.input.data["amount"] == 3.0
     assert echo.isHidden()
     assert error.isHidden()
@@ -246,19 +247,20 @@ def test_each_model_level_aligns_its_controls_on_one_label_column(
     view, _state = editor
     lay_out(view, qapp)
     line = child(view, QLineEdit, "form.input.amount").height()
-    (fold,) = [b for b in view.findChildren(QPushButton) if b.text() == "Collapse"]
-    for leaves, group_row in ((TOP_LEAVES, rect(view, fold)), (INNER_LEAVES, None)):
+    # The inner section's fold title is its row's name label in the top column.
+    title = child(view, QLabel, "form.fold.inner")
+    for leaves, titles in ((TOP_LEAVES, [title]), (INNER_LEAVES, [])):
         lefts = {path: beside_label(view, path).left() for path in leaves}
-        if group_row is not None:
-            lefts["inner"] = group_row.left()
         assert len(set(lefts.values())) == 1, lefts
         labels = [label_rect(view, text) for text in leaves.values()]
-        # Labels stay left-aligned in the column.
+        labels += [rect(view, shown) for shown in titles]
+        # Labels stay left-aligned in one column of one width.
         assert len({label.left() for label in labels}) == 1, labels
+        assert len({label.width() for label in labels}) == 1, labels
         widest = max(
             w.sizeHint().width()
-            for w in view.findChildren(QLabel)
-            if w.text() in leaves.values()
+            for w in [*view.findChildren(QLabel), *titles]
+            if w.text() in leaves.values() or w in titles
         )
         column = next(iter(lefts.values())) - labels[0].left()
         assert widest <= column <= widest + line / 2, (column, widest)
@@ -277,7 +279,7 @@ def test_field_error_appears_below_its_input_without_overlapping_the_next_row(
     error = child(view, QLabel, "form.error.count")
     assert error.isHidden()
     text = child(view, QLineEdit, "form.input.count")
-    text.setText("-")
+    commit_text(text, "-")
     lay_out(view, qapp)
     assert not error.isHidden()
     assert error.text()
@@ -286,6 +288,6 @@ def test_field_error_appears_below_its_input_without_overlapping_the_next_row(
     following = rect(view, child(view, QComboBox, "form.input.unit"))
     assert shown.top() >= field.top() + field.height()
     assert following.top() >= shown.top() + shown.height()
-    text.setText("4")
+    commit_text(text, "4")
     assert state.input.data["count"] == 4
     assert error.isHidden()

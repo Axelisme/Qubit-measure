@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -14,9 +15,8 @@ from typing import (
 from typing_extensions import TypeVar
 
 if TYPE_CHECKING:
-    from zcu_tools.cfg_model import CfgValidationContext, ModuleSpec
+    from zcu_tools.cfg_model import CfgValidationContext, ConfigBase, ModuleSpec
     from zcu_tools.datafile import RunMetadata
-    from zcu_tools.experiment.cfg_model import ExpCfgModel
     from zcu_tools.gui.session.parameters import ParameterContext
     from zcu_tools.resources.entry.ledger_models import JsonObject
     from zcu_tools.resources.entry.storage import PointStorageBinding
@@ -26,12 +26,12 @@ if TYPE_CHECKING:
 # ``ContextReadiness``, and ``SessionEnv`` are session-core value types — they live
 # in ``gui/session/types`` (no experiment cfg-tree coupling). They are re-exported
 # from the adapter package because ``ExpAdapterProtocol``'s signatures speak in
-# them (``make_default_cfg(ctx: SessionEnv)``, ``RunRequest.soc: SocHandle``).
+# them (``make_save_paths(ctx: SessionEnv)``, ``RunRequest.soc: SocHandle``).
 from zcu_tools.gui.session.types import SessionEnv, SocCfgHandle, SocHandle
 
 T_Result = TypeVar("T_Result")
-T_Cfg = TypeVar("T_Cfg", bound="ExpCfgModel")
-T_Cfg_contra = TypeVar("T_Cfg_contra", bound="ExpCfgModel", contravariant=True)
+T_Cfg = TypeVar("T_Cfg", bound="ConfigBase")
+T_Cfg_contra = TypeVar("T_Cfg_contra", bound="ConfigBase", contravariant=True)
 T_Result_co = TypeVar("T_Result_co")
 
 
@@ -79,23 +79,17 @@ class AdapterCapabilities:
 
 @dataclass(frozen=True)
 class AdapterGuide:
-    """Human-facing orientation for an adapter — read *before* running it.
+    """Human-facing Markdown and the directory for its relative resources.
 
-    Prose, not a contract: it helps an agent/user grasp the experiment's
-    behaviour and the adapter's built-in recommendations at a glance, but how
-    they actually use it is their call. Written in present tense at the
-    intent level (e.g. "assumes the resonator frequency is already calibrated"),
-    NOT as a literal md-key list or concrete numbers — those would rot against
-    the imperative ``md_get_*`` reads / default values they describe.
+    markdown is the complete guide text, without section parsing or rewriting.
+    An adapter without a guide returns an unwritten-guide notice instead.
+    resource_dir is the directory against which consumers resolve relative image
+    paths, or None when the adapter declares no guide. It does not imply that
+    any referenced image exists or has been read.
     """
 
-    behavior: str  # what this experiment measures and roughly how it runs
-    expects_md: (
-        str  # what it assumes is already in the parameter context (intent level)
-    )
-    expects_ml: str  # what it assumes is in the ModuleLibrary
-    typical_writeback: str  # what a completed run tends to propose writing back
-    recommended: str  # recommended analysis settings + typical usage (when/why)
+    markdown: str
+    resource_dir: Path | None
 
 
 def _is_json_safe(val: object) -> bool:

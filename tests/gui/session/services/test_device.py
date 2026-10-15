@@ -26,7 +26,12 @@ from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
 )
-from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
+from zcu_tools.gui.session.operation_handles import OperationHandles
+from zcu_tools.gui.session.ports import (
+    BackgroundExecutor,
+    OperationConflictError,
+    OperationKind,
+)
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
     DeviceService,
@@ -84,28 +89,31 @@ def _drain_until(
 
 
 def _make_svc(
-    driver: MagicMock | None = None, gate: OperationGate | None = None
+    gate: OperationGate | None = None,
+    state: State | None = None,
+    bus: EventBus | None = None,
+    handles: OperationHandles | None = None,
+    bg: BackgroundExecutor | None = None,
 ) -> tuple[DeviceService, MagicMock]:
-    from zcu_tools.gui.session.operation_handles import OperationHandles
     from zcu_tools.gui.session.operation_runner import OperationRunner
 
-    device = driver or MagicMock()
+    device = MagicMock()
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=0.0)
-    bg = _bg()
+    bg = bg or _bg()
     resolved_gate = gate or OperationGate(EventBus())
-    handles = OperationHandles()
+    handles = handles or OperationHandles()
     progress = ProgressService(QtProgressTransport())
-    bus = EventBus()
+    bus = bus or EventBus()
     runner = OperationRunner(resolved_gate, handles, progress, bg, bus)
     return (
         DeviceService(
             bus,
-            State(MagicMock()),
+            state or State(MagicMock()),
             resolved_gate,
             bg,
             runner,
             handles,
-            driver_factory=lambda _type, _address: device,  # type: ignore[arg-type]
+            driver_factory=lambda type_name, address: device,
             device_registry=FakeDeviceRegistry(),
         ),
         device,
@@ -167,22 +175,23 @@ def test_device_setup_updates_value_and_disconnect_updates_snapshot(qapp):
 
 
 def test_device_setup_started_and_finished_keep_operation_origin(qapp) -> None:
-    svc, device = _make_svc()
+    bus = EventBus()
+    svc, device = _make_svc(bus=bus)
     _connect(svc, _req())
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=1.0)
     observed: list[tuple[object, EventMeta]] = []
-    svc._bus.subscribe_with_meta(
+    bus.subscribe_with_meta(
         DeviceSetupStartedPayload,
         lambda payload, meta: observed.append((payload, meta)),
     )
-    svc._bus.subscribe_with_meta(
+    bus.subscribe_with_meta(
         DeviceSetupFinishedPayload,
         lambda payload, meta: observed.append((payload, meta)),
     )
     loop = QEventLoop()
     on_setup_finished(svc, lambda _name: loop.quit())
 
-    with svc._bus.origin(EventOrigin(kind="agent", client_id="client-a")):
+    with bus.origin(EventOrigin(kind="agent", client_id="client-a")):
         token = svc.start_setup_device(
             SetupDeviceRequest(
                 name="dev1", info=FakeDeviceInfo(address="addr", value=1.0)
@@ -248,7 +257,7 @@ def test_device_connect_failure_is_reported_without_live_registration(qapp):
 
     assert errors
     assert "cannot query" in errors[0]
-    assert "dev1" not in svc._registry.get_all_devices()
+    assert "dev1" not in svc.get_connected_devices()
     device.close.assert_called_once_with()
     assert svc.get_device_snapshot("dev1") is None
 
@@ -368,7 +377,8 @@ def test_wait_setup_done_wakes_from_worker_thread_without_deadlock(qapp):
     import threading
     import time
 
-    svc, device = _make_svc()
+    handles = OperationHandles()
+    svc, device = _make_svc(handles=handles)
     _connect(svc, _req())
 
     # Make setup take ~0.5s so the waiter genuinely has to block.
@@ -386,7 +396,7 @@ def test_wait_setup_done_wakes_from_worker_thread_without_deadlock(qapp):
 
     def waiter() -> None:
         t0 = time.monotonic()
-        outcome = svc._handles.await_outcome(token, timeout=3.0)
+        outcome = handles.await_outcome(token, timeout=3.0)
         result["outcome"] = outcome
         result["dt"] = time.monotonic() - t0
 
@@ -415,7 +425,8 @@ def test_wait_setup_done_raises_on_setup_failure(qapp):
     import threading
     import time
 
-    svc, device = _make_svc()
+    handles = OperationHandles()
+    svc, device = _make_svc(handles=handles)
     _connect(svc, _req())
 
     def failing_setup(_info, stop_event=None):
@@ -431,7 +442,7 @@ def test_wait_setup_done_raises_on_setup_failure(qapp):
     result: dict[str, object] = {}
 
     def waiter() -> None:
-        result["outcome"] = svc._handles.await_outcome(token, timeout=3.0)
+        result["outcome"] = handles.await_outcome(token, timeout=3.0)
 
     wt = threading.Thread(target=waiter)
     wt.start()
@@ -463,7 +474,7 @@ def test_disconnect_close_failure_retains_connected_device_and_releases_gate(qap
     loop.exec()
 
     assert "close failed" in errors[0]
-    assert "dev1" in svc._registry.get_all_devices()
+    assert "dev1" in svc.get_connected_devices()
     assert svc.get_device_snapshot("dev1").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
     device.close.side_effect = None
     retry_loop = QEventLoop()
@@ -509,8 +520,8 @@ def test_failing_device_changed_subscriber_does_not_abort_connect(qapp):
 
 
 def test_connect_writes_device_state_to_state_with_remember(qapp):
-    svc, _device = _make_svc()
-    state = svc._state  # white-box: State is the device-state SSOT
+    state = State(MagicMock())
+    svc, _device = _make_svc(state=state)
     _connect(svc, ConnectDeviceRequest("FakeDevice", "dev1", "addr", remember=False))
     dev = state.get_device("dev1")
     assert dev is not None
@@ -520,12 +531,13 @@ def test_connect_writes_device_state_to_state_with_remember(qapp):
 
 
 def test_get_device_info_unchanged_does_not_bump_or_emit(qapp):
-    svc, device = _make_svc()
-    state = svc._state
+    state = State(MagicMock())
+    bus = EventBus()
+    svc, device = _make_svc(state=state, bus=bus)
     _connect(svc, _req())  # connected with FakeDeviceInfo(value=0.0)
     before = state.version.get("device:dev1")
     events: list[object] = []
-    svc._bus.subscribe(DeviceChangedPayload, lambda p: events.append(p.name))
+    bus.subscribe(DeviceChangedPayload, lambda p: events.append(p.name))
 
     # Driver returns the same value already cached → pure cache sync.
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=0.0)
@@ -539,12 +551,13 @@ def test_get_device_info_unchanged_does_not_bump_or_emit(qapp):
 
 
 def test_get_device_info_changed_bumps_and_emits(qapp):
-    svc, device = _make_svc()
-    state = svc._state
+    state = State(MagicMock())
+    bus = EventBus()
+    svc, device = _make_svc(state=state, bus=bus)
     _connect(svc, _req())  # connected with FakeDeviceInfo(value=0.0)
     before = state.version.get("device:dev1")
     events: list[object] = []
-    svc._bus.subscribe(DeviceChangedPayload, lambda p: events.append(p.name))
+    bus.subscribe(DeviceChangedPayload, lambda p: events.append(p.name))
 
     # Driver value moved underneath us (e.g. external hardware change).
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=2.0)
@@ -580,6 +593,7 @@ class _DeferredPollBackground:
 
     def __init__(self) -> None:
         self.submitted = False
+        self.background = _bg()
         self._delivery: Callable[[], None] | None = None
 
     def submit(
@@ -590,7 +604,11 @@ class _DeferredPollBackground:
         on_done: Callable[[Any], None],
         on_error: Callable[[Exception], None],
     ) -> None:
-        assert run_in_pool is True
+        if not run_in_pool:
+            self.background.submit(
+                work, run_in_pool=False, on_done=on_done, on_error=on_error
+            )
+            return
         self.submitted = True
         try:
             result = work()
@@ -611,12 +629,13 @@ def test_poll_device_info_changed_value_bumps_and_emits_on_main(qapp):
     """The off-main poll reads the driver on a worker; the main-thread on_done
     does the cache compare + bump + DEVICE_CHANGED. A value that drifted under
     us (mock: backgrounded set_value) shows up after a poll."""
-    svc, device = _make_svc()
-    state = svc._state
+    state = State(MagicMock())
+    bus = EventBus()
+    svc, device = _make_svc(state=state, bus=bus)
     _connect(svc, _req())  # connected with FakeDeviceInfo(value=0.0)
     before = state.version.get("device:dev1")
     events: list[object] = []
-    svc._bus.subscribe(DeviceChangedPayload, lambda p: events.append(p.name))
+    bus.subscribe(DeviceChangedPayload, lambda p: events.append(p.name))
 
     # Simulate an external drift: the driver now reports a different value than
     # the cache (mock stand-in for a real hardware change between reads).
@@ -635,12 +654,13 @@ def test_poll_device_info_changed_value_bumps_and_emits_on_main(qapp):
 def test_poll_device_info_unchanged_value_does_not_bump_or_emit(qapp):
     """An unchanged poll is a pure cache sync — no spurious version bump (would
     invalidate other clients' expected_versions) and no DEVICE_CHANGED."""
-    svc, device = _make_svc()
-    state = svc._state
+    state = State(MagicMock())
+    bus = EventBus()
+    svc, device = _make_svc(state=state, bus=bus)
     _connect(svc, _req())  # connected with FakeDeviceInfo(value=0.0)
     before = state.version.get("device:dev1")
     events: list[object] = []
-    svc._bus.subscribe(DeviceChangedPayload, lambda p: events.append(p.name))
+    bus.subscribe(DeviceChangedPayload, lambda p: events.append(p.name))
 
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=0.0)
     svc.poll_device_info("dev1")
@@ -672,8 +692,9 @@ def test_poll_device_info_skips_memory_only_device(qapp):
 def test_poll_device_info_polls_setting_up_device(qapp):
     """Setup/ramp is the safe mutation: poll may read current driver values and
     refresh cache/UI while setup remains in flight."""
-    svc, device = _make_svc()
-    state = svc._state
+    state = State(MagicMock())
+    bus = EventBus()
+    svc, device = _make_svc(state=state, bus=bus)
     _connect(svc, _req())
 
     entered = threading.Event()
@@ -696,7 +717,7 @@ def test_poll_device_info_polls_setting_up_device(qapp):
         device.get_info.reset_mock()
         before = state.version.get("device:dev1")
         events: list[object] = []
-        svc._bus.subscribe(DeviceChangedPayload, lambda p: events.append(p.name))
+        bus.subscribe(DeviceChangedPayload, lambda p: events.append(p.name))
 
         svc.poll_device_info("dev1")
         _drain_until(
@@ -751,24 +772,24 @@ def test_poll_device_info_skips_non_setup_device_mutation(qapp, kind: OperationK
 def test_poll_device_info_late_result_skips_after_non_setup_mutation(qapp):
     """A delayed poll delivery must not bump State after the device enters a
     non-setup mutation."""
-    svc, device = _make_svc()
-    state = svc._state
+    state = State(MagicMock())
+    bus = EventBus()
+    bg = _DeferredPollBackground()
+    svc, device = _make_svc(state=state, bus=bus, bg=bg)
     _connect(svc, _req())
     before = state.version.get("device:dev1")
     events: list[object] = []
-    svc._bus.subscribe(DeviceChangedPayload, lambda p: events.append(p.name))
+    bus.subscribe(DeviceChangedPayload, lambda p: events.append(p.name))
 
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=8.0)
-    deferred_bg = _DeferredPollBackground()
-    svc._bg = deferred_bg  # white-box: only poll_device_info reads this field.
 
     svc.poll_device_info("dev1")
-    assert deferred_bg.submitted is True
+    assert bg.submitted is True
     assert state.version.get("device:dev1") == before
 
     state.set_device_status("dev1", DeviceStatus.DISCONNECTING)
     after_status_change = state.version.get("device:dev1")
-    deferred_bg.deliver()
+    bg.deliver()
 
     assert state.version.get("device:dev1") == after_status_change
     assert events == []
@@ -779,12 +800,13 @@ def test_poll_device_info_late_result_skips_after_non_setup_mutation(qapp):
 def test_poll_device_info_swallows_read_failure(qapp):
     """A single failed read (timeout / driver boom) is logged and dropped so the
     poller keeps ticking — best-effort, not Fast-Fail."""
-    svc, device = _make_svc()
-    state = svc._state
+    state = State(MagicMock())
+    bus = EventBus()
+    svc, device = _make_svc(state=state, bus=bus)
     _connect(svc, _req())
     before = state.version.get("device:dev1")
     events: list[object] = []
-    svc._bus.subscribe(DeviceChangedPayload, lambda p: events.append(p.name))
+    bus.subscribe(DeviceChangedPayload, lambda p: events.append(p.name))
 
     device.get_info.side_effect = RuntimeError("read timeout")
     svc.poll_device_info("dev1")  # must not raise

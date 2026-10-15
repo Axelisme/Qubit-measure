@@ -248,7 +248,10 @@ def test_module_edits_by_path_reply_with_form_and_write_the_edited_spec(
         assert reply["item"]["id"] == "ml-1"
         assert reply["errors"] == []
         assert reply["input"]["freq"] == 5100.0
-        assert reply["input"]["waveform"] == MODULE_PROPOSAL_WAVEFORM
+        assert reply["input"]["waveform"] == {
+            "kind": "ref",
+            "name": MODULE_PROPOSAL_WAVEFORM,
+        }
         assert {"path": ["freq"], "value": 5100.0} in reply["values"]
         assert "freq" in reply["schema"]["properties"]
         written = call(

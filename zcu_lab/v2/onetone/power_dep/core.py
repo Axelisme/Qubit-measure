@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Annotated
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     IDENTITY,
     MHZ_TO_HZ,
@@ -42,19 +43,22 @@ def gaindep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class PowerDepModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    readout: PulseReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
 
 
 class PowerDepSweepCfg(ConfigBase):
-    gain: SweepCfg
-    freq: SweepCfg
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
 
 
 class PowerDepCfg(ProgramV2Cfg, ExpCfgModel):
     modules: PowerDepModuleCfg
     sweep: PowerDepSweepCfg
-    earlystop_snr: float | None = None
+    earlystop_snr: Annotated[
+        float | None,
+        FieldMeta(label="Early-stop SNR (nonpositive disables)", decimals=3),
+    ] = None
 
 
 class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):

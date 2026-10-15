@@ -10,6 +10,7 @@ from zcu_tools.resources.entry import (
 )
 
 from tests.gui.app.workflows._start_fakes import StartHarness
+from tests.gui.widgets.form._text_input import commit_text
 
 from ._sample_input import sample_input
 from ._synthetic import Context
@@ -129,7 +130,7 @@ def test_form_inspection_rpc_uses_accepted_host_and_preserves_local_text(
     state.write({("sample", "value"): {"expr": "3 * 11"}}, panel.host.env)
     local = panel.panel.editor.findChild(QLineEdit, "form.input.sample.factor")
     assert isinstance(local, QLineEdit)
-    local.setText("-")
+    commit_text(local, "-")
     before = (
         state.input.data,
         state.base.data,

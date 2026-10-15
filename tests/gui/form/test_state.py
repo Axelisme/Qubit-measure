@@ -157,7 +157,7 @@ class StaticBranch(FormModel):
 
 
 class ContextBranch(FormModel):
-    """A branch factory reads captured context and previous input."""
+    """A branch factory reads only captured context."""
 
     kind: Literal["context"] = "context"
     shared: float = 9.0
@@ -165,10 +165,8 @@ class ContextBranch(FormModel):
     required: float
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
-        """Seed the new branch before core carries same-name fields."""
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
+        """Seed the new branch independently of the current draft."""
         return {
             "kind": "context",
             "shared": 9.0,
@@ -177,7 +175,7 @@ class ContextBranch(FormModel):
                 if env.parameters is not None
                 else 3.0
             ),
-            "required": previous.get("static_only", 0),
+            "required": 0,
         }
 
 
@@ -272,7 +270,7 @@ def environment(
 def test_static_defaults_leave_required_and_none_default_keys_absent() -> None:
     env = environment()
     assert PlainForm.default_input(env).data == {}
-    partial = PlainForm.defaults(env, {})
+    partial = PlainForm.defaults(env)
     assert "section" not in partial
     nullable = NullableForm.default_input(env)
     assert nullable.data == {}

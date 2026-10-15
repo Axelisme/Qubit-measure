@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from zcu_tools.cfg_model import PulseCfg, Range
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.cfg.resource import CfgPreconditionError, CfgPreconditionReason
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request
 
@@ -24,7 +24,10 @@ class TupleCfg(SampleCfg):
 
 
 class TupleAdapter(SampleAdapter):
-    form = Form(TupleCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[TupleCfg]:
+        del ctx
+        return Form(TupleCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
 
 
 class ExtraInputs(BaseModel):
@@ -36,12 +39,15 @@ def retain_cfg(extras: ExtraInputs, cfg: SampleCfg) -> SampleCfg:
 
 
 class ExtrasAdapter(SampleAdapter):
-    form = Form(
-        SampleCfg,
-        {"sweep": Range.between(1.0, 2.0, expts=3)},
-        extras=ExtraInputs,
-        lower=retain_cfg,
-    )
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[SampleCfg]:
+        del ctx
+        return Form(
+            SampleCfg,
+            {"sweep": Range.between(1.0, 2.0, expts=3)},
+            extras=ExtraInputs,
+            lower=retain_cfg,
+        )
 
 
 class ImmediateScheduler:
@@ -312,7 +318,10 @@ class ModuleRpcCfg(SampleCfg):
 
 
 class ModuleRpcAdapter(SampleAdapter):
-    form = Form(ModuleRpcCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[ModuleRpcCfg]:
+        del ctx
+        return Form(ModuleRpcCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
 
 
 @pytest.mark.parametrize("draft", ["partial", "invalid-expression"])
@@ -362,12 +371,15 @@ def retain_tagged_cfg(extras: TaggedExtraInputs, cfg: ModuleRpcCfg) -> ModuleRpc
 
 
 class TaggedExtrasAdapter(ModuleRpcAdapter):
-    form = Form(
-        ModuleRpcCfg,
-        {"sweep": Range.between(1.0, 2.0, expts=3)},
-        extras=TaggedExtraInputs,
-        lower=retain_tagged_cfg,
-    )
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[ModuleRpcCfg]:
+        del ctx
+        return Form(
+            ModuleRpcCfg,
+            {"sweep": Range.between(1.0, 2.0, expts=3)},
+            extras=TaggedExtraInputs,
+            lower=retain_tagged_cfg,
+        )
 
 
 def test_use_inline_rejects_tagged_nonmodule_input(

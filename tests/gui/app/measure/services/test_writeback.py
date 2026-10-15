@@ -203,10 +203,10 @@ def test_arb_names_are_captured_when_the_draft_is_created(session):
     names.clear()
     proposed = service.preview_values(draft)["ml-1"].proposed
     assert isinstance(proposed, dict) and proposed["waveform"]["data"] == "first"
-    draft.edit("ml-1", edits={("waveform", "data"): "second"})
+    draft.edit("ml-1", edits={("waveform", "module", "data"): "second"})
     with pytest.raises(LibraryEntryInvalid) as error:
         service.preview_values(draft)
-    assert set(error.value.errors.messages) == {("waveform", "data")}
+    assert set(error.value.errors.messages) == {("waveform", "module", "data")}
 
 
 def test_ordered_write_rejects_invalid_module_before_context_apply(session):

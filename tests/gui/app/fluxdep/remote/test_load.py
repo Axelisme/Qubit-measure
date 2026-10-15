@@ -312,6 +312,7 @@ def test_processed_partial_publication_is_not_rolled_back_or_self_refreshed(
     client = route_harness.client()
     _observe_sources(route_harness, client)
     before = state.version.get(f"spectrum:{name}")
+    route_harness.ctrl.remove_spectrum(name)
     put_spectrum = FluxDepState.put_spectrum
 
     def fail_second_publication(target: FluxDepState, entry: SpectrumEntry) -> None:
@@ -332,8 +333,47 @@ def test_processed_partial_publication_is_not_rolled_back_or_self_refreshed(
     assert state.get_spectrum(name).points_completed
     assert state.get_spectrum(name).spec_type == "OneTone"
     assert state.version.get(f"spectrum:{name}") == before + 1
-    # Failed handlers do not advance even previously matching observations.
+    # The failed handler retained the committed prefix, not a rollback.
     _observe_sources(route_harness, client)
+    route_harness.ctrl.remove_spectrum(name)
     assert route_harness.request(
         client, "spectrum.load_processed", filepath=processed_hdf5
     )["ok"]
+
+
+def test_rpc_load_updates_the_list_without_opening_a_picker(
+    route_harness: RouteHarness, spectrum_hdf5: SpectrumFile, qapp
+) -> None:
+    from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import (
+        ResultPreviewWidget,
+    )
+    from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
+
+    from tests.gui._dialog_fakes import RecordingDialogPresenter
+    from tests.gui.app.fluxdep._window import editor, list_labels, stage_status
+
+    ctrl = route_harness.ctrl
+    window = MainWindow(
+        ctrl, dialog_presenter=RecordingDialogPresenter(confirm_answers=[True])
+    )
+    try:
+        client = route_harness.client()
+        _observe_sources(route_harness, client)
+        reply = _load_request(route_harness, client, "spectrum.load", spectrum_hdf5[0])
+        assert reply["ok"] is True, reply
+        name = reply["result"]["name"]
+        assert isinstance(name, str)
+        assert any(label.startswith(name) for label in list_labels(window))
+        assert ctrl.interactive.inspect(name) is None
+        shown = route_harness.request(client, "spectrum.set_active", name=name)
+        assert shown["ok"] is True, shown
+        # Active only displays: the agent's spectrum shows its published preview.
+        preview = editor(window)
+        assert isinstance(preview, ResultPreviewWidget)
+        assert stage_status(window, "align") == "open"
+        assert stage_status(window, "sample") == "locked"
+        assert ctrl.interactive.inspect(name) is None
+    finally:
+        window.close()
+        window.deleteLater()
+        qapp.processEvents()

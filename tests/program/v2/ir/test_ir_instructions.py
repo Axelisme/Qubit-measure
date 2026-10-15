@@ -41,11 +41,6 @@ from zcu_tools.program.v2.ir.instructions import (
     TrigInst,
     WaitInst,
     WmemWriteInst,
-    _parse_cond_code,
-    _parse_mem_addr_field,
-    _parse_port_dst,
-    _require_literal,
-    _require_register,
 )
 from zcu_tools.program.v2.ir.labels import Label, LabelRef
 from zcu_tools.program.v2.ir.operands import (
@@ -688,37 +683,39 @@ class TestMetaInstruction:
         assert inst.info["n"] == 10
 
 
-class TestInstructionHelpers:
-    def test_require_literal_accepts_valid_value(self):
-        assert _require_literal("set", "FLAG.C_OP", frozenset({"set", "clr"})) == "set"
+class TestInstructionParsing:
+    def test_flag_accepts_valid_operation(self):
+        assert BaseInst.from_dict({"CMD": "FLAG", "C_OP": "set"}) == FlagInst(
+            c_op="set"
+        )
 
-    def test_require_literal_rejects_invalid_value(self):
+    def test_flag_rejects_invalid_operation(self):
         with pytest.raises(ValueError, match="FLAG.C_OP"):
-            _require_literal("bad", "FLAG.C_OP", frozenset({"set", "clr"}))
+            BaseInst.from_dict({"CMD": "FLAG", "C_OP": "bad"})
 
-    def test_parse_cond_code_accepts_none_and_valid(self):
-        assert _parse_cond_code(None) is None
-        assert _parse_cond_code("NZ") == "NZ"
+    @pytest.mark.parametrize("condition", [None, "NZ"])
+    def test_jump_accepts_absent_and_valid_condition(self, condition):
+        assert JumpInst.from_dict({"IF": condition}).if_cond == condition
 
-    def test_parse_cond_code_rejects_invalid_value(self):
+    def test_jump_rejects_invalid_condition(self):
         with pytest.raises(ValueError, match="valid condition code"):
-            _parse_cond_code("bad")
+            JumpInst.from_dict({"IF": "bad"})
 
-    def test_require_register_rejects_invalid_value(self):
+    def test_regwrite_rejects_invalid_register(self):
         with pytest.raises(ValueError, match="DST"):
-            _require_register("garbage", "DST")
+            RegWriteInst.from_dict({"DST": "garbage", "SRC": "imm"})
 
     def test_dispatch_rejects_invalid_test_alu_expression(self):
         with pytest.raises(ValueError, match="Cannot parse ALU expression: 'garbage'"):
             BaseInst.from_dict({"CMD": "TEST", "OP": "garbage"})
 
-    def test_parse_port_dst_rejects_invalid_value(self):
+    def test_port_write_rejects_invalid_port(self):
         with pytest.raises(ValueError, match="port number"):
-            _parse_port_dst("bogus")
+            PortWriteInst.from_dict({"DST": "bogus"})
 
-    def test_parse_mem_addr_field_rejects_invalid_value(self):
+    def test_port_write_rejects_invalid_address(self):
         with pytest.raises(ValueError, match="ADDR"):
-            _parse_mem_addr_field("bogus", "ADDR")
+            PortWriteInst.from_dict({"DST": "0", "ADDR": "bogus"})
 
     def test_instruction_str_omits_none_fields(self):
         assert str(TimeInst(c_op="rst")) == "TimeInst(C_OP=rst)"

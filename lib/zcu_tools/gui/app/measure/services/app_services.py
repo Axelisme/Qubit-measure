@@ -94,7 +94,7 @@ class AppServices:
     context_control: ContextControlPort
     setup_control: SetupControlPort
     tab: TabService
-    tab_cfg: TabFormResources
+    tab_forms: TabFormResources
     tab_control: TabControlPort
     run_analyze_control: RunAnalyzeControlPort
     load: LoadService
@@ -195,7 +195,7 @@ def build_app_services(
             source_basis=bindings.source_basis(state),
         )
 
-    tab_cfg = TabFormResources(
+    tab_forms = TabFormResources(
         mutation_allowed=lambda tab_id: not state.is_tab_busy(tab_id),
     )
     # Independent library/inspect drafts never publish tab cfg.
@@ -213,7 +213,7 @@ def build_app_services(
     # TabService composes the tab render model and needs the writeback query port
     # (built above) — built after writeback (read-model dependency, ADR-0067).
     tab = TabService(
-        state, registry, writeback, tab_cfg, form_sources, captured_parameters
+        state, registry, writeback, tab_forms, form_sources, captured_parameters
     )
     workspace = WorkspaceService(state, tab, bus)
     guard = GuardService(state)
@@ -305,7 +305,7 @@ def build_app_services(
         context_control=session.context_control,
         setup_control=session.setup_control,
         tab=tab,
-        tab_cfg=tab_cfg,
+        tab_forms=tab_forms,
         tab_control=tab_control,
         run_analyze_control=run_analyze_control,
         load=load,

@@ -8,17 +8,10 @@ from typing import ClassVar, Literal
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import AnalysisDocument, RunMetadata
 from zcu_tools.experiment.native_persistence import PreparedRunData
-from zcu_tools.gui.app.measure.adapter import LoadDataRequest, SessionEnv
+from zcu_tools.gui.app.measure.adapter import LoadDataRequest
 from zcu_tools.gui.app.measure.catalog import CatalogReloadError, PreparedCatalogReload
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    DirectValue,
-    ScalarSpec,
-)
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 
 from tests.gui._adapter_fakes import DummyAdapter
 
@@ -33,7 +26,11 @@ class OldAdapter(DummyAdapter):
     """Context-free cfg adapter for reload tests, without native persistence."""
 
     experiment_tag: ClassVar[str | None] = None
-    form = Form(ReloadCfg, {})
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[ConfigBase]:
+        del ctx
+        return Form(ReloadCfg, {})
 
     def load(self, req: LoadDataRequest) -> tuple[object, RunMetadata]:
         """Reject native Load requests; this reload-only fake has no loader."""
@@ -56,13 +53,6 @@ class OldAdapter(DummyAdapter):
         del result, comment
         raise NotImplementedError("Reload fake does not prepare native data")
 
-    def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
-        del ctx
-        return CfgSchema(
-            spec=CfgSectionSpec(fields={"knob": ScalarSpec(label="Knob", type=int)}),
-            value=CfgSectionValue(fields={"knob": DirectValue(7)}),
-        )
-
 
 class NewAdapter(OldAdapter):
     pass
@@ -71,7 +61,7 @@ class NewAdapter(OldAdapter):
 class Loader:
     def __init__(self) -> None:
         self.candidate = Registry()
-        self.candidate.register("demo", NewAdapter, form=NewAdapter.form)
+        self.candidate.register("demo", NewAdapter)
         self.failure: CatalogReloadError | None = None
         self.prepare_failure: Exception | None = None
         self.during_load: Callable[[], None] = lambda: None

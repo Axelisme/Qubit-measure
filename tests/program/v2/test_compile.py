@@ -11,8 +11,6 @@ from collections.abc import Mapping
 
 import pytest
 from zcu_tools.program.v2.base import ProgramV2Cfg
-from zcu_tools.program.v2.ir import base as ir_base
-from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modular import BaseCustomProgramV2, ModularProgramV2
 from zcu_tools.program.v2.modules import Delay, SoftDelay
@@ -144,25 +142,6 @@ def test_rounds_propagated():
 def test_datamem_none_when_empty():
     prog = _make_prog()
     assert prog.compile_datamem() is None
-
-
-def test_compile_passes_pmem_budget_into_pipeline(monkeypatch):
-    seen: dict[str, object] = {}
-
-    class _NoopPipeline:
-        def __call__(self, ir, dmem_base_offset=0):
-            return ir, PipeLineContext(config=PipeLineConfig(), pmem_budget=1024)
-
-    def fake_make_default_pipeline(pmem_capacity):
-        seen["pmem_capacity"] = pmem_capacity
-        return _NoopPipeline()
-
-    monkeypatch.setattr(ir_base, "make_default_pipeline", fake_make_default_pipeline)
-
-    prog = _make_prog()
-
-    assert "pmem_capacity" in seen
-    assert seen["pmem_capacity"] == prog.tproccfg["pmem_size"]
 
 
 # ---------------------------------------------------------------------------

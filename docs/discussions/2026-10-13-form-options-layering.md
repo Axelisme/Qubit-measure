@@ -4,7 +4,7 @@ status: active
 superseded_by: null
 related:
   - docs/adr/draft/pydantic-form-tool.md
-  - docs/adr/draft/measure-form-derivation.md
+  - docs/adr/0073-measure-form-derivation.md
   - docs/discussions/2026-10-13-measure-form-redesign.md
 basis:
   - main@007a30ccc（撰寫時）

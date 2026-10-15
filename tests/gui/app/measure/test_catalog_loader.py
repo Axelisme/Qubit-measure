@@ -12,6 +12,8 @@ from zcu_tools.gui.app.measure.catalog_loader import (
 )
 from zcu_tools.gui.app.measure.registry import Registry
 
+from tests.gui.app.measure.remote._helpers import Fixture
+
 
 def test_measure_adapter_keeps_registration_and_validation_contract(
     tmp_path: Path,
@@ -27,7 +29,7 @@ class Adapter(ExpAdapterProtocol):
     capabilities = AdapterCapabilities()
     @classmethod
     def guide(cls):
-        return AdapterGuide("VERSION", "", "", "", "")
+        return AdapterGuide(markdown="VERSION", resource_dir=None)
 def register_all(registry):
     registry.register("demo", Adapter)
 """
@@ -42,11 +44,11 @@ def register_all(registry):
             current_registry=Registry(),
         )
         first = loader.load(loader.prepare())
-        assert first.create("demo").guide().behavior == "v1"
+        assert first.create("demo").guide().markdown == "v1"
         path.write_text(source.replace("VERSION", "v2"))
         second = loader.load(loader.prepare())
-        assert second.create("demo").guide().behavior == "v2"
-        assert first.create("demo").guide().behavior == "v1"
+        assert second.create("demo").guide().markdown == "v2"
+        assert first.create("demo").guide().markdown == "v1"
     finally:
         sys.path.remove(str(tmp_path))
         for name in tuple(sys.modules):
@@ -57,34 +59,26 @@ def register_all(registry):
         importlib.invalidate_caches()
 
 
-def test_reload_binds_forms_to_current_registry_templates(tmp_path: Path) -> None:
+def test_reload_keeps_templates_for_open_and_reset(tmp_path: Path, qapp) -> None:
     root = tmp_path / "measure_template_loader_fixture"
     root.mkdir()
     (root / "__init__.py").write_text("")
     (root / "catalog.py").write_text(
-        """from zcu_tools.cfg_model import ConfigBase, Template
-from zcu_tools.program.v2.modules import PulseCfg
-from zcu_tools.gui.app.measure.adapter import (
-    ExpAdapterProtocol, AdapterCapabilities, AdapterGuide, Form,
-)
-from zcu_tools.gui.form import FormEnv, FormErrors, FormState
+        """from zcu_tools.cfg_model import ConfigBase, Template, PulseCfg
+from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
+from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.form_adapter import Form, FormContext
 class Cfg(ConfigBase):
     probe: PulseCfg
-class Adapter(ExpAdapterProtocol):
-    capabilities = AdapterCapabilities()
-    form = Form(Cfg, {"probe": Template("probe")})
-    @classmethod
-    def guide(cls):
-        env = FormEnv()
-        result = FormState(cls.form.default_input(env)).result(env)
-        if isinstance(result, FormErrors):
-            raise ValueError(str(result.messages))
-        cfg = cls.form.to_cfg(result, env)
-        if isinstance(cfg, FormErrors):
-            raise ValueError(str(cfg.messages))
-        return AdapterGuide(str(cfg.probe.gain), "", "", "", "")
+class Adapter(BaseAdapter[Cfg, float]):
+    capabilities = AdapterCapabilities(requires_soc=False, load_data=False, analysis=AnalysisMode.NONE)
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[Cfg]:
+        return Form(Cfg, {"probe": Template("probe")})
+    def make_filename_stem(self, ctx):
+        return "demo"
 def register_all(registry):
-    registry.register("demo", Adapter, form=Adapter.form)
+    registry.register("demo", Adapter)
 """
     )
     template = TemplateDef(
@@ -120,13 +114,23 @@ def register_all(registry):
         assert candidate.templates == {"probe": template}
         assert current.list_names() == []
         assert candidate.list_names() == ["demo"]
-        # The adapter's guide observes a cfg materialized through its bound form.
-        assert candidate.create("demo").guide().behavior == "0.25"
-        current.replace_from(candidate)
-        second = loader.load(loader.prepare())
-        assert second is not candidate
-        assert second.templates == current.templates
-        assert second.create("demo").guide().behavior == "0.25"
+        application = Fixture(headless=True)
+        try:
+            application.registry.replace_from(candidate)
+            tab_id = application.ctrl.new_tab("demo")
+            resource = application.ctrl.cfg_resources.lookup(tab_id)
+            assert resource.read_module(("probe",)).value["gain"] == 0.25
+            current.replace_from(candidate)
+            second = loader.load(loader.prepare())
+            assert second is not candidate
+            assert second.templates == current.templates
+            application.registry.replace_from(second)
+            resource.reset()
+            assert resource.read_module(("probe",)).value["gain"] == 0.25
+        finally:
+            application.stop()
+            for tab_id in tuple(application.ctrl.list_tab_ids()):
+                application.ctrl.close_tab(tab_id)
     finally:
         sys.path.remove(str(tmp_path))
         for name in tuple(sys.modules):

@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import Field
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
     AxesSpec,
@@ -43,20 +41,40 @@ def fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class FluxDepModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    readout: PulseReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
 
 
 class FluxDepSweepCfg(ConfigBase):
-    freq: SweepCfg
-    flux: SweepCfg
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(label="Freq", unit="MHz", description="Readout frequency sweep."),
+    ]
+    flux: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Flux device value",
+            description="Flux device sweep in flux_unit coordinates.",
+        ),
+    ]
 
 
 class FluxDepCfg(ProgramV2Cfg, ExpCfgModel):
-    flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
     modules: FluxDepModuleCfg
-    # Map flux_dev to a connected driver name.
-    dev: Mapping[str, str] = Field(...)
+    flux_dev: Annotated[
+        str,
+        FieldMeta(
+            label="Flux Device",
+            description="Name of the connected flux-bias device driven by the sweep.",
+        ),
+    ]
+    flux_unit: Annotated[
+        Literal["A", "V", "native"],
+        FieldMeta(
+            label="Flux unit",
+            description="Working unit for the selected flux driver; no conversion.",
+        ),
+    ]
     sweep: FluxDepSweepCfg
 
 
@@ -72,6 +90,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
         result_type=FluxDepResult,
         cfg_type=FluxDepCfg,
         tag="onetone/flux_dep",
+        cfg_schema_version="2.0",  # dev mapping replaced by named flux_dev field
     )
 
     def run(
@@ -100,7 +119,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
         )
 
         set_flux(
-            context.devices[cfg.dev["flux_dev"]],
+            context.devices[cfg.flux_dev],
             dev_values[0],
             unit=cfg.flux_unit,
             stop=context.cancel_signal,
@@ -127,7 +146,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
             for _, step in sched.scan("flux", dev_values.tolist()):
                 cfg = step.cfg
                 set_flux(
-                    context.devices[cfg.dev["flux_dev"]],
+                    context.devices[cfg.flux_dev],
                     step.value,
                     unit=cfg.flux_unit,
                     stop=context.cancel_signal,

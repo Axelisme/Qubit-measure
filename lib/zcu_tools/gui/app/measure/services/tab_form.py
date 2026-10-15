@@ -28,7 +28,7 @@ from zcu_tools.gui.form import (
     FormState,
     FormWritePath,
 )
-from zcu_tools.gui.form_adapter import Form, ModuleValues
+from zcu_tools.gui.form_adapter import Form, FormContext, ModuleValues
 
 _logger = getLogger(__name__)
 
@@ -73,7 +73,7 @@ class TabFormResource:
 
     def __init__[C: ConfigBase](
         self,
-        form: Form[C],
+        make_form: Callable[[FormContext], Form[C]],
         *,
         capture: Callable[[Mapping[str, str] | None], TabFormSources],
         mutation_allowed: Callable[[], bool],
@@ -82,7 +82,8 @@ class TabFormResource:
     ) -> None:
         """Prepare default input using one capture before exposing the resource.
 
-        form is the registry-bound generated definition for this tab lifetime.
+        make_form builds a definition from the newly captured context on Open
+        and Reset. The caller binds its template catalog before returning it.
         capture accepts one-shot named alias overrides, or None for global rows.
         mutation_allowed is the app busy/control policy; notification_active
         reports notifications in other tab resources. Neither callback may do
@@ -91,16 +92,12 @@ class TabFormResource:
         restored. Capture/default failures propagate without a resource.
         """
         self._capture = capture
-        self._default_input = form.default_input
-        self._to_cfg: Callable[[FormModel, FormEnv], ConfigBase | FormErrors] = (
-            form.to_cfg
-        )
-        self._read_module = form.read_module
-        self._module_input_kind = form.module_input_kind
+        self._make_form = make_form
         self._mutation_allowed = mutation_allowed
         self._notification_active = notification_active
         self._sources = capture(None)
-        self._state = FormState(form.default_input(self._sources.env))
+        self._form = make_form(FormContext(self._sources.env.parameters))
+        self._state = FormState(self._form.default_input(self._sources.env))
         self._dropped_paths = (
             self._state.write_compatible(initial, self._sources.env)
             if initial is not None
@@ -166,7 +163,7 @@ class TabFormResource:
         result = self._state.result(self._sources.env)
         if isinstance(result, FormErrors):
             return result
-        return self._to_cfg(result, self._sources.env)
+        return self._form.to_cfg(result, self._sources.env)
 
     def accept(self) -> AcceptedFormConfig:
         """Accept only the current valid cfg without a new source capture.
@@ -212,7 +209,7 @@ class TabFormResource:
         validation, input change or publication occurs.
         """
         self._require_open()
-        return self._module_input_kind(self.input, path)
+        return self._form.module_input_kind(self.input, path)
 
     def read_module(self, path: tuple[str, ...]) -> ModuleValues:
         """Read one core module field using the fixed Open/Reset capture.
@@ -226,7 +223,7 @@ class TabFormResource:
         publication occurs. Unexpected source failures propagate.
         """
         self._require_open()
-        result = self._read_module(self.input, path, self._sources.env)
+        result = self._form.read_module(self.input, path, self._sources.env)
         if isinstance(result, FormErrors):
             raise CfgPreconditionError(
                 CfgPreconditionReason.NOT_VALID,
@@ -271,13 +268,16 @@ class TabFormResource:
 
         aliases optionally overrides named bindings for this capture only. It is
         neither retained as an override nor written to the global alias table.
-        Capture/default failures preserve the old input and source. Busy, revoked
+        Capture/factory/default failures preserve the old shape, input and source.
+        A successful Reset replaces shape and defaults together. Busy, revoked
         and notification-reentrant calls raise CfgPreconditionError.
         """
         with self._mutation():
             sources = self._capture(aliases)
-            state = FormState(self._default_input(sources.env))
+            form = self._make_form(FormContext(sources.env.parameters))
+            state = FormState(form.default_input(sources.env))
             self._sources = sources
+            self._form = form
             self._state = state
             self._notify()
 
@@ -368,14 +368,14 @@ class TabFormResources:
     def create[C: ConfigBase](
         self,
         tab_id: str,
-        form: Form[C],
+        make_form: Callable[[FormContext], Form[C]],
         *,
         capture: Callable[[Mapping[str, str] | None], TabFormSources],
         initial: Mapping[str, JsonValue] | None = None,
     ) -> TabFormResource:
         """Prepare one fixed capture and optional compatible restoration before registration.
 
-        tab_id is a nonempty new app identity. form is the registry-bound adapter
+        tab_id is a nonempty new app identity. make_form builds a catalog-bound
         definition; capture reads published sources on Open/Reset only. initial
         is saved Form input JSON, never an old CfgSchema memento. Duplicate/empty
         identities raise ValueError; preparation failures leave no association.
@@ -387,7 +387,7 @@ class TabFormResources:
                 f"Tab form identity is empty or already registered: {tab_id!r}"
             )
         resource = TabFormResource(
-            form,
+            make_form,
             capture=capture,
             initial=initial,
             mutation_allowed=lambda: self._mutation_allowed(tab_id),

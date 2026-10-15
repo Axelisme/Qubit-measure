@@ -28,12 +28,10 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned 
 
 已遷移adapter的`run(req, raw_cfg, *, context)`使用Guard凍結的resolved cfg，RunService 提供單次 RunContext，adapter 與核心共用其 devices、plots 和取消訊號。
 `analyze(req, *, plots)`將圖寫入本次具名Plots，不把Figure塞入數值結果。
-T1／GE／Lookback／OneTone Freq、PowerDep／FakeFrequency／Fake stub 的 GUI run 將同次 cfg 與純 Result 配成 RunRecord，analyze 使用該 source。GE post 另接已採用的 primary calibration，不使用未重新分析的表單。
+T1／GE／Lookback／OneTone Freq、PowerDep 的 GUI run 將同次 cfg 與純 Result 配成 RunRecord，analyze 使用該 source。GE post 另接已採用的 primary calibration，不使用未重新分析的表單。
 BaseAdapter 的 load/save 直接傳遞核心 records；load 不用目前 cfg 補來源，save 將 explicit source 和 exact path 交給核心，override 可接受 cfg=None。
 GUI LoadService 只從 loaded record.cfg 回填，缺失或不可採用時保留 Config/editor，不撤回有效 loaded data。
 OneTone Freq 保 route-qualified delay calibration 與 readout writeback。PowerDep 把 SNR stop control 放進 typed cfg，不提供 analysis。
-FakeFrequency core 與 adapter 留在 `fake/freq/core.py` 與 `fake/freq/gui.py`。Core 重用 FreqExp 的資料分析，不讀 simulation truth，圖歸本次 Plots。RunRecord 保留 FakeFreqCfg；readout 使用可解碼的 concrete union。GUI 支援 canonical load，save 使用 exact path；persist_data=False 仍是明確 noop。
-`fake/stub/core.py` 與 `fake/stub/gui.py` 保留未註冊的 hardware-free GUI stub。Core 回傳純 data，GUI 建立 matching cfg／Result record並捕捉 detached device snapshot。Threshold 與 peak 分析由 core 擁有，GUI 投影 numeric peak 並提供 fake_peak writeback。Save 保持明確 noop，load 明確 unsupported，GUI load_data=False。不用固定 samples 捏造 canonical physical axis。
 OneTone FluxDep 的 run 將同次 cfg 與純 Result 配成 RunRecord，interactive plugin 明確取該 source 的資料並捕捉成唯讀 inputs。
 GE 的 FIT／post 分別發布 `fit`／`post` 具名圖，post 使用已採用的 primary FIT；
 OneTone FluxDep 用具名 2D `measurement` liveplot。互動 Done 從 committed state 呼叫 Qt-free kernel 與原生圖 builder，產生 GUI-owned 數值結果與 `pick` 圖。Qt 畫布只負責預覽。TwoTone FluxDep 的 run 也回傳 RunRecord，plugin 從 explicit source 捕捉 inputs，保留 phase 投影並共用這條終止 renderer。TwoTone Freq 的 FIT 回傳頻率與線寬及其誤差，fit 圖另交 Plots；TwoTone PowerDep 只提供 run 與 canonical records，不提供 analysis。Lookback FIT 只輸出 predict_offset scalar，具名 fit 另由 Plots 發布；GUI ratio0.1／smooth1.0 與 timeFly writeback 不變。其餘 adapters 同樣使用 explicit records，framework 不提供 pyplot 或舊簽名 fallback。

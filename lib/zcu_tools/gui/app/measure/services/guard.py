@@ -147,7 +147,6 @@ class GuardService:
         ctx = self._state.session_env
         parameters = tab.cfg.env.parameters
         accepted = tab.cfg.accept()
-        raw_cfg = accepted.values
         req = RunRequest(
             soc=ctx.soc,
             soccfg=ctx.soccfg,
@@ -162,7 +161,7 @@ class GuardService:
                 raise GuardError(str(exc), reason_code="no_soc") from exc
 
         try:
-            tab.adapter.validate_run_request(req, raw_cfg)
+            tab.adapter.validate_run_request(req, accepted.cfg)
         except Exception as exc:
             raise GuardError(
                 f"Run config invalid: {exc}", reason_code="invalid_cfg"

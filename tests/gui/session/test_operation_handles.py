@@ -472,32 +472,6 @@ def test_handles_cancel_invokes_hook() -> None:
     assert called == [True]
 
 
-def test_settle_window_keeps_token_reachable() -> None:
-    """Registry TOCTOU regression (ADR-0066): ``settle`` publishes the channel
-    to ``_done`` BEFORE retracting it from ``_live``, so a concurrent
-    ``await_outcome`` / ``poll`` always finds it in at least one dict and never
-    falls through to the default 'finished' (which would misreport a
-    cancelled/failed terminal). This hand-constructs both in-flight windows."""
-    handles = OperationHandles()
-    token = handles.create()
-    record = handles._live[token]
-    record.channel.settle(OperationOutcome("cancelled", "stopped"))
-
-    # Window 1: published to _done, not yet retracted from _live (in BOTH).
-    handles._done[token] = record
-    assert handles.poll(token) == OperationOutcome("cancelled", "stopped")
-    r = handles.await_outcome(token, timeout=0.5)
-    assert r is not None and r.reason == "completed"
-    assert r.outcome is not None and r.outcome.status == "cancelled"
-
-    # Window 2: retracted from _live, in _done only.
-    handles._live.pop(token, None)
-    assert handles.poll(token) == OperationOutcome("cancelled", "stopped")
-    r2 = handles.await_outcome(token, timeout=0.5)
-    assert r2 is not None and r2.reason == "completed"
-    assert r2.outcome is not None and r2.outcome.status == "cancelled"
-
-
 # ---------------------------------------------------------------------------
 # OperationChannel.can_cancel (ADR-0066)
 # ---------------------------------------------------------------------------

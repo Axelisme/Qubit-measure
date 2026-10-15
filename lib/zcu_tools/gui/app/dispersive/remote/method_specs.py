@@ -22,8 +22,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     # Project
     "project.info": MethodSpec(
         5.0,
-        "Read the current project info (chip_name, qub_name, result_dir, "
-        "database_path).",
+        "Read the current project info (chip_name, qub_name, result_dir, data_root).",
         readonly=True,
     ),
     # Fluxonium fit inputs (the fluxdep_fit handoff dispersive reads)

@@ -8,15 +8,13 @@ operator guide. The core experiment lives in ``zcu_lab.v2.jpa``
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, ClassVar, TypeAlias
+from pathlib import Path
+from typing import ClassVar, TypeAlias
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     NoAnalyzeParams,
@@ -24,23 +22,13 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-    ModuleInit,
-)
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
-from zcu_lab.v2._support.measure.seeds import res_freq_range
 from zcu_lab.v2.jpa.check.core import CheckCfg, CheckExp, CheckResult
+from zcu_lab.v2.jpa.check.form import make_form
 
 JpaCheckRunResult: TypeAlias = RunRecord[CheckCfg, CheckResult]
-
-# Bring-up survey: ~101 readout-frequency points around the resonator. These
-# are inspectable starting bounds, NOT safety certification — the operator must
-# review device and sweep.
-_JPA_CHECK_FREQ_EXPTS = 101
 
 
 @dataclass
@@ -53,85 +41,22 @@ class JpaCheckAdapter(
 ):
     experiment_tag: ClassVar[str | None] = CheckExp.persistence_tag()
     exp_cls = CheckExp
-    ExpCfg_cls: ClassVar[Any] = CheckCfg
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "JPA pump off/on resonator check: sweeps the readout frequency "
-            "with the JPA pump RF output off and again with it on, recording "
-            "the one-tone resonator response in both states so you can "
-            "compare the resonance by eye. Runs on real hardware and commands "
-            "the selected JPA RF device (its output is toggled off, then on). "
-            "WARNING: the run leaves the JPA pump output ON when it finishes "
-            "— the pump is NOT turned off afterwards. Review the selected RF "
-            "device and the sweep range before running — the seeded bounds "
-            "are bring-up defaults, not certified safety limits."
-        ),
-        expects_md=(
-            "Uses current aliases: qubit (qubit/*), resonator (resonator), and "
-            "jpa (amplifier/jpa). Add a jpa alias row in the global dialog, "
-            "for example $resonator.amplifier. Scalars use $jpa.pump_freq, "
-            "$jpa.pump_power, $jpa.flux and canonical qubit/resonator wiring. "
-            "Missing aliases or calibration leave cfg Invalid; no static fallback."
-        ),
-        expects_ml=(
-            "SMART modules use $qubit.module.x180, $qubit.module.readout and "
-            "optional $qubit.module.reset. Inline readout uses resonator scalar "
-            "and wiring calibration; module waveforms follow their module source."
-        ),
-        typical_writeback=(
-            "No writeback — the check is a visual diagnostic: compare the two "
-            "traces and update parameters in another step."
-        ),
-        recommended=(
-            "No analysis options — the Analyze tab shows the pump off/on "
-            "comparison figure only. Typical sweep: readout frequency ~101 "
-            "points spanning 1.5 linewidths around $resonator.freq. Before every run, "
-            "confirm the current JPA pump state and review the selected RF "
-            "device: the run toggles its output off then on and leaves it ON."
-        ),
-    )
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[CheckCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
 
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .readout(
-                pulse_only=True,
-                init=ModuleInit.INLINE,
-                locked={
-                    "pulse_cfg.freq": 0.0,
-                    "ro_cfg.ro_freq": 0.0,
-                },
-            )
-            .relax_delay(0.5)
-            .device(
-                "jpa_rf_dev",
-                label="JPA RF device",
-                default="",
-                required=False,
-            )
-            .sweep(
-                "freq",
-                label="Freq (MHz)",
-                default=res_freq_range(expts=_JPA_CHECK_FREQ_EXPTS),
-            )
-            .reps(1000)
-            .rounds(5)
-            .build()
-        )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: CheckCfg,
         *,
         context: RunContext,
     ) -> JpaCheckRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         return RunRecord(cfg, CheckExp().run(cfg, context=context))
 
     def analyze(

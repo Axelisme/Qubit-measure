@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import socket
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
@@ -25,7 +26,7 @@ from qtpy.QtWidgets import (
     QTreeWidget,
     QWidget,
 )
-from zcu_tools.cfg_model import waveform_spec_from_raw
+from zcu_tools.cfg_model import ConfigBase, waveform_spec_from_raw
 from zcu_tools.datafile import RunMetadata
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -69,6 +70,7 @@ from zcu_tools.resources.waveform_assets import FormulaRecipe
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui._user_input import key_click, type_text
 from tests.gui.app.measure._components import ResonatorSchema
 from tests.gui.app.measure._load_support import historical_metadata
 from tests.gui.app.measure._reload_fakes import Loader, OldAdapter
@@ -84,10 +86,8 @@ class StoppableAdapter(OldAdapter):
         requires_soc=False
     )
 
-    def run(
-        self, req: RunRequest, raw_cfg: Mapping[str, Any], *, context: RunContext
-    ) -> object:
-        del req, raw_cfg
+    def run(self, req: RunRequest, cfg: ConfigBase, *, context: RunContext) -> object:
+        del req, cfg
         if not context.cancel_signal.event.wait(5):
             raise RuntimeError("test run was not stopped")
         return object()
@@ -264,9 +264,48 @@ def test_indicator_clicks_lock_reclaim_unlock_and_show_offline(control_ui, qapp)
     assert indicator.text() == "Local"
 
 
+def assert_remote_forms_readable_without_writes(
+    ui: ControlUi, qapp: QApplication
+) -> None:
+    """Typing and committing cannot change any Remote tab's visible text or input."""
+    for tab in ui.window.findChildren(ExpTabWidget):
+        resource = ui.controller.cfg_resources.lookup(tab.tab_id)
+        before = deepcopy(resource.input.data)
+        fields = form_editor(tab).findChildren(QLineEdit)
+        assert fields, "each synthetic tab has a readable knob input"
+        for field in fields:
+            assert field.isEnabled() and field.isReadOnly()
+            text = field.text()
+            field.setFocus()
+            field.selectAll()
+            assert field.selectedText() == text, "Remote text stays selectable"
+            type_text(field, "99")
+            key_click(field, Qt.Key.Key_Return)
+            field.clearFocus()
+            qapp.processEvents()
+            assert field.text() == text
+        assert resource.input.data == before, "Remote input events must not write"
+
+
+def assert_local_forms_accept_input(ui: ControlUi, qapp: QApplication) -> None:
+    """The same typing and Enter events write every tab's knob after Local reclaim."""
+    for tab in ui.window.findChildren(ExpTabWidget):
+        field = form_editor(tab).findChild(QLineEdit, "form.input.knob")
+        assert field is not None, "each synthetic tab mounts its public knob input"
+        assert field.isEnabled() and not field.isReadOnly()
+        field.setFocus()
+        field.selectAll()
+        type_text(field, "99")
+        key_click(field, Qt.Key.Key_Return)
+        qapp.processEvents()
+        assert field.text() == "99"
+        assert ui.controller.cfg_resources.lookup(tab.tab_id).input.data["knob"] == 99
+
+
 def test_remote_disables_writes_but_keeps_tabs_figures_inspect_and_screenshots(
     control_ui,
-):
+    qapp: QApplication,
+) -> None:
     ui = control_ui
     ui.controller.new_tab("stoppable")
     ui.connect()
@@ -278,16 +317,11 @@ def test_remote_disables_writes_but_keeps_tabs_figures_inspect_and_screenshots(
         if w.tab_id == created["result"]["tab_id"]
     )
     assert not new_tab.reset_btn.isEnabled()
-    assert not any(
-        field.isEnabled() for field in form_editor(new_tab).findChildren(QLineEdit)
-    )
     assert not button(ui.window, "New Tab ▾").isEnabled()
     assert not button(ui.window, "Reload experiments").isEnabled()
     assert not ui.tab.reset_btn.isEnabled()
     assert not ui.tab.run_btn.isEnabled()
-    assert not any(
-        field.isEnabled() for field in form_editor(ui.tab).findChildren(QLineEdit)
-    )
+    assert_remote_forms_readable_without_writes(ui, qapp)
     ui.window.refresh_context_panel()
     ui.window.refresh_run_lock(None)
     assert not ui.tab.reset_btn.isEnabled(), (
@@ -320,6 +354,7 @@ def test_remote_disables_writes_but_keeps_tabs_figures_inspect_and_screenshots(
     indicator.click()
     assert ui.tab.reset_btn.isEnabled()
     assert ui.tab.run_btn.isEnabled()
+    assert_local_forms_accept_input(ui, qapp)
     assert inspect.close()
     ui.window.open_dialog(DialogName.INSPECT)
     local_inspect = next(

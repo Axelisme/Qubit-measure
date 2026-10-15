@@ -80,7 +80,7 @@ def test_unknown_error_falls_back_gracefully():
 
 def test_fit_no_database():
     msg = friendly_fit_message("Search", "no database path set (call set_params first)")
-    assert "Select a database" in msg
+    assert "Select a search DB" in msg
 
 
 def test_fit_mirror_needs_sample_f():

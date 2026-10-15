@@ -7,7 +7,7 @@ from threading import Event
 import pytest
 from zcu_tools.cfg_model import Range
 from zcu_tools.gui.app.measure.remote import ControlOptions
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
@@ -234,7 +234,10 @@ class TextCfg(SampleCfg):
 
 
 class TextAdapter(SampleAdapter):
-    form = Form(TextCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[TextCfg]:
+        del ctx
+        return Form(TextCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
 
 
 def test_reply_encoding_failure_does_not_roll_back_the_cfg_publication(qapp):

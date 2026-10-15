@@ -15,7 +15,6 @@ from zcu_tools.gui.form import (
     FormModel,
     FormPath,
     FormState,
-    ModuleInline,
     ModuleRef,
     field_error,
 )
@@ -185,42 +184,6 @@ def test_public_module_alias_projects_reference_choices() -> None:
     assert isinstance(errors, FormErrors)
     assert ("drive", "name") in errors.messages
     assert not validator.is_valid(invalid)
-
-
-def test_explicit_inline_defaults_copy_a_detached_spec_without_materializing_children() -> (
-    None
-):
-    source = library()
-    env = FormEnv(library=source)
-    before = source.document()
-    state = FormState(ModuleForm.default_input(env))
-    reference = state.result(env)
-    assert isinstance(reference, ModuleForm)
-    assert isinstance(reference.drive, ModuleRef)
-    assert reference.drive.name == "Q1.pulses.pi"
-
-    copied = ModuleInline.defaults(env, {"kind": "ref", "name": reference.drive.name})
-    state.write({("drive",): copied}, env)
-    inline = state.result(env)
-    assert isinstance(inline, ModuleForm)
-    assert isinstance(inline.drive, SyntheticModuleInline)
-    assert inline.drive.module.model_dump(mode="json") == source.module_spec(
-        "Q1.pulses.pi"
-    ).model_dump(mode="json")
-    assert state.input.data["drive"] == {
-        "kind": "inline",
-        "module": source.module_spec("Q1.pulses.pi").model_dump(mode="json"),
-    }
-
-    state.write({("drive", "module", "gain"): 0.5}, env)
-    changed_env = FormEnv(library=library(0.75))
-    detached = state.result(changed_env)
-    assert isinstance(detached, ModuleForm)
-    assert isinstance(detached.drive, SyntheticModuleInline)
-    assert isinstance(detached.drive.module, KeyPulseSpec)
-    assert detached.drive.module.gain == 0.5
-    assert detached.drive.module.waveform == "Q1.waveforms.not_materialized"
-    assert source.document() == before
 
 
 def test_same_batch_explicit_inline_content_follows_branch_selection() -> None:

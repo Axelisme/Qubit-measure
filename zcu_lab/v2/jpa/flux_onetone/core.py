@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Literal
+from typing import Annotated, Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import Field
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
     AxesSpec,
@@ -40,20 +38,37 @@ class OneToneFluxResult:
 
 
 class OneToneFluxModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    readout: PulseReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
 
 
 class OneToneFluxSweepCfg(ConfigBase):
-    jpa_flux: SweepCfg
-    freq: SweepCfg
+    jpa_flux: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="JPA flux device value",
+            description="Flux bounds in flux_unit coordinates.",
+        ),
+    ]
+    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
 
 
 class OneToneFluxCfg(ProgramV2Cfg, ExpCfgModel):
-    flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
+    flux_unit: Annotated[
+        Literal["A", "V", "native"],
+        FieldMeta(
+            label="Flux unit",
+            description="Working unit for the selected flux driver; no conversion.",
+        ),
+    ]
     modules: OneToneFluxModuleCfg
-    # Map jpa_flux_dev to a connected driver name.
-    dev: Mapping[str, str] = Field(...)
+    jpa_flux_dev: Annotated[
+        str,
+        FieldMeta(
+            label="JPA flux device",
+            description="Connected flux device driven by the survey.",
+        ),
+    ]
     sweep: OneToneFluxSweepCfg
 
 
@@ -70,6 +85,7 @@ class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
         result_type=OneToneFluxResult,
         cfg_type=OneToneFluxCfg,
         tag="jpa/flux_onetone",
+        cfg_schema_version="2.0",
     )
 
     def run(self, cfg: OneToneFluxCfg, *, context: RunContext) -> OneToneFluxResult:
@@ -100,7 +116,7 @@ class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for jpa_flux, step in sched.scan("JPA Flux value", jpa_fluxs.tolist()):
                 set_flux(
-                    context.devices[step.cfg.dev["jpa_flux_dev"]],
+                    context.devices[step.cfg.jpa_flux_dev],
                     jpa_flux,
                     unit=step.cfg.flux_unit,
                     stop=context.cancel_signal,

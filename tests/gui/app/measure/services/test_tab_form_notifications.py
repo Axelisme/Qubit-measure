@@ -41,7 +41,7 @@ def notification_resource() -> tuple[TabFormResource, VersionTable]:
         )
     )
     resource = TabFormResource(
-        Form(SubscriberCfg, {}),
+        lambda _ctx: Form(SubscriberCfg, {}),
         capture=lambda _aliases: TabFormSources(FormEnv(library=library)),
         mutation_allowed=lambda: True,
     )

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import Annotated
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     IDENTITY,
     AxesSpec,
@@ -59,14 +60,14 @@ def reset_rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
 
 
 class RabiCheckModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    rabi_pulse: PulseCfg
-    tested_reset: ResetCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    rabi_pulse: Annotated[PulseCfg, FieldMeta(label="Rabi pulse")]
+    tested_reset: Annotated[ResetCfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class RabiCheckSweepCfg(ConfigBase):
-    gain: SweepCfg
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
 
 
 class RabiCheckCfg(ProgramV2Cfg, ExpCfgModel):

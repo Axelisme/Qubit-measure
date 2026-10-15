@@ -12,7 +12,6 @@ from zcu_tools.datafile import (
     RunSnapshot,
     SoftwareProvenance,
 )
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.run_saving import ArtifactRef, SaveReport
@@ -38,7 +37,7 @@ from zcu_tools.gui.app.measure.services.save import SaveService
 from zcu_tools.gui.app.measure.services.save_control import SaveControlFacet
 from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import CommandOrigin, PointUseRequest
@@ -51,7 +50,6 @@ from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 from tests.gui.app.measure._form_fakes import make_form
-from tests.gui.app.measure.adapter._cfg_fakes import StaticCfgDefinition
 
 GUI_ORIGIN = CommandOrigin("gui")
 
@@ -77,15 +75,16 @@ class SavingAdapter(
     """Real BaseAdapter mapping with an offline typed experiment declaration."""
 
     exp_cls = SavingCore
-    form = Form(SavingCfg, {})
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[SavingCfg]:
+        del ctx
+        return Form(SavingCfg, {})
+
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.NONE, load_data=False, requires_soc=False
     )
     experiment_tag: ClassVar[str | None] = SavingCore().persistence_spec().tag
-
-    @classmethod
-    def cfg_definition(cls) -> StaticCfgDefinition:
-        return StaticCfgDefinition()
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return "saving"
@@ -93,12 +92,11 @@ class SavingAdapter(
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: SavingCfg,
         *,
         context: RunContext,
     ) -> RunRecord[SavingCfg, SavingResult]:
         """Acquire a typed record using only the offline fake backend."""
-        cfg = SavingCfg.model_validate(raw_cfg)
         return RunRecord(cfg, SavingCore().run(cfg, context=context))
 
 
@@ -216,7 +214,7 @@ def native_save_session(
         Session(
             adapter_name="saving",
             adapter=AnalysisSavingAdapter(),
-            cfg=make_form(SavingAdapter.form, state=state),
+            cfg=make_form(SavingAdapter.make_form(FormContext(None)), state=state),
         ),
     )
     state.update_tab_result("tab", record, metadata=metadata, parameters=captured)

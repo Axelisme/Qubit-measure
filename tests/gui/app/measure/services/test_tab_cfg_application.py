@@ -26,7 +26,7 @@ from zcu_tools.gui.cfg.resource import CfgPreconditionError, CfgPreconditionReas
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormModel
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.aliases import AliasRow
@@ -46,13 +46,16 @@ from tests.gui.app.measure.remote._helpers import Fixture
 
 
 class SchemaAdapter(SampleAdapter):
-    form = Form(SampleCfg, {"gain": 1.0, "sweep": Range.between(5, 6, expts=11)})
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[SampleCfg]:
+        del ctx
+        return Form(SampleCfg, {"gain": 1.0, "sweep": Range.between(5, 6, expts=11)})
 
 
 @pytest.fixture
 def application(qapp: QApplication) -> Generator[Fixture]:
     fixture = Fixture(headless=True)
-    fixture.registry.register("cfg-contract", SchemaAdapter, form=SchemaAdapter.form)
+    fixture.registry.register("cfg-contract", SchemaAdapter)
     try:
         yield fixture
     finally:
@@ -118,11 +121,14 @@ def test_definition_failure_does_not_publish_a_partial_tab(
             raise RuntimeError("definition failed")
 
     class BrokenAdapter(SchemaAdapter):
-        form = BrokenForm(SampleCfg, {})
+        @staticmethod
+        def make_form(ctx: FormContext) -> Form[SampleCfg]:
+            del ctx
+            return BrokenForm(SampleCfg, {})
 
     tab_id = application.ctrl.new_tab("cfg-contract")
     before = application.ctrl.cfg_resources.lookup(tab_id).input.data
-    application.registry.register("broken-cfg", BrokenAdapter, form=BrokenAdapter.form)
+    application.registry.register("broken-cfg", BrokenAdapter)
     with pytest.raises(RuntimeError, match="definition failed"):
         application.ctrl.new_tab("broken-cfg")
     assert application.ctrl.list_tab_ids() == [tab_id]
@@ -229,24 +235,30 @@ class SourceDrive(ComponentSchema):
 
 class GlobalSourceAdapter(SampleAdapter):
     experiment_tag: ClassVar[str | None] = "fake.stub"
-    form = Form(
-        SampleCfg, {"gain": Expr("$qubit.gain"), "sweep": Range.between(5, 6, expts=11)}
-    )
 
-    def run(
-        self, req: RunRequest, raw_cfg: Mapping[str, object], *, context: RunContext
-    ) -> NoReturn:
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[SampleCfg]:
+        del ctx
+        return Form(
+            SampleCfg,
+            {"gain": Expr("$qubit.gain"), "sweep": Range.between(5, 6, expts=11)},
+        )
+
+    def run(self, req: RunRequest, cfg: SampleCfg, *, context: RunContext) -> NoReturn:
         raise AssertionError("Admission-only adapter must not execute")
 
 
 class MissingModuleSlotAdapter(GlobalSourceAdapter):
-    form = Form(
-        SampleCfg,
-        {
-            "gain": Expr("$qubit.module.x180.gain"),
-            "sweep": Range.between(5, 6, expts=11),
-        },
-    )
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[SampleCfg]:
+        del ctx
+        return Form(
+            SampleCfg,
+            {
+                "gain": Expr("$qubit.module.x180.gain"),
+                "sweep": Range.between(5, 6, expts=11),
+            },
+        )
 
 
 @pytest.fixture
@@ -257,12 +269,8 @@ def global_sources(
     component_registry.register("cfg/drive", SourceDrive)
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     registry = Registry()
-    registry.register(
-        "global-source", GlobalSourceAdapter, form=GlobalSourceAdapter.form
-    )
-    registry.register(
-        "missing-slot", MissingModuleSlotAdapter, form=MissingModuleSlotAdapter.form
-    )
+    registry.register("global-source", GlobalSourceAdapter)
+    registry.register("missing-slot", MissingModuleSlotAdapter)
     try:
         services = build_app_services(
             alias_presets={"default": ALIAS_PRESET},

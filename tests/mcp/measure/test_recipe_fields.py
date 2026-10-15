@@ -92,7 +92,9 @@ def test_set_fields_writes_one_batch_and_keeps_none_default(
         tab = RecipeSession(
             client.context,
             summary_parameters=(
-                SummaryParameter("frequency", "modules.readout.module.pulse_cfg.freq"),
+                SummaryParameter(
+                    "frequency", "modules.readout.module.pulse_cfg.module.freq"
+                ),
                 SummaryParameter("rounds", "rounds"),
             ),
         ).open_tab("lookback")
@@ -101,7 +103,7 @@ def test_set_fields_writes_one_batch_and_keeps_none_default(
             [
                 recipe.RecipeFieldEdit("rounds", None, "ignored"),
                 recipe.RecipeFieldEdit(
-                    "modules.readout.module.pulse_cfg.freq",
+                    "modules.readout.module.pulse_cfg.module.freq",
                     recipe.RecipeExpression(expr="$custom.low"),
                     "caller_low",
                 ),
@@ -122,6 +124,7 @@ def test_set_fields_writes_one_batch_and_keeps_none_default(
                                 "readout",
                                 "module",
                                 "pulse_cfg",
+                                "module",
                                 "freq",
                             ],
                             "value": {"expr": "$custom.low"},
@@ -143,17 +146,18 @@ def test_set_fields_writes_one_batch_and_keeps_none_default(
 
         assert cfg_value(gui.publication, "rounds") == 3
         assert gui.publication["input"]["modules"]["readout"]["module"]["pulse_cfg"][
-            "freq"
-        ] == {"expr": "$custom.low"}
+            "module"
+        ]["freq"] == {"expr": "$custom.low"}
         assert (
-            cfg_value(gui.publication, "modules.readout.module.pulse_cfg.freq") == 10.0
+            cfg_value(gui.publication, "modules.readout.module.pulse_cfg.module.freq")
+            == 10.0
         )
         snapshot = tab.run().snapshot()
         assert snapshot is not None
         assert (
-            snapshot.actual["fields"]["modules.readout.module.pulse_cfg.freq"].get(
-                "source"
-            )
+            snapshot.actual["fields"][
+                "modules.readout.module.pulse_cfg.module.freq"
+            ].get("source")
             == "caller_low"
         )
         assert snapshot.actual["fields"]["rounds"].get("source") == "gui_default"

@@ -8,8 +8,7 @@ from zcu_tools.cfg_model import (
     Range,
     Slot,
 )
-from zcu_tools.gui.form import ModuleInline
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.context_types import LibraryChange
 
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
@@ -23,25 +22,31 @@ class PulseReferenceCfg(SampleCfg):
 
 
 class PulseReferenceAdapter(SampleAdapter):
-    form = Form(
-        PulseReferenceCfg,
-        {
-            "sweep": Range.between(1.0, 2.0, expts=3),
-            "linked": Slot("Q1.pulses.seed"),
-            "inline": Slot("Q1.pulses.seed", copy=True, set={"gain": 0.75}),
-        },
-    )
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[PulseReferenceCfg]:
+        del ctx
+        return Form(
+            PulseReferenceCfg,
+            {
+                "sweep": Range.between(1.0, 2.0, expts=3),
+                "linked": Slot("Q1.pulses.seed"),
+                "inline": Slot("Q1.pulses.seed", copy=True, set={"gain": 0.75}),
+            },
+        )
 
 
 class WaveformReferenceAdapter(SampleAdapter):
-    form = Form(
-        PulseReferenceCfg,
-        {
-            "sweep": Range.between(1.0, 2.0, expts=3),
-            "linked": Slot("Q1.pulses.carrier", copy=True),
-            "inline": Slot("Q1.pulses.carrier", copy=True),
-        },
-    )
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[PulseReferenceCfg]:
+        del ctx
+        return Form(
+            PulseReferenceCfg,
+            {
+                "sweep": Range.between(1.0, 2.0, expts=3),
+                "linked": Slot("Q1.pulses.carrier", copy=True),
+                "inline": Slot("Q1.pulses.carrier", copy=True),
+            },
+        )
 
 
 @pytest.fixture(params=["module", "waveform"])
@@ -82,12 +87,14 @@ def test_library_mutation_refreshes_ref_and_explicit_inline_tab_cfg(
     tab_id = fx.ctrl.new_tab("references")
     owner = fx.ctrl.cfg_resources.lookup(tab_id)
     if kind == "waveform":
-        pulse = (
-            fx.ctrl.read_context()
-            .library.module_spec("Q1.pulses.carrier")
-            .model_copy(update={"waveform": ConstWaveformCfg(length=0.75)})
+        owner.write(
+            {
+                ("inline", "module", "waveform"): {
+                    "kind": "inline",
+                    "module": {"style": "const", "length": 0.75},
+                }
+            }
         )
-        owner.write({("inline",): ModuleInline(module=pulse).model_dump(mode="json")})
     fx.start()
     bridge, invoke = mcp_client(fx.service.port, tmp_path)
     try:
@@ -99,11 +106,11 @@ def test_library_mutation_refreshes_ref_and_explicit_inline_tab_cfg(
         if kind == "module":
             assert linked == {"kind": "ref", "name": path}
         else:
-            assert linked["module"]["waveform"] == path
+            assert linked["module"]["waveform"] == {"kind": "ref", "name": path}
         inline_path = (
             ("inline", "module", field)
             if kind == "module"
-            else ("inline", "module", "waveform", field)
+            else ("inline", "module", "waveform", "module", field)
         )
         leaves = {tuple(item["path"]): item["value"] for item in before["values"]}
         assert leaves[inline_path] == 0.75

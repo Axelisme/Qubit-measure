@@ -3,10 +3,10 @@
 from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
-# v3 narrows accepted input: {"expr": text} only in text fields, and the T1
-# tunables' guess_us has no schema default (the form's defaults fill it).
-WIRE_VERSION = 3
-GUI_VERSION = 3
+# Options carry selection values, fields and commands; ref/inline input is
+# explicitly tagged and branch defaults never depend on a previous draft.
+WIRE_VERSION = 4
+GUI_VERSION = 4
 
 _RUN_ID = ParamSpec(
     "run_id",

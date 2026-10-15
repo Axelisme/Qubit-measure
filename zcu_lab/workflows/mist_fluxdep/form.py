@@ -99,11 +99,9 @@ class MISTPlanForm(FormModel):
         return self
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
         """Retain fixed flux alias/x180 pi estimate; leave gain/MIST fields required."""
-        return calibration_defaults(super().defaults(env, previous), env, previous)
+        return calibration_defaults(super().defaults(env), env)
 
     @classmethod
     def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:

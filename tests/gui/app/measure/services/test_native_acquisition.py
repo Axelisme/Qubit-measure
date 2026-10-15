@@ -1,7 +1,7 @@
 """Native run evidence publication, acquired ledger events and retained admission source."""
 
 import logging
-from collections.abc import Generator, Mapping
+from collections.abc import Generator
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -13,7 +13,6 @@ from zcu_tools.datafile import (
     SoftwareProvenance,
     load_run_data,
 )
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import RunRequest, SessionEnv
@@ -308,13 +307,13 @@ def test_native_run_stop_records_usable_result_but_failure_does_not(
 
     def acquire(
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: SavingCfg,
         *,
         context: RunContext,
     ) -> RunRecord[SavingCfg, SavingResult]:
         if failure:
             raise RuntimeError("offline acquisition failed")
-        record = original(req, raw_cfg, context=context)
+        record = original(req, cfg, context=context)
         context.cancel_signal.set()
         return record
 

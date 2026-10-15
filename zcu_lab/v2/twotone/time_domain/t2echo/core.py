@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar, Literal
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -13,7 +13,7 @@ from zcu_tools.analysis.fitting import (
     fit_decay,
     fit_decay_fringe,
 )
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     US_TO_S,
     AxesSpec,
@@ -57,14 +57,14 @@ def t2echo_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class T2EchoModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    pi2_pulse: PulseCfg
-    pi_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    pi2_pulse: Annotated[PulseCfg, FieldMeta(label="Pi/2 Pulse")]
+    pi_pulse: Annotated[PulseCfg, FieldMeta(label="Pi Pulse")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class T2EchoSweepCfg(ConfigBase):
-    length: SweepCfg
+    length: Annotated[SweepCfg, FieldMeta(label="Total delay", unit="us")]
 
 
 class T2EchoCfg(ProgramV2Cfg, ExpCfgModel):

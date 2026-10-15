@@ -38,7 +38,6 @@ from zcu_tools.gui.form import (
     FormInput,
     FormModel,
     FormState,
-    FormWritePath,
     KeyRef,
     ModuleInline,
     ModuleRef,
@@ -133,17 +132,41 @@ def _inline_kinds(annotation: object) -> tuple[type[BaseModel], ...]:
     )
 
 
+def _module_options(
+    keys: tuple[tuple[str, OptionCommand], ...],
+    kinds: list[tuple[type[BaseModel], type[BaseModel]]],
+    *,
+    nullable: bool,
+) -> tuple[Option, ...]:
+    """Format ordered None/ref/inline selections from caller-owned fields/commands."""
+    options = [Option("None", None)] if nullable else []
+    options.extend(
+        Option(key, {"kind": "ref", "name": key}, commands=(command,))
+        for key, command in keys
+    )
+    for kind, fields in kinds:
+        tag, value = _spec_tag(kind)
+        options.append(
+            Option(
+                "Inline" if len(kinds) == 1 else f"Inline: {value}",
+                {"kind": "inline", "module": {tag: value}},
+                fields=fields,
+            )
+        )
+    return tuple(options)
+
+
 def _spec_options(
-    model: type[BaseModel], env: FormEnv
+    model: type[BaseModel],
+    env: FormEnv,
+    inline_fields: dict[tuple[type[BaseModel], type[BaseModel]], type[BaseModel]],
 ) -> Mapping[tuple[str | int, ...], tuple[Option, ...]]:
     declared: dict[tuple[str | int, ...], tuple[Option, ...]] = {}
     for name, info in model.model_fields.items():
         specs = _key_specs(info.annotation)
         if not specs:
             continue
-        options = (
-            [Option("None", None)] if type(None) in members(info.annotation) else []
-        )
+        key_commands: tuple[tuple[str, OptionCommand], ...] = ()
         if env.library is not None and any(
             isinstance(member, type) and issubclass(member, KeyRef)
             for member in members(info.annotation)
@@ -153,20 +176,17 @@ def _spec_options(
                 env.library.waveform_keys() if waveform else env.library.module_keys()
             )
             read = env.library.waveform_spec if waveform else env.library.module_spec
-            options.extend(
-                Option(
+            key_commands = tuple(
+                (
                     key,
-                    {"kind": "ref", "name": key},
-                    commands=(
-                        OptionCommand(
-                            "to_inline",
-                            "Convert to inline",
-                            partial(
-                                _copy_spec,
-                                key,
-                                _inline_kinds(spec_annotation(info.annotation)),
-                                waveform=waveform,
-                            ),
+                    OptionCommand(
+                        "to_inline",
+                        "Convert to inline",
+                        partial(
+                            _copy_spec,
+                            key,
+                            _inline_kinds(spec_annotation(info.annotation)),
+                            waveform=waveform,
                         ),
                     ),
                 )
@@ -177,18 +197,19 @@ def _spec_options(
         wrapper = inline_wrapper(info.annotation)
         if wrapper is None:
             raise TypeError("Spec options require a tagged inline wrapper")
+        kind_fields: list[tuple[type[BaseModel], type[BaseModel]]] = []
         for kind in kinds:
-            tag, value = _spec_tag(kind)
-            options.append(
-                Option(
-                    "Inline" if len(kinds) == 1 else f"Inline: {value}",
-                    {"kind": "inline", "module": {tag: value}},
-                    fields=create_model(
-                        f"{kind.__name__}Fields", __base__=wrapper, module=(kind, ...)
-                    ),
+            key = (wrapper, kind)
+            fields = inline_fields.get(key)
+            if fields is None:
+                fields = create_model(
+                    f"{kind.__name__}Fields", __base__=wrapper, module=(kind, ...)
                 )
-            )
-        declared[(name,)] = tuple(options)
+                inline_fields[key] = fields
+            kind_fields.append((kind, fields))
+        declared[(name,)] = _module_options(
+            key_commands, kind_fields, nullable=type(None) in members(info.annotation)
+        )
     return declared
 
 
@@ -368,15 +389,16 @@ def editable_spec(
             derived.metadata.append(display)
         namespace[name] = derived
 
+    # Each generated model owns its classes; option values and sources stay fresh.
+    inline_fields: dict[tuple[type[BaseModel], type[BaseModel]], type[BaseModel]] = {}
+
     def options(
         cls: type[FormModel], env: FormEnv
     ) -> Mapping[tuple[str | int, ...], tuple[Option, ...]]:
-        return _spec_options(cls, env)
+        return _spec_options(cls, env, inline_fields)
 
-    def defaults(
-        cls: type[FormModel], env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
-        del env, previous
+    def defaults(cls: type[FormModel], env: FormEnv) -> dict[str, JsonValue]:
+        del env
         return supported_input(cls, complete_input(cls, {}))
 
     namespace["options"] = classmethod(options)
@@ -448,10 +470,7 @@ def bind_template_defaults(
         if not issubclass(model, FormModel):
             raise TypeError("Template defaults require generated FormModel types")
 
-        def defaults(
-            cls: type[FormModel], env: FormEnv, previous: Mapping[str, JsonValue]
-        ) -> dict[str, JsonValue]:
-            del previous
+        def defaults(cls: type[FormModel], env: FormEnv) -> dict[str, JsonValue]:
             data = template_input(template, catalog, models, env)
             subtree = _template_subtree(data, ancestry)
             if subtree is None:
@@ -566,11 +585,9 @@ class ModuleField:
             "__annotations__": {"module": module},
         }
 
-        def defaults(
-            cls: type[ModuleInline], env: FormEnv, previous: Mapping[str, JsonValue]
-        ) -> dict[str, JsonValue]:
-            del cls, previous
-            return field.inline_input({}, env)
+        def defaults(cls: type[ModuleInline], env: FormEnv) -> dict[str, JsonValue]:
+            del cls
+            return field.fresh_inline_input(env)
 
         namespace["defaults"] = classmethod(defaults)
         inline = new_class(
@@ -581,6 +598,7 @@ class ModuleField:
         if not issubclass(inline, ModuleInline):
             raise TypeError("Generated inline model must implement ModuleInline")
         self.inline = inline
+        self._inline_fields: dict[type[BaseModel], type[BaseModel]] = {}
         self.annotation = (
             inline
             if self.locks
@@ -606,65 +624,39 @@ class ModuleField:
 
         Keys are limited to this field's persistent families in the fixed env.
         Inline values select only kind tags; core supplies fresh branch defaults.
-        Fields describe the selected inline wrapper and omit its structural tags.
+        Fields reuse a class per inline wrapper/kind for this field's lifetime,
+        describe the selected inline wrapper and omit its structural tags.
         Empty kinds have no editable content and do not get an Inline selection.
         """
-        options = [Option("None", None)] if self.nullable else []
+        key_commands: tuple[tuple[str, OptionCommand], ...] = ()
         if not self.locks and env.library is not None:
-            options.extend(
-                Option(
+            key_commands = tuple(
+                (
                     key,
-                    {"kind": "ref", "name": key},
-                    commands=(
-                        OptionCommand(
-                            "to_inline",
-                            "Convert to inline",
-                            partial(self.copy_input, key),
-                        ),
+                    OptionCommand(
+                        "to_inline",
+                        "Convert to inline",
+                        partial(_copy_spec, key, self.editable, waveform=False),
                     ),
                 )
                 for key in env.library.module_keys()
                 if isinstance(env.library.module_spec(key), self.ref_specs)
             )
-        kinds = _inline_kinds(union_type(self.editable))
-        for kind in kinds:
-            tag, value = _spec_tag(kind)
-            fields = create_model(
-                f"{kind.__name__}InlineFields", __base__=self.inline, module=(kind, ...)
-            )
-            options.append(
-                Option(
-                    "Inline" if len(kinds) == 1 else f"Inline: {value}",
-                    {"kind": "inline", "module": {tag: value}},
-                    fields=fields,
+        kind_fields: list[tuple[type[BaseModel], type[BaseModel]]] = []
+        for kind in _inline_kinds(union_type(self.editable)):
+            fields = self._inline_fields.get(kind)
+            if fields is None:
+                fields = create_model(
+                    f"{kind.__name__}InlineFields",
+                    __base__=self.inline,
+                    module=(kind, ...),
                 )
-            )
-        return tuple(options)
-
-    def copy_input(self, key: str, env: FormEnv) -> dict[str, JsonValue]:
-        """Copy an allowed captured key into inline input, without prior draft data.
-
-        Child keys remain references. Unsupported fields are discarded and locks
-        restored. Missing or incompatible sources fail before any write.
-        """
-        copied = _copy_spec(key, self.editable, env, waveform=False)
-        module = copied["module"]
-        if not isinstance(module, dict):
-            raise TypeError("Copied module input must be an object")
-        selected = selected_model(union_type(self.editable), module)
-        raw = persistent_input(selected, module)
-        for path, value in self.locks.items():
-            set_path(raw, path, scalar_seed(value))
-        return {"kind": "inline", "module": supported_input(selected, raw)}
+                self._inline_fields[kind] = fields
+            kind_fields.append((kind, fields))
+        return _module_options(key_commands, kind_fields, nullable=self.nullable)
 
     def validate_templates(self, catalog: Mapping[str, TemplateDef]) -> None:
-        template = (
-            self.node
-            if isinstance(self.node, Template)
-            else self.node.fallback
-            if self.node is not None
-            else None
-        )
+        template = self.node if isinstance(self.node, Template) else None
         seeds: dict[str, JsonValue] = {}
         if template is not None:
             template_input(template, catalog, self.editable, None)
@@ -713,14 +705,12 @@ class ModuleField:
                 )
             if not self.node.copy and not self.locks:
                 return {"kind": "ref", "name": key}
-            model = self._editable_for(spec.type)
+            model = next(
+                model for model in self.editable if type_tag(model) == spec.type
+            )
             module = persistent_input(
                 model,
                 supported_input(model, spec.model_dump(mode="json", exclude_none=True)),
-            )
-        elif self.node.fallback is not None:
-            module = template_input(
-                self.node.fallback, self.catalog, self.editable, env
             )
         else:
             return None
@@ -740,9 +730,6 @@ class ModuleField:
         return supported_input(
             selected_model(union_type(self.editable), module), module
         )
-
-    def _editable_for(self, tag: str) -> type[BaseModel]:
-        return next(model for model in self.editable if type_tag(model) == tag)
 
     def read(self, raw: JsonValue, env: FormEnv) -> ModuleValues | FormErrors:
         """Evaluate only this module, then materialize against its fixed capture.
@@ -780,32 +767,9 @@ class ModuleField:
         )
         return ModuleValues(cfg.model_dump(mode="json"), mode, source)
 
-    def inline_input(
-        self, previous: Mapping[str, JsonValue], env: FormEnv
-    ) -> dict[str, JsonValue]:
-        """Build detached inline input, copying captured refs or authored fallback.
-
-        Already-inline input is retained. Missing captured library/key uses the
-        Slot Template fallback, or static blank when absent. Wrong families and
-        source read failures propagate; copied and fresh input restores locks.
-        """
-        if previous.get("kind") == "inline":
-            return deepcopy(dict(previous))
-        name = previous.get("name")
-        if (
-            previous.get("kind") == "ref"
-            and isinstance(name, str)
-            and env.library is not None
-            and name in env.library.module_keys()
-        ):
-            return self.copy_input(name, env)
-        template = (
-            self.node
-            if isinstance(self.node, Template)
-            else self.node.fallback
-            if self.node is not None
-            else None
-        )
+    def fresh_inline_input(self, env: FormEnv) -> dict[str, JsonValue]:
+        """Build fresh Template/blank input and locks without copying any prior ref."""
+        template = self.node if isinstance(self.node, Template) else None
         if template is not None:
             module = template_input(template, self.catalog, self.editable, env)
         elif len(self.editable) == 1:
@@ -815,15 +779,6 @@ class ModuleField:
         for path, value in self.locks.items():
             set_path(module, path, scalar_seed(value))
         return {"kind": "inline", "module": self._project(module)}
-
-    def inline_writes(
-        self, previous: Mapping[str, JsonValue], env: FormEnv
-    ) -> dict[FormWritePath, JsonValue]:
-        """Prepare one model-aware leaf batch for nullable or required modules."""
-        candidate = self.inline_input(previous, env)
-        if self.nullable:
-            return {self.path: candidate}
-        return _input_writes(self.inline, candidate, self.path)
 
     def materialize(self, item: BaseModel, env: FormEnv) -> ConfigBase:
         if isinstance(item, ModuleRef):
@@ -839,22 +794,3 @@ class ModuleField:
         return (
             NativeModuleFactory.from_core(cfg, context=context) if self.native else cfg
         )
-
-
-def _input_writes(
-    model: type[BaseModel], data: Mapping[str, JsonValue], path: tuple[str, ...]
-) -> dict[FormWritePath, JsonValue]:
-    """Project prepared model input to public leaf writes, preserving containers."""
-    batch: dict[FormWritePath, JsonValue] = {}
-    for name, value in data.items():
-        annotation = model.model_fields[name].annotation
-        if isinstance(value, dict) and any(
-            isinstance(member, type) and issubclass(member, BaseModel)
-            for member in members(annotation)
-        ):
-            batch.update(
-                _input_writes(selected_model(annotation, value), value, (*path, name))
-            )
-        else:
-            batch[(*path, name)] = value
-    return batch

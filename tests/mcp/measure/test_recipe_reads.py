@@ -141,7 +141,7 @@ def test_read_field_uses_last_successful_publication(tmp_path: Path) -> None:
         ref = tab.read_field("modules.readout")
         assert ref.mode == "inline"
         assert ref.key is None
-        assert ref.fields == ("kind", "module")
+        assert ref.fields == ("module",)
         assert tab.read_field("modules").fields == ("reset", "init_pulse", "readout")
         assert len(client.transport.sent) == before
         tab.set("rounds", 7)

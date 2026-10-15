@@ -6,35 +6,59 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import numpy as np
 import pytest
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from qtpy.QtCore import QEvent, QMetaObject, Qt, QTimer
-from qtpy.QtGui import QKeyEvent
+from qtpy.QtCore import QEvent
 from qtpy.QtWidgets import (
     QApplication,
+    QCheckBox,
     QDialog,
-    QFileDialog,
+    QDoubleSpinBox,
     QGroupBox,
+    QLabel,
     QLineEdit,
-    QListWidget,
     QPushButton,
-    QTabWidget,
+    QToolBar,
+    QWidget,
 )
 from zcu_tools.analysis.fluxdep.models import TransitionDict
-from zcu_tools.analysis.fluxdep.search import SearchCancelled
+from zcu_tools.analysis.fluxdep.search import ParamBounds, SearchCancelled
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.search import FluxDepSearchRuntime
-from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.services.progress import ProgressService
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui.app.fluxdep._search_result import (
+    perfect_fit_result,
+    synthetic_search_input,
+)
+from tests.gui.app.fluxdep._window import (
+    choose_file,
+    click_fit_stage,
+    command,
+    current_page,
+    filter_button,
+    fit_panel,
+    fit_stage_button,
+    fit_stage_status,
+    named,
+    open_chooser,
+    picker_button,
+    show_canvas,
+    show_page,
+    spectra_list,
+    stage_button,
+)
+from tests.gui.app.fluxdep.remote._route_harness import RouteHarness, copy_sources
 
 
 def button(widget, text):
@@ -93,70 +117,166 @@ def test_indicator_projects_online_offline_reclaim_lock_and_unlock(window):
 def test_remote_blocks_spectrum_writes_but_keeps_result_canvas_available(window):
     view, ctrl = window
     ctrl.control_identity.connect("a", "flux-agent", "owner")
-    for text in (
-        "Project…",
-        "Add…",
-        "Remove",
-        "Restore",
-        "Export",
-        "Analyze…",
-        "Re-pick lines",
-        "Re-select points",
+    for name in (
+        "fluxdep.project",
+        "fluxdep.spectrum.add",
+        "fluxdep.spectrum.remove",
+        "fluxdep.spectra.restore",
+        "fluxdep.spectra.export",
     ):
-        assert not button(view, text).isEnabled(), text
-    spectra = view.findChild(QListWidget)
-    assert spectra is not None and not spectra.isEnabled()
+        assert not command(view, name).isEnabled(), name
+    # Stages stay clickable for viewing, but a non-holder click opens no input.
+    for stage in ("align", "sample"):
+        stage_button(view, stage).click()
+        assert ctrl.interactive.inspect("a") is None, stage
+    spectra = spectra_list(view)
+    assert spectra.isEnabled()
     canvas = view.findChild(FigureCanvasQTAgg)
     assert canvas is not None and canvas.isEnabled()
     assert view.centralWidget().isEnabled()
-    button(view, "Remove").click()
+    command(view, "fluxdep.spectrum.remove").click()
     assert "a" in ctrl.state.spectrums
     indicator(view).click()
     assert spectra.isEnabled()
-    button(view, "Remove").click()
+    command(view, "fluxdep.spectrum.remove").click()
     assert "a" not in ctrl.state.spectrums
 
 
-def choose_file(path, activate, *, cancel=False):
-    """Accept or cancel the real Local file chooser."""
-    errors = []
-    seen = []
-
-    def respond():
-        chooser = QApplication.activeModalWidget()
-        try:
-            assert isinstance(chooser, QFileDialog)
-            seen.append(chooser.windowTitle())
-            chooser.selectFile(str(path))
-            QMetaObject.invokeMethod(
-                chooser,
-                "reject" if cancel else "accept",
-                Qt.ConnectionType.DirectConnection,
-            )
-        except (AssertionError, RuntimeError, TypeError) as exc:
-            errors.append(exc)
-            if isinstance(chooser, QDialog):
-                chooser.reject()
-
-    def abort():
-        chooser = QApplication.activeModalWidget()
-        errors.append(AssertionError("Static chooser did not finish within 2 seconds"))
-        if isinstance(chooser, QDialog):
-            chooser.reject()
-
-    timeout = QTimer()
-    timeout.setSingleShot(True)
-    timeout.timeout.connect(abort)
-    timeout.start(2000)
-    QTimer.singleShot(0, respond)
-    activate()
-    timeout.stop()
-    if errors:
-        raise errors[0]
-    assert seen, "The action must present a real modal file chooser"
+def _record_stale_fit(ctrl, search_db):
+    ctrl.set_fit_params(
+        search_db,
+        (3.0, 12.0),
+        (0.3, 1.5),
+        (0.2, 1.2),
+        TransitionDict({"transitions": [(0, 1)]}),
+        None,
+        None,
+    )
+    bounds = ParamBounds(EJ=(3.0, 12.0), EC=(0.3, 1.5), EL=(0.2, 1.2))
+    fluxs, freqs = ctrl.selected_pointcloud()
+    ctrl.record_search_result(
+        perfect_fit_result(fluxs, freqs, bounds),
+        synthetic_search_input(ctrl.state, fluxs, freqs, bounds),
+    )
+    ctrl.set_selection(np.array([True, False, True, True]))
+    assert ctrl.state.fit_stale_reasons == ["filter changed"]
 
 
-@pytest.mark.parametrize("owner", ["load", "export", "result", "database", "search"])
+def test_remote_viewer_reads_fit_page_without_opening_filter(
+    window, search_database_hdf5
+):
+    view, ctrl = window
+    _record_stale_fit(ctrl, search_database_hdf5)
+    ctrl.control_identity.connect("a", "flux-agent", "owner")
+    show_page(view, "fit")
+    panel = fit_panel(view)
+    assert panel is not None
+    assert ctrl.interactive.current_cross_selection() is None
+    freshness = named(panel, QLabel, "fluxdep.fit.freshness")
+    assert freshness.text() == "Outdated: filter changed"
+    form = next(
+        g for g in panel.findChildren(QGroupBox) if g.title() == "Search parameters"
+    )
+    assert not form.isEnabled()
+    # A viewer lands on the read-only published Filter; it cannot open input.
+    assert panel.current_tab == "filter"
+    assert fit_stage_button(panel, "filter").isEnabled()
+    published = named(panel, FigureCanvasQTAgg, "fluxdep.filter.published")
+    assert published.isVisibleTo(panel)
+    assert not filter_button(panel, "edit").isEnabled()
+    panel.show_tab("show")
+    title = show_canvas(panel).figure.axes[0].get_title()
+    assert "Outdated: filter changed" in title
+    assert ctrl.interactive.current_cross_selection() is None
+    assert ctrl.control_identity.status().holder == "rpc:flux-agent"
+
+
+def _show_display_inputs(panel) -> list[QWidget]:
+    """Every input of Show's Display group: limits, Auto limits, lines, subset, Apply."""
+    display = next(g for g in panel.findChildren(QGroupBox) if g.title() == "Display")
+    return [
+        control
+        for control in display.findChildren(QWidget)
+        if isinstance(control, (QDoubleSpinBox, QCheckBox, QLineEdit, QPushButton))
+    ]
+
+
+def test_remote_viewer_show_display_is_disabled_but_toolbar_zooms_until_reclaim(
+    window, search_database_hdf5
+):
+    view, ctrl = window
+    _record_stale_fit(ctrl, search_database_hdf5)
+    show_page(view, "fit")
+    panel = fit_panel(view)
+    assert panel is not None
+    panel.show_tab("show")
+    inputs = _show_display_inputs(panel)
+    kinds = {type(control) for control in inputs}
+    assert {QDoubleSpinBox, QCheckBox, QLineEdit, QPushButton} <= kinds
+    assert {"fluxdep.show.apply", "fluxdep.show.auto_limits"} <= {
+        control.objectName() for control in inputs
+    }
+    assert all(control.isEnabled() for control in inputs)
+
+    ctrl.control_identity.connect("a", "flux-agent", "owner")
+    still_enabled = [control for control in inputs if control.isEnabled()]
+    assert still_enabled == [], "a non-holder must not edit Show's display choices"
+    # The toolbar only changes this viewer's own view, so it stays usable.
+    toolbar = named(panel, QToolBar, "fluxdep.show.toolbar")
+    assert toolbar.isEnabled()
+    tools = {action.text(): action for action in toolbar.actions() if action.text()}
+    # Back/Forward follow matplotlib's view history, not control authority.
+    assert all(tools[name].isEnabled() for name in ("Home", "Pan", "Zoom"))
+
+    indicator(view).click()
+    assert all(control.isEnabled() for control in inputs)
+    assert toolbar.isEnabled()
+
+
+def test_remote_page_switch_keeps_agent_filter_session(window):
+    view, ctrl = window
+    ctrl.control_identity.connect("a", "flux-agent", "owner")
+    with ctrl.bus.origin(EventOrigin(kind="agent")):
+        context = ctrl.interactive.begin_cross_selection()
+    # The agent's Filter waits on the Fit page; the viewer stays on Spectra.
+    assert current_page(view) == "spectra"
+    show_page(view, "fit")
+    panel = fit_panel(view)
+    assert panel is not None and panel.current_tab == "filter"
+    assert panel.findChild(SelectorWidget) is not None
+    active = ctrl.interactive.inspect_selection()
+    assert active is not None and active.context is context
+    show_page(view, "spectra")
+    # Leaving Fit retires the Filter view (deferred Qt deletion) but not its input.
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert panel.findChild(SelectorWidget) is None
+    assert ctrl.interactive.inspect_selection() == active
+    show_page(view, "fit")
+    assert panel.current_tab == "filter"
+    assert panel.findChild(SelectorWidget) is not None
+    assert ctrl.interactive.inspect_selection() == active
+
+
+def test_ended_agent_filter_no_longer_routes_the_next_fit_entry(window):
+    view, ctrl = window
+    show_page(view, "fit")
+    panel = fit_panel(view)
+    assert panel is not None
+    panel.show_tab("search")
+    show_page(view, "spectra")
+    ctrl.control_identity.connect("a", "flux-agent", "owner")
+    with ctrl.bus.origin(EventOrigin(kind="agent")):
+        ctrl.interactive.begin_cross_selection()
+        ctrl.interactive.cancel_selection()
+    indicator(view).click()
+    assert ctrl.control_identity.status().holder == "gui"
+    show_page(view, "fit")
+    # The agent's Filter has ended, so its event no longer picks the tab.
+    assert panel.current_tab == "search"
+    assert ctrl.interactive.current_cross_selection() is None
+
+
+@pytest.mark.parametrize("owner", ["load", "export", "result", "database"])
 @pytest.mark.parametrize("cancel", [False, True])
 def test_local_chooser_preserves_path_and_cancel_contract(
     window, tmp_path, spectrum_hdf5, owner, cancel
@@ -167,17 +287,10 @@ def test_local_chooser_preserves_path_and_cancel_contract(
         target = tmp_path
     elif owner != "export":
         target = Path(spectrum_hdf5[0])
-    if owner == "search":
-        button(view, "Analyze…").click()
-        panel = view.findChild(AnalyzePanelWidget)
-        assert panel is not None
-        panel.show_tab("search")
-        container = panel
-    else:
-        command = {"load": "Add…", "export": "Export"}.get(owner, "Project…")
-        button(view, command).click()
-        container = QApplication.activeModalWidget()
-        assert isinstance(container, QDialog)
+    name = {"load": "fluxdep.spectrum.add", "export": "fluxdep.spectra.export"}
+    command(view, name.get(owner, "fluxdep.project")).click()
+    container = QApplication.activeModalWidget()
+    assert isinstance(container, QDialog)
     edits = container.findChildren(QLineEdit)
     before = [edit.text() for edit in edits]
     browse_buttons = [
@@ -197,59 +310,128 @@ def test_local_chooser_preserves_path_and_cancel_contract(
             assert button(container, "OK").isEnabled()
     assert target.exists() == (owner != "export")
     assert ctrl.control_identity.status().holder == "gui"
-    if isinstance(container, QDialog):
-        container.reject()
+    container.reject()
 
 
-def test_remote_filter_switch_cannot_cancel_until_reclaim(window):
+@pytest.mark.parametrize("cancel", [False, True])
+def test_search_db_chooser_is_non_blocking_and_holds_local_while_open(
+    qapp, tmp_path, cross_controller, search_database_hdf5, cancel
+):
+    harness = copy_sources(RouteHarness.create(str(tmp_path)), cross_controller)
+    # A published Filter unlocks Search, whose form holds Browse….
+    harness.ctrl.set_selection(np.ones(4, dtype=np.bool_))
+    view = MainWindow(harness.ctrl)
+    view.show()
+    try:
+        show_page(view, "fit")
+        panel = fit_panel(view)
+        assert panel is not None
+        panel.show_tab("search")
+        field = named(panel, QLineEdit, "fluxdep.fit.search_db")
+        before = field.text()
+        browse = button(panel, "Browse…")
+        chooser = open_chooser(browse.click)
+        # An open Local chooser refuses an agent's owner connection.
+        link = ClientLink("agent", token_required=False)
+        harness.service.on_client_open(link)
+        harness.links.append(link)
+        refused = harness.request(link, "control.connect", label="agent", mode="owner")
+        assert refused["ok"] is False
+        assert refused["error"].get("reason") == "local_busy"
+        assert harness.ctrl.control_identity.status().holder == "gui"
+        if cancel:
+            chooser.reject()
+            assert field.text() == before
+        else:
+            chooser.selectFile(search_database_hdf5)
+            chooser.accept()
+            assert field.text() == search_database_hdf5
+        assert QApplication.activeModalWidget() is None
+        accepted = harness.request(link, "control.connect", label="agent", mode="owner")
+        assert accepted["ok"], accepted
+    finally:
+        harness.ctrl.control_identity.reclaim_local()
+        view.close()
+        view.deleteLater()
+        qapp.processEvents()
+        harness.close()
+
+
+def _selector_count(panel) -> int:
+    """Selector views under panel once deferred Qt deletions have run."""
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    return len(panel.findChildren(SelectorWidget))
+
+
+def test_remote_filter_switch_detaches_and_cannot_cancel_until_reclaim(window):
     view, ctrl = window
-    button(view, "Analyze…").click()
-    panel = view.findChild(AnalyzePanelWidget)
+    show_page(view, "fit")
+    panel = fit_panel(view)
     assert panel is not None
+    filter_button(panel, "edit").click()
     active = ctrl.interactive.inspect()
     assert active is not None and active.kind == "selection"
-    tabs = panel.findChild(QTabWidget)
-    assert tabs is not None
     ctrl.control_identity.connect("a", "flux-agent", "owner")
-    assert not tabs.tabBar().isEnabled()
     selector = panel.findChild(SelectorWidget)
     assert selector is not None
     assert not button(selector, "Apply").isEnabled()
+    discard = filter_button(panel, "discard")
+    assert not discard.isEnabled()
+    discard.click()
     assert ctrl.interactive.inspect() == active
-    indicator(view).click()
-    assert tabs.tabBar().isEnabled()
-    tabs.setCurrentIndex(1)
-    assert ctrl.interactive.inspect() is None
-
-
-def test_remote_filter_keyboard_navigation_cannot_cancel_session(window):
-    view, ctrl = window
-    button(view, "Analyze…").click()
-    panel = view.findChild(AnalyzePanelWidget)
-    assert panel is not None
-    tabs = panel.findChild(QTabWidget)
-    assert tabs is not None
-    active = ctrl.interactive.inspect()
-    assert active is not None and active.kind == "selection"
-    ctrl.control_identity.connect("a", "flux-agent", "owner")
-    QApplication.sendEvent(
-        tabs,
-        QKeyEvent(
-            QEvent.Type.KeyPress, Qt.Key.Key_Tab, Qt.KeyboardModifier.ControlModifier
-        ),
-    )
+    # A non-holder leaving Filter only retires the view; the Session stays.
+    show_page(view, "spectra")
+    assert _selector_count(panel) == 0
+    assert ctrl.interactive.inspect() == active
+    # Coming back reattaches the same Session, still read-only.
+    show_page(view, "fit")
     assert panel.current_tab == "filter"
+    assert _selector_count(panel) == 1
+    selector = panel.findChild(SelectorWidget)
+    assert selector is not None and not button(selector, "Apply").isEnabled()
     assert ctrl.interactive.inspect() == active
-    assert ctrl.control_identity.status().holder == "rpc:flux-agent"
     indicator(view).click()
-    QApplication.sendEvent(
-        tabs,
-        QKeyEvent(
-            QEvent.Type.KeyPress, Qt.Key.Key_Tab, Qt.KeyboardModifier.ControlModifier
-        ),
-    )
-    assert panel.current_tab == "search"
+    # The holder's leaving keeps the Session as well; only Discard ends it.
+    show_page(view, "spectra")
+    assert ctrl.interactive.inspect() == active
+    show_page(view, "fit")
+    filter_button(panel, "discard").click()
     assert ctrl.interactive.inspect() is None
+
+
+def test_remote_viewer_sees_stages_locked_while_the_agent_filter_runs(
+    window, search_database_hdf5
+):
+    view, ctrl = window
+    _record_stale_fit(ctrl, search_database_hdf5)
+    ctrl.control_identity.connect("a", "flux-agent", "owner")
+    with ctrl.bus.origin(EventOrigin(kind="agent")):
+        context = ctrl.interactive.begin_cross_selection()
+    show_page(view, "fit")
+    panel = fit_panel(view)
+    assert panel is not None and panel.current_tab == "filter"
+    assert _selector_count(panel) == 1
+    active = ctrl.interactive.inspect_selection()
+    assert active is not None and active.context is context
+    # The live agent draft locks Search and Show for every viewer.
+    assert fit_stage_status(panel, "filter") == "draft"
+    assert not fit_stage_button(panel, "search").isEnabled()
+    assert not fit_stage_button(panel, "show").isEnabled()
+    with ctrl.bus.origin(EventOrigin(kind="agent")):
+        ctrl.interactive.cancel_selection()
+    # Without a live Filter the viewer reads the published masks, opening nothing.
+    assert _selector_count(panel) == 0
+    published = named(panel, FigureCanvasQTAgg, "fluxdep.filter.published")
+    assert published.isVisibleTo(panel)
+    click_fit_stage(panel, "search")
+    assert panel.current_tab == "search"
+    freshness = named(panel, QLabel, "fluxdep.fit.freshness")
+    assert freshness.text().startswith("Outdated: ")
+    click_fit_stage(panel, "show")
+    assert panel.current_tab == "show"
+    click_fit_stage(panel, "filter")
+    assert panel.current_tab == "filter"
+    assert ctrl.interactive.current_cross_selection() is None
 
 
 def test_agent_mounts_new_remote_picker_without_enabling_controls_or_pointer(window):
@@ -259,7 +441,7 @@ def test_agent_mounts_new_remote_picker_without_enabling_controls_or_pointer(win
         context = ctrl.interactive.begin_line_pick("a")
     picker = view.findChild(LinePickerWidget)
     assert picker is not None
-    assert not button(picker, "Swap Lines").isEnabled()
+    assert not picker_button(picker, "swap").isEnabled()
     assert picker.canvas.isEnabled()
     before = context.session.snapshot()
     picker.canvas.draw()
@@ -274,7 +456,7 @@ def test_agent_mounts_new_remote_picker_without_enabling_controls_or_pointer(win
         picker.canvas.callbacks.process(kind, event)
     assert context.session.snapshot() == before
     indicator(view).click()
-    button(picker, "Swap Lines").click()
+    picker_button(picker, "swap").click()
     assert context.session.snapshot().flux_half == before.flux_int
 
 
@@ -299,7 +481,7 @@ class DeferredSearch:
 
 
 @pytest.fixture
-def pending_window(qapp, cross_controller, tmp_path):
+def pending_window(qapp, cross_controller, search_database_hdf5):
     background = DeferredSearch()
     ctrl = Controller(
         cross_controller.state,
@@ -307,10 +489,10 @@ def pending_window(qapp, cross_controller, tmp_path):
             background, ProgressService(QtProgressTransport())
         ),
     )
-    path = tmp_path / "db.h5"
-    path.touch()
+    # A published Filter unlocks Search, so its run controls follow authority.
+    ctrl.set_selection(np.ones(4, dtype=np.bool_))
     ctrl.set_fit_params(
-        str(path),
+        search_database_hdf5,
         (2, 15),
         (0.2, 2),
         (0.1, 2),
@@ -323,8 +505,8 @@ def pending_window(qapp, cross_controller, tmp_path):
     )
     view = MainWindow(ctrl, dialog_presenter=dialogs)
     view.show()
-    button(view, "Analyze…").click()
-    panel = view.findChild(AnalyzePanelWidget)
+    show_page(view, "fit")
+    panel = fit_panel(view)
     assert panel is not None
     panel.show_tab("search")
     token = ctrl.search.start()
@@ -340,7 +522,8 @@ def pending_window(qapp, cross_controller, tmp_path):
 
 def test_remote_search_cancel_disabled_reclaim_restores_domain_gate(pending_window):
     view, ctrl, panel, background, token, _dialogs = pending_window
-    cancel = button(panel, "Cancel search")
+    cancel = named(panel, QPushButton, "fluxdep.fit.cancel")
+    search = named(panel, QPushButton, "fluxdep.fit.search")
     assert cancel.isEnabled()
     ctrl.control_identity.connect("a", "flux-agent", "owner")
     assert not cancel.isEnabled()
@@ -348,23 +531,52 @@ def test_remote_search_cancel_disabled_reclaim_restores_domain_gate(pending_wind
         g for g in panel.findChildren(QGroupBox) if g.title() == "Search parameters"
     )
     assert not form.isEnabled()
-    tabs = panel.findChild(QTabWidget)
-    assert tabs is not None and tabs.tabBar().isTabEnabled(2)
-    tabs.setCurrentIndex(2)
+    # Show stays locked without a recorded result; shown programmatically, its
+    # Display group still follows control authority.
+    assert fit_stage_status(panel, "show") == "locked"
+    panel.show_tab("show")
     assert panel.current_tab == "show"
-    assert next(
+    assert not next(
         g for g in panel.findChildren(QGroupBox) if g.title() == "Display"
     ).isEnabled()
     cancel.click()
     assert ctrl.search.outcome(token) is None
     assert ctrl.control_identity.status().holder == "rpc:flux-agent"
     indicator(view).click()
-    assert cancel.isEnabled() and not button(panel, "Search database").isEnabled()
+    assert cancel.isEnabled() and not search.isEnabled()
     cancel.click()
     background.complete_cancel()
     outcome = ctrl.search.outcome(token)
     assert outcome is not None and outcome.status == "cancelled"
-    assert not cancel.isEnabled() and button(panel, "Search database").isEnabled()
+    assert not cancel.isEnabled() and search.isEnabled()
+
+
+def test_a_pending_search_cancel_ignores_the_search_stage_lock(pending_window):
+    _view, ctrl, panel, background, token, _dialogs = pending_window
+    cancel = named(panel, QPushButton, "fluxdep.fit.cancel")
+    search = named(panel, QPushButton, "fluxdep.fit.search")
+    db_edit = named(panel, QLineEdit, "fluxdep.fit.search_db")
+    assert cancel.isEnabled()
+    # A Filter draft that is not an agent's leaves the user on Search.
+    ctrl.interactive.begin_cross_selection()
+    # Search is locked under the draft: it stays shown with its form and
+    # Search disabled, while the running search can still be cancelled.
+    assert panel.current_tab == "search"
+    assert fit_stage_status(panel, "search") == "locked"
+    assert not db_edit.isEnabled() and not search.isEnabled()
+    assert cancel.isEnabled()
+    # A non-holder still cannot cancel, lock or no lock.
+    ctrl.control_identity.connect("a", "flux-agent", "owner")
+    assert not cancel.isEnabled()
+    ctrl.control_identity.reclaim_local()
+    assert cancel.isEnabled()
+    cancel.click()
+    background.complete_cancel()
+    outcome = ctrl.search.outcome(token)
+    assert outcome is not None and outcome.status == "cancelled"
+    assert not cancel.isEnabled()
+    ctrl.interactive.cancel_selection()
+    assert not cancel.isEnabled() and search.isEnabled()
 
 
 def test_remote_close_decline_has_no_lifecycle_effect_accept_waits_for_search(

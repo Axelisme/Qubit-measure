@@ -33,7 +33,6 @@ from zcu_tools.gui.form import (
     FormInput,
     FormModel,
     FormState,
-    FormWritePath,
     LinRange,
     Option,
     static_defaults,
@@ -237,34 +236,30 @@ class _Section:
             namespace[name] = field_info
         section = self
 
-        def defaults(
-            cls: type[FormModel], env: FormEnv, previous: Mapping[str, JsonValue]
-        ) -> dict[str, JsonValue]:
-            del cls, previous
+        def defaults(cls: type[FormModel], env: FormEnv) -> dict[str, JsonValue]:
+            del cls
             return section.default_data(env)
 
         def choices(
             cls: type[FormModel], env: FormEnv
         ) -> Mapping[tuple[str | int, ...], tuple[JsonValue, ...]]:
             del cls
-            return {
-                (name,): (
-                    (None, *env.devices)
-                    if type(None)
-                    in _members(section.core.model_fields[name].annotation)
-                    else tuple(env.devices)
-                )
-                for name, node in section.tree.items()
-                if isinstance(node, AliasName) and node.choices_source == "devices"
-            }
+            return section._alias_choices(env)
 
         def options(
             cls: type[FormModel], env: FormEnv
         ) -> Mapping[tuple[str | int, ...], tuple[Option, ...]]:
-            del cls
-            return {
+            result: dict[tuple[str | int, ...], tuple[Option, ...]] = {
                 (name,): field.options(env) for name, field in section.modules.items()
             }
+            # Empty device defaults need a label; choices remains the value policy.
+            result.update(
+                {
+                    path: tuple(Option(str(value) or "None", value) for value in values)
+                    for path, values in cls.choices(env).items()
+                }
+            )
+            return result
 
         namespace.update(
             __annotations__=annotations,
@@ -280,6 +275,26 @@ class _Section:
         if not issubclass(model, FormModel):
             raise TypeError("Generated model must implement FormModel")
         self.model = model
+
+    def _alias_choices(
+        self, env: FormEnv
+    ) -> dict[tuple[str | int, ...], tuple[JsonValue, ...]]:
+        """Share core device defaults and captured names with schema and validation."""
+        result: dict[tuple[str | int, ...], tuple[JsonValue, ...]] = {}
+        for name, node in self.tree.items():
+            if not isinstance(node, AliasName) or node.choices_source != "devices":
+                continue
+            info = self.core.model_fields[name]
+            values: tuple[JsonValue, ...] = (
+                (None, *env.devices)
+                if type(None) in _members(info.annotation)
+                else tuple(env.devices)
+            )
+            # Unresolved aliases use the core default without writing input.
+            if isinstance(info.default, str) and info.default not in values:
+                values = (info.default, *values)
+            result[(name,)] = values
+        return result
 
     def _annotation(self, name: str, info: FieldInfo, node: FormNode) -> object:
         if isinstance(node, Locked):
@@ -402,7 +417,7 @@ class Form[C: ConfigBase]:
     model is a generated FormModel class, used only through the public form API.
     default_input resolves names once against the supplied captured FormEnv;
     hosts use the same env until Reset. The host calls bind_templates with its
-    template catalog before resolving Template/fallback nodes. Slot copies
+    template catalog before resolving Template nodes. Slot copies
     and Template defaults are detached persistent Specs, not library-editor
     structural defaults. Only Expr nodes become expression envelopes. Ordinary
     strings, including $-prefixed strings, remain literal. Expr initial values
@@ -489,7 +504,7 @@ class Form[C: ConfigBase]:
         raises the same ValueError, naming the template id and the dotted seed
         path; to_cfg fills those fields only from Spec defaults. Seeds for other
         fields, including $-prefixed strings, stay literal. No sources are read.
-        Call before default_input when the tree contains Template/fallback nodes.
+        Call before default_input when the tree contains Template nodes.
         Definitions remain immutable and the caller's mapping is never retained.
         """
         self._section.bind_templates(MappingProxyType(dict(templates)), adapter)
@@ -514,52 +529,6 @@ class Form[C: ConfigBase]:
         if path[-1] not in section.modules:
             raise ValueError(f"Not a core module field: {'.'.join(path)}")
         return section.modules[path[-1]]
-
-    def module_inline_input(
-        self, input: FormInput[FormModel], path: tuple[str, ...], env: FormEnv
-    ) -> dict[str, JsonValue]:
-        """Prepare inline input for a core module path against fixed env.
-
-        input must belong to this Form; otherwise raise TypeError. path consists
-        of nonempty core field names, not module descendants; invalid paths raise
-        ValueError. Copy a captured library Spec into supported detached input;
-        absent library/key uses Template fallback or editable static blank.
-        Wrong family/source failures propagate. Preserve existing inline values
-        and locks. No mutation, validation of the whole draft, or publication
-        occurs; blank may still require ordinary leaf edits before Run.
-        """
-        if input.model is not self.model:
-            raise TypeError("module_inline_input requires this Form's input")
-        field = self._module_field(path)
-        raw: JsonValue = input.data
-        for part in path:
-            raw = raw.get(part) if isinstance(raw, dict) else None
-        return field.inline_input(raw if isinstance(raw, dict) else {}, env)
-
-    def module_inline_writes(
-        self, input: FormInput[FormModel], path: tuple[str, ...], env: FormEnv
-    ) -> dict[FormWritePath, JsonValue]:
-        """Prepare one public leaf batch for required or nullable module input.
-
-        input, path and env follow module_inline_input, with the same failures,
-        locks and captured-library/Template/blank preparation. The generated
-        inline branch defaults use only the Template/blank preparation during
-        switching, never this explicit copy path. Return no writes for already-inline input. The resource must
-        apply this batch once through guarded public write; preparation changes
-        no input and publishes nothing. Callers need not know module layout.
-        """
-        if input.model is not self.model:
-            raise TypeError("module_inline_writes requires this Form's input")
-        field = self._module_field(path)
-        raw: JsonValue = input.data
-        for part in path:
-            raw = raw.get(part) if isinstance(raw, dict) else None
-        previous = raw if isinstance(raw, dict) else {}
-        return (
-            {}
-            if previous.get("kind") == "inline"
-            else field.inline_writes(previous, env)
-        )
 
     def module_input_kind(
         self, input: FormInput[FormModel], path: tuple[str, ...]
@@ -622,7 +591,7 @@ class Form[C: ConfigBase]:
         TemplateDef values. env supplies captured parameters and library for
         Expr initial values and Slot resolution. Partial seeds overlay Spec
         defaults; failed Expr initial values leave required fields unfilled.
-        Bound Slots keep child library keys; unbound Slots use their fallback.
+        Bound Slots keep child library keys; unbound Slots leave required input absent.
         No native cfg or asset is materialized. to_cfg returns the original Spec.
 
         input.model may be a subclass of this Form's model, specialized for
@@ -636,7 +605,7 @@ class Form[C: ConfigBase]:
         The input model retains a detached catalog mapping, not the caller's map.
 
         Core cfg Forms raise TypeError. Unknown IDs, incompatible Spec families,
-        unsupported or malformed seed/lock paths and recursive fallbacks raise
+        unsupported or malformed seed/lock paths raise
         ValueError naming the template or path. Captured-source and default
         factory failures propagate; they never silently use a fallback.
         """

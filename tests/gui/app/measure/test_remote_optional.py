@@ -15,9 +15,8 @@ from zcu_tools.gui.app.measure.catalog import (
 )
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-from zcu_tools.gui.cfg import DirectValue
+from zcu_tools.gui.form import FormErrors
 
 from tests.gui.app.measure._synthetic import SampleAdapter
 
@@ -31,10 +30,10 @@ def measure_gui(qapp: QApplication, tmp_path: Path) -> Iterator[Controller]:
         def load(self, plan: PreparedCatalogReload) -> Registry:
             raise RuntimeError("reload is not part of this composition test")
 
-    def registry_factory() -> tuple[Registry, TemplateCatalog, ExperimentCatalogLoader]:
+    def registry_factory() -> tuple[Registry, ExperimentCatalogLoader]:
         registry = Registry()
         registry.register("fake", SampleAdapter)
-        return registry, TemplateCatalog(), UnusedLoader()
+        return registry, UnusedLoader()
 
     previous_hook = sys.excepthook
     ctrl: Controller | None = None
@@ -73,31 +72,27 @@ def test_tab_cfg_and_revision_publish_without_viewer_timer(
     tab_id = ctrl.new_tab("fake")
     other_tab = ctrl.new_tab("fake")
     qapp.processEvents()
-    from zcu_tools.gui.cfg.resource import CfgEdit
 
     cfg = ctrl.cfg_resources.lookup(tab_id)
     key = f"tab:{tab_id}:cfg"
     other_key = f"tab:{other_tab}:cfg"
     before = ctrl.resources_versions()
 
-    cfg.edit((CfgEdit(("gain",), 0.25),))
+    cfg.write({("gain",): 0.25})
 
-    saved = ctrl.get_tab_snapshot(tab_id).cfg_schema
-    assert saved.value.fields["gain"] == DirectValue(0.25)
-    assert ctrl.resources_versions()[key] == before[key] + 1
-    assert ctrl.resources_versions()[other_key] == before[other_key]
+    saved = ctrl.get_tab_snapshot(tab_id).cfg_input
+    assert saved["gain"] == 0.25
+    assert ctrl.resources_versions()[key] == before.get(key, 0) + 1
+    assert ctrl.resources_versions().get(other_key, 0) == before.get(other_key, 0)
 
-    cfg.edit((CfgEdit(("gain",), DirectValue(raw="1e")),))
+    cfg.write({("gain",): "1e"})
 
-    invalid = ctrl.get_tab_snapshot(tab_id).cfg_schema.value.fields["gain"]
-    assert isinstance(invalid, DirectValue)
-    assert invalid.raw == "1e"
-    observed_value = cfg.observe().tree.children["gain"].value
-    assert isinstance(observed_value, DirectValue)
-    assert observed_value.error is not None
-    assert invalid.value is None
-    assert saved.value.fields["gain"] == DirectValue(0.25)
-    assert ctrl.resources_versions()[key] == before[key] + 2
+    invalid = ctrl.get_tab_snapshot(tab_id).cfg_input["gain"]
+    assert invalid == "1e"
+    assert cfg.input.data["gain"] == "1e"
+    assert isinstance(cfg.result(), FormErrors)
+    assert saved["gain"] == 0.25
+    assert ctrl.resources_versions()[key] == before.get(key, 0) + 2
     qapp.processEvents()
-    assert ctrl.resources_versions()[key] == before[key] + 2
-    assert ctrl.resources_versions()[other_key] == before[other_key]
+    assert ctrl.resources_versions()[key] == before.get(key, 0) + 2
+    assert ctrl.resources_versions().get(other_key, 0) == before.get(other_key, 0)

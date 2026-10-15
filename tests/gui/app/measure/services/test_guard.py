@@ -102,7 +102,9 @@ def test_run_inputs_issued_for_active_valid_cfg():
     assert inputs.request.cfg_context == parameters.library.validation_context()
     assert inputs.adapter is state.get_tab(tab_id).adapter
     adapter = cast(MagicMock, inputs.adapter)
-    adapter.validate_run_request.assert_called_once_with(inputs.request, {})
+    adapter.validate_run_request.assert_called_once_with(
+        inputs.request, inputs.accepted_cfg.cfg
+    )
 
 
 def test_run_inputs_freezes_published_expression_and_provenance() -> None:
@@ -146,8 +148,9 @@ def test_run_inputs_detaches_reference_shape_and_values() -> None:
             ("asset", "kind"): "inline",
             ("asset", "module", "ch"): 0,
             ("asset", "module", "nqz"): 1,
-            ("asset", "module", "waveform", "style"): "const",
-            ("asset", "module", "waveform", "length"): 0.4,
+            ("asset", "module", "waveform", "kind"): "inline",
+            ("asset", "module", "waveform", "module", "style"): "const",
+            ("asset", "module", "waveform", "module", "length"): 0.4,
             ("asset", "module", "gain"): 0.25,
             ("asset", "module", "freq"): 4000,
             ("asset", "module", "phase"): 0,

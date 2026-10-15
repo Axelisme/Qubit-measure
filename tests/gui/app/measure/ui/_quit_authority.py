@@ -12,7 +12,6 @@ from qtpy.QtWidgets import QApplication
 from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
@@ -52,7 +51,7 @@ def main(project_root: Path) -> int:
     registry = Registry()
     registry.register("saving", AnalysisSavingAdapter)
     behavior = MeasureGuiBehavior(
-        lambda: (registry, TemplateCatalog(), Loader()),
+        lambda: (registry, Loader()),
         clean=True,
         project_root=str(project_root),
     )

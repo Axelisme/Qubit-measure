@@ -65,9 +65,7 @@ class CoherenceTunablesForm(FormModel):
     )
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
         """Fill t1 from T1TunablesForm.defaults, including its initial guess.
 
         t1 has no static default, so this is its only default source; the
@@ -76,11 +74,8 @@ class CoherenceTunablesForm(FormModel):
         and t2echo keep their static defaults. Existing input overlays remain
         the host's responsibility; no source is recaptured.
         """
-        data = super().defaults(env, previous)
-        prior_t1 = previous.get("t1", {})
-        data["t1"] = T1TunablesForm.defaults(
-            env, prior_t1 if isinstance(prior_t1, dict) else {}
-        )
+        data = super().defaults(env)
+        data["t1"] = T1TunablesForm.defaults(env)
         return data
 
     def to_cfg(self) -> CoherenceTunables:
@@ -144,9 +139,7 @@ class CoherencePlanForm(FormModel):
         return self
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
         """Prefill the captured device name and x180 pi estimate.
 
         Resolve $flux_dev only for new defaults and keep the name literal.
@@ -162,8 +155,8 @@ class CoherencePlanForm(FormModel):
         not a fallback.
         No live selection, YAML refresh or device access occurs.
         """
-        data = calibration_defaults(super().defaults(env, previous), env, previous)
-        if env.parameters is None or "flux_dev" in previous:
+        data = calibration_defaults(super().defaults(env), env)
+        if env.parameters is None:
             return data
         try:
             data["flux_dev"] = env.parameters.resolve_path("$flux_dev")

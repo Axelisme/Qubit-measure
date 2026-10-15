@@ -9,7 +9,6 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.services.tab_control import TabControlFacet
-from zcu_tools.gui.app.measure.services.tab_form import TabFormResources, TabFormSources
 from zcu_tools.gui.app.measure.services.workspace import WorkspaceService
 from zcu_tools.gui.app.measure.services.writeback import WritebackService
 from zcu_tools.gui.app.measure.services.writeback_control import WritebackControlFacet
@@ -17,7 +16,6 @@ from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.remote.errors import ErrorCode
 from zcu_tools.gui.session.context_types import EntryRequest
 from zcu_tools.gui.session.parameters import ParameterContext
@@ -25,6 +23,7 @@ from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.resources.entry import ResultEntry
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui.app.measure._form_fakes import form_resources, form_sources
 
 from ._point_application import PointAdapter, PointApplication
 
@@ -224,12 +223,8 @@ def parameter_writeback_pane(
         application.state,
         registry,
         service,
-        TabFormResources(
-            mutation_allowed=lambda tab_id: not application.state.is_tab_busy(tab_id)
-        ),
-        lambda aliases: TabFormSources(
-            FormEnv(parameters=control.read_context(aliases=aliases))
-        ),
+        form_resources(application.state),
+        lambda aliases: form_sources(application.state, aliases),
         lambda aliases: control.read_context(aliases=aliases),
     )
     application.remote.tab_control = TabControlFacet(

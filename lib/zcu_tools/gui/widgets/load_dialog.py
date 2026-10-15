@@ -8,13 +8,16 @@ applies the chosen ``transpose_axes`` flag, so State always stores the canonical
 
 This base owns the shared mechanics — the file row + Browse, the transpose toggle,
 the best-effort read, the preview canvas + render, and OK-gated-until-a-file. App
-extras are added via two hooks:
+extras are added via these hooks:
 
 * ``_build_options(opt_row)`` — populate the option row (the subclass decides where
   the shared ``self._transpose_btn`` sits and adds any extra widgets, e.g. a Type
   combo or an "Inherit from" combo).
 * ``result_request()`` (abstract) — build the app's own request object from the
   shared fields (``self._filepath`` / ``self._transpose``) plus the extra widgets.
+* ``_draw_preview_overlay(ax)`` (optional) — draw app marks over a rendered 2D
+  preview; the default draws nothing. A subclass whose marks depend on its
+  option widgets calls ``_render_preview()`` when they change.
 
 This module pulls in Qt + matplotlib; import it only after the matplotlib backend
 is selected (i.e. when building the UI).
@@ -25,6 +28,7 @@ from __future__ import annotations
 import logging
 
 import numpy as np
+from matplotlib.axes import Axes
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
@@ -133,6 +137,14 @@ class LoadDataDialog(QDialog):
         extra option widgets) in whatever order/layout the app wants."""
         raise NotImplementedError
 
+    def _draw_preview_overlay(self, ax: Axes) -> None:
+        """Draw app marks over the rendered 2D preview; the default draws nothing.
+
+        ax shows the preview after the chosen transpose: x is the device (flux)
+        axis and y the frequency axis, in the file's native units. Called on
+        every render that draws a 2D spectrum, before the canvas redraws.
+        """
+
     # --- actions ---------------------------------------------------------
 
     def _on_browse(self) -> None:
@@ -220,4 +232,5 @@ class LoadDataDialog(QDialog):
         )
         self._ax.set_xlabel("Device value (flux)")
         self._ax.set_ylabel("Frequency")
+        self._draw_preview_overlay(self._ax)
         self._canvas.draw_idle()

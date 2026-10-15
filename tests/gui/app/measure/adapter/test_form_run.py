@@ -1,8 +1,7 @@
-"""Accepted Form dumps cross the adapter's mapping seam without reassembly."""
+"""BaseAdapter passes its validated Form output directly to the core."""
 
 import pytest
-from pydantic import Field, ValidationError
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.app.measure.adapter import (
@@ -12,41 +11,48 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.services.tab_cfg import TabFormResource, TabFormSources
+from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
 from zcu_tools.gui.form import FormEnv
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 
-class MeasurementCfg(ExpCfgModel):
-    """A core owns its setting validation, independently of GUI assembly."""
+class MeasurementCfg(ConfigBase):
+    """A Form output need not inherit an experiment cfg base."""
 
-    amount: float = Field(default=1.0, gt=0)
+    amount: float = 1.0
 
 
 class RecordingCore:
-    """Return the core setting through the synchronous acquisition boundary."""
+    """Expose the exact cfg received through the synchronous core boundary."""
 
-    def run(self, cfg: MeasurementCfg, *, context: RunContext) -> float:
+    def run(self, cfg: MeasurementCfg, *, context: RunContext) -> MeasurementCfg:
         del context
-        return cfg.amount
+        return cfg
 
 
-class FormAdapter(BaseAdapter[MeasurementCfg, float]):
-    """A normal adapter declares only Form and core, not an assembly override."""
-
-    form = Form(MeasurementCfg, {})
+class FormAdapter(BaseAdapter[MeasurementCfg, MeasurementCfg]):
     exp_cls = RecordingCore
     capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE, load_data=False)
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[MeasurementCfg]:
+        del ctx
+        return Form(MeasurementCfg, {})
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         del ctx
         return "measurement"
 
 
-def test_accepted_form_dump_runs_with_core_validation() -> None:
+def measurement(cfg: ConfigBase) -> MeasurementCfg:
+    assert isinstance(cfg, MeasurementCfg)
+    return cfg
+
+
+def test_base_run_preserves_form_output_identity() -> None:
     resource = TabFormResource(
-        FormAdapter.form,
+        FormAdapter.make_form,
         capture=lambda _aliases: TabFormSources(FormEnv()),
         mutation_allowed=lambda: True,
     )
@@ -60,14 +66,11 @@ def test_accepted_form_dump_runs_with_core_validation() -> None:
     )
     try:
         try:
-            result = adapter.run(req, accepted.values, context=context)
-        except NotImplementedError as exc:
-            pytest.fail(f"Accepted Form cfg must use its declared core type: {exc}")
-        assert result == 4.5
-        assert accepted.values["amount"] == 4.5
-        assert adapter.build_exp_cfg(accepted.values, req) == MeasurementCfg(amount=4.5)
-        with pytest.raises(ValidationError):
-            adapter.build_exp_cfg({"amount": -1.0}, req)
+            result = adapter.run(req, measurement(accepted.cfg), context=context)
+        except (AttributeError, NotImplementedError, TypeError) as exc:
+            pytest.fail(f"Base Run must forward the validated Form output: {exc}")
+        assert result is accepted.cfg
+        assert result.amount == 4.5
     finally:
         plots.finish()
         plots.release()

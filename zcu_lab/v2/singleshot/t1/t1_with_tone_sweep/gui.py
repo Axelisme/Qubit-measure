@@ -22,16 +22,13 @@ only in which outer sweep they declare + its default.
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
-from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, ClassVar, TypeAlias
+from pathlib import Path
+from typing import ClassVar, TypeAlias
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     NoAnalyzeParams,
@@ -39,32 +36,22 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-    ModuleInit,
-)
-from zcu_tools.gui.app.measure.seeds import SweepDefault, custom, scaled_path_seed
-from zcu_tools.gui.cfg import (
-    EvalValue,
-    ScalarSpec,
-    SweepValue,
-    resolved_direct_number,
-)
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2._support.measure.singleshot_shared import (
     read_analysis_float,
     read_confusion_matrix,
-    readout_probe_freq,
-    readout_probe_freq_range,
 )
 from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.core import (
     T1WithToneSweepAnalyzeOptions,
     T1WithToneSweepCfg,
     T1WithToneSweepExp,
     T1WithToneSweepResult,
+)
+from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.form import (
+    make_form_freq,
+    make_form_gain,
 )
 
 SsT1ToneSweepRunResult: TypeAlias = RunRecord[T1WithToneSweepCfg, T1WithToneSweepResult]
@@ -90,95 +77,19 @@ class _SsT1ToneSweepBase(
     """
 
     exp_cls = T1WithToneSweepExp
-    ExpCfg_cls: ClassVar[Any] = T1WithToneSweepCfg
 
-    # Subclass contract: which outer sweep to expose, its label/default, the probe
-    # role to default it to, and the filename token.
-    outer_key: ClassVar[str]
+    # Subclasses supply the Form, analysis axis label and filename token.
     outer_label: ClassVar[str]
-    outer_default: ClassVar[SweepValue]
     filename_token: ClassVar[str]
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        outer_key = cls.outer_key
-        outer_label = cls.outer_label
-        outer_default = deepcopy(cls.outer_default)
-        outer_expts = resolved_direct_number(outer_default.expts)
-        if not isinstance(outer_expts, int):
-            raise TypeError("Outer sweep default requires an integer point count")
-        outer_sweep = (
-            custom(
-                lambda ctx: readout_probe_freq_range(ctx, outer_expts),
-                description="readout probe frequency range",
-            )
-            if outer_key == "freq"
-            else outer_default
-        )
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("pi_pulse", role_id="pi_pulse")
-            .pulse(
-                "probe_pulse",
-                role_id="res_probe",
-                label="Probe Pulse",
-                init=ModuleInit.INLINE,
-                overrides={
-                    "freq": custom(
-                        readout_probe_freq,
-                        description="readout probe frequency",
-                    )
-                },
-            )
-            .readout()
-            .relax_delay(
-                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=100.0)
-            )
-            .sweep(
-                "length",
-                label="Delay (us)",
-                default=SweepDefault(
-                    start=0.0,
-                    # The fallback is the fully scaled 5 * 100 us window.
-                    stop=scaled_path_seed(
-                        "$qubit.t1", factor=5.0, fallback_value=500.0
-                    ),
-                    expts=51,
-                ),
-            )
-            .sweep(outer_key, label=outer_label, default=outer_sweep)
-            .field(
-                "g_center",
-                spec=ScalarSpec("Ground center", complex),
-                default=EvalValue("$qubit.ext.readout_cal.g_center"),
-            )
-            .field(
-                "e_center",
-                spec=ScalarSpec("Excited center", complex),
-                default=EvalValue("$qubit.ext.readout_cal.e_center"),
-            )
-            .field(
-                "radius",
-                spec=ScalarSpec("Classification radius", float),
-                default=EvalValue("$qubit.ext.readout_cal.radius"),
-            )
-            .bool("uniform", label="Uniform (linear) sweep", default=True)
-            .reps(1000)
-            .rounds(10)
-            .build()
-        )
 
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: T1WithToneSweepCfg,
         *,
         context: RunContext,
     ) -> SsT1ToneSweepRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         return RunRecord(cfg, T1WithToneSweepExp().run(cfg, context=context))
 
     def analyze(
@@ -207,91 +118,26 @@ class _SsT1ToneSweepBase(
 
 
 class SsT1ToneSweepGainAdapter(_SsT1ToneSweepBase):
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form_gain(ctx)
+
     experiment_tag: ClassVar[str | None] = T1WithToneSweepExp.persistence_tag()
-    outer_key: ClassVar[str] = "gain"
     outer_label: ClassVar[str] = "Probe gain (a.u.)"
-    outer_default: ClassVar[SweepValue] = SweepValue(start=0.0, stop=1.0, expts=21)
     filename_token: ClassVar[str] = "gain"
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "Single-shot T1-with-tone, probe-gain sweep: at each probe gain it "
-            "sweeps the wait-plus-probe length from both |g> and |e> initial "
-            "states (Branch), classifies each shot in-program against the "
-            "|g>/|e> centres, fits the dual transition rates per gain, and "
-            "renders the 3×3 rate landscape over (gain, time). Runs on real "
-            "hardware."
-        ),
-        expects_md=(
-            "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
-            "cfg, not live parameter context. Enter direct cfg values or optionally seed "
-            "defaults with 'singleshot/ge' writeback. Missing or invalid cfg "
-            "calibration fails before hardware. Optionally reads 'confusion_matrix' "
-            "(readout correction) and 'ac_stark_coeff' (rescales the gain axis to photon "
-            "number) at analyze time; 't1' to seed the length sweep stop; "
-            "'readout_f' or 'r_f' plus 'res_ch' seed the probe tone."
-        ),
-        expects_ml=(
-            "Needs a qubit pi-pulse module, a probe-tone pulse module, and a "
-            "readout module. Optional reset (disabled when no library entry "
-            "exists)."
-        ),
-        typical_writeback=(
-            "No writeback — the rate landscape is read off the grid by eye."
-        ),
-        recommended=(
-            "Set calibration cfg directly or seed it with 'singleshot/ge'. "
-            "Keep the gain sweep coarse (the inner "
-            "length sweep multiplies the run time). Provide 'ac_stark_coeff' "
-            "for a photon-number x-axis. 'uniform=True' (default) uses a linear "
-            "length sweep; set False to cluster points along the expected "
-            "exponential decay while preserving the configured window and count."
-        ),
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.gain.md")
 
 
 class SsT1ToneSweepFreqAdapter(_SsT1ToneSweepBase):
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form_freq(ctx)
+
     experiment_tag: ClassVar[str | None] = T1WithToneSweepExp.persistence_tag()
-    outer_key: ClassVar[str] = "freq"
     outer_label: ClassVar[str] = "Probe frequency (MHz)"
-    outer_default: ClassVar[SweepValue] = SweepValue(
-        start=5250.0, stop=6750.0, expts=21
-    )
     filename_token: ClassVar[str] = "freq"
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "Single-shot T1-with-tone, probe-frequency sweep: at each probe "
-            "frequency it sweeps the wait-plus-probe length from both |g> and "
-            "|e> initial states (Branch), classifies each shot in-program "
-            "against the |g>/|e> centres, fits the dual transition rates per "
-            "frequency, and renders the 3×3 rate landscape over (freq, time). "
-            "Runs on real hardware."
-        ),
-        expects_md=(
-            "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
-            "cfg, not live parameter context. Enter direct cfg values or optionally seed "
-            "defaults with 'singleshot/ge' writeback. Missing or invalid cfg "
-            "calibration fails before hardware. Optionally reads 'confusion_matrix' "
-            "(readout correction) at analyze time; 't1' to seed the length sweep stop; "
-            "'readout_f' or 'r_f' plus 'rf_w' / 'res_ch' seed the probe drive "
-            "and frequency sweep. "
-            "('ac_stark_coeff' applies only to a gain sweep, not this one.)"
-        ),
-        expects_ml=(
-            "Needs a qubit pi-pulse module, a probe-tone pulse module, and a "
-            "readout module. Optional reset (disabled when no library entry "
-            "exists)."
-        ),
-        typical_writeback=(
-            "No writeback — the rate landscape is read off the grid by eye."
-        ),
-        recommended=(
-            "Set calibration cfg directly or seed it with 'singleshot/ge'. "
-            "Keep the frequency sweep coarse (the "
-            "inner length sweep multiplies the run time). 'uniform=True' "
-            "(default) uses a linear length sweep; set False to cluster points "
-            "along the expected exponential decay while preserving the configured "
-            "window and count."
-        ),
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.freq.md")

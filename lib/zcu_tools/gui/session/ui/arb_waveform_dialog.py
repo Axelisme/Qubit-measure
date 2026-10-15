@@ -29,6 +29,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.waveform_assets import (
     ArbWaveformData,
     ArbWaveformError,
@@ -360,6 +361,7 @@ class ArbWaveformDialog(QDialog):
         layout.addWidget(symbols)
 
         self._warning = QLabel()
+        make_label_selectable(self._warning)
         self._warning.setWordWrap(True)
         self._warning.setVisible(False)
         layout.addWidget(self._warning)

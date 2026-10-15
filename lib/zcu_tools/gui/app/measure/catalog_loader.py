@@ -16,7 +16,9 @@ class SourceExperimentCatalogLoader(SourceCatalogLoader[Registry]):
     current_registry is the app's stable registry identity. Each load copies its
     templates into a fresh candidate; clearing adapters does not lose templates.
     The loader never publishes or mutates current_registry. catalog_module must
-    export register_all(registry) and explicitly register each adapter's form.
+    export register_all(registry) and register adapter classes with make_form.
+    Loading checks the adapter contract without invoking form factories or
+    validating templates; those errors surface on Open/Reset.
     Registration/validation failures become CatalogReloadError. App recovery and
     tab publication remain with the measure Controller, not this adapter.
     """

@@ -178,21 +178,30 @@ def _tag(model: type[BaseModel], key: str) -> tuple[object, ...]:
     )
 
 
-def schema_branch_model(info: FieldInfo, tags: list[JsonValue]) -> type[BaseModel]:
-    """Match emitted intrinsic JSON tags to info's declared union model.
+def intrinsic_tags(model: type[BaseModel], key: str) -> tuple[JsonValue, ...]:
+    """Read typed JSON tags from model's Literal declaration, not dynamic choices.
 
-    info must declare a discriminator field name for a model union. tags are its emitted
-    x-form-discriminator-values, not dynamic choice enums. Declared Literal tags
-    may use named aliases, Annotated wrappers or unions of Literals. Match both
-    JSON type and value. Raise ValueError for a missing discriminator or unmatched tags;
-    declared non-JSON/non-finite tags also fail through the shared JSON codec.
+    Named aliases, Annotated wrappers and unions of Literals share the native
+    tag reader. Non-JSON/non-finite values fail through the shared JSON codec.
+    """
+    return tuple(
+        default_json(tag.value if isinstance(tag, Enum) else tag)
+        for tag in _tag(model, key)
+    )
+
+
+def schema_branch_model(info: FieldInfo, tags: list[JsonValue]) -> type[BaseModel]:
+    """Match an undecorated schema branch's tags to its annotation owner.
+
+    info must declare a string discriminator. Match both JSON type and value,
+    before dynamic choices can change the selector schema. Missing or unmatched
+    tags raise ValueError; invalid declared tags fail through the JSON codec.
     """
     key = discriminator(info)
     if key is None:
         raise ValueError("Schema branch requires a string discriminator")
     for model in model_types(info.annotation):
-        for tag in _tag(model, key):
-            value = default_json(tag.value if isinstance(tag, Enum) else tag)
+        for value in intrinsic_tags(model, key):
             if any(
                 type(candidate) is type(value) and candidate == value
                 for candidate in tags
@@ -294,13 +303,11 @@ def _choice_fields(model: type[BaseModel], path: FormPath) -> tuple[FieldInfo, .
     return (info,)
 
 
-def _branch_defaults(
-    model: type[BaseModel], env: FormEnv, previous: Mapping[str, JsonValue]
-) -> dict[str, JsonValue]:
+def _branch_defaults(model: type[BaseModel], env: FormEnv) -> dict[str, JsonValue]:
     if issubclass(model, FormModel):
         from ._evaluate import evaluate_defaults
 
-        return evaluate_defaults(model, model.defaults(env, copy_object(previous)), env)
+        return evaluate_defaults(model, model.defaults(env), env)
     return static_defaults(model)
 
 
@@ -354,7 +361,7 @@ def _switch(
     if branch is None:
         raise ValueError(f"Unknown discriminator at path {path!r}: {value!r}")
     try:
-        new = _branch_defaults(branch, env, {})
+        new = _branch_defaults(branch, env)
     except PydanticCustomError as exc:
         from ._sources import prefix_error
 
@@ -384,7 +391,7 @@ def _select_object(
         raise ValueError(f"Missing or unknown discriminator at {path!r}")
     try:
         if not isinstance(old, dict) or selected(info, old) is not branch:
-            seed = _branch_defaults(branch, env, {})
+            seed = _branch_defaults(branch, env)
         else:
             seed = copy_object(old)
         parent[key] = _partial_model(branch, seed, value, env)
@@ -421,7 +428,7 @@ def _partial_model(
                     child,
                     copy_object(prior)
                     if isinstance(prior, dict)
-                    else _branch_defaults(child, env, {}),
+                    else _branch_defaults(child, env),
                     item,
                     env,
                 )
@@ -616,7 +623,7 @@ def _restore_branch_seed(
             copy_object(prior) if isinstance(current, dict) else static_defaults(child)
         )
     try:
-        seed = _branch_defaults(child, env, prior)
+        seed = _branch_defaults(child, env)
     except PydanticCustomError as exc:
         from ._sources import prefix_error
 

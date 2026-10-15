@@ -43,6 +43,8 @@ from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui._user_input import key_click
+from tests.gui.widgets.form._text_input import commit_text_on_focus_loss as commit_text
 
 PULSE = "Q1.pulses.pi"
 WAVEFORM = "Q1.waveforms.base"
@@ -153,6 +155,8 @@ def _open(
     tabs = dialog.findChild(QTabWidget)
     assert tabs is not None
     tabs.setCurrentIndex(1)
+    dialog.show()
+    QApplication.processEvents()
     return dialog
 
 
@@ -192,12 +196,8 @@ def _status(dialog: QWidget) -> str:
     return _child(dialog, QLabel, "inspect.entry.status").text()
 
 
-def _group_fold(parent: QWidget, name: str) -> QPushButton:
-    block = _child(parent, QWidget, f"form.group.{name}")
-    (button,) = block.findChildren(
-        QPushButton, "", Qt.FindChildOption.FindDirectChildrenOnly
-    )
-    return button
+def _group_fold(parent: QWidget, name: str) -> QLabel:
+    return _child(parent, QLabel, f"form.fold.group.{name}")
 
 
 def _library(session: _Session):
@@ -215,7 +215,7 @@ def test_entry_edit_is_unsaved_until_revert_or_apply(session: _Session) -> None:
     revert = _child(dialog, QPushButton, "inspect.entry.revert")
     assert not apply.isEnabled()
 
-    gain.setText("0.5")
+    commit_text(gain, "0.5")
     assert _status(dialog) == "Unsaved"
     assert apply.isEnabled() and revert.isEnabled()
     revert.click()
@@ -225,7 +225,7 @@ def test_entry_edit_is_unsaved_until_revert_or_apply(session: _Session) -> None:
         ch=0, nqz=1, freq=100.0, gain=0.25, waveform=WAVEFORM
     )
 
-    _child(dialog, QLineEdit, "form.input.gain").setText("0.5")
+    commit_text(_child(dialog, QLineEdit, "form.input.gain"), "0.5")
     _child(dialog, QPushButton, "inspect.entry.apply").click()
     written = _library(session).module_spec(PULSE)
     assert isinstance(written, PulseSpec)
@@ -268,7 +268,7 @@ def test_child_waveform_key_stays_a_key_after_apply(session: _Session) -> None:
     assert not any(
         "(missing)" in waveform.itemText(index) for index in range(waveform.count())
     )
-    _child(dialog, QLineEdit, "form.input.freq").setText("150")
+    commit_text(_child(dialog, QLineEdit, "form.input.freq"), "150")
     _child(dialog, QPushButton, "inspect.entry.apply").click()
     written = _library(session).module_spec(PULSE)
     assert isinstance(written, PulseSpec)
@@ -296,7 +296,7 @@ def test_name_apply_renames_and_a_taken_name_keeps_the_draft(
     name = _child(dialog, QLineEdit, "inspect.entry.name")
     before = _library(session).document()
     _type(name, "_v2")
-    _child(dialog, QLineEdit, "form.input.gain").setText("0.75")
+    commit_text(_child(dialog, QLineEdit, "form.input.gain"), "0.75")
     # The waveform family is separate; a module name must not reuse a module key.
     session.control.set_module(
         session.control.read_context().target,
@@ -330,7 +330,7 @@ def test_switching_with_unsaved_changes_prompts_and_discard_loads_next(
     presenter = RecordingDialogPresenter()
     dialog = _open(session, presenter)
     _select(dialog, PULSE)
-    _child(dialog, QLineEdit, "form.input.gain").setText("0.9")
+    commit_text(_child(dialog, QLineEdit, "form.input.gain"), "0.9")
     before = _library(session).document()
 
     presenter.queue_save_discard_cancel("cancel")
@@ -353,7 +353,7 @@ def test_dirty_close_requires_an_explicit_decision(session: _Session) -> None:
     dialog = _open(session, presenter)
     dialog.show()
     _select(dialog, PULSE)
-    _child(dialog, QLineEdit, "form.input.gain").setText("0.9")
+    commit_text(_child(dialog, QLineEdit, "form.input.gain"), "0.9")
 
     presenter.queue_save_discard_cancel("cancel")
     dialog.close()
@@ -391,7 +391,7 @@ def test_read_only_locks_inputs_but_keeps_scrolling_and_folds(
     advanced = _group_fold(dialog, "Advanced")
     nqz = _child(dialog, QWidget, "form.input.nqz")
     assert not nqz.isVisibleTo(dialog)
-    advanced.click()
+    key_click(advanced, Qt.Key.Key_Space)
     assert nqz.isVisibleTo(dialog)
     qapp.processEvents()
     bar = _child(dialog, QScrollArea, "inspect.entry.scroll").verticalScrollBar()
@@ -486,8 +486,8 @@ def test_template_switch_keeps_only_the_name_and_creates_the_new_template(
     name = _child(new, QLineEdit, "inspect.new_entry.name")
     name.clear()
     _type(name, "Q1.pulses.my_pulse")
-    _child(new, QLineEdit, "form.input.gain").setText("0.9")
-    _group_fold(new, "Advanced").click()
+    commit_text(_child(new, QLineEdit, "form.input.gain"), "0.9")
+    key_click(_group_fold(new, "Advanced"), Qt.Key.Key_Space)
     nqz = _child(new, QWidget, "form.input.nqz")
     assert nqz.isVisibleTo(new)
     qapp.processEvents()

@@ -22,6 +22,7 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
+    AdapterGuide,
     AnalysisMode,
     ModuleWriteback,
     ParameterWriteback,
@@ -65,7 +66,9 @@ def make_ctrl() -> Iterator[Callable[[], MagicMock]]:
         configure_form_lookup(ctrl)
         ctrl.get_left_panel_width.return_value = 500
         ctrl.get_tab_adapter_name.return_value = "fake"
-        ctrl.get_adapter_guide.return_value = {}
+        ctrl.get_adapter_guide.return_value = AdapterGuide(
+            markdown="", resource_dir=None
+        )
         ctrl.progress_control.attach_progress.return_value = lambda: None
         ctrl.progress_control.progress_bars.return_value = []
         parameters = _parameters()

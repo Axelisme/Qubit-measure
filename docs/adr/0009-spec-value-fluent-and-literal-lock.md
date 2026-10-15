@@ -4,7 +4,7 @@ status: accepted
 
 # Spec/Value fluent 覆寫 + LiteralSpec 鎖定 + 角色 default 表（ROLE_TABLE）
 
-**狀態：** accepted（已實作）。本檔以現在式描述最終形狀（含試點後收斂與每角色重構）。
+**狀態：** Spec／Value 的局部機制仍供 Library、writeback 與 Inspect 使用。Measure authoring 與角色 default 表由 [[0073]] 取代；本文的相關段落保留作舊設計記錄。
 **關聯：** value 樹完整性與「空」語義見 [[0010]]；成品邊界驗證見 [[0011]]；value 層組裝 builder 見 [[0012]]。
 
 ## 脈絡

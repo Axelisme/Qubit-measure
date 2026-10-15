@@ -1,13 +1,12 @@
 """Deterministic hardware-free adapters for application and remote contracts."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import PulseSpec, Range
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -24,18 +23,10 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-    ModuleInit,
-)
-from zcu_tools.gui.cfg import SweepSpec, SweepValue
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import SweepCfg
-
-from tests.gui.app.measure._templates import ROLE_FACTORIES
 
 ALIAS_PRESET = (
     AliasRow("qubit", ""),
@@ -71,42 +62,23 @@ class SampleAnalysis(AnalyzeResultBase):
 
 
 class SampleAdapter(BaseAdapter[SampleCfg, SampleRun, SampleAnalysis, SampleParams]):
-    form = Form(SampleCfg, {"sweep": Range.between(5.0, 6.0, expts=11)})
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[SampleCfg]:
+        del ctx
+        return Form(SampleCfg, {"sweep": Range.between(5.0, 6.0, expts=11)})
+
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         requires_soc=False, load_data=False
     )
 
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(role_factories={})
-            .reps(100)
-            .rounds(10)
-            .field(
-                "sweep",
-                spec=SweepSpec(label="Sample"),
-                default=SweepValue(start=5.0, stop=6.0, expts=11),
-            )
-            .float("gain", label="Gain", default=0.1)
-            .float("noise_scale", label="Noise scale", default=0.1)
-            .build()
-        )
-
-    def build_exp_cfg(
-        self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
-    ) -> SampleCfg:
-        return SampleCfg.model_validate(raw_cfg)
-
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: SampleCfg,
         *,
         context: RunContext,
     ) -> SampleRun:
-        return RunRecord(
-            self.build_exp_cfg(raw_cfg, req), SampleResult(np.array([0.1, 0.2, 0.3]))
-        )
+        return RunRecord(cfg, SampleResult(np.array([0.1, 0.2, 0.3])))
 
     def analyze(
         self, req: AnalyzeRequest[SampleRun, SampleParams], *, plots: Plots
@@ -174,29 +146,6 @@ class EmptyParams:
 
 class PairAdapter(SampleAdapter):
     """Config reference and two scalar proposals; no scientific fit involved."""
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(role_factories=ROLE_FACTORIES)
-            .readout(
-                init=ModuleInit.INLINE,
-                locked={"pulse_cfg.freq": 0.0, "ro_cfg.ro_freq": 0.0},
-            )
-            .sweep(
-                "freq",
-                label="Frequency",
-                default=SweepValue(start=6000.0, stop=6002.0, expts=3, step=0.5),
-            )
-            .reps(100)
-            .rounds(1)
-            .build()
-        )
-
-    def build_exp_cfg(
-        self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
-    ) -> SampleCfg:
-        return SampleCfg(sweep=SweepCfg(start=1.0, stop=2.0, expts=3, step=0.5))
 
     def get_writeback_items(
         self, req: WritebackRequest[SampleRun, SampleAnalysis]

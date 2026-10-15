@@ -197,7 +197,7 @@ class FormModel(BaseModel):
     def default_input(cls, env: FormEnv) -> FormInput[Self]:
         """Build isolated input from declared defaults; required keys stay absent.
 
-        Calls defaults(env, {}) before checking sources and assembling input.
+        Calls defaults(env) before checking sources and assembling input.
         Used missing library or device sources raise field_error with the
         consuming path. A text-field {"expr": text} default (int, float,
         complex or str, a choice leaf included) is evaluated once with
@@ -217,22 +217,18 @@ class FormModel(BaseModel):
         from ._structure import check_form_shape
 
         check_form_shape(cls)
-        data = cls.defaults(env, {})
+        data = cls.defaults(env)
         check_sources(cls, data, env)
         return FormInput(cls, evaluate_defaults(cls, data, env))
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
         """Return initial or new-branch defaults before explicit field writes.
 
-        previous is empty for initial input and write branch switches. Explicit
-        callers and compatible restore may supply detached prior JSON. The
-        fallback uses Pydantic static
-        defaults and leaves required keys absent; it does not validate a partial
-        model or replace missing keys with None. Domain factories may use env
-        and previous; source failures propagate with the consuming field path.
+        Defaults depend only on the declaration and fixed env, never a prior
+        draft. The fallback uses Pydantic static defaults and leaves required
+        keys absent; it does not validate a partial model or replace missing
+        keys with None. Source failures propagate at the consuming field path.
         A text-field leaf may be {"expr": text} to derive its initial value from
         env, such as {"expr": "$flux_dev"}; default_input and branch switches
         evaluate it into a direct value (see default_input), so it never stays
@@ -240,7 +236,7 @@ class FormModel(BaseModel):
         """
         from .defaults import static_defaults
 
-        del env, previous
+        del env
         return static_defaults(cls)
 
     @classmethod
@@ -304,22 +300,15 @@ class FormModel(BaseModel):
         marked hidden: the tag field of a tagged-union branch that this form,
         ModuleInput declares for the model or a base class; LinRange.kind is
         also structural even though ranges have only one supported shape.
-        Structural selectors accept only ordinary typed tags,
-        never Expr envelopes. Each tagged
-        oneOf branch has x-form-discriminator-values: its intrinsic Literal
-        tags as ordinary JSON values, independent of current choices. Each
-        branch reachable through model fields is one concrete model; a named
-        nested union tagged on the same key expands into its members. An
-        untagged str | Model field raises ValueError naming its path; use a
-        tagged ref/inline union. A union of ModuleRef and a ModuleInline
-        subclass whose module has supported field annotations has the
-        x-form-key-or-inline marker on its non-null tagged node: ref holds
-        the key in name and inline holds the module. With a
-        captured library, the ref branch's name property lists in
-        x-form-library-keys every library module key; when choices declare options
-        for that name, only the module keys among them. Without a captured
-        library the list is absent. Any string key remains acceptable
-        input; a missing key fails the source check at the name. This
+        Structural selectors accept only ordinary typed tags, never Expr
+        envelopes. Each intrinsic tag has one x-form-options item, including
+        aliases, with fields shared by tags of the same model. Branch identity
+        comes from model annotations, independently of dynamic choices.
+        Each reachable branch is concrete; named unions tagged on the same key
+        expand into their members. An untagged str | Model raises ValueError
+        naming its path; use a tagged ref/inline union. Upper-layer generators
+        declare library/inline selections through options(env), not markers.
+        A missing ModuleRef key fails the source check at name. This
         schema describes partial JSON input, not just a valid model. Domain
         source failures from choices propagate; no refresh or file access occurs.
         A field whose union mixes text members (int, float, complex, str)
@@ -409,7 +398,7 @@ class FormState[F: FormModel]:
     def write(self, batch: Mapping[FormWritePath, JsonValue], env: FormEnv) -> None:
         """Install one input batch, keeping model-invalid drafts editable.
 
-        Discriminator changes apply first: use new-branch defaults(env, {}),
+        Discriminator changes apply first: use new-branch defaults(env),
         with Expr defaults evaluated as in default_input. Never inherit old
         same-name fields or copy sources. A partial object at a union position
         selects its branch and writes its leaves in this same batch; it need
@@ -662,38 +651,6 @@ class ModuleInline(FormModel):
 
     kind: Literal["inline"] = "inline"
     module: ModuleSpec
-
-    @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
-        """Explicitly seed inline from a prior ref's captured library Spec.
-
-        Ordinary branch writes pass empty previous and never copy a ref.
-        Explicit callers may supply previous as {kind: ref, name: actual_key}. Read LibrarySnapshot's public
-        module_spec and retain a detached input under module. Missing captured
-        library/key or invalid module family fails at the consuming field path;
-        it never supplies a dummy Spec. Static defaults apply without a prior ref.
-        """
-        from ._json import copy_object
-        from .defaults import static_defaults
-
-        data = static_defaults(cls)
-        if previous.get("kind") == "ref" and isinstance(
-            name := previous.get("name"), str
-        ):
-            if env.library is None:
-                raise field_error(
-                    ("module",), "Missing captured library for inline module"
-                )
-            try:
-                spec = env.library.module_spec(name)
-            except (ValueError, KeyError) as exc:
-                raise field_error(
-                    ("module",), f"Cannot read module {name!r}: {exc}"
-                ) from exc
-            data["module"] = copy_object(spec.model_dump(mode="json"))
-        return data
 
 
 type ModuleInput = Annotated[ModuleRef | ModuleInline, Field(discriminator="kind")]

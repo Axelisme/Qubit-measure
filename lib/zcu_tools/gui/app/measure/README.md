@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-14, named alias preset startup data and Inspect Load preset
+**Last updated:** 2026-10-15，main Form／Markdown guide 與具名 alias preset 整合
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -111,7 +111,7 @@ pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 align
 
 ## Package Boundaries
 
-- `schema_builder.py`、`seeds.py`、`role_factories.py`：context-free authoring 與通用 deferred defaults。Caller 明傳角色 factory 表；角色詞彙與三個掃描範圍政策留在使用者套件。
+- `form_adapter` 從 core cfg 與作者樹推導 Form。`make_form(ctx)`、範本與實驗初值由使用者套件宣告，舊 builder、seeds 與角色 factory 表已退休。
 - `flux_pick_plugin.py`、`flux_pick_frontend.py`、`interactive_flux_pick.py`：measure 選線的終態結果與 click-follow frontend。Caller 傳 FluxPickInputs 和初始數值，不帶具體實驗或參數容器。共用數值及 single-flight 機制仍由既有 kernel/plugin 擁有。
 - `adapter/`：framework-facing contract、measure-owned finished-cfg ports、analyze params、
   adapter validation與protocol signature需要的session vocabulary；不forward generic cfg API。
@@ -773,7 +773,7 @@ New GUI RPC methods that should be agent-accessible need a live catalog policy a
 領域政策由 `zcu_lab.recipes.helpers` 擁有。`RecipeTab` 只提供通用 parameter／library／
 cfg field／device 讀取與 set／set_fields／set_sweep，框架不推論 calibration 或 linewidth。
 `zcu_lab.recipes.helpers.use_flux_device` 使用通用 `RecipeTab.read_device` 讀 cached
-snapshot，caller 明填 unit 必須完全匹配，包括 native。驗證成功後才寫 dev.flux_dev
+snapshot，caller 明填 unit 必須完全匹配，包括 native。驗證成功後才寫 cfg.flux_dev
 與獨立 cfg.flux_unit，不換算、不連線或 setup，也不改 recipe policy 或 alias capture。
 
 ## Dialog Rules
@@ -883,15 +883,37 @@ Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩
   `BaseAdapter` 的 import-time 條件 hook 驗證與 concrete adapter 義務見
   [framework BaseAdapter](adapter/base.py)；
   capability 判斷不用 method presence 推測。
-- Adapter `form` is the core-derived definition. Register it explicitly with the
-  Registry template catalog before opening tabs. Open and Reset derive input
-  against a fixed FormEnv. Legacy builder hooks remain during experiment
-  migration but are not a tab fallback.
-- `validate_run_request(req, raw_cfg)` is a mandatory framework member that
+- `AdapterGuide(markdown, resource_dir)` carries complete free-format Markdown
+  and a `Path | None` for resolving relative image paths. `BaseAdapter` authors
+  declare `guide_path = Path(__file__).with_name("guide.md")`, or an explicit
+  sibling filename when adapters share a directory. The base reads UTF-8 on
+  each `guide()` call. No declaration returns an unwritten-guide notice and
+  `None`; a declared missing file raises. `guide_path` is a base-class authoring
+  choice, not a member of `ExpAdapterProtocol`. TabService and Controller return
+  the same named guide; only the remote adapter converts the directory to JSON.
+  The framework does not parse sections. The Guide subtab (`ui/guide_view.py`)
+  is the only reader of referenced images: a read-only view that parses with
+  markdown-it-py (CommonMark plus tables, raw HTML shown as text) and the
+  dollarmath plugin, then shows the HTML in a `QTextBrowser`. Clicked links go
+  to the system browser. The only self-written rendering is the math token hook:
+  inline `$...$` and `$$...$$` blocks become matplotlib mathtext images, while
+  rejected TeX and `\$` stay literal. Code and link destinations keep their
+  text because the library tokenizes them first. PNG/JPG files directly in
+  `resource_dir` scale down to the pane width; network, SVG and
+  other-directory images stay unloaded.
+- Adapter `make_form(ctx)` builds a definition from captured source existence.
+  Registry registers adapter classes without evaluating factories or templates.
+  Open and Reset invoke the factory, bind the current Registry catalog and
+  derive input against a fixed FormEnv. Reset replaces shape and defaults
+  atomically; preparation failures retain the previous form and sources.
+- `validate_run_request(req, cfg)` is a mandatory framework member that
   `GuardService` always calls before opening an async handle. `BaseAdapter`
   supplies the no-op default; overrides are pure, predictable preflight only and
   must not touch devices or mutate cfg/state.
-- Adapter `run()` receives a concrete config and performs the experiment.
+- Adapter `run()` and preflight receive the exact validated Form output.
+  The framework neither inspects its concrete type nor validates it again.
+  BaseAdapter connects Form[T_Cfg] to run(T_Cfg); the heterogeneous Protocol
+  treats only those cfg positions as opaque.
 - `analyze()` / interactive analysis hooks must match `AdapterCapabilities`.
 - `get_writeback_items()` and `get_post_writeback_items()` return domain writeback
   candidates for their owning analysis pane; the base post hook returns no candidates,

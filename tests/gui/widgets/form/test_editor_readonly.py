@@ -1,7 +1,7 @@
 """set_editing_enabled(enabled=False) leaves the form readable but not editable.
 
 Every check is a user action on a shown editor: typing, clicking, the mouse
-wheel, arrow keys, the Expression action and the fold buttons. Each action is
+wheel, arrow keys, the Expression action and clicks on fold titles. Each action is
 also shown to edit the form once editing is enabled again, so a check of
 "nothing changed" cannot pass because the action never reached the control.
 """
@@ -20,7 +20,6 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
-    QPushButton,
     QWidget,
 )
 from zcu_tools.gui.form import (
@@ -154,23 +153,9 @@ def enabled_box(view: QWidget, path: str) -> QCheckBox:
     return child(view, QCheckBox, f"form.enabled.{path}")
 
 
-def fold(block: QWidget) -> QPushButton:
-    """The Expand/Collapse button directly inside a row or group block."""
-    (button,) = [
-        button
-        for button in block.findChildren(
-            QPushButton, "", Qt.FindChildOption.FindDirectChildrenOnly
-        )
-        if button.text() in ("Expand", "Collapse")
-    ]
-    return button
-
-
-def row_of(view: QWidget, path: str) -> QWidget:
-    """The row widget at path: the parent of its form.value.<path> label."""
-    row = child(view, QLabel, f"form.value.{path}").parentWidget()
-    assert row is not None
-    return row
+def fold(title: QLabel) -> None:
+    """Click title, as a user folds or unfolds its section."""
+    mouse_click(title, title.rect().center())
 
 
 def wheel(widget: QWidget) -> None:
@@ -244,6 +229,7 @@ def test_text_fields_ignore_typing_but_select_and_copy(
             assert field.isEnabled(), f"{path} must not be greyed out"
             type_text(field, "9")
             key_click(field, Qt.Key.Key_Backspace)
+            key_click(field, Qt.Key.Key_Return)
             assert field.text() == text
             key_click(field, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
             assert field.selectedText() == text
@@ -299,20 +285,58 @@ def test_folds_still_expand_and_collapse_without_writing(
     view: View, qapp: QApplication
 ) -> None:
     editor, state = view
-    for block, inner in (
-        (child(editor, QWidget, "form.group.Advanced"), "form.input.phase"),
-        (row_of(editor, "section"), "form.input.section.level"),
+    for name, inner in (
+        ("form.fold.group.Advanced", "form.input.phase"),
+        ("form.fold.section", "form.input.section.level"),
     ):
-        button = fold(block)
+        title = child(editor, QLabel, name)
         content = child(editor, QLineEdit, inner)
-        assert button.isEnabled() and not content.isVisibleTo(editor)
-        button.click()
+        assert title.isEnabled() and not content.isVisibleTo(editor)
+        assert title.text().startswith("\u25b8 "), name
+        fold(title)
         qapp.processEvents()
         assert content.isVisibleTo(editor), inner
         assert content.isEnabled(), f"{inner} must not be greyed out"
-        button.click()
+        assert title.text().startswith("\u25be "), name
+        fold(title)
         qapp.processEvents()
         assert not content.isVisibleTo(editor), inner
+        assert title.text().startswith("\u25b8 "), name
+    assert state.input.data == DATA
+
+
+def test_fold_titles_take_tab_focus_and_fold_on_space_or_enter_without_writing(
+    view: View,
+) -> None:
+    editor, state = view
+    start = child(editor, QLineEdit, "form.input.amount")
+    start.setFocus(Qt.FocusReason.TabFocusReason)
+    stops = [start.objectName()]
+    for _ in range(50):
+        focused = QApplication.focusWidget()
+        assert focused is not None
+        key_click(focused, Qt.Key.Key_Tab)
+        now = QApplication.focusWidget()
+        assert now is not None
+        if now is start:
+            break
+        stops.append(now.objectName())
+    for name, inner in (
+        ("form.fold.group.Advanced", "form.input.phase"),
+        ("form.fold.section", "form.input.section.level"),
+    ):
+        assert name in stops, (name, stops)
+        title = child(editor, QLabel, name)
+        content = child(editor, QLineEdit, inner)
+        title.setFocus(Qt.FocusReason.TabFocusReason)
+        assert title.hasFocus(), name
+        assert not content.isVisibleTo(editor), inner
+        key_click(title, Qt.Key.Key_Space, text=" ")
+        assert content.isVisibleTo(editor), inner
+        assert title.text().startswith("\u25be "), name
+        key_click(title, Qt.Key.Key_Return, text="\r")
+        assert not content.isVisibleTo(editor), inner
+        assert title.text().startswith("\u25b8 "), name
     assert state.input.data == DATA
 
 
@@ -333,6 +357,7 @@ def test_enabling_again_restores_every_edit_and_mode_switch(
     amount = child(editor, QLineEdit, "form.input.amount")
     key_click(amount, Qt.Key.Key_End)
     type_text(amount, "5")
+    key_click(amount, Qt.Key.Key_Return)
     assert state.input.data["amount"] == 2.05
     # The write keeps the form's shape, so the typed-into field stays.
     assert child(editor, QLineEdit, "form.input.amount") is amount
@@ -342,6 +367,7 @@ def test_enabling_again_restores_every_edit_and_mode_switch(
     label = child(editor, QLineEdit, "form.input.label")
     key_click(label, Qt.Key.Key_End)
     key_click(label, Qt.Key.Key_Backspace)
+    key_click(label, Qt.Key.Key_Return)
     assert state.input.data["label"] == "prob"
 
     choice = child(editor, QComboBox, "form.input.mode")

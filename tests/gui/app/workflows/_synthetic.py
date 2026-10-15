@@ -1,6 +1,5 @@
 """Small independent workflow registrations for host contract tests."""
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
@@ -38,10 +37,8 @@ class SampleForm(FormModel):
     factor: float = Field(default=4.0, gt=0)
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
-        data = super().defaults(env, previous)
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
+        data = super().defaults(env)
         if env.parameters is not None:
             try:
                 env.parameters.value("general.ext.value")
@@ -61,11 +58,9 @@ class TunablesForm(FormModel):
     sample: SampleForm = Field(default_factory=SampleForm)
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
-        data = super().defaults(env, previous)
-        data["sample"] = SampleForm.defaults(env, {})
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
+        data = super().defaults(env)
+        data["sample"] = SampleForm.defaults(env)
         return data
 
     def to_cfg(self) -> Tunables:

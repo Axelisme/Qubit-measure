@@ -33,6 +33,7 @@ from zcu_tools.gui.session.ui.component_editing import (
     set_red,
     show_error,
 )
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.entry import (
     FieldSpec,
     component_field_specs,
@@ -121,6 +122,7 @@ class AddComponentDialog(QDialog):
         layout = QVBoxLayout(self)
 
         destination = QLabel(self._destination_text())
+        make_label_selectable(destination)
         destination.setObjectName("add_destination")
         destination.setWordWrap(True)
         layout.addWidget(destination)
@@ -152,9 +154,7 @@ class AddComponentDialog(QDialog):
         self._error = QLabel()
         self._error.setObjectName("add_error")
         self._error.setWordWrap(True)
-        self._error.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
+        make_label_selectable(self._error)
         set_red(self._error, red=True)
         self._error.setVisible(False)
         layout.addWidget(self._error)

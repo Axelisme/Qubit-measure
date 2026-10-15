@@ -2,12 +2,13 @@
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Self
+from typing import Annotated, Self
 
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
+from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import IDENTITY, AxesSpec, Axis, PersistableExperiment, ZSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -25,9 +26,9 @@ from .analysis import IRBAnalysis, analyze_irb, project_arm_means
 class IRBCfg(RBCfg):
     """Paired RB settings; depth counts random Cliffords, rounds are host passes."""
 
-    target_gate: TargetGate = "X90"
+    target_gate: Annotated[TargetGate, FieldMeta(label="Target gate")] = "X90"
     """Physical Clifford inserted after each random Clifford, in its current frame."""
-    n_seeds: int = Field(ge=2)
+    n_seeds: Annotated[int, FieldMeta(label="Number of sequences")] = Field(ge=2)
     """Number of independent random sequences shared by both arms."""
 
     @model_validator(mode="after")

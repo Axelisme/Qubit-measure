@@ -41,6 +41,7 @@ from zcu_tools.mcp.measure.recipe_form import (
     RecipeFormField,
     RecipeModuleValues,
     field_schema,
+    library_option_value,
     module_scalar,
     read_form_field,
     read_module_values,
@@ -865,7 +866,7 @@ class RecipeTab:
         """Read a detached field from the last Form observation, without RPC.
 
         field is a non-empty dotted model-field path. Inline paths include
-        module, for example modules.readout.module.pulse_cfg.freq. Range count
+        module, for example modules.readout.module.pulse_cfg.module.freq. Range count
         is n, not set_sweep's public expts argument. RecipeFormField exposes
         input, input_present, ordinary value, key/inline mode, actual key, lock,
         current child field names and directed errors. It reconstructs no old
@@ -942,12 +943,13 @@ class RecipeTab:
     def use_library(
         self, field: str, name: str | None, *, required: str | None = None
     ) -> MissingParameter | None:
-        """Select an actual library key at a Form Slot or key-or-inline field.
+        """Write a declared ref Option value at a tagged Form module field.
 
         name is a nonblank concrete library key, not a role/alias or __ref tag.
         None retains the current input. required names the tool parameter whose
         absent selection returns MissingParameter without editing. Explicit
-        invalid selections raise GuiRpcError(invalid_cfg), retaining owner errors.
+        unoffered keys raise GuiRpcError(invalid_cfg) before any write, naming
+        the field and current available keys. Owner validation errors propagate.
         An inline-only locked Slot rejects explicit selection before any RPC.
         This method does not copy or materialize library content. GUI and source
         failures propagate without retry, refresh or fallback.
@@ -955,22 +957,15 @@ class RecipeTab:
         path = tuple(_field_path(field))
         schema, _, _ = field_schema(self._binding.publication, path)
         slot = slot_schema(schema)
-        if slot is None and not schema.get("x-form-key-or-inline"):
+        if slot is None:
             raise ValueError(f"Not a module reference field: {field}")
         if name is not None:
             if not name or not name.strip():
                 raise ValueError("library name must be non-empty")
             if slot == "locked":
                 raise ValueError(f"Cannot select a library key at locked Slot: {field}")
-            if slot:
-                self._edit(
-                    [
-                        {"path": [*path, "kind"], "value": "ref"},
-                        {"path": [*path, "name"], "value": name},
-                    ]
-                )
-            else:
-                self._edit([{"path": list(path), "value": name}])
+            selection = library_option_value(schema, name, field)
+            self._edit([{"path": list(path), "value": selection}])
         selected = self.read_field(field)
         if name is not None and (selected.errors or selected.key != name):
             raise GuiRpcError(f"Invalid {field} reference", reason="invalid_cfg")
@@ -987,7 +982,7 @@ class RecipeTab:
         """Write null to an optional Slot; the Form owner validates nullability."""
         path = tuple(_field_path(field))
         schema, _, _ = field_schema(self._binding.publication, path)
-        if slot_schema(schema) is None and not schema.get("x-form-key-or-inline"):
+        if slot_schema(schema) is None:
             raise ValueError(f"Not a module reference field: {field}")
         self._edit([{"path": list(path), "value": None}])
         selected = self.read_field(field)

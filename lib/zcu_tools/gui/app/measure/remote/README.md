@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-14，直接 context 寫入、guarded 選項指令與 inline no-op
+**Last updated:** 2026-10-15，main Form／Markdown guide 與具名 alias preset 整合
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -60,6 +60,14 @@ proposed are Spec dictionaries of the same shape. Module `edits` on
 `{path: [field, ...], value}`, as in `tab.edit_cfg`. `writeback_set` replies
 with the item's Form observation; an invalid module form rejects write, apply
 and preview with `invalid_params`, reason `form_errors` and `data.errors`.
+
+`adapter.guide(adapter_name)` returns
+`{guide: {markdown: string, resource_dir: string | null}}`. Markdown is the full
+source text. The directory is an absolute path on the GUI host for resolving
+relative image references. An undeclared guide returns an unwritten-guide
+notice and null; a declared source file error propagates through RPC. The query
+does not read or attach images. Agents read relative images from that directory
+when needed; a different host may not have access to the path.
 
 - One connection has at most one in-flight RPC.
 - Request and response roots are JSON objects.
@@ -219,9 +227,9 @@ Agent-visible async completion comes from operation request/reply, not pushes.
 
 The launch/connect note reports three numbers:
 
-- `WIRE_VERSION = 103`: GUI RPC contract. MCP pins and compares this value.
-- `GUI_VERSION = 136`: GUI process code revision. It is displayed, not compared.
-- `MCP_VERSION = 118`: MCP bridge code revision. The bridge displays this value.
+- `WIRE_VERSION`: GUI RPC contract. MCP pins and compares this value.
+- `GUI_VERSION`: GUI process code revision. It is displayed, not compared.
+- `MCP_VERSION`: MCP bridge code revision. The bridge displays this value.
 
 The first two constants live in this package's `wire_version.py`.
 `MCP_VERSION` lives in `zcu_tools.mcp.measure.server`.

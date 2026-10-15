@@ -49,6 +49,7 @@ from tests.gui.app.measure._synthetic import (
     SampleParams,
 )
 from tests.gui.app.measure.ui._qt_interactions import modal_action, wait_until
+from tests.gui.widgets.form._text_input import commit_text_on_focus_loss as commit_text
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
@@ -372,11 +373,11 @@ def test_module_dialog_edits_shared_form_and_applies_as_new_name(module_widget):
     initial = form.spec()
     assert isinstance(initial, PulseSpec)
     assert initial.waveform == MODULE_PROPOSAL_WAVEFORM
-    _input(dialog, "freq").setText("5100.125")
+    commit_text(_input(dialog, "freq"), "5100.125")
     mode = dialog.findChild(QAction, "form.mode.gain")
     assert mode is not None
     mode.trigger()
-    _input(dialog, "gain").setText("general.ext.gain / 2")
+    commit_text(_input(dialog, "gain"), "general.ext.gain / 2")
     name = dialog.findChildren(QLineEdit)[0]
     name.setText("Q1.pulses.retuned")
     name.editingFinished.emit()
@@ -483,9 +484,9 @@ def test_invalid_module_dialog_marks_row_refuses_apply_and_repairs(
         mode = dialog.findChild(QAction, "form.mode.gain")
         assert mode is not None
         mode.trigger()
-        _input(dialog, "gain").setText("missing.value")
+        commit_text(_input(dialog, "gain"), "missing.value")
     else:
-        gain.setText("not-a-number")
+        commit_text(gain, "not-a-number")
     proposed = widget.findChild(QLabel, "writebackProposed")
     assert proposed is not None
     assert proposed.text() == "Invalid configuration"
@@ -513,7 +514,7 @@ def test_invalid_module_dialog_marks_row_refuses_apply_and_repairs(
         assert _input(dialog, "gain").text() == "missing.value"
     else:
         assert float(_input(dialog, "gain").text()) == pytest.approx(0.3)
-    _input(dialog, "gain").setText("0.45")
+    commit_text(_input(dialog, "gain"), "0.45")
     assert proposed.text().startswith("map[")
     assert _apply(widget).isEnabled()
     widget.apply_requested.connect(lambda: ctrl.apply_writeback_for_pane(tab_id, pane))
@@ -544,7 +545,7 @@ def test_module_validity_refresh_uses_current_view_or_repaired_state(
     ctrl, widget, tab_id, pane = _populate_module(module_widget)
     dialog = _module_dialog(widget)
     if scenario == "open-local":
-        _input(dialog, "gain").setText("not-a-number")
+        commit_text(_input(dialog, "gain"), "not-a-number")
         _populate_module(module_widget)
         proposed = widget.findChild(QLabel, "writebackProposed")
         # Old rows awaiting Qt deletion are not the new rendered preview.
@@ -557,7 +558,7 @@ def test_module_validity_refresh_uses_current_view_or_repaired_state(
         mode = dialog.findChild(QAction, "form.mode.gain")
         assert mode is not None
         mode.trigger()
-        _input(dialog, "gain").setText("missing.value")
+        commit_text(_input(dialog, "gain"), "missing.value")
         dialog.accept()
         assert not _apply(widget).isEnabled()
         ctrl.set_writeback_item_for_pane(tab_id, pane, "ml-1", edits={("gain",): 0.5})
@@ -570,12 +571,12 @@ def test_busy_module_field_edit_is_rejected_and_dialog_keeps_authored_input(
 ):
     ctrl, widget, tab_id, pane = _populate_module(module_widget)
     dialog = _module_dialog(widget)
-    _input(dialog, "freq").setText("5100.125")
+    commit_text(_input(dialog, "freq"), "5100.125")
     form = ctrl.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
     before = form.state.input.data
     ctrl.set_running(tab_id, running=True)
     try:
-        _input(dialog, "gain").setText("0.6")
+        commit_text(_input(dialog, "gain"), "0.6")
         error = dialog.findChild(QLabel, "form.error.gain")
         assert error is not None and "busy" in error.text().lower()
         assert form.state.input.data == before
@@ -642,11 +643,11 @@ def module_host(module_widget, qapp):
 def test_host_module_invalid_edit_keeps_row_dialog_and_draft(module_host):
     ctrl, window, widget, tab_id, pane, presenter = module_host
     dialog = _module_dialog(widget)
-    _input(dialog, "freq").setText("5100.125")
+    commit_text(_input(dialog, "freq"), "5100.125")
     mode = dialog.findChild(QAction, "form.mode.gain")
     assert mode is not None
     mode.trigger()
-    _input(dialog, "gain").setText("missing.value")
+    commit_text(_input(dialog, "gain"), "missing.value")
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     proposed = widget.findChild(QLabel, "writebackProposed")
     assert proposed is not None and proposed.text() == "Invalid configuration"
@@ -668,7 +669,7 @@ def test_host_module_invalid_edit_keeps_row_dialog_and_draft(module_host):
         not in ctrl.context_control.read_context().library.module_keys()
     )
     assert presenter.calls == []
-    _input(dialog, "gain").setText("0.45")
+    commit_text(_input(dialog, "gain"), "0.45")
     dialog.accept()
     window.apply_tab_writeback(tab_id, pane=pane)
     assert _pulse(ctrl, MODULE_PROPOSAL_TARGET).gain == 0.45
@@ -679,7 +680,7 @@ def test_host_module_invalid_edit_keeps_row_dialog_and_draft(module_host):
 def test_host_apply_presents_expected_busy_error_without_losing_draft(module_host):
     ctrl, window, widget, tab_id, pane, presenter = module_host
     dialog = _module_dialog(widget)
-    _input(dialog, "freq").setText("5100.125")
+    commit_text(_input(dialog, "freq"), "5100.125")
     form = ctrl.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
     before = form.state.input.data
     ctrl.set_running(tab_id, running=True)

@@ -25,26 +25,22 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     # Project
     "project.info": MethodSpec(
         5.0,
-        "Read the current project info (chip_name, qub_name, result_dir, "
-        "database_path).",
+        "Read the current project info (chip_name, qub_name, result_dir, data_root).",
         readonly=True,
     ),
     "project.setup": MethodSpec(
         5.0,
-        "Apply project identity and paths. Empty or "
-        "omitted paths use the native project defaults; database_path is the raw "
-        "data root, not the fit search database file.",
+        "Apply chip/qubit identity. The GUI derives result_dir and data_root "
+        "from its project root; paths are outputs, not accepted inputs.",
         params=(
             ParamSpec("chip_name", JsonType.STRING),
             ParamSpec("qub_name", JsonType.STRING),
-            ParamSpec("result_dir", JsonType.STRING, required=False, default=""),
-            ParamSpec("database_path", JsonType.STRING, required=False, default=""),
         ),
     ),
     # Spectrum collection
     "spectrum.list": MethodSpec(
         5.0,
-        "List spectra: each {name, spec_type, aligned, points_completed, point_count}. "
+        "List spectra: each {name, spec_type, aligned, points_completed, point_count, pending}. "
         "Completion includes zero points; point_count reports available data.",
         readonly=True,
     ),
@@ -52,6 +48,13 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0,
         "Read the complete editable spectrum projection for a literal name. "
         "Absent names return {name, exists: false}; no raw complex matrix is sent.",
+        params=(ParamSpec("name", JsonType.STRING),),
+        readonly=True,
+    ),
+    "spectrum.render": MethodSpec(
+        30.0,
+        "Render published raw spectrum, committed alignment lines and sampled points "
+        "as {png_b64, bytes}. Does not open input or change display.",
         params=(ParamSpec("name", JsonType.STRING),),
         readonly=True,
     ),
@@ -69,8 +72,8 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "spectrum.load_processed": MethodSpec(
         30.0,
-        "Restore processed spectra, including empty completed spectra; "
-        "publication is incremental, not rolled back on failure.",
+        "Restore sampled checkpoints, including empty completed spectra. "
+        "Reject all names before publication if any already exist; Filter masks are not restored.",
         params=(ParamSpec("filepath", JsonType.STRING),),
     ),
     "spectrum.remove": MethodSpec(
@@ -82,6 +85,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0,
         "Select a spectrum for display. Null or "
         "omitted name clears display selection without changing source versions.",
+        readonly=True,
         params=(ParamSpec("name", JsonType.STRING, required=False),),
     ),
     "spectrum.reset_alignment": MethodSpec(
@@ -99,7 +103,14 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "selection.snapshot": MethodSpec(
         5.0,
         "Read the complete published joint-cloud selection mask and native "
-        "normalized min_distance. Null mask means all points, not a live Session.",
+        "normalized min_distance, plus pending for an unfinished Filter draft. "
+        "Null mask means all points, not a live Session.",
+        readonly=True,
+    ),
+    "selection.render": MethodSpec(
+        30.0,
+        "Render the published joint cloud and per-spectrum Filter masks as PNG. "
+        "Never opens a Session or reads a draft.",
         readonly=True,
     ),
     "selection.pointcloud": MethodSpec(
@@ -111,17 +122,38 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "interactive.read": MethodSpec(
         30.0,
         "Inspect the live context without opening input or changing display. "
-        "Returns state and native PNG, or null when inactive.",
+        "Returns committed state, or null when inactive. target is required: "
+        "spectrum requires a literal nonempty name; selection forbids name. "
+        "Optional context_id validates the addressed draft lifetime.",
+        params=(
+            ParamSpec("target", JsonType.STRING, enum=("spectrum", "selection")),
+            ParamSpec("name", JsonType.STRING, required=False),
+            ParamSpec("context_id", JsonType.INTEGER, required=False),
+        ),
         readonly=True,
+    ),
+    "interactive.render": MethodSpec(
+        30.0,
+        "Render a current context as PNG without editing or switching display. "
+        "target is required: spectrum requires a literal nonempty name; "
+        "selection forbids name. Missing drafts are rejected.",
+        readonly=True,
+        params=(
+            ParamSpec("target", JsonType.STRING, enum=("spectrum", "selection")),
+            ParamSpec("name", JsonType.STRING, required=False),
+        ),
     ),
     "spectrum.interactive.open": MethodSpec(
         30.0,
-        "Open/reuse a picker for an already active literal spectrum. "
-        "kind is line, onetone or twotone. Returns the "
-        "owner identity, commands, state and native PNG.",
+        "Open/reuse a picker by literal spectrum name. "
+        "kind is line, sample, onetone or twotone. sample uses the published "
+        "spectrum type; native admission rejects unknown or unaligned sources. "
+        "Returns owner identity, actual native kind and committed state.",
         params=(
             ParamSpec("name", JsonType.STRING),
-            ParamSpec("kind", JsonType.STRING, enum=("line", "onetone", "twotone")),
+            ParamSpec(
+                "kind", JsonType.STRING, enum=("line", "sample", "onetone", "twotone")
+            ),
         ),
     ),
     "spectrum.interactive.command": MethodSpec(
@@ -138,14 +170,13 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "selection.interactive.open": MethodSpec(
         30.0,
-        "Open/reuse the joint-cloud selection. "
-        "Returns identity, commands, input state and native PNG.",
+        "Open/reuse the joint-cloud selection. Returns identity and input state.",
     ),
     "selection.interactive.command": MethodSpec(
         30.0,
         "Command the current joint identity. "
-        "Use plugin commands or parameterless undo, apply, cancel. "
-        "Apply publishes without closing.",
+        "Use plugin commands or parameterless undo, finish, apply, cancel. "
+        "Finish publishes and closes; Apply publishes without closing.",
         params=(
             ParamSpec("context_id", JsonType.INTEGER),
             ParamSpec("command", JsonType.STRING),
@@ -156,18 +187,31 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "fit.result": MethodSpec(
         5.0,
         "Read the current fit inputs and result: {has_result, params:{EJ,EC,EL} "
-        "or null, database_path, EJb, ECb, ELb, transitions, r_f, sample_f}.",
+        "or null, search_db, EJb, ECb, ELb, transitions, r_f, sample_f}.",
+        readonly=True,
+    ),
+    "fit.render": MethodSpec(
+        30.0,
+        "Render the native Show overlay as PNG. Requires a fit result; "
+        "does not change display or save an artifact.",
+        readonly=True,
+    ),
+    "fit.database_info": MethodSpec(
+        30.0,
+        "Read search DB path, entry/level counts and inclusive EJ/EC/EL GHz and "
+        "normalized flux ranges without loading energy values.",
+        params=(ParamSpec("path", JsonType.STRING),),
         readonly=True,
     ),
     "fit.set_params": MethodSpec(
         5.0,
         "Replace all fit inputs; clear the old result "
-        "without starting a search. database_path is the search database file. "
+        "without starting a search. search_db is the search database file. "
         "EJb, ECb and ELb are finite [lower, upper] bounds in GHz. transitions "
         "maps category names to integer pairs; reserved r_f/sample_f are finite "
         "numbers. Optional separate r_f/sample_f default to null.",
         params=(
-            ParamSpec("database_path", JsonType.STRING),
+            ParamSpec("search_db", JsonType.STRING),
             ParamSpec("EJb", JsonType.ARRAY, array_item_type="number"),
             ParamSpec("ECb", JsonType.ARRAY, array_item_type="number"),
             ParamSpec("ELb", JsonType.ARRAY, array_item_type="number"),

@@ -24,6 +24,7 @@ from zcu_tools.gui.session.expression import (
     coerce_eval_result,
     evaluate_numeric_expr,
 )
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
 if TYPE_CHECKING:
@@ -91,6 +92,7 @@ class EvalNumericField(QWidget):
         self._line_edit.setVisible(False)
         layout.addWidget(self._line_edit, stretch=1)
         self._ghost = QLabel()
+        make_label_selectable(self._ghost)
         self._ghost.setVisible(False)
         layout.addWidget(self._ghost)
         self._line_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)

@@ -113,21 +113,21 @@ def resolve_calibration_modules(
 
 
 def calibration_defaults(
-    data: dict[str, JsonValue], env: FormEnv, previous: Mapping[str, JsonValue]
+    data: dict[str, JsonValue], env: FormEnv
 ) -> dict[str, JsonValue]:
     """Extend a fresh form-default dict with fixed flux alias and pi estimate.
 
     data is caller-owned and changed in place. Always declare flux_dev as the
     $flux_dev expression default; default_input and branch defaults evaluate it
     into the captured device name, or leave the required field unfilled when
-    the alias is missing or unbound. With no previous input, resolve captured
+    the alias is missing or unbound. Resolve captured
     $qubit x180 length and declare its concrete path as the pi_length_us
     expression default if present/non-null, evaluated the same way.
     Missing/unreadable optional defaults stay required, without simulator
     literals or live lookups.
     """
     data["flux_dev"] = {"expr": "$flux_dev"}
-    if previous or env.parameters is None:
+    if env.parameters is None:
         return data
     try:
         path = env.parameters.resolve_path("$qubit.module.x180.waveform.length")

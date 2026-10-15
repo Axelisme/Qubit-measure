@@ -6,13 +6,14 @@ from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParame
 from zcu_tools.mcp.measure.recipe import (
     MissingParameter,
     RecipeDefinition,
+    RecipeFieldEdit,
     RecipeGenerator,
     RecipeNeedsParameters,
     RecipeRun,
     RecipeSession,
 )
 
-from .helpers import set_frequency
+from .helpers import set_frequency, set_nested_module_scalar
 
 
 def _validate_inputs(
@@ -124,20 +125,15 @@ def amplitude_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool i
         expts=points,
         sources={"start": "explicit", "stop": "explicit", "expts": "explicit"},
     )
-    if pulse_length_us is None and tab.read_field("modules.qub_pulse").mode == "key":
-        tab.retain_module_source(
-            "modules.qub_pulse",
-            summary_field="modules.qub_pulse.module.waveform.length",
-            value_path=("waveform", "length"),
-        )
-    else:
-        if pulse_length_us is not None:
-            tab.use_inline("modules.qub_pulse")
-        tab.set(
-            "modules.qub_pulse.module.waveform.length",
-            pulse_length_us,
-            source="explicit",
-        )
+    set_nested_module_scalar(
+        tab,
+        "modules.qub_pulse",
+        "modules.qub_pulse.module.waveform",
+        RecipeFieldEdit(
+            "modules.qub_pulse.module.waveform.module.length", pulse_length_us
+        ),
+        ("waveform", "length"),
+    )
     tab.set("reps", reps, source="explicit")
     tab.set("rounds", rounds, source="explicit")
 
@@ -188,7 +184,9 @@ DEFINITION = RecipeDefinition(
     adapter_name="twotone/rabi/amp_rabi",
     summary_parameters=(
         SummaryParameter(
-            "readout_frequency_mhz", "modules.readout.module.pulse_cfg.freq", "MHz"
+            "readout_frequency_mhz",
+            "modules.readout.module.pulse_cfg.module.freq",
+            "MHz",
         ),
         SummaryParameter(
             "ro_frequency_mhz", "modules.readout.module.ro_cfg.ro_freq", "MHz"
@@ -200,7 +198,7 @@ DEFINITION = RecipeDefinition(
         SummaryParameter("frequency_mhz", "modules.qub_pulse.module.freq", "MHz"),
         SummaryParameter("drive_ref", "modules.qub_pulse"),
         SummaryParameter(
-            "pulse_length_us", "modules.qub_pulse.module.waveform.length", "us"
+            "pulse_length_us", "modules.qub_pulse.module.waveform.module.length", "us"
         ),
         SummaryParameter("gain_sweep", "sweep.gain"),
     ),

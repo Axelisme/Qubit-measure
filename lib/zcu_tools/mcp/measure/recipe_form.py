@@ -40,8 +40,10 @@ class RecipeFormField:
     key is the actual library key in key mode, never an alias, otherwise None.
     locked reports an inline-only Slot or a single-literal constrained field;
     it does not imply that descendants of a key are readonly cfg nodes.
-    fields lists the active model's immediate field names, in schema order. Leaf
-    fields have an empty tuple. Paths use these names, including module/name/kind.
+    fields lists the selected Option fields, or direct section properties, in
+    schema order. Option-selected tags are omitted; ref and other options without
+    fields have no children. Tag leaves are not read_field paths. Inline leaves
+    remain accessible as <field>.module.<leaf>.
     errors contains directed errors at or below this field, and root errors.
     All containers are detached from the retained observation.
     """
@@ -125,42 +127,68 @@ def wire_value(value: object) -> YamlValue:
         raise GuiRpcError("Invalid GUI value", reason="incompatible_wire") from error
 
 
-def schema_branches(schema: Mapping[str, object]) -> tuple[dict[str, object], ...]:
-    """Flatten public inline anyOf/oneOf alternatives, retaining their metadata."""
-    alternatives = schema.get("oneOf", schema.get("anyOf"))
-    if alternatives is None:
-        return (dict(schema),)
-    if not isinstance(alternatives, list):
-        raise GuiRpcError(
-            "Invalid Form schema alternatives", reason="incompatible_wire"
+def _direct_schema(schema: Mapping[str, object]) -> dict[str, object]:
+    """Unwrap only an ordinary nullable single model, never select a union."""
+    variants = schema.get("anyOf")
+    if isinstance(variants, list):
+        nodes = [wire_object(item) for item in variants]
+        objects = [node for node in nodes if "properties" in node]
+        if (
+            len(nodes) == 2
+            and len(objects) == 1
+            and any(node.get("type") == "null" for node in nodes)
+        ):
+            return objects[0]
+    return dict(schema)
+
+
+def schema_options(schema: Mapping[str, object]) -> tuple[dict[str, object], ...]:
+    """Read the ordered public Option list; malformed wire raises.
+
+    An undeclared list is empty. Each item supplies value and optional fields or
+    commands. This does not inspect unions, read sources or evaluate input.
+    """
+    options = schema.get("x-form-options", [])
+    if not isinstance(options, list):
+        raise GuiRpcError("Invalid Form options", reason="incompatible_wire")
+    return tuple(wire_object(item) for item in options)
+
+
+def _option_matches(value: object, current: object, *, partial: bool = True) -> bool:
+    """Match wire value leaves by JSON type/value, with whole arrays exact."""
+    if isinstance(value, dict):
+        if not isinstance(current, dict):
+            return False
+        declared = wire_object(value)
+        supplied = wire_object(current)
+        return (partial or declared.keys() == supplied.keys()) and all(
+            name in supplied and _option_matches(child, supplied[name], partial=partial)
+            for name, child in declared.items()
         )
-    return tuple(
-        branch for item in alternatives for branch in schema_branches(wire_object(item))
-    )
+    if isinstance(value, list):
+        return (
+            isinstance(current, list)
+            and len(value) == len(current)
+            and all(
+                _option_matches(a, b, partial=False)
+                for a, b in zip(value, current, strict=True)
+            )
+        )
+    return type(value) is type(current) and value == current
 
 
 def active_schema(schema: Mapping[str, object], raw: object) -> dict[str, object]:
-    """Select the declared model branch using intrinsic public discriminator tags."""
-    branches = schema_branches(schema)
-    models = [
-        branch
-        for branch in branches
-        if "properties" in branch and set(wire_object(branch["properties"])) != {"expr"}
-    ]
-    if isinstance(raw, dict):
-        for branch in models:
-            properties = wire_object(branch["properties"])
-            for name, item in properties.items():
-                tags = [
-                    variant["const"]
-                    for variant in schema_branches(wire_object(item))
-                    if "const" in variant
-                ]
-                if name in raw and raw[name] in tags:
-                    return branch
-    if len(models) == 1:
-        return models[0]
-    return dict(schema)
+    """Return the first matching Option's fields, or a direct section schema.
+
+    Option-selected tags are not editable children. An option without fields,
+    an empty list or no match exposes no children; no union inference runs.
+    """
+    if "x-form-options" not in schema:
+        return _direct_schema(schema)
+    for option in schema_options(schema):
+        if _option_matches(option["value"], raw):
+            return wire_object(option.get("fields", {}))
+    return {}
 
 
 def field_schema(
@@ -181,17 +209,47 @@ def field_schema(
 
 
 def slot_schema(schema: Mapping[str, object]) -> Literal["selectable", "locked"] | None:
-    """Describe module selection from public ModuleRef/ModuleInline field schemas."""
-    properties = [
-        wire_object(branch["properties"])
-        for branch in schema_branches(schema)
-        if "properties" in branch
-    ]
-    if any("kind" in fields and "name" in fields for fields in properties):
-        return "selectable"
-    if any("kind" in fields and "module" in fields for fields in properties):
+    """Describe S2 module selection from options and a fixed single-model tag.
+
+    A directly declared kind.const=inline is locked, including an ordinary
+    nullable wrapper. Other S2 selections come only from Option values. An
+    absent ref option, such as without captured library, never implies locked.
+    """
+    properties = wire_object(_direct_schema(schema).get("properties", {}))
+    kind = properties.get("kind")
+    if isinstance(kind, dict) and kind.get("const") == "inline":
         return "locked"
+    for option in schema_options(schema):
+        value = option["value"]
+        if isinstance(value, dict) and value.get("kind") in ("ref", "inline"):
+            return "selectable"
     return None
+
+
+def library_option_value(
+    schema: Mapping[str, object], name: str, field: str
+) -> dict[str, object]:
+    """Return the declared S2 ref value for a requested literal library key.
+
+    schema is the field's public schema and field is its dotted diagnostic path.
+    Match the whole value exactly; do not synthesize a ref or read any source.
+    Unoffered keys raise invalid_cfg naming field and current available keys.
+    The returned value is detached and ready for one whole-field write.
+    """
+    requested = {"kind": "ref", "name": name}
+    keys: list[str] = []
+    for option in schema_options(schema):
+        value = option["value"]
+        if value == requested:
+            return wire_object(value)
+        if isinstance(value, dict) and value.get("kind") == "ref":
+            key = value.get("name")
+            if isinstance(key, str):
+                keys.append(key)
+    raise GuiRpcError(
+        f"Invalid {field} reference {name!r}. Available keys: {keys}",
+        reason="invalid_cfg",
+    )
 
 
 def directed_errors(
@@ -258,20 +316,15 @@ def read_form_field(
     slot = slot_schema(schema)
     mode: Literal["key", "inline"] | None = None
     key = None
-    if slot and isinstance(raw, dict):
+    if isinstance(raw, dict):
         if raw.get("kind") == "ref":
             mode = "key"
             if isinstance(raw.get("name"), str):
                 key = raw["name"]
         elif raw.get("kind") == "inline":
             mode = "inline"
-    elif schema.get("x-form-key-or-inline"):
-        if isinstance(raw, str):
-            mode, key = "key", raw
-        elif isinstance(raw, dict):
-            mode = "inline"
     properties = wire_object(active_schema(schema, raw).get("properties", {}))
-    literal = any("const" in branch for branch in schema_branches(schema))
+    literal = "const" in _direct_schema(schema)
     return RecipeFormField(
         input=wire_value(raw),
         input_present=present,

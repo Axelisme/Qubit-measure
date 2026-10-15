@@ -39,13 +39,11 @@ def test_unknown_or_malformed_placeholders_fail_at_definition(text: str) -> None
 
 
 def test_slot_path_expands_without_resolving_or_rewriting_form_options() -> None:
-    fallback = cfg_model.Template("drive", qubit="$other", set={"gain": 0.2})
     slot = cfg_model.Slot(
         "{qubit}.module.x90",
         copy=True,
         set={"freq": cfg_model.Expr("{resonator}.freq")},
         lock={"ch": 2},
-        fallback=fallback,
     )
     definition = cfg_model.TemplateDef(
         cfg_model.BathResetSpec,
@@ -58,12 +56,11 @@ def test_slot_path_expands_without_resolving_or_rewriting_form_options() -> None
         copy=True,
         set={"freq": cfg_model.Expr("{resonator}.freq")},
         lock={"ch": 2},
-        fallback=fallback,
     )
     assert expanded["desc"] == "$literal"
     assert expanded["detune"] == cfg_model.Expr("$unbound.freq")
     assert definition.expanded_seeds()["pi2_cfg"] == cfg_model.Slot(
-        "$qubit.module.x90", copy=True, set=slot.set, lock=slot.lock, fallback=fallback
+        "$qubit.module.x90", copy=True, set=slot.set, lock=slot.lock
     )
 
 

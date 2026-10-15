@@ -1,6 +1,6 @@
 """Sensible default starting directories for the file dialogs.
 
-Derived from the project (chip / qubit / result_dir / database_path) so the user
+Derived from the project (chip / qubit / result_dir / data_root) so the user
 doesn't have to navigate from scratch. The helper returns the nearest existing
 ancestor of the intended directory, so a dialog opens close to the right place
 even before any file exists there.
@@ -12,8 +12,8 @@ from zcu_tools.gui.project import ProjectInfo, nearest_existing
 
 
 def raw_onetone_dir(project: ProjectInfo) -> str:
-    """Where raw one-tone hdf5 files live — the project's database_path root."""
-    return nearest_existing(project.database_path)
+    """Where raw one-tone hdf5 files live — the project's data_root root."""
+    return nearest_existing(project.data_root)
 
 
 def params_dir(project: ProjectInfo) -> str:

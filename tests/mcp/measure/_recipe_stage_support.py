@@ -8,7 +8,7 @@ from typing import Any
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
 
-from ._recipe_support import PNG, LookbackGui
+from ._recipe_support import PNG, ExecutionGui
 from ._support import MeasureClient
 
 RAW_REPORT = SaveReport(
@@ -89,7 +89,7 @@ def skip_writeback(client: MeasureClient, question: ToolReply) -> ToolReply:
     return reply
 
 
-class StageGui(LookbackGui):
+class StageGui(ExecutionGui):
     def __init__(self, *, interactive=False):
         super().__init__()
         self.interactive = interactive

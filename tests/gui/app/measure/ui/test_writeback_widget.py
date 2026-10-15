@@ -77,13 +77,14 @@ def _default_analyze_params(
 def test_writeback_widget_lists_items_and_edit_buttons(qapp):
     ctx = _make_ctx()
     adapter = PairAdapter()
-    schema = adapter.make_default_cfg(ctx)
-    from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
+    from zcu_tools.program.v2 import SweepCfg
+
+    from tests.gui.app.measure._synthetic import SampleCfg
 
     run_plots = Plots(NonPresentingHost())
     result = adapter.run(
         RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, cfg_context=None),
-        dict(schema_to_raw_dict(schema, ctx.parameters)),
+        SampleCfg(sweep=SweepCfg(start=5.0, stop=6.0, expts=11, step=0.1)),
         context=RunContext(
             ctx.soc, ctx.soccfg, run_plots, devices={}, cancel_signal=StopSignal()
         ),

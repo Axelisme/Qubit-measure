@@ -47,6 +47,33 @@ def _energies(t_fluxs):
     return e
 
 
+def test_published_filter_overlays_complete_high_order_kernel_frequencies():
+    from zcu_tools.gui.app.fluxdep.controller import Controller
+    from zcu_tools.gui.app.fluxdep.state import FluxDepState
+
+    state = FluxDepState()
+    state.put_spectrum(_entry())
+    state.set_fit_params(
+        "",
+        (2, 15),
+        (0.2, 2),
+        (0.1, 2),
+        {"transitions": [(0, 16)], "mirror20": [(0, 1)]},
+        None,
+        20.0,
+    )
+    state.set_fit_result((3.0, 0.8, 0.5))
+    ctrl = Controller(state)
+    try:
+        figure = Figure()
+        ctrl.render_selection(figure)
+        lines = figure.axes[0].lines
+        assert [line.get_label() for line in lines] == ["0 -> 16", "20 0 -> 1 mirror"]
+        assert all(np.isfinite(line.get_ydata()).all() for line in lines)
+    finally:
+        ctrl.interactive.dispose()
+
+
 def test_render_fit_figure_draws_all_layers():
     fig = Figure()
     spectrums = {"s1": _entry()}

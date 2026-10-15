@@ -18,10 +18,6 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.measure.adapter.protocol import NoAnalyzeParams
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
 from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
@@ -51,10 +47,6 @@ def _schema(spec_fields: dict, val_fields: dict | None = None) -> CfgSchema:
     spec = CfgSectionSpec(fields=spec_fields)
     value = CfgSectionValue(fields=val_fields or {})
     return CfgSchema(spec=spec, value=value)
-
-
-def _empty_cfg_definition() -> MeasureCfgDefinition:
-    return MeasureCfgBuilder(role_factories={}).build()
 
 
 def test_require_soc_handles_is_framework_request_validation() -> None:
@@ -756,13 +748,6 @@ def _make_concrete_adapter() -> BaseAdapter:
         capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)
         exp_cls = MagicMock()
 
-        @classmethod
-        def cfg_definition(cls) -> MeasureCfgDefinition:
-            return _empty_cfg_definition()
-
-        def build_exp_cfg(self, raw_cfg, req):
-            return MagicMock()
-
         def make_filename_stem(self, ctx):
             return "fake_stem"
 
@@ -847,13 +832,6 @@ def test_base_adapter_validates_forgotten_real_analyze_params_override():
             capabilities = AdapterCapabilities(analysis=AnalysisMode.FIT)
             exp_cls = MagicMock()
 
-            @classmethod
-            def cfg_definition(cls) -> MeasureCfgDefinition:
-                return _empty_cfg_definition()
-
-            def build_exp_cfg(self, raw_cfg, req):
-                return MagicMock()
-
             def make_filename_stem(self, ctx):
                 return "stem"
 
@@ -884,13 +862,6 @@ def test_analyze_params_cls_fallback_when_no_annotation():
     class _UnannotatedAdapter(BaseAdapter):
         capabilities = AdapterCapabilities(analysis=AnalysisMode.FIT)
         exp_cls = MagicMock()
-
-        @classmethod
-        def cfg_definition(cls) -> MeasureCfgDefinition:
-            return _empty_cfg_definition()
-
-        def build_exp_cfg(self, raw_cfg, req):
-            return MagicMock()
 
         def make_filename_stem(self, ctx):
             return "stem"

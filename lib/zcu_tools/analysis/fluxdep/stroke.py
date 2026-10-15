@@ -25,6 +25,10 @@ class BrushPoint:
     y: float
 
 
+# Inclusive normalized radius limits for the picking/filtering tool controls.
+BRUSH_WIDTH_MIN = 0.0
+BRUSH_WIDTH_MAX = 0.1
+
 BrushMode = Literal["select", "erase"]
 
 

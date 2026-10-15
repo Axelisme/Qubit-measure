@@ -12,7 +12,6 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
-    AdapterCfgDefinition,
     AnalysisMode,
     LoadDataRequest,
     NoAnalysisResult,
@@ -27,7 +26,6 @@ from tests.gui.app.measure._native_save_support import (
     AnalysisSavingAdapter,
     native_save_session,
 )
-from tests.gui.app.measure.adapter._cfg_fakes import StaticCfgDefinition
 
 
 class _Cfg(ExpCfgModel):
@@ -51,10 +49,6 @@ class _LoadAdapter(BaseAdapter[_Cfg, _LoadedRecord, NoAnalysisResult, NoAnalyzeP
         analysis=AnalysisMode.NONE
     )
     exp_cls = _LoadExp
-
-    @classmethod
-    def cfg_definition(cls) -> AdapterCfgDefinition:
-        return StaticCfgDefinition()
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return "load"

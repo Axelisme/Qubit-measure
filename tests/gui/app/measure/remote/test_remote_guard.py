@@ -17,7 +17,6 @@ from typing import Any
 
 import pytest
 from zcu_tools.gui.cfg.resource import (
-    CfgEdit,
     CfgPreconditionError,
     CfgPreconditionReason,
 )
@@ -396,9 +395,9 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
                 },
             )
         editor = fx.ctrl.cfg_resources.lookup(tab_id)
-        editor.observe()
+        _ = editor.input
         for command in (
-            lambda: editor.edit((CfgEdit(("gain",), 0.2),)),
+            lambda: editor.write({("gain",): 0.2}),
             lambda: editor.reset(),
         ):
             with pytest.raises(CfgPreconditionError) as blocked:
@@ -408,7 +407,7 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
             fx.ctrl.close_tab(tab_id)
         other = fx.ctrl.new_tab("fake")
         other_editor = fx.ctrl.cfg_resources.lookup(other)
-        other_editor.edit((CfgEdit(("gain",), 0.3),))
+        other_editor.write({("gain",): 0.3})
         _edit_context_as_gui(fx, "run_source", 17)
         if terminal == "cancelled":
             assert call("cancel", {"op": op})["status"] in {"cancelling", "cancelled"}
@@ -417,7 +416,7 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
         assert fx.state.get_tab(tab_id).run.result is not None
         fx.ctrl.close_tab(tab_id)
         with pytest.raises(CfgPreconditionError) as gone:
-            editor.observe()
+            _ = editor.input
         assert gone.value.reason is CfgPreconditionReason.RESOURCE_GONE
     finally:
         release.set()

@@ -19,23 +19,30 @@ from zcu_tools.gui.form import (
     FormWritePath,
     WriteRejected,
 )
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 from ._controls import ROW_SPACING, FieldRow, GroupBlock, LocalText
 from ._schema_view import FieldView, flatten_fields, project_fields
 
 # What decides one row's controls: path, kind, options present, expression,
-# fixed and group. The rows are rebuilt when any field's shape changes.
-type _RowShape = tuple[FormWritePath, str, bool, bool, bool, str | None]
+# fixed, group and whether a model row folds (a disabled nullable model has
+# no fold). The rows are rebuilt when any field's shape changes.
+type _RowShape = tuple[FormWritePath, str, bool, bool, bool, str | None, bool]
 
 
 class FormEditor[F: FormModel](QWidget):
     """Edit a caller-owned FormState on the Qt GUI thread, without submitting it.
 
-    The editor borrows state and the host-captured env. Parsed input writes the
-    state immediately, or goes to the host's write callable (see __init__);
-    unparseable text and host-rejected input remain local and block editor
-    validity. Evaluation, choices, branch defaults and model validation belong
-    to state.
+    The editor borrows state and the host-captured env. A text field commits
+    its text when the user presses Enter or the field loses focus, not on each
+    keystroke; text that already shows the state's input writes nothing, and
+    read-only rows commit nothing. Checkboxes, dropdowns, Enabled boxes and the
+    Expression action write at once. Committed parsed input writes the state,
+    or goes to the host's write callable (see __init__); committed unparseable
+    text and host-rejected input remain local and block editor validity.
+    Uncommitted text changes neither state nor validity, and an external state
+    publication redraws it with the state's input. Evaluation, choices, branch
+    defaults and model validation belong to state.
     No Engine update, revision check, source capture, persistence or I/O occurs.
 
     Public child object names use model-field paths joined by dots:
@@ -48,8 +55,16 @@ class FormEditor[F: FormModel](QWidget):
     checked in Expression mode. form.input.<path> lists it in actions() and
     in its right-click menu, after the text field's standard items; the row
     tooltip says so. Triggering it switches the mode and writes the input
-    again: {"expr": <current text>} in Expression mode, the parsed text in
-    Direct mode. An Expression-mode input has a light tint of the palette's
+    again through the same write route as a commit. In Expression mode it
+    writes {"expr": <current text>}. In Direct mode it writes the value the
+    state's public preview computed for the shown text, when that text is
+    the state's committed, accepted Expression input. A computed value the
+    model rejects is still written, and validation shows its errors.
+    Uncommitted or host-rejected text never takes an older preview value.
+    Without a usable computed value, Direct mode parses the shown text as a
+    commit does: a numeric field keeps unparseable text as local input with
+    its parse error, and a str field writes the text as a literal.
+    An Expression-mode input has a light tint of the palette's
     highlight colour. Dropdown and checkbox fields have no form.mode.<path>.
     A one-value Literal has form.input.<path> as read-only QLineEdit text of
     its value, without form.mode or a dropdown. A float with Display decimals
@@ -76,16 +91,32 @@ class FormEditor[F: FormModel](QWidget):
     QActions form.command.<path>.<name> with the schema label as text, also
     in form.input.<path>.actions(); triggering one runs that command (see
     __init__). An option without commands opens no menu.
-    form.enabled.<path> is a nullable-model activation QCheckBox.
+    The editor has no fold buttons: group blocks and model sections fold by
+    a left-button click on their fold title, a bold QLabel whose text is
+    "\u25b8 " (folded) or "\u25be " (expanded) followed by the label.
+    Tab stops on every fold title, while a click does not focus it. A title
+    with keyboard focus shows the style's focus frame around it, and Space,
+    Return or Enter folds or unfolds it; no other key does, and keys typed
+    into an input never reach a title, so Enter there still commits text.
+    form.fold.<path> is the fold title of the model row at <path>: a nested
+    model, a tagged union, an option row whose selected option draws fields
+    and an enabled nullable model. It is that row's name label, in its
+    level's label column, and folds the row's child rows; a unit follows
+    it, after the row's dropdown or Enabled box if any. Other rows show
+    their name in normal weight without a mark, and a click on it does
+    nothing. form.enabled.<path> is a nullable-model activation QCheckBox
+    beside the title. A disabled nullable model draws only its plain label
+    (no fold mark, no form.fold.<path>) and form.enabled.<path>, without an
+    empty box.
     form.group.<path>.<group> (form.group.<group> at the root level) is the
     block of one Display group of the model level at <path>. It holds the
-    level's fields of that group, in declaration order, under a header with
-    the group name in the level's label column and an Expand/Collapse
-    QPushButton. Each level shows its ungrouped rows first, then its group
-    blocks in the order of each group's first field. A group whose fields
-    are all hidden has no block. While any of its rows (or their children)
-    shows an error, the header shows a "Contains errors" note; a folded
-    group stays folded.
+    level's fields of that group, in declaration order, under a header whose
+    fold title form.fold.group.<path>.<group> (form.fold.group.<group> at the
+    root) shows the group name in the level's label column. Each level shows
+    its ungrouped rows first, then its group blocks in the order of each
+    group's first field. A group whose fields are all hidden has no block.
+    While any of its rows (or their children) shows an error, the header
+    shows a "Contains errors" note; a folded group stays folded.
     Groups start folded; model rows start as Display(collapsed=...) says.
     Folds the user sets on groups and model rows survive rebuilds of this
     editor (option or activation changes), remembered by path.
@@ -106,8 +137,9 @@ class FormEditor[F: FormModel](QWidget):
     (form.input and form.enabled) show the current value in normal colours
     and ignore mouse clicks, wheel turns and keys other than Tab and Backtab;
     a wheel turn over them scrolls an enclosing scroll area instead. Option
-    command actions stay listed but disabled. Group and model fold buttons
-    still expand and collapse.
+    command actions stay listed but disabled. Fold titles still take Tab
+    focus and fold and unfold on a click, Space, Return or Enter, without
+    writing state.
 
     Build finishes before subscribing. detach or close removes the subscription,
     disables this view and drops local text without changing caller state.
@@ -193,12 +225,16 @@ class FormEditor[F: FormModel](QWidget):
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(ROW_SPACING)
         self._root_error = QLabel(self)
+        make_label_selectable(self._root_error)
         self._root_error.setObjectName("form.error")
         self._root_error.setWordWrap(True)
         self._root_error.hide()
         self._layout.addWidget(self._root_error)
         self._content = QWidget(self)
         self._layout.addWidget(self._content)
+        # The host owns the capture lifetime; only refresh replaces this schema.
+        self._schema = state.input_schema(env)
+        self._publication_count = 0
         self._publish()
         # The state callback must not keep the QWidget alive. No Python slot is
         # connected to destroyed: cyclic GC may clear such a slot before Qt
@@ -220,12 +256,15 @@ class FormEditor[F: FormModel](QWidget):
     def refresh(self, env: FormEnv) -> None:
         """Re-evaluate with env and refresh controls, choices, values and errors.
 
-        Keep still-active local unparseable or rejected input. Never reset
-        state, run domain defaults, poll sources or echo a write. External
+        Recompute input_schema even if env is the same capture; ordinary state
+        publications reuse it. Keep still-active local unparseable or rejected
+        input. Never reset state, run domain defaults, poll sources or echo a
+        write. External
         state publications refresh parsed controls through the subscription.
         Inactive branch text is discarded. Raises RuntimeError after detach.
         """
-        self._require_state()
+        state = self._require_state()
+        self._schema = state.input_schema(env)
         self._env = env
         self._publish()
 
@@ -245,13 +284,15 @@ class FormEditor[F: FormModel](QWidget):
         """Allow user edits (enabled=True, the initial mode) or make the form read-only.
 
         Read-only (enabled=False) keeps every control enabled and readable:
-        text can be selected and copied, folds still work, and no user input
+        text can be selected and copied, fold titles still fold, and no user input
         changes state or local text (see the class docstring for each
         control). Neither mode writes state or drops local text. External
         state changes remain visible while read-only. Raises RuntimeError
         after detach.
         """
         self._require_state()
+        if self._editing_enabled == enabled:
+            return
         self._editing_enabled = enabled
         self._publish()
 
@@ -293,6 +334,7 @@ class FormEditor[F: FormModel](QWidget):
             self._unsubscribe = None
         self._state = None
         self._env = None
+        self._schema = {}
         self._local.clear()
         self.setEnabled(False)
 
@@ -315,9 +357,8 @@ class FormEditor[F: FormModel](QWidget):
     def _publish(self) -> None:
         state = self._require_state()
         env = self._require_env()
-        schema = state.input_schema(env)
         preview = state.preview(env)
-        fields = project_fields(schema, state.input.data, preview)
+        fields = project_fields(self._schema, state.input.data, preview)
         flat = flatten_fields(fields)
         self._state_errors = preview.errors
         # Text does not survive its path becoming a model section, nor does a
@@ -336,6 +377,7 @@ class FormEditor[F: FormModel](QWidget):
                 field.expression,
                 field.fixed,
                 field.group,
+                field.kind == "model" and field.active,
             )
             for field in flat
         )
@@ -350,6 +392,7 @@ class FormEditor[F: FormModel](QWidget):
                 field, self._local.get(field.path), editable=self._editing_enabled
             )
         self._show_errors()
+        self._publication_count += 1
 
     def _rebuild(self, fields: tuple[FieldView, ...]) -> None:
         old = self._content
@@ -431,6 +474,7 @@ class FormEditor[F: FormModel](QWidget):
     ) -> None:
         """Install batch from the row at path, or keep it local if rejected."""
         state = self._require_state()
+        publication = self._publication_count
         self._local.pop(path, None)
         if self._host_write is None:
             state.write(batch, self._require_env())
@@ -441,12 +485,15 @@ class FormEditor[F: FormModel](QWidget):
                 # The host installed nothing: keep this input local, like
                 # unparseable text; the publish below redraws state around it.
                 self._local[path] = self._rows[path].rejected_input(exc.message)
-        # Unchanged writes do not publish but can clear a local parse error.
-        self._publish()
+        # A changed write already rendered synchronously in the subscriber.
+        # Unchanged/rejected writes still need to update view-local errors.
+        if self._publication_count == publication:
+            self._publish()
 
     def _run_command(self, path: FormWritePath, name: str) -> None:
         """Run option command name at path, or keep its rejection local."""
         state = self._require_state()
+        publication = self._publication_count
         self._local.pop(path, None)
         if self._host_command is None:
             state.run_command(path, name, self._require_env())
@@ -456,7 +503,8 @@ class FormEditor[F: FormModel](QWidget):
             except WriteRejected as exc:
                 # The host changed nothing: show its message at the field.
                 self._local[path] = self._rows[path].rejected_input(exc.message)
-        self._publish()
+        if self._publication_count == publication:
+            self._publish()
 
     def _unparsed(self, path: FormWritePath, local: LocalText) -> None:
         self._local[path] = local

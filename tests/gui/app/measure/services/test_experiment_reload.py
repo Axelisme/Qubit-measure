@@ -18,7 +18,7 @@ from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import FormEnv, FormInput, FormModel
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 
 from tests.gui.app.measure._form_fakes import form_resources, form_sources
 from tests.gui.app.measure._reload_fakes import (
@@ -48,7 +48,7 @@ def app() -> App:
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     bus = BaseEventBus()
     registry = Registry()
-    registry.register("demo", OldAdapter, form=OldAdapter.form)
+    registry.register("demo", OldAdapter)
     writeback = MagicMock()
     tabs = TabService(
         state,
@@ -241,7 +241,7 @@ def test_restart_required_failure_cannot_retry(app: App) -> None:
 def test_partial_restore_retries_only_skipped_entries_without_stealing_selection(
     app: App,
 ) -> None:
-    app.registry.register("missing", OldAdapter, form=OldAdapter.form)
+    app.registry.register("missing", OldAdapter)
     app.controls.new_tab("demo")
     app.controls.new_tab("missing")
     report = app.reload.reload_confirmed(app.reload.prepare_reload())
@@ -249,7 +249,7 @@ def test_partial_restore_retries_only_skipped_entries_without_stealing_selection
     assert len(report.rejected_tabs) == 1
     retained = app.state.list_tab_ids()[0]
     app.state.set_active_tab(retained)
-    app.registry.register("missing", NewAdapter, form=NewAdapter.form)
+    app.registry.register("missing", NewAdapter)
     report = app.reload.retry_skipped_tabs()
     assert report.restored_tabs == 1
     assert app.state.list_tab_ids()[0] == retained
@@ -265,10 +265,13 @@ def test_invalid_defaults_are_reported_without_discarding_other_tabs(app: App) -
             raise ValueError("missing calibration")
 
     class InvalidAdapter(OldAdapter):
-        form = BrokenForm(ReloadCfg, {})
+        @staticmethod
+        def make_form(ctx: FormContext) -> Form[ReloadCfg]:
+            del ctx
+            return BrokenForm(ReloadCfg, {})
 
-    app.registry.register("bad", OldAdapter, form=OldAdapter.form)
-    app.loader.candidate.register("bad", InvalidAdapter, form=InvalidAdapter.form)
+    app.registry.register("bad", OldAdapter)
+    app.loader.candidate.register("bad", InvalidAdapter)
     app.controls.new_tab("bad")
     app.controls.new_tab("demo")
     report = app.reload.reload_confirmed(app.reload.prepare_reload())
@@ -291,7 +294,7 @@ def test_driving_gate_and_nested_reload_are_blocked_during_import(app: App) -> N
 
 
 def test_new_reload_discard_is_explicit_in_preview(app: App) -> None:
-    app.registry.register("missing", OldAdapter, form=OldAdapter.form)
+    app.registry.register("missing", OldAdapter)
     app.controls.new_tab("missing")
     app.reload.reload_confirmed(app.reload.prepare_reload())
     preview = app.reload.prepare_reload()

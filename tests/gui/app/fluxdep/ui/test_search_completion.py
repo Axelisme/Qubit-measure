@@ -16,36 +16,42 @@ from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import (
     DatabaseSearchResult,
     ParamBounds,
-    SearchExecution,
 )
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
 from zcu_tools.gui.app.fluxdep.search import FluxDepSearchRuntime
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
+from zcu_tools.gui.app.fluxdep.ui.error_messages import friendly_fit_message
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.services.progress import ProgressService
 
+from tests.gui.app.fluxdep._search_result import perfect_fit_result
+from tests.gui.app.fluxdep._search_runtime import ControlledBackground
+from tests.gui.app.fluxdep._window import named
+
 
 @pytest.fixture
-def search_input(qapp, tmp_path, spectrum_hdf5, failure, monkeypatch):
+def search_input(qapp, search_database_hdf5, spectrum_hdf5, failure):
     runner = BackgroundRunner()
     transport = QtProgressTransport()
+    background = ControlledBackground()
     ctrl = Controller(
         FluxDepState(),
         interactive_owner=QtOwnerScheduler(),
-        search_runtime=FluxDepSearchRuntime(runner, ProgressService(transport)),
+        search_runtime=FluxDepSearchRuntime(
+            runner if failure == "submit" else background, ProgressService(transport)
+        ),
     )
     name = ctrl.load_spectrum(spectrum_hdf5[0], spec_type="TwoTone")
     ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
     ctrl.set_points(name, np.array([0.0, 0.1]), np.array([5.0, 5.1]))
-    db_path = tmp_path / "database.h5"
-    db_path.touch()
+    ctrl.set_selection(np.ones(2, dtype=np.bool_))  # a published Filter unlocks Search
     bounds = ParamBounds(EJ=(2.0, 15.0), EC=(0.2, 2.0), EL=(0.1, 2.0))
     ctrl.set_fit_params(
-        str(db_path),
+        search_database_hdf5,
         bounds.EJ,
         bounds.EC,
         bounds.EL,
@@ -53,60 +59,25 @@ def search_input(qapp, tmp_path, spectrum_hdf5, failure, monkeypatch):
         None,
         None,
     )
-    result = DatabaseSearchResult(
-        params=(5.0, 1.0, 0.5),
-        best_distance=0.1,
-        best_scale=1.0,
-        best_index=0,
-        entry_results=np.array([[0.1, 1.0]]),
-        entry_params=np.array([[5.0, 1.0, 0.5]]),
-        fluxs=np.array([0.0, 0.1]),
-        freqs=np.array([5.0, 5.1]),
-        predicted_freqs=np.array([5.0, 5.1]),
-        bounds=bounds,
-    )
+    result = perfect_fit_result(np.array([0.0, 0.1]), np.array([5.0, 5.1]), bounds)
     if failure == "submit":
-
-        def fail_submit(*args, **kwargs):
-            raise RuntimeError("submit failed")
-
-        monkeypatch.setattr(runner, "submit", fail_submit)
-    yield ctrl, result, runner
+        runner.stop_accepting()
+    yield ctrl, result, runner, background
     ctrl.search.begin_close()
     assert runner.quiesce()
     ctrl.interactive.dispose()
 
 
 @pytest.fixture
-def completed_search(qapp, search_input, monkeypatch, failure):
-    from zcu_tools.gui.app.fluxdep.services import fit
+def search_panel(qapp, search_input, monkeypatch, failure):
     from zcu_tools.gui.app.fluxdep.ui import analyze_panel
 
-    ctrl, result, runner = search_input
+    ctrl, result, runner, background = search_input
     facts: list[FitChangedPayload] = []
     ctrl.bus.subscribe(FitChangedPayload, facts.append)
     calls: list[str] = []
     warnings: list[tuple[str, str]] = []
-    make_figure = analyze_panel.make_search_diagnostic_figure
     present_figure = analyze_panel.QtPlotHost.present
-
-    def search(*args, execution: SearchExecution | None = None):
-        del args, execution
-        calls.append("search")
-        assert QThread.currentThread() != qapp.thread()
-        if failure == "search":
-            raise RuntimeError("numeric search failed")
-        return result
-
-    def build(actual):
-        calls.append("builder")
-        assert QThread.currentThread() == qapp.thread()
-        assert actual is result
-        assert ctrl.state.fit.params == result.params
-        assert sum(p.has_result for p in facts) == calls.count("search")
-        if failure == "builder":
-            raise RuntimeError("diagnostic builder failed")
-        return make_figure(actual)
 
     def present(host, figure):
         calls.append("present")
@@ -116,28 +87,15 @@ def completed_search(qapp, search_input, monkeypatch, failure):
             raise RuntimeError("diagnostic present failed")
         present_figure(host, figure)
 
-    monkeypatch.setattr(fit, "search_database", search)
-    monkeypatch.setattr(analyze_panel, "make_search_diagnostic_figure", build)
     monkeypatch.setattr(analyze_panel.QtPlotHost, "present", present)
-    monkeypatch.setattr(
-        analyze_panel,
-        "calculate_energy_vs_flux",
-        lambda *args, **kwargs: (None, np.zeros((1000, 15))),
-    )
-    monkeypatch.setattr(
-        analyze_panel, "render_fit_figure", lambda *args, **kwargs: None
-    )
     monkeypatch.setattr(
         QMessageBox,
         "warning",
         lambda parent, title, message: warnings.append((title, message)),
     )
     panel = AnalyzePanelWidget(ctrl)
-    buttons = {button.text(): button for button in panel.findChildren(QPushButton)}
     try:
-        buttons["Search database"].click()
-        assert runner.quiesce()
-        yield panel, ctrl, result, facts, calls, warnings, buttons, runner
+        yield panel, ctrl, result, facts, calls, warnings, runner, background
     finally:
         assert runner.quiesce()
         panel.quiesce()
@@ -145,27 +103,44 @@ def completed_search(qapp, search_input, monkeypatch, failure):
         panel.deleteLater()
 
 
-@pytest.mark.parametrize("failure", [None, "builder", "present", "search", "submit"])
-def test_search_button_commits_before_rendering(completed_search, failure):
-    panel, ctrl, result, facts, calls, warnings, buttons, _runner = completed_search
-    assert buttons["Search database"].isEnabled()
+def _click_search(
+    panel: AnalyzePanelWidget,
+    background: ControlledBackground,
+    result: DatabaseSearchResult,
+    failure: str | None = None,
+) -> None:
+    """Click Search, then deliver the outcome through the injected runtime."""
+    named(panel, QPushButton, "fluxdep.fit.search").click()
+    if failure == "search":
+        background.fail(RuntimeError("numeric search failed"))
+    elif failure != "submit":
+        background.deliver(result)
+
+
+@pytest.mark.parametrize("failure", [None, "present", "search", "submit"])
+def test_search_button_commits_before_rendering(search_panel, failure):
+    panel, ctrl, result, facts, calls, warnings, _runner, background = search_panel
+    _click_search(panel, background, result, failure)
+    assert named(panel, QPushButton, "fluxdep.fit.search").isEnabled()
+    export = named(panel, QPushButton, "fluxdep.fit.export_params")
     if failure in ("search", "submit"):
-        assert calls == (["search"] if failure == "search" else [])
+        assert calls == []
         assert ctrl.state.fit.params is None
         assert not any(p.has_result for p in facts)
-        assert not buttons["Export params.json"].isEnabled()
-        assert len(warnings) == 1
-        assert warnings[0][0] == "Search failed"
+        assert not export.isEnabled()
+        # A failed search is reported on the Search status line, not in a modal.
+        assert warnings == []
+        activity = ctrl.search.current
+        assert activity is not None and activity.error is not None
+        assert named(panel, QLabel, "fluxdep.fit.status").text() == (
+            friendly_fit_message("Search", activity.error)
+        )
     else:
         assert ctrl.state.fit.params == result.params
         assert [p.has_result for p in facts if p.has_result] == [True]
-        assert buttons["Export params.json"].isEnabled()
+        assert export.isEnabled()
         assert any("EJ=5.000" in label.text() for label in panel.findChildren(QLabel))
-        assert calls == (
-            ["search", "builder"]
-            if failure == "builder"
-            else ["search", "builder", "present"]
-        )
+        assert calls == ["present"]
         if failure:
             assert len(warnings) == 1
             assert warnings[0][0] == "Diagnostic plot failed"
@@ -176,21 +151,18 @@ def test_search_button_commits_before_rendering(completed_search, failure):
 
 
 @pytest.mark.parametrize("failure", [None])
-def test_replacing_and_releasing_diagnostics_keeps_retained_figures(
-    completed_search, monkeypatch
-):
+def test_replacing_and_releasing_diagnostics_keeps_retained_figures(search_panel):
     import matplotlib.pyplot as plt
-    from zcu_tools.gui.app.fluxdep.services import fit
 
-    panel, ctrl, _result, _facts, _calls, _warnings, buttons, runner = completed_search
+    panel, ctrl, result, _facts, _calls, _warnings, _runner, background = search_panel
+    _click_search(panel, background, result)
     retained = panel.figures
     first = retained["diagnostic"]
     before = BytesIO()
     first.savefig(before, format="png")
     unrelated = plt.figure()
     try:
-        buttons["Search database"].click()
-        assert runner.quiesce()
+        _click_search(panel, background, result)
         second = panel.figures["diagnostic"]
         assert second is not first
         assert retained["diagnostic"] is first
@@ -199,16 +171,10 @@ def test_replacing_and_releasing_diagnostics_keeps_retained_figures(
         first.savefig(after, format="png")
         assert before.getvalue() == after.getvalue()
 
-        def fail_search(*args, execution: SearchExecution | None = None):
-            del args, execution
-            raise RuntimeError("numeric search failed")
-
-        monkeypatch.setattr(fit, "search_database", fail_search)
-        buttons["Search database"].click()
-        assert runner.quiesce()
+        _click_search(panel, background, result, "search")
         assert panel.figures["diagnostic"] is second
         assert ctrl.state.fit.params is None
-        assert not buttons["Export params.json"].isEnabled()
+        assert not named(panel, QPushButton, "fluxdep.fit.export_params").isEnabled()
         panel.release_figures()
         saved = BytesIO()
         second.savefig(saved, format="png")

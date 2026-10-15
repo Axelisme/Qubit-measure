@@ -1,4 +1,4 @@
-"""Synthetic persistent templates and unchanged legacy cfg role factories."""
+"""Synthetic persistent templates for shared library creation."""
 
 from zcu_tools.cfg_model import (
     ConstWaveformCfg,
@@ -7,16 +7,6 @@ from zcu_tools.cfg_model import (
     PulseReadoutSpec,
     PulseSpec,
     TemplateDef,
-)
-from zcu_tools.experiment.cfg_editing import PROGRAM_SHAPES
-from zcu_tools.gui.app.measure.adapter import SessionEnv
-from zcu_tools.gui.app.measure.role_factories import RoleFactorySpec
-from zcu_tools.gui.app.measure.specs import MAIN_PROGRAM_SPEC_POLICY
-from zcu_tools.gui.cfg import (
-    CfgSectionSpec,
-    ReferenceValue,
-    make_custom_reference_key,
-    make_default_value,
 )
 
 TEMPLATES: dict[str, TemplateDef] = {
@@ -52,33 +42,4 @@ TEMPLATES: dict[str, TemplateDef] = {
     ),
     "none_reset": TemplateDef(NoneResetCfg, "No reset", {}, "reset_none"),
     "const": TemplateDef(ConstWaveformCfg, "Constant", {"length": 0.0}),
-}
-
-
-def readout_shape() -> CfgSectionSpec:
-    return PROGRAM_SHAPES.get("module", "readout/pulse").make_spec(
-        MAIN_PROGRAM_SPEC_POLICY
-    )
-
-
-def readout_value(ctx: SessionEnv) -> ReferenceValue:
-    value = make_default_value(readout_shape())
-    # Fully specified inline values make run/config tests independent of calibration.
-    for path, item in {
-        "pulse_cfg.ch": 0,
-        "pulse_cfg.nqz": 2,
-        "pulse_cfg.freq": 0.0,
-        "pulse_cfg.gain": 0.1,
-        "pulse_cfg.waveform.length": 1.0,
-        "ro_cfg.ro_ch": 0,
-        "ro_cfg.ro_freq": 0.0,
-        "ro_cfg.ro_length": 1.0,
-        "ro_cfg.trig_offset": 0.0,
-    }.items():
-        value.with_field(path, item)
-    return ReferenceValue(make_custom_reference_key("Pulse Readout"), value)
-
-
-ROLE_FACTORIES = {
-    "readout": RoleFactorySpec("module", readout_shape, readout_value),
 }

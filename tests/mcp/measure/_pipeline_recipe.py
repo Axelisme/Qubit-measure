@@ -8,6 +8,7 @@ from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import (
     MissingParameter,
     RecipeDefinition,
+    RecipeFieldEdit,
     RecipeGenerator,
     RecipeNeedsParameters,
     RecipeRun,
@@ -43,14 +44,21 @@ def pipeline(
         raise RecipeNeedsParameters(
             (MissingParameter("frequency_mhz", "Supply a value"),)
         )
-    for path, value in (
-        ("modules.readout.module.pulse_cfg.freq", frequency_mhz),
-        ("modules.readout.module.ro_cfg.ro_freq", frequency_mhz),
-        ("modules.readout.module.ro_cfg.ro_length", readout_length_us),
-        ("modules.readout.module.ro_cfg.trig_offset", trigger_offset_us),
-        ("rounds", rounds),
-    ):
-        tab.set(path, value)
+    tab.set_fields(
+        (
+            RecipeFieldEdit(
+                "modules.readout.module.pulse_cfg.module.freq", frequency_mhz
+            ),
+            RecipeFieldEdit("modules.readout.module.ro_cfg.ro_freq", frequency_mhz),
+            RecipeFieldEdit(
+                "modules.readout.module.ro_cfg.ro_length", readout_length_us
+            ),
+            RecipeFieldEdit(
+                "modules.readout.module.ro_cfg.trig_offset", trigger_offset_us
+            ),
+            RecipeFieldEdit("rounds", rounds),
+        )
+    )
     run, status = yield tab.run()
     if status == "cancelled":
         return
@@ -100,7 +108,7 @@ PIPELINE = RecipeDefinition(
     adapter_name="lookback",
     summary_parameters=(
         SummaryParameter(
-            "frequency_mhz", "modules.readout.module.pulse_cfg.freq", "MHz"
+            "frequency_mhz", "modules.readout.module.pulse_cfg.module.freq", "MHz"
         ),
         SummaryParameter(
             "ro_frequency_mhz", "modules.readout.module.ro_cfg.ro_freq", "MHz"

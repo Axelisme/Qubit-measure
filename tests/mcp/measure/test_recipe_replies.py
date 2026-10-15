@@ -9,7 +9,7 @@ from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
 from zcu_tools.mcp.measure import tools_recipes
 
 from ._recipe_actual_support import cfg_value
-from ._recipe_support import PNG, LookbackGui, recipe_client
+from ._recipe_support import PNG, ExecutionGui, recipe_client
 from ._support import full_execution_reply, make_client
 
 
@@ -41,7 +41,7 @@ from ._support import full_execution_reply, make_client
 def test_actual_projection_is_fixed_flat_and_shared_by_every_reply(
     tmp_path, arguments, expected
 ):
-    gui = LookbackGui()
+    gui = ExecutionGui()
     expected = {
         **expected,
         "use_reset": {"value": None, "source": "disabled"},
@@ -65,7 +65,7 @@ def test_actual_projection_is_fixed_flat_and_shared_by_every_reply(
 
 @pytest.mark.parametrize("outcome", ["awaiting_answer", "missing", "failed"])
 def test_recipe_initial_wait_and_status_share_the_same_summary(tmp_path, outcome):
-    gui = LookbackGui()
+    gui = ExecutionGui()
 
     def respond(method, params):
         if outcome == "failed" and method == "operation.await":
@@ -108,7 +108,7 @@ def test_recipe_initial_wait_and_status_share_the_same_summary(tmp_path, outcome
 
 
 def test_writeback_destination_summary_keeps_context_and_project_identity(tmp_path):
-    gui = LookbackGui()
+    gui = ExecutionGui()
     destination = {
         "active_label": "sample",
         "has_active_context": True,
@@ -155,7 +155,7 @@ def test_writeback_destination_summary_keeps_context_and_project_identity(tmp_pa
 def test_pulse_readout_candidate_summary_keeps_nested_values_and_captured_full(
     tmp_path,
 ):
-    gui = LookbackGui()
+    gui = ExecutionGui()
     current: dict[str, Any] = {
         "type": "readout/pulse",
         "cloned_from": "calibrated_readout",
@@ -232,7 +232,7 @@ def test_pulse_readout_candidate_summary_keeps_nested_values_and_captured_full(
 
 
 def test_module_candidate_summary_keeps_source_changes_and_full_proposal(tmp_path):
-    gui = LookbackGui()
+    gui = ExecutionGui()
     current: dict[str, Any] = {
         "type": "pulse",
         "freq": 6100.0,
@@ -302,7 +302,7 @@ def test_module_candidate_summary_keeps_source_changes_and_full_proposal(tmp_pat
 def test_run_start_failure_preserves_confirmed_rejection_or_ambiguity(
     tmp_path, monkeypatch, receipt, reason, step_status
 ):
-    gui = LookbackGui()
+    gui = ExecutionGui()
     pending = Event()
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     with recipe_client(tmp_path, gui) as client:
@@ -361,7 +361,7 @@ def test_run_start_failure_preserves_confirmed_rejection_or_ambiguity(
 def test_unconfirmed_run_receipt_stays_unknown_until_the_original_start_returns(
     tmp_path, monkeypatch
 ):
-    gui = LookbackGui()
+    gui = ExecutionGui()
     pending = Event()
     release = Event()
 
@@ -416,7 +416,7 @@ def test_unconfirmed_run_receipt_stays_unknown_until_the_original_start_returns(
 def test_unconfirmed_analysis_start_reports_its_phase_without_new_reads(
     tmp_path, monkeypatch
 ):
-    gui = LookbackGui()
+    gui = ExecutionGui()
     pending = Event()
     release = Event()
 
@@ -453,7 +453,7 @@ def test_unconfirmed_analysis_start_reports_its_phase_without_new_reads(
 
 
 def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
-    gui = LookbackGui()
+    gui = ExecutionGui()
 
     def respond(method, params):
         response = gui(method, params)
@@ -483,7 +483,7 @@ def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
         assert summary["execution"] == full["execution"] == execution
         assert summary["run_id"] == full["raw_save"]["run_id"] == "run-a"
         assert (
-            cfg_value(gui.publication, "modules.readout.module.pulse_cfg.freq")
+            cfg_value(gui.publication, "modules.readout.module.pulse_cfg.module.freq")
             == 6020.0
         )
         assert cfg_value(gui.publication, "rounds") == 7
@@ -578,7 +578,7 @@ def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
 def test_malformed_completion_fails_at_its_owner_without_losing_run_capture(
     tmp_path, wire_op, phase, raw_status, outcome
 ):
-    gui = LookbackGui()
+    gui = ExecutionGui()
 
     def respond(method, params):
         if method == "operation.await" and params["operation_id"] == wire_op:
@@ -594,7 +594,7 @@ def test_malformed_completion_fails_at_its_owner_without_losing_run_capture(
         assert reply.data["error"]["reason"] == "incompatible_wire"
         assert reply.data["error"]["phase"] == phase
         assert (
-            cfg_value(gui.publication, "modules.readout.module.pulse_cfg.freq")
+            cfg_value(gui.publication, "modules.readout.module.pulse_cfg.module.freq")
             == 6020.0
         )
         assert reply.data["actual"]["rounds"] == {"value": 3, "source": "gui_default"}
@@ -623,7 +623,7 @@ def test_malformed_completion_fails_at_its_owner_without_losing_run_capture(
 def test_recipe_connection_loss_retains_known_prefix_without_reconnecting(
     tmp_path, monkeypatch, pending_method, wire_op, phase, raw_status
 ):
-    client = make_client(tmp_path, LookbackGui(), port_is_open=lambda port: True)
+    client = make_client(tmp_path, ExecutionGui(), port_is_open=lambda port: True)
     send_line = client.transport.send_line
     pending = Event()
     reconnects = []
@@ -694,7 +694,7 @@ def test_recipe_connection_loss_retains_known_prefix_without_reconnecting(
 def test_lookback_failure_preserves_completed_prefix_without_retry(
     tmp_path, failure, phase, raw_status
 ):
-    gui = LookbackGui()
+    gui = ExecutionGui()
 
     def respond(method, params):
         fail_operation = {"run": 71, "analysis": 93}.get(failure)

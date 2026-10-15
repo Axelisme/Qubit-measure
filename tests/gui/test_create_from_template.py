@@ -56,7 +56,7 @@ def controller(qapp, tmp_path: Path):
             PulseReadoutSpec,
             "Readout",
             {
-                "pulse_cfg": Slot("{qubit}.pulses.probe", fallback=None),
+                "pulse_cfg": Slot("{qubit}.pulses.probe"),
                 "ro_cfg.ro_ch": 1,
                 "ro_cfg.ro_freq": 100.0,
                 "ro_cfg.ro_length": 2.0,

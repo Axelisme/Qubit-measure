@@ -1,6 +1,5 @@
 """Existing tab views follow the current session source without changing identity."""
 
-from collections.abc import Mapping
 from typing import NoReturn
 
 from qtpy.QtWidgets import QTabWidget
@@ -22,7 +21,7 @@ from zcu_tools.gui.session.types import SessionEnv
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._progress_fakes import DirectProgressTransport
-from tests.gui.app.measure._synthetic import SampleAdapter
+from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
 
 
 class ProjectionAdapter(SampleAdapter):
@@ -31,7 +30,7 @@ class ProjectionAdapter(SampleAdapter):
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, object],
+        cfg: SampleCfg,
         *,
         context: RunContext,
     ) -> NoReturn:

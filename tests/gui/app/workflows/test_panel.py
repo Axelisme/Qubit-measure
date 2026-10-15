@@ -6,6 +6,8 @@ from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.form import FormErrors
 from zcu_tools.resources.entry import ResultEntry
 
+from tests.gui.widgets.form._text_input import commit_text
+
 from ._start_fakes import StartHarness
 from ._synthetic import Context, Plan, PlanForm, TunablesForm, inline_input
 
@@ -36,11 +38,11 @@ def test_panel_exposes_generic_local_parse_errors_and_host_reset(
     panel = window.tunables_panel
     field = panel.editor.findChild(QLineEdit, "form.input.sample.factor")
     assert isinstance(field, QLineEdit)
-    field.setText("-")
+    commit_text(field, "-")
     assert isinstance(panel.state.result(panel.env), TunablesForm)
     errors = panel.editor.local_parse_errors()
     assert isinstance(errors, FormErrors) and ("sample", "factor") in errors.messages
-    field.setText("8")
+    commit_text(field, "8")
     result = panel.state.result(panel.env)
     assert isinstance(result, TunablesForm) and result.sample.factor == 8.0
     assert panel.editor.local_parse_errors() is None
@@ -79,9 +81,9 @@ def test_plan_panel_previews_native_plan_and_blocks_incomplete_text(
     assert preview.points == 21 and preview.samples == (1.0, 1.1)
     field = panel.editor.findChild(QLineEdit, "form.input.points")
     assert isinstance(field, QLineEdit)
-    field.setText("-")
+    commit_text(field, "-")
     errors = panel.preview(snapshot)
     assert isinstance(errors, FormErrors) and ("points",) in errors.messages
-    field.setText("31")
+    commit_text(field, "31")
     repaired = panel.preview(snapshot)
     assert isinstance(repaired, Plan) and repaired.points == 31

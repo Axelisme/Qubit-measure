@@ -20,8 +20,32 @@ from __future__ import annotations
 #   GUI_VERSION  — this GUI code's *revision*. Reported, never compared. Bump on
 #     any meaningful GUI change you want to be able to spot a reload of,
 #     INCLUDING pure-internal logic changes that don't touch the wire.
-WIRE_VERSION = 5  # fixed connection identity and holder-gated commands
+# This unpublished interface revision includes identity-only project setup,
+# data_root, spectrum evidence/drafts and fit search_db/render/database_info.
+# 9: a new Filter context starts from the published brush selection (the
+# pre-downsample selection; all-selected without a published mask), so
+# selection.interactive.open evidence reports that seed.
+WIRE_VERSION = 9
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
-GUI_VERSION = 7  # application-owned control authority shared with the GUI
+# 12: window shell with Spectra/Fit pages, editing flow and picker columns,
+# Fit page form/status, shared spectrum row query; two-line spectrum list
+# rows, one dip-depth OneTone background in every view (OneTone PNGs too),
+# constrained Search diagnostic layout; Search disabled while a needed
+# frequency is blank, non-holder Filter tab switches detach only; literal
+# spectrum targets and independent global Filter lifetime; inherited
+# alignment preserved on presentation-only draft edits.
+# 13: Spectra stage bar (1 Align -> 2 Sample) replaces the result preview's
+# next-step buttons; a list pick shows the published preview first.
+# 14: Show display controls follow control authority and a Show zoom toolbar;
+# colour-blind-safe shared point palette, brush band along the whole stroke,
+# picker titles refit on update, faded (unset) frequencies, inherited
+# half/integer lines on the Add spectrum preview.
+# 15: Fit stage bar (1 Filter -> 2 Search -> 3 Show) with locks; Filter shows
+# the published masks without a Session, Edit/Discard/Finish own the Session,
+# leaving Filter only detaches; a new Filter starts from the published masks;
+# a locked stage stays shown with its inputs disabled.
+# 16: Filter Apply/Finish also publish the brush selection; a reopened Filter
+# starts from it, so an unchanged Finish reproduces the published kept mask.
+GUI_VERSION = 16

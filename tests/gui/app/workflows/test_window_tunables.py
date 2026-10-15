@@ -1,7 +1,6 @@
 """Window tunables contracts through public native/GUI seams."""
 
 import json
-from collections.abc import Mapping
 
 import pytest
 from pydantic import JsonValue
@@ -13,12 +12,11 @@ from zcu_tools.experiment.workflows import (
     Next,
     RunMismatch,
     Step,
-    TunablesSnapshot,
     WorkflowEnv,
     workflow,
 )
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
-from zcu_tools.gui.form import FormEnv, FormErrors, FormWritePath
+from zcu_tools.gui.form import FormEnv, FormErrors
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.resources.entry import (
@@ -26,6 +24,7 @@ from zcu_tools.resources.entry import (
 )
 
 from tests.gui.app.workflows._start_fakes import StartHarness
+from tests.gui.widgets.form._text_input import commit_text
 
 from ._reload_source import InjectedCatalog
 from ._sample_input import sample_input
@@ -68,7 +67,7 @@ def test_rpc_tunables_running_submits_shared_draft_but_keeps_current_step_captur
                 QLineEdit, "form.input.sample.factor"
             )
             assert isinstance(control, QLineEdit)
-            control.setText("-")
+            commit_text(control, "-")
             replies.append(
                 rpc(
                     "workflow.tunables",
@@ -400,7 +399,7 @@ def test_rpc_tunables_native_failure_keeps_base_revision_and_local_text(
     accepted = panel.host.accepted_input.data
     control = panel.panel.editor.findChild(QLineEdit, "form.input.sample.factor")
     assert isinstance(control, QLineEdit)
-    control.setText("-")
+    commit_text(control, "-")
     journal = entry.result_path / "workflows/tuning/journal.jsonl"
     original_journal = journal.read_bytes()
     if failure == "terminal":
@@ -455,7 +454,6 @@ def test_apply_click_isolates_native_journal_failure_without_accepting_draft(
     run_attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
     paused_tuning: list[tuple[int, float, int]],
     escaped_qt_errors: list[BaseException],
-    settlements: list[int],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     del paused_tuning
@@ -472,7 +470,7 @@ def test_apply_click_isolates_native_journal_failure_without_accepting_draft(
     message = panel.findChild(QLabel, "workflow.tuning.message")
     assert isinstance(control, QLineEdit) and isinstance(button, QPushButton)
     assert isinstance(message, QLabel)
-    control.setText("8.00")
+    commit_text(control, "8.00")
     before_click_text = control.text()
     journal = entry.result_path / "workflows/tuning/journal.jsonl"
     original = journal.read_bytes()
@@ -503,40 +501,20 @@ def test_apply_click_isolates_native_journal_failure_without_accepting_draft(
     assert sample_input(panel.panel.state.input.data)["value"] == 45.0
     assert sample_input(panel.panel.state.input.data)["factor"] == 8.0
     assert control.text() == before_click_text
-    assert settlements == [token]
     assert harness.handles.live_count() == 0 and not harness.gate.snapshot()
     assert not harness.progress.bars_for_owner("workflow")
     assert form_editable(window.plan_panel) and not controller.has_pending_segment
     window.stop("tuning")
     assert window.close() and window.close()
-    assert settlements == [token] and escaped_qt_errors == []
+    assert harness.handles.known_outcome(token) == outcome and escaped_qt_errors == []
 
 
-def test_window_tunables_journal_failure_reraises_the_original_cause(
+def test_window_tunables_journal_failure_reports_the_original_path(
     attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
     paused_tuning: list[tuple[int, float, int]],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     del paused_tuning
     window, harness, entry = attachment
-    panel = window.tuning_panel
-    assert panel is not None
-    native_errors: list[Exception] = []
-    original_apply = panel.apply_external
-
-    def observe_native_error(
-        batch: Mapping[FormWritePath, JsonValue],
-        *,
-        actor: Actor,
-    ) -> TunablesSnapshot | FormErrors:
-        try:
-            return original_apply(batch, actor=actor)
-        except Exception as error:
-            native_errors.append(error)
-            raise
-
-    # Observe the borrowed public panel boundary without replacing its behavior.
-    monkeypatch.setattr(panel, "apply_external", observe_native_error)
     journal = entry.result_path / "workflows/tuning/journal.jsonl"
     original = journal.read_bytes()
     journal.unlink()
@@ -549,7 +527,7 @@ def test_window_tunables_journal_failure_reraises_the_original_cause(
     finally:
         journal.rmdir()
         journal.write_bytes(original)
-    assert len(native_errors) == 1 and caught.value is native_errors[0]
+    assert caught.value.filename == str(journal)
     assert window.controller is not None
     status = window.controller.status()
     assert status is not None and status.lifecycle == "failed"

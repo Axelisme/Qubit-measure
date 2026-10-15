@@ -1,24 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from inspect import signature
 from typing import Any, ClassVar
 
 import pytest
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
-    AdapterCfgDefinition,
     AnalysisMode,
-    ExpAdapterProtocol,
     NoAnalysisResult,
     NoAnalyzeParams,
     PostAnalyzeResultBase,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-
-from tests.gui.app.measure.adapter._cfg_fakes import StaticCfgDefinition
 
 
 class _MinimalNoAnalysisAdapter(
@@ -28,10 +23,6 @@ class _MinimalNoAnalysisAdapter(
         analysis=AnalysisMode.NONE
     )
     exp_cls: ClassVar[type[object]] = object
-
-    @classmethod
-    def cfg_definition(cls) -> AdapterCfgDefinition:
-        return StaticCfgDefinition()
 
     def make_filename_stem(self, ctx: Any) -> str:
         del ctx
@@ -88,10 +79,6 @@ def test_fit_requires_analyze_params_hook_when_params_need_values() -> None:
             )
             exp_cls: ClassVar[type[object]] = object
 
-            @classmethod
-            def cfg_definition(cls) -> AdapterCfgDefinition:
-                return StaticCfgDefinition()
-
             def make_filename_stem(self, ctx: Any) -> str:
                 del ctx
                 return "bad"
@@ -109,10 +96,6 @@ def test_fit_allows_base_analyze_params_hook_when_params_all_have_defaults() -> 
             analysis=AnalysisMode.FIT
         )
         exp_cls: ClassVar[type[object]] = object
-
-        @classmethod
-        def cfg_definition(cls) -> AdapterCfgDefinition:
-            return StaticCfgDefinition()
 
         def make_filename_stem(self, ctx: Any) -> str:
             del ctx
@@ -291,15 +274,9 @@ def test_intermediate_base_forbidden_implementation_is_detected() -> None:
             )
 
 
-def test_run_preflight_protocol_and_base_signatures_match() -> None:
-    assert signature(ExpAdapterProtocol.validate_run_request) == signature(
-        BaseAdapter.validate_run_request
-    )
-
-
 def test_base_run_preflight_default_is_noop() -> None:
     req: Any = object()
-    raw_cfg: dict[str, ExperimentCfgValue] = {"sentinel": "unchanged"}
+    cfg = ConfigBase()
 
-    assert _MinimalNoAnalysisAdapter().validate_run_request(req, raw_cfg) is None
-    assert set(raw_cfg) == {"sentinel"}
+    assert _MinimalNoAnalysisAdapter().validate_run_request(req, cfg) is None
+    assert cfg.model_dump() == {}

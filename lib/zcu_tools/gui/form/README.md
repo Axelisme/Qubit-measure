@@ -1,6 +1,6 @@
 # gui/form — Qt-free Pydantic input editing
 
-**Last updated:** 2026-10-14，入口拒絕未標 tag 的 str-or-model，同步 subscriber 故障隔離
+**Last updated:** 2026-10-14，統一 options schema 與 fresh defaults
 
 `static_defaults(model)` 接受普通 Pydantic BaseModel 或持久 Spec，產生 detached input JSON。必填欄位與 None 預設保持缺席，讓 before validator 能從其他欄位推導值。Default factory 每次呼叫重新執行。FormModel defaults 與普通 model 的分支切換共用這個入口。
 
@@ -12,15 +12,15 @@ Defaults hook 可以用 `{"expr": ...}` 宣告 scalar 初始值的來源，例�
 
 `Option` 宣告 label、部分 JSON input value、可選 BaseModel fields 與 commands。`options(env)` 是宣告 hook，consumer 讀 schema 的 `x-form-options` 有效清單。Core 自動產生 Literal、Enum、choices 與 tagged union 選項。最深 local 宣告優先，包含表示無選項的空清單，非重疊 parent 宣告保留。Bool 與一般 nullable model 照舊用 checkbox 與 Enabled。Fields 投影成內嵌子 schema，不顯示 value 已決定的 tag。比對只看 value 的每個葉，JSON 型別與值相同即符合，第一項匹配優先。無匹配時 consumer 顯示目前值加 `(missing)`，不寫 state。
 
-Union 位置的 partial object 是選分支加寫入內容，與 tag 葉切換共用新分支 defaults。不繼承舊值，defaults 收到空 previous。非換分支的 leaf write 與 compatible restore 規則不變。明確指令用 `OptionCommand(name, label, run)` 宣告，schema 只列 name 與 label。`FormState.run_command(path, name, env)` 只找目前 active branch 第一個匹配選項的指令。Run callable 讀同一份固定 env，回傳該欄位的部分 input，core 用一次 write 提交。未知或不適用指令、來源與結構失敗不寫入，不建立第二份 state。既有 `ModuleInline.defaults` 的 explicit previous 複製仍供明確 caller 使用，普通換分支不呼叫這條複製路徑。
+Union 位置的 partial object 是選分支加寫入內容，與 tag 葉切換共用新分支 defaults。不繼承舊值，defaults 只收到固定 env。非換分支的 leaf write 與 compatible restore 規則不變。明確指令用 `OptionCommand(name, label, run)` 宣告，schema 只列 name 與 label。`FormState.run_command(path, name, env)` 只找目前 active branch 第一個匹配選項的指令。Run callable 讀同一份固定 env，回傳該欄位的部分 input，core 用一次 write 提交。未知或不適用指令、來源與結構失敗不寫入，不建立第二份 state。`defaults(env)` 只依型別與固定來源產生新 input，沒有 previous 參數或隱含 ref 複製。
 
-Input schema 的 tagged oneOf branch 以 x-form-discriminator-values 提供保留 JSON 型別的 intrinsic tags。這份 identity 不隨 dynamic choices 改變。Model 欄位可達的每個 branch 都是一個具體 model：union member 若是同一 tag key 的具名 union（例如 `ModuleSpec` 內的 `ReadoutSpec`），schema 把它展開成各 member 的 branch，與 core 對 annotation 的 union 展開一致。Choices 仍限制當次可接受的 leaf 值，不切換目前的 input branch。Discriminator 是決定子 model 形狀與 branch defaults 的結構 selector，schema 只提供普通 typed tag，不提供 expression envelope。
+每個 intrinsic tag 都有一個普通 Option。多個 tag 指向同一 model 時，各選項共用 branch fields，保留 tag 的 JSON 型別與宣告順序。Core 從 annotation 讀取 tag，不從動態 choices 或 consumer 標記推導身分。Model 欄位可達的每個 branch 都是一個具體 model，同一 tag key 的具名 union 展開成各成員。Choices 仍限制當次可接受的 leaf 值，不改目前 input 的 branch。
 
 `FormModel.default_input`、`FormModel.input_schema` 與 `FormInput` 在入口拒絕未標 tag 的 `str | Model` 欄位。ValueError 指出欄位路徑與不支援的形狀。檢查走過 nullable、alias 與所有 model branches，包含未啟用的分支；它不讀 captured sources。Key-or-inline input 必須使用明確的 tagged ref／inline union，不能靠 JSON 字串或物件型別選分支。持久 Spec 的 `str | Spec` 不改，生成器在 input 邊界投影成 tagged wrappers。
 
-Module 欄位使用 `ModuleRef` 與 `ModuleInline` 衍生 class 的 tagged union，由 `kind` 選分支。Ref 的 `name` 是 key，inline 的 `module` 是支援的 input model。Core 依這兩個 base class 識別 branch。原生 `ModuleInput` 的 `module` 是持久 `ModuleSpec`，內含未標 tag unions，不能直接放進手寫 FormModel；caller 使用生成器的欄位型別。Schema 在非 null 節點標 `x-form-key-or-inline: true`，tagged 形狀不變。Nullable input schema 保留 null 分支，只有非 null 節點帶合併標記。有 captured library 時，ref branch 的 `name` property 帶 `x-form-library-keys`：清單是全部 library module keys；Form 用 `choices()` 為 `<field>.name` 宣告選項時，只留兩者的交集，清單裡每個 key 都能通過 choices 與 library 檢查。沒有 captured library 時沒有清單。Wire 仍可寫任意 name，library 沒有的 name 在 source 檢查時報在 `name`。
+Module 欄位使用 `ModuleRef` 與 `ModuleInline` 衍生 class 的 tagged union，由 `kind` 選分支。Ref 的 `name` 是 literal key，inline 的 `module` 是支援的 input model。原生 `ModuleInput.module` 是持久 `ModuleSpec`，內含未標 tag unions，不能直接放進手寫 FormModel。Caller 使用 `gui.form_adapter` 的生成欄位與選項。生成器宣告 None、library keys、Inline kinds 與 `to_inline` 指令，core 不替 consumer 列 library 清單。選項的 fields 不含 value 已固定的 tag，ref 選項不帶 fields。
 
-Editor 的 key-or-inline 呈現契約適用於 module 與 waveform。可留空欄位把 `None`、library keys 與 Inline kinds 放進同一選單，不顯示 Enabled。選 `None` 寫入 null，選 key 寫入 key，選 Inline 展開子表單。必填欄位沒有 `None`。選單依序列出 `None`（只限可留空）、分隔線、library keys、分隔線、每個 kind 的 `Inline: <kind>`。只有一個 inline kind 時顯示 `Inline`。Library key 項目只顯示 key 名稱。選定 Inline kind 後，子表單只顯示該 kind 的欄位，不再顯示 kind 下拉。改選 Inline kind 時，範本有該 kind 就用範本初值，否則用該 kind 的預設值，不帶入舊 kind 的值。Qt 選單與 kind 攤平由 editor 負責，core 保留現有 schema 契約。
+Editor 與 MCP 讀同一份 `x-form-options`，照 label 列選項，一次寫入 value，只展開選中項目的 fields。它們不推論 union、ref 或 library 的呈現。普通 nullable model 仍用 Enabled，bool 仍用 checkbox。明確複製只經 `to_inline` 指令，使用 host 的 guarded command callback；一般選 Inline 只建立 fresh defaults。
 
 Scalar、整個 sequence 與整個 typed mapping 都是 leaf。普通 nested model 只編輯子欄位，一般可留空 model 區段仍用 Enabled 控制 object／null 啟停。Choices 使用 model-field leaf paths，驗證與 schema 共用同一份當次選項。Parent 與 child 宣告同一 leaf 時，最深 nested FormModel 的 local choices 優先，包含空選項。非重疊的 parent 選項保持有效，重用同型 nested model 的欄位各自隔離。
 

@@ -3,13 +3,12 @@ from __future__ import annotations
 import dataclasses
 import os
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from inspect import signature
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, cast
 
 from zcu_tools.datafile import AnalysisDocument, RunMetadata
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.native_persistence import (
     PreparedRunData,
@@ -19,7 +18,6 @@ from zcu_tools.experiment.native_persistence import (
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
-    AdapterCfgDefinition,
     AdapterGuide,
     AnalysisMode,
     AnalyzeRequest,
@@ -40,10 +38,8 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.app.measure.adapter.lowering import validate_schema
 from zcu_tools.gui.app.measure.adapter.types import AnalyzeResult
-from zcu_tools.gui.cfg import CfgSchema
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.interactive import PluginDefinition, Session
 
 if TYPE_CHECKING:
@@ -56,13 +52,7 @@ if TYPE_CHECKING:
 # Index of T_AnalyzeParams in BaseAdapter's generic parameter list
 # (Cfg, Result, AnalyzeResult, AnalyzeParams).
 _ANALYZE_PARAMS_GENERIC_INDEX = 3
-_NO_GUIDE = AdapterGuide(
-    behavior="(no guide written yet)",
-    expects_md="",
-    expects_ml="",
-    typical_writeback="",
-    recommended="",
-)
+_NO_GUIDE = AdapterGuide(markdown="(no guide written yet)", resource_dir=None)
 
 
 def _analyze_params_generic_arg(cls: type) -> type:
@@ -117,7 +107,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     """Shared implementation for experiment adapters.
 
     Concrete adapters subclass this and fill in the experiment-specific knowledge
-    (``form``, ``build_exp_cfg``, ``make_filename_stem``
+    (``make_form``, ``make_filename_stem``
     and — when the experiment supports analysis — ``get_analyze_params``/``analyze``).
     Everything else (run delegation, save-path policy,
     save) is provided here once.
@@ -140,10 +130,19 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     # Most registered adapters use the canonical PersistableExperiment loader;
     # concrete no-load adapters declare ``load_data=False`` explicitly.
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(load_data=True)
-    guide_text: ClassVar[AdapterGuide] = _NO_GUIDE
+    # Explicit UTF-8 Markdown source. None returns the unwritten-guide notice;
+    # a declared path is read on each guide() call and I/O errors propagate.
+    guide_path: ClassVar[Path | None] = None
 
-    # Concrete adapters publish one core-derived definition; the host owns state.
-    form: Form[T_Cfg]
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[T_Cfg]:
+        """Build a fresh definition for captured Open/Reset sources.
+
+        Concrete adapters provide this factory. No fixed definition fallback is
+        supplied; missing factories raise NotImplementedError when used.
+        """
+        del ctx
+        raise NotImplementedError("Adapters must implement make_form")
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -295,53 +294,33 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     # -- experiment-specific contract (subclass must fill) -----------------
 
     @classmethod
-    def cfg_definition(cls) -> AdapterCfgDefinition:
-        """Return a legacy independent schema definition; not used by tab forms.
-
-        Adapters that still use make_default_cfg must declare this hook. The
-        core-derived tab path uses form instead. Missing legacy hooks raise
-        NotImplementedError rather than guessing a form/schema conversion.
-        """
-        raise NotImplementedError("Legacy cfg_definition is not declared")
-
-    @classmethod
     def guide(cls) -> AdapterGuide:
-        """Static human-facing orientation guide.
+        """Read the declared UTF-8 Markdown guide without parsing its contents.
 
-        Concrete adapters keep the guide prose local as ``guide_text``. The
-        method remains the framework-facing protocol entry point so GUI/MCP
-        consumers do not need to know how each adapter stores its prose.
-
-        Honest default: an adapter that has not written prose says so plainly
-        (Fast-Fail spirit — surface the gap, do not fake content).
+        guide_path names the source file; its parent is the resource directory
+        for relative image references. Relative guide paths use the current
+        working directory. None returns an unwritten-guide notice and no
+        resource directory. Each call reads the file afresh. A declared missing
+        file raises FileNotFoundError; other I/O and decoding errors propagate.
+        Images are not read here.
         """
-        return cls.guide_text
+        if cls.guide_path is None:
+            return _NO_GUIDE
+        return AdapterGuide(
+            markdown=cls.guide_path.read_text(encoding="utf-8"),
+            resource_dir=cls.guide_path.parent,
+        )
 
-    def build_exp_cfg(
-        self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
-    ) -> T_Cfg:
-        """Validate an accepted Form dump as this adapter's concrete core cfg.
-
-        raw_cfg contains the already lowered values from TabFormResource.accept,
-        not authored input or library references. req remains the Run request;
-        this conversion needs no sources, assets or hardware. Return the type
-        published by form.core_cfg. Core ValidationError propagates for invalid
-        mappings. The mapping and request are not modified or reassembled.
-        """
-        del req
-        return self.form.core_cfg.model_validate(raw_cfg)
-
-    def validate_run_request(
-        self, req: RunRequest, raw_cfg: Mapping[str, ExperimentCfgValue]
-    ) -> None:
+    def validate_run_request(self, req: RunRequest, cfg: T_Cfg) -> None:
         """Pure run preflight for adapter-specific constraints.
 
         GuardService calls this before opening an async run handle. The default is
-        intentionally empty because most adapters have no constraints beyond
-        lowering + model construction; adapters that need SoC-dependent checks
-        override it and must not touch devices or mutate cfg/state.
+        intentionally empty: cfg is the output already validated by this adapter's
+        Form, not raw input. Adapters that need SoC-dependent checks override it
+        and must not touch devices or mutate cfg/state. Validation failures
+        propagate to GuardService's admission error translation.
         """
-        del req, raw_cfg
+        del req, cfg
 
     @abstractmethod
     def make_filename_stem(self, ctx: SessionEnv) -> str:
@@ -457,18 +436,6 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
 
     # -- shared implementation (provided once) -----------------------------
 
-    def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
-        """Instantiate fresh defaults and validate their static input contract.
-
-        ctx supplies the fixed parameter capture. Unbound role defaults may
-        retain expressions and empty linked references for cfg Invalid
-        publication; they are not runnable. Definition, source and malformed
-        input failures propagate without fallback or context mutation.
-        """
-        schema = type(self).cfg_definition().instantiate(ctx)
-        validate_schema(schema, ctx.parameters)
-        return schema
-
     @classmethod
     def analyze_params_cls(cls) -> type:
         """Return the analyze-params dataclass type (static, no instance/result).
@@ -498,11 +465,17 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: T_Cfg,
         *,
         context: RunContext,
     ) -> T_Result:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        """Pass this adapter's validated Form output to its core unchanged.
+
+        req supplies admission inputs; context owns acquisition dependencies.
+        No form rebuild, source capture or cfg validation happens here.
+        Core execution failures propagate to the operation owner.
+        """
+        del req
         return cast(T_Result, self.exp_cls().run(cfg, context=context))
 
     def load(self, req: LoadDataRequest) -> tuple[object, RunMetadata]:

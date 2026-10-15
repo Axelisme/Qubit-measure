@@ -11,13 +11,11 @@ import numpy as np
 import pytest
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import (
-    ActiveSpectrumChangedPayload,
     InteractiveChangedPayload,
     SpectrumChangedPayload,
 )
-from zcu_tools.gui.app.fluxdep.interactive import LinePickContext
+from zcu_tools.gui.app.fluxdep.interactive import CrossSelectionContext, LinePickContext
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpectrumEntry
-from zcu_tools.gui.event_bus import EventMeta
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
 
@@ -50,6 +48,118 @@ def controller():
     ctrl.set_active_spectrum("sample")
     yield ctrl
     ctrl.interactive.dispose()
+
+
+@pytest.mark.parametrize("retirement", ["cancel", "replace", "source", "dispose"])
+def test_selection_name_draft_has_independent_global_lifetime(
+    selection_name_controller: Controller, retirement: str
+):
+    ctrl = selection_name_controller
+    owner = ctrl.interactive
+    line = owner.begin_line_pick("selection")
+    named = owner.inspect("selection")
+    assert named is not None, "A literal spectrum name must read its own draft"
+    assert named.context is line
+    line.plugin.execute_command(
+        line.session, "move_line", {"role": "half", "position": 0.25}
+    )
+    joint = owner.begin_cross_selection()
+    global_draft = owner.inspect_selection()
+    assert global_draft is not None and global_draft.context is joint
+    assert owner.inspect("selection") == named
+    assert owner.inspect() == global_draft
+    ctrl.set_active_spectrum("selection")
+    assert owner.inspect() == named
+    assert owner.inspect_selection() == global_draft
+    assert line.session.can_undo()
+
+    if retirement == "cancel":
+        owner.cancel_selection()
+        assert owner.inspect_selection() is None
+        assert owner.inspect("selection") == named
+        joint = owner.begin_cross_selection()
+        owner.cancel("selection")
+        assert owner.inspect("selection") is None
+        assert owner.current_cross_selection() is joint
+        joint.session.ensure_input_open()
+    elif retirement == "replace":
+        sample = owner.begin_sample_pick("selection")
+        assert owner.current_onetone_pick("selection") is sample
+        assert owner.current_cross_selection() is joint
+        with pytest.raises(FailedPreconditionError, match="closed"):
+            line.session.ensure_input_open()
+        owner.finish_onetone_pick("selection")
+        assert owner.inspect("selection") is None
+        assert owner.inspect_selection() is None
+    elif retirement == "source":
+        ctrl.set_points("selection", np.array([1.0]), np.array([4.6]))
+        assert owner.inspect("selection") is None
+        assert owner.inspect_selection() is None
+        with pytest.raises(FailedPreconditionError, match="closed"):
+            joint.session.ensure_input_open()
+    else:
+        owner.dispose()
+        assert owner.inspect("selection") is None
+        assert owner.inspect_selection() is None
+        with pytest.raises(FailedPreconditionError, match="closed"):
+            joint.session.ensure_input_open()
+        with pytest.raises(FailedPreconditionError, match="disposed"):
+            owner.begin_line_pick("selection")
+    with pytest.raises(FailedPreconditionError, match="closed"):
+        line.session.ensure_input_open()
+
+
+def test_selection_name_line_finish_publishes_literal_source(
+    selection_name_controller: Controller,
+):
+    ctrl = selection_name_controller
+    line = ctrl.interactive.begin_line_pick("selection")
+    draft = ctrl.interactive.inspect("selection")
+    assert draft is not None and draft.context is line
+    line.plugin.execute_command(
+        line.session, "move_line", {"role": "half", "position": 0.5}
+    )
+    line.plugin.execute_command(
+        line.session, "move_line", {"role": "integer", "position": 2.5}
+    )
+    ctrl.interactive.begin_cross_selection()
+    receipt = ctrl.interactive.finish_line_pick("selection")
+    assert receipt.result.flux_half == 0.5
+    assert ctrl.state.get_spectrum("selection").flux_half == 0.5
+    assert ctrl.interactive.inspect("selection") is None
+    assert ctrl.interactive.inspect_selection() is None
+
+
+def test_spectrum_drafts_survive_display_switch_and_finish_by_name(
+    controller: Controller,
+):
+    owner = controller.interactive
+    other = deepcopy(controller.state.get_spectrum("sample"))
+    other.name = "other"
+    controller.state.put_spectrum(other)
+    first = owner.begin_line_pick("sample")
+    first.plugin.execute_command(
+        first.session, "move_line", {"role": "half", "position": -1.0}
+    )
+    controller.set_active_spectrum("other")
+    assert first.session.can_undo(), "display switching must retain the editable draft"
+    first.session.ensure_input_open()
+    second = owner.begin_line_pick("other")
+    second.plugin.execute_command(
+        second.session, "move_line", {"role": "integer", "position": 3.0}
+    )
+    assert owner.begin_line_pick("sample") is first
+    inspected_first = owner.inspect("sample")
+    assert inspected_first is not None and inspected_first.context is first
+    inspected_second = owner.inspect("other")
+    assert inspected_second is not None and inspected_second.context is second
+    first.session.undo()
+    assert second.session.can_undo()
+    owner.finish_line_pick("other")
+    assert controller.state.get_spectrum("other").aligned
+    assert owner.inspect("other") is None
+    inspected_first = owner.inspect("sample")
+    assert inspected_first is not None and inspected_first.context is first
 
 
 def test_inspect_identity_and_facts_follow_committed_session(controller: Controller):
@@ -175,9 +285,9 @@ def test_inspect_tracks_kind_switch_and_terminal_facts(twotone_controller):
         subscription.unsubscribe()
 
 
-@pytest.mark.parametrize("kind", ["line", "onetone", "twotone", "selection"])
+@pytest.mark.parametrize("kind", ["line", "onetone", "twotone"])
 def test_closed_callback_context_is_not_overwritten(
-    controller: Controller, kind: Literal["line", "onetone", "twotone", "selection"]
+    controller: Controller, kind: Literal["line", "onetone", "twotone"]
 ):
     if kind == "twotone":
         controller.state.spectrums["sample"].spec_type = "TwoTone"
@@ -185,9 +295,9 @@ def test_closed_callback_context_is_not_overwritten(
     controller.set_points("sample", np.array([-0.5, 0.5]), np.array([4.2, 4.3]))
     owner = controller.interactive
     old = (
-        owner.begin_line_pick("sample")
-        if kind == "selection"
-        else owner.begin_cross_selection()
+        owner.begin_onetone_pick("sample")
+        if kind == "line"
+        else owner.begin_line_pick("sample")
     )
     reentered: list[LinePickContext] = []
     facts: list[InteractiveChangedPayload] = []
@@ -201,7 +311,6 @@ def test_closed_callback_context_is_not_overwritten(
         "line": lambda: owner.begin_line_pick("sample"),
         "onetone": lambda: owner.begin_onetone_pick("sample"),
         "twotone": lambda: owner.begin_twotone_pick("sample"),
-        "selection": owner.begin_cross_selection,
     }[kind]
     subscription = controller.bus.subscribe(InteractiveChangedPayload, on_fact)
     try:
@@ -225,61 +334,54 @@ def test_closed_callback_context_is_not_overwritten(
         subscription.unsubscribe()
 
 
-def test_begin_preserves_reentry_from_current_query_retirement(controller: Controller):
-    second = deepcopy(controller.state.spectrums["sample"])
-    second.name = "second"
-    controller.state.put_spectrum(second)
-    controller.set_alignment("second", -1.0, 1.0)
+def test_selection_and_spectrum_contexts_coexist(controller: Controller):
+    controller.set_alignment("sample", -1.0, 1.0)
+    controller.set_points("sample", np.array([-0.5, 0.5]), np.array([4.2, 4.3]))
     owner = controller.interactive
-    old = owner.begin_line_pick("sample")
-    reentered: list[LinePickContext] = []
-    errors: list[FailedPreconditionError] = []
-    facts: list[InteractiveChangedPayload] = []
+    line = owner.begin_line_pick("sample")
+    selection = owner.begin_cross_selection()
+    line_active = owner.inspect("sample")
+    selection_active = owner.inspect_selection()
+    assert line_active is not None and line_active.context is line
+    assert selection_active is not None and selection_active.context is selection
+    assert line_active.context_id != selection_active.context_id
+    line.session.ensure_input_open()
+    selection.session.ensure_input_open()
+    line.plugin.actions.swap.execute(line.session, None)
+    selection.session.ensure_input_open()
 
-    def on_fact(fact: InteractiveChangedPayload) -> None:
-        facts.append(fact)
-        if fact.phase == "closed" and not reentered:
-            reentered.append(owner.begin_line_pick("second"))
 
-    def on_active(event: ActiveSpectrumChangedPayload, _meta: EventMeta) -> None:
-        if event.name == "second":
-            try:
-                owner.begin_onetone_pick("second")
-            except FailedPreconditionError as exc:
-                errors.append(exc)
+def test_selection_cancel_callback_keeps_editable_successor(controller: Controller):
+    controller.set_alignment("sample", -1.0, 1.0)
+    controller.set_points("sample", np.array([-0.5, 0.5]), np.array([4.2, 4.3]))
+    owner = controller.interactive
+    old = owner.begin_cross_selection()
+    old_active = owner.inspect_selection()
+    successors: list[CrossSelectionContext] = []
 
-    subscription = controller.bus.subscribe(InteractiveChangedPayload, on_fact)
-    metadata = controller.bus.subscribe_with_meta(
-        ActiveSpectrumChangedPayload, on_active
-    )
+    def reopen(fact: InteractiveChangedPayload) -> None:
+        if fact.kind == "selection" and fact.phase == "closed" and not successors:
+            successors.append(owner.begin_cross_selection())
+
+    subscription = controller.bus.subscribe(InteractiveChangedPayload, reopen)
     try:
-        controller.set_active_spectrum("second")
-        assert len(errors) == 1
-        assert len(reentered) == 1
-        active = owner.inspect()
-        assert active is not None and active.context is reentered[0]
-        assert [fact.phase for fact in facts] == ["closed", "opened"]
+        owner.cancel_selection()
+        active = owner.inspect_selection()
+        assert active is not None and active.context is successors[0]
+        assert old_active is not None and active.context_id != old_active.context_id
         with pytest.raises(FailedPreconditionError, match="closed"):
             old.session.ensure_input_open()
-        current = reentered[0]
-        current.plugin.actions.swap.execute(current.session, None)
-        current.session.undo()
-        assert [fact.phase for fact in facts] == [
-            "closed",
-            "opened",
-            "updated",
-            "updated",
-        ]
-        assert {fact.context_id for fact in facts[1:]} == {active.context_id}
-        owner.cancel()
-        assert owner.inspect() is None
-        assert facts[-1].phase == "closed"
-        assert facts[-1].context_id == active.context_id
-        with pytest.raises(FailedPreconditionError, match="closed"):
-            current.session.ensure_input_open()
+        current = successors[0]
+        current.plugin.execute_command(
+            current.session, "set_min_distance", {"min_distance": 0.01}
+        )
+        assert current.session.snapshot().min_distance == 0.01
     finally:
-        metadata.unsubscribe()
         subscription.unsubscribe()
+    owner.cancel_selection()
+    assert owner.inspect_selection() is None
+    with pytest.raises(FailedPreconditionError, match="closed"):
+        current.session.ensure_input_open()
 
 
 def test_dispose_rejects_begin_from_closed_callback(controller: Controller):
@@ -406,7 +508,7 @@ def test_begin_reuses_session_and_finish_publishes_alignment(controller: Control
     subscription = controller.bus.subscribe(
         SpectrumChangedPayload, lambda event: changes.append(event.name)
     )
-    result = owner.finish_line_pick()
+    result = owner.finish_line_pick().result
     subscription.unsubscribe()
     assert result.flux_period == 3.0
     entry = controller.state.spectrums["sample"]
@@ -432,15 +534,13 @@ def test_equal_seed_finish_failure_keeps_context_editable(controller):
     assert controller.interactive.current_line_pick() is ctx
     assert not controller.state.spectrums["sample"].aligned
     ctx.plugin.actions.move.execute(ctx.session, ("half", 1.0))
-    assert controller.interactive.finish_line_pick().flux_period == 2.0
+    assert controller.interactive.finish_line_pick().result.flux_period == 2.0
 
 
-@pytest.mark.parametrize("change", ["switch", "remove", "reload", "alignment"])
+@pytest.mark.parametrize("change", ["remove", "reload", "alignment"])
 def test_spectrum_change_closes_old_input(controller, change):
     ctx = controller.interactive.begin_line_pick("sample")
-    if change == "switch":
-        controller.set_active_spectrum(None)
-    elif change == "remove":
+    if change == "remove":
         controller.remove_spectrum("sample")
     elif change == "reload":
         controller.state.put_spectrum(replace(controller.state.spectrums["sample"]))
@@ -454,14 +554,10 @@ def test_spectrum_change_closes_old_input(controller, change):
         ctx.plugin.actions.swap.execute(ctx.session, None)
 
 
-def test_unknown_inactive_disposed_and_cancel_contract(controller):
+def test_unknown_disposed_and_cancel_contract(controller):
     owner = controller.interactive
     with pytest.raises(InvalidInputError):
         owner.begin_line_pick("missing")
-    controller.set_active_spectrum(None)
-    with pytest.raises(FailedPreconditionError):
-        owner.begin_line_pick("sample")
-    controller.set_active_spectrum("sample")
     old = owner.begin_line_pick("sample")
     owner.cancel()
     new = owner.begin_line_pick("sample")
@@ -503,6 +599,11 @@ def test_twotone_reuse_kind_switch_and_terminal_publication(twotone_controller):
     assert owner.begin_twotone_pick("two") is context
     with pytest.raises(FailedPreconditionError):
         line.session.undo()
+    context.plugin.execute_command(
+        context.session,
+        "stroke",
+        {"vertices": [[-1.0, 4.5], [1.0, 5.1]], "width": 0.04, "mode": "select"},
+    )
     expected = analyze_twotone_pick(context.plugin.inputs, context.session.snapshot())
     assert expected.dev_values.size > 0
     changes: list[str] = []
@@ -510,7 +611,7 @@ def test_twotone_reuse_kind_switch_and_terminal_publication(twotone_controller):
         SpectrumChangedPayload, lambda event: changes.append(event.name)
     )
     try:
-        result = owner.finish_twotone_pick()
+        result = owner.finish_twotone_pick().result
     finally:
         subscription.unsubscribe()
     np.testing.assert_array_equal(result.dev_values, expected.dev_values)
@@ -542,7 +643,7 @@ def test_invalid_twotone_finish_keeps_context_editable(twotone_controller):
     assert not twotone_controller.state.spectrums["two"].points_completed
     context.session.undo()
     context.plugin.clear.execute(context.session, None)
-    assert owner.finish_twotone_pick().dev_values.size == 0
+    assert owner.finish_twotone_pick().result.dev_values.size == 0
 
 
 def test_line_begin_closes_previous_twotone_input(twotone_controller):
@@ -555,9 +656,7 @@ def test_line_begin_closes_previous_twotone_input(twotone_controller):
         old.plugin.clear.execute(old.session, None)
 
 
-@pytest.mark.parametrize(
-    "condition", ["missing", "inactive", "unaligned", "type", "disposed"]
-)
+@pytest.mark.parametrize("condition", ["missing", "unaligned", "type", "disposed"])
 def test_twotone_begin_prerequisites(twotone_controller, condition):
     ctrl = twotone_controller
     name = "two"
@@ -565,8 +664,6 @@ def test_twotone_begin_prerequisites(twotone_controller, condition):
     if condition == "missing":
         name = "missing"
         error = InvalidInputError
-    elif condition == "inactive":
-        ctrl.set_active_spectrum(None)
     elif condition == "unaligned":
         ctrl.state.put_spectrum(replace(ctrl.state.spectrums[name], aligned=False))
     elif condition == "type":
@@ -580,7 +677,7 @@ def test_twotone_begin_prerequisites(twotone_controller, condition):
 
 
 @pytest.mark.parametrize(
-    "change", ["switch", "remove", "reload", "alignment", "cancel", "dispose"]
+    "change", ["remove", "reload", "alignment", "cancel", "dispose"]
 )
 def test_twotone_invalidation_closes_input_without_points(twotone_controller, change):
     from zcu_tools.gui.app.fluxdep.event_bus import SpectrumAddedPayload
@@ -588,9 +685,7 @@ def test_twotone_invalidation_closes_input_without_points(twotone_controller, ch
     ctrl = twotone_controller
     owner = ctrl.interactive
     context = owner.begin_twotone_pick("two")
-    if change == "switch":
-        ctrl.set_active_spectrum(None)
-    elif change == "remove":
+    if change == "remove":
         ctrl.remove_spectrum("two")
     elif change == "reload":
         ctrl.state.put_spectrum(replace(ctrl.state.spectrums["two"]))
@@ -665,7 +760,7 @@ def test_onetone_reuse_kind_switch_and_terminal_publication(onetone_controller):
         SpectrumChangedPayload, lambda event: changes.append(event.name)
     )
     try:
-        result = owner.finish_onetone_pick()
+        result = owner.finish_onetone_pick().result
     finally:
         subscription.unsubscribe()
     np.testing.assert_array_equal(result.dev_values, expected.dev_values)
@@ -706,7 +801,7 @@ def test_invalid_onetone_finish_keeps_context_editable(onetone_controller):
     assert owner.current_onetone_pick() is context
     assert not onetone_controller.state.spectrums["one"].points_completed
     context.plugin.set_threshold.execute(context.session, 0.1)
-    assert owner.finish_onetone_pick().dev_values.size == 2
+    assert owner.finish_onetone_pick().result.dev_values.size == 2
 
 
 def test_line_begin_closes_previous_onetone_input(onetone_controller):
@@ -720,9 +815,7 @@ def test_line_begin_closes_previous_onetone_input(onetone_controller):
     assert not onetone_controller.state.spectrums["one"].points_completed
 
 
-@pytest.mark.parametrize(
-    "condition", ["missing", "inactive", "unaligned", "type", "disposed"]
-)
+@pytest.mark.parametrize("condition", ["missing", "unaligned", "type", "disposed"])
 def test_onetone_begin_prerequisites(onetone_controller, condition):
     ctrl = onetone_controller
     name = "one"
@@ -730,8 +823,6 @@ def test_onetone_begin_prerequisites(onetone_controller, condition):
     if condition == "missing":
         name = "missing"
         error = InvalidInputError
-    elif condition == "inactive":
-        ctrl.set_active_spectrum(None)
     elif condition == "unaligned":
         ctrl.state.put_spectrum(replace(ctrl.state.spectrums[name], aligned=False))
     elif condition == "type":
@@ -745,15 +836,13 @@ def test_onetone_begin_prerequisites(onetone_controller, condition):
 
 
 @pytest.mark.parametrize(
-    "change", ["switch", "remove", "reload", "alignment", "cancel", "dispose"]
+    "change", ["remove", "reload", "alignment", "cancel", "dispose"]
 )
 def test_onetone_invalidation_closes_input_without_points(onetone_controller, change):
     ctrl = onetone_controller
     owner = ctrl.interactive
     context = owner.begin_onetone_pick("one")
-    if change == "switch":
-        ctrl.set_active_spectrum(None)
-    elif change == "remove":
+    if change == "remove":
         ctrl.remove_spectrum("one")
     elif change == "reload":
         ctrl.state.put_spectrum(replace(ctrl.state.spectrums["one"]))

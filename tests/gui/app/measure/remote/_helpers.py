@@ -17,25 +17,24 @@ from functools import partial
 from io import BytesIO
 from pathlib import Path
 from tempfile import mkdtemp
-from typing import Any, cast
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 from PIL import Image
 from qtpy.QtCore import QCoreApplication
-from zcu_tools.cfg_model import TemplateDef
+from zcu_tools.cfg_model import ConfigBase, TemplateDef
 from zcu_tools.gui.app.measure.adapter import ExpAdapterProtocol, SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.remote.wire_version import WIRE_VERSION
-from zcu_tools.gui.app.measure.services.tab_cfg import TabCfgResources
+from zcu_tools.gui.app.measure.services.tab_form import TabFormResource
 from zcu_tools.gui.app.measure.state import Session, State
-from zcu_tools.gui.cfg import CfgSchema
-from zcu_tools.gui.cfg.resource import CfgObservation, CfgResource
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import ExpectedError
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.remote.errors import remote_error_from_expected
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.context_types import (
@@ -55,6 +54,7 @@ from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui.app.measure._form_fakes import form_sources
 from tests.gui.app.measure._synthetic import ALIAS_PRESET, SampleAdapter, register_all
 
 
@@ -206,34 +206,28 @@ class Fixture:
             render_view=self.view,
         )
 
-    def prepare_tab(
+    def prepare_tab[C: ConfigBase](
         self,
         tab_id: str,
         adapter: ExpAdapterProtocol,
-        schema: CfgSchema,
+        form: Form[C],
         *,
         adapter_name: str = "fake",
-    ) -> CfgResource:
-        """Install a custom test tab through the application lifetime owner."""
-        resources = cast(TabCfgResources, self.ctrl.cfg_resources)
-        from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-
-        cfg = resources.create(
+    ) -> TabFormResource:
+        """Install a synthetic Form through the application's resource owner."""
+        cfg = self.ctrl.cfg_resources.create(
             tab_id,
-            lambda: schema,
-            initial=schema,
-            resolution=lambda: MeasureCfgBindings(self.ctrl).snapshot_from_state(
-                self.state, captured_values={}, parameters=self.ctrl.read_context()
-            ),
+            lambda _ctx: form,
+            capture=lambda aliases: form_sources(self.state, aliases),
         )
         self.state.add_tab(
             tab_id, Session(adapter_name=adapter_name, adapter=adapter, cfg=cfg)
         )
 
-        def published(_observation: CfgObservation) -> None:
+        def published() -> None:
             self.state.version.bump(f"tab:{tab_id}:cfg")
 
-        cfg.watch(published)
+        cfg.subscribe(published)
         return cfg
 
     def start(self) -> int:

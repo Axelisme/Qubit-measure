@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar, Literal
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
     AxesSpec,
@@ -54,15 +54,15 @@ class FreqResult:
 
 
 class FreqModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    init_pulse: PulseCfg | None = None
-    tested_reset: TwoPulseResetCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[TwoPulseResetCfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class FreqSweepCfg(ConfigBase):
-    freq1: SweepCfg
-    freq2: SweepCfg
+    freq1: Annotated[SweepCfg, FieldMeta(label="Freq1", unit="MHz")]
+    freq2: Annotated[SweepCfg, FieldMeta(label="Freq2", unit="MHz")]
 
 
 class FreqCfg(ProgramV2Cfg, ExpCfgModel):

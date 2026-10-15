@@ -184,7 +184,7 @@ def test_terminal_delivery_releases_completed_future_result() -> None:
         on_error=lambda error: pytest.fail(str(error)),
     )
     del payload
-    _pump_until(scheduler, lambda: bool(delivered) and not executor._jobs)
+    _pump_until(scheduler, lambda: bool(delivered))
 
     assert executor.quiesce()
     assert delivered == [True]

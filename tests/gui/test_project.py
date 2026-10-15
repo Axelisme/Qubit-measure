@@ -27,7 +27,7 @@ def test_project_info_payload_returns_four_fields():
         "chip_name",
         "qub_name",
         "result_dir",
-        "database_path",
+        "data_root",
     }
 
 
@@ -38,16 +38,14 @@ def test_project_info_payload_values_match():
     assert payload["qub_name"] == "Q1"
     # ProjectInfo derives these in __post_init__; the payload just forwards them.
     assert payload["result_dir"] == project.result_dir
-    assert payload["database_path"] == project.database_path
+    assert payload["data_root"] == project.data_root
 
 
 def test_project_info_payload_with_explicit_paths():
-    project = ProjectInfo(
-        chip_name="A", qub_name="B", result_dir="/r", database_path="/d"
-    )
+    project = ProjectInfo(chip_name="A", qub_name="B", result_dir="/r", data_root="/d")
     payload = project_info_payload(project)
     assert payload["result_dir"] == "/r"
-    assert payload["database_path"] == "/d"
+    assert payload["data_root"] == "/d"
 
 
 # ---------------------------------------------------------------------------

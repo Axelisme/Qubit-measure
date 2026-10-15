@@ -21,6 +21,7 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
+    AdapterGuide,
     AnalysisMode,
     ParameterWriteback,
 )
@@ -53,6 +54,7 @@ from zcu_tools.resources.entry import (
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.measure._form_fakes import configure_form_lookup, make_form
 from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
+from tests.gui.widgets.form._text_input import commit_text
 
 
 @pytest.fixture
@@ -78,6 +80,9 @@ def control_factory(qapp: QApplication) -> Iterator[Callable[[], ControlIdentity
 def _mock_ctrl(control_factory: Callable[[], ControlIdentity]) -> MagicMock:
     ctrl = MagicMock()
     ctrl.control_identity = control_factory()
+    ctrl.get_adapter_guide.return_value = AdapterGuide(
+        markdown="# Synthetic guide\n", resource_dir=None
+    )
     configure_form_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
     ctrl.writeback_control.get_writeback_values_for_pane.return_value.__getitem__.return_value.actual_path = "r_f"
@@ -473,7 +478,7 @@ def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(control_factory, qapp):
     )
     reps = tab.findChild(QLineEdit, "form.input.reps")
     assert reps is not None
-    reps.setText("many")
+    commit_text(reps, "many")
     tab.update_interaction_state(
         _snapshot(
             "tab-1",
@@ -730,6 +735,29 @@ def test_main_window_successful_writeback_relies_on_event_owned_projection(
     ctrl.apply_writeback_for_pane.assert_called_once_with("tab-1", "analysis")
     window.refresh_tab_writeback.assert_not_called()
     window.show_status_message.assert_called_once_with("Writeback applied: param-1")
+
+
+def _status_bar_labels(window: MainWindow, text: str) -> list[QLabel]:
+    status_bar = window.statusBar()
+    assert status_bar is not None
+    return [label for label in status_bar.findChildren(QLabel) if label.text() == text]
+
+
+def test_status_bar_message_is_mouse_selectable(control_factory, qapp):
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.list_tab_ids.return_value = []
+    window = MainWindow(ctrl, templates=lambda: {})
+
+    assert len(_status_bar_labels(window, "Ready")) == 1
+
+    window.show_status_message("Writeback applied: param-1")
+
+    labels = _status_bar_labels(window, "Writeback applied: param-1")
+    assert len(labels) == 1
+    flags = labels[0].textInteractionFlags()
+    assert flags & Qt.TextInteractionFlag.TextSelectableByMouse
+    assert window.get_view_snapshot()["status"] == "Writeback applied: param-1"
 
 
 def test_main_window_toolbar_does_not_show_arb_waveforms(control_factory, qapp):
@@ -2470,12 +2498,12 @@ def run_form(
 
 
 def edit_run_input(fx: RunFormFixture, text: str) -> None:
-    """Replace the Value text; the editor parses each text change."""
+    """Replace the Value text and press Enter; the editor parses each commit."""
     fx.line.setFocus()
-    fx.line.setText(text)
+    commit_text(fx.line, text)
 
 
-def test_run_uses_the_input_published_while_typing(
+def test_run_uses_the_input_published_on_commit(
     run_form: RunFormFixture,
 ) -> None:
     fx = run_form
@@ -2572,7 +2600,7 @@ def test_reset_replaces_published_input_with_defaults(
     tab = fx.window.findChildren(ExpTabWidget)[0]
     line = tab.findChild(QLineEdit, "form.input.value")
     assert line is not None
-    line.setText("3.5")
+    commit_text(line, "3.5")
     assert fx.owner.accept().values == {"value": 3.5}
     tab.reset_btn.click()
     line = tab.findChild(QLineEdit, "form.input.value")

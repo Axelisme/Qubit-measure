@@ -12,6 +12,7 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
+from ..guide_types import AdapterGuideView
 from ._common import render_view
 
 
@@ -25,10 +26,25 @@ def h_adapter_list(
 def h_adapter_guide(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
+    """Return guide Markdown and an absolute resource directory string or null.
+
+    params['adapter_name'] names a registered adapter. Unknown names raise
+    invalid_params; guide source errors propagate to the shared RPC dispatcher.
+    Referenced images are not read or attached.
+    """
     name = str(params["adapter_name"])
     if name not in adapter.ctrl.get_adapter_names():
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown adapter: {name!r}")
-    return {"guide": adapter.ctrl.get_adapter_guide(name)}
+    guide = adapter.ctrl.get_adapter_guide(name)
+    view: AdapterGuideView = {
+        "markdown": guide.markdown,
+        "resource_dir": (
+            str(guide.resource_dir.resolve())
+            if guide.resource_dir is not None
+            else None
+        ),
+    }
+    return {"guide": view}
 
 
 def h_app_shutdown(
