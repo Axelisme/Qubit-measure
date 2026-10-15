@@ -238,7 +238,7 @@ def test_invalid_backend_signals_fail_public_acquire_and_allow_retry(invalid, mo
     reason = (
         "finite|int64"
         if invalid in ("nan", "infinity", "overflow")
-        else "shape|channels"
+        else "expected.*got|channels"
     )
     with pytest.raises(ValueError, match=reason):
         acquire(env.soc, progress=False)
