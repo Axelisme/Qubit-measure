@@ -563,3 +563,26 @@ def test_invalid_library_mapping_fails_before_entry_creation(
     with pytest.raises(MigrationInputError):
         _convert(request, replace(mapping, module_rules=rules))
     assert not request.results_root.exists()
+
+
+def test_migrated_pulse_library_can_be_reopened_with_current_header(
+    request_data: MigrationRequest,
+    library_mapping: MigrationMapping,
+) -> None:
+    request = replace(request_data, part="parameters")
+    _library(
+        write_meta(request, "context", {}),
+        {
+            "modules": {"same": _pulse("same")},
+            "waveforms": {"same": {"style": "const", "length": 0.125}},
+        },
+    )
+
+    report = _convert(request, library_mapping)
+
+    assert report.pending == ()
+    assert report.failures == ()
+    pulse = _entry(request).module_library("context").snapshot().get_module("C1.pulses.pi")
+    assert isinstance(pulse, PulseCfg)
+    assert pulse.freq == 123.5
+    assert pulse.waveform.length == 0.125
