@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
 from copy import deepcopy
 from pathlib import Path
 
@@ -18,28 +17,10 @@ from zcu_tools.resources.waveform_assets import (
 )
 
 
-@pytest.fixture(scope="module", autouse=True)
-def repository_state_guard() -> Iterator[None]:
-    before = vars(ArbWaveformDatabase)["_database_path"]
-    yield
-    assert vars(ArbWaveformDatabase)["_database_path"] == before
-
-
-@pytest.fixture(autouse=True)
-def isolated_repository(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
-
-
-def _init_db(tmp_path):
-    root = tmp_path / "arb_waveforms"
-    ArbWaveformDatabase.init(root)
-    return root
-
-
-def _save_zero_q_asset(data_key: str = "pulse") -> None:
-    ArbWaveformDatabase.save(
-        data_key, idata=np.array([0.0, 0.4]), time=np.array([0.0, 0.75])
-    )
+def _save_zero_q_asset(
+    repository: ArbWaveformDatabase, data_key: str = "pulse"
+) -> None:
+    repository.save(data_key, idata=np.array([0.0, 0.4]), time=np.array([0.0, 0.75]))
 
 
 def test_root_bound_repositories_isolate_interleaved_writes_and_captures(
@@ -75,9 +56,10 @@ def test_root_bound_repositories_isolate_interleaved_writes_and_captures(
 
 
 def test_import_data_uses_single_file_layout_and_runtime_get(tmp_path):
-    root = _init_db(tmp_path)
+    root = tmp_path / "arb_waveforms"
+    repository = ArbWaveformDatabase(root)
 
-    info = ArbWaveformDatabase.import_data(
+    info = repository.import_data(
         "arb_data1",
         idata=np.array([0.0, 0.5, 0.0]),
         qdata=None,
@@ -88,8 +70,8 @@ def test_import_data_uses_single_file_layout_and_runtime_get(tmp_path):
     assert info.duration == 0.75
     assert (root / "arb_data1.npz").exists()
     assert not (root / "arb_data1").exists()
-    assert ArbWaveformDatabase.list() == ["arb_data1"]
-    idata, qdata, time = ArbWaveformDatabase.get("arb_data1")
+    assert repository.list() == ["arb_data1"]
+    idata, qdata, time = repository.get("arb_data1")
     assert np.allclose(idata, [0.0, 0.5, 0.0])
     assert qdata is None
     assert np.allclose(time, [0.0, 0.25, 0.75])
@@ -98,47 +80,45 @@ def test_import_data_uses_single_file_layout_and_runtime_get(tmp_path):
 def test_info_at_binds_explicit_scope_without_switching_repository(
     tmp_path: Path,
 ) -> None:
-    first = _init_db(tmp_path)
-    _save_zero_q_asset()
-    ArbWaveformDatabase.init(tmp_path / "second")
-    ArbWaveformDatabase.save(
-        "pulse", idata=np.array([0.0, 0.8]), time=np.array([0.0, 2.0])
-    )
+    first = tmp_path / "arb_waveforms"
+    repository = ArbWaveformDatabase(first)
+    _save_zero_q_asset(repository)
+    other = ArbWaveformDatabase(tmp_path / "second")
+    other.save("pulse", idata=np.array([0.0, 0.8]), time=np.array([0.0, 2.0]))
 
     bound = ArbWaveformDatabase.info_at(first)
     assert bound.duration("pulse") == 0.75
     np.testing.assert_array_equal(bound.samples("pulse").time, [0.0, 0.75])
-    assert ArbWaveformDatabase.bound_info().duration("pulse") == 2.0
+    assert other.bound_info().duration("pulse") == 2.0
 
 
 def test_bound_info_keeps_scope_after_repository_switch(tmp_path: Path) -> None:
-    _init_db(tmp_path)
-    ArbWaveformDatabase.save(
+    repository = ArbWaveformDatabase(tmp_path / "arb_waveforms")
+    repository.save(
         "pulse",
         idata=np.array([0.0, 0.4, 0.0]),
         qdata=np.array([0.0, 0.3, 0.0]),
         time=np.array([0.0, 0.25, 0.75]),
     )
-    bound = ArbWaveformDatabase.bound_info()
+    bound = repository.bound_info()
 
-    ArbWaveformDatabase.init(tmp_path / "other_assets")
-    ArbWaveformDatabase.save(
-        "pulse", idata=np.array([0.0, 0.8]), time=np.array([0.0, 2.0])
-    )
+    other = ArbWaveformDatabase(tmp_path / "other_assets")
+    other.save("pulse", idata=np.array([0.0, 0.8]), time=np.array([0.0, 2.0]))
 
     assert bound.duration("pulse") == 0.75
     samples = bound.samples("pulse")
     np.testing.assert_array_equal(samples.time, [0.0, 0.25, 0.75])
     np.testing.assert_array_equal(samples.idata, [0.0, 0.4, 0.0])
     np.testing.assert_array_equal(samples.qdata, [0.0, 0.3, 0.0])
-    assert ArbWaveformDatabase.bound_info().duration("pulse") == 2.0
-    assert ArbWaveformDatabase.bound_info().samples("pulse").qdata is None
+    assert other.bound_info().duration("pulse") == 2.0
+    assert other.bound_info().samples("pulse").qdata is None
 
 
 def test_bound_info_reads_current_bytes_and_isolates_arrays(tmp_path: Path) -> None:
-    root = _init_db(tmp_path)
-    _save_zero_q_asset()
-    bound = ArbWaveformDatabase.bound_info()
+    root = tmp_path / "arb_waveforms"
+    repository = ArbWaveformDatabase(root)
+    _save_zero_q_asset(repository)
+    bound = repository.bound_info()
     copied = deepcopy(bound)
     first = bound.samples("pulse")
     first.idata[1] = -0.9
@@ -146,7 +126,7 @@ def test_bound_info_reads_current_bytes_and_isolates_arrays(tmp_path: Path) -> N
     np.testing.assert_array_equal(copied.samples("pulse").idata, [0.0, 0.4])
     assert copied.duration("pulse") == 0.75
 
-    ArbWaveformDatabase.save(
+    repository.save(
         "pulse",
         idata=np.array([0.0, 0.3]),
         qdata=np.array([0.0, 0.4]),
@@ -162,7 +142,6 @@ def test_bound_info_reads_current_bytes_and_isolates_arrays(tmp_path: Path) -> N
     assert copied.duration("pulse") == 1.5
     np.testing.assert_array_equal(first.idata, [0.0, -0.9])
 
-    ArbWaveformDatabase.init(tmp_path / "other_assets")
     (root / "pulse.npz").unlink()
     with pytest.raises(ArbWaveformError) as exc:
         copied.samples("pulse")
@@ -172,10 +151,10 @@ def test_bound_info_reads_current_bytes_and_isolates_arrays(tmp_path: Path) -> N
 def test_bound_path_keeps_scope_and_checks_existence_without_decoding(
     tmp_path: Path,
 ) -> None:
-    root = _init_db(tmp_path)
+    root = tmp_path / "arb_waveforms"
+    repository = ArbWaveformDatabase(root)
     (root / "opaque.npz").write_bytes(b"not an archive")
-    bound = ArbWaveformDatabase.bound_info()
-    ArbWaveformDatabase.init(tmp_path / "other")
+    bound = repository.bound_info()
     assert bound.path_for("opaque") == (root / "opaque.npz").resolve()
     with pytest.raises(ArbWaveformError) as error:
         bound.samples("opaque")
@@ -189,15 +168,16 @@ def test_bound_path_keeps_scope_and_checks_existence_without_decoding(
 def test_bound_path_rejects_missing_and_invalid_keys(
     tmp_path: Path, key: str, reason: str
 ) -> None:
-    _init_db(tmp_path)
-    bound = ArbWaveformDatabase.bound_info()
+    repository = ArbWaveformDatabase(tmp_path / "arb_waveforms")
+    bound = repository.bound_info()
     with pytest.raises(ArbWaveformError) as error:
         bound.path_for(key)
     assert error.value.reason == reason
 
 
 def test_repository_rejects_formula_semantics_not_just_json(tmp_path: Path) -> None:
-    root = _init_db(tmp_path)
+    root = tmp_path / "arb_waveforms"
+    repository = ArbWaveformDatabase(root)
     np.savez(
         root / "invalid_formula.npz",
         time=[0, 1],
@@ -206,22 +186,17 @@ def test_repository_rejects_formula_semantics_not_just_json(tmp_path: Path) -> N
         recipe_json=np.array('{"future_recipe": true}'),
     )
     with pytest.raises(ArbWaveformError):
-        ArbWaveformDatabase.load("invalid_formula")
-
-
-def test_bound_info_requires_initialized_scope() -> None:
-    with pytest.raises(RuntimeError, match="not initialized"):
-        ArbWaveformDatabase.bound_info()
+        repository.load("invalid_formula")
 
 
 @pytest.mark.parametrize("operation", ["duration", "samples"])
 def test_bound_info_reports_missing_key_in_bound_scope(
     tmp_path: Path, operation: str
 ) -> None:
-    root = _init_db(tmp_path)
-    _save_zero_q_asset("present")
-    bound = ArbWaveformDatabase.bound_info()
-    ArbWaveformDatabase.init(tmp_path / "other_assets")
+    root = tmp_path / "arb_waveforms"
+    repository = ArbWaveformDatabase(root)
+    _save_zero_q_asset(repository, "present")
+    bound = repository.bound_info()
     read = bound.duration if operation == "duration" else bound.samples
     with pytest.raises(ArbWaveformError) as exc:
         read("missing")
@@ -232,8 +207,8 @@ def test_bound_info_reports_missing_key_in_bound_scope(
 
 @pytest.mark.parametrize("operation", ["duration", "samples"])
 def test_bound_info_rejects_invalid_keys(tmp_path: Path, operation: str) -> None:
-    _init_db(tmp_path)
-    bound = ArbWaveformDatabase.bound_info()
+    repository = ArbWaveformDatabase(tmp_path / "arb_waveforms")
+    bound = repository.bound_info()
     read = bound.duration if operation == "duration" else bound.samples
     with pytest.raises(ArbWaveformError) as exc:
         read("../escape")
@@ -244,14 +219,15 @@ def test_bound_info_rejects_invalid_keys(tmp_path: Path, operation: str) -> None
 def test_bound_info_propagates_archive_validation(
     tmp_path: Path, operation: str
 ) -> None:
-    root = _init_db(tmp_path)
+    root = tmp_path / "arb_waveforms"
+    repository = ArbWaveformDatabase(root)
     np.savez(
         root / "invalid.npz",
         idata=np.array([0.0, 0.4]),
         qdata=np.array([0.0, 0.0]),
         time=np.array([0.0, 0.0]),
     )
-    bound = ArbWaveformDatabase.bound_info()
+    bound = repository.bound_info()
     read = bound.duration if operation == "duration" else bound.samples
     with pytest.raises(ArbWaveformError) as exc:
         read("invalid")
@@ -262,9 +238,10 @@ def test_bound_info_propagates_archive_validation(
 def test_bound_info_propagates_io_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
 ) -> None:
-    root = _init_db(tmp_path)
-    _save_zero_q_asset()
-    bound = ArbWaveformDatabase.bound_info()
+    root = tmp_path / "arb_waveforms"
+    repository = ArbWaveformDatabase(root)
+    _save_zero_q_asset(repository)
+    bound = repository.bound_info()
 
     def unreadable(*_args: object, **_kwargs: object) -> None:
         raise PermissionError("asset read denied")
@@ -280,10 +257,10 @@ def test_bound_info_propagates_io_failure(
 
 
 def test_import_data_rejects_invalid_key_before_filesystem(tmp_path):
-    _init_db(tmp_path)
+    repository = ArbWaveformDatabase(tmp_path / "arb_waveforms")
 
     with pytest.raises(ArbWaveformError) as exc:
-        ArbWaveformDatabase.import_data(
+        repository.import_data(
             "../bad",
             idata=np.array([0.0, 0.0]),
             qdata=None,
@@ -294,9 +271,9 @@ def test_import_data_rejects_invalid_key_before_filesystem(tmp_path):
 
 
 def test_import_data_accepts_nonuniform_strictly_increasing_time(tmp_path):
-    _init_db(tmp_path)
+    repository = ArbWaveformDatabase(tmp_path / "arb_waveforms")
 
-    info = ArbWaveformDatabase.import_data(
+    info = repository.import_data(
         "raw_nonuniform",
         idata=np.array([0.0, 0.2, 0.1, 0.0]),
         qdata=np.array([0.0, 0.1, 0.2, 0.0]),
@@ -308,7 +285,8 @@ def test_import_data_accepts_nonuniform_strictly_increasing_time(tmp_path):
 
 
 def test_npz_unknown_key_and_invalid_recipe_json_fail_fast(tmp_path):
-    root = _init_db(tmp_path)
+    root = tmp_path / "arb_waveforms"
+    repository = ArbWaveformDatabase(root)
     np.savez(
         root / "bad_extra.npz",
         idata=np.array([0.0, 0.0]),
@@ -325,9 +303,9 @@ def test_npz_unknown_key_and_invalid_recipe_json_fail_fast(tmp_path):
     )
 
     with pytest.raises(ArbWaveformError) as extra_exc:
-        ArbWaveformDatabase.load("bad_extra")
+        repository.load("bad_extra")
     with pytest.raises(ArbWaveformError) as recipe_exc:
-        ArbWaveformDatabase.load("bad_recipe")
+        repository.load("bad_recipe")
 
     assert extra_exc.value.reason == "unknown_npz_key"
     assert recipe_exc.value.reason == "invalid_recipe_json"
@@ -336,19 +314,20 @@ def test_npz_unknown_key_and_invalid_recipe_json_fail_fast(tmp_path):
 def test_create_from_formula_embeds_loadable_recipe_and_preserves_formula_text(
     tmp_path,
 ):
-    root = _init_db(tmp_path)
+    root = tmp_path / "arb_waveforms"
+    repository = ArbWaveformDatabase(root)
     recipe: dict[str, object] = {
         "segments": [{"duration": 1.0, "formula": " sin(2*pi*t) "}],
         "normalize": "none",
     }
 
-    ArbWaveformDatabase.create_from_formula("formula1", recipe)
-    info = ArbWaveformDatabase.inspect("formula1")
+    repository.create_from_formula("formula1", recipe)
+    info = repository.inspect("formula1")
 
     assert info.sample_count == 1001
     assert info.duration == pytest.approx(1.0)
     assert info.has_recipe is True
-    loaded_recipe = ArbWaveformDatabase.load_recipe("formula1")
+    loaded_recipe = repository.load_recipe("formula1")
     assert loaded_recipe is not None
     assert loaded_recipe.segments[0].formula == " sin(2*pi*t) "
     with np.load(root / "formula1.npz", allow_pickle=False) as archive:
@@ -443,7 +422,7 @@ def test_formula_rejects_unsupported_syntax_and_names():
 
 
 def test_collision_update_delete_and_rename_policy(tmp_path):
-    _init_db(tmp_path)
+    repository = ArbWaveformDatabase(tmp_path / "arb_waveforms")
     recipe = FormulaRecipe.from_raw(
         {
             "segments": [{"duration": 0.002, "formula": "0"}],
@@ -451,22 +430,22 @@ def test_collision_update_delete_and_rename_policy(tmp_path):
         }
     )
 
-    ArbWaveformDatabase.create_from_formula("asset_a", recipe)
+    repository.create_from_formula("asset_a", recipe)
     with pytest.raises(ArbWaveformError) as collision_exc:
-        ArbWaveformDatabase.create_from_formula("asset_a", recipe)
+        repository.create_from_formula("asset_a", recipe)
     with pytest.raises(ArbWaveformError) as missing_update_exc:
-        ArbWaveformDatabase.update_formula("missing", recipe)
+        repository.update_formula("missing", recipe)
 
-    ArbWaveformDatabase.create_from_formula("asset_b", recipe)
+    repository.create_from_formula("asset_b", recipe)
     with pytest.raises(ArbWaveformError) as rename_collision_exc:
-        ArbWaveformDatabase.rename("asset_a", "asset_b")
-    ArbWaveformDatabase.rename("asset_a", "asset_c")
-    ArbWaveformDatabase.delete("asset_c")
+        repository.rename("asset_a", "asset_b")
+    repository.rename("asset_a", "asset_c")
+    repository.delete("asset_c")
 
     assert collision_exc.value.reason == "data_key_exists"
     assert missing_update_exc.value.reason == "data_key_not_found"
     assert rename_collision_exc.value.reason == "data_key_exists"
-    assert ArbWaveformDatabase.list() == ["asset_b"]
+    assert repository.list() == ["asset_b"]
 
 
 # ---------------------------------------------------------------------------

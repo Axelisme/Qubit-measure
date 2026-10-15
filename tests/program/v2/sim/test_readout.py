@@ -497,13 +497,6 @@ def _flat_top_readout_cfg(length: float = 1.0, ramp: float = 0.2) -> PulseCfg:
     )
 
 
-@pytest.fixture(scope="module", autouse=True)
-def repository_state_guard() -> Iterator[None]:
-    before = vars(ArbWaveformDatabase)["_database_path"]
-    yield
-    assert vars(ArbWaveformDatabase)["_database_path"] == before
-
-
 class TestEnvelopeAt:
     """envelope_at: peak-normalized shape, zero outside the pulse window."""
 
@@ -563,16 +556,13 @@ class TestEnvelopeAt:
 
         np.testing.assert_allclose(amp, [0.0, 0.0, 0.5, 0.75, 0.0])
 
-    def test_arb_envelope_uses_native_path_after_global_db_switch(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    def test_arb_envelope_uses_native_path_with_another_repository(
+        self, tmp_path: Path
     ) -> None:
-        monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
         path = tmp_path / "shape.npz"
         np.savez(path, time=[0, 0.5, 1], idata=[0, 0.3, 0.6], qdata=[0, 0.4, 0.8])
-        ArbWaveformDatabase.init(tmp_path / "other")
-        ArbWaveformDatabase.save(
-            "shape", idata=np.array([0.9, 0.9]), time=np.array([0.0, 9.0])
-        )
+        repository = ArbWaveformDatabase(tmp_path / "other")
+        repository.save("shape", idata=np.array([0.9, 0.9]), time=np.array([0.0, 9.0]))
         cfg = PulseCfg(
             waveform=ArbWaveformCfg(data="shape", path=path.as_posix()),
             ch=0,
@@ -585,18 +575,17 @@ class TestEnvelopeAt:
 
     @pytest.mark.parametrize("flat_top", [False, True])
     def test_converted_capture_envelope_reads_current_arb_and_flat_top_samples(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flat_top: bool
+        self, tmp_path: Path, flat_top: bool
     ) -> None:
-        monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
         first = tmp_path / "first"
-        ArbWaveformDatabase.init(first)
-        ArbWaveformDatabase.save(
+        repository = ArbWaveformDatabase(first)
+        repository.save(
             "shape",
             time=np.array([0.0, 1.0, 2.0]),
             idata=np.array([0.0, 0.3, 0.0]),
             qdata=np.array([0.0, 0.4, 0.0]),
         )
-        context = CfgValidationContext(assets=ArbWaveformDatabase.bound_info())
+        context = CfgValidationContext(assets=repository.bound_info())
         waveform = {"style": "arb", "data": "shape"}
         core = CoreModuleCfgFactory.from_raw(
             {
@@ -620,8 +609,8 @@ class TestEnvelopeAt:
         copied = PulseCfg.model_validate_json(native.model_dump_json()).model_copy(
             deep=True
         )
-        ArbWaveformDatabase.init(tmp_path / "second")
-        ArbWaveformDatabase.save(
+        repository = ArbWaveformDatabase(tmp_path / "second")
+        repository.save(
             "shape",
             time=np.array([0.0, 9.0]),
             idata=np.array([0.9, 0.9]),
