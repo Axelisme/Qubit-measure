@@ -615,3 +615,53 @@ def test_alias_static_default_is_valid_and_selectable(binding: str | None) -> No
         assert isinstance(rejected, FormErrors)
         assert rejected.messages == {(name,): "Value is not among current choices"}
         state.write({(name,): default}, env)
+
+
+@pytest.mark.parametrize("enabled", [False, True], ids=["disabled", "enabled"])
+def test_optional_partially_locked_module_describes_fixed_branch_not_value(
+    enabled: bool,
+) -> None:
+    class OptionalCore(ConfigBase):
+        probe: PulseCfg | None = None
+
+    form = Form(OptionalCore, {"probe": Slot("Q.pulses.probe", lock={"freq": 0.0})})
+    form.bind_templates(templates(), adapter="synthetic")
+    env = environment()
+    initial = form.default_input(env)
+    inline = initial.data["probe"]
+    state = FormState(initial)
+    if not enabled:
+        state.write({("probe",): None}, env)
+    row = state.describe((), env).children[0]
+    description = state.describe(("probe",), env)
+    assert description.target == row
+    assert row.nullable is True
+    assert row.selection_fixed is True
+    assert row.fixed is False
+    assert row.fixed_value is None
+    assert row.options is not None
+    assert [option.label for option in row.options] == ["None", "Inline"]
+    assert row.can_expand is enabled
+
+    if not enabled:
+        assert description.children == ()
+        state.write({("probe",): inline}, env)
+    state.write({("probe", "module", "gain"): 0.6}, env)
+    value = state.result(env)
+    assert not isinstance(value, FormErrors), value
+    cfg = form.to_cfg(value, env)
+    assert isinstance(cfg, OptionalCore) and cfg.probe is not None
+    assert cfg.probe.freq == 0.0
+    assert cfg.probe.gain == 0.6
+
+    state.write({("probe",): None}, env)
+    value = state.result(env)
+    assert not isinstance(value, FormErrors), value
+    cfg = form.to_cfg(value, env)
+    assert isinstance(cfg, OptionalCore) and cfg.probe is None
+    disabled = state.describe(("probe",), env)
+    assert disabled.target is not None
+    assert disabled.target.selection_fixed is True
+    assert disabled.target.fixed is False
+    assert disabled.target.nullable is True
+    assert disabled.children == ()
