@@ -620,7 +620,8 @@ def test_fixed_option_keeps_editable_children_and_guarded_commands(build: Build)
 
     def run(path: FormWritePath, name: str) -> None:
         calls.append((path, name))
-        state.run_command(path, name, env)
+        # The host owns execution; this plain model accepts only leaf writes.
+        state.write({("shape", "length"): 8.0}, env)
 
     editor = build(state, env, lambda batch: state.write(batch, env), run)
     length = child(editor, QLineEdit, "form.input.shape.length")
@@ -634,6 +635,9 @@ def test_fixed_option_keeps_editable_children_and_guarded_commands(build: Build)
     editor.set_editing_enabled(enabled=False)
     assert not command(editor, "shape", "lengthen").isEnabled()
     assert length.isReadOnly()
+    command(editor, "shape", "lengthen").trigger()
+    assert calls == [(("shape",), "lengthen")]
+    assert state.input.data["shape"] == {"kind": "flat", "length": 8.0}
 
 
 def test_read_only_editor_keeps_commands_listed_but_disabled(build: Build) -> None:
