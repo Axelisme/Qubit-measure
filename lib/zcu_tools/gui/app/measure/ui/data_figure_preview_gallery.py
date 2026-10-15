@@ -55,6 +55,7 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
+from zcu_tools.gui.widgets import secondary_colour, set_foreground
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 if TYPE_CHECKING:
@@ -337,7 +338,7 @@ class DataFigurePreviewGallery(QWidget):
         outer.setSpacing(6)
 
         header = QLabel(
-            "<b>Figure previews</b> <span style='color:#6c757d; font-weight:normal;'>(read-only)</span>"
+            f"<b>Figure previews</b> <span style='color:{secondary_colour(self).name()}; font-weight:normal;'>(read-only)</span>"
         )
         header.setTextFormat(Qt.TextFormat.RichText)
         header.setObjectName("previewGalleryHeader")
@@ -346,7 +347,10 @@ class DataFigurePreviewGallery(QWidget):
             "Run is always shown; Analysis/Post appear when supported by this experiment."
         )
         hint.setWordWrap(True)
-        hint.setStyleSheet("color:#6c757d; font-size:11px;")
+        font = hint.font()
+        font.setPixelSize(11)
+        hint.setFont(font)
+        set_foreground(hint, secondary_colour(self))
         hint.setObjectName("previewGalleryHint")
         outer.addWidget(hint)
 

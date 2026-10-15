@@ -13,6 +13,7 @@ from zcu_tools.gui.session.ui.arb_waveform_dialog import (
     ArbWaveformDialog,
     _PreviewCanvas,
 )
+from zcu_tools.gui.widgets import error_colour
 from zcu_tools.resources.waveform_assets import (
     ArbWaveformData,
     ArbWaveformInfo,
@@ -555,3 +556,73 @@ def test_close_is_in_bottom_right_footer(entry_waveform_dialog, qapp) -> None:
     )
     close.click()
     assert not dialog.isVisible()
+
+
+def test_arb_error_uses_theme_foreground(qapp, window_palette):
+    from qtpy.QtWidgets import QLabel, QTableWidget
+
+    state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
+    dialog = ArbWaveformDialog(arb_waveform.ArbWaveformService(state))
+    try:
+        dialog.setPalette(window_palette)
+        segments = next(
+            table
+            for table in dialog.findChildren(QTableWidget)
+            if table.columnCount() == 2
+        )
+        duration = segments.item(0, 0)
+        assert duration is not None
+        duration.setText("not a duration")
+        label = next(
+            label
+            for label in dialog.findChildren(QLabel)
+            if not label.isHidden() and "duration" in label.text().lower()
+        )
+        label.ensurePolished()
+        assert label.palette().color(label.foregroundRole()) == error_colour(label)
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_arb_feedback_switches_between_error_and_info(entry_waveform_dialog, qapp):
+    from qtpy.QtGui import QColor, QPalette
+    from qtpy.QtWidgets import QLabel, QTableWidget
+    from zcu_tools.gui.widgets import warning_colour
+    from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
+
+    dialog, assets = entry_waveform_dialog
+    palette = dialog.palette()
+    palette.setColor(QPalette.ColorRole.Window, QColor("#353535"))
+    palette.setColor(QPalette.ColorRole.Base, QColor("#353535"))
+    palette.setColor(QPalette.ColorRole.Text, QColor("#eeeeee"))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor("#eeeeee"))
+    dialog.setPalette(palette)
+    ArbWaveformDatabase(assets.root_path()).save("raw", [0.0, 1.0], [0.0, 1.0])
+    dialog.refresh()
+    segments = next(
+        table for table in dialog.findChildren(QTableWidget) if table.columnCount() == 2
+    )
+    duration = segments.item(0, 0)
+    assert duration is not None
+    duration.setText("not a duration")
+    label = next(
+        label
+        for label in dialog.findChildren(QLabel)
+        if not label.isHidden() and "duration" in label.text().lower()
+    )
+    label.ensurePolished()
+    assert label.palette().color(label.foregroundRole()) == error_colour(dialog)
+
+    listing = next(
+        table for table in dialog.findChildren(QTableWidget) if table.columnCount() == 3
+    )
+    listing.selectRow(0)
+    assert "no formula recipe" in label.text()
+    assert label.palette().color(label.foregroundRole()) == warning_colour(dialog)
+
+    duration = segments.item(0, 0)
+    assert duration is not None
+    duration.setText("not a duration")
+    assert label.palette().color(label.foregroundRole()) == error_colour(dialog)

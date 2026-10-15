@@ -1,10 +1,12 @@
 """Observable display-only contracts for analysis parameters and writeback."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QEvent
+from qtpy.QtGui import QColor, QPalette
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -13,6 +15,7 @@ from qtpy.QtWidgets import (
     QLineEdit,
     QPushButton,
     QTabWidget,
+    QWidget,
 )
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -22,6 +25,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.writeback import WritebackValues
 from zcu_tools.gui.app.measure.writeback.widget import WritebackWidget
+from zcu_tools.gui.widgets import error_colour
 
 
 @pytest.fixture
@@ -330,4 +334,138 @@ def test_writeback_preview_failure_keeps_unavailable_reasons(qapp, pane):
     finally:
         tab.close()
         tab.deleteLater()
+        qapp.processEvents()
+
+
+def test_preview_error_uses_theme_foreground(qapp, window_palette):
+    widget = WritebackWidget(MagicMock(), tab_id="t")
+    try:
+        widget.setPalette(window_palette)
+        widget.show_preview_unavailable("source failed")
+        label = widget.findChild(QLabel, "writebackPreviewUnavailable")
+        assert label is not None
+        label.ensurePolished()
+        assert label.palette().color(label.foregroundRole()) == error_colour(widget)
+    finally:
+        widget.deleteLater()
+        qapp.processEvents()
+
+
+def test_preview_error_recolours_on_palette_change(qapp):
+    widget = WritebackWidget(MagicMock(), tab_id="t")
+    try:
+        palette = widget.palette()
+        palette.setColor(QPalette.ColorRole.Window, QColor("white"))
+        widget.setPalette(palette)
+        widget.show_preview_unavailable("source failed")
+        label = widget.findChild(QLabel, "writebackPreviewUnavailable")
+        assert label is not None
+        light_error = error_colour(widget)
+        palette.setColor(QPalette.ColorRole.Window, QColor("#202020"))
+        widget.setPalette(palette)
+        qapp.processEvents()
+        label.ensurePolished()
+        assert error_colour(widget) != light_error
+        assert label.palette().color(label.foregroundRole()) == error_colour(widget)
+    finally:
+        widget.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize(
+    "name, colour_name",
+    [
+        ("writebackCurrent", "secondary_colour"),
+        ("writebackProposed", "accent_colour"),
+        ("writebackArrow", "secondary_colour"),
+        ("writebackAppliedLegend", "secondary_colour"),
+    ],
+)
+def test_writeback_semantic_foregrounds_refresh_with_owner_palette(
+    scalar_ledger, qapp, name, colour_name
+):
+    from zcu_tools.gui.widgets import accent_colour, secondary_colour
+
+    colours: dict[str, Callable[[QWidget], QColor]] = {
+        "secondary_colour": secondary_colour,
+        "accent_colour": accent_colour,
+    }
+    colour = colours[colour_name]
+    widget, _ = scalar_ledger
+    palette = widget.palette()
+    palette.setColor(QPalette.ColorRole.Window, QColor("#353535"))
+    palette.setColor(QPalette.ColorRole.Text, QColor("#eeeeee"))
+    widget.setPalette(palette)
+    qapp.processEvents()
+    label = widget.findChild(QLabel, name)
+    assert label is not None
+    label.ensurePolished()
+    assert label.palette().color(label.foregroundRole()) == colour(widget)
+
+
+def test_writeback_unavailable_reason_uses_owner_warning(qapp, window_palette):
+    from zcu_tools.gui.widgets import warning_colour
+
+    widget = WritebackWidget(MagicMock(), tab_id="t")
+    try:
+        widget.setPalette(window_palette)
+        widget.show_preview_unavailable(
+            "failed", unavailable_reasons=("No destination",)
+        )
+        label = widget.findChild(QLabel, "writebackUnavailableReason")
+        assert label is not None
+        label.ensurePolished()
+        assert label.palette().color(label.foregroundRole()) == warning_colour(widget)
+    finally:
+        widget.deleteLater()
+        qapp.processEvents()
+
+
+def test_all_ledger_and_open_edit_foregrounds_follow_palette_change(
+    scalar_ledger, qapp
+):
+    from zcu_tools.gui.widgets import accent_colour, secondary_colour, warning_colour
+
+    widget, item = scalar_ledger
+    palette = widget.palette()
+    palette.setColor(QPalette.ColorRole.Window, QColor("white"))
+    palette.setColor(QPalette.ColorRole.Text, QColor("black"))
+    widget.setPalette(palette)
+    widget.populate(
+        [item],
+        {
+            item.session_id: WritebackValues(
+                actual_path="Q1.t1",
+                current=20.0,
+                proposed=item.proposed_value,
+                unit="us",
+            )
+        },
+        unavailable_reasons=("No other destination",),
+    )
+    next(
+        button for button in widget.findChildren(QPushButton) if button.text() == "Edit"
+    ).click()
+    qapp.processEvents()
+    colours = {
+        "writebackCurrent": secondary_colour,
+        "writebackProposed": accent_colour,
+        "writebackActualPath": secondary_colour,
+        "writebackArrow": secondary_colour,
+        "writebackAppliedLegend": secondary_colour,
+        "writebackUnavailableReason": warning_colour,
+        "writebackCurrentReadonly": secondary_colour,
+    }
+    try:
+        palette.setColor(QPalette.ColorRole.Window, QColor("#353535"))
+        palette.setColor(QPalette.ColorRole.Text, QColor("#eeeeee"))
+        widget.setPalette(palette)
+        qapp.processEvents()
+        for name, colour in colours.items():
+            label = widget.findChild(QLabel, name)
+            assert label is not None
+            assert label.palette().color(label.foregroundRole()) == colour(widget), name
+    finally:
+        for dialog in widget.findChildren(QDialog):
+            dialog.reject()
         qapp.processEvents()

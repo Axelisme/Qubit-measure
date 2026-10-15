@@ -26,6 +26,7 @@ from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
+    EntryInfo,
     EntryRequest,
     PointCreateRequest,
     PointUseRequest,
@@ -41,6 +42,7 @@ from zcu_tools.gui.session.services.project_settings import (
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 from zcu_tools.gui.session.types import ContextReadiness, SessionEnv
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
+from zcu_tools.gui.widgets import error_colour
 
 
 def _prefs(
@@ -693,7 +695,8 @@ def test_missing_result_root_shows_hint_instead_of_error(
         status = dialog.findChild(QLabel, "setup_status")
         assert status is not None
         assert str(tmp_path / "result") in status.toolTip()
-        assert "red" not in status.styleSheet()
+        status.ensurePolished()
+        assert status.palette().color(status.foregroundRole()) != error_colour(status)
         assert entry_selector(dialog).count() == 0
         (tmp_path / "result").write_text("not a directory", encoding="utf-8")
         next(
@@ -701,9 +704,92 @@ def test_missing_result_root_shows_hint_instead_of_error(
             for b in dialog.findChildren(QPushButton)
             if b.toolTip() == "Refresh result entries"
         ).click()
-        assert "red" in status.styleSheet()
+        status.ensurePolished()
+        assert status.palette().color(status.foregroundRole()) == error_colour(status)
     finally:
         dialog.reject()
         controller.close()
         dialog.deleteLater()
         qapp.processEvents()
+
+
+@pytest.mark.parametrize("action", ["Open", "Connect"])
+def test_setup_error_uses_theme_foreground(qapp, window_palette, action):
+    ctrl = _make_ctrl()
+    ctrl.open_entry.side_effect = RuntimeError("entry failed")
+    ctrl.start_connect.side_effect = RuntimeError("connection failed")
+    dialog = SetupDialog(ctrl)
+    try:
+        dialog.setPalette(window_palette)
+        entry_selector(dialog).addItem("missing")
+        entry_selector(dialog).setCurrentText("missing")
+        entry_button(dialog, action).click()
+        label = next(
+            label for label in dialog.findChildren(QLabel) if "failed" in label.text()
+        )
+        label.ensurePolished()
+        assert label.palette().color(label.foregroundRole()) == error_colour(label)
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_setup_success_replaces_error_foreground(qapp, window_palette):
+    from zcu_tools.gui.widgets import success_colour
+
+    ctrl = _make_ctrl()
+    ctrl.open_entry.side_effect = RuntimeError("entry failed")
+    dialog = SetupDialog(ctrl)
+    try:
+        dialog.setPalette(window_palette)
+        entry_selector(dialog).addItem("entry")
+        entry_selector(dialog).setCurrentText("entry")
+        entry_button(dialog, "Open").click()
+        label = next(
+            label
+            for label in dialog.findChildren(QLabel)
+            if "entry failed" in label.text()
+        )
+        ctrl.open_entry.side_effect = None
+        ctrl.open_entry.return_value = EntryInfo(
+            "id",
+            "entry",
+            Path("/synthetic/result/entry"),
+            Path("/synthetic/database/entry"),
+        )
+        entry_button(dialog, "Open").click()
+        label.ensurePolished()
+        assert label.palette().color(label.foregroundRole()) == success_colour(dialog)
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_selected_description_restores_live_theme_inheritance(entry_dialog, qapp):
+    from qtpy.QtGui import QColor, QPalette
+
+    dialog, controller, _state = entry_dialog
+    palette = dialog.palette()
+    palette.setColor(QPalette.ColorRole.WindowText, QColor("black"))
+    dialog.setPalette(palette)
+    controller.setup_control.new_point(
+        PointCreateRequest("described", "A note", CommandOrigin("gui"))
+    )
+    controller.setup_control.new_point(
+        PointCreateRequest("empty", "", CommandOrigin("gui"))
+    )
+    listing = point_list(dialog)
+    listing.setCurrentRow(1)
+    label = selected_description(dialog)
+    assert label.text() == "No description"
+    listing.setCurrentRow(0)
+    assert label.text() == "Description: A note"
+    palette.setColor(QPalette.ColorRole.Window, QColor("#353535"))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor("white"))
+    dialog.setPalette(palette)
+    qapp.processEvents()
+    assert label.palette().color(label.foregroundRole()) == dialog.palette().color(
+        QPalette.ColorRole.WindowText
+    )

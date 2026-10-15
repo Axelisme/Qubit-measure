@@ -37,7 +37,7 @@ from zcu_tools.gui.session.ui.component_editing import (
     edit_completions,
     field_tooltip,
     parse_field_input,
-    set_red,
+    set_error_foreground,
     show_error,
 )
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
@@ -141,7 +141,7 @@ class ComponentTreeWidget(QWidget):
         make_label_selectable(self._error)
         self._error.setObjectName("component_error")
         self._error.setWordWrap(True)
-        set_red(self._error, red=True)
+        set_error_foreground(self._error, error=True)
         layout.addWidget(self._error)
         self._hint = QLabel()
         self._hint.setObjectName("component_hint")

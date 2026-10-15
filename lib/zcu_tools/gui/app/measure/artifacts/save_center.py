@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 from qtpy.QtCore import QEvent, Qt, QUrl
 from qtpy.QtGui import QColor, QDesktopServices, QPalette, QResizeEvent
 from qtpy.QtWidgets import (
-    QApplication,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -27,7 +26,13 @@ from zcu_tools.gui.app.measure.artifacts import (
     OutputSnapshot,
     SaveStatus,
 )
-from zcu_tools.gui.widgets import error_colour, mixed_colour
+from zcu_tools.gui.widgets import (
+    accent_colour,
+    error_colour,
+    secondary_colour,
+    set_foreground,
+    warning_colour,
+)
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.entry import ArtifactKey
 
@@ -42,10 +47,10 @@ _STATUS_TEXT = {
     SaveStatus.SAVED: "✓ SAVED",
 }
 _STATUS_COLOR = {
-    SaveStatus.NOT_SAVED: "#3f3f3f",
-    SaveStatus.PARTIALLY_SAVED: "#c45100",
-    SaveStatus.UNSAVED_CHANGES: "#c45100",
-    SaveStatus.SAVED: "#0067c0",
+    SaveStatus.NOT_SAVED: secondary_colour,
+    SaveStatus.PARTIALLY_SAVED: warning_colour,
+    SaveStatus.UNSAVED_CHANGES: warning_colour,
+    SaveStatus.SAVED: accent_colour,
 }
 _SECTION_TITLE = {
     "run": "Measurement data",
@@ -58,8 +63,6 @@ _NO_PERSISTENCE_HINT = "This experiment does not save to the result entry yet."
 _LINE_EDIT_TEXT_INSET = 8
 # Path text is smaller than the filename above it.
 _PATH_FONT_SCALE = 0.9
-# Share of Window mixed into Text to make the path a secondary foreground.
-_PATH_WINDOW_SHARE = 0.42
 
 
 def _display_path(path: Path, bases: tuple[Path, ...]) -> str:
@@ -82,10 +85,10 @@ def _output_error_text(output: OutputSnapshot) -> str:
     return f"✗ {output.error}" if output.error else "✗"
 
 
-def _hint_label(text: str) -> QLabel:
+def _hint_label(text: str, owner: QWidget) -> QLabel:
     """A hidden, wrapping gray note; callers decide when it shows."""
     label = QLabel(text)
-    label.setStyleSheet("color: gray;")
+    set_foreground(label, secondary_colour(owner))
     label.setWordWrap(True)
     label.hide()
     return label
@@ -98,8 +101,9 @@ class _ElidedPathEdit(QLineEdit):
     absolute full path as tooltip and full_path() for Open folder.
     """
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, owner: QWidget) -> None:
+        super().__init__(owner)
+        self._colour_owner = owner
         self._display = ""
         self._full = ""
         self.setReadOnly(True)
@@ -123,11 +127,7 @@ class _ElidedPathEdit(QLineEdit):
     def _update_colour(self) -> None:
         shown = self.palette()
         # Read the inherited colours, not our already-muted Text colour.
-        parent = self.parentWidget()
-        source = parent.palette() if parent is not None else QApplication.palette()
-        text = source.color(QPalette.ColorRole.Text)
-        window = source.color(QPalette.ColorRole.Window)
-        secondary = mixed_colour(text, window, _PATH_WINDOW_SHARE)
+        secondary = secondary_colour(self._colour_owner)
         # Avoid re-entry when setPalette triggers another PaletteChange.
         if (
             shown.color(QPalette.ColorRole.Text) != secondary
@@ -238,7 +238,7 @@ class ArtifactSaveCenter(QWidget):
         self._comment_edit.setPlaceholderText("Optional comment…")
         self._comment_edit.setFixedHeight(60)
         outer.addWidget(self._comment_edit)
-        self._no_persistence_hint = _hint_label(_NO_PERSISTENCE_HINT)
+        self._no_persistence_hint = _hint_label(_NO_PERSISTENCE_HINT, self)
         outer.addWidget(self._no_persistence_hint)
         self._rows_layout = QVBoxLayout()
         self._rows_layout.setContentsMargins(0, 0, 0, 0)
@@ -280,7 +280,7 @@ class ArtifactSaveCenter(QWidget):
         status = QLabel()
         row.addWidget(status)
         row.addStretch()
-        edit = _ElidedPathEdit()
+        edit = _ElidedPathEdit(self)
         open_folder = QPushButton("Open folder")
         open_folder.clicked.connect(
             lambda _checked=False, e=edit: self._open_folder(e.full_path())
@@ -293,7 +293,7 @@ class ArtifactSaveCenter(QWidget):
         make_label_selectable(error)
         error.setTextFormat(Qt.TextFormat.PlainText)
         error.setWordWrap(True)
-        error.setPalette(self._error_palette())
+        set_foreground(error, error_colour(self))
         error.hide()
         layout.addWidget(error)
         return _OutputRow(container, name, edit, status, error)
@@ -301,15 +301,14 @@ class ArtifactSaveCenter(QWidget):
     def changeEvent(self, a0: QEvent | None) -> None:
         super().changeEvent(a0)
         if a0 is not None and a0.type() == QEvent.Type.PaletteChange:
-            palette = self._error_palette()
+            for ref, artifact_row in self._rows.items():
+                set_foreground(
+                    artifact_row.status,
+                    _STATUS_COLOR[self._snapshots[ref].status](self),
+                )
+            set_foreground(self._no_persistence_hint, secondary_colour(self))
             for row in self._output_rows.values():
-                row.error.setPalette(palette)
-
-    def _error_palette(self) -> QPalette:
-        """Return the output-error foreground for the current palette."""
-        palette = QPalette()
-        palette.setColor(QPalette.ColorRole.WindowText, error_colour(self))
-        return palette
+                set_foreground(row.error, error_colour(self))
 
     def _save_artifact(self, ref: ArtifactRef) -> None:
         if self._save_handler is not None:
@@ -383,6 +382,7 @@ class ArtifactSaveCenter(QWidget):
             if identity not in wanted_outputs:
                 self._output_rows.pop(identity).container.deleteLater()
         bases = snapshot.save.display_bases
+        set_foreground(self._no_persistence_hint, secondary_colour(self))
         self._no_persistence_hint.setVisible(not snapshot.save.saves_to_entry)
         per_section = {
             section.section: len(section.artifacts) for section in snapshot.artifacts
@@ -413,7 +413,7 @@ class ArtifactSaveCenter(QWidget):
         self._rows_layout.insertWidget(index, row.container)
         row.title.setText(title)
         row.status.setText(_STATUS_TEXT[artifact.status])
-        row.status.setStyleSheet(f"color: {_STATUS_COLOR[artifact.status]};")
+        set_foreground(row.status, _STATUS_COLOR[artifact.status](self))
         output_index = 0
         for member in artifact.members:
             for member_output_index, output in enumerate(member.outputs):

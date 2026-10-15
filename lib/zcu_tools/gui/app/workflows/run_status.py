@@ -3,8 +3,10 @@
 from dataclasses import dataclass
 from typing import Literal
 
+from qtpy.QtGui import QFont
 from qtpy.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
+from zcu_tools.gui.widgets import secondary_colour, set_foreground
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 type RunBadge = Literal[
@@ -75,7 +77,10 @@ class WorkflowRunStatus(QWidget):
         super().__init__(parent)
         self.setObjectName("workflow.run.status")
         self._previous = self._label("workflow.run.previous", "Previous run:")
-        self._previous.setStyleSheet("QLabel { color: #6b7280; font-weight: 600; }")
+        font = self._previous.font()
+        font.setWeight(QFont.Weight.DemiBold)
+        self._previous.setFont(font)
+        set_foreground(self._previous, secondary_colour(self))
         self._badge = self._label("workflow.run.badge", "")
         self._workflow = self._label("workflow.run.workflow", "")
         self._workflow.setStyleSheet("QLabel { font-weight: 600; }")
@@ -105,6 +110,7 @@ class WorkflowRunStatus(QWidget):
 
     def show_line(self, line: RunStatusLine) -> None:
         """Show line's prefix, badge colour and text, workflow and detail."""
+        set_foreground(self._previous, secondary_colour(self))
         # Polling repeats the same line; restyling only on change keeps it cheap.
         if line == self._line:
             return
