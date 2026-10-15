@@ -27,7 +27,7 @@ from zcu_tools.gui.app.measure.artifact_tracker import (
     OutputSnapshot,
     SaveStatus,
 )
-from zcu_tools.gui.widgets import error_colour
+from zcu_tools.gui.widgets import error_colour, mixed_colour
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.entry import ArtifactKey
 
@@ -56,6 +56,10 @@ _NO_PERSISTENCE_HINT = "This experiment does not save to the result entry yet."
 # QLineEdit reserves a text/cursor inset even without a frame. contentsRect
 # and textMargins do not report it; without this slack the elided text clips.
 _LINE_EDIT_TEXT_INSET = 8
+# Path text is smaller than the filename above it.
+_PATH_FONT_SCALE = 0.9
+# Share of Window mixed into Text to make the path a secondary foreground.
+_PATH_WINDOW_SHARE = 0.42
 
 
 def _display_path(path: Path, bases: tuple[Path, ...]) -> str:
@@ -102,9 +106,9 @@ class _ElidedPathEdit(QLineEdit):
         self.setFrame(False)
         font = self.font()
         if font.pointSizeF() > 0:
-            font.setPointSizeF(font.pointSizeF() * 0.9)
+            font.setPointSizeF(font.pointSizeF() * _PATH_FONT_SCALE)
         else:
-            font.setPixelSize(max(1, round(font.pixelSize() * 0.9)))
+            font.setPixelSize(max(1, round(font.pixelSize() * _PATH_FONT_SCALE)))
         self.setFont(font)
         self._update_colour()
 
@@ -123,11 +127,8 @@ class _ElidedPathEdit(QLineEdit):
         source = parent.palette() if parent is not None else QApplication.palette()
         text = source.color(QPalette.ColorRole.Text)
         window = source.color(QPalette.ColorRole.Window)
-        secondary = QColor(
-            round(text.red() + (window.red() - text.red()) * 0.42),
-            round(text.green() + (window.green() - text.green()) * 0.42),
-            round(text.blue() + (window.blue() - text.blue()) * 0.42),
-        )
+        secondary = mixed_colour(text, window, _PATH_WINDOW_SHARE)
+        # Avoid re-entry when setPalette triggers another PaletteChange.
         if (
             shown.color(QPalette.ColorRole.Text) != secondary
             or shown.color(QPalette.ColorRole.Base).alpha() != 0
@@ -292,9 +293,7 @@ class ArtifactSaveCenter(QWidget):
         make_label_selectable(error)
         error.setTextFormat(Qt.TextFormat.PlainText)
         error.setWordWrap(True)
-        palette = QPalette()
-        palette.setColor(QPalette.ColorRole.WindowText, error_colour(self))
-        error.setPalette(palette)
+        error.setPalette(self._error_palette())
         error.hide()
         layout.addWidget(error)
         return _OutputRow(container, name, edit, status, error)
@@ -302,10 +301,15 @@ class ArtifactSaveCenter(QWidget):
     def changeEvent(self, a0: QEvent | None) -> None:
         super().changeEvent(a0)
         if a0 is not None and a0.type() == QEvent.Type.PaletteChange:
-            palette = QPalette()
-            palette.setColor(QPalette.ColorRole.WindowText, error_colour(self))
+            palette = self._error_palette()
             for row in self._output_rows.values():
                 row.error.setPalette(palette)
+
+    def _error_palette(self) -> QPalette:
+        """Return the output-error foreground for the current palette."""
+        palette = QPalette()
+        palette.setColor(QPalette.ColorRole.WindowText, error_colour(self))
+        return palette
 
     def _save_artifact(self, ref: ArtifactRef) -> None:
         if self._save_handler is not None:

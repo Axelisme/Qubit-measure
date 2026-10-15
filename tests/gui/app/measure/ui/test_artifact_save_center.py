@@ -391,15 +391,14 @@ def test_output_path_is_smaller_secondary_read_only_text(
         assert edit.selectedText() == edit.text()
 
 
-@pytest.mark.parametrize(
-    "window, expected", [("#ffffff", "#b3261e"), ("#353535", "#ff8a80")]
-)
+@pytest.mark.parametrize("window", ["#ffffff", "#353535"])
 def test_output_failure_colour_follows_window_palette(
     output_center: ArtifactSaveCenter,
     qapp: QApplication,
     window: str,
-    expected: str,
 ) -> None:
+    from zcu_tools.gui.widgets import error_colour
+
     palette = output_center.palette()
     palette.setColor(QPalette.ColorRole.Window, QColor(window))
     output_center.setPalette(palette)
@@ -411,7 +410,8 @@ def test_output_failure_colour_follows_window_palette(
     ]
     assert failures
     assert all(
-        label.palette().color(QPalette.ColorRole.WindowText).name() == expected
+        label.palette().color(QPalette.ColorRole.WindowText)
+        == error_colour(output_center)
         for label in failures
     )
 

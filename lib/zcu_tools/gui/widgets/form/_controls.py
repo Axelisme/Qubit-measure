@@ -12,7 +12,6 @@ from pydantic import ConfigDict, JsonValue, TypeAdapter
 from PyQt6.QtGui import QAction
 from qtpy.QtCore import QEvent, QObject, QPoint, QSignalBlocker, Qt
 from qtpy.QtGui import (
-    QColor,
     QFocusEvent,
     QKeyEvent,
     QPalette,
@@ -31,8 +30,7 @@ from qtpy.QtWidgets import (
 
 from zcu_tools.core.complex_codec import decode_complex, encode_complex
 from zcu_tools.gui.form import FormOptionDescription, FormValue, FormWritePath
-from zcu_tools.gui.widgets import error_colour
-from zcu_tools.gui.widgets.colours import ERROR_RED_LIGHT
+from zcu_tools.gui.widgets import ERROR_RED_LIGHT, error_colour, mixed_colour
 from zcu_tools.gui.widgets.form.value_widgets import (
     FIELD_INPUT_MIN_WIDTH,
     connect_committed_value_widget,
@@ -203,15 +201,6 @@ def _direct_input(value: FormValue) -> JsonValue:
     if isinstance(value, complex):
         return _JSON.validate_python(encode_complex(value))
     return _JSON.validate_python(value)
-
-
-def _mixed(base: QColor, accent: QColor, share: float) -> QColor:
-    """base moved toward accent by share (0 keeps base, 1 gives accent)."""
-    return QColor(
-        round(base.red() + (accent.red() - base.red()) * share),
-        round(base.green() + (accent.green() - base.green()) * share),
-        round(base.blue() + (accent.blue() - base.blue()) * share),
-    )
 
 
 def _show_text_menu(widget: QLineEdit, action: QAction, pos: QPoint) -> None:
@@ -435,7 +424,9 @@ class FieldRow:
                 else ERROR_RED_LIGHT
             )
             share = _EXPRESSION_TINT if expression else _ERROR_TINT
-            background = _mixed(shown.color(QPalette.ColorRole.Base), accent, share)
+            background = mixed_colour(
+                shown.color(QPalette.ColorRole.Base), accent, share
+            )
             palette.setColor(QPalette.ColorRole.Base, background)
             if isinstance(widget, QComboBox):
                 # Non-editable dropdowns paint Button rather than Base.

@@ -3,9 +3,21 @@
 from qtpy.QtGui import QColor, QPalette
 from qtpy.QtWidgets import QWidget
 
-# Forms also mix this fixed red into Base for invalid direct-input backgrounds.
+# Light-theme error foreground and fixed red mixed into error backgrounds.
 ERROR_RED_LIGHT = QColor("#b3261e")
 _ERROR_RED_DARK = QColor("#ff8a80")
+
+
+def mixed_colour(base: QColor, accent: QColor, share: float) -> QColor:
+    """Mix RGB channels toward accent by share, from 0 (base) to 1 (accent).
+
+    Channels are rounded to integers; the returned colour is opaque.
+    """
+    return QColor(
+        round(base.red() + (accent.red() - base.red()) * share),
+        round(base.green() + (accent.green() - base.green()) * share),
+        round(base.blue() + (accent.blue() - base.blue()) * share),
+    )
 
 
 def error_colour(widget: QWidget) -> QColor:
