@@ -27,7 +27,7 @@ GUI 只讀 `data.h5`，Notebook 的 `load` 只讀 Labber，兩個前端讀不同
 
 ### 設定快照的正本只在資料檔
 
-設定快照的正本是 `data.h5` 的 `/cfg`，內容為 `CfgSnapshot`（values、cfg_type、schema_version）。Labber 照抄一份 cfg 給 Log Browser。ledger `acquired` 事件刪除 `cfg_summary` 欄位，因為它沒有讀者；`acquired` 事件本身保留。
+設定快照的正本是 `data.h5` 的 `/cfg`，內容為 `CfgSnapshot`（values、cfg_type、schema_version）。Labber 照抄一份 cfg 給 Log Browser。ledger `acquired` 事件刪除 `cfg_summary` 欄位，因為它沒有讀者；`acquired` 事件本身保留。讀取既有 ledger 時忽略不支援的欄位，舊行裡的 `cfg_summary` 照樣可讀。
 
 使用者 2026-10-14 在快照存放位置一題選 A：正本只放資料檔，ledger 不再存 cfg。
 
@@ -66,13 +66,13 @@ Writeback 採同樣結構：`lib/zcu_tools/gui/app/measure/writeback/` 收攏子
 
 使用者 2026-10-14：「好，同意做法一」。
 
-### 讀回：框架讀檔，核心實驗轉換，adapter 解讀 cfg
+### 讀回：框架讀檔，核心實驗轉換
 
 讀回分三步，每步的 owner 不同：
 
 1. 框架以 `datafile.load_run_data` 把檔案讀成 `StoredRun`（`lib/zcu_tools/datafile/native_models.py`），並比對 experiment tag。這一步不需要實驗程式碼。
 2. 核心實驗提供公開的 `from_stored(stored) -> RunRecord`，把 `StoredRun` 轉成 typed record。這是唯一的轉換，Notebook 與 GUI 共用。
-3. GUI adapter 拿到 `RunRecord` 後，把 cfg 轉成表單回填，或回報無法回填。
+3. GUI adapter 把 `StoredRun` 交給核心轉換，回傳的結果對框架不透明。Load 只把結果載進分頁供畫圖、分析與 writeback，不把設定填回表單；要看當時的設定，從 Inspect 看數據檔的 cfg。
 
 框架不碰 typed cfg（例如 `T1Cfg`）。`LoadService` 與 `RunService` 刪除 `getattr(result, "cfg")` 與 `isinstance(result, RunRecord)` 的窺探。
 
@@ -87,7 +87,7 @@ Notebook 用 `NotebookAdapter(...)(T1Exp()).load(path)` 讀回。`load` 只收�
 - 變數、軸或單位與實驗宣告不符：報錯，不讀回。
 - cfg 驗證失敗，包含 cfg_type 或 schema major 不符：`RunRecord.cfg` 為 `None`，並發出警告寫明原因。
 - `StoredRun` 一律保留原始 cfg JSON。
-- GUI 照常載入資料、不回填表單，以唯讀方式顯示原始 cfg。
+- GUI 照常載入資料，不回填表單；原始 cfg 由 Inspect 檢視。
 - 不相容的 cfg 型別變更要升 schema major。只有必須還原 typed cfg 時，才另寫離線遷移。
 
 [[0063]] 的「框架不提供版本遷移鏈或相容 loader」維持不變：讀回時不轉換舊 cfg，只把它標為不可用。
@@ -105,7 +105,7 @@ Notebook 用 `NotebookAdapter(...)(T1Exp()).load(path)` 讀回。`load` 只收�
 - 一次 Run 的 cfg 只有一份正本。ledger 只記事實，不記參數。
 - Notebook 改讀 `data.h5`，與 GUI 得到同一個 `RunRecord`。
 - 新增項目種類只改共用核心與 GUI 子模組，不改 adapter 介面。
-- 舊檔在 cfg schema 升版後仍能讀回資料；需要 cfg 的分析或回填在各自入口拒絕。
+- 舊檔在 cfg schema 升版後仍能讀回資料；需要 cfg 的分析在各自入口拒絕。
 - 代價：`AcquiredPayload` 刪欄位，GUI 與 Notebook 的 acquired 寫入與相關測試要改；`load_run_with_metadata` 改為寬容 cfg；GUI services、adapter base 與 `run_saving.py` 的程式碼搬進兩個子模組。
 
 ## 留下的問題
@@ -114,3 +114,10 @@ Notebook 用 `NotebookAdapter(...)(T1Exp()).load(path)` 讀回。`load` 只收�
 - Writeback 子模組的確切切分，例如哪些服務、remote handler 與 widget 搬進去。
 - Notebook 單檔 Labber `save()` 的去留。
 - 轉正時要修訂的既有段落：[[0063]] 的「Run 輸出位置與 writer 權責」與 GUI Native Load 段；[[0069]] 的「Result 只表達資料，不攜帶 cfg_snapshot」、核心操作形狀的 `load`，以及「RunRecord.cfg 允許 None」一段（目前 native load 不會產生 `None`）；[[0067]] 的「Adapter capability 與事件」段，補上 Artifact 與 Writeback 子模組是框架擁有的 adapter interface。
+
+## 補充裁定（2026-10-15）
+
+- Load 不回填表單。2026-10-13 已裁定「算了，設計妥協，Load不再填入表單，相關功能與工具都可以刪除」；本篇原寫的「adapter 回填表單」是 advisor 討論時遺漏此裁定，使用者 2026-10-15 確認維持：「1可以」。
+- 既有 ledger 行含 `cfg_summary`：讀取時忽略不支援的欄位，不寫遷移腳本。使用者：「2採用忽略不支援欄位的方式」。
+- 只有 Labber 檔、沒有 `data.h5` 的舊資料，Notebook 改版後讀不回，需先用 `migrations/` 轉換。使用者：「3同意」。
+- 範圍：子模組搬遷與 Writeback 一起做，不採延後的便宜版。使用者：「4一起做吧」。
