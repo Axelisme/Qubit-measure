@@ -466,7 +466,7 @@ def test_missing_native_evidence_rejects_before_operation_or_files(
     assert not (session.entry.database_path / "runs").exists()
 
 
-def test_invalid_record_raises_without_writing_or_saved_event(
+def test_invalid_record_reports_failed_data_outputs_and_saved_event(
     native_session: NativeSaveSession,
 ) -> None:
     session = native_session
@@ -476,9 +476,11 @@ def test_invalid_record_raises_without_writing_or_saved_event(
         metadata=session.metadata,
         parameters=session.state.get_tab("tab").run.parameters,
     )
-    with pytest.raises(TypeError, match="RunRecord"):
-        session.save()
-    assert session.entry.ledger.events() == ()
+    report = session.save()
+    assert len(report.outputs) == 2
+    assert all(item.status == "failed" for item in report.outputs)
+    assert all(item.error and "RunRecord" in item.error for item in report.outputs)
+    assert session.entry.ledger.events()[-1].kind == "saved"
     assert not (session.entry.database_path / "runs").exists()
 
 

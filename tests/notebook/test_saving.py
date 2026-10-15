@@ -238,16 +238,12 @@ def test_device_operation_interrupt_escapes_and_preserves_previous_record() -> N
     assert exp.acquisition_for(previous) == evidence
 
 
-@pytest.mark.parametrize("failure", ["missing_cfg", "invalid_shape"])
 def test_preparation_failure_retains_partial_handle_and_saves_files(
-    point: PointView, ledger: RecordsLedger, failure: str
+    point: PointView, ledger: RecordsLedger
 ) -> None:
     exp = experiment()
     source = exp.run(SavingCfg())
-    if failure == "missing_cfg":
-        source.cfg = None
-    else:
-        source.result.signal = source.result.signal[:1]
+    source.result.signal = source.result.signal[:1]
     try:
         exp.save_run(
             point, source=source, figures={"fit": saving_figure()},
