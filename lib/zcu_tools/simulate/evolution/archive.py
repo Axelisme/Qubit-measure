@@ -31,6 +31,8 @@ class ArchiveHeader(BaseModel):
     upper: float = 0
     degree: int = 0
     evidence: tuple[tuple[str, float], ...] = ()
+    duration_ns: float = 0
+    ratios: tuple[tuple[float, float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -62,7 +64,8 @@ def encode_archive(archive: NumericArchive) -> bytes:
         values=archive.values,
         present=archive.present,
     )
-    return stream.getvalue()
+    payload = stream.getvalue()
+    return sha256(payload).hexdigest().encode() + b"\n" + payload
 
 
 def read_archive(path: Path, digest: str | None = None) -> NumericArchive:
@@ -74,8 +77,11 @@ def read_archive(path: Path, digest: str | None = None) -> NumericArchive:
     payload = path.read_bytes()
     if digest is not None and sha256(payload).hexdigest() != digest:
         raise ValueError(f"numeric archive integrity failure: {path}")
+    checksum, separator, numeric = payload.partition(b"\n")
+    if not separator or checksum != sha256(numeric).hexdigest().encode():
+        raise ValueError(f"numeric archive integrity failure: {path}")
     try:
-        with np.load(BytesIO(payload), allow_pickle=False) as data:
+        with np.load(BytesIO(numeric), allow_pickle=False) as data:
             header = ArchiveHeader.model_validate_json(str(data["header"].item()))
             nodes = np.asarray(data["nodes"], dtype=np.float64)
             values = np.asarray(data["values"], dtype=np.complex128)

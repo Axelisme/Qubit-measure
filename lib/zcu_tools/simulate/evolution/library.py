@@ -18,7 +18,9 @@ from .archive import (
     write_archive,
 )
 from .batch import BatchResult, CPUReference, PlateauFamily
+from .controls import ControlSequence, quantize_ns
 from .intel import IntelOpenCL
+from .model import NumericModel
 from .state import ComplexMatrix
 from .validation import ValidationLimits, interpolate, validate_table
 
@@ -200,6 +202,101 @@ class EvolutionLibrary:
         archive = self._load(ref.path, ref.identity)
         return interpolate(archive.nodes, archive.values, scale)
 
+    def read_record(self, key: str) -> tuple[ComplexMatrix, str] | None:
+        """Read an exact deterministic density record, or None if absent.
+
+        key is the library-generated exact request identity. Corruption/key
+        mismatch fails explicitly; records are never promoted to U tables.
+        """
+        path = self.path / "direct" / f"{key}.npz"
+        if not path.exists():
+            return None
+        archive = read_archive(path)
+        if archive.header.kind != "direct" or archive.header.key != key:
+            raise ValueError("direct record identity mismatch")
+        return archive.values, sha256(path.read_bytes()).hexdigest()
+
+    def save_record(self, key: str, density: ComplexMatrix) -> str:
+        """Atomically persist a deterministic exact density; return file identity.
+
+        No sampled populations/noise/filter state is retained. Disk write errors
+        propagate to the acquire that incurred this direct solve.
+        """
+        path = self.path / "direct" / f"{key}.npz"
+        archive = NumericArchive(
+            ArchiveHeader(kind="direct", key=key),
+            np.array([], dtype=np.float64),
+            density,
+            np.array([], dtype=np.bool_),
+        )
+        return write_archive(path, archive)
+
+    def plateau(
+        self,
+        model: NumericModel,
+        controls: ControlSequence,
+        endpoints: tuple[float, float],
+        snapshot: LibrarySnapshot,
+    ) -> tuple[ComplexMatrix, str] | None:
+        """Find one static closed joint interval in a frozen published family.
+
+        Uses complete absolute phase history; only frequency=0 constant envelopes
+        with full interval support qualify. Bath/dynamic requests are legal
+        misses. Actual source amplitudes must be a real common scale of stored
+        ratios. Joint H is never replaced by serial source propagators.
+        """
+        if (
+            model.hamiltonian_at is not None
+            or model.collapse_at is not None
+            or model.collapse_operators
+        ):
+            return None
+        start, end = endpoints
+        active = [
+            p
+            for p in controls.pulses
+            if quantize_ns(p.start_ns) <= start and quantize_ns(p.end_ns) >= end
+        ]
+        if any(p.frequency_ghz != 0 or p.envelope.constant is None for p in active):
+            return None
+        amplitudes = tuple(
+            sum(
+                (
+                    controls.amplitude(p, (start + end) / 2)
+                    for p in active
+                    if p.source == source.name
+                ),
+                0j,
+            )
+            for source in model.sources
+        )
+        for ref in sorted(
+            snapshot.tables, key=lambda r: (r.degree, r.identity), reverse=True
+        ):
+            archive = self._load(ref.path, ref.identity)
+            header = archive.header
+            if header.duration_ns != end - start or len(header.ratios) != len(
+                amplitudes
+            ):
+                continue
+            ratios = tuple(complex(real, imag) for real, imag in header.ratios)
+            family = PlateauFamily(model, end - start, ratios)
+            if family.identity != ref.family:
+                continue
+            nonzero = [i for i, ratio in enumerate(ratios) if ratio != 0]
+            if not nonzero:
+                continue
+            quotient = amplitudes[nonzero[0]] / ratios[nonzero[0]]
+            scale = quotient.real
+            if abs(quotient.imag) > 1e-13 or any(
+                abs(a - scale * r) > 1e-13
+                for a, r in zip(amplitudes, ratios, strict=True)
+            ):
+                continue
+            if header.lower <= scale <= header.upper:
+                return interpolate(archive.nodes, archive.values, scale), ref.identity
+        return None
+
     def build(
         self, plan: BuildPlan, backend: IntelOpenCL, *, node_limit: int | None = None
     ) -> BuildResult:
@@ -239,6 +336,10 @@ class EvolutionLibrary:
                 lower=plan.lower,
                 upper=plan.upper,
                 degree=plan.degree,
+                duration_ns=plan.family.duration_ns,
+                ratios=tuple(
+                    (complex(r).real, complex(r).imag) for r in plan.family.ratios
+                ),
             )
             partial = NumericArchive(
                 header,

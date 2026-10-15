@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from hashlib import sha256
 from typing import Literal
 
 import numpy as np
@@ -24,11 +25,14 @@ class Envelope:
     constant: constant value, or None for time-varying envelopes. This is used
         for exact static/periodic algorithm selection and must match value.
         Prefer the constructors rather than setting this optimization hint.
+    identity: reproducible callable/content descriptor required for persistent
+        direct records; built-in constructors provide it. Never use callable repr.
     No amplitude normalization occurs. Nonfinite evaluations raise ValueError.
     """
 
     value: Callable[[float], complex]
     constant: complex | None = None
+    identity: str | None = None
 
     def at(self, local_ns: float) -> complex:
         """Evaluate the unchanged continuous envelope at pulse-local ns."""
@@ -42,7 +46,7 @@ class Envelope:
         """Return a constant signed dimensionless envelope without normalization."""
         if not np.isfinite(amplitude):
             raise ValueError("envelope amplitude must be finite")
-        return cls(lambda t: amplitude, amplitude)
+        return cls(lambda t: amplitude, amplitude, f"flat:{complex(amplitude)!s}")
 
     @classmethod
     def gaussian(cls, *, sigma_ns: float, center_ns: float) -> "Envelope":
@@ -53,19 +57,30 @@ class Envelope:
         """
         if not np.isfinite([sigma_ns, center_ns]).all() or sigma_ns <= 0:
             raise ValueError("Gaussian sigma must be positive and parameters finite")
-        return cls(lambda t: complex(np.exp(-0.5 * ((t - center_ns) / sigma_ns) ** 2)))
+        return cls(
+            lambda t: complex(np.exp(-0.5 * ((t - center_ns) / sigma_ns) ** 2)),
+            identity=f"gaussian:{float(sigma_ns).hex()}:{float(center_ns).hex()}",
+        )
 
     @classmethod
     def sampled(
-        cls, times_ns: NDArray[np.float64], values: NDArray[np.complex128]
+        cls,
+        times_ns: NDArray[np.float64],
+        values: NDArray[np.complex128],
+        *,
+        outside: Literal["zero", "hold"] = "zero",
     ) -> "Envelope":
         """Interpolate complex samples linearly on their original local ns axis.
 
-        Own copies of increasing finite (sample,) times and matching signed
+        outside: "zero" returns zero beyond the samples; "hold" extends endpoint
+        values (for program linear playback). Own copies of increasing finite
+        (sample,) times and matching signed
         complex values. Outside the sample range return zero. The pulse should
         declare semantic breakpoints if sample corners require solver boundaries;
         samples are not resampled onto the 2 ns event grid.
         """
+        if outside not in ("zero", "hold"):
+            raise ValueError("unsupported sampled envelope extension")
         times = np.array(times_ns, dtype=float, copy=True)
         samples = np.array(values, dtype=complex, copy=True)
         if (
@@ -81,7 +96,16 @@ class Envelope:
             )
         times.setflags(write=False)
         samples.setflags(write=False)
-        return cls(lambda t: complex(np.interp(t, times, samples, left=0, right=0)))
+        identity = sha256(
+            times.astype("<f8").tobytes()
+            + samples.astype("<c16").tobytes()
+            + outside.encode()
+        ).hexdigest()
+        left, right = (0j, 0j) if outside == "zero" else (samples[0], samples[-1])
+        return cls(
+            lambda t: complex(np.interp(t, times, samples, left=left, right=right)),
+            identity=f"sampled:{identity}",
+        )
 
 
 @dataclass(frozen=True)

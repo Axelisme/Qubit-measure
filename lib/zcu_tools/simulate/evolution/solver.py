@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 from operator import index
+from time import perf_counter
+from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy.integrate import solve_ivp
@@ -9,7 +11,11 @@ from scipy.linalg import expm
 
 from .controls import ControlPulse, ControlSequence, quantize_ns
 from .model import NumericModel, SolverSettings, hermitian_matrix
+from .reuse import EvaluationReceipt, exact_key
 from .state import ComplexMatrix, DensityState, owned_matrix
+
+if TYPE_CHECKING:
+    from .library import EvolutionLibrary, LibrarySnapshot
 
 
 def propagator_power(propagator: ComplexMatrix, repetitions: int) -> ComplexMatrix:
@@ -57,15 +63,35 @@ class Evolution:
 
     model: fixed-coordinate NumericModel, reusable and never modified.
     settings: internal algorithm accuracy controls; caller does not choose a
-        solver separately for every event interval. No tables or persistence.
+        solver separately for every event interval.
+    library: optional explicitly pathed deterministic storage with 4GB host LRU.
+    tables: optional frozen publication snapshot; otherwise captured at construction.
+        Only static closed plateau intervals use U tables. Other legal requests
+        retain the full direct solver, with persistent exact density records.
+    last_evaluation: author-only receipt of the last successful evolve, including
+        actual content identities and full load/solve/write wall time.
     Every evolve call requires its own initial density. Independent shots must
     explicitly supply their own initial state. Explicit shot fragments may feed
     the previous result to the next call with the complete absolute controls.
     """
 
-    def __init__(self, model: NumericModel, settings: SolverSettings | None = None):
+    def __init__(
+        self,
+        model: NumericModel,
+        settings: SolverSettings | None = None,
+        *,
+        library: "EvolutionLibrary | None" = None,
+        tables: "LibrarySnapshot | None" = None,
+    ):
         self.model = model
         self.settings = SolverSettings() if settings is None else settings
+        self.library = library
+        self.tables = (
+            tables
+            if tables is not None
+            else (library.snapshot() if library is not None else None)
+        )
+        self.last_evaluation = EvaluationReceipt("direct", (), 0)
         self._sources = {s.name: s for s in model.sources}
 
     def evolve(
@@ -86,9 +112,23 @@ class Evolution:
         ValueError reports invalid inputs/callbacks; RuntimeError reports solver
         failure or invalid output. No eigenvalue clipping or trace repair occurs.
         """
+        started = perf_counter()
         controls = ControlSequence() if controls is None else controls
         self._validate_inputs(initial, controls)
         points = controls.boundaries_ns(start_ns=start_ns, end_ns=end_ns)
+        key = ""
+        identities: list[str] = []
+        if self.library is not None:
+            key = exact_key(
+                self.model, self.settings, initial, controls, (points[0], points[-1])
+            )
+            record = self.library.read_record(key)
+            if record is not None:
+                state = DensityState(self.model.basis, record[0])
+                self.last_evaluation = EvaluationReceipt(
+                    "direct-record", (record[1],), perf_counter() - started
+                )
+                return state
         points = tuple(
             sorted(
                 set(points)
@@ -111,14 +151,32 @@ class Evolution:
             if self.model.collapse_operators or self.model.collapse_at is not None:
                 density = self._dissipative(density, interval)
             else:
-                u = self._closed(interval)
+                cached = None
+                if self.library is not None and self.tables is not None:
+                    cached = self.library.plateau(
+                        self.model, controls, (start, end), self.tables
+                    )
+                if cached is None:
+                    u = self._closed(interval)
+                else:
+                    u, identity = cached
+                    identities.append(identity)
                 density = u @ density @ u.conj().T
         try:
-            return DensityState(self.model.basis, density)
+            state = DensityState(self.model.basis, density)
         except ValueError as error:
             raise RuntimeError(
                 f"evolution produced invalid density: {error}"
             ) from error
+        if self.library is not None and not identities:
+            identities.append(self.library.save_record(key, state.density))
+            origin = "direct"
+        else:
+            origin = "table" if identities else "direct"
+        self.last_evaluation = EvaluationReceipt(
+            origin, tuple(dict.fromkeys(identities)), perf_counter() - started
+        )
+        return state
 
     def _validate_inputs(
         self, initial: DensityState, controls: ControlSequence

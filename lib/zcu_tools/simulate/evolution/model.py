@@ -62,6 +62,9 @@ class NumericModel:
     event_times_ns: finite absolute model discontinuities (e.g. bath updates),
         default empty. Evolution unions these with pulse events on the same 2 ns
         grid, without imposing a waveform sampling grid.
+    dynamics_identity: reproducible descriptor of every callback dependency,
+        required only for persistent records when callbacks are supplied.
+        This is a caller contract, not a callable repr or output path.
     Static matrices own read-only copies. Callbacks remain caller-owned. Shape,
     finiteness or Hermiticity violations raise ValueError, including at runtime.
     No physical applicability/convergence certification is performed.
@@ -76,6 +79,7 @@ class NumericModel:
     collapse_at: Callable[[float], tuple[ComplexMatrix, ...]] | None = None
 
     event_times_ns: tuple[float, ...] = ()
+    dynamics_identity: str | None = None
 
     def __post_init__(self) -> None:
         if not np.isfinite(self.event_times_ns).all():
