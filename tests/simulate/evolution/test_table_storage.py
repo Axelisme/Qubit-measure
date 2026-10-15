@@ -4,7 +4,6 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-
 from zcu_tools.simulate.evolution import Basis, DriveSource, NumericModel, PlateauFamily
 
 
@@ -12,7 +11,11 @@ def _family():
     basis = Basis("storage", ("g", "e"), np.eye(2, dtype=complex))
     x = np.array([[0, 1], [1, 0]], dtype=complex)
     y = np.array([[0, -1j], [1j, 0]], dtype=complex)
-    return PlateauFamily(NumericModel("storage", basis, 0.003*y, (DriveSource("a", 0.012*x),)), 8.0, (1+0.2j,))
+    return PlateauFamily(
+        NumericModel("storage", basis, np.asarray(0.003*y, dtype=np.complex128), (DriveSource("a", np.asarray(0.012*x, dtype=np.complex128)),)),
+        8.0,
+        (1 + 0.2j,),
+    )
 
 
 def test_partial_resume_publish_interpolate_and_freeze_versions(tmp_path):
@@ -34,23 +37,39 @@ def test_partial_resume_publish_interpolate_and_freeze_versions(tmp_path):
     assert library.evaluate(family, 0.037, frozen) is None
     current = library.snapshot()
     actual = library.evaluate(family, 0.037, current)
+    assert actual is not None
     from scipy.linalg import expm
-    expected = expm(-2j*np.pi*8*(family.model.hamiltonian_ghz+0.037*family.drive_ghz))
+
+    expected = expm(
+        -2j * np.pi * 8 * (family.model.hamiltonian_ghz + 0.037 * family.drive_ghz)
+    )
     np.testing.assert_allclose(actual, expected, atol=2e-9, rtol=0)
     assert library.evaluate(family, 0.101, current) is None
     assert library.evaluate(replace(family, duration_ns=10), 0.037, current) is None
-    changed = replace(family, model=replace(family.model, collapse_operators=(np.diag([0., .1]).astype(complex),)))
+    changed = replace(
+        family,
+        model=replace(
+            family.model, collapse_operators=(np.diag([0.0, 0.1]).astype(complex),)
+        ),
+    )
     assert changed.identity == family.identity
     assert library.resident_bytes <= library.budget_bytes
     library.clear_memory()
     assert library.resident_bytes == 0
     reloaded = EvolutionLibrary(tmp_path / "data", budget_bytes=1)
-    np.testing.assert_array_equal(reloaded.evaluate(family, 0.037, reloaded.snapshot()), actual)
+    np.testing.assert_array_equal(
+        reloaded.evaluate(family, 0.037, reloaded.snapshot()), actual
+    )
     assert reloaded.resident_bytes == 0
 
 
 def test_validation_failure_never_publishes_or_auto_raises_degree(tmp_path):
-    from zcu_tools.simulate.evolution import BuildPlan, EvolutionLibrary, IntelOpenCL, ValidationLimits
+    from zcu_tools.simulate.evolution import (
+        BuildPlan,
+        EvolutionLibrary,
+        IntelOpenCL,
+        ValidationLimits,
+    )
 
     library = EvolutionLibrary(tmp_path / "data")
     plan = BuildPlan(_family(), -1.0, 1.0, 4, ValidationLimits(density_abs=1e-15))
@@ -63,7 +82,9 @@ def test_corrupt_published_data_is_not_a_miss(tmp_path):
     from zcu_tools.simulate.evolution import BuildPlan, EvolutionLibrary, IntelOpenCL
 
     library = EvolutionLibrary(tmp_path / "data")
-    library.build(BuildPlan(_family(), -0.1, 0.1, 6), IntelOpenCL(tmp_path / "compiler"))
+    library.build(
+        BuildPlan(_family(), -0.1, 0.1, 6), IntelOpenCL(tmp_path / "compiler")
+    )
     snapshot = library.snapshot()
     snapshot.tables[0].path.write_bytes(b"broken file")
     with pytest.raises(ValueError, match="(corrupt|integrity)"):
