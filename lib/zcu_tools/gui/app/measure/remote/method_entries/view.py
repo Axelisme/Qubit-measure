@@ -42,7 +42,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Gracefully close an idle GUI. Any active operation returns busy. "
             "All unsaved artifacts require discard_unsaved=true. Persist session "
             "and clean up through the normal shutdown path after this reply. "
-            "Returns shutting_down and pid, not confirmation that the process has exited. "
+            "Returns shutting_down and pid: the close request is accepted, not proof "
+            "that cleanup has completed. A drain timeout keeps remote available and "
+            "asks the local user to wait again or explicitly force close. "
             "rpc_call does not wait for process exit or send an OS kill.",
             (
                 ParamSpec(

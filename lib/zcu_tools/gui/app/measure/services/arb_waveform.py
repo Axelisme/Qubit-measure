@@ -26,7 +26,13 @@ ARB_WAVEFORMS_VERSION_KEY = "arb_waveforms"
 
 
 class ArbWaveformService:
-    """App-local adapter for the shared arbitrary waveform repository."""
+    """Select a repository from the current session environment per operation.
+
+    No root is retained between operations. Listing without project context
+    returns an empty list; other operations require a resolvable root. Repository
+    validation and filesystem failures propagate without changing revisions.
+    Successful writes, renames and deletes bump the waveform revision once.
+    """
 
     def __init__(self, state: State) -> None:
         self._state = state
@@ -37,21 +43,20 @@ class ArbWaveformService:
         return root
 
     def list_data_keys(self) -> list[str]:
-        if not self._try_init_database():
+        root = try_resolve_arb_waveform_root(self._state.session_env)
+        if root is None:
             return []
-        return ArbWaveformDatabase.list()
+        return ArbWaveformDatabase(root).list()
 
     def list_infos(self) -> list[ArbWaveformInfo]:
-        if not self._try_init_database():
+        root = try_resolve_arb_waveform_root(self._state.session_env)
+        if root is None:
             return []
-        return [
-            ArbWaveformDatabase.inspect(data_key)
-            for data_key in ArbWaveformDatabase.list()
-        ]
+        repository = ArbWaveformDatabase(root)
+        return [repository.inspect(data_key) for data_key in repository.list()]
 
     def load_data(self, data_key: str) -> ArbWaveformData:
-        self._init_database()
-        return ArbWaveformDatabase.load(data_key)
+        return ArbWaveformDatabase(self.root_path()).load(data_key)
 
     def get_preview(self, data_key: str) -> ArbWaveformPreviewResult:
         data = self.load_data(data_key)
@@ -67,32 +72,19 @@ class ArbWaveformService:
         *,
         overwrite: bool,
     ) -> ArbWaveformWriteStatus:
-        self._init_database()
-        existed = ArbWaveformDatabase.exists(data_key)
-        ArbWaveformDatabase.create_from_formula(data_key, recipe, overwrite=overwrite)
+        repository = ArbWaveformDatabase(self.root_path())
+        existed = repository.exists(data_key)
+        repository.create_from_formula(data_key, recipe, overwrite=overwrite)
         self._state.version.bump(ARB_WAVEFORMS_VERSION_KEY)
         return "overwritten" if existed else "created"
 
     def delete(self, data_key: str) -> None:
-        self._init_database()
-        ArbWaveformDatabase.delete(data_key)
+        ArbWaveformDatabase(self.root_path()).delete(data_key)
         self._state.version.bump(ARB_WAVEFORMS_VERSION_KEY)
 
     def rename(self, old_data_key: str, new_data_key: str) -> None:
-        self._init_database()
-        ArbWaveformDatabase.rename(old_data_key, new_data_key)
+        ArbWaveformDatabase(self.root_path()).rename(old_data_key, new_data_key)
         self._state.version.bump(ARB_WAVEFORMS_VERSION_KEY)
-
-    def _init_database(self) -> None:
-        ArbWaveformDatabase.init(self.root_path())
-
-    def _try_init_database(self) -> bool:
-        root = try_resolve_arb_waveform_root(self._state.session_env)
-        if root is None:
-            return False
-        root.mkdir(parents=True, exist_ok=True)
-        ArbWaveformDatabase.init(root)
-        return True
 
 
 def resolve_arb_waveform_root(ctx: SessionEnv) -> Path:

@@ -164,7 +164,7 @@ def test_measure_reference_missing_then_relinks_with_embedded_snapshot() -> None
         ),
     )
     ml = LibrarySnapshot(
-        ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+        ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
     ).replaced_module("Q1.pulses.drive", module_spec_from_raw(_PULSE))
     ml = ml.deleted("Q1.pulses.drive", kind="module")
 

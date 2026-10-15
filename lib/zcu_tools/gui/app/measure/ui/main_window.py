@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
     from zcu_tools.gui.app.measure.controller import Controller, ViewSnapshot
+    from zcu_tools.gui.app.measure.remote import RemoteControlAdapter
     from zcu_tools.gui.app.measure.services import TabSnapshot
     from zcu_tools.gui.app.measure.services.writeback_control import WritebackPane
 
@@ -121,16 +122,9 @@ class MainWindow(QMainWindow):
             self._ctrl, parent=self, dialog_refs=self._dialog_refs
         )
         self._events = MainWindowEventCoordinator(self._ctrl, host=self)
-        # True once _perform_close has begun the actual teardown, so the second
-        # closeEvent (triggered by _perform_close's self.close()) passes straight
-        # through instead of re-entering the cancel-and-wait coordination.
-        self._closing = False
-        self._close_prompt_open = False
+        self._initialize_close_state()
         self._reload_prompt_open = False
-        self._shutdown_requested = False
-        self._programmatic_shutdown_requested = False
-        self._post_shutdown_prompt_open = False
-        self._pending_tab_closes: set[str] = set()
+        self.remote_control_service: RemoteControlAdapter | None = None
         self.setWindowTitle("ZCU Qubit Measure — v2 GUI")
         self.resize(1280, 750)
 
@@ -178,6 +172,18 @@ class MainWindow(QMainWindow):
 
         # Cleanup on destroy
         self.destroyed.connect(self._cleanup_bus_subscriptions)
+
+    def _initialize_close_state(self) -> None:
+        """Initialize cancellation, drain and decision guards for final teardown."""
+        # Only final teardown permits the second closeEvent to pass straight through.
+        self._closing = False
+        self._close_prompt_open = False
+        self._shutdown_requested = False
+        self._programmatic_shutdown_requested = False
+        self._post_shutdown_prompt_open = False
+        self._draining_close = False
+        self._drain_prompt_open = False
+        self._pending_tab_closes: set[str] = set()
 
     def watch_application_shutdown(self, application: QApplication) -> None:
         """Retire this app's views on normal Qt exit, before adapter shutdown.
@@ -1071,8 +1077,9 @@ class MainWindow(QMainWindow):
         """Programmatic close (the app.shutdown RPC). Runs on the Qt main thread
         via the remote dispatch marshal. Does the same work as a user's
         window-close — cancel every live operation, wait for them to stop,
-        persist session, tear down remote, quit — but without the interactive
-        confirmation (no user to answer it).
+        persist session, tear down remote, quit — without the initial interactive
+        confirmation. A background drain timeout still requires a local decision.
+        An accepted request does not mean cleanup has completed.
 
         The cancel-and-wait is deferred to the next event-loop turn so the
         triggering RPC's reply is written back before the remote service tears
@@ -1197,10 +1204,44 @@ class MainWindow(QMainWindow):
             )
 
     def _perform_close(self, a0: QCloseEvent | None = None) -> None:
-        """The actual teardown: persist session, stop remote, accept the close.
-        Runs once every cancelled operation has settled (or timed out), driven by
-        the Controller's shutdown coordinator. Shared by closeEvent (user) and
-        request_shutdown (RPC)."""
+        """Drain accepted background work before any irreversible View teardown."""
+        if self._closing or self._draining_close or self._drain_prompt_open:
+            return
+        self._draining_close = True
+        try:
+            self._ctrl.close()
+        except TimeoutError:
+            self._present_drain_timeout()
+            return
+        finally:
+            self._draining_close = False
+        self._teardown(a0)
+
+    def _present_drain_timeout(self) -> None:
+        """Keep the View and remote alive until a retry or explicit force choice."""
+        self._drain_prompt_open = True
+
+        self._dialog_presenter.destructive_confirm(
+            self,
+            "背景工作仍在執行",
+            "背景工作仍在執行。再等一下會重試收尾；強制關閉可能讓晚到的 callback "
+            "觸及已釋放的視窗，並不代表儀器已斷線或 RF 已關閉。",
+            action_text="強制關閉",
+            cancel_text="再等一下",
+            on_decision=lambda force: self._on_drain_decision(force=force),
+        )
+
+    def _on_drain_decision(self, *, force: bool) -> None:
+        """Schedule the explicit force choice, or retry without recursive draining."""
+        if not self._drain_prompt_open or self._closing:
+            return
+        self._drain_prompt_open = False
+        QTimer.singleShot(0, self._teardown if force else self._perform_close)
+
+    def _teardown(self, a0: QCloseEvent | None = None) -> None:
+        """Persist and release the View after drain, or an explicit unsafe force."""
+        if self._closing:
+            return
         self._closing = True
         self.dispose_control_watches()
         # A nested Load exec/chooser may still be running during RPC shutdown.

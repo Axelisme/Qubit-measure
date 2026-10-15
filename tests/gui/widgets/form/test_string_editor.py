@@ -34,7 +34,7 @@ def name_editor(
             general=PointGeneral(created_at="2026-10-11T00:00:00Z"),
         ),
         library=LibrarySnapshot(
-            ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+            ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
         ),
         target=SavedPoint(entry_id="entry", point="synthetic"),
         roles=None,

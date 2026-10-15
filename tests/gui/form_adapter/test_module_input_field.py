@@ -87,14 +87,12 @@ def persistent_spec(value: str | ModuleSpec | None) -> ModuleSpec:
 
 
 def library_env() -> FormEnv:
-    pulse = PulseSpec(
-        ch=0, nqz=1, freq=100.0, gain=0.2, waveform="Q.waveforms.const", mask=[1]
-    )
+    pulse = PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.2, waveform="Q.waveforms.const")
     return FormEnv(
         library=LibrarySnapshot(
             ModuleLibraryDocument(
                 format="zcu.module-library",
-                format_version="1.0",
+                format_version="2.0",
                 components={
                     "Q": ComponentLibrary(
                         pulses={"first": pulse, "second": pulse},
@@ -188,7 +186,6 @@ def test_full_family_inline_projects_detached_specs_without_sources(
     assert spec.model_dump(mode="json")[child] == expected
     assert state.input.data == before
     if isinstance(spec, PulseSpec):
-        assert spec.mask is None
         spec.gain = 0.5
         assert (
             persistent_spec(field.to_spec(selection_result(state, env))).model_dump()[
@@ -333,7 +330,6 @@ def test_copy_command_is_atomic_and_uses_existing_supported_spec_projection() ->
     assert isinstance(spec, PulseSpec)
     assert spec.waveform == "Q.waveforms.const"
     assert spec.gain == 0.2
-    assert spec.mask is None
 
 
 @pytest.mark.parametrize("family", [(), str, ConstWaveformCfg, PulseSpec | None])

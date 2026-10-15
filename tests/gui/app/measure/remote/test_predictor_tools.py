@@ -101,7 +101,7 @@ def simulator(qapp, tmp_path: Path):
     finally:
         sock.close()
         adapter.stop()
-        assert vars(controller)["_background_svc"].quiesce()
+        controller.close()
         for kind in added:
             component_registry.unregister(kind)
         assert component_registry.kinds() == before_kinds

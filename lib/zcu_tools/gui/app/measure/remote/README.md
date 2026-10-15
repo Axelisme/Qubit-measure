@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-14，Markdown guide contract
+**Last updated:** 2026-10-15，accepted shutdown and background drain
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -437,9 +437,14 @@ for `wait(op=handle)`. Wait for successful completion before starting measuremen
 ## Launch / Shutdown
 
 The GUI launcher starts the remote-control socket after the main window exists.
-Shutdown flows through the same MainWindow close path as the UI, persists state,
-marks the controller shutting down, stops the remote service, and then closes Qt
-resources.
+`app.shutdown` returns `shutting_down=True` and `pid` when the close request is
+accepted, not when cleanup completes. Busy and unsaved-data admission still apply.
+The next Qt turn follows the MainWindow cancellation and background-drain path.
+Only after drain succeeds does it persist state, stop remote, and release the View.
+A timeout retains the window and remote connection and asks the local user to wait
+again or explicitly force close. Dismissal retries on the next Qt turn. Repeated
+shutdown requests do not force teardown. Force accepts late-callback risk; neither
+this reply nor closing the window establishes device disconnection or RF safety.
 
 The MCP `connect` tool attaches to an existing GUI or explicitly launches one;
 exiting MCP disconnects without closing the GUI.

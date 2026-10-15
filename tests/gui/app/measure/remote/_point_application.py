@@ -18,17 +18,10 @@ class PointAdapter(SampleAdapter):
     pass
 
 
-class PointController(Controller):
-    """Give the fixture owned background teardown without exposing app APIs."""
-
-    def quiesce(self) -> None:
-        self._background_svc.quiesce()
-
-
 @dataclass
 class PointApplication:
     state: State
-    controller: PointController
+    controller: Controller
     remote: RemoteControlAdapter
     client: socket
 

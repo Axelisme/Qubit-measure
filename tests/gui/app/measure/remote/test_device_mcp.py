@@ -24,7 +24,7 @@ def device_client(qapp, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     finally:
         bridge.disconnect()
         # Fixture teardown must drain the Controller-owned runner before GC.
-        assert vars(fx.ctrl)["_background_svc"].quiesce()
+        fx.ctrl.close()
         fx.stop()
 
 
