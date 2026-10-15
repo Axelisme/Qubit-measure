@@ -3,15 +3,38 @@
 from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
-# Options carry selection values, fields and commands; ref/inline input is
-# explicitly tagged and branch defaults never depend on a previous draft.
-WIRE_VERSION = 4
-GUI_VERSION = 4
+# Form observations are lean; describe_form returns one layer from the exact
+# call-local candidate. Authored input and its persistence format are unchanged.
+WIRE_VERSION = 5
+GUI_VERSION = 5
 
 _RUN_ID = ParamSpec(
     "run_id",
     JsonType.STRING,
     description="Explicit native identity supplied to the GUI Start.",
+)
+
+_FORM_PARAMS = (
+    ParamSpec(
+        "form",
+        JsonType.STRING,
+        enum=("plan", "tunables"),
+        description="Form to inspect; current run knobs use the same accepted binding.",
+    ),
+    ParamSpec(
+        "run_id",
+        JsonType.STRING,
+        required=False,
+        default=None,
+        description="Required when a run is attached; omitted/null before Start.",
+    ),
+    ParamSpec(
+        "batch",
+        JsonType.JSON,
+        required=False,
+        default=None,
+        description="Omitted/null reads GUI draft with local errors; a path/value array previews parsed input only, without writing.",
+    ),
 )
 
 METHOD_SPECS: dict[str, MethodSpec] = {
@@ -59,33 +82,31 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "workflow.form": MethodSpec(
         5.0,
-        "Read schema/input/ordinary values/errors, or preview a batch without committing. "
-        "Schema fields marked hidden hold fixed values and need no input. "
-        "x-form-group only groups fields on screen; grouped fields take input "
-        "like any other, and the schema says which are required. "
-        'Expressions {"expr": text} are input only for text fields (int, float, '
-        "complex and str values whose schema offers that alternative); "
-        "Literal/enum, choices, bool and library-key fields take plain values.",
+        "Read input/ordinary values/errors and native revision, or preview a batch "
+        "without committing. Use workflow.describe_form for field metadata. "
+        'Expressions {"expr": text} are accepted only where description.expression '
+        "is true; selector, bool and library-key fields take plain values.",
+        params=_FORM_PARAMS,
+    ),
+    "workflow.describe_form": MethodSpec(
+        5.0,
+        "Read single-layer metadata and input/ordinary values/errors for the same "
+        "candidate in one owner turn. path=[] lists root fields; a field path "
+        "returns its metadata and direct children only. Options carry values and "
+        "commands, not branch fields; selected is the core's first matching index "
+        "or null. Full paths retain flattened wrappers. hidden/group/collapsed "
+        "only affect presentation; constraints are hints, not validation. "
+        "can_expand is structural and may expand to no children. selection_fixed "
+        "fixes only this branch, not inner choices; fixed/fixed_value fixes the "
+        "complete value. Invalid paths return invalid_params with reason=form_path "
+        "and data.form_path; declaration failures remain controller_error. "
+        "Uses workflow.form's run target, fixed env and non-submitting batch rules.",
         params=(
+            *_FORM_PARAMS,
             ParamSpec(
-                "form",
-                JsonType.STRING,
-                enum=("plan", "tunables"),
-                description="Form to inspect; current run knobs use the same accepted binding.",
-            ),
-            ParamSpec(
-                "run_id",
-                JsonType.STRING,
-                required=False,
-                default=None,
-                description="Required when a run is attached; omitted/null before Start.",
-            ),
-            ParamSpec(
-                "batch",
-                JsonType.JSON,
-                required=False,
-                default=None,
-                description="Omitted/null reads GUI draft with local errors; a path/value array previews parsed input only, without writing.",
+                "path",
+                JsonType.ARRAY,
+                description="Model-field names; [] is root. No container indices or mapping keys.",
             ),
         ),
     ),
