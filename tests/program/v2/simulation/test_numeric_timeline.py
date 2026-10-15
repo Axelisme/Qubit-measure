@@ -13,6 +13,8 @@ from zcu_tools.program.v2.modules.pulse import Pulse
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ArbWaveformCfg, ConstWaveformCfg
 
+from tests.program.v2.simulation.support import raw_of, request_of
+
 
 def readout(name="readout", *, channel=0, samples=31, waveform=None):
     return PulseReadoutCfg(
@@ -41,7 +43,7 @@ def test_empty_table_is_a_semantic_noop_if_no_consumer_needs_its_register(loader
         prog.acquire(env.soc, progress=False)
     except ValueError as exc:
         pytest.fail(f"empty loader must preserve its hardware no-op semantics: {exc}")
-    assert len(env.soc.binding.last_request.controls[0]) == 1
+    assert len(request_of(env).controls[0]) == 1
 
 
 def test_arb_preserves_signed_complex_scale_sample_axis_and_detached_ownership(
@@ -55,10 +57,10 @@ def test_arb_preserves_signed_complex_scale_sample_axis_and_detached_ownership(
     module = readout(waveform=ArbWaveformCfg(data="signed", path=str(path)))
     prog = ModularProgramV2(env.soccfg, ProgramV2Cfg(reps=2), modules=[module])
     prog.acquire(env.soc, progress=False)
-    event = env.soc.binding.last_request.controls[0][0]
+    event = request_of(env).controls[0][0]
     envelope = event.envelope
     assert envelope is not None
-    values = np.asarray(envelope.values)
+    values = np.asarray(envelope.values, dtype=np.complex128)
     assert envelope.sample_us[0] == 0
     assert envelope.sample_us[1] == pytest.approx(1 / 6144)
     assert event.duration_us == pytest.approx(38 / 384)
@@ -84,7 +86,7 @@ def test_adc_read_windows_retain_each_generator_association():
         env.soccfg, ProgramV2Cfg(), modules=[readout("first"), second]
     )
     prog.acquire(env.soc, progress=False)
-    window = env.soc.binding.last_request.timelines[0].readouts[0]
+    window = request_of(env).timelines[0].readouts[0]
     assert getattr(window, "generator_channels", ()) == (0, 1)
 
 
@@ -120,7 +122,7 @@ def test_two_adc_sample_counts_order_round_averaging_and_companion_raw():
     assert [trace.shape for trace in traces] == [(2, 7, 2), (2, 3, 2)]
     np.testing.assert_array_equal(traces[0], 10.75)
     np.testing.assert_array_equal(traces[1], 0.75)
-    raw = prog.get_raw()
+    raw = raw_of(prog)
     np.testing.assert_array_equal(raw[0], 79)  # round(7 * 11.25), last round only
     np.testing.assert_array_equal(raw[1], 4)  # round(3 * 1.25)
     assert len(seen) == 2
@@ -140,7 +142,7 @@ def test_join_swept_branch_emission_order_is_fixed_even_when_times_cross():
         sweep=[("axis", 2)],
     )
     prog.acquire(env.soc, progress=False)
-    request = env.soc.binding.last_request
+    request = request_of(env)
     assert [[e.source for e in events] for events in request.controls] == [
         ["a", "b"],
         ["a", "b"],

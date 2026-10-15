@@ -13,6 +13,8 @@ from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
+from tests.program.v2.simulation.support import raw_of, request_of
+
 
 class Feedback(Module):
     """Synthetic unsupported operation; compilation itself needs no hardware."""
@@ -113,7 +115,7 @@ def test_swept_trigger_uses_start_and_truncated_loop_step_not_pointwise_rounding
         env.soccfg, ProgramV2Cfg(), modules=[cfg.build("readout")], sweep=[("axis", 3)]
     )
     prog.acquire(env.soc, progress=False)
-    request = env.soc.binding.last_request
+    request = request_of(env)
     assert [t.readouts[0].trigger_us[0] for t in request.timelines] == pytest.approx(
         [0, 1 / 430.08, 2 / 430.08]
     )
@@ -150,7 +152,7 @@ def test_join_emits_interleaved_read_order_and_companion_raw_from_same_realizati
     assert len(seen) == 2
     assert traces.shape == (2, 3, request.readouts[0].samples, 2)
     np.testing.assert_array_equal(traces[:, :, 0, 0], [[5, 6, 7], [8, 9, 10]])
-    raw = prog.get_raw()[0]
+    raw = raw_of(prog)[0]
     np.testing.assert_array_equal(
         raw[..., 0],
         np.array([[10, 11, 12], [13, 14, 15]]) * request.readouts[0].samples,

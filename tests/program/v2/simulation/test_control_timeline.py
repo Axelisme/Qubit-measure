@@ -18,6 +18,8 @@ from zcu_tools.program.v2.modules.reset import NoneResetCfg, TwoPulseResetCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.utils import readout_freq_words
 
+from tests.program.v2.simulation.support import raw_of, request_of
+
 
 def drive(length=0.1, gain=0.2):
     return PulseCfg(
@@ -46,7 +48,7 @@ def acquire(modules, *, sweep=None, reps=1):
         prog.acquire(env.soc, progress=False)
     except ValueError as exc:
         pytest.fail(f"supported semantic control must acquire: {exc}")
-    return env.soc.binding.last_request, prog, env
+    return request_of(env), prog, env
 
 
 @pytest.mark.parametrize("compress", [False, True])
@@ -99,7 +101,7 @@ def test_scanwith_runtime_repeat_count_and_delay_cycles_are_local_to_each_acquir
     ]
     assert request.controls[0][-1].start_us == pytest.approx(0.4, abs=0.015)
     prog.acquire(env.soc, progress=False)
-    assert env.soc.binding.last_request.timelines == request.timelines
+    assert request_of(env).timelines == request.timelines
 
 
 def test_tablelength_uses_selected_duration_and_sweeps_use_quantized_controls():
@@ -116,7 +118,7 @@ def test_tablelength_uses_selected_duration_and_sweeps_use_quantized_controls():
         assert events[0].duration_us == pytest.approx([0.1, 0.3][i % 2], abs=0.003)
         assert events[1].start_us == pytest.approx([0.1, 0.3][i % 2], abs=0.006)
         assert events[1].gain == pytest.approx([0.1, 0.2][i % 2], abs=1e-4)
-    assert prog.get_raw()[0].shape == (2, 2, 1, 2)
+    assert raw_of(prog)[0].shape == (2, 2, 1, 2)
 
 
 def test_loadword_uint32_frequency_and_signed_gain_are_decoded_only_by_readout():
@@ -164,7 +166,7 @@ def test_table_readout_initial_template_exec_after_and_outer_wrap_are_not_index_
     )
     prog.acquire(env.soc, progress=False)
     assert [
-        events[0].frequency_mhz for events in env.soc.binding.last_request.controls
+        events[0].frequency_mhz for events in request_of(env).controls
     ] == pytest.approx([100, 300, 200, 300], abs=1e-4)
 
 

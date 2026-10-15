@@ -17,6 +17,8 @@ from zcu_tools.program.v2.modules.waveform import (
     GaussWaveformCfg,
 )
 
+from tests.program.v2.simulation.support import request_of
+
 
 @pytest.mark.parametrize(
     "waveform",
@@ -56,7 +58,7 @@ def test_parallel_pulses_retain_envelopes_phase_and_separate_adc_duration(wavefo
         prog.acquire(env.soc, progress=False)
     except ValueError as exc:
         pytest.fail(f"supported pulse/timing modules must acquire: {exc}")
-    request = env.soc.binding.last_request
+    request = request_of(env)
     events = request.controls[0]
     drive = next(event for event in events if event.gen_ch == 1)
     receiver = next(event for event in events if event.gen_ch == 0)
@@ -92,5 +94,7 @@ def test_parallel_pulses_retain_envelopes_phase_and_separate_adc_duration(wavefo
             )
     assert request.controls[1] == events
     # Frozen request survives later mutation of its originating module cfg.
+    if pulse.cfg is None:
+        raise AssertionError("drive fixture must provide a configured pulse")
     pulse.cfg.gain = 0.9
     assert drive.gain < 0
