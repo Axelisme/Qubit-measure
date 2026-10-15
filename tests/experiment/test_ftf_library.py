@@ -2,7 +2,7 @@
 
 import numpy as np
 import pytest
-from ruamel.yaml import YAML
+import yaml
 
 from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
 from zcu_tools.program.v2.modules.pulse import PulseCfg
@@ -30,7 +30,7 @@ def test_yaml_gpu_builder_and_public_closed_acquire_hit_table(tmp_path):
     document = settings.model_dump(mode="json", exclude_none=True)
     yaml_path = tmp_path / "ftf.yaml"
     with yaml_path.open("w") as stream:
-        YAML().dump(document, stream)
+        yaml.safe_dump(document, stream)
     path = tmp_path / "data"
     built = build_database(yaml_path, path, FTFBuildPlan(8., (1+0j,), -.1, .1, 6), tmp_path / "compiler")
     assert built.published is not None
@@ -84,7 +84,7 @@ def test_offline_cli_main_reads_yaml_and_resumes_partial(tmp_path):
 
     yaml_path = tmp_path / "ftf.yaml"
     with yaml_path.open("w") as stream:
-        YAML().dump(ftf_document(), stream)
+        yaml.safe_dump(ftf_document(), stream)
     args = [str(yaml_path), str(tmp_path / "data"), "--duration-ns", "8", "--ratios", "1", "--lower", "-.1", "--upper", ".1", "--degree", "6", "--compiler-directory", str(tmp_path / "compiler")]
     assert main(args+["--node-limit", "2"]) == 0
     assert not EvolutionLibrary(tmp_path / "data").snapshot().tables
