@@ -44,6 +44,7 @@ class ProgramV2Cfg(ConfigBase):
     ] = 1.0
 
 
+# QICK annotates single ndarrays; our existing mixin returns one array per ADC.
 class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
     SimulationAcquireMixin, ImproveAsmV2, AveragerProgramV2, IRCompileMixin
 ):

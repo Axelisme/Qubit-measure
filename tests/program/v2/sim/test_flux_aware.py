@@ -84,12 +84,6 @@ def test_flux_binding_is_local_to_soc_and_preserves_parameter_values():
     assert _SIM.model_dump() == before
 
 
-def test_white_noise_soc_rejects_flux_binding():
-    soc, _ = make_mock_soc()
-    with pytest.raises(RuntimeError, match="requires a SimParams"):
-        soc.set_flux_source(lambda: 0.0)
-
-
 def test_invalid_binding_preserves_previous_source():
     soc, _ = make_mock_soc(sim=_SIM)
 

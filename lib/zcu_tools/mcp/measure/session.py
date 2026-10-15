@@ -43,6 +43,17 @@ class GuiRpcError(GuiInvocationError):
         self.request_rejected = request_rejected
 
 
+def _reject_environment_attach(
+    simulate: str | None, launch: str, *, existing: bool
+) -> None:
+    """An explicit environment path may only select a newly born GUI process."""
+    if simulate is not None and launch != "new" and (launch == "never" or existing):
+        raise GuiRpcError(
+            'Existing GUI unchanged; close it first, then use launch="new" with simulate.',
+            reason="environment_requires_new_gui",
+        )
+
+
 def _transport_timeout(exc: GuiTransportTimeoutError) -> GuiRpcError:
     """Use the same uncertain transport error for public and internal reads."""
     return GuiRpcError(
@@ -134,7 +145,13 @@ class ConnectIdentity:
     mode: Literal["owner", "readonly"] | None = None
 
     def resolve(self, previous: ControlConnection) -> ControlConnection:
-        return ControlConnection(previous.label if self.label is None else self.label, previous.mode if self.mode is None else self.mode)
+        return ControlConnection(
+            previous.label if self.label is None else self.label,
+            previous.mode if self.mode is None else self.mode,
+        )
+
+
+_DEFAULT_CONNECT_IDENTITY = ConnectIdentity()
 
 
 class MeasureMcpSession:
@@ -400,7 +417,7 @@ class MeasureMcpSession:
         launch: str,
         clean: bool,
         token: str | None = None,
-        identity: ConnectIdentity = ConnectIdentity(),
+        identity: ConnectIdentity = _DEFAULT_CONNECT_IDENTITY,
         simulate: str | None = None,
     ) -> dict[str, Any]:
         """Attach and initialize identity before catalog; report native control.
@@ -454,11 +471,7 @@ class MeasureMcpSession:
         A repeated attach returns the connected GUI. GUI code revision is shown
         but never compared. No failed or stale mutation is resent automatically.
         """
-        if simulate is not None and launch != "new" and self.bridge.is_connected:
-            raise GuiRpcError(
-                'Existing GUI unchanged; close it first, then use launch="new" with simulate.',
-                reason="environment_requires_new_gui",
-            )
+        _reject_environment_attach(simulate, launch, existing=self.bridge.is_connected)
         if (
             launch != "new"
             and self.bridge.is_connected
@@ -475,13 +488,7 @@ class MeasureMcpSession:
             }
         selected = self._resolve_connect_port(self._config, port)
         existing = self._port_is_open(selected)
-        if simulate is not None and (
-            launch == "never" or (launch == "if_missing" and existing)
-        ):
-            raise GuiRpcError(
-                'Existing GUI unchanged; close it first, then use launch="new" with simulate.',
-                reason="environment_requires_new_gui",
-            )
+        _reject_environment_attach(simulate, launch, existing=existing)
         if launch == "new" and existing:
             raise GuiRpcError(f"GUI port {selected} is in use", reason="port_in_use")
         if launch == "never" and not existing:

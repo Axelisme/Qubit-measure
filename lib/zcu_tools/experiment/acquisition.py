@@ -21,6 +21,7 @@ from pydantic import TypeAdapter
 from zcu_tools.datafile import JsonObject, SoftwareProvenance
 from zcu_tools.device import BaseDevice
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.program.v2.simulation import SimulationSoc
 from zcu_tools.resources.entry import new_run_id as generate_run_id
 
 
@@ -133,6 +134,11 @@ def capture_software_provenance(
         qick_version=qick_version,
         soc_fingerprint=_soc_fingerprint(context),
         hostname=socket.gethostname(),
+        simulation_id=(
+            context.soc.binding.provenance.identifier
+            if context is not None and isinstance(context.soc, SimulationSoc)
+            else None
+        ),
     )
 
 

@@ -23,6 +23,9 @@ facade。caller 優先從 package root import model 與 function。Facade 在 ca
 - `validate_cfg_snapshot` 擁有 cfg 的 JSON、非空 cfg_type 與完整 major.minor 格式規則。
   Native writer/reader 與離線 migration callback 共用它；純驗證不修改歷史值。
   Concrete cfg 的欄位及支援 major 由該 cfg owner 驗證，不屬於檔案格式。
+- `SoftwareProvenance.simulation_id` is an optional opaque public environment identifier.
+  Native provenance stores it as a UTF-8 attr; files that omit the attr read as None.
+  It contains no seed, model truth or round inputs. Writers do not inspect environments.
 - `RunMetadata`、`RunSnapshot`、`CfgSnapshot` 是 caller 傳入的歷史資料，writer
   不擷取 live context 或讀硬體。`RunMetadata.device_snapshot` 保存 Run 前固定的
   JSON settings，key 是 device 名稱，value 是 get_info 設定。Native 沿既有 `/device`

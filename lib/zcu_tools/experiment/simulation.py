@@ -1,6 +1,7 @@
 """Explicit Python environments, shared by GUI startup and Notebook callers."""
 
 import importlib.util
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
@@ -33,6 +34,10 @@ class SimulationEnvironment:
     soccfg: QickConfig
     devices: DeviceManager
     description: str
+
+    def __post_init__(self) -> None:
+        if self.soc.get_cfg() != self.soccfg.get_cfg():
+            raise ValueError("environment soc and soccfg must use matching profiles")
 
 
 @dataclass(frozen=True)
@@ -108,11 +113,18 @@ def load_environment(path: str | Path) -> SimulationEnvironment:
     if spec is None or spec.loader is None:
         raise ValueError(f"cannot load environment: {path}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    builder = getattr(module, "build_environment", None)
-    if not callable(builder):
-        raise TypeError("environment must define build_environment()")
-    result = builder()
-    if not isinstance(result, SimulationEnvironment):
-        raise TypeError("build_environment() must return SimulationEnvironment")
-    return result
+    # Ordinary Python import identity is needed by postponed annotations and
+    # dataclasses. Retain successful author modules for later type resolution.
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+        builder = getattr(module, "build_environment", None)
+        if not callable(builder):
+            raise TypeError("environment must define build_environment()")
+        result = builder()
+        if not isinstance(result, SimulationEnvironment):
+            raise TypeError("build_environment() must return SimulationEnvironment")
+        return result
+    except Exception:
+        del sys.modules[spec.name]
+        raise

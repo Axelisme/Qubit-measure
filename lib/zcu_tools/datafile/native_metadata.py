@@ -14,7 +14,13 @@ from .native_nodes import known_group, known_node
 _JSON = TypeAdapter(JsonObject)
 _METADATA = TypeAdapter(RunMetadata)
 _DEVICE = TypeAdapter(dict[str, JsonObject])
-_OPTIONAL_EVIDENCE = ("git_commit", "qick_version", "soc_fingerprint", "hostname")
+_OPTIONAL_EVIDENCE = (
+    "git_commit",
+    "qick_version",
+    "soc_fingerprint",
+    "hostname",
+    "simulation_id",
+)
 
 
 def text_attr(node: h5.Group | h5.Dataset, name: str) -> str:
@@ -268,6 +274,9 @@ def read_metadata(file: h5.File, source: Path) -> tuple[RunMetadata, CfgSnapshot
         )
     }
     for name in _OPTIONAL_EVIDENCE:
+        if name == "simulation_id" and name not in group.attrs:
+            evidence[name] = None
+            continue
         value = text_attr(group, name)
         evidence[name] = value or None
     dirty = text_attr(group, "git_dirty")

@@ -9,9 +9,26 @@
 - **Mock Interfaces**: Use type-compatible fakes or an existing typed seam when passing test collaborators to functions. Do not add type suppressions or `cast()` to silence an incompatible interface.
 - **Program Emission Tests**: Unit tests that assert emitted program actions use a typed `ProgramTrace` adapter rather than loose `MagicMock` program objects. The trace records semantic program intents (readout declarations, triggers, pulses, loops, delays, register writes, and jumps) without acting as a second compiler or IR parser.
 - **MagicMock Scope**: Keep `MagicMock` for non-program collaborators, child-module spy hooks, and deliberate error-injection tests. Do not use it as the default stand-in for a program object when the test is asserting emitted program behavior.
-- **MockSoc Role**: `MockSoc` remains the compile/acquire/sim adapter for integration-style tests. `ProgramTrace` is a unit-test recorder and does not replace hardware-aligned compile or acquisition coverage.
+- **Offline acquisition**: `make_mock_soccfg(n_gens, n_readouts)` builds only a compile profile. Explicit environments use `SimulationSoc` and `SimulationBinding`; ordinary acquisition tests may inject a deterministic transport. `ProgramTrace` records emission and does not replace real acquire coverage.
 - **QICK External Types**: `QickParam` runtime objects expose methods/attributes (`is_sweep`, `minval`, `maxval`, `start`, `spans`, `to_array`) that can be missing from third-party stubs. Program code narrows through `program.v2.utils.is_qick_param()` / `QickParamLike` instead of local `cast()` calls, so every use has a runtime guard.
 - **Cfg Contracts**: `AbsModuleCfg` and `AbsWaveformCfg` are abstract contracts. Concrete cfg classes implement both `build()` and `set_param()`; unknown parameter names raise `ValueError` rather than being ignored. `tests/program/v2/modules/test_set_param_contract.py` is the cross-family audit for this fail-fast rule.
+
+## Fixed offline profile
+
+`make_mock_soccfg(n_gens=2, n_readouts=1)` accepts nonnegative channel counts.
+It builds no hardware, acquisition source or noise fallback. The profile uses
+ZCU216-shaped metadata, tProc v2 at 430.08 MHz and the installed QICK assembly
+revision. Generators are `axis_signal_gen_v6`, with 32-bit DDS/phase,
+12288 MHz DDS, 384 MHz fabric, 16 envelope samples/clock, max gain word 32766
+and 65536 envelope samples. ADCs are `axis_readout_v2`, with 32-bit DDS,
+2457.6 MHz DDS, 307.2 MHz output and 8192-sample accumulated/decimated buffers.
+Mixers, mux channels and weighted readouts are not offered. These are virtual
+compile capabilities, not a claim about an attached board. Clocks, DDS, memory
+limits and channel types are not override parameters. Explicit `(gen_ch, ro_ch)`
+wiring belongs to `SimulationSoc`; actually using an unwired channel fails.
+
+See [simulation](simulation/README.md) for the shared numeric contract, trusted
+Python builder, ownership, seeded white noise and the supported minimal readout.
 
 ## IR System & Hardware Alignment
 

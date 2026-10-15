@@ -77,6 +77,9 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         composition, not a file location. Assembly uses default rows for the
         session's one-time unique-focus initialization. Saved entry tables take
         precedence, including empty tables. No device or cache binding occurs.
+        ``simulate`` selects a trusted Python builder at assembly, once per process.
+        Its successful return transfers ownership of the exact manager to this
+        composition; startup failure propagates and triggers manager cleanup.
         """
         from zcu_tools.gui.app.measure.ui.error_handler import show_error_dialog
         from zcu_tools.gui.app.measure.utils.error_handler import (
@@ -104,13 +107,9 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
             self._environment = load_environment(self._simulate)
         try:
             return self._assemble(control)
-        except Exception as error:
-            try:
-                self.close(None)
-            except Exception as cleanup_error:  # noqa: BLE001 — preserve original and cleanup failures
-                raise ExceptionGroup(
-                    "environment startup and cleanup failed", [error, cleanup_error]
-                ) from None
+        except Exception:
+            # If close fails, Python exception chaining preserves both failures.
+            self.close(None)
             raise
 
     def _assemble(self, control: ControlOptions | None) -> GuiAssembly:
@@ -140,7 +139,7 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
             # MainWindow._perform_close stops this before accepting close. The
             # runtime also connects adapter.stop to aboutToQuit as an idempotent
             # safety net for non-window shutdown paths.
-            window.remote_control_service = adapter  # type: ignore[attr-defined]
+            window.remote_control_service = adapter
 
         return GuiAssembly(controller=ctrl, window=window, control_adapter=adapter)
 

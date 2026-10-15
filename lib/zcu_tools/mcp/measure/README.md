@@ -4,21 +4,31 @@
 
 Measure MCP 透過 GUI 的 loopback remote socket 操作同一份 GUI 狀態。GUI core 不 import MCP。GUI `RemoteMethodEntry` 擁有 wire schema、exposure、readonly 與 operation policy。MCP 每次連線讀取 live `rpc.catalog`，不複製 policy 表，也不依 catalog 動態建立 tools。
 
+## Startup environment
+
+`connect(..., simulate="/absolute/path/environment.py")` forwards the path only
+when this call launches a new GUI. The Python file is trusted code with a
+zero-argument `build_environment`. Explicit paths on attach, including an
+already-connected early return or `if_missing` finding an existing GUI, fail with
+`environment_requires_new_gui`. The existing GUI is unchanged. Close it and use
+`launch="new"` to select another environment. Attach without a path is unchanged.
+There is no dynamic simulation tool or initialization RPC.
+
 ## 固定工具與 RPC
 
-`mcp_servers/measure.py` 把使用者的 recipe definitions 注入 session 與 `assembly.py`。Registry 驗證名稱、手寫 schema 與 callback，工具表拒絕不一致的注入及重名。Framework 不反向 import 使用者 recipes，也不從 GUI catalog 產生 tools。共用工具為 `connect`、`status`、`wait`、`cancel`、`finish_early`、`rpc_list`、`rpc_describe`、`rpc_call`、`tab_analyze`、`tab_interact`、`tab_close`、`answer` 與 `apply_writeback`，以及 `simulation_initialize`、`device_setup`、`recipe_guide`。
+`mcp_servers/measure.py` 把使用者的 recipe definitions 注入 session 與 `assembly.py`。Registry 驗證名稱、手寫 schema 與 callback，工具表拒絕不一致的注入及重名。Framework 不反向 import 使用者 recipes，也不從 GUI catalog 產生 tools。共用工具為 `connect`、`status`、`wait`、`cancel`、`finish_early`、`rpc_list`、`rpc_describe`、`rpc_call`、`tab_analyze`、`tab_interact`、`tab_close`、`answer` 與 `apply_writeback`，以及 `device_setup`、`recipe_guide`。
 
 ## Setup 工具
 
-`recipe_guide(recipe)` 使用 registry 的 adapter mapping，回傳 recipe、adapter 與 `guide: {markdown, resource_dir}`，不從 recipe 名稱猜 adapter。Markdown 保留全文；resource_dir 是 GUI host 的絕對目錄字串，未宣告 guide 時是 null。Guide 中的圖片使用相對路徑，agent 需要時自行從該目錄讀取。工具不讀圖、不附圖；跨機 agent 可能無法存取這個路徑。`simulation_initialize` 接現行 GUI coordinator，重用有效 simulation，切換時可能斷開真實裝置。它不套用 project，也不連真實硬體。Caller 仍須取得切換授權。Ready 只核對 MockSoc 與 connected fake_flux，不依賴 predictor。全域 status 不讀或投影 installed predictor。
+`recipe_guide(recipe)` 使用 registry 的 adapter mapping，回傳 recipe、adapter 與 `guide: {markdown, resource_dir}`，不從 recipe 名稱猜 adapter。Markdown 保留全文；resource_dir 是 GUI host 的絕對目錄字串，未宣告 guide 時是 null。Guide 中的圖片使用相對路徑，agent 需要時自行從該目錄讀取。工具不讀圖、不附圖；跨機 agent 可能無法存取這個路徑。全域 status 不讀或投影 installed predictor。
 
 `device_setup(name, cfg)` 接受 partial Info patch。工具先讀 before snapshot，合併 before.info 與 caller patch，再送一次完整 `device.setup(name, cfg)` RPC。YOKO patch 含 value 時，caller 必須明填 value_unit，不能借 before 的 unit。只改 output／rampstep 不需要 unit。欄位必填、extra、mode/unit 與 limits 由 RPC 的同一 Info model validator 拒絕，connected admission 由 GUI DeviceService 擁有。非 YOKO 沿各自的 Info 契約，不加 flux 規則或單位換算。
 
 Raw RPC 是非同步完整 cfg 入口，不接受 partial updates、不補 cached 舊值。Caller 先讀 `device.snapshot`，修改完整 Info cfg，呼叫 `device.setup`，用 `wait(op)` 等待，再讀 snapshot。全部 model-required 欄位必須提供，default 欄位沿 Info constructor。YOKO mode 必填；raw RPC 可省略 value_unit，由 Info 依 mode 產生。這不取代固定工具對 value patch 的明填要求。
 
-`device_setup` 沒有 timeout 參數，固定最多等待 300 秒。逾時回 running 與已知 op，不取消；caller 用 `wait(op)` 續等。需要短等時使用 raw RPC 與 caller 的 wait。Client deadline 必須大於 300 秒並預留 transport/reply overhead。`simulation_initialize` 保留原可調 timeout 與 verification.ready。
+`device_setup` 沒有 timeout 參數，固定最多等待 300 秒。逾時回 running 與已知 op，不取消；caller 用 `wait(op)` 續等。需要短等時使用 raw RPC 與 caller 的 wait。Client deadline 必須大於 300 秒並預留 transport/reply overhead。
 
-兩個 mutation 工具保留 pre_read、start、wait、post_read、requested、before/after 與 native operation。Device requested 是 `{name, cfg}`，cfg 在 before-read 與合併完成前為 null，之後是完整候選，不保證 model 接受。Before.info 為 null 時不能合併，pre_read failed。Before 有 Info 則送一次 RPC，由 service 拒絕未連線裝置，回 start failed、完整 candidate、before facts 與 null after。Device 不做 verification；snapshot 有目標值不代表 operation finished。Native finished／failed／cancelled、driver error 與 unknown 原樣保留。Step completed 只表示該步成功。工具不重連、重送或回滾。Caller 用已知 op 的 wait 和完整 snapshot 接手。
+Device setup 保留 pre_read、start、wait、post_read、requested、before/after 與 native operation。Device requested 是 `{name, cfg}`，cfg 在 before-read 與合併完成前為 null，之後是完整候選，不保證 model 接受。Before.info 為 null 時不能合併，pre_read failed。Before 有 Info 則送一次 RPC，由 service 拒絕未連線裝置，回 start failed、完整 candidate、before facts 與 null after。Device 不做 verification；snapshot 有目標值不代表 operation finished。Native finished／failed／cancelled、driver error 與 unknown 原樣保留。Step completed 只表示該步成功。工具不重連、重送或回滾。Caller 用已知 op 的 wait 和完整 snapshot 接手。
 
 ## 日常與細部操作
 

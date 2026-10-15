@@ -4,6 +4,18 @@
 
 `experiment/` 定義實驗介面、Result 與保存資料之間的映射，以及實驗 cfg 的支援機制。這個位置不表示其現有程式碼均與 QICK 無關。`cfg_assembler.py` 只提供 Run mapping 的共用值型別，`utils/sweep.py` 使用 `program.v2` 的 `SweepCfg`。程式指令的建構與 acquire 由 [program/v2](../program/v2/README.md) 及 [experiment/v2/runtime](v2/runtime/README.md) 接合。
 
+## Explicit simulation environments
+
+`simulation.py` provides `SimulationEnvironment`, `white_noise` and
+`load_environment`. A trusted Python file defines zero-argument `build_environment`.
+It returns a bound SoC, its matching compile config, the exact populated
+`DeviceManager` and a public description. GUI and Notebook share this bundle;
+there is no controller argument, registry discovery or runtime mode switch.
+Successful builder return transfers cleanup to the host. Read the
+[acquisition environment contract](../program/v2/simulation/README.md) before
+writing a builder or numeric source. Public Run metadata contains only the
+optional opaque `simulation_id`; private replay inputs remain on the binding.
+
 ## 實驗介面與資料
 
 - `records.py` 的 `RunRecord` 將 nullable cfg 與純 Result 配對。建立時複製 cfg，隔離 caller 之後對輸入 cfg 的修改；record 內 cfg 與 Result 仍可修改。`interfaces.py` 的 `RecordExperiment` 定義 run／save／load，`SynchronousExperiment` 另加同步 analyze，不要求 interactive 實驗提供 analyze。

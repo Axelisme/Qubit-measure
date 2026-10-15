@@ -258,16 +258,9 @@ class DeviceService:
         self._registry: DeviceRegistryPort = (
             device_registry if device_registry is not None else DeviceManager()
         )
-        # Device state lives in State (the SSOT). This service holds only the
-        # live driver (in the registry), the worker threads, and the in-flight
-        # operation transients below. Setup progress lives in the shared
-        # ProgressService, keyed by each operation's token (owner = name).
-        #
-        # Phase C: per-device concurrency. Connect / disconnect / setup of
-        # different devices run in parallel, so the in-flight bookkeeping is a
-        # dict keyed by device name (each op's resource_id) rather than a single
-        # scalar set. The gate enforces that the SAME device has at most one
-        # in-flight mutation, so each name maps to exactly one _InflightOp.
+        # State owns serializable snapshots; this service owns live drivers and
+        # per-name operation transients. The gate prevents concurrent mutations
+        # of the same device. ProgressService owns per-operation setup progress.
         self._inflight: dict[str, _InflightOp] = {}
 
     def publish_initial_devices(self) -> None:

@@ -159,7 +159,6 @@ def make_mock_soccfg(n_gens: int = 2, n_readouts: int = 1) -> QickConfig:
     Wiring belongs to SimulationSoc, not this compile-only helper. No hardware
     or acquisition source is constructed. Negative counts fail with ValueError.
     """
-    """Build a minimal but structurally-valid QickConfig for compile-phase testing."""
     if (
         isinstance(n_gens, bool)
         or isinstance(n_readouts, bool)

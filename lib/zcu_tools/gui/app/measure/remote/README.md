@@ -328,7 +328,6 @@ The wire surface is grouped by ownership:
   old flattened md keys or an ml runtime index. Library editing and template create/list use the app controller;
   delete/rename accept concrete three-segment keys and preserve owner errors.
 - `soc.*`：real SoC connection and current SoC queries. `soc.connect` requires `kind='remote'`, `ip` and `port`; it rejects mock connections.
-- `simulation.initialize`：no-argument asynchronous environment initialization through the same `SetupControlPort` coordinator as GUI **Use Simulate Env**. It disconnects real devices, prepares `fake_flux`, binds its live value to MockSoc. Predictor is not part of simulation readiness. Repeated initialization preserves a valid simulation and its values. Failure may leave partial changes; inspect state before retrying.
 - `device.*`：device connect/disconnect/setup/snapshot through `DeviceControlPort`.
 - `predictor.predict`／`predictor.calibrate`／`predictor.info`：read-only simulator queries with exactly one source, `qubit` or `params`. A concrete `qubit` such as Q2 reads the currently selected point through the injected params_for. It is not an alias or a path. Direct `params` has `model="fluxonium"` with named EJ, EC, EL, or `model="transmon"` with EJmax, EC, d (junction asymmetry), plus flux_half, flux_period, flux_bias fields. Energies use GHz; affine inputs and device_value use the source's native device units. Returned frequencies use MHz. Info returns `{model, params, missing}` and preserves unknown fields as null. Predict and Calibrate require complete valid inputs. Calibrate returns `{flux_bias_before, flux_bias_after, frequency_mhz, clamped}` without changing the component, dialog or source parameters. Both models choose the smallest absolute native bias across all roots. frequency_mhz is the actual attained MHz. Unreachable targets return the globally closest attainable frequency with clamped=true; ties choose the smallest absolute bias. Reachable targets have clamped=false. Invalid parameters or transitions are rejected, not clamped. Queries never read hardware, dialog/cache or an installed model. No target or load/set/clear commands.
 
@@ -486,8 +485,9 @@ saves and preview delivery. Execution identity and completion policy live in the
 [measure MCP adapter](../../../../mcp/measure/README.md), not the GUI operation table.
 
 `soc.connect` returns its summary synchronously, without exposing an operation id.
-`simulation.initialize` returns a GUI-local `operation_id`; MCP maps it to a handle
-for `wait(op=handle)`. Wait for successful completion before starting measurements.
+Explicit simulation environments are installed before remote readiness with
+`--simulate <environment.py>`. They cannot be replaced through RPC. A startup-owned
+SoC rejects connect/disconnect mutation; device operations keep their normal policy.
 
 ## Launch / Shutdown
 

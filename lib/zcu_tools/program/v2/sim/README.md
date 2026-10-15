@@ -1,4 +1,12 @@
-# sim/ — physical simulation for the mock soc (mocksim)
+# Legacy TLS simulation pending FTF migration
+
+This package and its TLS-specific tests await the FTF replacement. It is not an
+active acquisition entry: the dual-mode mock SoC and implicit noise route have
+been retired. The historical notes below describe that removed integration.
+New callers use [explicit environments](../simulation/README.md). Do not add a shim
+or migrate framework tests back to this package.
+
+# Historical TLS implementation
 
 **Last updated:** 2026-10-15，flat readout lowering 與 generator view
 

@@ -192,10 +192,14 @@ GUI Guard tests 驗證 cached settings 缺失或無效時仍可 admission；Guar
 registry dict、`get_info` 不被其它 device 的 setup ramp 阻塞、整批 name validation
 fast-fail、以及 `setup_devices(..., cancel_signal=...)` 的顯式協作取消語意。取消測試使用真 `FakeDevice`，不註冊 MagicMock driver。
 
-### 補充 — `make_mock_soc()`（`lib/zcu_tools/program/v2/mocksoc.py`）
+### Offline acquisition transports
 
-若要測 `acquire()` / `poll_data()` 路徑（不只 compile），可用 `make_mock_soc()` 建立 `MockQickSoc`。  
-它繼承 `QickConfig` 並提供 no-op 硬體控制方法，回傳 shape 正確的隨機資料，讓整段 acquire 流程可在無硬體下跑通。
+Compile-only cases use `make_mock_soccfg(n_gens, n_readouts)`. Simulation acquisition
+cases explicitly build `white_noise(...)` or a numeric `SimulationBinding` and use
+public program acquire/get_raw. Normal unbound pipeline tests use the deterministic
+transport in `tests/program/_acquisition_soc.py`. No fixture silently installs noise.
+Synthetic registered experiments exercise Window/RPC Run, Stop, failure and native Save
+in `tests/gui/app/measure/test_simulation_run.py`. All offline caches remain isolated.
 
 ### Program v2 simulator tests
 

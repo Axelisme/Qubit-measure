@@ -60,7 +60,7 @@ def build_request(
         if not all(isinstance(v, (int, float)) for v in values):
             raise ValueError("simulation currently requires scalar readout controls")
         # QICK quantizers own the board grid, including matched generator/ADC DDS.
-        start = cursor + float(cfg.pre_delay)
+        start = float(prog.cycles2us(prog.us2cycles(cursor + float(cfg.pre_delay))))
         duration = float(
             prog.cycles2us(
                 prog.us2cycles(cfg.waveform.length, gen_ch=cfg.gen_ch),
@@ -79,11 +79,18 @@ def build_request(
                 start,
                 duration,
                 frequency,
-                float(cfg.phase),
-                float(cfg.gain),
+                float(
+                    prog.reg2deg(
+                        prog.deg2reg(cfg.phase, gen_ch=cfg.gen_ch), gen_ch=cfg.gen_ch
+                    )
+                ),
+                int(float(cfg.gain) * prog.soccfg.get_maxv(cfg.gen_ch))
+                / prog.soccfg.get_maxv(cfg.gen_ch),
             )
         )
-        triggers[cfg.ro_ch].append(start + float(cfg.trig_offset))
+        triggers[cfg.ro_ch].append(
+            float(prog.cycles2us(prog.us2cycles(cursor + float(cfg.trig_offset))))
+        )
         cursor = float(module.total_length(prog)) + cursor
     dims = tuple(int(n) for n in prog.loop_dims)
     windows = tuple(

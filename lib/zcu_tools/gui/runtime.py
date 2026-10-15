@@ -170,18 +170,10 @@ def run_gui_runtime(
 
         behavior.after_show(assembly)
         return int(app.exec())
-    except Exception as error:
-        try:
-            behavior.close(assembly)
-        except Exception as cleanup_error:  # noqa: BLE001 — retain primary and cleanup failures
-            raise ExceptionGroup(
-                "GUI startup and cleanup failed", [error, cleanup_error]
-            ) from None
-        raise
     finally:
-        # Only normal completion reaches here without a propagating exception.
-        if sys.exc_info()[0] is None:
-            behavior.close(assembly)
+        # Runs after admission/drain on success and on every startup failure.
+        # A close failure retains the original exception as its context.
+        behavior.close(assembly)
 
 
 def _validate_control_assembly(

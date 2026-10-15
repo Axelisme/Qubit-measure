@@ -1,8 +1,6 @@
 """Tests for sim/engine.py — SimEngine assembly + MyProgramV2.acquire dispatch.
 
 Covers:
-- D1 fallback: ``make_mock_soc()`` with no SimParams runs the white-noise
-  accumulated path (same shapes, random data).
 - Engine smoke (real path): a sim soc running real experiment programs
   (twotone freq, amp_rabi, T1, T2 ramsey) produces physically-structured data,
   not white noise — a peak/dip at f_qubit, gain-driven Rabi oscillation, a T1
@@ -88,40 +86,6 @@ def _amp(result: list[np.ndarray]) -> np.ndarray:
 
 
 # --------------------------------------------------------------------------- D1
-
-
-def test_d1_no_sim_white_noise_unchanged():
-    """make_mock_soc() with no SimParams keeps the original white-noise path."""
-
-    soc, soccfg = make_mock_soc()
-    assert soc.sim_params is None
-
-    sw = SweepCfg(start=4000.0, stop=4100.0, expts=5, step=25.0)
-    freq_param = sweep2param("freq", sw)
-    pulse = PulseCfg(
-        ch=0,
-        nqz=1,
-        gain=0.3,
-        freq=freq_param,
-        phase=0.0,
-        waveform=ConstWaveformCfg(length=0.5),
-    ).build("qub")
-    prog = ModularProgramV2(
-        soccfg,
-        ProgramV2Cfg(reps=10, rounds=2),
-        modules=[pulse, _readout(7200.0)],
-        sweep=[("freq", sw)],
-    )
-
-    result = prog.acquire(soc, progress=False)
-
-    # Same shape contract as the real accumulated path: (nreads, n_sweep, 2).
-    assert len(result) == 1
-    assert result[0].shape == (1, 5, 2)
-    # get_raw keeps the (reps, *sweep, nreads, 2) raw layout.
-    raw = prog.get_raw()
-    assert raw is not None
-    assert raw[0].shape == (10, 5, 1, 2)
 
 
 # ----------------------------------------------------------- acquire seed stream
@@ -210,15 +174,6 @@ def test_direct_simengine_uses_root_seed_and_advances_round_stream() -> None:
 
     np.testing.assert_array_equal(first_round, replay)
     assert not np.array_equal(first_round, second_round)
-
-
-def test_mock_soc_seed_none_returns_no_deterministic_child_seed() -> None:
-    """seed=None keeps acquire routes on default_rng(None), not a child sequence."""
-
-    soc, _soccfg = make_mock_soc(sim=_SIM.model_copy(update={"seed": None}))
-
-    assert soc.next_sim_acquire_seed() is None
-    assert soc.next_sim_acquire_seed() is None
 
 
 # ------------------------------------------------------------ engine smoke path
