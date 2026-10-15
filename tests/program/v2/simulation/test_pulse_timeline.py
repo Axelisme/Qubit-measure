@@ -1,5 +1,7 @@
 """Generator and ADC timing observed at the public acquisition boundary."""
 
+import math
+
 import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
@@ -57,7 +59,10 @@ def test_parallel_pulses_retain_envelopes_phase_and_separate_adc_duration(wavefo
     assert drive.gain == pytest.approx(-0.4, abs=1 / 32766)
     assert drive.phase_deg == pytest.approx(37, abs=1e-5)
     assert drive.phase_reference_us == receiver.phase_reference_us == 0
-    assert request.timelines[0].readouts[0].trigger_us[0] == pytest.approx(0.62, abs=0.005)
+    origin = math.ceil(0.5 * 430.08) / 430.08
+    offset = math.ceil(0.1 * 430.08) / 430.08
+    trigger = origin + round((offset + 0.02) * 430.08) / 430.08
+    assert request.timelines[0].readouts[0].trigger_us[0] == pytest.approx(trigger)
     assert request.readouts[0].samples == prog.ro_chs[0]["length"]
     assert request.readouts[0].samples / request.readouts[0].sample_rate_mhz > receiver.duration_us
     assert drive.source == "drive"
