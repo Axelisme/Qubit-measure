@@ -156,3 +156,160 @@ def test_value_type_specific_validation(qapp, original, invalid, message):
         dialog.close()
         widget.deleteLater()
         qapp.processEvents()
+
+
+def test_module_leaf_changes_include_additions_removals_and_nested_fields():
+    from zcu_tools.gui.app.measure.writeback import edit_dialogs
+
+    changes = edit_dialogs.module_changes(
+        {"freq": 6000.0, "waveform": {"length": 1.8}, "removed": 2, "same": None},
+        {"freq": 6012.0, "waveform": {"length": 2.0}, "added": 3, "same": None},
+    )
+    assert {c.path: (c.current, c.proposed) for c in changes} == {
+        "freq": ("6000.0", "6012.0"),
+        "waveform.length": ("1.8", "2.0"),
+        "removed": ("2", "—"),
+        "added": ("—", "3"),
+    }
+    assert edit_dialogs.module_changes({"freq": 1}, {"freq": 1}) == []
+
+
+@pytest.fixture
+def module_editor(qapp, monkeypatch):
+    from zcu_tools.cfg_model import PulseSpec
+    from zcu_tools.gui.app.measure.writeback import ModuleWriteback
+    from zcu_tools.gui.session.library_entry import ModuleEntryForm
+
+    from tests.gui.app.measure._cfg_fakes import parameter_capture
+
+    spec = PulseSpec(
+        ch=0,
+        nqz=1,
+        freq=6001.0,
+        phase=0.0,
+        gain=0.2,
+        waveform={"style": "const", "length": 2.0},
+    )
+    form = ModuleEntryForm(spec, parameter_capture(), arb_names=())
+    item = ModuleWriteback(
+        target_name="pulse", description="Readout pulse", proposal=spec
+    )
+    item.session_id = "ml-1"
+    current = spec.model_dump(mode="python")
+    current["freq"] = 6000.0
+    ctrl = MagicMock()
+    ctrl.get_writeback_item_form_for_pane.return_value = form
+
+    def preview(*args, **kwargs):
+        return {
+            item.session_id: WritebackValues(
+                actual_path=item.target_name,
+                current=current,
+                proposed=form.spec().model_dump(mode="python"),
+                unit=None,
+            )
+        }
+
+    def set_item(*args, **kwargs):
+        item.target_name = kwargs.get("target_name", item.target_name)
+
+    ctrl.set_writeback_item_for_pane.side_effect = set_item
+    ctrl.writeback_control.get_writeback_values_for_pane.side_effect = preview
+    messages = []
+    monkeypatch.setattr(QMessageBox, "critical", lambda *a: messages.append(a))
+    widget = WritebackWidget(ctrl, tab_id="tab-1", pane="analysis")
+    widget.populate([item], preview())
+    widget.show()
+    button(widget, "Edit").click()
+    dialog = next(d for d in widget.findChildren(QDialog) if d.isVisible())
+    yield widget, dialog, item, ctrl, form, current, messages
+    dialog.close()
+    widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.processEvents()
+
+
+def test_module_context_changes_follow_shared_state(module_editor):
+    _, dialog, _, _, form, current, _ = module_editor
+    texts = label_text(dialog)
+    assert "Readout pulse" in texts
+    assert "Changes go to the writeback draft at once" in texts
+    assert "only written by Apply Selected" in texts
+    assert "Writes to library" in texts
+    assert "Changes from library (1)" in texts
+    assert "freq  6000.0 → 6001.0" in texts
+    form.state.write({("gain",): 0.3}, form.env)
+    assert "Changes from library (2)" in label_text(dialog)
+    assert "gain  0.2 → 0.3" in label_text(dialog)
+    current.clear()
+    # The preview contract uses None, not an empty dict, for missing entries.
+    ctrl = module_editor[3]
+    ctrl.writeback_control.get_writeback_values_for_pane.side_effect = lambda *a, **k: {
+        "ml-1": WritebackValues(
+            actual_path="pulse",
+            current=None,
+            proposed=form.spec().model_dump(mode="python"),
+            unit=None,
+        )
+    }
+    form.state.write({("gain",): 0.4}, form.env)
+    assert "New library entry" in label_text(dialog)
+
+
+def test_module_errors_list_path_and_discard_warning(module_editor):
+    from tests.gui.widgets.form._text_input import commit_text_on_focus_loss
+
+    _, dialog, _, _, _, _, messages = module_editor
+    assert "Changes from library" in label_text(dialog)
+    freq = dialog.findChild(QLineEdit, "form.input.freq")
+    commit_text_on_focus_loss(freq, "abc")
+    texts = label_text(dialog)
+    assert "freq:" in texts and "abc" in texts
+    assert "Invalid text is discarded when you press Done" in texts
+    assert "Unavailable while the configuration is invalid" in texts
+    error = dialog.findChild(QLabel, "writebackEditError")
+    assert error.isVisible()
+    assert error.palette().color(QPalette.ColorRole.WindowText) == error_colour(dialog)
+    commit_text_on_focus_loss(freq, "6002.0")
+    assert not error.isVisible()
+    assert "freq  6000.0 → 6002.0" in label_text(dialog)
+    assert messages == []
+
+
+@pytest.mark.parametrize("finish", ["done", "escape", "close"])
+def test_module_finish_commits_name_and_drops_only_local_text(module_editor, finish):
+    from qtpy.QtCore import Qt
+    from qtpy.QtTest import QTest
+
+    from tests.gui.widgets.form._text_input import commit_text_on_focus_loss
+
+    _, dialog, item, _, form, _, messages = module_editor
+    assert "Done" in [b.text() for b in dialog.findChildren(QPushButton)]
+    freq = dialog.findChild(QLineEdit, "form.input.freq")
+    commit_text_on_focus_loss(freq, "abc")
+    name = next(e for e in dialog.findChildren(QLineEdit) if e.text() == "pulse")
+    name.setText("tuned")
+    if finish == "done":
+        button(dialog, "Done").click()
+    elif finish == "escape":
+        QTest.keyClick(dialog, Qt.Key.Key_Escape)
+    else:
+        dialog.close()
+    assert not dialog.isVisible()
+    assert item.target_name == "tuned"
+    assert form.spec().freq == 6001.0
+    assert messages == []
+
+
+def test_module_target_refusal_is_inline(module_editor):
+    _, dialog, item, ctrl, _, _, messages = module_editor
+    assert "Changes go to the writeback draft at once" in label_text(dialog)
+    ctrl.set_writeback_item_for_pane.side_effect = RuntimeError("Tab is busy")
+    name = next(e for e in dialog.findChildren(QLineEdit) if e.text() == "pulse")
+    name.setText("tuned")
+    name.editingFinished.emit()
+    assert "Tab is busy" in label_text(dialog)
+    assert dialog.isVisible()
+    assert item.target_name == "pulse"
+    assert messages == []
+    ctrl.set_writeback_item_for_pane.side_effect = None
