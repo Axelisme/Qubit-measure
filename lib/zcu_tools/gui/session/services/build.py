@@ -27,9 +27,6 @@ from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
 from zcu_tools.gui.session.services.predictor import ParamsFor, PredictorService
 from zcu_tools.gui.session.services.project_settings import ProjectSettingsService
-from zcu_tools.gui.session.services.simulated_environment import (
-    SimulatedEnvironmentCoordinator,
-)
 from zcu_tools.gui.session.services.value_sources import ValueSourceBinder
 from zcu_tools.gui.session.setup_control import SetupControlFacet
 from zcu_tools.gui.session.value_lookup import ValueLookup, ValueRegistry
@@ -66,7 +63,6 @@ class SessionServices:
         progress: Injected session progress owner. Publishes live bars by operation
             and owner id, with reads and listener delivery on the owner thread.
         soc_connection: SoC connection commands and cached connection queries.
-        simulated_environment: Explicit simulated SoC/device/predictor setup.
         predictor: Predictor installation and calculation commands.
         predictor_control: Narrow predictor command/query/event facade.
         progress_control: Narrow owner-keyed progress query/subscription facade.
@@ -88,7 +84,6 @@ class SessionServices:
     runner: OperationRunner
     progress: ProgressService
     soc_connection: SoCConnectionService
-    simulated_environment: SimulatedEnvironmentCoordinator
     predictor: PredictorService
     predictor_control: PredictorControlPort
     progress_control: ProgressControlPort
@@ -176,22 +171,17 @@ def build_session_services(
         result_root=Path(project_root) / "result",
         database_root=Path(project_root) / "Database",
     )
-    simulated_environment = SimulatedEnvironmentCoordinator(
-        bus, device, soc_connection, gate, handles
-    )
     setup_control = SetupControlFacet(
         bus=bus,
         settings=settings,
         context=context_control,
         connection=soc_connection,
-        simulated_environment=simulated_environment,
         device=device_control,
     )
     return SessionServices(
         runner=runner,
         progress=progress,
         soc_connection=soc_connection,
-        simulated_environment=simulated_environment,
         predictor=predictor,
         predictor_control=predictor_control,
         progress_control=progress_control,

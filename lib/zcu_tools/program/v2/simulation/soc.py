@@ -55,14 +55,24 @@ class SimulationSoc(QickConfig):
         self._accumulated, self._decimated = pack_signals(self._request, signals)
         self._round_index += 1
 
-    def start_tproc(self, *args, **kwargs) -> None:
+    def start_tproc(self) -> None:
         self._execute_round()
 
     def start_readout(self, total_shots, counter_addr, ch_list, reads_per_shot) -> None:
+        if self._request is None:
+            raise RuntimeError("simulation has no active acquisition request")
+        expected = [(w.channel, w.reads) for w in self._request.readouts]
+        if (
+            total_shots != self._request.executions
+            or list(zip(ch_list, reads_per_shot, strict=True)) != expected
+        ):
+            raise ValueError("QICK readout layout differs from simulation request")
+        del counter_addr
         self._poll_done = False
         self._execute_round()
 
     def poll_data(self, totaltime=0.1, timeout=None):
+        del totaltime, timeout
         if self._poll_done or self._request is None:
             return []
         self._poll_done = True
@@ -74,6 +84,7 @@ class SimulationSoc(QickConfig):
         ]
 
     def get_tproc_counter(self, addr: int) -> int:
+        del addr
         return 2**31 - 1
 
     def get_decimated(self, ch, address, length):

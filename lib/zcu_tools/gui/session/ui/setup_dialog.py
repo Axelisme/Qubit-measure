@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from qtpy.QtCore import Qt, QUrl
 from qtpy.QtGui import QDesktopServices, QResizeEvent, QShowEvent
 from qtpy.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -313,13 +312,6 @@ class SetupDialog(QDialog):
 
         right_layout.addWidget(conn_group)
 
-        self._mock_check = QCheckBox("Use Simulate Env")
-        self._mock_check.setToolTip(
-            "Disconnect real devices and set up a simulated environment with a FakeDevice and MockSoc."
-        )
-        self._mock_check.stateChanged.connect(self._on_mock_toggled)
-        right_layout.addWidget(self._mock_check)
-
         self._connect_btn = QPushButton("Connect")
         self._connect_btn.clicked.connect(self._on_connect_clicked)
         right_layout.addWidget(self._connect_btn)
@@ -390,9 +382,6 @@ class SetupDialog(QDialog):
         if isinstance(payload, SocChangedPayload) and payload.soc is not None:
             self._set_conn_status("Connected", error=False)
             self._maybe_show_current_cfg()
-            self._mock_check.blockSignals(True)
-            self._mock_check.setChecked(payload.is_mock)
-            self._mock_check.blockSignals(False)
         else:
             self._set_conn_status("Disconnected", error=False)
             self._cfg_text.setVisible(False)
@@ -655,43 +644,26 @@ class SetupDialog(QDialog):
             self._show_cfg(describe_soc(soccfg))
             self._set_conn_status("Currently connected", error=False)
 
-    def _on_mock_toggled(self, state: int) -> None:
-        use_mock = bool(state)
-        self._ip_edit.setEnabled(not use_mock)
-        self._port_spin.setEnabled(not use_mock)
-
     def _on_connect_clicked(self) -> None:
         from zcu_tools.gui.session.services.connection import ConnectRemoteRequest
 
-        use_mock = self._mock_check.isChecked()
-
         self._ctrl.bind_connection_outcome(
-            self._on_connect_finished,
-            self._on_connect_failed,
+            self._on_connect_finished, self._on_connect_failed
         )
-
-        if not use_mock:
-            self._ctrl.remember_connection(
-                ConnectionPreferences(
-                    ip=self._ip_edit.text().strip(),
-                    port=self._port_spin.value(),
+        self._ctrl.remember_connection(
+            ConnectionPreferences(
+                ip=self._ip_edit.text().strip(), port=self._port_spin.value()
+            )
+        )
+        self._connect_btn.setEnabled(False)
+        self._set_conn_status("Connecting…", error=False)
+        try:
+            self._ctrl.start_connect(
+                ConnectRemoteRequest(
+                    ip=self._ip_edit.text().strip(), port=self._port_spin.value()
                 )
             )
-        self._connect_btn.setEnabled(False)
-        self._set_conn_status(
-            "Preparing simulated environment…" if use_mock else "Connecting…",
-            error=False,
-        )
-        try:
-            if use_mock:
-                self._ctrl.start_simulated_environment()
-            else:
-                self._ctrl.start_connect(
-                    ConnectRemoteRequest(
-                        ip=self._ip_edit.text().strip(), port=self._port_spin.value()
-                    )
-                )
-        except Exception as exc:  # noqa: BLE001 — restore the button on entry rejection
+        except Exception as exc:  # noqa: BLE001 — restore the button on admission rejection
             self._on_connect_failed(str(exc))
 
     def _on_connect_finished(self) -> None:

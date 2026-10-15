@@ -89,6 +89,10 @@ class GuiRuntimeBehavior(ABC):
         """Run app-specific setup after the window is shown and control is started."""
         del assembly
 
+    def close(self, assembly: GuiAssembly | None) -> None:
+        """Release app-owned resources after drain, including failed startup."""
+        del assembly
+
 
 BehaviorT = TypeVar("BehaviorT", bound=GuiRuntimeBehavior)
 
@@ -148,20 +152,36 @@ def run_gui_runtime(
     app = _get_or_create_qapplication()
     _initialize_rendering(app)
 
-    assembly = behavior.assemble(control)
-    _validate_control_assembly(control, assembly)
-    behavior.before_show(assembly)
-    assembly.window.show()
+    assembly = None
+    try:
+        assembly = behavior.assemble(control)
+        _validate_control_assembly(control, assembly)
+        behavior.before_show(assembly)
+        assembly.window.show()
 
-    if assembly.control_adapter is not None:
-        if not _start_control_adapter(behavior.spec, control, assembly.control_adapter):
-            return 1
-        # stop() unsubscribes app-side listeners synchronously, so keep it on the
-        # Qt main thread; aboutToQuit is emitted there.
-        app.aboutToQuit.connect(assembly.control_adapter.stop)
+        if assembly.control_adapter is not None:
+            if not _start_control_adapter(
+                behavior.spec, control, assembly.control_adapter
+            ):
+                return 1
+            # stop() unsubscribes app-side listeners synchronously, so keep it on the
+            # Qt main thread; aboutToQuit is emitted there.
+            app.aboutToQuit.connect(assembly.control_adapter.stop)
 
-    behavior.after_show(assembly)
-    return int(app.exec())
+        behavior.after_show(assembly)
+        return int(app.exec())
+    except Exception as error:
+        try:
+            behavior.close(assembly)
+        except Exception as cleanup_error:  # noqa: BLE001 — retain primary and cleanup failures
+            raise ExceptionGroup(
+                "GUI startup and cleanup failed", [error, cleanup_error]
+            ) from None
+        raise
+    finally:
+        # Only normal completion reaches here without a propagating exception.
+        if sys.exc_info()[0] is None:
+            behavior.close(assembly)
 
 
 def _validate_control_assembly(

@@ -7,6 +7,7 @@ from typing import Any
 
 from zcu_tools.mcp.core.control import ControlConnection
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
+from zcu_tools.mcp.measure.session import ConnectIdentity
 from zcu_tools.mcp.measure.tools_operation import status
 
 
@@ -27,13 +28,16 @@ def tool_connect(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str
     ControlConnection.parse(
         arguments.get("label", "agent"), arguments.get("mode", "owner")
     )
+    simulate = arguments.get("simulate")
+    if simulate is not None and (not isinstance(simulate, str) or not simulate):
+        raise ValueError("simulate must be a non-empty environment Python path")
     connection = ctx.session.connect_to_gui(
         port=port,
+        simulate=simulate,
         launch=launch,
         clean=clean,
         token=token,
-        label=arguments.get("label"),
-        mode=arguments.get("mode"),
+        identity=ConnectIdentity(arguments.get("label"), arguments.get("mode")),
     )
     return {**connection, "status": status(ctx, {})}
 
@@ -51,6 +55,11 @@ CONNECT_TOOL: dict[str, Any] = {
                 "default": "never",
             },
             "clean": {"type": "boolean", "default": False},
+            "simulate": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Trusted environment Python path; only applies when launching a new GUI. Attach with a path is rejected.",
+            },
             "label": {"type": "string", "minLength": 1, "default": "agent"},
             "mode": {
                 "type": "string",

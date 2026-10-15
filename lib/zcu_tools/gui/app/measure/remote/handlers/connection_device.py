@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 
 def coerce_connect_request(params: Mapping[str, object]) -> ConnectRemoteRequest:
-    """Coerce a real-board connection request; simulation has its own entry."""
+    """Coerce a real-board connection request; simulation is selected at startup."""
     kind = require_str(params, "kind")
     if kind == "remote":
         return ConnectRemoteRequest(
@@ -31,7 +31,7 @@ def coerce_connect_request(params: Mapping[str, object]) -> ConnectRemoteRequest
         )
     raise RemoteError(
         ErrorCode.INVALID_PARAMS,
-        "soc.connect requires kind='remote'; use simulation.initialize for simulation",
+        "soc.connect requires kind='remote'; select --simulate at startup for simulation",
     )
 
 
@@ -67,13 +67,6 @@ def h_soc_connect(
     # via soc.info (it is ~2 KB and rarely needed at connect time).
     info = adapter.ctrl.get_soc_info()
     return {"soc": {"description": info["description"], "is_mock": info["is_mock"]}}
-
-
-def h_simulation_initialize(
-    adapter: RemoteControlAdapter, _params: Mapping[str, object]
-) -> Mapping[str, object]:
-    operation_id = adapter.ctrl.setup_control.start_simulated_environment()
-    return {"operation_id": operation_id}
 
 
 def h_device_connect(

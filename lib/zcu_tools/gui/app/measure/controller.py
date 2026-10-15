@@ -79,10 +79,15 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
     from zcu_tools.gui.session.persistence import SingleFileCaretaker
-    from zcu_tools.gui.session.ports import OwnerScheduler, ProgressTransport
+    from zcu_tools.gui.session.ports import (
+        DeviceRegistryPort,
+        OwnerScheduler,
+        ProgressTransport,
+    )
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.setup_control import SetupControlPort
+    from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
 
     from .services import AppServices
     from .services.operation_control import OperationControlPort
@@ -275,6 +280,7 @@ class Controller(SessionControllerMixin):
         params_for: ParamsFor | None = None,
         *,
         alias_presets: AliasPresets | None = None,
+        device_registry: DeviceRegistryPort | None = None,
     ) -> None:
         """Compose services for state/registry with an optional view and adapters.
 
@@ -341,6 +347,7 @@ class Controller(SessionControllerMixin):
             catalog_loader=catalog_loader,
             params_for=params_for,
             alias_presets=alias_presets,
+            device_registry=device_registry,
         )
         self._bind_services(services)
         # App-level PersistenceCaretaker, injected by runtime behavior via
@@ -693,6 +700,10 @@ class Controller(SessionControllerMixin):
 
     def get_running_tab_id(self) -> str | None:
         return self._tab_control.get_running_tab_id()
+
+    def install_startup_soc(self, soc: SocHandle, soccfg: SocCfgHandle) -> None:
+        """Publish a bound startup SoC; later connection mutations are rejected."""
+        self._soc_svc.install_startup_soc(soc, soccfg)
 
     def has_soc(self) -> bool:
         return self._soc_svc.has_soc()

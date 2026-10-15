@@ -1,6 +1,9 @@
 """Explicit Python environments, shared by GUI startup and Notebook callers."""
 
+import importlib.util
 from dataclasses import dataclass
+from pathlib import Path
+from uuid import uuid4
 
 import numpy as np
 from qick import QickConfig
@@ -91,3 +94,25 @@ def white_noise(
     return SimulationEnvironment(
         soc, soccfg, DeviceManager(), "white_noise: independent Gaussian ADC samples"
     )
+
+
+def load_environment(path: str | Path) -> SimulationEnvironment:
+    """Execute trusted Python once and invoke its zero-argument builder once.
+
+    No sandbox, fallback, discovery, or hot reload. Builders own pre-return
+    failures; the caller owns the returned manager even if installation fails.
+    """
+    spec = importlib.util.spec_from_file_location(
+        f"_zcu_environment_{uuid4().hex}", Path(path).resolve()
+    )
+    if spec is None or spec.loader is None:
+        raise ValueError(f"cannot load environment: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    builder = getattr(module, "build_environment", None)
+    if not callable(builder):
+        raise TypeError("environment must define build_environment()")
+    result = builder()
+    if not isinstance(result, SimulationEnvironment):
+        raise TypeError("build_environment() must return SimulationEnvironment")
+    return result

@@ -21,7 +21,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             # A margin above make_soc_proxy's 1s COMMTIMEOUT lets its error return.
             3.0,
             "Connect a real SoC SYNCHRONOUSLY with kind='remote', ip and port. "
-            "Mock connections are rejected; use simulation.initialize for an offline "
+            "Mock connections are rejected; use --simulate at GUI startup for an offline "
             "environment. Returns {soc: {description, is_mock}} once connected; "
             "read soc.info for structured cfg. Unreachable boards fail fast (~1s).",
             (
@@ -29,24 +29,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 required_string("ip", "Real board IP"),
                 required_integer("port", "Real board port"),
             ),
-        ),
-    ),
-    method_entry(
-        "simulation.initialize",
-        "connection_device:h_simulation_initialize",
-        MethodSpec(
-            5.0,
-            "Initialize the simulated environment using the same coordinator as the "
-            "GUI Use Simulate Env action. Disconnects real devices, prepares fake_flux, "
-            "binds its live value to MockSoc, without installing a predictor. "
-            "Reuses an already valid simulation without resetting its values. "
-            "Returns operation_id asynchronously; rpc_call maps it to a handle. "
-            "Use wait(op=handle) for terminal status before running measurements. "
-            "Failure may leave partial changes; inspect state before retrying.",
-            (),
-        ),
-        agent=AgentMethodPolicy(
-            operation_key="simulation",
         ),
     ),
     method_entry(

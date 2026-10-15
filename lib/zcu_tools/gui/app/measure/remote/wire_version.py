@@ -6,9 +6,9 @@ WIRE_VERSION; it reports GUI_VERSION without comparing it.
 
 from __future__ import annotations
 
-# The combined lazy-description and flat Readout contract differs from both v104 branches.
-WIRE_VERSION = 105
+# Startup environments replace the dynamic simulation RPC.
+WIRE_VERSION = 106
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 138
+GUI_VERSION = 139

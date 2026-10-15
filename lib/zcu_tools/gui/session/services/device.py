@@ -270,6 +270,30 @@ class DeviceService:
         # in-flight mutation, so each name maps to exactly one _InflightOp.
         self._inflight: dict[str, _InflightOp] = {}
 
+    def publish_initial_devices(self) -> None:
+        """Publish injected live drivers before preference restore, on owner loop.
+
+        No drivers are reconstructed or connected. Read failure aborts startup;
+        the composition host retains cleanup responsibility for the same manager.
+        Existing published rows are rejected rather than overwritten.
+        """
+        entries = self._registry.get_all_devices()
+        infos = {name: driver.get_info() for name, driver in entries.items()}
+        for name, info in infos.items():
+            if self._state.get_device(name) is not None:
+                raise ValueError(f"device already published: {name}")
+            self._state.put_device(
+                DeviceState(
+                    name=name,
+                    type_name=info.type,
+                    address=info.address,
+                    status=DeviceStatus.CONNECTED,
+                    remember=False,
+                    info=info,
+                )
+            )
+            self._emit_device_changed(name)
+
     def start_connect_device(self, req: ConnectDeviceRequest) -> int:
         current = self._state.get_device(req.name)
         if current is not None and current.is_live():

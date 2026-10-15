@@ -43,7 +43,7 @@ class SimulationBinding:
         seed: int | None = None,
     ) -> None:
         if seed is not None and (
-            isinstance(seed, bool) or not isinstance(seed, int) or seed < 0
+            isinstance(seed, bool) or type(seed) is not int or seed < 0
         ):
             raise ValueError("seed must be a nonnegative integer or None")
         self.capture_snapshot = capture_snapshot
