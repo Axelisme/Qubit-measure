@@ -25,18 +25,21 @@ def test_fixed_squid_static_spectrum_and_native_charge_square() -> None:
     ej = 10 * np.sqrt(np.cos(np.pi * 0.27) ** 2 + 0.2**2 * np.sin(np.pi * 0.27) ** 2)
     reference = np.diag(4 * 0.3 * n**2) - ej / 2 * (np.eye(9, k=1) + np.eye(9, k=-1))
     np.testing.assert_allclose(
-        model.local_energies_ghz[1], np.linalg.eigvalsh(reference)[:4], atol=1e-12
+        model.local_energies_ghz[1],
+        np.linalg.eigvalsh(reference)[:4],
+        atol=1e-12,
+        rtol=0,
     )
     charge = model.charge_operator(1)
     square = model.charge_squared_operator(1)
     assert np.linalg.norm(square - charge @ charge) > 0.1
     np.testing.assert_allclose(
-        model.hamiltonian(dc), np.diag(model.energies_ghz), atol=1e-12
+        model.hamiltonian(dc), np.diag(model.energies_ghz), atol=1e-12, rtol=0
     )
     initial = model.initial_state()
     u = expm(-2j * np.pi * model.hamiltonian(dc) * 7.2)
     np.testing.assert_allclose(
-        u @ initial.density @ u.conj().T, initial.density, atol=1e-12
+        u @ initial.density @ u.conj().T, initial.density, atol=1e-12, rtol=0
     )
 
 
@@ -74,5 +77,5 @@ def test_signed_direct_coupling_and_parent_readout_states() -> None:
     assert np.count_nonzero(rates) > 4
     q = rates - np.diag(rates.sum(axis=0))
     np.testing.assert_allclose(
-        q @ np.diag(plus.initial_state().density).real, 0, atol=1e-16
+        q @ np.diag(plus.initial_state().density).real, 0, atol=1e-16, rtol=0
     )

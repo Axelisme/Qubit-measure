@@ -32,9 +32,12 @@ def test_joint_capacitive_lc_directional_and_gibbs() -> None:
     )
     p = gibbs_weights(energy, temperature_k=0.08)
     q = warm - np.diag(warm.sum(axis=0))
-    np.testing.assert_allclose(q @ p, 0, atol=1e-17)
+    np.testing.assert_allclose(q @ p, 0, atol=1e-17, rtol=0)
     np.testing.assert_allclose(
-        gibbs_weights(np.array([2.0, 2.0, 4.0]), temperature_k=0), [0.5, 0.5, 0]
+        gibbs_weights(np.array([2.0, 2.0, 4.0]), temperature_k=0),
+        [0.5, 0.5, 0],
+        rtol=0,
+        atol=0,
     )
 
 
@@ -72,5 +75,5 @@ def test_markov_dephasing_collapse_matches_echo_and_photon_rates() -> None:
     for c in dephasing_operators(gamma):
         loss = c.conj().T @ c
         change += c @ rho @ c.conj().T - (loss @ rho + rho @ loss) / 2
-    np.testing.assert_allclose(change, -gamma * rho, atol=1e-16)
-    np.testing.assert_allclose(np.diag(change), 0, atol=1e-17)
+    np.testing.assert_allclose(change, -gamma * rho, atol=1e-16, rtol=0)
+    np.testing.assert_allclose(np.diag(change), 0, atol=1e-17, rtol=0)

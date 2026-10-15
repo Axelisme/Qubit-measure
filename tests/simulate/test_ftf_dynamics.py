@@ -84,7 +84,7 @@ def test_dynamic_flux_signed_complex_drive_against_larger_fixed_parent() -> None
         )
 
     energy, vectors = np.linalg.eigh(parent_h(dc))
-    np.testing.assert_allclose(joint.energies_ghz, energy[:20], atol=1e-12)
+    np.testing.assert_allclose(joint.energies_ghz, energy[:20], atol=1e-12, rtol=0)
     coefficients = (0.03 + 0.01j, 0j, -0.004 + 0.003j)
     envelope = Envelope(
         lambda t: complex(
@@ -178,4 +178,4 @@ def test_joint_static_coherence_phase_uses_coupled_energies() -> None:
     expected = 0.5 * np.exp(
         -2j * np.pi * (joint.energies_ghz[0] - joint.energies_ghz[1]) * 12.0
     )
-    np.testing.assert_allclose(result.density[0, 1], expected, atol=1e-9)
+    np.testing.assert_allclose(result.density[0, 1], expected, atol=1e-9, rtol=0)

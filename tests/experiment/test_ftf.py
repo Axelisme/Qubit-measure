@@ -43,31 +43,34 @@ def test_point_composition_units_signed_drive_and_tail_freeze() -> None:
     plan = plan_point(settings, snapshot, PointTimeline((), events, (window,), 2.5))
     assert plan.readout_start_ns == 2000.0
     assert plan.pulses[0].frequency_ghz == 6.0
-    assert plan.pulses[0].phase_rad == pytest.approx(np.pi / 2)
+    assert plan.pulses[0].phase_rad == pytest.approx(np.pi / 2, abs=1e-12, rel=0)
     assert plan.controls.pulses[1].start_ns == 500.0
     assert plan.controls.pulses[1].end_ns == 1000.0
     assert plan.controls.pulses[1].frequency_ghz == 0.02
-    np.testing.assert_allclose(plan.grid.times_ns, 1900 + 10 * np.arange(10))
+    np.testing.assert_allclose(
+        plan.grid.times_ns, 1900 + 10 * np.arange(10), atol=1e-12, rtol=0
+    )
     expected_flux = 0.22 + 0.04 * (1 - np.exp(-5)) * np.exp(-15)
-    assert plan.readout_flux[1] == pytest.approx(expected_flux, abs=1e-12)
+    assert plan.readout_flux[1] == pytest.approx(expected_flux, abs=1e-12, rel=0)
     assert plan.readout_flux[1] != 0.22
     source = next(s for s in plan.evolution_model.sources if s.name == "mw")
     expected = sum(
         (c * plan.joint.charge_operator(i) for i, c in enumerate([0.02, 0.0, -0.01])),
         np.zeros((8, 8), dtype=complex),
     )
-    np.testing.assert_allclose(source.in_phase_ghz, expected, atol=1e-12)
+    np.testing.assert_allclose(source.in_phase_ghz, expected, atol=1e-12, rtol=0)
     expected_q = sum(
         (-c * plan.joint.charge_operator(i) for i, c in enumerate([0.01, 0.0, 0.02])),
         np.zeros((8, 8), dtype=complex),
     )
     if source.quadrature_ghz is None:
         raise AssertionError("microwave source must retain its quadrature operator")
-    np.testing.assert_allclose(source.quadrature_ghz, expected_q, atol=1e-12)
+    np.testing.assert_allclose(source.quadrature_ghz, expected_q, atol=1e-12, rtol=0)
     np.testing.assert_allclose(
         plan.readout_model.frequencies_ghz,
         plan.joint.readout_frequencies_ghz(plan.readout_flux, plan.resonators),
         atol=1e-12,
+        rtol=0,
     )
 
 

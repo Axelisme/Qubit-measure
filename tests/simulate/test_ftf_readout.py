@@ -54,5 +54,5 @@ def test_virtual_transitions_include_full_local_parent_and_counterrotation() -> 
                 * (1 / (gap + frequency) + 1 / (gap - frequency))
             )
     np.testing.assert_allclose(
-        model.readout_frequencies_ghz(flux, resonators), expected, atol=1e-12
+        model.readout_frequencies_ghz(flux, resonators), expected, atol=1e-12, rtol=0
     )

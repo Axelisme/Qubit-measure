@@ -41,12 +41,13 @@ def test_execution_grid_converts_spectral_density_to_sample_covariance() -> None
         plan.readout_model.receiver.noise_covariance,
         [[1.0, 0.2], [0.2, 2.0]],
         atol=1e-12,
+        rtol=0,
     )
     np.testing.assert_allclose(
-        plan.grids[1].times_ns, 120 + 10 * np.arange(8), atol=1e-12
+        plan.grids[1].times_ns, 120 + 10 * np.arange(8), atol=1e-12, rtol=0
     )
     assert plan.grids[1].demodulation_frequency_ghz == 6.1
-    np.testing.assert_allclose(plan.grids[1].phase_rad, np.pi / 2, atol=1e-12)
+    np.testing.assert_allclose(plan.grids[1].phase_rad, np.pi / 2, atol=1e-12, rtol=0)
 
 
 def test_public_integrated_thermal_mixture_matches_conditional_field_mean() -> None:
