@@ -72,10 +72,6 @@ def _make_prog(modules=None, sweep=None, n_gens=2, n_readouts=1, **cfg_kwargs):
     return ModularProgramV2(soccfg, cfg, modules=modules or [], sweep=sweep)
 
 
-def _label_addr(labels: dict[str, str], name: str) -> int:
-    return int(labels[name].removeprefix("&"))
-
-
 def _pulse_cfg(
     ch=GEN_CH,
     freq=GEN_FREQ,

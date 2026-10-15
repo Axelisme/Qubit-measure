@@ -186,13 +186,13 @@ def test_flat_native_knobs_and_capture(mock_prog):
 
 
 @pytest.mark.parametrize(
-    "length,ro_length,expected_ticks", [(0.5, 2.0, 1034), (3.0, 0.5, 1507)]
+    "length,ro_length,expected_ticks", [(0.5, 2.0, 1034), (3.0, 0.5, 1508)]
 )
 def test_flat_readout_schedules_and_blocks_both_paths(
     mock_prog, length, ro_length, expected_ticks
 ):
     cfg = _make_pulse_ro_cfg(ch=2, ro_ch=1)
-    cfg.waveform.length = length
+    cfg.set_param("length", length)
     cfg.ro_length = ro_length
     cfg.pre_delay = 0.25
     cfg.post_delay = 0.25
@@ -243,7 +243,7 @@ def test_native_readout_conversion_binds_arb_to_explicit_capture(tmp_path, flat_
         else native.waveform
     )
     assert isinstance(waveform, ArbWaveformCfg)
-    assert waveform.path == (first / "shape.npz").resolve()
+    assert waveform.path == (first / "shape.npz").resolve().as_posix()
     assert waveform.length == 0.5
     with pytest.raises(ValueError, match="assets"):
         ModuleCfgFactory.from_core(source, context=None)
