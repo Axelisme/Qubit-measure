@@ -8,7 +8,6 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import (
     CfgSnapshot,
     JsonObject,
-    decode_labber_comment,
     encode_labber_comment,
 )
 from zcu_tools.utils import format_obj
@@ -37,16 +36,3 @@ def make_comment(cfg: ConfigBase, comment: str | None = None) -> str:
     The envelope encoding belongs to datafile, not this adapter.
     """
     return encode_labber_comment(format_obj(cfg.to_dict()), comment)
-
-
-def parse_comment(
-    comment: str,
-) -> tuple[JsonObject | None, str | None, str | None]:
-    """Return cfg JSON, user text and local envelope timestamp, in that order.
-
-    Non-envelope text is preserved in the second result with cfg/time absent.
-    Recognized envelopes with invalid field types raise ValueError. This adapter
-    does not validate cfg as an experiment model or infer historical run time.
-    """
-    decoded = decode_labber_comment(comment)
-    return decoded.cfg, decoded.comment, decoded.timestamp

@@ -42,9 +42,6 @@ class RecordingAdapter(
         del ctx
         return Form(RecordingCfg, {})
 
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return "sample"
-
     def run(
         self,
         req: RunRequest,
@@ -74,9 +71,6 @@ class InteractiveAdapter(
     def make_form(ctx: FormContext) -> Form[RecordingCfg]:
         del ctx
         return Form(RecordingCfg, {})
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return "sample"
 
     def make_interactive_plugin(self, req, *, plots):
         return PluginDefinition(

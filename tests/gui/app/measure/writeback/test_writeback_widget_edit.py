@@ -21,13 +21,13 @@ from qtpy.QtWidgets import (
     QPushButton,
 )
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
-from zcu_tools.gui.app.measure.adapter import ParameterWriteback, SessionEnv
+from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.services.writeback import WritebackValues
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
+from zcu_tools.gui.app.measure.writeback import ParameterWriteback, WritebackValues
+from zcu_tools.gui.app.measure.writeback.widget import WritebackWidget
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.form import FormErrors
@@ -171,9 +171,7 @@ def test_edit_md_item_rejects_blank_target_name(qapp, widget_factory, control_fa
         )
         # The validation error pops a modal QMessageBox; stub it so the test
         # does not block on it.
-        with patch(
-            "zcu_tools.gui.app.measure.ui.writeback_widget.QMessageBox.critical"
-        ):
+        with patch("zcu_tools.gui.app.measure.writeback.widget.QMessageBox.critical"):
             save_btn.click()
 
         # Blank name is rejected: target_name unchanged, dialog stays open.
@@ -224,9 +222,7 @@ def test_edit_md_item_rejects_unparseable_complex(
         save_btn = next(
             b for b in dialog.findChildren(QPushButton) if b.text() == "Save"
         )
-        with patch(
-            "zcu_tools.gui.app.measure.ui.writeback_widget.QMessageBox.critical"
-        ):
+        with patch("zcu_tools.gui.app.measure.writeback.widget.QMessageBox.critical"):
             save_btn.click()
 
         # Invalid input rejected: value unchanged, dialog stays open.

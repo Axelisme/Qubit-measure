@@ -7,21 +7,19 @@ from typing import ClassVar, TypeAlias
 import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.datafile import load_run_data
+from zcu_tools.datafile import StoredRun, load_run_data
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
-    LoadDataRequest,
     NoAnalysisResult,
     NoAnalyzeParams,
-    SaveDataRequest,
-    SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
+from tests.gui.app.measure._load_support import write_native_file
 from tests.gui.app.measure._native_save_support import (
     AnalysisSavingAdapter,
     native_save_session,
@@ -50,9 +48,6 @@ class _LoadAdapter(BaseAdapter[_Cfg, _LoadedRecord, NoAnalysisResult, NoAnalyzeP
     )
     exp_cls = _LoadExp
 
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return "load"
-
 
 class _NeedsArgsExp:
     def __init__(self, required: object) -> None:
@@ -80,8 +75,11 @@ class _InternalTypeErrorAdapter(_LoadAdapter):
     exp_cls = _InternalTypeErrorExp
 
 
-def _request(path: str = "/tmp/result.hdf5") -> LoadDataRequest:
-    return LoadDataRequest(data_path=path, parameters=None)
+@pytest.fixture
+def stored(tmp_path: Path) -> StoredRun:
+    path = tmp_path / "data.h5"
+    write_native_file(path)
+    return load_run_data(path)
 
 
 def test_base_adapter_load_reads_native_record_and_full_history(
@@ -93,60 +91,26 @@ def test_base_adapter_load_reads_native_record_and_full_history(
             session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
         )
 
-        record, metadata = AnalysisSavingAdapter().load(_request(str(path)))
+        restored = AnalysisSavingAdapter().restore(load_run_data(path))
+        record = restored.record
 
         assert isinstance(record, RunRecord)
         assert isinstance(record.cfg, SavingCfg)
         assert isinstance(record.result, SavingResult)
         np.testing.assert_array_equal(record.result.frequency, [1000, 1001, 1002])
-        assert metadata == load_run_data(path).metadata
+        assert restored.cfg_issue is None
 
 
 @pytest.mark.parametrize("adapter_cls", [_NeedsArgsAdapter, _NoLoadAdapter])
-def test_base_adapter_load_raises_explicit_unsupported(adapter_cls: type[_LoadAdapter]):
-    with pytest.raises(NotImplementedError, match="does not support loading"):
-        adapter_cls().load(_request())
-
-
-def test_base_adapter_load_preserves_constructor_internal_type_error() -> None:
-    with pytest.raises(TypeError, match="constructor bug"):
-        _InternalTypeErrorAdapter().load(_request())
-
-
-@pytest.mark.parametrize("missing_cfg", [False, True])
-def test_base_adapter_save_passes_explicit_record_to_override(
-    tmp_path: Path, missing_cfg: bool, qapp: QApplication
+def test_base_adapter_restore_raises_explicit_unsupported(
+    adapter_cls: type[_LoadAdapter], stored: StoredRun
 ) -> None:
-    received: list[tuple[_LoadedRecord, Path, str | None]] = []
+    with pytest.raises(NotImplementedError, match="does not support loading"):
+        adapter_cls().restore(stored)
 
-    class Saver(_LoadExp):
-        def save(
-            self,
-            source: _LoadedRecord,
-            destination: Path,
-            *,
-            comment: str | None = None,
-        ) -> None:
-            received.append((source, destination, comment))
 
-    class Adapter(_LoadAdapter):
-        exp_cls = Saver
-
-    source = RunRecord(
-        cfg=None if missing_cfg else _Cfg(),
-        result=_LoadedResult(path=tmp_path / "source.hdf5"),
-    )
-    destination = tmp_path / "exact.hdf5"
-    with native_save_session(tmp_path, qapp) as native:
-        request = SaveDataRequest(
-            run_result=source,
-            data_path=str(destination),
-            parameters=native.state.get_tab("tab").run.parameters,
-            storage=native.context.read_context().capture_storage(),
-            comment="override metadata",
-        )
-
-        Adapter().save(request)
-
-    assert received == [(source, destination, "override metadata")]
-    assert received[0][0] is source
+def test_base_adapter_restore_preserves_constructor_internal_type_error(
+    stored: StoredRun,
+) -> None:
+    with pytest.raises(TypeError, match="constructor bug"):
+        _InternalTypeErrorAdapter().restore(stored)

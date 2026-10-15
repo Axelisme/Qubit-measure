@@ -275,7 +275,8 @@ decimated trace 與 branch smoke。效能相關 regression 先找 public simulat
 
 Library entry 與範本的公開行為由 `tests/gui/session/test_library_entry.py` 驗證，
 Inspect 與 Aliases 由 `tests/gui/session/ui/` 驗證。Measure 的 tab Form resource、
-固定 capture、Run 與 writeback 在 `tests/gui/app/measure/services/`；
+固定 capture 與 Run 在 `tests/gui/app/measure/services/`；writeback draft、Apply 與 widget
+在 `tests/gui/app/measure/writeback/`；
 Library／writeback 的 wire 行為由 `tests/gui/app/measure/remote/` 驗證。
 Writeback 案例區分 Form batch、draft-local edits 與 target 提交，不把 selected Apply 當成跨檔原子交易。
 

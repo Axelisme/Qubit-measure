@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-15，單層 Form description、ARB 唯讀與 terminal Controller close
+**Last updated:** 2026-10-16，Artifact／Writeback owner、Opaque Run／Load、單層 Form description、ARB 唯讀、terminal Controller close 與 raw cfg 非 UI 讀取
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -17,6 +17,19 @@ Run 框架在 hardware lease 後、adapter.run 前讀取全部已連線 device �
 任一讀取失敗拒絕 Run，不寫設定、不進 adapter/core、不以 State cache 補值，無 device 記 `{}`。
 這份實驗前 snapshot 沿 RunMetadata.device_snapshot 保存，不被後續 sweep 改寫。
 Native Save 寫入既有 `/device`，不查 live hardware；實際 sweep 值由 cfg 與 persisted axes 記錄。
+Run handle 保持 adapter-owned opaque，不因 native evidence 要求 RunRecord 或讀 cfg／result 欄位。
+`artifacts` 集中 tracker、SaveService、SaveControl、保存中心與 `ArtifactHandover` 契約。
+State、controller、remote 和 Qt caller 使用該 package 公開入口；不保留舊位置 shim。
+Adapter 的 `data_item(key, result, comment=...)` 與 `analysis_item(key, result, parameters, pane=...)`
+只交固定 framework items。框架選路徑與格式、同步編碼及逐輸出隔離失敗。
+Data 準備錯誤交給 DataItem.failed 或 from_run，producer 拋錯也轉成該 data outputs 的失敗；
+同選集的圖與分析仍保存。Figure 取已提交 pane，不取未提交草稿。
+`writeback` 集中三類 proposals、opaque draft、WritebackService、WritebackControl 與 widget。
+Adapter 公開入口繼續再匯出 proposal 型別，其他舊位置不保留 shim。
+resources.entry executor 與 remote handler／wire types 留在各自 owner。
+Artifact 與 Writeback 不直接互相 import，由 app composition 協調。
+`measure-artifacts-no-writeback` 與 `measure-writeback-no-artifacts` contracts 約束兩個方向，
+允許共用 State／events／context。
 可提交的 native 結果先由 State 一次發布結果與 `RunPaneState.metadata`，
 再在 terminal 追加 acquired。Origin 沿發起命令的 GUI／MCP，沒有 Save 也追加事件，
 但不建立 run 資料夾。未綁定或沒有 storage 時不造事件，terminal 明確記錄診斷。
@@ -100,8 +113,9 @@ MainWindow 是唯一 Qt authority 訂閱者。`set_writable` 更新主窗與目�
 新 tab 建立時套用當下狀態。Tab 與 interactive frontend 只接收可寫狀態。
 Local modal 期間，Qt remote adapter 拒絕 owner 取得，回 `local_busy` 與「Local 使用中」。
 Chooser 使用非 native option。Dialog 不訂閱 control，也不在寫入前重查 holder。
-Inspect 與 Device 的查看入口提供靜態 read-only mode，Inspect 不開放 Add、
-library mutation 或 Arb Waveforms。Inspect Delete 先固定 `ParameterContext`，
+Inspect、Devices 與 ARB Waveforms 的查看入口提供靜態 read-only mode。
+Inspect 不開放 Add 或 library mutation，但仍可開啟唯讀 ARB Waveforms。
+Inspect Delete 先固定 `ParameterContext`，
 再用 `Controller.apply_library_change` 刪除該 target，不因確認期間 context switch 改寫新 point。
 Add 與 RunLoad 的 finished 仍退休單次輸入，晚到提交不能重新寫入。
 只有量測 Stop 和 device setup Stop 在 Remote 收回 Local locked 並請求 cancellation。
@@ -113,9 +127,11 @@ pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 align
 
 - `form_adapter` 從 core cfg 與作者樹推導 Form。`make_form(ctx)`、範本與實驗初值由使用者套件宣告，舊 builder、seeds 與角色 factory 表已退休。
 - `flux_pick_plugin.py`、`flux_pick_frontend.py`、`interactive_flux_pick.py`：measure 選線的終態結果與 click-follow frontend。Caller 傳 FluxPickInputs 和初始數值，不帶具體實驗或參數容器。共用數值及 single-flight 機制仍由既有 kernel/plugin 擁有。
-- `adapter/`：framework-facing contract、request/result/writeback/analyze params、
-  adapter validation 與 protocol signature 所需的 session vocabulary。ModuleWriteback 的
-  proposal 直接使用持久 ModuleSpec，不帶 editor identity。
+- `adapter/`：framework-facing contract、request/result/analyze params、
+  adapter validation 與 protocol signature 所需的 session vocabulary。Writeback 型別由
+  `writeback/` 擁有，adapter 公開入口再匯出。ModuleWriteback proposal 直接使用持久
+  ModuleSpec，不帶 editor identity。
+- `writeback/`：parameter／module／sample proposals、draft、service、control 與 Qt review widget。
 - `services/`：app service layer。Service 依賴 ports，不直接 import sibling service
   implementation；package `__init__` 只做 lazy public re-export。
 - `state.py`：tab/device/pane/path/version-table SSOT 與主線程 mutators；固定的
@@ -125,7 +141,7 @@ pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 align
   `●` marker while Run is active; Run start/terminal EventBus reactions and tab insertion
   repaint from State, so the marker is never persisted or cached as a second busy state.
 - `ui/`：Qt widgets、MainWindow top-level façade、capability-driven `ExpTabWidget`、
-  writeback view、feedback widgets；generic cfg form不屬於app package。
+  feedback widgets；writeback view 由 `writeback/` 擁有，generic cfg form不屬於app package。
   `ExpTabWidget` owns capability-driven left subtab composition (fixed order Run |
   Analysis | Post-Analysis | Data | Guide, with optional Analysis/Post only when
   the adapter declares the capability) and per-pane `FigureContainer` routing
@@ -198,8 +214,9 @@ pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 align
   Qt 顯示本次輸出的 path/status/error，包含實際 Labber path。
   Mapping／ledger 錯誤直接傳遞，不偽造 report 或回滾已寫文件。
   保存不產生 acquisition identity，也不重讀 live point。
-  RPC／MCP 直接投影回傳報告。Native Load 讀回 typed record 與原 RunMetadata。
-  Load 在 adapter 呼叫前固定 request 與不帶 alias 的 Save storage capability。
+  RPC／MCP 直接投影回傳報告。Native Load 由框架讀取 StoredRun 並比對 experiment tag，
+  再交 adapter.restore(stored)。框架不檢查 record.cfg，歷史 metadata 直接取自 StoredRun。
+  Load 在 adapter 呼叫前固定目前來源與不帶 alias 的 Save storage capability。
   Analyze/WB 另用檔案 point 與 resolved alias names，一次透過 context owner 讀取。
   歷史 point 的檔案、schema 或 kind 錯誤在發布結果前傳遞，舊結果不變。
   Save 在 mapping 或輸出 I/O 前比對 native 歷史 entry 與這份 result source storage。
@@ -485,8 +502,12 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    persistence. Native Load retains the original identity, and analysis without
    native metadata uses `None`.
 
-- `load_tab_result` 載入 typed RunRecord，保留 Record.cfg 作為結果來源快照，供 Inspect 與分析讀取。
-  缺 cfg 時保留可用資料，不捏造設定。WB 不從 Load-time calibration 補 pulse module、改槽或 pi_product。
+- `load_tab_result` 接受 RestoredRun 的 opaque record 與明示 cfg_issue。
+  BaseAdapter.restore 委派 core.from_stored，不讀檔案或目前表單。cfg_issue 為 null 表示 typed cfg 可用，
+  字串則解釋不可用原因；缺 cfg 仍可成功載入數據。
+  原始 cfg 保存在 native 資料檔，透過公開 `datafile.load_run_data` 離線讀取為 `StoredRun`。
+  GUI 不提供原始 cfg 檢視入口。
+  WB 不從 Load-time calibration 補 pulse module、改槽或 pi_product。
   Load 保留表單原輸入與固定來源，不要求 draft 有效。
   Run/Load 先提交 primary result。Analysis preparation 失敗不撤回它，只報 diagnostic。
   Named figures 和各 pane 的 presentation lifecycle 分開管理。
@@ -627,9 +648,11 @@ and detaches the editor before the tab closes.
 
 Load replaces results, not Form input. Valid, invalid and unfinished drafts
 keep their authored values and expression text, including extras. Load does not
-validate the current draft or infer input from native cfg. The result retains
-its native cfg for Inspect and analysis. Native Load's historical analysis
-source and Save storage retain their separate Load-time ownership.
+validate the current draft or infer input from native cfg. The adapter owns
+its record and cfg diagnostic. Raw cfg stays in the native data file and is
+available offline as `StoredRun` through the public `datafile.load_run_data` API.
+The GUI provides no raw cfg inspection entry point. Native Load's historical
+analysis source and Save storage retain their separate Load-time ownership.
 
 Workspace saves authored Form input JSON, including expression text. Restore
 captures new sources and overlays compatible leaves through the resource,
@@ -755,7 +778,10 @@ reload 後的新範本在下次開啟生效）、`Controller.arb_waveforms`、wi
 以及開 `DialogName.ARB_WAVEFORM` 的入口，讓 ARB 對話框保有具名管理與 remote screenshot，
 加上組合根的具名 alias preset catalog。
 Measure 不再有自己的 Inspect 子類別或 ARB 實作；行為與 Modules 分頁見
-[session README](../../session/README.md)。Inspect、Devices 與 ARB 的唯讀 mode 都由宿主在開啟時依控制權的 `writable` 設定。從 Inspect 開的 ARB 沿用該 Inspect 的 `writable`。這三個對話框不加 run lock，也不追蹤開啟後的控制權變化。
+[session README](../../session/README.md)。共用 Inspect、Devices 與 ARB 都提供 `set_read_only`，
+宿主在開啟時依控制權的 `writable` 設定唯讀 mode。從 Inspect 開的 ARB 沿用該 Inspect 的 `writable`。
+Measure 不對這三個對話框加 run lock，也不追蹤開啟後的控制權變化。
+Workflows 依自己的 run lock，從 Start 到 terminal delivery 同步設定這三個對話框的唯讀 mode。
 `SetupDialog` receives `setup_control`, so project/context/SoC bootstrap UI no
 longer depends on the concrete controller façade. The persistent measure
 `PredictorDialog` receives both `predictor_control` and `device_control`, so the

@@ -17,15 +17,15 @@ from qtpy.QtWidgets import (
     QStackedWidget,
     QTabWidget,
 )
+from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalysisMode,
     ParameterWriteback,
 )
-from zcu_tools.gui.app.measure.artifact_tracker import (
+from zcu_tools.gui.app.measure.artifacts import (
     ArtifactSectionSnapshot,
     ArtifactSnapshot,
     SaveStatus,
@@ -53,7 +53,7 @@ from zcu_tools.resources.entry import (
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.measure._form_fakes import configure_form_lookup, make_form
-from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
+from tests.gui.app.measure.artifacts._snapshots import ready_figures, with_artifacts
 from tests.gui.widgets.form._text_input import commit_text
 
 
@@ -670,7 +670,7 @@ def test_main_window_load_data_dialog_calls_controller(
         tab_id="tab-1",
         data_path="/tmp/result.hdf5",
         result_type="Result",
-        has_cfg_snapshot=False,
+        cfg_issue="cfg unavailable",
         has_analyze_params=analysis_error is None,
         analysis_error=analysis_error,
     )

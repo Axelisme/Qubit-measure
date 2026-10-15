@@ -240,6 +240,14 @@ class NotebookExperiment(Generic[CoreT]):
         self: NotebookExperiment[RecordExperiment[CfgT, ResultT]],
         source: Path,
     ) -> RunRecord[CfgT, ResultT]:
+        """Load a native Path through the core and publish only after success.
+
+        No hardware is required. Return the core RunRecord, including cfg=None
+        and its warning when historical cfg is incompatible. Successful load
+        clears analysis, presentation references and acquisition evidence;
+        failure retains all prior results. Labber-only files must be converted
+        offline with the migrations tools before using the default core loader.
+        """
         record = self._core.load(source)
         self._last_run = record
         self._acquisition_evidence = None

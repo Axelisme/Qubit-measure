@@ -131,7 +131,7 @@ class RecordingLoad:
             tab_id="tab-1",
             data_path=data_path,
             result_type="Result",
-            has_cfg_snapshot=True,
+            cfg_issue=None,
             has_analyze_params=False,
         )
 

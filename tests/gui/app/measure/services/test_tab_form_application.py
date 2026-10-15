@@ -3,7 +3,6 @@
 from typing import ClassVar
 
 import pytest
-from qtpy.QtCore import QEventLoop, QTimer
 from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConfigBase, Expr, PulseCfg, Template
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -13,7 +12,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
     ExpAdapterProtocol,
     RunRequest,
-    SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
@@ -21,6 +19,7 @@ from zcu_tools.gui.app.measure.services.form_contracts import CfgPreconditionErr
 from zcu_tools.gui.form import FormValue
 from zcu_tools.gui.form_adapter import Form, FormContext
 
+from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure.remote._helpers import Fixture
 
 
@@ -41,9 +40,6 @@ class TraceAdapter(BaseAdapter[TraceCfg, TraceCfg]):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.NONE, load_data=False, requires_soc=False
     )
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return "trace"
 
     def run(
         self,
@@ -85,9 +81,6 @@ def test_tab_factory_errors_surface_at_use_and_reset_keeps_live_form(
                     raise RuntimeError("factory source failed")
                 return Form(FactoryCfg, {"pulse": Template("missing")})
             return Form(FactoryCfg, {"amount": 3.0})
-
-        def make_filename_stem(self, ctx: SessionEnv) -> str:
-            return "factory"
 
     application = Fixture(headless=True)
     application.registry.register("factory", FactoryAdapter)
@@ -144,23 +137,17 @@ def test_open_edit_run_reset_and_reopen_restore_use_public_form_authority(
         assert resource.result() == TraceCfg(amount=6.0)
         assert resource.preview().values[("amount",)] == 6.0
         finished: list[RunFinishedPayload] = []
-        loop, timer = QEventLoop(), QTimer()
-        timer.setSingleShot(True)
-        timer.timeout.connect(loop.quit)
 
         def terminal(payload: RunFinishedPayload) -> None:
             if payload.tab_id == tab_id:
                 finished.append(payload)
-                loop.quit()
 
         subscription = application.bus.subscribe(RunFinishedPayload, terminal)
         try:
             application.ctrl.start_run(tab_id)
-            timer.start(3000)
-            if not finished:
-                loop.exec()
+            # The admitted trace adapter returns and publishes RunFinishedPayload.
+            qt_until(lambda: bool(finished), label="form authority run terminal")
         finally:
-            timer.stop()
             subscription.unsubscribe()
         assert finished, "Run must reach a terminal notification before timeout"
         assert not application.state.is_run_active()
