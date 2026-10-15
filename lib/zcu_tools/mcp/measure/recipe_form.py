@@ -39,8 +39,9 @@ class RecipeFormField:
     mode is key for a library key, inline for an inline module/Spec, or None for
     scalar, ordinary section, range, disabled or unfilled fields.
     key is the actual library key in key mode, never an alias, otherwise None.
-    locked reports an inline-only Slot or a single-literal constrained field;
-    it does not imply that descendants of a key are readonly cfg nodes.
+    locked is the owner's selection_fixed or fixed flag: this level has a
+    declaration-fixed branch or complete value. It does not freeze inner
+    choices, hide children or imply readonly descendants.
     fields lists the selected Option fields, or direct section properties, in
     declaration order. Option-selected tags are omitted; ref and other options without
     fields have no children. Tag leaves are not read_field paths. Inline leaves
@@ -147,20 +148,21 @@ def slot_description(
 ) -> Literal["selectable", "locked"] | None:
     """Classify S2 module metadata, without option matching or union inference.
 
-    observation is a decoded current field. A declaration-fixed inline value
-    means locked; declared ref/inline option values mean selectable. Missing
-    library options alone never imply a lock. Nonmodule fields return None.
+    observation is a decoded current field. Declared ref/inline option values
+    identify module selectors; the owner's selection_fixed or fixed flag
+    decides locking. Missing library options alone never imply a lock.
+    Nonmodule fields return None.
     """
     target = observation["description"]["target"]
-    if target is not None and target["fixed"]:
-        fixed = target["fixed_value"]
-        if isinstance(fixed, dict) and fixed.get("kind") == "inline":
-            return "locked"
     if target is not None:
         for option in target["options"] or []:
             value = option["value"]
             if isinstance(value, dict) and value.get("kind") in ("ref", "inline"):
-                return "selectable"
+                return (
+                    "locked"
+                    if target["selection_fixed"] or target["fixed"]
+                    else "selectable"
+                )
     return None
 
 
@@ -245,7 +247,7 @@ def read_form_field(
         value=wire_value(observation["value"]),
         mode=mode,
         key=key,
-        locked=slot_description(observation) == "locked" or target["fixed"],
+        locked=target["selection_fixed"] or target["fixed"],
         fields=tuple(
             child["name"]
             for child in description["children"]
