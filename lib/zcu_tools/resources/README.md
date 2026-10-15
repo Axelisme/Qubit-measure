@@ -5,6 +5,11 @@
 `resources/` 組織實驗工作資源的命名、讀寫與交換。它不是通用 storage framework，也不包含 datafile。
 
 - [`context/`](context/README.md) 管理 point-local typed ModuleLibrary。
+- `simulation_replay.py` owns opt-in private FTF input JSON, content integrity,
+  atomic file I/O and acquire/round reference resolution. It retains detached
+  waveform samples and settings, not measured I/Q. Numeric manifests stay opaque
+  and are verified by their numeric owner. Normal waveform assets and data.h5
+  policies do not change. This module does not import program or simulate.
 - [`ftf/`](ftf/README.md) 讀取 immutable FTF YAML，擁有具名欄位、units、limits、接線與 noise PSD 的 field-path 診斷，不依賴 simulate、device 或 program。
 - [`qubit_params.py`](qubit_params.py) 直接管理 result scope 的 typed `params.json` handoff。公開讀寫先重新讀取 JSON，寫入採原子替換；方法與 section 規則見 [qubit_params.md](qubit_params.md)。
 - [`sample_table/`](sample_table/README.md) 管理條目的只追加 JSONL 樣本歷史、CSV 匯出與 opt-in v2 欄位協定。

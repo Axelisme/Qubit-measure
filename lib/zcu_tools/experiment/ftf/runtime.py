@@ -19,6 +19,7 @@ from zcu_tools.experiment.simulation import SimulationEnvironment
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.simulation import SimulationBinding, SimulationSoc
 from zcu_tools.resources.ftf import FTFSettings, load_ftf, parse_ftf
+from zcu_tools.resources.simulation_replay import ReplayAcquire, save_replay
 from zcu_tools.simulate.adc import ADC, PopulationInput, SamplingIdentity
 from zcu_tools.simulate.evolution import (
     EvaluationReceipt,
@@ -31,6 +32,7 @@ from zcu_tools.simulate.evolution import (
 )
 
 from .point import FTFPointPlan, plan_point
+from .replay import replay_versions
 
 
 @dataclass(frozen=True)
@@ -68,7 +70,11 @@ class FTFSource:
     source tail or receiver noise is retained across calls. evaluations holds
     actual numeric receipts for every group/round of the latest acquire only;
     a new acquire sequence clears earlier receipts, never published disk data.
-    This is author-side composition, not an ordinary GUI/MCP truth interface.
+    private_replay: optional absolute author-only archive directory. Successful
+    rounds save detached controls/settings/snapshots/seeds and checked numeric
+    references there. None disables all private input I/O. Archive errors fail the
+    acquire; public provenance remains only simulation_id. This is author-side
+    composition, not an ordinary GUI/MCP truth interface.
     """
 
     def __init__(
@@ -77,11 +83,15 @@ class FTFSource:
         devices: DeviceManager,
         *,
         library: EvolutionLibrary | None = None,
+        private_replay: Path | None = None,
     ) -> None:
         self.settings = settings
         self.devices = devices
         self.identity = sha256(settings.model_dump_json().encode()).hexdigest()
         self.library = library
+        if private_replay is not None and not private_replay.is_absolute():
+            raise ValueError("private replay requires an explicit absolute root")
+        self.private_replay = private_replay
         self.evaluations: tuple[FTFNumericUse, ...] = ()
 
     def snapshot(self) -> EnvironmentSnapshot:
@@ -127,16 +137,23 @@ class FTFSource:
         adc = ADC(plan.readout_model, rtol=solver.rtol, atol=solver.atol)
         return _Prepared(plan, mixture, adc, evolution.last_evaluation)
 
-    def execute(self, request: RoundRequest) -> RoundSignals:
+    def execute(
+        self, request: RoundRequest, *, tables: LibrarySnapshot | None = None
+    ) -> RoundSignals:
         """Generate this round's single ADC sums/traces from detached timelines.
 
         Equal physical executions share evolution and conditional response, but
         receive independent joint-initial/noise draws. Point grouping does not
         depend on sweep names. No state/filter tail crosses shots/rounds. Raw and
         averaged acquisition share this one numeric realization via the adapter.
+        tables optionally supplies the exact frozen numeric publication set for
+        replay; None captures current publications once at this round boundary.
+        private_replay, if enabled, persists the successful round before return;
+        I/O and numeric-reference errors propagate rather than falling back.
         """
         # Publication versions are fixed for this round, not for each group.
-        tables = self.library.snapshot() if self.library is not None else None
+        if tables is None and self.library is not None:
+            tables = self.library.snapshot()
         acquire = request.acquire
         if (
             self.evaluations
@@ -179,11 +196,40 @@ class FTFSource:
                 output[indices, read] = (
                     samples.traces if acquire.mode == "decimated" else samples.sums
                 )
+        if self.private_replay is not None:
+            identities = tuple(
+                identity
+                for use in self.evaluations
+                if use.round_index == request.index
+                for identity in use.receipt.content_identities
+            )
+            manifest = (
+                self.library.replay_manifest(tables, identities)
+                if self.library is not None and tables is not None
+                else None
+            )
+            save_replay(
+                self.private_replay,
+                ReplayAcquire(
+                    settings=self.settings,
+                    request=acquire,
+                    versions=replay_versions(),
+                    library_path=self.library.path
+                    if self.library is not None
+                    else None,
+                ),
+                request.snapshot,
+                request.index,
+                manifest,
+            )
         return RoundSignals((ChannelSignals(self.settings.receiver.ro_ch, output),))
 
 
 def ftf(
-    configuration: FTFSettings | str | Path, *, library: EvolutionLibrary | None = None
+    configuration: FTFSettings | str | Path,
+    *,
+    library: EvolutionLibrary | None = None,
+    private_replay: Path | None = None,
 ) -> SimulationEnvironment:
     """Build a fixed-profile FTF environment from named values or a YAML path.
 
@@ -193,8 +239,14 @@ def ftf(
     profile, never arbitrary firmware overrides. Host receives no model truth.
     library optionally injects author-selected EvolutionLibrary storage; no path
     search/default cache. Numeric owner handles table parsing, misses and saving.
-    Weak dispersive/Markov/secular approximations and readout-origin flux freezing
-    are documented in the module README; no runtime applicability gate is added.
+    private_replay explicitly enables author-only checked input archives at an
+    absolute directory. None (default) writes no private replay data. Archives
+    contain model truth and must not be published through normal Run metadata.
+    Successful round capture failures propagate. replay_round reloads one round
+    independently; numeric references remain in the injected library and must
+    be retained. The module README documents weak dispersive/Markov/secular
+    approximations and readout-origin flux freezing. No runtime applicability
+    gate is added.
     """
     settings = (
         parse_ftf(configuration)
@@ -216,7 +268,9 @@ def ftf(
                 ),
                 progress=False,
             )
-        coordinator = FTFSource(settings, devices, library=library)
+        coordinator = FTFSource(
+            settings, devices, library=library, private_replay=private_replay
+        )
         soccfg = make_mock_soccfg(
             settings.channels.generators, settings.channels.readouts
         )

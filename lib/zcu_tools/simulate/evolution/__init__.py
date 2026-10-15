@@ -9,7 +9,7 @@ from .controls import ControlPulse, ControlSequence, Envelope, PhaseEvent
 from .intel import IntelOpenCL
 from .library import BuildPlan, EvolutionLibrary, LibrarySnapshot
 from .model import DriveSource, NumericModel, SolverSettings
-from .reuse import EvaluationReceipt
+from .reuse import NUMERIC_VERSION, EvaluationReceipt
 from .solver import Evolution, propagator_power
 from .state import Basis, DensityState, Populations, populations
 from .validation import ValidationEvidence, ValidationLimits

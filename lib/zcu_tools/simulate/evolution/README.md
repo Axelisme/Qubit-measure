@@ -5,6 +5,14 @@
 `Evolution` owns event geometry, solver selection, U lookup and exact density
 records. The caller supplies a model, continuous controls and an explicit initial
 density. No shot, filter tail or noise realization survives a call implicitly.
+The solver contracts exact Lindblad jump algebra before repeated RHS evaluations.
+Dynamic callbacks still run and validate their full contents at every evaluation.
+Only identical contents reuse algebra. Hamiltonian and baths stay in one full
+Lindblad ODE, without operator splitting or fewer bath updates. Each action uses
+at most 16 MiB for an optional dense gain matrix; dimensions above 32 use exact
+batched matrix products instead. Solver workspaces remain outside the library
+LRU budget. `NUMERIC_VERSION` is `density-direct-v2`; older exact-record keys and
+private replay versions do not silently alias the changed arithmetic.
 `last_evaluation` reports the actual direct, direct-record or table path and
 content identities. It is author diagnostic data, not public acquisition truth.
 
@@ -47,6 +55,15 @@ round or acquire boundary. The snapshot contains no arrays. New publications do
 not change it. `evaluate(family, scale, snapshot)` returns U or a legal miss,
 without extrapolation or automatic building. Missing/corrupt referenced files,
 illegal input, solver and write errors propagate.
+
+`replay_manifest(snapshot, content_identities)` returns an opaque checked JSON
+manifest for the original table set and exact record content used by a round.
+`restore_replay(manifest)` checks every referenced file from disk and returns
+that frozen table set, without discovering new publications or warming arrays.
+The numeric owner resolves record keys and checks versions, digests and metadata.
+Caller archives retain this opaque string, not an independent NPZ parser. Files
+remain in the explicitly selected library; deleting them breaks replay rather
+than triggering silent regeneration.
 
 Pass `library=` and optionally `tables=` to `Evolution`. Static closed plateau
 intervals can use the snapshot. All other legal requests keep the full direct

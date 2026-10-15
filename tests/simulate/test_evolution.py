@@ -242,10 +242,17 @@ def test_invalid_density_and_nonfinite_dynamic_model_fail_without_repair():
 
 
 def test_complex_multilevel_lindblad_matches_independent_generator_exponential():
-    from zcu_tools.simulate.evolution import Basis, DensityState, Evolution, NumericModel
+    from zcu_tools.simulate.evolution import (
+        Basis,
+        DensityState,
+        Evolution,
+        NumericModel,
+    )
 
-    h = np.array([[0.01, 0.003j, 0.004], [-0.003j, 0.02, 0.002j],
-                  [0.004, -0.002j, 0.03]], dtype=complex)
+    h = np.array(
+        [[0.01, 0.003j, 0.004], [-0.003j, 0.02, 0.002j], [0.004, -0.002j, 0.03]],
+        dtype=complex,
+    )
     jumps = (
         np.array([[0.03j, 0.05, 0], [0.01, 0.02, 0.04j], [0.02j, 0, 0.01]], complex),
         np.array([[0.02, 0, 0.01j], [0.02j, 0.01, 0], [0, 0.03, -0.02]], complex),
@@ -276,11 +283,15 @@ def test_complex_multilevel_lindblad_matches_independent_generator_exponential()
 def test_continuous_collapse_content_and_invalid_callback_are_not_frozen():
     from zcu_tools.simulate.evolution import DensityState, Evolution, NumericModel
 
-    lowering = np.array([[0, 0.2j], [0, 0]], dtype=complex)
+    lowering: NDArray[np.complex128] = np.array(
+        [[0, 0.2j], [0, 0]], dtype=np.complex128
+    )
     initial = np.diag([0, 1]).astype(complex)
     base = model()
     numeric = NumericModel(
-        "continuous-bath", base.basis, base.hamiltonian_ghz,
+        "continuous-bath",
+        base.basis,
+        base.hamiltonian_ghz,
         collapse_at=lambda t: (lowering * (1 + t / 8),),
     )
     actual = Evolution(numeric).evolve(DensityState(base.basis, initial), end_ns=8)
@@ -288,7 +299,9 @@ def test_continuous_collapse_content_and_invalid_callback_are_not_frozen():
     excited = np.exp(-0.04 * 8 * 7 / 3)
     assert_allclose(actual.density, np.diag([1 - excited, excited]), atol=2e-10, rtol=0)
     invalid = NumericModel(
-        "invalid-bath", base.basis, base.hamiltonian_ghz,
+        "invalid-bath",
+        base.basis,
+        base.hamiltonian_ghz,
         collapse_at=lambda t: (lowering if t < 2 else lowering * np.nan,),
     )
     with pytest.raises(ValueError, match="finite"):

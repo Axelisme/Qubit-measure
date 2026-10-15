@@ -12,6 +12,8 @@ from .controls import ControlSequence
 from .model import NumericModel, SolverSettings
 from .state import DensityState
 
+NUMERIC_VERSION = "density-direct-v2"
+
 
 @dataclass(frozen=True)
 class EvaluationReceipt:
@@ -66,7 +68,7 @@ def exact_key(
     event_keys = [(e.source, e.time_ns, e.delta_rad) for e in controls.phase_events]
     basis = model.basis
     description = (
-        "density-direct-v1",
+        NUMERIC_VERSION,
         np.__version__,
         scipy.__version__,
         model.identity,

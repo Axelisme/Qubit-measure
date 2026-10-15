@@ -6,9 +6,11 @@ from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 from pathlib import Path
 from time import perf_counter
+from typing import Literal
 
 import numpy as np
 from filelock import FileLock
+from pydantic import BaseModel, ConfigDict
 
 from .archive import (
     ArchiveHeader,
@@ -94,6 +96,13 @@ class LibrarySnapshot:
     """
 
     tables: tuple[TableReference, ...]
+
+
+class _ReplayManifest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    version: Literal[1] = 1
+    snapshot: LibrarySnapshot
+    records: tuple[tuple[str, str], ...]
 
 
 @dataclass(frozen=True)
@@ -237,6 +246,60 @@ class EvolutionLibrary:
                 )
             )
         return LibrarySnapshot(tuple(tables))
+
+    def replay_manifest(
+        self, snapshot: LibrarySnapshot, content_identities: tuple[str, ...]
+    ) -> str:
+        """Encode/check frozen publications and exact content used by a round.
+
+        snapshot is the round's original publication set. content_identities
+        are complete-file identities from successful EvaluationReceipts. The
+        returned opaque JSON retains exact record keys/digests and publication
+        references; callers must not decode this numeric-owner format. It holds
+        no arrays. Referenced files stay in this library, not in a caller bundle.
+        Missing/corrupt used artifacts raise; files are never regenerated here.
+        """
+        remaining = set(content_identities) - {r.identity for r in snapshot.tables}
+        records = []
+        for path in sorted((self.path / "direct").glob("*.npz")):
+            digest = sha256(path.read_bytes()).hexdigest()
+            if digest in remaining:
+                records.append((path.stem, digest))
+                remaining.remove(digest)
+        if remaining:
+            raise FileNotFoundError(f"missing replay numeric contents: {remaining}")
+        manifest = _ReplayManifest(snapshot=snapshot, records=tuple(records))
+        encoded = manifest.model_dump_json()
+        self.restore_replay(encoded)
+        return encoded
+
+    def restore_replay(self, manifest: str) -> LibrarySnapshot:
+        """Verify all exact numeric references and return the frozen table set.
+
+        manifest is the opaque result of replay_manifest. Exact schema/version,
+        file digests, numeric headers and publication metadata must match. All
+        references are checked from disk even when arrays are resident. Missing,
+        damaged or mismatched artifacts raise before any evolution, never become
+        misses or silently use newly published tables. Direct paths resolve in
+        this explicitly pathed library. No arrays are installed in the RAM LRU.
+        """
+        record = _ReplayManifest.model_validate_json(manifest)
+        for ref in record.snapshot.tables:
+            archive = read_archive(ref.path, ref.identity)
+            header = archive.header
+            if (
+                header.kind,
+                header.family,
+                header.lower,
+                header.upper,
+                header.degree,
+            ) != ("table", ref.family, ref.lower, ref.upper, ref.degree):
+                raise ValueError("replay publication metadata mismatch")
+        for key, digest in record.records:
+            archive = read_archive(self._record_path(key), digest)
+            if archive.header.kind != "direct" or archive.header.key != key:
+                raise ValueError("replay direct record identity mismatch")
+        return record.snapshot
 
     def evaluate(
         self, family: PlateauFamily, scale: float, snapshot: LibrarySnapshot

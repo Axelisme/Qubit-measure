@@ -15,11 +15,18 @@ from zcu_tools.simulate.evolution import EvolutionLibrary
 from tests.resources._ftf_data import ftf_document
 
 
-def test_reload_selected_round_without_prior_acquires_or_live_devices(tmp_path: Path) -> None:
+def test_reload_selected_round_without_prior_acquires_or_live_devices(
+    tmp_path: Path,
+) -> None:
     settings = parse_ftf(
         ftf_document()
-        | {"receiver": {"ro_ch": 0, "gain": 10000.0,
-                        "noise_psd_adc2_ns": [[30.0, 0.0], [0.0, 30.0]]}}
+        | {
+            "receiver": {
+                "ro_ch": 0,
+                "gain": 10000.0,
+                "noise_psd_adc2_ns": [[30.0, 0.0], [0.0, 30.0]],
+            }
+        }
     )
     archive = tmp_path / "private"
     library = EvolutionLibrary(tmp_path / "numeric")
@@ -29,11 +36,19 @@ def test_reload_selected_round_without_prior_acquires_or_live_devices(tmp_path: 
         if not isinstance(driver, FakeDevice):
             raise TypeError("FTF source must be a fixed-unit memory driver")
         program = ModularProgramV2(
-            env.soccfg, ProgramV2Cfg(reps=4, rounds=3),
-            modules=[PulseReadoutCfg(
-                gen_ch=0, ro_ch=0, nqz=1, freq=6000.0, gain=0.1,
-                waveform=ConstWaveformCfg(length=0.016), ro_length=0.016,
-            ).build("ro")],
+            env.soccfg,
+            ProgramV2Cfg(reps=4, rounds=3),
+            modules=[
+                PulseReadoutCfg(
+                    gen_ch=0,
+                    ro_ch=0,
+                    nqz=1,
+                    freq=6000.0,
+                    gain=0.1,
+                    waveform=ConstWaveformCfg(length=0.016),
+                    ro_length=0.016,
+                ).build("ro")
+            ],
         )
         values = iter((0.4, 0.2, 0.7))
 
@@ -63,10 +78,16 @@ def test_reload_selected_round_without_prior_acquires_or_live_devices(tmp_path: 
 
     from zcu_tools.resources.simulation_replay import save_replay
 
-    incompatible = restored.acquire.model_copy(update={"versions": (("backend", "future"),)})
-    mismatch = save_replay(tmp_path / "incompatible", incompatible,
-                           restored.round.snapshot, restored.round.index,
-                           restored.round.numeric_manifest)
+    incompatible = restored.acquire.model_copy(
+        update={"versions": (("backend", "future"),)}
+    )
+    mismatch = save_replay(
+        tmp_path / "incompatible",
+        incompatible,
+        restored.round.snapshot,
+        restored.round.index,
+        restored.round.numeric_manifest,
+    )
     with pytest.raises(ValueError, match="version mismatch"):
         replay_round(mismatch)
 

@@ -10,6 +10,7 @@ from scipy.integrate import solve_ivp
 from scipy.linalg import expm
 
 from .controls import ControlPulse, ControlSequence, quantize_ns
+from .lindblad import LindbladAction
 from .model import NumericModel, SolverSettings, hermitian_matrix
 from .reuse import EvaluationReceipt, exact_key
 from .state import ComplexMatrix, DensityState, owned_matrix
@@ -297,23 +298,17 @@ class Evolution:
         self, density: ComplexMatrix, interval: _Interval
     ) -> ComplexMatrix:
         n = density.shape[0]
+        static = LindbladAction(n)
+        static.replace(self.model.collapse_operators)
+        dynamic = LindbladAction(n)
 
         def rhs(t, flat):
             h = self._hamiltonian(t, interval)
             rho = flat.reshape(n, n)
-            derivative = -2j * np.pi * (h @ rho - rho @ h)
-            collapse = self.model.collapse_operators
+            derivative = -2j * np.pi * (h @ rho - rho @ h) + static.apply(rho)
             if self.model.collapse_at is not None:
-                dynamic = tuple(
-                    owned_matrix(c, "dynamic collapse operator")
-                    for c in self.model.collapse_at(interval.time(t))
-                )
-                if any(c.shape != rho.shape for c in dynamic):
-                    raise ValueError("dynamic collapse shape must match basis")
-                collapse += dynamic
-            for c in collapse:
-                loss = c.conj().T @ c
-                derivative += c @ rho @ c.conj().T - (loss @ rho + rho @ loss) / 2
+                dynamic.replace(self.model.collapse_at(interval.time(t)))
+                derivative += dynamic.apply(rho)
             return derivative.ravel()
 
         return self._integrate(rhs, density, interval)

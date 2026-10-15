@@ -54,6 +54,20 @@ metadata carries I/Q and the existing opaque provenance ID, not model truth.
 There is no TLS fallback, single-qubit preset or runtime table build. Private
 persistent replay remains separate from numeric records.
 
+Authors opt in with `ftf(settings, private_replay=absolute_directory)`. Successful
+rounds save checked content-addressed private inputs through
+`resources.simulation_replay`. Acquire content is shared; each round retains its
+snapshot and sampling identity. Detached complex waveform samples and full
+settings survive source-file edits. `replay_round(round_path)` runs only that
+round, without drivers, earlier acquisitions or current YAML. Exact numerical
+and RNG dependency versions must match. EvolutionLibrary owns opaque manifests
+that pin/check the original publications and exact records before any solve.
+Missing/damaged references fail, even if current inputs could be solved again.
+Numeric files remain in the explicitly selected library and must be retained.
+No pickle, arbitrary callable or generated noise is stored. Private archives
+contain truth; they are never normal RunRecord/native/RPC fields. Failed rounds
+are not marked as successful archives; in-memory binding inputs remain available.
+
 ## Offline library
 
 `build_database(yaml_path, library_path, FTFBuildPlan(...), compiler_directory)`
