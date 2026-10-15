@@ -151,6 +151,7 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
         z=ZSpec("populations", "Population", "a.u.", dtype=np.float64),
         result_type=AcStarkResult,
         cfg_type=AcStarkCfg,
+        cfg_schema_version="2.0",
         tag="singleshot/ac_stark",
     )
 

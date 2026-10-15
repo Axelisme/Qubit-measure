@@ -91,6 +91,7 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
         z=ZSpec("signals", "Signal", "a.u.", dtype=np.float64),
         result_type=FreqGainResult,
         cfg_type=FreqGainCfg,
+        cfg_schema_version="2.0",
         tag="twotone/ge/ro_optimize/freq_gain",
     )
 
@@ -108,12 +109,12 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
         freqs = sweep2array(
             cfg.sweep.freq,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules.readout.pulse_cfg.ch},
+            {"soccfg": soccfg, "gen_ch": modules.readout.gen_ch},
         )
         gains = sweep2array(
             cfg.sweep.gain,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules.readout.pulse_cfg.ch},
+            {"soccfg": soccfg, "gen_ch": modules.readout.gen_ch},
         )
 
         viewer = context.plots.liveplot_2d(

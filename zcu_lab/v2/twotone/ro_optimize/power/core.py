@@ -85,6 +85,7 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=PowerResult,
         cfg_type=PowerCfg,
+        cfg_schema_version="2.0",
         tag="twotone/ge/ro_optimize/gain",
     )
 
@@ -102,7 +103,7 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
         gains = sweep2array(
             cfg.sweep.gain,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules.readout.pulse_cfg.ch},
+            {"soccfg": soccfg, "gen_ch": modules.readout.gen_ch},
         )
 
         viewer = context.plots.liveplot_1d(

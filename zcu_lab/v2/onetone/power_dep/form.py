@@ -17,9 +17,7 @@ def make_form(ctx: FormContext) -> Form[PowerDepCfg]:
                 "readout": Template(
                     "readout",
                     set={
-                        "ro_cfg.ro_length": Expr(
-                            "$resonator.ext.default_probe_length - 0.1"
-                        )
+                        "ro_length": Expr("$resonator.ext.default_probe_length - 0.1")
                     },
                 ),
             },

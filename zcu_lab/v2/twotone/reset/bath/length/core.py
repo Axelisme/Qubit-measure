@@ -81,6 +81,7 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
         z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=LengthResult,
         cfg_type=LengthCfg,
+        cfg_schema_version="2.0",
         tag="twotone/reset/bath/length",
     )
 
