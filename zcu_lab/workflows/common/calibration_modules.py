@@ -3,6 +3,9 @@
 Module input aliases describe generated ref/inline values, not persistent Specs.
 Always use the owning ModuleInputField.to_spec before native materialization;
 never inspect their module content through the static nominal type view.
+Inline module input omits desc; to_spec uses its Spec default, and copying a
+library key to Inline drops the entry's description. Pulse has no persistent
+ro_ch. Flat PulseReadoutCfg.ro_ch stays required input.
 """
 
 from collections.abc import Mapping

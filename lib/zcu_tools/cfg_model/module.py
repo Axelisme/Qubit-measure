@@ -41,7 +41,7 @@ class _PulseFields(_ModuleFields):
     type: Literal["pulse"] = "pulse"
     ch: Annotated[int, FieldMeta(label="Gen ch")]
     nqz: Annotated[Literal[1, 2], FieldMeta(label="NQZ", group="Advanced")]
-    freq: Annotated[float | QickParam, FieldMeta(label="Freq", unit="MHz", decimals=2)]
+    freq: Annotated[float | QickParam, FieldMeta(label="Freq", unit="MHz", decimals=3)]
     phase: Annotated[
         float | QickParam,
         FieldMeta(label="Phase", unit="deg", decimals=2, group="Advanced"),
@@ -57,7 +57,7 @@ class _PulseFields(_ModuleFields):
     ] = 0.0
     mixer_freq: Annotated[
         float | None,
-        FieldMeta(label="Mixer freq", unit="MHz", decimals=2, group="Advanced"),
+        FieldMeta(label="Mixer freq", unit="MHz", decimals=3, group="Advanced"),
     ] = None
 
 
@@ -100,7 +100,7 @@ class _PulseReadoutFields(_ModuleFields):
     type: Literal["readout/pulse"] = "readout/pulse"
     gen_ch: Annotated[int, FieldMeta(label="Gen ch")]
     nqz: Annotated[Literal[1, 2], FieldMeta(label="NQZ", group="Advanced")]
-    freq: Annotated[float | QickParam, FieldMeta(label="Freq", unit="MHz", decimals=2)]
+    freq: Annotated[float | QickParam, FieldMeta(label="Freq", unit="MHz", decimals=3)]
     gain: Annotated[float | QickParam, FieldMeta(label="Gain", decimals=4)]
     phase: Annotated[
         float | QickParam,
@@ -108,7 +108,7 @@ class _PulseReadoutFields(_ModuleFields):
     ] = 0.0
     mixer_freq: Annotated[
         float | None,
-        FieldMeta(label="Mixer freq", unit="MHz", decimals=2, group="Advanced"),
+        FieldMeta(label="Mixer freq", unit="MHz", decimals=3, group="Advanced"),
     ] = None
     pre_delay: Annotated[
         float | QickParam,

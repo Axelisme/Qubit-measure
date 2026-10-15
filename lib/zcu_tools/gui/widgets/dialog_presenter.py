@@ -128,12 +128,17 @@ class QtDialogPresenter:
         save = QMessageBox.StandardButton.Save
         discard = QMessageBox.StandardButton.Discard
         cancel = QMessageBox.StandardButton.Cancel
-        answer = QMessageBox.question(
-            parent, title, message, save | discard | cancel, cancel
-        )
-        if answer == save:
+        box = self._message_box(parent, QMessageBox.Icon.Question, title, message)
+        box.addButton(save)
+        discard_button = self._require_button(box.addButton(discard), "Discard")
+        # Platform themes may label the standard button "Close without Saving".
+        discard_button.setText("Discard")
+        cancel_button = self._require_button(box.addButton(cancel), "Cancel")
+        box.setDefaultButton(cancel_button)
+        answer = box.exec()
+        if answer == save.value:
             return "save"
-        if answer == discard:
+        if answer == discard.value:
             return "discard"
         return "cancel"
 
