@@ -101,13 +101,6 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):
                 raise ValueError(
                     "sampling_mode='homophasal' requires homophasal fit parameters"
                 )
-            readout = self.modules.readout
-            if readout.ro_cfg.gen_ch != readout.pulse_cfg.ch:
-                raise ValueError(
-                    "homophasal sampling requires ro_cfg.gen_ch to match "
-                    f"pulse_cfg.ch; got {readout.ro_cfg.gen_ch} and "
-                    f"{readout.pulse_cfg.ch}"
-                )
         elif self.homophasal is not None:
             raise ValueError(
                 "homophasal fit parameters require sampling_mode='homophasal'"
@@ -169,6 +162,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=FreqResult,
         cfg_type=FreqCfg,
+        cfg_schema_version="2.0",
         tag="onetone/freq",
     )
 
@@ -176,8 +170,8 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         modules = cfg.modules
         return {
             "soccfg": soccfg,
-            "gen_ch": modules.readout.pulse_cfg.ch,
-            "ro_ch": modules.readout.ro_cfg.ro_ch,
+            "gen_ch": modules.readout.gen_ch,
+            "ro_ch": modules.readout.ro_ch,
         }
 
     def _run_uniform(
@@ -243,15 +237,14 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             cfg = sched.cfg
             modules = cfg.modules
             modules.readout.set_param("freq", float(freqs[0]))
-            pulse_cfg = modules.readout.pulse_cfg
-            ro_cfg = modules.readout.ro_cfg
+            readout_cfg = modules.readout
             freq_words, ro_freq_words = readout_freq_words(
                 soccfg,
                 freqs,
-                gen_ch=pulse_cfg.ch,
-                ro_ch=ro_cfg.ro_ch,
-                mixer_freq=pulse_cfg.mixer_freq,
-                nqz=pulse_cfg.nqz,
+                gen_ch=readout_cfg.gen_ch,
+                ro_ch=readout_cfg.ro_ch,
+                mixer_freq=readout_cfg.mixer_freq,
+                nqz=readout_cfg.nqz,
             )
 
             _ = (

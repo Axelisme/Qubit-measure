@@ -32,10 +32,10 @@ def expand_path(
 
 
 def _spec_members(annotation: object) -> tuple[type[ConfigBase], ...]:
-    if isinstance(annotation, type) and issubclass(annotation, ConfigBase):
-        return (annotation,)
-    # Type aliases and Annotated unions can nest inside ModuleSpec.
+    # Type aliases may resolve to a concrete Spec rather than a union.
     alias_value: object = getattr(annotation, "__value__", annotation)
+    if isinstance(alias_value, type) and issubclass(alias_value, ConfigBase):
+        return (alias_value,)
     return tuple(
         member
         for argument in get_args(alias_value)

@@ -139,6 +139,7 @@ class ResetCheckExp(PersistableExperiment[ResetCheckResult, ResetCheckCfg]):
         z=ZSpec("signals", "Population", "a.u.", dtype=np.float64),
         result_type=ResetCheckResult,
         cfg_type=ResetCheckCfg,
+        cfg_schema_version="2.0",
         tag="singleshot/reset_check",
     )
 

@@ -321,8 +321,7 @@ RO_FREQ  = 100.0    # MHz，axis_readout_v2 有效
 
 ### PulseReadout / gen_ch
 
-`DirectReadoutCfg(gen_ch=X)` 需要 gen ch X 已被 `declare_gen` 過（即同一個程式中有對應的 `Pulse.init`），  
-否則 `add_readoutconfig` 會找不到 `gen_chs[X]`，拋出 `KeyError`。
+`PulseReadoutCfg` 使用平鋪的 `gen_ch`、`ro_ch` 與單一 `freq`。Runtime 先宣告 generator 與 ADC，再建立 readout configuration；caller 不另建 Pulse 或 DirectReadout 配置。
 
 ### Register-driven Repeat
 

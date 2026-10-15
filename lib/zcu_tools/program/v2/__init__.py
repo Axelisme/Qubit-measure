@@ -12,8 +12,6 @@ from .modules import (
     ComputedPulse,
     Delay,
     DelayAuto,
-    DirectReadout,
-    DirectReadoutCfg,
     Join,
     LoadValue,
     LoadWord,

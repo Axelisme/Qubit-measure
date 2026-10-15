@@ -185,11 +185,8 @@ DEFINITION = RecipeDefinition(
     summary_parameters=(
         SummaryParameter(
             "readout_frequency_mhz",
-            "modules.readout.module.pulse_cfg.module.freq",
+            "modules.readout.module.freq",
             "MHz",
-        ),
-        SummaryParameter(
-            "ro_frequency_mhz", "modules.readout.module.ro_cfg.ro_freq", "MHz"
         ),
         SummaryParameter("readout_ref", "modules.readout"),
         SummaryParameter("use_reset", "modules.reset"),

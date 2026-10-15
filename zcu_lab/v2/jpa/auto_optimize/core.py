@@ -288,7 +288,7 @@ JPA_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
     result_type=JPAOptimizeResult,
     cfg_type=JPAOptCfg,
     tag="jpa/auto_optimize",
-    cfg_schema_version="2.0",
+    cfg_schema_version="3.0",
     result_builder=_build_jpa_auto_result,
     result_validator=_validate_jpa_auto_result,
 )

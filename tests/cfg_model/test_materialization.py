@@ -10,7 +10,6 @@ from zcu_tools.cfg_model import (
     CfgInputValue,
     CfgValidationContext,
     ConstWaveformCfg,
-    DirectReadoutCfg,
     FlatTopWaveformCfg,
     FlatTopWaveformSpec,
     GaussWaveformCfg,
@@ -375,12 +374,6 @@ class TestModuleCfgFactoryFromRaw:
         )
         assert isinstance(cfg, PulseCfg)
 
-    def test_dispatch_readout_direct(self):
-        cfg = ModuleCfgFactory.from_raw(
-            {"type": "readout/direct", "ro_ch": 0, "ro_length": 1.0, "ro_freq": 5000.0}
-        )
-        assert isinstance(cfg, DirectReadoutCfg)
-
     def test_dispatch_reset_none(self):
         cfg = ModuleCfgFactory.from_raw({"type": "reset/none"})
         assert isinstance(cfg, NoneResetCfg)
@@ -453,3 +446,59 @@ class TestWaveformCfgFactoryFromRaw:
         with pytest.raises(ValueError, match="union_tag_not_found") as failure:
             WaveformCfgFactory.from_raw({"length": 1.0})
         assert "Root <inline>; chain <inline>; expected waveform:" in str(failure.value)
+
+
+@pytest.mark.parametrize("arb", [False, True])
+def test_readout_key_expands_captured_waveform_and_ramp(arb: bool):
+    from zcu_tools.cfg_model import PulseReadoutCfg, PulseReadoutSpec
+
+    resolver = Resolver()
+    resolver.waveforms["ramp"] = (
+        ArbWaveformCfg(data="shape")
+        if arb
+        else GaussWaveformCfg(length=0.1, sigma=0.02)
+    )
+    resolver.waveforms["flat"] = FlatTopWaveformSpec(length=5.0, raise_waveform="ramp")
+    resolver.modules["Q1.readout.probe"] = PulseReadoutSpec.model_validate(
+        {
+            "gen_ch": 1,
+            "nqz": 1,
+            "freq": 700.0,
+            "gain": 0.4,
+            "waveform": "flat",
+            "ro_ch": 0,
+            "ro_length": 6.0,
+        }
+    )
+    context = CfgValidationContext(modules=resolver, assets=AssetInfo())
+    cfg = ModuleCfgFactory.from_raw("Q1.readout.probe", context=context)
+    assert isinstance(cfg, PulseReadoutCfg)
+    assert isinstance(cfg.waveform, FlatTopWaveformCfg)
+    assert cfg.waveform.length == 5.0
+    assert cfg.waveform.raise_waveform.length == (2.5 if arb else 0.1)
+    resolver.waveforms["ramp"] = GaussWaveformCfg(length=0.3, sigma=0.05)
+    assert cfg.waveform.raise_waveform.length == (2.5 if arb else 0.1)
+    stored = resolver.modules["Q1.readout.probe"]
+    assert isinstance(stored, PulseReadoutSpec)
+    assert stored.waveform == "flat"
+
+
+def test_readout_missing_waveform_reports_root_key_and_chain():
+    from zcu_tools.cfg_model import PulseReadoutSpec
+
+    resolver = Resolver()
+    resolver.modules["Q1.readout.probe"] = PulseReadoutSpec.model_validate(
+        {
+            "gen_ch": 1,
+            "nqz": 1,
+            "freq": 700.0,
+            "gain": 0.4,
+            "waveform": "missing",
+            "ro_ch": 0,
+            "ro_length": 6.0,
+        }
+    )
+    with pytest.raises(ValueError, match="Q1.readout.probe.*missing"):
+        ModuleCfgFactory.from_raw(
+            "Q1.readout.probe", context=CfgValidationContext(modules=resolver)
+        )

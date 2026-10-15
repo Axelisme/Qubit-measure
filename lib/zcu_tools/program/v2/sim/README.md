@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-10-11，現行參數容器名稱
+**Last updated:** 2026-10-15，flat readout lowering 與 generator view
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -155,8 +155,8 @@ Each soc keeps its own copied parameters and source binding.
   or `PulseReadout.ro_freq_val`. Paired generator/readout words resolve the
   semantic probe frequency from the generator and validate the ADC word
   bit-exactly. A readout-only word is an ADC-DDS alias, so lowering unwraps the
-  alias nearest the semantic `ro_freq` template. Arbitrary raw hardware words still fast-fail
-  without an explicit consuming module contract. Does NOT compute f_qubit, acc_buf,
+  alias nearest the semantic `freq` template. Arbitrary raw hardware words still
+  fast-fail without an explicit consuming module contract. Does NOT compute f_qubit, acc_buf,
   noise, S21, or the detune ensemble (the engine owns that).
 - `control_flow.py` — resolves control flow at one sweep point: picks the
   deterministic `Branch` sub-sequence, unrolls `Repeat` (int count or a
@@ -257,17 +257,18 @@ Each soc keeps its own copied parameters and source binding.
   soc routes through the engine just like `acquire`: the engine lowers the single
   lookback point, evolves the Bloch vector to `P_e`, and renders the time-domain
   trace via `decimated_trace` — the readout gain times the readout envelope scaled
-  by the steady mixed S21, **shifted by `sim.timeFly + pulse_cfg.pre_delay`**. With
+  by the steady mixed S21, **shifted by `sim.timeFly + readout.pre_delay`**. With
   zero pulse pre-delay, the trace is ~0 for program-time `< timeFly` and the
-  readout pulse envelope appears at `[timeFly, timeFly + pulse_cfg.waveform.length)`,
+  readout pulse envelope appears at `[timeFly, timeFly + readout.waveform.length)`,
   giving lookback a physical rising edge whose position `analyze` recovers as the
   trig_offset (`≈ timeFly`).
-  The ADC/readout window length (`ro_cfg.ro_length`) only determines the sampled
+  The ADC/readout window length (`readout.ro_length`) only determines the sampled
   time axis and may outlive the generator envelope. Model A has no resonator
   ring-up transient (the steady S21 applied per sample); the accumulated companion
   `acc_buf` stays white noise (lookback never reads it). Decimated needs a
-  `PulseReadout` (its `pulse_cfg` defines the envelope); a `DirectReadout` or more
-  than one readout fast-fails.
+  single `PulseReadout`. Lowering projects its flat generator fields into a
+  PulseCfg view for the existing envelope helpers; callers do not construct a
+  nested cfg. Both accumulated and decimated paths consume this readout plan.
 - **Deterministic Branch supported.** A `Branch` selected by a registered
   sweep-loop counter (e.g. g/e prep) lowers its chosen sub-sequence; the frame
   detuning recurses into the selected branch. Measurement-conditional branches,
@@ -296,8 +297,7 @@ Each soc keeps its own copied parameters and source binding.
   readout-induced `e -> g` model: post-readout state survival uses the generator
   `pulse_length_us`, while the excited-initial readout center uses the average
   survival over the ADC `ro_length_us` horizon and holds survival fixed after the
-  generator pulse ends. DirectReadout has no explicit generator gain, so it has
-  no photon backaction and stays on the linear path.
+  generator pulse ends. Every readout has an explicit generator gain and envelope.
   `readout_photons_per_gain2` is the explicit mock calibration from PulseReadout
   gain² to intracavity photons; its default is `100.0`, and `None` is rejected so
   the power calibration cannot silently depend on the current critical photon
@@ -398,3 +398,5 @@ Each soc keeps its own copied parameters and source binding.
 - `test_gate_sequences.py` — AllXY reports an injected 10 % gain error, the
   ZigZag gain scan recovers the pi gain, and the ZigZag frequency scan recovers
   the qubit frequency.
+
+Readout 的跨 owner 契約見 [ADR-0074](../../../../../docs/adr/0074-flat-readout-module.md)。

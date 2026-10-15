@@ -85,7 +85,7 @@ class FreqFluxExp(PersistableExperiment[FreqFluxResult, FreqFluxCfg]):
         result_type=FreqFluxResult,
         cfg_type=FreqFluxCfg,
         tag="twotone/flux_dep/freq",
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
     )
 
     def run(

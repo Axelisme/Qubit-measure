@@ -69,6 +69,7 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
         z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=CheckResult,
         cfg_type=CheckCfg,
+        cfg_schema_version="2.0",
         tag="singleshot/check",
     )
 

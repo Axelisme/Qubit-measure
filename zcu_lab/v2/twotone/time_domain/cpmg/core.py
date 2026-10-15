@@ -192,6 +192,7 @@ CPMG_GROUPED_AXES_SPEC = GroupedAxesSpec(
     ),
     result_type=CPMG_Result,
     cfg_type=CPMG_Cfg,
+    cfg_schema_version="2.0",
     tag="twotone/ge/cpmg",
     result_builder=_build_cpmg_result,
     result_validator=_validate_cpmg_result,

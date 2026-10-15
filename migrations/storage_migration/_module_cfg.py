@@ -100,7 +100,7 @@ def _prepare_library(
     candidate = LibrarySnapshot(
         ModuleLibraryDocument(
             format=MODULE_LIBRARY_FORMAT,
-            format_version=str(MODULE_LIBRARY_VERSION),
+            format_version=f"{MODULE_LIBRARY_VERSION.major}.{MODULE_LIBRARY_VERSION.minor}",
         )
     )
     for key in values:

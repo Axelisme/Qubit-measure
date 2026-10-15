@@ -29,7 +29,6 @@ class PulseRegistry:
         "phase",
         "gain",
         "mixer_freq",
-        "ro_ch",
     ]
 
     def __init__(self) -> None:
@@ -40,7 +39,13 @@ class PulseRegistry:
         """Number of unique pulse configurations registered."""
         return len(self._pulses)
 
-    def calc_name(self, cfg: PulseCfg) -> str:
+    def calc_name(self, cfg: PulseCfg, *, ro_ch: int | None = None) -> str:
+        """Return a stable hardware-definition name, including runtime ADC matching.
+
+        cfg supplies generator/waveform settings. ro_ch is None for unpaired
+        playback or an ADC channel; delays and description do not affect identity.
+        """
+
         def sort_dict(d: Mapping[str, object]) -> OrderedDict[str, object]:
             sorted_dict: OrderedDict[str, object] = OrderedDict()
             for key in sorted(d.keys()):
@@ -63,14 +68,18 @@ class PulseRegistry:
         filter_cfg = {
             k: cfg_dict.get(k) for k in PulseRegistry.HASH_KEYS if k in cfg_dict
         }
+        filter_cfg["ro_ch"] = ro_ch
         cfg_json = json.dumps(sort_dict(filter_cfg), separators=(",", ":"))
         hash_name = hashlib.sha256(cfg_json.encode("utf-8")).hexdigest()
 
         return f"pulse_{hash_name[:16]}"
 
-    def register(self, name: str, cfg: PulseCfg) -> bool:
-        """Registers a pulse configuration. returns True if the pulse is newly registered, False if it already exists."""
-        pulse_name = self.calc_name(cfg)
+    def register(self, name: str, cfg: PulseCfg, *, ro_ch: int | None = None) -> bool:
+        """Capture cfg with runtime ADC matching; return False for a reused definition.
+
+        name labels diagnostics. ro_ch has the same meaning as in calc_name.
+        """
+        pulse_name = self.calc_name(cfg, ro_ch=ro_ch)
         if pulse_name in self._pulses:
             logger.debug(
                 "PulseRegistry: reuse '%s' (module=%s, ch=%s, phase=%s, gain=%s)",

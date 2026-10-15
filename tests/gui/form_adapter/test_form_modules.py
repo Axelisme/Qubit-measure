@@ -462,7 +462,6 @@ def stored_env() -> FormEnv:
                                     "freq": 100,
                                     "gain": 0.3,
                                     "desc": "stored",
-                                    "ro_ch": 4,
                                     "waveform": {"style": "const", "length": 0.1},
                                 }
                             )
@@ -474,7 +473,7 @@ def stored_env() -> FormEnv:
     )
 
 
-@pytest.mark.parametrize("name", ["desc", "ro_ch"])
+@pytest.mark.parametrize("name", ["desc"])
 def test_inline_module_rejects_unsupported_field_writes(name: str) -> None:
     form = Form(ModuleCore, {})
     env = module_env()
@@ -518,7 +517,7 @@ def test_inline_copy_of_library_entry_replaces_unsupported_values_with_defaults(
     assert isinstance(cfg, ModuleCore), cfg
     probe = cfg.modules.probe
     assert (probe.freq, probe.gain) == (100, 0.3)
-    assert (probe.desc, probe.ro_ch) == (None, None)
+    assert probe.desc is None
 
 
 def test_locked_module_field_with_spec_decimals_has_input_schema() -> None:
