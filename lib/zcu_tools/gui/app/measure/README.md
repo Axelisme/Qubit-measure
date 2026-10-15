@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-16，Writeback owner、Opaque Run／Load、Artifact handover、共用 Form、Controller close 與 raw cfg 非 UI 讀取
+**Last updated:** 2026-10-16，Artifact／Writeback owner、Opaque Run／Load、共用 Form／持久 Spec、ARB 唯讀、terminal Controller close 與 raw cfg 非 UI 讀取
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -113,8 +113,9 @@ MainWindow 是唯一 Qt authority 訂閱者。`set_writable` 更新主窗與目�
 新 tab 建立時套用當下狀態。Tab 與 interactive frontend 只接收可寫狀態。
 Local modal 期間，Qt remote adapter 拒絕 owner 取得，回 `local_busy` 與「Local 使用中」。
 Chooser 使用非 native option。Dialog 不訂閱 control，也不在寫入前重查 holder。
-Inspect 與 Device 的查看入口提供靜態 read-only mode，Inspect 不開放 Add、
-library mutation 或 Arb Waveforms。Inspect Delete 先固定 `ParameterContext`，
+Inspect、Devices 與 ARB Waveforms 的查看入口提供靜態 read-only mode。
+Inspect 不開放 Add 或 library mutation，但仍可開啟唯讀 ARB Waveforms。
+Inspect Delete 先固定 `ParameterContext`，
 再用 `Controller.apply_library_change` 刪除該 target，不因確認期間 context switch 改寫新 point。
 Add 與 RunLoad 的 finished 仍退休單次輸入，晚到提交不能重新寫入。
 只有量測 Stop 和 device setup Stop 在 Remote 收回 Local locked 並請求 cancellation。
@@ -777,7 +778,10 @@ reload 後的新範本在下次開啟生效）、`Controller.arb_waveforms`、wi
 以及開 `DialogName.ARB_WAVEFORM` 的入口，讓 ARB 對話框保有具名管理與 remote screenshot，
 加上組合根的具名 alias preset catalog。
 Measure 不再有自己的 Inspect 子類別或 ARB 實作；行為與 Modules 分頁見
-[session README](../../session/README.md)。Inspect 的唯讀 mode 由 window 在 Remote 查看時設定。
+[session README](../../session/README.md)。共用 Inspect、Devices 與 ARB 都提供 `set_read_only`，
+宿主在開啟時依控制權的 `writable` 設定唯讀 mode。從 Inspect 開的 ARB 沿用該 Inspect 的 `writable`。
+Measure 不對這三個對話框加 run lock，也不追蹤開啟後的控制權變化。
+Workflows 依自己的 run lock，從 Start 到 terminal delivery 同步設定這三個對話框的唯讀 mode。
 `SetupDialog` receives `setup_control`, so project/context/SoC bootstrap UI no
 longer depends on the concrete controller façade. The persistent measure
 `PredictorDialog` receives both `predictor_control` and `device_control`, so the
