@@ -2,8 +2,8 @@
 
 Uses a synchronous _FakeBg that drives on_done/on_error inline so tests can
 step through the runner lifecycle without a real QEventLoop event-pump for most
-paths, and fall back to QEventLoop + real BackgroundRunner only for end-to-end
-async signal tests (mock / remote failure) where the bg submit matters.
+paths, and use qt_until + real BackgroundRunner only for end-to-end
+async signal tests (offline remote success / failure) where the bg submit matters.
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QEventLoop
 from zcu_tools.gui.app.measure.services.operation_gate import (
     OperationGate,
 )
@@ -32,8 +31,21 @@ from zcu_tools.gui.session.services.connection import (
 )
 from zcu_tools.gui.session.services.progress import ProgressService
 
-from tests.gui._completion_helpers import on_connection_failed, on_connection_finished
+from tests.gui._completion_helpers import on_connection_failed
 from tests.gui._progress_fakes import DirectProgressTransport
+from tests.gui._qt_waits import qt_until
+
+
+@pytest.fixture
+def real_bg(qapp):
+    from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+
+    background = BackgroundRunner()
+    try:
+        yield background
+    finally:
+        # The finite offline proxy returns or raises; drain workers and queued delivery.
+        assert background.quiesce(timeout_ms=30_000)
 
 
 @pytest.fixture(autouse=True)
@@ -121,9 +133,8 @@ def _make_svc(
 # ---------------------------------------------------------------------------
 
 
-def test_start_connect_mock_emits_finished_and_updates_context(qapp):
-    """Mock connect triggers connection_finished and sets soc in state."""
-    from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+def test_start_connect_mock_emits_finished_and_updates_context(qapp, real_bg):
+    """Offline remote connect delivers completion and sets soc in state."""
     from zcu_tools.gui.session.operation_runner import OperationRunner
 
     state = _make_state()
@@ -131,43 +142,33 @@ def test_start_connect_mock_emits_finished_and_updates_context(qapp):
     gate = OperationGate(EventBus())
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
-    real_bg = BackgroundRunner()
-    runner = OperationRunner(gate, handles, progress, real_bg, bus)  # type: ignore[arg-type]
+    runner = OperationRunner(gate, handles, progress, real_bg, bus)
     svc = SoCConnectionService(state, bus, gate, handles, runner)
 
-    loop = QEventLoop()
-    on_connection_finished(svc, loop.quit)
-    on_connection_failed(svc, lambda msg: loop.quit())
-
-    svc.start_connect(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
-    loop.exec()
+    token = svc.start_connect(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
+    # The finite offline proxy returns, then the owner publishes this handle's outcome.
+    qt_until(lambda: handles.poll(token) is not None, label="SoC connection outcome")
 
     assert svc.has_soc()
     assert state.session_env.soccfg is not None
 
 
-def test_connect_bumps_soc_not_context_version(qapp):
+def test_connect_bumps_soc_not_context_version(qapp, real_bg):
     """Connect must bump soc version only; context version must stay unchanged."""
-    from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
-
     state = _make_state()
     bus = EventBus()
     gate = OperationGate(EventBus())
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
-    real_bg = BackgroundRunner()
-    runner = OperationRunner(gate, handles, progress, real_bg, bus)  # type: ignore[arg-type]
+    runner = OperationRunner(gate, handles, progress, real_bg, bus)
     svc = SoCConnectionService(state, bus, gate, handles, runner)
 
     ctx_before = state.version.get("context")
     soc_before = state.version.get("soc")
 
-    loop = QEventLoop()
-    on_connection_finished(svc, loop.quit)
-    on_connection_failed(svc, lambda msg: loop.quit())
-
-    svc.start_connect(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
-    loop.exec()
+    token = svc.start_connect(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
+    # The finite offline proxy returns, then the owner publishes this handle's outcome.
+    qt_until(lambda: handles.poll(token) is not None, label="SoC connection outcome")
 
     assert state.version.get("soc") == soc_before + 1
     assert state.version.get("context") == ctx_before
@@ -348,17 +349,14 @@ def test_start_connect_rejected_while_run_active(qapp):
 # ---------------------------------------------------------------------------
 
 
-def test_start_connect_remote_failure_emits_failed(qapp, monkeypatch):
+def test_start_connect_remote_failure_emits_failed(qapp, monkeypatch, real_bg):
     """Remote connect failure: connection_failed emitted with 'nope' in message."""
-    from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
-
     state = _make_state()
     bus = EventBus()
     gate = OperationGate(EventBus())
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
-    real_bg = BackgroundRunner()
-    runner = OperationRunner(gate, handles, progress, real_bg, bus)  # type: ignore[arg-type]
+    runner = OperationRunner(gate, handles, progress, real_bg, bus)
     svc = SoCConnectionService(state, bus, gate, handles, runner)
 
     import zcu_tools.qick_remote as remote
@@ -368,13 +366,12 @@ def test_start_connect_remote_failure_emits_failed(qapp, monkeypatch):
 
     monkeypatch.setattr(remote, "make_soc_proxy", fail, raising=False)
 
-    loop = QEventLoop()
     errors: list[str] = []
-    on_connection_failed(svc, lambda msg: errors.append(msg) or loop.quit())
-    on_connection_finished(svc, loop.quit)
+    on_connection_failed(svc, errors.append)
 
-    svc.start_connect(ConnectRemoteRequest(ip="127.0.0.1", port=7000))
-    loop.exec()
+    token = svc.start_connect(ConnectRemoteRequest(ip="127.0.0.1", port=7000))
+    # The failing proxy raises immediately; the owner settles the accepted operation.
+    qt_until(lambda: handles.poll(token) is not None, label="SoC connection failure")
 
     assert errors
     assert "nope" in errors[0]
