@@ -35,7 +35,7 @@ from zcu_tools.cfg_model import (
 )
 from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue
 
-from ..document_store import DocumentChange, DocumentStore, DocumentValue
+from ..document_store import DocumentChange, DocumentValue
 from ..entry.provenance import Provenance, ProvenanceData, validate_source
 
 MODULE_LIBRARY_FORMAT = "zcu.module-library"
@@ -678,23 +678,21 @@ class ModuleLibrary:
         path is the point-local module_cfg.yaml; assets is its fixed capability,
         or None for Spec-only operations. Materializing Arb requires a provider.
         ledger names the entry's records/ledger.jsonl; entry_id is its UUID.
-        Header/schema/source/I/O errors propagate. Opening does not read assets.
+        Invalid existing Specs or entry-local provenance are backed up and
+        removed under the document lock. Container/header, ledger I/O/schema
+        and unexpected errors propagate without publication. Reads can write
+        cleanup; new edits remain strict. Opening does not read assets.
         """
         self._path = path.resolve()
         self._assets = assets
         self._ledger = ledger.resolve()
         self._entry_id = entry_id
-        self._store = DocumentStore(
-            self._path,
-            ModuleLibraryDocument,
-            format=MODULE_LIBRARY_FORMAT,
-            supported_version=MODULE_LIBRARY_VERSION,
-            validate=self._validate,
-        )
+        # Defer composition: the store policy uses the document models above.
+        from .library_store import open_library_store
 
-    def _validate(self, document: ModuleLibraryDocument) -> None:
-        """Validate this handle's persistent document and entry-scoped source evidence."""
-        document.validate_content(ledger=self._ledger, entry_id=self._entry_id)
+        self._store = open_library_store(
+            self._path, ledger=self._ledger, entry_id=self._entry_id
+        )
 
     @property
     def source_path(self) -> Path:
@@ -726,7 +724,9 @@ class ModuleLibrary:
     def refresh(self) -> bool:
         """Reload and publish changed valid content; return whether it changed.
 
-        Source/schema/header/I/O failures propagate and retain published state.
+        Existing invalid entries are backed up and removed before publication.
+        Container/header, ledger I/O/schema and unexpected failures propagate
+        and retain published state.
         """
         return self._store.refresh()
 
