@@ -12,6 +12,7 @@ from zcu_tools.gui.cfg.resource import (
     CfgPreconditionError,
     CfgPreconditionReason,
 )
+from zcu_tools.gui.form import FormPathError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 if TYPE_CHECKING:
@@ -288,9 +289,13 @@ def h_tab_describe_cfg(
 ) -> Mapping[str, object]:
     """Read one current layer and local observation in the same owner turn.
 
-    params supplies tab_id and path (string array, [] for root). Malformed or
-    unknown paths become invalid_params/form_errors; resource lifetime errors
-    keep their normal cfg projection. Reads allow busy and observer clients.
+    params supplies tab_id and path (string array, [] for root). Malformed
+    arrays become invalid_params/form_errors. Core FormPathError becomes
+    invalid_params/form_path with data.form_path preserving the requested path.
+    Other declaration failures retain the controller_error boundary; resource
+    lifetime errors keep their cfg projection. Reads allow busy and observer
+    clients. Local errors are Form preview only; use get_cfg or Run admission
+    for lowered cfg errors.
     """
     from ..cfg_observation import cfg_error_to_remote
     from ..form_description import describe_form
@@ -309,9 +314,12 @@ def h_tab_describe_cfg(
         return dict(describe_form(adapter.cfg_lookup(str(params["tab_id"])), path))
     except (CfgInputError, CfgPreconditionError) as exc:
         raise cfg_error_to_remote(exc) from exc
-    except ValueError as exc:
+    except FormPathError as exc:
         raise RemoteError(
-            ErrorCode.INVALID_PARAMS, str(exc), reason="form_errors"
+            ErrorCode.INVALID_PARAMS,
+            str(exc),
+            reason="form_path",
+            data={"form_path": list(exc.path)},
         ) from exc
 
 

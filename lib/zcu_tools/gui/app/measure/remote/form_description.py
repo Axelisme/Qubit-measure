@@ -53,11 +53,16 @@ class FormFieldWire(TypedDict):
     the control category. title is display text; description/unit/placeholder
     are optional text. decimals is display precision, not rounding input.
     hidden omits a UI row, group names a same-level UI group, collapsed is an
-    initial model fold hint. nullable permits null, expression permits Expr.
+    initial model fold hint. can_expand reports structural expandability, not
+    guaranteed nonempty children, without running child hooks.
+    nullable permits null, expression permits Expr.
     choices is a legal-value list or None when undeclared. options is the
     ordered selector list or None for a non-selector. selected is the first
-    matching index or None for missing/no match. fixed indicates a constrained
-    value, fixed_value is meaningful only when fixed. constraints are hints.
+    matching index or None for missing/no match. selection_fixed means the
+    annotation permits one selector branch at this level, without freezing
+    inner choices; it carries no value and ignores dynamic menu size. fixed
+    constrains the complete value, fixed_value is meaningful only when fixed.
+    Both flags may be true. constraints are hints.
     """
 
     path: list[str]
@@ -84,11 +89,13 @@ class FormFieldWire(TypedDict):
     hidden: bool
     group: str | None
     collapsed: bool
+    can_expand: bool
     nullable: bool
     expression: bool
     choices: list[JsonValue] | None
     options: list[FormOptionWire] | None
     selected: int | None
+    selection_fixed: bool
     fixed: bool
     fixed_value: JsonValue
     constraints: FormConstraintsWire
@@ -153,6 +160,7 @@ def _field_wire(field: FormFieldDescription) -> FormFieldWire:
         "hidden": field.hidden,
         "group": field.group,
         "collapsed": field.collapsed,
+        "can_expand": field.can_expand,
         "nullable": field.nullable,
         "expression": field.expression,
         "choices": list(field.choices) if field.choices is not None else None,
@@ -170,6 +178,7 @@ def _field_wire(field: FormFieldDescription) -> FormFieldWire:
         if field.options is not None
         else None,
         "selected": field.selected,
+        "selection_fixed": field.selection_fixed,
         "fixed": field.fixed,
         "fixed_value": field.fixed_value,
         "constraints": {
@@ -190,9 +199,12 @@ def describe_form(
     """Read description and local values in this owner turn using fixed sources.
 
     resource must be live; path is canonical model-field names, () for root.
-    Unknown/inactive/whole-leaf descendants raise ValueError from core. Revoked
-    resources raise RESOURCE_GONE. Busy/notification/observer reads are allowed.
-    No defaults, capture, library materialization or publication occurs.
+    Unknown/inactive/whole-leaf descendants raise FormPathError from core;
+    other declaration failures retain their exception types. Revoked resources
+    raise RESOURCE_GONE. Busy/notification/observer reads are allowed.
+    Only Form preview root/descendant errors are returned; use get_cfg or Run
+    admission for lowered cfg errors. No defaults, capture, library
+    materialization or publication occurs.
     """
     description = resource.describe(path)
     preview = resource.preview()
