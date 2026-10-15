@@ -76,8 +76,8 @@ def test_mux_numeric_tones_and_order_survive_native_and_labber(tmp_path: Path):
     labber = tmp_path / "labber.h5"
     write_labber(labber, prepared.payload, cfg=prepared.cfg)
     loaded = load_labber_data(str(labber))
-    np.testing.assert_array_equal(loaded.z[2], result.signals)
+    np.testing.assert_array_equal(loaded.z, result.signals)
     np.testing.assert_array_equal(loaded.axes[0][2], [0, 1])
     np.testing.assert_array_equal(loaded.axes[1][2], result.offsets * 1e6)
     envelope = decode_labber_comment(loaded.metadata.comment)
-    assert envelope.cfg == cfg.to_dict()
+    assert envelope.cfg == cfg.model_dump(mode="json")

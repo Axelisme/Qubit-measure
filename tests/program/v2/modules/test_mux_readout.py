@@ -4,6 +4,7 @@ from copy import deepcopy
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 from pydantic import TypeAdapter
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.modular import ModularProgramV2
@@ -27,6 +28,7 @@ def test_native_cfg_build_and_union_preserve_order_and_copy():
         TypeAdapter(ModuleCfg).validate_python(core.to_dict()),
         TypeAdapter(readout.ReadoutCfg).validate_python(core.to_dict()),
     ):
+        assert isinstance(parsed, readout.MuxReadoutCfg)
         module = readout.Readout("mux", parsed)
         assert isinstance(module, readout.MuxReadout)
         parsed.tones.reverse()
@@ -85,7 +87,10 @@ def test_blocking_covers_rounded_generator_and_adc_windows(updates):
     prog = RecordingProgram(mux_soccfg(), [module])
     # Scheduled scalar starts round to tProc ticks, hardware windows to their clocks.
     tclk = prog.soccfg["tprocs"][0]["f_time"]
-    ceil_t = lambda t: np.ceil(t * tclk) / tclk
+
+    def ceil_t(t):
+        return np.ceil(t * tclk) / tclk
+
     gen_duration = prog.cycles2us(prog.us2cycles(cfg.length, gen_ch=0), gen_ch=0)
     adc_duration = prog.cycles2us(prog.us2cycles(cfg.ro_length, ro_ch=4), ro_ch=4)
     expected = max(
@@ -98,54 +103,50 @@ def test_blocking_covers_rounded_generator_and_adc_windows(updates):
 
 
 @pytest.mark.parametrize(
-    "fault",
+    "field,value",
     [
-        "gen_type",
-        "mixer",
-        "gain",
-        "phase",
-        "tone_capacity",
-        "gen_missing",
-        "ro_type",
-        "dynamic",
-        "pfb_path",
-        "pfb_capacity",
-        "port_range",
-        "duplicate_port",
-        "ro_missing",
-        "duplicate_channel",
-        "short_gen",
-        "short_adc",
+        ("type", "axis_signal_gen_v6"),
+        ("has_mixer", False),
+        ("has_gain", False),
+        ("has_phase", False),
+        ("n_tones", 1),
     ],
 )
-def test_invalid_hardware_or_routes_fail_before_declaration(fault):
+def test_invalid_generator_capabilities_fail(field, value):
     cfg = native_mux()
     soccfg = mux_soccfg()
-    gen, ros = soccfg["gens"][0], soccfg["readouts"]
-    if fault == "gen_type":
-        gen["type"] = "axis_signal_gen_v6"
-    elif fault == "mixer":
-        gen["has_mixer"] = False
-    elif fault == "gain":
-        gen["has_gain"] = False
-    elif fault == "phase":
-        gen["has_phase"] = False
-    elif fault == "tone_capacity":
-        gen["n_tones"] = 1
-    elif fault == "gen_missing":
+    soccfg["gens"][0][field] = value
+    with pytest.raises(ValueError, match="mux"):
+        RecordingProgram(soccfg, [cfg.build("mux")])
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("ro_type", "axis_pfb_readout_v3"),
+        ("tproc_ctrl", 0),
+        ("ro_fullpath", "other"),
+        ("pfb_nout", 1),
+        ("pfb_port", 8),
+        ("pfb_port", 4),
+    ],
+)
+def test_invalid_pfb_wiring_or_capacity_fails(field, value):
+    cfg = native_mux()
+    soccfg = mux_soccfg()
+    soccfg["readouts"][1][field] = value
+    with pytest.raises(ValueError, match="mux"):
+        RecordingProgram(soccfg, [cfg.build("mux")])
+
+
+@pytest.mark.parametrize(
+    "fault",
+    ["gen_missing", "ro_missing", "duplicate_channel", "short_gen", "short_adc"],
+)
+def test_invalid_routes_or_rounded_windows_fail(fault):
+    cfg = native_mux()
+    if fault == "gen_missing":
         cfg.gen_ch = 99
-    elif fault == "ro_type":
-        ros[4]["ro_type"] = "axis_pfb_readout_v3"
-    elif fault == "dynamic":
-        ros[4]["tproc_ctrl"] = 0
-    elif fault == "pfb_path":
-        ros[1]["ro_fullpath"] = "other"
-    elif fault == "pfb_capacity":
-        ros[1]["pfb_nout"] = 1
-    elif fault == "port_range":
-        ros[1]["pfb_port"] = 8
-    elif fault == "duplicate_port":
-        ros[1]["pfb_port"] = 4
     elif fault == "ro_missing":
         cfg.tones[0].ro_ch = 99
     elif fault == "duplicate_channel":
@@ -155,7 +156,7 @@ def test_invalid_hardware_or_routes_fail_before_declaration(fault):
     elif fault == "short_adc":
         cfg.ro_length = 1e-8
     with pytest.raises(ValueError, match="mux"):
-        RecordingProgram(soccfg, [cfg.build("mux")])
+        RecordingProgram(mux_soccfg(), [cfg.build("mux")])
 
 
 class UnrelatedReadout(Module):
@@ -167,7 +168,7 @@ class UnrelatedReadout(Module):
 
     def run(self, prog, t=0.0):
         prog.send_readoutconfig(8, "unrelated", t=t)
-        prog.trigger([8], t=t)
+        prog.trigger([8])
         return t + 0.3
 
 
@@ -192,7 +193,7 @@ def test_collect_iq_uses_current_declarations_and_read_index(unrelated_first):
     assert iq.shape == (2, 3, 2, 2)
     np.testing.assert_array_equal(iq[..., 0, :], selected[4][1])
     np.testing.assert_array_equal(iq[..., 1, :], selected[1][1])
-    for actual, expected in zip(raw, before):
+    for actual, expected in zip(raw, before, strict=True):
         np.testing.assert_array_equal(actual, expected)
 
 
@@ -204,11 +205,9 @@ def test_collect_iq_uses_current_declarations_and_read_index(unrelated_first):
         "count",
         "negative",
         "bool",
-        "fraction",
         "bounds",
         "no_read",
         "iq_width",
-        "dtype",
         "read_shape",
         "sweep_shape",
     ],
@@ -216,7 +215,9 @@ def test_collect_iq_uses_current_declarations_and_read_index(unrelated_first):
 def test_collect_iq_rejects_invalid_averaged_input(fault):
     module = native_mux().build("mux")
     prog = RecordingProgram(mux_soccfg(), [module])
-    raw = [np.zeros((2, 3, 2), dtype=np.float64) for _ in range(2)]
+    raw: list[NDArray[np.float64]] = [
+        np.zeros((2, 3, 2), dtype=np.float64) for _ in range(2)
+    ]
     index = 0
     if fault == "uninitialized":
         module = native_mux().build("mux")
@@ -228,22 +229,71 @@ def test_collect_iq_rejects_invalid_averaged_input(fault):
         index = -1
     elif fault == "bool":
         index = True
-    elif fault == "fraction":
-        index = 0.5
     elif fault == "bounds":
         index = 2
     elif fault == "no_read":
         raw[0] = np.zeros(2)
     elif fault == "iq_width":
         raw[0] = np.zeros((2, 3, 3))
-    elif fault == "dtype":
-        raw[0] = np.zeros((2, 3, 2), dtype=np.float32)
     elif fault == "read_shape":
         raw[0] = np.zeros((3, 3, 2))
     elif fault == "sweep_shape":
         raw[0] = np.zeros((2, 4, 2))
     with pytest.raises(ValueError, match="mux"):
         module.collect_iq(prog, raw, read_index=index)
+
+
+def test_collect_iq_rejects_fractional_read_index_at_runtime():
+    module = native_mux().build("mux")
+    prog = RecordingProgram(mux_soccfg(), [module])
+    raw = [np.zeros((2, 3, 2), dtype=np.float64) for _ in range(2)]
+    # Deliberately violate static index typing to verify rejection at the public runtime boundary.
+    public_method = "collect_iq"
+    collect = getattr(module, public_method)
+    with pytest.raises(ValueError, match="mux.*read_index"):
+        collect(prog, raw, read_index=0.5)
+
+
+def test_collect_iq_rejects_float32_at_runtime():
+    module = native_mux().build("mux")
+    prog = RecordingProgram(mux_soccfg(), [module])
+    raw = [np.zeros((2, 3, 2), dtype=np.float32) for _ in range(2)]
+    # Deliberately violate static dtype typing: QICK's runtime dtype has no static guarantee.
+    public_method = "collect_iq"
+    collect = getattr(module, public_method)
+    with pytest.raises(ValueError, match=r"mux.*tone 0.*ro_ch 4.*acquired\[0\]"):
+        collect(prog, raw)
+
+
+class RouteReuse(Module):
+    name = "other"
+
+    def __init__(self, route: str):
+        self.route = route
+
+    def init(self, prog):
+        if self.route == "gen":
+            prog.declare_gen(
+                ch=0,
+                nqz=1,
+                mixer_freq=1000.0,
+                mux_freqs=[1000.0, 1080.0],
+                mux_gains=[0.1, 0.1],
+                mux_phases=[0.0, 45.0],
+                ro_ch=4,
+            )
+        else:
+            prog.declare_readout(ch=4, length=0.413, freq=1000.0, gen_ch=0)
+
+    def run(self, prog, t=0.0):
+        return t
+
+
+@pytest.mark.parametrize("route", ["gen", "readout"])
+def test_later_module_cannot_overwrite_mux_routes(route):
+    module = native_mux().build("mux")
+    with pytest.raises(ValueError, match="route"):
+        RecordingProgram(mux_soccfg(), [module, RouteReuse(route)])
 
 
 @pytest.mark.parametrize("collision", ["gen", "readout"])

@@ -15,6 +15,7 @@ def test_builder_converter_uses_initialized_copy_and_normalized_acquire():
     original = native_mux().build("mux")
     buffer = SignalBuffer((2,), dtype=np.complex128)
     stop = StopSignal()
+    result = buffer.data
     with Schedule(ProgramV2Cfg(reps=3, rounds=2), buffer, stop=stop) as sched:
         builder = sched.prog_builder(soc, soccfg).add(original)
         prog = builder.build()

@@ -15,7 +15,7 @@ from tests.program.v2._mux_support import RecordingProgram, mux_soccfg, native_m
 def test_simulation_acquire_rejects_mux_with_type_and_name(method):
     prog = RecordingProgram(mux_soccfg(), [native_mux().build("mux_probe")])
     soc, _ = make_mock_soc(sim=DEFAULT_SIMPARAM.model_copy(deep=True))
-    with pytest.raises(ValueError) as caught:
+    with pytest.raises(ValueError, match="unsupported") as caught:
         getattr(prog, method)(soc, progress=False)
     message = str(caught.value)
     assert "unsupported" in message.lower()

@@ -122,7 +122,7 @@ class AcquisitionSoc(QickConfig):
         # Each channel has its own sentinel, multiplied by its rounded window.
         # QICK must normalize this back to [ch+1, -(ch+1)].
         data = []
-        for ch, n in zip(self.channels, self.reads):
+        for ch, n in zip(self.channels, self.reads, strict=True):
             length = self.us2cycles(0.413, ro_ch=ch)
             data.append(
                 np.tile(np.array([ch + 1, -ch - 1]) * length, (self.shots * n, 1))
