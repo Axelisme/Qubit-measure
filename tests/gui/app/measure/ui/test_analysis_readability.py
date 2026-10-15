@@ -111,7 +111,7 @@ def test_edit_retains_full_precision_and_refreshes_display_and_tooltip(
         current = dialog.findChild(QLabel, "writebackCurrentReadonly")
         assert current is not None
         assert current.text() == "20.1234567890123 us"
-        edit = dialog.findChildren(QLineEdit)[1]
+        edit = dialog.findChild(QLineEdit, "writebackValue")
         assert edit.text() == "33.8724123470065"
         edit.setText("5999.30228396247")
         next(b for b in dialog.findChildren(QPushButton) if b.text() == "Save").click()

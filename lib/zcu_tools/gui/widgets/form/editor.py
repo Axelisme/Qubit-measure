@@ -185,10 +185,15 @@ class FormEditor[F: FormModel](QWidget):
     state publication removes the subscription without touching state.
     refresh and error queries after detach raise RuntimeError.
     validity_changed emits a bool only when combined validity changes; it is not
-    an Apply request. GUI-thread use and a live QApplication are required.
+    an Apply request. errors_changed emits the new errors() result, FormErrors
+    or None when valid, only when it differs from the previous result. Local
+    parse/rejection changes and state error publications can trigger it, even
+    while validity stays False. It never emits after detach.
+    GUI-thread use and a live QApplication are required.
     """
 
     validity_changed = pyqtSignal(bool)
+    errors_changed = pyqtSignal(object)
 
     def __init__(
         self,
@@ -255,6 +260,7 @@ class FormEditor[F: FormModel](QWidget):
         self._model_expanded: dict[FormWritePath, bool] = {}
         self._group_expanded: dict[tuple[FormWritePath, str], bool] = {}
         self._state_errors: FormErrors | None = None
+        self._last_errors: FormErrors | None = None
         self._valid: bool | None = None
         # Hosts own outer margins; rows keep ROW_SPACING apart.
         self._layout = QVBoxLayout(self)
@@ -644,6 +650,9 @@ class FormEditor[F: FormModel](QWidget):
         if valid != self._valid:
             self._valid = valid
             self.validity_changed.emit(valid)
+        if self._state is not None and errors != self._last_errors:
+            self._last_errors = errors
+            self.errors_changed.emit(errors)
 
     def _error_target(self, path: FormPath) -> FormWritePath | None:
         for length in range(len(path), 0, -1):
