@@ -164,21 +164,24 @@ class Field:
 
     @property
     def selection_fixed(self) -> bool:
-        """Whether annotation permits only one selector branch at this level.
+        """Whether annotation permits one non-null selector branch at this level.
 
-        A single non-null model branch qualifies without freezing any nested
-        selector or field. A categorical leaf must have just one intrinsic
-        value. No selector means False; dynamic menu size does not participate.
+        Null only enables/disables the field. A single non-null model branch
+        qualifies without freezing nested selectors or fields. A categorical
+        leaf must have one non-null intrinsic value. No selector means False;
+        dynamic menu size does not participate.
         """
         if self.options is None:
             return False
         values = literal_values(self.info.annotation)
         if values is not None:
-            return len(values) == 1
-        return (
-            len(alternatives(self.info.annotation)) == 1
-            and len(model_types(self.info.annotation)) == 1
-        )
+            return len([value for value in values if value is not None]) == 1
+        branches = [
+            member
+            for member in alternatives(self.info.annotation)
+            if member is not type(None)
+        ]
+        return len(branches) == 1 and len(model_types(self.info.annotation)) == 1
 
     @property
     def fixed_option(self) -> Option | None:
