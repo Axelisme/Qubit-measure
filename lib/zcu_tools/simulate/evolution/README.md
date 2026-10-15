@@ -25,7 +25,8 @@ have no implementation or empty registration entry.
 `EvolutionLibrary.build` saves completed nodes under `partial/` and resumes the
 same plan. Partial files cannot be evaluated as tables. Before publication the
 builder compares GPU nodes to CPU reference, then tests independent heldouts,
-phase-bearing densities, adjacent blocks, 512 repeats, unitarity and recovered
+phase-bearing densities, adjacent blocks, 512 repeats, independent trace and
+unitarity limits, and recovered
 amplitude-scale calibration. It publishes only when every absolute limit passes.
 `BuildResult.validation` and `library.validation(reference)` expose named
 absolute error measurements without requiring callers to decode files. Partial

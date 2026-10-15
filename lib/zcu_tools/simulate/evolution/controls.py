@@ -74,8 +74,8 @@ class Envelope:
 
         outside: "zero" returns zero beyond the samples; "hold" extends endpoint
         values (for program linear playback). Own copies of increasing finite
-        (sample,) times and matching signed
-        complex values. Outside the sample range return zero. The pulse should
+        (sample,) times and matching signed complex values. Extension beyond the
+        sample range follows outside. The pulse should
         declare semantic breakpoints if sample corners require solver boundaries;
         samples are not resampled onto the 2 ns event grid.
         """

@@ -168,9 +168,10 @@ class EvolutionLibrary:
     """Explicit disk library and LRU for deterministic numeric arrays.
 
     path: caller-selected root, never cwd/global discovery. budget_bytes defaults
-    to 4,000,000,000 and covers nodes, grid U arrays, completion masks and direct
-    density arrays retained in this instance's host LRU. Runtime GPU residency
-    is zero. Oversized entries are used transiently but not retained. Archive
+    to 4,000,000,000 and covers nodes, grid U arrays and completion masks
+    retained in this instance's host LRU. Direct density records stream through
+    on each use and are not resident. Runtime GPU residency is zero.
+    Oversized entries are used transiently but not retained. Archive
     decoding/interpolation/build workspace, Python objects, models/solver/ADC and
     driver allocations are separate process memory, not hidden in this budget.
     last_evaluation: latest successful public Evolution receipt, or None before
@@ -281,6 +282,7 @@ class EvolutionLibrary:
                 values["invariant"],
                 values["calibration"],
                 values["gpu"],
+                values["trace"],
             )
         except KeyError as error:
             raise ValueError("incomplete published validation evidence") from error

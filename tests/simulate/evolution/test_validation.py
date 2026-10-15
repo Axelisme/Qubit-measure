@@ -21,7 +21,7 @@ def test_trace_growth_is_rejected_even_within_elementwise_unitarity_limit():
         "trace",
         basis,
         np.zeros((n, n), dtype=complex),
-        (DriveSource("drive", 0.01 * coherent / n),),
+        (DriveSource("drive", np.asarray(0.01 * coherent / n, dtype=np.complex128)),),
     )
     family = PlateauFamily(model, 2.0, (1 + 0j,))
     nodes = 0.1 * np.cos(np.linspace(np.pi, 0, 7))
