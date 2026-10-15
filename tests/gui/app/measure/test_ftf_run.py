@@ -61,7 +61,7 @@ def test_ftf_yaml_environment_runs_and_saves_only_public_iq(qapp, tmp_path):
         tab = ctrl.new_tab("ftf")
         sock = open_client(remote.start())
         started = call(sock, "tab.run_start", {"tab_id":tab})["result"]["operation_id"]
-        terminal = call(sock, "operation.await", {"operation_id":started, "timeout":15})["result"]
+        terminal = call(sock, "operation.await", {"operation_id":started, "timeout":15}, timeout_s=20)["result"]
         assert terminal["status"] == "finished", terminal
         saved = call(sock, "tab.save_data", {"tab_id":tab})
         assert saved["ok"], saved
