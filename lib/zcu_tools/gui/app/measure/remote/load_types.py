@@ -9,7 +9,7 @@ def project_load_outcome(outcome: LoadTabResultOutcome) -> dict[str, object]:
         "tab_id": outcome.tab_id,
         "data_path": outcome.data_path,
         "result_type": outcome.result_type,
-        "has_cfg_snapshot": outcome.has_cfg_snapshot,
+        "cfg_issue": outcome.cfg_issue,
         "has_analyze_params": outcome.has_analyze_params,
         "source_kind": outcome.source_kind,
         "analysis_error": outcome.analysis_error,

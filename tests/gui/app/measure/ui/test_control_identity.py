@@ -27,13 +27,13 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 from zcu_tools.cfg_model import ConfigBase, waveform_spec_from_raw
-from zcu_tools.datafile import RunMetadata
+from zcu_tools.datafile import StoredRun
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.native_persistence import RestoredRun
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
-    LoadDataRequest,
     RunRequest,
     SessionEnv,
 )
@@ -72,7 +72,7 @@ from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._user_input import key_click, type_text
 from tests.gui.app.measure._components import ResonatorSchema
-from tests.gui.app.measure._load_support import historical_metadata
+from tests.gui.app.measure._load_support import write_native_file
 from tests.gui.app.measure._reload_fakes import Loader, OldAdapter
 from tests.gui.app.measure.remote._helpers import recv_response, send
 from tests.gui.app.measure.ui._qt_interactions import modal_action, wait_until
@@ -107,12 +107,16 @@ class ModalLoadAdapter(OldAdapter):
 
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(load_data=True)
 
-    def load(
-        self, req: LoadDataRequest
-    ) -> tuple[RunRecord[ModalRuntimeCfg, ModalLoadResult], RunMetadata]:
-        return (
-            RunRecord(cfg=ModalRuntimeCfg(), result=ModalLoadResult(req.data_path)),
-            historical_metadata(),
+    experiment_tag: ClassVar[str | None] = "test/load"
+
+    def restore(
+        self, stored: StoredRun
+    ) -> RestoredRun[RunRecord[ModalRuntimeCfg, ModalLoadResult]]:
+        return RestoredRun(
+            RunRecord(
+                cfg=ModalRuntimeCfg(), result=ModalLoadResult(stored.metadata.run_id)
+            ),
+            None,
         )
 
 
@@ -181,7 +185,11 @@ def control_ui(
     tmp_path: Path,
     request: pytest.FixtureRequest,
     registered_resonator,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[ControlUi]:
+    monkeypatch.chdir(tmp_path)
+    write_native_file(tmp_path / "original.hdf5")
+    write_native_file(tmp_path / "unsaved.hdf5")
     registry = Registry()
     registry.register("stoppable", StoppableAdapter)
     registry.register("loadable", ModalLoadAdapter)
@@ -638,7 +646,7 @@ def test_load_file_return_accept_and_cancel_preserve_result_contract(
     ui = control_ui
     tab_id = ui.controller.new_tab("loadable")
     path = tmp_path / "selected.h5"
-    path.touch()
+    write_native_file(path)
     ui.controller.load_tab_result(tab_id, "original.hdf5")
     before = ui.controller.get_tab_snapshot(tab_id).run
     assert before is not None
@@ -816,7 +824,7 @@ def test_shutdown_finishes_load_interaction_before_owner_teardown(
     before = ui.controller.get_tab_snapshot(tab_id).run
     assert before is not None
     path = tmp_path / "late-choice.h5"
-    path.touch()
+    write_native_file(path)
     finished: list[tuple[int, str | None, bool]] = []
     owner_finished: list[bool] = []
     load_dialogs: list[RunLoadDialog] = []

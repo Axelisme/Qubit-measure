@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     # Type-only: importing Controller at runtime would form a cycle
     # (controller.py imports remote.dialogs). String annotation keeps pyright
     # checking handler/ctrl method names while the runtime import never happens.
+    from zcu_tools.gui.app.measure.artifacts import SaveControlPort
     from zcu_tools.gui.app.measure.controller import Controller, RenderView, Severity
     from zcu_tools.gui.app.measure.services.operation_control import (
         OperationControlPort,
@@ -48,10 +49,9 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.services.run_analyze_control import (
         RunAnalyzeControlPort,
     )
-    from zcu_tools.gui.app.measure.services.save_control import SaveControlPort
     from zcu_tools.gui.app.measure.services.tab_control import TabControlPort
     from zcu_tools.gui.app.measure.services.tab_form import TabFormResource
-    from zcu_tools.gui.app.measure.services.writeback_control import (
+    from zcu_tools.gui.app.measure.writeback import (
         WritebackControlPort,
     )
     from zcu_tools.gui.session.context_control import ContextControlPort

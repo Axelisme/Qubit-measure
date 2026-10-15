@@ -26,7 +26,7 @@ from qtpy.QtWidgets import (
     QScrollArea,
     QWidget,
 )
-from zcu_tools.experiment.run_saving import ArtifactRef
+from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
@@ -40,7 +40,7 @@ from zcu_tools.gui.app.measure.ui.data_figure_preview_gallery import (
 from zcu_tools.gui.control_identity import ControlIdentity
 
 from tests.gui.app.measure._form_fakes import configure_form_lookup
-from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
+from tests.gui.app.measure.artifacts._snapshots import ready_figures, with_artifacts
 
 
 @dataclass

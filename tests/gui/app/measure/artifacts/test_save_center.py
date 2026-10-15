@@ -12,10 +12,11 @@ from matplotlib.figure import Figure
 from qtpy.QtCore import QEvent, QPoint, Qt, QUrl
 from qtpy.QtGui import QColor, QDesktopServices, QKeyEvent, QPalette
 from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton
-from zcu_tools.experiment.run_saving import ArtifactRef, OutputResult, SaveReport
+from zcu_tools.experiment.artifacts import ArtifactRef, OutputResult, SaveReport
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.measure.artifact_tracker import (
+from zcu_tools.gui.app.measure.artifacts import (
     ArtifactDeclaration,
+    ArtifactSaveCenter,
     ArtifactTracker,
 )
 from zcu_tools.gui.app.measure.services.ports import (
@@ -26,10 +27,9 @@ from zcu_tools.gui.app.measure.services.ports import (
     TabSnapshot,
 )
 from zcu_tools.gui.app.measure.state import TabInteractionState
-from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
 from zcu_tools.resources.entry import ArtifactKey, Output, SaveLayout
 
-from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
+from tests.gui.app.measure.artifacts._snapshots import ready_figures, with_artifacts
 
 _CAPABILITIES = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
 _REFS = (

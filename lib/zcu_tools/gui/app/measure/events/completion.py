@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import ClassVar, Literal
 
-from zcu_tools.experiment.run_saving import SaveReport
+from zcu_tools.experiment.artifacts import SaveReport
 from zcu_tools.gui.event_bus import BasePayload
 
 

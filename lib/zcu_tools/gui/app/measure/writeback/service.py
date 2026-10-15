@@ -9,12 +9,6 @@ from pydantic import JsonValue
 
 from zcu_tools.cfg_model import ModuleSpec
 from zcu_tools.format_version import YamlMap
-from zcu_tools.gui.app.measure.adapter import (
-    ModuleWriteback,
-    ParameterWriteback,
-    SampleWriteback,
-    WritebackItem,
-)
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.form import FormWritePath
 from zcu_tools.gui.session.context_control import ContextControlPort
@@ -24,6 +18,8 @@ from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.entry import RoleResolutionError, document_unit
 from zcu_tools.resources.entry import writeback as concrete
 from zcu_tools.resources.entry.ledger_models import AcceptedWrite, JsonObject
+
+from .items import ModuleWriteback, ParameterWriteback, SampleWriteback, WritebackItem
 
 _GUI_ORIGIN = CommandOrigin("gui")
 

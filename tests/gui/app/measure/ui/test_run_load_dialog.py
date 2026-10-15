@@ -15,9 +15,9 @@ from qtpy.QtWidgets import (
     QTableWidget,
 )
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AdapterGuide
+from zcu_tools.gui.app.measure.artifacts import SavedRunInfo
 from zcu_tools.gui.app.measure.services.load import LoadTabResultOutcome
 from zcu_tools.gui.app.measure.services.ports import SavePaneSnapshot, TabSnapshot
-from zcu_tools.gui.app.measure.services.save_control import SavedRunInfo
 from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
@@ -151,11 +151,11 @@ def test_main_window_routes_dialog_selection_to_existing_load(
     if action == "query-error":
         ctrl.save_control.list_saved_runs.side_effect = ValueError("corrupt ledger")
     ctrl.load_tab_result.return_value = LoadTabResultOutcome(
-        "tab",
-        str(rows[0].data_path),
-        "Result",
-        True,
-        False,
+        tab_id="tab",
+        data_path=str(rows[0].data_path),
+        result_type="Result",
+        cfg_issue=None,
+        has_analyze_params=False,
     )
     dialogs = RecordingDialogPresenter()
     window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=dialogs)

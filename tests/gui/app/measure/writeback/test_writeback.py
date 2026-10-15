@@ -6,8 +6,9 @@ from pathlib import Path
 
 import pytest
 from zcu_tools.cfg_model import ArbWaveformCfg, ConstWaveformCfg, PulseSpec
-from zcu_tools.gui.app.measure.adapter import ModuleWriteback, ParameterWriteback
-from zcu_tools.gui.app.measure.services.writeback import (
+from zcu_tools.gui.app.measure.writeback import (
+    ModuleWriteback,
+    ParameterWriteback,
     WritebackEdit,
     WritebackService,
     WritebackWritten,

@@ -49,7 +49,6 @@ def test_capture_retains_cached_context_and_exact_entry_attribution(
             run_id="captured-run",
             tab="synthetic",
             experiment="test/saving",
-            cfg_summary={},
             point=captured.point,
             roles={},
         ),

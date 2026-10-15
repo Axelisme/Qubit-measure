@@ -6,14 +6,14 @@ from collections.abc import Mapping
 from dataclasses import asdict, replace
 from typing import TYPE_CHECKING, Literal, cast
 
-from zcu_tools.gui.app.measure.adapter import (
-    AnalysisMode,
+from zcu_tools.gui.app.measure.adapter import AnalysisMode
+from zcu_tools.gui.app.measure.writeback import (
     ModuleWriteback,
     ParameterWriteback,
     SampleWriteback,
+    WritebackEdit,
     WritebackItem,
 )
-from zcu_tools.gui.app.measure.services.writeback import WritebackEdit
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 

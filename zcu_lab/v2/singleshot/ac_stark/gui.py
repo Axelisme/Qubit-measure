@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,7 +13,6 @@ from zcu_tools.gui.app.measure.adapter import (
     NoAnalyzeParams,
     ParameterWriteback,
     RunRequest,
-    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -108,6 +106,3 @@ class SsAcStarkAdapter(
                 proposed_value=req.analyze_result.ac_stark_coeff,
             ),
         ]
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return f"{ctx.qub_name}_sh_ac_stark_{time.strftime('%m%d')}"

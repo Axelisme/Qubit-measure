@@ -8,7 +8,7 @@ from pydantic import TypeAdapter
 from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.gui.app.measure import adapter as proposals
 from zcu_tools.gui.app.measure.services.ports import AnalysisPaneSnapshot, TabSnapshot
-from zcu_tools.gui.app.measure.services.writeback import (
+from zcu_tools.gui.app.measure.writeback import (
     WritebackDraft,
     WritebackEdit,
     WritebackService,

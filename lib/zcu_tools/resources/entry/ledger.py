@@ -172,12 +172,10 @@ class RecordsLedger:
                     data = _JSON_OBJECT.validate_json(raw)
                     if "format" not in data or "format_version" not in data:
                         raise ValueError("missing format or format_version header")
-                    version = data.get("format_version")
-                    # The model validates version syntax before unknown fields
-                    # are projected; the raw envelope remains in event_json.
-                    future = isinstance(version, str) and version != "1.0"
+                    # Reading projects known fields at every supported minor;
+                    # event_json retains the complete original envelope.
                     event = LedgerEvent.model_validate(
-                        data, extra="ignore" if future else "forbid"
+                        data, extra="ignore", context={"ledger_read": True}
                     )
                     if event.entry_id != self._entry_id:
                         raise ValueError("entry_id belongs to another entry")

@@ -18,7 +18,6 @@ from zcu_tools.gui.app.measure.adapter import (
     ParameterWriteback,
     ParamMeta,
     RunRequest,
-    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -95,9 +94,6 @@ class SampleAdapter(BaseAdapter[SampleCfg, SampleRun, SampleAnalysis, SamplePara
                 "general.ext.fake_peak", "Sample peak", req.analyze_result.peak
             )
         ]
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return f"{ctx.res_name}_fake"
 
 
 MODULE_PROPOSAL_TARGET = "Q1.pulses.tuned"

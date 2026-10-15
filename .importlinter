@@ -329,3 +329,37 @@ forbidden_modules =
     zcu_tools.gui
     zcu_tools.mcp
     zcu_tools.notebook
+
+# Shared artifact persistence owns formats and failures without any GUI dependency.
+[importlinter:contract:artifacts-core-no-ui]
+name = Artifact persistence is independent of GUI and Qt
+type = forbidden
+source_modules =
+    zcu_tools.experiment.artifacts
+forbidden_modules =
+    zcu_tools.gui
+    qtpy
+    PyQt5
+    PyQt6
+    PySide2
+    PySide6
+
+# Artifact and writeback commands meet only at app composition. Both may use
+# shared State, events and context without importing the other package directly.
+[importlinter:contract:measure-artifacts-no-writeback]
+name = Measure artifacts do not import writeback owners
+type = forbidden
+source_modules =
+    zcu_tools.gui.app.measure.artifacts
+forbidden_modules =
+    zcu_tools.gui.app.measure.writeback
+allow_indirect_imports = True
+
+[importlinter:contract:measure-writeback-no-artifacts]
+name = Measure writeback does not import artifact owners
+type = forbidden
+source_modules =
+    zcu_tools.gui.app.measure.writeback
+forbidden_modules =
+    zcu_tools.gui.app.measure.artifacts
+allow_indirect_imports = True
