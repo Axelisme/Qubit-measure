@@ -19,10 +19,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             10.0,
             "Edit write=[{id,target?,value?,edits?}] sequentially in the shared draft. "
-            "An edit failure preserves the draft prefix and starts no context write. "
+            "edits uses the tab.writeback_set module grammar. An edit failure, "
+            "including a listed module whose form is invalid, preserves the draft "
+            "prefix and starts no context write; an invalid module form fails with "
+            "invalid_params, reason form_errors and data.errors [{path, message}]. "
             "After all edits succeed, apply only the listed IDs once without changing "
             "GUI selection. Returns {written:[{id,kind,target,before,after}]} with "
-            "complete actual destination values. Kinds are md|module|waveform; "
+            "complete actual destination values. Kinds are parameter|module|sample; "
             "cross-kind names may coincide. Empty write is a no-op. Explicit null "
             "value sets an md value to null; omission keeps its proposal. "
             "Requires a selected working point; writes retain the captured SavedPoint destination. "
@@ -45,16 +48,18 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "{has_draft, items, destination_context}; has_draft is false before any "
             "analyze produced a draft; destination_context is the current active "
             "SessionEnv projection at reply time. Each item: id "
-            "(<kind>-<n>, kind∈md|ml|wf), target_name (apply destination, editable), "
-            "kind (parameter|module|waveform), description, selected; parameter adds "
-            "proposed_value; every item includes complete current/proposed values "
-            "(md values or module/waveform cfg dictionaries). Current is read from "
+            "(<kind>-<n>, kind∈param|ml|sample), target_name (apply destination, "
+            "editable), kind (parameter|module|sample), description, selected; "
+            "parameter adds proposed_value; every item includes complete "
+            "current/proposed values (parameter values, or module Spec dictionaries "
+            "in the same shape for current and proposed). Current is read from "
             "the active context at preview time and is null for a missing target; "
-            "proposed cfg is lowered from the shared GUI draft. Invalid cfg or "
-            "missing context fails instead of reporting an empty preview. "
-            "Module/waveform add has_edit_schema, and "
-            "may include role_id when the proposal corresponds to a ModuleLibrary "
-            "role. A complex parameter proposed_value is carried as "
+            "proposed module Specs come from the shared GUI form evaluated at the "
+            "draft's capture. An invalid module form (invalid_params, reason "
+            "form_errors, data.errors) or missing context fails instead of reporting "
+            "an empty preview. Module items may include role_id when the proposal "
+            "corresponds to a ModuleLibrary role. A complex parameter proposed_value "
+            "is carried as "
             '{"__complex__": [re, im]} (JSON has no complex). Edit an item via '
             "rpc_call on tab.writeback_set; the user's Edit dialog renders the same "
             "model (WYSIWYG). Optional operation_id requires that analysis result "
@@ -78,18 +83,16 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "proposed_value? is "
             "the METADICT-only facet (a complex value is passed as "
             '{"__complex__": [re, im]}, the same shape the list emits; it applies as '
-            "a Python complex). edits? is the MODULE/WAVEFORM-only facet: an ORDERED "
-            "list of {path, value} canonical cfg edits copied from the listing and "
-            "applied to the item's draft (no editor_id "
-            "needed — the surface resolves it internally). Apply ref-switch edits "
-            "before dependent inner-path edits (a ref switch removes child paths); "
-            "fail-fast and non-atomic. proposed_value and edits are mutually exclusive "
-            "(different item kinds). Echoes the edited {item}; an edits batch also "
-            "returns {valid, removed, added} as the final net before/after path-set "
-            "difference (A→B→A is empty). Agent edits "
-            "use the shared aggregate grammar: edit a sweep as one object, not "
-            "the GUI's leaf controls. Read current/proposed values via "
-            "tab.writeback_preview.",
+            "a Python complex). edits? is the MODULE-only facet: one batch "
+            "[{path:[field,...], value}] written into the item's form with the "
+            "tab.edit_cfg grammar (path segments are model field names; text fields "
+            'accept {"expr": text} evaluated at the draft capture). The batch '
+            "installs whole: unknown paths fail with invalid_params and change "
+            "nothing, while invalid values stay in the form and appear in errors. "
+            "proposed_value and edits are mutually exclusive (different item kinds). "
+            "Echoes the edited {item}; an edits batch also returns the form "
+            "observation {schema, input, values, errors}. Read current/proposed "
+            "values via tab.writeback_preview.",
             (
                 required_string("tab_id"),
                 required_string("subtab_id", "Pane: analysis|post_analysis"),
@@ -109,8 +112,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     "edits",
                     JsonType.JSON,
                     required=False,
-                    description="Ordered list of {path, value} cfg edits "
-                    "(module/waveform items only)",
+                    description="Form edits [{path:[field,...], value}] "
+                    "(module items only)",
                 ),
             ),
         ),
@@ -126,7 +129,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "changing GUI selection; omitted or null ids uses selected items. Empty ids writes "
             "nothing; unknown or duplicate IDs fail before writing. Returns "
             "{applied_ids, written, context_version, destination_context}: written lists the destination "
-            "names actually pushed, split by kind ({md, ml_modules, ml_waveforms}); "
+            "names actually pushed, split by kind ({parameter, ml_modules, samples}); "
+            "an invalid module form writes nothing and fails with invalid_params, "
+            "reason form_errors and data.errors; "
             "context_version is the bumped 'context' resource version after apply; "
             "destination_context is the active SessionEnv projection at reply time. "
             "Requires a selected working point but always writes to the draft's captured SavedPoint.",

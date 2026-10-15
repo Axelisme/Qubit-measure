@@ -8,11 +8,11 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 
 from zcu_tools.experiment.run_saving import ArtifactRef
-from zcu_tools.gui.cfg.resource import CfgInputError, CfgPreconditionError
+from zcu_tools.gui.app.measure.services.form_contracts import CfgPreconditionError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.context_types import CommandOrigin
 
-from ..cfg_observation import cfg_error_to_remote
+from ..form_errors import cfg_error_to_remote
 from ..load_types import project_load_outcome
 from ..save_types import SaveArtifactRefWire, project_save_report
 from ._common import follow_tab
@@ -41,7 +41,7 @@ def h_tab_run_start(
         operation_id = control.start_run(
             tab_id, aliases=aliases, origin=CommandOrigin("mcp")
         )
-    except (CfgInputError, CfgPreconditionError) as exc:
+    except CfgPreconditionError as exc:
         raise cfg_error_to_remote(exc) from exc
     return {"operation_id": operation_id}
 

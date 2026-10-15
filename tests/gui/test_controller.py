@@ -12,7 +12,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QCoreApplication
-from zcu_tools.device.fake import FakeDevice
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     ContextReadiness,
@@ -42,7 +41,11 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
 )
-from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
+from zcu_tools.gui.session.ports import (
+    BackgroundAdmissionClosedError,
+    OperationConflictError,
+    OperationKind,
+)
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
     DisconnectDeviceRequest,
@@ -50,10 +53,6 @@ from zcu_tools.gui.session.services.device import (
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
-from tests.gui._completion_helpers import (
-    on_device_connected,
-    on_device_operation_failed,
-)
 from tests.gui._controller_adapter import (
     InteractiveAdapter,
     RecordingAdapter,
@@ -124,24 +123,13 @@ class ControllerFixture:
         self.caretaker = PersistenceCaretaker(self.ctrl, cache_dir=cache_dir)
         self.ctrl.attach_caretaker(self.caretaker)
 
-    def quiesce(self) -> None:
-        """Join the Controller's in-flight background work and flush its queued
-        main-thread deliveries (run/analyze/device all share one
-        BackgroundRunner). Must run before the fixture — and thus the Controller
-        and its QObject service graph — is GC'd: a run spawns a dedicated worker
-        thread whose finished→deleteLater and done delivery are posted to the main
-        thread. If the Controller is collected with those still queued, a later
-        test's event pump (QEventLoop.exec / processEvents) dispatches them onto a
-        freed C++ object and segfaults."""
-        self.ctrl._background_svc.quiesce()
-
 
 @pytest.fixture()
 def cf(qapp, tmp_path) -> Iterator[ControllerFixture]:
     # Scope persistence to a temp dir so tests never read/write the real cache.
     fixture = ControllerFixture(cache_dir=tmp_path)
     yield fixture
-    fixture.quiesce()
+    fixture.ctrl.close()
 
 
 def _start_interactive_analysis(cf: ControllerFixture) -> tuple[str, int]:
@@ -191,12 +179,65 @@ def test_get_project_root_falls_back_to_cwd_when_not_injected(qapp, tmp_path):
         bus=BaseEventBus(),
     )
     assert ctrl.get_project_root() == os.getcwd()
-    ctrl._background_svc.quiesce()
+    ctrl.close()
 
 
 # ---------------------------------------------------------------------------
 # new_tab / close_tab
 # ---------------------------------------------------------------------------
+
+
+def test_close_drains_worker_and_owner_delivery_and_closes_admission(cf):
+    owner_thread = threading.get_ident()
+    delivered: list[tuple[object, int]] = []
+    errors: list[Exception] = []
+    callback_admission: list[Exception] = []
+
+    def on_done(value: object) -> None:
+        delivered.append((value, threading.get_ident()))
+        try:
+            cf.ctrl.run_background(lambda: "late", delivered.append, errors.append)
+        except BackgroundAdmissionClosedError as exc:
+            callback_admission.append(exc)
+
+    cf.ctrl.run_background(lambda: "result", on_done, errors.append)
+    cf.ctrl.close()
+
+    assert delivered == [("result", owner_thread)]
+    assert errors == []
+    assert len(callback_admission) == 1
+    cf.ctrl.close()
+    with pytest.raises(BackgroundAdmissionClosedError):
+        cf.ctrl.run_background(lambda: "new", delivered.append, errors.append)
+    assert delivered == [("result", owner_thread)]
+
+
+def test_close_timeout_keeps_admission_closed_and_can_be_retried(cf):
+    release = threading.Event()
+    started = threading.Event()
+    delivered: list[object] = []
+    errors: list[Exception] = []
+
+    def compute() -> str:
+        started.set()
+        if not release.wait(5):
+            raise RuntimeError("test did not release worker")
+        return "finished"
+
+    cf.ctrl.run_background(compute, delivered.append, errors.append)
+    try:
+        assert started.wait(2)
+        with pytest.raises(TimeoutError):
+            cf.ctrl.close(timeout_ms=0)
+        assert delivered == []
+        with pytest.raises(BackgroundAdmissionClosedError):
+            cf.ctrl.run_background(lambda: "new", delivered.append, errors.append)
+    finally:
+        release.set()
+    cf.ctrl.close()
+    assert delivered == ["finished"]
+    assert errors == []
+    cf.ctrl.close()
 
 
 def test_new_tab_adds_entry_to_state(cf):
@@ -619,36 +660,24 @@ def test_run_rejected_while_soc_connect_lease_active(cf):
     cf.ctrl._operation_gate.release(1)
 
 
-def test_device_connect_handler_is_ui_only_no_persistence_coordination(cf):
-    """Persistence is now a State projection (ProjectSettingsService subscribes to
-    DEVICE_CHANGED). The Controller's connect handler must not itself coordinate
-    persistence — it only presents UI feedback."""
-    driver = FakeDevice()
-    cf.ctrl._dev_svc._driver_factory = lambda _type, _address: driver
-    cf.ctrl._settings_svc = MagicMock()
-    connected: list[object] = []
-    errors: list[str] = []
-    on_device_connected(cf.ctrl._dev_svc, connected.append)
-    on_device_operation_failed(
-        cf.ctrl._dev_svc, lambda _name, error: errors.append(error)
-    )
-
+def test_device_connect_updates_state_and_presents_ui_feedback(
+    cf: ControllerFixture,
+):
+    """The default FakeDevice connects through the public device control facet."""
     cf.ctrl.device_control.start_connect_device(
         ConnectDeviceRequest(type_name="FakeDevice", name="flux", address="addr")
     )
-    assert _wait_for(lambda: bool(connected or errors))
-    assert not errors
+    assert _wait_for(lambda: not cf.ctrl.device_control.get_active_device_operations())
 
-    # Controller no longer reaches into ProjectSettingsService for device persistence.
-    assert not cf.ctrl._settings_svc.method_calls
-    # On terminal success the device is committed to State as CONNECTED.
     dev = cf.state.get_device("flux")
     assert dev is not None and dev.status is DeviceStatus.CONNECTED
-    cf.view.show_status_message.assert_called()
-    cf.ctrl._dev_svc.start_disconnect_device(
+    cf.view.show_status_message.assert_any_call("Device connected: flux")
+
+    cf.ctrl.device_control.start_disconnect_device(
         DisconnectDeviceRequest(name="flux", remember=False)
     )
     assert _wait_for(lambda: cf.state.get_device("flux") is None)
+    cf.view.show_status_message.assert_any_call("Device disconnected: flux")
 
 
 def test_run_completion_prepares_pure_tab_snapshot(cf):
@@ -716,7 +745,7 @@ def test_reset_tab_cfg_while_running_raises(cf):
     )
     assert cf.state.is_tab_running(tab_id)
 
-    from zcu_tools.gui.cfg.resource import CfgPreconditionError
+    from zcu_tools.gui.app.measure.services.form_contracts import CfgPreconditionError
 
     cfg = cf.ctrl.cfg_resources.lookup(tab_id)
     with pytest.raises(CfgPreconditionError, match="blocked"):

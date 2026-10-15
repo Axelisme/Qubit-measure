@@ -15,10 +15,10 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services import create_persistence_caretaker
 from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import BaseEventBus
@@ -37,8 +37,7 @@ from tests.gui.app.measure._synthetic import (
     SampleCfg,
     SampleRun,
 )
-from tests.gui.app.measure._templates import register_all_templates
-from tests.gui.app.measure.remote._helpers import FixtureController
+from tests.gui.app.measure._templates import TEMPLATES
 
 
 class LedgerAdapter(PairAdapter):
@@ -70,22 +69,20 @@ def hw_fixture(qapp, tmp_path):
     added = "resonator" not in before
     if added:
         component_registry.register("resonator", ResonatorSchema)
-    registry, templates = Registry(), TemplateCatalog()
+    registry = Registry(templates=TEMPLATES)
     registry.register("fake/freq", LedgerAdapter)
-    register_all_templates(templates)
     state, bus = (
         State(SessionEnv(parameters=None, soc=None, soccfg=None)),
         BaseEventBus(),
     )
-    ctrl = FixtureController(
+    ctrl = Controller(
         state=state,
         registry=registry,
-        template_catalog=templates,
         view=None,
         bus=bus,
         project_root=str(tmp_path),
     )
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     ctrl.add_view(window)
     caretaker = create_persistence_caretaker(ctrl, cache_dir=tmp_path / "cache")
     ctrl.attach_caretaker(caretaker)
@@ -107,7 +104,7 @@ def hw_fixture(qapp, tmp_path):
     try:
         yield ctrl, window
     finally:
-        ctrl.quiesce()
+        ctrl.close()
         window.deleteLater()
         qapp.processEvents()
         if added:

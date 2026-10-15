@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-15，measure Form owner 與舊 builder 退休
+**Last updated:** 2026-10-15，共用 Form／Library／writeback 測試 owner
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -80,29 +80,32 @@ GUI cache 隔離只支援 Linux，其它平台在 root conftest 載入時直接�
 清掉的 basetemp。這些目錄保留到 process 結束，再由 `atexit` 清理。
 巢狀 `pytest.main()` session 的 teardown 不還原 `XDG_CACHE_HOME`，後續 cleanup 仍使用隔離目錄。
 
-### BackgroundRunner.quiesce() — 測試 teardown 必要模式
+### Background work — 測試 teardown 必要模式
 
-任何 fixture 若持有會透過 `BackgroundRunner` 提交 pool 或
-thread worker 的物件，都必須在 teardown 呼叫 `quiesce()`，**才** `deleteLater()` / 放 GC。
+Fixture 必須在 `deleteLater()` 或放 GC 前等待背景工作與 queued delivery。
+持有 measure Controller 時呼叫 `close()`。直接持有 `BackgroundRunner` 時呼叫
+`quiesce()`。
 
 原因：worker 的 `on_done` 是跨執行緒 queued signal；如果 runner 在 delivery 進到 main-thread queue
 之後就被 GC，下一次 `processEvents()` 會把訊號分發到已釋放的 C++ 物件 → segfault。
 
+持有 measure `Controller` 的 fixture 呼叫公開 `close()`，不讀取內部 runner。
+它先永久停止 admission，再等待 worker 與 queued owner deliveries。逾時會 raise
+`TimeoutError`，teardown 不應吞掉例外或當作已完成。成功後可重複呼叫。
+
 ```python
-# pattern（見 tests/gui/test_controller.py 的 ControllerFixture.quiesce()
-#           和 tests/gui/session/services/test_device_manager.py 的 _quiesce_services fixture）
 @pytest.fixture
-def my_widget(qapp):
-    w = SomeWidgetThatOwnsBackgroundRunner(...)
-    yield w
-    w._debounce.stop()   # 停止任何 debounce timer，防止啟動新 worker
-    w._runner.quiesce()  # join in-flight + flush queued deliveries
-    w.deleteLater()
+def controller_view(qapp):
+    ctrl, view = make_controller_view()
+    yield ctrl, view
+    ctrl.close()
+    view.deleteLater()
     qapp.processEvents()
 ```
 
-如果 fixture 持有的是 `Controller`（它持有具體 `BackgroundRunner`），改呼叫
-`ctrl._background_svc.quiesce()`（見 `tests/gui/test_controller.py`）。
+直接持有其他 runner 的 fixture 繼續呼叫該 runner 的公開 lifecycle API，不套用
+Controller 的 terminal close。見 `tests/gui/session/services/test_device_manager.py`
+的 `_quiesce_services` fixture。
 
 ### Qt timer waits
 
@@ -208,29 +211,21 @@ decimated trace 與 branch smoke。效能相關 regression 先找 public simulat
 不是新增測試的獨立驗收條件。既有 `test_engine_optimization_contract.py`
 仍含白箱案例，本次文件整理不代表該檔已遷移。
 
-### Shared GUI cfg import ownership tests
+### Form 與持久 Spec 的測試 owner
 
-`tests/experiment/cfg_editing/`鎖定closed 7 module + 6 waveform discriminator/label/order、program/v2
-runtime parity、nested allowed sets、deep-fresh mutable containers、main及default policy差異、
-strict root-only Mapping/typed inspection、missing/non-string/unknown。materializer tests 另鎖 spec/value 完整對齊、scalar
-missing、nested complete default、required reference `allowed[0]`、missing style Const、explicit unknown與
-Bath ghost rejection。`tests/gui/cfg/test_materialization.py`只測domain-free Spec walk與policy ports；main
-全7+6由measure app cfg tests鎖定。app binding/lowering tests鎖
-shape lookup、converter與`to_dict()`精確call count；role tests鎖registration shape/value count、Controller
-value→shape順序，以及既有26-entry metadata/value golden。
+`tests/gui/form/` 驗證共用 input、schema、expression、options、defaults、state 與 preview。
+`tests/gui/form_adapter/` 驗證 core cfg 生成、持久 Spec 投影、child key 保留與屏蔽欄位政策。
+`tests/gui/widgets/form/` 從 FormEditor 觀察提交、解析錯誤、唯讀、群組與選項，也涵蓋共用 value-widget helpers。
 
-`tests/gui/cfg/binding/test_targets.py`鎖定list/resolve acceptance equality、canonical grammar、
-legacy zero-mutation replacement、schema collision與production registry coverage。remote cfg tests
-鎖定 target wire parity；service/writeback tests 鎖定 shape-only listing 與 batch net diff。
-Import ownership、來源依賴與靜態宣告直接審閱，不以 AST 或獨立程序的匯入結果作測試。
+Library entry 與範本的公開行為由 `tests/gui/session/test_library_entry.py` 驗證，
+Inspect 與 Aliases 由 `tests/gui/session/ui/` 驗證。Measure 的 tab Form resource、
+固定 capture、Run 與 writeback 在 `tests/gui/app/measure/services/`；
+Library／writeback 的 wire 行為由 `tests/gui/app/measure/remote/` 驗證。
+Writeback 案例區分 Form batch、draft-local edits 與 target 提交，不把 selected Apply 當成跨檔原子交易。
 
-measure adapter facade 不 forward `zcu_tools.gui.cfg.__all__` names；generic cfg imports
-應指向 shared owner。
-Import 規則由直接 review 相關檔案確認，對外行為由接縫測試驗證。
-
-`tests/gui/cfg/test_schema_assembler.py`擁有domain-free paired Spec/Value construction contract：
-path/parent conflict與batch preflight、default carrier、optional ref、locked alignment、choice binding、
-caller alias隔離與one-shot build。domain role、Seed與app section policy不得進入這組shared tests。
+Import ownership、來源依賴、靜態宣告與文件內容直接審閱，不以 AST、
+absence assertions 或獨立程序匯入結果作測試。框架案例使用 synthetic adapter／Spec，
+不 import zcu_lab，也不固定個別實驗的預設值。
 
 ### Adapter 與共用工具 tests
 
@@ -252,8 +247,8 @@ source retention、nullable options、失敗隔離與 widget lifecycle，不使�
 `tests/gui/remote/test_lazy_broadcast.py`以barrier鎖定two-phase recipient
 selection：零matching recipient不build、多client只build一次、unsubscribe/disconnect送前重驗、
 late subscribe不補收舊event，以及slow-client drop budget不阻塞healthy client或改變per-client order。
-remote EventBus與cfg-editor focused tests另鎖serializer/current-path/encode lazy cost、failure logging、
-`editor_closed` delivery cleanup；diagnostic測試確認fault channel仍不受subscription gate影響。
+remote EventBus focused tests另鎖serializer/current-path/encode lazy cost與failure logging；
+diagnostic測試確認fault channel仍不受subscription gate影響。
 
 `tests/gui/app/measure/ui/test_main_window_events.py`鎖定closed tab facts到Qt reaction的
 完整call sequence、zero-reaction local edits與lazy單次snapshot；service與真實UI測試覆蓋

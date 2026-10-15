@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from zcu_tools.gui.cfg.resource import (
+from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
 )
@@ -420,7 +420,7 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
         assert gone.value.reason is CfgPreconditionReason.RESOURCE_GONE
     finally:
         release.set()
-        fx.ctrl._background_svc.quiesce()
+        fx.ctrl.close()
         bridge.disconnect()
 
 

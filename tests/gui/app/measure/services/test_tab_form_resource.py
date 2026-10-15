@@ -7,7 +7,10 @@ import pytest
 from pydantic import JsonValue
 from zcu_tools.cfg_model import ConfigBase, Expr, Hidden, PulseSpec
 from zcu_tools.gui.app.measure.services import tab_form as resource_api
-from zcu_tools.gui.cfg.resource import CfgPreconditionError, CfgPreconditionReason
+from zcu_tools.gui.app.measure.services.form_contracts import (
+    CfgPreconditionError,
+    CfgPreconditionReason,
+)
 from zcu_tools.gui.form import FormEnv, FormErrors
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.context_types import SavedPoint
@@ -34,7 +37,7 @@ class ScalarCore(ConfigBase):
 def captured_env(amount: float) -> FormEnv:
     """Construct a detached source with a known arithmetic value."""
     library = LibrarySnapshot(
-        ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+        ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
     )
     parameters = ParameterContext(
         point=PointDocument(
@@ -132,7 +135,7 @@ def test_open_and_reset_factory_replace_shape_and_values_from_current_capture() 
     library = LibrarySnapshot(
         ModuleLibraryDocument(
             format="zcu.module-library",
-            format_version="1.0",
+            format_version="2.0",
             components={
                 "Q1": ComponentLibrary(
                     pulses={

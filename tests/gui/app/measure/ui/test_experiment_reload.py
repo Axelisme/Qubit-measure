@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 from qtpy.QtWidgets import QPushButton
 from zcu_tools.gui.app.measure.catalog import CatalogReloadError
+from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import (
     ControlOptions,
@@ -26,7 +27,6 @@ from zcu_tools.gui.session.types import SessionEnv
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.measure._reload_fakes import Loader, NewAdapter, OldAdapter
 from tests.gui.app.measure.remote._helpers import (
-    FixtureController,
     open_client,
     recv_response,
     send,
@@ -35,7 +35,7 @@ from tests.gui.app.measure.remote._helpers import (
 
 @dataclass
 class WindowApp:
-    ctrl: FixtureController
+    ctrl: Controller
     window: MainWindow
     state: State
     loader: Loader
@@ -48,7 +48,7 @@ def window_app(qapp) -> Iterator[WindowApp]:
     registry = Registry()
     registry.register("demo", OldAdapter)
     loader = Loader()
-    ctrl = FixtureController(
+    ctrl = Controller(
         state=state,
         registry=registry,
         view=None,
@@ -56,13 +56,13 @@ def window_app(qapp) -> Iterator[WindowApp]:
         catalog_loader=loader,
     )
     dialogs = RecordingDialogPresenter()
-    window = MainWindow(ctrl, dialog_presenter=dialogs)
+    window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=dialogs)
     ctrl.add_view(window)
     window.show()
     try:
         yield WindowApp(ctrl, window, state, loader, dialogs)
     finally:
-        ctrl.quiesce()
+        ctrl.close()
         window.deleteLater()
         qapp.processEvents()
 

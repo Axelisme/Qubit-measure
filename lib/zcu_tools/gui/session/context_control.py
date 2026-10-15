@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import ModuleSpec, WaveformSpec
     from zcu_tools.format_version import YamlMap, YamlValue
-    from zcu_tools.gui.cfg import CfgSchema
     from zcu_tools.gui.session.aliases import AliasRow
     from zcu_tools.gui.session.context_types import (
         ContextSourceBinding,
@@ -172,19 +171,15 @@ class ContextControlPort(Protocol):
         ...
 
     def apply_library_change(
-        self,
-        parameters: ParameterContext,
-        change: LibraryChange,
-        *,
-        lower_module: Callable[[CfgSchema, ParameterContext], ModuleSpec],
-        lower_waveform: Callable[[CfgSchema, ParameterContext], WaveformSpec],
+        self, parameters: ParameterContext, change: LibraryChange
     ) -> None:
-        """Lower/commit one fixed-target structure command via ContextService.
+        """Commit one fixed-target structure command via ContextService.
 
-        The supplied callbacks convert put/replace schemas using parameters;
-        rename/delete do not call them. Writes require a selected working point.
-        Detached SavedPoint writes do not select or publish. Invalid target,
-        lowering/schema/source/conflict/I/O failures publish nothing.
+        Put/replace write the change's persistent Spec as given; rename/delete
+        move or remove an existing root. The command runs in one library
+        transaction. Writes require a selected working point. Detached
+        SavedPoint writes do not select or publish. Invalid target, Spec
+        family, source, conflict and I/O failures write and publish nothing.
         """
         ...
 
@@ -348,20 +343,10 @@ class ContextControlFacet(ContextControlPort):
         self._context.set_waveform(target, path, value, source=source)
 
     def apply_library_change(
-        self,
-        parameters: ParameterContext,
-        change: LibraryChange,
-        *,
-        lower_module: Callable[[CfgSchema, ParameterContext], ModuleSpec],
-        lower_waveform: Callable[[CfgSchema, ParameterContext], WaveformSpec],
+        self, parameters: ParameterContext, change: LibraryChange
     ) -> None:
         """Apply the structure command using ContextControlPort's target policy."""
-        self._context.apply_library_change(
-            parameters,
-            change,
-            lower_module=lower_module,
-            lower_waveform=lower_waveform,
-        )
+        self._context.apply_library_change(parameters, change)
 
     def get_entry_info(self) -> EntryInfo | None:
         return self._context.get_entry_info()

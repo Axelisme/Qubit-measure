@@ -224,7 +224,6 @@ def test_parameter_read_resolves_library_slots_in_current_temporary_source(
                 "$driver.pulses.pi",
                 "QL.pulses.pi",
                 "$driver.pulses.later",
-                "<Custom:pulse>",
             ],
         },
     )
@@ -235,7 +234,6 @@ def test_parameter_read_resolves_library_slots_in_current_temporary_source(
             "$driver.pulses.pi": "QL.pulses.pi",
             "QL.pulses.pi": "QL.pulses.pi",
             "$driver.pulses.later": "QL.pulses.later",
-            "<Custom:pulse>": None,
         },
     }
 

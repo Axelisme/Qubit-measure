@@ -23,7 +23,7 @@ from unittest.mock import MagicMock
 import pytest
 from PIL import Image
 from qtpy.QtCore import QCoreApplication
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, TemplateDef
 from zcu_tools.gui.app.measure.adapter import ExpAdapterProtocol, SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
@@ -32,7 +32,6 @@ from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.remote.wire_version import WIRE_VERSION
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource
 from zcu_tools.gui.app.measure.state import Session, State
-from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.form_adapter import Form
@@ -146,16 +145,12 @@ def make_view() -> MagicMock:
     return view
 
 
-class FixtureController(Controller):
-    """Expose deterministic worker teardown to the shared Qt/socket fixtures."""
-
-    def quiesce(self) -> bool:
-        """Join workers and flush owner deliveries before fixture destruction."""
-        return self._background_svc.quiesce()
-
-
 class Fixture:
-    """Holds strong refs to Controller + service to survive GC mid-test."""
+    """Hold Controller and service for socket tests until explicit stop().
+
+    templates optionally injects the caller-owned persistent TemplateDef catalog
+    into Registry for library creation; omission supplies an empty catalog.
+    """
 
     def __init__(
         self,
@@ -163,25 +158,25 @@ class Fixture:
         project_root: str | None = None,
         *,
         active_label: str | None = None,
-        template_catalog: TemplateCatalog | None = None,
+        templates: Mapping[str, TemplateDef] | None = None,
         empty_project: bool = False,
         headless: bool = False,
     ) -> None:
         self.state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
-        self.registry = Registry()
+        # templates is the caller-owned persistent catalog for library creation.
+        self.registry = Registry(templates=templates)
         register_all(self.registry)
         if not self.registry.has("fake"):
             self.registry.register("fake", SampleAdapter)
         self.view = None if headless else make_view()
         self.bus = EventBus()
         fixture_root = str(_context_root()) if project_root is None else project_root
-        self.ctrl = FixtureController(
-            alias_preset=ALIAS_PRESET,
+        self.ctrl = Controller(
+            alias_presets={"default": ALIAS_PRESET},
             state=self.state,
             registry=self.registry,
             view=self.view,
             bus=self.bus,
-            template_catalog=template_catalog,
             project_root=fixture_root,
         )
         if not empty_project:
@@ -232,7 +227,7 @@ class Fixture:
 
     def stop(self) -> None:
         self.service.stop()
-        self.ctrl.quiesce()
+        self.ctrl.close()
 
 
 class FakeTransport:

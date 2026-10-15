@@ -182,11 +182,10 @@ def role_application(
         "zcu_tools.gui.app.measure.services.run.capture_software_provenance", provenance
     )
     services = build_app_services(
-        alias_preset=ALIAS_PRESET,
+        alias_presets={"default": ALIAS_PRESET},
         state=state,
         bus=bus,
         registry=registry,
-        cfg_editor_ctrl=MagicMock(),
         progress_transport=DirectProgressTransport(),
         resource_versions=state.version.snapshot,
         render_host=lambda: None,

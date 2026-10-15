@@ -61,7 +61,7 @@ class RecordingWriteback:
     def __init__(self, log: CallLog) -> None:
         self._log = log
         self.items = [object()]
-        service = WritebackService(MagicMock(), MagicMock())
+        service = WritebackService(MagicMock(), arb_names=lambda: ())
         self.analysis_draft = service.create_draft(
             [], parameters=None, experiment_name="test/analysis"
         )
@@ -69,15 +69,12 @@ class RecordingWriteback:
             [], parameters=None, experiment_name="test/post-analysis"
         )
 
-    def get_item_draft(self, draft: object, session_id: str) -> object:
-        self._log.add("writeback", "get_item_draft", draft, session_id)
+    def get_item_form(self, draft: object, session_id: str) -> object:
+        self._log.add("writeback", "get_item_form", draft, session_id)
         return {"draft": draft, "session_id": session_id}
 
-    def edit_draft(
-        self, draft: object, session_id: str, **changes: Any
-    ) -> dict[str, object]:
+    def edit_draft(self, draft: object, session_id: str, **changes: Any) -> None:
         self._log.add("writeback", "edit_draft", draft, session_id, **changes)
-        return {"valid": True}
 
     def apply_draft(
         self, draft: object, *, item_ids: tuple[str, ...] | None = None
@@ -141,18 +138,18 @@ def test_pane_writeback_reads_edits_and_applies_its_own_draft(
     events: list[TabInteractionChangedPayload] = []
     bus.subscribe(TabInteractionChangedPayload, events.append)
 
-    assert facet.get_writeback_item_draft_for_pane(
+    assert facet.get_writeback_item_form_for_pane(
         "tab-1", cast(Any, pane), "param-1"
     ) == {"draft": draft, "session_id": "param-1"}
-    assert facet.set_writeback_item_for_pane(
+    facet.set_writeback_item_for_pane(
         "tab-1", cast(Any, pane), "param-1", selected=False
-    ) == {"valid": True}
+    )
     assert facet.apply_writeback_for_pane("tab-1", cast(Any, pane)) == {
         "applied_ids": ["pane-item"],
         "written": {},
     }
 
-    assert call("writeback", "get_item_draft", draft, "param-1") in log.calls
+    assert call("writeback", "get_item_form", draft, "param-1") in log.calls
     assert (
         call("writeback", "edit_draft", draft, "param-1", selected=False) in log.calls
     )
@@ -244,7 +241,7 @@ def test_batch_write_publishes_shared_draft_even_after_partial_failure(
             cfg=MagicMock(),
         ),
     )
-    service = WritebackService(MagicMock(), control)
+    service = WritebackService(control, arb_names=lambda: ())
     draft = service.create_draft(
         [ParameterWriteback("general.ext.a", "d", proposed_value=1)],
         parameters=parameters,

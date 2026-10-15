@@ -1,13 +1,11 @@
 """Entry selection admission at real application, view and wire seams."""
 
 from collections.abc import Iterator
-from typing import NoReturn
 
 import pytest
 from qtpy.QtWidgets import QLabel, QPushButton
 from zcu_tools.gui.app.measure.adapter import ParameterWriteback
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
 from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.services.tab_control import TabControlFacet
@@ -38,10 +36,6 @@ def entry_resource(application: PointApplication) -> ResultEntry:
         result_root=info.result_path.parent,
         database_root=info.database_path.parent,
     )
-
-
-def unused_resolution(_parameters: ParameterContext | None) -> NoReturn:
-    raise AssertionError("Writeback admission must not assemble Run cfg")
 
 
 @pytest.mark.parametrize("command", ["new", "open"])
@@ -94,7 +88,9 @@ def test_unselected_point_disables_run_writeback_and_inspect_with_next_step(
     tab_id = application.controller.new_tab("pointed")
     application.state.update_tab_analyze(tab_id, object(), None)
     window = MainWindow(
-        application.controller, dialog_presenter=RecordingDialogPresenter()
+        application.controller,
+        templates=lambda: {},
+        dialog_presenter=RecordingDialogPresenter(),
     )
     window.add_tab_widget(tab_id, "pointed")
     editor = ComponentTreeWidget(application.controller.context_control)
@@ -141,18 +137,8 @@ def test_writeback_requires_selection_after_reopen_but_keeps_captured_destinatio
     control = application.controller.context_control
     captured = control.read_context()
     bus = BaseEventBus()
-    editor = CfgEditorService(
-        application.controller,
-        application.controller,
-        application.controller,
-        application.controller,
-        bus,
-    )
-
-    service = WritebackService(editor, write_port=control)
-    guard = GuardService(
-        application.state,
-    )
+    service = WritebackService(control, arb_names=lambda: ())
+    guard = GuardService(application.state)
     facet = WritebackControlFacet(
         state=application.state,
         guard=guard,
@@ -212,19 +198,10 @@ def parameter_writeback_pane(
     control.set_parameter(captured.target, "general.ext.a", 1.0)
     control.set_parameter(captured.target, "general.ext.b", 2.0)
     bus = BaseEventBus()
-    editor = CfgEditorService(
-        application.controller,
-        application.controller,
-        application.controller,
-        application.controller,
-        bus,
-    )
-    service = WritebackService(editor, write_port=control)
+    service = WritebackService(control, arb_names=lambda: ())
     facet = WritebackControlFacet(
         state=application.state,
-        guard=GuardService(
-            application.state,
-        ),
+        guard=GuardService(application.state),
         writeback=service,
         resource_versions=application.state.version.snapshot,
         bus=bus,

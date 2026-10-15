@@ -1,6 +1,6 @@
 # Measure adapter authoring
 
-**Last updated:** 2026-10-15，make_form 與持久範本
+**Last updated:** 2026-10-15，持久 Spec writeback 與共用 entry Form
 
 `zcu_lab/v2/<實驗>/gui.py` 把同資料夾的 core 包成 GUI adapter，供框架層 `zcu_tools.gui.app.measure` 驅動。Adapter 依賴框架契約 `ExpAdapterProtocol`。框架不 import 使用者套件，也不含實驗領域知識。
 
@@ -47,8 +47,10 @@ Make_form 只在 Open／Reset 執行。`ctx.has(ref)` 用固定來源選 Slot �
 
 持久範本目錄由組合根以 Registry(templates=TEMPLATES) 注入，也供 Library 新建選單使用。
 範本儲存 Spec defaults 與 seeds，不維護另一份角色 shape／blank／ref 表。
-Library、writeback 與 Inspect 的獨立 editor 仍使用 CfgSchema／cfg_editing；
-adapter facade 不 forward shared generic cfg names。這些 retained editor 不是 measure tab 的入口。
+Library、writeback 與 Inspect 也使用 gui.form／FormEditor，透過 gui.form_adapter
+投影持久 Spec。Adapter 的 ModuleWriteback 直接提供 ModuleSpec proposal，不組編輯樹。
+Child key 保持 key，expression 在固定 env 求成數字後才存 Library。具體 family 固定，
+屏蔽欄位由生成器預設補回。提交與 draft 邊界見 ADR-0065、ADR-0008。
 
 Adapter 如需不同於 core 的欄位，Form 明列 extras 與具名 lower，或直接回傳 adapter 自己的
 型別。Runtime 與 extras 的解讀屬 adapter，框架不知道它是不是實驗 cfg。
@@ -299,9 +301,10 @@ qubit.ext.rabi_freq 的原 seed。Missing、null 或 invalid scalar 沿 Form 驗
 ### Run-tested finisher
 
 SingleToneFreq、DualTonePower 與 BathPhase 使用該 Run 的完整
-`source.cfg.modules.tested_reset`。`module_cfg_to_value` 建立隔離的 Spec/Value，adapter
-只替換本次分析欄位，再提出 `ModuleWriteback`。不讀 ext、舊 module 或目前 point/alias
-補欄位。手動修改後實際測過的頻率、gain、波形與其他 schema 欄位都保留。
+`source.cfg.modules.tested_reset`。`module_writeback` 從 Run 的 module dump 建立隔離的
+持久 Spec，adapter 只替換本次分析欄位，再提出 `ModuleWriteback(proposal=spec)`。
+這份來源已是 materialized runtime cfg，child pulse／waveform 因此成為 inline Spec。
+Adapter 不讀 ext、舊 module 或目前 point/alias 補欄位。手動修改後實際測過的頻率、gain、波形與其他 schema 欄位都保留。
 
 - SingleToneFreq 只換 `pulse_cfg.freq`。FWHM 只寫 ext，不是 reset module 欄位。
 - DualTonePower 只換 `pulse1_cfg.gain` 和 `pulse2_cfg.gain`，保留實測兩頻率。

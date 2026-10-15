@@ -9,7 +9,10 @@ import pytest
 from pydantic import BaseModel, Field
 from zcu_tools.cfg_model import PulseCfg, Range
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
-from zcu_tools.gui.cfg.resource import CfgPreconditionError, CfgPreconditionReason
+from zcu_tools.gui.app.measure.services.form_contracts import (
+    CfgPreconditionError,
+    CfgPreconditionReason,
+)
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request
@@ -91,7 +94,7 @@ def form_rpc(qapp) -> Iterator[tuple[Fixture, str, FormRpc]]:
     try:
         yield fixture, tab_id, rpc
     finally:
-        fixture.ctrl.quiesce()
+        fixture.ctrl.close()
         fixture.ctrl.tab_control.close_tab(tab_id)
         remote.on_client_close(rpc.link, on_owner_thread=True)
 
@@ -273,7 +276,7 @@ def test_recipe_with_real_form_and_adapter_preserves_acquisition_result(
         prepared = session.open_tab("fake", reuse=tab)
         prepared.set("gain", 0.75)
         operation = prepared.run()
-        assert fixture.ctrl.quiesce()
+        fixture.ctrl.close()
         completed, status = operation.complete_in_current_worker()
         assert status == "completed"
         if completed is None:

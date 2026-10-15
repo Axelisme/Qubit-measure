@@ -1,18 +1,18 @@
 # gui/app/workflows — Workflow host
 
-**Last updated:** 2026-10-15，session 列只留 Entry chip（文字可選取）；Devices… 開共用 DeviceDialog，run 進行中唯讀；stopping 時 live tuning 唯讀但可讀、停用 Apply 與 Discard；options／tagged input 與 memento 版本；run 進行中 Plan 與 Start Tunables 表單唯讀但可讀（不再停用面板）；run 進行中停用 Prepare forms 與 Reload source；terminal 後保存可編輯的 Start knobs；run view 在 terminal 時重設 Start knobs
+**Last updated:** 2026-10-15，session 列只留 Entry chip（文字可選取）；Devices… 開共用 DeviceDialog，run 進行中唯讀；stopping 時 live tuning 唯讀但可讀、停用 Apply 與 Discard；options／tagged input 與 memento 版本；run 進行中 Plan 與 Start Tunables 表單唯讀但可讀（不再停用面板）；run 進行中停用 Prepare forms 與 Reload source；terminal 後保存可編輯的 Start knobs；run view 在 terminal 時重設 Start knobs；具名 alias preset 啟動資料整合
 
 ## 註冊與組裝
 
 `WorkflowAttachment` 配對已宣告的 native step、plan/tunables FormModel、converter 與 context seed。每個附件保留 native plan、tunables、state、record 與 form 的型別配對。同一宿主的附件共享 context 型別參數，宿主不解讀 context，也不依 workflow 名稱分支。註冊項目沒有 export 或 presentation callback。
 
-`WorkflowsGuiBehavior(registrations=..., loader=..., alias_rows=...)` 建立一份 EMPTY session。`WorkflowWindow` 也可接收既有 state/services/owner 與註冊清單，嵌入 caller 的 Qt parent。清單必須非空且名稱唯一，第一項是預設。GUI、RPC 與 MCP 使用同一 Window 與 Controller。公開參數、欄位、錯誤與 lifetime 契約見各型別 docstring。
+`WorkflowsGuiBehavior(registrations=..., loader=..., alias_presets=...)` 建立一份 EMPTY session。Behavior 的公開 `alias_presets` 欄位保留完整名稱與有序表，session 只使用 default rows。省略或 None 建立空表，顯式 mapping 必須含 default，default 的空 tuple 合法。`WorkflowWindow` 也可接收既有 state/services/owner 與註冊清單，嵌入 caller 的 Qt parent。清單必須非空且名稱唯一，第一項是預設。GUI、RPC 與 MCP 使用同一 Window 與 Controller。公開參數、欄位、錯誤與 lifetime 契約見各型別 docstring。
 
 `scripts/run_workflows_gui.py` 是組合根。它讀 `zcu_lab.workflows.registry`，注入註冊清單、alias preset 與 `SourceCatalogLoader`。Builder 每次重新 import 當前清單。Framework 和 component sources 固定，workflow/form/registry sources 一起 bounded reload。Framework 不 import 使用者套件，依賴方向由 C16 保護。
 
 ## Window 版面
 
-`layout.py` 建一次控制項與版面，`session_strip.py` 的 `WorkflowSessionStrip` 顯示 session 列。最上面一列只有一個 Entry chip（`Entry: <entry> / <point>`），之後是 Setup…、Aliases…、Devices…、Prepare forms、Reload source。Qubit、裝置與 ZCU 不在 session 列：框架不認得 qubit，裝置與 ZCU 狀態由 Device 對話框或 workflow 自己的畫面呈現。Chip 只讀 services，收到 context 切換事件時刷新，Setup／Aliases 關閉與 Prepare forms 後也刷新；過長的文字截斷，完整文字放在 tooltip，不撐寬視窗。Devices… 用 measure GUI 同一個共用 `DeviceDialog`，同樣以 window-modal 開啟、關閉即刪除、已開著時只 raise，吃 session 的 device control 與 parameter provider。Workflows 沒有控制權交接，所以不設 `before_stop`。從 Start 到 terminal delivery（pending、running、pausing、paused、stopping），hardware gate 擋住裝置變更，宿主也拒絕 Prepare forms 與 Reload source：這兩顆停用，Device 對話框（不論 run 前或 run 中開啟）切成唯讀，terminal delivery 後恢復可設定。Setup…、Aliases… 與 Devices… 維持可按；Setup 與 Aliases 改的是 session，不影響已 capture 的 run。Reload 另外要有 loader，且沒有要求重啟的 reload 失敗。
+`layout.py` 建一次控制項與版面，`session_strip.py` 的 `WorkflowSessionStrip` 顯示 session 列。最上面一列只有一個 Entry chip（`Entry: <entry> / <point>`），之後是 Setup…、Devices…、Prepare forms、Reload source。Qubit、裝置與 ZCU 不在 session 列：框架不認得 qubit，裝置與 ZCU 狀態由 Device 對話框或 workflow 自己的畫面呈現。Chip 只讀 services，收到 context 切換事件時刷新，Setup 關閉與 Prepare forms 後也刷新；過長的文字截斷，完整文字放在 tooltip，不撐寬視窗。Devices… 用 measure GUI 同一個共用 `DeviceDialog`，同樣以 window-modal 開啟、關閉即刪除、已開著時只 raise，吃 session 的 device control 與 parameter provider。Workflows 沒有控制權交接，所以不設 `before_stop`。從 Start 到 terminal delivery（pending、running、pausing、paused、stopping），hardware gate 擋住裝置變更，宿主也拒絕 Prepare forms 與 Reload source：這兩顆停用，Device 對話框（不論 run 前或 run 中開啟）切成唯讀，terminal delivery 後恢復可設定。Setup… 與 Devices… 維持可按；Setup 改的是 session，不影響已 capture 的 run。Alias 表在共用 Inspect 的 Aliases 頁編輯，本視窗沒有獨立入口。Reload 另外要有 loader，且沒有要求重啟的 reload 失敗。
 
 下方是可拖動的 QSplitter。左欄依序是 workflow 選單、`Plan`／`Tunables` 兩個分頁與固定在底部的 Start／Pause／Resume／Stop。分頁內容放在 QScrollArea，所以表單展開多少都不影響視窗最小高度；切換 workflow、Prepare 與 Reload 換掉的 panel 放回同一個分頁。右欄依序是 run 狀態列（`run_status.py`）、診斷訊息列 `workflow.run.message` 與 `figure_area.py` 的 `WorkflowFigureArea`。版面只依 widget 結構，不依 workflow 名稱；既有 objectName 保持不變。
 

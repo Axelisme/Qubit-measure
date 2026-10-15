@@ -17,7 +17,6 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.app.measure.ui.main_window_toolbar import (
     AdapterMenuItem,
@@ -115,16 +114,9 @@ def test_toolbar_dialog_buttons_open_expected_dialogs(qapp) -> None:
     ]
 
 
-class ToolbarController(Controller):
-    """Expose the existing background drain for this real UI composition."""
-
-    def quiesce(self) -> None:
-        self._background_svc.quiesce()
-
-
 @dataclass
 class ToolbarApplication:
-    controller: ToolbarController
+    controller: Controller
     window: MainWindow
     remote: RemoteControlAdapter
     link: ClientLink
@@ -148,18 +140,19 @@ def toolbar_application(
     registry.register("stoppable", OldAdapter)
     registry.register("group/nested", OldAdapter)
     scheduler = ImmediateOwnerScheduler()
-    ctrl = ToolbarController(
+    ctrl = Controller(
         State(SessionEnv(parameters=None, soc=None, soccfg=None)),
         registry,
         None,
         BaseEventBus(),
         owner_scheduler=scheduler,
         project_root=str(tmp_path),
-        template_catalog=TemplateCatalog(),
     )
     ctrl.setup_control.new_entry(EntryRequest("toolbar"))
     ctrl.setup_control.new_point(PointCreateRequest("point", "", CommandOrigin("gui")))
-    window = MainWindow(ctrl, dialog_presenter=RecordingDialogPresenter())
+    window = MainWindow(
+        ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
+    )
     ctrl.add_view(window)
     tab_id = ctrl.new_tab("stoppable")
     remote = RemoteControlAdapter(
@@ -172,7 +165,7 @@ def toolbar_application(
         yield ToolbarApplication(ctrl, window, remote, link, tab_id)
     finally:
         remote.on_client_close(link, on_owner_thread=True)
-        ctrl.quiesce()
+        ctrl.close()
         for tid in tuple(ctrl.list_tab_ids()):
             ctrl.tab_control.close_tab(tid)
         window.deleteLater()

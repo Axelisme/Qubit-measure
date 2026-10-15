@@ -1,12 +1,14 @@
 # `zcu_tools.resources.context` point-local module library
 
-**Last updated:** 2026-10-11，退休舊 context 與 metadata store
+**Last updated:** 2026-10-15，ModuleLibrary 2.0
 
 本 package 擁有 point-local `ModuleLibrary`。條目、setup 與 point 參數由 [entry owner](../entry/README.md) 管理；GUI 的切換與命令由 ContextService 編排。Library 使用 typed 文件，不提供 flat modules／waveforms 或自動 mtime 同步。
 
 ## Module library
 
-`library.py` 擁有 `module_cfg.yaml` 的文件、查詢、編輯與來源。文件格式是 `zcu.module-library` 1.0。Header-only 文件表示合法空 library。
+`library.py` 擁有 `module_cfg.yaml` 的文件、查詢、編輯與來源。文件格式是 `zcu.module-library` 2.0。Header-only 文件表示合法空 library。
+
+Pulse Spec 刪除 mux_freqs、mux_gains、mux_phases、mask 與 outsel 後，以新 major 區分持久 schema（ADR-0072）。所有 1.0 library 都在 header 被拒絕，即使未使用這些欄位也一樣。不為 1.0 library 提供遷移或相容讀取。
 
 Library 的設計是「元件 → 分組 → pydantic model」，分組名稱不是封閉清單。pulses、readout、reset 與 waveforms 是目前使用的四個分組。
 

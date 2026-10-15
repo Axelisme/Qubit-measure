@@ -57,7 +57,6 @@ from zcu_tools.gui.session.persistence import PersistenceError
 from zcu_tools.gui.session.ports import OwnerScheduler
 from zcu_tools.gui.session.services.build import SessionServices
 from zcu_tools.gui.session.state import SessionState
-from zcu_tools.gui.session.ui.alias_dialog import AliasDialog
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.plotting.plots import Plots
@@ -157,7 +156,6 @@ class WorkflowWindow[C](QWidget):
             (self._controls.resume, self._resume_clicked),
             (self._controls.stop, self._stop_clicked),
             (self._controls.setup, self.open_setup),
-            (self._controls.aliases, self._aliases_clicked),
             (self._controls.devices, self.open_devices),
             (self._controls.prepare, self._use_source_clicked),
             (self._controls.reload, self._reload_clicked),
@@ -183,17 +181,6 @@ class WorkflowWindow[C](QWidget):
         self.setup_dialog.show()
         self.setup_dialog.raise_()
         self.setup_dialog.activateWindow()
-
-    def _aliases_clicked(self) -> None:
-        try:
-            dialog = AliasDialog(self._services.context_control, self)
-        except Exception as error:
-            logger.exception("Workflow alias editor could not open")
-            self._controls.message.setText(str(error))
-            return
-        dialog.finished.connect(self._session.refresh)
-        dialog.finished.connect(dialog.deleteLater)
-        dialog.show()
 
     def open_devices(self) -> None:
         """Open the shared Device dialog window-modally on the GUI owner.
@@ -232,8 +219,8 @@ class WorkflowWindow[C](QWidget):
         stopping) the host rejects Prepare forms and Reload source, so both are
         disabled, and the hardware gate rejects device changes, so an open
         Device dialog is read-only. Reload also needs a loader and no
-        restart-required reload failure. Setup, Aliases and Devices stay
-        enabled: Setup and Aliases change the session, not the run's capture.
+        restart-required reload failure. Setup and Devices stay enabled: Setup
+        changes the session, not the run's capture.
         """
         locked = self._run_view.start_locked
         error = self._catalog_error

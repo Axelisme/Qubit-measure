@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from zcu_tools.gui.app.measure.services import arb_waveform
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.session.services import arb_waveform
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from ._helpers import Fixture, dispatch_handler
@@ -17,16 +16,8 @@ def _qt(qapp):
     yield
 
 
-@pytest.fixture(scope="module", autouse=True)
-def repository_state_guard() -> Iterator[None]:
-    before = vars(ArbWaveformDatabase)["_database_path"]
-    yield
-    assert vars(ArbWaveformDatabase)["_database_path"] == before
-
-
 @pytest.fixture()
 def fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Fixture:
-    monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
     monkeypatch.setattr(arb_waveform, "gettempdir", lambda: str(tmp_path))
     fx = Fixture()
     db_path = tmp_path / "Database" / "chip_a" / "q1" / "2026" / "06" / "Data_0626"
@@ -75,6 +66,50 @@ def test_set_list_and_preview_round_trip(fixture: Fixture, tmp_path: Path) -> No
     assert preview["recipe"] == _recipe()
     assert Path(str(preview["preview_figure"])).exists()
     assert fixture.state.version.get("arb_waveforms") == 1
+
+
+def test_scope_switch_routes_new_writes_and_preserves_captured_assets(
+    fixture: Fixture,
+    tmp_path: Path,
+) -> None:
+    assets = fixture.ctrl.arb_waveforms
+    try:
+        first = ArbWaveformDatabase(
+            arb_waveform.resolve_arb_waveform_root(fixture.state.session_env)
+        )
+    except TypeError as exc:
+        pytest.fail(f"Repositories must accept and own independent roots: {exc}")
+    first.save("pulse", idata=[0.0, 0.4], time=[0.0, 0.75])
+    captured = first.bound_info()
+    captured_path = captured.path_for("pulse")
+
+    fixture.state.session_env = replace(
+        fixture.state.session_env,
+        qub_name="q2",
+        database_path=str(
+            tmp_path / "Database" / "chip_a" / "q2" / "2026" / "06" / "Data_0626"
+        ),
+    )
+    recipe = {"segments": [{"duration": 0.002, "formula": "0.8"}], "normalize": "none"}
+    assert dispatch_handler(
+        fixture.ctrl,
+        "arb_waveform.set",
+        {"name": "pulse", "recipe": recipe, "overwrite": False},
+    ) == {"success": True, "status": "created"}
+    assert assets.load_data("pulse").idata.tolist() == [0.8, 0.8, 0.8]
+    assert captured.path_for("pulse") == captured_path
+    assert captured.duration("pulse") == 0.75
+
+    first.save("pulse", idata=[0.0, 0.3], time=[0.0, 1.5])
+    assert captured.duration("pulse") == 1.5
+    assert captured.samples("pulse").idata.tolist() == [0.0, 0.3]
+    assets.rename("pulse", "renamed")
+    assert first.list() == ["pulse"]
+    assert assets.list_data_keys() == ["renamed"]
+    assets.delete("renamed")
+    assert assets.list_data_keys() == []
+    assert first.list() == ["pulse"]
+    assert fixture.state.version.get("arb_waveforms") == 3
 
 
 def test_list_without_project_database_path_returns_empty(fixture: Fixture) -> None:

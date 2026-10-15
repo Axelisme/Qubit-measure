@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorError
 from zcu_tools.gui.app.measure.services.guard import GuardError
 from zcu_tools.gui.app.measure.services.load import LoadDataError
 from zcu_tools.gui.expected_error import (
@@ -91,7 +90,6 @@ def test_named_failed_precondition_errors_preserve_runtime_ancestry(
 @pytest.mark.parametrize(
     "error",
     [
-        CfgEditorError("bad editor"),
         MissingValue("missing", "missing value"),
         ValueTypeError("wrong", "wrong type"),
     ],

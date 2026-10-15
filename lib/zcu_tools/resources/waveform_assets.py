@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -36,40 +35,33 @@ _DATA_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
 class ArbWaveformDatabase:
-    """Qubit-scoped single-file arbitrary waveform asset repository."""
+    """Single-file waveform repository bound to one asset directory.
 
-    _database_path: ClassVar[Path | None] = None
+    root accepts a string or Path naming the asset directory, not the entry
+    root. Construction creates it and propagates filesystem errors. Each
+    instance owns its root for its lifetime; operations never select a global
+    repository. Keys, payloads and collisions raise ArbWaveformError; raw
+    filesystem write errors propagate. Reads validate current NPZ bytes and
+    report missing/invalid assets or read failures as ArbWaveformError.
+    """
 
-    @classmethod
-    def init(cls, path: str | Path) -> None:
-        """Set and create the database directory for arbitrary waveforms."""
-        cls._database_path = Path(path)
-        cls._database_path.mkdir(parents=True, exist_ok=True)
+    def __init__(self, root: str | Path) -> None:
+        """Bind and create root, propagating filesystem failures."""
+        self._root = Path(root).resolve()
+        self._root.mkdir(parents=True, exist_ok=True)
 
-    @classmethod
-    def _check_initialized(cls) -> Path:
-        if cls._database_path is None:
-            raise RuntimeError(
-                "ArbWaveformDatabase is not initialized. "
-                "Call ArbWaveformDatabase.init(path) first."
-            )
-        cls._database_path.mkdir(parents=True, exist_ok=True)
-        return cls._database_path
+    def bound_info(self) -> WaveformAssetInfo:
+        """Bind reads to this instance's absolute asset directory.
 
-    @classmethod
-    def bound_info(cls) -> WaveformAssetInfo:
-        """Bind asset reads to the currently initialized repository directory.
-
-        Raises RuntimeError if init() has not set an explicit scope. A later
-        init() does not change this binding. path_for() checks existence without
-        loading bytes. duration() and samples() load current asset bytes on every call and propagate ArbWaveformError for
-        missing keys, invalid archives or I/O failures. No data is cached.
+        path_for() checks existence without loading bytes. duration() and
+        samples() load current bytes on every call and propagate ArbWaveformError
+        for missing keys, invalid archives or I/O failures. No data is cached.
         """
-        return cls.info_at(cls._check_initialized())
+        return self.info_at(self._root)
 
     @staticmethod
     def info_at(directory: Path) -> WaveformAssetInfo:
-        """Bind asset reads to an explicit directory without changing global scope.
+        """Bind asset reads to an explicit directory without selecting a repository.
 
         directory is the asset folder, not the entry's database root. Binding
         resolves it to an absolute path but creates no directory and reads no
@@ -78,31 +70,26 @@ class ArbWaveformDatabase:
         """
         return _BoundWaveformAssetInfo(directory.resolve())
 
-    @classmethod
-    def path_for(cls, data_key: str) -> Path:
-        """Return the current DB key path without reading or requiring a file.
+    def path_for(self, data_key: str) -> Path:
+        """Return this repository's absolute key path without requiring a file.
 
-        Validate key grammar and require initialized scope. The path follows
-        init's directory, which may be relative; native conversion uses the
-        capture-bound absolute WaveformAssetInfo.path_for instead.
+        Invalid key grammar raises ArbWaveformError. Native conversion uses
+        WaveformAssetInfo.path_for instead, which also checks file existence.
         """
-        db_path = cls._check_initialized()
+        db_path = self._root
         _validate_data_key(data_key)
         return db_path / f"{data_key}.npz"
 
-    @classmethod
-    def exists(cls, data_key: str) -> bool:
-        return cls.path_for(data_key).exists()
+    def exists(self, data_key: str) -> bool:
+        return self.path_for(data_key).exists()
 
-    @classmethod
-    def list(cls) -> list[str]:
+    def list(self) -> list[str]:
         """List all available data keys without opening each archive."""
-        return [entry.data_key for entry in cls.list_entries()]
+        return [entry.data_key for entry in self.list_entries()]
 
-    @classmethod
-    def list_entries(cls) -> list[ArbWaveformListEntry]:
+    def list_entries(self) -> list[ArbWaveformListEntry]:
         """List cheap directory entries without opening each `.npz` payload."""
-        db_path = cls._check_initialized()
+        db_path = self._root
         entries: list[ArbWaveformListEntry] = []
         for path in db_path.glob("*.npz"):
             data_key = path.stem
@@ -116,28 +103,24 @@ class ArbWaveformDatabase:
             )
         return sorted(entries, key=lambda item: item.data_key)
 
-    @classmethod
-    def load(cls, data_key: str) -> ArbWaveformData:
-        return _load_asset(cls.path_for(data_key))
+    def load(self, data_key: str) -> ArbWaveformData:
+        return _load_asset(self.path_for(data_key))
 
-    @classmethod
     def get(
-        cls, name: str
+        self, name: str
     ) -> tuple[NDArray[np.float64], NDArray[np.float64] | None, NDArray[np.float64]]:
         """Read isolated 1D (I, Q, time) arrays, with time in microseconds.
 
         Q is None for zero Q; missing/invalid assets or I/O raise ArbWaveformError.
         """
-        samples = cls.bound_info().samples(name)
+        samples = self.bound_info().samples(name)
         return samples.idata, samples.qdata, samples.time
 
-    @classmethod
-    def load_recipe(cls, data_key: str) -> FormulaRecipe | None:
-        return cls.load(data_key).recipe
+    def load_recipe(self, data_key: str) -> FormulaRecipe | None:
+        return self.load(data_key).recipe
 
-    @classmethod
-    def inspect(cls, data_key: str) -> ArbWaveformInfo:
-        path = cls.path_for(data_key)
+    def inspect(self, data_key: str) -> ArbWaveformInfo:
+        path = self.path_for(data_key)
         data = _load_asset(path)
         stat = path.stat()
         return ArbWaveformInfo(
@@ -152,9 +135,8 @@ class ArbWaveformDatabase:
             recipe=data.recipe,
         )
 
-    @classmethod
     def save(
-        cls,
+        self,
         name: str,
         idata: ArrayLike,
         time: ArrayLike,
@@ -169,11 +151,10 @@ class ArbWaveformDatabase:
         For an explicit collision policy, use import_data instead.
         """
         qdata_save = np.zeros_like(idata) if qdata is None else qdata
-        cls.import_data(name, idata=idata, qdata=qdata_save, time=time, overwrite=True)
+        self.import_data(name, idata=idata, qdata=qdata_save, time=time, overwrite=True)
 
-    @classmethod
     def import_data(
-        cls,
+        self,
         data_key: str,
         *,
         idata: ArrayLike,
@@ -191,7 +172,7 @@ class ArbWaveformDatabase:
         keys or payloads also raise ArbWaveformError; I/O errors propagate.
         Metadata inspection can fail after the write has completed.
         """
-        path = cls.path_for(data_key)
+        path = self.path_for(data_key)
         if path.exists() and not overwrite:
             raise ArbWaveformError(
                 f"Arbitrary waveform {data_key!r} already exists",
@@ -201,11 +182,10 @@ class ArbWaveformDatabase:
         qdata_save = np.zeros_like(idata) if qdata is None else qdata
         data = validate_payload(idata=idata, qdata=qdata_save, time=time, recipe=None)
         write_npz(path, data)
-        return cls.inspect(data_key)
+        return self.inspect(data_key)
 
-    @classmethod
     def import_file(
-        cls, data_key: str, source_path: str | Path, *, overwrite: bool = False
+        self, data_key: str, source_path: str | Path, *, overwrite: bool = False
     ) -> ArbWaveformInfo:
         source = Path(source_path)
         if source.suffix.lower() != ".npz":
@@ -214,7 +194,7 @@ class ArbWaveformDatabase:
                 reason="unsupported_import_format",
                 data={"path": str(source)},
             )
-        path = cls.path_for(data_key)
+        path = self.path_for(data_key)
         if path.exists() and not overwrite:
             raise ArbWaveformError(
                 f"Arbitrary waveform {data_key!r} already exists",
@@ -223,18 +203,17 @@ class ArbWaveformDatabase:
             )
         data = load_npz(source)
         write_npz(path, data)
-        return cls.inspect(data_key)
+        return self.inspect(data_key)
 
-    @classmethod
     def create_from_formula(
-        cls,
+        self,
         data_key: str,
         recipe: FormulaRecipe | dict[str, object],
         *,
         overwrite: bool = False,
     ) -> None:
         """Persist a recipe and its arrays; inspect/preview are separate reads."""
-        path = cls.path_for(data_key)
+        path = self.path_for(data_key)
         if path.exists() and not overwrite:
             raise ArbWaveformError(
                 f"Arbitrary waveform {data_key!r} already exists",
@@ -244,20 +223,18 @@ class ArbWaveformDatabase:
         data = render_formula_recipe(recipe)
         write_npz(path, data)
 
-    @classmethod
     def update_formula(
-        cls, data_key: str, recipe: FormulaRecipe | dict[str, object]
+        self, data_key: str, recipe: FormulaRecipe | dict[str, object]
     ) -> None:
         """Replace an existing recipe asset without a post-write inspection."""
-        path = cls.path_for(data_key)
+        path = self.path_for(data_key)
         if not path.exists():
             raise _asset_not_found(data_key, path)
         data = render_formula_recipe(recipe)
         write_npz(path, data)
 
-    @classmethod
     def validate_formula(
-        cls, recipe: FormulaRecipe | dict[str, object]
+        self, recipe: FormulaRecipe | dict[str, object]
     ) -> FormulaValidationResult:
         try:
             data = render_formula_recipe(recipe)
@@ -270,17 +247,15 @@ class ArbWaveformDatabase:
             )
         return FormulaValidationResult(ok=True, data=data)
 
-    @classmethod
-    def delete(cls, data_key: str) -> None:
-        path = cls.path_for(data_key)
+    def delete(self, data_key: str) -> None:
+        path = self.path_for(data_key)
         if not path.exists():
             raise _asset_not_found(data_key, path)
         path.unlink()
 
-    @classmethod
-    def rename(cls, old_data_key: str, new_data_key: str) -> None:
-        old_path = cls.path_for(old_data_key)
-        new_path = cls.path_for(new_data_key)
+    def rename(self, old_data_key: str, new_data_key: str) -> None:
+        old_path = self.path_for(old_data_key)
+        new_path = self.path_for(new_data_key)
         if not old_path.exists():
             raise _asset_not_found(old_data_key, old_path)
         if new_path.exists():
@@ -328,7 +303,7 @@ class _BoundWaveformAssetInfo:
 
         Validate key grammar and file existence without reading its bytes or
         recipe. Raise ArbWaveformError for an invalid/missing key; propagate
-        filesystem errors. The current global DB does not affect this path.
+        filesystem errors. Other repositories do not affect this path.
         """
         _validate_data_key(data_key)
         path = self.directory / f"{data_key}.npz"

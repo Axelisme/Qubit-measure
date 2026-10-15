@@ -13,7 +13,7 @@ from pydantic import JsonValue
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
-from zcu_tools.gui.cfg.resource import (
+from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
     SourceBasis,
