@@ -55,13 +55,13 @@ def _payload() -> YamlMap:
             "same": _pulse(),
             "readout": {
                 "type": "readout/pulse",
-                "pulse_cfg": "same",
-                "ro_cfg": {
-                    "type": "readout/direct",
-                    "ro_ch": 0,
-                    "ro_length": 2.5,
-                    "ro_freq": 123.5,
-                },
+                "gen_ch": 0,
+                "nqz": 1,
+                "freq": 123.5,
+                "gain": 0.25,
+                "waveform": "flat",
+                "ro_ch": 0,
+                "ro_length": 2.5,
             },
         },
         "waveforms": {
@@ -157,8 +157,8 @@ def test_parameters_publish_canonical_specs_references_units_and_manual_sources(
     assert pulse.waveform.raise_waveform.length == 0.05
     readout = snapshot.get_module("C1.readout.main")
     assert isinstance(readout, PulseReadoutCfg)
-    assert readout.pulse_cfg.freq == 123.5
-    assert readout.ro_cfg.ro_length == 2.5
+    assert readout.freq == 123.5
+    assert readout.ro_length == 2.5
     module = entry.use_point("context").C1.module
     assert isinstance(module, FieldView)
     assert module.chosen == "C1.pulses.pi"

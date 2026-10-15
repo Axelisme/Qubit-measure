@@ -126,10 +126,10 @@ def test_scalar_frequency_matches_compiler_signed_and_matched(freq, ro_ch):
             ch=0,
             nqz=1,
             freq=freq,
-            ro_ch=ro_ch,
             gain=0.1,
             waveform=ConstWaveformCfg(length=0.25),
         ),
+        ro_ch=ro_ch,
     )
     prog = ModularProgramV2(soccfg, ProgramV2Cfg(), [pulse])
     expected = prog.get_pulse_param(pulse.pulse_id, "freq", as_array=False)

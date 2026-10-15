@@ -13,7 +13,6 @@ from .dependencies import CfgValidationContext
 from .inputs import CfgInputMap
 from .module import (
     BathResetSpec,
-    DirectReadoutCfg,
     ModuleCfg,
     ModuleSpec,
     NoneResetCfg,
@@ -58,7 +57,6 @@ def _persistent_raw(value: object) -> object:
                 PulseResetSpec,
                 TwoPulseResetSpec,
                 BathResetSpec,
-                DirectReadoutCfg,
                 NoneResetCfg,
                 FlatTopWaveformSpec,
                 ConstWaveformCfg,
@@ -147,11 +145,11 @@ def _expand_module(
     try:
         data = TypeAdapter(dict[str, object]).validate_python(_isolated_raw(raw))
         kind = data.get("type")
-        if kind == "pulse" and "waveform" in data:
+        if kind in ("pulse", "readout/pulse") and "waveform" in data:
             data["waveform"] = _isolated_raw(
                 _expand_waveform(data["waveform"], context, root, chain)
             )
-        elif kind in ("readout/pulse", "reset/pulse") and "pulse_cfg" in data:
+        elif kind == "reset/pulse" and "pulse_cfg" in data:
             data["pulse_cfg"] = _isolated_raw(
                 _expand_module(
                     data["pulse_cfg"], context, root, chain, expected="pulse"

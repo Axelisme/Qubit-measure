@@ -275,6 +275,7 @@ RO_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
     ),
     result_type=AutoOptResult,
     cfg_type=AutoOptCfg,
+    cfg_schema_version="2.0",
     tag="twotone/ge/ro_optimize/auto",
     result_builder=_build_auto_opt_result,
     result_validator=_validate_auto_opt_result,

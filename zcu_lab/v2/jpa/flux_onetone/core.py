@@ -85,7 +85,7 @@ class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
         result_type=OneToneFluxResult,
         cfg_type=OneToneFluxCfg,
         tag="jpa/flux_onetone",
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
     )
 
     def run(self, cfg: OneToneFluxCfg, *, context: RunContext) -> OneToneFluxResult:
@@ -98,7 +98,7 @@ class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
         freqs = sweep2array(
             cfg.sweep.freq,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules.readout.pulse_cfg.ch},
+            {"soccfg": soccfg, "gen_ch": modules.readout.gen_ch},
             allow_array=True,
         )
 

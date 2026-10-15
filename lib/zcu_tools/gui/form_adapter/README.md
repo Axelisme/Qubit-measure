@@ -1,6 +1,6 @@
 # gui/form_adapter — 從 core cfg 生成 Form
 
-**Last updated:** 2026-10-15，單層描述、captured factory 與 Pulse 表單屏蔽範圍縮減
+**Last updated:** 2026-10-15，單層描述、平鋪 Readout 與必填通道
 
 本 package 是 GUI 的 Qt-free 前端框架。它把 core cfg 宣告與作者寫的起始樹翻譯成 `gui.form` 的 `FormModel`，再把表單結果轉回驗證過的 core cfg。它供 measure、workflows、library 與 writeback 的表單定義共用。Measure 的註冊、protocol 與分頁 Form resource 使用 `Form`，workflows 的手寫 plan 表單使用 `ModuleInputField`。
 
@@ -19,7 +19,7 @@
 生成器擁有兩條翻譯政策，host 與 `gui.form` 不重做：
 
 - `FieldMeta` 的 label、unit、decimals、description、group 轉成 `Display`，core 欄位與 module 欄位共用同一個翻譯。被鎖定的欄位是單值 Literal，不帶 decimals。Sweep 的 decimals 只傳到生成 LinRange 的 start／stop float 欄位，不套外層 model 或 n。
-- 生成 module 欄位時，選填的 `desc` 與 `ro_ch` 不在 model、input、description 與寫入路徑。`to_cfg` 驗證成 Spec 時由 Spec 預設補回。從 library 複製成 inline 或 `input_from_spec` 時，這些欄位的原值被丟棄，所以編輯後會變回預設。必填且沒有預設的欄位，例如 `DirectReadoutCfg.ro_ch`，照常可編輯。範本 seed 這些欄位時，註冊入口拒絕，訊息寫出 template id 與 seed 路徑；`to_cfg` 只由 Spec 預設補回。其他欄位的字串 seed 照舊是字面值。目前沒有露出覆寫機制。
+- 生成 module 欄位時，選填的 `desc` 不在 model、input、description 與寫入路徑。`to_cfg` 驗證成 Spec 時由 Spec 預設補回。從 library 複製成 inline 或 `input_from_spec` 時，原 description 被丟棄，所以編輯後會變回預設。Readout 的必填通道照常可編輯；Pulse cfg 不保存 `ro_ch`、`mux_*`、`mask` 或 `outsel`。範本 seed 屏蔽欄位時，註冊入口拒絕，訊息寫出 template id 與 seed 路徑；`to_cfg` 只由 Spec 預設補回。其他欄位的字串 seed 照舊是字面值。目前沒有露出覆寫機制。
 
 生成的 `options(env)` 宣告可留空欄位的 None、依持久 Spec family 篩選的 captured library keys，以及每個可編輯 Inline kind。只有結構 tag 的 kind 不列為 Inline。所有 key input 使用 `{"kind": "ref", "name": key}`，inline 使用 `{"kind": "inline", "module": content}`，可留空時也接受 null。Options 的 value 只帶 key 或所選 kind 的 tag。fields 指向該 kind 的 wrapper 子表單，describe 所選欄位才列 children，不重複固定 tag。Ref 選項不帶 fields，也不顯示 entry 內容。普通換分支使用 `defaults(env)` 的 fresh 範本／型別初值，不接收 previous、不複製來源，也不保留其他 kind 的草稿。
 
@@ -27,7 +27,7 @@
 
 持久 Spec、範本 seed 與 lock 路徑仍使用原欄位名稱，不含 wrapper。生成器在 input 邊界加入 wrapper，`to_cfg` 去掉 wrapper，保留 child key 字串。Nested ref 使用 core 的 `KeyRef`，不限制 choices，也不新增 captured source 檢查。Core module ref 仍使用 `ModuleRef` 並檢查固定 library。兩種 ref 的 name 都只接受 literal key，不求 Expr。
 
-Readout 的 ADC 推導由 `PulseReadoutSpec.derive_input_fields` 擁有。生成器將 input 投影回持久形狀後呼叫它，保留其他 invalid leaves。既有 Spec validator 使用同一份推導。
+Readout 直接編輯平鋪的 generator 與 ADC 欄位。`gen_ch` 與 `ro_ch` 必填且可編輯；一般 Pulse 沒有 `ro_ch`。單一 `freq` 同時供兩者使用，不從其他欄位推導通道或補值。Waveform 仍可保留 child library key。
 
 Template／Slot 節點在 host 呼叫 `Form.bind_templates(catalog, adapter=...)` 後才解析。Measure 在 Open／Reset 捕捉來源，呼叫 adapter 的 `make_form(ctx)`，再綁定 Registry 的範本目錄。註冊與 reload 不呼叫 factory，也不預檢範本。範本目錄的格式在 `cfg_model`，真實範本表在 `zcu_lab`。
 
@@ -44,3 +44,5 @@ Module、seed、Display 與 annotation 翻譯放在私有模組 `_modules.py`、
 `gui.form` 是通用 Pydantic 輸入核心，不認得 core cfg 推導。推導與 module materialization 放在本 package，不放回 `gui.form`。
 
 設計背景見 [ADR-0073 measure 表單推導](../../../../docs/adr/0073-measure-form-derivation.md) 與 [`gui/form` README](../form/README.md)。
+
+Readout 的跨 owner 契約見 [ADR-0074](../../../../docs/adr/0074-flat-readout-module.md)。

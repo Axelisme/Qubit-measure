@@ -106,6 +106,7 @@ class RabiCheckExp(PersistableExperiment[RabiCheckResult, RabiCheckCfg]):
         z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=RabiCheckResult,
         cfg_type=RabiCheckCfg,
+        cfg_schema_version="2.0",
         tag="twotone/reset/rabi_check",
     )
 

@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-07 — swept pulse blocking timing
+**Last updated:** 2026-10-15 — flat readout and runtime ADC matching
 
 High-level cheat-sheet for `program/v2/modules/`. Read before touching this
 package. Implementation detail belongs in code and tests; this file records module
@@ -23,6 +23,19 @@ without leaking hardware register choreography into experiment classes.
   `0..2^32-1` word range; storage maps those words onto the signed int32 dmem
   representation while preserving the hardware bit pattern. It is intentionally
   uncompressed because consumers care about the exact word loaded into a register.
+
+## Readout configuration
+
+`PulseReadoutCfg` owns flat generator/ADC settings and a native waveform. One
+semantic `freq` configures both channels. `PulseReadout` declares and schedules
+the ADC itself, sends configuration at the module start, triggers at
+`trig_offset`, and plays the generator at `pre_delay`. Blocking covers both the
+ADC window and generator playback including `post_delay`, with clock rounding.
+
+`Pulse` takes optional runtime `ro_ch` for QICK frequency matching. That channel
+is not a cfg field. `PulseRegistry` includes it in hardware-definition identity,
+so unpaired playback and ADC channels 0 and 1 cannot share a definition by
+accident. Mixer declaration receives the channel only when mixing is configured.
 
 ## Readout Runtime Words
 
@@ -83,3 +96,5 @@ Scalar and pre/post-delay timing keep their existing rules.
 - A module that loads a register does not by itself define how a later pulse,
   readout, or simulator interprets that register. Add explicit consuming module
   contracts for those cases instead of relying on name conventions.
+
+Readout 的跨 owner 契約見 [ADR-0074](../../../../../docs/adr/0074-flat-readout-module.md)。

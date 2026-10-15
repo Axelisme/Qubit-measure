@@ -82,6 +82,7 @@ class AccPhaseExp(PersistableExperiment[AccPhaseResult, AccPhaseCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=AccPhaseResult,
         cfg_type=AccPhaseCfg,
+        cfg_schema_version="2.0",
         tag="fastflux/distortion/acc_phase",
     )
 

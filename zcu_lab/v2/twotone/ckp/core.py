@@ -284,6 +284,7 @@ class CKP_Exp(PersistableExperiment[CKP_Result, CKP_Cfg]):
         z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=CKP_Result,
         cfg_type=CKP_Cfg,
+        cfg_schema_version="2.0",
         tag="twotone/ge/ckp",
     )
 

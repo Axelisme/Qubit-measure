@@ -18,9 +18,9 @@ def make_form(ctx: FormContext) -> Form[LookbackCfg]:
                 "readout": Template(
                     "readout",
                     set={
-                        "pulse_cfg.gain": 1.0,
-                        "ro_cfg.ro_length": 1.5,
-                        "ro_cfg.trig_offset": Expr("$resonator.ext.time_of_fly - 0.1"),
+                        "gain": 1.0,
+                        "ro_length": 1.5,
+                        "trig_offset": Expr("$resonator.ext.time_of_fly - 0.1"),
                     },
                 ),
             },

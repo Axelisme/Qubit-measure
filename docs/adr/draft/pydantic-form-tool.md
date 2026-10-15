@@ -53,7 +53,7 @@ Editor 預設直接呼叫 `FormState.write`。Host 需要在寫入前檢查或�
 
 Branch switch 先呼叫新分支的 fresh defaults，expression defaults 照 `default_input` 的規則算成值。它不繼承舊分支的同名欄位，明送內容最後覆蓋。Discriminator 使用新分支的普通 typed tag。它是結構 selector，決定子 model 的形狀與 branch defaults，不是延後求值的 value leaf。Core description 不提供 expression 能力，editor 不提供 expression mode，字串與 numeric selector 遵守同一規則。沒有 branch factory registry。
 
-只有一個合法值的 `Literal` 沒有可選或可算的內容。Editor 把它畫成唯讀文字，沒有下拉與 expression 模式；core description 回 fixed／fixed_value，expression=false。Model 不經 union selector 到達時，例如單一 model 欄位或 nullable model，它身為 tagged union branch 的 tag 只剩一個值，是固定的結構 tag。Description 把這個 tag 標成 `hidden`，editor 不畫它，值照常留在 input 並驗證。Branch 身分來自本表單、ModuleInput 可達的 tagged union，也涵蓋 branch 的子類別，例如單獨使用的 `LinRange.kind`，以及 inline readout 的 `ro_cfg.type`。在 union 位置的 tag 照舊是 selector。
+只有一個合法值的 `Literal` 沒有可選或可算的內容。Editor 把它畫成唯讀文字，沒有下拉與 expression 模式；core description 回 fixed／fixed_value，expression=false。Model 不經 union selector 到達時，例如單一 model 欄位或 nullable model，它身為 tagged union branch 的 tag 只剩一個值，是固定的結構 tag。Description 把這個 tag 標成 `hidden`，editor 不畫它，值照常留在 input 並驗證。Branch 身分來自本表單、ModuleInput 可達的 tagged union，也涵蓋 branch 的子類別，例如單獨使用的 `LinRange.kind`。在 union 位置的 tag 照舊是 selector。
 
 核心在 `default_input` 與 FormInput 入口全樹拒絕未標 tag 的 `str | Model`，包含 nullable、alias、containers 與 inactive branches。錯誤指名欄位並要求 tagged ref／inline。持久 Spec 仍可保存 child key 字串，生成器在 input 邊界加 wrapper，轉回持久 Spec 時去掉 wrapper。核心不豁免 Spec，也不依賴生成器。
 

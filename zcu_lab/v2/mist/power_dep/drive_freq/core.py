@@ -76,6 +76,7 @@ class DriveFreqExp(PersistableExperiment[DriveFreqResult, DriveFreqCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=DriveFreqResult,
         cfg_type=DriveFreqCfg,
+        cfg_schema_version="2.0",
         tag="mist/",
     )
 

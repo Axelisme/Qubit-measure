@@ -33,7 +33,6 @@ from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     PulseCfg,
-    PulseReadoutCfg,
     ReadoutCfg,
     ResetCfg,
     SweepCfg,
@@ -125,6 +124,7 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
         z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=AmpRabiResult,
         cfg_type=AmpRabiCfg,
+        cfg_schema_version="2.0",
         tag="singleshot/amp_rabi",
     )
 
@@ -246,12 +246,7 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
             max_calls=options.max_calls,
         )
         readout = source.cfg.modules.readout if source.cfg is not None else None
-        if readout is None:
-            ro_length = None
-        elif isinstance(readout, PulseReadoutCfg):
-            ro_length = readout.ro_cfg.ro_length
-        else:
-            ro_length = readout.ro_length
+        ro_length = readout.ro_length if readout is not None else None
         ro_length_us = float(ro_length) if isinstance(ro_length, Real) else None
         plot_rabi_joint(
             gains,

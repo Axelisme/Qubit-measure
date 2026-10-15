@@ -78,6 +78,7 @@ class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=PowerDepResult,
         cfg_type=PowerDepCfg,
+        cfg_schema_version="2.0",
         tag="mist/gain",
     )
 

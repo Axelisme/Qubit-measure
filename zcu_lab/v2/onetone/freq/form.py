@@ -1,4 +1,4 @@
-"""One-tone starting values; the Run sweep owns both readout frequencies."""
+"""One-tone starting values; the Run sweep owns the shared generator/ADC frequency."""
 
 from zcu_tools.cfg_model import Expr, Hidden, Range, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
@@ -17,10 +17,8 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
                 "readout": Template(
                     "readout",
                     set={
-                        "pulse_cfg.gain": 0.05,
-                        "ro_cfg.ro_length": Expr(
-                            "$resonator.ext.default_probe_length - 0.1"
-                        ),
+                        "gain": 0.05,
+                        "ro_length": Expr("$resonator.ext.default_probe_length - 0.1"),
                     },
                 ),
             },

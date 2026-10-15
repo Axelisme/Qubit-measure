@@ -5,8 +5,9 @@ from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 # Form observations are lean; describe_form returns one layer from the exact
 # call-local candidate. Authored input and its persistence format are unchanged.
-WIRE_VERSION = 5
-GUI_VERSION = 5
+# Reject either earlier v5 shape: schema-based flat Readout or lazy nested Readout.
+WIRE_VERSION = 6
+GUI_VERSION = 6
 
 _RUN_ID = ParamSpec(
     "run_id",
