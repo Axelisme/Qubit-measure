@@ -9,7 +9,6 @@ drops a log call is caught.
 from __future__ import annotations
 
 import logging
-import time
 from pathlib import Path
 
 import pytest
@@ -25,6 +24,8 @@ from zcu_tools.gui.session.operation_handles import (
     OperationOutcome,
 )
 
+from tests.gui._qt_waits import qt_until
+
 # Reuse the same quiesce discipline as test_background: a queued cross-thread
 # delivery onto a freed C++ object segfaults, so drain every runner before GC.
 _LIVE_BG: list[BackgroundRunner] = []
@@ -34,18 +35,13 @@ _LIVE_BG: list[BackgroundRunner] = []
 def _quiesce_bg():
     yield
     for bg in _LIVE_BG:
-        bg.quiesce()
+        # Submitted Qt work has no remaining blocker; drain its worker and delivery.
+        assert bg.quiesce(timeout_ms=30_000)
     _LIVE_BG.clear()
 
 
-def _pump_until(qapp, predicate, timeout: float = 2.0) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return
-        qapp.processEvents()
-        time.sleep(0.005)
-    qapp.processEvents()
+def _pump_until(qapp, predicate) -> None:
+    qt_until(predicate)
 
 
 def test_operation_settle_failure_logs_warning(caplog) -> None:

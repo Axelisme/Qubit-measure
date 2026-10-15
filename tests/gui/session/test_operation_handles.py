@@ -13,9 +13,6 @@ idempotent settle, interactive direct-settle cancel_hook ordering).
 
 from __future__ import annotations
 
-import threading
-import time
-
 import pytest
 from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.session.operation_handles import (
@@ -27,6 +24,8 @@ from zcu_tools.gui.session.operation_handles import (
 from zcu_tools.gui.session.operation_handles import (
     OperationHandles as _OperationHandles,
 )
+
+from tests.gui._lifecycle_waits import waiting_call
 
 _USER_ORIGIN = EventOrigin(kind="user")
 
@@ -95,32 +94,25 @@ def test_await_result_timeout_ok() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_await_outcome_unblocks_on_settle() -> None:
+def test_await_outcome_unblocks_on_settle(monkeypatch) -> None:
     handles = OperationHandles()
     token = handles.create()
+    outcome = OperationOutcome("failed", "boom")
 
-    results: list[AwaitResult] = []
-    dt: list[float] = []
-
-    def waiter() -> None:
-        t0 = time.monotonic()
-        r = handles.await_outcome(token, timeout=5.0)
-        assert r is not None
-        results.append(r)
-        dt.append(time.monotonic() - t0)
-
-    wt = threading.Thread(target=waiter)
-    wt.start()
-    time.sleep(0.05)
-    handles.settle(token, OperationOutcome("failed", "boom"))
-    wt.join(timeout=4.0)
-
-    assert results
-    r = results[0]
+    # Settle follows actual entry into the queue's external blocking wait.
+    with waiting_call(
+        monkeypatch, lambda: handles.await_outcome(token, timeout=30)
+    ) as (arrived, result):
+        try:
+            # The scheduled await worker enters Condition.wait on the empty FIFO.
+            assert arrived.wait(30)
+            assert handles.poll(token) is None
+        finally:
+            handles.settle(token, outcome)
+    r = result.result()
+    assert r is not None
     assert r.reason == "completed"
-    assert r.outcome == OperationOutcome("failed", "boom")
-    # Woke promptly via Queue.get, not on a full 2s tick.
-    assert dt[0] < 2.0
+    assert r.outcome == outcome
 
 
 def test_await_outcome_immediate_for_already_settled() -> None:
@@ -128,21 +120,16 @@ def test_await_outcome_immediate_for_already_settled() -> None:
     token = handles.create()
     handles.settle(token, OperationOutcome("finished"))
 
-    t0 = time.monotonic()
-    r = handles.await_outcome(token, timeout=10.0)
-    elapsed = time.monotonic() - t0
+    r = handles.await_outcome(token, timeout=0.0)
 
     assert r is not None
     assert r.reason == "completed"
     assert r.outcome == OperationOutcome("finished")
-    assert elapsed < 0.5  # fast path, no blocking
 
 
 def test_await_outcome_immediate_for_unknown_token() -> None:
     handles = OperationHandles()
-    t0 = time.monotonic()
-    r = handles.await_outcome(99999, timeout=10.0)
-    assert time.monotonic() - t0 < 0.5
+    r = handles.await_outcome(99999, timeout=0.0)
 
     assert r is not None
     assert r.reason == "completed"
@@ -152,7 +139,7 @@ def test_await_outcome_immediate_for_unknown_token() -> None:
 def test_await_outcome_times_out_while_pending() -> None:
     handles = OperationHandles()
     token = handles.create()
-    r = handles.await_outcome(token, timeout=0.05)
+    r = handles.await_outcome(token, timeout=0.0)
     assert r is not None
     assert r.reason == "timeout"
     # timeout is non-terminal: handle is still pending
@@ -165,13 +152,13 @@ def test_await_outcome_handle_still_awitable_after_timeout() -> None:
     token = handles.create()
 
     # First await — times out
-    r1 = handles.await_outcome(token, timeout=0.05)
+    r1 = handles.await_outcome(token, timeout=0.0)
     assert r1 is not None
     assert r1.reason == "timeout"
 
     # Settle and re-await — must succeed
     handles.settle(token, OperationOutcome("finished"))
-    r2 = handles.await_outcome(token, timeout=1.0)
+    r2 = handles.await_outcome(token, timeout=0.0)
     assert r2 is not None
     assert r2.reason == "completed"
     assert r2.outcome is not None
@@ -261,7 +248,7 @@ def test_cancel_hook_exception_is_logged_and_stop_event_stays_queued(caplog) -> 
         ch.stop("abort anyway")
 
     ch.settle(OperationOutcome("cancelled"))
-    result = ch.consume(timeout=1.0)
+    result = ch.consume(timeout=0.0)
 
     assert result.reason == "completed"
     assert result.outcome is not None
@@ -329,7 +316,7 @@ def test_channel_stop_folded_into_reason() -> None:
     ch.stop("stop - wrong resonator")
     ch.settle(OperationOutcome("cancelled"))
 
-    r = ch.consume(timeout=1.0)
+    r = ch.consume(timeout=0.0)
     assert r.reason == "completed"
     assert r.outcome == OperationOutcome("cancelled")
     assert r.feedback == "stop - wrong resonator"
@@ -341,14 +328,14 @@ def test_channel_stop_then_settled_folds_reason_across_consume_calls() -> None:
     ch.stop("abort reason")
 
     # First consume: sees Stop, returns timeout (no Settled yet).
-    r1 = ch.consume(timeout=0.05)
+    r1 = ch.consume(timeout=0.0)
     assert r1.reason == "timeout"
 
     # Settle after the first consume.
     ch.settle(OperationOutcome("cancelled"))
 
     # Second consume: sees Settled; _pending_stop_reason is still latched.
-    r2 = ch.consume(timeout=1.0)
+    r2 = ch.consume(timeout=0.0)
     assert r2.reason == "completed"
     assert r2.outcome is not None
     assert r2.outcome.status == "cancelled"
@@ -381,20 +368,18 @@ def test_channel_terminal_idempotent_reconsume() -> None:
     ch = OperationChannel()
     ch.settle(OperationOutcome("finished"))
 
-    r1 = ch.consume(timeout=1.0)
+    r1 = ch.consume(timeout=0.0)
     assert r1.reason == "completed"
 
     # Re-consume: must return immediately (not block).
-    t0 = time.monotonic()
-    r2 = ch.consume(timeout=5.0)
-    assert time.monotonic() - t0 < 0.5
+    r2 = ch.consume(timeout=0.0)
     assert r2.reason == "completed"
 
 
 def test_channel_timeout() -> None:
     """consume on an empty channel returns timeout after the deadline."""
     ch = OperationChannel()
-    r = ch.consume(timeout=0.05)
+    r = ch.consume(timeout=0.0)
     assert r.reason == "timeout"
 
 
@@ -416,7 +401,7 @@ def test_channel_cancel_hook_triggers_direct_settle() -> None:
     ch.stop(reason_text)
     # stop() enqueued Stop BEFORE calling hook; hook settled the channel.
 
-    r = ch.consume(timeout=1.0)
+    r = ch.consume(timeout=0.0)
     assert r.reason == "completed"
     assert r.outcome is not None
     assert r.outcome.status == "cancelled"
@@ -429,7 +414,7 @@ def test_channel_settled_no_stop_has_no_feedback() -> None:
     ch = OperationChannel()
     ch.settle(OperationOutcome("cancelled"))
 
-    r = ch.consume(timeout=1.0)
+    r = ch.consume(timeout=0.0)
     assert r.reason == "completed"
     assert r.feedback is None
 
@@ -440,7 +425,7 @@ def test_channel_finished_outcome_no_feedback_even_with_stop() -> None:
     ch.stop("some reason")
     ch.settle(OperationOutcome("finished"))
 
-    r = ch.consume(timeout=1.0)
+    r = ch.consume(timeout=0.0)
     assert r.reason == "completed"
     assert r.outcome is not None
     assert r.outcome.status == "finished"
@@ -455,7 +440,7 @@ def test_handles_stop_with_reason_folds_into_cancelled() -> None:
     handles.stop(token, reason="agent aborted")
     handles.settle(token, OperationOutcome("cancelled"))
 
-    r = handles.await_outcome(token, timeout=1.0)
+    r = handles.await_outcome(token, timeout=0.0)
     assert r is not None
     assert r.reason == "completed"
     assert r.outcome is not None

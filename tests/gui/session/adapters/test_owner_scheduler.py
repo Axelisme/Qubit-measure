@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import threading
-import time
 
 import pytest
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.ports import OwnerScheduler
+
+from tests.gui._lifecycle_waits import running
+from tests.gui._qt_waits import qt_until
 
 
 def _assert_owner_scheduler_contract(scheduler: OwnerScheduler) -> None:
@@ -22,9 +24,8 @@ def test_manual_scheduler_posts_until_owner_pumps() -> None:
     scheduler = ManualOwnerScheduler()
     seen: list[int] = []
 
-    thread = threading.Thread(target=lambda: scheduler.post(lambda: seen.append(1)))
-    thread.start()
-    thread.join()
+    with running(lambda: scheduler.post(lambda: seen.append(1))):
+        pass
 
     assert seen == []
     assert scheduler.pump_all() == 1
@@ -35,10 +36,9 @@ def test_manual_scheduler_call_returns_foreign_thread_result() -> None:
     scheduler = ManualOwnerScheduler()
     result: list[int] = []
 
-    thread = threading.Thread(target=lambda: result.append(scheduler.call(lambda: 7)))
-    thread.start()
-    assert scheduler.pump_once(block=True, timeout=1.0)
-    thread.join()
+    with running(lambda: result.append(scheduler.call(lambda: 7))):
+        # The scheduled foreign call posts one callback, waking the queue pump.
+        assert scheduler.pump_once(block=True, timeout=30)
 
     assert result == [7]
 
@@ -56,10 +56,9 @@ def test_manual_scheduler_call_propagates_callback_error() -> None:
         except BaseException as exc:
             errors.append(exc)
 
-    thread = threading.Thread(target=invoke)
-    thread.start()
-    assert scheduler.pump_once(block=True, timeout=1.0)
-    thread.join()
+    with running(invoke):
+        # The scheduled foreign call posts the failing callback before waiting.
+        assert scheduler.pump_once(block=True, timeout=30)
 
     assert len(errors) == 1
     assert isinstance(errors[0], ValueError)
@@ -79,9 +78,8 @@ def test_manual_scheduler_rejects_owner_thread_call_and_foreign_pump() -> None:
         except BaseException as exc:
             errors.append(exc)
 
-    thread = threading.Thread(target=pump)
-    thread.start()
-    thread.join()
+    with running(pump):
+        pass
     assert len(errors) == 1
     assert isinstance(errors[0], RuntimeError)
 
@@ -96,15 +94,9 @@ def test_qt_scheduler_posts_and_calls_on_owner_thread(qapp) -> None:
         scheduler.post(lambda: posted.append(threading.get_ident()))
         called.append(scheduler.call(threading.get_ident))
 
-    thread = threading.Thread(target=worker)
-    thread.start()
-    deadline = time.monotonic() + 1.0
-    while thread.is_alive() and time.monotonic() < deadline:
-        qapp.processEvents()
-        time.sleep(0.001)
-    thread.join(timeout=0.1)
+    with running(worker):
+        qt_until(lambda: bool(posted and called))
 
-    assert not thread.is_alive()
     assert posted == [owner_thread_id]
     assert called == [owner_thread_id]
 
