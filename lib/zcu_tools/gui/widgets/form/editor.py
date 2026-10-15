@@ -26,7 +26,8 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
-from ._controls import ROW_SPACING, FieldRow, GroupBlock, LocalText
+from ._controls import FieldRow, GroupBlock, LocalText
+from ._fold import ROW_SPACING
 from ._view import FieldView, project_field
 
 
