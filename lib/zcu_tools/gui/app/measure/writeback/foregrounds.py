@@ -1,7 +1,7 @@
 """Palette-aware foreground declarations shared by the ledger and its editors."""
 
 from collections.abc import Callable
-from weakref import WeakKeyDictionary, ref
+from weakref import ref
 
 from PyQt6 import sip
 from qtpy.QtGui import QColor
@@ -15,15 +15,13 @@ class ThemedForegrounds:
 
     owner supplies the background palette passed to every colour function.
     Use on the Qt GUI thread; the caller invokes refresh after palette changes.
-    Widgets are weakly held; refresh drops any destroyed Qt objects still held
-    by Python callers.
+    refresh drops destroyed Qt objects. Keep widgets registered until then so
+    pending-delete children also follow palette changes.
     """
 
     def __init__(self, owner: QWidget) -> None:
         self._owner = ref(owner)
-        self._colours: WeakKeyDictionary[QWidget, Callable[[QWidget], QColor]] = (
-            WeakKeyDictionary()
-        )
+        self._colours: dict[QWidget, Callable[[QWidget], QColor]] = {}
 
     def set(self, widget: QWidget, colour: Callable[[QWidget], QColor]) -> None:
         """Record or replace widget's colour function and apply it using owner.
