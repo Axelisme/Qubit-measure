@@ -254,6 +254,33 @@ def test_restored_focused_draft_commits_once_on_normal_focus_loss(
         qapp.processEvents()
 
 
+def test_replacing_a_focused_branch_does_not_commit_retired_text(qapp: QApplication) -> None:
+    env = FormEnv()
+    state = FormState(LazyForm.default_input(env))
+    batches: list[dict[FormWritePath, JsonValue]] = []
+    editor = FormEditor(
+        state, env, write=lambda batch: batches.append(dict(batch)),
+        run_command=lambda _path, _name: None,
+    )
+    try:
+        editor.show()
+        qapp.processEvents()
+        field = text(editor, "branch.one")
+        field.setFocus()
+        assert field.hasFocus()
+        field.selectAll()
+        type_text(field, "7")
+        state.write({("branch",): {"kind": "second"}}, env)
+        qapp.processEvents()
+        assert batches == []
+        assert state.input.data["branch"] == {"kind": "second", "two": 2.0}
+        assert float(text(editor, "branch.two").text()) == 2.0
+    finally:
+        editor.detach()
+        editor.deleteLater()
+        qapp.processEvents()
+
+
 @pytest.mark.parametrize("operation", ["option", "nullable"])
 def test_shape_change_keeps_unrelated_widgets_and_fold_state(
     view: tuple[FormEditor[LazyForm], FormState[LazyForm]],
