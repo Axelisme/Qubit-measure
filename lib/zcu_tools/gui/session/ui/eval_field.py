@@ -24,6 +24,7 @@ from zcu_tools.gui.session.expression import (
     coerce_eval_result,
     evaluate_numeric_expr,
 )
+from zcu_tools.gui.widgets import error_colour, secondary_colour, set_foreground
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
@@ -92,6 +93,9 @@ class EvalNumericField(QWidget):
         self._line_edit.setVisible(False)
         layout.addWidget(self._line_edit, stretch=1)
         self._ghost = QLabel()
+        font = self._ghost.font()
+        font.setItalic(True)
+        self._ghost.setFont(font)
         make_label_selectable(self._ghost)
         self._ghost.setVisible(False)
         layout.addWidget(self._ghost)
@@ -226,15 +230,15 @@ class EvalNumericField(QWidget):
                 self._ghost.setToolTip(
                     f"out of range [{self._minimum}, {self._maximum}]"
                 )
-                self._ghost.setStyleSheet("color: red; font-style: italic;")
+                set_foreground(self._ghost, error_colour(self))
             else:
                 self._ghost.setText(text)
                 self._ghost.setToolTip("")
-                self._ghost.setStyleSheet("color: gray; font-style: italic;")
+                set_foreground(self._ghost, secondary_colour(self))
         except Exception as exc:
             self._ghost.setText("= ?")
             self._ghost.setToolTip(str(exc))
-            self._ghost.setStyleSheet("color: red; font-style: italic;")
+            set_foreground(self._ghost, error_colour(self))
 
     # ------------------------------------------------------------------
     # Context menu (right-click toggle)

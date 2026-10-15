@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from qtpy.QtCore import Qt
-from qtpy.QtGui import QAction, QColor
+from qtpy.QtGui import QAction
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
@@ -21,6 +21,7 @@ from zcu_tools.gui.session.alias_presets import AliasPresets
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import ContextSourceUnavailableError
+from zcu_tools.gui.widgets import error_colour, secondary_colour
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 _EDIT_TRIGGERS = (
@@ -233,7 +234,7 @@ class AliasPanel(QWidget):
                 item = self._result_item(index)
                 item.setText(str(error))
                 item.setToolTip(str(error))
-                item.setForeground(QColor("red"))
+                item.setForeground(error_colour(self._table))
             return
         except FailedPreconditionError:
             # No entry or selected point: there is no applied projection to show.
@@ -242,10 +243,10 @@ class AliasPanel(QWidget):
             item = self._result_item(index)
             if not row.value:
                 item.setText("(unbound)")
-                item.setForeground(QColor("gray"))
+                item.setForeground(secondary_colour(self._table))
             elif row.error is not None:
                 item.setText(row.error)
-                item.setForeground(QColor("red"))
+                item.setForeground(error_colour(self._table))
             else:
                 item.setText(row.resolved or "")
                 item.setForeground(self._table.palette().text())

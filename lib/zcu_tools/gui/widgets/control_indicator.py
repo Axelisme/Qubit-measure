@@ -3,10 +3,12 @@
 from qtpy.QtWidgets import QPushButton, QWidget
 
 from zcu_tools.gui.control_identity import ControlIdentity, ControlStatus
-
-# Amber for a state that asks for attention: "Local locked" here, and app
-# field hints that share the indicator's palette.
-CAUTION_COLOR = "#a66b00"
+from zcu_tools.gui.widgets import (
+    accent_colour,
+    set_foreground,
+    success_colour,
+    warning_colour,
+)
 
 
 class ControlIndicator(QPushButton):
@@ -24,8 +26,8 @@ class ControlIndicator(QPushButton):
         """Display the main window's current holder projection."""
         if status.holder == "gui":
             self.setText("Local locked" if status.locked else "Local")
-            self.setStyleSheet(
-                f"color: {CAUTION_COLOR};" if status.locked else "color: #228844;"
+            set_foreground(
+                self, warning_colour(self) if status.locked else success_colour(self)
             )
             self.setToolTip(
                 "Unlock for agents" if status.locked else "Lock local control"
@@ -33,5 +35,5 @@ class ControlIndicator(QPushButton):
         else:
             presence = "online" if status.online else "offline"
             self.setText(f"Remote · {status.holder.removeprefix('rpc:')} · {presence}")
-            self.setStyleSheet("color: #286ac7;")
+            set_foreground(self, accent_colour(self))
             self.setToolTip("Take control back and lock Local")

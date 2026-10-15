@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QCoreApplication, QEvent, QPoint, Qt
+from qtpy.QtGui import QColor, QPalette
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -213,12 +214,12 @@ def _assert_ledger_panel(widget: WritebackWidget) -> None:
     if panel_layout is None:
         raise RuntimeError("Writeback panel has no Qt layout")
     assert panel.objectName() == "writebackPanel"
-    # rendered white background shared between panel and rows (palette)
-    panel_bg = panel.palette().color(panel.backgroundRole()).name().lower()
-    assert panel_bg == "#ffffff", f"panel bg {panel_bg}"
+    # Rendered Base background is shared between panel and rows.
+    panel_bg = panel.palette().color(panel.backgroundRole())
+    assert panel_bg == widget.palette().color(QPalette.ColorRole.Base)
     assert rows, "no rows rendered"
-    first_bg = rows[0].palette().color(rows[0].backgroundRole()).name().lower()
-    assert first_bg == "#ffffff", f"row bg {first_bg}"
+    first_bg = rows[0].palette().color(rows[0].backgroundRole())
+    assert first_bg == widget.palette().color(QPalette.ColorRole.Base)
     assert panel_bg == first_bg
     # container has no extra spacing, rows stack continuously with 1px border gap
     assert panel_layout.spacing() == 0
@@ -242,31 +243,31 @@ def _assert_ledger_panel(widget: WritebackWidget) -> None:
     # offscreen QT_QPA_PLATFORM=offscreen has devicePixelRatio 1.0; scale if hidpi
     dpr = panel_grab.devicePixelRatio()
     scale = int(dpr) if dpr != 1 else 1
-    outer_expected = "#d7dde7"
-    divider_expected = "#e8ecf2"
+    # QImage pixels quantize the palette's 16-bit channels to 8 bits.
+    outer_expected = QColor.fromRgba(
+        widget.palette().color(QPalette.ColorRole.Mid).rgba()
+    )
+    divider_expected = QColor.fromRgba(
+        widget.palette().color(QPalette.ColorRole.Midlight).rgba()
+    )
     # outer border — top-center and left-mid avoid rounded corners
-    assert (
-        img.pixelColor((w // 2) * scale, 0 * scale).name().lower() == outer_expected
-    ), f"outer top border {img.pixelColor((w // 2) * scale, 0).name().lower()}"
-    assert img.pixelColor(0 * scale, (h // 2) * scale).name().lower() == outer_expected
+    assert img.pixelColor((w // 2) * scale, 0 * scale) == outer_expected, (
+        f"outer top border {img.pixelColor((w // 2) * scale, 0).name().lower()}"
+    )
+    assert img.pixelColor(0 * scale, (h // 2) * scale) == outer_expected
     # adjacent-row divider — horizontal 1px line at row boundary
     assert len(rows) >= 2
     y_div = rows[1].pos().y() - 1
     assert 0 <= y_div < h, f"divider y {y_div} out of {h}"
-    assert (
-        img.pixelColor((w // 2) * scale, y_div * scale).name().lower()
-        == divider_expected
+    assert img.pixelColor((w // 2) * scale, y_div * scale) == divider_expected
+    assert img.pixelColor((w // 4) * scale, y_div * scale) == divider_expected
+    # Interior pixels use Base rather than the border colour.
+    assert img.pixelColor((w // 2) * scale, 1 * scale) == widget.palette().color(
+        QPalette.ColorRole.Base
     )
-    assert (
-        img.pixelColor((w // 4) * scale, y_div * scale).name().lower()
-        == divider_expected
-    )
-    # sanity: interior pixels are white, not border
-    assert img.pixelColor((w // 2) * scale, 1 * scale).name().lower() == "#ffffff"
-    assert (
-        img.pixelColor((w // 2) * scale, (y_div + 1) * scale).name().lower()
-        == "#ffffff"
-    )
+    assert img.pixelColor(
+        (w // 2) * scale, (y_div + 1) * scale
+    ) == widget.palette().color(QPalette.ColorRole.Base)
 
 
 def test_writeback_compact_ledger_target_only_centered_and_equal_actions(qapp):

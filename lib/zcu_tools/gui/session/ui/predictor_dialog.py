@@ -47,6 +47,7 @@ from zcu_tools.gui.session.ui.predictor_cache import (
     PredictorSnapshotCodec,
 )
 from zcu_tools.gui.session.ui.predictor_canvas import PredictorCurveCanvas
+from zcu_tools.gui.widgets import error_colour, set_foreground, success_colour
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.gui.widgets.spinbox import FiniteFloatSpinBox, TrimDoubleSpinBox
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
@@ -1700,5 +1701,6 @@ class PredictorDialog(QDialog):
 
     def _set_status(self, msg: str, error: bool = False) -> None:
         self._status_label.setText(msg)
-        color = "red" if error else "green"
-        self._status_label.setStyleSheet(f"color: {color};")
+        set_foreground(
+            self._status_label, error_colour(self) if error else success_colour(self)
+        )
