@@ -52,3 +52,23 @@ def test_runtime_adc_channel_is_part_of_registry_identity():
         assert reg.register("first", cfg, ro_ch=ch) is True
         assert reg.register("again", cfg, ro_ch=ch) is False
     assert reg.count == 3
+
+
+def test_runtime_adc_channel_reaches_generator_and_pulse(mock_prog):
+    from zcu_tools.program.v2.modules import Pulse
+
+    cfg = _make_cfg()
+    cfg.mixer_freq = 500.0
+    pulse = Pulse("mixed", cfg, ro_ch=1)
+    pulse.init(mock_prog)
+    assert mock_prog.only("declare_gen").kwargs["ro_ch"] == 1
+    assert mock_prog.only("add_pulse").kwargs["ro_ch"] == 1
+
+
+def test_runtime_adc_channel_without_mixer_only_matches_pulse(mock_prog):
+    from zcu_tools.program.v2.modules import Pulse
+
+    pulse = Pulse("unmixed", _make_cfg(), ro_ch=0)
+    pulse.init(mock_prog)
+    assert mock_prog.only("declare_gen").kwargs["ro_ch"] is None
+    assert mock_prog.only("add_pulse").kwargs["ro_ch"] == 0

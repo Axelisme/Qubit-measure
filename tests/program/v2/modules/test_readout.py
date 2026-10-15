@@ -247,3 +247,28 @@ def test_native_readout_conversion_binds_arb_to_explicit_capture(tmp_path, flat_
     assert waveform.length == 0.5
     with pytest.raises(ValueError, match="assets"):
         ModuleCfgFactory.from_core(source, context=None)
+
+
+def test_swept_readout_schedule_and_blocking_window(mock_prog):
+    import numpy as np
+    from qick.asm_v2 import QickParam
+
+    cfg = _make_pulse_ro_cfg(ch=2, ro_ch=1)
+    cfg.pre_delay = QickParam(0.25, {"scan": 0.1})
+    cfg.trig_offset = QickParam(0.4, {"scan": 0.1})
+    cfg.set_param("ro_length", QickParam(2.0, {"scan": 0.5}))
+    ro = Readout("swept", cfg)
+    ro.init(mock_prog)
+    end = ro.run(mock_prog, t=QickParam(1.0, {"scan": 0.2}))
+    sent = mock_prog.only("send_readout_config").kwargs["t"]
+    trigger = mock_prog.only("trigger").kwargs["t"]
+    pulse = mock_prog.only("pulse").kwargs["t"]
+    loops = {"scan": 3}
+    np.testing.assert_allclose(sent.to_array(loops), [1.0, 1.1, 1.2])
+    np.testing.assert_allclose(trigger.to_array(loops), [1.4, 1.55, 1.7])
+    np.testing.assert_allclose(pulse.to_array(loops), [1.25, 1.4, 1.55])
+    assert isinstance(end, QickParam)
+    end_times = np.asarray(end.to_array(loops))
+    window_ends = np.array([3.4, 3.8, 4.2])
+    assert np.all(end_times >= window_ends)
+    assert np.all(end_times <= window_ends + 0.01)
