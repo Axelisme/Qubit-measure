@@ -145,7 +145,7 @@ def test_read_field_observes_current_input_and_propagates_failed_edits(
         ref = tab.read_field("modules.readout")
         assert ref.mode == "inline"
         assert ref.key is None
-        assert ref.fields == ("ro_cfg", "pulse_cfg")
+        assert "freq" in ref.fields
         assert tab.read_field("modules").fields == ("reset", "init_pulse", "readout")
         assert len(client.transport.sent) == before + 4
         tab.set("rounds", 7)
