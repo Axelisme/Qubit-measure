@@ -378,3 +378,21 @@ def test_invalid_module_ledger_explains_apply_gate_and_recovers(module_editor, q
     assert proposed.text() == "1 changes"
     assert "Select the items to write back" in hint.text()
     assert button(widget, "Apply Selected").isEnabled()
+
+
+def test_module_error_list_tracks_edits_while_already_invalid(module_editor, qapp):
+    from tests.gui.widgets.form._text_input import commit_text_on_focus_loss
+
+    _, dialog, _, _, _, _, _ = module_editor
+    error = dialog.findChild(QLabel, "writebackEditError")
+    freq = dialog.findChild(QLineEdit, "form.input.freq")
+    gain = dialog.findChild(QLineEdit, "form.input.gain")
+    commit_text_on_focus_loss(freq, "bad-frequency")
+    qapp.processEvents()
+    commit_text_on_focus_loss(gain, "bad-gain")
+    qapp.processEvents()
+    assert "freq:" in error.text() and "gain:" in error.text()
+    commit_text_on_focus_loss(freq, "6002.0")
+    qapp.processEvents()
+    assert "freq:" not in error.text()
+    assert "gain:" in error.text()
