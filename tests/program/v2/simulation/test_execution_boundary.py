@@ -2,13 +2,14 @@
 
 import numpy as np
 import pytest
-from qick.asm_v2 import QickParam
+from qick.asm_v2 import AsmInst, QickParam
 from zcu_tools.core.simulation import ChannelSignals, RoundSignals
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.control import Repeat
 from zcu_tools.program.v2.modules.delay import Join, SoftDelay
+from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
@@ -40,6 +41,25 @@ def test_raw_program_body_rejected_instead_of_silently_ignoring_instructions(met
     prog = RawProgram(env.soccfg, ProgramV2Cfg(), modules=[readout("readout")])
     with pytest.raises(ValueError, match="RawProgram.*raw.*unsupported"):
         getattr(prog, method)(env.soc, progress=False)
+    assert not env.soc.binding.rounds
+
+
+def test_raw_loop_hook_rejected_before_any_backend_round():
+    env = white_noise(std_adc=0)
+    prog = ModularProgramV2(env.soccfg, ProgramV2Cfg(), modules=[readout("readout")], sweep=[("axis", 2)])
+    prog.append_loop_after("axis", AsmInst(inst={"CMD": "NOP"}, addr_inc=1))
+    prog.compile()
+    with pytest.raises(ValueError, match="axis.*raw.*unsupported"):
+        prog.acquire(env.soc, progress=False)
+    assert not env.soc.binding.rounds
+
+
+def test_unwired_generator_pulse_is_not_silently_accepted():
+    env = white_noise(std_adc=0, n_gens=2, routes=((0, 0),))
+    drive = PulseCfg(ch=1, nqz=1, freq=50, gain=0.2, waveform=ConstWaveformCfg(length=0.1)).build("unwired_drive")
+    prog = ModularProgramV2(env.soccfg, ProgramV2Cfg(), modules=[drive, readout("readout")])
+    with pytest.raises(ValueError, match="unwired_drive.*1.*bound"):
+        prog.acquire(env.soc, progress=False)
     assert not env.soc.binding.rounds
 
 
