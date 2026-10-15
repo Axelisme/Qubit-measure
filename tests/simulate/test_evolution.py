@@ -271,3 +271,25 @@ def test_complex_multilevel_lindblad_matches_independent_generator_exponential()
     assert_allclose(actual, expected, atol=2e-10, rtol=0)
     assert abs(np.trace(actual) - 1) <= 1e-10
     assert np.linalg.eigvalsh(actual).min() >= -1e-10
+
+
+def test_continuous_collapse_content_and_invalid_callback_are_not_frozen():
+    from zcu_tools.simulate.evolution import DensityState, Evolution, NumericModel
+
+    lowering = np.array([[0, 0.2j], [0, 0]], dtype=complex)
+    initial = np.diag([0, 1]).astype(complex)
+    base = model()
+    numeric = NumericModel(
+        "continuous-bath", base.basis, base.hamiltonian_ghz,
+        collapse_at=lambda t: (lowering * (1 + t / 8),),
+    )
+    actual = Evolution(numeric).evolve(DensityState(base.basis, initial), end_ns=8)
+    # Integral_0^8 .04*(1+t/8)^2 dt = .04*8*7/3.
+    excited = np.exp(-0.04 * 8 * 7 / 3)
+    assert_allclose(actual.density, np.diag([1 - excited, excited]), atol=2e-10, rtol=0)
+    invalid = NumericModel(
+        "invalid-bath", base.basis, base.hamiltonian_ghz,
+        collapse_at=lambda t: (lowering if t < 2 else lowering * np.nan,),
+    )
+    with pytest.raises(ValueError, match="finite"):
+        Evolution(invalid).evolve(DensityState(base.basis, initial), end_ns=8)
