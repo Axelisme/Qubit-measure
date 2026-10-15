@@ -4,7 +4,7 @@ from collections.abc import Callable, Iterator, Mapping
 
 import pytest
 from pydantic import JsonValue
-from qtpy.QtWidgets import QApplication, QCheckBox, QLabel, QLineEdit, QWidget
+from qtpy.QtWidgets import QApplication, QCheckBox, QLineEdit, QWidget
 from zcu_tools.gui.form import (
     FormEnv,
     FormErrors,
@@ -15,6 +15,7 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.widgets.form import FormEditor
 
+from tests.gui.widgets.form._field_errors import field_error
 from tests.gui.widgets.form._text_input import commit_text
 
 
@@ -121,11 +122,10 @@ def test_rejected_text_stays_typed_with_the_host_message_until_accepted(
     observed: list[bool] = []
     editor.validity_changed.connect(observed.append)
     text = child(editor, QLineEdit, f"form.input.{path}")
-    error = child(editor, QLabel, f"form.error.{path}")
     commit_text(text, "@{gain}")
     assert text.text() == "@{gain}"
     assert state.input.data[path] == ""
-    assert error.text() == "Unknown capture key @{gain}"
+    assert field_error(editor, path) == "Unknown capture key @{gain}"
     local = editor.local_parse_errors()
     assert isinstance(local, FormErrors)
     assert local.messages == {(path,): "Unknown capture key @{gain}"}
@@ -136,11 +136,11 @@ def test_rejected_text_stays_typed_with_the_host_message_until_accepted(
     editor.refresh(FormEnv())
     assert state.input.data["amount"] == 2.0
     assert text.text() == "@{gain}"
-    assert error.text() == "Unknown capture key @{gain}"
+    assert field_error(editor, path) == "Unknown capture key @{gain}"
 
     commit_text(text, "plain")
     assert state.input.data[path] == "plain"
-    assert error.text() == ""
+    assert field_error(editor, path) == ""
     assert editor.errors() is None
     assert observed == [False, True]
 
@@ -163,12 +163,12 @@ def test_rejected_checkbox_and_section_show_state_with_the_host_message(
     assert state.input.data == before
     assert not flag.isChecked()
     assert not enabled.isChecked()
-    assert child(editor, QLabel, "form.error.flag").text() == "Locked by the host"
-    assert child(editor, QLabel, "form.error.section").text() == "Locked by the host"
+    assert field_error(editor, "flag") == "Locked by the host"
+    assert field_error(editor, "section") == "Locked by the host"
     local = editor.local_parse_errors()
     assert isinstance(local, FormErrors)
     assert set(local.messages) == {("flag",), ("section",)}
 
     editor.discard_local_text()
     assert editor.errors() is None
-    assert child(editor, QLabel, "form.error.flag").text() == ""
+    assert field_error(editor, "flag") == ""

@@ -12,7 +12,6 @@ from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
-    QLabel,
     QLineEdit,
     QMenu,
     QWidget,
@@ -31,6 +30,7 @@ from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._form_context import captured_ext_env
 from tests.gui._user_input import type_text
+from tests.gui.widgets.form._field_errors import field_error
 from tests.gui.widgets.form._text_input import commit_text
 
 
@@ -360,9 +360,7 @@ def test_direct_mode_fills_a_computed_value_the_model_rejects(
     assert batches == [{(path,): direct}]
     assert state.input.data[path] == direct
     assert view.local_parse_errors() is None
-    error = child(view, QLabel, f"form.error.{path}")
-    assert message in error.text()
-    assert not error.isHidden()
+    assert message in field_error(view, path)
 
 
 @pytest.mark.parametrize(

@@ -49,6 +49,7 @@ from tests.gui.app.measure._synthetic import (
     SampleParams,
 )
 from tests.gui.app.measure.ui._qt_interactions import modal_action, wait_until
+from tests.gui.widgets.form._field_errors import field_error
 from tests.gui.widgets.form._text_input import commit_text_on_focus_loss as commit_text
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
@@ -440,8 +441,7 @@ def test_module_option_command_uses_captured_source_and_current_admission(
         assert not errors, f"Option commands must use the public editor route: {errors}"
         if busy:
             assert form.state.input.data == before
-            error = dialog.findChild(QLabel, "form.error.waveform")
-            assert error is not None and "busy" in error.text().lower()
+            assert "busy" in field_error(dialog, "waveform").lower()
             assert ctrl.writeback_control.get_writeback_applied_for_pane(tab_id, pane)[
                 "ml-1"
             ]
@@ -569,8 +569,7 @@ def test_busy_module_field_edit_is_rejected_and_dialog_keeps_authored_input(
     ctrl.set_running(tab_id, running=True)
     try:
         commit_text(_input(dialog, "gain"), "0.6")
-        error = dialog.findChild(QLabel, "form.error.gain")
-        assert error is not None and "busy" in error.text().lower()
+        assert "busy" in field_error(dialog, "gain").lower()
         assert form.state.input.data == before
         assert dialog.isVisible()
         assert _input(dialog, "freq").text() == "5100.125"

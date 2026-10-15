@@ -343,6 +343,8 @@ class WindowSession:
             self.harness.state,
             self.harness.services,
             self.harness.owner,
+            templates={},
+            alias_presets=None,
             registrations=self.source.catalog.attachments,
             loader=self.source.loader,
         )

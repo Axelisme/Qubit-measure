@@ -285,6 +285,7 @@ def test_app_injects_bounded_loader_and_reloads_without_rebuilding_session(
 ) -> None:
     source = ReloadSource(tmp_path)
     app = WorkflowsGuiBehavior(
+        templates={},
         registrations=source.build().attachments,
         alias_presets={"default": ALIAS_PRESET},
         loader=source.loader,

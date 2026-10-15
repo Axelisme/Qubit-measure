@@ -251,6 +251,8 @@ def test_invalid_apply_keeps_installed_rows_and_editable_draft(memory_session) -
     assert control.get_alias_rows() == original
     assert _cell(table, 0, 1).text() == "$resonator"
     assert _error(page)
+    error = _child(page, QLabel, "inspect.aliases.error")
+    assert error.textInteractionFlags() & Qt.TextInteractionFlag.TextSelectableByMouse
 
     _cell(table, 0, 1).setText("Q2")
     _button(page, "apply").click()
