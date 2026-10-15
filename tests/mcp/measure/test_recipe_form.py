@@ -296,9 +296,8 @@ def test_locked_outer_branch_keeps_inner_kind_editable(tmp_path: Path) -> None:
         capture=lambda aliases: TabFormSources(FormEnv()),
         mutation_allowed=lambda: True,
     )
-    gui.owner.write({("extras", "choice"): {
-        "kind": "inline", "module": {"kind": 1, "amount": 7.0},
-    }})
+    gui.owner.describe(("extras", "choice"))
+    assert gui.owner.preview().errors is None
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         outer = tab.read_field("extras.choice")
