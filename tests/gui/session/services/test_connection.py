@@ -27,7 +27,6 @@ from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
 from zcu_tools.gui.session.services.connection import (
-    ConnectMockRequest,
     ConnectRemoteRequest,
     SoCConnectionService,
 )
@@ -35,6 +34,19 @@ from zcu_tools.gui.session.services.progress import ProgressService
 
 from tests.gui._completion_helpers import on_connection_failed, on_connection_finished
 from tests.gui._progress_fakes import DirectProgressTransport
+
+
+@pytest.fixture(autouse=True)
+def offline_remote(monkeypatch):
+    import zcu_tools.qick_remote as remote
+    from zcu_tools.experiment.simulation import white_noise
+
+    def proxy(ip, port):
+        env = white_noise()
+        return env.soc, env.soccfg
+
+    monkeypatch.setattr(remote, "make_soc_proxy", proxy)
+
 
 # ---------------------------------------------------------------------------
 # Fakes (from test_operation_runner.py pattern)
@@ -75,14 +87,6 @@ class _FakeBg:
     def deliver_error(self, exc: Exception) -> None:
         assert self._on_error is not None
         self._on_error(exc)
-
-
-class _FakeProgress:
-    def make_factory(self, operation_id: int, owner_id: str) -> None:
-        return None
-
-    def discard_operation(self, operation_id: int) -> None:
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +139,7 @@ def test_start_connect_mock_emits_finished_and_updates_context(qapp):
     on_connection_finished(svc, loop.quit)
     on_connection_failed(svc, lambda msg: loop.quit())
 
-    svc.start_connect(ConnectMockRequest())
+    svc.start_connect(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
     loop.exec()
 
     assert svc.has_soc()
@@ -162,7 +166,7 @@ def test_connect_bumps_soc_not_context_version(qapp):
     on_connection_finished(svc, loop.quit)
     on_connection_failed(svc, lambda msg: loop.quit())
 
-    svc.start_connect(ConnectMockRequest())
+    svc.start_connect(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
     loop.exec()
 
     assert state.version.get("soc") == soc_before + 1
@@ -187,7 +191,7 @@ def test_connect_sync_mock_sets_soc_and_emits_payload(qapp):
     bus.subscribe(SocChangedPayload, lambda p: payloads.append(p))
 
     soc_before = state.version.get("soc")
-    soc, soccfg = svc.connect_sync(ConnectMockRequest())
+    soc, soccfg = svc.connect_sync(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
 
     assert soc is not None and soccfg is not None
     assert svc.has_soc()
@@ -195,7 +199,7 @@ def test_connect_sync_mock_sets_soc_and_emits_payload(qapp):
     # The shared _apply_connection side effects fired synchronously.
     assert state.version.get("soc") == soc_before + 1
     assert len(payloads) == 1
-    assert payloads[0].is_mock is True
+    assert payloads[0].is_mock is False
     # Lease released, no lingering active token.
     assert not gate.has_active(OperationKind.SOC_CONNECT)
     assert not svc.is_connect_active()
@@ -205,16 +209,15 @@ def test_successful_endpoint_changes_and_failed_reconnect_preserves_it(
     qapp, monkeypatch
 ):
     import zcu_tools.qick_remote as remote
-    from zcu_tools.program.v2.mocksoc import make_mock_soc
+    from zcu_tools.experiment.simulation import white_noise
 
     svc, _bg, _handles = _make_svc()
-    svc.connect_sync(ConnectMockRequest())
-    assert svc.is_mock_soc()
-    assert svc.connected_endpoint() == {"address": None, "port": None}
+    assert not svc.has_soc()
 
     def proxy(ip: str, port: int):
         assert (ip, port) == ("192.0.2.1", 8888)
-        return make_mock_soc()
+        env = white_noise()
+        return env.soc, env.soccfg
 
     monkeypatch.setattr(remote, "make_soc_proxy", proxy)
     svc.connect_sync(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
@@ -234,11 +237,12 @@ def test_successful_endpoint_changes_and_failed_reconnect_preserves_it(
 
 def test_gui_async_remote_connect_updates_the_successful_endpoint(qapp, monkeypatch):
     import zcu_tools.qick_remote as remote
-    from zcu_tools.program.v2.mocksoc import make_mock_soc
+    from zcu_tools.experiment.simulation import white_noise
 
     def proxy(ip: str, port: int):
         assert (ip, port) == ("192.0.2.3", 8000)
-        return make_mock_soc()
+        env = white_noise()
+        return env.soc, env.soccfg
 
     monkeypatch.setattr(remote, "make_soc_proxy", proxy)
     svc, background, _handles = _make_svc()
@@ -262,7 +266,7 @@ def test_connect_sync_rejects_concurrent_calls(qapp):
         note="existing connect",
     )
     with pytest.raises(OperationConflictError, match="soc_connect is active"):
-        svc.connect_sync(ConnectMockRequest())
+        svc.connect_sync(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
 
 
 def test_connect_sync_remote_failure_releases_lease_and_raises(qapp, monkeypatch):
@@ -311,7 +315,7 @@ def test_start_connect_rejects_concurrent_calls(qapp):
         note="existing connect",
     )
     with pytest.raises(OperationConflictError, match="soc_connect is active"):
-        svc.start_connect(ConnectMockRequest())
+        svc.start_connect(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
 
 
 def test_start_connect_remote_unsupported_request_raises(qapp):
@@ -336,7 +340,7 @@ def test_start_connect_rejected_while_run_active(qapp):
     )
 
     with pytest.raises(OperationConflictError, match="run is active"):
-        svc.start_connect(ConnectMockRequest())
+        svc.start_connect(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +407,7 @@ def test_soc_changed_subscriber_failure_releases_connection_lease(qapp):
     svc = SoCConnectionService(state, bus, gate, handles, runner)
 
     # start_connect registers the exclusion lease and submits to fake_bg
-    svc.start_connect(ConnectMockRequest())
+    svc.start_connect(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
     assert gate.has_active(OperationKind.SOC_CONNECT)
 
     # Drive the synchronous bg path: work() runs make_mock_soc, on_terminal is called
@@ -427,7 +431,7 @@ def test_cancel_token_does_not_interrupt_connect(qapp):
     gate = OperationGate(EventBus())
     svc, fake_bg, handles = _make_svc(gate=gate)
 
-    token = svc.start_connect(ConnectMockRequest())
+    token = svc.start_connect(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
     assert gate.has_active(OperationKind.SOC_CONNECT)
 
     # cancel does NOT raise, does NOT interrupt the in-flight work
@@ -446,7 +450,7 @@ def test_cancel_all_does_not_interrupt_connect(qapp):
     gate = OperationGate(EventBus())
     svc, fake_bg, handles = _make_svc(gate=gate)
 
-    svc.start_connect(ConnectMockRequest())
+    svc.start_connect(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
     assert gate.has_active(OperationKind.SOC_CONNECT)
 
     handles.cancel_all()

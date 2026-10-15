@@ -15,7 +15,9 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 def environment(**kwargs):
     name = "zcu_tools.experiment.simulation"
-    assert importlib.util.find_spec(name) is not None, "explicit environment API required"
+    assert importlib.util.find_spec(name) is not None, (
+        "explicit environment API required"
+    )
     return importlib.import_module(name).white_noise(**kwargs)
 
 
@@ -38,6 +40,13 @@ def program(env, *, reps=2, rounds=1, channels=(0,), samples=16):
     )
 
 
+def raw_of(prog):
+    raw = prog.get_raw()
+    if raw is None:
+        raise AssertionError("completed acquisition must retain raw buffers")
+    return raw
+
+
 def test_explicit_zero_noise_preserves_shapes_and_raw():
     env = environment(std_adc=0, seed=123)
     prog = program(env, rounds=2)
@@ -58,22 +67,22 @@ def test_gaussian_sum_scaling_and_reproducible_independent_acquires():
     env = environment(std_adc=20, seed=41)
     prog = program(env, reps=6000, samples=9)
     prog.acquire(env.soc, progress=False)
-    first = prog.get_raw()[0].copy()
+    first = raw_of(prog)[0].copy()
     assert abs(first.mean()) < 2
     assert 58 < first.std() < 62  # sqrt(9) * 20 ADC sum units
     prog.acquire(env.soc, progress=False)
-    assert not np.array_equal(first, prog.get_raw()[0])
+    assert not np.array_equal(first, raw_of(prog)[0])
     repeat = environment(std_adc=20, seed=41)
     replay = program(repeat, reps=6000, samples=9)
     replay.acquire(repeat.soc, progress=False)
-    np.testing.assert_array_equal(first, replay.get_raw()[0])
+    np.testing.assert_array_equal(first, raw_of(replay)[0])
 
 
 def test_decimated_companion_raw_uses_same_trace_and_adc_order():
     env = environment(std_adc=3, seed=91, n_gens=2, n_readouts=2)
     prog = program(env, channels=(1, 0), reps=3, samples=7)
     traces = prog.acquire_decimated(env.soc, progress=False)
-    raw = prog.get_raw()
+    raw = raw_of(prog)
     for trace, accumulated in zip(traces, raw, strict=True):
         np.testing.assert_array_equal(
             accumulated[:, 0, :], np.rint(trace.sum(axis=-2)).astype(np.int64)
@@ -112,7 +121,8 @@ def test_reentry_does_not_corrupt_original_rounds_and_stop_consumes_sequence():
 
     prog.acquire(env.soc, progress=False, round_hook=hook)
     assert observed == [1, 2]
-    assert len(prog.get_rounds()) == 2
+    rounds = prog.get_rounds()
+    assert rounds is not None and len(rounds) == 2
     prog.acquire(env.soc, progress=False)
     assert env.soc.binding.last_request.sequence == 1
     stop = Event()

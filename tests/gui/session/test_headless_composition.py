@@ -12,6 +12,7 @@ import pytest
 
 def test_session_core_connects_and_cancels_on_owner_thread(
     request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from zcu_tools.device.fake import FakeDevice
     from zcu_tools.gui.event_bus import BaseEventBus, EventOrigin
@@ -39,7 +40,7 @@ def test_session_core_connects_and_cancels_on_owner_thread(
     )
     from zcu_tools.gui.session.ports import ProgressEvent
     from zcu_tools.gui.session.services.build import build_session_services
-    from zcu_tools.gui.session.services.connection import ConnectMockRequest
+    from zcu_tools.gui.session.services.connection import ConnectRemoteRequest
     from zcu_tools.gui.session.services.progress import ProgressService
     from zcu_tools.gui.session.state import (
         DeviceState,
@@ -163,16 +164,25 @@ def test_session_core_connects_and_cancels_on_owner_thread(
     bus.subscribe(ConnectionFinishedPayload, record_connection)
     worker_threads: list[int] = []
 
-    success_token = session.soc_connection.start_connect(ConnectMockRequest())
+    import zcu_tools.qick_remote as remote
+    from zcu_tools.experiment.simulation import white_noise
+
+    env = white_noise()
+    monkeypatch.setattr(
+        remote, "make_soc_proxy", lambda ip, port: (env.soc, env.soccfg)
+    )
+    success_token = session.soc_connection.start_connect(
+        ConnectRemoteRequest(ip="192.0.2.1", port=8888)
+    )
     assert handles.live_count() == 1
     assert handles.poll(success_token) is None
     assert len(gate.snapshot()) == 1
-    assert gate.snapshot()[0].note == "connect SoC (mock)"
+    assert gate.snapshot()[0].note == "connect SoC (remote)"
     pump_until(lambda: handles.poll(success_token) is not None)
     success_outcome = handles.poll(success_token)
     assert success_outcome is not None and success_outcome.status == "finished"
     assert session.soc_connection.has_soc()
-    assert session.soc_connection.is_mock_soc()
+    assert not session.soc_connection.is_mock_soc()
     assert state.session_env.soc is not None
     assert state.session_env.soccfg is not None
     assert state.version.get("soc") == 1

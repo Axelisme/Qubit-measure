@@ -15,6 +15,7 @@ from matplotlib.figure import Figure
 from pydantic import Field
 from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QWidget
 from zcu_tools.datafile import RunSnapshot
+from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import (
     Done,
     InitEnv,
@@ -30,7 +31,6 @@ from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.form import Display, FormEnv, FormModel
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import PointUseRequest
-from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.resources.entry import ResultEntry
 
 from tests.experiment.workflows._engine_fakes import Plan, State, Tunables
@@ -270,7 +270,8 @@ def bind_point(harness: StartHarness, root: Path) -> ResultEntry:
 
 def install_soc(harness: StartHarness) -> None:
     """Publish a mock SoC directly in state, as a caller-owned connection would."""
-    soc, soccfg = make_mock_soc()
+    env = white_noise()
+    soc, soccfg = env.soc, env.soccfg
     harness.state.set_context(
         replace(harness.state.session_env, soc=soc, soccfg=soccfg)
     )

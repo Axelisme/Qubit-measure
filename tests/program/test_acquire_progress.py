@@ -6,11 +6,12 @@ from zcu_tools.gui.session.pbar_host import ProgressBar
 from zcu_tools.gui.session.ports import ProgressEvent, ProgressEventKind
 from zcu_tools.gui.session.services.progress import BoundProgressFactory
 from zcu_tools.program.v2.base import ProgramV2Cfg
-from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.progress_bar import use_pbar_factory
+
+from tests.program._acquisition_soc import make_acquisition_soc
 
 
 class RecordingTransport:
@@ -30,7 +31,7 @@ class RecordingTransport:
 
 
 def _acquire_two_records() -> None:
-    soc, soccfg = make_mock_soc()
+    soc, soccfg = make_acquisition_soc()
     program = ModularProgramV2(
         soccfg,
         ProgramV2Cfg(reps=500, rounds=1),
