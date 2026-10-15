@@ -27,9 +27,9 @@ from tests.gui._completion_helpers import (
     on_device_connected,
     on_device_operation_failed,
 )
+from tests.gui._qt_waits import qt_until
 from tests.gui.session.services._device_fakes import FakeDeviceRegistry
 from tests.gui.session.services._device_waits import DeviceWorkers
-from tests.gui.session.services._device_waits import drain_until as _drain_until
 
 _workers = DeviceWorkers()
 _bg = _workers.background
@@ -76,7 +76,7 @@ def _connect(
     svc.start_connect_device(
         ConnectDeviceRequest(type_name=type_name, name=name, address="")
     )
-    _drain_until(lambda: bool(connected or errors), label=f"connect {name}")
+    qt_until(lambda: bool(connected or errors), label=f"connect {name}")
     assert not errors
 
 

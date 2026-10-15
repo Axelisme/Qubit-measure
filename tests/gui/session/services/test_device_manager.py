@@ -39,9 +39,9 @@ from tests.gui._completion_helpers import (
     on_setup_failed,
     on_setup_finished,
 )
+from tests.gui._qt_waits import qt_until
 from tests.gui.session.services._device_fakes import FakeDeviceRegistry
 from tests.gui.session.services._device_waits import DeviceWorkers
-from tests.gui.session.services._device_waits import drain_until as _drain_until
 
 _workers = DeviceWorkers()
 _bg = _workers.background
@@ -88,7 +88,7 @@ def _connect(svc: DeviceService) -> None:
     svc.start_connect_device(
         ConnectDeviceRequest(type_name="FakeDevice", name="test_dev", address="none")
     )
-    _drain_until(lambda: bool(connected or errors), label="connect test_dev")
+    qt_until(lambda: bool(connected or errors), label="connect test_dev")
     assert not errors
 
 
@@ -125,7 +125,7 @@ def test_device_setup_cancel_emits_setup_cancelled(qapp):
     svc.start_setup_device(
         SetupDeviceRequest(name="test_dev", info=FakeDeviceInfo(address="none"))
     )
-    _drain_until(block.entered.is_set, label="setup driver entered")
+    qt_until(block.entered.is_set, label="setup driver entered")
     svc.cancel_device_operation("test_dev")
     assert block.stop_event is not None and block.stop_event.is_set()
     block.release.set()

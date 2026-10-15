@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
 
-from qtpy.QtCore import QCoreApplication, QEventLoop, QTimer
 from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
@@ -14,26 +12,7 @@ from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
 )
 
-
-def drain_until(condition: Callable[[], bool], *, label: str = "completion") -> None:
-    """Pump real owner deliveries until condition; the timer only guards deadlock."""
-    assert QCoreApplication.instance() is not None
-    loop = QEventLoop()
-    probe = QTimer()
-    probe.timeout.connect(lambda: loop.quit() if condition() else None)
-    watchdog = QTimer()
-    watchdog.setSingleShot(True)
-    watchdog.timeout.connect(loop.quit)
-    probe.start(0)
-    # The caller has scheduled a driver/owner completion that makes condition true.
-    watchdog.start(30_000)
-    try:
-        if not condition():
-            loop.exec()
-        assert condition(), f"timed out waiting for {label}"
-    finally:
-        probe.stop()
-        watchdog.stop()
+from tests.gui._qt_waits import qt_until
 
 
 class SetupBlock:
@@ -75,7 +54,7 @@ class DeviceCompletion:
 
     def exec(self) -> None:
         """Dispatch owner callbacks; report unexpected worker failure to the caller."""
-        drain_until(
+        qt_until(
             lambda: self.done or len(self.errors) > self.before,
             label="device operation terminal delivery",
         )

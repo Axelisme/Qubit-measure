@@ -47,9 +47,9 @@ from tests.gui._completion_helpers import (
     on_setup_failed,
     on_setup_finished,
 )
+from tests.gui._qt_waits import qt_until
 from tests.gui.session.services._device_fakes import FakeDeviceRegistry
 from tests.gui.session.services._device_waits import DeviceWorkers
-from tests.gui.session.services._device_waits import drain_until as _drain_until
 
 _workers = DeviceWorkers()
 _bg = _workers.background
@@ -106,7 +106,7 @@ def _connect(svc: DeviceService, req: ConnectDeviceRequest) -> None:
     on_device_connected(svc, connected.append)
     on_device_operation_failed(svc, lambda _name, error: errors.append(error))
     svc.start_connect_device(req)
-    _drain_until(lambda: bool(connected or errors), label=f"connect {req.name}")
+    qt_until(lambda: bool(connected or errors), label=f"connect {req.name}")
     assert not errors
 
 
@@ -117,7 +117,7 @@ def test_device_connect_returns_operation_handle(qapp):
     on_device_connected(svc, connected.append)
     on_device_operation_failed(svc, lambda _name, error: errors.append(error))
     token = svc.start_connect_device(_req())
-    _drain_until(lambda: bool(connected or errors), label="device connect")
+    qt_until(lambda: bool(connected or errors), label="device connect")
     assert not errors
     # connect now returns an operation token (parity with setup) for awaiting.
     assert isinstance(token, int)
@@ -273,7 +273,7 @@ def test_active_device_setups_enumerates_concurrent_setups(qapp):
             SetupDeviceRequest(name=name, info=FakeDeviceInfo(address=name, value=1.0))
         )
     for block in blocks.values():
-        _drain_until(block.entered.is_set, label="setup worker entered")
+        qt_until(block.entered.is_set, label="setup worker entered")
 
     setups = svc.get_active_device_setups()
     assert [s.device_name for s in setups] == ["alpha", "beta"]
@@ -283,7 +283,7 @@ def test_active_device_setups_enumerates_concurrent_setups(qapp):
     assert all(o.snapshot.status is DeviceStatus.SETTING_UP for o in ops)
     for block in blocks.values():
         block.release.set()
-    _drain_until(lambda: len(finished) == 2, label="both setups finished")
+    qt_until(lambda: len(finished) == 2, label="both setups finished")
     assert finished == {"alpha", "beta"}
 
 
@@ -302,7 +302,7 @@ def test_wait_setup_done_wakes_from_worker_thread_without_deadlock(qapp, failure
     token = svc.start_setup_device(
         SetupDeviceRequest(name="dev1", info=FakeDeviceInfo(address="addr", value=2.0))
     )
-    _drain_until(block.entered.is_set, label="setup worker entered")
+    qt_until(block.entered.is_set, label="setup worker entered")
     pending: Future[AwaitResult | None] = Future()
     result: Future[AwaitResult | None] = Future()
     done = threading.Event()
@@ -331,7 +331,7 @@ def test_wait_setup_done_wakes_from_worker_thread_without_deadlock(qapp, failure
         # never proves arrival; load cannot fail a correct still-pending waiter.
         assert not done.wait(0.02)
         block.release.set()
-        _drain_until(done.is_set, label="off-main waiter terminal")
+        qt_until(done.is_set, label="off-main waiter terminal")
         outcome = result.result()  # rethrow worker errors on the caller
         assert outcome is not None and outcome.reason == "completed"
         assert outcome.outcome is not None
@@ -341,7 +341,7 @@ def test_wait_setup_done_wakes_from_worker_thread_without_deadlock(qapp, failure
     finally:
         block.release.set()
         try:
-            _drain_until(done.is_set, label="waiter cleanup after driver release")
+            qt_until(done.is_set, label="waiter cleanup after driver release")
         finally:
             # The released driver and owner delivery terminate the waiter.
             wt.join(timeout=30)
@@ -595,7 +595,7 @@ def test_poll_device_info_polls_setting_up_device(qapp):
         SetupDeviceRequest(name="dev1", info=FakeDeviceInfo(address="addr", value=4.0))
     )
     try:
-        _drain_until(block.entered.is_set, label="setup worker entered")
+        qt_until(block.entered.is_set, label="setup worker entered")
         assert svc.get_device_snapshot("dev1").status is DeviceStatus.SETTING_UP  # type: ignore[union-attr]
 
         device.get_info.reset_mock()
@@ -604,7 +604,7 @@ def test_poll_device_info_polls_setting_up_device(qapp):
         bus.subscribe(DeviceChangedPayload, lambda p: events.append(p.name))
 
         svc.poll_device_info("dev1")
-        _drain_until(
+        qt_until(
             lambda: state.version.get("device:dev1") == before + 1,
             label="setup poll delivery",
         )
@@ -618,8 +618,11 @@ def test_poll_device_info_polls_setting_up_device(qapp):
         assert getattr(cached.info, "value", None) == 4.0
     finally:
         block.release.set()
-        _drain_until(
-            lambda: svc.get_device_snapshot("dev1").status is DeviceStatus.CONNECTED,  # type: ignore[union-attr]
+        qt_until(
+            lambda: (
+                (snapshot := svc.get_device_snapshot("dev1")) is not None
+                and snapshot.status is DeviceStatus.CONNECTED
+            ),
             label="setup finished",
         )
 
@@ -755,7 +758,7 @@ def _connect_named(svc: DeviceService, name: str) -> None:
     svc.start_connect_device(
         ConnectDeviceRequest(type_name="FakeDevice", name=name, address=name)
     )
-    _drain_until(lambda: bool(connected or errors), label=f"connect {name}")
+    qt_until(lambda: bool(connected or errors), label=f"connect {name}")
     assert not errors
 
 
@@ -774,7 +777,7 @@ def test_gate_allows_concurrent_setup_of_different_devices(qapp):
     svc.start_setup_device(
         SetupDeviceRequest(name="devA", info=FakeDeviceInfo(address="devA", value=1.0))
     )
-    _drain_until(block_a.entered.is_set, label="devA driver entered")
+    qt_until(block_a.entered.is_set, label="devA driver entered")
     # devB setup must start concurrently (no OperationConflictError).
     finished_b = _workers.completion()
     on_setup_finished(svc, lambda n: finished_b.quit() if n == "devB" else None)
@@ -817,7 +820,7 @@ def test_same_device_setup_still_blocked_while_in_flight(qapp):
     svc.start_setup_device(
         SetupDeviceRequest(name="devA", info=FakeDeviceInfo(address="devA", value=1.0))
     )
-    _drain_until(block.entered.is_set, label="devA driver entered")
+    qt_until(block.entered.is_set, label="devA driver entered")
     try:
         with pytest.raises(RuntimeError):
             svc.start_setup_device(
@@ -859,8 +862,8 @@ def test_concurrent_setups_cancel_independently(qapp):
     assert gate.is_device_mutating("devA")
     assert gate.is_device_mutating("devB")
 
-    _drain_until(block_a.entered.is_set, label="devA driver entered")
-    _drain_until(block_b.entered.is_set, label="devB driver entered")
+    qt_until(block_a.entered.is_set, label="devA driver entered")
+    qt_until(block_b.entered.is_set, label="devB driver entered")
     # Cancel only devA.
     cancel_loop = _workers.completion()
     on_setup_cancelled(svc, lambda n: cancel_loop.quit() if n == "devA" else None)
@@ -1018,7 +1021,7 @@ def test_concurrent_setup_failure_does_not_affect_other(qapp):
     svc.start_setup_device(
         SetupDeviceRequest(name="devB", info=FakeDeviceInfo(address="devB", value=2.0))
     )
-    _drain_until(block_b.entered.is_set, label="devB driver entered")
+    qt_until(block_b.entered.is_set, label="devB driver entered")
     fail_loop = _workers.completion(allow_failure=True)
     on_setup_failed(svc, lambda n, _e: fail_loop.quit() if n == "devA" else None)
     svc.start_setup_device(
