@@ -4,11 +4,11 @@ Single-shot ground/excited readout: measures without and with the probe pi-pulse
 
 ## Expects (parameter context)
 
-Defaults use the tab's fixed qubit and referenced resonator. Relax delay is 5 * qubit.t1 (fallback 100 us). Inline probe reads qubit.freq and qubit.wiring.L01.ch. Inline pulse-readout reads resonator.freq, resonator.wiring.ch/ro_ch and resonator.ext.time_of_fly + 0.05 us (fallback 0.55 us). Missing or null calibration uses fallback; unbound roles remain Invalid until supplied.
+Open and Reset capture the current aliases, parameters and library. Relax delay is 5 * `$qubit.t1.` Inline probe uses `$qubit.freq` and `$qubit.wiring.L01.ch.` Inline templates read `$qubit.freq`, `$qubit.wiring.L01.ch` and `$resonator.freq`/wiring.ch/wiring.ro_ch; readout trigger uses `$resonator.ext.time_of_fly` + 0.05 us. Missing required sources remain Invalid; no numeric fallback is supplied.
 
 ## Expects (ModuleLibrary)
 
-Uses captured qubit.module.x180 for init and probe and qubit.module.readout for pulse-readout. Missing or dangling probe/readout slots seed fresh inline defaults. Optional init and qubit.module.reset remain disabled when absent. Verify the inline pulse and readout timing before Run.
+Uses `$qubit.module.x180` for optional init and required probe, `$qubit.module.reset` for optional reset, and `$qubit.module.readout` for readout. Missing required slots use pi_pulse/readout templates; missing optional slots stay disabled. Run uses this fixed capture.
 
 ## Typical writeback
 

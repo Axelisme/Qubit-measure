@@ -4,15 +4,15 @@ JPA pump-frequency tracer: with the qubit prepared in g and e (a pi pulse toggle
 
 ## Expects (parameter context)
 
-Uses current aliases: qubit (qubit/*), resonator (resonator), and jpa (amplifier/jpa). Add a jpa alias row in the global dialog, for example `$resonator.amplifier`. Scalars use `$jpa.pump_freq`, `$jpa.pump_power`, `$jpa.flux` and canonical qubit/resonator wiring. Missing aliases or calibration leave cfg Invalid; no static fallback.
+Uses the qubit (qubit/*), resonator and jpa (amplifier/jpa) aliases. The pump-frequency bounds use `$jpa.pump_freq.` Select the connected JPA RF device in the form. RF defaults capture jpa_rf_dev at Open or Reset; an unbound alias leaves the optional field empty. Missing required aliases or calibration leave the form Invalid.
 
 ## Expects (ModuleLibrary)
 
-SMART modules use `$qubit.module.x180`, `$qubit.module.readout` and optional `$qubit.module.reset`. Inline readout uses resonator scalar and wiring calibration; module waveforms follow their module source.
+Module slots use `$qubit.module.x180`, `$qubit.module.readout` and optional `$qubit.module.reset.` Missing pi/readout slots fall back to the pi_pulse/readout templates. Inline pulse calibration uses `$qubit.freq` and `$qubit.wiring.L01.ch`; inline readout uses resonator frequency/wiring and `$resonator.ext.time_of_fly` + 0.05. An unset reset slot disables reset. Missing required fallback calibration leaves the form Invalid.
 
 ## Typical writeback
 
-Proposes the signal-maximizing JPA pump frequency into parameter context 'best_jpa_freq' (MHz) as a draft — it never writes it back without your acceptance and never touches 'cur_jpa_A'.
+Proposes the signal-maximizing JPA pump frequency into `$jpa.pump_freq` (MHz) as a draft. Nothing is written without your acceptance, and writeback never changes the current-source value.
 
 ## Recommended
 

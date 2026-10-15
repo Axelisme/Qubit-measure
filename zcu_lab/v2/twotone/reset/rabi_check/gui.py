@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar, TypeAlias
+from typing import ClassVar, TypeAlias
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -19,21 +17,15 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.cfg import (
-    SweepValue,
-)
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.twotone.reset.rabi_check.core import (
     RabiCheckCfg,
     RabiCheckExp,
     RabiCheckResult,
 )
+from zcu_lab.v2.twotone.reset.rabi_check.form import make_form
 
 RabiCheckRunResult: TypeAlias = RunRecord[RabiCheckCfg, RabiCheckResult]
 
@@ -71,42 +63,26 @@ class RabiCheckAdapter(
     experiment_tag: ClassVar[str | None] = RabiCheckExp.persistence_tag()
 
     exp_cls = RabiCheckExp
-    ExpCfg_cls: ClassVar[Any] = RabiCheckCfg
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[RabiCheckCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
+
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         requires_soc=True, analysis=AnalysisMode.FIT, load_data=True
     )
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("rabi_pulse", role_id="pi_pulse", label="Rabi Pulse")
-            .reset("tested_reset", role_id="reset", label="Tested Reset")
-            .readout()
-            .relax_delay(1.0)
-            .sweep(
-                "gain",
-                label="Gain (a.u.)",
-                default=SweepValue(start=0.0, stop=1.0, expts=51),
-            )
-            .reps(1000)
-            .rounds(10)
-            .build()
-        )
-
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: RabiCheckCfg,
         *,
         context: RunContext,
     ) -> RabiCheckRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         result = RabiCheckExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 

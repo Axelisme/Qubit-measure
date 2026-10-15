@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
 
 from zcu_tools.datafile import RunMetadata
 from zcu_tools.experiment.run_saving import ArtifactRef, SaveReport
-from zcu_tools.gui.cfg.resource import CfgResource
+from zcu_tools.gui.app.measure.services.tab_form import TabFormResource
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.state import (
     DEFAULT_LEFT_PANEL_WIDTH as DEFAULT_LEFT_PANEL_WIDTH,
@@ -178,7 +178,7 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     adapter_name: str
     adapter: ExpAdapterProtocol
     # A handle to the tab's sole cfg authority, not a second input tree.
-    cfg: CfgResource
+    cfg: TabFormResource
 
     # Canonical pane-owned resources.
     run: RunPaneState[T_Result] = field(

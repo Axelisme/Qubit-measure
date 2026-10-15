@@ -4,15 +4,15 @@ JPA flux-device calibration: with the qubit prepared in g and e (a pi pulse togg
 
 ## Expects (parameter context)
 
-Uses current aliases: qubit (qubit/*), resonator (resonator), and jpa (amplifier/jpa). Add a jpa alias row in the global dialog, for example `$resonator.amplifier`. Scalars use `$jpa.pump_freq`, `$jpa.pump_power`, `$jpa.flux` and canonical qubit/resonator wiring. Missing aliases or calibration leave cfg Invalid; no static fallback.
+Uses the qubit (qubit/*), resonator and jpa (amplifier/jpa) aliases. The flux bounds use `$jpa.flux.` The optional JPA flux device resolves the flux_dev alias once at Open or Reset; an unbound alias leaves bias control disabled. flux_unit starts as A with no conversion. Missing required calibration leaves the form Invalid.
 
 ## Expects (ModuleLibrary)
 
-SMART modules use `$qubit.module.x180`, `$qubit.module.readout` and optional `$qubit.module.reset`. Inline readout uses resonator scalar and wiring calibration; module waveforms follow their module source.
+Module slots use `$qubit.module.x180`, `$qubit.module.readout` and optional `$qubit.module.reset.` Missing pi/readout slots fall back to the pi_pulse/readout templates. Inline pulse calibration uses `$qubit.freq` and `$qubit.wiring.L01.ch`; inline readout uses resonator frequency/wiring and `$resonator.ext.time_of_fly` + 0.05. An unset reset slot disables reset. Missing required fallback calibration leaves the form Invalid.
 
 ## Typical writeback
 
-Proposes the signal-maximizing JPA flux device value into parameter context 'best_jpa_flux' as a draft — it never writes it back without your acceptance, never commands the device from the writeback, and never touches 'cur_jpa_A'.
+Proposes the signal-maximizing JPA flux device value into `$jpa.flux`, in `$jpa.flux_unit` coordinates, as a draft. Nothing is written without your acceptance. Writeback never commands the device or changes the current-source value.
 
 ## Recommended
 

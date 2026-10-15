@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
-from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, LoadDataRequest
-from zcu_tools.gui.app.measure.adapter.loaded_cfg import project_loaded_cfg
-from zcu_tools.gui.cfg.resource import CfgInputError, CfgPreconditionError
+from zcu_tools.gui.app.measure.adapter import (
+    AdapterCapabilities,
+    LoadDataRequest,
+)
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import RoleBinding
@@ -27,13 +27,21 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class LoadTabResultOutcome:
+    """Committed Load facts, independent of the tab's editable Form input.
+
+    tab_id names the receiving tab; data_path is the selected source file.
+    result_type is the adapter result's class name. has_cfg_snapshot reports
+    native cfg presence, not form validity. has_analyze_params reports successful
+    analysis preparation; analysis_error carries its diagnostic on partial success.
+    source_kind identifies the loaded result rather than an acquired Run.
+    """
+
     tab_id: str
     data_path: str
     result_type: str
     has_cfg_snapshot: bool
     has_analyze_params: bool
     source_kind: str = "loaded"
-    cfg_backfill: Literal["applied", "not_applied"] = "not_applied"
     analysis_error: str | None = None
 
 
@@ -66,24 +74,22 @@ class LoadService:
         state: State,
         writeback: WritebackLifecyclePort,
         *,
-        provide_options: Callable[[str], Sequence[object]],
         context: ContextControlPort,
         captured_parameters: Callable[
             [Mapping[str, str] | None], ParameterContext | None
         ],
     ) -> None:
-        """Inject fixed current-source capture and cfg backfill option lookup.
+        """Inject fixed Load-time metadata capture, distinct from the tab form capture.
 
         captured_parameters reads current point/library/storage and global aliases
         on the owner thread; its result must not follow later source changes.
         context reads the file's fixed point/roles in the opened entry without
-        changing selection. provide_options returns cfg backfill choices.
+        changing selection. Load preserves the tab's authored input and fixed sources.
         """
         self._context = context
         self._captured_parameters = captured_parameters
         self._state = state
         self._writeback = writeback
-        self._provide_options = provide_options
 
     @staticmethod
     def _supports_load_data(adapter: object) -> bool:
@@ -102,8 +108,9 @@ class LoadService:
         Foreign-entry/pointless/EMPTY loads have no analysis source; context-free
         analysis remains available. Historical source read failures propagate
         before result replacement. Retain native history without acquisition.
-        Return committed result details and cfg backfill status. Busy or cfg
-        notification reentrancy rejects before loading; adapter file/capability
+        Return committed result details without validating or replacing form input.
+        Busy or cfg notification reentrancy rejects before loading;
+        adapter file/capability
         failures raise LoadDataError without replacing the previous result.
         """
         if self._state.is_tab_busy(tab_id):
@@ -172,32 +179,7 @@ class LoadService:
             result_type=type(result).__name__,
             has_cfg_snapshot=snapshot is not None,
             has_analyze_params=False,
-            cfg_backfill=self._backfill_cfg(tab_id, snapshot),
         )
-
-    def _backfill_cfg(
-        self, tab_id: str, snapshot: object
-    ) -> Literal["applied", "not_applied"]:
-        if not isinstance(snapshot, ExpCfgModel):
-            return "not_applied"
-        cfg = self._state.get_tab(tab_id).cfg
-        try:
-            candidate = project_loaded_cfg(
-                cfg.snapshot_inputs(), snapshot, provide_options=self._provide_options
-            )
-            if candidate is None:
-                return "not_applied"
-            cfg.replace_inputs(candidate, require_valid=True)
-        except (
-            CfgInputError,
-            CfgPreconditionError,
-            ValueError,
-            TypeError,
-            RuntimeError,
-        ):
-            logger.exception("loaded config was not applied: tab_id=%r", tab_id)
-            return "not_applied"
-        return "applied"
 
     def _teardown_retired(self, retired: RetiredPaneResources) -> None:
         for draft in retired.writeback_drafts:

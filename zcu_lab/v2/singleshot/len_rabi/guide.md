@@ -4,15 +4,15 @@ Single-shot Length Rabi: sweeps the qubit-drive pulse length, preserves every ra
 
 ## Expects (parameter context)
 
-Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved cfg, not live parameter context. Enter direct cfg values or optionally seed defaults with 'singleshot/ge' writeback. Missing or invalid cfg calibration fails before hardware. These values support live classification; the saved raw-IQ analysis jointly refits its calibration. Reads 'pi_len' to seed the sweep stop (4*pi_len when calibrated; fallback sweep 0.03–0.2 us); 'q_f' / 'qub_ch' to seed the qubit-drive defaults.
+Open and Reset capture the current aliases, parameters and library. Relax delay starts at 50.5 us. Length sweep is 0.03 us to 4 * `$qubit.module.x180.waveform.length.` Inline qubit gain starts at 1.0. Classification seeds `$qubit.ext.readout_cal.g_center`/e_center/radius; missing calibration stays Invalid. Inline templates read `$qubit.freq`, `$qubit.wiring.L01.ch` and `$resonator.freq`/wiring.ch/wiring.ro_ch; readout trigger uses `$resonator.ext.time_of_fly` + 0.05 us. Missing required sources remain Invalid; no numeric fallback is supplied.
 
 ## Expects (ModuleLibrary)
 
-Needs a qubit drive-pulse module (qub_pulse) and a readout module. Optional reset (disabled when no library entry exists).
+Qubit pulse starts from qub_probe. Reset uses optional `$qubit.module.reset`; readout uses `$qubit.module.readout` or readout template. Sweep-overwritten pulse values remain editable and library keys stay selectable. Run uses this fixed capture.
 
 ## Typical writeback
 
-When the joint fit is valid and its complete calibration is finite, proposes g_center, e_center, ge_radius, and confusion_matrix as four independent items. The four-item proposal is all-or-none.
+When the joint fit is valid and its complete calibration is finite, proposes `$qubit.ext.readout_cal.g_center`, `$qubit.ext.readout_cal.e_center`, `$qubit.ext.readout_cal.radius`, and `$qubit.ext.readout_cal.confusion_matrix` as four independent items. The four-item proposal is all-or-none.
 
 ## Recommended
 

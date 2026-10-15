@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import ClassVar, Literal
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import AnalysisDocument, RunMetadata
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.native_persistence import PreparedRunData
 from zcu_tools.gui.app.measure.adapter import (
@@ -23,7 +24,7 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
     WritebackRequest,
 )
-from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 
@@ -62,13 +63,14 @@ class DummyAdapter:
     experiment_tag: ClassVar[str | None] = None
     exp_cls = DummyExp
 
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[ConfigBase]:
+        del ctx
+        return Form(ExpCfgModel, {})
+
     @classmethod
     def guide(cls) -> AdapterGuide:
         return AdapterGuide(markdown="dummy", resource_dir=None)
-
-    def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
-        del ctx
-        return CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
 
     @classmethod
     def analyze_params_cls(cls) -> type:
@@ -78,19 +80,17 @@ class DummyAdapter:
         del result, ctx
         return DummyAnalyzeParams()
 
-    def validate_run_request(
-        self, req: RunRequest, raw_cfg: Mapping[str, ExperimentCfgValue]
-    ) -> None:
-        del req, raw_cfg
+    def validate_run_request(self, req: RunRequest, cfg: ConfigBase) -> None:
+        del req, cfg
 
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: ConfigBase,
         *,
         context: RunContext,
     ):
-        del req, raw_cfg, context
+        del req, cfg, context
         return object()
 
     def load(self, req: LoadDataRequest) -> tuple[object, RunMetadata]:

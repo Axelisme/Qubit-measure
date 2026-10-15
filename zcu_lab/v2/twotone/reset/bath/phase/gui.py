@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar, TypeAlias
+from typing import ClassVar, TypeAlias
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -22,19 +21,12 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import path_seed
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    SweepValue,
-)
+from zcu_tools.gui.cfg import CfgSchema
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.twotone.reset.bath.phase.core import PhaseCfg, PhaseExp, PhaseResult
+from zcu_lab.v2.twotone.reset.bath.phase.form import make_form
 
 BathPhaseRunResult: TypeAlias = RunRecord[PhaseCfg, PhaseResult]
 
@@ -55,44 +47,13 @@ class BathPhaseAdapter(
 ):
     experiment_tag: ClassVar[str | None] = PhaseExp.persistence_tag()
     exp_cls = PhaseExp
-    ExpCfg_cls: ClassVar[Any] = PhaseCfg
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[PhaseCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("init_pulse", role_id="pi_pulse", optional=True)
-            .reset(
-                "tested_reset",
-                role_id="bath_reset",
-                label="Tested Reset",
-                shape="bath",
-                locked={"pi2_cfg.phase": 0.0},
-                overrides={
-                    "cavity_tone_cfg.freq": path_seed(
-                        "$qubit.ext.reset_bath_freq", fallback=0.0
-                    ),
-                    "cavity_tone_cfg.gain": path_seed(
-                        "$qubit.ext.reset_bath_gain", fallback=0.1
-                    ),
-                },
-            )
-            .readout()
-            .relax_delay(10.5)
-            .sweep(
-                "phase",
-                label="Phase (deg)",
-                default=SweepValue(start=-360.0, stop=360.0, expts=201),
-            )
-            .reps(100)
-            .rounds(1000)
-            .build()
-        )
 
     # No get_analyze_params override: NoAnalyzeParams (the 4th generic arg) makes
     # BaseAdapter return the empty params instance and reflect the type.
@@ -100,11 +61,11 @@ class BathPhaseAdapter(
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: PhaseCfg,
         *,
         context: RunContext,
     ) -> BathPhaseRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         result = PhaseExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 

@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING, TypedDict
 
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.cfg import is_custom_reference_key
-from zcu_tools.gui.cfg.edit_codec import decode_edits
 from zcu_tools.gui.cfg.resource import (
     CfgInputError,
     CfgPreconditionError,
+    CfgPreconditionReason,
 )
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
@@ -34,12 +34,12 @@ def h_tab_new(
 def h_tab_open_file(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from dataclasses import asdict
+    from ..load_types import project_load_outcome
 
     name = str(params["adapter_name"])
     if name not in adapter.ctrl.get_adapter_names():
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown adapter: {name!r}")
-    return asdict(
+    return project_load_outcome(
         adapter.tab_control.open_tab_from_file(name, str(params["data_path"]))
     )
 
@@ -170,7 +170,7 @@ class TabParameterRead(TypedDict):
     values maps requested logical paths to YAML values. Absent leaves are
     omitted; explicit null is retained. modules maps each requested reference
     to its existing canonical library root, or None for custom/missing roots.
-    Both use current point/library/aliases, with optional temporary aliases.
+    Both use the tab's fixed Open/Reset parameter/library/alias capture.
     Neither mapping refreshes the live context or operation guards.
     """
 
@@ -196,12 +196,11 @@ def _parameter_query_strings(params: Mapping[str, object], name: str) -> list[st
 def h_tab_parameter_read(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> TabParameterRead:
-    """Read paths and module_refs through current sources for the named tab.
+    """Read paths and module_refs through fixed sources for the named tab.
 
     tab_id is an existing GUI tab. paths and module_refs are arrays of non-empty
-    strings, with $alias.path distinct from concrete component paths. Optional
-    aliases maps alias names to concrete components without changing globals.
-    None and {} mean no override.
+    strings, with $alias.path distinct from concrete component paths. Reset may
+    capture single-use aliases without changing globals; reads never recapture.
     Query only these requested data.
     Missing leaves and explicit null follow TabParameterRead. Module lookup uses
     the parameter owner's role/slot resolution and library membership. Unknown
@@ -215,8 +214,7 @@ def h_tab_parameter_read(
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     paths = _parameter_query_strings(params, "paths")
     module_refs = _parameter_query_strings(params, "module_refs")
-    aliases = temporary_aliases(params)
-    parameters = adapter.tab_control.capture_parameters(tab_id, aliases=aliases)
+    parameters = adapter.cfg_lookup(tab_id).env.parameters
     if parameters is None:
         if paths or module_refs:
             raise RemoteError(
@@ -279,52 +277,123 @@ def temporary_aliases(params: Mapping[str, object]) -> dict[str, str] | None:
 def h_tab_get_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """Read cached cfg, or preview current inputs against named aliases.
+    """Read current Form schema/input/ordinary leaves/errors from fixed sources."""
+    from ..form_observation import observe_form
 
-    aliases maps alias names to concrete components. None and {} read cached
-    cfg. Nonempty aliases resolves current inputs without publication or Run.
-    Malformed aliases and source failures reject. Ordinary reads do not query
-    sources or refresh observation guards.
-    """
-    from ..cfg_observation import build_resource_observation, cfg_error_to_remote
-
-    aliases = temporary_aliases(params)
-    tab_id = str(params["tab_id"])
-    if not aliases:
-        return build_resource_observation(adapter.cfg_lookup(tab_id).observe())
-    try:
-        observation = adapter.tab_control.preview_cfg(tab_id, aliases=aliases)
-    except (CfgInputError, CfgPreconditionError) as exc:
-        raise cfg_error_to_remote(exc) from exc
-    return build_resource_observation(observation)
+    return dict(observe_form(adapter.cfg_lookup(str(params["tab_id"]))))
 
 
 def h_tab_reset_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from ..cfg_observation import build_resource_observation, cfg_error_to_remote
+    from ..cfg_observation import cfg_error_to_remote
+    from ..form_observation import observe_form
 
     tab_id = str(params["tab_id"])
     try:
-        editor = adapter.cfg_lookup(tab_id)
-        result = editor.reset()
+        resource = adapter.cfg_lookup(tab_id)
+        resource.reset(aliases=temporary_aliases(params))
     except (CfgInputError, CfgPreconditionError) as exc:
         raise cfg_error_to_remote(exc) from exc
     follow_tab(adapter, tab_id, "run")
-    return build_resource_observation(result)
+    return dict(observe_form(resource))
 
 
 def h_tab_edit_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from ..cfg_observation import build_resource_observation, cfg_error_to_remote
+    from ..cfg_observation import cfg_error_to_remote
+    from ..form_observation import form_writes, observe_form
 
     tab_id = str(params["tab_id"])
+    batch = form_writes(params["edits"])
     try:
-        edits = decode_edits(params["edits"])
-        editor = adapter.cfg_lookup(tab_id)
-        result = editor.edit(edits)
+        resource = adapter.cfg_lookup(tab_id)
+        resource.write(batch)
     except (CfgInputError, CfgPreconditionError) as exc:
         raise cfg_error_to_remote(exc) from exc
+    except ValueError as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, str(exc), reason="form_errors"
+        ) from exc
     follow_tab(adapter, tab_id, "run")
-    return build_resource_observation(result)
+    return dict(observe_form(resource))
+
+
+def module_path(raw: object) -> tuple[str, ...]:
+    """Validate a dotted core module field supplied to the module RPCs."""
+    if (
+        not isinstance(raw, str)
+        or not raw
+        or any(not part or part != part.strip() for part in raw.split("."))
+    ):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "field must be a dotted module path"
+        )
+    return tuple(raw.split("."))
+
+
+def h_tab_read_module(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Read detached field-local module values, without source refresh or mutation."""
+    from ..cfg_observation import cfg_error_to_remote
+
+    path = module_path(params["field"])
+    try:
+        module = adapter.cfg_lookup(str(params["tab_id"])).read_module(path)
+    except CfgPreconditionError as exc:
+        raise cfg_error_to_remote(exc) from exc
+    except ValueError as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, str(exc), reason="form_errors"
+        ) from exc
+    return {"value": module.value, "mode": module.mode, "source": module.source}
+
+
+def h_tab_use_inline(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Convert one module using the fixed capture and return its complete Form view.
+
+    params supplies tab_id and a dotted core module field. Resource admission
+    runs before reading the public input tag at an exact core module path.
+    Ref invokes to_inline through the guarded command host; inline is a no-op
+    even for partial input or invalid expressions. Mode detection does not
+    evaluate the draft or read sources. Disabled, missing or untagged input and
+    unavailable ref commands reject without fallback.
+    Busy, revoked and notification-reentrant calls also reject inline no-ops.
+    Known form failures become directed RemoteError replies; unexpected failures
+    propagate. No source refresh, caller layout construction or retry occurs.
+    """
+    from ..cfg_observation import cfg_error_to_remote
+    from ..form_observation import observe_form
+
+    path = module_path(params["field"])
+    try:
+        resource = adapter.cfg_lookup(str(params["tab_id"]))
+        resource.require_mutation_allowed()
+        kind = resource.read_module_kind(path)
+        if kind == "ref":
+            resource.run_command(path, "to_inline")
+        # Inline is an explicit no-op after the same admission checks.
+    except CfgPreconditionError as exc:
+        if exc.reason is CfgPreconditionReason.NOT_VALID:
+            raise cfg_error_to_remote(
+                CfgPreconditionError(
+                    exc.reason,
+                    f"Cannot convert {'.'.join(path)!r}: {exc}. "
+                    "Select an Inline option to edit this field.",
+                )
+            ) from exc
+        raise cfg_error_to_remote(exc) from exc
+    except CfgInputError as exc:
+        raise cfg_error_to_remote(exc) from exc
+    except ValueError as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"Cannot convert {'.'.join(path)!r}: {exc}. "
+            "Select an Inline option to edit this field.",
+            reason="form_errors",
+        ) from exc
+    return dict(observe_form(resource))

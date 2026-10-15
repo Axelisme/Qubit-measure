@@ -25,7 +25,7 @@ from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.types import ParameterContext, SessionEnv
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
-from tests.gui.app.measure._cfg_fakes import cfg_resolution, cfg_resources
+from tests.gui.app.measure._form_fakes import form_resources, form_sources
 from tests.gui.app.measure._load_support import historical_metadata
 from tests.gui.session.ui._parameter_fakes import make_parameters
 
@@ -80,8 +80,8 @@ def test_default_analysis_params_retain_result_source(
         state,
         MagicMock(),
         MagicMock(),
-        cfg_resources(state),
-        cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
+        form_resources(state),
+        form_sources=lambda aliases: form_sources(state, aliases),
         captured_parameters=lambda _aliases: state.session_env.parameters,
     )
     preparation = service.prepare_result_analysis("tab")

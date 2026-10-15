@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, TypeAlias
+from typing import Annotated, ClassVar, TypeAlias
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -19,19 +17,9 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import Seed, SweepDefault, custom, scaled_path_seed
-from zcu_tools.gui.cfg import EvalValue, SweepValue
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
-from zcu_lab.v2._support.measure.zigzag import (
-    add_gate_modules,
-    add_repeat_fields,
-)
 from zcu_lab.v2.twotone.zigzag_sweep.core import (
     ZigZagScanAnalyzeOptions,
     ZigZagScanCfg,
@@ -39,9 +27,9 @@ from zcu_lab.v2.twotone.zigzag_sweep.core import (
     ZigZagScanResult,
 )
 
-ZigZagScanRunResult: TypeAlias = RunRecord[ZigZagScanCfg, ZigZagScanResult]
+from .form import make_freq_form, make_gain_form
 
-_FREQ_HALF_SPAN = 2.0  # MHz around q_f for the frequency scan default
+ZigZagScanRunResult: TypeAlias = RunRecord[ZigZagScanCfg, ZigZagScanResult]
 
 
 @dataclass
@@ -55,14 +43,6 @@ class ZigZagScanAnalyzeResult(AnalyzeResultBase):
     best_value: float
 
 
-def _qub_freq_window(_ctx: SessionEnv, expts: int) -> SweepValue:
-    return SweepValue(
-        start=EvalValue(f"$qubit.freq - {_FREQ_HALF_SPAN}"),
-        stop=EvalValue(f"$qubit.freq + {_FREQ_HALF_SPAN}"),
-        expts=expts,
-    )
-
-
 class _ZigZagScanBase(
     BaseAdapter[
         ZigZagScanCfg,
@@ -74,38 +54,17 @@ class _ZigZagScanBase(
     """Shared body; subclasses choose the single swept parameter."""
 
     exp_cls = ZigZagScanExp
-    ExpCfg_cls: ClassVar[Any] = ZigZagScanCfg
 
     sweep_key: ClassVar[str]
-    sweep_label: ClassVar[str]
-
-    @classmethod
-    def sweep_default(cls) -> SweepDefault | Seed[SweepValue]:
-        raise NotImplementedError
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        builder = (
-            add_gate_modules(
-                MeasureCfgBuilder(
-                    role_factories=ROLE_FACTORIES,
-                )
-            )
-            .relax_delay(
-                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=100.5)
-            )
-            .sweep(cls.sweep_key, label=cls.sweep_label, default=cls.sweep_default())
-        )
-        return add_repeat_fields(builder, n_times=6).reps(100).rounds(100).build()
 
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: ZigZagScanCfg,
         *,
         context: RunContext,
     ) -> ZigZagScanRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         result = ZigZagScanExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 
@@ -128,35 +87,24 @@ class _ZigZagScanBase(
 
 
 class ZigZagScanGainAdapter(_ZigZagScanBase):
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_gain_form(ctx)
+
     experiment_tag: ClassVar[str | None] = ZigZagScanExp.persistence_tag()
     sweep_key: ClassVar[str] = "gain"
-    sweep_label: ClassVar[str] = "Gain (a.u.)"
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.gain.md")
 
-    @classmethod
-    def sweep_default(cls) -> SweepDefault:
-        return SweepDefault(
-            start=scaled_path_seed(
-                "$qubit.module.x180.gain", factor=0.8, fallback_value=0.4
-            ),
-            stop=scaled_path_seed(
-                "$qubit.module.x180.gain", factor=1.2, fallback_value=0.6
-            ),
-            expts=101,
-        )
-
 
 class ZigZagScanFreqAdapter(_ZigZagScanBase):
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_freq_form(ctx)
+
     experiment_tag: ClassVar[str | None] = ZigZagScanExp.persistence_tag()
     sweep_key: ClassVar[str] = "freq"
-    sweep_label: ClassVar[str] = "Frequency (MHz)"
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.freq.md")
-
-    @classmethod
-    def sweep_default(cls) -> Seed[SweepValue]:
-        return custom(
-            lambda ctx: _qub_freq_window(ctx, 101),
-            description="qubit frequency window (101 points)",
-        )

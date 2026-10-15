@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Literal, TypeAlias
+from typing import Annotated, ClassVar, Literal, TypeAlias
 
 from zcu_tools.analysis.fitting.singleshot_rabi import RabiJointFitResult
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -20,19 +19,9 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-    ModuleInit,
-)
-from zcu_tools.gui.app.measure.seeds import SweepDefault, scaled_path_seed
-from zcu_tools.gui.cfg import (
-    EvalValue,
-    ScalarSpec,
-)
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2._support.measure.singleshot_rabi import rabi_calibration_writeback
 from zcu_lab.v2.singleshot.len_rabi.core import (
     LenRabiAnalyzeOptions,
@@ -40,6 +29,7 @@ from zcu_lab.v2.singleshot.len_rabi.core import (
     LenRabiExp,
     LenRabiResult,
 )
+from zcu_lab.v2.singleshot.len_rabi.form import make_form
 
 # ``LenRabiExp`` from ``singleshot`` — sweeps the qubit-drive pulse *length* and
 # preserves every raw IQ shot. Analysis derives populations from that canonical
@@ -70,68 +60,24 @@ class SsLenRabiAdapter(
     ]
 ):
     experiment_tag: ClassVar[str | None] = LenRabiExp.persistence_tag()
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[LenRabiCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
+
     exp_cls = LenRabiExp
-    ExpCfg_cls: ClassVar[Any] = LenRabiCfg
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse(
-                "qub_pulse",
-                role_id="qub_probe",
-                init=ModuleInit.INLINE,
-                overrides={"gain": 1.0},
-            )
-            .readout()
-            .relax_delay(50.5)
-            .sweep(
-                "length",
-                label="Length (us)",
-                default=SweepDefault(
-                    start=0.03,
-                    stop=scaled_path_seed(
-                        "$qubit.module.x180.waveform.length",
-                        factor=4.0,
-                        fallback_value=0.2,
-                    ),
-                    expts=51,
-                ),
-            )
-            .int("shots", label="Shots", default=1000)
-            .field(
-                "g_center",
-                spec=ScalarSpec("Ground center", complex),
-                default=EvalValue("$qubit.ext.readout_cal.g_center"),
-            )
-            .field(
-                "e_center",
-                spec=ScalarSpec("Excited center", complex),
-                default=EvalValue("$qubit.ext.readout_cal.e_center"),
-            )
-            .field(
-                "radius",
-                spec=ScalarSpec("Classification radius", float),
-                default=EvalValue("$qubit.ext.readout_cal.radius"),
-            )
-            .reps(1, locked=True)
-            .rounds(1, locked=True)
-            .build()
-        )
 
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: LenRabiCfg,
         *,
         context: RunContext,
     ) -> SsLenRabiRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         result = LenRabiExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 

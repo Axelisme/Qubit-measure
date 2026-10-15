@@ -12,7 +12,7 @@ from zcu_tools.mcp.measure.recipe import (
 from zcu_tools.mcp.measure.recipe_execution import RecipeExecutions
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
-from ._recipe_support import LookbackGui
+from ._recipe_support import ExecutionGui
 
 
 def definition(
@@ -49,7 +49,7 @@ def registry(
         executions.join()
 
 
-class ControlledRunGui(LookbackGui):
+class ControlledRunGui(ExecutionGui):
     """Hold the native Run until GUI/agent supplies a terminal outcome."""
 
     def __init__(self) -> None:

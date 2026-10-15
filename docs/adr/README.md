@@ -24,12 +24,13 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Cfg / Value Model
 
+- [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：make_form、固定捕捉、adapter 黑箱、持久範本與具名裝置欄位。
 - [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用機制、measure tab resource 的原子 publication／固定 Run acceptance、唯讀 ref／顯式 inline 轉換、Custom reference 繼承及獨立 draft 的現況分界；library conversion、selected Apply 與其他 app 的剩餘目標見 [Cfg draft](draft/cfg-editing-boundaries.md)，measure slice 的設計與驗收邊界見 [resource contract](draft/cfg-resource-contract.md)。
 - [0008 — Measure CfgEditor session](0008-cfg-editor-session.md)：measure headless session 與 opaque writeback 的局部契約仍有效；其中 tab auto-commit／雙樹不是共用目標。
-- [0009 — Spec/Value fluent + LiteralSpec lock](0009-spec-value-fluent-and-literal-lock.md)：Spec／Value 和角色預設的局部契約，概要見 [cfg owner](../../lib/zcu_tools/gui/cfg/README.md)；角色 default 表將由 [measure-form draft](draft/measure-form-derivation.md) 的範本目錄接替。
+- [0009 — Spec/Value fluent + LiteralSpec lock](0009-spec-value-fluent-and-literal-lock.md)：Spec／Value 和角色預設的局部契約，概要見 [cfg owner](../../lib/zcu_tools/gui/cfg/README.md)；Measure authoring 與角色 default 表由 [[0073]] 接替。
 - [0010 — Complete value tree](0010-value-tree-complete-none-for-empty.md)：完整 Value tree 與停用表示的局部契約。
 - [0011 — Finished-cfg validation](0011-cfgschema-validate-boundary.md)：成品驗證的局部條件；舊篇所述 app-local lowering 位置已更新。
-- [0012 — Context-free measure definition](0012-cfgbuilder-value-layer-fluent-assembly.md)：實驗 adapter 的 definition／seed 及 assembler 契約；目標設計見 [measure-form draft](draft/measure-form-derivation.md)，實作完成後退役。
+- [0012 — Context-free measure definition](0012-cfgbuilder-value-layer-fluent-assembly.md)：舊 definition／seed 契約，由 [[0073]] 取代。
 - [0037 — Session value lookup](0037-measure-gui-value-lookup-resolve-once.md)：lookup 與 resolve-once 輸入的 measure 局部契約。
 - [0045 — Shared GUI cfg core](0045-shared-gui-cfg-core-ownership.md)：renderer registry／import surface 的局部細節仍有效；舊 program owner 路徑已過時。
 - [0046 — Shared cfg lowering ports](0046-shared-cfg-lowering-ports.md)：generic lowering 操作與 ports；live-key 說明不得推定為核准的 refresh／override 目標。
@@ -69,11 +70,11 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 
 - [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：核准方向、尚未實作。啟動固定 Python environment，FTF 用 YAML 調參；同步 acquire 固定量測要求、逐 round 捕捉環境，backend 固定輸入輸出。物理與依賴邊界已定，具體型別、schema、遷移與驗收待完成。
 
-- [Measure 表單從 core cfg 推導](draft/measure-form-derivation.md)：表單形狀從 core 的 pydantic cfg 推導，欄位說明用 `Annotated[..., FieldMeta]` 放 core，起始值與偏差寫在每個實驗的 `form.py` 樹；module 節點只有 `Slot` 與 `Template`，角色表改為組合根注入的範本目錄；`dev` 改為 core 的具名裝置欄位。設計已採用，measure-form task 實作完成後轉正式 ADR。
 
 - [量測成果 Artifact、設定快照與讀回](draft/artifact-persistence.md)：核准方向、尚未實作。設定快照正本只在 `data.h5`，ledger 不存 cfg，Notebook 與 GUI 都讀 `data.h5`。Artifact 與 Writeback 各成子模組，`experiment` 共用核心依項目種類決定格式，GUI 子模組管顯示與 adapter 介面。讀回經 `StoredRun` 與核心 `from_stored`，資料優先、cfg 可缺。待 measure-form 與 cfgschema-retire 落地後實作。
 
-- [Pydantic 表單、輸入與宿主提交](draft/pydantic-form-tool.md)：Qt-free core 與 editor 分離，共用 defaults hook、evaluator 與 complex codec。Expression 保存在 input，Engine journal 只記普通值。不遷移 CfgSchema／Measure。
+
+- [Pydantic 表單、輸入與宿主提交](draft/pydantic-form-tool.md)：Qt-free core 與 editor 分離，共用 defaults hook、evaluator 與 complex codec。Expression 保存在 input，Engine journal 只記普通值。保留獨立 CfgSchema editor；Measure 推導與宿主接線見 [[0073]]。
 
 - [Agent 介面分層](draft/agent-interface-layers.md)：L0 實驗環境、L1 GUI／Notebook、L2 recipe、L3 workflow 與跨實驗分析的定位；L1 由 agent 決定在哪一步介入，L2 recipe 與 L3 workflow 由自己決定在哪裡 yield；自動推導歸 recipe、workflow 內部或 GUI adapter 的初始參數生成；層間以共享狀態交接，選層由上而下。Workflow yield 由進行中的重構實作；無人回應時停在 yield，預設決定與 L0 強制有需求再設計。
 - [GUI 事件收合](draft/remote-event-coalescing.md)：GUI 訂閱端依 payload type 與 tab 的 per-tick 收合尚未落實；cfg 表單 snapshot 收合已實作。

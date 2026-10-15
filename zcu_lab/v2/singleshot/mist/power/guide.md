@@ -4,11 +4,11 @@ MIST probe-power sweep: drives a probe pulse whose gain is swept and classifies 
 
 ## Expects (parameter context)
 
-Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved cfg, not live parameter context. Enter direct cfg values or optionally seed defaults with 'singleshot/ge' writeback. The run classifies each shot using these values; missing or invalid cfg calibration fails before hardware. Optionally reads 'confusion_matrix' (readout correction) and 'ac_stark_coeff' (rescales the x-axis to photon number) at analyze time, and 't1' to set the relax delay; 'readout_f' or 'r_f' plus 'res_ch' seed the probe drive.
+Open and Reset capture the current aliases, parameters and library. Relax delay is 5 * `$qubit.t1.` Probe gain sweep runs from 0 to 1. Classification seeds `$qubit.ext.readout_cal.g_center`/e_center/radius; missing calibration stays Invalid. Inline templates read `$qubit.freq`, `$qubit.wiring.L01.ch` and `$resonator.freq`/wiring.ch/wiring.ro_ch; readout trigger uses `$resonator.ext.time_of_fly` + 0.05 us. Missing required sources remain Invalid; no numeric fallback is supplied.
 
 ## Expects (ModuleLibrary)
 
-Needs a probe pulse and a readout module. Optionally references a calibrated reset and an init pulse — both disabled when no library entry exists.
+Probe starts from res_probe. Optional init/reset use `$qubit.module.x180`/reset. Readout uses `$qubit.module.readout` or readout template. Sweep-overwritten pulse values remain editable and library keys stay selectable. Run uses this fixed capture.
 
 ## Typical writeback
 
@@ -16,4 +16,4 @@ No writeback — the population curves are read off the plot by eye.
 
 ## Recommended
 
-Set calibration cfg directly or seed it with 'singleshot/ge'. Sweep the probe gain across the MIST onset; provide 'ac_stark_coeff' (from the AC-Stark experiment) for a photon-number x-axis.
+Set calibration cfg directly or seed it with 'singleshot/ge'. Sweep the probe gain across the MIST onset; provide '`$qubit.ext.ac_stark_coeff`' (from the AC-Stark experiment) for a photon-number x-axis.

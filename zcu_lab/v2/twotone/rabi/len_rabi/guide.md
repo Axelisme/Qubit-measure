@@ -4,11 +4,11 @@ Length Rabi: drives the qubit at its known frequency and sweeps the drive-pulse 
 
 ## Expects (parameter context)
 
-Uses the tab's captured qubit and resonator roles. Length sweep stop is 4 * qubit.module.x180.waveform.length (fallback 0.3 us); relax delay is 5 * qubit.t1 (fallback 30.5 us). Fresh drive uses qubit.freq (fallback 4000 MHz) and wiring.L01.ch (fallback 0). Fresh readout uses resonator.freq (fallback 6000 MHz) and wiring.ch/wiring.ro_ch (fallback 0), with trigger offset 0.55 us.
+Length runs 0.03 to 4 * qubit.module.x180.waveform.length us over 101 points; Run overwrites drive length. Relax delay is 5 * qubit.t1 us. Missing calibration leaves the affected fields empty and Invalid; no numeric fallback.
 
 ## Expects (ModuleLibrary)
 
-Mounts captured qubit.module.x180/readout/reset slots. Missing or dangling drive/readout slots use fresh inline pulses; reset stays disabled. The length sweep owns waveform.length, locked at 1 us in the cfg. Inline drive gain is 0.3; inline readout gain is 0.1, const length 1 us and ADC window 0.9 us. No named waveform is adopted.
+Uses captured qubit.module.readout with a readout template fallback, and qubit.module.reset with no fallback (disabled when absent). The drive uses qubit.module.x180 with a pi_pulse template fallback. Unset or dangling slots use the named template, not a legacy blank. Key choices remain available. Inline templates read qubit.freq, qubit.wiring.L01.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.ext.time_of_fly + 0.05 us; missing required calibration remains Invalid.
 
 ## Typical writeback
 

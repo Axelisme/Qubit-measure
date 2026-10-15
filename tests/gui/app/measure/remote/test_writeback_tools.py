@@ -26,7 +26,6 @@ from zcu_tools.gui.app.measure.services.ports import (
     TabSnapshot,
 )
 from zcu_tools.gui.app.measure.services.writeback import WritebackValues
-from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
@@ -72,7 +71,7 @@ def _snapshot(
     )
     return TabSnapshot(
         adapter_name="fake",
-        cfg_schema=MagicMock(spec=CfgSchema),
+        cfg_input={},
         tab_id=tab_id,
         interaction=MagicMock(),
         capabilities=caps,

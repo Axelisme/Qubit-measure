@@ -7,6 +7,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import BaseDevice
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -29,6 +30,7 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import BasePayload
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import (
     OperationRunner,
@@ -38,7 +40,8 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import Module, ProgramV2Cfg
 
 from tests.gui._progress_fakes import DirectProgressTransport
-from tests.gui.app.measure._cfg_fakes import make_cfg, parameter_capture
+from tests.gui.app.measure._cfg_fakes import parameter_capture
+from tests.gui.app.measure._form_fakes import make_form
 
 
 def empty_schema() -> CfgSchema:
@@ -65,7 +68,7 @@ def make_state(
         Session(
             adapter_name="any",
             adapter=adapter,
-            cfg=make_cfg(empty_schema(), state=state),
+            cfg=make_form(Form(ConfigBase, {}), state=state),
         ),
     )
     return state, tab_id, adapter

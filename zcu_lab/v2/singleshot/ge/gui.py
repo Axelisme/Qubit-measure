@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, TypeAlias, cast
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, TypeAlias, cast
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -26,29 +25,8 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import (
-    custom,
-    module_seed,
-    path_seed,
-    scaled_path_seed,
-)
-from zcu_tools.gui.app.measure.spec_helpers import (
-    make_pulse_module_spec,
-    make_pulse_readout_module_spec,
-    make_reset_module_spec,
-)
-from zcu_tools.gui.cfg import (
-    ReferenceValue,
-    make_custom_reference_key,
-    make_default_value,
-)
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.singleshot.ge.core import (
     GE_Cfg,
     GE_Exp,
@@ -57,47 +35,13 @@ from zcu_lab.v2.singleshot.ge.core import (
     GEAnalyzeOptions,
     GEPostAnalyzeOptions,
 )
+from zcu_lab.v2.singleshot.ge.form import make_form
 
 if TYPE_CHECKING:
-    from zcu_tools.plotting.plots import Plots
+    from zcu_tools.gui.form_adapter import Form, FormContext
+from zcu_tools.plotting.plots import Plots
 
 GERunResult: TypeAlias = RunRecord[GE_Cfg, GE_Result]
-
-
-def _blank_pulse(ctx: SessionEnv) -> ReferenceValue:
-    value = make_default_value(make_pulse_module_spec().allowed[0])
-    value.with_field("freq", path_seed("$qubit.freq", fallback=4000.0).resolve(ctx))
-    value.with_field("ch", path_seed("$qubit.wiring.L01.ch", fallback=0).resolve(ctx))
-    value.with_field("nqz", 2)
-    value.with_field("gain", 0.1)
-    value.with_field("waveform.length", 5.1)
-    return ReferenceValue(make_custom_reference_key("Pulse"), value)
-
-
-def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
-    value = make_default_value(make_pulse_readout_module_spec().allowed[0])
-    frequency = path_seed("$resonator.freq", fallback=6000.0).resolve(ctx)
-    value.with_field("pulse_cfg.freq", frequency)
-    value.with_field(
-        "pulse_cfg.ch", path_seed("$resonator.wiring.ch", fallback=0).resolve(ctx)
-    )
-    value.with_field("pulse_cfg.nqz", 2)
-    value.with_field("pulse_cfg.gain", 0.1)
-    value.with_field("pulse_cfg.waveform.length", 1.0)
-    value.with_field("ro_cfg.ro_freq", frequency)
-    value.with_field(
-        "ro_cfg.ro_ch", path_seed("$resonator.wiring.ro_ch", fallback=0).resolve(ctx)
-    )
-    value.with_field("ro_cfg.ro_length", 0.9)
-    value.with_field(
-        "ro_cfg.trig_offset",
-        path_seed(
-            "$resonator.ext.time_of_fly",
-            expr="$resonator.ext.time_of_fly + 0.05",
-            fallback=0.55,
-        ).resolve(ctx),
-    )
-    return ReferenceValue(make_custom_reference_key("Pulse Readout"), value)
 
 
 @dataclass
@@ -144,8 +88,13 @@ class GEPostAnalyzeResult(PostAnalyzeResultBase):
 
 class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParams]):
     experiment_tag: ClassVar[str | None] = GE_Exp.persistence_tag()
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[GE_Cfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
+
     exp_cls = GE_Exp
-    ExpCfg_cls: ClassVar[Any] = GE_Cfg
     # FIT primary analysis + a confusion-diagnostic post-analysis layer.
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
@@ -153,62 +102,14 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        """Declare static shape and fresh defaults on the supplied capture.
-
-        Instantiate with SessionEnv.parameters. Bound missing/null scalar
-        calibration uses the guide's fallback. Missing module slots disable
-        optional init/reset and seed required probe/readout inline. Unbound
-        roles remain cfg Invalid; source/materialization faults propagate.
-        """
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .field(
-                "modules.reset",
-                spec=make_reset_module_spec(optional=True),
-                default=module_seed("$qubit.module.reset", fallback=None),
-            )
-            .field(
-                "modules.init_pulse",
-                spec=make_pulse_module_spec(optional=True),
-                default=module_seed("$qubit.module.x180", fallback=None),
-            )
-            .field(
-                "modules.probe_pulse",
-                spec=make_pulse_module_spec(label="Probe Pulse"),
-                default=module_seed(
-                    "$qubit.module.x180",
-                    fallback=custom(_blank_pulse, description="inline probe pulse"),
-                ),
-            )
-            .field(
-                "modules.readout",
-                spec=make_pulse_readout_module_spec(),
-                default=module_seed(
-                    "$qubit.module.readout",
-                    fallback=custom(_blank_readout, description="inline readout"),
-                ),
-            )
-            .relax_delay(
-                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=100.0)
-            )
-            .int("shots", label="Shots", default=100000)
-            .reps(1, locked=True)
-            .rounds(1, locked=True)
-            .build()
-        )
-
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: GE_Cfg,
         *,
         context: RunContext,
     ) -> GERunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         result = GE_Exp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 

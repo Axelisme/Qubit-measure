@@ -34,7 +34,6 @@ from zcu_tools.gui.app.measure.services.writeback import (
     WritebackWritten,
 )
 from zcu_tools.gui.app.measure.services.writeback_control import WritebackControlFacet
-from zcu_tools.gui.cfg.resource import CfgResolution
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.aliases import AliasRow
@@ -55,7 +54,7 @@ from zcu_tools.resources.entry import (
 )
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
-from tests.gui.app.measure._cfg_fakes import cfg_resolution, cfg_resources
+from tests.gui.app.measure._form_fakes import form_resources, form_sources
 from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
     PaneParams,
@@ -76,12 +75,7 @@ def _native_controls(
     def capture(aliases: Mapping[str, str] | None) -> ParameterContext | None:
         return session.capture_parameters(aliases)
 
-    def resolve(parameters: ParameterContext | None) -> CfgResolution:
-        return cfg_resolution(session.state, parameters)
-
-    guard = GuardService(
-        session.state, captured_parameters=capture, cfg_resolution=resolve
-    )
+    guard = GuardService(session.state)
     runner = OperationRunner(
         None, session.handles, None, session.background, session.bus
     )
@@ -89,14 +83,13 @@ def _native_controls(
         session.state,
         MagicMock(),
         writeback,
-        cfg_resources(session.state),
-        resolve,
+        form_resources(session.state),
+        lambda aliases: form_sources(session.state, aliases),
         capture,
     )
     load = LoadService(
         session.state,
         writeback,
-        provide_options=lambda _: (),
         context=control,
         captured_parameters=capture,
     )
@@ -197,7 +190,6 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
     service = LoadService(
         session.state,
         MagicMock(),
-        provide_options=lambda _: (),
         context=control,
         captured_parameters=session.capture_parameters,
     )
@@ -289,7 +281,6 @@ def test_native_load_historical_source_failure_preserves_previous_result(
     service = LoadService(
         session.state,
         MagicMock(),
-        provide_options=lambda _: (),
         context=ContextControlFacet(context=session.context),
         captured_parameters=session.capture_parameters,
     )
@@ -326,7 +317,6 @@ def test_native_load_keeps_unknown_historical_name_until_component_field_read(
     service = LoadService(
         session.state,
         MagicMock(),
-        provide_options=lambda _: (),
         context=ContextControlFacet(context=session.context),
         captured_parameters=session.capture_parameters,
     )
@@ -510,7 +500,6 @@ def test_native_load_retains_history_and_resaves_captured_source(
         service = LoadService(
             session.state,
             MagicMock(),
-            provide_options=lambda _: (),
             context=ContextControlFacet(context=session.context),
             captured_parameters=session.capture_parameters,
         )
@@ -569,7 +558,6 @@ def test_loaded_same_entry_different_point_resaves_original_run(
         service = LoadService(
             session.state,
             MagicMock(),
-            provide_options=lambda _: (),
             context=ContextControlFacet(context=session.context),
             captured_parameters=session.capture_parameters,
         )
@@ -685,7 +673,6 @@ def test_loaded_foreign_origin_save_rejects_before_mapping_or_io(
         service = LoadService(
             session.state,
             MagicMock(),
-            provide_options=lambda _: (),
             context=ContextControlFacet(context=session.context),
             captured_parameters=session.capture_parameters,
         )
@@ -747,7 +734,6 @@ def test_unselected_entry_load_retains_history_and_save_rejects_without_writes(
         service = LoadService(
             session.state,
             MagicMock(),
-            provide_options=lambda _: (),
             context=ContextControlFacet(context=session.context),
             captured_parameters=session.capture_parameters,
         )
@@ -799,7 +785,6 @@ def test_native_experiment_mismatch_keeps_previous_result_and_history(
         service = LoadService(
             session.state,
             MagicMock(),
-            provide_options=lambda _: (),
             context=ContextControlFacet(context=session.context),
             captured_parameters=session.capture_parameters,
         )
@@ -821,7 +806,6 @@ def test_unreadable_native_load_keeps_previous_result_and_history(
         service = LoadService(
             session.state,
             MagicMock(),
-            provide_options=lambda _: (),
             context=ContextControlFacet(context=session.context),
             captured_parameters=session.capture_parameters,
         )

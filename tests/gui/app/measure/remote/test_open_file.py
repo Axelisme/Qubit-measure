@@ -11,8 +11,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
     LoadDataRequest,
 )
-from zcu_tools.gui.cfg import DirectValue
-from zcu_tools.gui.cfg.resource import CfgResource
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
@@ -68,13 +66,8 @@ def app(qapp):
         fx.stop()
 
 
-@pytest.mark.parametrize(
-    "path, backfill, knob",
-    [("saved.h5", "applied", 42), ("no-cfg.h5", "not_applied", 7)],
-)
-def test_open_file_loads_without_soc_with_result_and_cfg_backfill(
-    app, path, backfill, knob
-):
+@pytest.mark.parametrize("path", ["saved.h5", "no-cfg.h5"])
+def test_open_file_loads_without_soc_with_result(app, path):
     fx, sock = app
     previous = fx.ctrl.new_tab("file")
     reply = call(sock, "tab.open_file", {"adapter_name": "file", "data_path": path})
@@ -82,43 +75,16 @@ def test_open_file_loads_without_soc_with_result_and_cfg_backfill(
     outcome = reply["result"]
     tab = outcome["tab_id"]
     assert tab != previous
-    assert outcome["cfg_backfill"] == backfill
     assert fx.state.active_tab_id == tab
     assert fx.state.session_env.soc is None
     assert fx.state.get_tab(tab).run.result == RunRecord(
-        cfg=None if backfill == "not_applied" else LoadedCfg(),
+        cfg=None if path == "no-cfg.h5" else LoadedCfg(),
         result=LoadedResult(path),
     )
-    assert fx.state.get_tab(tab).cfg.snapshot_inputs().value.fields[
-        "knob"
-    ] == DirectValue(knob)
     snapshot = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0]
     assert snapshot["run_id"] is None
     assert snapshot["result_state"]["available"] is True
     assert snapshot["result_state"]["source_path"] == path
-
-
-def test_open_file_backfill_failure_retains_loaded_result(app, monkeypatch):
-    fx, sock = app
-
-    def reject_replacement(self, *args, **kwargs):
-        raise ValueError("cfg cannot be prepared")
-
-    monkeypatch.setattr(CfgResource, "replace_inputs", reject_replacement)
-    assert call(sock, "context.snapshot")["ok"] is True
-    reply = call(
-        sock, "tab.open_file", {"adapter_name": "file", "data_path": "saved.h5"}
-    )
-    assert reply["ok"] is True
-    assert reply["result"]["cfg_backfill"] == "not_applied"
-    tab = reply["result"]["tab_id"]
-    assert fx.state.active_tab_id == tab
-    assert fx.state.get_tab(tab).run.result == RunRecord(
-        cfg=LoadedCfg(), result=LoadedResult("saved.h5")
-    )
-    assert fx.state.get_tab(tab).cfg.snapshot_inputs().value.fields[
-        "knob"
-    ] == DirectValue(7)
 
 
 @pytest.mark.parametrize("has_previous", [False, True])

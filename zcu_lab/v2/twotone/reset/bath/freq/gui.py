@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Literal, TypeAlias
+from typing import Annotated, ClassVar, Literal, TypeAlias
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -20,44 +19,18 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import Seed, custom, scaled_path_seed
-from zcu_tools.gui.cfg import (
-    EvalValue,
-    SweepValue,
-)
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.twotone.reset.bath.freq.core import (
     FreqGainAnalyzeOptions,
     FreqGainCfg,
     FreqGainExp,
     FreqGainResult,
 )
+from zcu_lab.v2.twotone.reset.bath.freq.form import make_form
 
 BathFreqGainRunResult: TypeAlias = RunRecord[FreqGainCfg, FreqGainResult]
-
-# The pi/2 readout tomography pulse sits at a fixed phase offset; the domain
-# adds a 4-point QickSweep1D("phase", 0, 270) on top of pi2_cfg.phase, so the
-# form value is the *base* offset (notebook: phase=90), not a swept axis.
-_PI2_PHASE_OFFSET_DEG: float = 90.0
-
-
-def _cavity_freq_range(expts: int) -> Seed[SweepValue]:
-    """Store cavity frequency minus 0.8–1.2 times calibrated Rabi frequency."""
-
-    def resolve(_ctx: SessionEnv) -> SweepValue:
-        return SweepValue(
-            start=EvalValue("$resonator.freq - 1.2 * $qubit.ext.rabi_freq"),
-            stop=EvalValue("$resonator.freq - 0.8 * $qubit.ext.rabi_freq"),
-            expts=expts,
-        )
-
-    return custom(resolve, description="bath cavity frequency range")
 
 
 @dataclass
@@ -84,56 +57,22 @@ class BathFreqGainAdapter(
 ):
     experiment_tag: ClassVar[str | None] = FreqGainExp.persistence_tag()
     exp_cls = FreqGainExp
-    ExpCfg_cls: ClassVar[Any] = FreqGainCfg
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[FreqGainCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset("reset", optional=True)
-            .pulse("init_pulse", role_id="pi_pulse", optional=True)
-            .reset(
-                "tested_reset",
-                role_id="bath_reset",
-                label="Tested Reset",
-                shape="bath",
-                locked={
-                    "cavity_tone_cfg.freq": 0.0,
-                    "cavity_tone_cfg.gain": 0.0,
-                    "pi2_cfg.phase": _PI2_PHASE_OFFSET_DEG,
-                },
-            )
-            .readout()
-            .relax_delay(
-                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=30.5),
-            )
-            .sweep(
-                "freq",
-                label="Cavity freq (MHz)",
-                default=_cavity_freq_range(51),
-            )
-            .sweep(
-                "gain",
-                label="Cavity gain (a.u.)",
-                default=SweepValue(start=0.4, stop=1.0, expts=51),
-            )
-            .reps(1000)
-            .rounds(100)
-            .build()
-        )
 
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: FreqGainCfg,
         *,
         context: RunContext,
     ) -> BathFreqGainRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         result = FreqGainExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 

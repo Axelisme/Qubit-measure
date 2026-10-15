@@ -4,11 +4,11 @@ Hardware gain and three-branch sweep: Rabi / Rabi + reset / Rabi + reset + Rabi.
 
 ## Expects (parameter context)
 
-Freezes g_center / e_center / radius from resolved cfg. Set calibration directly or seed defaults with singleshot/ge writeback; invalid calibration fails before hardware. Optionally uses confusion_matrix for analysis correction. Reads pi_gain and t1 for defaults.
+Open and Reset capture the current aliases, parameters and library. Relax delay is 5 * `$qubit.t1`; the gain sweep ends at 4 * `$qubit.module.x180.gain.` Classification seeds `$qubit.ext.readout_cal.g_center`/e_center/radius; missing calibration stays Invalid. Inline templates read `$qubit.freq`, `$qubit.wiring.L01.ch` and `$resonator.freq`/wiring.ch/wiring.ro_ch; readout trigger uses `$resonator.ext.time_of_fly` + 0.05 us. Missing required sources remain Invalid; no numeric fallback is supplied.
 
 ## Expects (ModuleLibrary)
 
-Needs rabi_pulse, tested_reset and readout. Optional upstream reset prepares the initial state.
+Rabi uses `$qubit.module.x180` or pi_pulse. Tested reset uses `$qubit.module.reset` or reset template. Upstream reset is optional; readout uses `$qubit.module.readout` or readout template. Sweep-overwritten pulse values remain editable and library keys stay selectable. Run uses this fixed capture.
 
 ## Typical writeback
 

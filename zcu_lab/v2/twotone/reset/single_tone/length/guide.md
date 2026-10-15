@@ -4,11 +4,11 @@ Single-tone sideband-reset length sweep: holds the tested pulse-reset at its cal
 
 ## Expects (parameter context)
 
-Requires `$qubit.ext.reset_f` for the tested reset frequency. Missing, null or invalid values fail cfg lowering. Other drive defaults use captured qubit frequency and wiring.
+The tested pulse frequency reads `$qubit.ext.reset_f.` Seeds 50 length points from 0.1 to 20.0 us, with relax delay 30.5 us. Open and Reset evaluate starting expressions once into direct input using captured sources. Inline qubit pulses read `$qubit.freq` and `$qubit.wiring.L01.ch.` Inline readout reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.ext.time_of_fly` + 0.05 us for trigger timing. Missing or invalid required sources leave the affected fields empty and Invalid; supply calibration or direct values before Run. No numeric calibration fallback is supplied.
 
 ## Expects (ModuleLibrary)
 
-Builds the tested pulse reset inline and needs a readout module. Optionally references a calibrated upstream reset and an init pulse (a library pi pulse when present) — both disabled when no library entry exists.
+Tested reset starts inline from the reset template. Optional init pulse uses `$qubit.module.x180` without fallback; an unset/dangling slot or unbound alias leaves it disabled and Valid. `$qubit.module.readout` selects a captured library link, otherwise a fresh inline readout template with a const waveform. Its required parameter sources must still be present. Optional `$qubit.module.reset` has no fallback: an unset/dangling slot or unbound alias leaves it disabled and Valid.
 
 ## Typical writeback
 

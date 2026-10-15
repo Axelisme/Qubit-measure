@@ -22,11 +22,11 @@ from zcu_tools.gui.app.measure.adapter.types import (
     PostAnalyzeResultBase,
     T_PostAnalyzeResult,
 )
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 from tests.gui.app.measure._synthetic import EmptyParams
-from tests.gui.app.measure.adapter._cfg_fakes import StaticCfgDefinition
 
 
 @dataclass
@@ -53,12 +53,13 @@ class PaneAdapter(BaseAdapter[SavingCfg, SavingRun, PaneResult, PaneParams]):
         post_analysis=True, requires_soc=False, load_data=True
     )
     exp_cls = SavingCore
-    ExpCfg_cls = SavingCfg
-    experiment_tag: ClassVar[str | None] = "test/saving"
 
-    @classmethod
-    def cfg_definition(cls) -> StaticCfgDefinition:
-        return StaticCfgDefinition()
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[SavingCfg]:
+        del ctx
+        return Form(SavingCfg, {})
+
+    experiment_tag: ClassVar[str | None] = "test/saving"
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return "panes"

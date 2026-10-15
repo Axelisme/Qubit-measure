@@ -13,6 +13,7 @@ from zcu_tools.resources.entry import ResultEntry
 
 from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.gui.app.workflows._synthetic import TunablesForm
+from tests.gui.widgets.form._text_input import commit_text
 
 from ._sample_input import sample_input
 from ._synthetic import Context
@@ -57,7 +58,7 @@ def test_incomplete_gui_text_blocks_apply_and_discard_restores_control(
     widget, engine = tuning
     control = widget.panel.editor.findChild(QLineEdit, "form.input.sample.factor")
     assert isinstance(control, QLineEdit)
-    control.setText("-")
+    commit_text(control, "-")
     blocked = widget.apply()
     assert isinstance(blocked, FormErrors)
     assert ("sample", "factor") in blocked.messages
@@ -96,7 +97,7 @@ def test_successful_external_edit_replaces_unparseable_view_text(
     widget, engine = tuning
     control = widget.panel.editor.findChild(QLineEdit, "form.input.sample.factor")
     assert isinstance(control, QLineEdit)
-    control.setText("-")
+    commit_text(control, "-")
     applied = widget.apply_external(
         {("sample", "factor"): 8.0}, actor=Actor("agent", "rpc")
     )
@@ -117,7 +118,7 @@ def test_journal_failure_propagates_without_accepting_input_or_clearing_local_te
     accepted = widget.host.accepted_input.data
     control = widget.panel.editor.findChild(QLineEdit, "form.input.sample.factor")
     assert isinstance(control, QLineEdit)
-    control.setText("-")
+    commit_text(control, "-")
     _window, _harness, entry = attachment
     journal = entry.result_path / "workflows/tuning/journal.jsonl"
     original = journal.read_bytes()

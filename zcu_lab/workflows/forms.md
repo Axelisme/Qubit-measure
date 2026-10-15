@@ -1,6 +1,6 @@
 # Workflow form attachments
 
-**Last updated:** 2026-10-13，defaults 的 expression 開表單時算成值；T1 guess_us 不靠靜態預設
+**Last updated:** 2026-10-14，defaults 只依固定 capture 產生 fresh 初值
 
 這個 package 擁有具體 workflow 的表單、to_cfg 與校準 module 轉換，不實作通用 editor、Window 或 Engine。
 Native science 不依賴 GUI。宿主、catalog、泛型 attachment、表單協調、presentation、input 保存、RPC 與 MCP 組裝由 lib 擁有，見 [host README](../../lib/zcu_tools/gui/app/workflows/README.md)。
@@ -20,7 +20,7 @@ Plan 透過通用 WorkflowPlanPanel preview；local parse errors 先阻擋 previ
 `CoherenceTunablesForm` 含共用 `cal` 與獨立 `t1`、`t2ramsey`、`t2echo`，不把 plan flags 放進 paused tunables。
 `T1TunablesForm` 是 t1 子表單，不再含重複 calibration。Echo／Ramsey 子表單各有自己的 guess、averaging 與 timing。
 Ramsey detune_ratio 預設 0.05 fringes/step，不論開關都驗有限值。Plan/tunables 仍分開驗證，不新增聯合 admission。
-T1 guess 初次輸入以 captured general.ext.guess_us 的 expression 宣告，開表單時算成值，位於 t1.guess_us；沒有 capture／leaf 時 defaults 明確給 20 µs。
+`defaults(env)` 不接收 previous，新表單與換分支使用同一份 fresh 初值。T1 guess 以 captured general.ext.guess_us 的 expression 宣告，開表單時算成值，位於 t1.guess_us；沒有 capture／leaf 時 defaults 明確給 20 µs。
 `guess_us` 沒有 Pydantic 靜態預設，`t1` 也因此沒有靜態預設，只由 `CoherenceTunablesForm.defaults` 提供。
 Null、非數字或 ≤0 的 referenced value 讓 guess_us 留空，result 只報 `t1.guess_us` 的 Field required，不落回 20。使用者寫的 expression 留在 FormInput，Engine journal 只存普通值。
 
@@ -38,7 +38,7 @@ Defaults 在同一 capture 解析 $qubit.module.x180.waveform.length，以具體
 它是 required Rabi-range estimate，供 host seed 使用，不是 fitted pi，也不放進 native CoherencePlan。
 
 `common.calibration_modules.resolve_calibration_modules` 集中 Coherence/MIST 的 drive 與 pulse-backed readout 規則。
-它經 captured core/native factories materialize ref/inline modules與 assets。
+三個 plan 表單用 `gui.form_adapter.ModuleInputField` 生成 tagged module 欄位，經公開 `to_spec` 取 key 或持久 Spec，再交 captured core/native factories materialize modules 與 assets。Inline 保留全部 module 家族，ref choices 仍依各欄位的原篩選，nullable reset 保 None。生成器只屏蔽已核准的選填硬體欄位，科學檢查仍由 workflows 負責。
 Pure arb drive 不能改 Length-Rabi duration，回 qub_pulse consuming-field error；flat_top arb ramp 與 arb readout 保留。
 這裡不提供 gain-Rabi、time-scaling、live repository lookup 或 guessed modules。
 

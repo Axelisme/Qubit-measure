@@ -1,13 +1,12 @@
-"""Hardware-free fake-adapter Run tree and native writeback ledger presentation."""
+"""Hardware-free Form adapter Run and native writeback ledger presentation."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 
 import pytest
 from qtpy.QtCore import QEventLoop, QTimer
-from qtpy.QtWidgets import QApplication, QCheckBox, QLabel, QScrollArea, QTreeWidget
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
+from qtpy.QtWidgets import QApplication, QCheckBox, QLabel, QScrollArea
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import (
     ParameterWriteback,
@@ -35,6 +34,7 @@ from tests.gui.app.measure._components import ResonatorSchema
 from tests.gui.app.measure._synthetic import (
     PairAdapter,
     SampleAnalysis,
+    SampleCfg,
     SampleRun,
 )
 from tests.gui.app.measure._templates import register_all_templates
@@ -47,11 +47,11 @@ class LedgerAdapter(PairAdapter):
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: SampleCfg,
         *,
         context: RunContext,
     ) -> SampleRun:
-        return super().run(req, dict(raw_cfg), context=context)
+        return super().run(req, cfg, context=context)
 
     def get_writeback_items(
         self, req: WritebackRequest[SampleRun, SampleAnalysis]
@@ -116,18 +116,13 @@ def hw_fixture(qapp, tmp_path):
 
 
 def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
-    """Public tab creation mounts the tree and native 6100 MHz writeback ledger."""
+    """Public Form tab Run/analysis renders a native 6100 MHz writeback ledger."""
     ctrl, window = hw_fixture
     assert "fake/freq" in ctrl.get_adapter_names()
     assert ctrl.get_session_env().soc is None
     tab_id = ctrl.new_tab("fake/freq")
     QApplication.processEvents()
     (tab,) = window.findChildren(ExpTabWidget)
-    tree = tab.cfg_form.findChild(QTreeWidget)
-    assert tree is not None
-    assert tree.isHeaderHidden()
-    assert tree.indentation() == 10
-    assert tree.font().pixelSize() == 13
     assert tab.analyze_form.font().pixelSize() == 13
 
     def is_descendant(widget, ancestor):
@@ -162,10 +157,8 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     idx_writeback = widgets.index(tab.writeback_section)
     assert idx_params < idx_analyze < idx_writeback
 
-    from zcu_tools.gui.cfg.resource import CfgEdit
-
     cfg = ctrl.cfg_resources.lookup(tab_id)
-    cfg.edit((CfgEdit(("rounds",), 1),))
+    cfg.write({("rounds",): 1})
     ctrl.start_run(tab_id)
 
     def wait_for(predicate: Callable[[], bool]) -> None:

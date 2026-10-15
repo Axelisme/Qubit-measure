@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import math
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar, TypeAlias
+from typing import ClassVar, TypeAlias
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -23,56 +21,12 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-    ModuleInit,
-)
-from zcu_tools.gui.app.measure.seeds import custom
-from zcu_tools.gui.cfg import EvalValue, SweepValue
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
-from zcu_lab.v2._support.measure.seeds import res_freq_range
 from zcu_lab.v2.twotone.ckp.core import CKP_Cfg, CKP_Exp, CKP_Result
 
-_CKP_SWEEP_EXPTS = 101
-_CKP_QUB_PULSE_LENGTH_US = 1.5
-
-
-def _rf_width_timing_seed(
-    _ctx: SessionEnv, *, numerator: float, offset: float = 0.0
-) -> EvalValue:
-    coefficient = numerator / (2 * math.pi)
-    expression = f"{coefficient} / $resonator.kappa"
-    if offset:
-        expression = f"{offset} + {expression}"
-    return EvalValue(expr=expression)
-
-
-def _res_pulse_length_seed(ctx: SessionEnv) -> float | EvalValue:
-    return _rf_width_timing_seed(
-        ctx,
-        numerator=5.1,
-        offset=_CKP_QUB_PULSE_LENGTH_US,
-    )
-
-
-def _qub_pre_delay_seed(ctx: SessionEnv) -> float | EvalValue:
-    return _rf_width_timing_seed(ctx, numerator=5.0)
-
-
-def _qub_post_delay_seed(ctx: SessionEnv) -> float | EvalValue:
-    return _rf_width_timing_seed(ctx, numerator=3.1)
-
-
-def _qub_freq_sweep_seed(_ctx: SessionEnv) -> SweepValue:
-    return SweepValue(
-        start=EvalValue("$qubit.freq - 10"),
-        stop=EvalValue("$qubit.freq + 5"),
-        expts=_CKP_SWEEP_EXPTS,
-    )
-
+from .form import make_form
 
 CKPRunResult: TypeAlias = RunRecord[CKP_Cfg, CKP_Result]
 
@@ -85,83 +39,26 @@ class CKPAnalyzeResult(AnalyzeResultBase):
 
 
 class CKPAdapter(BaseAdapter[CKP_Cfg, CKPRunResult, CKPAnalyzeResult, NoAnalyzeParams]):
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[CKP_Cfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
+
     experiment_tag: ClassVar[str | None] = CKP_Exp.persistence_tag()
     exp_cls = CKP_Exp
-    ExpCfg_cls: ClassVar[Any] = CKP_Cfg
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: CKP_Cfg,
         *,
         context: RunContext,
     ) -> CKPRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         result = CKP_Exp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("pi_pulse", role_id="pi_pulse", label="Pi Pulse")
-            .pulse(
-                "res_pulse",
-                role_id="res_probe",
-                label="Resonator Drive Pulse",
-                init=ModuleInit.INLINE,
-                overrides={
-                    "waveform.length": custom(
-                        _res_pulse_length_seed,
-                        description="CKP resonator-drive pulse length",
-                    ),
-                    "gain": 0.015,
-                },
-                locked={"freq": 0.0},
-            )
-            .pulse(
-                "qub_pulse",
-                role_id="qub_probe",
-                label="Qubit Probe Pulse",
-                init=ModuleInit.INLINE,
-                overrides={
-                    "waveform.length": _CKP_QUB_PULSE_LENGTH_US,
-                    "gain": 0.01,
-                    "pre_delay": custom(
-                        _qub_pre_delay_seed,
-                        description="CKP qubit-probe pre-delay",
-                    ),
-                    "post_delay": custom(
-                        _qub_post_delay_seed,
-                        description="CKP qubit-probe post-delay",
-                    ),
-                },
-                locked={"freq": 0.0},
-            )
-            .readout()
-            .relax_delay(10.1)
-            .sweep(
-                "res_freq",
-                label="Resonator drive freq (MHz)",
-                default=res_freq_range(expts=_CKP_SWEEP_EXPTS),
-            )
-            .sweep(
-                "qub_freq",
-                label="Qubit probe freq (MHz)",
-                default=custom(
-                    _qub_freq_sweep_seed,
-                    description="CKP qubit-probe frequency range",
-                ),
-            )
-            .reps(100)
-            .rounds(100)
-            .build()
-        )
 
     def analyze(
         self, req: AnalyzeRequest[CKPRunResult, NoAnalyzeParams], *, plots: Plots
@@ -179,17 +76,17 @@ class CKPAdapter(BaseAdapter[CKP_Cfg, CKPRunResult, CKPAnalyzeResult, NoAnalyzeP
         result = req.analyze_result
         return [
             ParameterWriteback(
-                target_name="chi",
+                target_name="$qubit.ext.chi",
                 description="Dispersive shift chi (MHz)",
                 proposed_value=result.chi,
             ),
             ParameterWriteback(
-                target_name="rf_w",
+                target_name="$resonator.kappa",
                 description="Resonator linewidth kappa (MHz)",
                 proposed_value=result.kappa,
             ),
             ParameterWriteback(
-                target_name="readout_f",
+                target_name="$resonator.freq",
                 description="Readout frequency (MHz)",
                 proposed_value=result.res_freq,
             ),

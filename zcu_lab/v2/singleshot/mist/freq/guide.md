@@ -4,11 +4,11 @@ MIST probe-frequency sweep: drives a probe pulse whose frequency is swept and cl
 
 ## Expects (parameter context)
 
-Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved cfg, not live parameter context. Enter direct cfg values or optionally seed defaults with 'singleshot/ge' writeback. The run classifies each shot using these values; missing or invalid cfg calibration fails before hardware. Optionally reads 'confusion_matrix' (the GE 3x3 matrix) to readout-correct the populations at analyze time, and 't1' to set the relax delay; 'readout_f' or 'r_f' plus 'rf_w' / 'res_ch' seed the probe drive and frequency sweep.
+Open and Reset capture the current aliases, parameters and library. Relax delay is 5 * `$qubit.t1.` Probe sweep is `$resonator.freq` +/- 1.5 * `$resonator.kappa.` Classification seeds `$qubit.ext.readout_cal.g_center`/e_center/radius; missing calibration stays Invalid. Inline templates read `$qubit.freq`, `$qubit.wiring.L01.ch` and `$resonator.freq`/wiring.ch/wiring.ro_ch; readout trigger uses `$resonator.ext.time_of_fly` + 0.05 us. Missing required sources remain Invalid; no numeric fallback is supplied.
 
 ## Expects (ModuleLibrary)
 
-Needs a probe pulse and a readout module. Optionally references a calibrated reset and an init pulse — both disabled when no library entry exists.
+Probe starts from res_probe. Optional init/reset use `$qubit.module.x180`/reset. Readout uses `$qubit.module.readout` or readout template. Sweep-overwritten pulse values remain editable and library keys stay selectable. Run uses this fixed capture.
 
 ## Typical writeback
 
@@ -16,4 +16,4 @@ No writeback — the population curves are read off the plot by eye.
 
 ## Recommended
 
-Set calibration cfg directly or seed it with 'singleshot/ge'. A frequency span around the qubit drive captures the MIST response; use a large enough shot count (reps) for clean populations.
+Set calibration cfg directly or seed it with 'singleshot/ge'. A frequency span around the resonator line captures the MIST response; use a large enough shot count (reps) for clean populations.

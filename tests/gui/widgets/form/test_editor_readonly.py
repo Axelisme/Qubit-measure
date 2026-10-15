@@ -1,12 +1,12 @@
 """set_editing_enabled(enabled=False) leaves the form readable but not editable.
 
 Every check is a user action on a shown editor: typing, clicking, the mouse
-wheel, arrow keys, the Expression action and the fold buttons. Each action is
+wheel, arrow keys, the Expression action and clicks on fold titles. Each action is
 also shown to edit the form once editing is enabled again, so a check of
 "nothing changed" cannot pass because the action never reached the control.
 """
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Annotated, Literal
 
 import pytest
@@ -20,17 +20,18 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
-    QPushButton,
     QWidget,
 )
-from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
-from zcu_tools.gui.form import Display, FormEnv, FormInput, FormModel, FormState
-from zcu_tools.gui.widgets.form import FormEditor
-from zcu_tools.resources.context.library import (
-    ComponentLibrary,
-    LibrarySnapshot,
-    ModuleLibraryDocument,
+from zcu_tools.gui.form import (
+    Display,
+    FormEnv,
+    FormInput,
+    FormModel,
+    FormPath,
+    FormState,
+    Option,
 )
+from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._user_input import key_click, mouse_click, type_text
 
@@ -51,6 +52,12 @@ class Extra(BaseModel):
     note: str = "n"
 
 
+DRIVE_OPTIONS = (
+    Option("Q1.pulses.pi", "Q1.pulses.pi"),
+    Option("Q1.pulses.pi2", "Q1.pulses.pi2"),
+)
+
+
 class ReadOnlyForm(FormModel):
     """One row of every control kind the editor draws."""
 
@@ -58,12 +65,17 @@ class ReadOnlyForm(FormModel):
     label: str = "probe"
     mode: Literal["fast", "slow"] = "fast"
     flag: bool = False
-    drive: str | PulseSpec = "Q1.pulses.pi"
+    drive: str = "Q1.pulses.pi"
     section: Annotated[Section, Display(collapsed=True)] = Field(
         default_factory=Section
     )
     extra: Extra | None = None
     phase: Annotated[float, Display(group="Advanced")] = 0.5
+
+    @classmethod
+    def options(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[Option, ...]]:
+        """Offer two declared drive keys in one option dropdown."""
+        return {("drive",): DRIVE_OPTIONS}
 
 
 class GroupFirstForm(FormModel):
@@ -75,11 +87,16 @@ class GroupFirstForm(FormModel):
     label: str = "probe"
     mode: Literal["fast", "slow"] = "fast"
     flag: bool = False
-    drive: str | PulseSpec = "Q1.pulses.pi"
+    drive: str = "Q1.pulses.pi"
     section: Annotated[Section, Display(collapsed=True)] = Field(
         default_factory=Section
     )
     extra: Extra | None = None
+
+    @classmethod
+    def options(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[Option, ...]]:
+        """Offer two declared drive keys in one option dropdown."""
+        return {("drive",): DRIVE_OPTIONS}
 
 
 DATA: dict[str, JsonValue] = {
@@ -96,25 +113,6 @@ TEXT_ROWS = ("amount", "label")
 DROPDOWN_ROWS = ("mode", "drive")
 
 
-def library_env() -> FormEnv:
-    """Two pulse modules under component Q1, so drive offers two keys."""
-    pulse = PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.2, waveform="Q1.waveforms.flat")
-    return FormEnv(
-        library=LibrarySnapshot(
-            ModuleLibraryDocument(
-                format="zcu.module-library",
-                format_version="1.0",
-                components={
-                    "Q1": ComponentLibrary(
-                        pulses={"pi": pulse, "pi2": pulse},
-                        waveforms={"flat": ConstWaveformCfg(length=1.0)},
-                    )
-                },
-            )
-        )
-    )
-
-
 type View = tuple[FormEditor[FormModel], FormState[FormModel]]
 
 
@@ -125,7 +123,7 @@ def view(qapp: QApplication, request: pytest.FixtureRequest) -> Iterator[View]:
     """A shown editor over DATA, with editing disabled, for each field order."""
     model: type[FormModel] = request.param
     state = FormState(FormInput(model, DATA))
-    editor = FormEditor(state, library_env())
+    editor = FormEditor(state, FormEnv())
     editor.resize(520, 600)
     editor.show()
     editor.set_editing_enabled(enabled=False)
@@ -155,23 +153,9 @@ def enabled_box(view: QWidget, path: str) -> QCheckBox:
     return child(view, QCheckBox, f"form.enabled.{path}")
 
 
-def fold(block: QWidget) -> QPushButton:
-    """The Expand/Collapse button directly inside a row or group block."""
-    (button,) = [
-        button
-        for button in block.findChildren(
-            QPushButton, "", Qt.FindChildOption.FindDirectChildrenOnly
-        )
-        if button.text() in ("Expand", "Collapse")
-    ]
-    return button
-
-
-def row_of(view: QWidget, path: str) -> QWidget:
-    """The row widget at path: the parent of its form.value.<path> label."""
-    row = child(view, QLabel, f"form.value.{path}").parentWidget()
-    assert row is not None
-    return row
+def fold(title: QLabel) -> None:
+    """Click title, as a user folds or unfolds its section."""
+    mouse_click(title, title.rect().center())
 
 
 def wheel(widget: QWidget) -> None:
@@ -245,6 +229,7 @@ def test_text_fields_ignore_typing_but_select_and_copy(
             assert field.isEnabled(), f"{path} must not be greyed out"
             type_text(field, "9")
             key_click(field, Qt.Key.Key_Backspace)
+            key_click(field, Qt.Key.Key_Return)
             assert field.text() == text
             key_click(field, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
             assert field.selectedText() == text
@@ -300,26 +285,64 @@ def test_folds_still_expand_and_collapse_without_writing(
     view: View, qapp: QApplication
 ) -> None:
     editor, state = view
-    for block, inner in (
-        (child(editor, QWidget, "form.group.Advanced"), "form.input.phase"),
-        (row_of(editor, "section"), "form.input.section.level"),
+    for name, inner in (
+        ("form.fold.group.Advanced", "form.input.phase"),
+        ("form.fold.section", "form.input.section.level"),
     ):
-        button = fold(block)
+        title = child(editor, QLabel, name)
         content = child(editor, QLineEdit, inner)
-        assert button.isEnabled() and not content.isVisibleTo(editor)
-        button.click()
+        assert title.isEnabled() and not content.isVisibleTo(editor)
+        assert title.text().startswith("\u25b8 "), name
+        fold(title)
         qapp.processEvents()
         assert content.isVisibleTo(editor), inner
         assert content.isEnabled(), f"{inner} must not be greyed out"
-        button.click()
+        assert title.text().startswith("\u25be "), name
+        fold(title)
         qapp.processEvents()
         assert not content.isVisibleTo(editor), inner
+        assert title.text().startswith("\u25b8 "), name
+    assert state.input.data == DATA
+
+
+def test_fold_titles_take_tab_focus_and_fold_on_space_or_enter_without_writing(
+    view: View,
+) -> None:
+    editor, state = view
+    start = child(editor, QLineEdit, "form.input.amount")
+    start.setFocus(Qt.FocusReason.TabFocusReason)
+    stops = [start.objectName()]
+    for _ in range(50):
+        focused = QApplication.focusWidget()
+        assert focused is not None
+        key_click(focused, Qt.Key.Key_Tab)
+        now = QApplication.focusWidget()
+        assert now is not None
+        if now is start:
+            break
+        stops.append(now.objectName())
+    for name, inner in (
+        ("form.fold.group.Advanced", "form.input.phase"),
+        ("form.fold.section", "form.input.section.level"),
+    ):
+        assert name in stops, (name, stops)
+        title = child(editor, QLabel, name)
+        content = child(editor, QLineEdit, inner)
+        title.setFocus(Qt.FocusReason.TabFocusReason)
+        assert title.hasFocus(), name
+        assert not content.isVisibleTo(editor), inner
+        key_click(title, Qt.Key.Key_Space, text=" ")
+        assert content.isVisibleTo(editor), inner
+        assert title.text().startswith("\u25be "), name
+        key_click(title, Qt.Key.Key_Return, text="\r")
+        assert not content.isVisibleTo(editor), inner
+        assert title.text().startswith("\u25b8 "), name
     assert state.input.data == DATA
 
 
 def test_external_updates_show_while_read_only(view: View) -> None:
     editor, state = view
-    state.write({("amount",): 6.0, ("mode",): "slow"}, library_env())
+    state.write({("amount",): 6.0, ("mode",): "slow"}, FormEnv())
     assert float(child(editor, QLineEdit, "form.input.amount").text()) == 6.0
     assert child(editor, QComboBox, "form.input.mode").currentText() == "slow"
 
@@ -334,6 +357,7 @@ def test_enabling_again_restores_every_edit_and_mode_switch(
     amount = child(editor, QLineEdit, "form.input.amount")
     key_click(amount, Qt.Key.Key_End)
     type_text(amount, "5")
+    key_click(amount, Qt.Key.Key_Return)
     assert state.input.data["amount"] == 2.05
     # The write keeps the form's shape, so the typed-into field stays.
     assert child(editor, QLineEdit, "form.input.amount") is amount
@@ -343,6 +367,7 @@ def test_enabling_again_restores_every_edit_and_mode_switch(
     label = child(editor, QLineEdit, "form.input.label")
     key_click(label, Qt.Key.Key_End)
     key_click(label, Qt.Key.Key_Backspace)
+    key_click(label, Qt.Key.Key_Return)
     assert state.input.data["label"] == "prob"
 
     choice = child(editor, QComboBox, "form.input.mode")

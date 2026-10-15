@@ -84,8 +84,8 @@ if TYPE_CHECKING:
     from .services.operation_control import OperationControlPort
     from .services.run_analyze_control import RunAnalyzeControlPort
     from .services.save_control import SaveControlPort
-    from .services.tab_cfg import TabCfgLookup
     from .services.tab_control import TabControlPort
+    from .services.tab_form import TabFormResources
     from .services.writeback_control import WritebackControlPort, WritebackPane
 
 
@@ -373,7 +373,7 @@ class Controller(SessionControllerMixin):
         self._ctx_svc = services.context
         self._context_control = services.context_control
         self._setup_control = services.setup_control
-        self._tab_cfg = services.tab_cfg
+        self._tab_forms = services.tab_forms
         self._tab_svc = services.tab
         self._tab_control = services.tab_control
         self._run_analyze_control = services.run_analyze_control
@@ -556,8 +556,9 @@ class Controller(SessionControllerMixin):
         return self._setup_control
 
     @property
-    def cfg_resources(self) -> TabCfgLookup:
-        return self._tab_cfg
+    def cfg_resources(self) -> TabFormResources:
+        """Return the tab Form owner pool; lookup rejects retired tab identities."""
+        return self._tab_forms
 
     @property
     def tab_control(self) -> TabControlPort:
@@ -702,7 +703,7 @@ class Controller(SessionControllerMixin):
     def start_run(
         self, tab_id: str, *, aliases: Mapping[str, str] | None = None
     ) -> int:
-        """Start observed cfg inputs with an optional single-Run alias override.
+        """Run displayed cfg values; nonempty aliases require an explicit Reset first.
 
         See RunAnalyzeControlFacet.start_run for admission and failure semantics.
         """

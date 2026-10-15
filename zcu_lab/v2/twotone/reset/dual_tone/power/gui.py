@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Literal, TypeAlias
+from typing import Annotated, ClassVar, Literal, TypeAlias
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -22,24 +21,17 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import path_seed
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    SweepValue,
-)
+from zcu_tools.gui.cfg import CfgSchema
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.twotone.reset.dual_tone.power.core import (
     PowerAnalyzeOptions,
     PowerCfg,
     PowerExp,
     PowerResult,
 )
+from zcu_lab.v2.twotone.reset.dual_tone.power.form import make_form
 
 DualTonePowerRunResult: TypeAlias = RunRecord[PowerCfg, PowerResult]
 
@@ -68,54 +60,22 @@ class DualTonePowerAdapter(
 ):
     experiment_tag: ClassVar[str | None] = PowerExp.persistence_tag()
     exp_cls = PowerExp
-    ExpCfg_cls: ClassVar[Any] = PowerCfg
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[PowerCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("init_pulse", role_id="pi_pulse", optional=True)
-            .reset(
-                "tested_reset",
-                role_id="two_pulse_reset",
-                label="Tested Reset",
-                shape="two_pulse",
-                locked={"pulse1_cfg.gain": 0.0, "pulse2_cfg.gain": 0.0},
-                overrides={
-                    "pulse1_cfg.freq": path_seed("$qubit.ext.reset_f1", fallback=0.0),
-                    "pulse2_cfg.freq": path_seed("$qubit.ext.reset_f2", fallback=0.0),
-                },
-            )
-            .readout()
-            .relax_delay(0.5)
-            .sweep(
-                "gain1",
-                label="Gain 1 (a.u.)",
-                default=SweepValue(start=0.0, stop=1.0, expts=51),
-            )
-            .sweep(
-                "gain2",
-                label="Gain 2 (a.u.)",
-                default=SweepValue(start=0.0, stop=1.0, expts=51),
-            )
-            .reps(100)
-            .rounds(100)
-            .build()
-        )
 
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: PowerCfg,
         *,
         context: RunContext,
     ) -> DualTonePowerRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         result = PowerExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 

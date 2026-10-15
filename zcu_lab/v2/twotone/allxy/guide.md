@@ -4,11 +4,11 @@ AllXY: runs the 21 standard pairs of I, X90, Y90, X180 and Y180 gates before rea
 
 ## Expects (parameter context)
 
-Reads 't1' (us) to seed relax_delay as 5*t1 (fallback ~30 us). Pulse modules pull 'q_f' (~2000–6000 MHz) and 'qub_ch'; readout pulls 'r_f', 'res_ch' / 'ro_ch' and 'timeFly'.
+AllXY uses the captured gate slots. Relax delay is 5 * qubit.t1 us. Missing calibration leaves the affected fields empty and Invalid; no numeric fallback.
 
 ## Expects (ModuleLibrary)
 
-Needs an X90 pulse module (prefers the calibrated library pi/2 pulse 'pi2_amp' / 'pi2_len'), an X180 pulse module (prefers 'pi_amp' / 'pi_len'), and a readout module (calibrated 'readout_dpm' / 'readout_rf' / 'readout' / 'res_readout', else a blank pulse-readout). Optional reset references a library reset when present, else stays disabled. The identity gate is the X90 pulse at zero gain.
+Uses captured qubit.module.readout with a readout template fallback, and qubit.module.reset with no fallback (disabled when absent). Drive slots use qubit.module.x180/x90 with pi_pulse/pi2_pulse template fallbacks. Unset or dangling slots use the named template, not a legacy blank. Key choices remain available. Inline templates read qubit.freq, qubit.wiring.L01.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.ext.time_of_fly + 0.05 us; missing required calibration remains Invalid.
 
 ## Typical writeback
 

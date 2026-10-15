@@ -4,11 +4,11 @@ T2 Ramsey: two pi/2 pulses separated by a swept free-evolution delay; fits the d
 
 ## Expects (parameter context)
 
-Defaults use the tab's fixed qubit and referenced resonator. Delay ends at 1.5 * qubit.t2r (us, fallback 0.4 us); relax_delay is 5 * qubit.t1 (fallback 100 us). Inline pi/2 reads qubit.freq and qubit.wiring.L01.ch. Inline readout reads resonator.freq, resonator.wiring.ch/ro_ch, and resonator.ext.time_of_fly + 0.05 us (fallback 0.55 us). Missing or null calibration uses fallback; unbound roles remain Invalid until supplied.
+Delay runs 0 to 1.5 * qubit.t2r us over 101 points. Detune ratio is fringes per sweep step; native MHz detune is ratio / step. Relax delay is 5 * qubit.t1 us. Missing calibration leaves the affected fields empty and Invalid; no numeric fallback.
 
 ## Expects (ModuleLibrary)
 
-Uses captured qubit.module.x90 and qubit.module.readout. Missing or dangling slots seed fresh inline pulse/readout defaults. Optional qubit.module.reset stays disabled when absent. Verify the inline pulse values and readout timing before Run.
+Uses captured qubit.module.readout with a readout template fallback, and qubit.module.reset with no fallback (disabled when absent). The drive uses qubit.module.x90 with a pi2_pulse template fallback. Unset or dangling slots use the named template, not a legacy blank. Key choices remain available. Inline templates read qubit.freq, qubit.wiring.L01.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.ext.time_of_fly + 0.05 us; missing required calibration remains Invalid.
 
 ## Typical writeback
 

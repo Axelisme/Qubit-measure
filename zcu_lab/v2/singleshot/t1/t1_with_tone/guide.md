@@ -1,18 +1,18 @@
 ## Behavior
 
-Single-shot T1-with-tone: applies a π pulse and a simultaneous probe tone during the wait, sweeps the wait-plus-probe length, and classifies each shot in-program against the |g>/|e> IQ-cluster centres. Plots the ground / excited / other populations versus delay time with dual-transition-rate fits for T1 and T1_b. The fitted T1 value is written back to 't1_with_tone' in the parameter context. Runs on real hardware.
+Single-shot T1-with-tone: applies a π pulse and a simultaneous probe tone during the wait, sweeps the wait-plus-probe length, and classifies each shot in-program against the |g>/|e> IQ-cluster centres. Plots the ground / excited / other populations versus delay time with dual-transition-rate fits for T1 and T1_b. The fitted T1 value is written back to '`$qubit.ext.t1_with_tone`' in the parameter context. Runs on real hardware.
 
 ## Expects (parameter context)
 
-Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved cfg, not live parameter context. Enter direct cfg values or optionally seed defaults with 'singleshot/ge' writeback. Missing or invalid cfg calibration fails before hardware. Optionally reads 'confusion_matrix' to readout-correct populations at analyze time; 't1_with_tone' or 't1' to seed the sweep stop (5*t1_with_tone when present, else 5*t1; fallback 500 us); 't1' seeds relax delay (5*t1; fallback 100 us); 'q_f' / 'qub_ch' for the pi pulse; 'readout_f' or 'r_f' plus 'res_ch' seed the probe tone; 'r_f' / 'res_ch' / 'ro_ch' / 'timeFly' for readout.
+Open and Reset capture the current aliases, parameters and library. Relax delay is 5 * `$qubit.t1.` Length stop is 5 * `$qubit.ext.t1_with_tone`; there is no fallback to t1. Classification seeds `$qubit.ext.readout_cal.g_center`/e_center/radius; missing calibration stays Invalid. Inline templates read `$qubit.freq`, `$qubit.wiring.L01.ch` and `$resonator.freq`/wiring.ch/wiring.ro_ch; readout trigger uses `$resonator.ext.time_of_fly` + 0.05 us. Missing required sources remain Invalid; no numeric fallback is supplied.
 
 ## Expects (ModuleLibrary)
 
-Needs a qubit pi-pulse module, a probe-tone pulse module, and a readout module. Optional reset and optional init pulse (both disabled when no library entry exists).
+Pi pulse uses `$qubit.module.x180` or pi_pulse. Probe starts from res_probe. Optional init/reset use `$qubit.module.x180`/reset. Readout uses `$qubit.module.readout` or readout template. Sweep-overwritten pulse values remain editable and library keys stay selectable. Run uses this fixed capture.
 
 ## Typical writeback
 
-Proposes the fitted T1 relaxation time under the probe tone into parameter context 't1_with_tone' (us).
+Proposes the fitted T1 relaxation time under the probe tone into parameter context '`$qubit.ext.t1_with_tone`' (us).
 
 ## Recommended
 

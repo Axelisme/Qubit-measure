@@ -2,47 +2,42 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import replace
 from typing import Literal, cast
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.cfg_model import ConfigBase, Expr
 from zcu_tools.device import BaseDeviceInfo
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, ContextReadiness
+from zcu_tools.gui.app.measure.adapter import (
+    AdapterCapabilities,
+    ContextReadiness,
+)
 from zcu_tools.gui.app.measure.services.guard import (
     GuardError,
     GuardService,
     RunInputs,
 )
 from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    DirectValue,
-    EvalValue,
-    ReferenceSpec,
-    ReferenceValue,
-    ScalarSpec,
-)
-from zcu_tools.gui.cfg.resource import CfgEdit, CfgPreconditionError
+from zcu_tools.gui.cfg.resource import CfgPreconditionError
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
-from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.program.v2.modules import PulseCfg
 
-from tests.gui.app.measure._cfg_fakes import cfg_resolution, make_cfg, parameter_capture
+from tests.gui.app.measure._cfg_fakes import parameter_capture
+from tests.gui.app.measure._form_fakes import make_form
+
+
+class GainCfg(ConfigBase):
+    gain: float
+
+
+class ModuleAdmissionCfg(ConfigBase):
+    asset: PulseCfg
 
 
 def _make_guard(state: State) -> GuardService:
-    def capture(_aliases: Mapping[str, str] | None) -> ParameterContext | None:
-        parameters = state.session_env.parameters
-        return None if parameters is None else parameters.bind_aliases((), {})
-
-    return GuardService(
-        state,
-        captured_parameters=capture,
-        cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
-    )
+    return GuardService(state)
 
 
 def _make_state(
@@ -74,18 +69,12 @@ def _make_state(
         requires_soc=requires_soc, load_data=load_data
     )
 
-    if lowering_raises:
-        schema = CfgSchema(
-            spec=CfgSectionSpec(fields={"gain": ScalarSpec(label="Gain", type=float)}),
-            value=CfgSectionValue(fields={"gain": DirectValue(None)}),
-        )
-    else:
-        schema = CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
+    form = Form(GainCfg, {}) if lowering_raises else Form(ConfigBase, {})
 
     tab = Session(
         adapter_name="any",
         adapter=adapter,
-        cfg=make_cfg(schema, state=state),
+        cfg=make_form(form, state=state),
     )
     tab.run.result = run_result
     tab.analysis.result = analyze_result
@@ -113,7 +102,9 @@ def test_run_inputs_issued_for_active_valid_cfg():
     assert inputs.request.cfg_context == parameters.library.validation_context()
     assert inputs.adapter is state.get_tab(tab_id).adapter
     adapter = cast(MagicMock, inputs.adapter)
-    adapter.validate_run_request.assert_called_once_with(inputs.request, {})
+    adapter.validate_run_request.assert_called_once_with(
+        inputs.request, inputs.accepted_cfg.cfg
+    )
 
 
 def test_run_inputs_freezes_published_expression_and_provenance() -> None:
@@ -121,21 +112,14 @@ def test_run_inputs_freezes_published_expression_and_provenance() -> None:
     state.set_context(
         replace(state.session_env, parameters=parameter_capture(gain=0.25))
     )
-    cfg = make_cfg(
-        CfgSchema(
-            CfgSectionSpec(fields={"gain": ScalarSpec("Gain", float)}),
-            CfgSectionValue(fields={"gain": EvalValue("general.ext.gain")}),
-        ),
-        state=state,
-    )
+    cfg = make_form(Form(GainCfg, {"gain": Expr("general.ext.gain")}), state=state)
     state.get_tab(tab_id).cfg = cfg
-    before = cfg.observe()
+    before = cfg.accept()
     inputs = _make_guard(state).capture_run_inputs(tab_id)
     state.set_context(
         replace(state.session_env, parameters=parameter_capture(gain=0.75))
     )
     state.version.bump("context")
-    cfg.refresh()
 
     assert inputs.accepted_cfg.values == {"gain": 0.25}
     assert inputs.accepted_cfg.source_basis == before.source_basis
@@ -144,12 +128,8 @@ def test_run_inputs_freezes_published_expression_and_provenance() -> None:
 
 def test_run_inputs_rejects_invalid_expression_without_preflight() -> None:
     state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
-    cfg = make_cfg(
-        CfgSchema(
-            CfgSectionSpec(fields={"gain": ScalarSpec("Gain", float)}),
-            CfgSectionValue(fields={"gain": EvalValue("general.ext.missing_gain")}),
-        ),
-        state=state,
+    cfg = make_form(
+        Form(GainCfg, {"gain": Expr("general.ext.missing_gain")}), state=state
     )
     state.get_tab(tab_id).cfg = cfg
     with pytest.raises(CfgPreconditionError):
@@ -161,31 +141,26 @@ def test_run_inputs_rejects_invalid_expression_without_preflight() -> None:
 
 def test_run_inputs_detaches_reference_shape_and_values() -> None:
     state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
-    shape = CfgSectionSpec(
-        label="Pulse", fields={"gain": ScalarSpec(label="Gain", type=float)}
-    )
-    value = CfgSectionValue(fields={"gain": DirectValue(0.25)})
-    cfg = make_cfg(
-        CfgSchema(
-            CfgSectionSpec(
-                fields={"asset": ReferenceSpec(kind="module", allowed=[shape])}
-            ),
-            CfgSectionValue(
-                fields={
-                    "asset": ReferenceValue(
-                        "<Custom:Pulse>", value, resolved_label="Pulse"
-                    )
-                }
-            ),
-        ),
-        state=state,
-    )
+    cfg = make_form(Form(ModuleAdmissionCfg, {}), state=state)
     state.get_tab(tab_id).cfg = cfg
+    cfg.write(
+        {
+            ("asset", "kind"): "inline",
+            ("asset", "module", "ch"): 0,
+            ("asset", "module", "nqz"): 1,
+            ("asset", "module", "waveform", "kind"): "inline",
+            ("asset", "module", "waveform", "module", "style"): "const",
+            ("asset", "module", "waveform", "module", "length"): 0.4,
+            ("asset", "module", "gain"): 0.25,
+            ("asset", "module", "freq"): 4000,
+            ("asset", "module", "phase"): 0,
+        }
+    )
     inputs = _make_guard(state).capture_run_inputs(tab_id)
-    cfg.edit((CfgEdit(("asset", "gain"), 0.75),))
-    value.fields["gain"] = DirectValue(9.0)
-    shape.fields.clear()
-    assert inputs.accepted_cfg.values == {"asset": {"gain": 0.25}}
+    cfg.write({("asset", "module", "gain"): 0.75})
+    payload = inputs.accepted_cfg.values["asset"]
+    assert isinstance(payload, dict)
+    assert payload["gain"] == 0.25
 
 
 @pytest.mark.parametrize(

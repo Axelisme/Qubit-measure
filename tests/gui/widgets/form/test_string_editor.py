@@ -13,6 +13,8 @@ from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
+from tests.gui.widgets.form._text_input import commit_text
+
 
 class StringForm(FormModel):
     """A free text field resolves string expressions."""
@@ -57,13 +59,13 @@ def test_string_mode_writes_expression_and_projects_preview_and_errors(
     mode.trigger()
     text = editor.findChild(QLineEdit, f"form.input.{field}")
     assert isinstance(text, QLineEdit)
-    text.setText("$device")
+    commit_text(text, "$device")
     assert state.input.data[field] == {"expr": "$device"}
     assert state.preview(env).values[(field,)] == "yoko1"
     shown = editor.findChild(QLabel, f"form.value.{field}")
     assert isinstance(shown, QLabel)
     assert '$device = "yoko1"' in shown.text()
-    text.setText("$unbound")
+    commit_text(text, "$unbound")
     error = editor.findChild(QLabel, f"form.error.{field}")
     assert isinstance(error, QLabel)
     assert "unbound" in error.text()
@@ -75,6 +77,38 @@ def test_string_mode_writes_expression_and_projects_preview_and_errors(
     assert text.text() == "$device"
     assert state.input.data[field] == {"expr": "$device"}
     mode.trigger()
-    text.setText("$device")
+    commit_text(text, "$device")
     assert state.input.data[field] == "$device"
     assert state.preview(env).values[(field,)] == "$device"
+
+
+def test_string_direct_mode_fills_the_resolved_name(
+    name_editor: tuple[FormEditor[StringForm], FormState[StringForm], FormEnv],
+) -> None:
+    editor, state, env = name_editor
+    state.write({("name",): {"expr": "$device"}}, env)
+    mode = editor.findChild(QAction, "form.mode.name")
+    assert isinstance(mode, QAction)
+
+    mode.trigger()
+
+    assert not mode.isChecked()
+    assert state.input.data["name"] == "yoko1"
+    text = editor.findChild(QLineEdit, "form.input.name")
+    assert isinstance(text, QLineEdit)
+    assert text.text() == "yoko1"
+
+
+def test_string_direct_mode_keeps_an_unresolved_expression_as_literal_text(
+    name_editor: tuple[FormEditor[StringForm], FormState[StringForm], FormEnv],
+) -> None:
+    editor, state, env = name_editor
+    state.write({("name",): {"expr": "$unbound"}}, env)
+    mode = editor.findChild(QAction, "form.mode.name")
+    assert isinstance(mode, QAction)
+
+    mode.trigger()
+
+    assert not mode.isChecked()
+    assert state.input.data["name"] == "$unbound"
+    assert editor.errors() is None

@@ -4,11 +4,11 @@ Bath-reset length sweep: holds the tested bath reset at its calibrated cavity fr
 
 ## Expects (parameter context)
 
-Requires `$qubit.ext.reset_bath_freq` and `$qubit.ext.reset_bath_gain` for the tested cavity tone. Missing, null or invalid values fail cfg lowering. Other drive defaults use captured qubit/resonator frequency and wiring.
+Tested cavity frequency and gain read `$qubit.ext.reset_bath_freq` and `$qubit.ext.reset_bath_gain.` Seeds 201 length points from 0.05 to 15.0 us, with relax delay 10.5 us. Run replaces the pi/2 phase with its tomography cycle. Open and Reset evaluate starting expressions once into direct input using captured sources. Inline qubit pulses read `$qubit.freq` and `$qubit.wiring.L01.ch.` Inline readout reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.ext.time_of_fly` + 0.05 us for trigger timing. Missing or invalid required sources leave the affected fields empty and Invalid; supply calibration or direct values before Run. No numeric calibration fallback is supplied.
 
 ## Expects (ModuleLibrary)
 
-Builds the tested bath-reset cfg from captured defaults and needs a readout module. Optionally references an upstream reset and an init pulse (a library pi pulse when present) — both disabled when no library entry exists.
+Tested reset starts inline from the bath_reset template. Optional init pulse uses `$qubit.module.x180` without fallback; an unset/dangling slot or unbound alias leaves it disabled and Valid. The pi/2 tone uses `$qubit.module.x90`, otherwise a fresh pi2_pulse template. `$qubit.module.readout` selects a captured library link, otherwise a fresh inline readout template with a const waveform. Its required parameter sources must still be present. Optional `$qubit.module.reset` has no fallback: an unset/dangling slot or unbound alias leaves it disabled and Valid.
 
 ## Typical writeback
 

@@ -15,7 +15,6 @@ from zcu_tools.gui.form import (
     FormPath,
     FormState,
     LinRange,
-    RangeInput,
 )
 
 from tests.gui._form_context import captured_ext_env
@@ -91,20 +90,6 @@ def test_discriminator_identity_survives_dynamic_choices_refresh() -> None:
         assert isinstance(branch, dict)
         variants = branch["oneOf"]
         assert isinstance(variants, list)
-        identities: list[JsonValue] = []
-        for variant in variants:
-            assert isinstance(variant, dict)
-            identities.append(variant["x-form-discriminator-values"])
-            fields = variant["properties"]
-            assert isinstance(fields, dict)
-            selector = fields["kind"]
-            assert isinstance(selector, dict)
-            direct = selector
-            if empty:
-                assert direct["not"] == {}
-            else:
-                assert direct["enum"] == [2]
-        assert identities == [[1, 2], [3]]
         validator = Draft202012Validator(schema)
         assert validator.is_valid(before) is not empty
         result = state.result(env)
@@ -135,13 +120,13 @@ def identity_input() -> dict[str, JsonValue]:
 
 
 class SchemaIdentityForm(FormModel):
-    """Tagged schemas occur inside whole leaves and shared alias definitions."""
+    """Tagged schemas occur in whole leaves alongside reused linear ranges."""
 
     sequence: list[NumericChoice]
     fixed: tuple[NumericChoice, NumericChoice]
     mapping: dict[str, NumericChoice]
-    restricted: RangeInput
-    unrestricted: RangeInput
+    restricted: LinRange
+    unrestricted: LinRange
 
     @classmethod
     def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
@@ -170,43 +155,9 @@ def schema_object(value: JsonValue) -> dict[str, JsonValue]:
     return value
 
 
-def identity_values(node: dict[str, JsonValue]) -> list[JsonValue]:
-    """Read each oneOf branch's public identity, retaining None when absent."""
-    branches = node["oneOf"]
-    assert isinstance(branches, list)
-    return [
-        schema_object(branch).get("x-form-discriminator-values") for branch in branches
-    ]
-
-
-def identity_snapshot(schema: dict[str, JsonValue]) -> dict[str, list[JsonValue]]:
-    """Read identities at the eight public positions of SchemaIdentityForm's schema."""
-    fields = schema_object(schema["properties"])
-    definitions = schema_object(schema["$defs"])
-    sequence = schema_object(fields["sequence"])
-    fixed = schema_object(fields["fixed"])
-    mapping = schema_object(fields["mapping"])
-    prefix = fixed["prefixItems"]
-    assert isinstance(prefix, list)
-    return {
-        "items": identity_values(schema_object(sequence["items"])),
-        "prefix0": identity_values(schema_object(prefix[0])),
-        "prefix1": identity_values(schema_object(prefix[1])),
-        "additionalProperties": identity_values(
-            schema_object(mapping["additionalProperties"])
-        ),
-        "NumericChoice": identity_values(schema_object(definitions["NumericChoice"])),
-        "RangeInput": identity_values(schema_object(definitions["RangeInput"])),
-        "restricted": identity_values(schema_object(fields["restricted"])),
-        "unrestricted": identity_values(schema_object(fields["unrestricted"])),
-    }
-
-
 def range_count_options(node: dict[str, JsonValue]) -> JsonValue:
-    """Read the ordinary n options from the first branch of a RangeInput schema."""
-    branches = node["oneOf"]
-    assert isinstance(branches, list)
-    fields = schema_object(schema_object(branches[0])["properties"])
+    """Read the ordinary n options from a linear range schema."""
+    fields = schema_object(node["properties"])
     # A choice leaf has no Expr alternative, so its node holds the enum.
     count = schema_object(fields["n"])
     assert "anyOf" not in count
@@ -228,27 +179,6 @@ def test_container_discriminator_identity_and_retained_discriminator_identity_re
         env = captured_ext_env(empty_containers=empty, three_only=three_only)
         schema = SchemaIdentityForm.input_schema(env)
         fields = schema_object(schema["properties"])
-        observed = identity_snapshot(schema)
-        assert observed == {
-            "items": [[1, 2], [3]],
-            "prefix0": [[1, 2], [3]],
-            "prefix1": [[1, 2], [3]],
-            "additionalProperties": [[1, 2], [3]],
-            "NumericChoice": [[1, 2], [3]],
-            "RangeInput": [["linrange"], ["list"]],
-            "restricted": [["linrange"], ["list"]],
-            "unrestricted": [["linrange"], ["list"]],
-        }
-        for location in (
-            "items",
-            "prefix0",
-            "prefix1",
-            "additionalProperties",
-            "NumericChoice",
-        ):
-            for tags in observed[location]:
-                assert isinstance(tags, list)
-                assert all(type(tag) is int for tag in tags)
         for name in ("sequence", "fixed", "mapping"):
             node = schema_object(fields[name])
             if empty:
@@ -319,16 +249,6 @@ class TypedTagCollisionForm(FormModel):
 def test_discriminator_identity_keeps_numeric_and_string_tags_distinct() -> None:
     env = FormEnv()
     schema = TypedTagCollisionForm.input_schema(env)
-    fields = schema_object(schema["properties"])
-    branches = schema_object(fields["branch"])["oneOf"]
-    assert isinstance(branches, list)
-    observed: dict[str, JsonValue] = {}
-    for value in branches:
-        branch = schema_object(value)
-        properties = schema_object(branch["properties"])
-        name = "amount" if "amount" in properties else "text_only"
-        observed[name] = branch.get("x-form-discriminator-values")
-    assert observed == {"amount": [1, 2], "text_only": ["1"]}
     for tag in (1, 2, "1"):
         data: dict[str, JsonValue] = {"branch": {"kind": tag}}
         assert Draft202012Validator(schema).is_valid(data)
@@ -367,9 +287,6 @@ def test_skipped_discriminator_choice_keeps_normal_field_and_identity(
 ) -> None:
     env = FormEnv()
     schema = model.input_schema(env)
-    fields = schema_object(schema["properties"])
-    branch = schema_object(fields["branch"])
-    assert identity_values(branch) == [[1, 2]]
     for tag in (1, 2):
         data: dict[str, JsonValue] = {"branch": {"kind": tag, "amount": 7.0}}
         assert Draft202012Validator(schema).is_valid(data)
@@ -465,14 +382,6 @@ def test_literal_tag_declaration_keeps_schema_and_result_agreement(
     ):
         env = captured_ext_env(empty_amounts=empty, nine_only=nine_only)
         schema = model.input_schema(env)
-        fields = schema_object(schema["properties"])
-        identities = identity_values(schema_object(fields["branch"]))
-        assert identities == [[1, 2], ["1"]]
-        numeric_tags = identities[0]
-        string_tags = identities[1]
-        assert isinstance(numeric_tags, list) and isinstance(string_tags, list)
-        assert all(type(tag) is int for tag in numeric_tags)
-        assert all(type(tag) is str for tag in string_tags)
         validator = Draft202012Validator(schema)
         for tag in (1, 2):
             for amount in (7.0, 9.0):
@@ -586,14 +495,6 @@ def test_skipped_choice_keeps_branch_ownership_through_choices_refresh(
     ):
         env = captured_ext_env(empty_amounts=empty, nine_only=nine_only)
         schema = model.input_schema(env)
-        fields = schema_object(schema["properties"])
-        identities = identity_values(schema_object(fields["branch"]))
-        assert identities == [[1, 2], ["1"]]
-        numeric_tags = identities[0]
-        string_tags = identities[1]
-        assert isinstance(numeric_tags, list) and isinstance(string_tags, list)
-        assert all(type(tag) is int for tag in numeric_tags)
-        assert all(type(tag) is str for tag in string_tags)
         validator = Draft202012Validator(schema)
         allowed = 9.0 if nine_only else 7.0
         for tag in (1, 2):

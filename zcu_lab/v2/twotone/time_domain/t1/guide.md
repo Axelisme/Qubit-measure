@@ -4,11 +4,11 @@ T1 energy relaxation: applies a pi pulse to excite the qubit, then sweeps a wait
 
 ## Expects (parameter context)
 
-Requires a qubit and its referenced resonator. Defaults read qubit.t1 (us), qubit.freq (MHz), qubit.wiring.L01.ch, resonator.freq (MHz), and resonator.wiring.ch/ro_ch from the tab's fixed capture. Missing T1 seeds relax_delay at 100 us and the delay sweep stop at 500 us.
+Delay runs 0 to 5 * qubit.t1 us over 101 points. Relax delay is 5 * qubit.t1 us. Missing calibration leaves the affected fields empty and Invalid; no numeric fallback.
 
 ## Expects (ModuleLibrary)
 
-Uses qubit.module.x180 and qubit.module.readout from the fixed capture. Unset or dangling slots seed inline pulse/readout defaults. Optional qubit.module.reset stays disabled when absent. Inline readout trigger offset defaults to 0.55 us; verify wiring and timing before running.
+Uses captured qubit.module.readout with a readout template fallback, and qubit.module.reset with no fallback (disabled when absent). The drive uses qubit.module.x180 with a pi_pulse template fallback. Unset or dangling slots use the named template, not a legacy blank. Key choices remain available. Inline templates read qubit.freq, qubit.wiring.L01.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.ext.time_of_fly + 0.05 us; missing required calibration remains Invalid.
 
 ## Typical writeback
 
@@ -16,4 +16,4 @@ Proposes fitted qubit.t1 and its standard error (us) to the captured qubit and w
 
 ## Recommended
 
-Analysis defaults to a single-exponential fit; enable dual-exponential only when the decay clearly shows two timescales (a fast component on top of the slow relaxation). A delay sweep reaching ~5*T1 lets the decay flatten so the fit is well-constrained; with no prior qubit.t1 it spans 0–500 us. Set 'uniform=False' to cluster more points on the exponential decay while keeping the configured start/stop window.
+Analysis defaults to a single-exponential fit; enable dual-exponential only when the decay clearly shows two timescales (a fast component on top of the slow relaxation). A delay sweep reaching ~5*T1 lets the decay flatten so the fit is well-constrained. Supply a delay endpoint when qubit.t1 is missing. Set 'uniform=False' to cluster more points on the exponential decay while keeping the configured start/stop window.

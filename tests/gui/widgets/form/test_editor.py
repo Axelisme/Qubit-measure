@@ -28,6 +28,7 @@ from zcu_tools.gui.form import (
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._form_context import captured_ext_env
+from tests.gui.widgets.form._text_input import commit_text
 
 
 class StaticBranch(FormModel):
@@ -46,20 +47,15 @@ class AlternateBranch(FormModel):
     required: float
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
         """Supply the required field from this host-captured context."""
         return {
             "kind": "alternate",
             "shared": 9.0,
-            "required": previous.get(
-                "required",
-                (
-                    env.parameters.value("general.ext.seed")
-                    if env.parameters is not None
-                    else 4.0
-                ),
+            "required": (
+                env.parameters.value("general.ext.seed")
+                if env.parameters is not None
+                else 4.0
             ),
         }
 
@@ -174,13 +170,13 @@ def test_direct_numeric_and_expression_controls_write_only_parsed_input(
     state = FormState(SampleForm.default_input(env))
     editor = FormEditor(state, env)
     views.append(editor)
-    line(editor, "amount").setText("3.5")
+    commit_text(line(editor, "amount"), "3.5")
     result = state.result(env)
     assert isinstance(result, SampleForm)
     assert result.amount == 3.5
 
     mode(editor, "amount").trigger()
-    line(editor, "amount").setText("general.ext.seed / 2")
+    commit_text(line(editor, "amount"), "general.ext.seed / 2")
     assert state.input.data["amount"] == {"expr": "general.ext.seed / 2"}
     result = state.result(env)
     assert isinstance(result, SampleForm)
@@ -215,7 +211,7 @@ def test_partial_text_stays_local_and_validity_recovers_after_correction(
     observed: list[bool] = []
     editor.validity_changed.connect(observed.append)
     before = state.input.data
-    line(editor, "amount").setText("-")
+    commit_text(line(editor, "amount"), "-")
     assert state.input.data == before
     local = editor.local_parse_errors()
     assert isinstance(local, FormErrors)
@@ -227,7 +223,7 @@ def test_partial_text_stays_local_and_validity_recovers_after_correction(
     editor.refresh(environment(8.0))
     assert line(editor, "amount").text() == "-"
     assert state.input.data == before
-    line(editor, "amount").setText("5")
+    commit_text(line(editor, "amount"), "5")
     assert state.input.data["amount"] == 5.0
     assert editor.local_parse_errors() is None
     assert editor.errors() is None
@@ -241,7 +237,7 @@ def test_model_invalid_value_and_expression_remain_in_state_with_errors(
     state = FormState(SampleForm.default_input(env))
     editor = FormEditor(state, env)
     views.append(editor)
-    line(editor, "amount").setText("-2")
+    commit_text(line(editor, "amount"), "-2")
     assert state.input.data["amount"] == -2.0
     assert editor.local_parse_errors() is None
     errors = editor.errors()
@@ -250,7 +246,7 @@ def test_model_invalid_value_and_expression_remain_in_state_with_errors(
     assert label(editor, "form.error.amount").text()
 
     mode(editor, "amount").trigger()
-    line(editor, "amount").setText("absent_name")
+    commit_text(line(editor, "amount"), "absent_name")
     assert state.input.data["amount"] == {"expr": "absent_name"}
     assert editor.local_parse_errors() is None
     errors = editor.errors()
@@ -266,8 +262,8 @@ def test_integer_expression_and_direct_complex_keep_their_input_forms(
     editor = FormEditor(state, env)
     views.append(editor)
     mode(editor, "count").trigger()
-    line(editor, "count").setText("general.ext.seed + 1")
-    line(editor, "amplitude").setText("1+2j")
+    commit_text(line(editor, "count"), "general.ext.seed + 1")
+    commit_text(line(editor, "amplitude"), "1+2j")
     assert state.input.data["count"] == {"expr": "general.ext.seed + 1"}
     assert state.input.data["amplitude"] == {"__complex__": [1.0, 2.0]}
     result = state.result(env)
@@ -277,21 +273,22 @@ def test_integer_expression_and_direct_complex_keep_their_input_forms(
     assert editor.errors() is None
 
 
-def test_branch_selector_preserves_shared_value_and_uses_core_defaults(
+def test_branch_dropdown_switches_to_fresh_core_defaults(
     views: list[QWidget], qapp: QApplication
 ) -> None:
     env = environment()
     state = FormState(SampleForm.default_input(env))
     editor = FormEditor(state, env)
     views.append(editor)
-    line(editor, "branch.shared").setText("6")
-    selector = combo(editor, "form.input.branch.kind")
-    selector.setCurrentIndex(selector.findData("alternate"))
+    commit_text(line(editor, "branch.shared"), "6")
+    selector = combo(editor, "form.input.branch")
+    selector.setCurrentIndex(selector.findText("alternate"))
     qapp.processEvents()
     result = state.result(env)
     assert isinstance(result, SampleForm)
     assert isinstance(result.branch, AlternateBranch)
-    assert result.branch.shared == 6.0
+    # A new branch starts from its own defaults, not from the old branch.
+    assert result.branch.shared == 9.0
     assert result.branch.required == 4.0
     assert editor.findChild(QLineEdit, "form.input.branch.old_only") is None
     assert float(line(editor, "branch.required").text()) == 4.0
@@ -308,7 +305,7 @@ def test_nullable_section_activation_child_edit_and_deactivation(
     assert isinstance(enabled, QCheckBox)
     enabled.setChecked(True)
     qapp.processEvents()
-    line(editor, "section.stop").setText("5")
+    commit_text(line(editor, "section.stop"), "5")
     result = state.result(env)
     assert isinstance(result, SampleForm)
     assert result.section == Section(start=1.0, stop=5.0)
@@ -334,7 +331,7 @@ def test_nested_and_root_model_errors_are_visible_in_public_labels(
     assert isinstance(errors, FormErrors)
     assert ("section", "stop") in errors.messages
     assert label(editor, "form.error.section.stop").text()
-    line(editor, "section.stop").setText("3")
+    commit_text(line(editor, "section.stop"), "3")
     state.write({("amount",): 90.0, ("count",): 20}, env)
     errors = editor.errors()
     assert isinstance(errors, FormErrors)
@@ -349,19 +346,20 @@ def test_whole_sequence_and_mapping_text_support_replacement_and_clear(
     state = FormState(SampleForm.default_input(env))
     editor = FormEditor(state, env)
     views.append(editor)
-    line(editor, "samples").setText("[2, 3]")
-    line(editor, "offsets").setText(
-        '{"rack.left": {"expr": "general.ext.seed"}, "remove": 1}'
+    commit_text(line(editor, "samples"), "[2, 3]")
+    commit_text(
+        line(editor, "offsets"),
+        '{"rack.left": {"expr": "general.ext.seed"}, "remove": 1}',
     )
     result = state.result(env)
     assert isinstance(result, SampleForm)
     assert result.samples == (2.0, 3.0)
     assert result.offsets == {"rack.left": 4.0, "remove": 1.0}
-    line(editor, "offsets").setText('{"renamed": 4}')
+    commit_text(line(editor, "offsets"), '{"renamed": 4}')
     result = state.result(env)
     assert isinstance(result, SampleForm)
     assert result.offsets == {"renamed": 4.0}
-    line(editor, "offsets").setText("{}")
+    commit_text(line(editor, "offsets"), "{}")
     result = state.result(env)
     assert isinstance(result, SampleForm)
     assert result.offsets == {}
@@ -378,12 +376,12 @@ def test_incomplete_container_json_stays_local_until_it_parses(
     state = FormState(SampleForm.default_input(env))
     editor = FormEditor(state, env)
     views.append(editor)
-    line(editor, "offsets").setText('{"unfinished":')
+    commit_text(line(editor, "offsets"), '{"unfinished":')
     assert state.input.data["offsets"] == {}
     errors = editor.local_parse_errors()
     assert isinstance(errors, FormErrors)
     assert ("offsets",) in errors.messages
-    line(editor, "offsets").setText('{"finished": 2}')
+    commit_text(line(editor, "offsets"), '{"finished": 2}')
     assert state.input.data["offsets"] == {"finished": 2}
     assert editor.local_parse_errors() is None
 
@@ -418,7 +416,11 @@ def test_refresh_changes_choices_and_evaluation_without_writing_state(
     assert isinstance(errors, FormErrors)
     assert ("mode",) in errors.messages
     selector = combo(editor, "form.input.mode")
-    assert selector.findData("beta") == -1
+    assert [selector.itemText(i) for i in range(selector.count())] == [
+        "alpha",
+        "beta (missing)",
+    ]
+    assert selector.currentText() == "beta (missing)"
 
 
 def test_external_publication_reset_and_readonly_do_not_echo_writes(
@@ -544,7 +546,7 @@ def test_invalid_complex_envelope_is_displayed_without_breaking_construction(
     assert isinstance(editor.errors(), FormErrors)
     assert label(editor, "form.error.amplitude").text()
     assert label(editor, "form.value.amplitude").text() == ""
-    line(editor, "amplitude").setText("2+3j")
+    commit_text(line(editor, "amplitude"), "2+3j")
     assert state.input.data["amplitude"] == {"__complex__": [2.0, 3.0]}
     assert editor.errors() is None
 
@@ -556,10 +558,10 @@ def test_inactive_branch_discards_only_its_local_unparsed_text(
     state = FormState(SampleForm.default_input(env))
     editor = FormEditor(state, env)
     views.append(editor)
-    line(editor, "branch.old_only").setText("-")
-    line(editor, "amount").setText("-")
-    selector = combo(editor, "form.input.branch.kind")
-    selector.setCurrentIndex(selector.findData("alternate"))
+    commit_text(line(editor, "branch.old_only"), "-")
+    commit_text(line(editor, "amount"), "-")
+    selector = combo(editor, "form.input.branch")
+    selector.setCurrentIndex(selector.findText("alternate"))
     local = editor.local_parse_errors()
     assert isinstance(local, FormErrors)
     assert set(local.messages) == {("amount",)}
@@ -591,18 +593,18 @@ def test_nullable_numeric_direct_partial_null_and_expression(
     assert action.isChecked()
     assert text.text() == "general.ext.seed"
     action.trigger()
-    text.setText(str(direct))
+    commit_text(text, str(direct))
     assert state.input.data[path] == direct
     assert type(state.input.data[path]) is type(direct)
     before = state.input.data
-    text.setText("-")
+    commit_text(text, "-")
     assert state.input.data == before
     assert isinstance(editor.local_parse_errors(), FormErrors)
-    text.setText("")
+    commit_text(text, "")
     assert state.input.data[path] is None
     assert editor.local_parse_errors() is None
     action.trigger()
-    text.setText("general.ext.seed + 1")
+    commit_text(text, "general.ext.seed + 1")
     assert state.input.data[path] == {"expr": "general.ext.seed + 1"}
     notices: list[int] = []
     state.subscribe(lambda: notices.append(1))
@@ -652,250 +654,25 @@ def test_empty_choices_refresh_preserves_input(
     state.subscribe(lambda: notices.append(1))
     before = state.input.data
     empty = environment(empty_choices=True)
-    for captured, count in ((env, 2), (empty, 0), (env, 2), (empty, 0)):
+    for captured, listed in ((env, True), (empty, False), (env, True), (empty, False)):
         editor.refresh(captured)
         for path in ("literal", "text", "number"):
             control = editor.findChild(QComboBox, f"form.input.{path}")
             assert isinstance(control, QComboBox)
-            # Only the current choices.
-            assert control.count() == count
-            if count == 0:
-                assert control.currentIndex() == -1
+            current = before[path]
+            shown = [control.itemData(i) for i in range(control.count())]
+            if listed:
+                # Only the current choices, with the input's value selected.
+                assert len(shown) == 2 and current in shown
+                assert control.currentData() == current
+            else:
+                # No choice matches: the input shows as missing, unchanged.
+                assert shown == [current]
+                assert control.currentText() == f"{current} (missing)"
         assert state.input.data == before
         assert notices == []
         errors = editor.errors()
-        if count == 0:
-            assert isinstance(errors, FormErrors)
-        else:
+        if listed:
             assert errors is None
-
-
-class MultiTagBranch(FormModel):
-    """Two discriminator values select the same branch."""
-
-    kind: Literal["a", "alias"] = "a"
-    shared: float = 1.0
-    a_only: float = 3.0
-
-
-class SingleTagBranch(FormModel):
-    """Another branch preserves same-name input when selected."""
-
-    kind: Literal["b"] = "b"
-    shared: float = 9.0
-    b_only: float = 4.0
-
-
-class MultiTagForm(FormModel):
-    """The branch selector accepts every tag supported by the core."""
-
-    branch: Annotated[MultiTagBranch | SingleTagBranch, Field(discriminator="kind")]
-
-
-@pytest.mark.parametrize("initial_tag", ["a", "alias"])
-def test_multi_tag_discriminator_displays_and_switches_active_branch(
-    views: list[QWidget], initial_tag: str
-) -> None:
-    env = environment()
-    state = FormState(
-        FormInput(MultiTagForm, {"branch": {"kind": initial_tag, "shared": 6.0}})
-    )
-    editor = FormEditor(state, env)
-    views.append(editor)
-    control = editor.findChild(QLineEdit, "form.input.branch.a_only")
-    selector = editor.findChild(QComboBox, "form.input.branch.kind")
-    assert isinstance(control, QLineEdit)
-    assert isinstance(selector, QComboBox)
-    assert selector.currentData() == initial_tag
-    assert {selector.itemData(index) for index in range(selector.count())} == {
-        "a",
-        "alias",
-        "b",
-    }
-    selector.setCurrentIndex(selector.findData("b"))
-    result = state.result(env)
-    assert isinstance(result, MultiTagForm)
-    assert isinstance(result.branch, SingleTagBranch)
-    assert result.branch.shared == 6.0
-    assert editor.findChild(QLineEdit, "form.input.branch.a_only") is None
-    assert isinstance(
-        editor.findChild(QLineEdit, "form.input.branch.b_only"), QLineEdit
-    )
-    for tag in ("alias", "a"):
-        selector = editor.findChild(QComboBox, "form.input.branch.kind")
-        assert isinstance(selector, QComboBox)
-        selector.setCurrentIndex(selector.findData(tag))
-        result = state.result(env)
-        assert isinstance(result, MultiTagForm)
-        assert isinstance(result.branch, MultiTagBranch)
-        assert result.branch.kind == tag
-        assert result.branch.shared == 6.0
-        assert isinstance(
-            editor.findChild(QLineEdit, "form.input.branch.a_only"), QLineEdit
-        )
-        assert editor.findChild(QLineEdit, "form.input.branch.b_only") is None
-
-
-class SingleChoiceTagBranch(FormModel):
-    """A single intrinsic tag must not become another branch's choice."""
-
-    kind: Literal["a"] = "a"
-    shared: float = 1.0
-    a_only: float = 3.0
-
-
-class SingleDiscriminatorChoicesForm(FormModel):
-    """Dynamic selector choices restrict tags, not active branch identity."""
-
-    branch: Annotated[
-        SingleChoiceTagBranch | SingleTagBranch, Field(discriminator="kind")
-    ]
-
-    @classmethod
-    def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
-        """Permit only a, or no tags, from the captured context."""
-        return {
-            ("branch", "kind"): ()
-            if (
-                env.parameters is not None
-                and env.parameters.lookup("general.ext.empty_tags").value
-            )
-            else ("a",)
-        }
-
-
-class MultiDiscriminatorChoicesForm(FormModel):
-    """A dynamic enum may hide aliases without losing the intrinsic identity."""
-
-    branch: Annotated[MultiTagBranch | SingleTagBranch, Field(discriminator="kind")]
-
-    @classmethod
-    def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
-        """Permit only a, or no tags, from the captured context."""
-        return {
-            ("branch", "kind"): ()
-            if (
-                env.parameters is not None
-                and env.parameters.lookup("general.ext.empty_tags").value
-            )
-            else ("a",)
-        }
-
-
-@pytest.mark.parametrize(
-    "form_type", (SingleDiscriminatorChoicesForm, MultiDiscriminatorChoicesForm)
-)
-def test_discriminator_choices_refresh_keeps_intrinsic_active_branch(
-    views: list[QWidget],
-    form_type: type[SingleDiscriminatorChoicesForm]
-    | type[MultiDiscriminatorChoicesForm],
-) -> None:
-    env = environment()
-    empty = environment(empty_tags=True)
-    state = FormState(
-        FormInput(form_type, {"branch": {"kind": "a", "shared": 6.0, "a_only": 7.0}})
-    )
-    editor = FormEditor(state, env)
-    views.append(editor)
-    notices: list[int] = []
-    state.subscribe(lambda: notices.append(1))
-    before = state.input.data
-    for captured, count in ((env, 1), (empty, 0), (env, 1)):
-        editor.refresh(captured)
-        selector = combo(editor, "form.input.branch.kind")
-        assert selector.count() == count
-        assert selector.currentData() == ("a" if count else None)
-        control = editor.findChild(QLineEdit, "form.input.branch.a_only")
-        assert isinstance(control, QLineEdit)
-        assert control.text() == "7.0"
-        assert editor.findChild(QLineEdit, "form.input.branch.b_only") is None
-        assert state.input.data == before
-        assert notices == []
-        result = state.result(captured)
-        if count:
-            assert isinstance(
-                result, (SingleDiscriminatorChoicesForm, MultiDiscriminatorChoicesForm)
-            )
-            assert isinstance(result.branch, (SingleChoiceTagBranch, MultiTagBranch))
-            assert result.branch.kind == "a"
-            assert result.branch.a_only == 7.0
-            assert editor.errors() is None
         else:
-            assert isinstance(result, FormErrors)
-            assert ("branch", "kind") in result.messages
-            error = editor.findChild(QLabel, "form.error.branch.kind")
-            assert isinstance(error, QLabel)
-            assert error.text()
-            assert isinstance(editor.errors(), FormErrors)
-
-
-class NumericMultiTagBranch(FormModel):
-    """Two numeric tags select one branch with ordinary shared values."""
-
-    kind: Literal[1, 2] = 1
-    shared: float = 1.0
-    a_only: float = 3.0
-
-
-class NumericSingleTagBranch(FormModel):
-    """Another numeric branch inherits only same-name input."""
-
-    kind: Literal[3] = 3
-    shared: float = 9.0
-    b_only: float = 4.0
-
-
-class NumericDiscriminatorForm(FormModel):
-    """Numeric discriminator controls write typed tags, never expressions."""
-
-    branch: Annotated[
-        NumericMultiTagBranch | NumericSingleTagBranch, Field(discriminator="kind")
-    ]
-
-
-@pytest.mark.parametrize("initial_tag", (1, 2, 3))
-def test_numeric_discriminator_preserves_typed_tags_and_switches_active_fields(
-    views: list[QWidget], initial_tag: int
-) -> None:
-    env = environment()
-    state = FormState(
-        FormInput(
-            NumericDiscriminatorForm, {"branch": {"kind": initial_tag, "shared": 6.0}}
-        )
-    )
-    editor = FormEditor(state, env)
-    views.append(editor)
-    selector = combo(editor, "form.input.branch.kind")
-    assert selector.currentData() == initial_tag
-    tags = [selector.itemData(index) for index in range(selector.count())]
-    assert tags == [1, 2, 3]
-    assert all(type(tag) is int for tag in tags)
-    assert editor.findChild(QAction, "form.mode.branch.kind") is None
-    active = "b_only" if initial_tag == 3 else "a_only"
-    assert isinstance(
-        editor.findChild(QLineEdit, f"form.input.branch.{active}"), QLineEdit
-    )
-    selector.setCurrentIndex(selector.findData(3))
-    result = state.result(env)
-    assert isinstance(result, NumericDiscriminatorForm)
-    assert isinstance(result.branch, NumericSingleTagBranch)
-    assert result.branch.kind == 3
-    assert result.branch.shared == 6.0
-    assert editor.findChild(QLineEdit, "form.input.branch.a_only") is None
-    assert isinstance(
-        editor.findChild(QLineEdit, "form.input.branch.b_only"), QLineEdit
-    )
-    for tag in (2, 1):
-        selector = combo(editor, "form.input.branch.kind")
-        selector.setCurrentIndex(selector.findData(tag))
-        result = state.result(env)
-        assert isinstance(result, NumericDiscriminatorForm)
-        assert isinstance(result.branch, NumericMultiTagBranch)
-        assert result.branch.kind == tag
-        assert type(result.branch.kind) is int
-        assert result.branch.shared == 6.0
-        assert isinstance(
-            editor.findChild(QLineEdit, "form.input.branch.a_only"), QLineEdit
-        )
-        assert editor.findChild(QLineEdit, "form.input.branch.b_only") is None
-        assert editor.findChild(QAction, "form.mode.branch.kind") is None
+            assert isinstance(errors, FormErrors)

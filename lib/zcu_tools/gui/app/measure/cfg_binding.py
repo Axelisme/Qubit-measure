@@ -132,8 +132,22 @@ class MeasureCfgBindings:
         revision starts over. Captures must already be published cache values;
         this method never queries a value provider or live instrument.
         """
+        return self.snapshot(
+            self.source_basis(state),
+            captured_values=captured_values,
+            parameters=parameters,
+        )
+
+    @staticmethod
+    def source_basis(state: SessionState) -> SourceBasis:
+        """Read context/device-set/cache revision provenance without loading sources.
+
+        state supplies published versions and device identities on the owner
+        sequence. The set revision distinguishes removal/recreation when a
+        per-device revision starts over. This neither polls nor mutates devices.
+        """
         versions = state.version.snapshot()
-        basis: SourceBasis = (
+        return (
             SourceRevision("context", int(versions.get("context", 0))),
             SourceRevision(
                 DEVICE_SET_VERSION_KEY,
@@ -146,9 +160,6 @@ class MeasureCfgBindings:
                 )
                 for device in state.list_devices()
             ),
-        )
-        return self.snapshot(
-            basis, captured_values=captured_values, parameters=parameters
         )
 
     def new_draft(

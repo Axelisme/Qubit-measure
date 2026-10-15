@@ -26,7 +26,6 @@ from zcu_tools.gui.app.measure.services.ports import (
 )
 from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
-from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.resources.entry import ArtifactKey, Output, SaveLayout
 
 from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
@@ -118,7 +117,7 @@ def snapshot(tmp_path: Path) -> tuple[ArtifactTracker, TabSnapshot]:
         )
     return tracker, TabSnapshot(
         adapter_name="saving",
-        cfg_schema=CfgSchema(CfgSectionSpec(), CfgSectionValue()),
+        cfg_input={},
         tab_id="tab",
         capabilities=_CAPABILITIES,
         interaction=TabInteractionState(

@@ -3,14 +3,33 @@
 import base64
 from contextlib import contextmanager
 from copy import deepcopy
-from typing import Any
+from typing import Any, ClassVar
 
-from zcu_tools.gui.cfg.reference_key import is_custom_reference_key
-from zcu_tools.gui.session.aliases import AliasRow
+from zcu_tools.cfg_model import (
+    ConfigBase,
+    DirectReadoutCfg,
+    PulseCfg,
+    PulseReadoutCfg,
+    PulseReadoutSpec,
+    Range,
+    ResetCfg,
+    Slot,
+    Template,
+    TemplateDef,
+)
+from zcu_tools.gui.app.measure.remote.form_observation import form_writes, observe_form
+from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
+from zcu_tools.gui.form import FormEnv
+from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.session.aliases import AliasRow, AliasTable
 from zcu_tools.gui.session.context_types import SavedPoint
-from zcu_tools.gui.session.expression import evaluate_scalar_expr
 from zcu_tools.gui.session.types import ParameterContext
-from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
+from zcu_tools.program.v2 import SweepCfg
+from zcu_tools.resources.context.library import (
+    ComponentLibrary,
+    LibrarySnapshot,
+    ModuleLibraryDocument,
+)
 from zcu_tools.resources.entry.schema import (
     ComponentSchema,
     PointDocument,
@@ -21,6 +40,9 @@ from ._support import make_client
 
 
 class FormulaComponent(ComponentSchema):
+    low: float | None = None
+    high: float | None = None
+    threshold: float | None = None
     freq: float | None = None
     kappa: float | None = None
     flux_half: float | None = None
@@ -42,116 +64,115 @@ def recipe_client(tmp_path, respond):
         client.context.session.close()
 
 
-def scalar(value: object) -> dict[str, Any]:
-    return {
-        "kind": "scalar",
-        "valid": True,
-        "readonly": False,
-        "input": {
-            "mode": "direct",
-            "raw": value,
-            "resolved": value,
-            "error": None,
-            "validation_error": None,
+class RecipeModules(ConfigBase):
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
+    readout: PulseReadoutCfg
+
+
+class RecipeDevices(ConfigBase):
+    flux_dev: str = "coil"
+
+
+class RecipeControlsBase(ConfigBase):
+    rounds: int = 3
+    fixed: int = 2
+    modules: RecipeModules
+    dev: RecipeDevices = RecipeDevices()
+    flux_unit: str = "A"
+
+
+class RecipeControls(RecipeControlsBase):
+    range: SweepCfg
+    sweep: SweepCfg
+
+
+class ExecutionModules(ConfigBase):
+    """Nullable module collaborators, not native reset or init pulse execution."""
+
+    reset: DirectReadoutCfg | None = None
+    init_pulse: DirectReadoutCfg | None = None
+    readout: PulseReadoutCfg
+
+
+class ExecutionControls(ConfigBase):
+    """Execution collaborator values; reset is only a disabled-null module seam."""
+
+    rounds: int = 3
+    fixed: int = 2
+    modules: ExecutionModules
+    dev: RecipeDevices = RecipeDevices()
+    flux_unit: str = "A"
+    range: SweepCfg
+    sweep: SweepCfg
+
+
+_READOUT_SPEC = PulseReadoutSpec.model_validate(
+    {
+        "type": "readout/pulse",
+        "pulse_cfg": {
+            "type": "pulse",
+            "ch": 0,
+            "nqz": 1,
+            "freq": 5000.0,
+            "gain": 0.2,
+            "waveform": {"style": "const", "length": 0.1},
+        },
+        "ro_cfg": {
+            "type": "readout/direct",
+            "ro_ch": 0,
+            "ro_freq": 5000.0,
+            "ro_length": 2.0,
+            "trig_offset": 0.1,
         },
     }
+)
 
 
-def section(**children: dict[str, Any]) -> dict[str, Any]:
-    return {"kind": "section", "valid": True, "readonly": False, "children": children}
-
-
-def publish_reference_locks(node: object, *, readonly: bool = False) -> None:
-    """Update modes and locks in a recording cfg subtree, in place.
-
-    ``node`` is an observation dict with a boolean ``readonly`` and optional
-    ``children`` dict of observations. Reference nodes carry a string or None
-    ``ref``: library references use ref mode, custom references use inline mode,
-    and None disables the reference. ``readonly`` carries an ancestor lock.
-    Descendants of library references, literals and existing static locks stay
-    readonly. These recording trees do not simulate conversion back to inline.
-    Raise TypeError for malformed nodes, references or children.
-    """
-    if not isinstance(node, dict):
-        raise TypeError("Recording cfg nodes must be mappings")
-    locked = node.get("readonly")
-    if not isinstance(locked, bool):
-        raise TypeError("Recording cfg nodes must declare readonly")
-    child_readonly = readonly or locked or node.get("kind") == "literal"
-    node["readonly"] = child_readonly
-    if node.get("kind") == "reference":
-        reference = node.get("ref")
-        if reference is not None and not isinstance(reference, str):
-            raise TypeError("Recording references must be strings or None")
-        mode = (
-            ("inline" if is_custom_reference_key(reference) else "ref")
-            if reference is not None
-            else None
-        )
-        node["mode"] = mode
-        child_readonly = child_readonly or mode == "ref"
-    children = node.get("children", {})
-    if not isinstance(children, dict):
-        raise TypeError("Recording cfg children must be mappings")
-    for child in children.values():
-        publish_reference_locks(child, readonly=child_readonly)
+READOUT_TEMPLATE = TemplateDef(
+    PulseReadoutSpec,
+    "Readout",
+    {
+        "pulse_cfg.type": "pulse",
+        "pulse_cfg.ch": 0,
+        "pulse_cfg.nqz": 1,
+        "pulse_cfg.freq": 5000.0,
+        "pulse_cfg.gain": 0.2,
+        "pulse_cfg.waveform.style": "const",
+        "pulse_cfg.waveform.length": 0.1,
+        "ro_cfg.ro_ch": 0,
+        "ro_cfg.ro_freq": 5000.0,
+        "ro_cfg.ro_length": 2.0,
+        "ro_cfg.trig_offset": 0.1,
+    },
+)
 
 
 class LookbackGui:
     """GUI collaborator with distinct Run, save and analysis wire identities."""
 
+    cfg_cls: ClassVar[type[ConfigBase]] = RecipeControls
+
     def __init__(self):
-        self.publication: dict[str, Any] = {
-            "status": "Valid",
-            "source_basis": [],
-            "diagnostics": [],
-            "tree": section(
-                rounds=scalar(3),
-                modules=section(
-                    reset={
-                        "kind": "reference",
-                        "valid": True,
-                        "readonly": False,
-                        "ref": None,
-                    },
-                    init_pulse={
-                        "kind": "reference",
-                        "valid": True,
-                        "readonly": False,
-                        "ref": None,
-                    },
-                    readout={
-                        "kind": "reference",
-                        "valid": True,
-                        "readonly": False,
-                        "ref": None,
-                        "error": None,
-                        "children": {
-                            "pulse_cfg": section(freq=scalar(5000.0)),
-                            "ro_cfg": section(
-                                ro_freq=scalar(5000.0),
-                                ro_length=scalar(2.0),
-                                trig_offset=scalar(0.1),
-                            ),
-                        },
-                    },
-                ),
-            ),
-        }
         self.ran = False
         self.raw_saved = False
         self.md: dict[str, Any] = {}
         self.library: dict[str, Any] = {}
+        self._owner: TabFormResource | None = None
+        self.publication: dict[str, Any] = {}
+        self.fixed_values: dict[str, object] = {}
 
-    def evaluate_expression(self, expression: str) -> int | float | complex | str:
-        """Evaluate GUI formulas with native models and a fixed public context.
+    @property
+    def owner(self) -> TabFormResource:
+        if self._owner is None:
+            raise RuntimeError("Reset before accessing Form")
+        return self._owner
 
-        The recording parameter-read wire below deliberately retains malformed
-        values for caller rejection coverage; it does not claim native admission.
-        Formula evaluation, unlike that wire, uses the real scalar expression owner.
-        Bare aliases return resolved names; arithmetic returns numeric values.
-        Direct native model construction requires no process-global registry.
-        """
+    @owner.setter
+    def owner(self, resource: TabFormResource) -> None:
+        self._owner = resource
+
+    def capture_parameters(self, aliases=None):
         resonator = FormulaComponent.model_validate(
             {
                 "kind": "resonator",
@@ -172,23 +193,87 @@ class LookbackGui:
                 },
             }
         )
+        custom = FormulaComponent.model_validate(
+            {
+                "kind": "qubit/transmon",
+                **{
+                    name: self.md[f"$custom.{name}"]
+                    for name in ("low", "high", "threshold")
+                    if f"$custom.{name}" in self.md
+                    and isinstance(self.md[f"$custom.{name}"], (int, float))
+                },
+            }
+        )
         parameters = ParameterContext(
             point=PointDocument.model_construct(
                 format="zcu.parameter-container",
                 format_version="2.0",
                 general=PointGeneral(created_at="2026-10-09T00:00:00Z"),
-                components={"R1": resonator, "Q1": qubit},
+                components={
+                    "R1": resonator,
+                    "R2": resonator,
+                    "Q1": qubit,
+                    "Q2": qubit,
+                    "C1": custom,
+                },
             ),
             library=LibrarySnapshot(
                 ModuleLibraryDocument(
                     format="zcu.module-library",
                     format_version="1.0",
+                    components={
+                        "R1": ComponentLibrary(readout={"main": _READOUT_SPEC}),
+                        "R2": ComponentLibrary(readout={"main": _READOUT_SPEC}),
+                    },
                 )
             ),
             target=SavedPoint(entry_id="recipe-entry", point="working"),
             roles=None,
-        ).bind_aliases((AliasRow("resonator", "R1"), AliasRow("qubit", "Q1")), {})
-        return evaluate_scalar_expr(expression, parameters)
+        )
+        table = AliasTable(
+            (
+                AliasRow("resonator", "R1"),
+                AliasRow("qubit", "Q1"),
+                AliasRow("custom", "C1"),
+            )
+        )
+        for alias, component in (aliases or {}).items():
+            table = table.with_override(alias, component)
+        return parameters.bind_aliases(table.rows, {})
+
+    def make_form(self):
+        form = Form(
+            self.cfg_cls,
+            {
+                "range": Range.between(1.0, 2.0, expts=11),
+                "sweep": Range.between(1.0, 2.0, expts=51),
+                "modules": {
+                    "reset": Slot("$qubit.module.reset"),
+                    "init_pulse": Slot("$qubit.module.init_pulse"),
+                    "readout": Template("readout"),
+                },
+            },
+        )
+        form.bind_templates({"readout": READOUT_TEMPLATE}, adapter="lookback")
+        return form
+
+    def reset_form(self, aliases=None):
+        self.fixed_values = deepcopy(self.md)
+
+        def sources(overrides):
+            parameters = self.capture_parameters(overrides)
+            return TabFormSources(
+                FormEnv(parameters=parameters, library=parameters.library)
+            )
+
+        if self._owner is None:
+            self.owner = TabFormResource(
+                lambda _ctx: self.make_form(),
+                capture=sources,
+                mutation_allowed=lambda: True,
+            )
+        self.owner.reset(aliases=aliases)
+        self.publication = dict(observe_form(self.owner))
 
     def _observations(self) -> dict[str, dict[str, Any]]:
         return {
@@ -220,28 +305,17 @@ class LookbackGui:
             },
         }
 
-    def _edit(self, params: dict[str, Any]) -> None:
-        for edit in params["edits"]:
-            node = self.publication["tree"]
-            for part in edit["path"]:
-                node = node["children"][part]
-            if node["kind"] == "reference":
-                node["ref"] = edit["value"]["__ref"]
-                publish_reference_locks(node)
-            else:
-                value = edit["value"]
-                if isinstance(value, dict) and "__expr" in value:
-                    node.update(scalar(self.md.get(value["__expr"])))
-                    node["input"].update(mode="expression", raw=value["__expr"])
-                else:
-                    node.update(scalar(value))
+    def _edit(self, params: dict[str, object]) -> None:
+        self.owner.write(form_writes(params["edits"]))
+        self.publication = dict(observe_form(self.owner))
 
     def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         observations = self._observations()
         if method == "tab.parameter_read":
             observations[method] = {
                 "values": {
-                    path: deepcopy(self.md.get(path)) for path in params["paths"]
+                    path: deepcopy(self.fixed_values.get(path))
+                    for path in params["paths"]
                 },
                 "modules": {
                     reference: reference if reference in self.library else None
@@ -258,10 +332,10 @@ class LookbackGui:
                 assert params == expected[method]
             return deepcopy(observations[method])
         if method in ("tab.get_cfg", "tab.edit_cfg", "tab.reset_cfg"):
-            if method != "tab.get_cfg":
-                self._edit(
-                    params if method == "tab.edit_cfg" else {**params, "edits": []}
-                )
+            if method == "tab.reset_cfg":
+                self.reset_form(params.get("aliases"))
+            elif method == "tab.edit_cfg":
+                self._edit(params)
             return deepcopy(self.publication)
         if method == "tab.run_start":
             assert params == {
@@ -383,3 +457,9 @@ class LookbackGui:
                 "destination_context": {"active_label": "sample"},
             }
         raise AssertionError(method)
+
+
+class ExecutionGui(LookbackGui):
+    """Record execution phases without unrelated native reset family schemas."""
+
+    cfg_cls: ClassVar[type[ConfigBase]] = ExecutionControls

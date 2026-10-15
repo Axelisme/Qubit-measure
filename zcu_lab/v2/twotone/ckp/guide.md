@@ -4,15 +4,15 @@ CKP ground/excited-resolved spectroscopy: prepares the qubit in g and e, drives 
 
 ## Expects (parameter context)
 
-Reads from the parameter context (all optional, seeding fresh cfg defaults): 'r_f' and 'rf_w' set the resonator sweep and pulse timing; 'q_f' sets the qubit-probe sweep; 'qub_ch' / 'qub_1_4_ch' / 'qub_4_5_ch' select the qubit drive channel; 'res_ch' / 'ro_ch' select readout channels; 'timeFly' seeds the readout trigger offset.
+Inline templates read qubit.freq, qubit.wiring.L01.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.ext.time_of_fly + 0.05 us from the fixed capture. Missing required calibration remains Invalid; no numeric fallback. Resonator sweep is resonator.freq ± 1.5 * resonator.kappa. Qubit sweep runs qubit.freq - 10 to qubit.freq + 5 MHz. Probe timing scales inversely with resonator.kappa.
 
 ## Expects (ModuleLibrary)
 
-Needs a calibrated qubit pi pulse (typically 'pi_amp' or 'pi_len'), an inline resonator-drive pulse, an inline qubit-probe pulse, and a pulse-readout module (typically 'readout_dpm' or 'readout_rf'). Optionally references a calibrated reset module.
+Uses captured qubit.module.readout with a fresh readout template when unset or dangling. Optional qubit.module.reset stays disabled without a source. Library references remain selectable; sweeps overwrite their controlled fields only at Run. Pi pulse uses qubit.module.x180 with a pi_pulse template fallback; both probe pulses are fresh inline templates.
 
 ## Typical writeback
 
-Proposes fitted chi into parameter context 'chi', fitted kappa into 'rf_w', and fitted readout frequency into 'readout_f'. No ModuleLibrary writeback.
+Proposes fitted chi into '`$qubit.ext.chi`', fitted kappa into '`$resonator.kappa`', and fitted readout frequency into '`$resonator.freq`'. No ModuleLibrary writeback.
 
 ## Recommended
 

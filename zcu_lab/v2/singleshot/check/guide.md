@@ -4,11 +4,11 @@ Single-shot classification check: takes 'shots' single-shot readouts of the prep
 
 ## Expects (parameter context)
 
-REQUIRES the single-shot discrimination calibration in the parameter context for ANALYSIS — run 'singleshot/ge' first and apply its writeback so 'g_center' / 'e_center' / 'ge_radius' are present; the analyze classifies the scatter against them and fast-fails if any is missing. Also reads 't1' to set the relax delay; 'q_f' / 'qub_ch' seed the probe drive.
+Open and Reset capture the current aliases, parameters and library. Relax delay is 5 * `$qubit.t1.` Fresh inline probe uses `$qubit.freq` and `$qubit.wiring.L01.ch.` Inline templates read `$qubit.freq`, `$qubit.wiring.L01.ch` and `$resonator.freq`/wiring.ch/wiring.ro_ch; readout trigger uses `$resonator.ext.time_of_fly` + 0.05 us. Missing required sources remain Invalid; no numeric fallback is supplied.
 
 ## Expects (ModuleLibrary)
 
-Needs a probe pulse and a readout module. Optionally references a calibrated reset and an init pulse — both disabled when no library entry exists.
+Optional init/reset use `$qubit.module.x180`/reset. Probe starts from qub_probe. Readout uses `$qubit.module.readout` or the readout template. Run uses this fixed capture.
 
 ## Typical writeback
 

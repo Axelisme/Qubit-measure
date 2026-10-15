@@ -10,15 +10,12 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.state import Session, State
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-)
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
-from tests.gui.app.measure._cfg_fakes import make_cfg
+from tests.gui.app.measure._form_fakes import make_form
 
 
 def _plots_for(figure: Figure) -> Plots:
@@ -36,7 +33,7 @@ def _make_state(tab_id: str = "t1") -> State:
         Session(
             adapter_name="fake",
             adapter=MagicMock(),
-            cfg=make_cfg(CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())),
+            cfg=make_form(Form(ConfigBase, {}), state=state),
         ),
     )
     return state

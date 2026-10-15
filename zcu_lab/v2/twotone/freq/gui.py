@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Literal, TypeAlias
+from typing import Annotated, ClassVar, Literal, TypeAlias
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -21,69 +20,18 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import (
-    custom,
-    module_seed,
-    path_seed,
-)
-from zcu_tools.gui.app.measure.spec_helpers import (
-    make_pulse_module_spec,
-    make_pulse_readout_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
-)
-from zcu_tools.gui.cfg import (
-    ReferenceValue,
-    make_custom_reference_key,
-    make_default_value,
-)
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
-from zcu_lab.v2._support.measure.seeds import (
-    qub_freq_range,
-)
 from zcu_lab.v2.twotone.freq.core import (
     FreqAnalyzeOptions,
     FreqCfg,
     FreqExp,
     FreqResult,
 )
+from zcu_lab.v2.twotone.freq.form import make_form
 
 FreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
-
-
-def _blank_probe(ctx: SessionEnv) -> ReferenceValue:
-    value = make_default_value(make_pulse_module_spec().allowed[0])
-    value.with_field("freq", 0.0)
-    value.with_field("ch", path_seed("$qubit.wiring.L01.ch", fallback=0).resolve(ctx))
-    value.with_field("nqz", 2)
-    value.with_field("gain", 0.1)
-    value.with_field("waveform.length", 5.0)
-    return ReferenceValue(make_custom_reference_key("Pulse"), value)
-
-
-def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
-    value = make_default_value(make_pulse_readout_module_spec().allowed[0])
-    frequency = path_seed("$resonator.freq", fallback=6000.0).resolve(ctx)
-    value.with_field("pulse_cfg.freq", frequency)
-    value.with_field(
-        "pulse_cfg.ch", path_seed("$resonator.wiring.ch", fallback=0).resolve(ctx)
-    )
-    value.with_field("pulse_cfg.nqz", 2)
-    value.with_field("pulse_cfg.gain", 0.1)
-    value.with_field("pulse_cfg.waveform.length", 1.0)
-    value.with_field("ro_cfg.ro_freq", frequency)
-    value.with_field(
-        "ro_cfg.ro_ch", path_seed("$resonator.wiring.ro_ch", fallback=0).resolve(ctx)
-    )
-    value.with_field("ro_cfg.ro_length", 0.9)
-    value.with_field("ro_cfg.trig_offset", 0.55)
-    return ReferenceValue(make_custom_reference_key("Pulse Readout"), value)
 
 
 @dataclass
@@ -105,57 +53,24 @@ class FreqAdapter(
 ):
     experiment_tag: ClassVar[str | None] = FreqExp.persistence_tag()
     exp_cls = FreqExp
-    ExpCfg_cls: ClassVar[Any] = FreqCfg
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[FreqCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: FreqCfg,
         *,
         context: RunContext,
     ) -> FreqRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         result = FreqExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .field(
-                "modules.reset",
-                spec=make_reset_module_spec(optional=True),
-                default=module_seed("$qubit.module.reset", fallback=None),
-            )
-            .field(
-                "modules.qub_pulse",
-                spec=make_pulse_module_spec(label="Probe Pulse").lock_literal(
-                    "freq", 0.0
-                ),
-                default=custom(_blank_probe, description="inline probe pulse"),
-            )
-            .field(
-                "modules.readout",
-                spec=make_readout_module_spec(),
-                default=module_seed(
-                    "$qubit.module.readout",
-                    fallback=custom(_blank_readout, description="inline readout"),
-                ),
-            )
-            .relax_delay(1.0)
-            .sweep(
-                "freq",
-                label="Freq (MHz)",
-                default=qub_freq_range(expts=301),
-            )
-            .reps(1000)
-            .rounds(100)
-            .build()
-        )
 
     def analyze(
         self, req: AnalyzeRequest[FreqRunResult, FreqAnalyzeParams], *, plots: Plots

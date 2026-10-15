@@ -44,7 +44,7 @@ Recipe-owned done 回該 recipe 的後續 handoff，standalone analysis 保留�
 
 Standalone `apply_writeback(tab, items=None)` 按穩定 `target_name` 選擇當前 Primary／Post draft，不看 GUI 勾選，也不回答 recipe。省略 items 寫全部，空序列寫零項。MCP 在任何寫入前讀完兩個 pane 的當前 preview，拒絕未知、重複及跨 stage 同名，再解析當前 session ID。這些讀取不授權寫入。寫入維持 Primary 先、Post 後，首錯停止。收據只列 GUI-confirmed writes，保留失敗 stage 的不確定性，不 retry 或 rollback。
 
-Measure `tab.get_cfg` 回完整 publication。`tab.edit_cfg`、`tab.reset_cfg` 與 `tab.run_start` 不收 cfg ref 或 expected revision。Edit/reset 作用於目前 inputs；Reset 由既有 cfg resource 取得目前 adapter defaults，不複製預設值或新增 unsaved guard。Run 接受當下 Valid cfg，或使用 caller 明示 aliases 的固定一次性解析，不改全域 publication。直接 RPC 只轉送一次，不隱藏 refresh 或 retry。Recipe 在其宣告流程內讀 cfg，重用 tab 時 reset，再套本次參數與 Run。Fixed values、source provenance 與 acceptance 見 [[0065]]；holder、authentication、domain busy 與硬體 guards 分別檢查，不以 cfg 版本授權。
+Measure `tab.get_cfg` 回 Form schema、authored input、ordinary leaf values 與 directed errors。`tab.edit_cfg`、`tab.reset_cfg` 與 `tab.run_start` 不收 cfg ref 或 expected revision。Edit 以 model-field leaf paths 原子寫入目前 input。Reset 捕捉一次來源並取 adapter defaults，可接受單次 aliases，但不改全域列或 memento。Run 只接受畫面上目前有效的 Form result，在 focus 或 operation 效果前拒絕非空 aliases。直接 RPC 只轉送一次，不隱藏 refresh 或 retry。Recipe 在建立或重用 tab 後都先 Reset，再設定參數與 Run，只有 Reset 收單次 aliases。Fixed sources、source provenance 與 acceptance 見 [[0065]]。Holder、authentication、domain busy 與硬體 guards 分別檢查，不以 cfg 版本授權。
 
 共用 ParamSpec 同時擁有 string enum 的宣告驗證、schema 投影與 request membership。Flux plugin 從 domain FluxLineRole 提供選項，typed Action 仍做 domain 驗證。`device.snapshot.unit` 讀 cached Info 的 `value_unit`，YOKO 為 A／V，Fake 為 native。缺 Info 標 none，不按 device type 猜單位，不讀硬體。Zcu_lab flux recipe helper 比對 caller 明填 unit 與 snapshot unit，包括 native，沒有 Fake 特例；none 不是可用 flux 座標。Recipe policy 不延伸到共用 device 或 cfg 安全規則。
 
@@ -54,7 +54,7 @@ Measure remote 擁有分析結果的 JSON 投影。它將非有限 summary 數�
 
 讀取是取得當前資料，不建立 per-connection mutation baseline。Resource counters 可供來源、結果 replacement 與 provenance 使用，但不再以 seen map、guard dependencies 或 observation rollback 限制寫入。Result-bound operation ID、editor／interactive lifetime、domain busy、互斥及後續提交檢查仍由 owner 維持，生命週期見 [[0066]]。Timeout、斷線或回覆編碼失敗不證明命令沒有副作用，也不回滾 business publication。沒有明確冪等契約時不自動重送。
 
-`context.snapshot` 從同一次公開 capture 回 native target、point、library 與有序 aliases。Alias rows 保留 authored value 與 resolved 名稱，單列解析失敗附 error；它不是歷史 Run 的參數版本。Parameter／library 變更事件提示重讀這份 snapshot，alias 變更提示重讀已先發布的 tab cfg，Caller 使用 native snapshot，不使用舊 md／ml getters。Optional summaries 保留 dict tree 與 scalar，摘要 array／list leaves。Path 優先選取完整的單一值；這些投影不授權寫入。完整與部分讀取都使用同一固定 capture，精確投影見 remote owner README。
+`context.snapshot` 從同一次公開 capture 回 native target、point、library 與有序 aliases。Alias rows 保留 authored value 與 resolved 名稱，單列解析失敗附 error；它不是歷史 Run 的參數版本。Parameter／library／alias 變更事件提示重讀這份 snapshot。既有 tab 仍使用 Open／Reset 的固定來源，需 Reset 才取用新來源。Caller 使用 native snapshot，不使用舊 md／ml getters。Optional summaries 保留 dict tree 與 scalar，摘要 array／list leaves。Path 優先選取完整的單一值；這些投影不授權寫入。完整與部分讀取都使用同一固定 capture，精確投影見 remote owner README。
 
 ## Workflows 的同一 run
 

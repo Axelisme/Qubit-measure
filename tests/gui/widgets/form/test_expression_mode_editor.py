@@ -1,6 +1,6 @@
 """The right-click Expression action switches a text row between Direct and Expression."""
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from typing import Annotated, Literal
 
 import pytest
@@ -12,12 +12,26 @@ from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QLabel,
     QLineEdit,
     QMenu,
     QWidget,
 )
-from zcu_tools.gui.form import FormEnv, FormModel, FormPath, FormState
+from zcu_tools.gui.form import (
+    Display,
+    FormEnv,
+    FormInput,
+    FormModel,
+    FormPath,
+    FormState,
+    FormWritePath,
+    WriteRejected,
+)
 from zcu_tools.gui.widgets.form import FormEditor
+
+from tests.gui._form_context import captured_ext_env
+from tests.gui._user_input import type_text
+from tests.gui.widgets.form._text_input import commit_text
 
 
 class Alpha(BaseModel):
@@ -228,3 +242,205 @@ def test_dropdown_and_checkbox_rows_open_no_expression_menu(
     for path in CHOICE_ROWS:
         assert context_menu(child(view, QComboBox, f"form.input.{path}")) == [], path
     assert context_menu(child(view, QCheckBox, "form.input.enabled")) == []
+
+
+class FillForm(FormModel):
+    """Text rows whose computed Expression values fill Direct mode."""
+
+    amount: float = Field(default=2.0, gt=0)
+    count: int = 3
+    amplitude: complex = 1 + 0j
+    delay: Annotated[float, Display(decimals=3)] = 1.0
+
+
+type Batch = dict[FormWritePath, JsonValue]
+type Fill = tuple[FormEditor[FillForm], FormState[FillForm], list[Batch]]
+type BuildFill = Callable[[FormEnv, Callable[[Batch], None] | None], Fill]
+
+
+@pytest.fixture
+def fill(qapp: QApplication) -> Iterator[BuildFill]:
+    """Build editors over FillForm whose host write records accepted batches.
+
+    The optional check runs before a batch is recorded and installed and may
+    raise WriteRejected to refuse it.
+    """
+    editors: list[FormEditor[FillForm]] = []
+
+    def make(env: FormEnv, check: Callable[[Batch], None] | None) -> Fill:
+        state = FormState(FormInput(FillForm, {}))
+        state.write(
+            {
+                ("amount",): 2.0,
+                ("count",): 3,
+                ("amplitude",): {"__complex__": [1.0, 0.0]},
+                ("delay",): 1.0,
+            },
+            env,
+        )
+        batches: list[Batch] = []
+
+        def write(batch: Mapping[FormWritePath, JsonValue]) -> None:
+            if check is not None:
+                check(dict(batch))
+            batches.append(dict(batch))
+            state.write(batch, env)
+
+        def run_command(path: FormWritePath, name: str) -> None:
+            state.run_command(path, name, env)
+
+        view = FormEditor(state, env, write=write, run_command=run_command)
+        editors.append(view)
+        return view, state, batches
+
+    yield make
+    for view in editors:
+        view.close()
+        view.deleteLater()
+    qapp.processEvents()
+
+
+def seed_env() -> FormEnv:
+    """A fixed capture whose general.ext.seed is 4321.5."""
+    return captured_ext_env(seed=4321.5)
+
+
+@pytest.mark.parametrize(
+    ("path", "expression", "direct", "text"),
+    [
+        ("amount", "general.ext.seed + 5", 4326.5, "4326.5"),
+        ("count", "2 * 3", 6, "6"),
+        ("amplitude", "1j * 2 + 1", {"__complex__": [1.0, 2.0]}, "(1+2j)"),
+    ],
+)
+def test_direct_mode_fills_the_computed_expression_value(
+    fill: BuildFill, path: str, expression: str, direct: JsonValue, text: str
+) -> None:
+    view, state, batches = fill(seed_env(), None)
+    state.write({(path,): {"expr": expression}}, seed_env())
+    action = mode(view, path)
+    assert action.isChecked()
+
+    action.trigger()
+
+    assert not action.isChecked()
+    assert batches == [{(path,): direct}]
+    assert state.input.data[path] == direct
+    assert child(view, QLineEdit, f"form.input.{path}").text() == text
+    assert view.errors() is None
+
+
+def test_direct_mode_keeps_every_digit_of_a_rounded_value(fill: BuildFill) -> None:
+    view, state, batches = fill(seed_env(), None)
+    state.write({("delay",): {"expr": "1 / 3"}}, seed_env())
+
+    mode(view, "delay").trigger()
+
+    assert batches == [{("delay",): 1 / 3}]
+    assert state.input.data["delay"] == 1 / 3
+    # Only the shown text is rounded to the row's three decimals.
+    assert child(view, QLineEdit, "form.input.delay").text() == "0.333"
+
+
+@pytest.mark.parametrize(
+    ("path", "expression", "direct", "message"),
+    [
+        ("amount", "0 - 2", -2, "greater than 0"),
+        ("count", "1 / 2", 0.5, "valid integer"),
+    ],
+)
+def test_direct_mode_fills_a_computed_value_the_model_rejects(
+    fill: BuildFill, path: str, expression: str, direct: JsonValue, message: str
+) -> None:
+    view, state, batches = fill(seed_env(), None)
+    state.write({(path,): {"expr": expression}}, seed_env())
+
+    mode(view, path).trigger()
+
+    assert batches == [{(path,): direct}]
+    assert state.input.data[path] == direct
+    assert view.local_parse_errors() is None
+    error = child(view, QLabel, f"form.error.{path}")
+    assert message in error.text()
+    assert not error.isHidden()
+
+
+@pytest.mark.parametrize(
+    ("env", "expression"),
+    [
+        (seed_env(), "1 +"),
+        (seed_env(), "missing_name"),
+        (seed_env(), "1 / 0"),
+        (FormEnv(), "general.ext.seed + 5"),
+    ],
+    ids=["syntax", "unknown-reference", "arithmetic", "no-context"],
+)
+def test_direct_mode_keeps_an_expression_that_does_not_compute(
+    fill: BuildFill, env: FormEnv, expression: str
+) -> None:
+    view, state, batches = fill(env, None)
+    state.write({("amount",): {"expr": expression}}, env)
+    action = mode(view, "amount")
+
+    action.trigger()
+
+    assert not action.isChecked()
+    assert child(view, QLineEdit, "form.input.amount").text() == expression
+    assert batches == []
+    assert state.input.data["amount"] == {"expr": expression}
+    local = view.local_parse_errors()
+    assert local is not None
+    assert set(local.messages) == {("amount",)}
+
+
+def test_direct_mode_ignores_the_value_of_uncommitted_expression_text(
+    fill: BuildFill,
+) -> None:
+    view, state, batches = fill(seed_env(), None)
+    state.write({("amount",): {"expr": "1 / 4"}}, seed_env())
+    amount = child(view, QLineEdit, "form.input.amount")
+
+    amount.selectAll()
+    type_text(amount, "1 / 8")
+    batches.clear()
+    mode(view, "amount").trigger()
+
+    assert amount.text() == "1 / 8"
+    assert state.input.data["amount"] != 0.25
+    assert all(0.25 not in batch.values() for batch in batches)
+    local = view.local_parse_errors()
+    assert local is not None
+    assert set(local.messages) == {("amount",)}
+
+
+def test_direct_mode_ignores_the_value_of_rejected_expression_text(
+    fill: BuildFill,
+) -> None:
+    def reject_doubling(batch: Batch) -> None:
+        if batch.get(("amount",)) == {"expr": "2 * 4"}:
+            raise WriteRejected("Not allowed here")
+
+    view, state, batches = fill(seed_env(), reject_doubling)
+    state.write({("amount",): {"expr": "1 / 4"}}, seed_env())
+    amount = child(view, QLineEdit, "form.input.amount")
+    commit_text(amount, "2 * 4")
+    batches.clear()
+
+    mode(view, "amount").trigger()
+
+    assert amount.text() == "2 * 4"
+    assert batches == []
+    assert state.input.data["amount"] == {"expr": "1 / 4"}
+
+
+def test_read_only_rows_do_not_switch_to_direct(fill: BuildFill) -> None:
+    view, state, batches = fill(seed_env(), None)
+    state.write({("amount",): {"expr": "general.ext.seed + 5"}}, seed_env())
+    view.set_editing_enabled(enabled=False)
+    action = mode(view, "amount")
+
+    action.trigger()
+
+    assert action.isChecked()
+    assert batches == []
+    assert state.input.data["amount"] == {"expr": "general.ext.seed + 5"}

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias
 
 from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickInputs,
 )
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -31,30 +30,20 @@ from zcu_tools.gui.app.measure.interactive_flux_pick import (
     FluxPickParams,
     FluxPickResult,
 )
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-    ModuleInit,
-)
-from zcu_tools.gui.app.measure.seeds import (
-    alias_name_seed,
-)
 from zcu_tools.gui.interactive import PluginDefinition, Session
 
 from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
-from zcu_lab.v2._support.measure.seeds import (
-    flux_range,
-    qub_freq_range,
-)
 from zcu_lab.v2.twotone.fluxdep.core import FreqFluxCfg, FreqFluxExp, FreqFluxResult
+
+from .form import make_form
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.ui.interactive_frontend import (
         InteractiveFrontend,
         InteractiveFrontendEnv,
     )
-    from zcu_tools.plotting.plots import Plots
+    from zcu_tools.gui.form_adapter import Form, FormContext
+from zcu_tools.plotting.plots import Plots
 
 FluxDepRunResult: TypeAlias = RunRecord[FreqFluxCfg, FreqFluxResult]
 
@@ -62,9 +51,13 @@ FluxDepRunResult: TypeAlias = RunRecord[FreqFluxCfg, FreqFluxResult]
 class FluxDepAdapter(
     BaseAdapter[FreqFluxCfg, FluxDepRunResult, FluxPickResult, FluxPickParams]
 ):
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[FreqFluxCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
+
     experiment_tag: ClassVar[str | None] = FreqFluxExp.persistence_tag()
     exp_cls = FreqFluxExp
-    ExpCfg_cls = FreqFluxCfg
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.INTERACTIVE, load_data=True
     )
@@ -74,56 +67,13 @@ class FluxDepAdapter(
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: FreqFluxCfg,
         *,
         context: RunContext,
     ) -> FluxDepRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         result = FreqFluxExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse(
-                "qub_pulse",
-                role_id="qub_probe",
-                init=ModuleInit.INLINE,
-                locked={"freq": 0.0},
-            )
-            .readout()
-            .device(
-                "flux_dev",
-                label="Flux Device",
-                default=alias_name_seed("flux_dev"),
-            )
-            .choice(
-                "flux_unit",
-                label="Flux unit",
-                choices=("A", "V", "native"),
-                default="A",
-                tooltip="Working unit for the selected flux driver; no conversion.",
-            )
-            .relax_delay(1.0)
-            .sweep(
-                "flux",
-                label="Flux device value",
-                default=flux_range(expts=101),
-                decimals=6,
-            )
-            .sweep(
-                "freq",
-                label="Freq (MHz)",
-                default=qub_freq_range(expts=1001, span_factor=1.0),
-            )
-            .reps(1000)
-            .rounds(100)
-            .build()
-        )
 
     def make_interactive_plugin(
         self, req: AnalyzeRequest[FluxDepRunResult, FluxPickParams], *, plots: Plots

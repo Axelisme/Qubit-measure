@@ -1,6 +1,5 @@
 """Expression defaults become direct values when input is built or a branch opens."""
 
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -33,10 +32,8 @@ class Seeded(FormModel):
     authored: float = 1.0
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
-        data = super().defaults(env, previous)
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
+        data = super().defaults(env)
         data.update(SEEDED_EXPRESSIONS)
         return data
 
@@ -47,11 +44,9 @@ class Holder(FormModel):
     section: Seeded
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
-        data = super().defaults(env, previous)
-        data["section"] = Seeded.defaults(env, {})
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
+        data = super().defaults(env)
+        data["section"] = Seeded.defaults(env)
         return data
 
 
@@ -70,10 +65,8 @@ class Derived(FormModel):
     offset: float = 0.0
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
-        data = super().defaults(env, previous)
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
+        data = super().defaults(env)
         data["level"] = {"expr": "general.ext.seed + 1"}
         return data
 
@@ -134,7 +127,7 @@ def test_nested_section_defaults_are_evaluated_too() -> None:
     }
 
 
-def test_branch_switch_evaluates_new_defaults_and_keeps_inherited_expressions() -> None:
+def test_branch_switch_evaluates_new_defaults() -> None:
     env = environment(4.0)
     state = FormState(Switching.default_input(env))
     state.write({("branch", "offset"): {"expr": "general.ext.seed / 8"}}, env)
@@ -143,12 +136,12 @@ def test_branch_switch_evaluates_new_defaults_and_keeps_inherited_expressions() 
         "branch": {
             "kind": "derived",
             "level": 5.0,
-            "offset": {"expr": "general.ext.seed / 8"},
+            "offset": 0.0,
         }
     }
     result = state.result(env)
     assert isinstance(result, Switching)
-    assert result.branch == Derived(level=5.0, offset=0.5)
+    assert result.branch == Derived(level=5.0, offset=0.0)
 
 
 def test_authored_expressions_keep_their_text() -> None:

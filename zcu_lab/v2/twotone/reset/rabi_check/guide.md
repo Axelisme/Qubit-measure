@@ -4,11 +4,11 @@ Reset Rabi check: sweeps the initialisation (rabi) pulse gain and acquires three
 
 ## Expects (parameter context)
 
-Reads from the parameter context (all optional): 'q_f' / 'qub_ch' — qubit frequency and channel, seeding rabi_pulse and tested_reset defaults; 'r_f' / 'res_ch' / 'ro_ch' / 'timeFly' — resonator / readout defaults.
+Seeds 51 gain points from 0.0 to 1.0, with relax delay 1.0 us. Run overwrites the Rabi pulse gain. Open and Reset evaluate starting expressions once into direct input using captured sources. Inline qubit pulses read `$qubit.freq` and `$qubit.wiring.L01.ch.` Inline readout reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.ext.time_of_fly` + 0.05 us for trigger timing. Missing or invalid required sources leave the affected fields empty and Invalid; supply calibration or direct values before Run. No numeric calibration fallback is supplied.
 
 ## Expects (ModuleLibrary)
 
-Needs rabi_pulse (used before and after tested_reset), tested_reset (any reset shape: none / pulse / two-pulse / bath), and a readout module. Optionally references a calibrated upstream reset (disabled when absent).
+Rabi pulse uses `$qubit.module.x180` or a fresh pi_pulse template. Tested reset uses `$qubit.module.reset` or a fresh pulse-reset template; library reset families remain selectable. `$qubit.module.readout` selects a captured library link, otherwise a fresh inline readout template with a const waveform. Its required parameter sources must still be present. Optional `$qubit.module.reset` has no fallback: an unset/dangling slot or unbound alias leaves it disabled and Valid.
 
 ## Typical writeback
 

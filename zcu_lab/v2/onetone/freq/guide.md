@@ -4,7 +4,7 @@ One-tone resonator spectroscopy: sweeps the readout frequency and fits the reson
 
 ## Expects (parameter context)
 
-Uses the tab's captured resonator parameters: freq and kappa seed the sweep; ext.default_probe_length and ext.time_of_fly seed readout timing; wiring.ch and wiring.ro_ch seed channels. Homophasal sampling requires explicit cfg calibration values for r_f, rf_w, and theta0, supplied directly or as expressions. Analysis optionally reads the route-matched resonator.ext.edelay prior from the same fixed capture.
+Uses the tab's captured resonator parameters: freq and kappa seed the sweep; ext.default_probe_length and ext.time_of_fly seed ADC length minus 0.1 us and trigger offset plus 0.05 us; wiring.ch and wiring.ro_ch seed channels. Missing or null calibration leaves required fields Invalid, without numeric fallback. Homophasal sampling requires explicit cfg calibration values for r_f, rf_w, and theta0, supplied directly or as expressions. Analysis optionally reads the route-matched resonator.ext.edelay prior from the same fixed capture.
 
 ## Expects (ModuleLibrary)
 

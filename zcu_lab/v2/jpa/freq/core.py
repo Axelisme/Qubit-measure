@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Annotated
 
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
     AxesSpec,
@@ -51,20 +51,33 @@ class FreqAnalysis:
 
 
 class FreqModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    pi_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[PulseCfg, FieldMeta(label="Pi pulse")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class FreqSweepCfg(ConfigBase):
-    jpa_freq: SweepCfg
+    jpa_freq: Annotated[SweepCfg, FieldMeta(label="JPA pump freq", unit="MHz")]
 
 
 class FreqCfg(ProgramV2Cfg, ExpCfgModel):
-    dev: Mapping[str, str] | None = None  # jpa_rf_dev: connected name; None: no RF.
+    jpa_rf_dev: Annotated[
+        str | None,
+        FieldMeta(
+            label="JPA RF device",
+            description="Connected RF device name; None skips RF control.",
+        ),
+    ] = ""
     modules: FreqModuleCfg
     sweep: FreqSweepCfg
-    skew_penalty: float = Field(default=0.0, ge=0.0)
+    skew_penalty: Annotated[
+        float,
+        FieldMeta(
+            label="Skew penalty",
+            decimals=3,
+            description="Nonnegative SNR skew penalty.",
+        ),
+    ] = Field(default=0.0, ge=0.0)
 
 
 class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
@@ -75,6 +88,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         result_type=FreqResult,
         cfg_type=FreqCfg,
         tag="jpa/freq",
+        cfg_schema_version="2.0",
     )
 
     def run(self, cfg: FreqCfg, *, context: RunContext) -> FreqResult:
@@ -100,9 +114,9 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         )
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for jpa_freq, step in sched.scan("JPA Frequency", jpa_freqs.tolist()):
-                if step.cfg.dev is not None:
+                if step.cfg.jpa_rf_dev is not None:
                     set_rf_frequency(
-                        context.devices[step.cfg.dev["jpa_rf_dev"]], jpa_freq * 1e6
+                        context.devices[step.cfg.jpa_rf_dev], jpa_freq * 1e6
                     )
                 modules = step.cfg.modules
                 tracker = MomentTracker()

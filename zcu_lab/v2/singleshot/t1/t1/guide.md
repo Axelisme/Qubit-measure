@@ -4,11 +4,11 @@ Single-shot T1: applies a π pulse, waits for a variable delay, reads out, and c
 
 ## Expects (parameter context)
 
-Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved cfg, not live parameter context. Enter direct cfg values or optionally seed defaults with 'singleshot/ge' writeback. Missing or invalid cfg calibration fails before hardware. Optionally reads 'confusion_matrix' to readout-correct populations at analyze time; 't1' to seed the sweep stop (5*t1; fallback 500 us) and relax delay (5*t1; fallback 100 us); 'q_f' / 'qub_ch' for the pi pulse; 'r_f' / 'res_ch' / 'ro_ch' / 'timeFly' for readout.
+Open and Reset capture the current aliases, parameters and library. Relax delay and length stop are 5 * `$qubit.t1.` Classification seeds `$qubit.ext.readout_cal.g_center`/e_center/radius; missing calibration stays Invalid. Inline templates read `$qubit.freq`, `$qubit.wiring.L01.ch` and `$resonator.freq`/wiring.ch/wiring.ro_ch; readout trigger uses `$resonator.ext.time_of_fly` + 0.05 us. Missing required sources remain Invalid; no numeric fallback is supplied.
 
 ## Expects (ModuleLibrary)
 
-Needs a qubit pi-pulse module and a readout module. Optional reset (disabled when no library entry exists).
+Pi pulse uses `$qubit.module.x180` or pi_pulse. Reset is optional; readout uses `$qubit.module.readout` or readout template. Sweep-overwritten pulse values remain editable and library keys stay selectable. Run uses this fixed capture.
 
 ## Typical writeback
 
@@ -16,4 +16,4 @@ No writeback — T1 is shown in the plot title only. Use 'singleshot/t1_tone' if
 
 ## Recommended
 
-Set calibration cfg directly or seed it with 'singleshot/ge'. A delay sweep reaching ~5*T1 lets the decay flatten; with no prior 't1', the sweep spans 0–500 us. Set 'uniform=True' to sweep linearly; leave False to cluster more points along the expected exponential decay while preserving the configured start/stop window and point count.
+Set calibration cfg directly or seed it with 'singleshot/ge'. A delay sweep reaching ~5*T1 lets the decay flatten. Missing t1 leaves the length stop and relax delay Invalid. Set 'uniform=True' to sweep linearly; leave False to cluster more points along the expected exponential decay while preserving the configured start/stop window and point count.

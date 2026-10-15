@@ -4,16 +4,16 @@ Single-shot AC-Stark calibration: drives a cavity Stark tone and a qubit probe t
 
 ## Expects (parameter context)
 
-Run classification defaults reference `$qubit.ext.readout_cal.g_center`, `$qubit.ext.readout_cal.e_center` and `$qubit.ext.readout_cal.radius`. Probe frequency/channel use `$qubit.freq` and `$qubit.wiring.L01.ch`; probe length/mixer use `$qubit.module.x180.waveform.length` and `$qubit.module.x180.mixer_freq`. Cavity timing uses `$resonator.kappa`. Missing aliases or calibration leave cfg Invalid. Analyze calibration sources are not yet migrated to the historical Run contract.
+Open and Reset capture the current aliases, parameters and library. Relax delay starts at 5.5 us. Qubit sweep is `$qubit.freq` - 700 to `$qubit.freq` + 100 MHz. Qubit probe length/mixer use `$qubit.module.x180.waveform.length` and `$qubit.module.x180.mixer_freq.` Pre/post delay are 1.0/`$resonator.kappa` and 0.5/`$resonator.kappa`; cavity tone length adds 1.0/`$resonator.kappa` to the pi length. Classification seeds `$qubit.ext.readout_cal.g_center`/e_center/radius; missing calibration stays Invalid. Inline templates read `$qubit.freq`, `$qubit.wiring.L01.ch` and `$resonator.freq`/wiring.ch/wiring.ro_ch; readout trigger uses `$resonator.ext.time_of_fly` + 0.05 us. Missing required sources remain Invalid; no numeric fallback is supplied.
 
 ## Expects (ModuleLibrary)
 
-Uses `$qubit.module.readout` for SMART readout. Cavity and qubit probe tones are inline with canonical scalar calibration references; reset and init pulse start disabled.
+Reset and init start disabled. Cavity/qubit tones start from res_probe/pi_pulse with calibrated timing. Readout uses `$qubit.module.readout` or readout template. Sweep-overwritten pulse values remain editable and library keys stay selectable. Run uses this fixed capture.
 
 ## Typical writeback
 
-Proposes the fitted AC-Stark coefficient into parameter context 'ac_stark_coeff' (photon number per gain²); the MIST experiments read it to rescale their x-axis to photon number.
+Proposes the fitted AC-Stark coefficient into parameter context '`$qubit.ext.ac_stark_coeff`' (photon number per gain²); MIST reads it to rescale their x-axis to photon number.
 
 ## Recommended
 
-Set calibration cfg directly or seed it with 'singleshot/ge'; run after the dispersive-shift experiment has set 'chi' / 'rf_w'. Sweep the Stark gain across the onset and the probe frequency around the qubit line.
+Set calibration cfg directly or seed it with 'singleshot/ge'; run after the dispersive-shift experiment has set '`$qubit.ext.chi`' / '`$resonator.kappa`'. Sweep the Stark gain across the onset and the probe frequency around the qubit line.

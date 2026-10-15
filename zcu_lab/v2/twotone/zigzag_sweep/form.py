@@ -1,0 +1,72 @@
+"""Experiment starting values from fixed captures and injected templates."""
+
+from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
+from zcu_tools.gui.form_adapter import Form, FormContext
+
+from .core import ZigZagScanCfg
+
+
+def make_gain_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
+    """Build starting values and shape from the captured source availability."""
+    return Form(
+        ZigZagScanCfg,
+        tree={
+            "modules": {
+                "reset": Slot("$qubit.module.reset"),
+                "X90_pulse": Slot("$qubit.module.x90")
+                if ctx.has("$qubit.module.x90")
+                else Template("pi2_pulse"),
+                "X180_pulse": Slot("$qubit.module.x180")
+                if ctx.has("$qubit.module.x180")
+                else Template("pi_pulse"),
+                "readout": Slot("$qubit.module.readout")
+                if ctx.has("$qubit.module.readout")
+                else Template("readout"),
+            },
+            "relax_delay": Expr("5 * $qubit.t1"),
+            "initial_delay": Hidden(),
+            "n_times": 6,
+            "repeat_on": "X180_pulse",
+            "reps": 100,
+            "rounds": 100,
+            "sweep": {
+                "gain": Range.between(
+                    "0.8 * $qubit.module.x180.gain",
+                    "1.2 * $qubit.module.x180.gain",
+                    expts=101,
+                ),
+                "freq": Hidden(),
+            },
+        },
+    )
+
+
+def make_freq_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
+    """Build starting values and shape from the captured source availability."""
+    return Form(
+        ZigZagScanCfg,
+        tree={
+            "modules": {
+                "reset": Slot("$qubit.module.reset"),
+                "X90_pulse": Slot("$qubit.module.x90")
+                if ctx.has("$qubit.module.x90")
+                else Template("pi2_pulse"),
+                "X180_pulse": Slot("$qubit.module.x180")
+                if ctx.has("$qubit.module.x180")
+                else Template("pi_pulse"),
+                "readout": Slot("$qubit.module.readout")
+                if ctx.has("$qubit.module.readout")
+                else Template("readout"),
+            },
+            "relax_delay": Expr("5 * $qubit.t1"),
+            "initial_delay": Hidden(),
+            "n_times": 6,
+            "repeat_on": "X180_pulse",
+            "reps": 100,
+            "rounds": 100,
+            "sweep": {
+                "freq": Range.around("$qubit.freq", "2.0", expts=101),
+                "gain": Hidden(),
+            },
+        },
+    )

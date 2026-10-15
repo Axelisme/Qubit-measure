@@ -4,11 +4,11 @@ Paired single-qubit IRB: reference and interleaved arms share random Cliffords, 
 
 ## Expects (parameter context)
 
-Uses 5*t1 relaxation (us), fallback 200 us.
+Depth runs 0 to 100 random Cliffords over 21 points, seed 42 and 20 paired sequences. Relax delay is 5 * qubit.t1 us. Missing calibration leaves the affected fields empty and Invalid; no numeric fallback.
 
 ## Expects (ModuleLibrary)
 
-Uses calibrated X90/X180 and readout modules. Y gates use phase-shifted X pulses.
+Uses captured qubit.module.readout with a readout template fallback, and qubit.module.reset with no fallback (disabled when absent). Drive slots use qubit.module.x180/x90 with pi_pulse/pi2_pulse template fallbacks. Unset or dangling slots use the named template, not a legacy blank. Key choices remain available. Inline templates read qubit.freq, qubit.wiring.L01.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.ext.time_of_fly + 0.05 us; missing required calibration remains Invalid.
 
 ## Typical writeback
 

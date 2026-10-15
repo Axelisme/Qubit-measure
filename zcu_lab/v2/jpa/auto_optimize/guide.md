@@ -4,15 +4,15 @@ JPA joint optimization: with the qubit prepared in g and e (a pi pulse toggles i
 
 ## Expects (parameter context)
 
-Uses current aliases: qubit (qubit/*), resonator (resonator), and jpa (amplifier/jpa). Add a jpa alias row in the global dialog, for example `$resonator.amplifier`. Scalars use `$jpa.pump_freq`, `$jpa.pump_power`, `$jpa.flux` and canonical qubit/resonator wiring. Missing aliases or calibration leave cfg Invalid; no static fallback.
+Uses the qubit (qubit/*), resonator and jpa (amplifier/jpa) aliases. Search bounds use `$jpa.flux`, `$jpa.pump_freq` and `$jpa.pump_power.` The required JPA flux device resolves flux_dev once at Open or Reset; select the connected RF device in the form. RF defaults capture jpa_rf_dev at Open or Reset; an unbound alias leaves the optional field empty. flux_unit starts as A with no conversion. Missing required aliases or calibration leave the form Invalid.
 
 ## Expects (ModuleLibrary)
 
-SMART modules use `$qubit.module.x180`, `$qubit.module.readout` and optional `$qubit.module.reset`. Inline readout uses resonator scalar and wiring calibration; module waveforms follow their module source.
+Module slots use `$qubit.module.x180`, `$qubit.module.readout` and optional `$qubit.module.reset.` Missing pi/readout slots fall back to the pi_pulse/readout templates. Inline pulse calibration uses `$qubit.freq` and `$qubit.wiring.L01.ch`; inline readout uses resonator frequency/wiring and `$resonator.ext.time_of_fly` + 0.05. An unset reset slot disables reset. Missing required fallback calibration leaves the form Invalid.
 
 ## Typical writeback
 
-Proposes the signal-maximizing flux device value, pump frequency and pump power into three separate parameter context drafts — 'best_jpa_flux', 'best_jpa_freq' (MHz) and 'best_jpa_power' (dBm) — so you can accept, cancel or retarget each one independently. Nothing is written without your acceptance, writeback never commands a device, and it never touches 'cur_jpa_A'.
+Proposes the signal-maximizing flux device value, pump frequency and pump power into three separate drafts: `$jpa.flux` in `$jpa.flux_unit` coordinates, `$jpa.pump_freq` (MHz) and `$jpa.pump_power` (dBm). You can accept, cancel or retarget each independently. Nothing is written without your acceptance. Writeback never commands a device or changes the current-source value.
 
 ## Recommended
 

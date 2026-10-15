@@ -4,7 +4,7 @@ One-tone resonator power dependence: a 2D sweep of readout power (gain) versus r
 
 ## Expects (parameter context)
 
-Reads fixed tab parameters: resonator.freq and resonator.kappa seed the frequency sweep; resonator.wiring.ch/ro_ch seed the generator/ADC channels. Captured resonator.ext.default_probe_length minus 0.1 us seeds the ADC window, and resonator.ext.time_of_fly plus 0.05 us seeds trigger timing. Missing/null calibrations use the declared bring-up fallbacks; source and role errors propagate.
+Reads fixed tab parameters: resonator.freq and resonator.kappa seed the frequency sweep; resonator.wiring.ch/ro_ch seed the generator/ADC channels. Captured resonator.ext.default_probe_length minus 0.1 us seeds the ADC window, and resonator.ext.time_of_fly plus 0.05 us seeds trigger timing. Missing or null calibration and unbound aliases leave required fields Invalid without numeric fallback; source failures propagate.
 
 ## Expects (ModuleLibrary)
 
@@ -16,4 +16,4 @@ No writeback — this adapter has no analysis step (the underlying experiment is
 
 ## Recommended
 
-No analysis. Typical sweep: gain ~0.001 to 0.5 over ~101 points (low to high power), frequency resonator.freq ± linewidths over ~201 points. 'earlystop_snr' enters the run config (0 disables): set it positive to stop a column early once a signal-to-noise target is reached, speeding up the scan. Narrow the gain range once you've located the transition.
+No analysis. Typical sweep: gain ~0.001 to 0.5 over ~101 points (low to high power), frequency resonator.freq ± linewidths over ~201 points. 'earlystop_snr' starts disabled (None or nonpositive): set it positive to stop a column early once a signal-to-noise target is reached, speeding up the scan. Narrow the gain range once you've located the transition.

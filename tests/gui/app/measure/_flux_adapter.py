@@ -34,15 +34,11 @@ from zcu_tools.gui.app.measure.interactive_flux_pick import (
     FluxPickParams,
     FluxPickResult,
 )
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import alias_name_seed
 from zcu_tools.gui.app.measure.ui.interactive_frontend import (
     InteractiveFrontend,
     InteractiveFrontendEnv,
 )
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import SweepCfg
@@ -91,18 +87,13 @@ class SpectrumAdapter(
     )
     force_magnitude: ClassVar[bool] = True
     exp_cls = SpectrumCore
-    ExpCfg_cls = SpectrumCfg
     experiment_tag: ClassVar[str | None] = "test/spectrum"
 
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(role_factories={})
-            .device(
-                "flux_dev", label="Flux Device", default=alias_name_seed("flux_dev")
-            )
-            .build()
-        )
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[SpectrumCfg]:
+        """Return fixed typed spectra input for the analysis fixture."""
+        del ctx
+        return Form(SpectrumCfg, {})
 
     def make_interactive_plugin(
         self,

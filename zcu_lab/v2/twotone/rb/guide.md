@@ -4,11 +4,11 @@ Single-qubit Clifford RB: each independent random seed supplies a shared prefix 
 
 ## Expects (parameter context)
 
-Uses t1 (us) for a 5*t1 recovery delay, fallback 200 us.
+Depth runs 0 to 100 Cliffords over 21 points, seed 42 and 20 sequences. Relax delay is 5 * qubit.t1 us. Missing calibration leaves the affected fields empty and Invalid; no numeric fallback.
 
 ## Expects (ModuleLibrary)
 
-Requires calibrated X90 (pi2_amp/pi2_len), X180 (pi_amp/pi_len) and readout modules. Verify both drive frequencies and channels. Identity uses X90 at zero gain. Reset is optional.
+Uses captured qubit.module.readout with a readout template fallback, and qubit.module.reset with no fallback (disabled when absent). Drive slots use qubit.module.x180/x90 with pi_pulse/pi2_pulse template fallbacks. Unset or dangling slots use the named template, not a legacy blank. Key choices remain available. Inline templates read qubit.freq, qubit.wiring.L01.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.ext.time_of_fly + 0.05 us; missing required calibration remains Invalid.
 
 ## Typical writeback
 

@@ -804,12 +804,9 @@ class MainWindow(QMainWindow):
             self._ctrl.cancel_run()
             return
         logger.info("run_or_stop_tab: run requested tab_id=%r", tab_id)
-        if not tab_w.cfg_form.is_valid():
-            reason = tab_w.cfg_form.first_invalid_reason()
-            if reason:
-                msg = f"Config invalid: {reason}"
-            else:
-                msg = "Config has unset fields — fill required values before running"
+        reason = tab_w.cfg_invalid_reason()
+        if reason is not None:
+            msg = f"Config invalid: {reason}"
             logger.warning("run_or_stop_tab: blocked — %s", msg)
             self.show_status_message(msg)
             return
@@ -867,10 +864,7 @@ class MainWindow(QMainWindow):
             logger.exception("load_tab_data_dialog failed: tab_id=%r", tab_id)
             self.show_error_dialog("Load data failed", str(exc))
             return
-        message = f"Loaded data from {path}"
-        if outcome.cfg_backfill == "not_applied":
-            message += "; Config was not backfilled"
-        self.show_status_message(message)
+        self.show_status_message(f"Loaded data from {path}")
         if outcome.analysis_error is not None:
             self._dialog_presenter.warning(
                 self,

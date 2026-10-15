@@ -13,7 +13,7 @@ from typing import Annotated
 
 from matplotlib.figure import Figure
 from pydantic import Field
-from qtpy.QtWidgets import QApplication, QLineEdit, QPushButton, QWidget
+from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QWidget
 from zcu_tools.datafile import RunSnapshot
 from zcu_tools.experiment.workflows import (
     Done,
@@ -34,6 +34,7 @@ from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.resources.entry import ResultEntry
 
 from tests.experiment.workflows._engine_fakes import Plan, State, Tunables
+from tests.gui._user_input import mouse_click
 
 from ._reload_source import SourceNamespace
 from ._start_fakes import StartHarness
@@ -291,21 +292,25 @@ def form_editable(panel: QWidget) -> bool:
 
 
 def expand_all(widget: QWidget, qapp: QApplication) -> None:
-    """Click every enabled Expand fold, including folds revealed by an outer one.
+    """Click every enabled folded form.fold.* title, including titles revealed
+    by an outer one.
 
-    Disabled folds (a detached form) cannot be clicked by a user and are left
-    as they are.
+    A folded title's text starts with "\u25b8". Disabled titles (a detached
+    form) get no mouse input from a user and are left as they are.
     """
     while True:
         folds = [
-            button
-            for button in widget.findChildren(QPushButton)
-            if button.text() == "Expand" and button.isEnabled()
+            title
+            for title in widget.findChildren(QLabel)
+            if title.objectName().startswith("form.fold.")
+            and title.text().startswith("\u25b8")
+            and title.isEnabled()
+            and title.isVisibleTo(widget)
         ]
         if not folds:
             return
-        for button in folds:
-            button.click()
+        for title in folds:
+            mouse_click(title, title.rect().center())
         qapp.processEvents()
 
 

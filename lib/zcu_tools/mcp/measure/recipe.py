@@ -37,6 +37,16 @@ from zcu_tools.mcp.measure.recipe_capture import (
     SweepSources,
     capture_actual,
 )
+from zcu_tools.mcp.measure.recipe_form import (
+    RecipeFormField,
+    RecipeModuleValues,
+    field_schema,
+    library_option_value,
+    module_scalar,
+    read_form_field,
+    read_module_values,
+    slot_schema,
+)
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
@@ -53,11 +63,11 @@ AnalysisStage = Literal["primary", "post"]
 class RecipeExpression(TypedDict):
     """GUI expression input, forwarded unchanged rather than evaluated in MCP.
 
-    __expr is the expression text in the GUI's existing expression language.
+    expr is the expression text in the GUI's Form expression language.
     The GUI owns parsing, source resolution and diagnostics, including blanks.
     """
 
-    __expr: str
+    expr: str
 
 
 @dataclass(frozen=True)
@@ -72,51 +82,6 @@ class RecipeFieldEdit:
     field: str
     value: RecipeParameter | RecipeExpression
     source: str = "explicit"
-
-
-@dataclass(frozen=True)
-class RecipeInputState:
-    """Detached GUI input, without parsing expressions or decoding tagged values.
-
-    mode identifies direct input or expression text. raw is the original GUI
-    input, resolved is its cached value (possibly None). error is the resolution
-    diagnostic and validation_error is the owner validation diagnostic; each is
-    text or None. YAML containers are owned copies, not live cfg data.
-    """
-
-    mode: Literal["direct", "expression"]
-    raw: YamlValue
-    resolved: YamlValue
-    error: str | None
-    validation_error: str | None
-
-
-@dataclass(frozen=True)
-class RecipeFieldState:
-    """Detached last-publication cfg field, including invalid inputs.
-
-    kind is the GUI node kind; valid is its cached validity, not fresh validation.
-    children names its immediate children in owner order, not full paths.
-    reference/error are the chosen key and diagnostic for reference nodes only.
-    input is populated for scalar/literal nodes only. inputs maps owner-named
-    sweep/centered_sweep controls to their states; otherwise it is empty.
-    Inapplicable children/reference/error/input are empty tuple/None.
-    Returned containers may be changed without changing the tab publication.
-    """
-
-    kind: Literal[
-        "section", "reference", "scalar", "literal", "sweep", "centered_sweep"
-    ]
-    valid: bool
-    children: tuple[str, ...] = ()
-    # Reference mode is inline/ref, or None for disabled/non-reference nodes.
-    mode: Literal["inline", "ref"] | None = None
-    # Owner-imposed lock, including ref ancestors and static locked leaves.
-    readonly: bool = False
-    reference: str | None = None
-    error: str | None = None
-    input: RecipeInputState | None = None
-    inputs: Mapping[str, RecipeInputState] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -496,11 +461,10 @@ class _TabBinding:
     """Cfg preparation state hidden behind an author tab handle.
 
     tools is the execution's fixed connection. tab is the GUI locator.
-    publication is the last returned cfg observation, never refreshed on failure.
-    aliases is an owned single-use mapping of alias names to components, never tab binding.
-    Parameter sources are queried from current globals with these overrides. origins records sources
-    by public/derived field name for the later Run capture, including individual
-    sweep labels. summary_parameters selects the fixed Run facts to capture.
+    publication is the last Form observation, never refreshed on failure.
+    Parameter sources are read from the tab's fixed Open/Reset environment.
+    origins records sources by public/derived field name for the later Run
+    capture, including individual sweep labels. summary_parameters selects the fixed Run facts to capture.
     """
 
     tools: MeasureToolContext
@@ -509,8 +473,10 @@ class _TabBinding:
     observe_run: Callable[[RunOperation], None]
     observe_analysis: Callable[[AnalyzeOperation], None]
     observe_writeback: Callable[[WritebackReceipt], None]
-    aliases: Mapping[str, str] | None = None
     origins: dict[str, str | SweepSources] = field(default_factory=dict)
+    module_projections: dict[str, tuple[str, tuple[str, ...]]] = field(
+        default_factory=dict
+    )
     summary_parameters: tuple[SummaryParameter, ...] = ()
     closed: Event = field(default_factory=Event)
     condition: Condition = field(default_factory=Condition)
@@ -593,86 +559,12 @@ def _wire_value(value: object) -> YamlValue:
     raise GuiRpcError("Invalid GUI value", reason="incompatible_wire")
 
 
-def _wire_text(value: object) -> str | None:
-    if value is None or isinstance(value, str):
-        return value
-    raise GuiRpcError("Invalid GUI text", reason="incompatible_wire")
-
-
-def _input_state(value: object) -> RecipeInputState:
-    node = _cfg_object(value)
-    mode = node.get("mode")
-    if (
-        mode not in ("direct", "expression")
-        or "raw" not in node
-        or "resolved" not in node
-    ):
-        raise GuiRpcError("Invalid GUI input state", reason="incompatible_wire")
-    return RecipeInputState(
-        mode="direct" if mode == "direct" else "expression",
-        raw=_wire_value(node["raw"]),
-        resolved=_wire_value(node["resolved"]),
-        error=_wire_text(node.get("error")),
-        validation_error=_wire_text(node.get("validation_error")),
-    )
-
-
-def _field_state(node: dict[str, object]) -> RecipeFieldState:
-    kind = node.get("kind")
-    valid = node.get("valid")
-    if not isinstance(valid, bool):
-        raise GuiRpcError("Invalid GUI field validity", reason="incompatible_wire")
-    readonly = node.get("readonly")
-    if not isinstance(readonly, bool):
-        raise GuiRpcError(
-            "Invalid GUI field readonly state", reason="incompatible_wire"
-        )
-    raw_mode = node.get("mode")
-    mode: Literal["inline", "ref"] | None
-    if raw_mode == "inline":
-        mode = "inline"
-    elif raw_mode == "ref":
-        mode = "ref"
-    elif raw_mode is None:
-        mode = None
-    else:
-        raise GuiRpcError("Invalid GUI reference mode", reason="incompatible_wire")
-    if kind == "section" or kind == "reference":
-        return RecipeFieldState(
-            kind="section" if kind == "section" else "reference",
-            valid=valid,
-            readonly=readonly,
-            mode=mode,
-            children=tuple(_cfg_object(node.get("children", {}))),
-            reference=_wire_text(node.get("ref")) if kind == "reference" else None,
-            error=_wire_text(node.get("error")) if kind == "reference" else None,
-        )
-    if kind == "scalar" or kind == "literal":
-        return RecipeFieldState(
-            kind="scalar" if kind == "scalar" else "literal",
-            valid=valid,
-            readonly=readonly,
-            input=_input_state(node.get("input")),
-        )
-    if kind == "sweep" or kind == "centered_sweep":
-        return RecipeFieldState(
-            kind="sweep" if kind == "sweep" else "centered_sweep",
-            valid=valid,
-            readonly=readonly,
-            inputs={
-                key: _input_state(value)
-                for key, value in _cfg_object(node.get("inputs")).items()
-            },
-        )
-    raise GuiRpcError("Invalid GUI field kind", reason="incompatible_wire")
-
-
 def _is_expression(value: object) -> bool:
     """Recognize only the existing one-key expression wire carrier."""
     return (
         isinstance(value, dict)
-        and set(value) == {"__expr"}
-        and isinstance(value["__expr"], str)
+        and set(value) == {"expr"}
+        and isinstance(value["expr"], str)
     )
 
 
@@ -757,7 +649,7 @@ class RecipeSession:
         """Bind tools and optional execution lifetime/admission collaborators.
 
         summary_parameters is the recipe definition's declared cfg fields and
-        units for Run capture. Empty tuple records only the internal cfg ref.
+        units for Run capture. Empty tuple records no actual conditions.
         closed/condition are the driver's close event and wake condition; omission
         creates local ones. consume_cancel atomically consumes one pending cancel
         before a Run/analysis start and returns whether to suppress it. This
@@ -869,17 +761,13 @@ class RecipeSession:
         """Open adapter's tab, or validate/reset the named reusable tab.
 
         adapter is a non-empty public GUI adapter ID. aliases maps caller-owned
-        alias names to concrete components and is copied for this recipe's Run.
-        None and {} mean no override and retain cached preview/acceptance.
-        Nonempty overrides use temporary preview and acceptance without changing
-        tab/global binding. reuse=None creates a fresh tab; otherwise reuse is a
-        non-empty GUI locator. Parameter/library reads and cfg previews use
-        current sources with this same temporary mapping, not a
-        tab birth capture or context.snapshot. Source/alias failures propagate
-        without fallback. Busy, mismatched adapters
-        and invalid locators fail without creating a fallback. Use the returned
-        cfg publication for recipe edits and Run preparation; each source query
-        uses current globals. GUI/connection
+        alias names to concrete components and is copied into a single Reset.
+        None and {} use global aliases at Reset. Every recipe preparation resets
+        before edits, including a new tab. Parameter/library reads, edits and Run
+        use that fixed capture until the next explicit Reset. The override is not
+        written to global aliases or saved input. reuse=None creates a fresh tab;
+        otherwise reuse is a non-empty GUI locator. Busy, mismatched adapters and
+        invalid locators fail without creating a fallback. GUI/connection
         errors propagate; empty/non-string names raise ValueError before any GUI request. Identifier errors propagate from the GUI context owner.
         """
         if not adapter or not adapter.strip():
@@ -897,7 +785,7 @@ class RecipeSession:
                 )
             with self._condition:
                 self._tab = tab
-            publication = self._tools.send_gui_rpc("tab.get_cfg", {"tab_id": tab})
+
         else:
             tab = reuse
             with self._condition:
@@ -915,7 +803,10 @@ class RecipeSession:
             interaction = _cfg_object(snapshot["interaction"])
             if interaction["is_running"] or interaction["is_analyzing"]:
                 raise GuiRpcError("Tab is busy", reason="tab_busy")
-            publication = self._tools.send_gui_rpc("tab.reset_cfg", {"tab_id": tab})
+        reset: dict[str, object] = {"tab_id": tab}
+        if overrides:
+            reset["aliases"] = overrides
+        publication = self._tools.send_gui_rpc("tab.reset_cfg", reset)
         return RecipeTab(
             _TabBinding(
                 self._tools,
@@ -927,7 +818,6 @@ class RecipeSession:
                 closed=self._closed,
                 condition=self._condition,
                 consume_cancel=self._consume_cancel,
-                aliases=overrides,
                 summary_parameters=self._summary_parameters,
             )
         )
@@ -936,40 +826,22 @@ class RecipeSession:
 class RecipeTab:
     """Opaque tab handle returned by RecipeSession.open_tab.
 
-    field names are dot-separated public cfg fields (for example rounds or
-    modules.readout), not wire path lists. Methods preserve the observed cfg ref
-    and record parameter sources. GUI errors propagate without re-read, retry or
-    rollback. Authors obtain
+    Field names are dot-separated Form model fields, not wire path lists.
+    Methods keep a detached Form observation and record parameter sources.
+    GUI errors propagate without re-read, retry or rollback. Authors obtain
     this handle from open_tab rather than constructing the private binding.
     """
 
     def __init__(self, binding: _TabBinding) -> None:
         self._binding = binding
-        self._preview_aliases()
-
-    def _preview_aliases(self) -> None:
-        """Project named aliases at the retained ref; stale failures never refresh."""
-        if self._binding.aliases:
-            reply = self._binding.tools.send_gui_rpc(
-                "tab.get_cfg",
-                {
-                    "tab_id": self._binding.tab,
-                    **(
-                        {"aliases": self._binding.aliases}
-                        if self._binding.aliases
-                        else {}
-                    ),
-                },
-            )
-            self._binding.publication = _cfg_object(reply)
 
     def read_value(self, path: str) -> YamlValue:
-        """Read one non-blank logical leaf from current sources with this tab's aliases.
+        """Read one non-blank logical leaf from this tab's fixed Reset capture.
 
         path is a parameter path such as $custom.threshold or Q1.ext.seed, not an
         arithmetic formula. Missing and explicit null both return None. Each call
-        uses tab.parameter_read, returning a detached value without changing cfg,
-        provenance or Run state or refreshing context/operation guards. Source,
+        uses tab.parameter_read without overrides and returns a detached value.
+        It does not change cfg, provenance or Run state, or refresh guards. Source,
         alias and fixed-connection failures propagate without fallback or retry.
         ValueError rejects blank paths; malformed wire raises incompatible_wire.
         """
@@ -982,7 +854,7 @@ class RecipeTab:
 
         None returns None without an RPC. Other references must be non-blank;
         custom/missing modules return None, never a client-guessed root. Queries
-        use the fixed connection and copied aliases, not context.snapshot. Cfg,
+        use the fixed Reset capture, not context.snapshot or live aliases. Cfg,
         provenance and Run state are unchanged. Source/connection errors propagate
         without fallback/retry; malformed root replies raise incompatible_wire.
         """
@@ -990,16 +862,20 @@ class RecipeTab:
             raise ValueError("reference must be a non-empty module reference")
         return self._library_reference(reference)
 
-    def read_field(self, field: str) -> RecipeFieldState:
-        """Read a detached field from the last successful cfg publication, without RPC.
+    def read_field(self, field: str) -> RecipeFormField:
+        """Read a detached field from the last Form observation, without RPC.
 
-        field is a non-empty dotted public cfg path. Invalid fields retain their
-        cached inputs and diagnostics. Later successful edits or alias previews
-        replace the tab's publication but do not change previously returned states.
-        Failed edits do not refresh it. Unknown/malformed paths raise ValueError;
-        malformed wire raises GuiRpcError(incompatible_wire), not invalid_cfg.
+        field is a non-empty dotted model-field path. Inline paths include
+        module, for example modules.readout.module.pulse_cfg.module.freq. Range count
+        is n, not set_sweep's public expts argument. RecipeFormField exposes
+        input, input_present, ordinary value, key/inline mode, actual key, lock,
+        current child field names and directed errors. It reconstructs no old
+        CfgSchema kind or ref-readonly subtree. Successful edits replace the
+        observation without changing previously returned states. Failed edits
+        do not refresh it. Unknown/malformed paths raise ValueError; malformed
+        wire raises GuiRpcError(incompatible_wire), not invalid_cfg.
         """
-        return _field_state(self._node(field))
+        return self._node(field)
 
     def read_device(self, name: str) -> RecipeDeviceState:
         """Read name's cached device.snapshot once on the fixed GUI connection.
@@ -1026,13 +902,12 @@ class RecipeTab:
                 "tab_id": self._binding.tab,
                 "paths": [path],
                 "module_refs": [],
-                **({"aliases": self._binding.aliases} if self._binding.aliases else {}),
             },
         )
         return _cfg_object(reply.get("values")).get(path)
 
     def _library_reference(self, reference: str | None) -> str | None:
-        """Resolve a canonical module root using current sources and named aliases."""
+        """Resolve a canonical module root using the fixed Reset sources."""
         if reference is None:
             return None
         reply = self._binding.tools.send_gui_rpc(
@@ -1041,7 +916,6 @@ class RecipeTab:
                 "tab_id": self._binding.tab,
                 "paths": [],
                 "module_refs": [reference],
-                **({"aliases": self._binding.aliases} if self._binding.aliases else {}),
             },
         )
         modules = _cfg_object(reply.get("modules"))
@@ -1052,14 +926,8 @@ class RecipeTab:
             raise GuiRpcError("Invalid module lookup reply", reason="incompatible_wire")
         return root
 
-    def _node(self, name: str) -> dict[str, object]:
-        node = _cfg_object(self._binding.publication["tree"])
-        for part in _field_path(name):
-            children = _cfg_object(node.get("children", {}))
-            if part not in children:
-                raise ValueError(f"Unknown cfg field: {name}")
-            node = _cfg_object(children[part])
-        return node
+    def _node(self, name: str) -> RecipeFormField:
+        return read_form_field(self._binding.publication, tuple(_field_path(name)))
 
     def _edit(self, edits: list[_CfgEdit]) -> None:
         if edits:
@@ -1071,75 +939,118 @@ class RecipeTab:
                 },
             )
             self._binding.publication = _cfg_object(reply)
-            self._preview_aliases()
-
-    def _reference(self, field: str) -> dict[str, object]:
-        node = self._node(field)
-        if node["kind"] != "reference":
-            raise ValueError(f"Not a module reference field: {field}")
-        return node
 
     def use_library(
         self, field: str, name: str | None, *, required: str | None = None
     ) -> MissingParameter | None:
-        """Select a readonly library ref at a dotted module/waveform field path.
+        """Write a declared ref Option value at a tagged Form module field.
 
-        name is a non-blank explicit reference, or None to retain the current GUI
-        value. Ref child edits require explicit owner conversion to inline first;
-        this operation never copies content.
-
-        required names the public tool parameter and requires a valid reference
-        present in the library, including for explicit names. If name is None and
-        the retained reference is unusable, return MissingParameter with required
-        as its parameter and a supplying instruction as its reason, without
-        editing cfg or recording an origin. The caller collects missing values
-        and raises RecipeNeedsParameters once. A usable selection or retention
-        returns None. Omitting required also returns None, without requiring
-        library membership.
-
-        Explicit invalid references raise GuiRpcError (invalid_cfg), never a
-        missing value or fallback; with required, non-library names also raise it.
-        Blank names or unknown fields raise ValueError. GUI/source/connection
-        errors propagate without retry.
+        name is a nonblank concrete library key, not a role/alias or __ref tag.
+        None retains the current input. required names the tool parameter whose
+        absent selection returns MissingParameter without editing. Explicit
+        unoffered keys raise GuiRpcError(invalid_cfg) before any write, naming
+        the field and current available keys. Owner validation errors propagate.
+        An inline-only locked Slot rejects explicit selection before any RPC.
+        This method does not copy or materialize library content. GUI and source
+        failures propagate without retry, refresh or fallback.
         """
-        node = self._reference(field)
+        path = tuple(_field_path(field))
+        schema, _, _ = field_schema(self._binding.publication, path)
+        slot = slot_schema(schema)
+        if slot is None:
+            raise ValueError(f"Not a module reference field: {field}")
         if name is not None:
             if not name or not name.strip():
                 raise ValueError("library name must be non-empty")
-            self._edit([{"path": _field_path(field), "value": {"__ref": name}}])
-            node = self._reference(field)
-            if (
-                node.get("error")
-                or not node.get("valid")
-                or node.get("ref") != name
-                or (required is not None and self._library_reference(name) is None)
-            ):
-                raise GuiRpcError(f"Invalid {field} reference", reason="invalid_cfg")
-        reference = node.get("ref")
+            if slot == "locked":
+                raise ValueError(f"Cannot select a library key at locked Slot: {field}")
+            selection = library_option_value(schema, name, field)
+            self._edit([{"path": list(path), "value": selection}])
+        selected = self.read_field(field)
+        if name is not None and (selected.errors or selected.key != name):
+            raise GuiRpcError(f"Invalid {field} reference", reason="invalid_cfg")
         if (
             name is None
             and required is not None
-            and (
-                not isinstance(reference, str)
-                or self._library_reference(reference) is None
-                or not node.get("valid")
-                or node.get("error")
-            )
+            and (selected.key is None or selected.errors)
         ):
-            return MissingParameter(
-                required, f"Provide a valid {field} library reference"
-            )
+            return MissingParameter(required, f"Provide a valid {field} library key")
         self._binding.origins[field] = "explicit" if name is not None else "gui_default"
         return None
 
     def disable_library(self, field: str) -> None:
-        """Disable an optional module field explicitly; reject unknown fields."""
-        self._reference(field)
-        self._edit([{"path": _field_path(field), "value": {"__ref": None}}])
-        node = self._reference(field)
-        if node.get("ref") is not None or node.get("error"):
+        """Write null to an optional Slot; the Form owner validates nullability."""
+        path = tuple(_field_path(field))
+        schema, _, _ = field_schema(self._binding.publication, path)
+        if slot_schema(schema) is None:
+            raise ValueError(f"Not a module reference field: {field}")
+        self._edit([{"path": list(path), "value": None}])
+        selected = self.read_field(field)
+        if selected.input is not None or selected.errors:
             raise GuiRpcError(f"Cannot disable {field}", reason="invalid_cfg")
         self._binding.origins[field] = "disabled"
+
+    def read_module(self, field: str) -> RecipeModuleValues:
+        """Read one core module's value, mode and source from fixed Reset sources.
+
+        field is a nonempty dotted core module path, not an inline leaf. Values
+        are detached module JSON, without full-cfg validation, native to_cfg or
+        extras lowering. Other invalid fields do not block this read. The owner
+        rejects this module's invalid values with NOT_VALID, unknown/nonmodule
+        paths with invalid_params, and revoked resources with RESOURCE_GONE.
+        Busy and notification reads are allowed. No input change, publication,
+        source refresh or retry occurs. GUI/source/connection failures propagate.
+        """
+        _field_path(field)
+        return read_module_values(
+            self._binding.tools.send_gui_rpc(
+                "tab.read_module", {"tab_id": self._binding.tab, "field": field}
+            )
+        )
+
+    def use_inline(self, field: str) -> None:
+        """Ask the owner to convert a whole core module to editable inline input.
+
+        field follows read_module. The existing tab.use_inline RPC checks
+        holder, busy, lifetime and notification-reentrant admission before
+        reading the owner's module mode. Key mode runs the generated to_inline
+        option command on the fixed captured library. Inline mode is unchanged
+        with no publication, but still takes those guards. Locks remain applied.
+        Disabled or unresolved modules fail with a directed error; select an
+        Inline option explicitly to start from template/type defaults.
+        No caller layout construction or full-cfg/extras lowering occurs here.
+        A changed input uses one atomic write/publication; this handle retains
+        the returned Form view. Source, structural and connection failures
+        propagate without refresh, retry, fallback or rollback.
+        """
+        _field_path(field)
+        reply = self._binding.tools.send_gui_rpc(
+            "tab.use_inline", {"tab_id": self._binding.tab, "field": field}
+        )
+        self._binding.publication = _cfg_object(reply)
+
+    def retain_module_source(
+        self, field: str, *, summary_field: str, value_path: tuple[str, ...]
+    ) -> None:
+        """Record a generic scalar projection and module provenance for next Run.
+
+        field follows read_module. summary_field is the dotted inline leaf path
+        used as the summary identity. Use that same inline path in key mode,
+        even though the current key-mode input has no such leaf.
+        value_path contains module-relative field names, without the inline
+        envelope. Missing/non-scalar projections raise ValueError before metadata
+        changes. Module errors propagate. No frequency/calibration policy runs.
+        Validate now, then read the current module value at Run capture. Keep
+        numeric values and the library:<key> or dotted module source, not a key
+        string or whole module. Later set/set_sweep calls replace provenance;
+        already captured Runs remain detached. No Form mutation/publication or
+        source refresh occurs, and no success prefix is recorded on failure.
+        """
+        _field_path(summary_field)
+        module = self.read_module(field)
+        module_scalar(module.value, value_path)
+        self._binding.module_projections[summary_field] = (field, value_path)
+        self._binding.origins[summary_field] = module.source
 
     def retain_source(self, field: str, source: str) -> None:
         """Record a caller-chosen provenance label for an unchanged cfg field.
@@ -1148,12 +1059,14 @@ class RecipeTab:
         string, such as a library label; this method interprets no domain policy.
         It changes only this tab's source metadata for the next Run. Subsequent
         set/set_sweep calls can replace the label, and captured Runs remain fixed.
-        No RPC, cfg edit, revision change or validation of the resolved value
-        occurs. Unknown/non-scalar/non-sweep fields and empty labels raise
-        ValueError before metadata changes. set(None) still records gui_default.
+        No RPC, Form input change or validation of the resolved value occurs.
+        Unknown/non-scalar/non-sweep fields and empty labels raise ValueError before metadata changes. set(None) still records gui_default.
         """
         label = _source_label(source)
-        if self._node(field)["kind"] not in ("scalar", "sweep"):
+        node = self._node(field)
+        if node.mode is not None or (
+            node.fields and not {"start", "stop", "n"} <= set(node.fields)
+        ):
             raise ValueError(f"Not a scalar or sweep cfg field: {field}")
         self._binding.origins[field] = label
 
@@ -1165,11 +1078,11 @@ class RecipeTab:
         and record gui_default. Empty/default-only batches send no edit. Validate
         every path, scalar kind, carrier and label before any mutation; local
         errors raise ValueError. Expressions go unchanged to the GUI owner.
-        Supplied values share the retained cfg ref and one returned revision.
-        Check their returned validity/diagnostics before recording sources; invalid
-        replies raise GuiRpcError(invalid_cfg) but retain the returned publication.
+        The resource returns one complete Form observation. Check directed
+        errors before recording sources; invalid replies raise invalid_cfg
+        but retain the returned input and preview.
         GUI/connection failures propagate without refresh, retry or rollback;
-        this method adds no atomicity guarantee beyond the existing GUI protocol.
+        the resource owns the atomic write.
         """
         planned = tuple(edits)
         wire: list[_CfgEdit] = []
@@ -1177,7 +1090,7 @@ class RecipeTab:
             if not edit.source or not edit.source.strip():
                 raise ValueError("source must be a non-empty provenance label")
             node = self._node(edit.field)
-            if node["kind"] != "scalar":
+            if node.fields or node.mode is not None:
                 raise ValueError(f"Not a scalar cfg field: {edit.field}")
             _check_edit_value(edit.value)
             if edit.value is not None:
@@ -1188,12 +1101,7 @@ class RecipeTab:
         for edit in planned:
             if edit.value is not None:
                 node = self._node(edit.field)
-                state = _cfg_object(node["input"])
-                if (
-                    not node.get("valid")
-                    or state.get("error")
-                    or state.get("validation_error")
-                ):
+                if node.errors:
                     raise GuiRpcError(
                         f"Invalid {edit.field} value", reason="invalid_cfg"
                     )
@@ -1219,23 +1127,26 @@ class RecipeTab:
         """
         self.set_fields((RecipeFieldEdit(field, value, source),))
 
-    def _sweep_inputs(self, field: str) -> dict[str, object]:
+    def _sweep_inputs(self, field: str) -> RecipeFormField:
         node = self._node(field)
-        if node["kind"] != "sweep":
+        if not {"start", "stop", "n"} <= set(node.fields):
             raise ValueError(f"Not a sweep cfg field: {field}")
-        return _cfg_object(node["inputs"])
+        return node
 
     def _write_sweep(self, field: str, values: dict[str, object]) -> None:
         self._sweep_inputs(field)
         if not values:
             return
-        self._edit([{"path": _field_path(field), "value": values}])
-        inputs = self._sweep_inputs(field)
-        if not self._node(field).get("valid") or any(
-            _cfg_object(inputs[key]).get("error")
-            or _cfg_object(inputs[key]).get("validation_error")
-            for key in values
-        ):
+        self._edit(
+            [
+                {
+                    "path": [*_field_path(field), "n" if key == "expts" else key],
+                    "value": value,
+                }
+                for key, value in values.items()
+            ]
+        )
+        if self._node(field).errors:
             raise GuiRpcError(f"Invalid {field} sweep", reason="invalid_cfg")
 
     def set_sweep(
@@ -1290,14 +1201,15 @@ class RecipeTab:
         for key in ("start", "stop", "expts"):
             if key not in values:
                 captured_sources[key] = "gui_default"
-            self._binding.origins[f"{field}.{key}"] = captured_sources[key]
+            model_field = "n" if key == "expts" else key
+            self._binding.origins[f"{field}.{model_field}"] = captured_sources[key]
         self._binding.origins[field] = captured_sources
 
     def run(self) -> RunOperation:
         """Immediately send Run for this tab and return its yield handle.
 
-        The recipe cfg publication must be Valid. Nonempty aliases preview the
-        current inputs before this check; Invalid cfg fails before Run is sent.
+        The recipe cfg publication must be valid. Reset captured aliases and
+        parameter sources before edits; Run sends no source overrides.
         Capture actual conditions and result provenance. A pending between-yield
         cancel suppresses this one start and is consumed once. GUI rejection fails
         immediately; completion failures are thrown by the driver at the yield.
@@ -1309,8 +1221,7 @@ class RecipeTab:
         consume_cancel = self._binding.consume_cancel
         if consume_cancel is not None and consume_cancel():
             return suppressed
-        self._preview_aliases()
-        if self._binding.publication["status"] != "Valid":
+        if self._binding.publication["errors"]:
             raise GuiRpcError("Recipe cfg is not Valid", reason="invalid_cfg")
         actual = capture_actual(self._actual_fields())
         binding = _RunBinding(
@@ -1334,8 +1245,6 @@ class RecipeTab:
             binding.publish(replace(binding.capture, start_status="unknown"))
 
         payload: dict[str, object] = {"tab_id": tab}
-        if self._binding.aliases:
-            payload["aliases"] = self._binding.aliases
         try:
             started = tools.gui.send_gui_rpc(
                 "tab.run_start", payload, before_send=admit
@@ -1359,28 +1268,22 @@ class RecipeTab:
         return operation
 
     def _capture_cfg_field(self, name: str, source: str | SweepSources) -> ActualField:
-        """Capture one scalar, reference, sweep or sweep member from the publication."""
-        parts = _field_path(name)
-        parent = self._node(".".join(parts[:-1])) if len(parts) > 1 else None
-        if parent is not None and parent["kind"] == "sweep":
-            state = _cfg_object(_cfg_object(parent["inputs"])[parts[-1]])
-            return {"value": state["resolved"], "source": source}
+        projection = self._binding.module_projections.get(name)
+        if projection is not None:
+            module_field, value_path = projection
+            module = self.read_module(module_field)
+            return {"value": module_scalar(module.value, value_path), "source": source}
         node = self._node(name)
-        if node["kind"] == "scalar":
-            state = _cfg_object(node["input"])
-            return {"value": state["resolved"], "source": source}
-        if node["kind"] == "reference":
-            return {"value": node["ref"], "source": source}
-        if node["kind"] == "sweep":
-            inputs = _cfg_object(node["inputs"])
-            return {
-                "value": {
-                    key: _cfg_object(inputs[key])["resolved"]
-                    for key in ("start", "stop", "expts")
-                },
-                "source": source,
+        value = node.value
+        if node.mode == "key":
+            value = node.key
+        elif isinstance(value, dict) and {"start", "stop", "n"} <= value.keys():
+            value = {
+                "start": value["start"],
+                "stop": value["stop"],
+                "expts": value["n"],
             }
-        raise ValueError(f"Not a capturable cfg field: {name}")
+        return {"value": value, "source": source}
 
     def _actual_fields(self) -> dict[str, ActualField]:
         fields: dict[str, ActualField] = {}

@@ -6,6 +6,8 @@ from .dependencies import (
     ModuleResolver,
     WaveformAssetInfo,
 )
+from .field_meta import FieldMeta, get_field_meta
+from .form_nodes import AliasName, FormNode, Hidden, Locked, Range
 from .inputs import CfgInputMap, CfgInputValue
 from .materialization import (
     ModuleCfgFactory,
@@ -37,6 +39,8 @@ from .module import (
     TwoPulseResetSpec,
 )
 from .references import remap_module_references, remap_waveform_references
+from .template_nodes import Expr, Slot, Template, TemplateLiteral, TemplateSeed
+from .templates import TemplateDef, expand_path
 from .waveform import (
     AbsWaveformCfg,
     ArbWaveformCfg,
@@ -53,7 +57,21 @@ from .waveform import (
 )
 
 __all__ = [
+    "AliasName",
+    "FormNode",
+    "Hidden",
+    "Locked",
+    "Range",
     "ConfigBase",
+    "Expr",
+    "Slot",
+    "Template",
+    "TemplateLiteral",
+    "TemplateDef",
+    "TemplateSeed",
+    "expand_path",
+    "FieldMeta",
+    "get_field_meta",
     "CfgValidationContext",
     "ModuleResolver",
     "WaveformAssetInfo",

@@ -4,11 +4,11 @@ Readout time-of-flight (lookback) measurement: fires the readout pulse and captu
 
 ## Expects (parameter context)
 
-Defaults use the tab's fixed qubit and referenced resonator. Resonator frequency seeds the readout pulse and ADC at once; resonator wiring supplies drive and ADC channels. Trigger offset is resonator.ext.time_of_fly - 0.1 us, with fallback 0.4 us. Missing or null calibration uses fallback; an unbound resonator leaves cfg Invalid until supplied.
+Defaults use the tab's fixed resonator capture. resonator.freq seeds the pulse and ADC frequency; resonator.wiring.ch/ro_ch seed generator and ADC channels. Trigger offset is resonator.ext.time_of_fly - 0.1 us. Missing or null calibration and unbound aliases leave the affected fields required and cfg Invalid until supplied. No numeric fallback is substituted.
 
 ## Expects (ModuleLibrary)
 
-Readout always starts as a fresh inline pulse-readout, even when a calibrated readout slot exists. It does not adopt a legacy ro_waveform. Optional reset and init pulse start disabled; you can select their modules explicitly before Run.
+Readout always starts as a fresh inline pulse-readout, even when a calibrated readout slot exists. Its const waveform is inline, not a named library waveform. Optional reset and init pulse start disabled; you can select their modules explicitly before Run.
 
 ## Typical writeback
 

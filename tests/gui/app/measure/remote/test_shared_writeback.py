@@ -20,7 +20,7 @@ from zcu_tools.gui.app.measure.services.writeback import (
     WritebackEdit,
     WritebackService,
 )
-from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
+from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.binding import CfgDraft, SettableTarget
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import InvalidInputError
@@ -109,7 +109,7 @@ class WritebackHarness:
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
         return TabSnapshot(
             adapter_name="test/sample",
-            cfg_schema=CfgSchema(CfgSectionSpec(fields={}), CfgSectionValue(fields={})),
+            cfg_input={},
             tab_id=tab_id,
             capabilities=proposals.AdapterCapabilities(
                 analysis=proposals.AnalysisMode.FIT

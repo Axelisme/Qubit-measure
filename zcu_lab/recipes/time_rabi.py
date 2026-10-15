@@ -97,7 +97,7 @@ def time_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs
     if (
         parameter := set_frequency(
             tab,
-            "modules.qub_pulse.freq",
+            "modules.qub_pulse.module.freq",
             frequency_mhz,
             calibration="$qubit.freq",
             required="frequency_mhz",
@@ -122,7 +122,16 @@ def time_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs
         expts=points,
         sources={"start": "explicit", "stop": "explicit", "expts": "explicit"},
     )
-    tab.set("modules.qub_pulse.gain", gain, source="explicit")
+    if gain is None and tab.read_field("modules.qub_pulse").mode == "key":
+        tab.retain_module_source(
+            "modules.qub_pulse",
+            summary_field="modules.qub_pulse.module.gain",
+            value_path=("gain",),
+        )
+    else:
+        if gain is not None:
+            tab.use_inline("modules.qub_pulse")
+        tab.set("modules.qub_pulse.module.gain", gain, source="explicit")
     tab.set("reps", reps, source="explicit")
     tab.set("rounds", rounds, source="explicit")
 
@@ -167,16 +176,20 @@ DEFINITION = RecipeDefinition(
     adapter_name="twotone/rabi/len_rabi",
     summary_parameters=(
         SummaryParameter(
-            "readout_frequency_mhz", "modules.readout.pulse_cfg.freq", "MHz"
+            "readout_frequency_mhz",
+            "modules.readout.module.pulse_cfg.module.freq",
+            "MHz",
         ),
-        SummaryParameter("ro_frequency_mhz", "modules.readout.ro_cfg.ro_freq", "MHz"),
+        SummaryParameter(
+            "ro_frequency_mhz", "modules.readout.module.ro_cfg.ro_freq", "MHz"
+        ),
         SummaryParameter("readout_ref", "modules.readout"),
         SummaryParameter("use_reset", "modules.reset"),
         SummaryParameter("reps", "reps"),
         SummaryParameter("rounds", "rounds"),
-        SummaryParameter("frequency_mhz", "modules.qub_pulse.freq", "MHz"),
+        SummaryParameter("frequency_mhz", "modules.qub_pulse.module.freq", "MHz"),
         SummaryParameter("drive_ref", "modules.qub_pulse"),
-        SummaryParameter("gain", "modules.qub_pulse.gain"),
+        SummaryParameter("gain", "modules.qub_pulse.module.gain"),
         SummaryParameter("length_sweep", "sweep.length", "us"),
     ),
     summary_estimates=(

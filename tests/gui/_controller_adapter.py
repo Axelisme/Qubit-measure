@@ -1,11 +1,9 @@
 """Minimal adapters exercising controller Run and interactive operation lifetimes."""
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import ClassVar
 from unittest.mock import MagicMock
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import (
@@ -18,10 +16,7 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.interactive.plugin import PluginDefinition
 from zcu_tools.plotting.plots import Plots
 
@@ -31,24 +26,29 @@ class AnalyzeParams:
     threshold: float = 0.0
 
 
+class RecordingCfg(ExpCfgModel):
+    reps: int = 100
+
+
 class RecordingAdapter(
-    BaseAdapter[ExpCfgModel, object, NoAnalysisResult, AnalyzeParams]
+    BaseAdapter[RecordingCfg, object, NoAnalysisResult, AnalyzeParams]
 ):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         requires_soc=False, load_data=False
     )
 
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[RecordingCfg]:
+        del ctx
+        return Form(RecordingCfg, {})
+
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return "sample"
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return MeasureCfgBuilder(role_factories={}).reps(100).build()
 
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: RecordingCfg,
         *,
         context: RunContext,
     ) -> object:
@@ -70,12 +70,13 @@ class InteractiveAdapter(
         requires_soc=False, load_data=False, analysis=AnalysisMode.INTERACTIVE
     )
 
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[RecordingCfg]:
+        del ctx
+        return Form(RecordingCfg, {})
+
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return "sample"
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return MeasureCfgBuilder(role_factories={}).build()
 
     def make_interactive_plugin(self, req, *, plots):
         return PluginDefinition(

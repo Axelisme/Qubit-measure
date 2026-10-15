@@ -37,7 +37,7 @@ def _sample_state() -> AppPersistedState:
     return AppPersistedState(
         startup=PersistedStartup(chip_name="chip", ip="host", port=1234),
         session=PersistedSession(
-            tabs=(PersistedTab(adapter_name="fake", cfg_raw={"x": 1}),),
+            tabs=(PersistedTab(adapter_name="fake", form_input={"x": 1}),),
             active_tab_index=0,
         ),
     )
@@ -87,8 +87,8 @@ def test_restore_missing_file_uses_defaults(tmp_path: Path):
 def test_restore_corrupt_file_falls_back_with_error(tmp_path: Path):
     receiver = _FakeOriginator(AppPersistedState())
     caretaker = PersistenceCaretaker(receiver, cache_dir=tmp_path)
-    caretaker._path.parent.mkdir(parents=True, exist_ok=True)
-    caretaker._path.write_text("{ not json", encoding="utf-8")
+    caretaker.state_path.parent.mkdir(parents=True, exist_ok=True)
+    caretaker.state_path.write_text("{ not json", encoding="utf-8")
 
     outcome = caretaker.restore_all()
 
@@ -99,13 +99,27 @@ def test_restore_corrupt_file_falls_back_with_error(tmp_path: Path):
 def test_restore_wrong_version_falls_back_with_error(tmp_path: Path):
     receiver = _FakeOriginator(AppPersistedState())
     caretaker = PersistenceCaretaker(receiver, cache_dir=tmp_path)
-    caretaker._path.parent.mkdir(parents=True, exist_ok=True)
-    caretaker._path.write_text(
+    caretaker.state_path.parent.mkdir(parents=True, exist_ok=True)
+    caretaker.state_path.write_text(
         f'{{"version": {APP_STATE_VERSION + 99}, "startup": {{}}, "session": {{}}}}',
         encoding="utf-8",
     )
 
     outcome = caretaker.restore_all()
 
+    assert outcome.load_error is not None
+    assert receiver.restored == AppPersistedState()
+
+
+def test_previous_tab_memento_version_degrades_to_defaults(tmp_path: Path) -> None:
+    receiver = _FakeOriginator(AppPersistedState())
+    caretaker = PersistenceCaretaker(receiver, cache_dir=tmp_path)
+    caretaker.state_path.parent.mkdir(parents=True, exist_ok=True)
+    caretaker.state_path.write_text(
+        '{"version": 1, "startup": {}, "session": {"tabs": '
+        '[{"adapter_name": "retired", "cfg_raw": {"gain": 1.0}}]}}',
+        encoding="utf-8",
+    )
+    outcome = caretaker.restore_all()
     assert outcome.load_error is not None
     assert receiver.restored == AppPersistedState()

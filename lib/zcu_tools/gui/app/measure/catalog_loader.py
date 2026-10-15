@@ -9,13 +9,18 @@ from .registry import Registry
 
 
 class SourceExperimentCatalogLoader(SourceCatalogLoader[Registry]):
-    """Build validated measure registries using the original loader signature.
+    """Build detached validated registries using the current injected templates.
 
     sources, reload_modules, preserved_modules and catalog_module obey
     SourceCatalogLoader's owner-thread, fixed-source and single-use contracts.
-    catalog_module must export register_all(registry); registration/validation
-    failures become CatalogReloadError. App recovery and tab publication remain
-    with the measure Controller, not this adapter.
+    current_registry is the app's stable registry identity. Each load copies its
+    templates into a fresh candidate; clearing adapters does not lose templates.
+    The loader never publishes or mutates current_registry. catalog_module must
+    export register_all(registry) and register adapter classes with make_form.
+    Loading checks the adapter contract without invoking form factories or
+    validating templates; those errors surface on Open/Reset.
+    Registration/validation failures become CatalogReloadError. App recovery and
+    tab publication remain with the measure Controller, not this adapter.
     """
 
     def __init__(
@@ -25,15 +30,20 @@ class SourceExperimentCatalogLoader(SourceCatalogLoader[Registry]):
         reload_modules: tuple[str, ...],
         preserved_modules: tuple[str, ...],
         catalog_module: str,
+        current_registry: Registry,
     ) -> None:
-        """Capture source integrity and configure fresh measure registration."""
+        """Monitor explicit sources and borrow current_registry's template catalog.
+
+        Construction and all loads require the owner thread. Source declaration
+        errors follow SourceCatalogLoader; the registry is only read during load.
+        """
 
         def build() -> Registry:
             catalog = importlib.import_module(catalog_module)
             register = getattr(catalog, "register_all", None)
             if not callable(register):
                 raise TypeError("Catalog must export register_all(registry)")
-            candidate = Registry()
+            candidate = Registry(templates=current_registry.templates)
             register(candidate)
             candidate.validate()
             return candidate

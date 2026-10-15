@@ -4,15 +4,15 @@ Readout frequency optimization: with the qubit prepared in g and e (a pi pulse t
 
 ## Expects (parameter context)
 
-Reads from the parameter context (all optional): 'r_f' — resonator frequency, the sweep centre (~4000–8000 MHz); 'rf_w' — linewidth, setting the span as r_f ± 1.5*rf_w (~5–50 MHz; falls back to ±30 MHz when absent); 'res_ch' / 'ro_ch' — drive / ADC channels; 'timeFly' — cable time-of-flight for the trigger offset; 'q_f' / 'qub_ch' — qubit frequency / drive channel for the g↔e pi pulse.
+Seeds 301 frequency points at `$resonator.freq` +/- `$resonator.kappa.` Relax delay reads 5.0 * `$qubit.t1.` Open and Reset evaluate starting expressions once into direct input using captured sources. Inline qubit pulses read `$qubit.freq` and `$qubit.wiring.L01.ch.` Inline readout reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.ext.time_of_fly` + 0.05 us for trigger timing. Missing or invalid required sources leave the affected fields empty and Invalid; supply calibration or direct values before Run. No numeric calibration fallback is supplied.
 
 ## Expects (ModuleLibrary)
 
-Needs a qubit-probe pulse module (typically a calibrated pi pulse, e.g. 'pi_amp') and a pulse-readout module (e.g. 'readout_rf'); references a ModuleLibrary waveform named 'ro_waveform' when present. Optionally references a reset module.
+The qubit pulse uses `$qubit.module.x180` as a captured library link, otherwise a fresh pi_pulse template with a const waveform. `$qubit.module.readout` selects a captured library link, otherwise a fresh inline readout template with a const waveform. Its required parameter sources must still be present. Optional `$qubit.module.reset` has no fallback: an unset/dangling slot or unbound alias leaves it disabled and Valid.
 
 ## Typical writeback
 
-Proposes the SNR-maximizing readout frequency into parameter context 'best_ro_freq' (MHz). When a cfg snapshot with pulse readout is available and 'best_ro_freq' / 'best_ro_gain' / 'best_ro_length' are known from this result plus parameter context, also proposes ModuleLibrary 'readout_dpm'.
+Proposes the SNR-maximizing readout frequency into parameter context `$qubit.ext.best_ro_freq` (MHz). When a cfg snapshot with pulse readout is available and `$qubit.ext.best_ro_freq` / `$qubit.ext.best_ro_gain` / `$qubit.ext.best_ro_length` are known from this result plus parameter context, also proposes `$qubit.readout.readout_dpm.`
 
 ## Recommended
 

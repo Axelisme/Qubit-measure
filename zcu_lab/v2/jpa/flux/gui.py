@@ -7,13 +7,12 @@ guide. The core experiment lives in ``zcu_lab.v2.jpa``.
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar, TypeAlias
+from typing import ClassVar, TypeAlias
 
 from matplotlib.figure import Figure
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -27,41 +26,13 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import alias_name_seed, custom
-from zcu_tools.gui.cfg import EvalValue, SweepValue
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.jpa.flux.core import FluxCfg, FluxExp, FluxResult
+from zcu_lab.v2.jpa.flux.form import make_form
 
 JpaFluxRunResult: TypeAlias = RunRecord[FluxCfg, FluxResult]
-
-_JPA_FLUX_SWEEP_EXPTS = 101
-# Bring-up survey: ±5e-3 around the centre, taken from the notebook's JPA flux
-# sweep (single_qubit.md, -5e-3..5e-3) and compressed to 101 points. These are
-# inspectable starting bounds, NOT safety certification — the operator must
-# review device and sweep.
-_JPA_FLUX_SEED_SPAN = 5.0e-3
-
-
-def jpa_flux_sweep_seed(
-    ctx: SessionEnv, *, expts: int = _JPA_FLUX_SWEEP_EXPTS
-) -> SweepValue:
-    """Store ±5e-3 around $jpa.flux without reading ctx calibration.
-
-    Values use the selected device's working unit, not a unit conversion.
-    Missing aliases/calibration become Invalid during cfg resolution.
-    """
-    del ctx  # Defaults retain expressions; the resource owns source reads.
-    return SweepValue(
-        start=EvalValue(expr=f"$jpa.flux - {_JPA_FLUX_SEED_SPAN}"),
-        stop=EvalValue(expr=f"$jpa.flux + {_JPA_FLUX_SEED_SPAN}"),
-        expts=expts,
-    )
 
 
 @dataclass
@@ -94,55 +65,22 @@ class JpaFluxAdapter(
 ):
     experiment_tag: ClassVar[str | None] = FluxExp.persistence_tag()
     exp_cls = FluxExp
-    ExpCfg_cls: ClassVar[Any] = FluxCfg
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[FluxCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("pi_pulse", role_id="pi_pulse")
-            .readout()
-            .relax_delay(0.5)
-            .device(
-                "jpa_flux_dev",
-                label="JPA flux device",
-                default=alias_name_seed("flux_dev"),
-                required=False,
-            )
-            .choice(
-                "flux_unit",
-                label="Flux unit",
-                choices=("A", "V", "native"),
-                default="A",
-                tooltip="Working unit for the selected flux driver; no conversion.",
-            )
-            .sweep(
-                "jpa_flux",
-                label="JPA flux device value",
-                default=custom(
-                    jpa_flux_sweep_seed,
-                    description="jpa flux device value range",
-                ),
-            )
-            .float("skew_penalty", label="Skew penalty", default=0.0, decimals=3)
-            .reps(10000)
-            .rounds(1)
-            .build()
-        )
 
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: FluxCfg,
         *,
         context: RunContext,
     ) -> JpaFluxRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         return RunRecord(cfg, FluxExp().run(cfg, context=context))
 
     def analyze(
@@ -157,7 +95,7 @@ class JpaFluxAdapter(
     ) -> Sequence[WritebackItem]:
         return [
             ParameterWriteback(
-                target_name="best_jpa_flux",
+                target_name="$jpa.flux",
                 description="Best JPA flux device value",
                 proposed_value=req.analyze_result.best_flux,
             )

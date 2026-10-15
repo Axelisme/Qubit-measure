@@ -1,6 +1,6 @@
 # zcu_lab
 
-**Last updated:** 2026-10-14（離線遷移對照搬到 migrations）
+**Last updated:** 2026-10-15，make_form 與具名裝置欄位
 
 `zcu_lab` 只放實驗定義、實驗室宣告與各 workflow 自己的小工具。`zcu_tools` 提供實驗與前端框架，不反向 import 這個套件。使用者 GUI 入口在 `scripts/`，agent MCP 組合根在 `mcp_servers/`，取得定義後顯式注入框架。
 
@@ -8,7 +8,7 @@
 
 `zcu_lab.ALIAS_PRESET` 是唯一的有序 GUI alias 初值表。它保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列。Measure launcher 以 `alias_preset` 注入 app、Controller 與 services。框架不選裝置，也不從 cache 綁定 flux_dev。Workflow app 直接重用同一來源，交給 shared `build_session_services(alias_rows=...)`。這份表與 `definitions.py` 相鄰，取得 preset 不需提前載入實驗 catalog。
 
-`definitions.register_all` 接受 caller 的 measure Registry。Startup 可用 `templates` 傳入 TemplateCatalog，並用 `components` 傳入框架共用的 ComponentRegistry。Reload 省略這兩個參數，保留既有範本與元件註冊。Import 不執行註冊，重複 bootstrap 按 registry 規則報錯。
+`templates.TEMPLATES` 是「新建 module／waveform」的持久範本來源。組合根以 `Registry(templates=TEMPLATES)` 注入一次；`definitions.register_all` 從該 registry 讀範本，以 startup 的 `template_catalog` receiver 填入 library 選單，並可用 `components` 傳入共用 ComponentRegistry。Reload 省略這兩個 receiver，保留既有範本與元件註冊。Import 不執行註冊，重複 bootstrap 按 registry 規則報錯。
 
 `components.py` 擁有具體元件 model、wiring、module 槽與內建角色。Model 自行宣告 ext 與 extra 策略，普通字串引用在 resolve 時解析。GUI 與 MCP 組合根明確 bootstrap；notebook caller 可呼叫 `components.register_all(component_registry)`。框架只提供容器、kind 查表、角色解析與來源記錄。
 
@@ -18,15 +18,13 @@
 
 `recipes.RECIPES` 明列使用者的 generator definitions。每個 recipe 模組同時擁有流程、手寫 input_schema 與 summary declarations。MCP 組合根把清單注入 framework，import 不執行量測或註冊。Recipes 保留 target 參數，明確以 `aliases={"qubit": target}` 交給 generic `RecipeSession.open_tab`。Target 省略時不覆寫。GUI adapters 不宣告 parameter roles，cfg 與 Run 直接讀固定的全域 alias 表。
 
-五個 Measure flux adapters 使用共用 `alias_name_seed` 建立 direct 初值：`onetone/flux_dep` 與
-`twotone/fluxdep` 的 `dev.flux_dev`，以及 `jpa/auto_optimize`、`jpa/flux_onetone`
-與 `jpa/flux` 的 `dev.jpa_flux_dev`。Fresh cfg 或 default reset 建立時解析一次 `$flux_dev`，
-將名稱保存為 direct input。Alias 變更不更新既有 direct cfg／draft；新 cfg 或 reset 才讀新名稱。
-使用者仍可切成 eval，明填 `$flux_dev`。顯式 caller cfg 保留，不使用靜態 device 名稱 fallback，
-也不改 core 的 required dev／flux_unit。名稱不要求出現在 point 的元件表。
-Cfg editor 顯示 direct 名稱，缺列或未綁定時顯示指名 `flux_dev` alias 的 Invalid。
-Run 沿固定 capture 保存當次名稱，後續 Analyze／WB／Save 不重新解析目前表。
-裝置存在性由實際使用的 owner 檢查。
+Measure 的 `form.py` 提供 `make_form(ctx)`，在 Open／Reset 依固定來源選初值與形狀。
+`onetone/flux_dep` 與 `twotone/fluxdep` 的 core 用具名 `flux_dev: str`；
+JPA 使用具名 `jpa_flux_dev`。Form 以 `AliasName("flux_dev")` 解析 direct 裝置名稱。
+Alias 變更不更新既有 input；Open／Reset 才讀新名稱。缺列、未綁定或不在捕捉的
+候選清單時保持 Invalid，不使用靜態名稱 fallback。Core 透過 RunContext.devices
+取得 driver，不認得 alias。Analyze／WB／Save 使用 Run 的固定來源，不重讀目前表。
+具名欄位與範本契約見 [ADR-0073](../docs/adr/0073-measure-form-derivation.md)。
 
 Framework 的 `RecipeTab` 只提供通用 cfg 操作、expression／library／field 讀取與 cached device snapshot。
 `recipes.helpers` 使用這些公開介面，擁有 frequency／flux 的來源順序、校準範圍與 device unit policy。明填 frequency 優先，其次是有效 library leaf，再讀 caller 指定的 calibration。`FrequencySweepCalibration` 明列 frequency／linewidth 路徑與 full-span 倍率。三個 resonator spectrum 的預設倍率為 freq 3、power 3、flux 2，點數沿 GUI 的 301／201／101。Helper 讀目前數值，集中算 span 與 numeric start／stop。無效 linewidth 在 sweep edit／Run 前拒絕，不從 raw expression 抽倍率。Twotone 的 center_mhz／span_mhz／points 與 flux survey 的 flux_range／flux_points 必填且不能為 null。Flux helper 只比 snapshot unit，成功後寫 cfg 的 device identity 與獨立 flux_unit。它不換算 native 座標，也不連裝置。

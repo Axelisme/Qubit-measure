@@ -7,9 +7,38 @@ from zcu_tools.mcp.measure.recipe import (
     RecipeNeedsParameters,
     RecipeRun,
     RecipeSession,
+    RecipeTab,
 )
 
 from .helpers import set_frequency
+
+
+def _set_readout_timing(
+    tab: RecipeTab,
+    readout_length_us: float | None,
+    trigger_offset_us: float | None,
+) -> None:
+    """Keep omitted key values and provenance; convert only for explicit edits."""
+    for field, value, value_path in (
+        (
+            "modules.readout.module.ro_cfg.ro_length",
+            readout_length_us,
+            ("ro_cfg", "ro_length"),
+        ),
+        (
+            "modules.readout.module.ro_cfg.trig_offset",
+            trigger_offset_us,
+            ("ro_cfg", "trig_offset"),
+        ),
+    ):
+        if value is not None:
+            tab.use_inline("modules.readout")
+        if value is None and tab.read_field("modules.readout").mode == "key":
+            tab.retain_module_source(
+                "modules.readout", summary_field=field, value_path=value_path
+            )
+        else:
+            tab.set(field, value, source="explicit")
 
 
 def lookback(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
@@ -61,16 +90,7 @@ def lookback(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
     )
     if missing is not None:
         raise RecipeNeedsParameters((missing,))
-    tab.set(
-        "modules.readout.ro_cfg.ro_length",
-        readout_length_us,
-        source="explicit",
-    )
-    tab.set(
-        "modules.readout.ro_cfg.trig_offset",
-        trigger_offset_us,
-        source="explicit",
-    )
+    _set_readout_timing(tab, readout_length_us, trigger_offset_us)
     tab.set("rounds", rounds, source="explicit")
     run, status = yield tab.run()
     if status == "cancelled":
@@ -117,11 +137,17 @@ DEFINITION = RecipeDefinition(
     run=lookback,
     adapter_name="lookback",
     summary_parameters=(
-        SummaryParameter("frequency_mhz", "modules.readout.pulse_cfg.freq", "MHz"),
-        SummaryParameter("ro_frequency_mhz", "modules.readout.ro_cfg.ro_freq", "MHz"),
-        SummaryParameter("readout_length_us", "modules.readout.ro_cfg.ro_length", "us"),
         SummaryParameter(
-            "trigger_offset_us", "modules.readout.ro_cfg.trig_offset", "us"
+            "frequency_mhz", "modules.readout.module.pulse_cfg.module.freq", "MHz"
+        ),
+        SummaryParameter(
+            "ro_frequency_mhz", "modules.readout.module.ro_cfg.ro_freq", "MHz"
+        ),
+        SummaryParameter(
+            "readout_length_us", "modules.readout.module.ro_cfg.ro_length", "us"
+        ),
+        SummaryParameter(
+            "trigger_offset_us", "modules.readout.module.ro_cfg.trig_offset", "us"
         ),
         SummaryParameter("rounds", "rounds"),
         SummaryParameter("readout_ref", "modules.readout"),

@@ -39,7 +39,7 @@ from zcu_tools.gui.app.measure.ui.data_figure_preview_gallery import (
 )
 from zcu_tools.gui.control_identity import ControlIdentity
 
-from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup
+from tests.gui.app.measure._form_fakes import configure_form_lookup
 from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
 
 
@@ -135,7 +135,7 @@ def make_ctrl() -> Iterator[Callable[[], MagicMock]]:
         ctrl = MagicMock()
         ctrl.control_identity = ControlIdentity()
         owned_authorities.append(ctrl.control_identity)
-        configure_cfg_lookup(ctrl)
+        configure_form_lookup(ctrl)
         ctrl.get_left_panel_width.return_value = 500
         ctrl.get_tab_adapter_name.return_value = "fake"
         ctrl.get_adapter_guide.return_value = AdapterGuide(
@@ -180,7 +180,7 @@ def make_snapshot(tab_id: str, *, analysis=AnalysisMode.FIT, post=False, load=Fa
     save_snap = SavePaneSnapshot()
     snapshot = TabSnapshot(
         adapter_name="fake",
-        cfg_schema=MagicMock(),
+        cfg_input={},
         tab_id=tab_id,
         interaction=TabInteractionState(
             global_run_active=False,

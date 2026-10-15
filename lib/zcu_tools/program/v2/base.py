@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import cast
+from typing import Annotated, cast
 
 import numpy as np
 from qick import QickConfig
 from qick.asm_v2 import AveragerProgramV2
 
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.program.acquisition import ImproveAcquireMixin
 
 from .ir import IRCompileMixin
@@ -19,10 +19,30 @@ logger = logging.getLogger(__name__)
 
 
 class ProgramV2Cfg(ConfigBase):
-    reps: int = 1
-    rounds: int = 1
-    initial_delay: float = 1.0
-    relax_delay: float = 1.0
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay",
+            unit="us",
+            description="Delay before the first repetition.",
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
 
 
 class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]

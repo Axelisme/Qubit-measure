@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, ClassVar, TypeAlias
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -22,39 +21,21 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import (
-    SweepDefault,
-    custom,
-    module_seed,
-    path_seed,
-    scaled_path_seed,
-)
-from zcu_tools.gui.app.measure.spec_helpers import (
-    make_pulse_module_spec,
-    make_pulse_readout_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
-)
 from zcu_tools.gui.cfg import (
     CfgSchema,
-    ReferenceValue,
-    make_custom_reference_key,
-    make_default_value,
 )
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.twotone.rabi.amp_rabi.core import (
     AmpRabiAnalyzeOptions,
     AmpRabiCfg,
     AmpRabiExp,
     AmpRabiResult,
 )
+
+from .form import make_form
 
 AmpRabiRunResult: TypeAlias = RunRecord[AmpRabiCfg, AmpRabiResult]
 
@@ -74,69 +55,6 @@ class AmpRabiAnalyzeResult(AnalyzeResultBase):
     fit_quality: dict[str, dict[str, object]] | None = None
 
 
-def _blank_rabi_pulse(ctx: SessionEnv) -> ReferenceValue:
-    """Seed a fresh drive pulse from captured qubit paths.
-
-    Use qubit.freq (fallback 4000 MHz), wiring.L01.ch (fallback 0), nqz 2,
-    gain 0 and a const waveform whose length is 1.01 times the captured
-    module.x180.waveform.length (fallback 1.1 us). Missing/null calibration
-    uses the fallback; role, capture and materialization faults propagate.
-    """
-    spec = make_pulse_module_spec().allowed[0]
-    value = make_default_value(spec)
-    return (
-        ReferenceValue(make_custom_reference_key(spec.label), value)
-        .with_field("freq", path_seed("$qubit.freq", fallback=4000.0).resolve(ctx))
-        .with_field("ch", path_seed("$qubit.wiring.L01.ch", fallback=0).resolve(ctx))
-        .with_field("nqz", 2)
-        .with_field("gain", 0.0)
-        .with_field(
-            "waveform.length",
-            scaled_path_seed(
-                "$qubit.module.x180.waveform.length", factor=1.01, fallback_value=1.1
-            ).resolve(ctx),
-        )
-    )
-
-
-def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
-    """Seed a fresh pulse readout from captured resonator paths.
-
-    Use resonator.freq for generator and ADC (fallback 6000 MHz), wiring.ch
-    and wiring.ro_ch (fallback 0), nqz 2, gain 0.1, const pulse length 1 us
-    and ADC window 0.9 us. Trigger offset is ext.time_of_fly plus 0.05 us
-    (fallback 0.55 us). Missing/null values use these fallbacks; role,
-    capture and materialization faults propagate. Do not use named waveforms.
-    """
-    spec = make_pulse_readout_module_spec().allowed[0]
-    value = make_default_value(spec)
-    frequency = path_seed("$resonator.freq", fallback=6000.0).resolve(ctx)
-    return (
-        ReferenceValue(make_custom_reference_key(spec.label), value)
-        .with_field("pulse_cfg.freq", frequency)
-        .with_field(
-            "pulse_cfg.ch", path_seed("$resonator.wiring.ch", fallback=0).resolve(ctx)
-        )
-        .with_field("pulse_cfg.nqz", 2)
-        .with_field("pulse_cfg.gain", 0.1)
-        .with_field("pulse_cfg.waveform.length", 1.0)
-        .with_field("ro_cfg.ro_freq", frequency)
-        .with_field(
-            "ro_cfg.ro_ch",
-            path_seed("$resonator.wiring.ro_ch", fallback=0).resolve(ctx),
-        )
-        .with_field("ro_cfg.ro_length", 0.9)
-        .with_field(
-            "ro_cfg.trig_offset",
-            path_seed(
-                "$resonator.ext.time_of_fly",
-                fallback=0.55,
-                expr="$resonator.ext.time_of_fly + 0.05",
-            ).resolve(ctx),
-        )
-    )
-
-
 class AmpRabiAdapter(
     BaseAdapter[
         AmpRabiCfg,
@@ -145,16 +63,20 @@ class AmpRabiAdapter(
         AmpRabiAnalyzeParams,
     ]
 ):
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[AmpRabiCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
+
     experiment_tag: ClassVar[str | None] = AmpRabiExp.persistence_tag()
     exp_cls = AmpRabiExp
-    ExpCfg_cls = AmpRabiCfg
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: AmpRabiCfg,
         *,
         context: RunContext,
     ) -> AmpRabiRunResult:
@@ -164,63 +86,9 @@ class AmpRabiAdapter(
         acquisition and cancellation. Return the typed cfg alongside the result.
         Config, device and acquisition failures propagate without live defaults.
         """
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         result = AmpRabiExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        """Return the role-based amplitude-Rabi template, without live reads.
-
-        Instantiation mounts captured reset/x180/readout slots and resolves
-        gain/length/t1 seeds on that capture. Missing/null calibration uses
-        documented inline fallbacks; source and role errors propagate.
-        """
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .field(
-                "modules.reset",
-                spec=make_reset_module_spec(optional=True),
-                default=module_seed("$qubit.module.reset", fallback=None),
-            )
-            .field(
-                "modules.qub_pulse",
-                spec=make_pulse_module_spec(label="Rabi Pulse").lock_literal(
-                    "gain", 0.0
-                ),
-                default=module_seed(
-                    "$qubit.module.x180",
-                    fallback=custom(_blank_rabi_pulse, description="inline Rabi pulse"),
-                ),
-            )
-            .field(
-                "modules.readout",
-                spec=make_readout_module_spec(),
-                default=module_seed(
-                    "$qubit.module.readout",
-                    fallback=custom(_blank_readout, description="inline readout"),
-                ),
-            )
-            .relax_delay(
-                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=30.5),
-            )
-            .sweep(
-                "gain",
-                label="Gain (a.u.)",
-                default=SweepDefault(
-                    start=-0.3,
-                    stop=scaled_path_seed(
-                        "$qubit.module.x180.gain", factor=1.2, fallback_value=0.6
-                    ),
-                    expts=51,
-                ),
-            )
-            .reps(1000)
-            .rounds(100)
-            .build()
-        )
 
     def analyze(
         self,

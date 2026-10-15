@@ -7,12 +7,10 @@ fits power and detuning errors; the summary reports them.
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, TypeAlias
+from typing import Annotated, ClassVar, TypeAlias
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -23,20 +21,17 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import scaled_path_seed
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.twotone.allxy.core import (
     AllXY_Exp,
     AllXY_Result,
     AllXYAnalyzeOptions,
     AllXYCfg,
 )
+
+from .form import make_form
 
 AllXYRunResult: TypeAlias = RunRecord[AllXYCfg, AllXY_Result]
 
@@ -58,36 +53,24 @@ class AllXYAnalyzeResult(AnalyzeResultBase):
 class AllXYAdapter(
     BaseAdapter[AllXYCfg, AllXYRunResult, AllXYAnalyzeResult, AllXYAnalyzeParams]
 ):
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[AllXYCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
+
     experiment_tag: ClassVar[str | None] = AllXY_Exp.persistence_tag()
     exp_cls = AllXY_Exp
-    ExpCfg_cls: ClassVar[Any] = AllXYCfg
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("X90_pulse", role_id="pi2_pulse", label="X90 Pulse")
-            .pulse("X180_pulse", role_id="pi_pulse", label="X180 Pulse")
-            .readout()
-            .relax_delay(scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=30.5))
-            .reps(1000)
-            .rounds(100)
-            .build()
-        )
 
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: AllXYCfg,
         *,
         context: RunContext,
     ) -> AllXYRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         return RunRecord(cfg=cfg, result=AllXY_Exp().run(cfg, context=context))
 
     def analyze(

@@ -4,7 +4,7 @@ import warnings
 from copy import deepcopy
 from dataclasses import dataclass
 from numbers import Real
-from typing import ClassVar, Literal
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -15,7 +15,7 @@ from zcu_tools.analysis.fitting.singleshot_rabi import (
     fit_rabi_joint,
 )
 from zcu_tools.analysis.singleshot import classify_rabi_iq
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     IDENTITY,
     US_TO_S,
@@ -53,22 +53,22 @@ class LenRabiResult:
 
 
 class LenRabiSweepCfg(ConfigBase):
-    length: SweepCfg
+    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
 
 
 class LenRabiModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    qub_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    qub_pulse: Annotated[PulseCfg, FieldMeta(label="Qub Pulse")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class LenRabiCfg(ProgramV2Cfg, ExpCfgModel):
     modules: LenRabiModuleCfg
     sweep: LenRabiSweepCfg
-    shots: int
-    g_center: complex
-    e_center: complex
-    radius: float
+    shots: Annotated[int, FieldMeta(label="Shots")]
+    g_center: Annotated[complex, FieldMeta(label="Ground center")]
+    e_center: Annotated[complex, FieldMeta(label="Excited center")]
+    radius: Annotated[float, FieldMeta(label="Classification radius")]
 
     @field_serializer("g_center", "e_center")
     def serialize_center(self, value: complex) -> str:

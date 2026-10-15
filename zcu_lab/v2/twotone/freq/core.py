@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar, Literal
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import fit_qubit_freq
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     AxesSpec,
     Axis,
@@ -43,14 +43,23 @@ def qubfreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class FreqSweepCfg(ConfigBase):
-    freq: SweepCfg
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(label="Freq", unit="MHz", description="Qubit drive frequency sweep."),
+    ]
 
 
 class FreqModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    init_pulse: PulseCfg | None = None
-    qub_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init Pulse")] = None
+    qub_pulse: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="Probe Pulse",
+            description="Qubit drive; its frequency is set by the sweep.",
+        ),
+    ]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class FreqCfg(ProgramV2Cfg, ExpCfgModel):

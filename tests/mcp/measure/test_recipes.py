@@ -13,7 +13,7 @@ from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._recipe_actual_support import cfg_value
-from ._recipe_support import PNG, LookbackGui, recipe_client
+from ._recipe_support import PNG, ExecutionGui, recipe_client
 from ._support import full_execution_reply, make_client
 
 RAW_REPORT = SaveReport(
@@ -39,7 +39,7 @@ RAW_REPORT = SaveReport(
 
 
 def test_recipe_observes_run_save_and_analysis_on_one_worker(tmp_path):
-    gui = LookbackGui()
+    gui = ExecutionGui()
     waiting_workers: set[Thread] = set()
     awaited_operations: set[object] = set()
 
@@ -70,7 +70,7 @@ def test_recipe_observes_run_save_and_analysis_on_one_worker(tmp_path):
 def test_lookback_initial_wait_returns_while_the_same_execution_continues(
     tmp_path, monkeypatch
 ):
-    gui = LookbackGui()
+    gui = ExecutionGui()
     run_waiting = Event()
     release_run = Event()
     returned = Event()
@@ -117,7 +117,7 @@ def test_lookback_initial_wait_returns_while_the_same_execution_continues(
             client, client.call("wait", {"execution": execution, "timeout": 2})
         )
         assert completed.data["status"] == "awaiting_answer", completed.data
-        assert completed.data["run_op"] == initial["run_op"]
+        assert completed.data["run_op"] == status["run_op"]
         assert completed.data["raw_save"] == asdict(RAW_REPORT)
         assert completed.images[0].data == PNG
         finished = client.call("answer", {"recipe": execution, "decision": "skipped"})
@@ -135,7 +135,7 @@ def test_lookback_initial_wait_returns_while_the_same_execution_continues(
 
 @pytest.fixture
 def interactive_recipe(tmp_path, handoff_failure):
-    gui = LookbackGui()
+    gui = ExecutionGui()
     done = Event()
     writeback_read = Event()
     initial_handoff = True
@@ -257,7 +257,7 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(
 def test_session_close_drains_recipe_work_and_rejects_new_admission(
     tmp_path, monkeypatch, held_op
 ):
-    gui = LookbackGui()
+    gui = ExecutionGui()
     pending = Event()
     disconnected = Event()
 
@@ -305,11 +305,13 @@ def test_session_close_drains_recipe_work_and_rejects_new_admission(
 def test_lookback_cancel_latches_one_control_and_stops_after_original_run(
     tmp_path, monkeypatch
 ):
-    gui = LookbackGui()
+    gui = ExecutionGui()
     stopped = Event()
+    running = Event()
 
     def respond(method, params):
         if method == "operation.await" and params["operation_id"] == 71:
+            running.set()
             if stopped.is_set():
                 return {"reason": "completed", "status": "cancelled"}
             return {"reason": "timeout"}
@@ -326,10 +328,12 @@ def test_lookback_cancel_latches_one_control_and_stops_after_original_run(
             client, client.call("pipeline", {"frequency_mhz": 6020.0})
         )
         execution = initial.data["execution"]
+        assert running.wait(1)
+        started = client.call("status", {"execution": execution})
         cancelled = client.call("cancel", {"execution": execution})
         assert cancelled.data["cancel_requested"]
         assert cancelled.data["execution"] == execution
-        client.call("cancel", {"op": initial.data["run_op"]})
+        client.call("cancel", {"op": started["run_op"]})
         terminal = full_execution_reply(
             client, client.call("wait", {"execution": execution, "timeout": 2})
         )
@@ -355,11 +359,13 @@ def test_lookback_cancel_latches_one_control_and_stops_after_original_run(
 def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
     tmp_path, monkeypatch, partial_available, cancel_after, expected
 ):
-    gui = LookbackGui()
+    gui = ExecutionGui()
     release_run = Event()
+    running = Event()
 
     def respond(method, params):
         if method == "operation.await" and params["operation_id"] == 71:
+            running.set()
             return (
                 {"reason": "completed", "status": "cancelled"}
                 if release_run.is_set()
@@ -380,11 +386,13 @@ def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
             client, client.call("pipeline", {"frequency_mhz": 6020.0})
         )
         execution = initial.data["execution"]
-        early = client.call("finish_early", {"op": initial.data["run_op"]})
+        assert running.wait(1)
+        started = client.call("status", {"execution": execution})
+        early = client.call("finish_early", {"op": started["run_op"]})
         assert early.data == {
             "execution": execution,
-            "op": initial.data["op"],
-            "run_op": initial.data["run_op"],
+            "op": started["op"],
+            "run_op": started["run_op"],
             "status": "running",
             "phase": "run",
             "cancel_requested": False,
@@ -415,15 +423,7 @@ def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
         assert (
             client.call("status", {"execution": execution, "detail": "full"}) == frozen
         )
-        if expected == "finished":
-            assert result.data["raw_save"]["run_id"] == "run-a"
-            assert (
-                result.data["raw_save"]["artifacts"]["raw"]["data"]["status"] == "Saved"
-            )
-            assert result.data["analysis"]["status"] == "finished"
-        elif expected == "failed":
-            assert result.data["error"]["reason"] == "run_result_unavailable"
-            assert result.data["raw_save"] is None
+        assert_partial_run_products(result, expected)
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("operation.cancel") == 1
         assert methods.count("tab.run_start") == 1
@@ -434,11 +434,21 @@ def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
         client.context.session.close()
 
 
+def assert_partial_run_products(result: ToolReply, expected: str) -> None:
+    if expected == "finished":
+        assert result.data["raw_save"]["run_id"] == "run-a"
+        assert result.data["raw_save"]["artifacts"]["raw"]["data"]["status"] == "Saved"
+        assert result.data["analysis"]["status"] == "finished"
+    elif expected == "failed":
+        assert result.data["error"]["reason"] == "run_result_unavailable"
+        assert result.data["raw_save"] is None
+
+
 @pytest.fixture(params=[True, False], ids=["saved", "incomplete"])
 def admitted_raw_save(tmp_path, monkeypatch, request):
     """Hold a real recipe at its admitted raw-save transport until released."""
     save_succeeds = request.param
-    gui = LookbackGui()
+    gui = ExecutionGui()
     expected_report = asdict(RAW_REPORT)
     if not save_succeeds:
         artifact = expected_report["artifacts"]["raw"]["data"]
@@ -530,7 +540,7 @@ def test_recipe_cancel_after_analysis_admission_joins_the_true_outcome(
     tmp_path, outcome
 ):
     # Replaces the retired pre-handoff timing projection, not its scheduling.
-    gui = LookbackGui()
+    gui = ExecutionGui()
     stopped = Event()
 
     def respond(method, params):
@@ -601,7 +611,7 @@ def test_recipe_cancel_after_analysis_admission_joins_the_true_outcome(
 def test_recipe_cancel_delegates_to_the_existing_analysis_owner(
     tmp_path, monkeypatch, selector
 ):
-    gui = LookbackGui()
+    gui = ExecutionGui()
     analyzing = Event()
     stopped = Event()
 
@@ -665,7 +675,7 @@ def test_recipe_cancel_delegates_to_the_existing_analysis_owner(
 def test_recipe_cancel_blocks_the_next_phase_while_an_admitted_read_finishes(
     tmp_path, monkeypatch, pending_method, forbidden_method
 ):
-    gui = LookbackGui()
+    gui = ExecutionGui()
     pending = Event()
     release = Event()
     control_replies = []
@@ -739,7 +749,7 @@ def test_recipe_cancel_blocks_the_next_phase_while_an_admitted_read_finishes(
 def test_recipe_control_reaches_the_original_operation_after_a_late_receipt(
     tmp_path, monkeypatch, method_pending, wire_op, control
 ):
-    gui = LookbackGui()
+    gui = ExecutionGui()
     pending = Event()
     release = Event()
     stopped = Event()
@@ -806,7 +816,7 @@ def test_recipe_control_reaches_the_original_operation_after_a_late_receipt(
 def test_recipe_cancel_during_preparation_keeps_the_missing_parameter_handoff(
     tmp_path, monkeypatch
 ):
-    gui = LookbackGui()
+    gui = ExecutionGui()
     pending = Event()
     release = Event()
 
@@ -844,7 +854,7 @@ def test_recipe_worker_start_failure_returns_a_terminal_receipt_and_closes_safel
     def fail_start(self):
         raise RuntimeError("no thread resources")
 
-    with recipe_client(tmp_path, LookbackGui()) as client:
+    with recipe_client(tmp_path, ExecutionGui()) as client:
         monkeypatch.setattr(Thread, "start", fail_start)
         reply = client.call("pipeline", {"frequency_mhz": 6020.0})
         assert reply.is_error
@@ -864,7 +874,7 @@ def test_recipe_worker_start_failure_returns_a_terminal_receipt_and_closes_safel
 def test_recipe_cancel_during_admitted_writeback_preserves_result_and_intent(
     tmp_path, monkeypatch
 ):
-    gui = LookbackGui()
+    gui = ExecutionGui()
     reading = Event()
     release = Event()
     controller = None
@@ -927,7 +937,7 @@ def test_recipe_cancel_during_admitted_writeback_preserves_result_and_intent(
 def test_lookback_rejects_a_post_run_snapshot_from_another_source(
     tmp_path, replacement_source, available
 ):
-    gui = LookbackGui()
+    gui = ExecutionGui()
 
     def respond(method, params):
         reply = gui(method, params)
@@ -967,7 +977,7 @@ def test_lookback_rejects_a_post_run_snapshot_from_another_source(
 def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
     tmp_path, reuse, readout_length, offset, expected
 ):
-    gui = LookbackGui()
+    gui = ExecutionGui()
     with recipe_client(tmp_path, gui) as client:
         reply = full_execution_reply(
             client,
@@ -1031,17 +1041,17 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
         assert reply.images[0].data == PNG
         assert data["elapsed_s"] >= 0
         for path, value in {
-            "modules.readout.pulse_cfg.freq": 6020.0,
-            "modules.readout.ro_cfg.ro_freq": 6020.0,
-            "modules.readout.ro_cfg.ro_length": expected[0],
-            "modules.readout.ro_cfg.trig_offset": expected[1],
+            "modules.readout.module.pulse_cfg.module.freq": 6020.0,
+            "modules.readout.module.ro_cfg.ro_freq": 6020.0,
+            "modules.readout.module.ro_cfg.ro_length": expected[0],
+            "modules.readout.module.ro_cfg.trig_offset": expected[1],
             "rounds": 7,
         }.items():
             assert cfg_value(gui.publication, path) == value
             assert type(cfg_value(gui.publication, path)) is type(value)
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.run_start") == 1
-        assert methods.count("tab.reset_cfg") == int(reuse)
+        assert methods.count("tab.reset_cfg") == 1
         assert methods.count("tab.new") == int(not reuse)
         assert methods.count("tab.save_data") == 1
         assert methods.count("tab.analyze") == 1
@@ -1058,11 +1068,11 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
             for edit in params["edits"]
         ]
         by_path = {tuple(edit["path"]): edit["value"] for edit in edits}
-        assert by_path["modules", "reset"] == {"__ref": None}
-        assert by_path["modules", "init_pulse"] == {"__ref": None}
+        assert by_path["modules", "reset"] is None
+        assert by_path["modules", "init_pulse"] is None
         for key, value in zip(("ro_length", "trig_offset"), expected, strict=True):
-            assert by_path["modules", "readout", "ro_cfg", key] == value
-            assert type(by_path["modules", "readout", "ro_cfg", key]) is float
+            assert by_path["modules", "readout", "module", "ro_cfg", key] == value
+            assert type(by_path["modules", "readout", "module", "ro_cfg", key]) is float
 
 
 @pytest.mark.parametrize("reuse_tab_id", [None, "kept"])
@@ -1070,7 +1080,8 @@ def test_lookback_missing_frequency_does_not_run_a_blind_default(
     tmp_path, reuse_tab_id
 ):
     tab = reuse_tab_id or "new"
-    gui = LookbackGui()
+    gui = ExecutionGui()
+    gui.reset_form()
     publication = gui.publication
 
     def respond(method: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -1112,7 +1123,7 @@ def test_lookback_missing_frequency_does_not_run_a_blind_default(
         methods = [method for method, _ in client.transport.sent]
         assert "tab.run_start" not in methods
         assert ("tab.new" in methods) is (reuse_tab_id is None)
-        assert ("tab.reset_cfg" in methods) is (reuse_tab_id is not None)
+        assert methods.count("tab.reset_cfg") == 1
 
 
 @pytest.mark.parametrize(
@@ -1134,7 +1145,7 @@ def test_lookback_missing_frequency_does_not_run_a_blind_default(
 def test_lookback_invalid_explicit_inputs_never_fall_back_or_create_tab(
     tmp_path, arguments
 ):
-    gui = LookbackGui()
+    gui = ExecutionGui()
     gui.md["$resonator.freq"] = 6500.0
     with recipe_client(tmp_path, gui) as client:
         reply = client.call("pipeline", arguments)
@@ -1149,7 +1160,7 @@ def test_lookback_invalid_explicit_inputs_never_fall_back_or_create_tab(
 def test_manual_gui_run_cancel_never_starts_the_recipe_save_pipeline(
     tmp_path, partial_data
 ):
-    gui = LookbackGui()
+    gui = ExecutionGui()
 
     def respond(method, params):
         if method == "operation.await" and params["operation_id"] == 71:
@@ -1174,7 +1185,7 @@ def test_manual_gui_run_cancel_never_starts_the_recipe_save_pipeline(
 
 @pytest.mark.parametrize("failure", ["wrong_experiment", "busy", "missing", "stale"])
 def test_lookback_reuse_errors_do_not_create_replacement_or_retry(tmp_path, failure):
-    gui = LookbackGui()
+    gui = ExecutionGui()
     client = make_client(tmp_path, gui)
     if failure == "stale":
         client.transport.replies["tab.reset_cfg"] = {
