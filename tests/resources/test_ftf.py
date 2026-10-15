@@ -8,6 +8,13 @@ import yaml
 from tests.resources._ftf_data import ftf_document
 
 
+def test_singular_receiver_spectral_density_is_legal() -> None:
+    from zcu_tools.resources.ftf import parse_ftf
+
+    config = parse_ftf(ftf_document() | {"receiver": {"ro_ch": 0, "gain": 0., "noise_psd_adc2_ns": [[1., .1], [.1, .01]]}})
+    assert config.receiver.noise_psd_adc2_ns == ((1., .1), (.1, .01))
+
+
 def test_ftf_loads_detached_named_settings(tmp_path: Path) -> None:
     from zcu_tools.resources.ftf import load_ftf
 
