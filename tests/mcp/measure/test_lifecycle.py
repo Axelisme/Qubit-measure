@@ -3,7 +3,6 @@
 import json
 import socket
 import threading
-import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
@@ -15,13 +14,42 @@ from zcu_tools.gui.app.measure.remote.method_entries import METHOD_ENTRIES
 from zcu_tools.gui.app.measure.remote.method_entries._registry import (
     build_agent_catalog,
 )
-from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
+from zcu_tools.mcp.core import bridge as bridge_module
+from zcu_tools.mcp.core.bridge import (
+    DeliverFn,
+    GuiTransportTimeoutError,
+    OnClosedFn,
+    SocketTransport,
+)
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._support import make_client
 
 # Real loopback disconnects are observed by the bridge's reader thread.
 pytestmark = pytest.mark.uses_wall_clock
+
+
+@pytest.fixture
+def disconnected(monkeypatch: pytest.MonkeyPatch) -> threading.Event:
+    """Notify after the real socket reader delivers EOF to the bridge."""
+    observed = threading.Event()
+
+    class NotifyingSocketTransport(SocketTransport):
+        def attach(
+            self,
+            deliver_reply: DeliverFn,
+            deliver_event: DeliverFn,
+            on_closed: OnClosedFn,
+        ) -> None:
+            def closed(failure: Exception | None) -> None:
+                on_closed(failure)
+                observed.set()
+
+            super().attach(deliver_reply, deliver_event, closed)
+
+    # Keep real sockets, framing and EOF; only observe the transport callback seam.
+    monkeypatch.setattr(bridge_module, "SocketTransport", NotifyingSocketTransport)
+    return observed
 
 
 def test_session_close_wakes_an_inflight_rpc_without_waiting_for_rpc_lock(
@@ -40,14 +68,17 @@ def test_session_close_wakes_an_inflight_rpc_without_waiting_for_rpc_lock(
     monkeypatch.setattr(client.transport, "send_line", send)
     with ThreadPoolExecutor(max_workers=2) as pool:
         pending = pool.submit(
-            binding.send_gui_rpc, "context.labels", {}, timeout_seconds=10.0
+            binding.send_gui_rpc, "context.labels", {}, timeout_seconds=30.0
         )
         try:
-            assert sent.wait(1)
+            # The submitted RPC records transport dispatch before EOF or close. The 30s limit only guards deadlock.
+            assert sent.wait(30)
             closing = pool.submit(session.close)
-            closing.result(timeout=1)
+            # The submitted call completes after release/close; 30s only guards deadlock.
+            closing.result(timeout=30)
             with pytest.raises(GuiRpcError) as error:
-                pending.result(timeout=1)
+                # The submitted call completes after release/close; 30s only guards deadlock.
+                pending.result(timeout=30)
             assert error.value.reason == "session_closed"
             assert not client.transport.is_open
         finally:
@@ -87,8 +118,8 @@ class LoopbackGui:
         self.sent: list[str] = []
         self.exchanges: list[LoopbackExchange] = []
         self.close_on: str | None = None
-        self._thread = threading.Thread(target=self._serve, daemon=True)
-        self._thread.start()
+        self._pool = ThreadPoolExecutor(max_workers=1)
+        self._serving = self._pool.submit(self._serve)
 
     def _serve(self) -> None:
         attempt = 0
@@ -196,8 +227,11 @@ class LoopbackGui:
                 self._socket.shutdown(socket.SHUT_RDWR)
             self._socket.close()
         self._server.close()
-        self._thread.join(timeout=2)
-        assert not self._thread.is_alive()
+        try:
+            # Shutdown wakes recv/accept; 30s only guards deadlock in the producer.
+            self._serving.result(timeout=30)
+        finally:
+            self._pool.shutdown(wait=True)
 
 
 def assert_loopback_exchanges(
@@ -401,6 +435,7 @@ def test_connect_loads_catalog_and_rpc_tools_route_by_exposure(
 
 def test_unexpected_gui_eof_reconnects_same_port_without_replaying_mutation(
     tmp_path: Path,
+    disconnected: threading.Event,
 ) -> None:
     client = make_client(tmp_path, port_is_open=lambda port: True)
     catalog = {"methods": build_agent_catalog(METHOD_ENTRIES)}
@@ -426,9 +461,8 @@ def test_unexpected_gui_eof_reconnects_same_port_without_replaying_mutation(
         gui_b = LoopbackGui(
             {**catalog, "wire": client.context.config.wire_version}, gui_a.port
         )
-        deadline = time.monotonic() + 2
-        while client.context.bridge.is_connected and time.monotonic() < deadline:
-            time.sleep(0.01)
+        # Stopping the peer delivers EOF through the reader callback; 30s guards deadlock.
+        assert disconnected.wait(30), "socket EOF was not delivered to the bridge"
         assert not client.context.bridge.is_connected
         with pytest.raises(RuntimeError) as error:
             client.call("wait", {"op": old})
@@ -462,6 +496,7 @@ def test_unexpected_gui_eof_reconnects_same_port_without_replaying_mutation(
 
 def test_token_protected_gui_attach_rejects_bad_credentials_and_reauthenticates_after_restart(
     tmp_path: Path,
+    disconnected: threading.Event,
 ) -> None:
     client = make_client(tmp_path, port_is_open=lambda port: True)
     client.context.bridge.set_transport(None)
@@ -488,9 +523,8 @@ def test_token_protected_gui_attach_rejects_bad_credentials_and_reauthenticates_
             gui_a.port,
             token="test-secret",
         )
-        deadline = time.monotonic() + 2
-        while client.context.bridge.is_connected and time.monotonic() < deadline:
-            time.sleep(0.01)
+        # Stopping the peer delivers EOF through the reader callback; 30s guards deadlock.
+        assert disconnected.wait(30), "socket EOF was not delivered to the bridge"
         assert not client.context.bridge.is_connected
         assert client.call("rpc_list", {"domain": "adapter"})["methods"]
         # Join the reply producer before reading its final delivery record.
@@ -512,7 +546,9 @@ def test_token_protected_gui_attach_rejects_bad_credentials_and_reauthenticates_
 
 
 def test_failed_second_launch_preserves_credential_for_reconnect(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    disconnected: threading.Event,
 ) -> None:
     client = make_client(tmp_path, port_is_open=lambda port: port == gui_a.port)
     client.context.bridge.set_transport(None)
@@ -538,9 +574,8 @@ def test_failed_second_launch_preserves_credential_for_reconnect(
             gui_a.port,
             token="original",
         )
-        deadline = time.monotonic() + 2
-        while client.context.bridge.is_connected and time.monotonic() < deadline:
-            time.sleep(0.01)
+        # Stopping the peer delivers EOF through the reader callback; 30s guards deadlock.
+        assert disconnected.wait(30), "socket EOF was not delivered to the bridge"
         assert not client.context.bridge.is_connected
         assert client.call("rpc_list", {"domain": "adapter"})["methods"]
         assert gui_b.sent.count("auth") == 1

@@ -451,17 +451,26 @@ def test_run_preview_failure_retains_the_saved_raw_and_true_run(tmp_path, failur
 def test_cancel_does_not_suppress_sync_save_or_run_preview(
     tmp_path, monkeypatch, phase, fail
 ):
-    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
-    entered, release = Event(), Event()
+    # Poll returns the execution without relying on a scheduling slice for the worker.
+    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0)
+    run_completed, entered, release = Event(), Event(), Event()
+    boundary_order: list[str] = []
     gui = LookbackGui()
 
     def respond(method, params):
         should_block = (phase == "raw_save" and method == "tab.save_data") or (
             phase == "preview" and method == "tab.get_figure"
         )
+        if method == "operation.await":
+            assert params["operation_id"] == 71
+            run_completed.set()
         if should_block:
+            assert run_completed.is_set(), "save/preview preceded the original Run"
+            boundary_order.append("entered")
             entered.set()
-            assert release.wait(3)
+            # The test finally releases this responder barrier; 30s only guards deadlock.
+            assert release.wait(30)
+            boundary_order.append("released")
         if phase == "preview" and method == "tab.get_figure" and fail:
             return {"png_b64": "bad-png"}
         if method == "tab.get_figure":
@@ -478,16 +487,23 @@ def test_cancel_does_not_suppress_sync_save_or_run_preview(
                     {},
                 ),
             )
-            assert entered.wait(2)
+            # Starting the recipe causes the original Run await; 30s only guards deadlock.
+            assert run_completed.wait(30)
+            # Run completion causes this actual Save/preview RPC; 30s only guards deadlock.
+            assert entered.wait(30)
             execution = initial.data["execution"]
+            boundary_order.append("cancel")
             client.call("cancel", {"execution": execution})
             release.set()
             terminal = full_execution_reply(
-                client, client.call("wait", {"execution": execution, "timeout": 2})
+                # The released worker completes this execution; 30s only guards deadlock.
+                client,
+                client.call("wait", {"execution": execution, "timeout": 30}),
             )
             data = terminal.data
             assert data["status"] == ("failed" if fail else "finished")
             assert data["cancel_requested"]
+            assert boundary_order == ["entered", "cancel", "released"]
             assert data["raw_save"] == {
                 "run_id": "run-a",
                 "artifacts": {
@@ -523,3 +539,5 @@ def test_cancel_does_not_suppress_sync_save_or_run_preview(
             assert "tab.analyze" not in methods
         finally:
             release.set()
+            # Drain the released worker before closing its session, including on assertion failure.
+            client.context.session.recipes.join()
