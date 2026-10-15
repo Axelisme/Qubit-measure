@@ -92,9 +92,14 @@ class FormFieldDescription:
     an empty tuple allows no value. options is the effective ordered selector
     list, or None for a non-selector; () preserves an explicit empty override.
     selected is the first option index matching raw input, or None for missing
-    input/no match. No default option is guessed. fixed means the declaration
-    or enclosing selection fixes this leaf; fixed_value is that detached JSON
-    value (meaningful only when fixed). constraints contains finite leaf hints.
+    input/no match. No default option is guessed. selection_fixed means the
+    annotation permits one selector branch at this level, without freezing
+    nested choices or fields; it is False without a selector and does not use
+    dynamic menu size. fixed means the declaration or enclosing selection fixes
+    this leaf or the complete option value; fixed_value is that detached JSON
+    value (meaningful only when fixed, otherwise None). An outer model branch
+    can be selection_fixed while inner choices keep fixed False. Both flags
+    may be True. constraints contains finite leaf hints.
     """
 
     path: FormWritePath
@@ -114,6 +119,7 @@ class FormFieldDescription:
     choices: tuple[JsonValue, ...] | None
     options: tuple[FormOptionDescription, ...] | None
     selected: int | None
+    selection_fixed: bool
     fixed: bool
     fixed_value: JsonValue
     constraints: FormConstraints

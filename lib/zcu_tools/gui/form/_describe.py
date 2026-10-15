@@ -122,6 +122,24 @@ def _option_metadata(
     )
 
 
+def _fixed_value(target: Field) -> tuple[bool, JsonValue]:
+    """Return whether a whole leaf/option value is fixed, and that value.
+
+    Enclosing categorical pins take precedence over intrinsic single values
+    and declaration-fixed complete option values. An unfixed field returns
+    (False, None); a fixed null returns (True, None).
+    """
+    if target.pinned:
+        return True, target.level.pinned[target.name]
+    values = literal_values(target.info.annotation)
+    if values is not None and len(values) == 1:
+        return True, values[0]
+    option = target.fixed_option
+    if option is not None:
+        return True, option.value
+    return False, None
+
+
 def _metadata(
     target: Field, tags: Mapping[type[BaseModel], str]
 ) -> FormFieldDescription:
@@ -132,15 +150,7 @@ def _metadata(
     )
     if display.decimals is not None and float not in alternatives(info.annotation):
         raise ValueError(f"{target.path!r}: Display decimals requires a float field")
-    values = literal_values(info.annotation)
-    fixed = target.pinned or (values is not None and len(values) == 1)
-    fixed_value = (
-        target.level.pinned[target.name]
-        if target.pinned
-        else values[0]
-        if values is not None and len(values) == 1
-        else None
-    )
+    fixed, fixed_value = _fixed_value(target)
     hidden_tag = fixed_tag(target.level.model, tags) == target.name
     text = target.name.replace("_", " ")
     return FormFieldDescription(
@@ -167,6 +177,7 @@ def _metadata(
         else tuple(copy_json(value) for value in target.choices),
         options=_option_metadata(target.options),
         selected=target.selected,
+        selection_fixed=target.selection_fixed,
         fixed=fixed,
         fixed_value=copy_json(fixed_value),
         constraints=_constraints(target),

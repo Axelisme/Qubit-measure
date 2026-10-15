@@ -35,6 +35,32 @@ def literal_values(annotation: object) -> tuple[JsonValue, ...] | None:
     return tuple(result)
 
 
+def _declaration_fixes(annotation: object, value: JsonValue) -> bool:
+    """Whether annotation fixes every leaf of a complete partial option value.
+
+    Only single categorical values and single non-null model branches qualify.
+    Missing object fields are not part of the option value being checked.
+    No dynamic declarations, defaults or validation participate.
+    """
+    values = literal_values(annotation)
+    if values is not None:
+        return (
+            len(values) == 1 and type(values[0]) is type(value) and values[0] == value
+        )
+    models = model_types(annotation)
+    if (
+        not isinstance(value, dict)
+        or len(alternatives(annotation)) != 1
+        or len(models) != 1
+    ):
+        return False
+    fields = models[0].model_fields
+    return all(
+        name in fields and _declaration_fixes(fields[name].annotation, item)
+        for name, item in value.items()
+    )
+
+
 def _option_path(model: type[BaseModel], path: FormPath) -> bool:
     if not path or not isinstance(path[0], str):
         return False
@@ -134,6 +160,40 @@ class Field:
         """Whether the enclosing option fixes a categorical leaf's value."""
         return self.name in self.level.pinned and (
             self.choices is not None or literal_values(self.info.annotation) is not None
+        )
+
+    @property
+    def selection_fixed(self) -> bool:
+        """Whether annotation permits only one selector branch at this level.
+
+        A single non-null model branch qualifies without freezing any nested
+        selector or field. A categorical leaf must have just one intrinsic
+        value. No selector means False; dynamic menu size does not participate.
+        """
+        if self.options is None:
+            return False
+        values = literal_values(self.info.annotation)
+        if values is not None:
+            return len(values) == 1
+        return (
+            len(alternatives(self.info.annotation)) == 1
+            and len(model_types(self.info.annotation)) == 1
+        )
+
+    @property
+    def fixed_option(self) -> Option | None:
+        """First option whose complete value is fixed by annotation, or None.
+
+        Check every partial-value leaf against single declared categorical
+        values. This does not depend on input selection or dynamic menu size.
+        """
+        return next(
+            (
+                option
+                for option in self.options or ()
+                if _declaration_fixes(self.info.annotation, option.value)
+            ),
+            None,
         )
 
     @property
