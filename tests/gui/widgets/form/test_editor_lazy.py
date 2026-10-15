@@ -5,13 +5,14 @@ from typing import Annotated, Literal
 
 import pytest
 from pydantic import Field, JsonValue
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication, QCheckBox, QComboBox, QLabel, QLineEdit
 from zcu_tools.gui.form import (
     Display, FormDescription, FormEnv, FormInput, FormModel, FormPath, FormState, FormWritePath, Option,
 )
 from zcu_tools.gui.widgets.form import FormEditor
 
-from tests.gui._user_input import mouse_click
+from tests.gui._user_input import mouse_click, type_text
 
 
 class Inner(FormModel):
@@ -136,6 +137,37 @@ def test_first_expansion_builds_controls_and_collapse_keeps_uncommitted_text(
     assert text(editor, path) is field
     assert field.text() == "unfinished -"
     assert state.input.data == before
+
+
+@pytest.mark.parametrize("path,fold_path", [("folded.value", "folded"), ("advanced", "group.Advanced")])
+@pytest.mark.parametrize("draft", ["12.5", "unfinished -"])
+def test_collapsing_focused_text_neither_commits_nor_parses_it(
+    view: tuple[FormEditor[LazyForm], FormState[LazyForm]], qapp: QApplication,
+    path: str, fold_path: str, draft: str,
+) -> None:
+    editor, state = view
+    editor.resize(700, 900)
+    editor.show()
+    qapp.processEvents()
+    fold = title(editor, fold_path)
+    mouse_click(fold, fold.rect().center())
+    qapp.processEvents()
+    field = text(editor, path)
+    field.setFocus(Qt.FocusReason.TabFocusReason)
+    assert field.hasFocus()
+    field.selectAll()
+    type_text(field, draft)
+    before = state.input.data
+    mouse_click(fold, fold.rect().center())
+    qapp.processEvents()
+    assert not field.isVisibleTo(editor)
+    assert state.input.data == before
+    assert editor.local_parse_errors() is None
+    mouse_click(fold, fold.rect().center())
+    qapp.processEvents()
+    assert text(editor, path) is field
+    assert field.isVisibleTo(editor)
+    assert field.text() == draft
 
 
 @pytest.mark.parametrize("operation", ["option", "nullable"])
