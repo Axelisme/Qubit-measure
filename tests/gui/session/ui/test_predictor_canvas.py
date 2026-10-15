@@ -5,14 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from matplotlib.backend_bases import Event, MouseButton, MouseEvent
-from zcu_tools.gui.session.ui.predictor_canvas import (
-    _compute_xlim,
-    _pan_xlim_to_include,
-)
-
-# ---------------------------------------------------------------------------
-# Pure-function: _compute_xlim window-shift logic
-# ---------------------------------------------------------------------------
+from matplotlib.backends.backend_qt import NavigationToolbar2QT
 
 
 def _value_to_flux(v: float) -> float:
@@ -23,54 +16,6 @@ def _value_to_flux(v: float) -> float:
 def _flux_to_value(f: float) -> float:
     """Inverse of _value_to_flux."""
     return f
-
-
-def test_compute_xlim_marker_inside_window():
-    """When marker is inside the flux window, xlim maps to the window directly."""
-    # flux_window [0.4, 1.1] → value [0.4, 1.1] (identity affine)
-    x_lo, x_hi = _compute_xlim((0.4, 1.1), 0.7, _flux_to_value)
-    assert x_lo == pytest.approx(0.4)
-    assert x_hi == pytest.approx(1.1)
-
-
-def test_compute_xlim_marker_below_window():
-    """When marker is below the window, shift left (window width preserved)."""
-    # Window width = 0.7; marker at 0.2 → should be included at left edge.
-    width = 1.1 - 0.4
-    x_lo, x_hi = _compute_xlim((0.4, 1.1), 0.2, _flux_to_value)
-    assert x_lo == pytest.approx(0.2)
-    assert (x_hi - x_lo) == pytest.approx(width)
-
-
-def test_compute_xlim_marker_above_window():
-    """When marker is above the window, shift right (window width preserved)."""
-    width = 1.1 - 0.4
-    x_lo, x_hi = _compute_xlim((0.4, 1.1), 1.5, _flux_to_value)
-    assert x_hi == pytest.approx(1.5)
-    assert (x_hi - x_lo) == pytest.approx(width)
-
-
-def test_compute_xlim_marker_exactly_at_boundary():
-    """Marker exactly at the lower boundary is still considered inside."""
-    x_lo, x_hi = _compute_xlim((0.4, 1.1), 0.4, _flux_to_value)
-    assert x_lo == pytest.approx(0.4)
-    assert x_hi == pytest.approx(1.1)
-
-
-def test_compute_xlim_window_width_preserved_far_outside():
-    """Window width stays constant regardless of how far outside the marker is."""
-    width = 1.1 - 0.4
-    x_lo, x_hi = _compute_xlim((0.4, 1.1), 5.0, _flux_to_value)
-    assert (x_hi - x_lo) == pytest.approx(width)
-    assert x_hi == pytest.approx(5.0)
-
-
-def test_pan_xlim_to_include_preserves_zoom_width():
-    """Marker panning preserves a user zoom range instead of restoring defaults."""
-    x_lo, x_hi = _pan_xlim_to_include((0.45, 0.55), 0.8)
-
-    assert x_hi == pytest.approx(0.8)
-    assert (x_hi - x_lo) == pytest.approx(0.1)
 
 
 # ---------------------------------------------------------------------------
@@ -112,16 +57,14 @@ def test_canvas_render_curves_no_error(canvas):
 def test_canvas_primary_xaxis_label_device_value_no_unit(canvas):
     """The primary x-axis is labelled 'Device value' with no Ampere/'(A)' unit."""
     canvas.render_curves(**_make_render_kwargs())
-    ax = canvas._get_ax()
-    assert ax is not None
+    ax = canvas.figure.axes[0]
     assert ax.get_xlabel() == "Device value"
 
 
 def test_canvas_render_creates_four_curves(canvas):
     """render_curves must draw exactly four data lines (one per transition)."""
     canvas.render_curves(**_make_render_kwargs(n_transitions=4))
-    ax = canvas._get_ax()
-    assert ax is not None
+    ax = canvas.figure.axes[0]
     data_lines = [ln for ln in ax.lines if not ln.get_label().startswith("_")]
     assert len(data_lines) == 4
 
@@ -135,19 +78,19 @@ def test_canvas_set_marker_after_render(canvas):
     """set_marker after render_curves moves the marker line."""
     canvas.render_curves(**_make_render_kwargs())
     canvas.set_marker(0.3)
-    assert canvas._marker_value == pytest.approx(0.3)
+    assert canvas.figure.axes[0].lines[-1].get_xdata() == pytest.approx([0.3, 0.3])
 
 
 def test_canvas_set_marker_preserves_user_zoom_width(canvas):
     """set_marker pans the current zoom window rather than resetting to flux_window."""
     canvas.render_curves(**_make_render_kwargs())
-    ax = canvas._get_ax()
-    assert ax is not None
-    ax.set_xlim(0.45, 0.55)
+    canvas.apply_xlim((0.45, 0.55))
 
     canvas.set_marker(0.8)
 
-    x_lo, x_hi = ax.get_xlim()
+    xlim = canvas.current_xlim()
+    assert xlim is not None
+    x_lo, x_hi = xlim
     assert x_hi == pytest.approx(0.8)
     assert (x_hi - x_lo) == pytest.approx(0.1)
 
@@ -170,84 +113,69 @@ def test_canvas_apply_xlim_notify_contract(canvas):
 
 
 def test_canvas_clear_no_error(canvas):
-    """clear must not raise and must remove the marker state."""
+    """clear removes the plotted curves and marker."""
     canvas.render_curves(**_make_render_kwargs())
     canvas.clear()
-    assert canvas._marker_line is None
-    assert canvas._marker_value is None
+    assert canvas.figure.get_axes() == []
+    assert canvas.current_xlim() is None
 
 
-class _FakeAxesEvent:
-    """Lightweight in-axes event for driving the canvas handlers headlessly."""
-
-    def __init__(self, ax, x: float) -> None:
-        self.inaxes = ax
-        self.xdata = x
-
-
-def test_canvas_follow_engages_on_first_click(canvas):
-    """A first click near the marker engages follow mode (no lock callback yet)."""
-    canvas.render_curves(**_make_render_kwargs())
-    ax = canvas._get_ax()
-    assert ax is not None
-
-    locks: list[float] = []
-    canvas.bind_callbacks(on_follow=lambda _v: None, on_lock=locks.append)
-
-    canvas._on_press(_FakeAxesEvent(ax, 0.5))  # click on the marker → engage
-    assert canvas._following is True
-    assert locks == []  # engaging click does not lock
+def _mouse_event(canvas, name: str, x: float | None) -> None:
+    """Dispatch a real Matplotlib event at a device value, or outside the axes."""
+    canvas.canvas.draw()
+    ax = canvas.figure.axes[0]
+    pixels = (
+        (-1, -1) if x is None else ax.transData.transform((x, sum(ax.get_ylim()) / 2))
+    )
+    button = MouseButton.LEFT if name == "button_press_event" else None
+    event = MouseEvent(name, canvas.canvas, *pixels, button=button)
+    canvas.canvas.callbacks.process(name, event)
+    if name == "button_press_event":
+        release = MouseEvent(
+            "button_release_event", canvas.canvas, *pixels, button=button
+        )
+        canvas.canvas.callbacks.process("button_release_event", release)
 
 
-def test_canvas_toolbar_mode_blocks_marker_follow(canvas, monkeypatch):
+def test_canvas_toolbar_mode_blocks_marker_follow(canvas):
     """Native toolbar pan/zoom should own mouse events while active."""
     canvas.render_curves(**_make_render_kwargs())
-    ax = canvas._get_ax()
-    assert ax is not None
+    received: list[float] = []
+    canvas.bind_callbacks(on_follow=received.append, on_lock=lambda _v: None)
 
-    class _Toolbar:
-        mode = "pan/zoom"
+    toolbar = NavigationToolbar2QT(canvas.canvas, canvas)
+    toolbar.pan()
 
-    monkeypatch.setattr(canvas.canvas, "toolbar", _Toolbar(), raising=False)
-
-    canvas._on_press(_FakeAxesEvent(ax, 0.5))
-
-    assert canvas._following is False
+    _mouse_event(canvas, "button_press_event", 0.5)
+    _mouse_event(canvas, "motion_notify_event", 0.6)
+    assert received == []
 
 
-def test_canvas_toolbar_mode_blocks_marker_motion(canvas, monkeypatch):
+def test_canvas_toolbar_mode_blocks_marker_motion(canvas):
     """Active toolbar mode disengages marker follow on motion events too."""
     canvas.render_curves(**_make_render_kwargs())
-    ax = canvas._get_ax()
-    assert ax is not None
     locks: list[float] = []
     canvas.bind_callbacks(on_follow=lambda _v: None, on_lock=locks.append)
-    canvas._on_press(_FakeAxesEvent(ax, 0.5))
-    assert canvas._following is True
+    _mouse_event(canvas, "button_press_event", 0.5)
 
-    class _Toolbar:
-        mode = "pan/zoom"
+    toolbar = NavigationToolbar2QT(canvas.canvas, canvas)
+    toolbar.pan()
 
-    monkeypatch.setattr(canvas.canvas, "toolbar", _Toolbar(), raising=False)
+    _mouse_event(canvas, "motion_notify_event", 0.6)
 
-    canvas._on_move(_FakeAxesEvent(ax, 0.6))
-
-    assert canvas._following is False
     assert locks == pytest.approx([0.5])
 
 
 def test_canvas_follow_callback_fires_on_motion_without_button(canvas):
     """While following, motion (button NOT held) fires on_follow with the cursor x."""
     canvas.render_curves(**_make_render_kwargs())
-    ax = canvas._get_ax()
-    assert ax is not None
 
     received: list[float] = []
     canvas.bind_callbacks(on_follow=received.append, on_lock=lambda _v: None)
 
-    canvas._on_press(_FakeAxesEvent(ax, 0.5))  # engage follow
-    canvas._on_move(_FakeAxesEvent(ax, 0.6))  # cursor moves while following
-    canvas._on_move(_FakeAxesEvent(ax, 0.65))
+    _mouse_event(canvas, "button_press_event", 0.5)  # engage follow
+    _mouse_event(canvas, "motion_notify_event", 0.6)  # cursor moves while following
+    _mouse_event(canvas, "motion_notify_event", 0.65)
 
     assert received == pytest.approx([0.6, 0.65])
 
@@ -255,30 +183,25 @@ def test_canvas_follow_callback_fires_on_motion_without_button(canvas):
 def test_canvas_no_follow_motion_before_engage(canvas):
     """Motion without an engaging click must NOT fire on_follow."""
     canvas.render_curves(**_make_render_kwargs())
-    ax = canvas._get_ax()
-    assert ax is not None
 
     received: list[float] = []
     canvas.bind_callbacks(on_follow=received.append, on_lock=lambda _v: None)
 
-    canvas._on_move(_FakeAxesEvent(ax, 0.6))  # not following yet
+    _mouse_event(canvas, "motion_notify_event", 0.6)  # not following yet
     assert received == []
 
 
 def test_canvas_second_click_locks_and_disengages(canvas):
     """A second click disengages follow and fires on_lock at the current marker."""
     canvas.render_curves(**_make_render_kwargs())
-    ax = canvas._get_ax()
-    assert ax is not None
 
     locks: list[float] = []
     canvas.bind_callbacks(on_follow=lambda _v: None, on_lock=locks.append)
 
-    canvas._on_press(_FakeAxesEvent(ax, 0.5))  # engage
-    canvas._on_move(_FakeAxesEvent(ax, 0.7))  # follow → marker at 0.7
-    canvas._on_press(_FakeAxesEvent(ax, 0.7))  # second click → lock + disengage
+    _mouse_event(canvas, "button_press_event", 0.5)  # engage
+    _mouse_event(canvas, "motion_notify_event", 0.7)  # follow → marker at 0.7
+    _mouse_event(canvas, "button_press_event", 0.7)  # second click → lock + disengage
 
-    assert canvas._following is False
     assert len(locks) == 1
     assert locks[0] == pytest.approx(0.7)
 
@@ -286,17 +209,15 @@ def test_canvas_second_click_locks_and_disengages(canvas):
 def test_canvas_motion_after_lock_does_not_follow(canvas):
     """After locking, further motion must NOT fire on_follow."""
     canvas.render_curves(**_make_render_kwargs())
-    ax = canvas._get_ax()
-    assert ax is not None
 
     received: list[float] = []
     canvas.bind_callbacks(on_follow=received.append, on_lock=lambda _v: None)
 
-    canvas._on_press(_FakeAxesEvent(ax, 0.5))  # engage
-    canvas._on_move(_FakeAxesEvent(ax, 0.7))  # follow
-    canvas._on_press(_FakeAxesEvent(ax, 0.7))  # lock
+    _mouse_event(canvas, "button_press_event", 0.5)  # engage
+    _mouse_event(canvas, "motion_notify_event", 0.7)  # follow
+    _mouse_event(canvas, "button_press_event", 0.7)  # lock
     received.clear()
-    canvas._on_move(_FakeAxesEvent(ax, 0.9))  # motion after lock → ignored
+    _mouse_event(canvas, "motion_notify_event", 0.9)  # motion after lock → ignored
 
     assert received == []
 
@@ -306,27 +227,19 @@ def test_canvas_motion_after_lock_does_not_follow(canvas):
 # ---------------------------------------------------------------------------
 
 
-class _FakeLeaveEvent:
-    """Lightweight leave event (no xdata / inaxes) for driving _on_axes_leave."""
-
-    # axes_leave_event / figure_leave_event carry no meaningful xdata.
-    pass
-
-
 def test_canvas_leave_event_while_following_disengages(canvas):
     """axes_leave_event while following disengages and fires on_lock at last position."""
     canvas.render_curves(**_make_render_kwargs())
-    ax = canvas._get_ax()
-    assert ax is not None
 
     locks: list[float] = []
     canvas.bind_callbacks(on_follow=lambda _v: None, on_lock=locks.append)
 
-    canvas._on_press(_FakeAxesEvent(ax, 0.5))  # engage follow
-    canvas._on_move(_FakeAxesEvent(ax, 0.65))  # move → marker at 0.65
-    canvas._on_axes_leave(_FakeLeaveEvent())  # cursor leaves axes
+    _mouse_event(canvas, "button_press_event", 0.5)  # engage follow
+    _mouse_event(canvas, "motion_notify_event", 0.65)  # move → marker at 0.65
+    canvas.canvas.callbacks.process(
+        "axes_leave_event", Event("axes_leave_event", canvas.canvas)
+    )  # cursor leaves axes
 
-    assert canvas._following is False
     assert len(locks) == 1
     assert locks[0] == pytest.approx(0.65)  # locked at last in-range position
 
@@ -334,23 +247,15 @@ def test_canvas_leave_event_while_following_disengages(canvas):
 def test_canvas_out_of_range_motion_while_following_disengages(canvas):
     """motion_notify_event with inaxes=None while following auto-untracks."""
     canvas.render_curves(**_make_render_kwargs())
-    ax = canvas._get_ax()
-    assert ax is not None
 
     locks: list[float] = []
     canvas.bind_callbacks(on_follow=lambda _v: None, on_lock=locks.append)
 
-    canvas._on_press(_FakeAxesEvent(ax, 0.5))  # engage follow
-    canvas._on_move(_FakeAxesEvent(ax, 0.7))  # follow → marker at 0.7
+    _mouse_event(canvas, "button_press_event", 0.5)  # engage follow
+    _mouse_event(canvas, "motion_notify_event", 0.7)  # follow → marker at 0.7
 
-    # Out-of-range motion: inaxes is None, xdata is None.
-    class _OutOfRangeEvent:
-        inaxes = None
-        xdata = None
+    _mouse_event(canvas, "motion_notify_event", None)
 
-    canvas._on_move(_OutOfRangeEvent())  # backstop path
-
-    assert canvas._following is False
     assert len(locks) == 1
     assert locks[0] == pytest.approx(0.7)
 
@@ -358,20 +263,20 @@ def test_canvas_out_of_range_motion_while_following_disengages(canvas):
 def test_canvas_motion_after_leave_disengage_does_not_follow(canvas):
     """After auto-untrack via leave, in-range motion must NOT move marker or call on_follow."""
     canvas.render_curves(**_make_render_kwargs())
-    ax = canvas._get_ax()
-    assert ax is not None
 
     received: list[float] = []
     canvas.bind_callbacks(on_follow=received.append, on_lock=lambda _v: None)
 
-    canvas._on_press(_FakeAxesEvent(ax, 0.5))  # engage
-    canvas._on_move(_FakeAxesEvent(ax, 0.6))  # follow
-    canvas._on_axes_leave(_FakeLeaveEvent())  # leave → disengage
+    _mouse_event(canvas, "button_press_event", 0.5)  # engage
+    _mouse_event(canvas, "motion_notify_event", 0.6)  # follow
+    canvas.canvas.callbacks.process(
+        "axes_leave_event", Event("axes_leave_event", canvas.canvas)
+    )  # leave → disengage
     received.clear()
 
-    canvas._on_move(_FakeAxesEvent(ax, 0.8))  # in-range motion after disengage
+    _mouse_event(canvas, "motion_notify_event", 0.8)  # in-range motion after disengage
     assert received == []
-    assert canvas._marker_value == pytest.approx(0.6)  # marker stays at 0.6
+    assert canvas.figure.axes[0].lines[-1].get_xdata() == pytest.approx([0.6, 0.6])
 
 
 def test_canvas_leave_event_when_not_following_is_noop(canvas):
@@ -381,7 +286,9 @@ def test_canvas_leave_event_when_not_following_is_noop(canvas):
     locks: list[float] = []
     canvas.bind_callbacks(on_follow=lambda _v: None, on_lock=locks.append)
 
-    canvas._on_axes_leave(_FakeLeaveEvent())  # not following — no-op
+    canvas.canvas.callbacks.process(
+        "axes_leave_event", Event("axes_leave_event", canvas.canvas)
+    )  # not following — no-op
     assert locks == []
 
 
@@ -399,36 +306,35 @@ def test_canvas_render_curves_highlights_empty_no_error(canvas):
 
 
 def test_canvas_render_curves_highlights_empty_all_normal_lw(canvas):
-    """With highlights=(), all curve lines use the normal linewidth."""
-    from zcu_tools.gui.session.ui.predictor_canvas import _NORMAL_LW
-
+    """With highlights=(), all curves use the previously unhighlighted style."""
     kwargs = _make_render_kwargs()
+    canvas.render_curves(**kwargs)
+    normal_width = canvas.figure.axes[0].lines[1].get_linewidth()
     kwargs["highlights"] = ()
     canvas.render_curves(**kwargs)
-    for line in canvas._curve_lines.values():
-        assert line.get_linewidth() == pytest.approx(_NORMAL_LW)
+    assert [line.get_linewidth() for line in canvas.figure.axes[0].lines[:4]] == [
+        normal_width
+    ] * 4
 
 
 def test_canvas_set_highlights_empty_reverts_all_to_normal(canvas):
     """set_highlights(()) reverts all previously highlighted curves to normal."""
-    from zcu_tools.gui.session.ui.predictor_canvas import _NORMAL_LW
-
     canvas.render_curves(**_make_render_kwargs(n_transitions=4))
+    normal_width = canvas.figure.axes[0].lines[1].get_linewidth()
     canvas.set_highlights(())
-    for line in canvas._curve_lines.values():
-        assert line.get_linewidth() == pytest.approx(_NORMAL_LW)
+    assert [line.get_linewidth() for line in canvas.figure.axes[0].lines[:4]] == [
+        normal_width
+    ] * 4
 
 
 def test_canvas_set_highlights_marks_multiple_curves(canvas):
     """set_highlights can mark more than one rendered transition."""
-    from zcu_tools.gui.session.ui.predictor_canvas import _HIGHLIGHT_LW, _NORMAL_LW
-
     canvas.render_curves(**_make_render_kwargs(n_transitions=4))
     canvas.set_highlights(((0, 1), (0, 3)))
-
-    assert canvas._curve_lines[(0, 1)].get_linewidth() == pytest.approx(_HIGHLIGHT_LW)
-    assert canvas._curve_lines[(0, 3)].get_linewidth() == pytest.approx(_HIGHLIGHT_LW)
-    assert canvas._curve_lines[(0, 2)].get_linewidth() == pytest.approx(_NORMAL_LW)
+    lines = canvas.figure.axes[0].lines
+    assert lines[0].get_linewidth() == lines[2].get_linewidth()
+    assert lines[0].get_linewidth() > lines[1].get_linewidth()
+    assert lines[1].get_linewidth() == lines[3].get_linewidth()
 
 
 def test_canvas_render_curves_dynamic_count(canvas):
@@ -448,8 +354,7 @@ def test_canvas_render_curves_dynamic_count(canvas):
             value_to_flux=_value_to_flux,
             flux_to_value=_flux_to_value,
         )
-        ax = canvas._get_ax()
-        assert ax is not None
+        ax = canvas.figure.axes[0]
         data_lines = [ln for ln in ax.lines if not ln.get_label().startswith("_")]
         assert len(data_lines) == n_tr
 
@@ -470,8 +375,7 @@ def test_canvas_render_curves_custom_ylabel(canvas):
         value_to_flux=_value_to_flux,
         flux_to_value=_flux_to_value,
     )
-    ax = canvas._get_ax()
-    assert ax is not None
+    ax = canvas.figure.axes[0]
     assert ax.get_ylabel() == "|<i|n|j>|"
 
 

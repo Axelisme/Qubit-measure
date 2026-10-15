@@ -3,14 +3,14 @@
 Shared by fluxdep-gui and dispersive-gui: the project shape is identical, so the
 dialog is too. The chip / qubit names locate the default output layout
 (``result_dir`` → ``result/<chip>/<qubit>`` for processed outputs,
-``database_path`` → ``Database/<chip>/<qubit>`` for raw measurement data). Both
+``data_root`` → ``Database/<chip>/<qubit>`` for raw measurement data). Both
 auto-derive from the names and track them as the user types, until the user edits
 / browses a field — a manual change detaches that field from the derivation. Both
 have a Browse button (choose a folder). Returns a ``ProjectInfo`` (or None on
 cancel).
 
 The single per-app difference is the database field's label (``db_label``):
-fluxdep calls it "Database path" (the raw spectrum root), dispersive "One-tone
+fluxdep calls it "Data root" (the raw spectrum root), dispersive "One-tone
 dir" (its raw one-tone root). The app passes its label; everything else is shared.
 """
 
@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 # fluxdep's label; the database field's default form-row label. dispersive passes
 # its own ("One-tone dir") explicitly.
-DEFAULT_DB_LABEL = "Database path"
+DEFAULT_DB_LABEL = "Data root"
 
 
 class ProjectDialog(QDialog):
@@ -83,7 +83,7 @@ class ProjectDialog(QDialog):
             project.result_dir and project.result_dir != derived_result
         )
         self._database_overridden = bool(
-            project.database_path and project.database_path != derived_db
+            project.data_root and project.data_root != derived_db
         )
 
         root = QVBoxLayout(self)
@@ -118,7 +118,7 @@ class ProjectDialog(QDialog):
         self._result_edit.textEdited.connect(self._on_result_edited)
         form.addRow("Result dir", self._dir_row(self._result_edit, self._browse_result))
 
-        self._database_edit = QLineEdit(project.database_path or derived_db)
+        self._database_edit = QLineEdit(project.data_root or derived_db)
         self._database_edit.textEdited.connect(self._on_database_edited)
         form.addRow(
             self._db_label, self._dir_row(self._database_edit, self._browse_database)
@@ -308,6 +308,6 @@ class ProjectDialog(QDialog):
             chip_name=self._chip_edit.text().strip(),
             qub_name=self._qub_edit.text().strip(),
             result_dir=self._result_edit.text().strip(),
-            database_path=self._database_edit.text().strip(),
+            data_root=self._database_edit.text().strip(),
             root_dir=self._root,
         )

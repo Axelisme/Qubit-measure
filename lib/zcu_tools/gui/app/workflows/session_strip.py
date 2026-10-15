@@ -6,6 +6,7 @@ from qtpy.QtWidgets import QHBoxLayout, QLabel, QWidget
 from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.session.events import ContextSwitchedPayload
 from zcu_tools.gui.session.services.build import SessionServices
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 _CHIP_STYLE = (
     "QLabel { background: #eef2f7; border: 1px solid #c9d3e0;"
@@ -45,6 +46,7 @@ class WorkflowSessionStrip(QWidget):
         self._entry.setObjectName("workflow.session.entry")
         self._entry.setStyleSheet(_CHIP_STYLE)
         self._entry.setMaximumWidth(_CHIP_MAX_WIDTH)
+        make_label_selectable(self._entry)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._entry)

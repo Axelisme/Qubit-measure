@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, Literal, TypeAlias
+from pathlib import Path
+from typing import Annotated, ClassVar, Literal, TypeAlias
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     ParameterWriteback,
@@ -20,15 +19,9 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import scaled_path_seed
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
-from zcu_lab.v2._support.measure.seeds import res_freq_range
 from zcu_lab.v2._support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.freq.core import (
     FreqAnalyzeOptions,
@@ -36,6 +29,7 @@ from zcu_lab.v2.twotone.ro_optimize.freq.core import (
     FreqExp,
     FreqResult,
 )
+from zcu_lab.v2.twotone.ro_optimize.freq.form import make_form
 
 RoOptFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
@@ -63,79 +57,22 @@ class RoOptFreqAdapter(
 ):
     experiment_tag: ClassVar[str | None] = FreqExp.persistence_tag()
     exp_cls = FreqExp
-    ExpCfg_cls: ClassVar[Any] = FreqCfg
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "Readout frequency optimization: with the qubit prepared in g and "
-            "e (a pi pulse toggles it), sweeps the readout frequency and "
-            "measures the g/e signal-to-noise ratio (SNR), so you can pick the "
-            "readout frequency that best distinguishes the two states. Runs on "
-            "real hardware. One step of readout tuning; usually run after the "
-            "qubit and a pi pulse are calibrated."
-        ),
-        expects_md=(
-            "Reads from the parameter context (all optional): 'r_f' — resonator "
-            "frequency, the sweep centre (~4000–8000 MHz); 'rf_w' — linewidth, "
-            "setting the span as r_f ± 1.5*rf_w (~5–50 MHz; falls back to ±30 "
-            "MHz when absent); 'res_ch' / 'ro_ch' — drive / ADC channels; "
-            "'timeFly' — cable time-of-flight for the trigger offset; 'q_f' / "
-            "'qub_ch' — qubit frequency / drive channel for the g↔e pi pulse."
-        ),
-        expects_ml=(
-            "Needs a qubit-probe pulse module (typically a calibrated pi "
-            "pulse, e.g. 'pi_amp') and a pulse-readout module (e.g. "
-            "'readout_rf'); references a ModuleLibrary waveform named "
-            "'ro_waveform' when present. Optionally references a reset module."
-        ),
-        typical_writeback=(
-            "Proposes the SNR-maximizing readout frequency into parameter context "
-            "'best_ro_freq' (MHz). When a cfg snapshot with pulse readout is "
-            "available and 'best_ro_freq' / 'best_ro_gain' / "
-            "'best_ro_length' are known from this result plus parameter context, also "
-            "proposes ModuleLibrary 'readout_dpm'."
-        ),
-        recommended=(
-            "Analysis denoises the SNR curve before picking the peak. "
-            "Wavelet smoothing is the default; switch to Gaussian only when "
-            "you need to compare against the older sigma-based result. A "
-            "'smooth' strength around 2 tames noise without washing out the "
-            "feature."
-        ),
-    )
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[FreqCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
 
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("qub_pulse", role_id="pi_pulse")
-            .readout(
-                pulse_only=True,
-                locked={"pulse_cfg.freq": 0.0, "ro_cfg.ro_freq": 0.0},
-            )
-            .relax_delay(scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=30.5))
-            .sweep(
-                "freq",
-                label="Readout freq (MHz)",
-                default=res_freq_range(expts=301, span_factor=1.0),
-            )
-            .float("skew_penalty", label="Skew penalty", default=0.0, decimals=3)
-            .reps(1000)
-            .rounds(100)
-            .build()
-        )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: FreqCfg,
         *,
         context: RunContext,
     ) -> RoOptFreqRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         return RunRecord(cfg, FreqExp().run(cfg, context=context))
 
     def analyze(
@@ -160,7 +97,7 @@ class RoOptFreqAdapter(
         result = req.analyze_result
         items: list[WritebackItem] = [
             ParameterWriteback(
-                target_name="best_ro_freq",
+                target_name="$qubit.ext.best_ro_freq",
                 description="Optimal readout frequency (MHz)",
                 proposed_value=result.best_freq,
             ),

@@ -574,9 +574,6 @@ def test_answer_failure_keeps_confirmed_primary_write_and_all_previews(stage_cli
 
 def test_saves_and_delivers_primary_then_post_without_rerun(tmp_path):
     gui = StageGui()
-    modules = gui.publication["tree"]["children"]["modules"]["children"]
-    modules["reset"]["ref"] = "old_reset"
-    modules["init_pulse"]["ref"] = "old_init"
 
     def respond(method, params):
         reply = gui(method, params)
@@ -631,8 +628,8 @@ def test_saves_and_delivers_primary_then_post_without_rerun(tmp_path):
         assert data["writeback"]["items"][0]["id"] == "param-1"
         assert data["post_writeback"]["items"][0]["id"] == "classifier"
         assert len(reply.images) == 2
-        assert modules["reset"]["ref"] is None
-        assert modules["init_pulse"]["ref"] is None
+        assert gui.publication["input"]["modules"]["reset"] is None
+        assert gui.publication["input"]["modules"]["init_pulse"] is None
         stages = {
             "tab.run_start",
             "tab.save_data",

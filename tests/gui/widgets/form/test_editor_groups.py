@@ -1,6 +1,6 @@
 """Display groups fold a model level's grouped rows into one block per group.
 
-Group blocks and model sections fold by a double-click on their title.
+Group blocks and model sections fold by a click on their bold title.
 """
 
 from collections.abc import Callable, Iterator
@@ -9,25 +9,19 @@ from typing import Annotated, Literal
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from qtpy.QtCore import QPoint, Qt
+from qtpy.QtGui import QImage
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
-    QGroupBox,
     QLabel,
     QLineEdit,
-    QPushButton,
     QWidget,
 )
 from zcu_tools.gui.form import Display, FormEnv, FormInput, FormModel, FormState
 from zcu_tools.gui.widgets.form import FormEditor
 
-from tests.gui._user_input import (
-    key_click,
-    mouse_click,
-    mouse_double_click,
-    type_text,
-)
+from tests.gui._user_input import key_click, mouse_click, type_text
 
 type View = tuple[FormEditor[FormModel], FormState[FormModel]]
 type Build = Callable[[type[FormModel], dict[str, JsonValue] | None], View]
@@ -65,8 +59,8 @@ def child[W: QWidget](view: QWidget, kind: type[W], name: str) -> W:
 
 
 def direct[W: QWidget](parent: QWidget, kind: type[W]) -> list[W]:
-    """Children of kind whose parent widget is parent itself."""
-    return parent.findChildren(kind, "", Qt.FindChildOption.FindDirectChildrenOnly)
+    """Children of kind whose parent widget is parent itself, named or not."""
+    return [widget for widget in parent.children() if isinstance(widget, kind)]
 
 
 def group_fold(view: QWidget, name: str) -> QLabel:
@@ -84,8 +78,8 @@ def model_fold(view: QWidget, path: str) -> QLabel:
 
 
 def fold(title: QLabel) -> None:
-    """Double-click title, as a user folds or unfolds its section."""
-    mouse_double_click(title, title.rect().center())
+    """Click title, as a user folds or unfolds its section."""
+    mouse_click(title, title.rect().center())
 
 
 def expanded(title: QLabel) -> bool:
@@ -266,8 +260,8 @@ class FoldForm(FormModel):
 
 def switch_shape(view: QWidget, tag: str) -> None:
     """Select the shape branch tag, which rebuilds the editor's rows."""
-    selector = child(view, QComboBox, "form.input.shape.kind")
-    selector.setCurrentIndex(selector.findData(tag))
+    selector = child(view, QComboBox, "form.input.shape")
+    selector.setCurrentIndex(selector.findText(tag))
 
 
 def test_user_folds_survive_a_rebuild_of_the_same_editor(build: Build) -> None:
@@ -409,9 +403,10 @@ def test_typing_keeps_the_text_field_whatever_the_declaration_order(
     typed = field.text() + "55"
     key_click(field, Qt.Key.Key_End)
     type_text(field, "55")
+    key_click(field, Qt.Key.Key_Return)
     qapp.processEvents()
 
-    # Each key writes the state; a write that keeps the form's shape updates
+    # Enter writes the state; a write that keeps the form's shape updates
     # the row in place, so the field the user types into stays and keeps focus.
     assert child(view, QLineEdit, f"form.input.{path}") is field
     assert field.hasFocus()
@@ -427,11 +422,20 @@ class Extra(BaseModel):
     note: str = "n"
 
 
-class Tone(BaseModel):
-    """The inline model of a key-or-inline field."""
+class Muted(BaseModel):
+    """A tone branch without editable fields."""
 
     model_config = ConfigDict(extra="forbid")
 
+    kind: Literal["muted"] = "muted"
+
+
+class Tone(BaseModel):
+    """A tone branch whose option draws one field."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["tone"] = "tone"
     gain: float = 0.5
 
 
@@ -443,7 +447,9 @@ class ShapeForm(FormModel):
         default_factory=Alpha
     )
     extra: Extra | None = None
-    tone: str | Tone = "Q1.pulses.pi"
+    tone: Annotated[Muted | Tone, Field(discriminator="kind")] = Field(
+        default_factory=Muted
+    )
 
 
 def test_shape_changes_rebuild_rows_and_keep_folds_with_groups_first(
@@ -473,102 +479,265 @@ def test_shape_changes_rebuild_rows_and_keep_folds_with_groups_first(
 
     assert view.findChild(QLineEdit, "form.input.tone.gain") is None
     tone = child(view, QComboBox, "form.input.tone")
-    tone.setCurrentIndex(tone.findText("Inline"))
-    assert isinstance(state.input.data["tone"], dict)
+    tone.setCurrentIndex(tone.findText("tone"))
+    assert state.input.data["tone"] == {"kind": "tone", "gain": 0.5}
     assert view.findChild(QLineEdit, "form.input.tone.gain") is not None
     assert folds_kept()
 
 
-class SectionsForm(FormModel):
-    """One model section of every kind: nested, tagged, Inline and nullable."""
+class Packed(BaseModel):
+    """A branch whose only field besides its tag is an ordinary model."""
 
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["packed"] = "packed"
+    payload: Section = Field(default_factory=Section)
+
+
+class Bare(BaseModel):
+    """A branch with no fields besides its tag."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["bare"] = "bare"
+
+
+class SectionsForm(FormModel):
+    """Every foldable section beside plain rows.
+
+    Foldable: a nested model, a tagged branch, an option holding one ordinary
+    model, an enabled nullable model and a group. Plain: a number, a choice
+    and a disabled nullable model.
+    """
+
+    gain: float = 1.0
+    mode: Literal["fast", "slow"] = "fast"
     drive: Section = Field(default_factory=Section)
     shape: Annotated[Alpha | Beta, Field(discriminator="kind")] = Field(
         default_factory=Alpha
     )
-    tone: str | Tone = "Q1.pulses.pi"
+    wrapped: Annotated[Packed | Bare, Field(discriminator="kind")] = Field(
+        default_factory=Packed
+    )
     extra: Extra | None = None
+    off: Extra | None = None
+    delay: Annotated[float, Display(group="Advanced")] = 0.0
 
 
 SECTIONS: dict[str, JsonValue] = {
+    "gain": 1.0,
+    "mode": "fast",
     "drive": {"level": 1.0},
     "shape": {"kind": "alpha", "x": 1.0, "phase": 0.0},
-    "tone": {"gain": 0.5},
+    "wrapped": {"kind": "packed", "payload": {"level": 1.0}},
     "extra": {"note": "n"},
+    "off": None,
+    "delay": 0.0,
 }
 
 
-def test_every_model_section_folds_by_a_double_click_on_its_title(
-    build: Build,
-) -> None:
+def test_every_section_folds_by_a_click_on_its_bold_title(build: Build) -> None:
     view, state = build(SectionsForm, SECTIONS)
-    for path, label, inner in (
-        ("drive", "Drive", "drive.level"),
-        ("shape", "Shape", "shape.x"),
-        ("tone", "Tone", "tone.gain"),
-        ("extra", "Extra", "extra.note"),
+    for title, label, inner in (
+        (model_fold(view, "drive"), "Drive", "drive.level"),
+        (model_fold(view, "shape"), "Shape", "shape.x"),
+        (model_fold(view, "wrapped"), "Wrapped", "wrapped.payload.level"),
+        (model_fold(view, "extra"), "Extra", "extra.note"),
+        (group_fold(view, "Advanced"), "Advanced", "delay"),
     ):
-        title = model_fold(view, path)
-        assert title.text() == EXPANDED + label, path
-        assert shown(view, inner), path
+        start = expanded(title)
+        assert title.font().bold(), label
+        assert title.text() == (EXPANDED if start else FOLDED) + label
+        assert shown(view, inner) == start, inner
         fold(title)
-        assert title.text() == FOLDED + label, path
-        assert not shown(view, inner), path
+        assert title.text() == (FOLDED if start else EXPANDED) + label
+        assert shown(view, inner) != start, inner
         fold(title)
-        assert title.text() == EXPANDED + label, path
-        assert shown(view, inner), path
-    assert view.findChildren(QPushButton) == []
+        assert title.text() == (EXPANDED if start else FOLDED) + label
+        assert shown(view, inner) == start, inner
     assert state.input.data == SECTIONS
 
 
-def test_a_single_click_on_a_title_does_not_fold(
+def test_plain_rows_keep_a_normal_weight_name_without_a_mark(build: Build) -> None:
+    view, state = build(SectionsForm, SECTIONS)
+    for path in ("drive", "shape", "wrapped", "extra"):
+        title = model_fold(view, path)
+        assert title.font().bold() and expanded(title), path
+    plain = {"gain": "Gain", "mode": "Mode", "off": "Off", "drive.level": "Level"}
+    for path, text in plain.items():
+        assert not label_of(view, path, text).font().bold(), path
+    # A disabled nullable model has nothing to fold: its name ignores a click.
+    off = label_of(view, "off", "Off")
+    mouse_click(off, off.rect().center())
+    assert label_of(view, "off", "Off") is off
+    assert not child(view, QCheckBox, "form.enabled.off").isChecked()
+    assert state.input.data == SECTIONS
+
+
+def tab(start: QWidget, until: Callable[[QWidget], bool]) -> list[str]:
+    """Focus start, then press Tab on the focused widget until until(focused).
+
+    Stops when focus comes back to start, raising if until never held.
+    Returns the object name of each widget focus stopped on, start first.
+    """
+    start.setFocus(Qt.FocusReason.TabFocusReason)
+    assert start.hasFocus(), start.objectName()
+    stops = [start.objectName()]
+    for _ in range(100):
+        focused = QApplication.focusWidget()
+        assert focused is not None
+        key_click(focused, Qt.Key.Key_Tab)
+        now = QApplication.focusWidget()
+        assert now is not None
+        if until(now):
+            return stops
+        if now is start:
+            raise AssertionError(f"Tab came back to the start: {stops}")
+        stops.append(now.objectName())
+    raise AssertionError(f"Tab did not come back to the start: {stops}")
+
+
+def tab_to(view: QWidget, name: str) -> QLabel:
+    """Press Tab from the first input until the fold title name has focus."""
+    title = child(view, QLabel, name)
+    tab(child(view, QWidget, "form.input.gain"), lambda now: now is title)
+    return title
+
+
+def press(key: Qt.Key, text: str = "") -> None:
+    """Press and release key on the widget that has keyboard focus."""
+    focused = QApplication.focusWidget()
+    assert focused is not None
+    key_click(focused, key, text=text)
+
+
+SECTION_TITLES = (
+    ("form.fold.drive", "drive.level"),
+    ("form.fold.shape", "shape.x"),
+    ("form.fold.wrapped", "wrapped.payload.level"),
+    ("form.fold.extra", "extra.note"),
+    ("form.fold.group.Advanced", "delay"),
+)
+
+
+def test_tab_stops_on_fold_titles_and_space_or_enter_folds_them(
     build: Build, qapp: QApplication
 ) -> None:
-    view, state = build(FoldForm, None)
-    before = dict(state.input.data)
+    view, state = build(SectionsForm, SECTIONS)
+    view.resize(600, 700)
     view.show()
     qapp.processEvents()
-    for title, inner in (
-        (group_fold(view, "Advanced"), "delay"),
-        (model_fold(view, "drive"), "drive.level"),
-    ):
-        was_shown = shown(view, inner)
-        mouse_click(title, title.rect().center())
-        qapp.processEvents()
-        assert shown(view, inner) == was_shown, inner
-        assert expanded(title) == was_shown, inner
-        fold(title)
-        qapp.processEvents()
-        assert shown(view, inner) != was_shown, inner
-        assert expanded(title) != was_shown, inner
-    assert view.findChildren(QPushButton) == []
-    assert state.input.data == before
+    start = child(view, QWidget, "form.input.gain")
+    stops = tab(start, lambda now: now is start)
+    for name, _inner in SECTION_TITLES:
+        assert name in stops, (name, stops)
+    for name, inner in SECTION_TITLES:
+        title = tab_to(view, name)
+        start_expanded = expanded(title)
+        for key, text in (
+            (Qt.Key.Key_Space, " "),
+            (Qt.Key.Key_Return, "\r"),
+            (Qt.Key.Key_Enter, "\r"),
+            (Qt.Key.Key_Space, " "),
+        ):
+            before = expanded(title)
+            press(key, text)
+            assert expanded(title) != before, (name, key)
+            assert shown(view, inner) != before, (name, key)
+        assert expanded(title) == start_expanded, name
+        # No other key folds a title.
+        for key in (Qt.Key.Key_Right, Qt.Key.Key_Left, Qt.Key.Key_Down):
+            press(key)
+            assert expanded(title) == start_expanded, (name, key)
+    assert state.input.data == SECTIONS
+    # Enter in a text field inside a section commits the text, not a fold.
+    level = child(view, QLineEdit, "form.input.drive.level")
+    level.setFocus(Qt.FocusReason.TabFocusReason)
+    key_click(level, Qt.Key.Key_End)
+    type_text(level, "5")
+    key_click(level, Qt.Key.Key_Return)
+    assert state.input.data["drive"] == {"level": 1.05}
+    assert expanded(model_fold(view, "drive"))
+    assert shown(view, "drive.level")
 
 
-class OptionalForm(FormModel):
-    """A text row above one nullable section."""
+def edges_changed(before: QImage, after: QImage) -> list[str]:
+    """The sides of two same-size images whose outermost pixel line differs."""
+    assert before.size() == after.size()
+    width, height = before.width(), before.height()
+    sides = {
+        "top": [(x, 0) for x in range(width)],
+        "bottom": [(x, height - 1) for x in range(width)],
+        "left": [(0, y) for y in range(height)],
+        "right": [(width - 1, y) for y in range(height)],
+    }
+    return [
+        side
+        for side, points in sides.items()
+        if any(before.pixel(x, y) != after.pixel(x, y) for x, y in points)
+    ]
 
-    gain: float = 1.0
-    extra: Extra | None = None
 
-
-def test_a_disabled_nullable_section_draws_only_its_title_and_enabled_box(
-    build: Build,
+def test_a_fold_title_reached_by_tab_shows_an_outline(
+    build: Build, qapp: QApplication
 ) -> None:
-    view, state = build(OptionalForm, None)
-    row = row_of(view, "extra")
-    assert child(view, QCheckBox, "form.enabled.extra").parentWidget() is row
-    # Nothing to fold: a plain title, no fold mark and no empty content box.
-    assert [label.text() for label in direct(row, QLabel) if label.text()] == ["Extra"]
-    assert view.findChildren(QLabel, "form.fold.extra") == []
-    assert view.findChildren(QGroupBox) == []
+    view, _state = build(SectionsForm, SECTIONS)
+    view.resize(600, 700)
+    view.show()
+    qapp.processEvents()
+    for name, _inner in SECTION_TITLES:
+        title = child(view, QLabel, name)
+        unfocused = title.grab().toImage()
+        tab_to(view, name)
+        focused = title.grab().toImage()
+        # A frame around the title: every side of its rendering changes.
+        assert edges_changed(unfocused, focused) == [
+            "top",
+            "bottom",
+            "left",
+            "right",
+        ], name
+        press(Qt.Key.Key_Tab)
+        assert not title.hasFocus(), name
+        assert title.grab().toImage() == unfocused, name
 
-    child(view, QCheckBox, "form.enabled.extra").setChecked(True)
-    assert state.input.data["extra"] is not None
-    assert model_fold(view, "extra").text() == EXPANDED + "Extra"
-    assert shown(view, "extra.note")
 
-    child(view, QCheckBox, "form.enabled.extra").setChecked(False)
-    assert state.input.data["extra"] is None
-    assert view.findChildren(QLabel, "form.fold.extra") == []
-    assert view.findChildren(QGroupBox) == []
+class Span(BaseModel):
+    """A frequency span with two leaves and no unit of its own."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    start: float = 4000.0
+    stop: float = 4100.0
+
+
+class SweepForm(FormModel):
+    """One model section whose Display carries a unit."""
+
+    freq: Annotated[Span, Display(label="Freq", unit="MHz")] = Field(
+        default_factory=Span
+    )
+
+
+def test_a_section_unit_sits_right_after_its_name(
+    build: Build, qapp: QApplication
+) -> None:
+    view, _state = build(SweepForm, None)
+    view.resize(600, view.sizeHint().height())
+    view.show()
+    qapp.processEvents()
+    row = row_of(view, "freq")
+    (name,) = [label for label in direct(row, QLabel) if label.text().endswith("Freq")]
+    unit = label_of(view, "freq", "MHz")
+    name_right = name.geometry().right()
+    unit_left = unit.geometry().left()
+    assert unit_left > name_right
+    # Nothing of the row's header sits between the name and its unit.
+    between = [
+        type(widget).__name__
+        for widget in direct(row, QWidget)
+        if widget.isVisible()
+        and widget.geometry().left() > name_right
+        and widget.geometry().right() < unit_left
+    ]
+    assert between == []

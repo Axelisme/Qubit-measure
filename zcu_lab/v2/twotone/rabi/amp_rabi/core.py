@@ -3,12 +3,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     AxesSpec,
     Axis,
@@ -58,14 +58,14 @@ def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class AmpRabiSweepCfg(ConfigBase):
-    gain: SweepCfg
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
 
 
 class AmpRabiModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    init_pulse: PulseCfg | None = None
-    qub_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init Pulse")] = None
+    qub_pulse: Annotated[PulseCfg, FieldMeta(label="Rabi Pulse")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class AmpRabiCfg(ProgramV2Cfg, ExpCfgModel):

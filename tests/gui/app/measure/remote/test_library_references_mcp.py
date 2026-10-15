@@ -1,29 +1,62 @@
-"""Native library mutations projected through the live MCP socket."""
-
-from __future__ import annotations
+"""Native library mutations leave tab Form sources fixed until Reset."""
 
 import pytest
-from zcu_tools.cfg_model import ModuleCfgFactory, WaveformCfgFactory
+from zcu_tools.cfg_model import (
+    ModuleCfgFactory,
+    PulseCfg,
+    PulseSpec,
+    Range,
+    Slot,
+    WaveformCfgFactory,
+)
 from zcu_tools.gui.app.measure.cfg_schemas import (
     module_cfg_to_value,
     waveform_cfg_to_value,
 )
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    ReferenceSpec,
-    ReferenceValue,
-)
-from zcu_tools.gui.cfg.resource import CfgEdit
+from zcu_tools.gui.cfg import CfgSchema
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.context_types import LibraryChange
+
+from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
 
 from ._helpers import Fixture, mcp_client
 
 
+class PulseReferenceCfg(SampleCfg):
+    linked: PulseCfg | None = None
+    inline: PulseCfg | None = None
+
+
+class PulseReferenceAdapter(SampleAdapter):
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[PulseReferenceCfg]:
+        del ctx
+        return Form(
+            PulseReferenceCfg,
+            {
+                "sweep": Range.between(1.0, 2.0, expts=3),
+                "linked": Slot("Q1.pulses.seed"),
+                "inline": Slot("Q1.pulses.seed", copy=True, set={"gain": 0.75}),
+            },
+        )
+
+
+class WaveformReferenceAdapter(SampleAdapter):
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[PulseReferenceCfg]:
+        del ctx
+        return Form(
+            PulseReferenceCfg,
+            {
+                "sweep": Range.between(1.0, 2.0, expts=3),
+                "linked": Slot("Q1.pulses.carrier", copy=True),
+                "inline": Slot("Q1.pulses.carrier", copy=True),
+            },
+        )
+
+
 @pytest.fixture(params=["module", "waveform"])
 def reference_library(request):
-    """Real program schemas for ref and explicit inline references."""
     kind = request.param
     if kind == "module":
         cfg = ModuleCfgFactory.from_raw(
@@ -33,64 +66,69 @@ def reference_library(request):
                 "nqz": 1,
                 "freq": 100.0,
                 "gain": 0.5,
-                "phase": 0.0,
-                "pre_delay": 0.0,
-                "post_delay": 0.0,
                 "waveform": {"style": "const", "length": 0.1},
             }
         )
         spec, value = module_cfg_to_value(cfg)
-        field, path = "gain", "Q1.pulses.seed"
-    else:
-        cfg = WaveformCfgFactory.from_raw({"style": "const", "length": 0.1})
-        spec, value = waveform_cfg_to_value(cfg)
-        field, path = "length", "Q1.waveforms.seed"
-    return kind, spec, value, field, path
+        return kind, spec, value, "gain", "Q1.pulses.seed", PulseReferenceAdapter
+    cfg = WaveformCfgFactory.from_raw({"style": "const", "length": 0.1})
+    spec, value = waveform_cfg_to_value(cfg)
+    return kind, spec, value, "length", "Q1.waveforms.seed", WaveformReferenceAdapter
 
 
 @pytest.mark.parametrize("action", ["rename", "del"])
 def test_library_mutation_refreshes_ref_and_explicit_inline_tab_cfg(
     qapp,
     tmp_path,
-    monkeypatch,
     reference_library,
     action,
     point_models,
     point_registry_guard,
 ):
-    kind, spec, value, field, path = reference_library
+    kind, spec, value, field, path, adapter_type = reference_library
     fx = Fixture(project_root=str(tmp_path), active_label="ctx001")
     fx.ctrl.context_control.add_component("Q1", "fake/drive/a", {})
     fx.ctrl.apply_library_change(
         fx.ctrl.read_context(),
         LibraryChange(kind, "put", path, schema=CfgSchema(spec, value)),
     )
-    schema = CfgSchema(
-        CfgSectionSpec(
-            fields={name: ReferenceSpec(kind, [spec]) for name in ("linked", "inline")}
-        ),
-        CfgSectionValue(
-            {name: ReferenceValue(path, value) for name in ("linked", "inline")}
-        ),
-    )
-    from tests.gui.app.measure._synthetic import SampleAdapter
-
-    tab_id = "references"
-    cfg = fx.prepare_tab(tab_id, SampleAdapter(), schema)
-    cfg.convert_reference_to_inline(("inline",))
-    cfg.edit((CfgEdit(("inline", field), 0.75),))
+    if kind == "waveform":
+        fx.ctrl.context_control.set_module(
+            fx.ctrl.read_context().target,
+            "Q1.pulses.carrier",
+            PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.5, waveform=path),
+        )
+    fx.registry.register("references", adapter_type)
+    tab_id = fx.ctrl.new_tab("references")
+    owner = fx.ctrl.cfg_resources.lookup(tab_id)
+    if kind == "waveform":
+        owner.write(
+            {
+                ("inline", "module", "waveform"): {
+                    "kind": "inline",
+                    "module": {"style": "const", "length": 0.75},
+                }
+            }
+        )
     fx.start()
-    monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
     bridge, invoke = mcp_client(fx.service.port, tmp_path)
     try:
         invoke("connect", {"port": fx.service.port})
         before = invoke(
             "rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}}
-        )["tree"]
-        assert before["children"]["linked"]["valid"] is True
-        assert before["children"]["linked"]["ref"] == path
-        assert before["children"]["linked"]["mode"] == "ref"
-        assert before["children"]["inline"]["mode"] == "inline"
+        )
+        linked = before["input"]["linked"]
+        if kind == "module":
+            assert linked == {"kind": "ref", "name": path}
+        else:
+            assert linked["module"]["waveform"] == {"kind": "ref", "name": path}
+        inline_path = (
+            ("inline", "module", field)
+            if kind == "module"
+            else ("inline", "module", "waveform", "module", field)
+        )
+        leaves = {tuple(item["path"]): item["value"] for item in before["values"]}
+        assert leaves[inline_path] == 0.75
         fx.ctrl.apply_library_change(
             fx.ctrl.read_context(),
             LibraryChange(
@@ -102,28 +140,36 @@ def test_library_mutation_refreshes_ref_and_explicit_inline_tab_cfg(
         )
         after = invoke(
             "rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}}
-        )["tree"]
-        linked = after["children"]["linked"]
-        assert linked["ref"] == path
-        assert linked["valid"] is False
-        assert linked["error"] is not None
-        inline = after["children"]["inline"]
-        assert inline["mode"] == "inline"
-        assert inline["valid"] is True
-        assert inline["children"][field]["input"]["resolved"] == 0.75
-        published = cfg.snapshot_inputs().value.fields
-        published_linked, published_inline = published["linked"], published["inline"]
-        assert isinstance(published_linked, ReferenceValue)
-        assert isinstance(published_inline, ReferenceValue)
-        assert published_linked.chosen_key == path
-        assert published_inline.chosen_key == f"<Custom:{spec.label}>"
-        published_inline.value.fields.clear()
+        )
+        assert after == before
+        captured = owner.env.library
+        if captured is None:
+            raise TypeError("Expected captured library")
+        keys = captured.module_keys() if kind == "module" else captured.waveform_keys()
+        assert path in keys
+        current = fx.ctrl.read_context().library
+        current_keys = (
+            current.module_keys() if kind == "module" else current.waveform_keys()
+        )
+        assert current_keys == (
+            (path.replace("seed", "moved"),) if action == "rename" else ()
+        )
+        reset = invoke(
+            "rpc_call", {"method": "tab.reset_cfg", "params": {"tab_id": tab_id}}
+        )
+        assert reset != before
+        captured = owner.env.library
+        if captured is None:
+            raise TypeError("Expected Reset library")
+        reset_keys = (
+            captured.module_keys() if kind == "module" else captured.waveform_keys()
+        )
+        assert reset_keys == current_keys
+        after["input"]["inline"] = None
         again = invoke(
             "rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}}
-        )["tree"]
-        assert (
-            again["children"]["inline"]["children"][field]["input"]["resolved"] == 0.75
         )
+        assert again == reset
     finally:
         bridge.disconnect()
         fx.stop()

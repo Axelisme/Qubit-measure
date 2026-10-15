@@ -112,6 +112,16 @@ _CACHE_FLOAT_DECIMALS = 12
 
 @dataclass(frozen=True, slots=True)
 class PurcellEffectParams:
+    """Positive, finite GHz inputs for the two-level Purcell equilibrium model.
+
+    kappa_ghz is the resonator linewidth kappa_rate/(2*pi), not a decay rate;
+    0.001 means 1 MHz and the kernel uses 2*pi*kappa_ghz in ns^-1.
+    bare_rf is the bare resonator frequency; g is its charge-mode coupling.
+    The kernel thermally averages each qubit direction over resonator photons
+    and returns equilibrium T1=1/(Gamma_eg+Gamma_ge) for 0↔1 only.
+    It excludes leakage to higher qubit states.
+    """
+
     kappa_ghz: float
     bare_rf: float
     g: float
@@ -478,6 +488,13 @@ def calculate_purcell_t1_limit(
     *,
     Temp: float,
 ) -> NDArray[np.float64]:
+    """Return cached 0↔1 Purcell equilibrium T1 in ns on normalized fluxs.
+
+    context supplies fluxonium energies in GHz; purcell supplies GHz resonator
+    inputs. Temp must be positive and finite in K, otherwise raise ValueError.
+    The result has the same shape and order as fluxs. Its reciprocal is the
+    Gamma_eg+Gamma_ge contribution used by fitting and channel curves.
+    """
     if not np.isfinite(Temp) or Temp <= 0.0:
         raise ValueError("Temp must be positive and finite")
     return np.asarray(

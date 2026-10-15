@@ -15,7 +15,6 @@ from zcu_tools.gui.form import (
     FormPath,
     FormState,
     LinRange,
-    RangeInput,
 )
 
 from tests.gui._form_context import captured_ext_env
@@ -396,14 +395,14 @@ def test_schema_recomputes_dynamic_choices_for_each_request() -> None:
 
 def test_public_range_alias_projects_choices_without_reused_field_pollution() -> None:
     class RangeAliasForm(FormModel):
-        """Use the exported alias rather than an equivalent inline union."""
+        """Reuse the exported linear range model at two independent paths."""
 
-        restricted: RangeInput = Field(default_factory=LinRange)
-        unrestricted: RangeInput = Field(default_factory=LinRange)
+        restricted: LinRange = Field(default_factory=LinRange)
+        unrestricted: LinRange = Field(default_factory=LinRange)
 
         @classmethod
         def choices(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
-            """Restrict n at one occurrence of the public alias."""
+            """Restrict n at one occurrence of the public range model."""
             return {("restricted", "n"): (2,)}
 
     env = FormEnv()
@@ -440,9 +439,9 @@ def test_public_range_alias_projects_choices_without_reused_field_pollution() ->
 
 def test_nullable_public_range_alias_projects_choices_and_null() -> None:
     class NullableAliasForm(FormModel):
-        """Nullable exported aliases retain the same nested input contract."""
+        """Nullable linear ranges retain their nested input contract."""
 
-        fluxes: RangeInput | None = None
+        fluxes: LinRange | None = None
 
         @classmethod
         def choices(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:

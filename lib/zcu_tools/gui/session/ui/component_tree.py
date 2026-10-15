@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 import yaml
@@ -40,9 +40,9 @@ from zcu_tools.gui.session.ui.component_editing import (
     set_red,
     show_error,
 )
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.entry import (
     FieldValueKind,
-    Provenance,
     component_field_specs,
     document_fields,
     document_meta,
@@ -51,13 +51,12 @@ from zcu_tools.resources.entry import (
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.context_control import ContextControlPort
-    from zcu_tools.gui.session.context_types import EntryInfo
     from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
 
 
 logger = logging.getLogger(__name__)
 
-_FIELD, _VALUE, _UNIT, _SOURCE = range(4)
+_FIELD, _VALUE, _UNIT, _METADATA = range(4)
 _UNSET_TEXT = "(unset)"
 
 # A row key is the component name followed by the Field-column texts below it.
@@ -90,7 +89,9 @@ class ComponentTreeWidget(QWidget):
     """Inspect and edit registered components through ContextControlPort.
 
     The widget owns presentation only. The tree has Field, Value, Unit and
-    Source columns. Each component row shows its kind; its children follow
+    Metadata columns. Metadata shows a row's opaque caller mapping as one-line
+    flow YAML with a block YAML tooltip on each field row, including group
+    and unset rows, blank when absent or empty; no key is interpreted. Each component row shows its kind; its children follow
     component_field_specs(kind), so unset fields stay visible as an italic
     gray "(unset)" and nested models expand into child rows. Document data
     the schema does not declare follows the declared rows. Double-click or F2
@@ -137,6 +138,7 @@ class ComponentTreeWidget(QWidget):
         self._tree = self._build_tree()
         layout.addWidget(self._tree, stretch=1)
         self._error = QLabel()
+        make_label_selectable(self._error)
         self._error.setObjectName("component_error")
         self._error.setWordWrap(True)
         set_red(self._error, red=True)
@@ -178,15 +180,14 @@ class ComponentTreeWidget(QWidget):
         self._add_btn.setEnabled(not self._read_only)
         items: dict[_RowKey, QTreeWidgetItem] = {}
         default_expanded: dict[_RowKey, bool] = {}
-        entry_info = self._control.get_entry_info()
         for name, component in document.components.items():
             root = QTreeWidgetItem(self._tree, [name, component.kind, "", ""])
             items[(name,)] = root
             default_expanded[(name,)] = True
             self._render_declared(
-                document, name, component.kind, items, default_expanded, entry_info
+                document, name, component.kind, items, default_expanded
             )
-            self._render_undeclared(document, name, component.kind, items, entry_info)
+            self._render_undeclared(document, name, component.kind, items)
         for key, item in items.items():
             if item.childCount():
                 item.setExpanded(
@@ -275,7 +276,7 @@ class ComponentTreeWidget(QWidget):
     def _build_tree(self) -> QTreeWidget:
         tree = QTreeWidget()
         tree.setObjectName("component_tree")
-        tree.setHeaderLabels(["Field", "Value", "Unit", "Source"])
+        tree.setHeaderLabels(["Field", "Value", "Unit", "Metadata"])
         # Editing opens only on Value cells of editable rows, never on names.
         tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         tree.setItemDelegateForColumn(
@@ -292,7 +293,7 @@ class ComponentTreeWidget(QWidget):
         header.setStretchLastSection(False)
         header.setSectionResizeMode(_VALUE, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(_UNIT, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(_SOURCE, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(_METADATA, QHeaderView.ResizeMode.ResizeToContents)
         return tree
 
     def _render_declared(
@@ -302,7 +303,6 @@ class ComponentTreeWidget(QWidget):
         kind: str,
         items: dict[_RowKey, QTreeWidgetItem],
         default_expanded: dict[_RowKey, bool],
-        entry_info: EntryInfo | None,
     ) -> None:
         """Add one row per declared field below the component's root row."""
         component_value = document_value(document, name)
@@ -315,6 +315,7 @@ class ComponentTreeWidget(QWidget):
             items[key] = item
             path = ".".join(key)
             item.setToolTip(_FIELD, field_tooltip(spec, path))
+            self._show_metadata(item, document_meta(document, path))
             if spec.value_kind == "group":
                 default_expanded[key] = present
                 if not present:
@@ -322,7 +323,6 @@ class ComponentTreeWidget(QWidget):
                 continue
             if present:
                 item.setText(_VALUE, _display(value))
-                self._show_source(item, document_meta(document, path), entry_info)
             else:
                 self._mark_unset(item)
             if _addressable(key):
@@ -345,7 +345,6 @@ class ComponentTreeWidget(QWidget):
         name: str,
         kind: str,
         items: dict[_RowKey, QTreeWidgetItem],
-        entry_info: EntryInfo | None,
     ) -> None:
         """Keep document data that the kind's schema does not declare visible."""
         specs = component_field_specs(kind)
@@ -373,7 +372,7 @@ class ComponentTreeWidget(QWidget):
             )
             items[(name, *relative[:depth], label)] = item
             item.setToolTip(_FIELD, field.editable_path or ".".join(field.segments))
-            self._show_source(item, field.provenance, entry_info)
+            self._show_metadata(item, field.metadata)
             if field.editable_path is not None:
                 self._add_target(
                     item,
@@ -404,15 +403,20 @@ class ComponentTreeWidget(QWidget):
         item.setForeground(_VALUE, QBrush(gray))
 
     @staticmethod
-    def _show_source(
-        item: QTreeWidgetItem,
-        provenance: Provenance | None,
-        entry_info: EntryInfo | None,
-    ) -> None:
-        if provenance is None:
+    def _show_metadata(item: QTreeWidgetItem, metadata: YamlMap | None) -> None:
+        if not metadata:
             return
-        item.setText(_SOURCE, _source_summary(provenance, entry_info))
-        item.setToolTip(_SOURCE, _source_details(provenance))
+        # Caller key order is kept; one line avoids PyYAML's default wrapping.
+        summary = yaml.dump(
+            metadata,
+            Dumper=_OneLineDumper,
+            default_flow_style=True,
+            sort_keys=False,
+            width=sys.maxsize,
+        )
+        item.setText(_METADATA, summary.strip())
+        details = yaml.safe_dump(metadata, default_flow_style=False, sort_keys=False)
+        item.setToolTip(_METADATA, details.strip())
 
     # ------------------------------------------------------------------
     # In-place editing
@@ -520,6 +524,19 @@ class _ValueDelegate(QStyledItemDelegate):
         self.closeEditor.emit(combo, QAbstractItemDelegate.EndEditHint.NoHint)
 
 
+class _OneLineDumper(yaml.SafeDumper):
+    """SafeDumper whose strings with line breaks use escaped double quotes."""
+
+
+def _represent_str(dumper: yaml.SafeDumper, data: str) -> yaml.ScalarNode:
+    # Plain and single-quoted scalars write a newline as a real line break.
+    style = '"' if "\n" in data else None
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style=style)
+
+
+_OneLineDumper.add_representer(str, _represent_str)
+
+
 def _row_key(item: QTreeWidgetItem) -> _RowKey:
     texts: list[str] = []
     node: QTreeWidgetItem | None = item
@@ -568,46 +585,3 @@ def _display(value: YamlValue) -> str:
     if isinstance(value, str):
         return value
     return yaml.safe_dump(value, default_flow_style=True).removesuffix("...\n").strip()
-
-
-def _source_summary(provenance: Provenance, entry_info: EntryInfo | None) -> str:
-    cloned = provenance.cloned_from
-    if cloned is not None:
-        same_entry = (
-            entry_info is not None and cloned["entry_id"] == entry_info.entry_id
-        )
-        origin = (
-            entry_info.name
-            if same_entry and entry_info is not None
-            else cloned["entry_id"][:8]
-        )
-        return f"cloned · {origin}/{cloned['point']}"
-    if provenance.source == "manual":
-        return f"manual · {_short_time(provenance.at)}"
-    if provenance.run_id is not None:
-        return f"run {provenance.run_id}"
-    return f"event {provenance.source}"
-
-
-def _source_details(provenance: Provenance) -> str:
-    lines = [f"source: {provenance.source}", f"at: {provenance.at}"]
-    if provenance.kind is not None:
-        lines.append(f"kind: {provenance.kind}")
-    if provenance.run_id is not None:
-        lines.append(f"run_id: {provenance.run_id}")
-    if provenance.stderr is not None:
-        lines.append(f"stderr: {provenance.stderr}")
-    if provenance.cloned_from is not None:
-        cloned = provenance.cloned_from
-        lines.append(f"cloned from: {cloned['entry_id']}/{cloned['point']}")
-    return "\n".join(lines)
-
-
-def _short_time(at: str) -> str:
-    try:
-        moment = datetime.fromisoformat(at)
-    except ValueError:
-        return (
-            at  # Sources keep caller timestamps verbatim; show an unparsable one as is.
-        )
-    return moment.astimezone().strftime("%m-%d %H:%M")

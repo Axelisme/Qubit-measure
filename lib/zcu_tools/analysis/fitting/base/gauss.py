@@ -162,12 +162,15 @@ def fit_dual_gauss_gmm(
     Params:
     -----------
     signals:
-        1d / 2d real array
+        1d / 2d real array, with one sample per row and one feature per column.
     Return:
     -----------
     params:
         [yscale1, x_c1, sigma1, yscale2, x_c2, sigma2]
-        note that x_c1 < x_c2 and is the first dim of gauss center
+        x_c1 < x_c2; centers use the first feature. Each yscale is the
+        component's estimated sample count (N * mixture weight), not a Gaussian
+        curve's peak height. Overlapping clusters or small samples can make
+        these estimated counts unreliable. Sigma is the spherical width.
     """
     from sklearn.mixture import GaussianMixture
 
@@ -188,7 +191,7 @@ def fit_dual_gauss_gmm(
     assert covariances is not None
 
     yscale1 = signals.shape[0] * weights[0]
-    yscale2 = signals.shape[1] * weights[1]
+    yscale2 = signals.shape[0] * weights[1]
     x_c1, x_c2 = means[0][0], means[1][0]
     sigma1 = np.sqrt(covariances[0])
     sigma2 = np.sqrt(covariances[1])

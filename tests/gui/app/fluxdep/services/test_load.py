@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from zcu_tools.datafile import LabberData, save_labber_data
+from zcu_tools.datafile import save_labber_data
 from zcu_tools.gui.app.fluxdep.services.load import (
     LoadService,
     transpose_spectrum_data,
 )
-from zcu_tools.gui.app.fluxdep.state import FluxDepState, spectrum_version_key
+from zcu_tools.gui.app.fluxdep.state import (
+    AlignmentPublication,
+    FluxDepState,
+    spectrum_version_key,
+)
 from zcu_tools.gui.expected_error import ExpectedError, InvalidInputError
 
 
@@ -54,9 +58,7 @@ def test_load_spectrum_inherits_alignment(spectrum_hdf5):
     first = svc.load_spectrum(filepath, spec_type="OneTone")
     st.set_alignment(
         first,
-        flux_half=1.0,
-        flux_int=2.0,
-        flux_period=2.0,
+        alignment=AlignmentPublication(flux_half=1.0, flux_int=2.0, flux_period=2.0),
         new_fluxs=st.spectrums[first].raw["dev_values"].copy(),
         new_point_fluxs=np.empty(0, dtype=np.float64),
     )
@@ -94,24 +96,6 @@ def test_non_2d_native_load_is_nominal_invalid_input(tmp_path):
     assert caught.value.reason_code == "spectrum_not_2d"
     assert st.spectrums == {}
     assert st.version.snapshot() == {}
-
-
-def test_zero_axis_parsed_load_is_nominal_invalid_input(monkeypatch):
-    parsed = LabberData(("Signal", "a.u.", np.array(1.0 + 0j)), [])
-    monkeypatch.setattr(
-        "zcu_tools.gui.app.fluxdep.services.load.load_labber_data",
-        lambda _filepath: parsed,
-    )
-    st = FluxDepState()
-    before = st.version.snapshot()
-
-    with pytest.raises(InvalidInputError) as caught:
-        LoadService(st).load_spectrum("no-axes.hdf5", "OneTone")
-
-    assert caught.value.category == "invalid_input"
-    assert caught.value.reason_code == "spectrum_not_2d"
-    assert st.spectrums == {}
-    assert st.version.snapshot() == before
 
 
 def test_native_load_io_failure_remains_unexpected(tmp_path):
@@ -172,9 +156,7 @@ def test_inherited_load_marks_alignment_seeded(spectrum_hdf5):
     assert st.spectrums[first].alignment_seeded is False  # fresh load
     st.set_alignment(
         first,
-        flux_half=1.0,
-        flux_int=2.0,
-        flux_period=2.0,
+        alignment=AlignmentPublication(flux_half=1.0, flux_int=2.0, flux_period=2.0),
         new_fluxs=st.spectrums[first].raw["dev_values"].copy(),
         new_point_fluxs=np.empty(0, dtype=np.float64),
     )

@@ -1,6 +1,6 @@
 # gui/app/workflows — Workflow host
 
-**Last updated:** 2026-10-13，session 列只留 Entry chip；Devices… 開共用 DeviceDialog，run 進行中唯讀；stopping 時 live tuning 唯讀但可讀、停用 Apply 與 Discard；run 進行中 Plan 與 Start Tunables 表單唯讀但可讀（不再停用面板）；run 進行中停用 Prepare forms 與 Reload source；terminal 後保存可編輯的 Start knobs；run view 在 terminal 時重設 Start knobs
+**Last updated:** 2026-10-15，session 列只留 Entry chip（文字可選取）；Devices… 開共用 DeviceDialog，run 進行中唯讀；stopping 時 live tuning 唯讀但可讀、停用 Apply 與 Discard；options／tagged input 與 memento 版本；run 進行中 Plan 與 Start Tunables 表單唯讀但可讀（不再停用面板）；run 進行中停用 Prepare forms 與 Reload source；terminal 後保存可編輯的 Start knobs；run view 在 terminal 時重設 Start knobs
 
 ## 註冊與組裝
 
@@ -27,6 +27,8 @@
 Pause 保留 operation、RUN lease、progress、plan、input capture 與 Plots。Resume 重用同一 token 和 settlement，不重新 init 或 capture。Terminal delivery 先清理原生 run 與 admission，再通知 view；view 錯誤只記錄，不改 native outcome。SessionDevices 使用 shared public drivers，每次 env.run callback 前讀 connected device evidence。Driver 擁有硬體限制、單位與 setup。
 
 ## Input 與 reload
+
+Wire 4 使用明確 `x-form-options` 的 value／fields／commands 與 tagged ref／inline input。Memento 2 保存這份 input，舊版沿既有 codec／caretaker 拒絕，不 migration 或雙讀。`defaults(env)` 只建 fresh 初值，沒有 previous；相容 saved leaves 的 overlay 仍由 host 完成。
 
 `WorkflowForms` 保留各名稱的 parsed RAM drafts，建好候選 panels 後才發布。Prepare 用新 capture 重建 defaults。`SingleFileCaretaker` 保存 parsed FormInput，包括 expression，不保存 renderer-local 未解析文字、native run 或硬體。從 Start 到 terminal delivery，保存的 knobs 來自 run 的 binding，包括還沒 Apply 的 parsed 編輯；terminal 之後來自 Start knobs。`--clean` 只略過啟動讀取，正常 close 仍保存。啟動時 session 是 EMPTY、沒有 captured library，所以存檔裡的 module ref 名稱會被丟棄，其他相容欄位照常還原，訊息列逐一顯示 `Discarded plan: …` 或 `Discarded knobs: …`。
 

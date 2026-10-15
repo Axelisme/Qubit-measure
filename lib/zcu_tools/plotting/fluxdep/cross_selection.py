@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
-from matplotlib.patches import Ellipse
 
 from zcu_tools.analysis.fluxdep.cross_selection import (
     CrossSelectionInputs,
@@ -13,13 +14,25 @@ from zcu_tools.analysis.fluxdep.cross_selection import (
     CrossSelectionView,
     project_cross_selection,
 )
+from zcu_tools.analysis.fluxdep.stroke import BrushPoint
+
+from .brush import BrushBand
+from .palette import (
+    ADDED_COLOR,
+    ADDED_MARKER,
+    DROPPED_COLOR,
+    KEPT_COLOR,
+    REMOVED_COLOR,
+    REMOVED_MARKER,
+)
 
 
 class CrossSelectionPlot:
     """Reusable artists on a caller-owned Figure, shared by Qt and native output.
 
     Render backgrounds at sample centers (descending/nonuniform allowed),
-    calibrated flux/GHz points, ticks, grid and normalized-radius stroke outlines.
+    calibrated flux/GHz points, ticks, grid and the band a normalized-radius
+    brush sweeps along a stroke. Point colours come from ``palette``.
     No numerical preprocessing, Session mutation, pyplot or canvas adoption.
     """
 
@@ -29,6 +42,7 @@ class CrossSelectionPlot:
         inputs supplies read-only cloud/backgrounds and joint bounds.
         Caller owns Figure lifetime; render on its canvas owner thread.
         """
+        self._figure = figure
         self._axes = figure.add_subplot(111)
         self._x_span = inputs.flux_bound[1] - inputs.flux_bound[0]
         self._y_span = inputs.freq_bound[1] - inputs.freq_bound[0]
@@ -43,27 +57,34 @@ class CrossSelectionPlot:
                 rasterized=True,
             )
         self._kept = self._axes.scatter(
-            [], [], s=15, color="red", label="Kept", zorder=4
+            [], [], s=15, color=KEPT_COLOR, label="Kept", zorder=4
         )
         self._dropped = self._axes.scatter(
-            [], [], s=12, color="#707070", alpha=0.6, label="Dropped", zorder=3
+            [], [], s=12, color=DROPPED_COLOR, alpha=0.6, label="Dropped", zorder=3
         )
         self._added = self._axes.scatter(
             [],
             [],
             s=45,
-            edgecolors="#008b6b",
+            marker=ADDED_MARKER,
+            edgecolors=ADDED_COLOR,
             facecolors="none",
             label="Added",
             zorder=5,
         )
         self._removed = self._axes.scatter(
-            [], [], s=30, color="#b04bb3", marker="x", label="Removed", zorder=5
+            [],
+            [],
+            s=30,
+            color=REMOVED_COLOR,
+            marker=REMOVED_MARKER,
+            label="Removed",
+            zorder=5,
         )
-        (self._stroke,) = self._axes.plot(
-            [], [], color="#007e91", linewidth=1, linestyle="--", zorder=6
-        )
-        self._endpoints: list[Ellipse] = []
+        # The latest committed stroke, then an uncommitted drag above it.
+        x_span, y_span = abs(self._x_span), abs(self._y_span)
+        self._stroke = BrushBand(self._axes, x_span=x_span, y_span=y_span, zorder=6)
+        self._pointer = BrushBand(self._axes, x_span=x_span, y_span=y_span, zorder=7)
         self._axes.set_xlabel("Calibrated flux (Φ/Φ₀)")
         self._axes.set_ylabel("Frequency (GHz)")
         self._axes.set_xlim(
@@ -86,9 +107,10 @@ class CrossSelectionPlot:
     ) -> None:
         """Render exact view, kept/dropped points and optional latest changes.
 
-        Title shows kept/total, normalized distance/radius and radius in flux/GHz.
-        Changes use hollow added points, removed crosses and counts; stroke is a
-        thin dashed line with endpoint ellipses scaled by joint-bound spans.
+        Title shows kept/total, normalized distance/radius and radius in flux/GHz;
+        the figure layout is refitted so both title lines stay inside it.
+        Changes use hollow added points, removed crosses and counts, and the
+        band the stroke's brush swept along its whole path.
         Pure read defaults to no changes. No state, history or canvas mutation.
         """
         state, result = view.state, view.result
@@ -99,24 +121,9 @@ class CrossSelectionPlot:
         self._removed.set_offsets(view.removed_points)
         self._added.set_visible(show_changes)
         self._removed.set_visible(show_changes)
-        for endpoint in self._endpoints:
-            endpoint.remove()
-        self._endpoints.clear()
-        vertices = view.stroke_vertices if show_changes else ()
-        self._stroke.set_data([p.x for p in vertices], [p.y for p in vertices])
-        if vertices:
-            for point in (vertices[0], vertices[-1]):
-                endpoint = Ellipse(
-                    (point.x, point.y),
-                    width=2 * view.stroke_width * self._x_span,
-                    height=2 * view.stroke_width * self._y_span,
-                    fill=False,
-                    edgecolor="#007e91",
-                    linewidth=0.8,
-                    zorder=6,
-                )
-                self._axes.add_patch(endpoint)
-                self._endpoints.append(endpoint)
+        self._stroke.show(
+            view.stroke_vertices if show_changes else (), view.stroke_width
+        )
         info = (
             f"Selected {np.count_nonzero(result.selected)}/{result.selected.size}; "
             f"min_distance {state.min_distance:g}; width (radius) {state.width:g}\n"
@@ -127,7 +134,18 @@ class CrossSelectionPlot:
             info += (
                 f"; added {len(view.added_points)}, removed {len(view.removed_points)}"
             )
-        self._axes.set_title(info, fontsize=9)
+        # wrap keeps a long line inside a narrow figure; the refit then makes
+        # room above the axes for every line, which may change on each update.
+        self._axes.set_title(info, fontsize=9, wrap=True)
+        self._figure.tight_layout()
+
+    def show_pointer(self, vertices: Sequence[BrushPoint], width: float) -> None:
+        """Show an uncommitted drag: the band its brush sweeps along vertices.
+
+        vertices are calibrated flux/GHz; width is the normalized radius the
+        drag will commit. Empty vertices clear it. The caller redraws.
+        """
+        self._pointer.show(vertices, width)
 
 
 def make_cross_selection_figure(

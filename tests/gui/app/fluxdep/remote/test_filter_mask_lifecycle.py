@@ -44,7 +44,7 @@ def _processed(path: Path, name: str) -> str:
     [
         ("reset", [True, True, True, False, True], [10, 11, 12, 7], [0, 0.5, 1, 1]),
         ("set", [True, True, True, False, True], [10, 11, 12, 7], [0, 0.5, 1, 1]),
-        ("restore", [True, True, True, False, True], [10, 11, 12, 7], [0, 0.5, 1, 1]),
+        ("restore", [False, True, True, True, True], [7, 10, 11, 12], [1, 0, 0.5, 1]),
         (
             "remove_load",
             [False, True, True, True, True],
@@ -85,6 +85,7 @@ def test_filter_masks_follow_spectrum_points_not_joint_positions(
             ctrl.reset_points("A")
         ctrl.set_points("A", np.array([0.0, 0.5, 1.0]), np.array([10.0, 11.0, 12.0]))
     elif change == "restore":
+        ctrl.remove_spectrum("A")
         ctrl.load_processed_spectrums(_processed(tmp_path / "restore.hdf5", "A"))
     elif change == "remove_load":
         ctrl.remove_spectrum("A")
@@ -100,7 +101,11 @@ def test_filter_masks_follow_spectrum_points_not_joint_positions(
 
     snapshot = route_harness.request(client, "selection.snapshot")
     assert snapshot["ok"] is True, snapshot
-    assert snapshot["result"] == {"selected": expected_mask, "min_distance": 0.08}
+    assert snapshot["result"] == {
+        "selected": expected_mask,
+        "min_distance": 0.08,
+        "pending": False,
+    }
     inputs = ctrl.capture_search()
     np.testing.assert_array_equal(inputs.freqs, expected_freqs)
     np.testing.assert_array_equal(inputs.fluxs, expected_fluxs)

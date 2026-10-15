@@ -336,7 +336,7 @@ class RunService:
         cancel_requested = threading.Event()
         adapter = inputs.adapter
         request = inputs.request
-        raw_cfg = inputs.accepted_cfg.values
+        cfg = inputs.accepted_cfg.cfg
         context = RunContext(
             soc=request.soc,
             soccfg=request.soccfg,
@@ -393,7 +393,7 @@ class RunService:
                 )
             # Progress alone is ambient; execution dependencies are run-owned.
             with progress_ambient(factory):
-                result = adapter.run(request, raw_cfg, context=context)
+                result = adapter.run(request, cfg, context=context)
                 stop_signal.raise_if_error()
             # Completion records acquisition progress, not later operation cancellation.
             completion = "stopped" if stop_event.is_set() else "complete"

@@ -1,13 +1,20 @@
 """Display hints and fixed values change which rows the editor draws, and how."""
 
 from collections.abc import Callable, Iterator
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 from PyQt6.QtGui import QAction
 from qtpy.QtCore import Qt
-from qtpy.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit, QWidget
+from qtpy.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QLabel,
+    QLineEdit,
+    QWidget,
+)
 from zcu_tools.gui.form import (
     Display,
     FormEnv,
@@ -15,10 +22,10 @@ from zcu_tools.gui.form import (
     FormModel,
     FormState,
     LinRange,
-    ModuleInput,
-    RangeInput,
 )
 from zcu_tools.gui.widgets.form import FormEditor
+
+from tests.gui.widgets.form._text_input import commit_text
 
 type View = tuple[FormEditor[FormModel], FormState[FormModel]]
 type Build = Callable[[type[FormModel], dict[str, JsonValue] | None], View]
@@ -63,14 +70,14 @@ def row_names(view: QWidget, path: str) -> list[str]:
 def row_label(view: QWidget, path: str) -> str:
     """Text of the row's own leading label, without a fold title's mark.
 
-    A model row's leading label is its fold title form.fold.<path>; another
-    row's is the unnamed label beside its value label.
+    A foldable model row's leading label is its fold title form.fold.<path>;
+    another row's is the unnamed label beside its value label.
     """
     titles = view.findChildren(QLabel, f"form.fold.{path}")
     if titles:
         (title,) = titles
         mark, label = title.text().split(" ", 1)
-        assert mark in ("\u25b8", "\u25be"), title.text()
+        assert mark in ("▸", "▾"), title.text()
         return label
     row = child(view, QLabel, f"form.value.{path}").parentWidget()
     assert row is not None
@@ -104,6 +111,24 @@ class Beta(BaseModel):
     kind: Literal["beta"] = "beta"
 
 
+class DriveRef(BaseModel):
+    """Key branch of a tagged ref-or-inline selection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["ref"] = "ref"
+    name: str = ""
+
+
+class DriveInline(BaseModel):
+    """Inline branch whose module is an ordinary nested model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["inline"] = "inline"
+    module: Section = Field(default_factory=Section)
+
+
 def test_decimals_round_the_shown_number_without_rounding_input(build: Build) -> None:
     class DecimalsForm(FormModel):
         delay: Annotated[float, Display(decimals=3)] = 1.23456789
@@ -116,7 +141,7 @@ def test_decimals_round_the_shown_number_without_rounding_input(build: Build) ->
     assert state.input.data["delay"] == 1.23456789
 
     # Typed digits beyond decimals stay as typed and reach the state whole.
-    delay.setText("2.34567")
+    commit_text(delay, "2.34567")
     assert state.input.data["delay"] == 2.34567
     assert delay.text() == "2.34567"
     state.write({("delay",): 4.0}, FormEnv())
@@ -125,7 +150,7 @@ def test_decimals_round_the_shown_number_without_rounding_input(build: Build) ->
     mode = view.findChild(QAction, "form.mode.delay")
     assert isinstance(mode, QAction)
     mode.trigger()
-    child(view, QLineEdit, "form.input.delay").setText("1 / 3")
+    commit_text(child(view, QLineEdit, "form.input.delay"), "1 / 3")
     assert child(view, QLabel, "form.value.delay").text() == "0.333"
 
 
@@ -161,7 +186,7 @@ def test_hidden_field_is_not_drawn_but_kept_and_validated(build: Build) -> None:
 
     view, state = build(HiddenForm, None)
     assert row_names(view, "gain") == []
-    child(view, QLineEdit, "form.input.shown").setText("2.0")
+    commit_text(child(view, QLineEdit, "form.input.shown"), "2.0")
     assert state.input.data == {"shown": 2.0, "gain": 0.5}
     assert view.errors() is None
 
@@ -181,15 +206,17 @@ def test_one_value_tag_outside_a_union_is_not_drawn(build: Build) -> None:
         )
         alone: Alpha = Field(default_factory=Alpha)
         sweep: LinRange = Field(default_factory=LinRange)
-        fluxes: RangeInput = Field(default_factory=LinRange)
 
     view, _state = build(TagForm, None)
     assert row_names(view, "alone.kind") == []
     assert row_names(view, "sweep.kind") == []
     assert child(view, QLineEdit, "form.input.sweep.start").text() == "0.0"
-    for path, tags in (("choice", ["alpha", "beta"]), ("fluxes", ["linrange", "list"])):
-        selector = child(view, QComboBox, f"form.input.{path}.kind")
-        assert [selector.itemData(i) for i in range(selector.count())] == tags
+    selector = child(view, QComboBox, "form.input.choice")
+    assert [selector.itemData(i) for i in range(selector.count())] == [
+        {"kind": "alpha"},
+        {"kind": "beta"},
+    ]
+    assert row_names(view, "choice.kind") == []
 
 
 def test_sections_and_selectors_are_titled_by_field_name(build: Build) -> None:
@@ -198,21 +225,156 @@ def test_sections_and_selectors_are_titled_by_field_name(build: Build) -> None:
         labelled: Annotated[Section, Display(label="Readout")] = Field(
             default_factory=Section
         )
-        drive: ModuleInput
+        drive: Annotated[DriveRef | DriveInline, Field(discriminator="kind")]
         choice: Annotated[Alpha | Beta, Field(discriminator="kind")]
 
     view, state = build(
         TitleForm,
         {
-            "drive": {"kind": "inline", "module": {"type": "pulse"}},
-            # Without a tag the editor shows only the placeholder selector.
+            "drive": {"kind": "inline", "module": {"level": 1.0}},
+            # Without a tag no option matches; the row keeps its title.
             "choice": {"x": 3.0},
         },
     )
     assert row_label(view, "ro_cfg") == "Ro cfg"
     assert row_label(view, "labelled") == "Readout"
     assert row_label(view, "drive") == "Drive"
-    assert row_label(view, "drive.module") == "Module"
-    placeholder = row_label(view, "choice.kind")
+    # The inline option holds only an ordinary model, which draws no row.
+    assert row_names(view, "drive.module") == []
+    assert row_label(view, "drive.module.level") == "Level"
+    assert row_label(view, "choice") == "Choice"
     state.write({("choice", "kind"): "alpha"}, FormEnv())
-    assert placeholder == row_label(view, "choice.kind")
+    assert row_label(view, "choice") == "Choice"
+
+
+class Body(BaseModel):
+    """An ordinary model whose fields carry their own presentation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    level: Annotated[
+        float, Display(label="Drive level", unit="V", description="Output level")
+    ] = 1.0
+    shape: Literal["flat", "ramp"] = "flat"
+    width: Annotated[float, Display(group="Advanced")] = 2.0
+
+    @model_validator(mode="after")
+    def validate_cover(self) -> Self:
+        """Leave a model-wide error at this model's own path."""
+        if self.width < self.level:
+            raise ValueError("Width must cover level")
+        return self
+
+
+class Packed(BaseModel):
+    """A branch whose only field besides its tag is an ordinary model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["packed"] = "packed"
+    payload: Body = Field(default_factory=Body)
+
+
+class Bare(BaseModel):
+    """A branch with no fields besides its tag."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["bare"] = "bare"
+
+
+class Nullable(BaseModel):
+    """A branch whose only field is a nullable model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["optional"] = "optional"
+    payload: Body | None = None
+
+
+class Nested(BaseModel):
+    """A branch whose only field is itself a selection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["nested"] = "nested"
+    payload: Annotated[Packed | Bare, Field(discriminator="kind")] = Field(
+        default_factory=Packed
+    )
+
+
+class Pair(BaseModel):
+    """A branch with an ordinary model beside another field."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["pair"] = "pair"
+    payload: Body = Field(default_factory=Body)
+    note: float = 0.0
+
+
+def test_an_option_holding_one_ordinary_model_draws_that_models_rows(
+    build: Build,
+) -> None:
+    class FlattenForm(FormModel):
+        choice: Annotated[Packed | Bare, Field(discriminator="kind")] = Field(
+            default_factory=Packed
+        )
+
+    view, state = build(FlattenForm, None)
+
+    # The lone model has no row of its own; its fields keep their full paths.
+    assert row_names(view, "choice.payload") == []
+    assert row_label(view, "choice.payload.level") == "Drive level"
+    level_row = child(view, QLabel, "form.value.choice.payload.level").parentWidget()
+    assert level_row is not None
+    texts = [
+        item.text()
+        for item in level_row.findChildren(
+            QLabel, "", Qt.FindChildOption.FindDirectChildrenOnly
+        )
+    ]
+    assert "V" in texts
+    assert "Output level" in level_row.toolTip()
+    width = child(view, QLineEdit, "form.input.choice.payload.width")
+    assert any(
+        block.objectName().startswith("form.group.") and block.isAncestorOf(width)
+        for block in view.findChildren(QWidget)
+    )
+
+    shape = child(view, QComboBox, "form.input.choice.payload.shape")
+    shape.setCurrentIndex(shape.findText("ramp"))
+    assert state.input.data["choice"] == {
+        "kind": "packed",
+        "payload": {"level": 1.0, "shape": "ramp", "width": 2.0},
+    }
+
+    # An error of the undrawn model shows at the nearest drawn row.
+    state.write({("choice", "payload", "level"): 5.0}, FormEnv())
+    error = child(view, QLabel, "form.error.choice")
+    assert "Width must cover level" in error.text()
+    assert not error.isHidden()
+
+
+def test_an_option_whose_lone_field_is_nullable_or_selectable_keeps_its_row(
+    build: Build,
+) -> None:
+    class KeepForm(FormModel):
+        optional: Annotated[Nullable | Bare, Field(discriminator="kind")] = Field(
+            default_factory=Nullable
+        )
+        nested: Annotated[Nested | Bare, Field(discriminator="kind")] = Field(
+            default_factory=Nested
+        )
+        pair: Annotated[Pair | Bare, Field(discriminator="kind")] = Field(
+            default_factory=Pair
+        )
+
+    view, _state = build(KeepForm, None)
+
+    assert row_label(view, "optional.payload") == "Payload"
+    assert child(view, QCheckBox, "form.enabled.optional.payload") is not None
+    assert row_label(view, "nested.payload") == "Payload"
+    assert child(view, QComboBox, "form.input.nested.payload") is not None
+    assert row_label(view, "pair.payload") == "Payload"
+    assert child(view, QLineEdit, "form.input.pair.note") is not None

@@ -7,16 +7,15 @@ guide. The core experiment lives in ``zcu_lab.v2.jpa``.
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar, TypeAlias
+from pathlib import Path
+from typing import ClassVar, TypeAlias
 
 from matplotlib.figure import Figure
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     NoAnalyzeParams,
@@ -27,36 +26,13 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import custom
-from zcu_tools.gui.cfg import EvalValue, SweepValue
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.jpa.power.core import PowerCfg, PowerExp, PowerResult
+from zcu_lab.v2.jpa.power.form import make_form
 
 JpaPowerRunResult: TypeAlias = RunRecord[PowerCfg, PowerResult]
-
-_JPA_POWER_SWEEP_EXPTS = 101
-_JPA_POWER_SEED_SPAN_DB = 5.0
-
-
-def jpa_power_sweep_seed(
-    ctx: SessionEnv, *, expts: int = _JPA_POWER_SWEEP_EXPTS
-) -> SweepValue:
-    """Store a ±5 dB sweep around $jpa.pump_power without reading ctx.
-
-    Missing aliases/calibration become Invalid during cfg resolution.
-    """
-    del ctx  # Defaults retain expressions; the resource owns source reads.
-    return SweepValue(
-        start=EvalValue(expr=f"$jpa.pump_power - {_JPA_POWER_SEED_SPAN_DB}"),
-        stop=EvalValue(expr=f"$jpa.pump_power + {_JPA_POWER_SEED_SPAN_DB}"),
-        expts=expts,
-    )
 
 
 @dataclass
@@ -82,82 +58,22 @@ class JpaPowerAdapter(
 ):
     experiment_tag: ClassVar[str | None] = PowerExp.persistence_tag()
     exp_cls = PowerExp
-    ExpCfg_cls: ClassVar[Any] = PowerCfg
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "JPA pump-power calibration: with the qubit prepared in g and e "
-            "(a pi pulse toggles it), sweeps the JPA pump power (dBm) and "
-            "measures the g/e signal difference, so you can pick the pump "
-            "power that best enhances readout. Runs on real hardware. WARNING: "
-            "review the selected JPA RF device and the power sweep before "
-            "running — the seeded bounds are bring-up defaults, not certified "
-            "safety limits, and the run commands the selected device."
-        ),
-        expects_md=(
-            "Uses current aliases: qubit (qubit/*), resonator (resonator), and "
-            "jpa (amplifier/jpa). Add a jpa alias row in the global dialog, "
-            "for example $resonator.amplifier. Scalars use $jpa.pump_freq, "
-            "$jpa.pump_power, $jpa.flux and canonical qubit/resonator wiring. "
-            "Missing aliases or calibration leave cfg Invalid; no static fallback."
-        ),
-        expects_ml=(
-            "SMART modules use $qubit.module.x180, $qubit.module.readout and "
-            "optional $qubit.module.reset. Inline readout uses resonator scalar "
-            "and wiring calibration; module waveforms follow their module source."
-        ),
-        typical_writeback=(
-            "Proposes the signal-maximizing JPA pump power into parameter context "
-            "'best_jpa_power' (dBm) as a draft — it never writes it back "
-            "without your acceptance, never commands a device from the "
-            "writeback, and never touches 'cur_jpa_A'."
-        ),
-        recommended=(
-            "Review the selected RF device and the power sweep bounds before "
-            "every run; the seeded range is a conservative low-power survey, "
-            "only a starting point. Analysis picks the peak of the absolute "
-            "signal difference."
-        ),
-    )
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[PowerCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
 
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("pi_pulse", role_id="pi_pulse")
-            .readout()
-            .relax_delay(0.5)
-            .device(
-                "jpa_rf_dev",
-                label="JPA RF device",
-                default="",
-                required=False,
-            )
-            .sweep(
-                "jpa_power",
-                label="JPA pump power (dBm)",
-                default=custom(
-                    jpa_power_sweep_seed,
-                    description="jpa pump power range",
-                ),
-            )
-            .float("skew_penalty", label="Skew penalty", default=0.0, decimals=3)
-            .reps(10000)
-            .rounds(1)
-            .build()
-        )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: PowerCfg,
         *,
         context: RunContext,
     ) -> JpaPowerRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         return RunRecord(cfg, PowerExp().run(cfg, context=context))
 
     def analyze(
@@ -172,7 +88,7 @@ class JpaPowerAdapter(
     ) -> Sequence[WritebackItem]:
         return [
             ParameterWriteback(
-                target_name="best_jpa_power",
+                target_name="$jpa.pump_power",
                 description="Best JPA pump power (dBm)",
                 proposed_value=req.analyze_result.best_power,
             )

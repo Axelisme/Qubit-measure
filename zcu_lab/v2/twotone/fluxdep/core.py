@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Literal
+from typing import Annotated, Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     IDENTITY,
     MHZ_TO_HZ,
@@ -44,21 +43,33 @@ def freqflux_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
 
 
 class FreqFluxSweepCfg(ConfigBase):
-    flux: SweepCfg
-    freq: SweepCfg
+    flux: Annotated[SweepCfg, FieldMeta(label="Flux device value", decimals=6)]
+    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
 
 
 class FreqFluxModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    init_pulse: PulseCfg | None = None
-    qub_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init Pulse")] = None
+    qub_pulse: Annotated[PulseCfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class FreqFluxCfg(ProgramV2Cfg, ExpCfgModel):
-    flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
+    flux_unit: Annotated[
+        Literal["A", "V", "native"],
+        FieldMeta(
+            label="Flux unit",
+            description="Working unit for the selected driver; no conversion.",
+        ),
+    ]  # External flux driver unit; no conversion.
     modules: FreqFluxModuleCfg
-    dev: Mapping[str, str]  # Map flux_dev to a connected driver name.
+    flux_dev: Annotated[
+        str,
+        FieldMeta(
+            label="Flux Device",
+            description="Name of the connected flux-bias device driven by the sweep.",
+        ),
+    ]
     sweep: FreqFluxSweepCfg
     fail_retry: int = 0
 
@@ -74,6 +85,7 @@ class FreqFluxExp(PersistableExperiment[FreqFluxResult, FreqFluxCfg]):
         result_type=FreqFluxResult,
         cfg_type=FreqFluxCfg,
         tag="twotone/flux_dep/freq",
+        cfg_schema_version="2.0",
     )
 
     def run(
@@ -111,7 +123,7 @@ class FreqFluxExp(PersistableExperiment[FreqFluxResult, FreqFluxCfg]):
             for _, step in sched.scan("flux", dev_values.tolist()):
                 cfg = step.cfg
                 set_flux(
-                    context.devices[cfg.dev["flux_dev"]],
+                    context.devices[cfg.flux_dev],
                     step.value,
                     unit=cfg.flux_unit,
                     stop=context.cancel_signal,

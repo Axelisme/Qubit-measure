@@ -1,10 +1,19 @@
-"""Joint-cloud actions shared by GUI and command adapters."""
+"""Joint-cloud actions shared by GUI and command adapters.
+
+SET_MIN_DISTANCE_PARAMS declares the normalized distance command and its inclusive
+limits. The plugin and remote schemas use the same declaration.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 
+import numpy as np
+from numpy.typing import NDArray
+
 from zcu_tools.analysis.fluxdep.cross_selection import (
+    MIN_DISTANCE_MAX,
+    MIN_DISTANCE_MIN,
     CrossSelectionInputs,
     CrossSelectionResult,
     CrossSelectionState,
@@ -26,6 +35,16 @@ from zcu_tools.gui.app.fluxdep.brush_commands import (
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.interactive import Action, Command, PluginDefinition, Session
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
+
+SET_MIN_DISTANCE_PARAMS = (
+    ParamSpec(
+        "min_distance",
+        JsonType.NUMBER,
+        minimum=MIN_DISTANCE_MIN,
+        maximum=MIN_DISTANCE_MAX,
+        description=f"Normalized distance [{MIN_DISTANCE_MIN:g},{MIN_DISTANCE_MAX:g}].",
+    ),
+)
 
 
 class CrossSelectionPlugin(PluginDefinition[CrossSelectionState, CrossSelectionResult]):
@@ -49,13 +68,15 @@ class CrossSelectionPlugin(PluginDefinition[CrossSelectionState, CrossSelectionR
         self,
         inputs: CrossSelectionInputs,
         *,
+        selected: NDArray[np.bool_] | None = None,
         min_distance: float = 0.0,
         brush_width: float = 0.05,
     ) -> None:
-        """Declare cross_selection commands with an all-selected seed.
+        """Declare cross_selection commands over a seed starting from selected.
 
-        min_distance/brush_width are finite normalized [0,0.1], width is radius.
-        Invalid seeds raise ValueError. set_min_distance requires a NUMBER.
+        selected is the starting full-cloud brush mask in inputs' cloud order;
+        None starts all-selected. min_distance/brush_width are finite normalized
+        [0,0.1], width is radius. Invalid seeds raise ValueError. set_min_distance requires a NUMBER.
         set_tool accepts optional width/mode with at least one non-null field.
         stroke requires NUMBER_PAIRS vertices, NUMBER width and select/erase mode.
         perform_on_all and clear take no fields. Unknown/missing/wrong-type/domain
@@ -63,9 +84,9 @@ class CrossSelectionPlugin(PluginDefinition[CrossSelectionState, CrossSelectionR
         Owner Apply synchronously analyzes the snapshot without calling finish.
         """
         seed = make_cross_selection_state(
-            inputs, min_distance=min_distance, width=brush_width
+            inputs, selected=selected, min_distance=min_distance, width=brush_width
         )
-        distance_params = (ParamSpec("min_distance", JsonType.NUMBER),)
+
         distance: Action[CrossSelectionState, float] = Action(
             lambda state, value: _transition(
                 lambda: set_cross_selection_distance(inputs, state, value)
@@ -98,7 +119,7 @@ class CrossSelectionPlugin(PluginDefinition[CrossSelectionState, CrossSelectionR
         def distance_command(
             session: Session[CrossSelectionState], params: Mapping[str, object]
         ) -> CrossSelectionState:
-            value = decode_parameters(distance_params, params)["min_distance"]
+            value = decode_parameters(SET_MIN_DISTANCE_PARAMS, params)["min_distance"]
             if not isinstance(value, float):
                 raise InvalidInputError("min_distance must be numeric")
             return distance.execute(session, value)
@@ -133,7 +154,7 @@ class CrossSelectionPlugin(PluginDefinition[CrossSelectionState, CrossSelectionR
             plugin_id="cross_selection",
             seed=seed,
             commands=(
-                Command("set_min_distance", distance_params, distance_command),
+                Command("set_min_distance", SET_MIN_DISTANCE_PARAMS, distance_command),
                 Command("set_tool", TOOL_PARAMS, tool_command),
                 Command("stroke", STROKE_PARAMS, stroke_command),
                 Command("perform_on_all", (), perform_command),

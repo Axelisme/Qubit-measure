@@ -317,7 +317,7 @@ def test_between_yield_cancel_suppresses_once_but_keeps_fast_steps(tmp_path):
             == 1
         )
         publication = client.context.send_gui_rpc("tab.get_cfg", {"tab_id": "t"})
-        assert publication["tree"]["children"]["rounds"]["input"]["resolved"] == 9
+        assert publication["input"]["rounds"] == 9
 
 
 @pytest.mark.parametrize("caught", [False, True])

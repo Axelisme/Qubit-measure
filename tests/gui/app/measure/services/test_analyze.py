@@ -189,7 +189,7 @@ def test_historical_analyze_uses_run_capture_after_alias_and_parameter_edits(
     original = make_parameters({})
     point = PointDocument.model_construct(
         format="zcu.parameter-container",
-        format_version="1.0",
+        format_version="2.0",
         general=original.document().general,
         components={
             "Q1": QubitSchema(kind="qubit/fluxonium", freq=4200.0),

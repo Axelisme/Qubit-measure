@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 from scqubits.core.fluxonium import Fluxonium
 from zcu_tools.notebook.analysis.t1_curve.Qqp import calc_qp_oper, calc_Qqp_vs_omega
-from zcu_tools.simulate.fluxonium import calculate_eff_t1_fast
 
 
 def test_qp_reverse_extraction_matches_scqubits_x_qp() -> None:
@@ -20,13 +19,9 @@ def test_qp_reverse_extraction_matches_scqubits_x_qp() -> None:
     omega = 2 * np.pi * (evals[1] - evals[0])
     sin_oper = calc_qp_oper(params, flux, return_dim=qub_dim, esys=(evals, evecs))
 
-    t1_ns = calculate_eff_t1_fast(
-        flux,
-        params,
-        [("t1_quasiparticle_tunneling", {"x_qp": x_qp})],
-        temp,
-        cutoff=cutoff,
-        qub_dim=qub_dim,
+    # Raw scqubits ns, independent of the repo forward helper.
+    t1_ns = fluxonium.t1_quasiparticle_tunneling(
+        i=1, j=0, x_qp=x_qp, T=temp, total=True, esys=(evals, evecs)
     )
     extracted_q_qp = calc_Qqp_vs_omega(
         params,

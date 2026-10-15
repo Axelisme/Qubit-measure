@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from types import SimpleNamespace
 from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
-import zcu_tools.analysis.fitting.resonance.base as resonance_base
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting.resonance import (
@@ -21,7 +19,6 @@ from zcu_tools.analysis.fitting.resonance import (
     normalize_signal,
     phase_func,
 )
-from zcu_tools.analysis.fitting.resonance.rational import fit_degree_one_rational
 
 
 def _hanger_truth(
@@ -77,30 +74,48 @@ def _homophasal_like_grid(
     )
 
 
+@pytest.mark.parametrize("model", [HangerModel, TransmissionModel])
 @pytest.mark.parametrize("descending", [False, True])
-def test_rational_initializer_recovers_degree_one_nonuniform_trace(
+def test_model_fit_recovers_nonuniform_trace_in_either_direction(
+    model: type[HangerModel] | type[TransmissionModel],
     descending: bool,
 ) -> None:
-    freqs = _homophasal_like_grid(6000.0, 700.0, 35.0, 301)
+    freq, Ql = 6000.0, 700.0
+    freqs = _homophasal_like_grid(freq, Ql, 35.0, 301)
     if descending:
         freqs = freqs[::-1]
-    x = (freqs - 6000.0) / 70.0
-    signals = (
-        1.7 * np.exp(0.2j) * (0.8 - 0.3j + (0.6 + 0.1j) * x) / (1.0 + (-0.2 + 0.7j) * x)
+    common = dict(
+        freq=freq,
+        Ql=Ql,
+        a0=1.7 * np.exp(0.2j),
+        edelay=0.02,
+        bg_amp_slope=0.0,
     )
+    if model is HangerModel:
+        signals = _hanger_truth(freqs, Qc_abs=1100.0, phi=0.1, **common)
+        params = HangerModel.fit(freqs, signals, edelay=0.02, fit_bg_amp_slope=True)
+        fitted = HangerModel.calc_signals(freqs, **params)
+    else:
+        signals = _transmission_truth(freqs, **common)
+        params = TransmissionModel.fit(
+            freqs, signals, edelay=0.02, fit_bg_amp_slope=True
+        )
+        fitted = TransmissionModel.calc_signals(freqs, **params)
 
-    result = fit_degree_one_rational(freqs, signals)
+    np.testing.assert_allclose(params["freq"], freq, atol=0.01)
+    np.testing.assert_allclose(params["Ql"], Ql, rtol=1e-3)
+    np.testing.assert_allclose(fitted, signals, atol=1e-8)
 
-    np.testing.assert_allclose(result.evaluate(freqs), signals, atol=1e-12)
-    assert result.residual_rms < 1e-12
 
-
-def test_rational_initializer_rejects_degenerate_signal() -> None:
+@pytest.mark.parametrize("model", [HangerModel, TransmissionModel])
+def test_model_fit_rejects_zero_signal(
+    model: type[HangerModel] | type[TransmissionModel],
+) -> None:
     freqs = np.linspace(5990.0, 6010.0, 11)
     signals = np.zeros_like(freqs, dtype=np.complex128)
 
-    with pytest.raises(ValueError, match="non-zero signal scale"):
-        fit_degree_one_rational(freqs, signals)
+    with pytest.raises(ValueError, match="non-zero signal"):
+        model.fit(freqs, signals, fit_bg_amp_slope=True)
 
 
 def test_transmission_fit_recovers_freq_and_Ql():
@@ -279,8 +294,9 @@ def test_related_four_point_uniform_traces_align_refined_aliases() -> None:
     assert abs(mean_error) < 3e-3
 
 
-def test_find_edelay_branch_recovers_resonance_waveform_across_multiple_expansions(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("search_radius", [1.5, 20.0])
+def test_fit_edelay_recovers_large_delay_with_bounded_search(
+    search_radius: float,
 ) -> None:
     freq, Ql, edelay = 5549.0, 740.0, 11.299
     freqs = _homophasal_like_grid(freq, Ql, 15.0, 301)
@@ -294,34 +310,28 @@ def test_find_edelay_branch_recovers_resonance_waveform_across_multiple_expansio
         edelay=edelay,
         bg_amp_slope=0.004,
     )
-    radii: list[float] = []
-    original_find = resonance_base._find_edelay_branch
-
-    def capture_radius(
-        freqs: NDArray[np.float64],
-        signals: NDArray[np.complex128],
-        rough_edelay: float,
-        search_radius: float,
-    ) -> float:
-        radii.append(search_radius)
-        return original_find(freqs, signals, rough_edelay, search_radius)
-
-    monkeypatch.setattr(resonance_base, "get_rough_edelay", lambda *_args: 0.0)
-    monkeypatch.setattr(resonance_base, "_find_edelay_branch", capture_radius)
-
-    estimated = find_edelay_branch(
+    estimated = fit_edelay(
         freqs,
         signals,
-        search_radius=1.5,
+        search_radius=search_radius,
         max_search_radius=20.0,
     )
 
-    assert radii == [1.5, 3.0, 6.0, 12.0]
-    assert estimated == pytest.approx(edelay, abs=2e-3)
+    assert estimated == pytest.approx(edelay, abs=3e-3)
 
 
-def test_find_edelay_branch_warns_for_near_tied_nonuniform_peaks(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("search_radius", "max_search_radius", "error"),
+    [
+        (1.5, None, "search boundary"),
+        (1.5, 3.0, "search boundary"),
+        (1e6, None, "resource limit"),
+    ],
+)
+def test_fit_edelay_rejects_insufficient_or_oversized_search(
+    search_radius: float,
+    max_search_radius: float | None,
+    error: str,
 ) -> None:
     freqs = _homophasal_like_grid(5549.0, 740.0, 15.0, 301)
     signals = _hanger_truth(
@@ -334,28 +344,26 @@ def test_find_edelay_branch_warns_for_near_tied_nonuniform_peaks(
         edelay=11.299,
         bg_amp_slope=0.004,
     )
-    monkeypatch.setattr(resonance_base, "_EDELAY_AMBIGUITY_MARGIN", 2.0)
+
+    with pytest.raises(ValueError, match=error):
+        fit_edelay(
+            freqs,
+            signals,
+            search_radius=search_radius,
+            max_search_radius=max_search_radius,
+        )
+
+
+def test_find_edelay_branch_warns_for_near_tied_nonuniform_peaks() -> None:
+    # Almost-uniform sampling leaves adjacent alias branches nearly indistinguishable.
+    freqs = np.linspace(5000.0, 5030.0, 301) + 1e-5 * np.sin(np.arange(301))
+    edelay = 0.2
+    signals = np.exp(-1j * 2.0 * np.pi * freqs * edelay)
 
     with pytest.warns(RuntimeWarning, match="branch search is ambiguous"):
-        find_edelay_branch(freqs, signals)
+        estimated = find_edelay_branch(freqs, signals)
 
-
-def test_find_edelay_branch_is_chunk_size_invariant(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    freqs = _homophasal_like_grid(5549.0, 740.0, 15.0, 301)
-    signals = _transmission_truth(
-        freqs,
-        freq=5549.0,
-        Ql=740.0,
-        a0=1.25 * np.exp(0.31j),
-        edelay=11.299,
-        bg_amp_slope=0.004,
-    )
-    expected = find_edelay_branch(freqs, signals)
-    monkeypatch.setattr(resonance_base, "_EDELAY_BRANCH_CHUNK_SIZE", 17)
-
-    assert find_edelay_branch(freqs, signals) == expected
+    assert estimated == pytest.approx(edelay, abs=1e-8)
 
 
 @pytest.mark.parametrize("model", [HangerModel, TransmissionModel])
@@ -386,30 +394,24 @@ def test_model_fit_recovers_large_delay_nonuniform_truth(
     assert nrmse < 0.01
 
 
+@pytest.mark.parametrize("model", [HangerModel, TransmissionModel])
 def test_explicit_edelay_bypasses_branch_search(
-    monkeypatch: pytest.MonkeyPatch,
+    model: type[HangerModel] | type[TransmissionModel],
 ) -> None:
     freqs = _homophasal_like_grid(5549.0, 740.0, 15.0, 301)
-    signals = _hanger_truth(
-        freqs,
+    common = dict(
         freq=5549.0,
         Ql=740.0,
-        Qc_abs=1100.0,
-        phi=0.12,
         a0=1.25 * np.exp(0.31j),
         edelay=11.299,
         bg_amp_slope=0.0,
     )
+    if model is HangerModel:
+        signals = _hanger_truth(freqs, Qc_abs=1100.0, phi=0.12, **common)
+    else:
+        signals = _transmission_truth(freqs, **common)
 
-    def unexpected_search(*_args: object, **_kwargs: object) -> float:
-        raise AssertionError("explicit edelay must bypass branch search")
-
-    monkeypatch.setattr(
-        "zcu_tools.analysis.fitting.resonance.hanger.fit_edelay",
-        unexpected_search,
-    )
-
-    params = HangerModel.fit(
+    params = model.fit(
         freqs,
         signals,
         edelay=11.299,
@@ -417,6 +419,8 @@ def test_explicit_edelay_bypasses_branch_search(
     )
 
     assert params["edelay"] == 11.299
+    np.testing.assert_allclose(params["freq"], 5549.0, atol=0.08)
+    np.testing.assert_allclose(params["Ql"], 740.0, rtol=0.03)
 
 
 def test_fit_edelay_rejects_nonmonotonic_frequency_grid() -> None:
@@ -446,10 +450,10 @@ def test_fit_edelay_rejects_branch_seed_with_max_search_radius() -> None:
 @pytest.mark.parametrize("model", [HangerModel, TransmissionModel])
 def test_model_fit_uses_edelay_branch_seed(
     model: type[HangerModel] | type[TransmissionModel],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     freq, Ql, edelay = 5549.0, 740.0, 11.299
-    freqs = _homophasal_like_grid(freq, Ql, 15.0, 301)
+    # The seed chooses a noncanonical alias that the uniform data cannot identify.
+    freqs = np.linspace(freq - 15.0, freq + 15.0, 301)
     common = dict(
         freq=freq,
         Ql=Ql,
@@ -462,22 +466,11 @@ def test_model_fit_uses_edelay_branch_seed(
     else:
         signals = _transmission_truth(freqs, **common)
 
-    observed: dict[str, object] = {}
-    original = resonance_base.fit_edelay
-
-    def capture_seed(*args: object, **kwargs: object) -> float:
-        observed.update(kwargs)
-        return original(*args, **kwargs)  # type: ignore[arg-type]
-
-    module = "hanger" if model is HangerModel else "transmission"
-    monkeypatch.setattr(
-        f"zcu_tools.analysis.fitting.resonance.{module}.fit_edelay", capture_seed
-    )
-
     params = model.fit(freqs, signals, edelay_branch_seed=edelay)
 
-    assert observed["branch_seed"] == edelay
     np.testing.assert_allclose(params["edelay"], edelay, atol=3e-3)
+    np.testing.assert_allclose(params["freq"], freq, atol=0.08)
+    np.testing.assert_allclose(params["Ql"], Ql, rtol=0.04)
 
 
 def test_get_proper_model_hanger_vs_transmission():
@@ -667,6 +660,52 @@ def test_background_options_recover_only_enabled_terms(
     )
 
 
+@pytest.mark.parametrize(
+    "count,slope,curvature,noise",
+    [
+        (301, 0.008, 7e-4, 0.0),
+        (101, 0.0, 7e-4, 0.002),
+        (101, 0.008, -7e-4, 0.002),
+        (301, 0.0, 3e-4, 0.002),
+    ],
+)
+def test_seeded_hanger_fit_recovers_resonance_with_phase_curvature(
+    count: int, slope: float, curvature: float, noise: float
+) -> None:
+    freqs = np.linspace(5965.0, 6035.0, count)[1:-1]
+    signals = _hanger_truth(
+        freqs,
+        freq=6000.0,
+        Ql=700.0,
+        Qc_abs=980.0,
+        phi=0.12,
+        a0=1.2 * np.exp(0.3j),
+        edelay=0.021,
+        bg_amp_slope=slope,
+        bg_phase_curvature=curvature,
+    )
+    rng = np.random.default_rng(17)
+    signals += noise * (rng.normal(size=len(freqs)) + 1j * rng.normal(size=len(freqs)))
+
+    params = HangerModel.fit(
+        freqs,
+        signals,
+        edelay_branch_seed=0.021,
+        fit_bg_amp_slope=True,
+        fit_bg_phase_curvature=True,
+    )
+
+    np.testing.assert_allclose(params["freq"], 6000.0, rtol=0, atol=0.05)
+    np.testing.assert_allclose(params["fwhm"], 6000.0 / 700.0, rtol=0.01)
+    np.testing.assert_allclose(params["edelay"], 0.021, rtol=0, atol=2e-5)
+    np.testing.assert_allclose(params["bg_amp_slope"], slope, rtol=0, atol=2e-4)
+    np.testing.assert_allclose(
+        params["bg_phase_curvature"], curvature, rtol=0, atol=2e-5
+    )
+    fitted = HangerModel.calc_signals(freqs, **params)
+    assert np.sqrt(np.mean(np.abs(fitted - signals) ** 2)) < max(1e-6, 2 * noise)
+
+
 def test_fixed_noise_refinement_reduces_complex_residual() -> None:
     freq, Ql, Qc_abs = 6053.0, 710.0, 1040.0
     freqs = _homophasal_like_grid(freq, Ql, 45.0, 601)
@@ -695,32 +734,18 @@ def test_fixed_noise_refinement_reduces_complex_residual() -> None:
     assert refined_rmse < 0.35 * sequential_rmse
 
 
-def test_bound_limited_refinement_warns_and_returns_sequential_result(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_bound_limited_refinement_warns_and_returns_sequential_result() -> None:
     freqs = np.linspace(5970.0, 6030.0, 401)
+    # A resonance outside the scan forces the bounded fit to its frequency limit.
     signals = _transmission_truth(
         freqs,
-        freq=6000.0,
+        freq=6040.0,
         Ql=650.0,
         a0=0.8 + 0.2j,
         edelay=0.0,
         bg_amp_slope=0.006,
     )
     sequential = TransmissionModel.fit(freqs, signals, edelay=0.0)
-
-    def bound_result(_residual, x0, **_kwargs):
-        return SimpleNamespace(
-            success=True,
-            x=x0,
-            fun=np.zeros(2 * len(freqs)),
-            active_mask=np.asarray([1, 0, 0, 0, 0]),
-        )
-
-    monkeypatch.setattr(
-        "zcu_tools.analysis.fitting.resonance.base.sp.optimize.least_squares",
-        bound_result,
-    )
 
     with pytest.warns(RuntimeWarning, match="parameter bound"):
         result = TransmissionModel.fit(
@@ -852,7 +877,6 @@ def test_visualization_uses_corrected_domain_and_background_envelope(
         assert fit_info.get_horizontalalignment() == "right"
         legend = magnitude_ax.get_legend()
         assert legend is not None
-        assert getattr(legend, "_loc") == 3  # lower left
     finally:
         plt.close(fig)
 

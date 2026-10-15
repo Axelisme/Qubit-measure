@@ -17,14 +17,18 @@ import pytest
 from matplotlib.figure import Figure
 from qtpy.QtWidgets import QLabel, QPushButton, QTabWidget
 from zcu_tools.experiment.run_saving import ArtifactRef
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
+from zcu_tools.gui.app.measure.adapter import (
+    AdapterCapabilities,
+    AdapterGuide,
+    AnalysisMode,
+)
 from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
-from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup
+from tests.gui.app.measure._form_fakes import configure_form_lookup
 from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
 
 if TYPE_CHECKING:
@@ -58,9 +62,12 @@ def make_ctrl() -> Iterator[Callable[[], MagicMock]]:
 
     def create_ctrl() -> MagicMock:
         ctrl = MagicMock()
+        ctrl.get_adapter_guide.return_value = AdapterGuide(
+            markdown="# Synthetic guide\n", resource_dir=None
+        )
         ctrl.control_identity = ControlIdentity()
         owned_authorities.append(ctrl.control_identity)
-        configure_cfg_lookup(ctrl)
+        configure_form_lookup(ctrl)
         ctrl.get_left_panel_width.return_value = 500
         return ctrl
 
@@ -138,7 +145,7 @@ def _snapshot(
             has_figure=True,
             has_post_analyze_result=has_post_analyze_result,
         ),
-        cfg_schema=MagicMock(),
+        cfg_input={},
         capabilities=AdapterCapabilities(
             analysis=AnalysisMode.FIT, post_analysis=post_analysis
         ),

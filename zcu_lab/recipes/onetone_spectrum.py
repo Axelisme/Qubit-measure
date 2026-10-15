@@ -3,13 +3,18 @@
 from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParameter
 from zcu_tools.mcp.measure.recipe import (
     RecipeDefinition,
+    RecipeFieldEdit,
     RecipeGenerator,
     RecipeNeedsParameters,
     RecipeRun,
     RecipeSession,
 )
 
-from .helpers import FrequencySweepCalibration, set_frequency_sweep
+from .helpers import (
+    FrequencySweepCalibration,
+    set_frequency_sweep,
+    set_nested_module_scalar,
+)
 
 
 def onetone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
@@ -61,7 +66,13 @@ def onetone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool
     )
     if missing:
         raise RecipeNeedsParameters(missing)
-    tab.set("modules.readout.pulse_cfg.gain", gain)
+    set_nested_module_scalar(
+        tab,
+        "modules.readout",
+        "modules.readout.module.pulse_cfg",
+        RecipeFieldEdit("modules.readout.module.pulse_cfg.module.gain", gain),
+        ("pulse_cfg", "gain"),
+    )
     tab.set("reps", reps)
     tab.set("rounds", rounds)
     run, status = yield tab.run()
@@ -104,7 +115,7 @@ DEFINITION = RecipeDefinition(
     adapter_name="onetone/freq",
     summary_parameters=(
         SummaryParameter("frequency_sweep", "sweep.freq", "MHz"),
-        SummaryParameter("gain", "modules.readout.pulse_cfg.gain"),
+        SummaryParameter("gain", "modules.readout.module.pulse_cfg.module.gain"),
         SummaryParameter("readout_ref", "modules.readout"),
         SummaryParameter("reps", "reps"),
         SummaryParameter("rounds", "rounds"),

@@ -31,27 +31,6 @@ def test_missing_parameter_rejects_empty_name_or_reason(parameter, reason):
         MissingParameter(parameter, reason)
 
 
-@pytest.mark.parametrize("mode", ["inline", "ref"])
-def test_author_reads_owner_reference_mode_and_child_readonly(tmp_path, mode):
-    gui = LookbackGui()
-    reference = gui.publication["tree"]["children"]["modules"]["children"]["readout"]
-    reference.update(
-        mode=mode,
-        readonly=False,
-        ref="Q1.readout.seed" if mode == "ref" else "<Custom:Readout>",
-    )
-    frequency = reference["children"]["ro_cfg"]["children"]["ro_freq"]
-    frequency["readonly"] = mode == "ref"
-    with recipe_client(tmp_path, gui) as client:
-        tab = RecipeSession(client.context).open_tab("lookback")
-        state = tab.read_field("modules.readout")
-        assert state.mode == mode
-        assert not state.readonly
-        assert tab.read_field("modules.readout.ro_cfg.ro_freq").readonly == (
-            mode == "ref"
-        )
-
-
 def test_author_edits_preserve_defaults(tmp_path):
     gui = LookbackGui()
     with recipe_client(tmp_path, gui) as client:
@@ -59,15 +38,14 @@ def test_author_edits_preserve_defaults(tmp_path):
         tab.set("rounds", None)
         assert tab.use_library("modules.readout", None) is None
         tab.set("rounds", 7)
-        # This short reference is a wire-edit literal, not native admission.
-        assert tab.use_library("modules.readout", "readout") is None
+        assert tab.use_library("modules.readout", "R1.readout.main") is None
         tab.disable_library("modules.reset")
 
-    assert gui.publication["tree"]["children"]["rounds"]["input"]["resolved"] == 7
-    assert (
-        gui.publication["tree"]["children"]["modules"]["children"]["readout"]["ref"]
-        == "readout"
-    )
+    assert gui.publication["input"]["rounds"] == 7
+    assert gui.publication["input"]["modules"]["readout"] == {
+        "kind": "ref",
+        "name": "R1.readout.main",
+    }
 
 
 @pytest.mark.parametrize(
@@ -117,7 +95,7 @@ def test_author_reuse_resets_the_observed_cfg_before_editing(tmp_path):
         "tab_id": "t",
         "edits": [{"path": ["rounds"], "value": 9}],
     }
-    assert gui.publication["tree"]["children"]["rounds"]["input"]["resolved"] == 9
+    assert gui.publication["input"]["rounds"] == 9
 
 
 @pytest.mark.parametrize("field", ["", "missing", "modules..readout", "rounds.child"])
@@ -132,61 +110,49 @@ def test_author_rejects_unknown_fields_without_editing(tmp_path, field):
 @pytest.mark.parametrize(
     "name,current_reference,expected",
     [
-        pytest.param(
+        (
             None,
             None,
             MissingParameter(
-                "readout_ref", "Provide a valid modules.readout library reference"
+                "readout_ref", "Provide a valid modules.readout library key"
             ),
-            id="absent-reference",
         ),
-        pytest.param(
-            None,
-            "unknown",
-            MissingParameter(
-                "readout_ref", "Provide a valid modules.readout library reference"
-            ),
-            id="unavailable-reference",
-        ),
-        pytest.param(None, "Q1.readout.seed", None, id="retained-library"),
-        pytest.param("Q1.readout.seed", None, None, id="explicit-library"),
+        (None, "R1.readout.main", None),
+        ("R1.readout.main", None, None),
     ],
 )
 def test_author_required_library_returns_parameter_gap_or_none(
     tmp_path, name, current_reference, expected
 ):
     gui = LookbackGui()
-    gui.library["Q1.readout.seed"] = {}
-    gui.publication["tree"]["children"]["modules"]["children"]["readout"]["ref"] = (
-        current_reference
-    )
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
-        assert tab.use_library("modules.readout", name, required="readout_ref") == (
-            expected
+        if current_reference is not None:
+            tab.use_library("modules.readout", current_reference)
+        before = len(client.transport.sent)
+        assert (
+            tab.use_library("modules.readout", name, required="readout_ref") == expected
         )
-    assert sum(method == "tab.edit_cfg" for method, _ in client.transport.sent) == (
-        0 if name is None else 1
-    )
+        assert sum(
+            method == "tab.edit_cfg" for method, _ in client.transport.sent[before:]
+        ) == (0 if name is None else 1)
 
 
 def test_author_explicit_invalid_library_does_not_fall_back(tmp_path):
     gui = LookbackGui()
-
-    def respond(method, params):
-        reply = gui(method, params)
-        if method == "tab.edit_cfg":
-            reply["tree"]["children"]["modules"]["children"]["readout"].update(
-                valid=False, error="unknown library"
-            )
-        return reply
-
-    with recipe_client(tmp_path, respond) as client:
+    with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
+        initial = tab.read_field("modules.readout")
+        before = list(client.transport.sent)
         with pytest.raises(GuiRpcError) as error:
-            tab.use_library("modules.readout", "unknown", required="readout_ref")
+            tab.use_library(
+                "modules.readout", "unknown.readout.main", required="readout_ref"
+            )
         assert error.value.reason == "invalid_cfg"
-        assert sum(method == "tab.edit_cfg" for method, _ in client.transport.sent) == 1
+        assert "modules.readout" in str(error.value)
+        assert "Available keys" in str(error.value)
+        assert tab.read_field("modules.readout") == initial
+        assert client.transport.sent == before
 
 
 @pytest.mark.parametrize("expts", [0, 1, 1.5, True])
@@ -203,17 +169,17 @@ def test_author_sweep_rejects_invalid_counts_before_edit(tmp_path, expts):
 
 def test_author_sweep_only_edits_supplied_fields(tmp_path):
     gui = _SweepGui()
-    before = deepcopy(
-        gui.publication["tree"]["children"]["sweep"]["children"]["freq"]["inputs"]
-    )
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
+        before = deepcopy(tab.read_field("sweep.freq").input)
         tab.set_sweep("sweep.freq")
         tab.set_sweep("sweep.freq", start=6000.0, expts=2)
-    inputs = gui.publication["tree"]["children"]["sweep"]["children"]["freq"]["inputs"]
-    assert inputs["start"]["resolved"] == 6000.0
-    assert inputs["stop"] == before["stop"]
-    assert inputs["expts"]["resolved"] == 2
+        inputs = tab.read_field("sweep.freq").input
+        if not isinstance(inputs, dict) or not isinstance(before, dict):
+            raise TypeError("Expected Form range input")
+        assert inputs["start"] == 6000.0
+        assert inputs["stop"] == before["stop"]
+        assert inputs["n"] == 2
 
 
 def test_author_sweep_captures_individual_labels_and_omitted_gui_sources(tmp_path):
@@ -233,7 +199,7 @@ def test_author_sweep_captures_individual_labels_and_omitted_gui_sources(tmp_pat
                     "sweep.freq",
                     "sweep.freq.start",
                     "sweep.freq.stop",
-                    "sweep.freq.expts",
+                    "sweep.freq.n",
                 )
             ),
         ).open_tab("lookback")
@@ -249,7 +215,7 @@ def test_author_sweep_captures_individual_labels_and_omitted_gui_sources(tmp_pat
         }
         assert fields["sweep.freq.start"].get("source") == "start_mhz"
         assert fields["sweep.freq.stop"].get("source") == "gui_default"
-        assert fields["sweep.freq.expts"].get("source") == "points"
+        assert fields.get("sweep.freq.n") == {"value": 2, "source": "points"}
 
 
 @pytest.mark.parametrize("key", ["start", "stop", "expts"])

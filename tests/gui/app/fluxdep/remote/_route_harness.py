@@ -7,6 +7,7 @@ No socket, QApplication or background worker is created.
 
 from __future__ import annotations
 
+import copy
 import json
 import threading
 from collections.abc import Callable
@@ -19,6 +20,7 @@ from zcu_tools.gui.app.fluxdep.remote.service import (
     RemoteControlAdapter,
 )
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
+from zcu_tools.gui.interactive.plugin import BackgroundSubmitter
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request
 
@@ -94,25 +96,31 @@ class RouteHarness:
     request_id: int = 0
 
     @classmethod
-    def create(cls, project_root: str) -> RouteHarness:
+    def create(
+        cls,
+        project_root: str,
+        *,
+        interactive_background: BackgroundSubmitter | None = None,
+    ) -> RouteHarness:
         """Build an inert adapter and State rooted at project_root; open no socket."""
         scheduler = ImmediateOwnerScheduler()
         ctrl = Controller(
             FluxDepState(),
             project_root=project_root,
             interactive_owner=scheduler,
+            interactive_background=interactive_background,
         )
         service = RemoteControlAdapter(
             ctrl, ControlOptions(port=0), owner_scheduler=scheduler
         )
         return cls(ctrl, service)
 
-    def client(self) -> ClientLink:
+    def client(self, *, label: str = "agent", mode: str = "owner") -> ClientLink:
         """Open an owner connection with the default control label and real app context."""
         link = ClientLink(f"client-{len(self.links)}", token_required=False)
         self.service.on_client_open(link)
         self.links.append(link)
-        reply = self.request(link, "control.connect")
+        reply = self.request(link, "control.connect", label=label, mode=mode)
         assert reply["ok"], reply
         return link
 
@@ -140,3 +148,11 @@ class RouteHarness:
         for link in self.links.copy():
             self.disconnect(link)
         self.ctrl.interactive.dispose()
+
+
+def copy_sources(harness: RouteHarness, ctrl: Controller) -> RouteHarness:
+    """Seed a route with detached Controller sources and the same display target."""
+    for entry in ctrl.state.spectrums.values():
+        harness.ctrl.state.put_spectrum(copy.deepcopy(entry))
+    harness.ctrl.set_active_spectrum(ctrl.state.active_spectrum)
+    return harness

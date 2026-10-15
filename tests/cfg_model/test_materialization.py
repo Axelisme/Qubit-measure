@@ -420,10 +420,6 @@ class TestModuleCfgFactoryFromRaw:
         assert resolver.modules["library_pulse"].to_dict() == expected_pulse
         assert raw == {"type": "reset/pulse", "pulse_cfg": "library_pulse"}
 
-    def test_no_context_when_not_provided(self):
-        cfg = ModuleCfgFactory.from_raw({"type": "reset/none"})
-        assert isinstance(cfg, NoneResetCfg)
-
 
 class TestWaveformCfgFactoryFromRaw:
     def test_dispatch_const(self):

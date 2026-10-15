@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-02, explicit rendering
+**Last updated:** 2026-10-12, shared project data-root naming
 
 # `zcu_tools.gui.app.dispersive` — dispersive-shift analysis GUI
 
@@ -57,13 +57,13 @@ Worker 只回資料，主執行緒擁有 Figure 與 canvas。Shared runtime 初�
 **State / wire 全程 GHz**（g, bare_rf, bare_rf_seed, freqs）；slider UI 顯示 MHz（×1e3 進 / ×1e-3 出）。onetone load 經 `analysis.spectrum.format_rawdata` Hz→GHz（**不走 experiment 層**：`FluxDepExp.load` 回 dataclass、MHz）。
 
 ## Remote / MCP（read-only，fluxdep 模式）
-agent 只觀測、user 在 GUI 驅動。method set 全純查詢（state.check / project.info / fit_inputs.info / preprocess.status / fit.result{has_result,g,bare_rf,res_dim} / resources.versions），**無 mutating RPC**。`mcp/dispersive/server.py` 是 **thin entrypoint**：填 config + instructions，body（`send_gui_rpc` / 3 lifecycle tools launch/connect/disconnect（**無 stop 曝露**）/ cleanup / `run_stdio_loop`）全交 `mcp/core/readonly_server.build_readonly_server`；read-only tools 從 METHOD_SPECS 自動生成。**event-push 丟棄**（read-only 無診斷流，bridge on_event 不接）。預設 control port **8767**（避開 fluxdep 8766）。當 script 跑：絕對 import（無 parent package）+ lib path inject。**WIRE=4/GUI=6**（EventBus push 含 seq/origin；fit.result 維持無 step）。`project.info` / `resources.versions` 直接註冊 `gui/remote/readonly_handlers.py` 的共用 `h_project_info` / `h_resources_versions`（與 fluxdep 共用，兩 app wire 形態永遠同步）；`_h_state_check` 仍 app-local（用 `gui/project.py` 的 `is_real_project`）。
+agent 只觀測、user 在 GUI 驅動。method set 全純查詢（state.check / project.info / fit_inputs.info / preprocess.status / fit.result{has_result,g,bare_rf,res_dim} / resources.versions），**無 mutating RPC**。`mcp/dispersive/server.py` 是 **thin entrypoint**：填 config + instructions，body（`send_gui_rpc` / 3 lifecycle tools launch/connect/disconnect（**無 stop 曝露**）/ cleanup / `run_stdio_loop`）全交 `mcp/core/readonly_server.build_readonly_server`；read-only tools 從 METHOD_SPECS 自動生成。**event-push 丟棄**（read-only 無診斷流，bridge on_event 不接）。預設 control port **8767**（避開 fluxdep 8766）。當 script 跑：絕對 import（無 parent package）+ lib path inject。**WIRE=5/GUI=7**（project.info 使用 data_root；EventBus push 含 seq/origin；fit.result 維持無 step）。`project.info` / `resources.versions` 直接註冊 `gui/remote/readonly_handlers.py` 的共用 `h_project_info` / `h_resources_versions`（與 fluxdep 共用，兩 app wire 形態永遠同步）；`_h_state_check` 仍 app-local（用 `gui/project.py` 的 `is_real_project`）。
 
 ## 已知坑 / 設計決策
 - **preprocess 數值核心**：使用 [analysis/dispersive](../../../analysis/dispersive/README.md) 的 branch discovery、local refinement 與前處理。GUI 保留 worker 啟動、結果記錄與 busy/indeterminate 進度條。
 - **OneTone 檔軸常反**：OneTone hdf5 常存成 `[Frequency, Flux]`，loader 假設 `[Flux, Flux→Freq]` → 載入後 freqs 變垃圾（如 ~1e-12），preprocess edelay 全錯。**不是 bug，是檔格式** —— user 在 load dialog 看 preview 勾「Transpose axes」修正（這正是 preview dialog 的用途）。同 fluxdep OneTone 軸反問題。
 - **preprocess smoothing signature**：preprocess 在 edelay/circle-fit 前與 phase-diff 前沿頻率軸做 smoothing，預設 method 是 `wavelet`；signature 包含 method、兩個 smoothing divisor 與 grid shape，因此 smoothing pipeline 變更會讓既有 fit 失效。小頻網格的 smoothing strength floor 至 1，GUI 不因粗網格崩潰。
-- **路徑**：`result_dir`=`result/<chip>/<qub>`（processed 輸出 / params.json，可由 result scope picker 帶入既有 scope）；`database_path`=`Database/<chip>/<qub>`（**raw onetone root**，對齊 notebook `Database/Q12_2D[5]/Q1/...`，**不是** result/ 下）。browse onetone 預設走 `database_path`。
+- **路徑**：`result_dir`=`result/<chip>/<qub>`（processed 輸出 / params.json，可由 result scope picker 帶入既有 scope）；`data_root`=`Database/<chip>/<qub>`（**raw onetone root**，對齊 notebook `Database/Q12_2D[5]/Q1/...`，**不是** result/ 下）。browse onetone 預設走 `data_root`。
 - **export 需既存 params.json**：`QubitParams.set_dispersive_fit()` 要求檔案已存在且已有 `fluxdep_fit`；export 前 gate on `has_result`，缺 handoff 則 fast-fail 指向 fluxdep。
 - **section timestamp**：export 只更新 `dispersive` section 與 `dispersive.timestamp`，不改寫 `fluxdep_fit.timestamp`。
 - **bare_rf seed 不覆蓋**：`set_fit_inputs` 只在 disp_fit.bare_rf 無值時 seed（不蓋既有 tuning 值）。

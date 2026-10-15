@@ -9,7 +9,6 @@ from typing_extensions import TypedDict as ExtTypedDict
 from zcu_tools.gui.app.fluxdep.state import SpecType
 from zcu_tools.gui.interactive.flux_pick import FluxPickInfo
 from zcu_tools.gui.project import ProjectInfoPayload
-from zcu_tools.gui.remote.param_spec import InputSchema
 
 
 class PngImage(TypedDict):
@@ -19,11 +18,10 @@ class PngImage(TypedDict):
     bytes: int
 
 
-class CommandDeclaration(TypedDict):
-    """Available command: name is plugin/reserved ID; schema is its JSON input."""
+class FigureReply(TypedDict):
+    """figure is the native Show overlay PNG, encoded without saving a file."""
 
-    name: str
-    schema: InputSchema
+    figure: PngImage
 
 
 class EmptyPluginInfo(TypedDict):
@@ -78,23 +76,23 @@ class SelectionStateReply(TypedDict):
     mode: Literal["select", "erase"]
     selected: list[bool]
     selected_count: int
+    # Source names map to [kept count after downsampling, total captured points].
+    per_spectrum: dict[str, list[int]]
 
 
 class ContextReplyBase(TypedDict):
-    """One owner-lifetime identity's committed state and native image.
+    """One owner-lifetime identity's committed state.
 
     context_id is positive, not an edit revision. closed means this identity
     retired, even if a successor exists. plugin is its native plugin ID.
-    commands lists current declarations (empty when closed). can_undo follows
-    Session history and is false when closed. figure depicts this exact capture.
+    can_undo follows Session history and is false when closed. PNG is returned
+    only by the dedicated readonly render method.
     """
 
     context_id: int
     closed: bool
     plugin: str
-    commands: list[CommandDeclaration]
     can_undo: bool
-    figure: PngImage
 
 
 class LineContextReply(ContextReplyBase):
@@ -191,8 +189,12 @@ class InteractiveReply(TypedDict):
 
     context belongs to the requested identity, never a synchronous successor.
     effect is null for reads/opens and populated only after a successful command.
+    discarded is align/sample only when open replaces an unfinished draft.
     """
 
+    # Terminal finish only: downstream labels from that exact app publication.
+    invalidated: NotRequired[list[str]]
+    discarded: NotRequired[Literal["align", "sample"]]
     context: InteractiveContextReply | None
     effect: InteractiveEffect | None
 
@@ -203,6 +205,10 @@ class SpectrumListItem(TypedDict):
     name is the opaque loaded identifier. spec_type is OneTone or TwoTone.
     aligned marks committed alignment. points_completed marks completion even
     with zero points. point_count is a nonnegative annotation count, not a gate.
+    stage is the published loaded/aligned/sampled state, independent of pending;
+    unaligned spectra stay loaded even with retained completed points.
+    filter_excluded_count counts False values in the published per-spectrum
+    Filter mask, or zero without a mask. It excludes draft edits and downsampling.
     """
 
     name: str
@@ -210,6 +216,10 @@ class SpectrumListItem(TypedDict):
     aligned: bool
     points_completed: bool
     point_count: int
+    stage: Literal["loaded", "aligned", "sampled"]
+    filter_excluded_count: int
+    # Unfinished alignment or sampling draft, otherwise None.
+    pending: Literal["align", "sample"] | None
 
 
 class SpectrumListReply(TypedDict):
@@ -223,6 +233,21 @@ class PointcloudReply(TypedDict):
 
     fluxs: list[float]
     freqs: list[float]
+
+
+class DatabaseInfoReply(TypedDict):
+    """Search DB path, candidate/level counts and inclusive parameter ranges.
+
+    EJ/EC/EL ranges are GHz; flux is normalized Phi_0. Every range is [min, max].
+    """
+
+    path: str
+    entries: int
+    levels: int
+    EJ: list[float]
+    EC: list[float]
+    EL: list[float]
+    flux: list[float]
 
 
 class FitParametersReply(TypedDict):
@@ -245,18 +270,50 @@ class TransitionWire(ExtTypedDict, extra_items=list[list[int]]):
     sample_f: NotRequired[float]
 
 
+class TransitionQualityReply(TypedDict):
+    """One compiled transition's recorded absolute GHz residuals.
+
+    transition is its kernel label; duplicates retain separate entries. points
+    counts attribution, including zero. mean/max are None for zero points.
+    """
+
+    transition: str
+    points: int
+    mean: float | None
+    max: float | None
+
+
+class FitQualityReply(TypedDict):
+    """Recorded kernel quality with full precision GHz values.
+
+    mean is the absolute residual average. outliers counts residuals strictly
+    above outlier_threshold. per_transition retains all compiled columns in order.
+    """
+
+    mean: float
+    outliers: int
+    outlier_threshold: float
+    per_transition: list[TransitionQualityReply]
+
+
 class FitResultReply(TypedDict):
     """Complete editable fit snapshot and current result availability.
 
     has_result marks a stored successful result. params is its EJ/EC/EL or None.
-    database_path is the search database file, not the project's raw root.
+    search_db is the search database file, not the project's raw root.
     EJb/ECb/ELb are [lower, upper] GHz bounds. transitions contains native choices.
     r_f/sample_f are separate optional GHz inputs, None when unset.
     """
 
+    # True when recorded search input versions changed; absent result is fresh.
+    stale: bool
+    # Ordered root-change descriptions from the app dependency graph.
+    stale_reasons: list[str]
+    # None when no full kernel search result has been recorded.
+    quality: FitQualityReply | None
     has_result: bool
     params: FitParametersReply | None
-    database_path: str
+    search_db: str
     EJb: list[float]
     ECb: list[float]
     ELb: list[float]
@@ -277,7 +334,10 @@ class StateCheckReply(TypedDict):
 
 
 class ResourceVersionsReply(TypedDict):
-    """versions is the raw live resource counter snapshot; missing keys stay absent."""
+    """versions is the public resource counter snapshot; missing keys stay absent.
+
+    Private pipeline stage counters are not part of the remote resource contract.
+    """
 
     versions: dict[str, int]
 
@@ -322,6 +382,12 @@ class SpectrumAbsentReply(TypedDict):
     exists: Literal[False]
 
 
+class AlignmentSourceReply(TypedDict):
+    """Current source of published alignment, or None for direct/manual lines."""
+
+    inherited_from: str | None
+
+
 class SpectrumPresentReply(TypedDict):
     """Complete editable live spectrum snapshot.
 
@@ -338,6 +404,8 @@ class SpectrumPresentReply(TypedDict):
     aligned: bool
     points_completed: bool
     alignment_seeded: bool
+    pending: Literal["align", "sample"] | None
+    alignment: AlignmentSourceReply
     flux_half: float
     flux_int: float
     flux_period: float
@@ -356,6 +424,8 @@ class SelectionSnapshotReply(TypedDict):
 
     selected: list[bool] | None
     min_distance: float
+    # True when an unfinished joint Filter draft exists.
+    pending: bool
 
 
 class ProjectSetupReply(TypedDict):
@@ -402,9 +472,15 @@ class SpectrumsExportedReply(TypedDict):
 
 
 class ParamsExportedReply(TypedDict):
-    """savepath is the native owner's actual merged params JSON output path."""
+    """Successful native merge output, captured by the GUI export owner.
+
+    savepath is the actual output path. params preserves full-precision EJ/EC/EL
+    in GHz. alignment_from is the first aligned spectrum used for calibration.
+    """
 
     savepath: str
+    params: FitParametersReply
+    alignment_from: str
 
 
 class OperationActivityReply(TypedDict):

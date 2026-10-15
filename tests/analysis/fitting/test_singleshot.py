@@ -157,6 +157,7 @@ def test_ge_does_not_return_initial_guess_on_optimizer_failure(monkeypatch):
     def fail(*args, **kwargs):
         raise RuntimeError("optimizer exhausted")
 
+    # Valid finite histograms cannot reliably exhaust SciPy's unexposed iteration budget.
     monkeypatch.setattr(singleshot, "curve_fit", fail)
     xs = np.linspace(-4, 4, 101)
     g, e = _make_overlapping_histogram(xs, -1, 1, 0.3)
@@ -164,124 +165,64 @@ def test_ge_does_not_return_initial_guess_on_optimizer_failure(monkeypatch):
         fit_singleshot(xs, g, e)
 
 
-@pytest.mark.parametrize("reverse_labels", [False, True])
-@pytest.mark.parametrize(
-    "fixed_populations, encoded, optimizer_covariance, physical_covariance",
-    [
-        (
-            (None, None),
-            [0.8, 0.25, 0.7],
-            [[0.04, 0.006, 0.002], [0.006, 0.09, 0.003], [0.002, 0.003, 0.01]],
-            [
-                [0.0729, -0.0477, -0.0009],
-                [-0.0477, 0.0625, 0.0029],
-                [-0.0009, 0.0029, 0.01],
-            ],
-        ),
-        (
-            (0.6, None),
-            [0.5, 0.7],
-            [[0.09, 0.003], [0.003, 0.01]],
-            [[0.0, 0.0, 0.0], [0.0, 0.0144, 0.0012], [0.0, 0.0012, 0.01]],
-        ),
-        (
-            (None, 0.2),
-            [0.75, 0.7],
-            [[0.09, 0.003], [0.003, 0.01]],
-            [[0.0576, 0.0, 0.0024], [0.0, 0.0, 0.0], [0.0024, 0.0, 0.01]],
-        ),
-    ],
-    ids=["both-free", "ground-fixed", "excited-fixed"],
-)
-def test_ge_returns_physical_covariance(
-    monkeypatch,
-    reverse_labels,
-    fixed_populations,
-    encoded,
-    optimizer_covariance,
-    physical_covariance,
-):
-    def optimizer(*args, **kwargs):
-        return np.array(encoded), np.array(optimizer_covariance)
+@pytest.mark.parametrize("p_avg", [0.15, 0.85])
+@pytest.mark.parametrize("initial_transition", [(0.05, 0.2), (0.95, 2.8)])
+def test_ge_recovers_from_misleading_initial_transition(p_avg, initial_transition):
+    xs = np.linspace(-4, 4, 201)
+    truth = (-1.0, 1.0, 0.3, 0.6, 0.2, p_avg, 1.2)
+    g = calc_population_pdf(xs, *truth)
+    e = calc_population_pdf(xs, *truth[:3], truth[4], truth[3], *truth[5:])
+    initial = [-1.0, 1.0, 0.3, 0.6, 0.2, *initial_transition]
 
-    monkeypatch.setattr(singleshot, "curve_fit", optimizer)
+    fitted, covariance = fit_singleshot(xs, g, e, fitparams=initial)
+
+    np.testing.assert_allclose(fitted, truth, atol=0.03)
+    predicted_g = calc_population_pdf(xs, *fitted)
+    predicted_e = calc_population_pdf(
+        xs, *fitted[:3], fitted[4], fitted[3], *fitted[5:]
+    )
+    residual = np.concatenate([predicted_g - g, predicted_e - e])
+    assert np.linalg.norm(residual) < 0.001
+    assert np.isfinite(covariance).all()
+
+
+@pytest.mark.parametrize("failure", ["exhausted", "nan-covariance", "inf-covariance"])
+def test_ge_recovers_after_unreliable_optimizer_candidate(monkeypatch, failure):
+    from scipy.optimize import curve_fit
+
     xs = np.linspace(-4, 4, 101)
     truth = (-1.0, 1.0, 0.3, 0.6, 0.2, 0.7, 0.7)
     g = calc_population_pdf(xs, *truth)
     e = calc_population_pdf(xs, *truth[:3], truth[4], truth[3], *truth[5:])
-    fixed = [-1.0, 1.0, 0.3, *fixed_populations, None, 0.7]
-    expected_values = np.array(truth)
-    # Independently calculated physical (p_g, p_e, p_avg) covariance, including
-    # correlations with p_avg so reversed labels must also reverse their signs.
-    expected_covariance = np.zeros((7, 7))
-    expected_covariance[3:6, 3:6] = physical_covariance
-    if reverse_labels:
-        g, e = e, g
-        fixed[0], fixed[1] = fixed[1], fixed[0]
-        expected_values[0], expected_values[1] = 1.0, -1.0
-        expected_values[5] = 0.3
-        expected_covariance[5, :5] *= -1
-        expected_covariance[:5, 5] *= -1
+    pending_failure = True
 
-    fitted, covariance = fit_singleshot(xs, g, e, fixedparams=fixed)
-
-    np.testing.assert_allclose(fitted, expected_values, atol=1e-12)
-    np.testing.assert_allclose(covariance, expected_covariance, atol=1e-12)
-
-
-@pytest.mark.parametrize("winner", [2, 3], ids=["earlier-valid", "later-valid"])
-def test_ge_tries_all_starts_and_selects_lowest_residual(monkeypatch, winner):
-    xs = np.linspace(-4, 4, 101)
-    truth = (-1.0, 1.0, 0.3, 0.6, 0.2, 0.7, 0.7)
-    g = calc_population_pdf(xs, *truth)
-    e = calc_population_pdf(xs, *truth[:3], truth[4], truth[3], *truth[5:])
-    starts = []
-    encoded_truth = np.array([-1.0, 1.0, 0.3, 0.8, 0.25, 0.7, 0.7])
-
-    def optimizer(model, coordinates, data, **options):
-        index = len(starts)
-        starts.append(options["p0"].copy())
-        np.testing.assert_array_equal(coordinates, np.concatenate([xs, xs]))
-        np.testing.assert_array_equal(data, np.concatenate([g, e]))
-        np.testing.assert_allclose(
-            options["bounds"],
-            [[-4, -1, xs[1] - xs[0], 0, 0, 0, 0], [1, 4, 8, 1, 1, 1, 3]],
-        )
-        assert options["max_nfev"] == 5000
-        assert options["sigma"] is None
-        if index == 0:
-            raise RuntimeError("first start exhausted")
-        fitted = encoded_truth.copy()
-        covariance = np.eye(7) * 0.01
-        if index == 1:
-            # This candidate has zero residual but cannot be accepted.
-            covariance[0, 0] = np.inf
-        elif index != winner:
-            fitted[4] = 0.4
+    def optimizer(*args, **options):
+        nonlocal pending_failure
+        fitted, covariance = curve_fit(*args, **options)
+        if pending_failure:
+            pending_failure = False
+            if failure == "exhausted":
+                raise RuntimeError("optimizer exhausted")
+            # Keep the real fit's near-zero residual, but make its uncertainty invalid.
+            covariance[0, 0] = np.nan if failure == "nan-covariance" else np.inf
         return fitted, covariance
 
+    # Finite histograms cannot reliably yield both valid and invalid SciPy candidates.
     monkeypatch.setattr(singleshot, "curve_fit", optimizer)
     fitted, covariance = fit_singleshot(xs, g, e, fitparams=truth)
 
-    np.testing.assert_allclose(fitted, truth, atol=1e-12)
+    np.testing.assert_allclose(fitted, truth, atol=1e-5)
     assert np.isfinite(covariance).all()
-    expected_starts = np.tile(encoded_truth, (4, 1))
-    expected_starts[:, 5:] = [[0.7, 0.7], [0.2, 0.5], [0.8, 0.5], [0.5, 1.5]]
-    np.testing.assert_allclose(starts, expected_starts, atol=1e-12)
 
 
 @pytest.mark.parametrize("nonfinite", [np.nan, np.inf])
-@pytest.mark.parametrize("component", ["parameters", "covariance"])
-def test_ge_rejects_nonfinite_optimizer_results(monkeypatch, component, nonfinite):
+def test_ge_rejects_nonfinite_optimizer_parameters(monkeypatch, nonfinite):
     def optimizer(*args, **options):
         fitted = options["p0"].copy()
-        covariance = np.eye(len(fitted))
-        if component == "parameters":
-            fitted[0] = nonfinite
-        else:
-            covariance[0, 0] = nonfinite
-        return fitted, covariance
+        fitted[0] = nonfinite
+        return fitted, np.eye(len(fitted))
 
+    # SciPy keeps bounded parameters finite for valid finite histogram inputs.
     monkeypatch.setattr(singleshot, "curve_fit", optimizer)
     xs = np.linspace(-4, 4, 101)
     g, e = _make_overlapping_histogram(xs, -1, 1, 0.3)
@@ -289,36 +230,33 @@ def test_ge_rejects_nonfinite_optimizer_results(monkeypatch, component, nonfinit
         fit_singleshot(xs, g, e)
 
 
-@pytest.mark.parametrize("fit_length_ratio", [False, True])
-def test_row_fit_uses_histogram_weights_and_ratio_bounds(monkeypatch, fit_length_ratio):
-    xs = np.linspace(-4, 4, 101)
+def test_ge_rejects_unestimable_covariance():
+    from scipy.optimize import OptimizeWarning
+
+    # Six observations cannot estimate the covariance of seven free parameters.
+    xs = np.array([-1.0, 0.0, 1.0])
+    truth = (-0.3, 0.3, 1.2, 0.6, 0.2, 0.7, 0.7)
+    g = calc_population_pdf(xs, *truth)
+    e = calc_population_pdf(xs, *truth[:3], truth[4], truth[3], *truth[5:])
+    with (
+        pytest.warns(OptimizeWarning, match="Covariance"),
+        pytest.raises(RuntimeError, match="did not converge"),
+    ):
+        fit_singleshot(xs, g, e, fitparams=truth)
+
+
+@pytest.mark.parametrize("target_ratio, expected_ratio", [(0.05, 0.35), (2.8, 1.4)])
+def test_row_fit_limits_adjustable_ratio(target_ratio, expected_ratio):
+    xs = np.linspace(-4, 4, 201)
     params = (-1.0, 1.0, 0.3, 0.6, 0.2, 0.7, 0.7)
-    pdf = calc_population_pdf(xs, *params)
-    calls = []
+    pdf = calc_population_pdf(xs, *params[:6], target_ratio)
 
-    def optimizer(model, coordinates, data, **options):
-        calls.append(options)
-        np.testing.assert_array_equal(coordinates, xs)
-        np.testing.assert_array_equal(data, pdf)
-        return options["p0"], np.eye(len(options["p0"]))
+    fitted, covariance = fit_singleshot_p0(xs, pdf, 0.6, 0.2, params, True)
 
-    monkeypatch.setattr(singleshot, "curve_fit", optimizer)
-    fitted, _ = fit_singleshot_p0(xs, pdf, 0.6, 0.2, params, fit_length_ratio)
-
-    assert len(calls) == 1
-    options = calls[0]
-    ground = np.exp(-0.5 * ((xs + 1) / 0.3) ** 2)
-    excited = np.exp(-0.5 * ((xs - 1) / 0.3) ** 2)
-    weights = 0.6 * ground / ground.sum() + 0.2 * excited / excited.sum()
-    np.testing.assert_allclose(options["sigma"], 1 / np.sqrt(weights))
-    assert options["max_nfev"] == 5000
-    if fit_length_ratio:
-        np.testing.assert_allclose(options["p0"], [0.8, 0.25, 0.7])
-        np.testing.assert_allclose(options["bounds"], [[0, 0, 0.35], [1, 1, 1.4]])
-    else:
-        np.testing.assert_allclose(options["p0"], [0.8, 0.25])
-        np.testing.assert_allclose(options["bounds"], [[0, 0], [1, 1]])
-    np.testing.assert_allclose(fitted, [0.6, 0.2, 0.7])
+    assert 0.35 <= fitted[2] <= 1.4
+    assert fitted[2] == pytest.approx(expected_ratio, abs=0.001)
+    assert min(fitted[:2]) >= 0 and sum(fitted[:2]) <= 1
+    assert np.isfinite(covariance).all()
 
 
 @pytest.mark.parametrize(

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     AxesSpec,
     Axis,
@@ -44,15 +44,15 @@ class PowerResult:
 
 
 class PowerModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    init_pulse: PulseCfg | None = None
-    tested_reset: TwoPulseResetCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[TwoPulseResetCfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class PowerSweepCfg(ConfigBase):
-    gain1: SweepCfg
-    gain2: SweepCfg
+    gain1: Annotated[SweepCfg, FieldMeta(label="Gain1", unit="a.u.")]
+    gain2: Annotated[SweepCfg, FieldMeta(label="Gain2", unit="a.u.")]
 
 
 class PowerCfg(ProgramV2Cfg, ExpCfgModel):

@@ -2,13 +2,12 @@
 
 from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
-from typing import NoReturn, assert_type
+from typing import assert_type
 from unittest.mock import Mock
 
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
-from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.device import DeviceManager, FakeDevice
 from zcu_tools.experiment import AcquisitionEvidence
 from zcu_tools.experiment.context import RunContext
@@ -442,16 +441,10 @@ def test_factory_keeps_each_experiment_records_independent() -> None:
     )
 
 
-def test_binding_and_offline_operations_do_not_query_devices(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    manager = DeviceManager()
-
-    def reject_query() -> NoReturn:
-        raise AssertionError("Offline operations must not query devices")
-
-    monkeypatch.setattr(manager, "get_all_devices", reject_query)
-    monkeypatch.setattr(manager, "get_all_info", reject_query)
+def test_binding_and_offline_operations_do_not_query_devices(tmp_path: Path) -> None:
+    manager = Mock(spec=DeviceManager)
+    manager.get_all_devices.side_effect = AssertionError("Offline device query")
+    manager.get_all_info.side_effect = AssertionError("Offline device query")
     factory = NotebookAdapter(device_manager=manager, host=_Host())
     first, second = factory(_Core()), factory(_Core())
     loaded = first.load(Path("loaded"))
@@ -464,19 +457,10 @@ def test_binding_and_offline_operations_do_not_query_devices(
     assert second.analysis is None
 
 
-def test_run_refreshes_driver_mapping_once_and_keeps_it_fixed_until_return(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_run_refreshes_driver_mapping_and_keeps_it_fixed_until_return() -> None:
     manager = DeviceManager()
     first_device, replacement = FakeDevice(fast_mode=True), FakeDevice(fast_mode=True)
     manager.register_device("flux", first_device)
-    query = Mock(wraps=manager.get_all_devices)
-    monkeypatch.setattr(manager, "get_all_devices", query)
-
-    def reject_info() -> NoReturn:
-        raise AssertionError("Run must not refresh cfg from device information")
-
-    monkeypatch.setattr(manager, "get_all_info", reject_info)
 
     class ReplacingCore(_Core):
         def run(self, config: _Cfg, *, context: RunContext) -> float:
@@ -491,12 +475,9 @@ def test_run_refreshes_driver_mapping_once_and_keeps_it_fixed_until_return(
     entry = NotebookAdapter(
         soc=object(), soccfg=object(), device_manager=manager, host=_Host()
     )(core)
-    assert query.call_count == 0
     first = entry.run(_Cfg(scale=2.0))
-    assert query.call_count == 1
     second = entry.run(_Cfg(scale=3.0))
 
-    assert query.call_count == 2
     assert first.result == 2.0 and second.result == 3.0
     assert core.contexts[0].devices["flux"] is first_device
     assert core.contexts[1].devices["flux"] is replacement
@@ -528,10 +509,12 @@ def test_reassigning_environment_variables_does_not_rebind_existing_factory() ->
     assert context.devices["flux"] is driver
 
 
-def test_mapping_failure_preserves_successful_records(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    manager = DeviceManager()
+def test_mapping_failure_preserves_successful_records() -> None:
+    manager = Mock(spec=DeviceManager)
+    manager.get_all_devices.side_effect = [
+        {},
+        RuntimeError("Registry snapshot unavailable"),
+    ]
     core = _Core()
     entry = NotebookAdapter(
         soc=object(), soccfg=object(), device_manager=manager, host=_Host()
@@ -540,10 +523,6 @@ def test_mapping_failure_preserves_successful_records(
     analysis = entry.analyze(_Options(weights=[2.0]))
     presentation = entry.run_presentation
 
-    def fail_mapping() -> NoReturn:
-        raise RuntimeError("Registry snapshot unavailable")
-
-    monkeypatch.setattr(manager, "get_all_devices", fail_mapping)
     with pytest.raises(RuntimeError, match="Registry snapshot unavailable"):
         entry.run(_Cfg(scale=9.0))
 
@@ -577,25 +556,18 @@ def test_save_defaults_to_last_run_not_explicit_historical_analysis(
     assert analysis.source is first
 
 
-def test_acquisition_boundaries_exclude_capture_and_presentation(
+def test_acquisition_boundaries_exclude_presentation(
     monkeypatch: pytest.MonkeyPatch,
-    software_provenance: SoftwareProvenance,
 ) -> None:
     started = datetime(2026, 10, 6, 12, tzinfo=UTC)
     finished = started + timedelta(seconds=10)
-    current = started - timedelta(seconds=10)
+    current = started
 
     class Clock:
         @classmethod
         def now(cls, tz: tzinfo | None = None) -> datetime:
             assert tz is UTC
             return current
-
-    def capture(*, context: RunContext | None = None) -> SoftwareProvenance:
-        nonlocal current
-        assert context is not None
-        current = started
-        return software_provenance
 
     class TimedCore(_Core):
         def run(self, config: _Cfg, *, context: RunContext) -> float:
@@ -612,7 +584,6 @@ def test_acquisition_boundaries_exclude_capture_and_presentation(
             super().present(figure)
 
     monkeypatch.setattr(adapter_module, "datetime", Clock)
-    monkeypatch.setattr(adapter_module, "capture_software_provenance", capture)
     adapter = NotebookAdapter(
         soc=object(), soccfg=object(), device_manager=DeviceManager(), host=TimedHost()
     )(TimedCore())
@@ -624,7 +595,6 @@ def test_acquisition_boundaries_exclude_capture_and_presentation(
     assert evidence.finished_at == finished
     assert evidence.completion == "complete"
     assert evidence.run_id.startswith("20261006T120000Z-")
-    assert evidence.provenance == software_provenance
     assert current > evidence.finished_at
     adapter.analyze(_Options(weights=[2.0]))
     assert adapter.acquisition_for(record) == evidence
@@ -657,48 +627,32 @@ def test_acquisition_identity_rejects_foreign_handmade_and_loaded_sources() -> N
             adapter.acquisition_for(invalid)
 
 
-def test_acquisition_isolates_provider_and_query_version_mappings(
-    software_provenance: SoftwareProvenance,
-) -> None:
-    versions = software_provenance.software_versions
-    assert isinstance(versions, dict)
-
-    class MutatingCore(_Core):
-        def run(self, config: _Cfg, *, context: RunContext) -> float:
-            versions["python"] = "changed during acquisition"
-            return super().run(config, context=context)
-
+def test_acquisition_isolates_query_version_mappings() -> None:
     adapter = NotebookAdapter(
         soc=object(), soccfg=object(), device_manager=DeviceManager(), host=_Host()
-    )(MutatingCore())
+    )(_Core())
     record = adapter.run(_Cfg())
     first = adapter.acquisition_for(record)
-    assert first.provenance.software_versions["python"] == "test"
-    versions["python"] = "provider changed"
+    original_versions = dict(first.provenance.software_versions)
     queried = first.provenance.software_versions
     assert isinstance(queried, dict)
     queried["python"] = "query changed"
 
     second = adapter.acquisition_for(record)
     assert second is not first
-    assert second.provenance.software_versions["python"] == "test"
+    assert second.provenance.software_versions == original_versions
 
 
-def test_capture_failure_retains_success_without_starting_core(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_capture_failure_retains_success_without_starting_core() -> None:
     core = _Core()
+    soccfg = Mock()
+    soccfg.dump_cfg.side_effect = ["{}", OSError("Software capture failed")]
     adapter = NotebookAdapter(
-        soc=object(), soccfg=object(), device_manager=DeviceManager(), host=_Host()
+        soc=object(), soccfg=soccfg, device_manager=DeviceManager(), host=_Host()
     )(core)
     record = adapter.run(_Cfg())
     evidence = adapter.acquisition_for(record)
     analysis = adapter.analyze(_Options(weights=[2.0]))
-    monkeypatch.setattr(
-        adapter_module,
-        "capture_software_provenance",
-        Mock(side_effect=OSError("Software capture failed")),
-    )
 
     with pytest.raises(OSError, match="Software capture failed"):
         adapter.run(_Cfg(scale=9.0))

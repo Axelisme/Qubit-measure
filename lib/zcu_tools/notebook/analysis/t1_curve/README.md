@@ -1,6 +1,6 @@
 # `t1_curve` 模塊重點文檔
 
-**Last updated:** 2026-10-11 — JSONL sample consumers
+**Last updated:** 2026-10-14，physical ns、標準 loss parameters 與 Purcell equilibrium T1
 
 Sample loading 使用 `JsonlSampleTable.read()`，預設讀取 `samples.jsonl`，每個 run_id 取最後一行。分析欄位使用 `freq_mhz`、`t1_us` 與 `t1_err_us`。資料缺 flux 或 row frame 時，由呼叫端提供同單位的 fallback frame。
 
@@ -11,9 +11,10 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 - 頻率 `freqs`: GHz；`omegas` (角頻率): rad/ns；兩者由 `freq2omega` 互轉。
 - T1 / T1err: ns。
 - 溫度 `Temp`: K (典型 ~20 mK)。
-- Purcell 參數 `bare_rf` / `g` / `kappa_ghz`: GHz。
+- Purcell 參數 `bare_rf` / `g`: GHz；`kappa_ghz` 表示 linewidth κ/(2π)，GHz。進入 decay rate 時乘 2π，單位 ns⁻¹。
 - 能量 `params = (EJ, EC, EL)`: GHz。
-- Dipole / spectral density: GHz，Q = T1 × dipole → 無量綱。
+- Dipole / spectral density 是包含 coupling prefactor 的 rate，單位 ns⁻¹。Q = T1 × dipole 為無量綱。Q_cap／Q_ind 是標準 loss quality factor，Q_qp = 1/x_qp。
+- Forward T1、pointwise Q 與 combined fit 使用同一套 rate prefactor。scqubits 在 energy/h=GHz 設定下已回傳 ns，不再外乘 2π，見 [ADR-0071](../../../../../docs/adr/0071-coherence-units.md)。
 
 ## 檔案與角色
 
@@ -50,8 +51,10 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 
 - `load_t1_curve_context()` / `calibrate_t1_flux()` / `prepare_t1_curve_data()` 封裝 sample loading、v2 flux resolution（explicit → row-frame → caller-declared fallback）、f01-based flux correction（derived rows 且 observed f01 finite 才執行）、integer branch alignment、T1/T1err 單位轉換與 fit-window filtering。以 `resolve_sample_flux` 取得 normalized flux；`freq_mhz` 為 null 的行仍可由 resolved flux 進入 analysis，missing observed f01 改用 model 在該 flux 預測的 f01。load 階段只讀 fluxdep fit 的 fluxonium 參數與 flux alignment；notebook-facing 參數用 us/ns 註明，低階 fit 一律吃 ns。
 - `plot_t1_flux_calibration(data)` 將每個 retained sample 的 raw flux 與 f01-corrected flux 畫在對應 f01 frequency 高度，供檢查 half-flux 附近是否發生不合理 branch jump。
-- `PurcellEffectParams(kappa_ghz, bare_rf, g)` 是 optional Purcell 設定本身的完整值容器；三個欄位都必填且必須為正 finite GHz。`load_t1_purcell_params(context, kappa_ghz=...)` 會從 `params.json` 的 `dispersive` section 解析 `bare_rf/g`，目前 `kappa_ghz` 仍由 notebook 明確輸入。
-- `calculate_purcell_t1_limit()` 對 Purcell sweep 使用 bounded LRU cache，並在 notebook workflow 內部關閉 scqubits sweep progress；cache key 包含 flux grid、`Temp`、fluxonium params、`bare_rf`、`g` 與 `kappa_ghz`，避免不同 qubit / dispersive 設定交叉命中。需要釋放或強制重算時呼叫 `clear_t1_purcell_cache()`。
+- `PurcellEffectParams(kappa_ghz, bare_rf, g)` 是 optional Purcell 設定本身的完整值容器；三個欄位都必填且必須為正 finite GHz。`kappa_ghz=0.001` 表示 1 MHz linewidth，不是 decay rate κ。`load_t1_purcell_params(context, kappa_ghz=...)` 會從 `params.json` 的 `dispersive` section 解析 `bare_rf/g`，目前 `kappa_ghz` 仍由 notebook 明確輸入。
+- `calculate_purcell_t1_limit()` 使用原 frequency-selected a†／a bath，分別對 e→g 與 g→e rates 做 resonator thermal average，回傳 equilibrium `T1=1/(Γeg+Γge)`，單位 ns。逐項 probe、combined fit 與 channel curves 都使用此 total rate。
+  - 模型只納入 0↔1，不包含高能態 leakage，也不代表來源論文的完整 loss 模型。底層 module-public `purcell` 保留 directional escape lifetime。
+  - Workflow 對 Purcell sweep 使用 bounded LRU cache，並在內部關閉 scqubits sweep progress。Cache key 包含 flux grid、`Temp`、fluxonium params、`bare_rf`、`g` 與 `kappa_ghz`，避免不同 qubit / dispersive 設定交叉命中。需要釋放或強制重算時呼叫 `clear_t1_purcell_cache()`。
 - `estimate_purcell_Temp_upper_bound(data, purcell, Temp_range=(10e-3, 300e-3), progress=False)` 用 `T1_Purcell(flux, Temp) >= T1_observed` 作為所有 fit 點的可行性條件，估算 Purcell 允許的最高 `Temp`；Purcell 不提供可正常推導的溫度下限。`progress=True` 只顯示外層 Temp bracket/bisection 進度，內部 Purcell sweep 仍關閉 scqubits progress。`plot_purcell_Temp_upper_bound(data, purcell, Temp=upper)` 用 T1 over flux 疊加 upper-bound Purcell curve，供檢查是哪個 flux 點限制溫度上限。
 - `analyze_t1_{capacitive,quasiparticle,inductive}_limit(..., purcell=None, fit_temperature=False, Temp_bounds=(10e-3, 300e-3))` 是逐項機制 probe；若提供 Purcell，會先以 rate domain 扣除 Purcell relaxation，再用 intrinsic T1 反推 pointwise Q、建議初值、上下界參考與 summary table。`fit_temperature=True` 時，Temp search 會使用 `Temp_bounds`，可傳 `(None, upper)` 只限制 Purcell 推得的上限，Purcell T1 也會以 candidate Temp 重算。`plot_t1_mechanism_dipole(probe)` 會用同一組 T1 口徑畫 T1 over dipole。
 - `make_t1_fit_init()` / `make_t1_fit_bounds()` / `fit_t1_curve(..., purcell=None)` 是綜合擬合階段；`active_mechanisms` 決定納入哪些通道，`mechanisms_to_fixed_params()` 決定哪些 active parameter 只固定不擬合。`make_t1_fit_bounds(..., Temp_bounds=(None, upper))` 會把 `None` 解析成預設正下限後交給底層 fit；Purcell 在 combined fit 中以 `1/T1_Purcell(Temp)` 加到總 relaxation rate，因此 `Temp` 若是 free parameter，Purcell 也會跟著更新。
@@ -60,20 +63,20 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 
 ### `Qcap.py` — 介電耗散 (電容通道)
 
-- `charge_spectral_density(ω, T, EC)`：`16·EC·coth(|ℏω/2kT|)/(1+e^{-ℏω/kT})`（對應 scqubits `t1_capacitive`）。
+- `charge_spectral_density(ω, T, EC)`：`32π·EC·coth(|ℏω/2kT|)/(1+e^{-ℏω/kT})`，是 unit-Q rate prefactor，對應 scqubits `t1_capacitive`。
 - `calc_cap_dipole(params, n_elements, ω, T)`：`|⟨0|n̂|1⟩|² · [S(ω)+S(-ω)]`。
 - `calc_Qcap_vs_omega(params, ω, T1s, n_elements, T1errs=None, Temp=20mK)`：`Q_cap = T1 · dipole`，可選回傳誤差。
 
 ### `Qind.py` — 電感耗散
 
-- `inductive_spectral_density(ω, T, EL)`：`2·EL·coth(|ℏω/2kT|)/(1+e^{-ℏω/kT})`。
+- `inductive_spectral_density(ω, T, EL)`：`4π·EL·coth(|ℏω/2kT|)/(1+e^{-ℏω/kT})`，是 unit-Q rate prefactor。
 - `calc_ind_dipole(params, phi_elements, ω, T)`：用 `|⟨0|φ̂|1⟩|²`。
 - `calc_Qind_vs_omega(...)`：結構同 Qcap。
 
 ### `Qqp.py` — 準粒子穿隧 (quasiparticle)
 
 - `DELTA_ALUMINUM = 3.4e-4` eV：鋁超導能隙預設值。
-- `qp_spectral_density(ω, T, EJ, Delta_eV)`：依 Smith et al. (2020) Eq. S23/19 的 `Re Y_qp / x_qp` 公式（含 `sp_special.kv(0, ...)` 修飾 Bessel）；對齊 scqubits：`Re Y_qp` 只依 `|ω|`，但 spectral-density 前因子保留 signed `ω`，讓 `S(ω)+S(-ω)` 正確。
+- `qp_spectral_density(ω, T, EJ, Delta_eV)` 使用 Smith et al. (2020) Eq. S23/19 的 `Re Y_qp / x_qp`，回傳每 unit x_qp 的 rate prefactor。Admittance 依 |ν| 計算，ν = ω/(2π)。Spectral prefactor 則用 signed angular ω，與 scqubits 的 `S(ω)+S(-ω)` 一致。
 - `calc_qp_oper(params, flux, return_dim=4, esys=None)`：回傳 `sin(φ/2)` 運算子矩陣；⚠ 假設 flux 併入 *cosine* 項（與某些文獻不同），故透過 `α=0.5, β=πflux` 做 `φ → φ + 2π·flux` 的平移。
 - `calc_qp_dipole(params, sin2_elements, ω, T, Delta_eV)`：`|⟨0|sin(φ/2)|1⟩|² · [S_qp(ω)+S_qp(-ω)]`。
 - `calc_Qqp_vs_omega(...)`：回傳的「Q_qp」實際上是 `1/x_qp`，代入 `plot_t1_with_sample(name="x_qp", ...)` 時要注意此反比關係。
@@ -86,6 +89,12 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 4. 依序跑 capacitive、quasiparticle、inductive probe，檢查每個機制的 pointwise Q 與單機制 T1 上限。
 5. 用 probe 結果建立 combined-fit 初值；用 `active_mechanisms` / `fixed_mechanisms` 控制納入與固定的通道。
 6. 在 uniform `t_fluxs` 上畫 effective T1 與各獨立機制曲線；需要交給 T2 分析時再顯式 `write_t1_curve_fit()`。
+
+## 歷史 fit
+
+舊 helper 曾在 forward T1 外乘 2π，pointwise spectrum 也缺少對應的 rate 轉換。舊 fitted parameters 可能靠這些偏差抵消而得到吻合曲線，不能直接視為標準 Q_cap／Q_ind／x_qp。使用者須重新擬合或審核來源，不要批次套用常數換算。本修正不改寫 measured T1、samples 或已保存的 fit，也不提供 legacy scale 開關。
+
+T1 channel curves 現在以修正後的 ns 作圖。T2 使用 model T1 計算 relaxation ceiling 時也會採用修正結果；使用 measured T1 的路徑不受這個理論單位修正影響。
 
 ## 注意事項
 

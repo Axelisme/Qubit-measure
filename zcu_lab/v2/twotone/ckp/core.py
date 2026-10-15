@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import Annotated
 
 import numpy as np
 from numpy.typing import NDArray
@@ -13,7 +14,7 @@ from zcu_tools.analysis.fitting import (
     fitlor,
     lorfunc,
 )
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     IDENTITY,
     MHZ_TO_HZ,
@@ -242,16 +243,16 @@ def _plot_resonance_maps(
 
 
 class CKPModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    pi_pulse: PulseCfg
-    res_pulse: PulseCfg
-    qub_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[PulseCfg, FieldMeta(label="Pi Pulse")]
+    res_pulse: Annotated[PulseCfg, FieldMeta(label="Resonator Drive Pulse")]
+    qub_pulse: Annotated[PulseCfg, FieldMeta(label="Qubit Probe Pulse")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class CKPSweepCfg(ConfigBase):
-    res_freq: SweepCfg
-    qub_freq: SweepCfg
+    res_freq: Annotated[SweepCfg, FieldMeta(label="Resonator drive freq", unit="MHz")]
+    qub_freq: Annotated[SweepCfg, FieldMeta(label="Qubit probe freq", unit="MHz")]
 
 
 class CKP_Cfg(ProgramV2Cfg, ExpCfgModel):

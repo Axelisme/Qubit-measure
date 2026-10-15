@@ -17,8 +17,9 @@ from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-from zcu_tools.gui.cfg import DirectValue
+from zcu_tools.gui.form import FormErrors
 
+from tests.gui.app.measure._library_fakes import sample_schema
 from tests.gui.app.measure._synthetic import SampleAdapter
 
 
@@ -73,34 +74,30 @@ def test_tab_cfg_and_revision_publish_without_viewer_timer(
     tab_id = ctrl.new_tab("fake")
     other_tab = ctrl.new_tab("fake")
     qapp.processEvents()
-    from zcu_tools.gui.cfg.resource import CfgEdit
 
     cfg = ctrl.cfg_resources.lookup(tab_id)
     key = f"tab:{tab_id}:cfg"
     other_key = f"tab:{other_tab}:cfg"
     before = ctrl.resources_versions()
 
-    cfg.edit((CfgEdit(("gain",), 0.25),))
+    cfg.write({("gain",): 0.25})
 
-    saved = ctrl.get_tab_snapshot(tab_id).cfg_schema
-    assert saved.value.fields["gain"] == DirectValue(0.25)
-    assert ctrl.resources_versions()[key] == before[key] + 1
-    assert ctrl.resources_versions()[other_key] == before[other_key]
+    saved = ctrl.get_tab_snapshot(tab_id).cfg_input
+    assert saved["gain"] == 0.25
+    assert ctrl.resources_versions()[key] == before.get(key, 0) + 1
+    assert ctrl.resources_versions().get(other_key, 0) == before.get(other_key, 0)
 
-    cfg.edit((CfgEdit(("gain",), DirectValue(raw="1e")),))
+    cfg.write({("gain",): "1e"})
 
-    invalid = ctrl.get_tab_snapshot(tab_id).cfg_schema.value.fields["gain"]
-    assert isinstance(invalid, DirectValue)
-    assert invalid.raw == "1e"
-    observed_value = cfg.observe().tree.children["gain"].value
-    assert isinstance(observed_value, DirectValue)
-    assert observed_value.error is not None
-    assert invalid.value is None
-    assert saved.value.fields["gain"] == DirectValue(0.25)
-    assert ctrl.resources_versions()[key] == before[key] + 2
+    invalid = ctrl.get_tab_snapshot(tab_id).cfg_input["gain"]
+    assert invalid == "1e"
+    assert cfg.input.data["gain"] == "1e"
+    assert isinstance(cfg.result(), FormErrors)
+    assert saved["gain"] == 0.25
+    assert ctrl.resources_versions()[key] == before.get(key, 0) + 2
     qapp.processEvents()
-    assert ctrl.resources_versions()[key] == before[key] + 2
-    assert ctrl.resources_versions()[other_key] == before[other_key]
+    assert ctrl.resources_versions()[key] == before.get(key, 0) + 2
+    assert ctrl.resources_versions().get(other_key, 0) == before.get(other_key, 0)
 
 
 def test_non_tab_editor_does_not_publish_into_tab_state(
@@ -109,17 +106,17 @@ def test_non_tab_editor_does_not_publish_into_tab_state(
     ctrl = measure_gui
     tab_id = ctrl.new_tab("fake")
     qapp.processEvents()
-    original = ctrl.get_tab_snapshot(tab_id).cfg_schema
+    original = ctrl.get_tab_snapshot(tab_id).cfg_input
     key = f"tab:{tab_id}:cfg"
-    before = ctrl.resources_versions()[key]
+    before = ctrl.resources_versions().get(key, 0)
     editor_id, _ = ctrl.open_seeded_cfg_editor(
-        original,
+        sample_schema(),
         parameters=ctrl.get_session_env().parameters,
         owner_key="writeback-test",
     )
     try:
         ctrl.cfg_editor_set_field(editor_id, "gain", 0.75)
-        assert ctrl.get_tab_snapshot(tab_id).cfg_schema == original
-        assert ctrl.resources_versions()[key] == before
+        assert ctrl.get_tab_snapshot(tab_id).cfg_input == original
+        assert ctrl.resources_versions().get(key, 0) == before
     finally:
         ctrl.teardown_cfg_editor(editor_id)

@@ -9,7 +9,8 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Annotated, Literal, Self, final
+from logging import getLogger
+from typing import TYPE_CHECKING, Annotated, Literal, Self, final
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from pydantic_core import PydanticCustomError
@@ -18,6 +19,12 @@ from zcu_tools.cfg_model import ModuleSpec
 from zcu_tools.device import BaseDeviceInfo
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot
+
+if TYPE_CHECKING:
+    from .options import Option
+
+_logger = getLogger(__name__)
+
 
 type FormPath = tuple[str | int, ...]
 """Relative model-field/mapping-key error path; integers are sequence indexes."""
@@ -178,6 +185,9 @@ class FormModel(BaseModel):
     mappings. default_input is final.
     No instances carry input, environment, revision or editing state. Ordinary
     nested BaseModel types remain supported without inheriting FormModel.
+    default_input, input_schema and FormInput reject untagged str | Model
+    fields with ValueError naming the field path, even in inactive branches.
+    Use a tagged ref/inline union instead.
     """
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
@@ -187,7 +197,7 @@ class FormModel(BaseModel):
     def default_input(cls, env: FormEnv) -> FormInput[Self]:
         """Build isolated input from declared defaults; required keys stay absent.
 
-        Calls defaults(env, {}) before checking sources and assembling input.
+        Calls defaults(env) before checking sources and assembling input.
         Used missing library or device sources raise field_error with the
         consuming path. A text-field {"expr": text} default (int, float,
         complex or str, a choice leaf included) is evaluated once with
@@ -204,29 +214,29 @@ class FormModel(BaseModel):
         """
         from ._evaluate import evaluate_defaults
         from ._sources import check_sources
+        from ._structure import check_form_shape
 
-        data = cls.defaults(env, {})
+        check_form_shape(cls)
+        data = cls.defaults(env)
         check_sources(cls, data, env)
         return FormInput(cls, evaluate_defaults(cls, data, env))
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
-        """Return initial or new-branch defaults before input inheritance.
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
+        """Return initial or new-branch defaults before explicit field writes.
 
-        previous is empty for initial input, otherwise detached old-branch JSON. The fallback uses Pydantic static
-        defaults and leaves required keys absent; it does not validate a partial
-        model or replace missing keys with None. Domain factories may use env
-        and previous; source failures propagate with the consuming field path.
+        Defaults depend only on the declaration and fixed env, never a prior
+        draft. The fallback uses Pydantic static defaults and leaves required
+        keys absent; it does not validate a partial model or replace missing
+        keys with None. Source failures propagate at the consuming field path.
         A text-field leaf may be {"expr": text} to derive its initial value from
         env, such as {"expr": "$flux_dev"}; default_input and branch switches
         evaluate it into a direct value (see default_input), so it never stays
         in input as an expression.
         """
-        from ._structure import static_defaults
+        from .defaults import static_defaults
 
-        del env, previous
+        del env
         return static_defaults(cls)
 
     @classmethod
@@ -250,41 +260,55 @@ class FormModel(BaseModel):
         return {}
 
     @classmethod
+    def options(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[Option, ...]]:
+        """Declare ordered named selections by relative model-field path.
+
+        Paths address fields, including model/union sections, not sequence
+        indexes or mapping keys. Unknown paths raise ValueError in schema and
+        command execution. The deepest nested declaration wins, including an
+        empty tuple, which means no selections and never falls back to a
+        parent or automatic list. Nonoverlapping parent paths remain effective.
+        Automatic Literal/Enum, choices and tagged-union selections apply only
+        without a declaration for that field. Commands resolve only the current
+        active branch; inactive branch declarations cannot provide an action.
+        Declarations do not add validation: Pydantic and choices remain authoritative. Read env only as a fixed
+        borrowed capture, never refresh or mutate it; source failures propagate.
+        The default hook is empty. Consumers read input_schema's effective
+        x-form-options list, not this declaration hook or union structure.
+        """
+        return {}
+
+    @classmethod
     def input_schema(cls, env: FormEnv) -> dict[str, JsonValue]:
         """Describe accepted input without constructing editing state.
 
+        x-form-options supplies effective ordered {label, value, fields?,
+        commands?} selections. fields is an embedded partial object schema,
+        without tags fixed by value; commands exposes only {name, label}.
+        Literal/Enum, choices and tagged unions get automatic selections;
+        options(env) declarations replace them. Bool and ordinary nullable
+        models keep their checkbox/Enabled contract. Selection matches each
+        value leaf, first match wins; no match preserves current input.
         Include an Expr alternative ({"expr": text}) for each text field: an
         int, float, complex or str value leaf. Leaves whose values are picked
         get none: Literal and Enum (schema enum/const), bool, leaves with
-        current choices, the key of a str-or-model field and a ModuleRef
-        name. Include the shared complex tag, Field constraints, Display metadata and current
+        current choices and a KeyRef name. Include the shared complex tag, Field constraints, Display metadata and current
         choices enums. Display decimals and hidden appear only where declared.
         A model field without a Display label is titled by its field name,
         underscores as spaces and only the first letter capitalized. A model
         reached without a union selector keeps its one-value structural tag
         marked hidden: the tag field of a tagged-union branch that this form,
-        ModuleInput or RangeInput declares for the model or a base class.
-        Structural selectors accept only ordinary typed tags,
-        never Expr envelopes. Each tagged
-        oneOf branch has x-form-discriminator-values: its intrinsic Literal
-        tags as ordinary JSON values, independent of current choices. Each
-        branch reachable through model fields is one concrete model; a named
-        nested union tagged on the same key expands into its members. An
-        untagged str-or-model field (str | Model, Model possibly a tagged
-        union) uses the JSON type as its structural selector: its string branch
-        is a plain library key without Expr, and its object branch is the
-        inline model. With a captured library, that string branch's
-        x-form-library-keys lists the library keys whose Spec is one of the
-        field's models; they are suggestions, not choices. Its field node
-        is marked x-form-key-or-inline: true. A ModuleInput field (not
-        nullable) has the same marker on its tagged node: its ref branch
-        holds the key in name and its inline branch the module. With a
-        captured library, the ref branch's name property lists in
-        x-form-library-keys every library module key, since the inline
-        ModuleSpec accepts every module type; when choices declare options
-        for that name, only the module keys among them. Without a captured
-        library the list is absent. Any string key remains acceptable
-        input; a missing key fails the source check at the name. This
+        ModuleInput declares for the model or a base class; LinRange.kind is
+        also structural even though ranges have only one supported shape.
+        Structural selectors accept only ordinary typed tags, never Expr
+        envelopes. Each intrinsic tag has one x-form-options item, including
+        aliases, with fields shared by tags of the same model. Branch identity
+        comes from model annotations, independently of dynamic choices.
+        Each reachable branch is concrete; named unions tagged on the same key
+        expand into their members. An untagged str | Model raises ValueError
+        naming its path; use a tagged ref/inline union. Upper-layer generators
+        declare library/inline selections through options(env), not markers.
+        A missing ModuleRef key fails the source check at name. This
         schema describes partial JSON input, not just a valid model. Domain
         source failures from choices propagate; no refresh or file access occurs.
         A field whose union mixes text members (int, float, complex, str)
@@ -311,7 +335,9 @@ class FormInput[F: FormModel]:
         and invalid values remain input for result/compatible restoration.
         """
         from ._json import copy_object
+        from ._structure import check_form_shape
 
+        check_form_shape(model)
         self._model = model
         self._data = copy_object(data)
 
@@ -372,10 +398,12 @@ class FormState[F: FormModel]:
     def write(self, batch: Mapping[FormWritePath, JsonValue], env: FormEnv) -> None:
         """Install one input batch, keeping model-invalid drafts editable.
 
-        Discriminator changes apply first: use the new branch's defaults(env,
-        previous), with Expr defaults evaluated as in default_input, then
-        inherit old same-name fields (authored expressions stay expressions)
-        except the discriminator.
+        Discriminator changes apply first: use new-branch defaults(env),
+        with Expr defaults evaluated as in default_input. Never inherit old
+        same-name fields or copy sources. A partial object at a union position
+        selects its branch and writes its leaves in this same batch; it need
+        not be a declared option value. Same-branch edits retain unsupplied
+        fields. Unknown tags or object fields raise before installation.
         Apply all remaining leaf writes afterwards, so explicitly supplied
         content wins. Required fields without defaults stay absent. Writes use
         model-field leaf paths. Sequences and typed mappings are whole leaves;
@@ -385,11 +413,9 @@ class FormState[F: FormModel]:
         model creates its static defaults object before applying the leaf.
         Nullable model sections accept None or an object to deactivate/activate;
         an explicit null section requires object activation before child edits.
-        A str-or-model field takes a string key as an ordinary leaf. Writing {}
-        there switches a key or unfilled value to the inline model's defaults
-        (a tagged inline union starts at its first branch and tag) and leaves
-        an inline object unchanged; the old key is never converted. Other
-        whole objects are model replacement and raise ValueError.
+        Nonempty
+        partial union objects write supplied children; ordinary non-nullable
+        model replacement outside a union remains rejected.
         Structurally unknown or overlapping paths raise ValueError without
         installing a partial batch.
         Ordinary invalid values/Expr are retained for result to report. Missing
@@ -404,12 +430,46 @@ class FormState[F: FormModel]:
         check_sources(self._model, candidate, env)
         self._install(candidate)
 
+    def run_command(self, path: FormWritePath, name: str, env: FormEnv) -> None:
+        """Execute a named action on the first option matching current raw input.
+
+        path addresses the option field; name is a command identifier from
+        its effective schema list. Resolve declarations with the same fixed
+        env used by the host for writes and sources. Unknown paths, missing
+        current input, no matching option or unavailable commands raise
+        ValueError, never silently do nothing. The callable returns partial
+        input for path; install it through one atomic write and notify once.
+        Callable/source/structural failures leave state unchanged; ordinary
+        validation failures remain drafts for result/preview. No refresh,
+        library semantics, I/O policy or separate state is introduced.
+        """
+        from ._schema import effective_options
+
+        options = effective_options(self._model, env, self._data).get(path, ())
+        current: JsonValue = self._data
+        for part in path:
+            if not isinstance(current, dict) or part not in current:
+                raise ValueError(f"No current option at {path!r}")
+            current = current[part]
+        option = next((item for item in options if item.matches(current)), None)
+        command = (
+            next((item for item in option.commands if item.name == name), None)
+            if option is not None
+            else None
+        )
+        if command is None:
+            raise ValueError(f"Unavailable option command {name!r} at {path!r}")
+        self.write({path: command.run(env)}, env)
+
     def _install(self, candidate: dict[str, JsonValue]) -> None:
         if candidate == self._data:
             return
         self._data = candidate
         for callback in tuple(self._callbacks):
-            callback()
+            try:
+                callback()
+            except Exception:
+                _logger.exception("Form state subscriber failed")
 
     def result(self, env: FormEnv) -> F | FormErrors:
         """Evaluate/decode input and validate its model, without editing input.
@@ -488,8 +548,9 @@ class FormState[F: FormModel]:
     def subscribe(self, callback: Callable[[], None]) -> Callable[[], None]:
         """Register a plain post-write/reset callback and return unsubscribe.
 
-        Unsubscribe is idempotent. Callbacks can observe installed input;
-        callback errors propagate after installation and do not roll it back.
+        Unsubscribe is idempotent. Callbacks run synchronously and can observe
+        installed input. Individual callback failures log a traceback and do not
+        roll back input or prevent later subscribers or host publication.
         No Qt signals, lifecycle controller or owner adapter is created.
         """
         self._callbacks.append(callback)
@@ -549,7 +610,7 @@ class FormState[F: FormModel]:
 class LinRange(FormModel):
     """Stored linear range; adapters expand it only when converting to cfg.
 
-    kind selects this branch. start/stop are finite endpoints in caller units;
+    kind identifies the stored linear shape. start/stop are finite endpoints in caller units;
     n is the positive number of points (one point is permitted). Descending or
     repeated endpoints are allowed; no step/expts synchronization occurs.
     """
@@ -560,31 +621,25 @@ class LinRange(FormModel):
     n: int = Field(default=3, ge=1)
 
 
-class ExplicitList(FormModel):
-    """Stored explicit finite values in caller units and their declared order.
+class KeyRef(FormModel):
+    """Tagged key-only input, without source lookup or inline content.
 
-    kind selects this branch. values is a nonempty whole sequence; adapters
-    decide how to use it. Inputs persist as JSON arrays, models hold tuples.
+    kind is always ref. name is a literal key string, including strings that
+    look like expressions. Expr envelopes are invalid and never evaluated.
+    Source validation, if required, belongs to a specialized ref subclass.
     """
 
-    kind: Literal["list"] = "list"
-    values: tuple[float, ...] = Field(default=(0.0,), min_length=1)
+    kind: Literal["ref"] = "ref"
+    name: str
 
 
-type RangeInput = Annotated[LinRange | ExplicitList, Field(discriminator="kind")]
-"""Stored range or explicit-list branches; no implicit array expansion."""
-
-
-class ModuleRef(FormModel):
+class ModuleRef(KeyRef):
     """Library module reference; no inline override or cached materialization.
 
     kind selects ref. name is an actual LibrarySnapshot module key, not a role
     or alias. A used ref needs captured library; missing/invalid names fail at
     the consuming path through public library reads, never fall back to defaults.
     """
-
-    kind: Literal["ref"] = "ref"
-    name: str
 
 
 class ModuleInline(FormModel):
@@ -596,37 +651,6 @@ class ModuleInline(FormModel):
 
     kind: Literal["inline"] = "inline"
     module: ModuleSpec
-
-    @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
-        """Seed inline from previous ref's captured library Spec when switching.
-
-        previous uses {kind: ref, name: actual_key}. Read LibrarySnapshot's public
-        module_spec and retain a detached input under module. Missing captured
-        library/key or invalid module family fails at the consuming field path;
-        it never supplies a dummy Spec. Static defaults apply without a prior ref.
-        """
-        from ._json import copy_object
-        from ._structure import static_defaults
-
-        data = static_defaults(cls)
-        if previous.get("kind") == "ref" and isinstance(
-            name := previous.get("name"), str
-        ):
-            if env.library is None:
-                raise field_error(
-                    ("module",), "Missing captured library for inline module"
-                )
-            try:
-                spec = env.library.module_spec(name)
-            except (ValueError, KeyError) as exc:
-                raise field_error(
-                    ("module",), f"Cannot read module {name!r}: {exc}"
-                ) from exc
-            data["module"] = copy_object(spec.model_dump(mode="json"))
-        return data
 
 
 type ModuleInput = Annotated[ModuleRef | ModuleInline, Field(discriminator="kind")]

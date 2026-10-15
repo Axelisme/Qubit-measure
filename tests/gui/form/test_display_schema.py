@@ -13,9 +13,9 @@ from zcu_tools.gui.form import (
     FormModel,
     FormState,
     LinRange,
-    ModuleInput,
-    RangeInput,
 )
+
+from ._module_models import SyntheticModuleInput
 
 
 def node(schema: JsonValue, *names: str) -> dict[str, JsonValue]:
@@ -45,7 +45,15 @@ def branch(field: dict[str, JsonValue], tag: JsonValue) -> dict[str, JsonValue]:
     assert isinstance(branches, list)
     for candidate in branches:
         assert isinstance(candidate, dict)
-        tags = candidate.get("x-form-discriminator-values")
+        properties = candidate["properties"]
+        assert isinstance(properties, dict)
+        discriminator = field["discriminator"]
+        assert isinstance(discriminator, dict)
+        name = discriminator["propertyName"]
+        assert isinstance(name, str)
+        selector = properties[name]
+        assert isinstance(selector, dict)
+        tags = selector.get("enum", [selector.get("const")])
         assert isinstance(tags, list)
         if tag in tags:
             return candidate
@@ -128,14 +136,12 @@ def test_model_sections_without_a_label_are_titled_by_field_name() -> None:
             default_factory=Section
         )
         optional_cfg: Section | None = None
-        pulse_cfg: str | Section = "Q1.pulses.pi"
-        drive: ModuleInput
+        drive: SyntheticModuleInput
 
     schema = TitledForm.input_schema(FormEnv())
     assert node(schema, "ro_cfg")["title"] == "Ro cfg"
     assert node(schema, "labelled")["title"] == "Readout"
     assert node(schema, "optional_cfg")["title"] == "Optional cfg"
-    assert node(schema, "pulse_cfg")["title"] == "Pulse cfg"
     drive = node(schema, "drive")
     assert drive["title"] == "Drive"
     assert node(branch(drive, "inline"), "module")["title"] == "Module"
@@ -149,13 +155,12 @@ def test_one_value_tags_outside_a_union_are_hidden_and_union_selectors_stay() ->
         alone: Alpha = Field(default_factory=Alpha)
         locked: LockedAlpha = Field(default_factory=LockedAlpha)
         sweep: LinRange = Field(default_factory=LinRange)
-        fluxes: RangeInput = Field(default_factory=LinRange)
         readout: DirectReadoutCfg | None = None
         fixed: Literal["fixed"] = "fixed"
 
     schema = TagForm.input_schema(FormEnv())
     # Models that a tagged union elsewhere selects by tag: this form's own
-    # union, gui.form's RangeInput, and the cfg_model module union.
+    # union and the cfg_model module union, plus the stored range's fixed tag.
     for path in (
         ("alone", "kind"),
         ("locked", "kind"),
@@ -165,7 +170,6 @@ def test_one_value_tags_outside_a_union_are_hidden_and_union_selectors_stay() ->
         assert node(schema, *path).get("hidden") is True, path
     # Selectors in a union position and one-value ordinary leaves stay visible.
     assert "hidden" not in node(branch(node(schema, "choice"), "alpha"), "kind")
-    assert "hidden" not in node(branch(node(schema, "fluxes"), "linrange"), "kind")
     assert "hidden" not in node(schema, "locked", "count")
     assert "hidden" not in node(schema, "fixed")
 
@@ -173,9 +177,25 @@ def test_one_value_tags_outside_a_union_are_hidden_and_union_selectors_stay() ->
         choice: Annotated[Alpha | Beta, Field(discriminator="kind")] = Field(
             default_factory=Alpha
         )
-        fluxes: RangeInput = Field(default_factory=LinRange)
 
     assert '"hidden"' not in json.dumps(UnionOnlyForm.input_schema(FormEnv()))
+
+
+def test_root_fixed_tag_is_hidden_without_changing_defaults_or_validation() -> None:
+    class RangeForm(LinRange):
+        fixed: Literal[2] = 2
+
+    env = FormEnv()
+    schema = RangeForm.input_schema(env)
+    assert node(schema, "kind").get("hidden") is True
+    assert node(schema, "kind")["const"] == "linrange"
+    assert "hidden" not in node(schema, "fixed")
+    state = FormState(RangeForm.default_input(env))
+    assert state.input.data["kind"] == "linrange"
+    state.write({("kind",): "other"}, env)
+    errors = state.result(env)
+    assert isinstance(errors, FormErrors)
+    assert set(errors.messages) == {("kind",)}
 
 
 def test_display_group_marks_only_declared_fields_in_the_schema() -> None:

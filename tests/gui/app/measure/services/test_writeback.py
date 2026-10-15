@@ -32,7 +32,7 @@ from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
-from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.entry import ResultEntry, document_meta
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
@@ -513,14 +513,7 @@ def test_apply_shared_flow_keeps_gui_selection_edits_and_failure_prefix(session)
     assert current.library.waveform_spec("Q1.waveforms.base") == ConstWaveformCfg(
         length=0.25
     )
-    meta = current.meta("general.ext.tuned")
-    assert meta is not None
-    assert (meta.kind, meta.run_id, meta.stderr, meta.source) == (
-        "test/gui-fit",
-        "run-fixed",
-        0.3,
-        event.id,
-    )
+    assert document_meta(current.document(), "general.ext.tuned") == {"stderr": 0.3}
     assert isinstance(event.payload, writeback.AcceptedPayload)
     assert [write.path for write in event.payload.writes] == [
         "Q1.waveforms.base",

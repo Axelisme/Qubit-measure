@@ -24,8 +24,6 @@ from zcu_tools.gui.app.measure.ui.main_window_toolbar import (
     MainWindowToolbar,
     adapter_menu_items,
 )
-from zcu_tools.gui.cfg import EvalValue
-from zcu_tools.gui.cfg.resource import CfgEdit
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request
@@ -276,15 +274,16 @@ def test_live_new_tab_popup_preserves_local_selection_cancel_and_remote_gate(
 
 
 @pytest.mark.uses_wall_clock
-def test_alias_override_run_rejection_keeps_cfg_location_and_has_no_effects(
+def test_run_with_alias_overrides_is_rejected_without_effects(
     toolbar_application: ToolbarApplication,
 ) -> None:
+    """Run takes no alias overrides; Reset with aliases is the way to use them."""
     ui = toolbar_application
     cfg = ui.controller.cfg_resources.lookup(ui.tab_id)
-    before = cfg.edit((CfgEdit(("knob",), EvalValue("$qubit.gain")),))
-    publications = []
-    remove = cfg.watch(publications.append)
-    publications.clear()
+    cfg.write({("knob",): {"expr": "$qubit.gain"}})
+    before = cfg.input.data
+    publications: list[object] = []
+    remove = cfg.subscribe(lambda: publications.append(cfg.input.data))
     rows = ui.controller.context_control.get_alias_rows()
     ui.connect()
     try:
@@ -294,10 +293,9 @@ def test_alias_override_run_rejection_keeps_cfg_location_and_has_no_effects(
         assert rejected["ok"] is False
         error = rejected["error"]
         assert error["code"] == "precondition_failed"
-        assert error.get("reason") == "not_valid"
-        assert error.get("data") == {"path": ["knob"]}
+        assert error.get("reason") == "run_aliases_not_supported"
         assert ui.controller.operation_control.active_operations() == ()
-        assert cfg.observe() == before
+        assert cfg.input.data == before
         assert publications == []
         assert ui.controller.context_control.get_alias_rows() == rows
     finally:

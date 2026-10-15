@@ -71,7 +71,7 @@ def bound_view(entry: ResultEntry, owner: str, kind: str) -> SetupView | PointVi
 def add_future_data(path: Path, location: str = "component") -> bytes:
     yaml = YAML(typ="rt")
     stored = yaml.load(path)
-    stored["format_version"] = "1.7"
+    stored["format_version"] = "2.7"
     fields = stored["components"]["S1"]
     (fields if location == "component" else fields["timing"])["future"] = 17
     yaml.dump(stored, path)
@@ -98,7 +98,7 @@ def test_document_minor_never_relaxes_original_model_validation(
             fields["timing"] = {"delay": 1.2, "future": 17}
         document: YamlMap = {
             "format": "zcu.parameter-container",
-            "format_version": f"1.{minor}",
+            "format_version": f"2.{minor}",
             "general": general,
             "components": {"S1": fields},
         }
@@ -186,13 +186,13 @@ def test_minor_commit_keeps_container_unknowns_but_applies_component_extra_polic
         path = source_path(view)
         yaml = YAML(typ="rt")
         stored = yaml.load(path)
-        stored["format_version"] = "1.7"
+        stored["format_version"] = "2.7"
         stored["future_top"] = {"keep": [1, "two"]}
         stored["general"]["future_general"] = "keep"
         for name in ("S1", "S2"):
             stored["components"][name]["future"] = 17
             stored["components"][name]["timing"]["future"] = 19
-        stored["provenance"]["S2.rate"]["future_source"] = "keep"
+        stored["metadata"]["S2.rate"] = {"future_source": "keep"}
         yaml.dump(stored, path)
         before = path.read_bytes()
         view.refresh()
@@ -212,12 +212,10 @@ def test_minor_commit_keeps_container_unknowns_but_applies_component_extra_polic
         assert final["components"]["S2"]["timing"]["future"] == 19
         assert final["future_top"] == {"keep": [1, "two"]}
         assert final["general"]["future_general"] == "keep"
-        assert final["format_version"] == "1.7"
+        assert final["format_version"] == "2.7"
         assert document_value(snapshot(view), "S1.rate") == 6600.0
-        metadata = document_meta(snapshot(view), "S1.rate")
-        assert metadata is not None
-        assert metadata.source == "manual"
-        assert final["provenance"]["S2.rate"]["future_source"] == "keep"
+        assert document_meta(snapshot(view), "S2.rate") == {"future_source": "keep"}
+        assert final["metadata"]["S2.rate"] == {"future_source": "keep"}
         reloaded = ResultEntry.open(
             "entry",
             result_root=entry.result_path.parent,
@@ -227,7 +225,7 @@ def test_minor_commit_keeps_container_unknowns_but_applies_component_extra_polic
         assert snapshot(again).model_dump() == snapshot(view).model_dump()
         for header, value, expected in (
             ("format", "wrong", FormatError),
-            ("format_version", "2.0", VersionError),
+            ("format_version", "3.0", VersionError),
         ):
             final[header] = value
             yaml.dump(final, path)
@@ -237,4 +235,4 @@ def test_minor_commit_keeps_container_unknowns_but_applies_component_extra_polic
                 view.refresh()
             assert path.read_bytes() == bad_bytes
             assert snapshot(view) == cached
-            final[header] = "zcu.parameter-container" if header == "format" else "1.7"
+            final[header] = "zcu.parameter-container" if header == "format" else "2.7"

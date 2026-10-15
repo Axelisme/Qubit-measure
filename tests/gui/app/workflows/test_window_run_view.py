@@ -27,7 +27,7 @@ from qtpy.QtWidgets import (
 from zcu_tools.gui.app.workflows.panel import WorkflowFormPanel
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
 
-from tests.gui._user_input import key_click, mouse_double_click, type_text
+from tests.gui._user_input import key_click, mouse_click, type_text
 
 from ._window_support import (
     FigurePoint,
@@ -321,11 +321,13 @@ def test_running_start_forms_stay_readable_and_unfold_but_ignore_typing(
             return
         wait_for(qapp, lambda: badge(window) == "running")
         before = (plan.state.input.data, knobs.state.input.data)
-        type_text(child(plan, QLineEdit, "form.input.count"), "9")
+        locked_count = child(plan, QLineEdit, "form.input.count")
+        type_text(locked_count, "9")
+        key_click(locked_count, Qt.Key.Key_Return)
         alpha = child(plan, QLineEdit, "form.input.first.alpha")
         folded_before = not alpha.isVisibleTo(plan)
         title = model_fold(plan, "first")
-        mouse_double_click(title, title.rect().center())
+        mouse_click(title, title.rect().center())
         qapp.processEvents()
         seen.append(
             Readable(
@@ -360,6 +362,7 @@ def test_running_start_forms_stay_readable_and_unfold_but_ignore_typing(
     count = child(plan, QLineEdit, "form.input.count")
     key_click(count, Qt.Key.Key_End)
     type_text(count, "9")
+    key_click(count, Qt.Key.Key_Return)
     assert plan.state.input.data["count"] == int(count.text())
 
 
@@ -462,7 +465,7 @@ class LiveTuning:
 
 
 def try_live_tuning(window: WorkflowWindow[None], qapp: QApplication) -> LiveTuning:
-    """Type into the live value, unfold Timing, and read what changed."""
+    """Type into the live value and press Return, unfold Timing, and read what changed."""
     tuning = window.tuning_panel
     assert tuning is not None and tuning.isVisibleTo(window)
     before = tuning.host.state.input.data
@@ -470,8 +473,9 @@ def try_live_tuning(window: WorkflowWindow[None], qapp: QApplication) -> LiveTun
     value = child(tuning, QLineEdit, "form.input.value")
     key_click(value, Qt.Key.Key_End)
     type_text(value, "9")
+    key_click(value, Qt.Key.Key_Return)
     title = model_fold(tuning, "timing")
-    mouse_double_click(title, title.rect().center())
+    mouse_click(title, title.rect().center())
     qapp.processEvents()
     return LiveTuning(
         panel_enabled=tuning.isEnabled(),

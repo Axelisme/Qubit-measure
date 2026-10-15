@@ -315,8 +315,11 @@ def calculate_eff_t1_vs_flux_fast(
 
     Matches ``calculate_eff_t1_vs_flux`` to ~1e-13 relative (see tests). Combines the
     requested ``noise_channels`` as ``1/T1_eff = sum_k 1/T1_k`` and returns
-    ``2*pi / total_rate`` in ns (the ``2*pi`` is the ns/rad -> ns conversion the
-    scqubits path also applies).
+    ``1 / total_rate`` in physical ns. Each spectral rate already includes its
+    angular-frequency conversion (ADR-0071). ``params=(EJ, EC, EL)`` are GHz.
+    ``fluxs`` must be a 1D array of shape ``(N,)`` in Φ/Φ₀, and ``Temp`` is K.
+    The output has shape ``(N,)`` and preserves the input flux order.
+    ``cutoff``/``qub_dim`` select oscillator basis/retained levels.
 
     ``noise_channels`` items are ``"t1_capacitive"`` etc., or ``("t1_inductive",
     {"Q_ind": 5e8})`` with per-channel options (Q_cap / Q_ind / Y_qp / M / Z / x_qp /
@@ -399,7 +402,7 @@ def calculate_eff_t1_vs_flux_fast(
         s = sfunc(omega, Temp) + sfunc(-omega, Temp)  # (N,)
         total += matelem2[op_key] * np.real(s)
 
-    out = np.where(total != 0.0, 2 * np.pi / total, np.inf)
+    out = np.where(total != 0.0, 1 / total, np.inf)
     return out.astype(np.float64, copy=False)
 
 

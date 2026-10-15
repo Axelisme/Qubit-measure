@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-13，slow 選集與 GUI cache 隔離生命週期
+**Last updated:** 2026-10-15，measure Form owner 與舊 builder 退休
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -18,7 +18,7 @@
    文件、靜態內容、設定值及腳本旗標直接審閱；既有白箱或靜態檢查案例不因本頁宣稱已搬遷。
    不新增頂層 unit／integration／e2e 目錄，亦不測 Notebook／腳本的主要內容。
 
-框架測試用最小合成 workflow／adapter，不 import `zcu_lab`，包括其 fake 實驗。Adapter、workflow 與 recipes 的個別實驗流程與預設值不寫測試；只因實驗定義改動而失敗的測試應刪除，不修成固定 lab 行為。宿主最高接縫是 caller 的註冊清單，再從 Window、RPC 或 MCP 驗證結果。刪掉 `zcu_lab/` 後整套 pytest 仍須通過，包含 slow，見 [模組定位 ADR](../docs/adr/draft/module-boundaries.md#分層)。
+框架測試用最小合成 workflow／adapter，不 import `zcu_lab`，包括其 fake 實驗。Adapter、workflow 與 recipes 的個別實驗流程與預設值不寫測試；只因實驗定義改動而失敗的測試應刪除，不修成固定 lab 行為。宿主最高接縫是 caller 的註冊清單，再從 Window、RPC 或 MCP 驗證結果。刪掉 `zcu_lab/` 後整套 pytest 仍須通過，包含 slow，見 [模組定位 ADR](../docs/adr/0072-module-boundaries.md#分層)。
 
 ## Fixture 與測試支援碼
 
@@ -117,7 +117,7 @@ debounce timer 時，用本地 helper 包 `QEventLoop + QTimer.singleShot`，不
 
 `tests/program/v2/` 擁有 QICK compile、IR、macro、module 與 simulator 行為；
 `tests/experiment/v2/` 擁有通用 runtime 與工具，`tests/experiment/workflows/` 擁有泛型 Engine、effects 與共用匯出機制。
-`tests/gui/app/workflows/` 使用合成註冊清單驗證宿主；`tests/gui/app/measure/adapter/` 擁有 adapter、builder 與 seed 框架契約。`tests/gui/` 與各 app GUI 目錄擁有 UI、service、remote
+`tests/gui/app/workflows/` 使用合成註冊清單驗證宿主；`tests/gui/app/measure/adapter/` 擁有 adapter、黑箱 Form 輸出與 Run 框架契約，`tests/gui/form_adapter/` 擁有 core cfg 生成 Form 的契約。`tests/gui/` 與各 app GUI 目錄擁有 UI、service、remote
 接縫；`tests/mcp/` 擁有 MCP bridge 與操作契約。`tests/resources/`、`tests/analysis/`、
 `tests/notebook/`、`tests/datafile/` 與 `tests/utils/` 分別擁有其路徑對應模組的測試。`tests/migrations/` 擁有 root `migrations/` 的離線轉換與 legacy reader 測試。
 例如 `tests/program/v2/modules/test_registry.py` 測 `PulseRegistry` 的 pulse 定義 SHA256 去重，
@@ -234,9 +234,10 @@ caller alias隔離與one-shot build。domain role、Seed與app section policy不
 
 ### Adapter 與共用工具 tests
 
-`tests/gui/app/measure/adapter/test_schema_builder.py` 驗證 context-free
-`MeasureCfgBuilder`／`MeasureCfgDefinition`、ModuleInit、Seed、override 與 definition isolation。
-同目錄的 module seeds 與 spec helpers 使用最小合成 role 表，不綁定 lab 的掃描預設。
+`tests/gui/app/measure/adapter/test_form_run.py` 驗證 Form 輸出原樣交給 adapter；
+`services/test_tab_form_resource.py`、`test_tab_form_notifications.py` 與
+`test_tab_cfg_application.py` 擁有固定 capture、Reset、busy／lifetime 與通知。
+`tests/gui/form_adapter/` 擁有推導與持久範本契約。舊 builder、Seed wrapper 與角色表的專用測試退休。
 Singleshot Rabi 數值與畫圖分別由 `tests/analysis/fitting/test_singleshot_rabi.py`
 及 `tests/plotting/test_singleshot_rabi.py` 驗證。Notebook flux picker 使用 caller 提供的
 `FluxPickInputs`，由 `tests/notebook/test_flux_dep.py` 驗證。

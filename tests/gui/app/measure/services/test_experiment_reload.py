@@ -15,16 +15,18 @@ from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.services.tab_control import TabControlFacet
 from zcu_tools.gui.app.measure.services.workspace import WorkspaceService
 from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    DirectValue,
-    schema_to_raw,
-)
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.form import FormEnv, FormInput, FormModel
+from zcu_tools.gui.form_adapter import Form, FormContext
 
-from tests.gui.app.measure._cfg_fakes import cfg_resolution, cfg_resources
-from tests.gui.app.measure._reload_fakes import Loader, NewAdapter, OldAdapter
+from tests.gui.app.measure._form_fakes import form_resources, form_sources
+from tests.gui.app.measure._reload_fakes import (
+    Loader,
+    NewAdapter,
+    OldAdapter,
+    ReloadCfg,
+)
 
 
 @dataclass
@@ -52,8 +54,8 @@ def app() -> App:
         state,
         registry,
         writeback,
-        cfg_resources(state),
-        cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
+        form_resources(state),
+        form_sources=lambda aliases: form_sources(state, aliases),
         captured_parameters=lambda _aliases: None,
     )
     workspace = WorkspaceService(state, tabs, bus)
@@ -258,9 +260,15 @@ def test_partial_restore_retries_only_skipped_entries_without_stealing_selection
 
 
 def test_invalid_defaults_are_reported_without_discarding_other_tabs(app: App) -> None:
-    class InvalidAdapter(OldAdapter):
-        def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
+    class BrokenForm(Form[ReloadCfg]):
+        def default_input(self, env: FormEnv) -> FormInput[FormModel]:
             raise ValueError("missing calibration")
+
+    class InvalidAdapter(OldAdapter):
+        @staticmethod
+        def make_form(ctx: FormContext) -> Form[ReloadCfg]:
+            del ctx
+            return BrokenForm(ReloadCfg, {})
 
     app.registry.register("bad", OldAdapter)
     app.loader.candidate.register("bad", InvalidAdapter)
@@ -268,7 +276,7 @@ def test_invalid_defaults_are_reported_without_discarding_other_tabs(app: App) -
     app.controls.new_tab("demo")
     report = app.reload.reload_confirmed(app.reload.prepare_reload())
     assert report.restored_tabs == 1
-    assert "invalid adapter defaults" in report.rejected_tabs[0].message
+    assert "missing calibration" in report.rejected_tabs[0].message
     assert app.reload.skipped_count == 1
 
 
@@ -299,12 +307,12 @@ def test_new_reload_discard_is_explicit_in_preview(app: App) -> None:
 def test_ram_snapshot_is_detached_from_retired_cfg(app: App) -> None:
     key = app.controls.new_tab("demo")
     retired = app.state.get_tab(key)
-    detached = retired.cfg.snapshot_inputs()
-    expected = schema_to_raw(detached)
+    detached = retired.cfg.input.data
+    expected = dict(detached)
     app.loader.failure = CatalogReloadError("bad import")
     app.reload.reload_confirmed(app.reload.prepare_reload())
-    detached.value.fields["knob"] = DirectValue(99)
+    detached["knob"] = 99
     app.loader.failure = None
     app.reload.retry_failed_reload()
     fresh = app.state.get_tab(app.state.list_tab_ids()[0])
-    assert schema_to_raw(fresh.cfg.snapshot_inputs()) == expected
+    assert fresh.cfg.input.data == expected

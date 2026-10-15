@@ -111,11 +111,13 @@ def test_metadata_lookup_failure_restores_default_with_error(
 def test_safe_cache_root_falls_back_when_platform_lookup_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # cache_dir bypasses this imported platform boundary instead of exercising lookup failure.
     monkeypatch.setattr(
         persistence_module,
         "user_cache_dir",
         lambda *args: (_ for _ in ()).throw(RuntimeError("platform failure")),
     )
+    # Control the imported OS fallback path without using the user cache.
     monkeypatch.setattr(persistence_module, "gettempdir", lambda: "/fallback")
 
     caretaker = SingleFileCaretaker(
@@ -230,6 +232,7 @@ def test_temporary_file_failures_are_typed_and_cleanup_created_file(
             raise expected
         return FailingTemporaryFile()
 
+    # The imported temporary-file boundary injects open/write/close I/O failures.
     monkeypatch.setattr(
         persistence_module, "NamedTemporaryFile", fake_named_temporary_file
     )

@@ -1,12 +1,10 @@
 """Real cfg resources for application tests that do not mount a frontend."""
 
 from collections.abc import Mapping
-from unittest.mock import MagicMock
 
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-from zcu_tools.gui.app.measure.services.tab_cfg import TabCfgResources
 from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.cfg.model import CfgSchema, CfgSectionSpec, CfgSectionValue
+from zcu_tools.gui.cfg.model import CfgSchema
 from zcu_tools.gui.cfg.resource import CfgResolution, CfgResource
 from zcu_tools.gui.session.aliases import AliasTable
 from zcu_tools.gui.session.context_types import SavedPoint
@@ -79,7 +77,7 @@ def parameter_capture(
         point = PointDocument.model_validate(
             {
                 "format": "zcu.parameter-container",
-                "format_version": "1.0",
+                "format_version": "2.0",
                 "general": {"created_at": "2026-10-08T00:00:00Z", "ext": values},
                 "components": {
                     name: component.model_dump(mode="python", exclude_unset=True)
@@ -112,14 +110,6 @@ def cfg_resolution(state: State, parameters: ParameterContext | None) -> CfgReso
     )
 
 
-def cfg_resources(state: State) -> TabCfgResources:
-    return TabCfgResources(
-        mutation_allowed=lambda tab_id: (
-            not state.has_tab(tab_id) or not state.is_tab_busy(tab_id)
-        ),
-    )
-
-
 def make_cfg(schema: CfgSchema, *, state: State | None = None) -> CfgResource:
     """Create a resource retaining the state's creation capture across refresh."""
     sources = (
@@ -132,14 +122,3 @@ def make_cfg(schema: CfgSchema, *, state: State | None = None) -> CfgResource:
         lambda: schema,
         resolution=lambda: cfg_resolution(sources, parameters),
     )
-
-
-def configure_cfg_lookup(ctrl: MagicMock) -> None:
-    editors: dict[str, CfgResource] = {}
-
-    def lookup(tab_id: str) -> CfgResource:
-        if tab_id not in editors:
-            editors[tab_id] = make_cfg(CfgSchema(CfgSectionSpec(), CfgSectionValue()))
-        return editors[tab_id]
-
-    ctrl.cfg_resources.lookup.side_effect = lookup

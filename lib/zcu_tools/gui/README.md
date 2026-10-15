@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-12
+**Last updated:** 2026-10-13，Form generator 移到 `form_adapter/`
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -85,6 +85,10 @@ RuntimeError-compatible fixed leaves讓既有view/handler catches維持相容（
 `ExpectedError`；generic mapping保留message/reason且不攜帶structured data。direct
 `RemoteError`仍供request coercion與domain-special payload使用，ordinary exception則保留
 controller error與traceback。
+
+## Form generator (`form_adapter/`)
+
+`form_adapter` 是 Qt-free 前端框架，從 core cfg 與作者樹生成 `gui.form` 的 FormModel 並轉回 core cfg。各 app 與表單定義從它的公開 root import `Form`；它不依賴任何 app。細節見 [form_adapter README](form_adapter/README.md)。
 
 ## Shared Config Core (`cfg/`)
 
@@ -199,6 +203,19 @@ declares shared logging/control/project flags and converts parser output into
 matplotlib or app modules at module import time. Runtime initializes the explicit
 plot host, shutdown callback and mathtext support after QApplication exists;
 it does not select a process-wide Matplotlib backend.
+
+When runtime gets or creates the `QApplication`, it calls
+`gui.widgets.selectable_text.install_selectable_message_boxes(app)`. The call
+installs one idempotent application event filter. Every `QMessageBox` shown in
+the process then lets users select its main text, informative text and detailed
+text with the mouse or keyboard. Call sites keep using plain `QMessageBox`; all
+four launchers get the filter because runtime is their only `QApplication`
+factory.
+
+A `QLabel` that shows a data value (device address, name, path, computed value,
+status or error message) calls `make_label_selectable(label)` from the same
+module, so users can select and copy it with the mouse. Labels for field names,
+hints, placeholders and decoration stay unselectable.
 
 ## Project / Result Scope
 

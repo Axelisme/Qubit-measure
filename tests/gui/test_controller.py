@@ -36,10 +36,6 @@ from zcu_tools.gui.app.measure.services import (
 )
 from zcu_tools.gui.app.measure.services.ports import RestoreIssue, RestoreReport
 from zcu_tools.gui.app.measure.state import DeviceStatus, State
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    DirectValue,
-)
 from zcu_tools.gui.event_bus import BaseEventBus, EventMeta, EventOrigin
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
@@ -58,7 +54,11 @@ from tests.gui._completion_helpers import (
     on_device_connected,
     on_device_operation_failed,
 )
-from tests.gui._controller_adapter import InteractiveAdapter, RecordingAdapter
+from tests.gui._controller_adapter import (
+    InteractiveAdapter,
+    RecordingAdapter,
+    RecordingCfg,
+)
 from tests.gui.app.measure._load_support import historical_metadata
 from tests.gui.app.measure.remote._helpers import _context_root
 
@@ -151,10 +151,6 @@ def _start_interactive_analysis(cf: ControllerFixture) -> tuple[str, int]:
     cf.view.mount_interactive_analysis.assert_called_once()
     assert cf.ctrl.run_analyze_control.get_interactive(tab_id) is not None
     return tab_id, token
-
-
-def _default_fake_schema(ctx: SessionEnv) -> CfgSchema:
-    return RecordingAdapter().make_default_cfg(ctx)
 
 
 def _wait_for(condition, timeout_ms: int = 3000, step_ms: int = 10) -> bool:
@@ -292,19 +288,17 @@ def test_start_run_passes_lowered_committed_state_cfg(cf):
     """start_run delivers values accepted from the tab cfg resource."""
     tab_id = cf.ctrl.new_tab("fake")
 
-    from zcu_tools.gui.cfg.resource import CfgEdit
-
     cfg = cf.ctrl.cfg_resources.lookup(tab_id)
-    cfg.edit((CfgEdit(("reps",), 42),))
+    cfg.write({("reps",): 42})
 
     # Observe the payload at the worker-to-adapter boundary.
-    captured: dict[str, dict[str, object]] = {}
+    captured: dict[str, RecordingCfg] = {}
     real_adapter = cf.state.get_tab(tab_id).adapter
 
     acquired = object()
 
-    def _capture_run(req, raw_cfg, *, context):
-        captured["cfg"] = raw_cfg
+    def _capture_run(req, accepted: RecordingCfg, *, context):
+        captured["cfg"] = accepted
         assert isinstance(context.plots, Plots)
         return acquired
 
@@ -319,7 +313,7 @@ def test_start_run_passes_lowered_committed_state_cfg(cf):
     )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
-    assert captured["cfg"]["reps"] == 42
+    assert captured["cfg"].reps == 42
     assert cf.ctrl.get_tab_snapshot(tab_id).run.result is acquired
 
 
@@ -672,16 +666,15 @@ def test_run_completion_prepares_pure_tab_snapshot(cf):
 
 
 def test_cfg_edit_publishes_without_full_tab_interaction_rebuild(cf):
-    from zcu_tools.gui.cfg.resource import CfgEdit
 
     tab_id = cf.ctrl.new_tab("fake")
     cfg = cf.ctrl.cfg_resources.lookup(tab_id)
     published = []
-    cfg.watch(published.append)
-    cfg.observe()
+    cfg.subscribe(lambda: published.append(cfg.input))
     cf.bus.emit.reset_mock()
-    cfg.edit((CfgEdit(("reps",), 42),))
+    cfg.write({("reps",): 42})
     assert cf.bus.emit.call_args_list == []
+    assert len(published) == 1
 
 
 def test_local_analyze_and_post_params_emit_precise_zero_reaction_facts(cf):
@@ -703,18 +696,12 @@ def test_local_analyze_and_post_params_emit_precise_zero_reaction_facts(cf):
 
 
 def test_tab_cfg_reset_restores_adapter_default_on_same_resource(cf):
-    from zcu_tools.gui.cfg.resource import CfgEdit
-
     tab_id = cf.ctrl.new_tab("fake")
     cfg = cf.ctrl.cfg_resources.lookup(tab_id)
-    cfg.edit((CfgEdit(("reps",), 123),))
-    cfg.observe()
+    cfg.write({("reps",): 123})
     cfg.reset()
-    defaults = _default_fake_schema(cf.state.session_env)
-    assert (
-        cf.state.get_tab(tab_id).cfg.snapshot_inputs().value.fields["reps"]
-        == defaults.value.fields["reps"]
-    )
+    assert cf.state.get_tab(tab_id).cfg is cfg
+    assert cfg.input.data["reps"] == 100
 
 
 def test_reset_tab_cfg_while_running_raises(cf):
@@ -753,10 +740,9 @@ def test_persist_then_restore_app_state(tmp_path):
     capture (flush) on one Controller, restore on a fresh one sharing the dir."""
     cf = ControllerFixture(cache_dir=tmp_path)
     tab_id = cf.ctrl.new_tab("fake")
-    from zcu_tools.gui.cfg.resource import CfgEdit
 
     cfg = cf.ctrl.cfg_resources.lookup(tab_id)
-    cfg.edit((CfgEdit(("reps",), 42),))
+    cfg.write({("reps",): 42})
     cf.ctrl.setup_control.new_entry(EntryRequest("chip"))
     cf.ctrl.setup_control.remember_connection(
         ConnectionPreferences(ip="10.0.0.2", port=7000)
@@ -769,7 +755,7 @@ def test_persist_then_restore_app_state(tmp_path):
     assert len(cf_restored.state.tabs) == 1
     restored_tab = next(iter(cf_restored.state.tabs.values()))
     assert restored_tab.adapter_name == "fake"
-    assert restored_tab.cfg.snapshot_inputs().value.fields["reps"] == DirectValue(42)
+    assert restored_tab.cfg.input.data["reps"] == 42
     # remembered settings round-tripped (prefill values; project not auto-applied).
     prefs = cf_restored.ctrl.setup_control.get_setup_preferences()
     assert prefs.entry_name == "chip"

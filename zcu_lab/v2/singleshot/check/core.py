@@ -3,12 +3,12 @@ from __future__ import annotations
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.singleshot import classify_result
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     AxesSpec,
     Axis,
@@ -42,15 +42,15 @@ class CheckResult:
 
 
 class CheckModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    init_pulse: PulseCfg | None = None
-    probe_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init Pulse")] = None
+    probe_pulse: Annotated[PulseCfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class CheckCfg(ProgramV2Cfg, ExpCfgModel):
     modules: CheckModuleCfg
-    shots: int
+    shots: Annotated[int, FieldMeta(label="Shots")]
 
 
 @dataclass(frozen=True)

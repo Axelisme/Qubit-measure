@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Annotated, Any, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     AxesSpec,
     Axis,
@@ -45,19 +45,21 @@ class PowerResult:
 
 
 class PowerModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    qub_pulse: PulseCfg
-    readout: PulseReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    qub_pulse: Annotated[PulseCfg, FieldMeta(label="Qubit pulse")]
+    readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
 
 
 class PowerSweepCfg(ConfigBase):
-    gain: SweepCfg
+    gain: Annotated[SweepCfg, FieldMeta(label="Readout gain", unit="a.u.")]
 
 
 class PowerCfg(ProgramV2Cfg, ExpCfgModel):
     modules: PowerModuleCfg
     sweep: PowerSweepCfg
-    skew_penalty: float = Field(default=0.0, ge=0.0)
+    skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
+        default=0.0, ge=0.0
+    )
 
 
 @dataclass(frozen=True)

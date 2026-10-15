@@ -6,7 +6,7 @@ import pytest
 from zcu_tools.mcp.measure.recipe import RecipeSession
 from zcu_tools.mcp.measure.session import GuiRpcError
 
-from ._recipe_support import LookbackGui, recipe_client, scalar
+from ._recipe_support import LookbackGui, recipe_client
 
 
 def test_read_value_tracks_sources_and_keeps_values_detached(tmp_path: Path) -> None:
@@ -19,7 +19,7 @@ def test_read_value_tracks_sources_and_keeps_values_detached(tmp_path: Path) -> 
         assert value == {"levels": [17.5]}
         gui.md["$custom.threshold"]["levels"][0] = 19.0
         assert value == {"levels": [17.5]}
-        assert tab.read_value("$custom.threshold") == {"levels": [19.0]}
+        assert tab.read_value("$custom.threshold") == {"levels": [17.5]}
         assert client.transport.sent[before:] == [
             (
                 "tab.parameter_read",
@@ -58,7 +58,16 @@ def test_reads_keep_alias_copy_and_propagate_owner_failure(tmp_path: Path) -> No
             for method, params in client.transport.sent
             if method == "tab.parameter_read"
         ]
-        assert all(params["aliases"] == {"custom": "Q2"} for params in reads)
+        assert reads == [
+            {"tab_id": "t", "paths": ["$custom.threshold"], "module_refs": []},
+            {"tab_id": "t", "paths": [], "module_refs": ["$custom.module.pulse"]},
+        ]
+        resets = [
+            params
+            for method, params in client.transport.sent
+            if method == "tab.reset_cfg"
+        ]
+        assert resets == [{"tab_id": "t", "aliases": {"custom": "Q2"}}]
         client.transport.replies["tab.parameter_read"] = {
             "ok": False,
             "error": {
@@ -104,63 +113,41 @@ def test_read_library_root_uses_owner_result_and_none_skips_rpc(tmp_path: Path) 
         assert failure.value.reason == "incompatible_wire"
 
 
-@pytest.mark.parametrize("kind", ["sweep", "centered_sweep"])
-def test_read_field_retains_named_inputs_and_invalid_diagnostics(
-    tmp_path: Path, kind: str
-) -> None:
-    gui = LookbackGui()
-    gui.publication["tree"]["children"]["range"] = {
-        "kind": kind,
-        "valid": False,
-        "readonly": False,
-        "inputs": {
-            "edge": {
-                "mode": "expression",
-                "raw": "$custom.edge",
-                "resolved": {"__complex__": [1.0, 2.0]},
-                "error": "unresolved",
-                "validation_error": "out of bounds",
-            }
-        },
-    }
-    with recipe_client(tmp_path, gui) as client:
+def test_read_field_retains_range_input_and_directed_errors(tmp_path: Path) -> None:
+    with recipe_client(tmp_path, LookbackGui()) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
+        with pytest.raises(GuiRpcError, match="Invalid"):
+            tab.set_sweep("range", start={"expr": "1 / 0"})
         before = len(client.transport.sent)
         state = tab.read_field("range")
-        assert state.kind == kind
-        assert not state.valid
-        assert state.input is None
-        assert state.inputs["edge"].raw == "$custom.edge"
-        assert state.inputs["edge"].resolved == {"__complex__": [1.0, 2.0]}
-        assert state.inputs["edge"].error == "unresolved"
-        assert state.inputs["edge"].validation_error == "out of bounds"
-        gui.publication["tree"]["children"]["range"]["inputs"]["edge"]["resolved"] = 7
-        assert state.inputs["edge"].resolved == {"__complex__": [1.0, 2.0]}
+        if not isinstance(state.input, dict) or not isinstance(state.value, dict):
+            raise TypeError("Expected range input/values")
+        assert state.input["start"] == {"expr": "1 / 0"}
+        assert state.value["stop"] == 2.0
+        assert state.errors[0].path == ("range", "start")
+        assert state.errors[0].message
+        assert state.fields == ("kind", "start", "stop", "n")
         assert len(client.transport.sent) == before
 
 
 def test_read_field_uses_last_successful_publication(tmp_path: Path) -> None:
     gui = LookbackGui()
-    gui.publication["tree"]["children"]["fixed"] = {**scalar(2), "kind": "literal"}
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         before = len(client.transport.sent)
         old = tab.read_field("rounds")
-        assert old.kind == "scalar"
-        assert old.input is not None
-        assert old.input.raw == old.input.resolved == 3
-        assert tab.read_field("fixed").kind == "literal"
+        assert old.input == old.value == 3
+        assert tab.read_field("fixed").value == 2
         ref = tab.read_field("modules.readout")
-        assert ref.kind == "reference"
-        assert ref.reference is None
-        assert ref.children == ("pulse_cfg", "ro_cfg")
-        assert tab.read_field("modules").kind == "section"
+        assert ref.mode == "inline"
+        assert ref.key is None
+        assert ref.fields == ("module",)
+        assert tab.read_field("modules").fields == ("reset", "init_pulse", "readout")
         assert len(client.transport.sent) == before
         tab.set("rounds", 7)
         current = tab.read_field("rounds")
-        assert current.input is not None
-        assert current.input.resolved == 7
-        assert old.input.resolved == 3
+        assert current.input == current.value == 7
+        assert old.input == old.value == 3
         client.transport.replies["tab.edit_cfg"] = {
             "ok": False,
             "error": {

@@ -17,7 +17,6 @@ from zcu_tools.gui.session.context_types import (
 from zcu_tools.resources.document_store import DocumentValue
 from zcu_tools.resources.entry import (
     RoleResolutionError,
-    document_meta,
     document_value,
     resolve_path,
 )
@@ -31,7 +30,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.context_types import ContextSourceFault, ContextTarget
     from zcu_tools.resources.context.library import LibrarySnapshot
     from zcu_tools.resources.entry import RoleSpec
-    from zcu_tools.resources.entry.provenance import Provenance
     from zcu_tools.resources.entry.schema import PointDocument
 
 
@@ -403,6 +401,33 @@ class ParameterContext:
             # Direct roots are valid keys even before an entry is created.
         return resolved
 
+    def has_library_key(self, path: str) -> bool:
+        """Test a captured library root or module slot without materializing it.
+
+        path uses the same direct-key, slot and $alias grammar as library_key.
+        Missing roots, unset/dangling slots and missing/unbound aliases return
+        False. Invalid syntax, other alias errors and source failures propagate.
+        The fixed point/library are never refreshed, changed or expanded.
+        """
+        try:
+            key = self.library_key(path)
+        except ModuleSlotError:
+            return False
+        except RoleResolutionError as exc:
+            if exc.reason in (
+                "Unknown alias",
+                "Alias is not bound",
+                "Role is not bound",
+            ):
+                return False
+            raise
+        kind = "waveform" if key.split(".")[1] == "waveforms" else "module"
+        try:
+            self._library.entry_value(key, kind=kind)
+        except KeyError:
+            return False
+        return True
+
     def _library_path(self, resolved: str) -> str | None:
         parts = resolved.split(".")
         if len(parts) < 2 or parts[0] == "general":
@@ -467,15 +492,3 @@ class ParameterContext:
         if not result.present:
             raise AttributeError(f"Missing parameter: {path!r}")
         return result.value
-
-    def meta(self, path: str) -> Provenance | None:
-        """Read the routed provenance, or None for absent/unsourced data.
-
-        Uses concrete library leaf sources, never synthesizing slot sources.
-        Syntax, namespace, and source errors propagate.
-        """
-        resolved = self.resolve_path(path)
-        library_path = self._library_path(resolved)
-        if library_path is not None:
-            return self._library.meta(library_path)
-        return document_meta(self._point, resolved)

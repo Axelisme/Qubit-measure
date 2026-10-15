@@ -164,18 +164,14 @@ def test_failed_writeback_view_selection_leaves_draft_untouched():
     adapter.writeback_control.write_writeback_for_pane.assert_not_called()
 
 
-@pytest.mark.parametrize("target", [None, "Q2"])
-def test_run_forwards_one_run_target_without_editing_sources(target):
+def test_run_forwards_without_editing_sources():
     adapter = MagicMock()
     adapter.render_view = None
     adapter.run_analyze_control.start_run.return_value = 19
-    params: dict[str, object] = {"tab_id": "t"}
-    if target is not None:
-        params["aliases"] = {"qubit": target}
-    assert h_tab_run_start(adapter, params) == {"operation_id": 19}
+    assert h_tab_run_start(adapter, {"tab_id": "t"}) == {"operation_id": 19}
     adapter.run_analyze_control.start_run.assert_called_once_with(
         "t",
-        aliases=None if target is None else {"qubit": target},
+        aliases=None,
         origin=CommandOrigin("mcp"),
     )
 

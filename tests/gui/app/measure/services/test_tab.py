@@ -29,10 +29,9 @@ from zcu_tools.gui.app.measure.state import (
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._cfg_fakes import (
-    cfg_resolution,
-    cfg_resources,
     parameter_capture,
 )
+from tests.gui.app.measure._form_fakes import form_resources, form_sources
 from tests.gui.app.measure._native_save_support import (
     GUI_ORIGIN,
     NativeSaveSession,
@@ -70,8 +69,8 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
         state,
         MagicMock(),
         writeback,
-        cfg_resources(state),
-        cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
+        form_resources(state),
+        form_sources=lambda aliases: form_sources(state, aliases),
         captured_parameters=lambda _aliases: state.session_env.parameters,
     )
 
@@ -107,8 +106,8 @@ def test_snapshot_projects_empty_writeback_draft_existence() -> None:
         state,
         MagicMock(),
         writeback,
-        cfg_resources(state),
-        cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
+        form_resources(state),
+        form_sources=lambda aliases: form_sources(state, aliases),
         captured_parameters=lambda _aliases: state.session_env.parameters,
     ).get_snapshot("tab")
 
@@ -137,8 +136,8 @@ def test_snapshot_propagates_writeback_preview_failure() -> None:
             state,
             MagicMock(),
             writeback,
-            cfg_resources(state),
-            cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
+            form_resources(state),
+            form_sources=lambda aliases: form_sources(state, aliases),
             captured_parameters=lambda _aliases: state.session_env.parameters,
         ).get_snapshot("tab")
 
@@ -161,8 +160,8 @@ def test_snapshot_projects_running_owner_without_session_run_flag() -> None:
         state,
         MagicMock(),
         writeback,
-        cfg_resources(state),
-        cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
+        form_resources(state),
+        form_sources=lambda aliases: form_sources(state, aliases),
         captured_parameters=lambda _aliases: state.session_env.parameters,
     )
 
@@ -216,8 +215,8 @@ def test_snapshot_carries_post_analyze_fields() -> None:
         state,
         MagicMock(),
         writeback,
-        cfg_resources(state),
-        cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
+        form_resources(state),
+        form_sources=lambda aliases: form_sources(state, aliases),
         captured_parameters=lambda _aliases: state.session_env.parameters,
     )
 
@@ -251,8 +250,8 @@ def test_initialize_post_analyze_params_seeds_from_primary_result() -> None:
         state,
         MagicMock(),
         MagicMock(),
-        cfg_resources(state),
-        cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
+        form_resources(state),
+        form_sources=lambda aliases: form_sources(state, aliases),
         captured_parameters=lambda _aliases: state.session_env.parameters,
     )
 
@@ -280,8 +279,8 @@ def test_initialize_post_analyze_params_fast_fails_without_primary_result() -> N
         state,
         MagicMock(),
         MagicMock(),
-        cfg_resources(state),
-        cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
+        form_resources(state),
+        form_sources=lambda aliases: form_sources(state, aliases),
         captured_parameters=lambda _aliases: state.session_env.parameters,
     )
 
@@ -295,7 +294,7 @@ def _native_snapshot(session: NativeSaveSession) -> TabSnapshot:
         registry=MagicMock(),
         writeback=MagicMock(),
         cfg_resources=MagicMock(),
-        cfg_resolution=MagicMock(),
+        form_sources=MagicMock(),
         captured_parameters=MagicMock(),
     ).get_snapshot("tab")
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -14,7 +14,7 @@ from zcu_tools.analysis.singleshot import (
     correct_populations,
     raw_population_signal,
 )
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     AxesSpec,
     Axis,
@@ -46,22 +46,22 @@ BRANCH_LINESTYLES = ("-", "--", ":")
 
 
 class ResetCheckModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    rabi_pulse: PulseCfg
-    tested_reset: ResetCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    rabi_pulse: Annotated[PulseCfg, FieldMeta(label="Rabi Pulse")]
+    tested_reset: Annotated[ResetCfg, FieldMeta(label="Tested Reset")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class ResetCheckSweepCfg(ConfigBase):
-    gain: SweepCfg
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
 
 
 class ResetCheckCfg(ProgramV2Cfg, ExpCfgModel):
     modules: ResetCheckModuleCfg
     sweep: ResetCheckSweepCfg
-    g_center: complex
-    e_center: complex
-    radius: float
+    g_center: Annotated[complex, FieldMeta(label="Ground center")]
+    e_center: Annotated[complex, FieldMeta(label="Excited center")]
+    radius: Annotated[float, FieldMeta(label="Classification radius")]
 
     @field_serializer("g_center", "e_center")
     def serialize_center(self, value: complex) -> str:

@@ -34,7 +34,7 @@ from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.resources.entry import ResultEntry
 
 from tests.experiment.workflows._engine_fakes import Plan, State, Tunables
-from tests.gui._user_input import mouse_double_click
+from tests.gui._user_input import mouse_click
 
 from ._reload_source import SourceNamespace
 from ._start_fakes import StartHarness
@@ -292,8 +292,8 @@ def form_editable(panel: QWidget) -> bool:
 
 
 def expand_all(widget: QWidget, qapp: QApplication) -> None:
-    """Double-click every enabled folded form.fold.* title, including titles
-    revealed by an outer one.
+    """Click every enabled folded form.fold.* title, including titles revealed
+    by an outer one.
 
     A folded title's text starts with "\u25b8". Disabled titles (a detached
     form) get no mouse input from a user and are left as they are.
@@ -310,7 +310,7 @@ def expand_all(widget: QWidget, qapp: QApplication) -> None:
         if not folds:
             return
         for title in folds:
-            mouse_double_click(title, title.rect().center())
+            mouse_click(title, title.rect().center())
         qapp.processEvents()
 
 

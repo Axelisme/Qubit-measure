@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
-from qtpy.QtWidgets import QApplication, QComboBox, QLineEdit, QPushButton
+from qtpy.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit, QPushButton
 from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.gui.result_scope import (
     ResultScope,
@@ -14,6 +14,16 @@ from zcu_tools.gui.result_scope import (
     write_params_identity,
 )
 from zcu_tools.gui.widgets.project_dialog import ProjectDialog
+
+
+def _field(widget: ProjectDialog, label: str) -> QLineEdit:
+    buddy = next(
+        item.buddy() for item in widget.findChildren(QLabel) if item.text() == label
+    )
+    assert buddy is not None
+    edit = buddy if isinstance(buddy, QLineEdit) else buddy.findChild(QLineEdit)
+    assert edit is not None
+    return edit
 
 
 @pytest.fixture
@@ -24,24 +34,24 @@ def dialog(qapp):
 
 
 def test_prefills_from_project(dialog):
-    assert dialog._chip_edit.text() == "Q5_2D"
-    assert dialog._qub_edit.text() == "Q1"
+    project = dialog.result_project()
+    assert (project.chip_name, project.qub_name) == ("Q5_2D", "Q1")
 
 
 def test_result_project_returns_edited_values(dialog):
-    dialog._chip_edit.setText("Chip2")
-    dialog._qub_edit.setText("Q3")
-    dialog._result_edit.setText("/r")
-    dialog._database_edit.setText("/db")
+    _field(dialog, "Chip name").setText("Chip2")
+    _field(dialog, "Qubit name").setText("Q3")
+    _field(dialog, "Result dir").setText("/r")
+    _field(dialog, "Data root").setText("/db")
     project = dialog.result_project()
     assert project.chip_name == "Chip2"
     assert project.qub_name == "Q3"
     assert project.result_dir == "/r"
-    assert project.database_path == "/db"
+    assert project.data_root == "/db"
 
 
 def test_names_are_trimmed(dialog):
-    dialog._chip_edit.setText("  spacey  ")
+    _field(dialog, "Chip name").setText("  spacey  ")
     assert dialog.result_project().chip_name == "spacey"
 
 
@@ -49,9 +59,9 @@ def test_result_dir_auto_derives_from_names(qapp):
     import os
 
     d = ProjectDialog(ProjectInfo())
-    d._chip_edit.setText("Q5_2D")
-    d._qub_edit.setText("Q1")
-    assert d._result_edit.text() == os.path.join("result", "Q5_2D", "Q1")
+    _field(d, "Chip name").setText("Q5_2D")
+    _field(d, "Qubit name").setText("Q1")
+    assert d.result_project().result_dir == os.path.join("result", "Q5_2D", "Q1")
     d.deleteLater()
 
 
@@ -62,9 +72,9 @@ def test_auto_derivation_anchors_at_project_root_dir(qapp):
     # auto-derivation anchor there, not at the cwd-relative default.
     root = os.path.join(os.sep, "repo")
     d = ProjectDialog(ProjectInfo(root_dir=root))
-    d._chip_edit.setText("Q5_2D")
-    d._qub_edit.setText("Q1")
-    assert d._result_edit.text() == os.path.join(root, "result", "Q5_2D", "Q1")
+    _field(d, "Chip name").setText("Q5_2D")
+    _field(d, "Qubit name").setText("Q1")
+    assert d.result_project().result_dir == os.path.join(root, "result", "Q5_2D", "Q1")
     # result_project carries the root_dir forward so re-derivation stays anchored.
     assert d.result_project().root_dir == root
     d.deleteLater()
@@ -72,30 +82,30 @@ def test_auto_derivation_anchors_at_project_root_dir(qapp):
 
 def test_manual_result_dir_stops_auto_derivation(qapp):
     d = ProjectDialog(ProjectInfo())
-    d._result_edit.setText("/custom/out")
-    d._on_result_edited("/custom/out")  # simulate textEdited
-    d._chip_edit.setText("Q5_2D")  # must NOT overwrite the manual dir
-    assert d._result_edit.text() == "/custom/out"
+    _field(d, "Result dir").setText("/custom/out")
+    _field(d, "Result dir").textEdited.emit("/custom/out")
+    _field(d, "Chip name").setText("Q5_2D")  # must NOT overwrite the manual dir
+    assert d.result_project().result_dir == "/custom/out"
     d.deleteLater()
 
 
-def test_database_path_auto_derives_from_names(qapp):
+def test_data_root_auto_derives_from_names(qapp):
     import os
 
     d = ProjectDialog(ProjectInfo())
-    d._chip_edit.setText("Q5_2D")
-    d._qub_edit.setText("Q1")
+    _field(d, "Chip name").setText("Q5_2D")
+    _field(d, "Qubit name").setText("Q1")
     # the raw-spectrum root tracks chip/qubit, but under Database/ (not result/)
-    assert d._database_edit.text() == os.path.join("Database", "Q5_2D", "Q1")
+    assert d.result_project().data_root == os.path.join("Database", "Q5_2D", "Q1")
     d.deleteLater()
 
 
-def test_manual_database_path_stops_auto_derivation(qapp):
+def test_manual_data_root_stops_auto_derivation(qapp):
     d = ProjectDialog(ProjectInfo())
-    d._database_edit.setText("/custom/raw")
-    d._on_database_edited("/custom/raw")  # simulate textEdited
-    d._chip_edit.setText("Q5_2D")  # must NOT overwrite the manual db path
-    assert d._database_edit.text() == "/custom/raw"
+    _field(d, "Data root").setText("/custom/raw")
+    _field(d, "Data root").textEdited.emit("/custom/raw")
+    _field(d, "Chip name").setText("Q5_2D")  # must NOT overwrite the manual db path
+    assert d.result_project().data_root == "/custom/raw"
     d.deleteLater()
 
 
@@ -115,7 +125,7 @@ def test_result_scope_dropdown_lists_discovered_params(qapp, tmp_path):
 
     d = ProjectDialog(ProjectInfo(root_dir=str(tmp_path)), project_root=str(tmp_path))
     try:
-        assert d._scope_combo.findData(str(params_path.parent.resolve())) >= 0
+        assert _scope_picker(d).findData(str(params_path.parent.resolve())) >= 0
     finally:
         d.deleteLater()
 
@@ -133,15 +143,15 @@ def test_selecting_result_scope_updates_names_and_paths(qapp, tmp_path):
         project_root=str(tmp_path),
     )
     try:
-        idx = d._scope_combo.findData(str(params_path.parent.resolve()))
+        idx = _scope_picker(d).findData(str(params_path.parent.resolve()))
         assert idx >= 0
 
-        d._scope_combo.setCurrentIndex(idx)
+        _scope_picker(d).setCurrentIndex(idx)
 
-        assert d._chip_edit.text() == "ChipA"
-        assert d._qub_edit.text() == "Q1"
-        assert d._result_edit.text() == str(params_path.parent.resolve())
-        assert d._database_edit.text() == os.path.join(
+        assert d.result_project().chip_name == "ChipA"
+        assert d.result_project().qub_name == "Q1"
+        assert d.result_project().result_dir == str(params_path.parent.resolve())
+        assert d.result_project().data_root == os.path.join(
             str(tmp_path), "Database", "ChipA", "Q1"
         )
     finally:
@@ -198,7 +208,7 @@ def test_scope_dropdown_preserves_previous_selection_over_result_and_names(
         chip_name="Initial",
         qub_name="Q0",
         result_dir=previous.result_dir,
-        database_path=str(tmp_path / "custom-database"),
+        data_root=str(tmp_path / "custom-database"),
         root_dir=str(tmp_path),
     )
     widget = scope_dialog(project)
@@ -214,7 +224,7 @@ def test_scope_dropdown_preserves_previous_selection_over_result_and_names(
         chip_name=names.chip_name,
         qub_name=names.qub_name,
         result_dir=result.result_dir,
-        database_path=project.database_path,
+        data_root=project.data_root,
         root_dir=project.root_dir,
     )
 
@@ -269,7 +279,7 @@ def test_scope_dropdown_fallback_keeps_unnamed_project(
         chip_name="",
         qub_name="",
         result_dir=str(tmp_path / "custom-result"),
-        database_path=str(tmp_path / "custom-database"),
+        data_root=str(tmp_path / "custom-database"),
         root_dir=str(tmp_path),
     )
     widget = scope_dialog(project)

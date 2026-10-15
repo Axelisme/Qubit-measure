@@ -5,7 +5,6 @@ from functools import partial
 
 from zcu_tools.experiment.cfg_editing import PROGRAM_SHAPES, ProgramShape
 from zcu_tools.gui.app.measure.adapter import SessionEnv
-from zcu_tools.gui.app.measure.role_factories import RoleFactorySpec
 from zcu_tools.gui.app.measure.specs import MAIN_PROGRAM_SPEC_POLICY, make_pulse_spec
 from zcu_tools.gui.app.measure.template_catalog import (
     TemplateCatalog,
@@ -79,11 +78,6 @@ def captured_readout(ctx: SessionEnv) -> ReferenceValue:
     }.items():
         result.value.with_field(path, capture_number(parameters, source))
     return result
-
-
-ROLE_FACTORIES = {
-    "readout": RoleFactorySpec("module", readout_shape, readout_value),
-}
 
 
 def register_all_templates(catalog: TemplateCatalog) -> None:

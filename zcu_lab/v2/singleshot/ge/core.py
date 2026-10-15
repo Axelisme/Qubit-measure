@@ -4,14 +4,14 @@ import warnings
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar, Literal, cast
+from typing import Annotated, ClassVar, Literal, cast
 
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.analysis.singleshot import classify_result
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     IDENTITY,
     AxesSpec,
@@ -261,15 +261,15 @@ class GEPostAnalysis:
 
 
 class GEModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    init_pulse: PulseCfg | None = None
-    probe_pulse: PulseCfg
-    readout: PulseReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init Pulse")] = None
+    probe_pulse: Annotated[PulseCfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
 
 
 class GE_Cfg(ProgramV2Cfg, ExpCfgModel):
     modules: GEModuleCfg
-    shots: int
+    shots: Annotated[int, FieldMeta(label="Shots")]
 
 
 class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):

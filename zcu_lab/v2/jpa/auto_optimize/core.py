@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import numpy as np
 from matplotlib import colormaps
@@ -12,7 +11,7 @@ from matplotlib.colors import Normalize
 from mpl_toolkits.mplot3d import Axes3D
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import LabberPayload
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
@@ -61,25 +60,71 @@ class JPAOptimizeAnalysis:
 
 
 class JPAOptModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    pi_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[PulseCfg, FieldMeta(label="Pi pulse")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class JPAOptSweepCfg(ConfigBase):
-    jpa_flux: SweepCfg
-    jpa_freq: SweepCfg
-    jpa_power: SweepCfg
+    jpa_flux: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="JPA flux device value",
+            description="Flux bounds in flux_unit coordinates.",
+        ),
+    ]
+    jpa_freq: Annotated[SweepCfg, FieldMeta(label="JPA pump freq", unit="MHz")]
+    jpa_power: Annotated[SweepCfg, FieldMeta(label="JPA pump power", unit="dBm")]
 
 
 class JPAOptCfg(ProgramV2Cfg, ExpCfgModel):
-    flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
+    flux_unit: Annotated[
+        Literal["A", "V", "native"],
+        FieldMeta(
+            label="Flux unit",
+            description="Working unit for the selected flux driver; no conversion.",
+        ),
+    ]
     modules: JPAOptModuleCfg
-    # Map jpa_flux_dev and jpa_rf_dev to connected driver names.
-    dev: Mapping[str, str] = Field(...)
-    sweep: JPAOptSweepCfg
-    num_points: int = Field(ge=4, strict=True)
-    skew_penalty: float = Field(default=0.0, ge=0.0)
+    jpa_flux_dev: Annotated[
+        str,
+        FieldMeta(
+            label="JPA flux device",
+            description="Connected flux device driven at each optimizer point.",
+        ),
+    ]
+    jpa_rf_dev: Annotated[
+        str,
+        FieldMeta(
+            label="JPA RF device",
+            description="Connected pump RF device driven at each optimizer point.",
+        ),
+    ] = ""
+    sweep: Annotated[
+        JPAOptSweepCfg,
+        FieldMeta(
+            label="Search bounds + relative resolution hints",
+            description=(
+                "Start/stop are search bounds. Point counts are relative resolution "
+                "hints for phase-1 allocation, not Cartesian sample counts."
+            ),
+        ),
+    ]
+    num_points: Annotated[
+        int,
+        FieldMeta(
+            label="Global optimizer points",
+            description="Total evaluation budget, at least four points.",
+        ),
+    ] = Field(ge=4, strict=True)
+    skew_penalty: Annotated[
+        float,
+        FieldMeta(
+            label="Skew penalty",
+            decimals=3,
+            description="Nonnegative SNR skew penalty.",
+        ),
+    ] = Field(default=0.0, ge=0.0)
 
 
 JPA_AUTO_FLUX_VARIABLE = "jpa_flux"
@@ -250,6 +295,7 @@ JPA_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
     result_type=JPAOptimizeResult,
     cfg_type=JPAOptCfg,
     tag="jpa/auto_optimize",
+    cfg_schema_version="2.0",
     result_builder=_build_jpa_auto_result,
     result_validator=_validate_jpa_auto_result,
 )
@@ -329,18 +375,17 @@ class AutoOptimizeExp(PersistableExperiment[JPAOptimizeResult, JPAOptCfg]):
 
                 params[idx, :] = cur_params
                 phases[idx] = optimizer.phase
-                dev = step.cfg.dev
                 set_flux(
-                    context.devices[dev["jpa_flux_dev"]],
+                    context.devices[step.cfg.jpa_flux_dev],
                     params[idx, 0],
                     unit=step.cfg.flux_unit,
                     stop=context.cancel_signal,
                     progress=False,
                 )
                 set_rf_frequency(
-                    context.devices[dev["jpa_rf_dev"]], 1e6 * params[idx, 1]
+                    context.devices[step.cfg.jpa_rf_dev], 1e6 * params[idx, 1]
                 )
-                set_rf_power(context.devices[dev["jpa_rf_dev"]], params[idx, 2])
+                set_rf_power(context.devices[step.cfg.jpa_rf_dev], params[idx, 2])
                 modules = step.cfg.modules
                 tracker = MomentTracker()
                 _ = (

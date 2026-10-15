@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 import zcu_tools.analysis.fitting as ft
@@ -15,7 +15,7 @@ from zcu_tools.analysis.fitting import (
     fit_decay,
     fit_dual_decay,
 )
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     US_TO_S,
     AxesSpec,
@@ -59,19 +59,19 @@ def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class T1ModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    pi_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[PulseCfg, FieldMeta(label="Pi Pulse")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class T1SweepCfg(ConfigBase):
-    length: SweepCfg | list[float]
+    length: Annotated[SweepCfg | list[float], FieldMeta(label="Delay", unit="us")]
 
 
 class T1Cfg(ProgramV2Cfg, ExpCfgModel):
     modules: T1ModuleCfg
     sweep: T1SweepCfg
-    uniform: bool = True
+    uniform: Annotated[bool, FieldMeta(label="Uniform (linear) sweep")] = True
 
 
 @dataclass(frozen=True)

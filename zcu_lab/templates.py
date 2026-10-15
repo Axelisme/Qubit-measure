@@ -1,99 +1,323 @@
-"""Startup-only template composition; retained across experiment reloads."""
+"""Persistent module/waveform creation templates, retained across reloads.
+
+Only Expr seeds evaluate; ordinary strings, numbers and bools remain literal.
+Slot seeds retain library links. The composition root injects TEMPLATES once
+into its measure Registry. This module does not register anything at import time.
+"""
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
-from zcu_tools.experiment.cfg_editing import PROGRAM_SHAPES, ProgramShape
-from zcu_tools.gui.app.measure.adapter import SessionEnv
-from zcu_tools.gui.app.measure.specs import MAIN_PROGRAM_SPEC_POLICY
-from zcu_tools.gui.app.measure.template_catalog import (
-    TemplateCatalog,
-    TemplateEntry,
-    TemplateItemKind,
+from zcu_tools.cfg_model import (
+    BathResetSpec,
+    ConstWaveformCfg,
+    CosineWaveformCfg,
+    DirectReadoutCfg,
+    DragWaveformCfg,
+    Expr,
+    FlatTopWaveformSpec,
+    GaussWaveformCfg,
+    NoneResetCfg,
+    PulseReadoutSpec,
+    PulseResetSpec,
+    PulseSpec,
+    Slot,
+    TemplateDef,
+    TemplateSeed,
+    TwoPulseResetSpec,
 )
-from zcu_tools.gui.cfg import (
-    ReferenceValue,
-    make_custom_reference_key,
-    make_default_value,
-)
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
-
-
-def _blank_value_factory(shape: ProgramShape) -> Callable[[SessionEnv], ReferenceValue]:
-    def _make(_ctx: SessionEnv) -> ReferenceValue:
-        value = make_default_value(shape.make_spec(MAIN_PROGRAM_SPEC_POLICY))
-        return ReferenceValue(make_custom_reference_key(shape.discriminator), value)
-
-    return _make
+_QUBIT_FREQ = Expr("{qubit}.freq")
+_QUBIT_CH = Expr("{qubit}.wiring.L01.ch")
+_RESONATOR_FREQ = Expr("{resonator}.freq")
+_RESONATOR_RO_CH = Expr("{resonator}.wiring.ro_ch")
+_TIME_OF_FLIGHT_PLUS_005_US = Expr("{resonator}.ext.time_of_fly + 0.05")
 
 
-def _blank_entries() -> list[TemplateEntry]:
-    entries: list[TemplateEntry] = []
-    factory: Callable[[SessionEnv], ReferenceValue]
-    for shape in PROGRAM_SHAPES.modules():
-        factory = _blank_value_factory(shape)
-        entries.append(
-            TemplateEntry(
-                f"{shape.discriminator}:blank",
-                f"Blank: {shape.discriminator}",
-                "module",
-                lambda shape=shape: shape.make_spec(MAIN_PROGRAM_SPEC_POLICY),
-                factory,
-            )
-        )
-    for shape in PROGRAM_SHAPES.waveforms():
-        factory = _blank_value_factory(shape)
-        entries.append(
-            TemplateEntry(
-                f"{shape.discriminator}:blank",
-                f"Blank: {shape.discriminator}",
-                "waveform",
-                lambda shape=shape: shape.make_spec(MAIN_PROGRAM_SPEC_POLICY),
-                factory,
-            )
-        )
-    return entries
+def pulse(
+    *,
+    freq: TemplateSeed = _QUBIT_FREQ,
+    ch: TemplateSeed = _QUBIT_CH,
+    gain: TemplateSeed = 0.1,
+    length: TemplateSeed = 5.1,
+    at: str = "",
+) -> dict[str, TemplateSeed]:
+    """Return partial pulse seeds relative to a persistent module root.
 
-
-# Insertion order is dropdown order. Blank factories never adopt library entries.
-_CATALOG_TEMPLATES: list[tuple[str, str, TemplateItemKind, str]] = [
-    ("res_probe", "Resonator probe", "module", "readout_rf"),
-    ("readout", "Pulse readout", "module", "readout_rf"),
-    ("readout_dpm", "Optimized readout (DPM)", "module", "readout_dpm"),
-    ("direct_readout", "Direct readout", "module", "readout_direct"),
-    ("qub_probe", "Qubit probe pulse", "module", "qub_pulse"),
-    ("pi_pulse", "Pi pulse", "module", "pi_amp"),
-    ("pi2_pulse", "Pi/2 pulse", "module", "pi2_amp"),
-    ("none_reset", "No reset", "module", "reset_none"),
-    ("reset", "Pulse reset", "module", "reset_10"),
-    ("two_pulse_reset", "Two-pulse reset", "module", "reset_120"),
-    ("bath_reset", "Bath reset", "module", "reset_bath"),
-    ("qub_waveform", "Qubit drive waveform", "waveform", "qub_flat"),
-    ("res_waveform", "Res-probe waveform", "waveform", "ro_waveform"),
-]
-
-TEMPLATE_ENTRIES: list[TemplateEntry] = [
-    TemplateEntry(
-        template_id,
-        label,
-        kind,
-        ROLE_FACTORIES[template_id].shape,
-        ROLE_FACTORIES[template_id].blank,
-        default_name,
-    )
-    for template_id, label, kind, default_name in _CATALOG_TEMPLATES
-]
-
-ALL_TEMPLATE_ENTRIES: list[TemplateEntry] = [*TEMPLATE_ENTRIES, *_blank_entries()]
-
-
-def register_all_templates(catalog: TemplateCatalog) -> None:
-    """Append named and blank templates in dropdown order to the caller catalog.
-
-    Duplicate IDs or invalid shapes raise the catalog registration error. Call
-    only at startup, not on reload; this function does not clear prior entries.
+    ``freq`` is MHz, ``ch`` is a generator channel, ``gain`` is normalized
+    amplitude, and ``length`` is waveform duration in us. ``at`` is an optional
+    dotted path to the pulse section; an empty path seeds a root PulseSpec.
+    The Nyquist zone is 2 and the waveform style is explicitly const, preserving
+    the legacy creation value without adding a persistent Spec default.
+    No library lookup or evaluation occurs here.
+    Wrap expressions in Expr; ordinary strings, including those starting with
+    ``$``, are literal values. Both string kinds may use ``{qubit}`` and
+    ``{resonator}``; TemplateDef validates and expands these placeholders.
+    Seed paths and value compatibility are checked by the consuming catalog.
     """
-    for entry in ALL_TEMPLATE_ENTRIES:
-        catalog.register(entry)
+    prefix = f"{at}." if at else ""
+    return {
+        f"{prefix}freq": freq,
+        f"{prefix}ch": ch,
+        f"{prefix}nqz": 2,
+        f"{prefix}gain": gain,
+        f"{prefix}waveform.style": "const",
+        f"{prefix}waveform.length": length,
+    }
+
+
+def ro(
+    *,
+    ro_freq: TemplateSeed = _RESONATOR_FREQ,
+    ro_ch: TemplateSeed = _RESONATOR_RO_CH,
+    ro_length: TemplateSeed = 0.9,
+    trig_offset: TemplateSeed = _TIME_OF_FLIGHT_PLUS_005_US,
+    at: str = "ro_cfg",
+) -> dict[str, TemplateSeed]:
+    """Return partial acquisition seeds relative to a persistent module root.
+
+    ``ro_freq`` is MHz, ``ro_ch`` is an ADC channel, and ``ro_length`` and
+    ``trig_offset`` are us. ``at`` is the dotted acquisition section path;
+    use an empty path for DirectReadoutCfg. The default trigger offset is the
+    resonator time of flight plus 0.05 us; missing calibration remains Invalid
+    in the consumer, rather than substituting a numeric fallback.
+    Wrap expressions in Expr; ordinary strings, numbers and bools are literal.
+    Strings and Expr may use ``{qubit}`` and ``{resonator}``, validated and
+    expanded by TemplateDef. This helper does not evaluate or read a library.
+    Seed paths and value compatibility are checked by the consuming catalog.
+    """
+    prefix = f"{at}." if at else ""
+    return {
+        f"{prefix}ro_freq": ro_freq,
+        f"{prefix}ro_ch": ro_ch,
+        f"{prefix}ro_length": ro_length,
+        f"{prefix}trig_offset": trig_offset,
+    }
+
+
+# Insertion order preserves library creation menus. Blank seeds retain legacy zeros.
+TEMPLATES: dict[str, TemplateDef] = {
+    "res_probe": TemplateDef(
+        PulseSpec,
+        "Resonator probe",
+        pulse(
+            freq=Expr("{resonator}.freq"),
+            ch=Expr("{resonator}.wiring.ch"),
+            gain=0.05,
+            length=1.0,
+        ),
+        default_name="readout_rf",
+    ),
+    "readout": TemplateDef(
+        PulseReadoutSpec,
+        "Pulse readout",
+        {
+            **pulse(
+                freq=Expr("{resonator}.freq"),
+                ch=Expr("{resonator}.wiring.ch"),
+                length=1.0,
+                at="pulse_cfg",
+            ),
+            **ro(),
+        },
+        default_name="readout_rf",
+    ),
+    "readout_dpm": TemplateDef(
+        PulseReadoutSpec,
+        "Optimized readout (DPM)",
+        {
+            **pulse(
+                freq=Expr("{qubit}.ext.best_ro_freq"),
+                ch=Expr("{resonator}.wiring.ch"),
+                gain=Expr("{qubit}.ext.best_ro_gain"),
+                length=Expr("{qubit}.ext.best_ro_length + 0.1"),
+                at="pulse_cfg",
+            ),
+            **ro(
+                ro_freq=Expr("{qubit}.ext.best_ro_freq"),
+                ro_length=Expr("{qubit}.ext.best_ro_length"),
+            ),
+        },
+        default_name="readout_dpm",
+    ),
+    "direct_readout": TemplateDef(
+        DirectReadoutCfg, "Direct readout", ro(at=""), default_name="readout_direct"
+    ),
+    "qub_probe": TemplateDef(
+        PulseSpec, "Qubit probe pulse", pulse(), default_name="qub_pulse"
+    ),
+    "pi_pulse": TemplateDef(PulseSpec, "Pi pulse", pulse(), default_name="pi_amp"),
+    "pi2_pulse": TemplateDef(PulseSpec, "Pi/2 pulse", pulse(), default_name="pi2_amp"),
+    "none_reset": TemplateDef(NoneResetCfg, "No reset", {}, default_name="reset_none"),
+    "reset": TemplateDef(
+        PulseResetSpec,
+        "Pulse reset",
+        pulse(gain=0.2, length=1.0, at="pulse_cfg"),
+        default_name="reset_10",
+    ),
+    "two_pulse_reset": TemplateDef(
+        TwoPulseResetSpec,
+        "Two-pulse reset",
+        {
+            **pulse(gain=0.2, length=1.0, at="pulse1_cfg"),
+            **pulse(gain=0.2, length=1.0, at="pulse2_cfg"),
+        },
+        default_name="reset_120",
+    ),
+    "bath_reset": TemplateDef(
+        BathResetSpec,
+        "Bath reset",
+        {
+            **pulse(
+                freq=Expr("{resonator}.freq"),
+                ch=Expr("{resonator}.wiring.ch"),
+                gain=0.1,
+                length=1.0,
+                at="cavity_tone_cfg",
+            ),
+            **pulse(gain=0.2, length=1.0, at="qubit_tone_cfg"),
+            "pi2_cfg": Slot("{qubit}.module.x90"),
+        },
+        default_name="reset_bath",
+    ),
+    "qub_waveform": TemplateDef(
+        CosineWaveformCfg,
+        "Qubit drive waveform",
+        {"length": 0.1},
+        default_name="qub_flat",
+    ),
+    "res_waveform": TemplateDef(
+        ConstWaveformCfg,
+        "Res-probe waveform",
+        {"length": 1.0},
+        default_name="ro_waveform",
+    ),
+    "pulse:blank": TemplateDef(
+        PulseSpec,
+        "Blank: pulse",
+        {
+            "ch": 0,
+            "freq": 0.0,
+            "gain": 0.0,
+            "nqz": 1,
+            "phase": 0.0,
+            "pre_delay": 0.0,
+            "post_delay": 0.0,
+            "waveform.style": "const",
+            "waveform.length": 0.0,
+        },
+    ),
+    "readout/direct:blank": TemplateDef(
+        DirectReadoutCfg,
+        "Blank: readout/direct",
+        {"ro_ch": 0, "ro_freq": 0.0, "ro_length": 0.0, "trig_offset": 0.0},
+    ),
+    "readout/pulse:blank": TemplateDef(
+        PulseReadoutSpec,
+        "Blank: readout/pulse",
+        {
+            "pulse_cfg.ch": 0,
+            "pulse_cfg.freq": 0.0,
+            "pulse_cfg.gain": 0.0,
+            "pulse_cfg.nqz": 1,
+            "pulse_cfg.phase": 0.0,
+            "pulse_cfg.pre_delay": 0.0,
+            "pulse_cfg.post_delay": 0.0,
+            "pulse_cfg.waveform.style": "const",
+            "pulse_cfg.waveform.length": 0.0,
+            "ro_cfg.ro_ch": 0,
+            "ro_cfg.ro_freq": 0.0,
+            "ro_cfg.ro_length": 0.0,
+            "ro_cfg.trig_offset": 0.0,
+        },
+    ),
+    "reset/none:blank": TemplateDef(
+        NoneResetCfg, "Blank: reset/none", {"type": "reset/none"}
+    ),
+    "reset/pulse:blank": TemplateDef(
+        PulseResetSpec,
+        "Blank: reset/pulse",
+        {
+            "pulse_cfg.ch": 0,
+            "pulse_cfg.freq": 0.0,
+            "pulse_cfg.gain": 0.0,
+            "pulse_cfg.nqz": 1,
+            "pulse_cfg.phase": 0.0,
+            "pulse_cfg.pre_delay": 0.0,
+            "pulse_cfg.post_delay": 0.0,
+            "pulse_cfg.waveform.style": "const",
+            "pulse_cfg.waveform.length": 0.0,
+        },
+    ),
+    "reset/two_pulse:blank": TemplateDef(
+        TwoPulseResetSpec,
+        "Blank: reset/two_pulse",
+        {
+            "pulse1_cfg.ch": 0,
+            "pulse1_cfg.freq": 0.0,
+            "pulse1_cfg.gain": 0.0,
+            "pulse1_cfg.nqz": 1,
+            "pulse1_cfg.phase": 0.0,
+            "pulse1_cfg.pre_delay": 0.0,
+            "pulse1_cfg.post_delay": 0.0,
+            "pulse1_cfg.waveform.style": "const",
+            "pulse1_cfg.waveform.length": 0.0,
+            "pulse2_cfg.ch": 0,
+            "pulse2_cfg.freq": 0.0,
+            "pulse2_cfg.gain": 0.0,
+            "pulse2_cfg.nqz": 1,
+            "pulse2_cfg.phase": 0.0,
+            "pulse2_cfg.pre_delay": 0.0,
+            "pulse2_cfg.post_delay": 0.0,
+            "pulse2_cfg.waveform.style": "const",
+            "pulse2_cfg.waveform.length": 0.0,
+        },
+    ),
+    "reset/bath:blank": TemplateDef(
+        BathResetSpec,
+        "Blank: reset/bath",
+        {
+            "cavity_tone_cfg.ch": 0,
+            "cavity_tone_cfg.freq": 0.0,
+            "cavity_tone_cfg.gain": 0.0,
+            "cavity_tone_cfg.nqz": 1,
+            "cavity_tone_cfg.phase": 0.0,
+            "cavity_tone_cfg.pre_delay": 0.0,
+            "cavity_tone_cfg.post_delay": 0.0,
+            "cavity_tone_cfg.waveform.style": "const",
+            "cavity_tone_cfg.waveform.length": 0.0,
+            "qubit_tone_cfg.ch": 0,
+            "qubit_tone_cfg.freq": 0.0,
+            "qubit_tone_cfg.gain": 0.0,
+            "qubit_tone_cfg.nqz": 1,
+            "qubit_tone_cfg.phase": 0.0,
+            "qubit_tone_cfg.pre_delay": 0.0,
+            "qubit_tone_cfg.post_delay": 0.0,
+            "qubit_tone_cfg.waveform.style": "const",
+            "qubit_tone_cfg.waveform.length": 0.0,
+            "pi2_cfg.ch": 0,
+            "pi2_cfg.freq": 0.0,
+            "pi2_cfg.gain": 0.0,
+            "pi2_cfg.nqz": 1,
+            "pi2_cfg.phase": 0.0,
+            "pi2_cfg.pre_delay": 0.0,
+            "pi2_cfg.post_delay": 0.0,
+            "pi2_cfg.waveform.style": "const",
+            "pi2_cfg.waveform.length": 0.0,
+        },
+    ),
+    "const:blank": TemplateDef(ConstWaveformCfg, "Blank: const", {"length": 0.0}),
+    "cosine:blank": TemplateDef(CosineWaveformCfg, "Blank: cosine", {"length": 0.0}),
+    "gauss:blank": TemplateDef(
+        GaussWaveformCfg, "Blank: gauss", {"length": 0.0, "sigma": 0.0}
+    ),
+    "drag:blank": TemplateDef(
+        DragWaveformCfg,
+        "Blank: drag",
+        {"length": 0.0, "sigma": 0.0, "delta": 0.0, "alpha": 0.0},
+    ),
+    "flat_top:blank": TemplateDef(
+        FlatTopWaveformSpec,
+        "Blank: flat_top",
+        {"length": 0.0, "raise_waveform.style": "cosine", "raise_waveform.length": 0.0},
+    ),
+}

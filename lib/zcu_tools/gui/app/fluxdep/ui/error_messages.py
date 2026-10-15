@@ -67,7 +67,7 @@ def friendly_io_message(action: str, filepath: str, exc: Exception) -> str:
 # no result / no aligned spectrum), the mirror-needs-sample_f transition error and
 # the no-candidate search outcome.
 _FIT_RULES: list[FriendlyRule] = [
-    (lambda low: "no database path" in low, "Select a database file before searching."),
+    (lambda low: "no database path" in low, "Select a search DB before searching."),
     (
         lambda low: "no selected points" in low,
         "No points to fit — select points on a spectrum first.",
@@ -79,7 +79,7 @@ _FIT_RULES: list[FriendlyRule] = [
     ),
     (
         lambda low: "no valid candidate" in low or "infeasible" in low,
-        "No match found in the database for these bounds. Widen the EJ / EC / "
+        "No match found in the search DB for these bounds. Widen the EJ / EC / "
         "EL bounds (or pick a different preset) and search again.",
     ),
     (lambda low: "no fit result" in low, "Nothing to export yet — run a search first."),

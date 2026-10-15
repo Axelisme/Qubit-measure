@@ -16,24 +16,25 @@ from ._recipe_support import LookbackGui, recipe_client
 def test_run_starts_immediately_with_detached_conditions(tmp_path):
     gui = LookbackGui()
     gui.md["$resonator.freq"] = 6100.0
-    gui.publication["source_basis"] = [{"key": "r_f", "revision": "7"}]
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(
             client.context,
             summary_parameters=(
                 SummaryParameter("rounds", "rounds"),
                 SummaryParameter("reset", "modules.reset"),
-                SummaryParameter("frequency", "modules.readout.pulse_cfg.freq"),
+                SummaryParameter(
+                    "frequency", "modules.readout.module.pulse_cfg.module.freq"
+                ),
             ),
         ).open_tab("lookback")
         tab.set("rounds", 7)
         tab.disable_library("modules.reset")
         tab.read_value("$resonator.freq")
         for path in (
-            "modules.readout.pulse_cfg.freq",
-            "modules.readout.ro_cfg.ro_freq",
+            "modules.readout.module.pulse_cfg.module.freq",
+            "modules.readout.module.ro_cfg.ro_freq",
         ):
-            tab.set(path, {"__expr": "$resonator.freq"}, source="$resonator.freq")
+            tab.set(path, {"expr": "$resonator.freq"}, source="$resonator.freq")
         operation = tab.run()
         assert gui.ran
         assert not any(
@@ -49,11 +50,12 @@ def test_run_starts_immediately_with_detached_conditions(tmp_path):
             "value": None,
             "source": "disabled",
         }
-        assert before.actual["fields"]["modules.readout.pulse_cfg.freq"] == {
+        assert before.actual["fields"][
+            "modules.readout.module.pulse_cfg.module.freq"
+        ] == {
             "value": 6100.0,
             "source": "$resonator.freq",
         }
-        gui.publication["source_basis"].clear()
         tab.set("rounds", 11)
         before.actual["fields"]["rounds"]["value"] = -1
         run, status = operation.complete_in_current_worker()
@@ -254,7 +256,9 @@ def test_start_rejection_retains_the_attempted_cfg_without_retry(tmp_path):
         assert (
             sum(method == "tab.run_start" for method, _ in client.transport.sent) == 1
         )
-        assert sum(method == "tab.get_cfg" for method, _ in client.transport.sent) == 1
+        assert (
+            sum(method == "tab.reset_cfg" for method, _ in client.transport.sent) == 1
+        )
 
 
 def test_uncertain_start_does_not_infer_not_started_from_a_missing_handle(tmp_path):

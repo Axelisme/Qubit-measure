@@ -5,6 +5,8 @@ from typing import Literal
 
 from qtpy.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
+
 type RunBadge = Literal[
     "ready",
     "pending",
@@ -78,6 +80,8 @@ class WorkflowRunStatus(QWidget):
         self._workflow = self._label("workflow.run.workflow", "")
         self._workflow.setStyleSheet("QLabel { font-weight: 600; }")
         self._detail = self._label("workflow.run.detail", "")
+        make_label_selectable(self._workflow)
+        make_label_selectable(self._detail)
         self._paused = self._label("workflow.run.paused_note", _PAUSED_NOTE)
         self._paused.setWordWrap(True)
         self._paused.setStyleSheet(_PAUSED_STYLE)

@@ -18,7 +18,7 @@ from zcu_tools.gui.cfg import (
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_expr
-from zcu_tools.gui.session.types import ParameterContext, RoleBinding, SessionEnv
+from zcu_tools.gui.session.types import ParameterContext, RoleBinding
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry import ComponentSchema, RoleSpec, component_registry
 from zcu_tools.resources.entry.schema import PointDocument
@@ -36,7 +36,7 @@ def parameters() -> Generator[ParameterContext]:
         point = PointDocument.model_validate(
             {
                 "format": "zcu.parameter-container",
-                "format_version": "1.0",
+                "format_version": "2.0",
                 "general": {"created_at": "2026-10-08T00:00:00Z"},
                 "components": {"Q1": {"kind": "lowering/driver", "rate": 4300.0}},
             }
@@ -108,20 +108,3 @@ def test_finished_literal_data_is_independent() -> None:
     lowered = schema_to_raw_dict(schema, None)
     value["items"].append(3)
     assert lowered == {"payload": {"items": [1, 2]}}
-
-
-def test_path_seeds_use_roles_and_explicit_fallback(
-    parameters: ParameterContext,
-) -> None:
-    from zcu_tools.gui.app.measure.seeds import path_seed, scaled_path_seed
-
-    environment = SessionEnv(parameters=parameters, soc=None, soccfg=None)
-    value = path_seed("$qubit.rate", fallback=100.0).resolve(environment)
-    assert isinstance(value, EvalValue) and value.expr == "$qubit.rate"
-    scaled = scaled_path_seed("$qubit.rate", factor=2.0, fallback_value=100.0).resolve(
-        environment
-    )
-    assert isinstance(scaled, EvalValue)
-    assert evaluate_scalar_expr(scaled.expr, parameters) == 8600.0
-    empty = SessionEnv(parameters=None, soc=None, soccfg=None)
-    assert path_seed("$qubit.rate", fallback=100.0).resolve(empty) == value

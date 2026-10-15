@@ -59,11 +59,11 @@ if TYPE_CHECKING:
     )
     from zcu_tools.gui.app.measure.services.save_control import SaveControlPort
     from zcu_tools.gui.app.measure.services.tab_control import TabControlPort
+    from zcu_tools.gui.app.measure.services.tab_form import TabFormResource
     from zcu_tools.gui.app.measure.services.writeback_control import (
         WritebackControlPort,
     )
     from zcu_tools.gui.cfg.binding import SettableTarget
-    from zcu_tools.gui.cfg.resource import CfgEditing
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.ports import OwnerScheduler
@@ -122,7 +122,7 @@ class RemoteControlAdapter(RemoteControlServiceBase):
 
     ctrl: Controller
     tab_control: TabControlPort
-    cfg_lookup: Callable[[str], CfgEditing]
+    cfg_lookup: Callable[[str], TabFormResource]
     run_analyze_control: RunAnalyzeControlPort
     operation_control: OperationControlPort
     save_control: SaveControlPort

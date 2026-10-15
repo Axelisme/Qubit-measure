@@ -1,11 +1,11 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-13
+**Last updated:** 2026-10-15，Guide view renders through markdown-it-py
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
 view 與 GUI-side remote handler。使用者套件的 adapter 擁有實驗領域知識；
-framework 只看 `ExpAdapterProtocol`。共用 `BaseAdapter` 住在 `adapter/base.py`。它透過 `AdapterCfgDefinition.instantiate(ctx)` 產生 fresh cfg，不依賴具體 builder 或 Seed。
+framework 只看 `ExpAdapterProtocol`。共用 `BaseAdapter` 住在 `adapter/base.py`。它宣告 `Form`，分頁從固定 `FormEnv` 產生 fresh input。
 
 Main 擁有 `AppPersistedState` codec/version、filename、originator、restore presentation 與
 lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleFileCaretaker`。
@@ -49,19 +49,11 @@ analyze 不檢查 adapter 的 analysis capability。操作期間的 busy／硬�
 `CfgEditorService` 按 `editor_id` 保存 cfg draft。可回收的 library-entry
 session 受 LRU／disconnect 回收；由 UI owner 建立的 seeded session 由 owner
 顯式 teardown。Widget attach／detach 不取得 draft 的銷毀權。
-Tab cfg 由 `Session.cfg` 的 `CfgResource` 擁有，不建立 editor session 或
-`State.cfg_schema` 鏡像。Qt 與 remote 都向同一資源提交作用於目前 inputs 的命令。
-`WritebackService` 以 opaque draft 保存候選項及 item-local editor
-session，不能把 preview 當成再次計算候選項的指令。`CfgDraft` 的共用
-Spec／Value、`None`、locked literal、reference binding 與 lowering 契約見
-[Cfg ADR](../../../../../docs/adr/0065-cfg-editing.md)、
-[GUI cfg README](../../cfg/README.md) 與
-[experiment cfg editing README](../../../experiment/cfg_editing/README.md)。
-Tab cfg edit batch 在完整候選準備成功後一次發布，拒絕不改舊 publication。
-獨立 library editor 的 draft batch 不具有這項原子保證。Source refresh 使用
-已發布快照，不把 live provider 當成 observation 的第二個 owner。Measure tab、
-Run、Qt 與 remote 的資源契約現況見 Cfg ADR；library conversion、selected Apply
-與其他 app 的剩餘目標見 [cfg draft](../../../../../docs/adr/draft/cfg-editing-boundaries.md)。
+Tab cfg 由 `Session.cfg` 的 `TabFormResource` 擁有。Open／Reset 捕捉來源，
+preview、result 和 Run 都使用這份來源。Input、來源與 guard 不交給 view 管理。
+Library、Inspect 與 writeback 保留獨立 `CfgDraft`，其共用機制見
+[Cfg ADR](../../../../../docs/adr/0065-cfg-editing.md) 與
+[GUI cfg README](../../cfg/README.md)。分頁 Form 契約見本頁 Config model。
 
 `State` 保存可觀察的 app 資料，`ContextService` 寫入參數容器／library；services
 依用途讀 owner 的 read contract、單向呼叫 command 或訂閱已提交 fact。
@@ -81,7 +73,7 @@ wire guard 與 off-owner await 見 [Remote README](remote/README.md)。
 `State.preferences` 保存下次預填值，面板寬度由 `Controller.get_left_panel_width()`
 提供；restore
 不自動連接 SoC 或套用 active context。`WorkspaceService` 處理 session
-capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
+capture／apply，resource 還原兼容的 Form input；`SingleFileCaretaker` 只
 處理單檔 I/O，不認識 State／cfg。關閉等待的 timeout 並不證明 cleanup
 完成。保存邊界見 [Persistence ADR](../../../../../docs/adr/0063-persistence-ownership.md)，
 關閉與取消見 [Operation ADR](../../../../../docs/adr/0066-operation-lifecycle.md)
@@ -110,7 +102,7 @@ pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 align
 
 ## Package Boundaries
 
-- `schema_builder.py`、`seeds.py`、`role_factories.py`：context-free authoring 與通用 deferred defaults。Caller 明傳角色 factory 表；角色詞彙與三個掃描範圍政策留在使用者套件。
+- `form_adapter` 從 core cfg 與作者樹推導 Form。`make_form(ctx)`、範本與實驗初值由使用者套件宣告，舊 builder、seeds 與角色 factory 表已退休。
 - `flux_pick_plugin.py`、`flux_pick_frontend.py`、`interactive_flux_pick.py`：measure 選線的終態結果與 click-follow frontend。Caller 傳 FluxPickInputs 和初始數值，不帶具體實驗或參數容器。共用數值及 single-flight 機制仍由既有 kernel/plugin 擁有。
 - `adapter/`：framework-facing contract、measure-owned finished-cfg ports、analyze params、
   adapter validation與protocol signature需要的session vocabulary；不forward generic cfg API。
@@ -388,7 +380,10 @@ Loader 不猜 namespace 或套件位置。Preserved prefix 優先於 reload pref
 import 新的固定 dependency 要求重啟。Loader 在所有來源保留固定 module identity，且每個
 prepare plan 只能使用一次。它在重載失敗時清除部分 owned modules，不回滾任意 import side effect。
 
-Bounded source inventory、prepare/load、fixed-source restart 與共同 token/error 型別由 `gui.catalog_loader` 擁有。Measure 的 SourceExperimentCatalogLoader 保留原簽名，只注入 Registry/register_all/validate builder；Controller 的 recovery 與 UI 政策不變。
+Bounded source inventory、prepare/load、fixed-source restart 與共同 token/error 型別由
+`gui.catalog_loader` 擁有。Measure loader 必填 `current_registry`，新建 detached
+candidate 時使用其 templates，不修改或自行發布 current registry。
+Controller 的 recovery 與 UI 政策不變。
 
 依賴重載是 best-effort，不全面保證 deferred/dynamic import 的一致性，也不禁止函式內 import；
 可重載 code 的 import 不得操作硬體或啟動背景工作。此取捨不放寬資料丟棄確認或 lifecycle 保護。
@@ -463,20 +458,16 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    at start and pass it to the opaque draft. Post captures the Primary draft's
    identity at operation start and passes it to its new draft. A missing Primary
    identity stays None, even if live Run metadata or Save has an id. Accepted
-   ledger events and destination provenance use that identity whether or not Save
+   ledger events and library provenance use that identity whether or not Save
    occurred. The identity does not imply a saved file; consult saved events for
    persistence. Native Load retains the original identity, and analysis without
    native metadata uses `None`.
 
-- `load_tab_result` 載入 typed RunRecord，以 Record.cfg 作為來源快照。
+- `load_tab_result` 載入 typed RunRecord，保留 Record.cfg 作為結果來源快照，供 Inspect 與分析讀取。
   缺 cfg 時保留可用資料，不捏造設定。WB 不從 Load-time calibration 補 pulse module、改槽或 pi_product。
-  有效 cfg 透過同一個 CfgResource 原子 backfill，保留 resource lifetime。
+  Load 保留表單原輸入與固定來源，不要求 draft 有效。
   Run/Load 先提交 primary result。Analysis preparation 失敗不撤回它，只報 diagnostic。
   Named figures 和各 pane 的 presentation lifecycle 分開管理。
-dynamic selectors must match live options and the new complete draft must be valid
-before publication. A failed lookup or malformed option list rejects the entire
-backfill rather than silently skipping that selector. Module/waveform references
-become custom values rather than guessed library keys.
 The Guard and LoadService both enforce the adapter's import-validated
 `capabilities.load_data` gate.
 
@@ -554,10 +545,9 @@ canvas, or changes ADR-0067 reactions. No competing state owner is introduced.
 
 ## Tab lifecycle and ordering
 
-Tab 不保存另一張 alias 表或 tab birth 環境。Cfg refresh／reset 與下一次 Run
-使用當次全域表的固定 capture。非空 caller `aliases` 只覆寫該次 preview／Run，
-不保存到 tab 或全域表。已有 Run／Analyze／WB／artifact 保留原結果來源，
-不因目前 alias 改綁而重新解析。
+Tab 不保存另一張 alias 表。Open／Reset 捕捉來源，下一次 Reset 前保持固定。
+Reset 的單次 aliases 不保存；Run 使用顯示值並拒絕非空 aliases。
+Run／Analyze／WB／artifact 保留原結果來源，不因目前 alias 改綁而重新解析。
 
 New tabs are pure GUI configuration surfaces: creating one builds the adapter's
 default cfg from the current context but does not start hardware work. The toolbar
@@ -570,136 +560,74 @@ Top-level experiment tabs are movable. The visible order is synchronized back to
 remote tab views, and captured sessions all use the same tab order as the Qt tab
 bar. Active and running tabs are identified by tab id, not visual index.
 
-## Config Model
+## Config model
 
-GUI flux adapter 表單的 `flux_unit` 是 A／V／native 三選一，初始 A，使用者可改。
-這是表單初始值，不從 cached DeviceInfo 推測。Core 與 Notebook cfg 仍必填
-`flux_unit`，不提供隱含 default，cfg 格式與 unit 驗證不變。
+`Session.cfg` owns one `TabFormResource`. The resource owns one `FormState`
+and captures parameters, library and cached device infos on Open and Reset. Preview, result and Run use that capture until the next Reset.
+Source events do not refresh existing forms. Device capture copies cached infos;
+it never queries a live driver.
 
-Measure Config uses `ResourceCfgFormWidget` and a State-owned cfg resource.
-The form submits every input change at once, so it always shows the published
-cfg. Run accepts current inputs only when their publication is Valid; an
-Invalid input never runs the previous values. Input that repairs an Invalid
-publication still cannot bypass busy, context or SoC gates. Library editors and writeback keep their existing `CfgDraft` binding behavior.
+Adapters declare `Form(core_cfg, tree)` from the shared `zcu_tools.gui.form_adapter`. Core annotations define editable shape and
+validation; the tree defines authored starting values, locks, hidden fields and
+module defaults. The Registry binds the Form to its injected template catalog.
+Form lowers ordinary input to core cfg, including optional extras through its named lower hook.
+Ordinary strings remain literal; expression input uses an explicit envelope.
+Nullable named device choices include None independently of whether a core field
+has a default. Missing required input remains Invalid.
 
-`Session.cfg` 只引用該 tab 的 `CfgResource`，不保存另一份 live schema。
-CfgResource 擁有 input、resolution、publication 與 acceptance。
-Qt、remote、reset 和 load 共用這個 owner。Edit 完整 batch 原子發布，合法未完成輸入
-發布 Invalid；拒絕不留下成功前綴。Observe、snapshot 和 Run acceptance 不重新讀取來源。
-`TabSnapshot.cfg_schema` 是 detached input memento，只供 snapshot／workspace restore。
-`CfgEditorService` 保留 library、inspect 和 writeback 的獨立 draft，不發布 tab cfg。Library editor 保存開啟時的 ParameterContext，並透過 `apply_library_change` 在原 target 提交結構操作。同一 entry 的 point 切換不會改寫目的地；跨 entry 拒絕寫入。失敗保留可編輯的 session。
+Frontends submit writes to the same resource. FormState applies a complete batch
+atomically; rejection leaves no successful prefix. Reads do not poll providers.
+Invalid input remains editable, including unfinished expressions. Run accepts only the current valid result and never uses an older
+valid cfg. Busy, lifetime, context and SoC guards remain separate requirements.
 
-獨立 library／inspect／writeback 的 CfgEditor 在 app seam 解碼 `ValueRef`，
-並依序操作 draft binding target。這個 draft batch 保留 fail-fast/non-atomic 行為，
-每筆成功 edit 各自 bump version。它不適用於 tab cfg resource 的原子 batch。
+`Reset(aliases=...)` captures one-shot named overrides and recomputes defaults.
+The overrides change neither global rows nor the memento. Run rejects nonempty
+aliases; None and an empty map use the displayed capture. Run metadata retains
+that capture's point, roles and storage. Acquisition still takes its own live
+device evidence after the hardware lease, as described above.
 
-Shared `CfgSchema` pairs two trees. The resource owns these inputs, and the form
-renders each publication after submitting an input change:
+Notifications permit reads and reject reentrant writes, acceptance and lifetime
+changes across tab resources. Subscriber faults log a traceback; the committed
+input remains installed and other subscribers still receive the change. Close
+revokes retained handles. Reopening creates a new resource and source capture.
+Frontend attach and detach do not own resource lifetime.
 
-- Spec tree: static shape, labels, variants, literal locks, optional/ref rules.
-- Value tree: authored inputs, including expressions and reference identities.
+The Qt Run panel mounts the shared `FormEditor` over `resource.editor_state`, the
+same FormState lent for reading and subscribing, and passes `write=resource.write`
+and `run_command=resource.run_command`. Editor input and right-click option
+commands (such as a module key's Convert to inline) therefore take the resource
+guards and publish to resource subscribers and the tab cfg version. Reset
+installs a new FormState; the panel watches the resource and mounts a new
+editor on that state. While the tab runs or analyzes, the panel only calls
+`set_editing_enabled(enabled=False)`: inputs lock, but the form still scrolls
+and its groups still fold. Detach unsubscribes
+and detaches the editor before the tab closes.
 
-Resource acceptance rejects unresolved or invalid cfg. Legal optional `None`
-remains valid. Run admission captures the current global `ParameterContext`, not tab birth sources.
-Nonempty caller-owned `aliases` maps alias names to concrete names and
-resolves the same inputs against its temporary capture. It changes neither tab
-publication nor global rows. Omission, None and {} use cached acceptance.
-Recipe parameter/library queries and cfg preview use the same named overrides.
-Temporary preview resolves current inputs and returns an observation
-without replacing the cached publication. Adapters do not declare parameter roles.
-EMPTY app captures without overrides retain deferred None; nonempty overrides
-reject no_context. Native Load takes Save storage from that one Load-time capture
-and reads historical fixed names without expanding current alias links.
-`schema_to_raw_dict(schema, parameters)` lowers independent drafts with their
-fixed ParameterContext, not the currently selected point or global aliases. `CfgSchema` stores shared spec/value data and `CfgDraft`
-provides draft expression evaluation and cached validity. `ValueRef` resolves
-once through the session `ValueLookup` and stores a direct scalar input.
+Load replaces results, not Form input. Valid, invalid and unfinished drafts
+keep their authored values and expression text, including extras. Load does not
+validate the current draft or infer input from native cfg. The result retains
+its native cfg for Inspect and analysis. Native Load's historical analysis
+source and Save storage retain their separate Load-time ownership.
 
-五個有 flux device 的 Measure adapter 預設使用 direct mode，包括 JPA 的
-`jpa_flux_dev` 欄位。建立預設 cfg 時，seed 從當時固定的 parameter capture
-只解析一次 `$flux_dev`，將名稱保存為 `DirectValue`，表單顯示例如 `yoko1`。
-未綁定時 cfg 發布 Invalid 並指名 alias，不 fallback。後續 alias 變更不更新
-已建立的 direct cfg 或 draft；新預設 cfg 才使用當時 capture 的解析結果。
-明確 caller 設定不被 preset 覆蓋。
+Workspace saves authored Form input JSON, including expression text. Restore
+captures new sources and overlays compatible leaves through the resource,
+reporting discarded paths. The app memento version changes with this input
+format; earlier versions use the caretaker's default degradation without tab
+migration.
 
-使用者仍可手動切成 eval mode 並輸入 `$flux_dev`。這時 string cfg 保留
-authored expression，與固定的 direct 初值不同。Preview、refresh 與 Run
-使用各自固定的 alias capture 解析 expression，顯示例如 `= "yoko1"`。
-未綁或缺列發布 Invalid 並指名 alias；無 context 或來源故障不沿用舊名稱。
-Alias 與 preview 不查 device 可用性，實際使用名稱時由實驗 device owner 報錯。
-RunMetadata 與 data.h5 保存當次的 `flux_dev → yoko1`；Analyze、WB 與 Save
-不重新讀取目前 alias 表。
+GUI flux forms provide A, V and native units with initial A. This initial value
+does not come from device info. Core and Notebook cfg require an explicit unit.
 
-generic model、spec walk、inheritance、codec、static/dynamic validation與lowering由
-`zcu_tools.gui.cfg`擁有，consumer直接從shared owner匯入。measure adapter提供固定
-`ParameterContext`的expression evaluator與module/waveform resolver。shared lowering
-回傳純range資料，experiment cfg建立時才驗證為`SweepCfg`。adapter package不import或
-forward shared cfg public names，也不保留第二份algorithm或model/inheritance/codec implementation（ADR-0065）。
+### Independent CfgSchema drafts
 
-Module與waveform field在shared model都使用`ReferenceSpec(kind=...)` / `ReferenceValue`。
-measure-owned pulse/waveform spec factory顯式設定`kind="module"`或`kind="waveform"`，
-`services.tab_cfg.TabCfgResources` 管理 tab 到 cfg resource 的身份關聯。TabService 建立及關閉
-資源，lookup 直接回傳 resource-bound editing，不轉送命令。建立失敗不留下關聯，retire
-先撤銷舊 handle，再移除關聯。Widget detach 只停止觀察，不改資源 lifetime。
+Library, Inspect and writeback retain `CfgSchema` and `CfgDraft`; they do not use
+the tab Form resource. Their Spec/Value model, reference materialization and
+codec stay with `gui.cfg` and `experiment.cfg_editing` as described in
+[Cfg ADR](../../../../../docs/adr/0065-cfg-editing.md). Library sessions retain
+the opened ParameterContext and target; a later point selection does not retarget
+Apply. Their fail-fast draft batches retain successful prefixes and are not the
+tab resource's atomic write contract.
 
-Tab 的每次 cfg refresh／reset 從目前全域 alias 表與 point／library 建立固定
-`ParameterContext`。它不讀 tab birth capture。`MeasureCfgBindings.snapshot_from_state`
-使用這份投影，擷取 options 與已發布的 values，並記錄 context、device set
-及每個 device 的 source basis。
-`@{key}` 先讀 `ValueSourceBinder` 已發布的 detached cache；未命中時，
-再沿同一固定 `ParameterContext` 查參數路徑。不查 live provider 或硬體。
-`$alias.path` 保持動態 alias 引用，不使用這條 resolve-once capture 路徑。
-Source 更新先準備及安裝所有 tab 的新 publication，再通知任何 subscriber。
-來源故障發布 Unavailable，不保留舊 Valid。通知期間拒絕 cfg mutation、acceptance 和 tab lifetime mutation。
-
-`MeasureCfgBindings`依`spec.kind`選擇精確的ModuleLibrary store/materializer facade，並提供expression、
-dynamic scalar options與ValueRef resolution policy；widget只讀field API，shared cfg不認識這些
-app-local policy。device selector是required string `ScalarSpec`，wire value維持`DirectValue(str)`。
-measure composition在`ui/cfg_binding.py`以generic `QLineEdit -> keepalive object` enhancer seam安裝
-`ValueSourceInputController`，保留eval input的completion與resolve-on-space；shared binding仍
-不import ValueRef或session，shared widget只接收generic enhancer callable。
-
-ModuleLibrary reference enumeration只以`experiment.cfg_editing.program_shape_for_input`讀root discriminator；
-不normalize typed cfg或建立Spec/Value。resolve才呼main materializer façade一次。Experiment
-composition把fresh canonical shape factory與eval-aware value factory一起註冊到immutable `TemplateEntry`；catalog
-registration只驗shape/kind，Controller create依序取得value與fresh shape並直接組`CfgSchema`，不從
-value sniff discriminator。
-Create 先取得 alias-aware `read_context()`，將同一固定 capture 放進 factory 的
-`SessionEnv.parameters` 並交 library write lowering。後來的來源或 selection 修改
-不改該次建立值與目的地。TemplateEntry 不要求 consumer roles。
-既有 role_id／roles wire metadata 與 blank template 順序保持不變。
-
-ModuleLibrary 新建唯一走 template catalog 的 `create_from_template`；`CfgEditorService.open`
-只以 required `from_name` 開啟既有 module/waveform 的 modify session，不提供
-discriminator blank seed。
-
-Sweep-like fields keep their UI value model until this lowering boundary:
-`SweepSpec` stores `start` / `stop` / `expts`, while `CenteredSweepSpec` stores
-`center` / `span` / `expts` and lowers to a program sweep only when building the
-raw experiment cfg. Centered sweep centers may be locked independently from the
-span/expts controls, which lets callers expose generated centers while keeping
-the search window editable. Sweep editors render as two balanced label+input
-columns per row, so start/stop or center/span share the available width evenly
-inside a full-width form row.
-
-Module and pulse waveform references directly select library names in ref mode.
-Ref contents follow library publication and remain readonly. The cfg owner's
-`convert_reference_to_inline` copies the valid published actual values into the
-same shape, recursively freezing nested refs and expressions. Inline values no
-longer depend on the old library or aliases. Missing/Invalid refs cannot convert;
-re-adding the missing key restores ref mode. Optional None remains disabled.
-The shared Qt header preserves shape/library/None selection and adds the explicit
-conversion button. Run acceptance still fixes actual values; slot writeback is unchanged.
-
-Adapter cfg authoring lives in the user experiment package as a context-free
-`MeasureCfgDefinition`. A single `MeasureCfgBuilder` declaration fixes static shape,
-field order, role, lock and deferred typed Seed; fresh `instantiate(ctx)` only resolves
-value defaults, then `BaseAdapter.make_default_cfg` validates the finished schema.
-The framework protocol does not expose a static spec query. Shared
-`CfgSchemaAssembler` owns only paired-tree mechanics and has no measure domain/context
-knowledge (ADR-0012、ADR-0065).
-
-Measure tab 使用 shared `ResourceCfgFormWidget`，只 watch publication 並提交 typed input。
 以下 `CfgFormWidget` binding 路徑供獨立 library／inspect／writeback draft 使用。
 每個 `CfgFormWidget` 持有自己的 frozen exact registry；沒有顯式注入時，
 `default_cfg_renderers()` 為五個 non-section exact field types
@@ -820,7 +748,7 @@ New GUI RPC methods that should be agent-accessible need a live catalog policy a
 領域政策由 `zcu_lab.recipes.helpers` 擁有。`RecipeTab` 只提供通用 parameter／library／
 cfg field／device 讀取與 set／set_fields／set_sweep，框架不推論 calibration 或 linewidth。
 `zcu_lab.recipes.helpers.use_flux_device` 使用通用 `RecipeTab.read_device` 讀 cached
-snapshot，caller 明填 unit 必須完全匹配，包括 native。驗證成功後才寫 dev.flux_dev
+snapshot，caller 明填 unit 必須完全匹配，包括 native。驗證成功後才寫 cfg.flux_dev
 與獨立 cfg.flux_unit，不換算、不連線或 setup，也不改 recipe policy 或 alias capture。
 
 ## Dialog Rules
@@ -944,13 +872,37 @@ Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩
   `BaseAdapter` 的 import-time 條件 hook 驗證與 concrete adapter 義務見
   [framework BaseAdapter](adapter/base.py)；
   capability 判斷不用 method presence 推測。
-- Adapter `cfg_definition()` is context-free authoring; only fresh
-  `make_default_cfg(ctx)` materializes deferred defaults and validates the schema.
-- `validate_run_request(req, raw_cfg)` is a mandatory framework member that
+- `AdapterGuide(markdown, resource_dir)` carries complete free-format Markdown
+  and a `Path | None` for resolving relative image paths. `BaseAdapter` authors
+  declare `guide_path = Path(__file__).with_name("guide.md")`, or an explicit
+  sibling filename when adapters share a directory. The base reads UTF-8 on
+  each `guide()` call. No declaration returns an unwritten-guide notice and
+  `None`; a declared missing file raises. `guide_path` is a base-class authoring
+  choice, not a member of `ExpAdapterProtocol`. TabService and Controller return
+  the same named guide; only the remote adapter converts the directory to JSON.
+  The framework does not parse sections. The Guide subtab (`ui/guide_view.py`)
+  is the only reader of referenced images: a read-only view that parses with
+  markdown-it-py (CommonMark plus tables, raw HTML shown as text) and the
+  dollarmath plugin, then shows the HTML in a `QTextBrowser`. Clicked links go
+  to the system browser. The only self-written rendering is the math token hook:
+  inline `$...$` and `$$...$$` blocks become matplotlib mathtext images, while
+  rejected TeX and `\$` stay literal. Code and link destinations keep their
+  text because the library tokenizes them first. PNG/JPG files directly in
+  `resource_dir` scale down to the pane width; network, SVG and
+  other-directory images stay unloaded.
+- Adapter `make_form(ctx)` builds a definition from captured source existence.
+  Registry registers adapter classes without evaluating factories or templates.
+  Open and Reset invoke the factory, bind the current Registry catalog and
+  derive input against a fixed FormEnv. Reset replaces shape and defaults
+  atomically; preparation failures retain the previous form and sources.
+- `validate_run_request(req, cfg)` is a mandatory framework member that
   `GuardService` always calls before opening an async handle. `BaseAdapter`
   supplies the no-op default; overrides are pure, predictable preflight only and
   must not touch devices or mutate cfg/state.
-- Adapter `run()` receives a concrete config and performs the experiment.
+- Adapter `run()` and preflight receive the exact validated Form output.
+  The framework neither inspects its concrete type nor validates it again.
+  BaseAdapter connects Form[T_Cfg] to run(T_Cfg); the heterogeneous Protocol
+  treats only those cfg positions as opaque.
 - `analyze()` / interactive analysis hooks must match `AdapterCapabilities`.
 - `get_writeback_items()` and `get_post_writeback_items()` return domain writeback
   candidates for their owning analysis pane; the base post hook returns no candidates,

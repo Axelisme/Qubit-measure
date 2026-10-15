@@ -41,7 +41,7 @@ def test_context_browse_forwarding_preserves_one_request_and_reply(
 
 
 def test_rpc_preserves_reply_and_sends_one_request(tmp_path: Path) -> None:
-    expected = {"loaded": True, "cfg_backfill": "not_applied"}
+    expected = {"loaded": True, "analysis_error": None}
     client = make_client(tmp_path, lambda method, params: expected)
     client.context.session.ensure_connected()
     client.transport.sent.clear()

@@ -1,11 +1,13 @@
 """Workflow input mementos through public Window and app lifecycle seams."""
 
 import json
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from qtpy.QtWidgets import QApplication, QLabel
+from zcu_tools.cfg_model import PulseSpec
 from zcu_tools.datafile import RunSnapshot
 from zcu_tools.experiment.workflows import (
     Done,
@@ -21,7 +23,16 @@ from zcu_tools.gui.app.workflows.persistence import (
     WorkflowInputSnapshot,
 )
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
-from zcu_tools.gui.form import FormEnv, FormInput, FormModel, ModuleInput
+from zcu_tools.gui.form import (
+    FormEnv,
+    FormInput,
+    FormModel,
+    FormPath,
+    ModuleInline,
+    ModuleRef,
+    Option,
+)
+from zcu_tools.gui.form_adapter import ModuleInputField
 from zcu_tools.gui.session.persistence import SingleFileCaretaker
 
 from tests.experiment.workflows._engine_fakes import Plan, State, Tunables
@@ -97,7 +108,7 @@ def test_open_restore_and_close_flush(qapp: QApplication, tmp_path: Path) -> Non
     path.write_text(
         json.dumps(
             {
-                "version": 1,
+                "version": 2,
                 "plan": {"scale": {"expr": "1 / 4"}},
                 "knobs": {"sample": {"value": 35.0}},
             }
@@ -127,8 +138,8 @@ def test_open_restore_and_close_flush(qapp: QApplication, tmp_path: Path) -> Non
     "payload",
     [
         "not JSON",
-        '{"version": 2, "plan": {}, "knobs": {}}',
-        '{"version": 1, "plan": [], "knobs": {}}',
+        '{"version": 1, "plan": {}, "knobs": {}}',
+        '{"version": 2, "plan": [], "knobs": {}}',
     ],
 )
 def test_unreadable_snapshot_reports_and_uses_defaults(
@@ -193,11 +204,23 @@ def test_clean_skips_read_but_close_replaces_snapshot(
         qapp.processEvents()
 
 
+DRIVE_FIELD = ModuleInputField(PulseSpec)
+if TYPE_CHECKING:
+    type DriveInput = ModuleRef | ModuleInline
+else:
+    DriveInput = DRIVE_FIELD.annotation
+
+
 class DrivePlanForm(FormModel):
     """Synthetic Start plan with one library reference and one ordinary leaf."""
 
-    drive: ModuleInput
+    drive: DriveInput
     count: int = 2
+
+    @classmethod
+    def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+        """Supply the generated field's options through the public owner."""
+        return {("drive",): DRIVE_FIELD.options(env)}
 
 
 class ValueKnobsForm(FormModel):
@@ -243,7 +266,7 @@ def test_saved_reference_without_captured_library_is_discarded_on_open(
     (tmp_path / "t1_workflow_state_v1.json").write_text(
         json.dumps(
             {
-                "version": 1,
+                "version": 2,
                 "plan": {"drive": {"kind": "ref", "name": "Q1.pulses.pi"}, "count": 5},
                 "knobs": {"value": 3},
             }

@@ -5,22 +5,13 @@ from __future__ import annotations
 from threading import Event
 
 import pytest
-from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
+from zcu_tools.cfg_model import Range
 from zcu_tools.gui.app.measure.remote import ControlOptions
-from zcu_tools.gui.cfg import (
-    CenteredSweepSpec,
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    DirectValue,
-    ReferenceSpec,
-    ScalarSpec,
-    make_default_value,
-)
-from zcu_tools.gui.cfg.resource import CfgEdit
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.mcp.measure.session import GuiRpcError
 
-from tests.gui.app.measure._synthetic import SampleAdapter
+from tests.gui.app.measure._library_fakes import sample_schema
+from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
 
 from ._helpers import Fixture, call, mcp_client, observe_run_inputs, open_client
 
@@ -48,74 +39,23 @@ def mcp_tab(live_tab, tmp_path, monkeypatch):
         sock.close()
 
 
-def test_tab_get_mcp_preserves_complete_publication_without_focusing(
-    qapp, tmp_path, monkeypatch
-):
-    fixture = Fixture()
-    spec = CfgSectionSpec(
-        fields={
-            "axis": CenteredSweepSpec(center_editable=False, locked_center=0.0),
-            "nqz": ScalarSpec("Nyquist zone", int, choices=[1, 2]),
-            "drive": ReferenceSpec(
-                "module",
-                [
-                    CfgSectionSpec(
-                        label="Pulse", fields={"gain": ScalarSpec("Gain", float)}
-                    )
-                ],
-                optional=True,
-            ),
-        }
+def test_tab_get_mcp_preserves_complete_publication_without_focusing(mcp_tab):
+    _, tab_id, invoke, sock = mcp_tab
+    before = call(sock, "tab.list_all")["result"]["active_tab_id"]
+    observed = invoke(
+        "rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}}
     )
-    tab_id = "tab-agent-cfg-read"
-    fixture.prepare_tab(
-        tab_id, SampleAdapter(), CfgSchema(spec, make_default_value(spec))
-    )
-    fixture.start()
-    monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
-    bridge, invoke = mcp_client(fixture.service.port, tmp_path)
-    sock = open_client(fixture.service.port)
-    try:
-        invoke("connect", {"port": fixture.service.port})
-        before = call(sock, "tab.list_all")
-        result = invoke(
-            "rpc_call",
-            {
-                "method": "tab.get_cfg",
-                "params": {
-                    "tab_id": tab_id,
-                },
-            },
-        )
-        children = result["tree"]["children"]
-        assert children["axis"]["kind"] == "centered_sweep"
-        assert children["axis"]["locked_center"] == 0.0
-        assert children["axis"]["center_editable"] is False
-        assert children["nqz"]["type"] == "int"
-        assert children["nqz"]["choices"] == [1, 2]
-        assert children["drive"]["kind"] == "reference"
-        assert children["drive"]["choices"] == ["Pulse"]
-        assert (
-            result
-            == call(
-                sock,
-                "tab.get_cfg",
-                {
-                    "tab_id": tab_id,
-                },
-            )["result"]
-        )
-        assert (
-            call(sock, "tab.list_all")["result"]["active_tab_id"]
-            == before["result"]["active_tab_id"]
-        )
-    finally:
-        bridge.disconnect()
-        sock.close()
-        fixture.stop()
+    assert observed["input"]["gain"] == 0.1
+    assert {tuple(item["path"]): item["value"] for item in observed["values"]}[
+        ("gain",)
+    ] == 0.1
+    assert observed["schema"]["properties"]["gain"]
+    assert observed["errors"] == []
+    assert observed == call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
+    assert call(sock, "tab.list_all")["result"]["active_tab_id"] == before
 
 
-def test_tab_edit_mcp_normalizes_sweep_in_one_publication(mcp_tab):
+def test_tab_edit_mcp_writes_range_leaves_in_one_observation(mcp_tab):
     _, tab_id, invoke, sock = mcp_tab
     call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
     result = invoke(
@@ -125,18 +65,20 @@ def test_tab_edit_mcp_normalizes_sweep_in_one_publication(mcp_tab):
             "params": {
                 "tab_id": tab_id,
                 "edits": [
-                    {
-                        "path": ["sweep"],
-                        "value": {"start": 2.0, "stop": 8.0, "step": 2.2},
-                    },
+                    {"path": ["sweep", "start"], "value": 2.0},
+                    {"path": ["sweep", "stop"], "value": 8.0},
+                    {"path": ["sweep", "n"], "value": 4},
                 ],
             },
         },
     )
-    assert result["status"] == "Valid"
-    inputs = result["tree"]["children"]["sweep"]["inputs"]
-    assert inputs["expts"]["resolved"] == 4
-    assert inputs["step"]["resolved"] == pytest.approx(2.0)
+    assert result["errors"] == []
+    assert result["input"]["sweep"] == {
+        "kind": "linrange",
+        "start": 2.0,
+        "stop": 8.0,
+        "n": 4,
+    }
     assert result == call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
 
 
@@ -163,10 +105,7 @@ def test_reset_mcp_restores_gui_defaults(mcp_tab):
             },
         },
     )
-    assert reset["tree"] == defaults["tree"]
-    assert reset["status"] == defaults["status"]
-    assert reset["source_basis"] == defaults["source_basis"]
-    assert reset["diagnostics"] == defaults["diagnostics"]
+    assert reset == defaults
     assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == reset
 
     unchanged = invoke(
@@ -178,7 +117,7 @@ def test_reset_mcp_restores_gui_defaults(mcp_tab):
             },
         },
     )
-    assert unchanged["tree"] == defaults["tree"]
+    assert unchanged == defaults
 
 
 def test_reset_during_active_run_preserves_the_publication(live_tab, monkeypatch):
@@ -207,7 +146,7 @@ def test_reset_during_active_run_preserves_the_publication(live_tab, monkeypatch
         assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == before
     finally:
         release.set()
-        fixture.ctrl._background_svc.quiesce()  # pyright: ignore[reportPrivateUsage] - owner deliveries before Qt teardown
+        fixture.ctrl.quiesce()
         sock.close()
 
 
@@ -223,21 +162,13 @@ def test_tab_edit_mcp_rejection_preserves_entire_previous_publication(mcp_tab):
                     "tab_id": tab_id,
                     "edits": [
                         {"path": ["gain"], "value": 0.25},
-                        {
-                            "path": ["sweep"],
-                            "value": {
-                                "start": 3.0,
-                                "stop": 9.0,
-                                "step": 2.0,
-                                "expts": 4,
-                            },
-                        },
+                        {"path": ["missing"], "value": 1},
                     ],
                 },
             },
         )
     assert raised.value.code == "invalid_params"
-    assert raised.value.reason == "invalid_value"
+    assert raised.value.reason == "form_errors"
     assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == before
 
 
@@ -275,12 +206,12 @@ def test_invalid_publication_is_success_but_cannot_run(mcp_tab):
             "method": "tab.edit_cfg",
             "params": {
                 "tab_id": tab_id,
-                "edits": [{"path": ["gain"], "value": {"__text": "-"}}],
+                "edits": [{"path": ["gain"], "value": {"expr": "1 / 0"}}],
             },
         },
     )
-    assert invalid["status"] == "Invalid"
-    assert invalid["tree"]["children"]["gain"]["input"]["raw"] == "-"
+    assert invalid["input"]["gain"] == {"expr": "1 / 0"}
+    assert invalid["errors"][0]["path"] == ["gain"]
     assert (
         invoke("rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}})
         == invalid
@@ -299,81 +230,22 @@ def test_invalid_publication_is_success_but_cannot_run(mcp_tab):
     assert fixture.ctrl.active_operation_count() == 0
 
 
-def test_unavailable_publication_is_preserved_by_mcp_read_and_blocks_run(
-    mcp_tab, monkeypatch
-):
-    fixture, tab_id, invoke, sock = mcp_tab
-    owner = fixture.ctrl.cfg_resources.lookup(tab_id)
-    before = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
-    observe_run_inputs(
-        fixture, tab_id, lambda name, params: call(sock, name, params)["result"]
-    )
-
-    def source_fault(*args, **kwargs):
-        raise RuntimeError("source snapshot failed")
-
-    with monkeypatch.context() as patch:
-        patch.setattr(MeasureCfgBindings, "snapshot_from_state", source_fault)
-        owner.refresh()
-        unavailable = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
-        assert unavailable["status"] == "Unavailable"
-        assert (
-            unavailable["tree"]["children"]["gain"]["input"]
-            == (before["tree"]["children"]["gain"]["input"])
-        )
-        assert unavailable["diagnostics"]
-        assert (
-            invoke("rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}})
-            == unavailable
-        )
-        rejected = call(
-            sock,
-            "tab.run_start",
-            {
-                "tab_id": tab_id,
-            },
-        )
-        assert rejected["error"]["reason"] == "not_valid"
-        assert fixture.ctrl.active_operation_count() == 0
-    owner.refresh()
-    assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]["status"] == "Valid"
+class TextCfg(SampleCfg):
+    text: str = "before"
 
 
-def test_edit_source_fault_does_not_publish_a_successful_prefix(mcp_tab, monkeypatch):
-    _, tab_id, invoke, sock = mcp_tab
-    before = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
-
-    def source_fault(*args, **kwargs):
-        raise RuntimeError("source snapshot failed")
-
-    with monkeypatch.context() as patch:
-        patch.setattr(MeasureCfgBindings, "snapshot_from_state", source_fault)
-        with pytest.raises(GuiRpcError) as raised:
-            invoke(
-                "rpc_call",
-                {
-                    "method": "tab.edit_cfg",
-                    "params": {
-                        "tab_id": tab_id,
-                        "edits": [{"path": ["gain"], "value": 0.25}],
-                    },
-                },
-            )
-        assert raised.value.code == "controller_error"
-        assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == before
+class TextAdapter(SampleAdapter):
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[TextCfg]:
+        del ctx
+        return Form(TextCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
 
 
 def test_reply_encoding_failure_does_not_roll_back_the_cfg_publication(qapp):
     fixture = Fixture()
-    tab_id = "reply-failure-tab"
-    owner = fixture.prepare_tab(
-        tab_id,
-        SampleAdapter(),
-        CfgSchema(
-            CfgSectionSpec(fields={"text": ScalarSpec("Text", str)}),
-            CfgSectionValue({"text": DirectValue("before")}),
-        ),
-    )
+    fixture.registry.register("text", TextAdapter)
+    tab_id = fixture.ctrl.new_tab("text")
+    owner = fixture.ctrl.cfg_resources.lookup(tab_id)
     fixture.start()
     sock = open_client(fixture.service.port)
     try:
@@ -398,10 +270,10 @@ def test_reply_encoding_failure_does_not_roll_back_the_cfg_publication(qapp):
             timeout_s=10.0,
         )
         assert rejected_reply["error"]["reason"] == "response_encoding_failed"
-        owner.observe()
-        assert owner.accept().values == {"text": text}
+        assert owner.input.data["text"] == text
+        assert owner.accept().values["text"] == text
 
-        owner.edit((CfgEdit(("text",), DirectValue("small")),))
+        owner.write({("text",): "small"})
     finally:
         sock.close()
         fixture.stop()
@@ -423,8 +295,8 @@ def test_edit_error_identifies_failed_path_and_index_without_committing(live_tab
                 ],
             },
         )
-        assert reply["error"]["reason"] == "unknown_path"
-        assert reply["error"]["data"] == {"path": ["missing"], "edit_index": 1}
+        assert reply["error"]["code"] == "invalid_params"
+        assert reply["error"]["reason"] == "form_errors"
         assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == before
     finally:
         sock.close()
@@ -432,7 +304,7 @@ def test_edit_error_identifies_failed_path_and_index_without_committing(live_tab
 
 def test_library_editor_batch_retains_its_independent_prefix_contract(live_tab):
     fixture, _ = live_tab
-    schema = SampleAdapter().make_default_cfg(fixture.state.session_env)
+    schema = sample_schema()
     parameters = fixture.ctrl.read_context()
     editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(
         schema, parameters=parameters, gc=False
@@ -480,7 +352,7 @@ def test_independent_editor_batch_preserves_precondition_and_prior_prefix(
     from zcu_tools.gui.session.value_lookup import ProviderError, UnavailableValue
 
     fixture, _ = live_tab
-    schema = SampleAdapter().make_default_cfg(fixture.state.session_env)
+    schema = sample_schema()
     parameters = fixture.ctrl.read_context()
     editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(
         schema, parameters=parameters, gc=False
@@ -542,10 +414,10 @@ def test_holder_edits_resets_and_runs_current_cfg_without_ref(live_tab):
             {"tab_id": tab_id, "edits": [{"path": ["gain"], "value": 0.75}]},
         )
         assert edited["ok"], edited
-        assert edited["result"]["tree"]["children"]["gain"]["input"]["resolved"] == 0.75
+        assert edited["result"]["input"]["gain"] == 0.75
         reset = call(sock, "tab.reset_cfg", {"tab_id": tab_id})
         assert reset["ok"], reset
-        assert reset["result"]["tree"]["children"]["gain"]["input"]["resolved"] != 0.75
+        assert reset["result"]["input"]["gain"] != 0.75
         started = call(sock, "tab.run_start", {"tab_id": tab_id})
         assert started["ok"], started
         assert started["result"]["operation_id"]

@@ -16,6 +16,7 @@ from zcu_tools.gui.app.fluxdep.remote.service import (
 )
 from zcu_tools.gui.app.fluxdep.search import FluxDepSearchRuntime
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
+from zcu_tools.gui.interactive.plugin import BackgroundSubmitter
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
@@ -64,7 +65,11 @@ class PumpedRouteHarness(RouteHarness):
 
     @classmethod
     def create(
-        cls, project_root: str, state: FluxDepState | None = None
+        cls,
+        project_root: str,
+        state: FluxDepState | None = None,
+        *,
+        interactive_background: BackgroundSubmitter | None = None,
     ) -> PumpedRouteHarness:
         """Compose an inert adapter and real search runtime; open no socket."""
         owner = ManualOwnerScheduler()
@@ -73,6 +78,7 @@ class PumpedRouteHarness(RouteHarness):
             state if state is not None else FluxDepState(),
             project_root=project_root,
             interactive_owner=owner,
+            interactive_background=interactive_background,
             search_runtime=FluxDepSearchRuntime(
                 background, ProgressService(QueuedProgress(owner))
             ),

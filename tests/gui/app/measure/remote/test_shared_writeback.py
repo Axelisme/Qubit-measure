@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import TypeAdapter
-from zcu_tools.format_version import YamlValue
+from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.gui.app.measure import adapter as proposals
 from zcu_tools.gui.app.measure.services.ports import (
     AnalysisPaneSnapshot,
@@ -20,7 +20,7 @@ from zcu_tools.gui.app.measure.services.writeback import (
     WritebackEdit,
     WritebackService,
 )
-from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
+from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.binding import CfgDraft, SettableTarget
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import InvalidInputError
@@ -36,7 +36,6 @@ from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import ParameterContext, SessionEnv
 from zcu_tools.resources.entry import ResultEntry
-from zcu_tools.resources.entry.provenance import Provenance
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from ._helpers import dispatch_handler
@@ -79,11 +78,11 @@ class RejectingContext(ContextService):
         path: str,
         value: YamlValue,
         *,
-        source: Provenance | None = None,
+        metadata: YamlMap | None = None,
     ) -> None:
         if path == "general.ext.rejected":
             raise InvalidInputError("rejected fit", reason_code="fit_rejected")
-        super().set_parameter(target, path, value, source=source)
+        super().set_parameter(target, path, value, metadata=metadata)
 
 
 class WritebackHarness:
@@ -110,7 +109,7 @@ class WritebackHarness:
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
         return TabSnapshot(
             adapter_name="test/sample",
-            cfg_schema=CfgSchema(CfgSectionSpec(fields={}), CfgSectionValue(fields={})),
+            cfg_input={},
             tab_id=tab_id,
             capabilities=proposals.AdapterCapabilities(
                 analysis=proposals.AnalysisMode.FIT

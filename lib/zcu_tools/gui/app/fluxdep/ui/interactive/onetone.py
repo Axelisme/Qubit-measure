@@ -12,9 +12,10 @@ from qtpy import QtCore, QtWidgets
 from zcu_tools.analysis.fluxdep.onetone import analyze_onetone_pick
 from zcu_tools.gui.app.fluxdep.interactive import OneTonePickContext
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.plotting.fluxdep.onetone import OneTonePickPlot
 
-from .base import InteractiveMplWidget
+from .base import InteractiveMplWidget, picker_object_name
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +25,16 @@ class OneToneWidget(InteractiveMplWidget):
 
     Controls use context.plugin.set_threshold and Session.undo. Finish is a
     request to the app owner; get_result never reads artist or slider caches.
+    The control column holds the Threshold slider, Undo, then the status,
+    with Finish pinned at the bottom.
     """
 
     def __init__(self, context: OneTonePickContext) -> None:
         """Attach an open context without taking domain ownership.
 
-        Teardown detaches only presentation. The owner controls cancellation,
-        spectrum invalidation and terminal publication. Closed input raises
-        FailedPreconditionError before attachment.
+        Teardown detaches only presentation. The owner
+        controls cancellation, spectrum invalidation and terminal publication.
+        Closed input raises FailedPreconditionError before attachment.
         """
         context.session.ensure_input_open()
         super().__init__()
@@ -47,7 +50,6 @@ class OneToneWidget(InteractiveMplWidget):
         self._redraw_timer.setSingleShot(True)
         self._redraw_timer.setInterval(50)
         self._redraw_timer.timeout.connect(self.redraw)
-        self.controls_layout.addWidget(QtWidgets.QLabel("Threshold"))
         self._threshold_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
         self._threshold_slider.setRange(0, 500)
         self._threshold_slider.valueChanged.connect(
@@ -57,11 +59,14 @@ class OneToneWidget(InteractiveMplWidget):
                 )
             )
         )
-        self.controls_layout.addWidget(self._threshold_slider)
+        self.add_labelled("Threshold", "threshold", self._threshold_slider)
         self._undo = QtWidgets.QPushButton("Undo")
+        self._undo.setObjectName(picker_object_name("undo"))
         self._undo.clicked.connect(lambda: self._execute(context.session.undo))
         self.controls_layout.addWidget(self._undo)
         self._info = QtWidgets.QLabel()
+        make_label_selectable(self._info)
+        self._info.setObjectName(picker_object_name("status"))
         self._info.setWordWrap(True)
         self.controls_layout.addWidget(self._info)
         self._finish = self.add_finish_button()

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Annotated
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import fit_decay
+from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import (
     IDENTITY,
     AxesSpec,
@@ -46,8 +48,8 @@ def rb_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 class RBCfg(ProgramV2Cfg, ExpCfgModel):
     modules: RBModuleCfg
     sweep: RBSweepCfg
-    seed: int
-    n_seeds: int
+    seed: Annotated[int, FieldMeta(label="Random seed")]
+    n_seeds: Annotated[int, FieldMeta(label="Number of sequences")]
 
 
 @dataclass(frozen=True)

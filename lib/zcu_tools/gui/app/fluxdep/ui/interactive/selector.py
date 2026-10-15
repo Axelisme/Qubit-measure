@@ -27,6 +27,7 @@ from zcu_tools.analysis.fluxdep.stroke import (
 from zcu_tools.gui.app.fluxdep.interactive import CrossSelectionContext
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.plotting.fluxdep.cross_selection import CrossSelectionPlot
 
 from .base import InteractiveMplWidget
@@ -46,7 +47,9 @@ CrossSelectionPreviewSubmitter = Callable[
 class SelectorWidget(InteractiveMplWidget):
     """View of one context, never a second committed selection/filter mask.
 
-    Controls use shared Actions and Session.undo; Apply calls the app owner.
+    Controls use shared Actions and Session.undo; Apply calls the app owner
+    and keeps input open. Finish (``fluxdep.picker.finish``) only emits
+    ``finished``; the host publishes and closes the context through the owner.
     Canvas press captures width/mode; release commits one complete stroke,
     including an outside-axes release. Move is pointer-only preview.
     """
@@ -81,9 +84,6 @@ class SelectorWidget(InteractiveMplWidget):
         self._gesture_width = 0.0
         self._gesture_mode: BrushMode = "select"
         self._plot = CrossSelectionPlot(self.figure, context.plugin.inputs)
-        (self._pointer,) = self.figure.axes[0].plot(
-            [], [], linestyle="--", linewidth=1, color="#007e91", zorder=7
-        )
         self._runner = BackgroundRunner(self) if submit_preview is None else None
         self._submit_preview = (
             submit_preview if submit_preview is not None else self._submit_owned
@@ -92,12 +92,11 @@ class SelectorWidget(InteractiveMplWidget):
         self._timer.setSingleShot(True)
         self._timer.setInterval(80)
         self._timer.timeout.connect(self._start_preview)
-        self._width = self._slider("Brush width")
-        self._distance = self._slider("Min distance")
+        self._width = self._slider("Brush width", "brush_width")
+        self._distance = self._slider("Min distance", "min_distance")
         self._mode = QtWidgets.QComboBox()
-        self._mode.setAccessibleName("Operation")
         self._mode.addItems(["Select", "Erase"])
-        self.controls_layout.addWidget(self._mode)
+        self.add_labelled("Operation", "operation", self._mode)
         self._width.valueChanged.connect(
             lambda value: self._execute(
                 lambda: context.plugin.set_tool.execute(
@@ -135,10 +134,12 @@ class SelectorWidget(InteractiveMplWidget):
         self._show_changes.toggled.connect(self._render)
         self.controls_layout.addWidget(self._show_changes)
         self._status = QtWidgets.QLabel()
+        make_label_selectable(self._status)
         self._status.setAccessibleName("Status")
         self._status.setWordWrap(True)
         self.controls_layout.addWidget(self._status)
         self.controls_layout.addStretch()
+        self.add_finish_button()
         self._unsubscribe = context.session.subscribe(self._show_committed)
         self._reproject_controls()
         self._schedule_preview()
@@ -232,12 +233,10 @@ class SelectorWidget(InteractiveMplWidget):
         self._unsubscribe()
         self.quiesce()
 
-    def _slider(self, name: str) -> QtWidgets.QSlider:
-        self.controls_layout.addWidget(QtWidgets.QLabel(name))
+    def _slider(self, name: str, action: str) -> QtWidgets.QSlider:
         slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
-        slider.setAccessibleName(name)
         slider.setRange(0, 100)
-        self.controls_layout.addWidget(slider)
+        self.add_labelled(name, action, slider)
         return slider
 
     def _button(
@@ -394,9 +393,7 @@ class SelectorWidget(InteractiveMplWidget):
         return BrushPoint(float(event.xdata), float(event.ydata))
 
     def _render_pointer(self) -> None:
-        self._pointer.set_data(
-            [p.x for p in self._vertices], [p.y for p in self._vertices]
-        )
+        self._plot.show_pointer(self._vertices, self._gesture_width)
         self.redraw()
 
 

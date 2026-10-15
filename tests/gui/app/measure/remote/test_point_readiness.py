@@ -10,7 +10,6 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
 from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.tab import TabService
-from zcu_tools.gui.app.measure.services.tab_cfg import TabCfgResources
 from zcu_tools.gui.app.measure.services.tab_control import TabControlFacet
 from zcu_tools.gui.app.measure.services.workspace import WorkspaceService
 from zcu_tools.gui.app.measure.services.writeback import WritebackService
@@ -26,6 +25,7 @@ from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.resources.entry import ResultEntry
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui.app.measure._form_fakes import form_resources, form_sources
 
 from ._point_application import PointAdapter, PointApplication
 
@@ -152,8 +152,6 @@ def test_writeback_requires_selection_after_reopen_but_keeps_captured_destinatio
     service = WritebackService(editor, write_port=control)
     guard = GuardService(
         application.state,
-        captured_parameters=lambda aliases: control.read_context(aliases=aliases),
-        cfg_resolution=unused_resolution,
     )
     facet = WritebackControlFacet(
         state=application.state,
@@ -226,8 +224,6 @@ def parameter_writeback_pane(
         state=application.state,
         guard=GuardService(
             application.state,
-            captured_parameters=lambda aliases: control.read_context(aliases=aliases),
-            cfg_resolution=unused_resolution,
         ),
         writeback=service,
         resource_versions=application.state.version.snapshot,
@@ -250,10 +246,8 @@ def parameter_writeback_pane(
         application.state,
         registry,
         service,
-        TabCfgResources(
-            mutation_allowed=lambda tab_id: not application.state.is_tab_busy(tab_id)
-        ),
-        unused_resolution,
+        form_resources(application.state),
+        lambda aliases: form_sources(application.state, aliases),
         lambda aliases: control.read_context(aliases=aliases),
     )
     application.remote.tab_control = TabControlFacet(

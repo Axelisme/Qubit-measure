@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-12，主視窗可寫狀態與 Local modal admission
+**Last updated:** 2026-10-14，Markdown guide contract
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -26,7 +26,9 @@ not declare MCP tools and does not own stdio transport.
 - `events.py`：domain payload type to wire event serializer mapping.
 - `dialogs.py`：wire-stable dialog names.
 - `path_resolver.py`：flat mutation-target projection for cfg-editor sessions.
-- `cfg_observation.py`：complete cached cfg observation and prefix projection.
+- `form_observation.py`：tab Form schema/input/values/errors projection.
+- `cfg_observation.py`：independent cfg-editor tree and prefix projection.
+- `load_types.py`：result and analysis Load facts, without Form backfill details.
 - `wire_version.py`：measure-gui wire contract version and GUI code revision.
 
 Shared transport primitives live in `zcu_tools.gui.remote`: NDJSON framing,
@@ -50,6 +52,14 @@ Their draft-local IDs use `param-<n>`. Apply receipts list parameter paths in
 before/after, including accepted metadata. Preview exposes unavailable_reasons
 for omitted sample proposals. The existing preview/set/apply/write methods own
 these projections; no sample-specific RPC is added.
+
+`adapter.guide(adapter_name)` returns
+`{guide: {markdown: string, resource_dir: string | null}}`. Markdown is the full
+source text. The directory is an absolute path on the GUI host for resolving
+relative image references. An undeclared guide returns an unwritten-guide
+notice and null; a declared source file error propagates through RPC. The query
+does not read or attach images. Agents read relative images from that directory
+when needed; a different host may not have access to the path.
 
 - One connection has at most one in-flight RPC.
 - Request and response roots are JSON objects.
@@ -143,9 +153,8 @@ Event push is still available on the wire for GUI/internal consumers. Event
 payloads use requery hints for complex objects; live Python objects never cross
 the wire. Parameter／library 變更事件以 `context.snapshot` 提示訂閱者重新讀取目前
 工作單位的 native 文件。這次讀取不改歷史 Run 的固定來源。
-`aliases_changed` directs subscribers to `tab.get_cfg` after the
-committed global table refreshes current cfg publications. It does not change
-historical Run sources. MCP completion still uses operation replies, not events.
+`aliases_changed` reports a global-table change. Existing Form sources and
+accepted Run sources stay fixed. Use explicit Reset to capture new aliases. MCP completion still uses operation replies, not events.
 EventBus pushes add process-wide `seq` and `origin={kind, operation_id}` without
 changing the event name or payload shape. The per-connection `client_id` is
 RPC-side bookkeeping and is deliberately omitted. Diagnostic and cfg-editor
@@ -174,9 +183,9 @@ Agent-visible async completion comes from operation request/reply, not pushes.
 
 The launch/connect note reports three numbers:
 
-- `WIRE_VERSION = 99`: GUI RPC contract. MCP pins and compares this value.
-- `GUI_VERSION = 132`: GUI process code revision. It is displayed, not compared.
-- `MCP_VERSION = 117`: MCP bridge code revision. The bridge displays this value.
+- `WIRE_VERSION`: GUI RPC contract. MCP pins and compares this value.
+- `GUI_VERSION`: GUI process code revision. It is displayed, not compared.
+- `MCP_VERSION`: MCP bridge code revision. The bridge displays this value.
 
 The first two constants live in this package's `wire_version.py`.
 `MCP_VERSION` lives in `zcu_tools.mcp.measure.server`.
@@ -199,7 +208,7 @@ Result-bound `run_operation_id` and analysis `operation_id` protect the original
 source from replacement, returning `result_superseded` rather than reading a
 new result. These tokens are session-local provenance, not control credentials.
 Snapshot counters distinguish replacements, including reloads of the same file.
-Run fixes ParameterContext at current cfg acceptance, not live md/ml.
+Run retains the tab's Open/Reset ParameterContext, not live parameters/library.
 Cfg.dev contains role-to-device names, not settings patches. Run does not precheck
 whether those names exist. Core lookup of context.devices[name] reports a missing
 name when the device is used, and the error names that device. Cfg format and required
@@ -246,10 +255,9 @@ SoC, device and independent predictor operations retain their own rules.
 Writeback keeps its captured SavedPoint after selecting another point in the
 same entry; a cross-entry destination is rejected.
 
-Native Load restores historical metadata, uses the same application operation
-and performs cfg backfill without acquired events or Save confirmation.
-Backfill failure retains the result and reports not_applied; failed new-tab
-cleanup reports cleanup_failed. Existing-tab Load checks its captured owner
+Native Load restores historical metadata and results, without acquired events
+or Save confirmation. It leaves Form input alone. Replies report loaded-result
+and analysis preparation facts. Failed new-tab cleanup reports cleanup_failed. Existing-tab Load checks its captured owner
 and result lifecycle, not a connection observation. Save rejects entry mismatch
 before output I/O; within the same entry it uses a loaded Run's historical point.
 
@@ -318,29 +326,51 @@ terminal status, not removed aliases. No tool inventory is generated from
 changes. `cfg_observation.py` projects `CfgDraft.observe()` data, never binding
 field/editor classes. Setters retain canonical paths and reject legacy aliases.
 
-`tab.get_cfg` returns status, tree, source_basis and diagnostics from the
-persistent tab resource. It has no prefix or widget prerequisite. Tree paths are
-string arrays. `tab.edit_cfg` decodes the common editing codec and applies one
-atomic batch to current inputs. Input errors can include path/edit_index.
-The adapter does not retry or publish a successful prefix. Plain strings are typed
-strings; __text, __expr, __complex and __ref carry the declared editing intents.
-Source publications update all affected cfg before notification.
+`tab.get_cfg` returns Form schema, authored input, ordinary leaf values and
+directed errors. It has no prefix or widget prerequisite. Each value has a
+model-field path array and a JSON value. Tuples become JSON lists; complex
+values use the public reversible `__complex__` tag.
 
-`tab.reset_cfg` obtains current adapter defaults and publishes a complete
-observation, even for unchanged inputs. Reset can publish Invalid. It preserves
-results and saved files, adds no unsaved guard, and follows the Run pane only
-after success.
+`tab.edit_cfg` atomically writes unique model-field leaf paths. Expressions use
+`{expr: text}`; ordinary strings are literal, including library keys. Range
+fields are separate leaves such as start, stop and n. Ordinary invalid input
+stays editable with errors. Structural/source rejection leaves the entire input
+unchanged. No successful prefix, hidden refresh, retry or rollback is added.
 
-`tab.run_start` accepts current Valid cfg without an expected ref.
-Domain readiness, SoC/device safety and authentication checks remain independent. Optional `aliases`
-maps alias names to concrete components for parameter/library reads, cfg preview
-and Run acceptance. Omission, None and {} mean no override and use cached cfg.
-Nonempty preview resolves current inputs without publication. Run uses
-that same mapping for its cfg and fixed metadata capture. An Invalid publication
-cannot run without a valid temporary resolution. Global rows and tab state never
-retain these overrides. Active Run
-blocks manual edits, reset, replacement and close on that tab; source publications
-and edits to other tabs remain allowed. Close becomes available after termination.
+`tab.read_module(tab_id, field)` reads one dotted core module field and returns
+detached value/mode/source. Key mode reads the fixed library capture and labels
+source as library:<key>. Inline mode evaluates that field's input. Other invalid
+fields do not block reads; this module's errors return NOT_VALID. Values exclude
+full-cfg validation, native to_cfg and extras lowering. Busy and observer reads
+are allowed. Reads do not mutate input, publish or refresh sources.
+
+`tab.use_inline(tab_id, field)` requires holder and resource mutation admission.
+The handler reads the public input tag at an exact core module path after
+admission, without evaluating the draft or reading sources. Ref runs the
+generated to_inline option command through resource.run_command using the fixed
+Open/Reset library capture. Locks remain applied. One atomic write publishes
+once. Existing inline input, including partial or invalid-expression drafts, is
+a guarded no-op. Disabled, missing or untagged module input returns
+invalid_params/form_errors with the field name and an Inline selection hint.
+Unresolved refs fail without fallback; select an Inline option to use
+template/type defaults.
+Wrong families, structural/source failures and busy/lifetime/reentrant guards
+reject before mutation. The reply is the complete Form observation.
+
+`tab.reset_cfg(aliases=...)` captures sources once and restores fresh adapter
+defaults. The observation may contain errors. Reset keeps results and saved
+files, adds no unsaved guard and follows Run only after success. Single-use
+aliases change neither global rows nor the memento.
+
+`tab.parameter_read` reads requested paths and module refs from
+resource.env.parameters. It takes no aliases. Reads and edits use the same fixed
+capture as cfg and Run, until the next Reset.
+
+`tab.run_start` accepts only current valid Form values. It rejects nonempty
+aliases before focus or operation effects; use Reset with aliases first.
+None and {} use the displayed capture. Domain readiness, SoC/device safety and
+authentication remain separate guards. Active Run blocks edits, Reset,
+replacement and close on that tab; other tabs remain editable.
 
 `editor.get` and `editor.new` retain the independent draft tree with dotted paths.
 Nodes contain kind/path/label/valid/readonly. Sections and active references have named
@@ -367,9 +397,9 @@ exposes `center` / `span` / `expts` / `step`. Independent `editor.set_field`
 accepts dotted edge paths from the editor read model. Tab cfg observations and
 `tab.edit_cfg` use string-array paths instead.
 
-`TabCfgResources` owns tab cfg lifetime. Tab creation provides the resource before
-any view attaches; close revokes old handles. Qt detach only stops watching.
-Load backfill publishes on the same resource.
+`TabFormResources` owns tab cfg lifetime. Tab creation provides the resource
+before any view attaches; close revokes old handles. Qt detach only stops
+watching. Independent editor sessions never publish tab Form input.
 `CfgEditorService` owns separate library, inspect and writeback drafts.
 Agent-created sessions are garbage-collected on commit/discard/client drop;
 UI-owned independent drafts follow their own owner lifetime.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
@@ -31,16 +32,17 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
-from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
 from zcu_tools.gui.expected_error import ExpectedError
+from zcu_tools.gui.form import FormErrors, FormModel, FormState
 from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 from zcu_tools.gui.widgets import DialogPresenter, QtDialogPresenter
-from zcu_tools.gui.widgets.cfg.resource_form import ResourceCfgFormWidget
+from zcu_tools.gui.widgets.form import FormEditor
 
 from .analyze_form import AnalyzeFormWidget
 from .data_figure_preview_gallery import DataFigurePreviewGallery
+from .guide_view import GuideView
 from .writeback_widget import WritebackWidget
 
 logger = logging.getLogger(__name__)
@@ -362,10 +364,16 @@ class ExpTabWidget(QWidget):
         run_layout.setContentsMargins(4, 4, 4, 4)
         run_layout.setSpacing(2)
 
-        self.cfg_form = ResourceCfgFormWidget(
-            text_input_enhancer=make_value_source_input_enhancer(self._ctrl),
-        )
-        run_layout.addWidget(self.cfg_form, stretch=1)
+        # The form editor borrows the resource's FormState; Reset installs a
+        # new one, so the editor is remounted when the state changes.
+        self._form_scroll = QScrollArea()
+        self._form_scroll.setWidgetResizable(True)
+        self._editor: FormEditor[FormModel] | None = None
+        self._editor_state: FormState[FormModel] | None = None
+        self._editing_enabled = True
+        self._cfg_unsub: Callable[[], None] | None = None
+        self._follow_cfg()
+        run_layout.addWidget(self._form_scroll, stretch=1)
 
         # Run action row: idle Reset 20% / Run 80%; running hides Reset and
         # lets Stop fill the row. Presentation changes do not alter commands.
@@ -484,17 +492,9 @@ class ExpTabWidget(QWidget):
 
     def _build_guide_panel(self) -> None:
         # ── Tab: Guide (always) ──────────────────────────────────
-        guide_scroll = QScrollArea()
-        guide_scroll.setWidgetResizable(True)
-        guide_label = QLabel()
-        guide_label.setWordWrap(True)
-        guide_label.setTextFormat(Qt.RichText)  # type: ignore[attr-defined]
-        guide_label.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
-        guide_label.setContentsMargins(8, 8, 8, 8)
-        guide_label.setText(self._render_guide_html())
-        guide_scroll.setWidget(guide_label)
-        self._guide_panel = guide_scroll
-        self._left_tabs.addTab(guide_scroll, "Guide")
+        adapter_name = self._ctrl.get_tab_adapter_name(self.tab_id)
+        self._guide_panel = GuideView(self._ctrl.get_adapter_guide(adapter_name))
+        self._left_tabs.addTab(self._guide_panel, "Guide")
 
     def _build_analysis_figure_pane(self) -> None:
         # Analysis figure pane (only when analysis present)
@@ -597,28 +597,6 @@ class ExpTabWidget(QWidget):
         self._fix_splitter_on_resize()
         self._schedule_handle_layout()
 
-    def _render_guide_html(self) -> str:
-        """Render this adapter's static AdapterGuide as read-only rich text."""
-        import html
-
-        adapter_name = self._ctrl.get_tab_adapter_name(self.tab_id)
-        guide = self._ctrl.get_adapter_guide(adapter_name)
-        sections = [
-            ("Behavior", guide.get("behavior", "")),
-            ("Expects (parameter context)", guide.get("expects_md", "")),
-            ("Expects (ModuleLibrary)", guide.get("expects_ml", "")),
-            ("Typical writeback", guide.get("typical_writeback", "")),
-            ("Recommended", guide.get("recommended", "")),
-        ]
-        parts = [
-            f"<p><b>{title}</b><br>{html.escape(body)}</p>"
-            for title, body in sections
-            if body
-        ]
-        if not parts:
-            return "<p><i>No guide written for this adapter yet.</i></p>"
-        return "".join(parts)
-
     def _fix_splitter_on_resize(self) -> None:
         if self._left_panel_collapsed:
             return
@@ -701,7 +679,7 @@ class ExpTabWidget(QWidget):
                 f"capability mismatch for tab {self.tab_id!r}: "
                 f"widget {self._capabilities!r} vs snapshot {snapshot.capabilities!r}"
             )
-        self.cfg_form.attach(self._cfg)
+        self._follow_cfg()
         if (
             self._has_analysis
             and snapshot.analysis is not None
@@ -1021,6 +999,77 @@ class ExpTabWidget(QWidget):
         self._cfg.reset()
         self._actions.refresh_interaction(self.tab_id)
 
+    # ── cfg form editor over the tab's form resource ───────────────────────
+
+    def cfg_invalid_reason(self) -> str | None:
+        """Return the first message blocking Run on the displayed config, or None.
+
+        Unparseable text and input the resource rejected count first, then the
+        resource's model and lowering errors. Raises RuntimeError once detached.
+        """
+        errors = self._require_editor().errors()
+        if errors is None:
+            result = self._cfg.result()
+            errors = result if isinstance(result, FormErrors) else None
+        if errors is None:
+            return None
+        path, message = next(iter(errors.messages.items()))
+        label = ".".join(str(part) for part in path)
+        return f"{label}: {message}" if label else message
+
+    def _follow_cfg(self) -> None:
+        """Mount an editor over the resource's current state and watch for swaps."""
+        if self._cfg_unsub is not None:
+            return
+        self._mount_editor()
+        self._cfg_unsub = self._cfg.subscribe(self._on_cfg_published)
+
+    def _unfollow_cfg(self) -> None:
+        if self._cfg_unsub is not None:
+            self._cfg_unsub()
+            self._cfg_unsub = None
+        if self._editor is not None:
+            self._editor.detach()
+
+    def _mount_editor(self) -> None:
+        if self._editor is not None:
+            self._editor.detach()
+            self._form_scroll.takeWidget()
+            self._editor.deleteLater()
+        state = self._cfg.editor_state
+        # Writes and option commands go to the resource unchanged, so its busy,
+        # lifetime and notification guards and its subscriber publication
+        # cover editor input; the editor never changes the borrowed state.
+        editor = FormEditor(
+            state,
+            self._cfg.env,
+            write=self._cfg.write,
+            run_command=self._cfg.run_command,
+        )
+        editor.setContentsMargins(4, 4, 4, 4)
+        editor.validity_changed.connect(self._on_cfg_validity_changed)
+        editor.set_editing_enabled(enabled=self._editing_enabled)
+        self._editor = editor
+        self._editor_state = state
+        self._form_scroll.setWidget(editor)
+
+    def _on_cfg_published(self) -> None:
+        if self._cfg.editor_state is not self._editor_state:
+            self._mount_editor()
+        # Every committed write re-evaluates Run admission, like a snapshot
+        # change: a valid edit must not leave a stale Run gate behind.
+        if self._actions is not None:
+            self._actions.refresh_interaction(self.tab_id)
+
+    def _on_cfg_validity_changed(self) -> None:
+        if self._actions is not None:
+            self._actions.refresh_interaction(self.tab_id)
+
+    def _require_editor(self) -> FormEditor[FormModel]:
+        if self._editor is None:
+            raise RuntimeError(f"tab {self.tab_id!r} has no form editor")
+        return self._editor
+
     def _is_data_visible(self) -> bool:
         return self._left_tabs.currentWidget() is self._save_panel
 
@@ -1145,7 +1194,8 @@ class ExpTabWidget(QWidget):
             self.run_btn.update()
 
         idle = writable and not local_busy
-        self.cfg_form.set_editing_enabled(idle)
+        self._editing_enabled = idle
+        self._require_editor().set_editing_enabled(enabled=idle)
         self.reset_btn.setEnabled(idle)
 
         # Capability is already enforced by conditional construction; no tab visibility toggling.
@@ -1191,7 +1241,8 @@ class ExpTabWidget(QWidget):
         local_busy: bool,
     ) -> None:
         """Enable idle Run and project the first blocking reason in UI priority order."""
-        cfg_valid = self.cfg_form.is_valid()
+        invalid_reason = self.cfg_invalid_reason()
+        cfg_valid = invalid_reason is None
         can_run = (
             writable
             and not local_busy
@@ -1211,20 +1262,12 @@ class ExpTabWidget(QWidget):
             self.run_btn.setToolTip("Select or create a working point first")
         elif capabilities.requires_soc and not state.has_soc:
             self.run_btn.setToolTip("No SoC connection")
-        elif not cfg_valid:
-            reason = self.cfg_form.first_invalid_reason()
-            self.run_btn.setToolTip(
-                f"Config invalid: {reason}" if reason else "Config invalid"
-            )
+        elif invalid_reason is not None:
+            self.run_btn.setToolTip(f"Config invalid: {invalid_reason}")
 
     def _bind_to_controller(self, actions: TabActions) -> None:
         tab_id = self.tab_id
         self._actions = actions
-
-        def validity_cb(_valid: bool) -> None:
-            actions.refresh_interaction(tab_id)
-
-        self.cfg_form.validity_changed.connect(validity_cb)
 
         if self._has_analysis:
             self.analyze_form.params_changed.connect(
@@ -1257,8 +1300,6 @@ class ExpTabWidget(QWidget):
             lambda ref: actions.save_artifact(tab_id, ref)
         )
 
-        self._validity_cb = validity_cb
-
     def _on_progress_changed(self) -> None:
         models = tuple(m for _, m in self._progress_control.progress_bars(self.tab_id))
         self.progress_stack.render_models(models)
@@ -1267,7 +1308,6 @@ class ExpTabWidget(QWidget):
         """Tear this tab widget down."""
         if self._actions is None:
             raise RuntimeError(f"tab {self.tab_id!r} is not attached")
-        self.cfg_form.validity_changed.disconnect(self._validity_cb)
         self._progress_unsub()
-        self.cfg_form.detach()
+        self._unfollow_cfg()
         self._actions = None

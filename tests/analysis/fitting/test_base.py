@@ -8,6 +8,7 @@ from zcu_tools.analysis.fitting.base import (
     dual_expfunc,
     expfunc,
     fit_asym_lor,
+    fit_dual_gauss_gmm,
     fit_dualexp,
     fit_gauss,
     fitcos,
@@ -158,12 +159,39 @@ def test_dual_gaussian_guess_orders_peak_centers(
     np.testing.assert_allclose(params, expected, rtol=1e-12, atol=1e-12)
 
 
+@pytest.mark.parametrize("dimensions", [1, 2])
+@pytest.mark.parametrize("left_count", [30, 50, 70])
+@pytest.mark.parametrize("seed", [0, 1])
+def test_dual_gaussian_gmm_scales_are_sorted_sample_counts(
+    dimensions: int, left_count: int, seed: int
+) -> None:
+    rng = np.random.default_rng(17)
+    signals = np.vstack(
+        [
+            rng.normal(-4.0, 0.2, (left_count, dimensions)),
+            rng.normal(4.0, 0.2, (100 - left_count, dimensions)),
+        ]
+    )
+    state = np.random.get_state()
+    try:
+        np.random.seed(seed)
+        params = fit_dual_gauss_gmm(signals[:, 0] if dimensions == 1 else signals)
+    finally:
+        np.random.set_state(state)
+
+    assert params[1] < params[4]
+    np.testing.assert_allclose([params[1], params[4]], [-4.0, 4.0], atol=0.1)
+    np.testing.assert_allclose([params[0], params[3]], [left_count, 100 - left_count])
+    assert params[0] + params[3] == pytest.approx(100.0)
+
+
 def test_fit_func_warns_when_falling_back_to_init_p(
     monkeypatch: pytest.MonkeyPatch,
 ):
     def fail_curve_fit(*args, **kwargs):
         raise RuntimeError("no convergence")
 
+    # Valid inputs cannot reliably exhaust SciPy\'s unexposed iteration budget.
     monkeypatch.setattr(base_module.sp.optimize, "curve_fit", fail_curve_fit)
 
     with pytest.warns(RuntimeWarning, match="returning init_p fallback"):

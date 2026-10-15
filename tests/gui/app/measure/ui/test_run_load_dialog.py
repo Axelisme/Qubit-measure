@@ -14,20 +14,19 @@ from qtpy.QtWidgets import (
     QPushButton,
     QTableWidget,
 )
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
+from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AdapterGuide
 from zcu_tools.gui.app.measure.services.load import LoadTabResultOutcome
 from zcu_tools.gui.app.measure.services.ports import SavePaneSnapshot, TabSnapshot
 from zcu_tools.gui.app.measure.services.save_control import SavedRunInfo
 from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
-from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.types import SessionEnv
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
-from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup
+from tests.gui.app.measure._form_fakes import configure_form_lookup
 
 
 @pytest.fixture
@@ -120,7 +119,10 @@ def test_main_window_routes_dialog_selection_to_existing_load(
     action: str,
 ) -> None:
     ctrl = MagicMock(control_identity=ControlIdentity())
-    configure_cfg_lookup(ctrl)
+    ctrl.get_adapter_guide.return_value = AdapterGuide(
+        markdown="# Synthetic guide\n", resource_dir=None
+    )
+    configure_form_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
     ctrl.get_bus.return_value = BaseEventBus()
     ctrl.active_operation_count.return_value = 0
@@ -138,7 +140,7 @@ def test_main_window_routes_dialog_selection_to_existing_load(
     ctrl.get_tab_snapshot.return_value = TabSnapshot(
         adapter_name="fake",
         tab_id="tab",
-        cfg_schema=CfgSchema(CfgSectionSpec(), CfgSectionValue()),
+        cfg_input={},
         capabilities=AdapterCapabilities(load_data=True),
         interaction=TabInteractionState(
             False, False, False, True, True, False, False, False, False

@@ -17,10 +17,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 
@@ -31,10 +27,6 @@ class _FakeAdapter(BaseAdapter[Any, Any, Any, Any]):
         analysis=AnalysisMode.NONE
     )
     exp_cls = MagicMock
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return MeasureCfgBuilder(role_factories={}).build()
 
     def make_filename_stem(self, ctx: Any) -> str:
         del ctx

@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-10-13, Rabi numerical fitting ownership
+**Last updated:** 2026-10-15, seeded hanger background initialization
 
 `singleshot_rabi` 提供 raw-IQ sweep 的 pooled PCA、joint population fitting 與 circle-classification calibration。它接收純數值，回傳 physical parameters、population arrays 與 optimizer diagnostics，不讀 cfg 或建立圖。Pulse length 與 gain 使用相同 coordinate 契約，gain caller 明確關閉 decay。
 
@@ -79,7 +79,9 @@ slope `exp(g * (f - f_r))` 與 resonance-centered quadratic phase
 維持唯一 global linear phase slope。兩個 background fit option 彼此獨立，停用的
 term 固定為零且不進 joint-refinement 參數。兩個 option 都停用時保留 sequential
 circle/phase path；任一 option 啟用時以 sequential / rational initializer 進 raw
-complex I/Q joint refinement，plot 的 IQ/circle/phase 使用移除 delay 與已啟用
+complex I/Q joint refinement。Hanger 背景擬合保留 caller 提供的 branch seed 作為
+joint fit 的 delay 初值，避免無背景圓形假設的局部搜尋將初值帶偏；delay 仍可在
+joint refinement 中調整，不變成固定參數。Plot 的 IQ/circle/phase 使用移除 delay 與已啟用
 background 後的 corrected domain。`a0` 是 fitted `f_r` 處的 complex scale；
 `g` 不改變 phase，`c` 在 `f_r` 的 phase 與一階 slope 均為零。
 Optimizer 的 non-finite、active-bound 或失敗結果會 warning 並回退 sequential result。

@@ -12,6 +12,7 @@ from zcu_tools.gui.app.fluxdep.state import (
     PROJECT_VERSION_KEY,
     SELECTION_VERSION_KEY,
     SPECTRUM_SET_VERSION_KEY,
+    AlignmentPublication,
     FluxDepState,
     SpectrumEntry,
     SpecType,
@@ -246,9 +247,7 @@ def test_set_alignment_marks_aligned_and_bumps():
     new_fluxs = st.spectrums["a"].raw["dev_values"].copy()
     st.set_alignment(
         "a",
-        flux_half=1.0,
-        flux_int=2.0,
-        flux_period=2.0,
+        alignment=AlignmentPublication(flux_half=1.0, flux_int=2.0, flux_period=2.0),
         new_fluxs=new_fluxs,
         new_point_fluxs=np.empty(0, dtype=np.float64),
     )
@@ -305,7 +304,12 @@ def test_alignment_rejects_invalid_point_mapping_without_mutation(invalid):
     version = st.version.get(spectrum_version_key("a"))
     raw_fluxs = entry.raw["fluxs"].copy()
     with pytest.raises(ValueError, match="new_point_fluxs|finite"):
-        st.set_alignment("a", 0.0, 1.0, 2.0, np.array([0.5, 0.75, 1.0]), invalid)
+        st.set_alignment(
+            "a",
+            AlignmentPublication(0.0, 1.0, 2.0),
+            np.array([0.5, 0.75, 1.0]),
+            invalid,
+        )
     assert st.spectrums["a"] is entry
     np.testing.assert_array_equal(entry.raw["fluxs"], raw_fluxs)
     np.testing.assert_array_equal(entry.points["fluxs"], [0.5, 1.0])
@@ -326,6 +330,84 @@ def test_set_selection_bumps_selection():
     assert st.selection_mask() is not None
 
 
+def _three_point_state() -> FluxDepState:
+    st = FluxDepState()
+    for name in ("a", "b"):
+        st.put_spectrum(_make_entry(name))
+        st.set_alignment(
+            name,
+            AlignmentPublication(0.0, 1.0, 2.0, None),
+            np.linspace(0.0, 1.0, 3),
+            np.empty(0),
+        )
+        three = np.arange(3.0)
+        st.set_points(name, PointsData(dev_values=three, fluxs=three, freqs=three))
+    return st
+
+
+def test_brush_mask_projects_the_published_brush_beside_the_kept_mask():
+    st = _three_point_state()
+    assert st.brush_mask() is None
+    kept = np.array([True, False, False, False, True, False])
+    brush = np.array([True, True, False, False, True, True])
+    st.set_selection(kept, 0.1, brush)
+    np.testing.assert_array_equal(st.selection_mask(), kept)
+    np.testing.assert_array_equal(st.brush_mask(), brush)
+    # Without a separate brush the kept mask is the brush.
+    st.set_selection(kept, 0.0)
+    np.testing.assert_array_equal(st.brush_mask(), kept)
+
+
+@pytest.mark.parametrize(
+    ("brush", "message"),
+    [
+        (np.ones(5, dtype=np.bool_), "brush mask must match"),
+        (np.array([False, True, True, True, True, True]), "kept point"),
+    ],
+)
+def test_set_selection_rejects_a_brush_that_is_misshaped_or_misses_kept_points(
+    brush, message: str
+):
+    st = _three_point_state()
+    before = st.version.snapshot()
+    with pytest.raises(ValueError, match=message):
+        st.set_selection(np.array([True, False, False, False, True, False]), 0.1, brush)
+    assert st.brush_mask() is None
+    assert st.selection_mask() is None
+    assert st.version.snapshot() == before
+
+
+@pytest.mark.parametrize("change", ["replace", "remove", "set_points", "reset_points"])
+def test_paths_that_drop_a_filter_mask_drop_its_brush(change: str):
+    st = _three_point_state()
+    st.set_selection(
+        np.array([True, False, False, False, True, False]),
+        0.1,
+        np.array([True, True, False, False, True, True]),
+    )
+    if change == "replace":
+        st.put_spectrum(_make_entry("b"))
+    elif change == "remove":
+        st.remove_spectrum("b")
+    elif change == "set_points":
+        st.set_points(
+            "b",
+            PointsData(
+                dev_values=np.arange(2.0), fluxs=np.arange(2.0), freqs=np.arange(2.0)
+            ),
+        )
+    else:
+        st.reset_points("b")
+    entry_b = st.spectrums.get("b")
+    assert entry_b is None or (
+        entry_b.filter_mask is None and entry_b.brush_mask is None
+    )
+    brush = st.brush_mask()
+    assert brush is not None
+    np.testing.assert_array_equal(brush[:3], [True, True, False])
+    assert brush[3:].all()
+
+
 def test_set_project_bumps_project():
     st = FluxDepState()
     st.set_project(ProjectInfo(chip_name="Q5_2D", qub_name="Q1"))
@@ -336,11 +418,11 @@ def test_set_project_bumps_project():
 def test_project_info_derives_paths_from_names():
     import os
 
-    # unset result_dir / database_path are derived from chip/qubit in __post_init__
+    # unset result_dir / data_root are derived from chip/qubit in __post_init__
     p = ProjectInfo(chip_name="Q5_2D", qub_name="Q1")
     assert p.result_dir == os.path.join("result", "Q5_2D", "Q1")
     # raw spectra live under Database/, not result/ (cf. measure-gui save layout)
-    assert p.database_path == os.path.join("Database", "Q5_2D", "Q1")
+    assert p.data_root == os.path.join("Database", "Q5_2D", "Q1")
 
 
 def test_project_info_default_names_derive_unknown_paths():
@@ -349,7 +431,7 @@ def test_project_info_default_names_derive_unknown_paths():
     # a bare ProjectInfo still has concrete (never empty) paths
     p = ProjectInfo()
     assert p.result_dir == os.path.join("result", "unknown_chip", "unknown_qubit")
-    assert p.database_path == os.path.join("Database", "unknown_chip", "unknown_qubit")
+    assert p.data_root == os.path.join("Database", "unknown_chip", "unknown_qubit")
 
 
 def test_project_info_explicit_paths_override_derivation():
@@ -358,10 +440,10 @@ def test_project_info_explicit_paths_override_derivation():
         chip_name="Q5_2D",
         qub_name="Q1",
         result_dir="/custom/out",
-        database_path="/custom/raw",
+        data_root="/custom/raw",
     )
     assert p.result_dir == "/custom/out"
-    assert p.database_path == "/custom/raw"
+    assert p.data_root == "/custom/raw"
 
 
 def test_project_info_root_dir_anchors_derived_defaults():
@@ -373,7 +455,7 @@ def test_project_info_root_dir_anchors_derived_defaults():
     root = os.path.join(os.sep, "repo")
     p = ProjectInfo(chip_name="Q5_2D", qub_name="Q1", root_dir=root)
     assert p.result_dir == os.path.join(root, "result", "Q5_2D", "Q1")
-    assert p.database_path == os.path.join(root, "Database", "Q5_2D", "Q1")
+    assert p.data_root == os.path.join(root, "Database", "Q5_2D", "Q1")
 
 
 def test_project_info_empty_root_dir_keeps_relative_default():
@@ -407,7 +489,7 @@ def test_set_fit_params_bumps_and_clears_result():
     )
     # changing inputs clears the stale result and bumps the version
     assert st.fit.params is None
-    assert st.fit.database_path == "db.h5"
+    assert st.fit.search_db == "db.h5"
     assert st.fit.r_f == 5.5
     assert st.version.get(FIT_VERSION_KEY) == before + 1
 
@@ -421,13 +503,6 @@ def test_set_fit_result_records_params():
     assert st.fit.params == (4.2, 1.1, 0.3)
     assert st.fit.has_result
     assert st.version.get(FIT_VERSION_KEY) == before + 1
-
-
-def test_default_transitions_is_basic_preset():
-    from zcu_tools.gui.app.fluxdep.state import default_transitions
-
-    t = default_transitions()
-    assert t["transitions"] == [(0, 1), (0, 2), (1, 2), (1, 3)]
 
 
 # --- transitions r_f/sample_f helpers (Optional) ---------------------------

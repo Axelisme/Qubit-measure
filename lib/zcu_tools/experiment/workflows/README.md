@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-13，泛型宿主與 workflow 自有繪圖
 
-此 package 擁有具名 workflow 的通用執行契約。具體 flux 清單、校準、分析與 record 語意屬於使用者 workflow，不屬於核心。架構分工見 [workflows ADR 草稿](../../../../docs/adr/draft/workflows-engine.md)。
+此 package 擁有具名 workflow 的通用執行契約。具體 flux 清單、校準、分析與 record 語意屬於使用者 workflow，不屬於核心。架構分工見 [ADR-0062](../../../../docs/adr/0062-experiment-workflow.md)。
 
 ## 能力與資料
 

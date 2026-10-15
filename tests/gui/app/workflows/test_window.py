@@ -23,6 +23,7 @@ from zcu_tools.resources.entry import (
 
 from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.gui.app.workflows._synthetic import PlanForm
+from tests.gui.widgets.form._text_input import commit_text
 
 from ._reload_source import InjectedCatalog
 from ._sample_input import sample_input
@@ -377,7 +378,7 @@ def test_rpc_start_ignores_unparseable_gui_text_then_resets_accepted_base(
     window, _harness, _entry = attachment
     widget = window.plan_panel.editor.findChild(QLineEdit, "form.input.scale")
     assert isinstance(widget, QLineEdit)
-    widget.setText("-")
+    commit_text(widget, "-")
     before = window.plan_panel.state.input.data
     local = window.plan_panel.editor.local_parse_errors()
     assert local is not None and ("scale",) in local.messages

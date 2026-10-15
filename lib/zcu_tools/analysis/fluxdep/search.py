@@ -16,7 +16,7 @@ from numpy.typing import NDArray
 from zcu_tools.analysis.fluxdep.models import TransitionDict, energy2linearform
 from zcu_tools.progress_bar import make_pbar
 
-from .search_models import compile_transitions
+from .search_models import compile_transitions, transition_labels
 
 
 class SearchCancelled(RuntimeError):
@@ -47,8 +47,55 @@ class ParamBounds:
 
 
 @dataclass(frozen=True)
+class TransitionResidual:
+    """Absolute GHz residuals for one compiled transition.
+
+    transition: Label ``category i-j``; duplicates remain separate entries.
+    points: Number of input points attributed to this transition, including zero.
+    mean, max: Mean and maximum absolute residual in GHz, or None for zero points.
+    """
+
+    transition: str
+    points: int
+    mean: float | None
+    max: float | None
+
+
+@dataclass(frozen=True)
+class SearchQuality:
+    """Quality of the winning candidate, without per-point arrays.
+
+    mean: Mean absolute residual in GHz over all input points.
+    outliers: Count of points with residual strictly above outlier_threshold.
+    outlier_threshold: Three times mean, in GHz.
+    per_transition: All compiled transitions in column order, even unused ones.
+    """
+
+    mean: float
+    outliers: int
+    outlier_threshold: float
+    per_transition: tuple[TransitionResidual, ...]
+
+
+@dataclass(frozen=True)
 class DatabaseSearchResult:
-    """Best fit and per-entry diagnostics; arrays are shared, not copied."""
+    """Best fit and per-entry diagnostics; arrays are shared, not copied.
+
+    params: Winning (EJ, EC, EL) in GHz, after applying best_scale.
+    best_distance: Search objective, the mean absolute GHz residual.
+    best_scale, best_index: Winning scale and zero-based database entry index.
+    entry_results: (entries, 2) distance/scale diagnostics; pruned entries retain
+        a distance lower bound and NaN scale.
+    entry_params: Unscaled database parameters, shape (entries, 3), in GHz.
+    fluxs, freqs: Paired input points (flux modulo one and frequency in GHz).
+    predicted_freqs: Nearest predicted transition frequency per point, in GHz.
+    bounds: Supplied parameter bounds in GHz.
+    transition_indices: Per-point zero-based indices into quality.per_transition;
+        equal-distance ties select the first compiled transition.
+    residuals: Per-point absolute frequency residuals, in GHz.
+    outlier_mask: Per-point residual > quality.outlier_threshold.
+    quality: Compact residual summary of the winning model.
+    """
 
     params: tuple[float, float, float]
     best_distance: float
@@ -60,6 +107,10 @@ class DatabaseSearchResult:
     freqs: NDArray[np.float64]
     predicted_freqs: NDArray[np.float64]
     bounds: ParamBounds
+    transition_indices: NDArray[np.int64]
+    residuals: NDArray[np.float64]
+    outlier_mask: NDArray[np.bool_]
+    quality: SearchQuality
 
 
 @lru_cache(maxsize=4)
@@ -283,12 +334,44 @@ def _scan_candidates(
     return best_idx, best_scale, best_dist, best_params, results, interrupted
 
 
-def _find_close_points(freqs, energies, scale, allows) -> np.ndarray:
-    Bs, Cs = energy2linearform(energies, allows)
+def _attribute_points(
+    freqs: NDArray[np.float64],
+    energies: NDArray[np.float64],
+    scale: float,
+    transitions: TransitionDict,
+) -> tuple[NDArray[np.float64], NDArray[np.int64]]:
+    Bs, Cs = energy2linearform(energies, transitions)
     fs = np.abs(scale * Bs + Cs)
     dists = np.abs(fs - freqs[:, None])
-    min_idx = np.argmin(dists, axis=1)
-    return fs[range(len(freqs)), min_idx]
+    indices = np.argmin(dists, axis=1).astype(np.int64)
+    return fs[np.arange(len(freqs)), indices], indices
+
+
+def _summarize_residuals(
+    residuals: NDArray[np.float64],
+    indices: NDArray[np.int64],
+    labels: tuple[str, ...],
+) -> tuple[SearchQuality, NDArray[np.bool_]]:
+    mean = float(np.mean(residuals))
+    threshold = 3.0 * mean
+    outlier_mask = residuals > threshold
+    summaries = []
+    for index, label in enumerate(labels):
+        assigned = residuals[indices == index]
+        summaries.append(
+            TransitionResidual(
+                transition=label,
+                points=int(assigned.size),
+                mean=float(np.mean(assigned)) if assigned.size else None,
+                max=float(np.max(assigned)) if assigned.size else None,
+            )
+        )
+    return (
+        SearchQuality(
+            mean, int(np.count_nonzero(outlier_mask)), threshold, tuple(summaries)
+        ),
+        outlier_mask,
+    )
 
 
 def search_database(
@@ -346,13 +429,15 @@ def search_database(
     best_full = _apply_interp(
         np.ascontiguousarray(f_energies[best_idx : best_idx + 1]), idxs, ws
     )[0]
-    # An empty transition set has no diagnostic line. The original non-plot
-    # search returned successfully in this case; only plotting attempted the
-    # invalid empty linear form.
-    if any(isinstance(value, list) and value for value in transitions.values()):
-        p_freqs = _find_close_points(freqs, best_full, best_scale, transitions)
-    else:
-        p_freqs = np.empty(0, dtype=np.float64)
+    p_freqs, transition_indices = _attribute_points(
+        freqs, best_full, best_scale, transitions
+    )
+    residuals = np.abs(p_freqs - freqs)
+    quality, outlier_mask = _summarize_residuals(
+        residuals,
+        transition_indices,
+        transition_labels(transitions, best_full.shape[1]),
+    )
     _check_cancellation(cancel_requested)
     return DatabaseSearchResult(
         params=(float(best_params[0]), float(best_params[1]), float(best_params[2])),
@@ -365,4 +450,8 @@ def search_database(
         freqs=freqs,
         predicted_freqs=p_freqs,
         bounds=bounds,
+        transition_indices=transition_indices,
+        residuals=residuals,
+        outlier_mask=outlier_mask,
+        quality=quality,
     )

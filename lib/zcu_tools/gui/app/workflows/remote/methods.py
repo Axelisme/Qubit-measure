@@ -3,10 +3,10 @@
 from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
-# v3 narrows accepted input: {"expr": text} only in text fields, and the T1
-# tunables' guess_us has no schema default (the form's defaults fill it).
-WIRE_VERSION = 3
-GUI_VERSION = 3
+# Options carry selection values, fields and commands; ref/inline input is
+# explicitly tagged and branch defaults never depend on a previous draft.
+WIRE_VERSION = 4
+GUI_VERSION = 4
 
 _RUN_ID = ParamSpec(
     "run_id",
@@ -63,9 +63,10 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "Schema fields marked hidden hold fixed values and need no input. "
         "x-form-group only groups fields on screen; grouped fields take input "
         "like any other, and the schema says which are required. "
-        "x-form-key-or-inline marks a field that holds either a library key "
-        "(a string, or a ModuleInput's ref name) or inline content (an object); "
-        "x-form-library-keys lists the library keys that branch can name. "
+        "x-form-options lists a field's choices in schema order, each with "
+        "label, value and optional fields and commands: select one by writing "
+        "its whole value once, then edit its fields (fixed tags are omitted); "
+        "commands are GUI actions with no workflow RPC. "
         'Expressions {"expr": text} are input only for text fields (int, float, '
         "complex and str values whose schema offers that alternative); "
         "Literal/enum, choices, bool and library-key fields take plain values.",

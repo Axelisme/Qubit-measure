@@ -70,7 +70,7 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v115: read-only predictor inputs and readiness without an installed predictor.
 # v116: explicit working-point selection and saved writeback destinations.
 # v117: holder/ref-free cfg integrated above the working-point and UI releases.
-MCP_VERSION = 117
+MCP_VERSION = 119
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect. This does not connect hardware.
@@ -89,6 +89,10 @@ writeback or diagnosis, use rpc_list(domain?), rpc_describe(method), then
 rpc_call(method, params). Every listed public method remains callable even
 when a recipe or shared tool covers it. Raw RPC does not aggregate tool
 results, decode PNG replies, or run the analysis artifact save pipeline.
+For large forms, replies from tab.get_cfg, tab.edit_cfg, tab.reset_cfg, and
+tab.use_inline all include the full schema, which can be several MB.
+Prefer recipe tools and avoid reading these replies directly via rpc_call;
+remove this guidance when lazy-form is complete.
 
 For authorized setup, simulation_initialize uses the GUI coordinator and may
 switch away from real devices. It does not launch a GUI or connect real hardware.
@@ -154,8 +158,27 @@ receipt, not terminal results; use wait or status to confirm the outcome.
 Terminal executions are not rewritten. Unregistered cancel(op) uses the direct
 GUI hook and may report operation_failed for an already failed operation.
 
-Cfg editing applies to current inputs; Run accepts only Valid cfg and fixes
-its execution values at admission. apply_writeback(tab, items) selects current
+Tab cfg reads and edits return Form schema/input/values/errors. Ordinary strings
+are literal; expressions use {expr: text}, complex uses the reversible __complex__
+tag, and library keys are actual keys. Read x-form-options in schema order:
+each item has label/value and optional editable fields or commands. Select by
+writing its whole value once; selected fields omit fixed tags, and ref options
+have no fields. Match every value leaf by JSON type and value, first match wins.
+Do not infer choices from unions. Unmatched input and errors remain unchanged.
+Recipe read_field exposes only selected fields; tag leaves are not read paths.
+Inline leaf paths include module. use_inline runs the owner's guarded to_inline
+command against fixed library capture, not a private copy path.
+Edit unique model-field leaf paths;
+write range start/stop/n separately. Invalid input remains editable with errors.
+Open and explicit Reset capture sources once. Recipe preparation always Reset
+before edits, including new tabs. Reset(aliases=...) is the single-use source
+override; it changes neither global aliases nor saved input. Parameter reads,
+cfg, edits and Run use that fixed capture until the next Reset. parameter_read
+and get_cfg take no aliases. run_start rejects nonempty aliases before focus or
+operation effects; None and {} use displayed values. Run accepts only current
+valid Form values. Load restores results and analysis sources, not Form input;
+inspect the result's native cfg separately. Load replies report result/analysis
+facts, not cfg backfill. apply_writeback(tab, items) selects current
 Primary/Post candidates by stable target_name. Omit items for all; an empty array
 writes none. It ignores checkboxes and rejects unknown or ambiguous names before
 any write, using current IDs rather than proposal IDs. It does not answer recipes.

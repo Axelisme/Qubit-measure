@@ -21,6 +21,8 @@ from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
+from tests.gui.widgets.form._text_input import commit_text
+
 
 class Inner(FormModel):
     """Nested group with two numeric rows."""
@@ -74,7 +76,7 @@ def alias_env() -> FormEnv:
     parameters = ParameterContext(
         point=PointDocument(
             format="zcu.parameter-container",
-            format_version="1.0",
+            format_version="2.0",
             general=PointGeneral(created_at="2026-10-13T00:00:00Z", ext={"seed": 4.0}),
         ),
         library=LibrarySnapshot(
@@ -163,21 +165,21 @@ def test_expression_rows_show_the_resolved_value_or_the_error(
     view, state = editor
     mode(view, "amount").trigger()
     text = child(view, QLineEdit, "form.input.amount")
-    text.setText("general.ext.seed / 2")
+    commit_text(text, "general.ext.seed / 2")
     echo = child(view, QLabel, "form.value.amount")
     error = child(view, QLabel, "form.error.amount")
     assert not echo.isHidden()
     assert float(echo.text()) == 2.0
     assert error.isHidden()
 
-    text.setText("absent_name")
+    commit_text(text, "absent_name")
     assert echo.isHidden()
     assert echo.text() == ""
     assert not error.isHidden()
     assert error.text()
 
     mode(view, "amount").trigger()
-    child(view, QLineEdit, "form.input.amount").setText("3")
+    commit_text(child(view, QLineEdit, "form.input.amount"), "3")
     assert state.input.data["amount"] == 3.0
     assert echo.isHidden()
     assert error.isHidden()
@@ -277,7 +279,7 @@ def test_field_error_appears_below_its_input_without_overlapping_the_next_row(
     error = child(view, QLabel, "form.error.count")
     assert error.isHidden()
     text = child(view, QLineEdit, "form.input.count")
-    text.setText("-")
+    commit_text(text, "-")
     lay_out(view, qapp)
     assert not error.isHidden()
     assert error.text()
@@ -286,6 +288,6 @@ def test_field_error_appears_below_its_input_without_overlapping_the_next_row(
     following = rect(view, child(view, QComboBox, "form.input.unit"))
     assert shown.top() >= field.top() + field.height()
     assert following.top() >= shown.top() + shown.height()
-    text.setText("4")
+    commit_text(text, "4")
     assert state.input.data["count"] == 4
     assert error.isHidden()

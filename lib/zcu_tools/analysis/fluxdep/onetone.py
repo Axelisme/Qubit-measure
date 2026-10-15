@@ -198,11 +198,16 @@ def _require_peak_indices(indices: object) -> None:
         previous = index
 
 
+# Inclusive dimensionless prominence limits for OneTone picking.
+THRESHOLD_MIN = 0.0
+THRESHOLD_MAX = 5.0
+
+
 def _require_threshold(threshold: object) -> None:
     if (
         isinstance(threshold, bool)
         or not isinstance(threshold, (int, float))
-        or not 0 <= threshold <= 5
+        or not THRESHOLD_MIN <= threshold <= THRESHOLD_MAX
         or not np.isfinite(threshold)
     ):
         raise ValueError("threshold must be a finite number in [0, 5]")

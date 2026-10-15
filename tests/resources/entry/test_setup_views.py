@@ -42,9 +42,6 @@ def test_newer_minor_preserves_unknown_fields_while_known_values_use_working_uni
     document["components"]["R1"]["wiring"]["delay"] = 1.5
     document["general"]["description"] = "edited with the older reader"
     stored = YAML(typ="safe").load(setup_path)
-    # Source timestamps change on acceptance; source behavior has its own seam tests.
-    stored.pop("provenance")
-    document.pop("provenance")
     assert stored == document
     again = ResultEntry.open("entry", result_root=results, database_root=database)
     assert again.setup.R1.rate == pytest.approx(6600.0)
@@ -565,7 +562,7 @@ def test_added_component_survives_reopening_with_its_declared_kind(
 
 def write_forward_setup(path: Path) -> None:
     document = YAML(typ="safe").load(path)
-    document["format_version"] = "1.7"
+    document["format_version"] = "2.7"
     document["future_top"] = {"next": [1, "two"]}
     document["general"]["future_general"] = "next metadata"
     document["components"]["R1"]["wiring"] = {"delay": 1.2}

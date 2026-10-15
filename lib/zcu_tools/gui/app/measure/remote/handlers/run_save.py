@@ -13,6 +13,7 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.context_types import CommandOrigin
 
 from ..cfg_observation import cfg_error_to_remote
+from ..load_types import project_load_outcome
 from ..save_types import SaveArtifactRefWire, project_save_report
 from ._common import follow_tab
 from .tab import temporary_aliases
@@ -26,6 +27,12 @@ def h_tab_run_start(
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     aliases = temporary_aliases(params)
+    if aliases:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            "Run aliases are not supported; Reset the tab with aliases first",
+            reason="run_aliases_not_supported",
+        )
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
@@ -53,7 +60,7 @@ def h_tab_load_data(
     snap = control.get_tab_snapshot(tab_id)
     interaction = snap.interaction
     assert interaction is not None
-    result: dict[str, object] = dataclasses.asdict(outcome)
+    result = project_load_outcome(outcome)
     result["has_run_result"] = bool(interaction.has_run_result)
     ap = None if snap.analysis is None else snap.analysis.params
     if ap is None:

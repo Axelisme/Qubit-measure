@@ -18,9 +18,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:h_tab_new",
         MethodSpec(
             10.0,
-            "Create a new tab using current global aliases. Unbound aliases allow "
-            "creation with an Invalid cfg. The tab retains no source capture; "
-            "named alias overrides belong to a single Run. Returns {tab_id}.",
+            "Create a new tab and capture current parameter/library/global aliases "
+            "once. Unbound aliases may leave Form errors. Reads, edits and Run "
+            "reuse this capture; Reset captures new sources. Returns {tab_id}.",
             (required_string("adapter_name", "Adapter to instantiate"),),
         ),
     ),
@@ -32,8 +32,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Create a tab, load a result file without a SoC, and focus it. "
             "A load failure closes the new "
             "tab and restores prior focus. Returns the load outcome including "
-            "tab_id, cfg_backfill and analysis_error. Failed analysis preparation "
-            "retains the loaded result and the new tab. not_applied retains the result.",
+            "tab_id and analysis_error. Failed analysis preparation "
+            "retains the loaded result and the new tab.",
             (required_string("adapter_name"), required_string("data_path")),
         ),
     ),
@@ -98,8 +98,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:h_tab_parameter_read",
         MethodSpec(
             5.0,
-            "Read only requested paths and module_refs from current point/library/aliases "
-            "for this tab. Optional aliases maps names to concrete components for this read only. None and {} mean no override. "
+            "Read requested paths and module_refs from the tab's fixed Open/Reset "
+            "parameter capture. Reset with aliases before querying overrides. "
             "Returns {values, modules}: absent values are "
             "omitted, null is retained; each module ref maps to an existing "
             "canonical library root or null for missing/custom. Invalid paths, "
@@ -108,12 +108,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 required_string("tab_id"),
                 ParamSpec("paths", JsonType.ARRAY, required=True),
                 ParamSpec("module_refs", JsonType.ARRAY, required=True),
-                ParamSpec(
-                    "aliases",
-                    JsonType.OBJECT,
-                    required=False,
-                    description="Temporary alias-name to component-name overrides; None and {} mean no override",
-                ),
             ),
             readonly=True,
         ),
@@ -123,21 +117,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:h_tab_get_cfg",
         MethodSpec(
             5.0,
-            "Return a complete cached resource publication: status, tree, "
-            "source_basis and diagnostics. Ordinary reads do not query sources. "
-            "Nonempty aliases resolves current inputs against named overrides "
-            "without publication. None and {} read cached cfg. Paths are arrays of field "
-            "segments; writes use the closed __expr/__text/__complex/__ref codec. "
-            "Library editor observations use their own independent interface.",
-            (
-                required_string("tab_id"),
-                ParamSpec(
-                    "aliases",
-                    JsonType.OBJECT,
-                    required=False,
-                    description="Temporary alias-name to component-name overrides; None and {} mean no override",
-                ),
-            ),
+            "Read Form schema, input, ordinary leaf values and errors from the "
+            "tab's fixed source snapshot. Reads do not refresh sources. "
+            "Expressions use {expr: text}; library keys are ordinary strings. "
+            "Use Reset to capture new sources. Independent library editors retain "
+            "their own interface.",
+            (required_string("tab_id"),),
             readonly=True,
         ),
     ),
@@ -146,10 +131,20 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:h_tab_reset_cfg",
         MethodSpec(
             5.0,
-            "Reset cfg to current adapter defaults. Returns the complete new "
-            "publication, which may be Invalid. Busy and notification-reentrant "
+            "Capture current sources once, optionally overriding named aliases "
+            "for this Reset only, and restore fresh adapter Form defaults. "
+            "Returns schema, input, values and errors. Overrides are not persisted "
+            "or written to global aliases. Busy and notification-reentrant "
             "resets are rejected. Does not clear results or save artifacts.",
-            (required_string("tab_id"),),
+            (
+                required_string("tab_id"),
+                ParamSpec(
+                    "aliases",
+                    JsonType.OBJECT,
+                    required=False,
+                    description="Single Reset alias-name to component-name capture overrides",
+                ),
+            ),
         ),
     ),
     method_entry(
@@ -157,17 +152,52 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:h_tab_edit_cfg",
         MethodSpec(
             5.0,
-            "Atomically apply an ordered edit batch to current inputs. Paths are "
-            "arrays of field-name segments. Scalars use __expr/__text/__complex; "
-            "reference inputs use __ref and complete children; range inputs are "
-            "complete objects. All edits publish together or none do. Valid "
-            "incomplete input may publish Invalid. Busy and notification-reentrant "
-            "edits are rejected. Returns the complete new observation.",
+            "Atomically write unique model-field leaf paths against fixed sources. "
+            "Each edit has path: [segments] and value: Form input JSON. "
+            "Expressions use {expr: text}, complex literals use __complex__, "
+            "and library keys are plain strings. Edit range leaves separately. "
+            "Invalid values stay editable with errors; structural failures preserve "
+            "the entire input. Returns schema, input, values and errors.",
             (
                 required_string("tab_id"),
                 required_json(
                     "edits", "Ordered list of {path: [segments], value} inputs"
                 ),
+            ),
+        ),
+    ),
+    method_entry(
+        "tab.read_module",
+        "tab:h_tab_read_module",
+        MethodSpec(
+            5.0,
+            "Read {value, mode, source} for one dotted core module field from fixed "
+            "Open/Reset sources. Key mode reads the captured library; inline mode "
+            "evaluates only this module. Other invalid fields do not block reads. "
+            "No native cfg or extras lowering, mutation or source refresh occurs. "
+            "This module's invalid values are rejected. Busy reads are allowed.",
+            (
+                required_string("tab_id"),
+                required_string("field", "Dotted core module field"),
+            ),
+            readonly=True,
+        ),
+    ),
+    method_entry(
+        "tab.use_inline",
+        "tab:h_tab_use_inline",
+        MethodSpec(
+            5.0,
+            "Convert one dotted core module field to inline input through guarded "
+            "option command. Copy a key from the fixed captured library. Preserve "
+            "locks. Existing inline is a guarded no-op. Disabled or unresolved "
+            "modules fail; select an Inline option to use template/type defaults. "
+            "Busy, revoked and reentrant calls are rejected. One changed input "
+            "publishes once; failures have no successful prefix. "
+            "Returns the complete Form observation.",
+            (
+                required_string("tab_id"),
+                required_string("field", "Dotted core module field"),
             ),
         ),
     ),

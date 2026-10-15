@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -12,10 +12,11 @@ from zcu_tools.gui.app.measure.adapter import (
     RunRequest,
     require_soc_handles,
 )
-from zcu_tools.gui.cfg.resource import AcceptedConfig, CfgResolution
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.types import ContextReadiness, ParameterContext
 from zcu_tools.resources.entry import PointStorageBinding
+
+from .tab_form import AcceptedFormConfig
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ class RunInputs:
     adapter_name: str
     request: RunRequest
     adapter: ExpAdapterProtocol
-    accepted_cfg: AcceptedConfig
+    accepted_cfg: AcceptedFormConfig
     snapshot: RunSnapshot | None = None
     experiment_tag: str | None = None
     storage: PointStorageBinding | None = None
@@ -87,25 +88,13 @@ class GuardService:
     the owning operation boundary — see ADR-0066.
     """
 
-    def __init__(
-        self,
-        state: State,
-        *,
-        captured_parameters: Callable[
-            [Mapping[str, str] | None], ParameterContext | None
-        ],
-        cfg_resolution: Callable[[ParameterContext | None], CfgResolution],
-    ) -> None:
-        """Use owner-sequence captures for preview-independent Run admission.
+    def __init__(self, state: State) -> None:
+        """Use State readiness and the tab resource's fixed source for Run admission.
 
-        captured_parameters freezes current point/library/storage and aliases;
-        its optional named aliases overrides affect only this capture. cfg_resolution must
-        resolve cfg using exactly the supplied capture and published caches.
-        Neither callback may poll hardware or retain live sources in its result.
+        Construction/cfg acceptance does not capture parameters or query hardware.
+        The application supplies resources before asking this owner to admit Run.
         """
         self._state = state
-        self._captured_parameters = captured_parameters
-        self._cfg_resolution = cfg_resolution
 
     def _require_tab(self, tab_id: str) -> Any:
         if not self._state.has_tab(tab_id):
@@ -140,24 +129,24 @@ class GuardService:
         SoC when declared. Unknown tab, readiness and adapter validation failures
         raise GuardError; invalid publications keep their cfg errors.
         Cached device settings do not participate in admission.
-        Captures current global parameters once for cfg context and all resolved
-        alias names. Nonempty aliases maps names to concrete components for
-        this Run, never changing global rows or tab cfg publication. None and {}
-        use cached acceptance. Temporary acceptance uses that same capture,
-        can resolve Invalid inputs without changing the publication.
-        Current saved-point storage supplies entry/point/description. No Run,
+        None and empty aliases accept current displayed values using the tab's
+        Open/Reset capture. Nonempty aliases fail before admission; Reset with
+        aliases first. No source is captured or expression re-resolved against
+        current global parameters. The fixed captured saved-point storage supplies
+        entry/point/description. No Run,
         lease, file or ledger write starts; source and alias errors propagate.
         """
+        if aliases:
+            raise GuardError(
+                "Run aliases are not supported; Reset the tab with aliases first",
+                reason_code="run_aliases_not_supported",
+            )
         tab = self._require_tab(tab_id)
         self._require_readiness(ContextReadiness.ACTIVE, "run")
 
         ctx = self._state.session_env
-        parameters = self._captured_parameters(aliases)
-        # Temporary alias resolution does not publish or change global aliases.
-        accepted = tab.cfg.accept(
-            resolution=self._cfg_resolution(parameters) if aliases else None,
-        )
-        raw_cfg = accepted.values
+        parameters = tab.cfg.env.parameters
+        accepted = tab.cfg.accept()
         req = RunRequest(
             soc=ctx.soc,
             soccfg=ctx.soccfg,
@@ -172,7 +161,7 @@ class GuardService:
                 raise GuardError(str(exc), reason_code="no_soc") from exc
 
         try:
-            tab.adapter.validate_run_request(req, raw_cfg)
+            tab.adapter.validate_run_request(req, accepted.cfg)
         except Exception as exc:
             raise GuardError(
                 f"Run config invalid: {exc}", reason_code="invalid_cfg"

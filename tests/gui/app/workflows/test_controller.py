@@ -11,9 +11,6 @@ from zcu_tools.experiment.workflows import (
 from zcu_tools.gui.app.workflows.controller import WorkflowController
 from zcu_tools.gui.session.operation_handles import OperationOutcome
 from zcu_tools.gui.session.ports import OperationConflictError
-from zcu_tools.gui.session.services.progress import (
-    BoundProgressFactory,
-)
 
 from tests.experiment.workflows._engine_fakes import (
     ManualClock,
@@ -83,17 +80,13 @@ def test_submit_is_pending_until_worker_accepts_and_owner_releases_lease(
     assert not rig.bars
 
 
-@pytest.mark.parametrize("failure", ["lease", "factory", "submit"])
+@pytest.mark.parametrize("failure", ["lease", "submit"])
 def test_submit_failure_has_no_native_artifacts_or_lease(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     failure: str,
 ) -> None:
     harness, rig = StartHarness(), Rig(tmp_path)
     controller = create_controller(harness, rig, lambda _status, _error: None)
-
-    def reject_factory(_token: int, _owner: str) -> BoundProgressFactory:
-        raise OSError("factory failed")
 
     if failure == "lease":
         harness.gate.register(
@@ -105,9 +98,6 @@ def test_submit_failure_has_no_native_artifacts_or_lease(
             resource_id="flux",
         )
         expected = OperationConflictError
-    elif failure == "factory":
-        monkeypatch.setattr(harness.progress, "make_factory", reject_factory)
-        expected = OSError
     else:
         harness.background.fail_submit = True
         expected = OSError

@@ -14,8 +14,12 @@ from zcu_tools.analysis.fluxdep import (
     fold_initial_lines,
 )
 from zcu_tools.gui.app.fluxdep.interactive import LinePickContext
-from zcu_tools.gui.app.fluxdep.ui.interactive.base import InteractiveMplWidget
+from zcu_tools.gui.app.fluxdep.ui.interactive.base import (
+    InteractiveMplWidget,
+    picker_object_name,
+)
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.plotting.fluxdep.pick import configure_flux_pick_axes
 
 __all__ = ["LinePickerWidget", "find_best_mirror_position", "fold_initial_lines"]
@@ -28,11 +32,21 @@ class LinePickerWidget(InteractiveMplWidget):
     Controls use context.plugin actions and context.session undo. The finished
     signal requests owner Finish; get_result is only a committed-state read.
     Invalid moves restore the snapshot and display their error, not a commit.
+    The control column holds Conjugate Line, then Swap / Auto Align / Undo,
+    then the alignment status, with Finish pinned at the bottom.
     """
 
-    def __init__(self, context: LinePickContext) -> None:
+    def __init__(
+        self,
+        context: LinePickContext,
+        *,
+        onetone: bool,
+    ) -> None:
         """Attach to an open context and capture its immutable rendering inputs.
 
+        onetone is True for a OneTone spectrum: its background is drawn like
+        the OneTone sample picker (dip depth, dark on white); a TwoTone
+        background is the alignment projection.
         Closing the context rejects input. Teardown detaches only presentation;
         the owner may mount another view of the same session.
         """
@@ -50,9 +64,11 @@ class LinePickerWidget(InteractiveMplWidget):
             flux_half=state.flux_half,
             flux_int=state.flux_int,
             force_magnitude=state.magnitude_only,
+            onetone=onetone,
         )
         configure_flux_pick_axes(self.figure)
         self._conjugate = QtWidgets.QCheckBox("Conjugate Line")
+        self._conjugate.setObjectName(picker_object_name("conjugate"))
         self._conjugate.toggled.connect(
             lambda enabled: self._execute(
                 lambda: context.plugin.actions.conjugate.execute(
@@ -63,13 +79,18 @@ class LinePickerWidget(InteractiveMplWidget):
         self.controls_layout.addWidget(self._conjugate)
         self._swap = self._add_button(
             "Swap Lines",
+            "swap",
             lambda: context.plugin.actions.swap.execute(context.session, None),
         )
         self._align = self._add_button(
-            "Auto Align", lambda: context.plugin.start_alignment(context.session)
+            "Auto Align",
+            "auto_align",
+            lambda: context.plugin.start_alignment(context.session),
         )
-        self._undo = self._add_button("Undo", context.session.undo)
+        self._undo = self._add_button("Undo", "undo", context.session.undo)
         self._info = QtWidgets.QLabel()
+        make_label_selectable(self._info)
+        self._info.setObjectName(picker_object_name("status"))
         self._info.setWordWrap(True)
         self.controls_layout.addWidget(self._info)
         self._finish = self.add_finish_button()
@@ -86,9 +107,10 @@ class LinePickerWidget(InteractiveMplWidget):
         self._show_committed()
 
     def _add_button(
-        self, label: str, operation: Callable[[], object]
+        self, label: str, action: str, operation: Callable[[], object]
     ) -> QtWidgets.QPushButton:
         button = QtWidgets.QPushButton(label)
+        button.setObjectName(picker_object_name(action))
         button.clicked.connect(lambda: self._execute(operation))
         self.controls_layout.addWidget(button)
         return button

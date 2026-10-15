@@ -4,17 +4,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from socket import socket
 
-from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.remote import RemoteControlAdapter
 from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    EvalValue,
-    ScalarSpec,
-)
 from zcu_tools.gui.session.context_types import EntryInfo, EntryRequest
 
 from tests.gui.app.measure._synthetic import SampleAdapter
@@ -23,11 +15,7 @@ from ._helpers import recv_response, send
 
 
 class PointAdapter(SampleAdapter):
-    def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
-        return CfgSchema(
-            CfgSectionSpec(fields={"rate": ScalarSpec("Rate", float)}),
-            CfgSectionValue(fields={"rate": EvalValue("driver.rate")}),
-        )
+    pass
 
 
 class PointController(Controller):

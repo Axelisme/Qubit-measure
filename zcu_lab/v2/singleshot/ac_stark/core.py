@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -15,7 +15,7 @@ from zcu_tools.analysis.singleshot import (
     correct_populations,
     raw_population_signal,
 )
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     IDENTITY,
     MHZ_TO_HZ,
@@ -83,24 +83,24 @@ def get_resonance_freq(
 
 
 class AcStarkModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    init_pulse: PulseCfg | None = None
-    stark_pulse1: PulseCfg
-    stark_pulse2: PulseCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init Pulse")] = None
+    stark_pulse1: Annotated[PulseCfg, FieldMeta(label="Cavity Stark Tone (gain sweep)")]
+    stark_pulse2: Annotated[PulseCfg, FieldMeta(label="Qubit Probe Tone (freq sweep)")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class AcStarkSweepCfg(ConfigBase):
-    gain: SweepCfg
-    freq: SweepCfg
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
 
 
 class AcStarkCfg(ProgramV2Cfg, ExpCfgModel):
     modules: AcStarkModuleCfg
     sweep: AcStarkSweepCfg
-    g_center: complex
-    e_center: complex
-    radius: float
+    g_center: Annotated[complex, FieldMeta(label="Ground center")]
+    e_center: Annotated[complex, FieldMeta(label="Excited center")]
+    radius: Annotated[float, FieldMeta(label="Classification radius")]
 
     @field_serializer("g_center", "e_center")
     def serialize_center(self, value: complex) -> str:
