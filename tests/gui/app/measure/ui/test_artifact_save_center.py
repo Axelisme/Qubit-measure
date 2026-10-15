@@ -356,13 +356,17 @@ def test_output_header_precedes_full_width_aligned_path_and_error(
             )
 
 
-@pytest.mark.parametrize("window", ["#ffffff", "#353535"])
+@pytest.mark.parametrize(
+    "window, text", [("#ffffff", "#000000"), ("#353535", "#eeeeec")]
+)
 def test_output_path_is_smaller_secondary_read_only_text(
-    output_center: ArtifactSaveCenter, qapp: QApplication, window: str
+    output_center: ArtifactSaveCenter, qapp: QApplication, window: str, text: str
 ) -> None:
     palette = output_center.palette()
     palette.setColor(QPalette.ColorRole.Window, QColor(window))
-    palette.setColor(QPalette.ColorRole.PlaceholderText, QColor("#8291a0"))
+    palette.setColor(QPalette.ColorRole.Base, QColor(window))
+    palette.setColor(QPalette.ColorRole.Text, QColor(text))
+    palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(text))
     output_center.setPalette(palette)
     qapp.processEvents()
     for edit in output_center.findChildren(QLineEdit):
@@ -372,8 +376,14 @@ def test_output_path_is_smaller_secondary_read_only_text(
             if label.text() == Path(edit.toolTip()).name
         )
         assert edit.fontMetrics().height() < name.fontMetrics().height()
-        assert edit.palette().color(QPalette.ColorRole.Text) == palette.color(
-            QPalette.ColorRole.PlaceholderText
+        path_colour = edit.palette().color(QPalette.ColorRole.Text)
+        text_colour = palette.color(QPalette.ColorRole.Text)
+        window_colour = palette.color(QPalette.ColorRole.Window)
+        assert path_colour not in (text_colour, window_colour)
+        assert (
+            min(text_colour.lightness(), window_colour.lightness())
+            < (path_colour.lightness())
+            < max(text_colour.lightness(), window_colour.lightness())
         )
         assert not edit.hasFrame()
         assert edit.isReadOnly()
