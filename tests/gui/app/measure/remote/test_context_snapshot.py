@@ -29,7 +29,7 @@ def test_active_point_label_and_real_window_follow_published_target_not_aliases(
 
     caplog.set_level(logging.ERROR)
     controller = application.controller
-    window = MainWindow(controller)
+    window = MainWindow(controller, templates=lambda: {})
     previous_view = application.remote.render_view
     application.remote.render_view = window
 

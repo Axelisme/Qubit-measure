@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from zcu_tools.gui.cfg.resource import (
+from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
 )

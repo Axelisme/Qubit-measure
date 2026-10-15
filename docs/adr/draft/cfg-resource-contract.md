@@ -1,6 +1,10 @@
+---
+status: superseded
+---
+
 # Cfg 資源公開契約與同步發布
 
-狀態：measure tab slice 的設計與驗收記錄。共用 resource、measure tab、Run、Qt 及 remote／MCP 接線的現況見 [ADR-0065](../0065-cfg-editing.md) 與 [ADR-0068](../0068-remote-transport.md)。本文保留設計邊界，不宣稱四個 app 已遷移。App 與 frontend 分界仍依 [ADR-0067](../0067-gui-application.md)。[既有 cfg draft](cfg-editing-boundaries.md) 的 library conversion、writeback Apply 與其他 app 義務仍保留。本文的 measure slice 以同步 Valid／Invalid／Unavailable 取代該 draft 的 pending 描述；expression capture 也以始終保存 expression 取代舊 resolve-once direct value 目標。
+**狀態：** 已結案，由 [ADR-0065](../0065-cfg-editing.md)、[ADR-0008](../0008-cfg-editor-session.md) 與 [ADR-0073](../0073-measure-form-derivation.md) 接替。Measure tab、Library 與 writeback 共用 Form 核心。舊 Spec／Value resource、Custom 繼承、逐引用 capture codec 與 Unavailable 模型已退休。以下保留歷史提案與當時的驗收邊界，不是待實作清單。
 
 ## 問題
 

@@ -10,7 +10,6 @@ from zcu_tools.gui.app.measure.remote import ControlOptions
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.mcp.measure.session import GuiRpcError
 
-from tests.gui.app.measure._library_fakes import sample_schema
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
 
 from ._helpers import Fixture, call, mcp_client, observe_run_inputs, open_client
@@ -298,99 +297,6 @@ def test_edit_error_identifies_failed_path_and_index_without_committing(live_tab
         assert reply["error"]["code"] == "invalid_params"
         assert reply["error"]["reason"] == "form_errors"
         assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == before
-    finally:
-        sock.close()
-
-
-def test_library_editor_batch_retains_its_independent_prefix_contract(live_tab):
-    fixture, _ = live_tab
-    schema = sample_schema()
-    parameters = fixture.ctrl.read_context()
-    editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(
-        schema, parameters=parameters, gc=False
-    )
-    sock = open_client(fixture.service.port)
-    try:
-        result = call(
-            sock,
-            "editor.set_fields",
-            {
-                "editor_id": editor_id,
-                "edits": [
-                    {
-                        "path": "sweep",
-                        "value": {"start": 2.0, "stop": 8.0, "step": 2.2},
-                    },
-                ],
-            },
-        )
-        assert result["ok"] is True
-        assert result["result"]["actual"]["sweep"]["expts"] == 4
-        rejected = call(
-            sock,
-            "editor.set_fields",
-            {
-                "editor_id": editor_id,
-                "edits": [
-                    {"path": "gain", "value": 0.25},
-                    {"path": "sweep", "value": {"start": 3.0, "stop": 9.0}},
-                ],
-            },
-        )
-        assert rejected["error"]["reason"] == "invalid_settable_path"
-        tree = call(sock, "editor.get", {"editor_id": editor_id})["result"]["tree"]
-        assert tree["children"]["gain"]["input"]["resolved"] == pytest.approx(0.25)
-        assert tree["children"]["sweep"]["inputs"]["expts"]["resolved"] == 4
-    finally:
-        sock.close()
-
-
-@pytest.mark.parametrize("failure", ["unavailable", "provider_fault"])
-def test_independent_editor_batch_preserves_precondition_and_prior_prefix(
-    live_tab, monkeypatch, failure
-):
-    from zcu_tools.gui.session.value_lookup import ProviderError, UnavailableValue
-
-    fixture, _ = live_tab
-    schema = sample_schema()
-    parameters = fixture.ctrl.read_context()
-    editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(
-        schema, parameters=parameters, gc=False
-    )
-
-    def reject(*_args):
-        if failure == "unavailable":
-            raise UnavailableValue("device.bias.value", "not ready")
-        raise ProviderError(
-            "device.bias.value", "device:bias", ValueError("driver fault")
-        )
-
-    monkeypatch.setattr(fixture.ctrl, "read_value_source", reject)
-    sock = open_client(fixture.service.port)
-    try:
-        reply = call(
-            sock,
-            "editor.set_fields",
-            {
-                "editor_id": editor_id,
-                "edits": [
-                    {"path": "gain", "value": 0.25},
-                    {
-                        "path": "gain",
-                        "value": {
-                            "__kind": "value_ref",
-                            "key": "device.bias.value",
-                            "type": "float",
-                        },
-                    },
-                ],
-            },
-        )
-        assert reply["error"]["code"] == (
-            "precondition_failed" if failure == "unavailable" else "controller_error"
-        )
-        tree = call(sock, "editor.get", {"editor_id": editor_id})["result"]["tree"]
-        assert tree["children"]["gain"]["input"]["resolved"] == 0.25
     finally:
         sock.close()
 

@@ -8,7 +8,7 @@ side-effect-free providers through ``ValueRegistry`` and callers receive only th
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Generic, Protocol, TypeAlias, TypeVar, cast
 
@@ -327,42 +327,6 @@ class ValueRegistry(ValueLookup):
             owner_keys.discard(key)
             if not owner_keys:
                 del self._owner_keys[owner]
-
-
-def decode_value_ref(raw: object) -> ValueRef | None:
-    """Decode an explicit wire/internal value-ref tag.
-
-    Returns ``None`` for non-value-ref objects so callers can compose this with
-    existing decoders. Malformed value-ref tags raise ``ValueError``.
-    """
-
-    if not isinstance(raw, Mapping):
-        return None
-    if raw.get("__kind") != "value_ref":
-        return None
-    key = raw.get("key")
-    if not isinstance(key, str):
-        raise ValueError("value_ref requires a string 'key'")
-    type_name = raw.get("type", raw.get("type_name"))
-    if type_name is not None and not isinstance(type_name, str):
-        raise ValueError("value_ref 'type' must be a string when provided")
-    return ValueRef(key=key, type_name=type_name)
-
-
-def parse_value_ref_text(text: str) -> ValueRef | None:
-    """Parse the explicit GUI convenience form ``@{source.key}``.
-
-    Parsing is intentionally exact after trimming surrounding whitespace; arbitrary
-    strings are not tokenized.
-    """
-
-    stripped = text.strip()
-    if not (stripped.startswith("@{") and stripped.endswith("}")):
-        return None
-    key = stripped[2:-1].strip()
-    if not key:
-        raise ValueError("value_ref text requires a non-empty key")
-    return ValueRef(key=key)
 
 
 def resolve_value_ref(

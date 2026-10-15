@@ -21,6 +21,7 @@ from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.device_control import DeviceControlFacet
 from zcu_tools.gui.session.predictor_control import PredictorControlFacet
 from zcu_tools.gui.session.progress_control import ProgressControlFacet
+from zcu_tools.gui.session.services.arb_waveform import ArbWaveformService
 from zcu_tools.gui.session.services.connection import SoCConnectionService
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
@@ -77,6 +78,8 @@ class SessionServices:
         settings: Entry opening/creation and remembered setup preferences.
         values: Read-only lookup of the session value-source registry.
         value_sources: Binder publishing cached owner-specific value sources.
+        arb_waveform: Qubit-scoped arbitrary waveform assets of the session
+            database, shared by every host's Inspect and ARB dialog.
 
     ``runner`` and ``progress`` are the exact instances supplied to
     ``build_session_services``; this bundle does not create or replace them.
@@ -97,6 +100,7 @@ class SessionServices:
     settings: ProjectSettingsService
     values: ValueLookup
     value_sources: ValueSourceBinder
+    arb_waveform: ArbWaveformService
 
 
 def build_session_services(
@@ -199,4 +203,5 @@ def build_session_services(
         settings=settings,
         values=value_registry,
         value_sources=value_sources,
+        arb_waveform=ArbWaveformService(state),
     )

@@ -4,8 +4,8 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from zcu_tools.gui.app.measure.services import arb_waveform
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.session.services import arb_waveform
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from ._helpers import Fixture, dispatch_handler

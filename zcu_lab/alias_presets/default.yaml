@@ -1,0 +1,6 @@
+format: zcu.aliases
+format_version: "1.0"
+aliases:
+  qubit: ""
+  resonator: $qubit.resonator
+  flux_dev: ""
