@@ -306,6 +306,9 @@ def test_error_tints_and_tooltips_restore_in_both_palettes(
     view, state = editor
     palette = QPalette()
     palette.setColor(QPalette.ColorRole.Base, QColor("#242424" if dark else "#fafafa"))
+    palette.setColor(
+        QPalette.ColorRole.Window, QColor("#353535" if dark else "#fafafa")
+    )
     palette.setColor(QPalette.ColorRole.Text, QColor("#eeeeee" if dark else "#151515"))
     palette.setColor(QPalette.ColorRole.Highlight, QColor("#4488cc"))
     view.setPalette(palette)
@@ -346,6 +349,7 @@ def test_error_tints_and_tooltips_restore_in_both_palettes(
         assert colour.red() - colour.green() > before.red() - before.green()
         if path in ("enabled", "inner"):
             assert isinstance(target, QLabel)
+            assert colour == QColor("#ff8a80" if dark else "#b3261e")
     assert row_tooltip(view, "amount").endswith(original["amount"][1])
     assert "Requested amount" in row_tooltip(view, "amount")
     assert "Right-click" in row_tooltip(view, "amount")
@@ -381,6 +385,9 @@ def test_expression_errors_keep_the_mode_tint_and_add_a_red_border(
     palette.setColor(QPalette.ColorRole.Base, QColor("#242424" if dark else "#fafafa"))
     palette.setColor(QPalette.ColorRole.Text, QColor("#eeeeee" if dark else "#151515"))
     palette.setColor(QPalette.ColorRole.Highlight, QColor("#4488cc"))
+    palette.setColor(
+        QPalette.ColorRole.Window, QColor("#353535" if dark else "#fafafa")
+    )
     view.setPalette(palette)
     mode(view, "amount").trigger()
     text = child(view, QLineEdit, "form.input.amount")
@@ -397,7 +404,7 @@ def test_expression_errors_keep_the_mode_tint_and_add_a_red_border(
     border = re.search(r"border:\s*1px solid (#[0-9a-fA-F]+)", text.styleSheet())
     assert border is not None
     red = QColor(border.group(1))
-    assert red.red() > red.green() and red.red() > red.blue()
+    assert red == QColor("#ff8a80" if dark else "#b3261e")
 
     mode(view, "amount").trigger()
     qapp.processEvents()

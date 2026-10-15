@@ -1,8 +1,55 @@
 """Observable decisions and labels of the Qt dialog presenter."""
 
 import pytest
+from qtpy.QtCore import QTimer
 from qtpy.QtWidgets import QMessageBox, QWidget
 from zcu_tools.gui.widgets.dialog_presenter import QtDialogPresenter
+
+
+@pytest.mark.parametrize(
+    ("decision", "expected"),
+    [
+        (QMessageBox.StandardButton.Save, "save"),
+        (QMessageBox.StandardButton.Discard, "discard"),
+        (QMessageBox.StandardButton.Cancel, "cancel"),
+        (None, "cancel"),
+    ],
+    ids=["save", "discard", "cancel", "dismiss"],
+)
+def test_unsaved_choice_has_explicit_discard_label_and_preserves_decisions(
+    qapp, decision, expected
+):
+    parent = QWidget()
+    observed: list[tuple[str, bool]] = []
+
+    def answer() -> None:
+        box = parent.findChild(QMessageBox)
+        assert box is not None
+        discard = box.button(QMessageBox.StandardButton.Discard)
+        assert discard is not None
+        observed.append(
+            (
+                discard.text(),
+                box.defaultButton() is box.button(QMessageBox.StandardButton.Cancel),
+            )
+        )
+        if decision is None:
+            box.reject()
+        else:
+            button = box.button(decision)
+            assert button is not None
+            button.click()
+
+    try:
+        QTimer.singleShot(0, answer)
+        result = QtDialogPresenter().save_discard_cancel(
+            parent, "Unsaved changes", "Save your changes?"
+        )
+        assert observed == [("Discard", True)]
+        assert result == expected
+    finally:
+        parent.deleteLater()
+        qapp.processEvents()
 
 
 @pytest.mark.parametrize("decision", ["action", "retry", "dismiss"])
