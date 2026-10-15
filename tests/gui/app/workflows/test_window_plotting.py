@@ -56,10 +56,19 @@ def execute_plot_worker(
 
 
 class RefreshDelivery:
-    """Hold the external refresh timer boundary; deliver its real Qt signal on demand."""
+    """Hold no-argument starts of single-shot 50 ms QTimers for manual delivery.
+
+    Other starts retain real Qt scheduling. Held timers report active until stopped
+    or delivered; stopping removes them from pending.
+    Pass a pytest monkeypatch fixture or scoped MonkeyPatch to own the QTimer
+    method patches. Keep it active while using this helper, then undo it; fixture
+    teardown or the MonkeyPatch context exit restores the original methods.
+    """
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Distinct held timers awaiting delivery; empty when none remain pending.
         self.pending: set[QTimer] = set()
+        # Ordered intercepted starts, including repeats; retained after stop/delivery.
         self.starts: list[QTimer] = []
         original_start, original_stop, original_active = (
             QTimer.start,
@@ -90,7 +99,10 @@ class RefreshDelivery:
         monkeypatch.setattr(QTimer, "isActive", active)
 
     def deliver(self) -> None:
-        """Expire the one pending single-shot timer through its native timeout signal."""
+        """Remove the sole pending timer and emit its native timeout signal.
+
+        Raise AssertionError unless exactly one timer is pending.
+        """
         assert len(self.pending) == 1
         timer = self.pending.pop()
         timer.timeout.emit()
