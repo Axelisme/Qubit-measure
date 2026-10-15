@@ -13,7 +13,11 @@ The executable example is `notebook_md/simulation/environment.py` with adjacent
 `FTFSource.snapshot` captures current device values immediately before each round.
 It checks the configured source units and limits without restoring startup values.
 `execute` uses only the detached `RoundRequest`. Identical physical executions
-share deterministic preparations; repetitions add independent state/noise draws.
+share deterministic preparations within a round; repetitions add independent
+state/noise draws. Optional `library=EvolutionLibrary(absolute_path)` injects
+numeric persistence. Each round fixes published table versions once. The numeric
+owner handles formats, table matching, misses, direct solves and saving. Source
+composition does not parse files or choose per-interval algorithms.
 No density, source filter state or receiver noise is inherited by another shot.
 
 `plan_point` is an author diagnostic interface. It converts each execution's
@@ -47,5 +51,26 @@ Single-shot variance includes the joint-initial mixture and receiver noise only.
 
 Plans, populations and state labels are author-only data. Normal GUI/MCP Run
 metadata carries I/Q and the existing opaque provenance ID, not model truth.
-There is no TLS fallback, single-qubit preset, runtime table build or GPU backend.
-Private persistent replay and offline libraries have separate owners/delivery.
+There is no TLS fallback, single-qubit preset or runtime table build. Private
+persistent replay remains separate from numeric records.
+
+## Offline library
+
+`build_database(yaml_path, library_path, FTFBuildPlan(...), compiler_directory)`
+reads the same YAML and uses `plan_point` to construct the fixed-DC family. No
+drivers, GUI or QICK program is created. The optional prebuild plan supplies a
+plateau duration, fixed complex microwave ratios and common-scale interval.
+Actual runtime waveforms still come from timelines; unmatched inputs go direct.
+`database.main(argv)` is the thin CLI. The example adjacent
+`notebook_md/simulation/build_database.py` selects its YAML and data paths.
+
+Only static closed constant-envelope/frequency-zero intervals use U tables.
+Nonzero baths, dynamic flux and other controls retain full direct evolution and
+persistent exact records. Changing only baths does not invalidate U identity,
+but it changes the direct density key. Round device values always affect the
+actual model, even with unchanged YAML. No seed/noise or density crosses shots.
+`FTFSource.evaluations` retains each round/group's actual content receipt for
+the latest acquire. It resets when the acquire sequence changes and contains no
+quantum/noise state. Normal GUI/MCP metadata does not expose these author records.
+Costs must distinguish table use, direct misses and direct-record reuse.
+Closed-system timings do not establish general nonzero-bath performance.

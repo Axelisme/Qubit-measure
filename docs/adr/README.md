@@ -70,7 +70,7 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 
 ## Draft
 
-- [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：核准方向、尚未實作。啟動固定 Python environment，FTF 用 YAML 調參；同步 acquire 固定量測要求、逐 round 捕捉環境，backend 固定輸入輸出。物理與依賴邊界已定；離線GPU建庫、存檔與模擬時插值的方向已確認，GPU建表及載入尚待驗證。具體型別、schema、遷移與驗收待完成。
+- [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：核准方向、尚未實作。啟動固定 Python environment，FTF 用 YAML 調參；同步 acquire 固定量測要求、逐 round 捕捉環境，backend 固定輸入輸出。物理與依賴邊界已定；simulate.evolution 擁有 Intel OpenCL 閉系統 plateau 建表、驗證發布、持久 exact records 與 bounded RAM，experiment.ftf 注入路徑並固定 round 版本。非零 bath 與其他控制保留直接演化，持久單 round 重播與完整效能驗收另有交付。
 
 
 - [Pydantic 表單、輸入與宿主提交](draft/pydantic-form-tool.md)：Qt-free core 與 editor 分離，共用 defaults hook、evaluator 與 complex codec。Expression 保存在 input，Engine journal 只記普通值。各宿主共用 FormEditor，Library／writeback 提交持久 Spec；Measure 推導見 [[0073]]。

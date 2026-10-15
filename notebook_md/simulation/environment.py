@@ -4,6 +4,7 @@ from pathlib import Path
 
 from zcu_tools.experiment.ftf import ftf
 from zcu_tools.experiment.simulation import SimulationEnvironment
+from zcu_tools.simulate.evolution import EvolutionLibrary
 
 
 def build_environment() -> SimulationEnvironment:
@@ -12,4 +13,7 @@ def build_environment() -> SimulationEnvironment:
     The host closes the returned device manager after acquisition has drained.
     YAML/binding errors abort startup without selecting another environment.
     """
-    return ftf(Path(__file__).with_name("ftf.yaml"))
+    return ftf(
+        Path(__file__).with_name("ftf.yaml"),
+        library=EvolutionLibrary(Path(__file__).resolve().with_name("evolution_data")),
+    )

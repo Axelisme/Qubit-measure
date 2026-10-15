@@ -119,6 +119,51 @@ class BuildResult:
     publication_seconds: float = 0.0
 
 
+def _constant_amplitudes(
+    model: NumericModel, controls: ControlSequence, endpoints: tuple[float, float]
+) -> tuple[complex, ...] | None:
+    if (
+        model.hamiltonian_at is not None
+        or model.collapse_at is not None
+        or model.collapse_operators
+    ):
+        return None
+    start, end = endpoints
+    active = [
+        p
+        for p in controls.pulses
+        if quantize_ns(p.start_ns) <= start and quantize_ns(p.end_ns) >= end
+    ]
+    if any(p.frequency_ghz != 0 or p.envelope.constant is None for p in active):
+        return None
+    return tuple(
+        sum(
+            (
+                controls.amplitude(p, (start + end) / 2)
+                for p in active
+                if p.source == source.name
+            ),
+            0j,
+        )
+        for source in model.sources
+    )
+
+
+def _common_scale(
+    amplitudes: tuple[complex, ...], ratios: tuple[complex, ...]
+) -> float | None:
+    nonzero = [i for i, ratio in enumerate(ratios) if ratio != 0]
+    if not nonzero:
+        return None
+    quotient = amplitudes[nonzero[0]] / ratios[nonzero[0]]
+    scale = quotient.real
+    if abs(quotient.imag) > 1e-13 or any(
+        abs(a - scale * r) > 1e-13 for a, r in zip(amplitudes, ratios, strict=True)
+    ):
+        return None
+    return scale
+
+
 class EvolutionLibrary:
     """Explicit disk library and LRU for deterministic numeric arrays.
 
@@ -240,13 +285,21 @@ class EvolutionLibrary:
         except KeyError as error:
             raise ValueError("incomplete published validation evidence") from error
 
+    def _record_path(self, key: str) -> Path:
+        if len(key) != 64 or any(
+            character not in "0123456789abcdef" for character in key
+        ):
+            raise ValueError("direct record requires a SHA256 numeric identity")
+        return self.path / "direct" / f"{key}.npz"
+
     def read_record(self, key: str) -> tuple[ComplexMatrix, str] | None:
         """Read an exact deterministic density record, or None if absent.
 
-        key is the library-generated exact request identity. Corruption/key
+        key is the library-generated lowercase 64-digit SHA256 exact request
+        identity, not a path; invalid keys raise ValueError. Corruption/key
         mismatch fails explicitly; records are never promoted to U tables.
         """
-        path = self.path / "direct" / f"{key}.npz"
+        path = self._record_path(key)
         if not path.exists():
             return None
         archive = read_archive(path)
@@ -257,10 +310,12 @@ class EvolutionLibrary:
     def save_record(self, key: str, density: ComplexMatrix) -> str:
         """Atomically persist a deterministic exact density; return file identity.
 
-        No sampled populations/noise/filter state is retained. Disk write errors
+        key must be a lowercase 64-digit SHA256 numeric identity, never a path.
+        Invalid keys raise ValueError. No sampled populations/noise/filter state
+        is retained. Disk write errors
         propagate to the acquire that incurred this direct solve.
         """
-        path = self.path / "direct" / f"{key}.npz"
+        path = self._record_path(key)
         archive = NumericArchive(
             ArchiveHeader(kind="direct", key=key),
             np.array([], dtype=np.float64),
@@ -283,31 +338,10 @@ class EvolutionLibrary:
         misses. Actual source amplitudes must be a real common scale of stored
         ratios. Joint H is never replaced by serial source propagators.
         """
-        if (
-            model.hamiltonian_at is not None
-            or model.collapse_at is not None
-            or model.collapse_operators
-        ):
+        amplitudes = _constant_amplitudes(model, controls, endpoints)
+        if amplitudes is None:
             return None
         start, end = endpoints
-        active = [
-            p
-            for p in controls.pulses
-            if quantize_ns(p.start_ns) <= start and quantize_ns(p.end_ns) >= end
-        ]
-        if any(p.frequency_ghz != 0 or p.envelope.constant is None for p in active):
-            return None
-        amplitudes = tuple(
-            sum(
-                (
-                    controls.amplitude(p, (start + end) / 2)
-                    for p in active
-                    if p.source == source.name
-                ),
-                0j,
-            )
-            for source in model.sources
-        )
         for ref in sorted(
             snapshot.tables, key=lambda r: (r.degree, r.identity), reverse=True
         ):
@@ -321,17 +355,8 @@ class EvolutionLibrary:
             family = PlateauFamily(model, end - start, ratios)
             if family.identity != ref.family:
                 continue
-            nonzero = [i for i, ratio in enumerate(ratios) if ratio != 0]
-            if not nonzero:
-                continue
-            quotient = amplitudes[nonzero[0]] / ratios[nonzero[0]]
-            scale = quotient.real
-            if abs(quotient.imag) > 1e-13 or any(
-                abs(a - scale * r) > 1e-13
-                for a, r in zip(amplitudes, ratios, strict=True)
-            ):
-                continue
-            if header.lower <= scale <= header.upper:
+            scale = _common_scale(amplitudes, ratios)
+            if scale is not None and header.lower <= scale <= header.upper:
                 return interpolate(archive.nodes, archive.values, scale), ref.identity
         return None
 

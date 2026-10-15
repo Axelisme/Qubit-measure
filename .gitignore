@@ -48,6 +48,9 @@ package-lock.json
 *.npz
 *.pdf
 
+# Explicit example-owned numeric data and OpenCL compiler artifacts.
+/notebook_md/simulation/evolution_data/
+
 # Jupytext generated files
 notebook/*
 notebook_md/plot/*

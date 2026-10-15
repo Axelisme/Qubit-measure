@@ -16,8 +16,16 @@ def test_intel_joint_complex128_batch_matches_independent_exponential(tmp_path):
         basis,
         np.diag([0, 0.017]).astype(complex),
         (
-            DriveSource("a", np.asarray(0.012*x, dtype=np.complex128), np.asarray(0.012*y, dtype=np.complex128)),
-            DriveSource("b", np.asarray(0.009*y, dtype=np.complex128), np.asarray(0.009*x, dtype=np.complex128)),
+            DriveSource(
+                "a",
+                np.asarray(0.012 * x, dtype=np.complex128),
+                np.asarray(0.012 * y, dtype=np.complex128),
+            ),
+            DriveSource(
+                "b",
+                np.asarray(0.009 * y, dtype=np.complex128),
+                np.asarray(0.009 * x, dtype=np.complex128),
+            ),
         ),
     )
     family = PlateauFamily(model, 8.0, (1 + 0.3j, -0.4 + 0.2j))

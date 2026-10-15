@@ -4,7 +4,7 @@ status: draft
 
 # 模擬環境、FTF preset 與參數檔
 
-**狀態：** 已核准方向的設計草稿，尚未實作；具體型別、部分 owner、schema 與驗收仍待完成。2026-10-15 補入離線演化表、GPU建庫與模擬時重用方向；尚未驗證的實作細節仍明列。
+**狀態：** 已核准方向的設計草稿。環境、FTF 數值工具與離線表的現行入口見各 owner README。持久單 round 重播與完整校準效能驗收仍待完成。本文保留使用者裁決原話，不以早期候選敘述替代現行 owner 契約。
 
 **關聯：** [[0064]] 啟動組裝、[[0068]] remote transport、[[0069]] 現行裝置環境、[[0071]] coherence 單位、[模組定位](../0072-module-boundaries.md)。遷移完成前，現行 simulate 功能仍以 [[0069]] 為準。早期選項比較保留於[討論快照](../../discussions/2026-10-13-simulation-environment-ftf-preset.md)。
 
@@ -181,11 +181,15 @@ Photon dephasing 使用 joint-state resonator pull 的完整差、total linewidt
 
 ### 離線演化表與模擬時重用
 
-採用可選離線計算格點、保存演化表，模擬時載入並插值演化；缺少可用資料時允許執行期求解並自動加入資料庫。預建不是開始模擬的必要前置條件。離線 GPU 平行建庫是後續驗證與實作方向；既有 GPU 批次演化證據不代表 GPU 建庫已完成。執行期不要求每點使用 GPU，CPU 求值與 GPU 常駐批次的選擇依實測決定。
+採用可選離線計算格點、保存演化表，模擬時載入並插值演化。缺少可用資料時，執行期直接求解並保存確定性 direct record，不建立或擴充插值表。預建不是開始模擬的必要前置條件。`simulate.evolution` 擁有格式、完整性、身份、驗證發布與 RAM 管理。`experiment.ftf` 只注入路徑、固定每 round 的發布版本，並組合 Evolution、populations 與 ADC。跨 package 方向仍由 C8、C9、C12 保護，不新增 storage interface 或 ignore。
+
+首版離線建庫使用本機 Intel Arc OpenCL complex128 批次計算，CPU reference 使用 SciPy expm 獨立對照。共同計算輸入是固定 DC、constant envelope、frequency=0 的聯合 Hamiltonian 與 signed complex 控制比例，插值軸是共同 amplitude scale。Duration、phase、source operators 與 basis 都參與身份。四／六階表在 heldout、相位接續、512 次長序列與 amplitude-scale 參數回收通過後才發布。這不是物理模型或任意設定的收斂保證，也不是 gate infidelity。
+
+首版 U 表只用於閉系統。非零 bath、動態 flux、其他 envelope 或 frequency 保留完整直接演化與持久 exact density records，不因缺表拒絕合法 FTF。Bath-only 修改可保留 U identity，但直接密度結果必須匹配新 baths。將 U 表和 bath splitting 組合是尚未實作的後續方向。首版沒有空 backend、registry、其他 GPU 實作或 production CPU 建庫 fallback。執行期讀表不要求 GPU。
 
 2026-10-15，使用者確認：「但我覺得目前的路線可行：預先計算成檔案，模擬時載入並插值。」並補充：「認同，通常模擬yaml參數在一輪使用中不怎麼會變。」使用者要求整理的路線是：「離線GPU平行建庫，模擬時插值演化，分段模擬以及快取等。」
 
-FTF環境目錄提供 `build_database.py` 類型的離線入口，直接讀取目前YAML、執行建庫並輸出資料庫檔案。建庫與模擬共用設定解析及物理語意；入口保持薄層，數值行為由可import函式提供。Environment 作者選擇並注入數值資料路徑；具體入口位置、YAML 建庫範圍與續建規則仍待細化。
+FTF環境目錄提供 `build_database.py` 類型的離線入口，直接讀取目前YAML、執行建庫並輸出資料庫檔案。建庫與模擬共用設定解析及物理語意；入口保持薄層，數值行為由可import函式提供。Environment 作者選擇並注入數值資料路徑。`experiment.ftf.build_database` 與 `database.main(argv)` 直接讀 YAML，範例入口位於 `notebook_md/simulation/build_database.py`。部分節點按 plan identity 存檔續建，驗證完成後才產生不可變發布檔。
 
 2026-10-15，使用者裁決：「應該只規定資料的格式與解析工具，路徑應該由enviroment/xxx作者注入。」數值 library 擁有演化資料格式、版本、必要檢查與解析／序列化工具，不規定預設資料目錄，也不從 cwd 或全域設定隱式尋找資料。離線建庫與執行期使用 environment 提供的路徑，environment 不自行解碼數值表內部版面。接收明確路徑的讀寫工具不擁有路徑政策。
 
@@ -203,13 +207,13 @@ FTF環境目錄提供 `build_database.py` 類型的離線入口，直接讀取�
 
 2026-10-15，對精度、執行期補表預算及資料保留三項建議，使用者裁決：「1可以 2第一版先不要支援執行期補表，表先由離線建立 3同意」。因此 environment 提供數值容差；加速算法在相同物理模型、basis 及量化後控制下對照高精度直接解，2 ns 量化前後的差異另驗。驗證涵蓋 population 絕對誤差、coherence／phase 與校準參數，於開發及離線建表進行，不新增 runtime 物理適用域審查。具體容差未在本次指定。
 
-檔案載入與參數範圍檢查屬必要資料契約，不是runtime物理適用域認證。不得靜默外插或套用不匹配的表。損壞檔案、非法輸入、不支援操作與solver失敗不是一般cache miss，不以空成功結果或未聲明算法切換掩蓋。NPZ目前只是研究產物格式。
+檔案載入與參數範圍檢查屬必要資料契約，不是runtime物理適用域認證。不得靜默外插或套用不匹配的表。損壞檔案、非法輸入、不支援操作與solver失敗不是一般cache miss，不以空成功結果或未聲明算法切換掩蓋。首版數值檔使用帶 JSON header 與內部 SHA256 的非 pickle NPZ，發布檔另以全檔 SHA256 命名。Library 驗證版本與陣列形狀，environment 不解碼版面。
 
-不要求一次建出全部參數組合。按family或參數區塊建完整小表、保存未完成格點再續建都是候選。現用tensor插值須取得其指定節點才能宣稱該表完成；逐點lazy累積或自適應插值需要另外驗證。RAM 快取在容量限制內可淘汰並重新載入；磁碟數值資料第一版不自動刪除，由 environment 作者管理，不建立磁碟 LRU 或背景清理。重播保留實際資料身份，刪除引用檔案後不宣稱仍可完整重播。既有 4 GB 預算須列出涵蓋的常駐陣列，建庫工作空間與 GPU 暫存另行計量；host／GPU 歸算、具體 eviction 與檔案 schema 仍待細化。
+不要求一次建出全部參數組合。首版按 family 建完整一維小表，保存未完成格點再續建。指定節點未齊全或驗證失敗時不發布，逐點 lazy 累積與自適應插值不在首版範圍。RAM LRU 預設限制每個 library instance 的常駐 host 陣列總量為 4,000,000,000 bytes，包括 U 格點、scale nodes 與完成 mask。Direct records 目前逐次讀取而不常駐，runtime GPU residency 為零。解碼、模型、solver、ADC 與建庫工作空間另計，不把 cache 預算當成 process RAM 上限。磁碟資料不自動刪除，由 environment 作者管理，沒有磁碟 LRU 或背景清理。刪除內容引用的檔案後，不宣稱仍可完整重播。
 
-離線建庫及驗證、首用載入與初始化、warm完整acquire分別報成本。四階／六階指插值階數，最終選擇需看observable與校準／gate參數偏差及實際成本。研究用保守門檻不是正式誤差承諾。數值 library 的具體子 package 分拆與新增 import 依賴邊尚未決定，不能以本方向建立未審查的registry或cache服務。
+離線建庫及驗證、首用載入與初始化、warm完整acquire分別報成本。四階／六階指插值階數，最終選擇需看observable與校準／gate參數偏差及實際成本。研究用保守門檻不是正式誤差承諾。數值能力位於 `simulate.evolution`，不建立 registry 或 cache service。`experiment.ftf` 依 C8、C9 組合穩定工具，C12 繼續禁止 simulate 依賴 resources、program 或 device。
 
-本次比較與使用者修正保留於[討論快照](../../discussions/2026-10-15-offline-propagator-library.md)。此方向不改變既有FTF／flux目標或white_noise契約，也不授權正式實作或恢復已暫停的研究。
+早期比較與使用者修正保留於[討論快照](../../discussions/2026-10-15-offline-propagator-library.md)。現行數值格式、公開入口、精度界線與記憶體歸算見 [evolution README](../../../lib/zcu_tools/simulate/evolution/README.md)。這些能力不改變既有 FTF／flux 範圍或 white_noise 契約。完整 acquire 的效能與持久重播不能由局部插值時間推定。
 
 ### 演化與 ADC 數值工具
 

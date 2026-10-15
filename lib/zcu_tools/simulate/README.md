@@ -70,8 +70,11 @@ A zero or singular positive-semidefinite 2x2 I/Q noise covariance is valid.
 Environment code owns unit conversion from QICK us/MHz/degrees to ns/GHz/radians
 and composes evolution, explicit populations and ADC. Program adapters still own
 channel order, QICK buffer shapes, nearest-even int64 conversion and acquisition
-normalization. These tools have no offline table, direct-record persistence,
-backend registry or GPU implementation.
+normalization. [`evolution`](evolution/README.md) also owns optional offline
+Intel OpenCL U tables, checked numeric files and persistent exact density
+records. GPU construction is offline only. Runtime fixes published versions at
+the environment-selected boundary and directly solves uncovered legal requests.
+There is no backend registry or automatic runtime table construction.
 
 ## FTF circuits and noise
 
