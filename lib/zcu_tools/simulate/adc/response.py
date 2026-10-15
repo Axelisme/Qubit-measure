@@ -13,9 +13,10 @@ class ConditionalReadout:
 
     model: pure numeric readout/rate/calibration model, never mutated.
     rtol/atol: positive finite DOP853 local error tolerances, not a physical
-        convergence guarantee. Each call starts fields in vacuum at the earliest
-        of origin zero, pulse start or sample time. Populations supplied to ADC
-        refer to that readout origin; sample lookback sees the same shot.
+        convergence guarantee. Readout origin is the earliest pulse start_ns,
+        or zero for no pulses. Initial populations refer to that origin, where
+        fields start in vacuum. Earlier lookback samples have zero physical
+        field and do not evolve populations; receiver offset/noise still apply.
     """
 
     def __init__(
@@ -50,8 +51,8 @@ class ConditionalReadout:
         integration or invalid probability/moment output. No density Hilbert
         space, jump-time sampling, clipping or renormalization is introduced.
         """
-        start = min(0.0, float(grid.times_ns[0]), *(p.start_ns for p in pulses))
-        end = float(grid.times_ns[-1])
+        start = min(p.start_ns for p in pulses) if pulses else 0.0
+        end = max(start, float(grid.times_ns[-1]))
         points = sorted(
             {start, end}
             | {
@@ -66,7 +67,7 @@ class ConditionalReadout:
         state: NDArray[np.complex128] = np.zeros((n, 3, n), dtype=np.complex128)
         state[:, 0, :] = np.eye(n)
         outputs = np.zeros((len(grid.times_ns), n, 3, n), dtype=np.complex128)
-        outputs[grid.times_ns == start] = state
+        outputs[grid.times_ns <= start] = state
         for left, right in zip(points[:-1], points[1:], strict=True):
             state = self._interval(state, pulses, grid.times_ns, outputs, left, right)
         self._validate_solution(state)

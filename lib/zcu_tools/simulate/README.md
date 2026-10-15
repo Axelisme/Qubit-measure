@@ -51,6 +51,9 @@ The outgoing forward field is `b_in-v.T*alpha`. This retains correlations betwee
 state and field. Substituting a population-averaged frequency does not implement
 this model. Each pulse has finite support, so the same equations cover ringup
 and ringdown. `SampleGrid` supplies physical lookback times and demodulation.
+Populations refer to the earliest readout pulse start, or zero with no pulses.
+Earlier samples have zero physical field and do not advance the initial mixture.
+Receiver offset and noise still apply to those samples.
 
 `ADC.sample` computes these conditional means once and draws one initial joint
 state per shot, then adds independent per-sample receiver noise. It does not draw

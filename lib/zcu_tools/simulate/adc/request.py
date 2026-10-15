@@ -111,6 +111,8 @@ class PopulationInput:
         and summing to one within 1e-10. No clipping or renormalization occurs.
         Convert density explicitly with evolution.populations if appropriate;
         ADC does not infer a basis or turn coherences into probabilities.
+        These describe the earliest readout pulse start_ns, or origin zero when
+        pulses are empty. Earlier lookback samples do not advance the mixture.
     Invalid values/order at the ADC seam raise ValueError.
     """
 
