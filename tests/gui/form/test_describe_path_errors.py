@@ -57,7 +57,7 @@ def test_describe_path_error_exposes_full_requested_path_and_valueerror_ancestry
     path: tuple[str, ...],
 ) -> None:
     state = FormState(FormInput(PathForm, {"selected": {"kind": "second"}}))
-    with pytest.raises(ValueError) as failure:
+    with pytest.raises(ValueError, match="form field path") as failure:
         state.describe(path, FormEnv())
     assert isinstance(failure.value, form.FormPathError)
     assert failure.value.path == path

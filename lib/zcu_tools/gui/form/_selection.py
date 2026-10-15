@@ -13,7 +13,7 @@ from pydantic.fields import FieldInfo
 from ._json import default_json
 from ._sources import local_choices
 from ._structure import alternatives, discriminator, intrinsic_tags, model_types
-from .model import FormEnv, FormModel, FormPath, FormWritePath
+from .model import FormEnv, FormModel, FormPath, FormPathError, FormWritePath
 from .options import Option
 
 
@@ -96,11 +96,8 @@ class Level:
     pinned: Mapping[str, JsonValue] = field(default_factory=dict)
 
     def field(self, name: str) -> Field:
-        """Resolve a direct field; unknown names raise with the full path."""
-        path = (*self.prefix, name)
-        info = self.model.model_fields.get(name)
-        if info is None:
-            raise ValueError(f"Unknown form field path: {path!r}")
+        """Resolve a declared direct field; undeclared names raise KeyError."""
+        info = self.model.model_fields[name]
         choices = self.choices.get((name,))
         options = self.options.get((name,))
         if options is None:
@@ -214,18 +211,23 @@ def resolve(
     """Resolve one nonroot canonical path through active children only.
 
     Unknown fields, inactive descendants and traversal into whole leaves raise
-    ValueError naming the requested path. The target itself may be invalid.
+    FormPathError carrying the full requested path. The target itself may be
+    invalid. Noncanonical path shapes still raise ValueError.
     """
     validate_path(path)
     if not path:
         raise ValueError(f"Expected a nonroot model-field tuple: {path!r}")
     level = root_level(model, data, env)
     for index, name in enumerate(path):
+        if name not in level.model.model_fields:
+            raise FormPathError(path, f"Unknown form field path: {path!r}")
         target = level.field(name)
         if index == len(path) - 1:
             return target
         children = target.children(env)
         if children is None:
-            raise ValueError(f"Inactive or whole-leaf form field path: {path!r}")
+            raise FormPathError(
+                path, f"Inactive or whole-leaf form field path: {path!r}"
+            )
         level = children
-    raise ValueError(f"Unknown form field path: {path!r}")
+    raise FormPathError(path, f"Unknown form field path: {path!r}")

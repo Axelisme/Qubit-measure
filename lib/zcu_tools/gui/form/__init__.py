@@ -17,6 +17,7 @@ from .model import (
     FormInput,
     FormModel,
     FormPath,
+    FormPathError,
     FormPreview,
     FormState,
     FormValue,
