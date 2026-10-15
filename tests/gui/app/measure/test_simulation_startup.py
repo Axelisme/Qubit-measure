@@ -8,7 +8,7 @@ from zcu_tools.device.fake import FakeDevice
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.session.services.project_settings import DeviceMemoryInfo
+from zcu_tools.gui.app.measure.services.persistence_types import AppPersistedState, PersistedStartup, PersistedDeviceEntry
 from zcu_tools.gui.session.state import DeviceStatus
 
 from tests.gui.app.measure._reload_fakes import Loader
@@ -34,7 +34,7 @@ def behavior_with_environment(tmp_path, monkeypatch, env):
 
 def test_startup_publishes_same_live_manager_before_remembered_devices(qapp, tmp_path, monkeypatch):
     env = white_noise(std_adc=0, seed=1)
-    driver = FakeDevice("none", fast_mode=True)
+    driver = FakeDevice(fast_mode=True)
     env.devices.register_device("bias", driver)
     old_hook = sys.excepthook
     behavior = behavior_with_environment(tmp_path, monkeypatch, env)
@@ -44,16 +44,16 @@ def test_startup_publishes_same_live_manager_before_remembered_devices(qapp, tmp
         ctrl = assembly.controller
         assert ctrl.has_soc()
         assert ctrl.get_soccfg() is env.soccfg
-        assert ctrl.get_connected_devices()["bias"] is driver
+        assert ctrl.device_control.get_device_info("bias").value == driver.get_value()
         # The owner API preserves existing live rows during preference restore.
-        ctrl.device_control.register_remembered_devices([
-            DeviceMemoryInfo("bias", "YOKOGS200", "GPIB::1"),
-            DeviceMemoryInfo("old_bias", "YOKOGS200", "GPIB::2"),
-        ])
-        snapshots = {s.name: s for s in ctrl.device_control.list_device_snapshots()}
+        ctrl.restore_persisted_state(AppPersistedState(startup=PersistedStartup(devices=(
+            PersistedDeviceEntry(name="bias", type_name="YOKOGS200", address="GPIB::1"),
+            PersistedDeviceEntry(name="old_bias", type_name="YOKOGS200", address="GPIB::2"),
+        ))))
+        snapshots = {entry.name: ctrl.device_control.get_device_snapshot(entry.name) for entry in ctrl.device_control.list_devices()}
         assert snapshots["bias"].status is DeviceStatus.CONNECTED
         assert snapshots["old_bias"].status is DeviceStatus.MEMORY_ONLY
-        assert ctrl.get_connected_devices() == {"bias": driver}
+        assert env.devices.get_all_devices() == {"bias": driver}
         ctrl.close()
         assert env.devices.get_device("bias") is driver  # drain does not own driver close
     finally:
@@ -72,7 +72,7 @@ def test_environment_install_failure_closes_returned_manager(qapp, tmp_path, mon
             raise RuntimeError("snapshot unavailable")
 
     env = white_noise()
-    env.devices.register_device("bad", FailingInfoDevice("none", fast_mode=True))
+    env.devices.register_device("bad", FailingInfoDevice(fast_mode=True))
     old_hook = sys.excepthook
     behavior = behavior_with_environment(tmp_path, monkeypatch, env)
     try:
