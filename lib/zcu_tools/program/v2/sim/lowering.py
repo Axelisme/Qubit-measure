@@ -731,7 +731,7 @@ def _readout_plan(
             pulse_pre_delay_us=pulse_pre_delay_us,
         )
     raise UnsupportedModuleError(
-        f"unsupported readout module {type(module).__name__} for lowering"
+        f"unsupported readout module {type(module).__name__} {module.name!r} for lowering"
     )
 
 

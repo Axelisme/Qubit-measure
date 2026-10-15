@@ -37,6 +37,16 @@ is not a cfg field. `PulseRegistry` includes it in hardware-definition identity,
 so unpaired playback and ADC channels 0 and 1 cannot share a definition by
 accident. Mixer declaration receives the channel only when mixing is configured.
 
+`MuxReadoutCfg` reuses the numeric cfg_model schema. `MuxReadout` declares fixed
+mixmux8 tones and explicit logical outputs on one static PFBv4, then plays one
+all-tone const mask and triggers the outputs together. It protects successful
+route declarations through `ModularProgramV2.protect_readout_routes`, including
+when nested; unprotected routes retain QICK's declaration semantics.
+`collect_iq` selects one standard averaged read using that program's actual
+channel ordering and returns tone-ordered float64 I/Q. The experiment owns
+complex conversion, interpretation and persistence. Mux has no physical
+simulation support.
+
 ## Readout Runtime Words
 
 - `PulseReadout` accepts optional `gain_val`, `freq_val`, and `ro_freq_val`
