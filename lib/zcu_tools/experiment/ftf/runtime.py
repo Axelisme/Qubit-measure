@@ -21,6 +21,7 @@ from zcu_tools.program.v2.simulation import SimulationBinding, SimulationSoc
 from zcu_tools.resources.ftf import FTFSettings, load_ftf, parse_ftf
 from zcu_tools.simulate.adc import ADC, PopulationInput, SamplingIdentity
 from zcu_tools.simulate.evolution import (
+    EvaluationReceipt,
     Evolution,
     EvolutionLibrary,
     LibrarySnapshot,
@@ -33,10 +34,27 @@ from .point import FTFPointPlan, plan_point
 
 
 @dataclass(frozen=True)
+class FTFNumericUse:
+    """Author-only actual evolution content used by one round execution group.
+
+    acquire_sequence/round_index: detached request sampling scope, not cache key.
+    group_index: zero-based deterministic timeline group in that round. receipt:
+    origin, immutable numeric content identities and full evolve cost. These
+    records contain no density/noise state and are not ordinary GUI/MCP truth.
+    """
+
+    acquire_sequence: int
+    round_index: int
+    group_index: int
+    receipt: EvaluationReceipt
+
+
+@dataclass(frozen=True)
 class _Prepared:
     plan: FTFPointPlan
     populations: Populations
     adc: ADC
+    receipt: EvaluationReceipt
 
 
 class FTFSource:
@@ -47,7 +65,9 @@ class FTFSource:
     per round; execute uses only RoundRequest numeric inputs, not drivers.
     library: optional explicitly pathed numeric owner for frozen U tables/exact
     records. Each round fixes published versions. No point preparation, density,
-    source tail or receiver noise is retained across calls.
+    source tail or receiver noise is retained across calls. evaluations holds
+    actual numeric receipts for every group/round of the latest acquire only;
+    a new acquire sequence clears earlier receipts, never published disk data.
     This is author-side composition, not an ordinary GUI/MCP truth interface.
     """
 
@@ -62,6 +82,7 @@ class FTFSource:
         self.devices = devices
         self.identity = sha256(settings.model_dump_json().encode()).hexdigest()
         self.library = library
+        self.evaluations: tuple[FTFNumericUse, ...] = ()
 
     def snapshot(self) -> EnvironmentSnapshot:
         """Capture current fixed-unit live values, without startup writes.
@@ -93,17 +114,18 @@ class FTFSource:
         plan = plan_point(self.settings, snapshot, timeline)
         solver = self.settings.solver
         # Explicit three-tool composition: density -> target populations -> ADC.
-        state = Evolution(
+        evolution = Evolution(
             plan.evolution_model,
             SolverSettings(solver.rtol, solver.atol, solver.max_step_ns),
             library=self.library,
             tables=tables,
-        ).evolve(
+        )
+        state = evolution.evolve(
             plan.joint.initial_state(), plan.controls, end_ns=plan.readout_start_ns
         )
         mixture = populations(state, plan.readout_basis)
         adc = ADC(plan.readout_model, rtol=solver.rtol, atol=solver.atol)
-        return _Prepared(plan, mixture, adc)
+        return _Prepared(plan, mixture, adc, evolution.last_evaluation)
 
     def execute(self, request: RoundRequest) -> RoundSignals:
         """Generate this round's single ADC sums/traces from detached timelines.
@@ -116,6 +138,11 @@ class FTFSource:
         # Publication versions are fixed for this round, not for each group.
         tables = self.library.snapshot() if self.library is not None else None
         acquire = request.acquire
+        if (
+            self.evaluations
+            and self.evaluations[-1].acquire_sequence != acquire.sequence
+        ):
+            self.evaluations = ()
         if len(acquire.timelines) != acquire.executions:
             raise ValueError("FTF requires per-execution point timelines")
         groups: dict[PointTimeline, list[int]] = {}
@@ -135,6 +162,9 @@ class FTFSource:
         output = np.empty(shape, dtype=float)
         for group, (timeline, indices) in enumerate(groups.items()):
             prepared = self._prepare(request.snapshot, timeline, tables)
+            self.evaluations += (
+                FTFNumericUse(acquire.sequence, request.index, group, prepared.receipt),
+            )
             plan = prepared.plan
             mixture = PopulationInput(
                 prepared.populations.basis.labels, prepared.populations.values

@@ -6,4 +6,4 @@ inputs for independent author diagnostics, not normal GUI/MCP calibration truth.
 
 from .database import FTFBuildPlan, build_database
 from .point import FTFPointPlan, plan_point
-from .runtime import FTFSource, ftf
+from .runtime import FTFNumericUse, FTFSource, ftf

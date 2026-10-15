@@ -214,8 +214,6 @@ def test_source_retains_each_round_group_actual_numeric_content_identity(tmp_pat
         )
         latest = source.evaluations
         assert len(latest) == 2
-        assert all(
-            item.acquire_sequence == acquire.sequence + 1 for item in latest
-        )
+        assert all(item.acquire_sequence == acquire.sequence + 1 for item in latest)
     finally:
         env.devices.close_all_devices()
