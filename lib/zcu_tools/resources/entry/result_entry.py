@@ -249,8 +249,13 @@ class ResultEntry:
         origin. origin identifies the importing frontend as gui, notebook or mcp.
         description=None preserves seed/clone metadata; a string explicitly sets it,
         including empty text, within this creation/cleanup scope.
-        No source files, data or images change. Failure removes only the new point;
-        completed imports may remain orphaned. No cross-file transaction is provided.
+        Reading the source library may first back up its original bytes and
+        clean invalid entries and their sources from its module_cfg. Clone copies
+        only retained entries and imports only retained sources. Data and images
+        are not copied or changed; other source files are unchanged.
+        Failure removes only the new point. Completed source-library cleanup and
+        its backup remain, and completed imports may remain orphaned. No cross-file
+        transaction is provided.
         """
         validate_origin(origin)
         destination = _entry_path(

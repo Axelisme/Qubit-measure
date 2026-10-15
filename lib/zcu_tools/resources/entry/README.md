@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-13，參數容器 2.0 與 opaque metadata
+**Last updated:** 2026-10-15，clone 來源 library 的備份與清理
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
@@ -26,9 +26,9 @@ PointView 的公開 constructor 必須提供 result_root 與 database_root，加
 
 `new_point(clone_from=...)` 接受同條目 label、`<entry>/<point>` 或相同 Result／Database roots 的 PointView。Clone 重讀已發布的 point 與 module_cfg，不用 view 的舊快照，也不讀目的 setup。目的 point 保留來源的其他 general 資料，更新 created_at。參數值與 metadata 原樣複製，不查 ledger、不匯入事件、不改寫 source，也不加 cloned_from。
 
-`module_library(label, assets=...)` 開啟該 point 的 typed library，綁定本條目 ledger 與 asset capability。它不讀 point、不選 active point，也不建立缺失文件。Library handle 與 clone 共用 library owner 的文件及來源驗證。
+`module_library(label, assets=...)` 開啟該 point 的 typed library，綁定本條目 ledger 與 asset capability。它不讀 point、不選 active point，也不建立缺失文件。Library handle 與 clone 共用 library owner 的文件、來源驗證及讀取清理政策。Clone 讀取來源 library 時，可能先逐 byte 備份原檔，再從來源主檔移除壞條目與附屬來源。Clone 只複製保留的條目，並只匯入保留的來源。
 
-跨條目 clone 只依 library 來源表，把每個不同的非 manual source 匯入為一筆本地 import 事件，共用事件只產生一筆 import。Library 來源表改寫為本地 ID，並更新直接 cloned_from。事件保存原行文字，附檔複製到目的 records。Manual 不產生 import；同條目 clone 不改 source。來源條目移走後，本地引用仍可查回。Clone 不複製 data 或圖片，不承諾 point 與 module_cfg 的跨檔 snapshot。失敗清理本次 point，已追加的 import 可以保留。
+跨條目 clone 只依 library 來源表，把每個不同的非 manual source 匯入為一筆本地 import 事件，共用事件只產生一筆 import。Library 來源表改寫為本地 ID，並更新直接 cloned_from。事件保存原行文字，附檔複製到目的 records。Manual 不產生 import；同條目 clone 不改 source。來源條目移走後，本地引用仍可查回。Clone 不複製 data 或圖片，不承諾 point 與 module_cfg 的跨檔 snapshot。失敗清理本次 point，已追加的 import 可以保留。後續 clone 失敗不回滾已完成的來源 library 清理，也不刪除其備份。
 
 ## 元件與定義
 
@@ -86,7 +86,7 @@ Data 回傳 run 的 data.h5 與當地日期樹內的 Labber 新檔名。Figure �
 
 DocumentStore 擁有單檔衝突檢查與 atomic replace。檔案、快照與視圖使用相同工作單位。不同 leaf 可合併，同 leaf 衝突拒絕整筆交易。Entry 不提供條目鎖或多檔交易。
 
-Model 的 before validator 可把舊欄位改成新欄位。Open、refresh 與空 edit 不寫檔。非空 commit 在最新 normalized tree 合併與完整驗證，再把序列化差異套回 raw YAML，保留未改節點的引號、註解與順序。保存消費 actual model_dump 輸出，不用原欄位值繞過 serializer。格式轉換不生成 metadata。
+Model 的 before validator 可把舊欄位改成新欄位。Setup／point 的 open、refresh 與空 edit 不寫檔。Library 的讀取清理是例外，依前述政策先備份再改寫。非空 commit 在最新 normalized tree 合併與完整驗證，再把序列化差異套回 raw YAML，保留未改節點的引號、註解與順序。保存消費 actual model_dump 輸出，不用原欄位值繞過 serializer。格式轉換不生成 metadata。
 
 Format 與 format_version 只描述容器結構。檔頭不符或 major 不同時拒絕載入。較新 2.x minor 保留容器層的未知欄位與 metadata 內容，不覆寫元件或 nested model 的 extra 策略。任何 minor 都由原 model 驗證完整元件 input：forbid 拒絕未知欄位，ignore 丟棄它們，allow 保留並公開它們。Ignore 丟棄的欄位在非空 commit 時移除。元件的 defaults、validators 與舊寫法演進由定義者決定，不綁容器版本號。非法元件在 load、refresh 與 commit 驗證時失敗，不發布新的值、metadata 或快照。
 
