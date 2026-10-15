@@ -71,6 +71,7 @@ class DescribeForm(FormModel):
 
     @classmethod
     def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
+        del env
         raise AssertionError("description must not request defaults")
 
     @classmethod
@@ -101,14 +102,17 @@ def test_root_model_leaf_are_single_layer_and_keep_display_constraints() -> None
     root = state.describe((), env)
     assert root.path == () and root.target is None
     assert [field.path for field in root.children][:3] == [
-        ("settings",), ("optional",), ("selection",)
+        ("settings",),
+        ("optional",),
+        ("selection",),
     ]
     settings = root.children[0]
     assert settings.kind == "model" and settings.title == "Settings"
     assert settings.group == "Advanced" and settings.collapsed
     model = state.describe(("settings",), env)
     assert [field.path for field in model.children] == [
-        ("settings", "frequency"), ("settings", "label")
+        ("settings", "frequency"),
+        ("settings", "label"),
     ]
     leaf = state.describe(("settings", "frequency"), env)
     assert leaf.children == ()
@@ -126,8 +130,12 @@ def test_root_model_leaf_are_single_layer_and_keep_display_constraints() -> None
 
 @pytest.mark.parametrize(
     ("name", "kind", "expression"),
-    [("samples", "sequence", False), ("mapping", "mapping", False),
-     ("flag", "boolean", False), ("amplitude", "complex", True)],
+    [
+        ("samples", "sequence", False),
+        ("mapping", "mapping", False),
+        ("flag", "boolean", False),
+        ("amplitude", "complex", True),
+    ],
 )
 def test_whole_leaves_describe_without_opening_container_contents(
     name: str, kind: str, expression: bool
@@ -148,8 +156,16 @@ def test_literal_enum_fixed_and_hidden_metadata_do_not_change_input() -> None:
     speed = state.describe(("speed",), env).target
     secret = state.describe(("secret",), env).target
     tag = state.describe(("grid", "kind"), env).target
-    assert count is not None and speed is not None and secret is not None and tag is not None
-    assert count.options is not None and [item.value for item in count.options] == [1, 2]
+    assert (
+        count is not None
+        and speed is not None
+        and secret is not None
+        and tag is not None
+    )
+    assert count.options is not None and [item.value for item in count.options] == [
+        1,
+        2,
+    ]
     assert speed.options is not None
     assert [item.value for item in speed.options] == [None, "slow", "fast"]
     assert speed.nullable and not speed.expression and speed.selected is None
@@ -160,33 +176,56 @@ def test_literal_enum_fixed_and_hidden_metadata_do_not_change_input() -> None:
 
 @pytest.mark.parametrize(
     ("value", "paths"),
-    [({"kind": "inline", "module": {"frequency": -2}},
-      [("selection", "module", "frequency"), ("selection", "module", "label")]),
-     ({"kind": "nullable", "module": None}, [("selection", "module")]),
-     ({"kind": "selectable", "module": {}}, [("selection", "module")]),
-     ({"kind": "ref", "name": "saved"}, []),
-     ({"kind": "missing"}, []), (None, [])],
+    [
+        (
+            {"kind": "inline", "module": {"frequency": -2}},
+            [("selection", "module", "frequency"), ("selection", "module", "label")],
+        ),
+        ({"kind": "nullable", "module": None}, [("selection", "module")]),
+        ({"kind": "selectable", "module": {}}, [("selection", "module")]),
+        ({"kind": "ref", "name": "saved"}, []),
+        ({"kind": "missing"}, []),
+        (None, []),
+    ],
 )
 def test_selected_fields_flatten_only_one_ordinary_wrapper(
     value: JsonValue, paths: list[tuple[str, ...]]
 ) -> None:
-    assert hasattr(FormState, "describe"), "selected fields need lazy full-path projection"
+    assert hasattr(FormState, "describe"), (
+        "selected fields need lazy full-path projection"
+    )
     state = FormState(FormInput(DescribeForm, {"selection": value}))
     description = state.describe(("selection",), FormEnv())
     assert [child.path for child in description.children] == paths
     assert description.target is not None and description.target.options is not None
     assert [item.label for item in description.target.options] == [
-        "None", "Saved", "Inline", "Nullable", "Selectable"
+        "None",
+        "Saved",
+        "Inline",
+        "Nullable",
+        "Selectable",
     ]
     assert description.target.selected == (
-        {"ref": 1, "inline": 2, "nullable": 3, "selectable": 4}.get(value.get("kind"))
-        if isinstance(value, dict) else 0
+        next(
+            (
+                index
+                for index, tag in enumerate(
+                    ("ref", "inline", "nullable", "selectable"), 1
+                )
+                if tag == value.get("kind")
+            ),
+            None,
+        )
+        if isinstance(value, dict)
+        else 0
     )
     assert state.input.data == state.base.data == {"selection": value}
 
 
 @pytest.mark.parametrize("value", [None, 42, {"kind": "unknown"}])
-def test_invalid_or_disabled_target_is_readable_but_descendant_is_not(value: JsonValue) -> None:
+def test_invalid_or_disabled_target_is_readable_but_descendant_is_not(
+    value: JsonValue,
+) -> None:
     assert hasattr(FormState, "describe"), "invalid drafts must remain describable"
     state = FormState(FormInput(DescribeForm, {"selection": value, "optional": None}))
     assert state.describe(("selection",), FormEnv()).target is not None
@@ -196,8 +235,12 @@ def test_invalid_or_disabled_target_is_readable_but_descendant_is_not(value: Jso
             state.describe(path, FormEnv())
 
 
-@pytest.mark.parametrize("path", [("unknown",), ("samples", "0"), ("mapping", "key"), ("count", "child")])
-def test_unknown_and_whole_leaf_descendants_fail_with_path(path: tuple[str, ...]) -> None:
+@pytest.mark.parametrize(
+    "path", [("unknown",), ("samples", "0"), ("mapping", "key"), ("count", "child")]
+)
+def test_unknown_and_whole_leaf_descendants_fail_with_path(
+    path: tuple[str, ...],
+) -> None:
     assert hasattr(FormState, "describe"), "invalid paths must fail at describe entry"
     state = FormState(FormInput(DescribeForm, {}))
     with pytest.raises(ValueError, match=path[0]):
@@ -236,11 +279,15 @@ def test_local_override_choices_field_isolation_first_match_and_detachment() -> 
     assert not left.children[0].expression
     assert left.children[1].choices == (2,) and left.children[1].selected == 0
     assert right.children[1].choices is None and right.children[1].expression
-    selection = FormState(FormInput(DescribeForm, {"selection": {"kind": "ref", "name": "saved"}}))
+    selection = FormState(
+        FormInput(DescribeForm, {"selection": {"kind": "ref", "name": "saved"}})
+    )
     target = selection.describe(("selection",), env).target
     assert target is not None and target.options is not None
     option = target.options[1]
-    assert [(command.name, command.label) for command in option.commands] == [("convert", "Convert")]
+    assert [(command.name, command.label) for command in option.commands] == [
+        ("convert", "Convert")
+    ]
     assert isinstance(option.value, dict)
     option.value["name"] = "changed"
     again = selection.describe(("selection",), env).target
@@ -249,9 +296,15 @@ def test_local_override_choices_field_isolation_first_match_and_detachment() -> 
     events: list[dict[str, JsonValue]] = []
     selection.subscribe(lambda: events.append(selection.input.data))
     selection.run_command(("selection",), "convert", env)
-    assert selection.input.data == {"selection": {"kind": "inline", "module": {"frequency": 4, "label": "new"}}}
+    assert selection.input.data == {
+        "selection": {"kind": "inline", "module": {"frequency": 4, "label": "new"}}
+    }
     assert events == [selection.input.data]
-    assert selection.describe(("selection", "module"), env).children[0].path == ("selection", "module", "frequency")
+    assert selection.describe(("selection", "module"), env).children[0].path == (
+        "selection",
+        "module",
+        "frequency",
+    )
     with pytest.raises(ValueError, match="command"):
         selection.run_command(("selection",), "convert", env)
     assert events == [selection.input.data]
