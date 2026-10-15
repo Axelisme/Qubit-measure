@@ -294,10 +294,11 @@ def test_A3_Writeback_items_show_current_proposed_and_edit(qapp, make_ctrl):
         prop = widget.findChildren(QLabel, "writebackProposed")
         assert len(cur) == 3
         assert any("6000.0" in label.text() for label in cur)
-        assert cur[1].text() == cur[2].text() == "—"
+        assert cur[1].text() == cur[2].text() == "new entry"
         assert len(prop) == 3
         assert any("6100.0" in label.text() for label in prop)
-        assert prop[1].text() == prop[2].text() == f"map[{len(proposed)}]"
+        assert prop[1].text() == prop[2].text()
+        assert prop[1].text().endswith(" changes")
         # Every module proposal edits its draft Form, so each row has Edit.
         edits = [
             button
@@ -323,7 +324,7 @@ def test_A3_Writeback_items_show_current_proposed_and_edit(qapp, make_ctrl):
             for dialog in QApplication.topLevelWidgets()
             if isinstance(dialog, QDialog)
             and dialog.isVisible()
-            and dialog.windowTitle().startswith("Edit Value:")
+            and dialog.windowTitle().startswith("Edit value —")
         )
         assert md_dialog is not None
         assert md_dialog.findChild(QLabel, "writebackCurrentReadonly") is not None

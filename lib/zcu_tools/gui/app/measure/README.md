@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-16，Artifact／Writeback owner、Opaque Run／Load、單層 Form description、ARB 唯讀、terminal Controller close 與 raw cfg 非 UI 讀取
+**Last updated:** 2026-10-16，Artifact／Writeback owner、Opaque Run／Load、單層 Form description、ARB 唯讀、terminal Controller close、raw cfg 非 UI 讀取與 writeback 編輯回饋
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -472,12 +472,16 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    Scalar parameter rows show values and stderr with static schema unit labels
    from resources; ext and fields without static units show no label. Labels never
    convert values. Draft-local retarget refreshes the destination facts and unit.
-   Module items show bounded change summaries without units. Their `Edit`
-   dialog mounts `FormEditor` directly on the draft's state and captured env;
-   `Apply as:` retargets the same item. Invalid State input survives Close and
+   Scalar `Edit` uses Save/Cancel and validates input inline. It shows the captured
+   destination, unit and stderr without reducing the stored value's precision.
+   Module rows count changed library leaves and list them in tooltips. Their `Edit`
+   dialog shows Changes from library and mounts `FormEditor` on the draft's state
+   and captured env. Field and Apply-as edits update the draft immediately;
+   only Apply Selected writes the library. Invalid State input survives Done and
    refuses Apply. Unparseable local text also marks the row Invalid and locks
-   Apply while open; Close drops only that local text and shows the State's
-   result, without writing the library. Field writes go through the existing
+   Apply while open. The dialog lists field errors; Done, Esc and window close
+   commit a nonblank Apply-as name and drop only local text. Selected invalid
+   modules show a warning explaining why Apply is disabled. Field writes go through the existing
    pane-qualified writeback guard. A refusal keeps the user's text in the open
    editor and displays the guard's reason without changing the shared state.
    A host refresh after module validation fails keeps Invalid rows and reads
