@@ -53,12 +53,15 @@ def view(qapp: QApplication) -> Iterator[tuple[FormEditor[LazyForm], FormState[L
 
 
 def test_expanding_an_empty_selected_layer_removes_the_fold_title(qapp: QApplication) -> None:
+    class Empty(FormModel):
+        kind: Literal["empty"] = "empty"
+
     class FixedBranch(FormModel):
-        branch: Annotated[First, Display(collapsed=True)] = Field(default_factory=First)
+        branch: Annotated[Empty, Display(collapsed=True)] = Field(default_factory=Empty)
 
         @classmethod
         def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
-            return {("branch",): (Option("Fixed", {"kind": "first", "one": 1.0}, fields=First),)}
+            return {("branch",): (Option("Fixed", {"kind": "empty"}, fields=Empty),)}
 
     env = FormEnv()
     state = FormState(FixedBranch.default_input(env))
