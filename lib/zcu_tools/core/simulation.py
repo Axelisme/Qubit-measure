@@ -92,6 +92,10 @@ class ReadoutWindow:
             for legacy shape-only windows; populated in every PointTimeline.
         phase_deg: Demodulation phases in degrees, one per trigger; empty for
             shape-only windows. The common phase origin is execution time zero.
+        generator_channels: Generator index per trigger in the same order as
+            trigger_us. Empty in shape-only records, whose gen_ch is the fallback.
+            PointTimeline windows populate this even when all reads use one route.
+            gen_ch retains the final route for the fixed ADC shape descriptor.
     """
 
     channel: int
@@ -101,6 +105,7 @@ class ReadoutWindow:
     trigger_us: tuple[float, ...]
     frequency_mhz: tuple[float, ...] = ()
     phase_deg: tuple[float, ...] = ()
+    generator_channels: tuple[int, ...] = ()
 
     @property
     def reads(self) -> int:

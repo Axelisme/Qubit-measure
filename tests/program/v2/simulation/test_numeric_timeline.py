@@ -80,7 +80,9 @@ def test_adc_read_windows_retain_each_generator_association():
     second.cfg.gen_ch = 1
     # Build again so the owned Pulse and flat readout share the selected route.
     second = second.cfg.build("second")
-    prog = ModularProgramV2(env.soccfg, ProgramV2Cfg(), modules=[readout("first"), second])
+    prog = ModularProgramV2(
+        env.soccfg, ProgramV2Cfg(), modules=[readout("first"), second]
+    )
     prog.acquire(env.soc, progress=False)
     window = env.soc.binding.last_request.timelines[0].readouts[0]
     assert getattr(window, "generator_channels", ()) == (0, 1)

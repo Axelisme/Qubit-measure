@@ -56,7 +56,9 @@ class SimulationSoc(QickConfig):
             else iter(request.readouts)
         )
         if any(
-            (window.gen_ch, window.channel) not in self.routes for window in windows
+            (gen_ch, window.channel) not in self.routes
+            for window in windows
+            for gen_ch in (window.generator_channels or (window.gen_ch,))
         ):
             raise ValueError("program uses an unbound generator/ADC route")
         self._request = request

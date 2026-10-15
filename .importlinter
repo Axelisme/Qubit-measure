@@ -343,6 +343,8 @@ source_modules =
     zcu_tools.program.v2.utils
 forbidden_modules =
     zcu_tools.program.v2.simulation.frontend
+    zcu_tools.program.v2.simulation.timeline
+    zcu_tools.program.v2.simulation.dependencies
     zcu_tools.program.v2.simulation.binding
     zcu_tools.program.v2.simulation.signals
     zcu_tools.program.v2.simulation.soc

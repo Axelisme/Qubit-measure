@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import replace
 
@@ -43,6 +44,21 @@ class TimelineInterpreter:
     records. Each instance owns its reference clock, channel clocks and registers.
     Unsupported modules raise ValueError naming the module and loop coordinates
     before any backend call. This is a Module interpreter, not an ISA emulator.
+
+    Attributes:
+        prog: Borrowed compiled program; never retained by output records.
+        point: Current hardware-loop zero-based indices, outermost first.
+        ref: Current processor reference in execution us, initialized to zero.
+        events: Owned list of emitted immutable generator events for this point.
+        reads: Owned per-ADC trigger tuples (us, MHz, degrees, generator index).
+        gen_end: Scheduling timestamps in execution us, keyed by generator.
+        ro_end: Scheduling timestamps in execution us, keyed by ADC.
+        routes: Last generator used per ADC for the fixed shape descriptor.
+        registers: Owned (integer value, is_uint32_word) pairs by semantic name.
+        iterations: Active nested Repeat (name, zero-based index) stack.
+        templates: Owned current paired generator/ADC uint32 words by table id;
+            absence means that table still uses its initial compiled template.
+        table_readouts: Borrowed validated table modules by id for loop hooks.
     """
 
     def __init__(self, prog: ModularProgramV2) -> None:
@@ -51,7 +67,7 @@ class TimelineInterpreter:
         self.point: dict[str, int] = {}
         self.ref = 0.0
         self.events: list[PulseEvent] = []
-        self.reads: dict[int, list[tuple[float, float, float]]] = {}
+        self.reads: dict[int, list[tuple[float, float, float, int]]] = {}
         self.gen_end: dict[int, float] = {}
         self.ro_end: dict[int, float] = {}
         self.routes: dict[int, int] = {}
@@ -78,7 +94,12 @@ class TimelineInterpreter:
         return float(result)
 
     def tick(self, value: float | QickParam) -> float:
-        """Return QICK nearest processor-tick quantization in us at this point."""
+        """Return processor-clock us using QICK start/step quantization.
+
+        Scalar values round to nearest ticks. Sweeps round start/span then truncate
+        each loop step, rather than independently rounding every point. Conversion
+        operates on a copy; the caller's QickParam is not mutated.
+        """
         cycles = self.prog.us2cycles(deepcopy(value))
         if isinstance(cycles, QickRawParam):
             cycles.to_steps(self.prog.loop_dict)
@@ -104,6 +125,7 @@ class TimelineInterpreter:
                 tuple(r[0] for r in self.reads[ch]),
                 tuple(r[1] for r in self.reads[ch]),
                 tuple(r[2] for r in self.reads[ch]),
+                tuple(r[3] for r in self.reads[ch]),
             )
             for ch, ro in self.prog.ro_chs.items()
         )
@@ -115,7 +137,9 @@ class TimelineInterpreter:
         )
         return PointTimeline(tuple(point.items()), tuple(self.events), windows, end)
 
-    def sequence(self, modules, t: float | QickParam) -> float | QickParam:
+    def sequence(
+        self, modules: Sequence[Module], t: float | QickParam
+    ) -> float | QickParam:
         """Run a semantic sequence at local us t and return its local end time."""
         for module in modules:
             try:
@@ -463,7 +487,7 @@ class TimelineInterpreter:
         self.routes[cfg.ro_ch] = cfg.gen_ch
         trigger = self.ref + self.tick(t + cfg.trig_offset)
         gen_freq, ro_freq = self.frequencies(module, words)
-        self.reads[cfg.ro_ch].append((trigger, ro_freq, 0.0))
+        self.reads[cfg.ro_ch].append((trigger, ro_freq, 0.0, cfg.gen_ch))
         self.ro_end[cfg.ro_ch] = trigger + self.prog.cycles2us(
             self.prog.ro_chs[cfg.ro_ch]["length"], ro_ch=cfg.ro_ch
         )

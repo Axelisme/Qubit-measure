@@ -64,13 +64,48 @@ is no automatic retry. `Controller.close()` drains work but does not close drive
 
 `core.simulation` owns immutable numeric records. No Module, driver, GUI object
 or callback crosses this boundary. Time is us, frequency MHz, phase degrees and
-gain normalized DAC amplitude. The initial frontend accepts exact scalar
-`PulseReadout` modules with constant waveforms and a single `freq` for generator
-and ADC matching. It rejects other Modules, runtime controls and waveforms rather
-than approximating them. Full Module interpretation extends `frontend.py`.
+gain normalized DAC amplitude. The frontend interprets exact supported Module
+classes, not arbitrary tProcessor instructions. Unknown subclasses (including mux
+readouts), raw program setup/body overrides, raw loop hooks and undefined or
+incorrectly typed registers fail before the backend produces any data. Errors
+identify the concrete Module type/name, loop coordinates and relevant register.
+
+Supported controls are Pulse, PulseReadout, Delay, SoftDelay, DelayAuto,
+LoadValue, LoadWord, Repeat, Branch, ScanWith, ComputedPulse, TableLengthPulse,
+TablePulseReadout, Join and the existing reset wrappers. Join interleaves branches
+in the same static minimum-time order as hardware emission and rejects
+cross-branch register dependencies. Reset wrappers emit actual pulses only;
+they do not reset a quantum state. LoadValue compression does not affect semantic
+values. LoadWord keeps uint32 patterns until a named readout frequency/gain
+consumer decodes them; scalar delay/count consumers cannot reinterpret words.
+
+Each execution has a detached `PointTimeline` with quantized controls and hardware
+loop indices. `PulseEvent` retains signed gain, carrier MHz, phase degrees, source,
+nested iteration coordinates and a common phase origin of zero. A nonconstant
+`PulseEnvelope` owns immutable complex samples on the actual DAC sample clock.
+Consumers interpolate linearly, hold the final sample through pulse end and use
+zero outside the event. No per-pulse peak normalization or solver grid is imposed.
+Const uses a unity envelope (`None`). Flat-top retains the two hardware ramps and
+half-gain plateau without expanding long plateaus onto a fixed fine grid.
+
+`ReadoutWindow` keeps ADC samples/rate independent of generator duration. Per-point
+windows retain trigger emission order, demodulation MHz/degrees and the generator
+association for each read. The acquire-level windows specify fixed ADC shapes;
+backends use `timelines` for execution-dependent timing/demodulation. `controls`
+remains the corresponding per-execution event tuples. Environments, not this
+frontend, explicitly convert us/MHz into the independent numeric APIs' ns/GHz.
+
+ComputedPulse reserves the maximum candidate blocking length. TableLengthPulse
+uses the selected quantized duration and the existing runtime timestamp policy,
+without padding to the longest entry. TablePulseReadout first plays its initial
+compiled template; only its named loop's exec-after hook prepares the next words.
+The last update restores table entry zero for the next outer repetition. Register
+and template state belongs to one frontend preparation, never to another acquire.
+Normal hardware compilation and the existing block_mode timing policy are unchanged.
 
 - `AcquireRequest` fixes C-order `loop_dims`, `avg_level`, per-execution controls,
-  declared ADC order, trigger-order windows and private sampling identity.
+  declared ADC order, trigger-order windows, detached timelines and private sampling
+  identity. Every used generator and every per-read ADC route must be bound.
 - `EnvironmentSnapshot` contains numeric native-unit device values and retained
   model/calibration identity. The environment captures it immediately before
   each round, not in getters or preparation. A successful round hook may change
