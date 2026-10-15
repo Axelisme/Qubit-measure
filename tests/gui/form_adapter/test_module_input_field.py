@@ -11,7 +11,6 @@ from zcu_tools.cfg_model import (
     BathResetSpec,
     ConfigBase,
     ConstWaveformCfg,
-    DirectReadoutCfg,
     ModuleSpec,
     NoneResetCfg,
     PulseReadoutSpec,
@@ -125,31 +124,18 @@ def library_env() -> FormEnv:
         ),
         (
             {
-                "type": "readout/direct",
-                "ro_ch": 0,
-                "ro_freq": 100.0,
-                "ro_length": 1.0,
-                "gen_ch": 0,
-            },
-            DirectReadoutCfg,
-            "ro_ch",
-            0,
-        ),
-        (
-            {
                 "type": "readout/pulse",
-                "pulse_cfg": {"kind": "ref", "name": "Q.pulses.first"},
-                "ro_cfg": {
-                    "type": "readout/direct",
-                    "ro_ch": 0,
-                    "ro_freq": 100.0,
-                    "ro_length": 1.0,
-                    "gen_ch": 0,
-                },
+                "gen_ch": 1,
+                "nqz": 1,
+                "freq": 100.0,
+                "gain": 0.2,
+                "ro_ch": 0,
+                "ro_length": 1.0,
+                "waveform": {"kind": "ref", "name": "Q.waveforms.const"},
             },
             PulseReadoutSpec,
-            "pulse_cfg",
-            "Q.pulses.first",
+            "waveform",
+            "Q.waveforms.const",
         ),
         ({"type": "reset/none"}, NoneResetCfg, "type", "reset/none"),
         (
@@ -224,7 +210,6 @@ def test_ref_family_only_limits_captured_keys_and_preserves_local_choices() -> N
     ] == ["Q.pulses.first", "Q.pulses.second"]
     assert [o.label for o in options if o.label.startswith("Inline")] == [
         "Inline: pulse",
-        "Inline: readout/direct",
         "Inline: readout/pulse",
         "Inline: reset/pulse",
         "Inline: reset/two_pulse",

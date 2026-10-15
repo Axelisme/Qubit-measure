@@ -282,40 +282,6 @@ class ReadoutCore(ConfigBase):
     readout: PulseReadoutCfg
 
 
-def test_template_nested_lock_and_none_omission_preserve_spec_derivation() -> None:
-    catalog = {
-        "readout": TemplateDef(
-            PulseReadoutSpec,
-            "Readout",
-            {
-                "pulse_cfg.type": "pulse",
-                "pulse_cfg.ch": 1,
-                "pulse_cfg.nqz": 1,
-                "pulse_cfg.freq": 100,
-                "pulse_cfg.gain": 0.3,
-                "pulse_cfg.waveform.style": "const",
-                "pulse_cfg.waveform.length": 0.2,
-                "ro_cfg.ro_ch": 0,
-                "ro_cfg.ro_length": 0.2,
-                "ro_cfg.trig_offset": 0,
-            },
-        )
-    }
-    form = Form(
-        ReadoutCore, {"readout": Template("readout", lock={"pulse_cfg.freq": 0.0})}
-    )
-    form.bind_templates(catalog, adapter="synthetic-readout")
-    env = environment()
-    state = FormState(form.default_input(env))
-    value = state.result(env)
-    assert not isinstance(value, FormErrors), value
-    cfg = form.to_cfg(value, env)
-    assert isinstance(cfg, ReadoutCore), cfg
-    assert cfg.readout.pulse_cfg.freq == 0
-    assert cfg.readout.ro_cfg.gen_ch == 1
-    assert cfg.readout.ro_cfg.ro_freq == 0
-
-
 def readout_expression_form(expression: Expr | None) -> Form[ReadoutCore]:
     """Author nested defaults on existing persistent Spec families only."""
     seeds = {

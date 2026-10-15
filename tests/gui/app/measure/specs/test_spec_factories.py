@@ -5,23 +5,11 @@ from __future__ import annotations
 from typing import cast
 
 from zcu_tools.gui.app.measure.specs import (
-    make_direct_readout_spec,
     make_pulse_readout_spec,
     make_pulse_spec,
     make_waveform_spec_by_style,
 )
 from zcu_tools.gui.cfg import ReferenceSpec
-
-
-def test_direct_readout_factory_returns_fresh_specs():
-    first = make_direct_readout_spec()
-    second = make_direct_readout_spec()
-
-    assert first is not second
-    assert first.fields is not second.fields
-
-    first.fields["ro_freq"] = first.fields["ro_ch"]
-    assert "ro_freq" in second.fields
 
 
 def test_pulse_readout_factory_returns_fresh_nested_specs():

@@ -24,7 +24,6 @@ from zcu_tools.program.v2.modules import (
     BathResetCfg,
     ConstWaveformCfg,
     CosineWaveformCfg,
-    DirectReadoutCfg,
     DragWaveformCfg,
     FlatTopWaveformCfg,
     GaussWaveformCfg,
@@ -37,7 +36,6 @@ from zcu_tools.program.v2.modules import (
 
 _MAIN_POLICY = ProgramSpecPolicy(
     arb_data_choices_source="arb_waveforms",
-    enable_readout_shape_inheritance=True,
 )
 _AUTOFLUX_POLICY = ProgramSpecPolicy()
 
@@ -114,7 +112,7 @@ class _TypedProgramCfg:
     [
         ("module", {"type": "pulse", "nested": {"type": "reset/none"}}, "pulse"),
         ("waveform", {"style": "gauss", "nested": {"style": "const"}}, "gauss"),
-        ("module", _TypedProgramCfg(type="readout/direct"), "readout/direct"),
+        ("module", _TypedProgramCfg(type="readout/pulse"), "readout/pulse"),
         ("waveform", _TypedProgramCfg(style="drag"), "drag"),
     ],
 )
@@ -186,7 +184,6 @@ def test_waveform_inspection_and_materialization_intentionally_differ_on_missing
 def test_catalog_matches_explicit_program_v2_runtime_discriminators() -> None:
     module_classes = (
         PulseCfg,
-        DirectReadoutCfg,
         PulseReadoutCfg,
         NoneResetCfg,
         PulseResetCfg,
@@ -265,18 +262,6 @@ def test_cross_app_specs_differ_only_by_two_policy_fields() -> None:
     autoflux_data = autoflux_arb.fields["data"]
     assert isinstance(autoflux_data, ScalarSpec)
     assert autoflux_data.choices_source == ""
-
-    for discriminator in ("readout/direct", "readout/pulse"):
-        assert (
-            PROGRAM_SHAPES.module(discriminator).make_spec(_MAIN_POLICY).inherit_hook
-            is not None
-        )
-        assert (
-            PROGRAM_SHAPES.module(discriminator)
-            .make_spec(_AUTOFLUX_POLICY)
-            .inherit_hook
-            is None
-        )
 
 
 def _literal_values(reference: ReferenceSpec, key: str) -> list[object]:

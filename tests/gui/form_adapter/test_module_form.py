@@ -9,7 +9,6 @@ from zcu_tools.cfg_model import (
     BathResetSpec,
     ConfigBase,
     ConstWaveformCfg,
-    DirectReadoutCfg,
     Expr,
     FlatTopWaveformSpec,
     ModuleSpec,
@@ -55,7 +54,6 @@ UNSUPPORTED_PULSE_FIELDS = (
     "mux_phases",
     "mask",
     "outsel",
-    "ro_ch",
 )
 
 PULSE_LEAVES: dict[FormWritePath, JsonValue] = {
@@ -405,53 +403,6 @@ def test_tagged_waveform_name_is_key_only_in_schema_result_defaults_and_restore(
     assert result_spec(form, restored, env).waveform == "$missing.value"
 
 
-@pytest.mark.parametrize("mode", ["derive", "explicit", "ref", "invalid"])
-def test_tagged_readout_preserves_owner_derivation_and_partial_errors(
-    mode: str,
-) -> None:
-    env = FormEnv()
-    form = form_adapter.module_form(PulseReadoutSpec)
-    spec = PulseReadoutSpec.model_validate(
-        {
-            "pulse_cfg": {
-                "ch": 2,
-                "nqz": 1,
-                "freq": 100.0,
-                "gain": 0.25,
-                "waveform": {"style": "const", "length": 0.4},
-            },
-            "ro_cfg": {"ro_ch": 0, "ro_length": 1.0},
-        }
-    )
-    data = form.input_from_spec(spec, env).data
-    pulse = expect_object(data["pulse_cfg"])
-    assert pulse.get("kind") == "inline"
-    ro = expect_object(data["ro_cfg"])
-    if mode == "explicit":
-        ro.update({"gen_ch": 3, "ro_freq": 150.0})
-    else:
-        ro.pop("gen_ch", None)
-        ro.pop("ro_freq", None)
-    if mode == "ref":
-        data["pulse_cfg"] = {"kind": "ref", "name": "$unavailable.key"}
-    if mode == "invalid":
-        expect_object(pulse["module"])["gain"] = "bad"
-    result = FormState(FormInput(form.model, data)).result(env)
-    if mode in {"invalid", "ref"}:
-        assert isinstance(result, FormErrors)
-        assert set(result.messages) == (
-            {("pulse_cfg", "module", "gain")}
-            if mode == "invalid"
-            else {("ro_cfg", "ro_freq")}
-        )
-    else:
-        assert not isinstance(result, FormErrors), result
-        cfg = form.to_cfg(result, env)
-        assert isinstance(cfg, PulseReadoutSpec)
-        assert cfg.ro_cfg.gen_ch == (3 if mode == "explicit" else 2)
-        assert cfg.ro_cfg.ro_freq == (150.0 if mode == "explicit" else 100.0)
-
-
 def test_spec_root_tag_is_hidden_and_remains_in_input() -> None:
     form = form_adapter.module_form(PulseSpec)
     env = FormEnv()
@@ -504,29 +455,6 @@ def test_unsupported_pulse_fields_cannot_be_written_and_use_spec_defaults(
     assert getattr(cfg, name) == PulseSpec.model_fields[name].default
 
 
-def test_required_direct_readout_channel_stays_settable() -> None:
-    form = form_adapter.module_form(PulseReadoutSpec)
-    env = FormEnv()
-    state = FormState(form.default_input(env))
-
-    state.write({("pulse_cfg",): {"kind": "inline"}}, env)
-    with pytest.raises(ValueError, match="Unknown field path"):
-        state.write({("pulse_cfg", "module", "ro_ch"): 4}, env)
-    state.write(
-        {
-            ("pulse_cfg",): {"kind": "ref", "name": "Q.probe"},
-            ("ro_cfg", "ro_ch"): 3,
-            ("ro_cfg", "ro_length"): 1.5,
-            ("ro_cfg", "ro_freq"): 6000.0,
-        },
-        env,
-    )
-    cfg = result_spec(form, state, env)
-
-    assert cfg.pulse_cfg == "Q.probe"
-    assert cfg.ro_cfg.ro_ch == 3
-
-
 def library_entry() -> PulseSpec:
     """A stored entry sets unsupported fields that the Form cannot edit."""
     return PulseSpec.model_validate(
@@ -538,38 +466,32 @@ def library_entry() -> PulseSpec:
             "desc": "stored entry",
             "mask": [0],
             "outsel": 1,
-            "ro_ch": 5,
             "waveform": "Q.flat",
         }
     )
 
 
 def writeback_proposal() -> PulseReadoutSpec:
-    """A proposal keeps its child key and sets unsupported nested pulse fields."""
-    return PulseReadoutSpec.model_validate(
-        {
-            "desc": "proposal",
-            "pulse_cfg": {
-                "ch": 0,
-                "nqz": 2,
-                "freq": 6000.0,
-                "gain": 0.1,
-                "mux_freqs": [6000.0],
-                "ro_ch": 3,
-                "waveform": "Q.square",
-            },
-            "ro_cfg": {"ro_ch": 3, "ro_length": 1.0, "ro_freq": 6000.0},
-        }
+    """A proposal keeps its waveform key and optional description."""
+    return PulseReadoutSpec(
+        desc="proposal",
+        gen_ch=0,
+        nqz=2,
+        freq=6000.0,
+        gain=0.1,
+        waveform="Q.square",
+        ro_ch=3,
+        ro_length=1.0,
     )
 
 
 @pytest.mark.parametrize(
     ("spec", "unsupported"),
     [
-        (library_entry(), {("desc",), ("mask",), ("outsel",), ("ro_ch",)}),
+        (library_entry(), {("desc",), ("mask",), ("outsel",)}),
         (
             writeback_proposal(),
-            {("desc",), ("pulse_cfg", "mux_freqs"), ("pulse_cfg", "ro_ch")},
+            {("desc",)},
         ),
     ],
     ids=["library-entry", "writeback-proposal"],
@@ -657,9 +579,9 @@ def test_generated_model_nests_in_module_inline_with_host_choices() -> None:
     assert isinstance(cfg, PulseSpec) and cfg.ch == 3 and cfg.waveform == "w"
 
 
-@pytest.mark.parametrize("spec_type", [PulseSpec, DirectReadoutCfg])
+@pytest.mark.parametrize("spec_type", [PulseSpec, PulseReadoutSpec])
 def test_spec_field_meta_reaches_generated_schema(
-    spec_type: type[PulseSpec] | type[DirectReadoutCfg],
+    spec_type: type[PulseSpec] | type[PulseReadoutSpec],
 ) -> None:
     properties = form_adapter.module_form(spec_type).model.input_schema(FormEnv())[
         "properties"
