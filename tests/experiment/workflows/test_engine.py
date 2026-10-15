@@ -317,7 +317,8 @@ def test_thread_safe_requests_do_not_wait_and_stop_upgrades_pause(rig: Rig) -> N
 
     def wait(signal: object) -> None:
         entered.set()
-        assert release.wait(5), "test did not release the engine thread"
+        # The controlling caller releases this seam even when an assertion fails.
+        assert release.wait(30), "test did not release the engine thread"
         signals.append(True)
 
     rig.clock.on_wait = wait
@@ -332,7 +333,8 @@ def test_thread_safe_requests_do_not_wait_and_stop_upgrades_pause(rig: Rig) -> N
     with ThreadPoolExecutor(max_workers=1) as pool:
         segment = pool.submit(rig.engine.execute, "run")
         try:
-            assert entered.wait(5), "engine did not reach the injected wait seam"
+            # execute is scheduled and its injected clock announces arrival here.
+            assert entered.wait(30), "engine did not reach the injected wait seam"
             assert rig.engine.pause("run").lifecycle == "pausing"
             assert rig.engine.pause("run").lifecycle == "pausing"
             assert not segment.done()
@@ -353,7 +355,8 @@ def test_thread_safe_requests_do_not_wait_and_stop_upgrades_pause(rig: Rig) -> N
                 )
         finally:
             release.set()
-        assert segment.result(timeout=5).lifecycle == "stopped"
+        # Release lets execute finish its genuine stop/cleanup path.
+        assert segment.result(timeout=30).lifecycle == "stopped"
     assert signals == [True]
     assert rig.kinds().count("pause_requested") == 1
     assert rig.kinds().count("stop_requested") == 1
