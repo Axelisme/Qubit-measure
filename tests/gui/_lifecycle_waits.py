@@ -2,54 +2,19 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from concurrent.futures import Future
 from contextlib import contextmanager
 from typing import TypeVar
 
-from qtpy.QtCore import QEventLoop, QTimer
+import pytest
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 
 _T = TypeVar("_T")
-
-
-def qt_until(completed: Callable[[], object]) -> bool:
-    """Pump real Qt deliveries until an arranged producer satisfies completed.
-
-    Callers must arrange the producer before entering. The deadline diagnoses a
-    stuck producer, not a promptness contract. Predicate errors return to caller.
-    """
-    loop = QEventLoop()
-    probe = QTimer()
-    watchdog = QTimer()
-    watchdog.setSingleShot(True)
-    errors: list[BaseException] = []
-
-    def check() -> None:
-        try:
-            if completed():
-                loop.quit()
-        except BaseException as exc:
-            errors.append(exc)
-            loop.quit()
-
-    probe.timeout.connect(check)
-    watchdog.timeout.connect(loop.quit)
-    # The caller's scheduled worker/callback produces completion; only guard hangs.
-    watchdog.start(30_000)
-    probe.start(0)
-    try:
-        if not completed():
-            loop.exec()
-        if errors:
-            raise errors[0]
-        assert completed(), "scheduled Qt delivery did not complete"
-        return True
-    finally:
-        probe.stop()
-        watchdog.stop()
+logger = logging.getLogger(__name__)
 
 
 def manual_until(owner: ManualOwnerScheduler, completed: Callable[[], object]) -> None:
@@ -63,7 +28,7 @@ def manual_until(owner: ManualOwnerScheduler, completed: Callable[[], object]) -
 
 
 @contextmanager
-def running(work: Callable[[], _T]) -> Iterator[Future[_T]]:
+def running(work: Callable[[], _T]) -> Generator[Future[_T]]:
     """Run work off-thread; join and propagate its error even if caller fails.
 
     The caller must release any test-controlled blockers in its inner finally.
@@ -74,6 +39,7 @@ def running(work: Callable[[], _T]) -> Iterator[Future[_T]]:
         try:
             result.set_result(work())
         except BaseException as exc:
+            logger.exception("test worker failed")
             result.set_exception(exc)
 
     thread = threading.Thread(target=invoke)
@@ -85,3 +51,32 @@ def running(work: Callable[[], _T]) -> Iterator[Future[_T]]:
         thread.join(timeout=30)
         assert not thread.is_alive(), "test worker did not finish"
         result.result()
+
+
+@contextmanager
+def waiting_call(
+    monkeypatch: pytest.MonkeyPatch, work: Callable[[], _T]
+) -> Generator[tuple[threading.Event, Future[_T]]]:
+    """Observe this worker entering stdlib Condition.wait, then delegate unchanged.
+
+    The arrival is emitted while the condition remains held, before its atomic
+    release-and-wait. No owner state or lock is inspected. The caller must finish
+    the public operation (even on failure) before leaving this context.
+    """
+    arrived = threading.Event()
+    worker_ids: list[int] = []
+    original_wait = threading.Condition.wait
+
+    def observe(condition: threading.Condition, timeout: float | None = None) -> bool:
+        if worker_ids == [threading.get_ident()]:
+            arrived.set()
+        return original_wait(condition, timeout)
+
+    def invoke() -> _T:
+        worker_ids.append(threading.get_ident())
+        return work()
+
+    with monkeypatch.context() as patch:
+        patch.setattr(threading.Condition, "wait", observe)
+        with running(invoke) as result:
+            yield arrived, result
