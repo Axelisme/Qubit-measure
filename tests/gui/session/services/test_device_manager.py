@@ -8,17 +8,13 @@ DeviceManager registry).
 
 from __future__ import annotations
 
-import time
-from collections.abc import Callable
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QCoreApplication, QEventLoop
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
 from zcu_tools.gui.app.measure.services.operation_gate import OperationGate
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
@@ -44,38 +40,19 @@ from tests.gui._completion_helpers import (
     on_setup_finished,
 )
 from tests.gui.session.services._device_fakes import FakeDeviceRegistry
+from tests.gui.session.services._device_waits import DeviceWorkers
+from tests.gui.session.services._device_waits import drain_until as _drain_until
 
-# See tests/gui/session/services/test_device.py for why test-created BackgroundRunners must
-# be quiesced before GC: a queued main-thread delivery to a GC'd runner segfaults.
-_LIVE_BG: list[BackgroundRunner] = []
-
-
-def _bg() -> BackgroundRunner:
-    bg = BackgroundRunner()
-    _LIVE_BG.append(bg)
-    return bg
+_workers = DeviceWorkers()
+_bg = _workers.background
 
 
 @pytest.fixture(autouse=True)
 def _quiesce_services():
-    yield
-    for bg in _LIVE_BG:
-        bg.quiesce()
-    _LIVE_BG.clear()
-
-
-def _drain_until(
-    condition: Callable[[], bool], *, timeout: float = 3.0, label: str = "condition"
-) -> None:
-    app = QCoreApplication.instance()
-    assert app is not None
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        app.processEvents()
-        if condition():
-            return
-        time.sleep(0.01)
-    raise AssertionError(f"timed out waiting for {label}")
+    try:
+        yield
+    finally:
+        _workers.close()
 
 
 def _make_svc(
@@ -88,6 +65,7 @@ def _make_svc(
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
     bus = bus or EventBus()
+    _workers.watch(bus)
     runner = OperationRunner(gate, handles, progress, bg, bus)
     svc = DeviceService(
         bus,
@@ -119,7 +97,7 @@ def test_device_setup_failure_emits_setup_failed(qapp):
     svc, device = _make_svc()
     _connect(svc)
     device.setup.side_effect = RuntimeError("setup failed")
-    loop = QEventLoop()
+    loop = _workers.completion(allow_failure=True)
     errors: list[str] = []
     on_setup_failed(svc, lambda _name, error: errors.append(error) or loop.quit())
 
@@ -138,15 +116,19 @@ def test_device_setup_cancel_emits_setup_cancelled(qapp):
     svc, device = _make_svc()
     _connect(svc)
     device.get_info.return_value = FakeDeviceInfo(address="none")
-    device.setup.side_effect = lambda _info, stop_event: stop_event.wait(1.0)
-    loop = QEventLoop()
+    block = _workers.setup()
+    device.setup.side_effect = block
+    loop = _workers.completion()
     cancelled: list[str] = []
     on_setup_cancelled(svc, lambda name: cancelled.append(name) or loop.quit())
 
     svc.start_setup_device(
         SetupDeviceRequest(name="test_dev", info=FakeDeviceInfo(address="none"))
     )
+    _drain_until(block.entered.is_set, label="setup driver entered")
     svc.cancel_device_operation("test_dev")
+    assert block.stop_event is not None and block.stop_event.is_set()
+    block.release.set()
     loop.exec()
 
     assert cancelled == ["test_dev"]
@@ -160,7 +142,7 @@ def test_device_service_emits_started_and_finished_events(qapp):
     finished: list[DeviceSetupFinishedPayload] = []
     bus.subscribe(DeviceSetupStartedPayload, started.append)
     bus.subscribe(DeviceSetupFinishedPayload, finished.append)
-    loop = QEventLoop()
+    loop = _workers.completion()
     on_setup_finished(svc, lambda _name: loop.quit())
 
     svc.start_setup_device(
@@ -179,12 +161,13 @@ def test_device_service_emits_started_and_finished_events(qapp):
 
 
 def _make_real_svc(driver: object | None = None) -> tuple[DeviceService, object]:
-    fake_device = driver if driver is not None else FakeDevice()
+    fake_device = driver if driver is not None else FakeDevice(fast_mode=True)
     gate = OperationGate(EventBus())
     bg = _bg()
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
     bus = EventBus()
+    _workers.watch(bus)
     runner = OperationRunner(gate, handles, progress, bg, bus)
     svc = DeviceService(
         bus,
@@ -199,7 +182,7 @@ def _make_real_svc(driver: object | None = None) -> tuple[DeviceService, object]
 
 
 def _register(svc: DeviceService, name: str = "flux") -> None:
-    loop = QEventLoop()
+    loop = _workers.completion()
     on_device_connected(svc, lambda _request: loop.quit())
     svc.start_connect_device(
         ConnectDeviceRequest(type_name="FakeDevice", name=name, address="")
@@ -208,7 +191,7 @@ def _register(svc: DeviceService, name: str = "flux") -> None:
 
 
 def _disconnect(svc: DeviceService, name: str = "flux") -> None:
-    loop = QEventLoop()
+    loop = _workers.completion()
     on_device_disconnected(svc, lambda _request: loop.quit())
     svc.start_disconnect_device(DisconnectDeviceRequest(name=name))
     loop.exec()
@@ -221,7 +204,7 @@ def _set_value(svc: DeviceService, name: str, value: float) -> None:
     # a mismatched address makes BaseDevice.setup raise.
     info = svc.get_device_info(name)
     assert info is not None
-    loop = QEventLoop()
+    loop = _workers.completion()
     on_setup_finished(svc, lambda _name: loop.quit())
     on_setup_failed(svc, lambda _name, _err: loop.quit())
     svc.start_setup_device(
@@ -231,7 +214,7 @@ def _set_value(svc: DeviceService, name: str, value: float) -> None:
 
 
 def test_devicemanager_register_and_list(qapp):
-    dev = FakeDevice()
+    dev = FakeDevice(fast_mode=True)
     svc, _ = _make_real_svc(driver=dev)
     _register(svc, "flux")
     entries = svc.list_devices()
@@ -256,7 +239,7 @@ def test_devicemanager_drop_device(qapp):
 
 
 def test_devicemanager_get_value_and_set_via_setup(qapp):
-    dev = FakeDevice()
+    dev = FakeDevice(fast_mode=True)
     dev.set_value(3.14)
     svc, _ = _make_real_svc(driver=dev)
     _register(svc, "flux")
@@ -270,7 +253,7 @@ def test_devicemanager_get_value_and_set_via_setup(qapp):
 
 def test_get_device_unit_strict_whitelisted_device(qapp):
     # Connected FakeDevice Info declares the native coordinate (no raise).
-    dev = FakeDevice()
+    dev = FakeDevice(fast_mode=True)
     svc, _ = _make_real_svc(driver=dev)
     _register(svc, "flux")
     assert svc.get_device_unit_strict("flux") == "native"
@@ -284,7 +267,7 @@ def test_get_device_unit_strict_unknown_device_raises(qapp):
 
 
 def test_devicemanager_get_all_info(qapp):
-    dev = FakeDevice()
+    dev = FakeDevice(fast_mode=True)
     dev.set_value(1.0)
     svc, _ = _make_real_svc(driver=dev)
     _register(svc, "flux")
@@ -325,12 +308,11 @@ def test_direct_poll_skips_terminal_admission_without_reading_driver(qapp) -> No
     )
     try:
         svc.start_connect_device(ConnectDeviceRequest("FakeDevice", "test_dev", "none"))
-        deadline = time.monotonic() + 2
-        while not svc.get_connected_devices() or svc.get_active_device_operations():
-            assert time.monotonic() < deadline
-            scheduler.pump_once(block=True, timeout=0.02)
+        # The accepted connect worker posts its terminal to this manual owner.
+        assert scheduler.pump_once(block=True, timeout=30)
         assert svc.get_connected_devices()
-        assert bg.quiesce()
+        # Connect was delivered; its worker and owner acknowledgement must drain.
+        assert bg.quiesce(timeout=30)
         before = svc.get_device_snapshot("test_dev")
         error: Exception | None = None
         try:
@@ -342,5 +324,6 @@ def test_direct_poll_skips_terminal_admission_without_reading_driver(qapp) -> No
         assert handles.live_count() == 0
     finally:
         scheduler.pump_all()
-        assert bg.quiesce()
+        # All accepted connect deliveries are acknowledged before driver disposal.
+        assert bg.quiesce(timeout=30)
         driver.close()

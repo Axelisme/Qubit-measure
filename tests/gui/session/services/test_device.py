@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import threading
-import time
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QCoreApplication, QEventLoop
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.gui.app.measure.services.operation_gate import OperationGate
 from zcu_tools.gui.app.measure.state import State
@@ -19,7 +18,6 @@ from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
     FailedPreconditionError,
 )
-from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
@@ -50,42 +48,19 @@ from tests.gui._completion_helpers import (
     on_setup_finished,
 )
 from tests.gui.session.services._device_fakes import FakeDeviceRegistry
+from tests.gui.session.services._device_waits import DeviceWorkers
+from tests.gui.session.services._device_waits import drain_until as _drain_until
 
-# Every BackgroundRunner created in a test is registered here so the autouse
-# teardown can quiesce it: a DeviceService runs its commands on a dedicated worker
-# thread whose done/failed outcome is delivered via a queued main-thread signal.
-# If the service (and its runner) is GC'd while that delivery is still queued, the
-# next processEvents() dispatches it onto a freed C++ object and segfaults.
-_LIVE_BG: list[BackgroundRunner] = []
-
-
-def _bg() -> BackgroundRunner:
-    bg = BackgroundRunner()
-    _LIVE_BG.append(bg)
-    return bg
+_workers = DeviceWorkers()
+_bg = _workers.background
 
 
 @pytest.fixture(autouse=True)
 def _quiesce_services():
-    """Drain every test-created BackgroundRunner before its objects are GC'd."""
-    yield
-    for bg in _LIVE_BG:
-        bg.quiesce()
-    _LIVE_BG.clear()
-
-
-def _drain_until(
-    condition: Callable[[], bool], *, timeout: float = 3.0, label: str = "condition"
-) -> None:
-    app = QCoreApplication.instance()
-    assert app is not None
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        app.processEvents()
-        if condition():
-            return
-        time.sleep(0.01)
-    raise AssertionError(f"timed out waiting for {label}")
+    try:
+        yield
+    finally:
+        _workers.close()
 
 
 def _make_svc(
@@ -104,6 +79,7 @@ def _make_svc(
     handles = handles or OperationHandles()
     progress = ProgressService(QtProgressTransport())
     bus = bus or EventBus()
+    _workers.watch(bus)
     runner = OperationRunner(resolved_gate, handles, progress, bg, bus)
     return (
         DeviceService(
@@ -156,7 +132,7 @@ def test_device_setup_updates_value_and_disconnect_updates_snapshot(qapp):
     # Setting an output value goes through setup (ramped/cancellable), not a
     # separate set_value: the post-setup get_info reflects the new value.
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=1.0)
-    setup_loop = QEventLoop()
+    setup_loop = _workers.completion()
     on_setup_finished(svc, lambda _name: setup_loop.quit())
     svc.start_setup_device(
         SetupDeviceRequest(name="dev1", info=FakeDeviceInfo(address="addr", value=1.0))
@@ -165,7 +141,7 @@ def test_device_setup_updates_value_and_disconnect_updates_snapshot(qapp):
     device.setup.assert_called_once()
     assert svc.get_device_snapshot("dev1").info.value == 1.0  # type: ignore[union-attr]
 
-    drop_loop = QEventLoop()
+    drop_loop = _workers.completion()
     on_device_disconnected(svc, lambda _request: drop_loop.quit())
     disc_token = svc.start_disconnect_device(DisconnectDeviceRequest(name="dev1"))
     assert isinstance(disc_token, int)  # disconnect also returns a handle
@@ -188,7 +164,7 @@ def test_device_setup_started_and_finished_keep_operation_origin(qapp) -> None:
         DeviceSetupFinishedPayload,
         lambda payload, meta: observed.append((payload, meta)),
     )
-    loop = QEventLoop()
+    loop = _workers.completion()
     on_setup_finished(svc, lambda _name: loop.quit())
 
     with bus.origin(EventOrigin(kind="agent", client_id="client-a")):
@@ -247,7 +223,7 @@ def test_device_connect_failure_is_reported_without_live_registration(qapp):
     svc, device = _make_svc()
     device.get_info.side_effect = RuntimeError("cannot query")
     errors: list[str] = []
-    loop = QEventLoop()
+    loop = _workers.completion(allow_failure=True)
     on_device_operation_failed(
         svc, lambda _name, error: errors.append(error) or loop.quit()
     )
@@ -266,7 +242,7 @@ def test_setup_uses_gate_and_returns_to_connected_snapshot(qapp):
     svc, device = _make_svc()
     _connect(svc, _req())
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=2.0)
-    loop = QEventLoop()
+    loop = _workers.completion()
     on_setup_finished(svc, lambda _name: loop.quit())
 
     svc.start_setup_device(
@@ -285,186 +261,99 @@ def test_active_device_setups_enumerates_concurrent_setups(qapp):
     """Phase C: two devices setting up concurrently both appear, sorted by name,
     and each in-flight op is reported with its kind (regression for the old
     single-valued getter that returned only one)."""
-    import time
-
-    # Per-name drivers so two devices coexist in one service.
-    drivers: dict[str, MagicMock] = {}
-
-    def factory(_type: str, _address: str) -> MagicMock:
-        # The service does not pass the name to the factory, so build a generic
-        # driver and let the caller register it under the connecting name.
-        dev = MagicMock()
-        dev.get_info.return_value = FakeDeviceInfo(address="addr", value=0.0)
-        return dev
-
-    from zcu_tools.gui.session.operation_handles import OperationHandles
-    from zcu_tools.gui.session.operation_runner import OperationRunner
-
-    bg_svc = _bg()
-    resolved_gate = OperationGate(EventBus())
-    handles = OperationHandles()
-    progress = ProgressService(QtProgressTransport())
-    bus = EventBus()
-    runner = OperationRunner(resolved_gate, handles, progress, bg_svc, bus)
-    registry = FakeDeviceRegistry()
-    svc = DeviceService(
-        bus,
-        State(MagicMock()),
-        resolved_gate,
-        bg_svc,
-        runner,
-        handles,
-        driver_factory=factory,  # type: ignore[arg-type]
-        device_registry=registry,
-    )
-
+    svc, drivers = _make_multi_svc()
     for name in ("alpha", "beta"):
-        loop = QEventLoop()
-        on_device_connected(svc, lambda _r: loop.quit())
-        svc.start_connect_device(_req(name))
-        loop.exec()
-        drivers[name] = cast(MagicMock, registry.get_device(name))
-
-    # Both setups block on the same gate event so they stay in-flight together.
-    release = threading.Event()
-
-    def blocking_setup(_info, stop_event=None):
-        release.wait(timeout=3.0)
-
-    for name in ("alpha", "beta"):
-        drivers[name].setup.side_effect = blocking_setup
-        drivers[name].get_info.return_value = FakeDeviceInfo(address="addr", value=1.0)
+        _connect_named(svc, name)
+    blocks = {name: _workers.setup() for name in drivers}
+    finished: set[str] = set()
+    on_setup_finished(svc, finished.add)
+    for name, block in blocks.items():
+        drivers[name].setup.side_effect = block
         svc.start_setup_device(
-            SetupDeviceRequest(
-                name=name, info=FakeDeviceInfo(address="addr", value=1.0)
-            )
+            SetupDeviceRequest(name=name, info=FakeDeviceInfo(address=name, value=1.0))
         )
-
-    # Wait until both workers have entered setup (status flipped to SETTING_UP).
-    deadline = time.monotonic() + 2.0
-    while time.monotonic() < deadline:
-        qapp.processEvents()
-        if len(svc.get_active_device_setups()) == 2:
-            break
-        time.sleep(0.01)
+    for block in blocks.values():
+        _drain_until(block.entered.is_set, label="setup worker entered")
 
     setups = svc.get_active_device_setups()
-    assert [s.device_name for s in setups] == ["alpha", "beta"]  # sorted by name
-
+    assert [s.device_name for s in setups] == ["alpha", "beta"]
     ops = svc.get_active_device_operations()
     assert [o.device_name for o in ops] == ["alpha", "beta"]
     assert all(o.kind is OperationKind.DEVICE_SETUP for o in ops)
     assert all(o.snapshot.status is DeviceStatus.SETTING_UP for o in ops)
-
-    # Let both setups finish so the autouse teardown can quiesce cleanly.
-    finished: set[str] = set()
-    done = QEventLoop()
-    on_setup_finished(
-        svc, lambda name: (finished.add(name), len(finished) == 2 and done.quit())
-    )
-    release.set()
-    spin_deadline = time.monotonic() + 3.0
-    while len(finished) < 2 and time.monotonic() < spin_deadline:
-        qapp.processEvents()
-        time.sleep(0.01)
+    for block in blocks.values():
+        block.release.set()
+    _drain_until(lambda: len(finished) == 2, label="both setups finished")
     assert finished == {"alpha", "beta"}
 
 
-def test_wait_setup_done_wakes_from_worker_thread_without_deadlock(qapp):
-    """wait_setup_done runs off the main thread; with the main event loop
-    spinning, the setup terminal wakes it promptly (regression: previously it
-    deadlocked because the handler occupied the main thread it needed)."""
-    import threading
-    import time
+@pytest.mark.parametrize("failure", [False, True], ids=["finished", "failed"])
+def test_wait_setup_done_wakes_from_worker_thread_without_deadlock(qapp, failure):
+    """A pending off-main waiter wakes from a real Qt owner terminal delivery."""
+    from concurrent.futures import Future
+
+    from zcu_tools.gui.session.operation_handles import AwaitResult
 
     handles = OperationHandles()
     svc, device = _make_svc(handles=handles)
     _connect(svc, _req())
-
-    # Make setup take ~0.5s so the waiter genuinely has to block.
-    def slow_setup(_info, stop_event=None):
-        time.sleep(0.5)
-
-    device.setup.side_effect = slow_setup
-    device.get_info.return_value = FakeDeviceInfo(address="addr", value=2.0)
-
+    block = _workers.setup(RuntimeError("hardware boom") if failure else None)
+    device.setup.side_effect = block
     token = svc.start_setup_device(
         SetupDeviceRequest(name="dev1", info=FakeDeviceInfo(address="addr", value=2.0))
     )
-
-    result: dict[str, object] = {}
+    _drain_until(block.entered.is_set, label="setup worker entered")
+    pending: Future[AwaitResult | None] = Future()
+    result: Future[AwaitResult | None] = Future()
+    done = threading.Event()
 
     def waiter() -> None:
-        t0 = time.monotonic()
-        outcome = handles.await_outcome(token, timeout=3.0)
-        result["outcome"] = outcome
-        result["dt"] = time.monotonic() - t0
+        try:
+            pending.set_result(handles.await_outcome(token, timeout=0))
+            # Releasing the driver and pumping Qt will settle this known token.
+            result.set_result(handles.await_outcome(token, timeout=30))
+        except BaseException as exc:
+            logging.exception("Device waiter failed")
+            result.set_exception(exc)
+            if not pending.done():
+                pending.set_exception(exc)
+        finally:
+            done.set()
 
     wt = threading.Thread(target=waiter)
     wt.start()
-
-    # Spin the main event loop (as the real GUI does) so the worker's
-    # setup_finished signal is dispatched and the gate lease is released.
-    deadline = time.monotonic() + 3.0
-    while wt.is_alive() and time.monotonic() < deadline:
-        qapp.processEvents()
-        time.sleep(0.01)
-    wt.join(timeout=1.0)
-
-    await_result: Any = result.get("outcome")
-    assert await_result is not None
-    assert await_result.reason == "completed"
-    assert await_result.outcome is not None
-    assert await_result.outcome.status == "finished"
-    dt = result.get("dt")
-    assert isinstance(dt, float)
-    assert dt < 2.0  # woke shortly after the 0.5s setup, not on timeout
-
-
-def test_wait_setup_done_raises_on_setup_failure(qapp):
-    import threading
-    import time
-
-    handles = OperationHandles()
-    svc, device = _make_svc(handles=handles)
-    _connect(svc, _req())
-
-    def failing_setup(_info, stop_event=None):
-        time.sleep(0.2)
-        raise RuntimeError("hardware boom")
-
-    device.setup.side_effect = failing_setup
-
-    token = svc.start_setup_device(
-        SetupDeviceRequest(name="dev1", info=FakeDeviceInfo(address="addr", value=2.0))
-    )
-
-    result: dict[str, object] = {}
-
-    def waiter() -> None:
-        result["outcome"] = handles.await_outcome(token, timeout=3.0)
-
-    wt = threading.Thread(target=waiter)
-    wt.start()
-    deadline = time.monotonic() + 3.0
-    while wt.is_alive() and time.monotonic() < deadline:
-        qapp.processEvents()
-        time.sleep(0.01)
-    wt.join(timeout=1.0)
-
-    await_result: Any = result.get("outcome")
-    assert await_result is not None
-    assert await_result.reason == "completed"
-    assert await_result.outcome is not None
-    assert await_result.outcome.status == "failed"
-    assert "hardware boom" in str(await_result.outcome.error)
+    try:
+        # The started waiter publishes its zero-timeout observation before blocking.
+        observed = pending.result(timeout=30)
+        assert observed is not None and observed.reason == "timeout"
+        assert handles.live_count() == 1  # timeout must not cancel the operation
+        # No public blocking-arrival hook: this window only adds regression sensitivity,
+        # never proves arrival; load cannot fail a correct still-pending waiter.
+        assert not done.wait(0.02)
+        block.release.set()
+        _drain_until(done.is_set, label="off-main waiter terminal")
+        outcome = result.result()  # rethrow worker errors on the caller
+        assert outcome is not None and outcome.reason == "completed"
+        assert outcome.outcome is not None
+        assert outcome.outcome.status == ("failed" if failure else "finished")
+        if failure:
+            assert "hardware boom" in str(outcome.outcome.error)
+    finally:
+        block.release.set()
+        try:
+            _drain_until(done.is_set, label="waiter cleanup after driver release")
+        finally:
+            # The released driver and owner delivery terminate the waiter.
+            wt.join(timeout=30)
+        assert not wt.is_alive()
+        result.result()
 
 
 def test_disconnect_close_failure_retains_connected_device_and_releases_gate(qapp):
     svc, device = _make_svc()
     _connect(svc, _req())
     device.close.side_effect = OSError("close failed")
-    loop = QEventLoop()
+    loop = _workers.completion(allow_failure=True)
     errors: list[str] = []
     on_device_operation_failed(
         svc, lambda _name, error: errors.append(error) or loop.quit()
@@ -477,7 +366,7 @@ def test_disconnect_close_failure_retains_connected_device_and_releases_gate(qap
     assert "dev1" in svc.get_connected_devices()
     assert svc.get_device_snapshot("dev1").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
     device.close.side_effect = None
-    retry_loop = QEventLoop()
+    retry_loop = _workers.completion()
     on_device_disconnected(svc, lambda _request: retry_loop.quit())
     svc.start_disconnect_device(DisconnectDeviceRequest(name="dev1"))
     retry_loop.exec()
@@ -582,8 +471,9 @@ def _drain_poll(qapp) -> None:
     ``on_read`` back to the main thread; quiesce the runner(s) then pump the
     event loop so the queued ``on_read`` actually fires.
     """
-    for bg in _LIVE_BG:
-        bg.quiesce()
+    for bg in _workers.runners:
+        # The scheduled poll producer and queued owner delivery must both drain.
+        assert bg.quiesce(timeout_ms=30_000)
     qapp.processEvents()
     qapp.processEvents()
 
@@ -676,7 +566,7 @@ def test_poll_device_info_skips_memory_only_device(qapp):
     svc, device = _make_svc()
     _connect(svc, _req())
     # Disconnect (remember=True) → MEMORY_ONLY.
-    drop_loop = QEventLoop()
+    drop_loop = _workers.completion()
     on_device_disconnected(svc, lambda _r: drop_loop.quit())
     svc.start_disconnect_device(DisconnectDeviceRequest(name="dev1"))
     drop_loop.exec()
@@ -697,21 +587,15 @@ def test_poll_device_info_polls_setting_up_device(qapp):
     svc, device = _make_svc(state=state, bus=bus)
     _connect(svc, _req())
 
-    entered = threading.Event()
-    release = threading.Event()
-
-    def blocking_setup(_info, stop_event=None):
-        entered.set()
-        release.wait()
-
-    device.setup.side_effect = blocking_setup
+    block = _workers.setup()
+    device.setup.side_effect = block
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=4.0)
 
     svc.start_setup_device(
         SetupDeviceRequest(name="dev1", info=FakeDeviceInfo(address="addr", value=4.0))
     )
     try:
-        _drain_until(entered.is_set, label="setup worker entered")
+        _drain_until(block.entered.is_set, label="setup worker entered")
         assert svc.get_device_snapshot("dev1").status is DeviceStatus.SETTING_UP  # type: ignore[union-attr]
 
         device.get_info.reset_mock()
@@ -733,7 +617,7 @@ def test_poll_device_info_polls_setting_up_device(qapp):
         assert cached.status is DeviceStatus.SETTING_UP
         assert getattr(cached.info, "value", None) == 4.0
     finally:
-        release.set()
+        block.release.set()
         _drain_until(
             lambda: svc.get_device_snapshot("dev1").status is DeviceStatus.CONNECTED,  # type: ignore[union-attr]
             label="setup finished",
@@ -846,6 +730,7 @@ def _make_multi_svc(
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
     bus = EventBus()
+    _workers.watch(bus)
     runner = OperationRunner(resolved_gate, handles, progress, bg, bus)
     registry = FakeDeviceRegistry()
     svc = DeviceService(
@@ -883,16 +768,15 @@ def test_gate_allows_concurrent_setup_of_different_devices(qapp):
     _connect_named(svc, "devB")
 
     # Hold devA mid-setup on a barrier so its lease is still active.
-    release_a = threading.Event()
-    drivers["devA"].setup.side_effect = lambda _info, stop_event=None: release_a.wait(
-        2.0
-    )
+    block_a = _workers.setup()
+    drivers["devA"].setup.side_effect = block_a
 
     svc.start_setup_device(
         SetupDeviceRequest(name="devA", info=FakeDeviceInfo(address="devA", value=1.0))
     )
+    _drain_until(block_a.entered.is_set, label="devA driver entered")
     # devB setup must start concurrently (no OperationConflictError).
-    finished_b = QEventLoop()
+    finished_b = _workers.completion()
     on_setup_finished(svc, lambda n: finished_b.quit() if n == "devB" else None)
     token_b = svc.start_setup_device(
         SetupDeviceRequest(name="devB", info=FakeDeviceInfo(address="devB", value=2.0))
@@ -911,9 +795,9 @@ def test_gate_allows_concurrent_setup_of_different_devices(qapp):
     assert svc.get_device_snapshot("devA").status is DeviceStatus.SETTING_UP  # type: ignore[union-attr]
 
     # Let devA finish too.
-    finished_a = QEventLoop()
+    finished_a = _workers.completion()
     on_setup_finished(svc, lambda n: finished_a.quit() if n == "devA" else None)
-    release_a.set()
+    block_a.release.set()
     finished_a.exec()
     assert svc.get_device_snapshot("devA").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
 
@@ -928,11 +812,12 @@ def test_same_device_setup_still_blocked_while_in_flight(qapp):
     svc, drivers = _make_multi_svc(gate=gate)
     _connect_named(svc, "devA")
 
-    release = threading.Event()
-    drivers["devA"].setup.side_effect = lambda _info, stop_event=None: release.wait(2.0)
+    block = _workers.setup()
+    drivers["devA"].setup.side_effect = block
     svc.start_setup_device(
         SetupDeviceRequest(name="devA", info=FakeDeviceInfo(address="devA", value=1.0))
     )
+    _drain_until(block.entered.is_set, label="devA driver entered")
     try:
         with pytest.raises(RuntimeError):
             svc.start_setup_device(
@@ -943,8 +828,8 @@ def test_same_device_setup_still_blocked_while_in_flight(qapp):
         # The in-flight op is untouched: exactly one lease for devA.
         assert gate.is_device_mutating("devA")
     finally:
-        release.set()
-        loop = QEventLoop()
+        block.release.set()
+        loop = _workers.completion()
         on_setup_finished(svc, lambda n: loop.quit() if n == "devA" else None)
         loop.exec()
 
@@ -956,18 +841,9 @@ def test_concurrent_setups_cancel_independently(qapp):
     _connect_named(svc, "devA")
     _connect_named(svc, "devB")
 
-    # Both setups poll their stop_event and only return when set (so cancel is
-    # observable) — but devB never gets cancelled, it finishes on a barrier.
-    def cancellable(_info, stop_event=None):
-        # Wait until cancelled (stop_event set) or a short timeout elapses.
-        if stop_event is not None:
-            stop_event.wait(2.0)
-
-    drivers["devA"].setup.side_effect = cancellable
-    release_b = threading.Event()
-    drivers["devB"].setup.side_effect = lambda _info, stop_event=None: release_b.wait(
-        2.0
-    )
+    block_a, block_b = _workers.setup(), _workers.setup()
+    drivers["devA"].setup.side_effect = block_a
+    drivers["devB"].setup.side_effect = block_b
 
     cancelled: list[str] = []
     on_setup_cancelled(svc, lambda n: cancelled.append(n))
@@ -983,10 +859,15 @@ def test_concurrent_setups_cancel_independently(qapp):
     assert gate.is_device_mutating("devA")
     assert gate.is_device_mutating("devB")
 
+    _drain_until(block_a.entered.is_set, label="devA driver entered")
+    _drain_until(block_b.entered.is_set, label="devB driver entered")
     # Cancel only devA.
-    cancel_loop = QEventLoop()
+    cancel_loop = _workers.completion()
     on_setup_cancelled(svc, lambda n: cancel_loop.quit() if n == "devA" else None)
     svc.cancel_device_operation("devA")
+    assert block_a.stop_event is not None and block_a.stop_event.is_set()
+    assert block_b.stop_event is not None and not block_b.stop_event.is_set()
+    block_a.release.set()
     cancel_loop.exec()
 
     assert cancelled == ["devA"]
@@ -995,9 +876,9 @@ def test_concurrent_setups_cancel_independently(qapp):
     assert svc.get_device_snapshot("devB").status is DeviceStatus.SETTING_UP  # type: ignore[union-attr]
     assert "devB" not in cancelled
 
-    finish_loop = QEventLoop()
+    finish_loop = _workers.completion()
     on_setup_finished(svc, lambda n: finish_loop.quit() if n == "devB" else None)
-    release_b.set()
+    block_b.release.set()
     finish_loop.exec()
     assert "devB" in finished
     assert svc.get_device_snapshot("devB").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
@@ -1024,6 +905,7 @@ def _make_svc_with_fake_registry(
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
     bus = EventBus()
+    _workers.watch(bus)
     runner = OperationRunner(resolved_gate, handles, progress, bg, bus)
     registry = FakeDeviceRegistry()
     svc = DeviceService(
@@ -1055,7 +937,7 @@ def test_registry_port_disconnect_drops_from_fake(qapp):
     _connect(svc, _req())
     assert "dev1" in registry.get_all_devices()
 
-    drop_loop = QEventLoop()
+    drop_loop = _workers.completion()
     on_device_disconnected(svc, lambda _r: drop_loop.quit())
     svc.start_disconnect_device(DisconnectDeviceRequest(name="dev1"))
     drop_loop.exec()
@@ -1083,7 +965,7 @@ def test_registry_port_connect_failure_rollback_still_correct(qapp):
     svc, device, registry = _make_svc_with_fake_registry()
     device.get_info.side_effect = RuntimeError("boom")
     errors: list[str] = []
-    loop = QEventLoop()
+    loop = _workers.completion(allow_failure=True)
     on_device_operation_failed(
         svc, lambda _name, error: errors.append(error) or loop.quit()
     )
@@ -1103,7 +985,7 @@ def test_registry_port_setup_reads_driver_from_fake(qapp):
     _connect(svc, _req())
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=5.0)
 
-    setup_loop = QEventLoop()
+    setup_loop = _workers.completion()
     on_setup_finished(svc, lambda _name: setup_loop.quit())
     svc.start_setup_device(
         SetupDeviceRequest(name="dev1", info=FakeDeviceInfo(address="addr", value=5.0))
@@ -1127,10 +1009,8 @@ def test_concurrent_setup_failure_does_not_affect_other(qapp):
     drivers["devA"].setup.side_effect = lambda _info, stop_event=None: (
         _ for _ in ()
     ).throw(RuntimeError("devA boom"))
-    release_b = threading.Event()
-    drivers["devB"].setup.side_effect = lambda _info, stop_event=None: release_b.wait(
-        2.0
-    )
+    block_b = _workers.setup()
+    drivers["devB"].setup.side_effect = block_b
 
     failed: list[tuple[str, str]] = []
     on_setup_failed(svc, lambda n, e: failed.append((n, e)))
@@ -1138,7 +1018,8 @@ def test_concurrent_setup_failure_does_not_affect_other(qapp):
     svc.start_setup_device(
         SetupDeviceRequest(name="devB", info=FakeDeviceInfo(address="devB", value=2.0))
     )
-    fail_loop = QEventLoop()
+    _drain_until(block_b.entered.is_set, label="devB driver entered")
+    fail_loop = _workers.completion(allow_failure=True)
     on_setup_failed(svc, lambda n, _e: fail_loop.quit() if n == "devA" else None)
     svc.start_setup_device(
         SetupDeviceRequest(name="devA", info=FakeDeviceInfo(address="devA", value=1.0))
@@ -1153,8 +1034,8 @@ def test_concurrent_setup_failure_does_not_affect_other(qapp):
     assert svc.get_device_snapshot("devB").status is DeviceStatus.SETTING_UP  # type: ignore[union-attr]
     assert gate.is_device_mutating("devB")
 
-    finish_loop = QEventLoop()
+    finish_loop = _workers.completion()
     on_setup_finished(svc, lambda n: finish_loop.quit() if n == "devB" else None)
-    release_b.set()
+    block_b.release.set()
     finish_loop.exec()
     assert svc.get_device_snapshot("devB").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
