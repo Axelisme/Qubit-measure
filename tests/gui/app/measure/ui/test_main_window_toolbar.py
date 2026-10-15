@@ -115,16 +115,9 @@ def test_toolbar_dialog_buttons_open_expected_dialogs(qapp) -> None:
     ]
 
 
-class ToolbarController(Controller):
-    """Expose the existing background drain for this real UI composition."""
-
-    def quiesce(self) -> None:
-        self._background_svc.quiesce()
-
-
 @dataclass
 class ToolbarApplication:
-    controller: ToolbarController
+    controller: Controller
     window: MainWindow
     remote: RemoteControlAdapter
     link: ClientLink
@@ -148,7 +141,7 @@ def toolbar_application(
     registry.register("stoppable", OldAdapter)
     registry.register("group/nested", OldAdapter)
     scheduler = ImmediateOwnerScheduler()
-    ctrl = ToolbarController(
+    ctrl = Controller(
         State(SessionEnv(parameters=None, soc=None, soccfg=None)),
         registry,
         None,
@@ -172,7 +165,7 @@ def toolbar_application(
         yield ToolbarApplication(ctrl, window, remote, link, tab_id)
     finally:
         remote.on_client_close(link, on_owner_thread=True)
-        ctrl.quiesce()
+        ctrl.close()
         for tid in tuple(ctrl.list_tab_ids()):
             ctrl.tab_control.close_tab(tid)
         window.deleteLater()

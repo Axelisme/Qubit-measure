@@ -29,16 +29,9 @@ from tests.gui.app.measure._templates import register_all_templates
 from tests.resources.entry.fakes import registry_state, restore_registry
 
 
-class TemplateController(Controller):
-    """Fixture-owned background teardown, matching the GUI lifecycle convention."""
-
-    def quiesce(self) -> None:
-        self._background_svc.quiesce()
-
-
 @dataclass
 class TemplateSession:
-    controller: TemplateController
+    controller: Controller
     entry: ResultEntry
     catalog: TemplateCatalog
     state: State
@@ -67,7 +60,7 @@ def session(qapp, tmp_path: Path) -> Generator[TemplateSession]:
         catalog = TemplateCatalog()
         register_all_templates(catalog)
         state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
-        ctrl = TemplateController(
+        ctrl = Controller(
             state,
             Registry(),
             None,
@@ -84,7 +77,7 @@ def session(qapp, tmp_path: Path) -> Generator[TemplateSession]:
                 "template capture tests polluted registries"
             )
         finally:
-            ctrl.quiesce()
+            ctrl.close()
             qapp.processEvents()
     finally:
         restore_registry(before)

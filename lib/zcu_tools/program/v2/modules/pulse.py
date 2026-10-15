@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable
 from copy import deepcopy
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BeforeValidator
 from qick.asm_v2 import QickParam, QickRawParam
@@ -27,11 +27,11 @@ if TYPE_CHECKING:
 class PulseCfg(AbsModuleCfg):
     """Native generator pulse; ADC matching is a Pulse runtime input.
 
-    ch selects the generator, nqz is Nyquist zone 1 or 2. freq/mixer_freq and
-    mux_freqs are MHz; phase/mux_phases are degrees; gain/mux_gains are normalized.
-    waveform is the native envelope; pre_delay/post_delay are us. Frequency,
-    phase, gain and delays accept QICK sweeps. Optional mux arrays, tone-index mask
-    and outsel configure the hardware. desc is optional prose; type is pulse.
+    ch selects the generator, nqz is Nyquist zone 1 or 2. freq/mixer_freq are
+    MHz; phase is degrees; gain is normalized. waveform is the native envelope;
+    pre_delay/post_delay are us. Frequency, phase, gain and delays accept QICK
+    sweeps. mixer_freq optionally configures mixing. desc is optional prose;
+    type is pulse.
     """
 
     type: Literal["pulse"] = "pulse"
@@ -45,11 +45,6 @@ class PulseCfg(AbsModuleCfg):
     post_delay: float | QickParam = 0.0
 
     mixer_freq: float | None = None
-    mux_freqs: list[float] | None = None
-    mux_gains: list[float] | None = None
-    mux_phases: list[float] | None = None
-    mask: list[int] | None = None
-    outsel: int | None = None
 
     def build(self, name: str) -> Pulse:
         return Pulse(name, self)
@@ -111,24 +106,17 @@ class Pulse(Module):
             cfg.ch,
             nqz=cfg.nqz,
             mixer_freq=cfg.mixer_freq,
-            mux_freqs=cfg.mux_freqs,
-            mux_gains=cfg.mux_gains,
-            mux_phases=cfg.mux_phases,
             ro_ch=ro_ch,
         )
 
         self.waveform.create(prog, cfg.ch)
-        pulse_kwargs = dict[str, Any](freq=cfg.freq, phase=cfg.phase, gain=cfg.gain)
-        if cfg.mask is not None:
-            pulse_kwargs["mask"] = cfg.mask
-        if cfg.outsel is not None:
-            pulse_kwargs["outsel"] = cfg.outsel
-
         prog.add_pulse(
             cfg.ch,
             pulse_id,
             ro_ch=self.ro_ch,
-            **pulse_kwargs,
+            freq=cfg.freq,
+            phase=cfg.phase,
+            gain=cfg.gain,
             **self.waveform.to_wav_kwargs(),
         )
 

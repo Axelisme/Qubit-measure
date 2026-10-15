@@ -29,11 +29,6 @@ class PulseRegistry:
         "phase",
         "gain",
         "mixer_freq",
-        "mux_freqs",
-        "mux_gains",
-        "mux_phases",
-        "mask",
-        "outsel",
     ]
 
     def __init__(self) -> None:

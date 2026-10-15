@@ -54,7 +54,7 @@ def measure_gui(qapp: QApplication, tmp_path: Path) -> Iterator[Controller]:
     finally:
         sys.excepthook = previous_hook
         if ctrl is not None and window is not None:
-            ctrl._background_svc.quiesce()  # pyright: ignore[reportPrivateUsage] - fixture teardown
+            ctrl.close()
             window.deleteLater()
             qapp.processEvents()
 

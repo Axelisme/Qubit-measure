@@ -15,6 +15,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services import create_persistence_caretaker
 from zcu_tools.gui.app.measure.state import State
@@ -38,7 +39,6 @@ from tests.gui.app.measure._synthetic import (
     SampleRun,
 )
 from tests.gui.app.measure._templates import register_all_templates
-from tests.gui.app.measure.remote._helpers import FixtureController
 
 
 class LedgerAdapter(PairAdapter):
@@ -77,7 +77,7 @@ def hw_fixture(qapp, tmp_path):
         State(SessionEnv(parameters=None, soc=None, soccfg=None)),
         BaseEventBus(),
     )
-    ctrl = FixtureController(
+    ctrl = Controller(
         state=state,
         registry=registry,
         template_catalog=templates,
@@ -107,7 +107,7 @@ def hw_fixture(qapp, tmp_path):
     try:
         yield ctrl, window
     finally:
-        ctrl.quiesce()
+        ctrl.close()
         window.deleteLater()
         qapp.processEvents()
         if added:

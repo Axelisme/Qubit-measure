@@ -21,6 +21,7 @@ class DialogCall:
     message: str
     action_text: str | None = None
     default: bool | None = None
+    cancel_text: str | None = None
 
 
 class RecordingDialogPresenter:
@@ -104,7 +105,9 @@ class RecordingDialogPresenter:
         action_text: str,
         on_decision: Callable[[bool], None],
         default: bool = False,
+        cancel_text: str = "Cancel",
     ) -> None:
+        """Record labels; only an explicit positive decision accepts the action."""
         del parent
         self.calls.append(
             DialogCall(
@@ -113,6 +116,7 @@ class RecordingDialogPresenter:
                 message,
                 action_text=action_text,
                 default=default,
+                cancel_text=cancel_text,
             )
         )
         if self._destructive_answers:

@@ -138,7 +138,6 @@ def test_template_required_nested_defaults_omit_none() -> None:
     assert isinstance(module, dict)
     assert module["phase"] == 0
     assert "mixer_freq" not in module
-    assert "mux_freqs" not in module
     assert module["freq"] == 120
     value = state.result(env)
     assert not isinstance(value, FormErrors), value
