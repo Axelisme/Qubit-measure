@@ -75,8 +75,6 @@ class Adapter(BaseAdapter[Cfg, float]):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[Cfg]:
         return Form(Cfg, {"probe": Template("probe")})
-    def make_filename_stem(self, ctx):
-        return "demo"
 def register_all(registry):
     registry.register("demo", Adapter)
 """

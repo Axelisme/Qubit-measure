@@ -6,7 +6,6 @@ fits power and detuning errors; the summary reports them.
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, ClassVar, TypeAlias
@@ -18,7 +17,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeResultBase,
     ParamMeta,
     RunRequest,
-    SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
@@ -91,6 +89,3 @@ class AllXYAdapter(
             detune_err=analysis.detune_err,
             residual_rms=analysis.residual_rms,
         )
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return f"{ctx.qub_name}_allxy_{time.strftime('%m%d')}"

@@ -6,11 +6,7 @@ from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
-    SessionEnv,
-)
+from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.program.v2 import ModuleCfg
 
@@ -47,7 +43,3 @@ class CalibrationAdapter(BaseAdapter[CalibrationInput, float]):
         analysis=AnalysisMode.NONE, load_data=False
     )
     exp_cls = _RejectRun
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        """Return the fixed local name used by this non-running adapter fake."""
-        return "calibration"

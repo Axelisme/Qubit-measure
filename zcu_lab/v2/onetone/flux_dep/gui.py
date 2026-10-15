@@ -15,7 +15,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     ParameterWriteback,
     RunRequest,
-    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -140,6 +139,3 @@ class OneToneFluxDepAdapter(
                 proposed_value=result.flx_period,
             ),
         ]
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return f"{ctx.res_name}_flux"

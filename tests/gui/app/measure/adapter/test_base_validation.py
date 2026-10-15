@@ -24,10 +24,6 @@ class _MinimalNoAnalysisAdapter(
     )
     exp_cls: ClassVar[type[object]] = object
 
-    def make_filename_stem(self, ctx: Any) -> str:
-        del ctx
-        return "minimal"
-
 
 class _FitNoParamsAdapter(_MinimalNoAnalysisAdapter):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
@@ -79,10 +75,6 @@ def test_fit_requires_analyze_params_hook_when_params_need_values() -> None:
             )
             exp_cls: ClassVar[type[object]] = object
 
-            def make_filename_stem(self, ctx: Any) -> str:
-                del ctx
-                return "bad"
-
             def analyze(self, req: Any, *, plots: Plots) -> NoAnalysisResult:
                 del req
                 return NoAnalysisResult()
@@ -96,10 +88,6 @@ def test_fit_allows_base_analyze_params_hook_when_params_all_have_defaults() -> 
             analysis=AnalysisMode.FIT
         )
         exp_cls: ClassVar[type[object]] = object
-
-        def make_filename_stem(self, ctx: Any) -> str:
-            del ctx
-            return "ok"
 
         def analyze(self, req: Any, *, plots: Plots) -> NoAnalysisResult:
             del req
