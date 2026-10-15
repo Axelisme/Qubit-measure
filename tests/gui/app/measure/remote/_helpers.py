@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import socket
-import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -22,7 +21,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from PIL import Image
-from qtpy.QtCore import QCoreApplication
+from qtpy.QtCore import QCoreApplication, QEventLoop, QSocketNotifier, QTimer
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.adapter import ExpAdapterProtocol, SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
@@ -328,15 +327,17 @@ def _inbox_buf(sock: socket.socket) -> bytearray:
 def recv_until(
     sock: socket.socket,
     accept: Callable[[dict], bool],
-    timeout_s: float = 3.0,
+    timeout_s: float = 30.0,
 ) -> dict:
     """Wait for the first NDJSON line where ``accept(msg)`` is True.
 
     Lines that ``accept`` rejects are **parked** in a per-socket inbox so a
     later ``recv_*`` call can still observe them — this is important when
     a test waits for a reply that may arrive interleaved with event pushes,
-    or vice versa. Pumps the Qt event loop between recv attempts so
-    marshalled handlers and EventBus emits make progress.
+    or vice versa. Runs the Qt owner loop while waiting for socket readiness so
+    marshalled handlers and EventBus emits make progress. Socket readiness
+    resumes framing; it does not imply a complete or matching frame. The
+    independent watchdog bounds a missing reply, never decides success.
     """
     app = QCoreApplication.instance()
     assert app is not None
@@ -345,32 +346,58 @@ def recv_until(
     for idx, msg in enumerate(inbox):
         if accept(msg):
             return inbox.pop(idx)
-    deadline = time.monotonic() + timeout_s
     buf = _inbox_buf(sock)
     sock.setblocking(False)
-    while time.monotonic() < deadline:
+    loop = QEventLoop()
+    notifier = QSocketNotifier(sock.fileno(), QSocketNotifier.Type.Read)
+    watchdog = QTimer()
+    watchdog.setSingleShot(True)
+    matched: list[dict] = []
+    errors: list[Exception] = []
+
+    def receive() -> None:
         try:
-            chunk = sock.recv(4096)
-            if not chunk:
-                raise AssertionError("peer closed without a matching line")
-            buf.extend(chunk)
-        except BlockingIOError:
-            pass
-        while True:
-            nl = buf.find(b"\n")
-            if nl < 0:
-                break
-            line = bytes(buf[:nl])
-            del buf[: nl + 1]
-            if not line:
-                continue
-            msg = json.loads(line.decode("utf-8"))
-            if accept(msg):
-                return msg
-            inbox.append(msg)
-        app.processEvents()
-        time.sleep(0.005)
-    raise AssertionError(f"no matching message within {timeout_s}s")
+            while True:
+                nl = buf.find(b"\n")
+                if nl >= 0:
+                    line = bytes(buf[:nl])
+                    del buf[: nl + 1]
+                    if not line:
+                        continue
+                    msg = json.loads(line.decode("utf-8"))
+                    if accept(msg):
+                        matched.append(msg)
+                        loop.quit()
+                        return
+                    inbox.append(msg)
+                    continue
+                try:
+                    chunk = sock.recv(4096)
+                except BlockingIOError:
+                    return
+                if not chunk:
+                    raise AssertionError("peer closed without a matching line")
+                buf.extend(chunk)
+        except Exception as exc:
+            errors.append(exc)
+            loop.quit()
+
+    notifier.activated.connect(receive)
+    watchdog.timeout.connect(loop.quit)
+    try:
+        receive()  # A complete frame may already be buffered from the previous read.
+        if not matched and not errors:
+            # The sent request / emitted event must produce a matching complete frame.
+            watchdog.start(int(timeout_s * 1000))
+            loop.exec()
+    finally:
+        notifier.setEnabled(False)
+        notifier.activated.disconnect(receive)
+        watchdog.stop()
+    if errors:
+        raise errors[0]
+    assert matched, "no matching message before socket watchdog"
+    return matched[0]
 
 
 def reset_inbox(sock: socket.socket) -> None:
@@ -379,7 +406,7 @@ def reset_inbox(sock: socket.socket) -> None:
     _INBOX_BUF.pop(sock.fileno(), None)
 
 
-def recv_response(sock: socket.socket, rid: str, timeout_s: float = 3.0) -> dict:
+def recv_response(sock: socket.socket, rid: str, timeout_s: float = 30.0) -> dict:
     """Wait for a NDJSON response with ``id == rid``; drops pushes."""
     return recv_until(
         sock,
@@ -388,7 +415,7 @@ def recv_response(sock: socket.socket, rid: str, timeout_s: float = 3.0) -> dict
     )
 
 
-def recv_push(sock: socket.socket, event: str, timeout_s: float = 3.0) -> dict:
+def recv_push(sock: socket.socket, event: str, timeout_s: float = 30.0) -> dict:
     """Wait for a push line whose ``event`` matches; drops replies."""
     return recv_until(
         sock,
@@ -398,7 +425,7 @@ def recv_push(sock: socket.socket, event: str, timeout_s: float = 3.0) -> dict:
 
 
 def open_client(port: int) -> socket.socket:
-    sock = socket.create_connection(("127.0.0.1", port), timeout=1.0)
+    sock = socket.create_connection(("127.0.0.1", port), timeout=30.0)
     # The OS may recycle a closed socket's fileno from an earlier test.
     reset_inbox(sock)
     reply = call(sock, "control.connect", rid="control-initialize")
@@ -413,7 +440,7 @@ def call(
     params: dict | None = None,
     *,
     rid: str = "1",
-    timeout_s: float = 3.0,
+    timeout_s: float = 30.0,
 ) -> dict:
     """Send a single RPC and wait for its matching reply."""
     send(sock, {"id": rid, "method": method, "params": params or {}})

@@ -4,13 +4,10 @@ from __future__ import annotations
 
 import json
 import socket
-import time
 from typing import Any
 from unittest.mock import MagicMock
 
-from qtpy.QtCore import QCoreApplication
-
-from ._helpers import Fixture
+from ._helpers import Fixture, recv_until
 from ._helpers import open_client as open_owner_client
 
 
@@ -34,33 +31,9 @@ def send(sock: socket.socket, obj: dict[str, Any]) -> None:
     sock.sendall((json.dumps(obj) + "\n").encode("utf-8"))
 
 
-def recv_response(sock: socket.socket, timeout_s: float = 3.0) -> dict[str, Any]:
-    """Wait for one NDJSON response, pumping the Qt event loop in between."""
-    app = QCoreApplication.instance()
-    assert app is not None
-    deadline = time.monotonic() + timeout_s
-    buf = bytearray()
-    sock.setblocking(False)
-    while time.monotonic() < deadline:
-        try:
-            chunk = sock.recv(4096)
-            if chunk:
-                buf.extend(chunk)
-                if b"\n" in buf:
-                    line, _, _ = bytes(buf).partition(b"\n")
-                    return json.loads(line.decode("utf-8"))
-                    # rest discarded — single-response helper
-            else:
-                # peer closed cleanly mid-recv → return ""
-                if buf and b"\n" in buf:
-                    line, _, _ = bytes(buf).partition(b"\n")
-                    return json.loads(line.decode("utf-8"))
-                raise AssertionError("peer closed without a response line")
-        except BlockingIOError:
-            pass
-        app.processEvents()
-        time.sleep(0.005)
-    raise AssertionError(f"no response within {timeout_s}s")
+def recv_response(sock: socket.socket) -> dict[str, Any]:
+    """Read the next complete reply with real Qt owner delivery and framing."""
+    return recv_until(sock, lambda msg: "id" in msg)
 
 
 def open_client(port: int) -> socket.socket:
