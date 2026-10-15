@@ -263,3 +263,29 @@ def test_invalid_backend_signals_fail_public_acquire_and_allow_retry(invalid, mo
     np.testing.assert_array_equal(result, 0)
     np.testing.assert_array_equal(raw_of(prog), 0)
     assert env.soc.binding.last_request.sequence == failed_sequence + 1
+
+
+def test_scalar_readout_trigger_is_relative_to_module_not_pulse_predelay():
+    env = environment(std_adc=0)
+    cfg = PulseReadoutCfg(
+        gen_ch=0,
+        ro_ch=0,
+        nqz=1,
+        freq=100.0,
+        gain=0.1,
+        waveform=ConstWaveformCfg(length=0.1),
+        ro_length=0.1,
+        pre_delay=1.5,
+        trig_offset=0.25,
+    )
+    prog = ModularProgramV2(
+        env.soccfg,
+        ProgramV2Cfg(reps=1),
+        modules=[cfg.build("readout")],
+    )
+    prog.acquire(env.soc, progress=False)
+    request = env.soc.binding.last_request
+    expected_trigger = prog.cycles2us(prog.us2cycles(0.25))
+    assert request.readouts[0].trigger_us == (expected_trigger,)
+    expected_pulse = prog.cycles2us(prog.us2cycles(1.5))
+    assert request.controls[0][0].start_us == expected_pulse
