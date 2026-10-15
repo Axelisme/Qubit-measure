@@ -17,7 +17,6 @@ from qtpy.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
-    QTreeWidget,
     QWidget,
 )
 from zcu_tools.gui.app.measure.adapter import (
@@ -30,13 +29,6 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    DirectValue,
-    ScalarSpec,
-)
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
@@ -160,48 +152,6 @@ def exp_tab_widget(qapp):
     from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 
     return ExpTabWidget
-
-
-def test_A1_Run_mounts_tree_with_visual_and_folding(
-    qapp, exp_tab_widget, snapshots, make_ctrl
-):
-    """Run keeps its tree presentation, Reset, editing lock and busy state."""
-    from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
-
-    ctrl = make_ctrl()
-    snap = snapshots("tab-1", analysis=AnalysisMode.FIT, post=False)
-    tab = exp_tab_widget("tab-1", ctrl, snap.capabilities)
-    w = CfgFormWidget(text_input_enhancer=None)
-    try:
-        tab.attach(snap, MagicMock())
-        schema = CfgSchema(
-            spec=CfgSectionSpec(fields={"reps": ScalarSpec(label="Reps", type=int)}),
-            value=CfgSectionValue(fields={"reps": DirectValue(10)}),
-        )
-        draft = MeasureCfgBindings(make_ctrl()).new_draft(schema, parameters=None)
-        w.attach(draft)
-        tree = w.findChild(QTreeWidget)
-        assert tree is not None
-        assert tree.isHeaderHidden()
-        assert tree.indentation() == 10
-        assert tree.font().pixelSize() == 13
-        assert tab.reset_btn.isEnabled() is True, ctrl.control_identity.status()
-        assert isinstance(tab.reset_btn.toolTip(), str)
-        busy_snap = snapshots("tab-1", analysis=AnalysisMode.FIT, post=False)
-        assert busy_snap.interaction is not None
-        busy_snap = dataclasses.replace(
-            busy_snap,
-            interaction=dataclasses.replace(busy_snap.interaction, is_running=True),
-        )
-        tab.update_interaction_state(busy_snap)
-        assert tab.reset_btn.isEnabled() is False
-    finally:
-        w.detach()
-        w.close()
-        tab.detach()
-        tab.close()
-        qapp.processEvents()
 
 
 def _click_header(qapp: QApplication, header: QWidget) -> None:

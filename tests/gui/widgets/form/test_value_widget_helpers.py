@@ -8,7 +8,7 @@ from qtpy.QtWidgets import (
     QSpinBox,
     QWidget,
 )
-from zcu_tools.gui.widgets.cfg.fields import (
+from zcu_tools.gui.widgets.form.value_widgets import (
     connect_committed_value_widget,
     connect_value_widget,
     read_value_widget,

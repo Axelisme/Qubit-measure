@@ -7,7 +7,6 @@ import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QApplication
@@ -72,7 +71,6 @@ def composed_context(
                     state=state,
                     bus=bus,
                     registry=registry,
-                    cfg_editor_ctrl=MagicMock(),
                     progress_transport=DirectProgressTransport(),
                     resource_versions=state.version.snapshot,
                     render_host=lambda: None,

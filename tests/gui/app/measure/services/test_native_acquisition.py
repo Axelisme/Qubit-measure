@@ -186,7 +186,6 @@ def role_application(
         state=state,
         bus=bus,
         registry=registry,
-        cfg_editor_ctrl=MagicMock(),
         progress_transport=DirectProgressTransport(),
         resource_versions=state.version.snapshot,
         render_host=lambda: None,

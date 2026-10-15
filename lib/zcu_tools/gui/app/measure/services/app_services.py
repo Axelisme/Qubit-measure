@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess, ExperimentCatalogLoader
-from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.alias_presets import AliasPresets, validate_alias_presets
@@ -24,8 +23,8 @@ from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from .analyze import AnalyzeService
-from .cfg_editor import CfgEditorService
 from .experiment_reload import ExperimentReloadService
+from .form_contracts import source_basis
 from .guard import GuardService
 from .load import LoadService
 from .operation_control import OperationControlFacet
@@ -53,7 +52,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.setup_control import SetupControlPort
 
-    from .cfg_editor import CfgEditorHost
     from .operation_control import OperationControlPort
     from .run_analyze_control import RunAnalyzeControlPort, RunAnalyzeRenderHost
     from .save_control import SaveControlPort
@@ -107,7 +105,6 @@ class AppServices:
     writeback_control: WritebackControlPort
     workspace: WorkspaceService
     settings: ProjectSettingsService
-    cfg_editor: CfgEditorService
     arb_waveform: ArbWaveformService
 
 
@@ -116,7 +113,6 @@ def build_app_services(
     state: State,
     bus: EventBus,
     registry: Registry,
-    cfg_editor_ctrl: CfgEditorHost,
     progress_transport: ProgressTransport,
     resource_versions: Callable[[], Mapping[str, int]],
     render_host: Callable[[], RunAnalyzeRenderHost | None],
@@ -127,11 +123,6 @@ def build_app_services(
     alias_presets: AliasPresets | None = None,
 ) -> AppServices:
     """Construct and wire every domain service into a frozen bundle.
-
-    ``cfg_editor_ctrl`` is the Controller itself (the CfgEditor session's
-    LiveModel env + ModuleLibrary registration surface). It is only stored, never
-    called during construction, so passing the still-initialising Controller is
-    safe and keeps the bundle complete (no service built outside this function).
 
     ``alias_presets`` maps names to ordered caller-owned rows. Omitted or None
     means no catalog and an empty initial table. A supplied mapping must contain
@@ -171,8 +162,6 @@ def build_app_services(
     device = session.device
     arb_waveform = session.arb_waveform
 
-    bindings = MeasureCfgBindings(cfg_editor_ctrl)
-
     def captured_parameters(
         aliases: Mapping[str, str] | None,
     ) -> ParameterContext | None:
@@ -192,19 +181,11 @@ def build_app_services(
                     if device.info is not None
                 },
             ),
-            source_basis=bindings.source_basis(state),
+            source_basis=source_basis(state),
         )
 
     tab_forms = TabFormResources(
         mutation_allowed=lambda tab_id: not state.is_tab_busy(tab_id),
-    )
-    # Independent library/inspect drafts never publish tab cfg.
-    cfg_editor = CfgEditorService(
-        cfg_editor_ctrl,
-        read_port=cfg_editor_ctrl,
-        write_port=cfg_editor_ctrl,
-        versions=cfg_editor_ctrl,
-        bus=bus,
     )
     writeback = WritebackService(
         ContextControlFacet(context=context),
@@ -320,6 +301,5 @@ def build_app_services(
         writeback_control=writeback_control,
         workspace=workspace,
         settings=session.settings,
-        cfg_editor=cfg_editor,
         arb_waveform=arb_waveform,
     )

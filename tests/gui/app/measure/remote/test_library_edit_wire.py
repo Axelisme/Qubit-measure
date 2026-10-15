@@ -161,23 +161,3 @@ def test_ml_edit_save_as_rejects_an_existing_name(library_socket) -> None:
     assert reply["error"]["code"] == "invalid_params"
     assert "already exists" in reply["error"]["message"]
     assert fx.ctrl.read_context().library.document() == before
-
-
-@pytest.mark.parametrize(
-    "value",
-    [
-        {"__kind": "eval", "expr": "0.25 + 0.5"},
-        {"__kind": "value_ref", "key": "device.flux.value", "type": "float"},
-    ],
-    ids=["eval", "value_ref"],
-)
-def test_ml_edit_rejects_retired_value_tags_with_the_expression_form(
-    library_socket, value
-) -> None:
-    fx, sock = library_socket
-    before = fx.ctrl.read_context().library.document()
-    reply = ml_edit(sock, "module", PULSE, [{"path": ["gain"], "value": value}])
-    assert reply["ok"] is False
-    assert reply["error"]["code"] == "invalid_params"
-    assert '{"expr": ' in reply["error"]["message"]
-    assert fx.ctrl.read_context().library.document() == before

@@ -24,37 +24,6 @@ from zcu_tools.gui.form import FormPath
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.types import ParameterContext
 
-
-@dataclass(frozen=True, slots=True)
-class CfgEdit:
-    path: str
-    value: object
-
-
-@dataclass(frozen=True, slots=True)
-class CfgEditResult:
-    valid: bool
-    removed: tuple[str, ...] = ()
-    added: tuple[str, ...] = ()
-    applied: int | None = None
-    actual: dict[str, object] | None = None
-    errors: tuple[dict[str, str], ...] | None = None
-
-    def to_wire(self) -> dict[str, object]:
-        result: dict[str, object] = {
-            "valid": self.valid,
-            "removed": list(self.removed),
-            "added": list(self.added),
-        }
-        if self.applied is not None:
-            result["applied"] = self.applied
-        if self.actual is not None:
-            result["actual"] = self.actual
-        if self.errors is not None:
-            result["errors"] = list(self.errors)
-        return result
-
-
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import (
         AdapterCapabilities,

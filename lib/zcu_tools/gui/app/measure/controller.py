@@ -12,8 +12,6 @@ from zcu_tools.gui.app.measure.services.experiment_reload import (
     ReloadPreview,
     ReloadReport,
 )
-from zcu_tools.gui.cfg import CfgSchema
-from zcu_tools.gui.cfg.binding import CfgDraft
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import EventOrigin
@@ -74,7 +72,6 @@ if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
     from zcu_tools.experiment.run_saving import SaveReport
-    from zcu_tools.gui.cfg.binding import SettableTarget
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
     from zcu_tools.gui.session.alias_presets import AliasPresets
     from zcu_tools.gui.session.arb_waveform import ArbWaveformPort
@@ -315,10 +312,6 @@ class Controller(SessionControllerMixin):
 
         # Construct and wire every domain service into an immutable bundle, then
         # alias them onto self for the façade's call sites.
-        # ``cfg_editor_ctrl=self`` lets build_app_services build CfgEditorService
-        # in the same bundle: the session only stores the Controller (as its
-        # LiveModel env + ModuleLibrary registration surface) and never calls it
-        # during construction, so passing the still-initialising self is safe.
         # The progress transport is the Qt marshal (a driven adapter). Default to
         # the Qt one so GUI/agent processes (which run a Qt event loop) work
         # without the entry point wiring it; tests inject a synchronous fake.
@@ -340,7 +333,6 @@ class Controller(SessionControllerMixin):
             state=state,
             bus=bus,
             registry=registry,
-            cfg_editor_ctrl=self,
             progress_transport=transport,
             resource_versions=self.resources_versions,
             render_host=lambda: self._render_host,
@@ -408,7 +400,6 @@ class Controller(SessionControllerMixin):
         self._writeback_control = services.writeback_control
         self._workspace_svc = services.workspace
         self._settings_svc = services.settings
-        self._cfg_editor_svc = services.cfg_editor
         self._arb_waveform_svc = services.arb_waveform
 
     def add_view(self, view: ViewProtocol) -> None:
@@ -1098,50 +1089,6 @@ class Controller(SessionControllerMixin):
         except LibraryEntryInvalid as exc:
             return exc.errors
         return None
-
-    # ------------------------------------------------------------------
-    # CfgEditor sessions (CfgEditorService) — seeded drafts
-    # ------------------------------------------------------------------
-
-    def open_seeded_cfg_editor(
-        self,
-        seed: CfgSchema,
-        *,
-        parameters: ParameterContext | None,
-        gc: bool = False,
-        owner_key: str | None = None,
-    ) -> tuple[str, tuple[SettableTarget, ...]]:
-        """Open a service-owned cfg model seeded from an existing CfgSchema.
-
-        parameters is the owner-supplied fixed expression/reference capture;
-        None permits pure math only. UI callers attach to get_cfg_editor_draft.
-        Seeded sessions cannot commit library structure writes. Invalid schema
-        and capture/reference failures propagate from the editor owner.
-        """
-        return self._cfg_editor_svc.open_seeded(
-            seed, parameters=parameters, gc=gc, owner_key=owner_key
-        )
-
-    def get_cfg_editor_draft(self, editor_id: str) -> CfgDraft:
-        """Return the service-owned CfgDraft for a widget to ``attach`` to."""
-        return self._cfg_editor_svc.get_draft(editor_id)
-
-    def teardown_cfg_editor(self, editor_id: str) -> None:
-        """Tear down a UI-owned (gc=False) cfg-editor session + its LiveModel."""
-        self._cfg_editor_svc.teardown(editor_id)
-
-    def editor_id_for_owner(self, owner_key: str) -> str | None:
-        return self._cfg_editor_svc.editor_id_for_owner(owner_key)
-
-    def bump_editor_version(self, editor_id: str) -> None:
-        """Bump draft version; teardown drops the key to invalidate stale guards."""
-        self._state.version.bump(f"editor:{editor_id}")
-
-    def drop_editor_version(self, editor_id: str) -> None:
-        """Forget an editor session's version on teardown (symmetric to tab/
-        device drop). A stale dependency on a gone editor then reads version 0,
-        so the guard treats it as stale rather than spuriously matching."""
-        self._state.version.drop_prefix(f"editor:{editor_id}")
 
     # ------------------------------------------------------------------
     # Device (DeviceService)

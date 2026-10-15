@@ -109,7 +109,6 @@ def test_assembled_save_driving_entry_observes_shared_catalog_access(
             state=session.state,
             bus=session.bus,
             registry=Registry(),
-            cfg_editor_ctrl=MagicMock(),
             progress_transport=MagicMock(),
             resource_versions=lambda: {},
             render_host=lambda: None,
