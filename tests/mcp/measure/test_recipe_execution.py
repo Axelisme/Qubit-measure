@@ -1,7 +1,7 @@
 """Generator execution contracts through injected definitions and recording GUI."""
 
 from dataclasses import replace
-from threading import Event
+from threading import Event, Timer
 
 import pytest
 from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
@@ -194,6 +194,33 @@ def test_question_captures_items_and_answer_only_delivers_decision(tmp_path, ans
         with pytest.raises(GuiRpcError) as duplicate:
             execution.answer(answer)
         assert duplicate.value.reason == "not_awaiting_answer"
+
+
+def test_completed_rejects_unexpected_question_handoff(tmp_path):
+    def sample(session: RecipeSession) -> RecipeGenerator:
+        run, _ = yield session.open_tab("lookback").run()
+        assert isinstance(run, RecipeRun)
+        _, _ = yield run.analyze("primary")
+        yield run.propose_writeback(["frequency"])
+
+    with (
+        recipe_client(tmp_path, AnalysisRecipeGui()) as client,
+        registry(client.context, definition(sample)) as executions,
+    ):
+        execution = executions.start(client.context, "sample", {})
+        assert handoff(execution).data["status"] == "awaiting_answer"
+        # A broken completion helper may join this unanswered question forever.
+        # This safety fuse closes it after the helper's own 30s watchdog can diagnose it.
+        fuse = Timer(60, execution.close)
+        try:
+            fuse.start()
+            with pytest.raises(AssertionError, match="nonterminal.*awaiting_answer"):
+                completed(execution)
+        finally:
+            fuse.cancel()
+            execution.close()
+            fuse.join()
+            execution.join()
 
 
 def test_question_cancel_delivers_none_and_clears_one_intent(tmp_path):
