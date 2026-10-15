@@ -9,7 +9,7 @@ from typing import Annotated, Literal
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from qtpy.QtCore import QPoint, Qt
-from qtpy.QtGui import QImage
+from qtpy.QtGui import QColor, QImage, QPalette
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -310,10 +310,20 @@ class ErrorForm(FormModel):
     )
 
 
+@pytest.mark.parametrize("dark", [False, True], ids=["light", "dark"])
 def test_folded_group_title_shows_member_errors_without_unfolding(
     build: Build,
+    dark: bool,
+    qapp: QApplication,
 ) -> None:
     view, state = build(ErrorForm, None)
+    palette = QPalette()
+    palette.setColor(
+        QPalette.ColorRole.Window, QColor("#353535" if dark else "#fafafa")
+    )
+    view.setPalette(palette)
+    view.show()
+    qapp.processEvents()
     env = FormEnv()
     note = error_note(view, "Advanced")
     assert note.isHidden()
@@ -323,6 +333,10 @@ def test_folded_group_title_shows_member_errors_without_unfolding(
     assert errors is not None
     assert set(errors.messages) == {("delay",)}
     assert not error_note(view, "Advanced").isHidden()
+    qapp.processEvents()
+    assert note.palette().color(QPalette.ColorRole.WindowText) == QColor(
+        "#ff8a80" if dark else "#b3261e"
+    )
     assert not shown(view, "delay")
     assert not expanded(group_fold(view, "Advanced"))
 

@@ -26,6 +26,7 @@ from zcu_tools.gui.form import (
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._user_input import mouse_click
+from tests.gui.widgets.form._field_errors import field_error
 from tests.gui.widgets.form._text_input import commit_text
 
 type View = tuple[FormEditor[FormModel], FormState[FormModel]]
@@ -152,7 +153,7 @@ def test_decimals_round_the_shown_number_without_rounding_input(build: Build) ->
     assert isinstance(mode, QAction)
     mode.trigger()
     commit_text(child(view, QLineEdit, "form.input.delay"), "1 / 3")
-    assert child(view, QLabel, "form.value.delay").text() == "0.333"
+    assert child(view, QLabel, "form.value.delay").text() == "= 0.333"
 
 
 def test_one_value_literal_is_read_only_text_without_modes(build: Build) -> None:
@@ -165,7 +166,6 @@ def test_one_value_literal_is_read_only_text_without_modes(build: Build) -> None
     before = state.input.data
     for path, text in (("reps", "1000"), ("style", "const")):
         assert row_names(view, path) == [
-            f"form.error.{path}",
             f"form.input.{path}",
             f"form.value.{path}",
         ]
@@ -354,9 +354,7 @@ def test_an_option_holding_one_ordinary_model_draws_that_models_rows(
 
     # An error of the undrawn model shows at the nearest drawn row.
     state.write({("choice", "payload", "level"): 5.0}, FormEnv())
-    error = child(view, QLabel, "form.error.choice")
-    assert "Width must cover level" in error.text()
-    assert not error.isHidden()
+    assert "Width must cover level" in field_error(view, "choice")
 
 
 def test_an_option_whose_lone_field_is_nullable_or_selectable_keeps_its_row(

@@ -42,6 +42,8 @@ def test_window_services_run_and_progress_share_session(
         harness.state,
         harness.services,
         harness.owner,
+        templates={},
+        alias_presets=None,
         registrations=catalog_source.catalog.attachments,
         loader=catalog_source.loader,
         parent=None,

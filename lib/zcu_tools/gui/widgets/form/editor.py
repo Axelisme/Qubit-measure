@@ -150,8 +150,12 @@ class FormEditor[F: FormModel](QWidget):
     editor (option or activation changes), remembered by path.
     form.value.<path> is a QLabel with the resolved value of an Expression-mode
     input; Direct input is not echoed, and the label is hidden while empty.
-    form.error.<path> is a QLabel under its field with current field errors;
-    form.error displays model-wide errors. Both are hidden while empty.
+    Field errors lead the row tooltip, followed by its description and hint.
+    Direct text inputs and dropdowns get a light-red Base tint; checkboxes and
+    model sections get a red name label. An invalid Expression keeps its mode
+    tint and gets a red border. The coloured widget has formError=True while
+    invalid, False otherwise. Errors add no row height. form.error displays
+    model-wide errors and is hidden while empty.
     Mapping-key/index errors appear at their container field.
     Only current active, instantiated fields have input controls. Model and
     group descendants are described and built on first expansion, or during

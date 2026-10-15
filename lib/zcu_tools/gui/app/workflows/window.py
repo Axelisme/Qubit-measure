@@ -54,11 +54,17 @@ from zcu_tools.gui.form import (
     FormWritePath,
 )
 from zcu_tools.gui.remote.control_service import ControlOptions
+from zcu_tools.gui.session.alias_presets import AliasPresets
 from zcu_tools.gui.session.persistence import PersistenceError
 from zcu_tools.gui.session.ports import OwnerScheduler
 from zcu_tools.gui.session.services.build import SessionServices
 from zcu_tools.gui.session.state import SessionState
+from zcu_tools.gui.session.ui.arb_waveform_dialog import ArbWaveformDialog
+from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
+from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
+from zcu_tools.gui.widgets.dialog_lifecycle import DialogRefStore
+from zcu_tools.gui.widgets.dialog_presenter import QtDialogPresenter
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
 from zcu_tools.resources.entry import new_run_id
@@ -71,6 +77,7 @@ from .forms import WorkflowForms
 from .run_view import WorkflowRunView
 
 if TYPE_CHECKING:
+    from zcu_tools.cfg_model import TemplateDef
     from zcu_tools.gui.app.workflows.panel import WorkflowFormPanel, WorkflowPlanPanel
 
 
@@ -98,6 +105,8 @@ class WorkflowWindow[C](QWidget):
         owner: OwnerScheduler,
         *,
         registrations: Sequence[Attachment[C]],
+        templates: Mapping[str, TemplateDef],
+        alias_presets: AliasPresets | None,
         loader: SourceCatalogLoader[WorkflowCatalog[C]] | None = None,
         on_close: Callable[[], None] | None = None,
         parent: QWidget | None = None,
@@ -108,6 +117,10 @@ class WorkflowWindow[C](QWidget):
         top-level; otherwise embedded. EMPTY builds partial source-free drafts.
         registrations is nonempty, ordered and has unique declaration names;
         its first item is the default. Invalid catalogs raise ValueError.
+        The event bus comes from services. templates supplies the
+        persistent module/waveform catalog shared Inspect offers under New; an
+        empty catalog is valid. alias_presets is the caller's complete named
+        catalog for Inspect, or None for no presets. No files are read for either.
         loader supplies current WorkflowCatalog[C] instances on source reload;
         caller owns its bounded namespaces and fresh-registration builder.
         loader=None is unmonitored and disables Reload.
@@ -124,6 +137,9 @@ class WorkflowWindow[C](QWidget):
         self._catalog_error: CatalogReloadError | None = None
         self._state = state
         self._services = services
+        self._templates = templates
+        self._alias_presets = alias_presets
+        self._dialog_presenter = QtDialogPresenter()
         self._runner = services.runner
         self._owner = owner
         self._progress = services.progress
@@ -147,6 +163,7 @@ class WorkflowWindow[C](QWidget):
             self.plan_panel,
             self.tunables_panel,
         )
+        self._dialogs = DialogRefStore()
         self._controls.selector.addItems(list(current.names))
         self._controls.selector.currentTextChanged.connect(self._selection_changed)
         for button, slot in (
@@ -155,6 +172,8 @@ class WorkflowWindow[C](QWidget):
             (self._controls.resume, self._resume_clicked),
             (self._controls.stop, self._stop_clicked),
             (self._controls.setup, self.open_setup),
+            (self._controls.devices, self.open_devices),
+            (self._controls.inspect, self.open_inspect),
             (self._controls.prepare, self._use_source_clicked),
             (self._controls.reload, self._reload_clicked),
         ):
@@ -162,7 +181,7 @@ class WorkflowWindow[C](QWidget):
         self._run_view = WorkflowRunView(
             self._controls, self.controller, self._forms, self
         )
-        self._sync_source_buttons()
+        self._sync_run_locked_controls()
         self._figure_views = WorkflowFigureViews(self._figure_area)
         self.setup_dialog = SetupDialog(self._services.setup_control, self)
         self.setup_dialog.finished.connect(self._session.refresh)
@@ -180,21 +199,87 @@ class WorkflowWindow[C](QWidget):
         self.setup_dialog.raise_()
         self.setup_dialog.activateWindow()
 
-    def _sync_source_buttons(self) -> None:
-        """Disable Prepare forms and Reload source while a run holds Start.
+    def open_devices(self) -> None:
+        """Open the shared Device dialog window-modally on the GUI owner.
 
-        The host rejects both from Start until terminal delivery (pending,
-        running, pausing, paused, stopping). Reload also needs a loader and no
-        restart-required reload failure. Setup stays enabled: it changes the
+        It lists and sets up this session's devices through device_control and
+        evaluates expressions against the current parameter context. A dialog
+        already open is raised instead of opening a second one; closing deletes
+        it. From Start until terminal delivery the hardware gate rejects device
+        changes, so the dialog is read-only: it still lists, refreshes and
+        polls the selected device, but cannot add, drop, apply or stop. Opening
+        reads no hardware and changes no form capture.
+        """
+        dialog = self._dialogs.get("devices")
+        if dialog is not None:
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+        dialog = DeviceDialog(
+            self._services.device_control,
+            parameter_provider=self._services.context_control.read_context,
+            parent=self,
+        )
+        dialog.set_read_only(read_only=self._run_view.start_locked)
+        self._dialogs.open_named("devices", dialog)
+
+    def open_inspect(self) -> None:
+        """Open the shared inspector on this session, on the Qt owner thread.
+
+        Raise an already open instance. Close deletes it; the next opening
+        reads fresh aliases as well as the current parameters and library.
+        From Start until terminal delivery only browsing is allowed. Writes
+        outside that interval go through the same context control as Setup.
+        """
+        dialog = self._dialogs.get("inspect")
+        if dialog is not None:
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+        dialog = InspectDialog(
+            self._services.context_control,
+            self._services.setup_control.get_bus(),
+            templates=self._templates,
+            arb_waveforms=self._services.arb_waveform,
+            open_arb_waveforms=self._open_arb_waveforms,
+            dialog_presenter=self._dialog_presenter,
+            alias_presets=self._alias_presets,
+            parent=self,
+        )
+        dialog.set_read_only(read_only=self._run_view.start_locked)
+        self._dialogs.open_named("inspect", dialog)
+
+    def _open_arb_waveforms(self) -> None:
+        dialog = self._dialogs.get("arb")
+        if dialog is not None:
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+        dialog = ArbWaveformDialog(self._services.arb_waveform, parent=self)
+        self._dialogs.open_named("arb", dialog)
+
+    def _sync_run_locked_controls(self) -> None:
+        """Apply the run's Start lock to source controls and shared dialogs.
+
+        From Start until terminal delivery (pending, running, pausing, paused,
+        stopping) the host rejects Prepare forms and Reload source, so both are
+        disabled. The hardware gate rejects device changes; the host also locks
+        source edits through Inspect. Open Device and Inspect dialogs are
+        read-only. Reload also needs a loader and no restart-required reload
+        failure. Setup, Inspect and Devices stay enabled: Setup changes the
         session, not the run's capture.
         """
-        idle = not self._run_view.start_locked
+        locked = self._run_view.start_locked
         error = self._catalog_error
         restart_required = error is not None and error.restart_required
-        self._controls.prepare.setEnabled(idle)
+        self._controls.prepare.setEnabled(not locked)
         self._controls.reload.setEnabled(
-            idle and self._loader is not None and not restart_required
+            not locked and self._loader is not None and not restart_required
         )
+        for key in ("devices", "inspect"):
+            dialog = self._dialogs.get(key)
+            if isinstance(dialog, (DeviceDialog, InspectDialog)):
+                dialog.set_read_only(read_only=locked)
 
     def _use_source_clicked(self) -> None:
         try:
@@ -338,7 +423,7 @@ class WorkflowWindow[C](QWidget):
             )
             self._catalog_error = error
             self._controls.start.setEnabled(False)
-            self._sync_source_buttons()
+            self._sync_run_locked_controls()
             self._controls.message.setText(str(error))
             if error is exc:
                 raise
@@ -553,7 +638,7 @@ class WorkflowWindow[C](QWidget):
             editor.refresh(env)
             editor.discard_local_text()
         self._run_view.submitted(attachment.name)
-        self._sync_source_buttons()
+        self._sync_run_locked_controls()
         return token
 
     def _start_ports(
@@ -786,7 +871,7 @@ class WorkflowWindow[C](QWidget):
             self._run_view.paused()
             return
         self._run_view.ended(status, error)
-        self._sync_source_buttons()
+        self._sync_run_locked_controls()
         self._figure_views.finish_native()
 
     def _pause_clicked(self) -> None:
@@ -837,7 +922,13 @@ class WorkflowWindow[C](QWidget):
             self._controls.message.setText("; ".join(result.messages.values()))
 
     def _shutdown_on_close(self, event: QCloseEvent | None) -> bool:
-        """Isolate composition shutdown failure and reject the Qt close attempt."""
+        """Resolve Inspect drafts before shutdown; reject cancellation or failure."""
+        inspect = self._dialogs.get("inspect")
+        if inspect is not None and not inspect.close():
+            # Cancel must leave the session services alive for continued editing.
+            if event is not None:
+                event.ignore()
+            return False
         try:
             if self._on_close is not None:
                 self._on_close()
@@ -887,6 +978,10 @@ class WorkflowWindow[C](QWidget):
         if not self._shutdown_on_close(a0):
             return
         self.setup_dialog.close()
+        for key in ("devices", "arb"):
+            dialog = self._dialogs.get(key)
+            if dialog is not None:
+                dialog.reject()
         self._session.detach()
         self._run_view.close()
         self._figure_views.release()

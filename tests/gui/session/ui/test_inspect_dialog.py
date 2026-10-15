@@ -234,6 +234,36 @@ def test_entry_edit_is_unsaved_until_revert_or_apply(session: _Session) -> None:
     presenter.assert_no_unexpected_messages()
 
 
+def test_reopened_module_preserves_full_frequency_precision_on_apply(
+    session: _Session,
+) -> None:
+    presenter = RecordingDialogPresenter()
+    session.control.set_module(
+        session.control.read_context().target,
+        PULSE,
+        PulseSpec(ch=0, nqz=1, freq=5000.1234, gain=0.25, waveform=WAVEFORM),
+    )
+    before = _library(session).document()
+    dialog = _open(session, presenter)
+    _select(dialog, PULSE)
+    freq = _child(dialog, QLineEdit, "form.input.freq")
+    apply = _child(dialog, QPushButton, "inspect.entry.apply")
+    assert freq.text() == "5000.123"
+    assert not apply.isEnabled()
+    apply.click()
+    assert _library(session).document() == before
+
+    # A real write through another field must not submit the rounded display.
+    commit_text(_child(dialog, QLineEdit, "form.input.gain"), "0.5")
+    assert apply.isEnabled()
+    apply.click()
+    written = _library(session).module_spec(PULSE)
+    assert isinstance(written, PulseSpec)
+    assert written.freq == 5000.1234
+    assert written.gain == 0.5
+    presenter.assert_no_unexpected_messages()
+
+
 def test_child_waveform_key_stays_a_key_after_apply(session: _Session) -> None:
     # A is a separate public capture. Inspect's capture/state have no public
     # read seam; B below observes only the actual host's Qt controls and Apply.
