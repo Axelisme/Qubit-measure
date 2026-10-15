@@ -30,6 +30,7 @@ EXISTING_NAMES = (
     "workflow.run.resume",
     "workflow.run.stop",
     "workflow.source.setup",
+    "workflow.source.inspect",
     "workflow.source.devices",
     "workflow.session.entry",
     "workflow.source.use",
@@ -43,6 +44,7 @@ RUN_ROW = (
 )
 SOURCE_BUTTONS = (
     "workflow.source.setup",
+    "workflow.source.inspect",
     "workflow.source.devices",
     "workflow.source.use",
     "workflow.source.reload",
