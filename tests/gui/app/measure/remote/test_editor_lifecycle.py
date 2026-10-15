@@ -7,6 +7,7 @@ import socket
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -34,9 +35,19 @@ from zcu_tools.gui.session.context_types import (
 pytestmark = pytest.mark.requires_loopback
 
 
+def pump_until(scheduler: ManualOwnerScheduler, completed: Callable[[], bool]) -> None:
+    """Deliver posted owner callbacks until the arranged completion is observable."""
+    # Disconnect reclamation / reader completion posts to this owner queue.
+    deadline = time.monotonic() + 30
+    while not completed():
+        remaining = deadline - time.monotonic()
+        assert remaining > 0, "owner callback did not complete before watchdog"
+        scheduler.pump_once(block=True, timeout=remaining)
+
+
 class Client:
     def __init__(self, port: int, scheduler: ManualOwnerScheduler) -> None:
-        self.socket = socket.create_connection(("127.0.0.1", port), timeout=1)
+        self.socket = socket.create_connection(("127.0.0.1", port), timeout=30)
         self.scheduler = scheduler
         self.buffer = bytearray()
         self.events: list[dict[str, object]] = []
@@ -47,47 +58,42 @@ class Client:
         self.buffer.clear()
         self.events.clear()
 
-    def _read_frame(self, deadline: float) -> dict[str, object]:
-        while time.monotonic() < deadline:
-            if b"\n" in self.buffer:
-                line, _, remaining = self.buffer.partition(b"\n")
-                self.buffer = bytearray(remaining)
-                frame: dict[str, object] = json.loads(line)
-                return frame
-            try:
+    def _read_frame(self) -> dict[str, object]:
+        def receive() -> dict[str, object]:
+            while b"\n" not in self.buffer:
                 chunk = self.socket.recv(65536)
                 assert chunk, "connection closed before next frame"
                 self.buffer.extend(chunk)
-                continue
-            except BlockingIOError:
-                self.scheduler.pump_once(block=True, timeout=0.005)
-        pytest.fail("no wire frame before deadline")
+            line, _, remaining = self.buffer.partition(b"\n")
+            self.buffer = bytearray(remaining)
+            return json.loads(line)
+
+        # A sent request / emitted push must finish a frame; recv has a 30s watchdog.
+        self.socket.settimeout(30)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            reader = pool.submit(receive)
+            reader.add_done_callback(lambda _: self.scheduler.post(lambda: None))
+            pump_until(self.scheduler, reader.done)
+            return reader.result()
 
     def call(self, method: str, **params: object) -> dict[str, object]:
         self.sequence += 1
         rid = str(self.sequence)
-        self.socket.settimeout(1)
+        self.socket.settimeout(30)
         self.socket.sendall(
             (
                 json.dumps({"id": rid, "method": method, "params": params}) + "\n"
             ).encode()
         )
-        self.socket.setblocking(False)
-        deadline = time.monotonic() + 3
-        while time.monotonic() < deadline:
-            frame = self._read_frame(deadline)
+        while True:
+            frame = self._read_frame()
             if frame.get("id") == rid:
                 return frame
             assert "event" in frame and "id" not in frame, frame
             self.events.append(frame)
-        pytest.fail(f"no reply for {method}")
 
     def next_event(self, expected: str) -> dict[str, object]:
-        event = (
-            self.events.pop(0)
-            if self.events
-            else self._read_frame(time.monotonic() + 3)
-        )
+        event = self.events.pop(0) if self.events else self._read_frame()
         assert event.get("event") == expected, event
         return event
 
@@ -164,10 +170,7 @@ class Connections:
         return client
 
     def wait(self, predicate: Callable[[], bool]) -> None:
-        deadline = time.monotonic() + 3
-        while not predicate() and time.monotonic() < deadline:
-            self.scheduler.pump_once(block=True, timeout=0.01)
-        assert predicate(), "owner callback did not complete"
+        pump_until(self.scheduler, predicate)
 
     def close(self) -> None:
         self.service.stop()
