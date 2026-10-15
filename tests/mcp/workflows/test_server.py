@@ -364,3 +364,22 @@ def test_direct_figure_reply_remains_a_structured_tool_reply(
     assert isinstance(result, ToolReply)
     assert result.data == {"run_id": "run:a", "name": "selected"}
     assert result.images[0].data == pixels.getvalue()
+
+
+def test_describe_form_tool_forwards_candidate_once(
+    config: MCPBridgeConfig,
+    bridge: McpBridge,
+    transport: RecordingTransport,
+    tmp_path: Path,
+) -> None:
+    native = {"description": {"path": ["sample"], "target": None, "children": []},
+              "input": {}, "values": [], "errors": [], "revision": 2}
+    transport.replies.append(GuiResponse(result=native))
+    tools = build_workflow_tools(config, bridge, tmp_path)
+    arguments = {"form": "tunables", "path": ["sample"], "run_id": "run:a",
+                 "batch": [{"path": ["sample", "value"], "value": -1}]}
+    assert "workflows_workflow_describe_form" in tools
+    assert tools["workflows_workflow_describe_form"]["handler"](arguments) == native
+    assert [(r["method"], r["params"]) for r in transport.requests] == [
+        ("workflow.describe_form", arguments)
+    ]

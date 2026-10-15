@@ -33,7 +33,6 @@ def test_form_inspection_rpc_reads_constructor_drafts(
         assert isinstance(result, dict)
         assert result["input"] == before[0]
         assert result["revision"] is None
-        assert isinstance(result["schema"], dict)
         assert isinstance(result["values"], list)
         assert isinstance(result["errors"], list)
         assert (panel.state.input.data, panel.state.base.data) == before
@@ -239,3 +238,99 @@ def test_form_inspection_rpc_requires_accepted_explicit_target(
         assert isinstance(error, dict) and error["code"] == expected
     window.stop("pending-form")
     harness.complete_segment()
+
+
+@pytest.mark.parametrize("path", [[], ["samples"], ["samples", "start"]])
+def test_describe_form_rpc_uses_call_local_branch(
+    attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
+    rpc: RpcRequest,
+    path: list[str],
+) -> None:
+    window, _harness, _entry = attachment
+    state = window.plan_panel.state
+    before = state.input.data, state.base.data
+    reply = rpc(
+        "workflow.describe_form",
+        {
+            "form": "plan",
+            "path": path,
+            "batch": [
+                {"path": ["samples", "kind"], "value": "linrange"},
+                {"path": ["samples", "start"], "value": {"expr": "1 / 2"}},
+                {"path": ["samples", "n"], "value": 0},
+            ],
+        },
+    )
+    assert reply["ok"] is True
+    result = reply["result"]
+    assert isinstance(result, dict)
+    assert result["revision"] is None
+    assert {"path": ["samples", "start"], "value": 0.5} in result["values"]
+    assert any(e["path"][-1:] == ["n"] for e in result["errors"])
+    description = result["description"]
+    assert description["path"] == path
+    if not path:
+        assert description["target"] is None
+        assert [child["path"] for child in description["children"]] == [
+            ["scale"], ["points"], ["samples"]
+        ]
+    elif path == ["samples"]:
+        target = description["target"]
+        assert target["options"][target["selected"]]["value"] == {"kind": "linrange"}
+        assert {tuple(child["path"]) for child in description["children"]} == {
+            ("samples", "kind"), ("samples", "start"),
+            ("samples", "stop"), ("samples", "n"),
+        }
+    else:
+        assert description["target"]["expression"] is True
+        assert description["target"]["kind"] == "number"
+        assert description["children"] == []
+    assert (state.input.data, state.base.data) == before
+    assert window.controller.binding is None
+
+
+def test_describe_form_rpc_keeps_run_capture_and_local_errors_read_only(
+    attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
+    paused_tuning: list[tuple[int, float, int]],
+    rpc: RpcRequest,
+) -> None:
+    del paused_tuning
+    window, harness, _entry = attachment
+    panel = window.tuning_panel
+    engine = window.controller.engine
+    assert panel is not None and engine is not None
+    host = panel.host
+    host.state.write({("sample", "value"): {"expr": "general.ext.value * 2"}}, host.env)
+    local = panel.panel.editor.findChild(QLineEdit, "form.input.sample.factor")
+    assert isinstance(local, QLineEdit)
+    commit_text(local, "-")
+    context = harness.services.context
+    context.set_parameter(context.read_context().target, "general.ext.value", 99.0)
+    before = host.state.input.data, host.state.base.data, host.accepted_input.data, engine.tunables("tuning")
+    for batch in (None, []):
+        reply = rpc("workflow.describe_form", {
+            "form": "tunables", "run_id": "tuning", "path": ["sample", "value"],
+            "batch": batch,
+        })
+        assert reply["ok"] is True
+        result = reply["result"]
+        assert isinstance(result, dict)
+        assert result["description"]["target"]["constraints"]["gt"] == 0
+        assert result["revision"] == before[3].revision
+        assert {"path": ["sample", "value"], "value": 40.0} in result["values"]
+        assert any(e["path"] == ["sample", "factor"] for e in result["errors"]) == (batch is None)
+    assert (host.state.input.data, host.state.base.data, host.accepted_input.data, engine.tunables("tuning")) == before
+    assert local.text() == "-"
+
+
+@pytest.mark.parametrize("run_id", [None, "stale"])
+def test_describe_form_rpc_requires_explicit_attached_target(
+    paused_tuning: list[tuple[int, float, int]],
+    rpc: RpcRequest,
+    run_id: str | None,
+) -> None:
+    del paused_tuning
+    reply = rpc("workflow.describe_form", {"form": "plan", "path": [], "run_id": run_id})
+    assert reply["ok"] is False
+    error = reply["error"]
+    assert isinstance(error, dict) and error["code"] == "precondition_failed"
