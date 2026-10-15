@@ -13,7 +13,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
     ExpAdapterProtocol,
     RunRequest,
-    SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
@@ -41,9 +40,6 @@ class TraceAdapter(BaseAdapter[TraceCfg, TraceCfg]):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.NONE, load_data=False, requires_soc=False
     )
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return "trace"
 
     def run(
         self,
@@ -85,9 +81,6 @@ def test_tab_factory_errors_surface_at_use_and_reset_keeps_live_form(
                     raise RuntimeError("factory source failed")
                 return Form(FactoryCfg, {"pulse": Template("missing")})
             return Form(FactoryCfg, {"amount": 3.0})
-
-        def make_filename_stem(self, ctx: SessionEnv) -> str:
-            return "factory"
 
     application = Fixture(headless=True)
     application.registry.register("factory", FactoryAdapter)

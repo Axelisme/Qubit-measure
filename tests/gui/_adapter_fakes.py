@@ -20,7 +20,6 @@ from zcu_tools.gui.app.measure.adapter import (
     ParameterWriteback,
     PostWritebackRequest,
     RunRequest,
-    SaveDataRequest,
     SessionEnv,
     WritebackRequest,
 )
@@ -118,10 +117,6 @@ class DummyAdapter:
         del req
         return []
 
-    def make_save_paths(self, ctx: SessionEnv):
-        del ctx
-        raise NotImplementedError
-
     # -- post-analysis stubs (mirror BaseAdapter raising defaults) -----------
 
     @classmethod
@@ -158,6 +153,3 @@ class DummyAdapter:
     def prepare_save_data(self, result: object, *, comment: str) -> PreparedRunData:
         """Reject native run persistence unsupported by this collaborator."""
         raise NotImplementedError("DummyAdapter has no native run evidence")
-
-    def save(self, req: SaveDataRequest[object]) -> None:
-        del req

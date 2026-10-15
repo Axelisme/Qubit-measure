@@ -6,7 +6,6 @@ guide. The core experiment lives in ``zcu_lab.v2.jpa``.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,7 +20,6 @@ from zcu_tools.gui.app.measure.adapter import (
     NoAnalyzeParams,
     ParameterWriteback,
     RunRequest,
-    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -93,6 +91,3 @@ class JpaPowerAdapter(
                 proposed_value=req.analyze_result.best_power,
             )
         ]
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return f"{ctx.qub_name}_jpa_power_{time.strftime('%m%d')}"

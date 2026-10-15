@@ -33,8 +33,6 @@ from .types import (
     PostWritebackRequest,
     RunRequest,
     SampleWriteback,
-    SaveDataRequest,
-    SavePaths,
     T_AnalyzeParams,
     T_AnalyzeResult,
     T_Cfg,
