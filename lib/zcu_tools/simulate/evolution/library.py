@@ -21,6 +21,7 @@ from .batch import BatchResult, CPUReference, PlateauFamily
 from .controls import ControlSequence, quantize_ns
 from .intel import IntelOpenCL
 from .model import NumericModel
+from .reuse import EvaluationReceipt
 from .state import ComplexMatrix
 from .validation import ValidationLimits, interpolate, validate_table
 
@@ -118,6 +119,8 @@ class EvolutionLibrary:
     is zero. Oversized entries are used transiently but not retained. Archive
     decoding/interpolation/build workspace, Python objects, models/solver/ADC and
     driver allocations are separate process memory, not hidden in this budget.
+    last_evaluation: latest successful public Evolution receipt, or None before
+    use. Contains no quantum/sample state; author diagnostic only.
     No disk eviction/daemon/background construction. Calls are synchronous;
     do not share an instance across concurrent computing threads. FileLock and
     atomic publication protect disk writes across processes.
@@ -131,6 +134,7 @@ class EvolutionLibrary:
         self.path = path
         self.budget_bytes = budget_bytes
         self._memory: OrderedDict[str, NumericArchive] = OrderedDict()
+        self.last_evaluation: EvaluationReceipt | None = None
 
     @property
     def resident_bytes(self) -> int:

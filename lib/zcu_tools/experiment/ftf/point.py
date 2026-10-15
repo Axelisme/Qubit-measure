@@ -1,6 +1,8 @@
 """Explicit QICK-to-numeric FTF composition and author diagnostics."""
 
+import json
 from dataclasses import dataclass
+from hashlib import sha256
 
 import numpy as np
 from numpy.typing import NDArray
@@ -27,9 +29,11 @@ def _envelope(event: PulseEvent) -> Envelope:
     if event.envelope is None:
         return Envelope.flat(event.gain)
     times = np.array(event.envelope.sample_us) * 1000
-    values = np.array(event.envelope.values, dtype=complex) * event.gain
+    values = np.asarray(
+        np.array(event.envelope.values, dtype=complex) * event.gain, dtype=np.complex128
+    )
     # Program owns linear playback with the final sample held through pulse end.
-    return Envelope(lambda t: complex(np.interp(t, times, values)))
+    return Envelope.sampled(times, values, outside="hold")
 
 
 def _control(event: PulseEvent, name: str) -> ControlPulse:
@@ -203,13 +207,33 @@ def plan_point(
     start = pulse.start_us * 1000
     actual = flux.at(start)
     resonators = numeric_resonators(settings)
-    model = joint.numeric_model(
-        flux.at,
-        _sources(settings, joint),
-        end_ns=start,
-        bath_segment_ns=settings.solver.bath_segment_ns,
-        resonators=resonators,
-    )
+    sources = _sources(settings, joint)
+    if any(
+        p.source in {s.name for s in settings.flux_sources} for p in controls.pulses
+    ):
+        model = joint.numeric_model(
+            flux.at,
+            sources,
+            end_ns=start,
+            bath_segment_ns=settings.solver.bath_segment_ns,
+            resonators=resonators,
+            dynamics_identity=sha256(
+                json.dumps(
+                    (
+                        settings.model.model_dump(mode="json"),
+                        [s.model_dump(mode="json") for s in settings.flux_sources],
+                        [r.model_dump(mode="json") for r in settings.resonators],
+                        tuple(float(value) for value in dc),
+                        settings.solver.bath_segment_ns,
+                    ),
+                    sort_keys=True,
+                ).encode()
+            ).hexdigest(),
+        )
+    else:
+        # With no flux-source events anywhere in this shot there is no filter
+        # excitation or passive tail. Do not infer constancy from endpoint values.
+        model = joint.fixed_numeric_model(dc, sources, resonators=resonators)
     _, vectors = joint.eigensystem(actual)
     basis = Basis("ftf-readout", joint.basis.labels, vectors)
     window = timeline.readouts[0]

@@ -128,6 +128,7 @@ class Evolution:
                 self.last_evaluation = EvaluationReceipt(
                     "direct-record", (record[1],), perf_counter() - started
                 )
+                self.library.last_evaluation = self.last_evaluation
                 return state
         points = tuple(
             sorted(
@@ -176,6 +177,8 @@ class Evolution:
         self.last_evaluation = EvaluationReceipt(
             origin, tuple(dict.fromkeys(identities)), perf_counter() - started
         )
+        if self.library is not None:
+            self.library.last_evaluation = self.last_evaluation
         return state
 
     def _validate_inputs(

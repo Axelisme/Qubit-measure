@@ -22,6 +22,8 @@ from zcu_tools.resources.ftf import FTFSettings, load_ftf, parse_ftf
 from zcu_tools.simulate.adc import ADC, PopulationInput, SamplingIdentity
 from zcu_tools.simulate.evolution import (
     Evolution,
+    EvolutionLibrary,
+    LibrarySnapshot,
     Populations,
     SolverSettings,
     populations,
@@ -42,18 +44,24 @@ class FTFSource:
 
     settings: validated FTF parameters retained for private in-memory reproduction;
     devices: the exact manager shared by the host. snapshot reads live DC once
-    per round; execute uses only RoundRequest numeric inputs, not drivers. Up to
-    32 deterministic point preparations are retained; shot/noise draws never are.
+    per round; execute uses only RoundRequest numeric inputs, not drivers.
+    library: optional explicitly pathed numeric owner for frozen U tables/exact
+    records. Each round fixes published versions. No point preparation, density,
+    source tail or receiver noise is retained across calls.
     This is author-side composition, not an ordinary GUI/MCP truth interface.
     """
 
-    def __init__(self, settings: FTFSettings, devices: DeviceManager) -> None:
+    def __init__(
+        self,
+        settings: FTFSettings,
+        devices: DeviceManager,
+        *,
+        library: EvolutionLibrary | None = None,
+    ) -> None:
         self.settings = settings
         self.devices = devices
         self.identity = sha256(settings.model_dump_json().encode()).hexdigest()
-        self._prepared: dict[
-            tuple[tuple[tuple[str, float], ...], PointTimeline], _Prepared
-        ] = {}
+        self.library = library
 
     def snapshot(self) -> EnvironmentSnapshot:
         """Capture current fixed-unit live values, without startup writes.
@@ -77,25 +85,25 @@ class FTFSource:
         return EnvironmentSnapshot("ftf-v1", self.identity, tuple(values))
 
     def _prepare(
-        self, snapshot: EnvironmentSnapshot, timeline: PointTimeline
+        self,
+        snapshot: EnvironmentSnapshot,
+        timeline: PointTimeline,
+        tables: LibrarySnapshot | None,
     ) -> _Prepared:
-        key = snapshot.values, timeline
-        if key not in self._prepared:
-            plan = plan_point(self.settings, snapshot, timeline)
-            solver = self.settings.solver
-            # Explicit three-tool composition: density -> target populations -> ADC.
-            state = Evolution(
-                plan.evolution_model,
-                SolverSettings(solver.rtol, solver.atol, solver.max_step_ns),
-            ).evolve(
-                plan.joint.initial_state(), plan.controls, end_ns=plan.readout_start_ns
-            )
-            mixture = populations(state, plan.readout_basis)
-            adc = ADC(plan.readout_model, rtol=solver.rtol, atol=solver.atol)
-            if len(self._prepared) >= 32:
-                del self._prepared[next(iter(self._prepared))]
-            self._prepared[key] = _Prepared(plan, mixture, adc)
-        return self._prepared[key]
+        plan = plan_point(self.settings, snapshot, timeline)
+        solver = self.settings.solver
+        # Explicit three-tool composition: density -> target populations -> ADC.
+        state = Evolution(
+            plan.evolution_model,
+            SolverSettings(solver.rtol, solver.atol, solver.max_step_ns),
+            library=self.library,
+            tables=tables,
+        ).evolve(
+            plan.joint.initial_state(), plan.controls, end_ns=plan.readout_start_ns
+        )
+        mixture = populations(state, plan.readout_basis)
+        adc = ADC(plan.readout_model, rtol=solver.rtol, atol=solver.atol)
+        return _Prepared(plan, mixture, adc)
 
     def execute(self, request: RoundRequest) -> RoundSignals:
         """Generate this round's single ADC sums/traces from detached timelines.
@@ -105,6 +113,8 @@ class FTFSource:
         depend on sweep names. No state/filter tail crosses shots/rounds. Raw and
         averaged acquisition share this one numeric realization via the adapter.
         """
+        # Publication versions are fixed for this round, not for each group.
+        tables = self.library.snapshot() if self.library is not None else None
         acquire = request.acquire
         if len(acquire.timelines) != acquire.executions:
             raise ValueError("FTF requires per-execution point timelines")
@@ -124,7 +134,7 @@ class FTFSource:
         )
         output = np.empty(shape, dtype=float)
         for group, (timeline, indices) in enumerate(groups.items()):
-            prepared = self._prepare(request.snapshot, timeline)
+            prepared = self._prepare(request.snapshot, timeline, tables)
             plan = prepared.plan
             mixture = PopulationInput(
                 prepared.populations.basis.labels, prepared.populations.values
@@ -142,13 +152,17 @@ class FTFSource:
         return RoundSignals((ChannelSignals(self.settings.receiver.ro_ch, output),))
 
 
-def ftf(configuration: FTFSettings | str | Path) -> SimulationEnvironment:
+def ftf(
+    configuration: FTFSettings | str | Path, *, library: EvolutionLibrary | None = None
+) -> SimulationEnvironment:
     """Build a fixed-profile FTF environment from named values or a YAML path.
 
     Startup creates fixed V/A FakeDevices and applies initial values once. The
     returned manager owns cleanup; builder failures close all devices and preserve
     both original and cleanup errors. Channels use make_mock_soccfg's supported
     profile, never arbitrary firmware overrides. Host receives no model truth.
+    library optionally injects author-selected EvolutionLibrary storage; no path
+    search/default cache. Numeric owner handles table parsing, misses and saving.
     Weak dispersive/Markov/secular approximations and readout-origin flux freezing
     are documented in the module README; no runtime applicability gate is added.
     """
@@ -172,7 +186,7 @@ def ftf(configuration: FTFSettings | str | Path) -> SimulationEnvironment:
                 ),
                 progress=False,
             )
-        coordinator = FTFSource(settings, devices)
+        coordinator = FTFSource(settings, devices, library=library)
         soccfg = make_mock_soccfg(
             settings.channels.generators, settings.channels.readouts
         )

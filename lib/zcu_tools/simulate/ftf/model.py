@@ -285,6 +285,33 @@ class JointModel:
         pure = tuple(v @ op @ v.conj().T for op in dephasing_operators(gamma))
         return jump_operators(rates, v) + pure
 
+    def fixed_numeric_model(
+        self,
+        flux: RealArray,
+        sources: tuple[DriveSource, ...],
+        *,
+        resonators: tuple[Resonator, Resonator],
+    ) -> NumericModel:
+        """Return static H and complete Lindblad baths in this joint fixed basis.
+
+        flux: finite (F1,C,F2) reduced flux in Phi/Phi0, constant throughout the
+        requested evolution (caller must not use this for pulses/passive tails).
+        sources: fixed-basis numeric quadratures in GHz per complex amplitude.
+        resonators: two numeric readout modes supplying residual photon baths.
+        Includes the same full couplings, directional relaxation and effective
+        Markov dephasing as numeric_model at this flux, without callbacks/update
+        events. Initial Gibbs state remains separately explicit. Invalid shapes,
+        active degenerate secular transitions or invalid bath data raise ValueError.
+        No physical applicability or basis convergence certification is performed.
+        """
+        return NumericModel(
+            "ftf-joint-v1",
+            self.basis,
+            self.hamiltonian(flux),
+            sources,
+            self.collapse_operators(flux, resonators),
+        )
+
     def numeric_model(
         self,
         flux_at: Callable[[float], RealArray],
@@ -293,6 +320,7 @@ class JointModel:
         end_ns: float,
         bath_segment_ns: float,
         resonators: tuple[Resonator, Resonator],
+        dynamics_identity: str | None = None,
     ) -> NumericModel:
         """Build fixed-basis continuous H with piecewise instantaneous baths.
 
@@ -303,6 +331,9 @@ class JointModel:
         Baths use segment-start flux, remain fixed during each segment, and are
         rotated back into this fixed basis. Evolution owns event partitioning and
         integration; states are never reset. resonators supplies residual photons.
+        dynamics_identity: stable descriptor of callback dependencies for exact
+        persistence; caller includes flux-line/control
+        contents, circuit/bath/resonator values and numeric conventions.
         Invalid scales raise ValueError. This is not a convergence certification.
         """
         if (
@@ -335,6 +366,7 @@ class JointModel:
             hamiltonian_at=hamiltonian_at,
             collapse_at=collapse_at,
             event_times_ns=boundaries,
+            dynamics_identity=dynamics_identity,
         )
 
     def _occupation(self, resonator: Resonator) -> float:
