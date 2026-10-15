@@ -1062,3 +1062,46 @@ def test_device_error_uses_theme_foreground(qapp, window_palette, failure):
         dialog.close()
         dialog.deleteLater()
         qapp.processEvents()
+
+
+@pytest.mark.parametrize(
+    "status, colour_name",
+    [
+        (DeviceStatus.CONNECTED, "success_colour"),
+        (DeviceStatus.CONNECTING, "secondary_colour"),
+    ],
+)
+def test_device_status_replaces_error_foreground(
+    qapp, window_palette, status, colour_name
+):
+    from dataclasses import replace
+
+    from zcu_tools.device.fake import FakeDeviceInfo
+    from zcu_tools.gui import widgets
+
+    colour = getattr(widgets, colour_name, None)
+    assert callable(colour), f"{colour_name} must be public"
+    ctrl = _make_ctrl()
+    ctrl.list_devices.return_value = [_entry("fd")]
+    snapshot = _connected_snapshot("fd", FakeDeviceInfo(address="none"))
+    ctrl.get_device_snapshot.return_value = snapshot
+    dialog = _make_dialog(ctrl)
+    try:
+        dialog.setPalette(window_palette)
+        ctrl.get_device_snapshot.return_value = replace(
+            snapshot, error="snapshot failed"
+        )
+        ctrl.get_bus().emit(DeviceChangedPayload(name="fd"))
+        label = next(
+            label
+            for label in dialog.findChildren(QLabel)
+            if label.text() == "snapshot failed"
+        )
+        ctrl.get_device_snapshot.return_value = replace(snapshot, status=status)
+        ctrl.get_bus().emit(DeviceChangedPayload(name="fd"))
+        label.ensurePolished()
+        assert label.palette().color(label.foregroundRole()) == colour(dialog)
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()

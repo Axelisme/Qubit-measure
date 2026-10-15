@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from qtpy.QtCore import QPoint, QTimer
+from qtpy.QtGui import QPalette
 from qtpy.QtWidgets import (
     QApplication,
     QDoubleSpinBox,
@@ -15,7 +16,7 @@ from qtpy.QtWidgets import (
 from zcu_tools.gui.session.expression import EvalRef
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
-from zcu_tools.gui.widgets import error_colour
+from zcu_tools.gui.widgets import error_colour, mixed_colour
 
 from tests.gui.session.ui._parameter_fakes import make_parameters
 
@@ -114,7 +115,13 @@ def test_eval_mode_ghost_shows_resolved_value(qapp):
     field.load_expression("0")
     _edit(field).setText("general.ext.flx_int")
     assert _ghost(field).text() == "= 0.5"
-    assert "gray" in _ghost(field).styleSheet()
+    assert _ghost(field).palette().color(
+        _ghost(field).foregroundRole()
+    ) == mixed_colour(
+        field.palette().color(QPalette.ColorRole.Text),
+        field.palette().color(QPalette.ColorRole.Window),
+        0.42,
+    )
     assert _ghost(field).palette().color(
         _ghost(field).foregroundRole()
     ) != error_colour(_ghost(field))
@@ -251,7 +258,13 @@ def test_ghost_below_min_shows_red(qapp):
 def test_ghost_in_range_shows_gray(qapp):
     field = _field(make_parameters({"x": 50.0}), minimum=0.0, maximum=100.0)
     field.load_expression("general.ext.x")
-    assert "gray" in _ghost(field).styleSheet()
+    assert _ghost(field).palette().color(
+        _ghost(field).foregroundRole()
+    ) == mixed_colour(
+        field.palette().color(QPalette.ColorRole.Text),
+        field.palette().color(QPalette.ColorRole.Window),
+        0.42,
+    )
     assert _ghost(field).palette().color(
         _ghost(field).foregroundRole()
     ) != error_colour(_ghost(field))
@@ -283,4 +296,19 @@ def test_eval_error_uses_theme_foreground(qapp, window_palette, expression):
     field.load_expression(expression)
     ghost = _ghost(field)
     assert ghost.palette().color(ghost.foregroundRole()) == error_colour(ghost)
+    assert ghost.font().italic()
+
+
+def test_eval_success_replaces_error_with_secondary(qapp, window_palette):
+    field = _field(minimum=-10, maximum=10)
+    field.setPalette(window_palette)
+    field.load_expression("unknown_name")
+    field.load_expression("5")
+    ghost = _ghost(field)
+    ghost.ensurePolished()
+    assert ghost.palette().color(ghost.foregroundRole()) == mixed_colour(
+        field.palette().color(QPalette.ColorRole.Text),
+        field.palette().color(QPalette.ColorRole.Window),
+        0.42,
+    )
     assert ghost.font().italic()

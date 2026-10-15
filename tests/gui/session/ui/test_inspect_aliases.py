@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 from qtpy.QtCore import Qt
-from qtpy.QtGui import QColor
+from qtpy.QtGui import QColor, QPalette
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -35,7 +35,7 @@ from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
-from zcu_tools.gui.widgets import error_colour
+from zcu_tools.gui.widgets import error_colour, mixed_colour
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
@@ -336,7 +336,11 @@ def test_resolution_column_shows_owner_projection_and_read_only_cells(
     assert direct.text() == "Q1"
     assert linked.text() == "R1"
     assert unbound.text() == "(unbound)"
-    assert unbound.foreground().color() == QColor("gray")
+    assert unbound.foreground().color() == mixed_colour(
+        table.palette().color(QPalette.ColorRole.Text),
+        table.palette().color(QPalette.ColorRole.Window),
+        0.42,
+    )
     error = control.read_context().resolved_aliases()[3].error
     assert error is not None
     assert broken.text() == error

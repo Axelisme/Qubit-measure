@@ -26,6 +26,7 @@ from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
+    EntryInfo,
     EntryRequest,
     PointCreateRequest,
     PointUseRequest,
@@ -728,6 +729,40 @@ def test_setup_error_uses_theme_foreground(qapp, window_palette, action):
         )
         label.ensurePolished()
         assert label.palette().color(label.foregroundRole()) == error_colour(label)
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_setup_success_replaces_error_foreground(qapp, window_palette):
+    from zcu_tools.gui import widgets
+
+    colour = getattr(widgets, "success_colour", None)
+    assert callable(colour), "success_colour must be public"
+    ctrl = _make_ctrl()
+    ctrl.open_entry.side_effect = RuntimeError("entry failed")
+    dialog = SetupDialog(ctrl)
+    try:
+        dialog.setPalette(window_palette)
+        entry_selector(dialog).addItem("entry")
+        entry_selector(dialog).setCurrentText("entry")
+        entry_button(dialog, "Open").click()
+        label = next(
+            label
+            for label in dialog.findChildren(QLabel)
+            if "entry failed" in label.text()
+        )
+        ctrl.open_entry.side_effect = None
+        ctrl.open_entry.return_value = EntryInfo(
+            "id",
+            "entry",
+            Path("/synthetic/result/entry"),
+            Path("/synthetic/database/entry"),
+        )
+        entry_button(dialog, "Open").click()
+        label.ensurePolished()
+        assert label.palette().color(label.foregroundRole()) == colour(dialog)
     finally:
         dialog.close()
         dialog.deleteLater()
