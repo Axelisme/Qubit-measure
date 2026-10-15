@@ -97,6 +97,7 @@ class T2EchoExp(PersistableExperiment[T2EchoResult, T2EchoCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=T2EchoResult,
         cfg_type=T2EchoCfg,
+        cfg_schema_version="2.0",
         tag="twotone/ge/t2echo",
     )
 

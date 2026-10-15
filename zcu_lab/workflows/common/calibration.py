@@ -99,8 +99,7 @@ class Calibrated:
 
     f01_mhz/readout_freq_mhz are positive finite frequencies in MHz.
     pi_length_us is a positive finite pi-pulse duration at the template gain.
-    readout_gain is a finite nonnegative native pulse gain, applied only to
-    PulseReadoutCfg. DirectReadoutCfg has no pulse gain to update.
+    readout_gain is a finite nonnegative native readout gain.
     Invalid values raise ValueError at construction.
     """
 
@@ -237,16 +236,12 @@ class ReadoutResult:
 def apply_readout_calibration(readout: ReadoutCfg, cal: Calibrated) -> None:
     """Apply accepted readout scalars to a caller-owned native cfg in place.
 
-    PulseReadoutCfg updates pulse/ADC frequency in MHz and native pulse gain.
-    DirectReadoutCfg updates only ADC frequency; it has no pulse gain.
+    Updates the shared generator/ADC frequency in MHz and native readout gain.
     Callers must copy any template they need to retain before calling.
     Native set_param errors propagate. No acquisition or saving occurs.
     """
-    if isinstance(readout, PulseReadoutCfg):
-        readout.set_param("freq", cal.readout_freq_mhz)
-        readout.set_param("gain", cal.readout_gain)
-    else:
-        readout.set_param("ro_freq", cal.readout_freq_mhz)
+    readout.set_param("freq", cal.readout_freq_mhz)
+    readout.set_param("gain", cal.readout_gain)
 
 
 def _validate_calibration_inputs(flux: float, t1_estimate_us: float) -> None:

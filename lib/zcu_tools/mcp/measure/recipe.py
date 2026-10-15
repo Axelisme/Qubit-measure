@@ -866,7 +866,7 @@ class RecipeTab:
         """Read a detached field from the last Form observation, without RPC.
 
         field is a non-empty dotted model-field path. Inline paths include
-        module, for example modules.readout.module.pulse_cfg.module.freq. Range count
+        module, for example modules.readout.module.freq. Range count
         is n, not set_sweep's public expts argument. RecipeFormField exposes
         input, input_present, ordinary value, key/inline mode, actual key, lock,
         current child field names and directed errors. It reconstructs no old

@@ -4,7 +4,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Optional, Union
 
-from qick.asm_v2 import AsmV2, QickParam
+from qick.asm_v2 import AsmV2, ConfigReadout, QickParam
 
 from .debug import PrintTimeStamp
 from .delay import DelayRegAuto
@@ -162,6 +162,21 @@ class AdditionalMacroMixin(AsmV2):
                 t=t,
             )
         )
+
+    def send_readoutconfig(
+        self,
+        ch: int,
+        name: str,
+        t: float | QickParam = 0.0,
+        tag: str | None = None,
+    ) -> None:
+        """Send a registered ADC configuration at scalar or swept time t in us.
+
+        ch is the ADC channel and name its add_readoutconfig name. Optional tag
+        identifies timing for get_time_param. This preserves QICK's scheduling
+        semantics while exposing its documented QickParam input type.
+        """
+        self.append_macro(ConfigReadout(ch=ch, name=name, t=t, tag=tag))
 
     def send_readoutconfig_from_regs(
         self,

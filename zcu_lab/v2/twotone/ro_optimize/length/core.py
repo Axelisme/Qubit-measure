@@ -85,6 +85,7 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
         z=ZSpec("signals", "Signal", "a.u.", dtype=np.float64),
         result_type=LengthResult,
         cfg_type=LengthCfg,
+        cfg_schema_version="2.0",
         tag="twotone/ge/ro_optimize/length",
     )
 
@@ -103,7 +104,7 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
         lengths = sweep2array(
             cfg.sweep.length,
             "time",
-            {"soccfg": soccfg, "ro_ch": readout_cfg.ro_cfg.ro_ch},
+            {"soccfg": soccfg, "ro_ch": readout_cfg.ro_ch},
         )
 
         viewer = context.plots.liveplot_1d(

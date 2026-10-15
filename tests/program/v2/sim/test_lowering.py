@@ -43,7 +43,6 @@ from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, SoftDelay
 from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import (
-    DirectReadoutCfg,
     PulseReadout,
     PulseReadoutCfg,
     TablePulseReadout,
@@ -101,7 +100,15 @@ def _identity_cycles2us(cycles: int) -> float:
 def _readout() -> Module:
     """A minimal fixed-frequency readout module (every timeline needs one)."""
 
-    return DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=7200.0).build("ro")
+    return PulseReadoutCfg(
+        ro_ch=0,
+        ro_length=1.0,
+        freq=7200.0,
+        gen_ch=1,
+        nqz=1,
+        gain=1.0,
+        waveform=ConstWaveformCfg(length=1.0),
+    ).build("ro")
 
 
 def _const_pulse(
@@ -129,8 +136,7 @@ def _const_pulse(
 
 
 @pytest.mark.parametrize("swept", [False, True])
-@pytest.mark.parametrize("pulse_readout", [False, True])
-def test_times_use_their_channel_clocks(swept: bool, pulse_readout: bool) -> None:
+def test_times_use_their_channel_clocks(swept: bool) -> None:
     """Lowering quantizes all time fields without changing their source parameters."""
     soccfg = make_mock_soccfg(n_readouts=2)
     soccfg["tprocs"][0]["f_time"] = 100.0
@@ -153,14 +159,17 @@ def test_times_use_their_channel_clocks(swept: bool, pulse_readout: bool) -> Non
         pre_delay=value,
         post_delay=value,
     )
-    ro_cfg = DirectReadoutCfg(
-        ro_ch=1, ro_freq=7200.0, ro_length=value, trig_offset=value
-    )
-    readout = (
-        PulseReadoutCfg(pulse_cfg=pulse_cfg, ro_cfg=ro_cfg).build("ro")
-        if pulse_readout
-        else ro_cfg.build("ro")
-    )
+    readout = PulseReadoutCfg(
+        gen_ch=1,
+        nqz=1,
+        gain=1.0,
+        freq=7200.0,
+        waveform=ConstWaveformCfg(length=value),
+        pre_delay=value,
+        ro_ch=1,
+        ro_length=value,
+        trig_offset=value,
+    ).build("ro")
     lp = lower_point(
         [
             pulse_cfg.build("drive"),
@@ -184,9 +193,8 @@ def test_times_use_their_channel_clocks(swept: bool, pulse_readout: bool) -> Non
     )
     assert lp.readout.ro_length_us == pytest.approx(ro_us)
     assert lp.readout.trig_offset_us == pytest.approx(tproc_us)
-    if pulse_readout:
-        assert lp.readout.pulse_length_us == pytest.approx(gen_us)
-        assert lp.readout.pulse_pre_delay_us == pytest.approx(tproc_us)
+    assert lp.readout.pulse_length_us == pytest.approx(gen_us)
+    assert lp.readout.pulse_pre_delay_us == pytest.approx(tproc_us)
     if isinstance(value, QickParam):
         np.testing.assert_array_equal(value.to_array(counts, all_loops=True), requested)
 
@@ -468,47 +476,23 @@ class TestResetSegments:
 class TestReadoutPlan:
     """Readout modules produce a resolved semantic ReadoutPlan per point."""
 
-    def test_direct_readout_fixed_freq(self) -> None:
-        lp = lower_point(
-            [
-                DirectReadoutCfg(
-                    ro_ch=0, ro_length=1.0, ro_freq=7200.0, trig_offset=0.25
-                ).build("ro")
-            ],
-            None,
-            _SIM,
-            _F_QUBIT_GHZ,
-            {},
-            _identity_cycles2us,
-        )
-        assert lp.readout.f_ro_ghz == pytest.approx(7.2)
-        assert lp.readout.ro_length_us == pytest.approx(1.0)
-        assert lp.readout.trig_offset_us == pytest.approx(0.25)
-        assert lp.readout.readout_gain == pytest.approx(1.0)
-        assert lp.readout.pulse_cfg is None
-        assert lp.readout.pulse_length_us is None
-
-    def test_pulse_readout_reads_nested_metadata(self) -> None:
-        pulse_cfg = PulseCfg(
+    def test_pulse_readout_resolves_generator_and_adc_geometry(self) -> None:
+        ro = PulseReadoutCfg(
             waveform=ConstWaveformCfg(length=1.0),
-            ch=0,
+            gen_ch=0,
             nqz=1,
             freq=7200.0,
             gain=0.25,
             pre_delay=0.15,
-        )
-        ro_cfg = DirectReadoutCfg(
-            ro_ch=0, ro_length=1.5, ro_freq=7200.0, trig_offset=0.35
-        )
-        ro = PulseReadoutCfg(pulse_cfg=pulse_cfg, ro_cfg=ro_cfg).build("ro")
+            ro_ch=0,
+            ro_length=1.5,
+            trig_offset=0.35,
+        ).build("ro")
         lp = lower_point([ro], None, _SIM, _F_QUBIT_GHZ, {}, _identity_cycles2us)
         assert lp.readout.f_ro_ghz == pytest.approx(7.2)
         assert lp.readout.ro_length_us == pytest.approx(1.5)
         assert lp.readout.trig_offset_us == pytest.approx(0.35)
         assert lp.readout.readout_gain == pytest.approx(0.25)
-        assert lp.readout.pulse_cfg is not None
-        assert lp.readout.pulse_cfg.gain == pytest.approx(0.25)
-        assert lp.readout.pulse_cfg.waveform.length == pytest.approx(1.0)
         assert lp.readout.pulse_length_us == pytest.approx(1.0)
         assert lp.readout.pulse_pre_delay_us == pytest.approx(0.15)
 
@@ -518,7 +502,15 @@ class TestReadoutPlan:
         # probe frequency point-by-point without a swept/fixed branch.
         ro_sweep = SweepCfg(start=7100.0, stop=7300.0, expts=3, step=100.0)
         ro_param = sweep2param("ro_freq", ro_sweep)
-        ro = DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=ro_param).build("ro")
+        ro = PulseReadoutCfg(
+            ro_ch=0,
+            ro_length=1.0,
+            freq=ro_param,
+            gen_ch=1,
+            nqz=1,
+            gain=1.0,
+            waveform=ConstWaveformCfg(length=1.0),
+        ).build("ro")
         for idx, expected_mhz in ((0, 7100.0), (1, 7200.0), (2, 7300.0)):
             lp = lower_point(
                 [ro],
@@ -536,19 +528,15 @@ class TestReadoutPlan:
         length_sweep = SweepCfg(start=0.5, stop=0.9, expts=3, step=0.2)
         freq_sweep = SweepCfg(start=7100.0, stop=7300.0, expts=3, step=100.0)
 
-        pulse_cfg = PulseCfg(
+        ro = PulseReadoutCfg(
             waveform=ConstWaveformCfg(length=sweep2param("pulse_length", length_sweep)),
-            ch=0,
+            gen_ch=0,
             nqz=1,
             freq=sweep2param("ro_freq", freq_sweep),
             gain=sweep2param("gain", gain_sweep),
-        )
-        ro_cfg = DirectReadoutCfg(
             ro_ch=0,
             ro_length=sweep2param("ro_length", ro_sweep),
-            ro_freq=sweep2param("ro_freq", freq_sweep),
-        )
-        ro = PulseReadoutCfg(pulse_cfg=pulse_cfg, ro_cfg=ro_cfg).build("ro")
+        ).build("ro")
         sweep = [
             ("ro_freq", freq_sweep),
             ("gain", gain_sweep),
@@ -576,19 +564,18 @@ class TestReadoutPlan:
         freq_words = [
             int(soccfg.freq2reg(freq, gen_ch=0, ro_ch=0)) for freq in freqs_mhz
         ]
-        pulse_cfg = PulseCfg(
-            waveform=ConstWaveformCfg(length=1.0),
-            ch=0,
-            nqz=1,
-            freq=freqs_mhz[0],
-            gain=0.25,
-        )
-        ro_cfg = DirectReadoutCfg(
-            ro_ch=0, ro_length=1.5, ro_freq=freqs_mhz[0], trig_offset=0.35
-        )
         ro = PulseReadout(
             "ro",
-            PulseReadoutCfg(pulse_cfg=pulse_cfg, ro_cfg=ro_cfg),
+            PulseReadoutCfg(
+                waveform=ConstWaveformCfg(length=1.0),
+                gen_ch=0,
+                nqz=1,
+                freq=freqs_mhz[0],
+                gain=0.25,
+                ro_ch=0,
+                ro_length=1.5,
+                trig_offset=0.35,
+            ),
             freq_val="freq_word",
         )
         modules = [
@@ -617,18 +604,16 @@ class TestReadoutPlan:
 
     def test_pulse_readout_load_word_rejects_partial_soccfg_double(self) -> None:
         freq_words = [1]
-        pulse_cfg = PulseCfg(
-            waveform=ConstWaveformCfg(length=1.0),
-            ch=0,
-            nqz=1,
-            freq=6000.0,
-            gain=0.25,
-        )
         ro = PulseReadout(
             "ro",
             PulseReadoutCfg(
-                pulse_cfg=pulse_cfg,
-                ro_cfg=DirectReadoutCfg(ro_ch=0, ro_length=1.5, ro_freq=6000.0),
+                waveform=ConstWaveformCfg(length=1.0),
+                gen_ch=0,
+                nqz=1,
+                freq=6000.0,
+                gain=0.25,
+                ro_ch=0,
+                ro_length=1.5,
             ),
             freq_val="freq_word",
         )
@@ -658,29 +643,38 @@ class TestReadoutPlan:
                 soccfg=partial_soccfg,
             )
 
+    @pytest.mark.parametrize(
+        ("gen_ch", "ro_ch", "mixer_freq"),
+        [(0, 0, None), (1, 1, 5500.0), (1, 1, 6500.0)],
+        ids=["no-mixer", "positive-dds", "negative-dds"],
+    )
     def test_pulse_readout_validates_paired_frequency_words(
-        self,
+        self, gen_ch: int, ro_ch: int, mixer_freq: float | None
     ) -> None:
-        soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+        soccfg = make_mock_soccfg(n_gens=2, n_readouts=2)
+        # Different channel clocks expose accidental decoding through channel 0.
+        soccfg["gens"][1].update(fs=6144.0, f_dds=6144.0, fs_mult=25, has_mixer=True)
+        soccfg["readouts"][1].update(fs=1228.8, f_dds=1228.8, fs_mult=5)
         freq_words, ro_freq_words = readout_freq_words(
             soccfg,
             (5990.0, 6000.0),
-            gen_ch=0,
-            ro_ch=0,
-            mixer_freq=None,
+            gen_ch=gen_ch,
+            ro_ch=ro_ch,
+            mixer_freq=mixer_freq,
             nqz=1,
         )
-        pulse_cfg = PulseCfg(
-            waveform=ConstWaveformCfg(length=1.0),
-            ch=0,
-            nqz=1,
-            freq=5990.0,
-            gain=0.25,
-        )
-        ro_cfg = DirectReadoutCfg(ro_ch=0, ro_length=1.5, ro_freq=5990.0)
         ro = PulseReadout(
             "ro",
-            PulseReadoutCfg(pulse_cfg=pulse_cfg, ro_cfg=ro_cfg),
+            PulseReadoutCfg(
+                waveform=ConstWaveformCfg(length=1.0),
+                gen_ch=gen_ch,
+                nqz=1,
+                freq=5990.0,
+                gain=0.25,
+                mixer_freq=mixer_freq,
+                ro_ch=ro_ch,
+                ro_length=1.5,
+            ),
             freq_val="freq_word",
             ro_freq_val="ro_freq_word",
         )
@@ -694,7 +688,6 @@ class TestReadoutPlan:
             ),
             ro,
         ]
-
         lp = lower_point(
             modules,
             [("freq", len(freq_words))],
@@ -704,56 +697,82 @@ class TestReadoutPlan:
             _identity_cycles2us,
             soccfg=soccfg,
         )
+        assert lp.readout.f_ro_ghz == pytest.approx(6.0, rel=0.0, abs=2e-9)
 
-        assert lp.readout.f_ro_ghz == pytest.approx(
-            soccfg.reg2freq(freq_words[1], gen_ch=0) / 1e3
-        )
+        # A wrong ADC downconversion sign must not become another valid probe.
+        wrong_ro_words = [-word % 2**32 for word in ro_freq_words]
+        inconsistent = [
+            modules[0],
+            LoadWord(
+                "wrong_adc_sign",
+                wrong_ro_words,
+                idx_reg="freq",
+                val_reg="ro_freq_word",
+            ),
+            ro,
+        ]
+        with pytest.raises(UnsupportedModuleError, match="words are inconsistent"):
+            lower_point(
+                inconsistent,
+                [("freq", len(freq_words))],
+                _SIM,
+                _F_QUBIT_GHZ,
+                {"freq": 1},
+                _identity_cycles2us,
+                soccfg=soccfg,
+            )
 
-    def test_table_pulse_readout_resolves_current_point_words(self) -> None:
-        soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
-        freqs_mhz = [5990.0, 6000.0, 6010.0]
+    @pytest.mark.parametrize(
+        ("gen_ch", "ro_ch", "mixer_freq"),
+        [(0, 0, None), (1, 1, 5500.0), (1, 1, 6500.0)],
+        ids=["no-mixer", "positive-dds", "negative-dds"],
+    )
+    def test_table_pulse_readout_resolves_current_point_words(
+        self, gen_ch: int, ro_ch: int, mixer_freq: float | None
+    ) -> None:
+        soccfg = make_mock_soccfg(n_gens=2, n_readouts=2)
+        soccfg["gens"][1].update(fs=6144.0, f_dds=6144.0, fs_mult=25, has_mixer=True)
+        soccfg["readouts"][1].update(fs=1228.8, f_dds=1228.8, fs_mult=5)
+        freqs_mhz = [5990.0, 6000.0, 5990.0, 6010.0]
         freq_words, ro_freq_words = readout_freq_words(
             soccfg,
             freqs_mhz,
-            gen_ch=0,
-            ro_ch=0,
-            mixer_freq=None,
+            gen_ch=gen_ch,
+            ro_ch=ro_ch,
+            mixer_freq=mixer_freq,
             nqz=1,
         )
         ro = TablePulseReadout(
             "ro",
             PulseReadoutCfg(
-                pulse_cfg=PulseCfg(
-                    waveform=ConstWaveformCfg(length=1.0),
-                    ch=0,
-                    nqz=1,
-                    freq=freqs_mhz[0],
-                    gain=0.25,
-                ),
-                ro_cfg=DirectReadoutCfg(
-                    ro_ch=0,
-                    ro_length=1.5,
-                    ro_freq=freqs_mhz[0],
-                    gen_ch=0,
-                ),
+                waveform=ConstWaveformCfg(length=1.0),
+                gen_ch=gen_ch,
+                nqz=1,
+                freq=freqs_mhz[0],
+                gain=0.25,
+                mixer_freq=mixer_freq,
+                ro_ch=ro_ch,
+                ro_length=1.5,
             ),
             idx_reg="freq",
             freq_words=freq_words,
             ro_freq_words=ro_freq_words,
         )
-
-        lp = lower_point(
-            [ro],
-            [("freq", len(freq_words))],
-            _SIM,
-            _F_QUBIT_GHZ,
-            {"freq": 2},
-            _identity_cycles2us,
-            soccfg=soccfg,
-        )
-
-        assert lp.readout.f_ro_ghz == pytest.approx(
-            soccfg.reg2freq(freq_words[2], gen_ch=0) / 1e3
+        frequencies = [
+            lower_point(
+                [ro],
+                [("outer", 2), ("freq", len(freq_words))],
+                _SIM,
+                _F_QUBIT_GHZ,
+                {"outer": outer, "freq": index},
+                _identity_cycles2us,
+                soccfg=soccfg,
+            ).readout.f_ro_ghz
+            for outer in range(2)
+            for index in range(len(freq_words))
+        ]
+        assert frequencies == pytest.approx(
+            [5.99, 6.0, 5.99, 6.01, 5.99, 6.0, 5.99, 6.01], rel=0.0, abs=2e-9
         )
 
     def test_pulse_readout_ro_only_word_unwraps_nearest_cfg_frequency(
@@ -768,18 +787,16 @@ class TestReadoutPlan:
             mixer_freq=None,
             nqz=1,
         )
-        pulse_cfg = PulseCfg(
-            waveform=ConstWaveformCfg(length=1.0),
-            ch=0,
-            nqz=1,
-            freq=6000.0,
-            gain=0.25,
-        )
         ro = PulseReadout(
             "ro",
             PulseReadoutCfg(
-                pulse_cfg=pulse_cfg,
-                ro_cfg=DirectReadoutCfg(ro_ch=0, ro_length=1.5, ro_freq=6000.0),
+                waveform=ConstWaveformCfg(length=1.0),
+                gen_ch=0,
+                nqz=1,
+                freq=6000.0,
+                gain=0.25,
+                ro_ch=0,
+                ro_length=1.5,
             ),
             ro_freq_val="ro_freq_word",
         )
@@ -805,17 +822,17 @@ class TestReadoutPlan:
         assert lp.readout.f_ro_ghz == pytest.approx(6.0)
 
     def test_pulse_readout_gain_val_load_word_fast_fails(self) -> None:
-        pulse_cfg = PulseCfg(
-            waveform=ConstWaveformCfg(length=1.0),
-            ch=0,
-            nqz=1,
-            freq=6000.0,
-            gain=0.25,
-        )
-        ro_cfg = DirectReadoutCfg(ro_ch=0, ro_length=1.5, ro_freq=6000.0)
         ro = PulseReadout(
             "ro",
-            PulseReadoutCfg(pulse_cfg=pulse_cfg, ro_cfg=ro_cfg),
+            PulseReadoutCfg(
+                waveform=ConstWaveformCfg(length=1.0),
+                gen_ch=0,
+                nqz=1,
+                freq=6000.0,
+                gain=0.25,
+                ro_ch=0,
+                ro_length=1.5,
+            ),
             gain_val="gain_word",
         )
 

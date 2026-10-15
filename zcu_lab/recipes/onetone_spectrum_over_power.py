@@ -13,7 +13,7 @@ from zcu_tools.mcp.measure.recipe import (
 from .helpers import (
     FrequencySweepCalibration,
     set_frequency_sweep,
-    set_nested_module_scalar,
+    set_module_scalar,
 )
 
 
@@ -73,12 +73,10 @@ def onetone_spectrum_over_power(  # noqa: PLR0913 - Preserve typed tool keywords
         stop=None if gain_range is None else gain_range[1],
         expts=gain_points,
     )
-    set_nested_module_scalar(
+    set_module_scalar(
         tab,
         "modules.readout",
-        "modules.readout.module.pulse_cfg",
-        RecipeFieldEdit("modules.readout.module.pulse_cfg.module.gain", None),
-        ("pulse_cfg", "gain"),
+        RecipeFieldEdit("modules.readout.module.gain", None),
     )
     tab.set("reps", reps)
     tab.set("rounds", rounds)
@@ -121,7 +119,7 @@ DEFINITION = RecipeDefinition(
     adapter_name="onetone/power_dep",
     summary_parameters=(
         SummaryParameter("frequency_sweep", "sweep.freq", "MHz"),
-        SummaryParameter("gain", "modules.readout.module.pulse_cfg.module.gain"),
+        SummaryParameter("gain", "modules.readout.module.gain"),
         SummaryParameter("readout_ref", "modules.readout"),
         SummaryParameter("reps", "reps"),
         SummaryParameter("rounds", "rounds"),

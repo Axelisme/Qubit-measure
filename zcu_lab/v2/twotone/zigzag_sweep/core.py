@@ -107,6 +107,7 @@ class ZigZagScanExp(PersistableExperiment[ZigZagScanResult, ZigZagScanCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=ZigZagScanResult,
         cfg_type=ZigZagScanCfg,
+        cfg_schema_version="2.0",
         tag="twotone/ge/zigzag_scan",
     )
 

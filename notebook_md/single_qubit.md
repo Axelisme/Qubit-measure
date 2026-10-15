@@ -27,7 +27,6 @@ from zcu_lab.components import register_all
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp
 from zcu_tools.cfg_model import (
     ConstWaveformCfg,
-    DirectReadoutCfg,
     PulseReadoutSpec,
     PulseSpec,
 )
@@ -140,15 +139,14 @@ if create_point:
         waveform=ConstWaveformCfg(length=0.1),
     )
     readout_spec = PulseReadoutSpec(
-        pulse_cfg=PulseSpec(
-            ch=roles.resonator.wiring.ch, nqz=2,
-            freq=roles.resonator.freq, gain=0.05,
-            waveform=ConstWaveformCfg(length=1.0),
-        ),
-        ro_cfg=DirectReadoutCfg(
-            ro_ch=roles.resonator.wiring.ro_ch,
-            ro_freq=roles.resonator.freq, ro_length=0.9, trig_offset=sim.timeFly,
-        ),
+        gen_ch=roles.resonator.wiring.ch,
+        nqz=2,
+        freq=roles.resonator.freq,
+        gain=0.05,
+        waveform=ConstWaveformCfg(length=1.0),
+        ro_ch=roles.resonator.wiring.ro_ch,
+        ro_length=0.9,
+        trig_offset=sim.timeFly,
     )
     with library.edit() as draft:
         draft.set_module("Q1.pulses.pi", pi_spec)

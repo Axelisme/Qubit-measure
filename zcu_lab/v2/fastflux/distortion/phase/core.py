@@ -80,6 +80,7 @@ class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=PhaseResult,
         cfg_type=PhaseCfg,
+        cfg_schema_version="2.0",
         tag="fastflux/distortion/phase",
     )
 

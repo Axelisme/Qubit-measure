@@ -206,7 +206,7 @@ def run_ro_landscape(run: Run[FreqGainCfg]) -> ReadoutAcquisition:
     """
     soc, soccfg = run.soc, run.soccfg
     cfg = run.cfg
-    round_info = {"soccfg": soccfg, "gen_ch": cfg.modules.readout.pulse_cfg.ch}
+    round_info = {"soccfg": soccfg, "gen_ch": cfg.modules.readout.gen_ch}
     freqs = sweep2array(cfg.sweep.freq, "freq", round_info)
     gains = sweep2array(cfg.sweep.gain, "gain", round_info)
     buffer = run.buffer((len(freqs), len(gains)), axes=(freqs, gains))

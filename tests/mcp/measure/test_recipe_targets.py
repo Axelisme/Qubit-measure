@@ -26,10 +26,7 @@ def targeted(
         reuse=reuse_tab_id,
     )
     tab.read_value("$resonator.freq")
-    for path in (
-        "modules.readout.module.pulse_cfg.module.freq",
-        "modules.readout.module.ro_cfg.ro_freq",
-    ):
+    for path in ("modules.readout.module.freq",):
         tab.set(path, {"expr": "$resonator.freq"}, source="$resonator.freq")
     yield tab.run()
 
@@ -50,9 +47,7 @@ _TARGETED_DEFINITION = definition(
 TARGETED = replace(
     _TARGETED_DEFINITION,
     summary_parameters=(
-        SummaryParameter(
-            "frequency_mhz", "modules.readout.module.pulse_cfg.module.freq", "MHz"
-        ),
+        SummaryParameter("frequency_mhz", "modules.readout.module.freq", "MHz"),
     ),
 )
 
@@ -187,15 +182,14 @@ def test_recipe_run_uses_temporary_target_without_tab_birth_binding(
             edit["value"]
             for params in edits
             for edit in params["edits"]
-            if edit["path"][-1] in ("freq", "ro_freq")
+            if edit["path"][-1] == "freq"
         ]
         assert expressions == [
             {"expr": "$resonator.freq"},
-            {"expr": "$resonator.freq"},
         ]
-        assert gui.publication["input"]["modules"]["readout"]["module"]["pulse_cfg"][
-            "module"
-        ]["freq"] == {"expr": "$resonator.freq"}
+        assert gui.publication["input"]["modules"]["readout"]["module"]["freq"] == {
+            "expr": "$resonator.freq"
+        }
 
 
 def test_recipe_target_can_be_used_with_explicit_reuse(tmp_path: Path) -> None:

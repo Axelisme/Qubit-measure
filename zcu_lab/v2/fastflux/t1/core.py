@@ -82,6 +82,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=T1Result,
         cfg_type=T1Cfg,
+        cfg_schema_version="2.0",
         tag="fastflux/t1",
     )
 

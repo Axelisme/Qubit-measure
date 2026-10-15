@@ -8,7 +8,7 @@ from typing import Literal, Self
 import h5py
 import numpy as np
 import pytest
-from zcu_tools.cfg_model import ConstWaveformCfg, DirectReadoutCfg, PulseSpec
+from zcu_tools.cfg_model import ConstWaveformCfg, PulseReadoutSpec, PulseSpec
 from zcu_tools.datafile import (
     AnalysisDocument,
     load_labber_data,
@@ -887,8 +887,14 @@ def test_accept_library_failure_keeps_prior_commits_and_stops(
             parameter={"D1.rate": 1700.0},
             module={
                 "D1.pulses.good": pulse_spec(),
-                "D1.pulses.bad": DirectReadoutCfg(
-                    ro_ch=0, ro_length=0.1, ro_freq=100.0
+                "D1.pulses.bad": PulseReadoutSpec(
+                    gen_ch=0,
+                    nqz=1,
+                    gain=0.1,
+                    waveform=ConstWaveformCfg(length=1.0),
+                    ro_ch=0,
+                    ro_length=0.1,
+                    freq=100.0,
                 ),
                 "D1.pulses.later": pulse_spec(gain=0.5),
             },

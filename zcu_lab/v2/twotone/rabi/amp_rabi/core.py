@@ -81,6 +81,7 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=AmpRabiResult,
         cfg_type=AmpRabiCfg,
+        cfg_schema_version="2.0",
         tag="twotone/ge/rabi_gain",
     )
 

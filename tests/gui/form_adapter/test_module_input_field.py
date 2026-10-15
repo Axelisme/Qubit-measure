@@ -11,7 +11,6 @@ from zcu_tools.cfg_model import (
     BathResetSpec,
     ConfigBase,
     ConstWaveformCfg,
-    DirectReadoutCfg,
     ModuleSpec,
     NoneResetCfg,
     PulseReadoutSpec,
@@ -123,31 +122,18 @@ def library_env() -> FormEnv:
         ),
         (
             {
-                "type": "readout/direct",
-                "ro_ch": 0,
-                "ro_freq": 100.0,
-                "ro_length": 1.0,
-                "gen_ch": 0,
-            },
-            DirectReadoutCfg,
-            "ro_ch",
-            0,
-        ),
-        (
-            {
                 "type": "readout/pulse",
-                "pulse_cfg": {"kind": "ref", "name": "Q.pulses.first"},
-                "ro_cfg": {
-                    "type": "readout/direct",
-                    "ro_ch": 0,
-                    "ro_freq": 100.0,
-                    "ro_length": 1.0,
-                    "gen_ch": 0,
-                },
+                "gen_ch": 1,
+                "nqz": 1,
+                "freq": 100.0,
+                "gain": 0.2,
+                "ro_ch": 0,
+                "ro_length": 1.0,
+                "waveform": {"kind": "ref", "name": "Q.waveforms.const"},
             },
             PulseReadoutSpec,
-            "pulse_cfg",
-            "Q.pulses.first",
+            "waveform",
+            "Q.waveforms.const",
         ),
         ({"type": "reset/none"}, NoneResetCfg, "type", "reset/none"),
         (
@@ -221,7 +207,6 @@ def test_ref_family_only_limits_captured_keys_and_preserves_local_choices() -> N
     ] == ["Q.pulses.first", "Q.pulses.second"]
     assert [o.label for o in options if o.label.startswith("Inline")] == [
         "Inline: pulse",
-        "Inline: readout/direct",
         "Inline: readout/pulse",
         "Inline: reset/pulse",
         "Inline: reset/two_pulse",
@@ -360,3 +345,46 @@ def test_ref_family_must_be_a_nonempty_subset_of_inline_family() -> None:
         field_type(PulseSpec, ref_family=PulseResetSpec)
     with pytest.raises((TypeError, ValueError), match="family|Spec"):
         field_type(PulseSpec, ref_family=())
+
+
+def test_flat_readout_ref_conversion_keeps_captured_channels_and_waveform_key() -> None:
+    source = PulseReadoutSpec(
+        gen_ch=2,
+        nqz=1,
+        freq=100.0,
+        gain=0.2,
+        waveform="Q.waveforms.const",
+        ro_ch=3,
+        ro_length=1.0,
+        desc="captured",
+    )
+    env = FormEnv(
+        library=LibrarySnapshot(
+            ModuleLibraryDocument(
+                format="zcu.module-library",
+                format_version="2.0",
+                components={"Q": ComponentLibrary(readout={"probe": source})},
+            )
+        )
+    )
+    field = make_field(PulseReadoutSpec)
+    model = selection_model(field)
+    state = FormState(
+        FormInput(
+            model,
+            {
+                "selection": {"kind": "ref", "name": "Q.readout.probe"},
+            },
+        )
+    )
+    assert field.to_spec(selection_result(state, env)) == "Q.readout.probe"
+
+    state.run_command(("selection",), "to_inline", env)
+    state.write({("selection", "module", "ro_ch"): 4}, env)
+    spec = persistent_spec(field.to_spec(selection_result(state, FormEnv())))
+
+    assert isinstance(spec, PulseReadoutSpec)
+    assert (spec.gen_ch, spec.ro_ch, spec.freq) == (2, 4, 100.0)
+    assert spec.waveform == "Q.waveforms.const"
+    assert spec.desc is None
+    assert source.ro_ch == 3

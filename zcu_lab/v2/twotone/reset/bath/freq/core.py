@@ -101,6 +101,7 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
         z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=FreqGainResult,
         cfg_type=FreqGainCfg,
+        cfg_schema_version="2.0",
         tag="twotone/reset/bath/freq_gain",
     )
 

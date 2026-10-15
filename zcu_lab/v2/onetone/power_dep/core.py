@@ -71,6 +71,7 @@ class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=PowerDepResult,
         cfg_type=PowerDepCfg,
+        cfg_schema_version="2.0",
         tag="onetone/power_dep",
     )
 
@@ -85,7 +86,7 @@ class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
         gains = sweep2array(
             gain_sweep,
             "gain",
-            {"soccfg": soccfg, "gen_ch": readout_cfg.pulse_cfg.ch},
+            {"soccfg": soccfg, "gen_ch": readout_cfg.gen_ch},
             allow_array=True,
         )
         freqs = sweep2array(
@@ -93,8 +94,8 @@ class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
             "freq",
             {
                 "soccfg": soccfg,
-                "gen_ch": readout_cfg.pulse_cfg.ch,
-                "ro_ch": readout_cfg.ro_cfg.ro_ch,
+                "gen_ch": readout_cfg.gen_ch,
+                "ro_ch": readout_cfg.ro_ch,
             },
         )
 

@@ -88,7 +88,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         result_type=FreqResult,
         cfg_type=FreqCfg,
         tag="jpa/freq",
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
     )
 
     def run(self, cfg: FreqCfg, *, context: RunContext) -> FreqResult:
