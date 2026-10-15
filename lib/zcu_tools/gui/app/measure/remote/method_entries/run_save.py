@@ -49,7 +49,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "then has a run result and can be analyzed without a SoC connection. "
             "Form input stays unchanged. cfg_issue is null when typed cfg is "
             "available, or a readable reason when valid data loads without cfg. "
-            "Inspect reads the file's original raw cfg. analysis_error "
+            "Read the file's original raw cfg offline as StoredRun through the "
+            "public datafile.load_run_data API; the GUI has no raw cfg inspection "
+            "entry point. analysis_error "
             "reports analysis preparation failure without undoing the load; "
             "has_analyze_params is false until preparation succeeds.",
             (

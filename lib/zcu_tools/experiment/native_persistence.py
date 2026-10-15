@@ -233,7 +233,9 @@ def restore_run(
     Validate tag and data before interpreting typed cfg. Missing variables, bad
     axes/units/dtype/shape, invalid cfg envelope or rejected builder results raise
     ValueError or TypeError. Extra variables are projected out. No registry or
-    dynamic imports are used, and raw cfg/metadata are not modified.
+    dynamic imports are used, and raw cfg/metadata are not modified. Grouped
+    builders receive cfg_snapshot=None: build and validate the Result from
+    variables before restoring typed cfg.
 
     A valid cfg envelope with an incompatible cfg_type, schema major or concrete
     model returns record.cfg=None and a readable cfg_issue, also emitted as one
@@ -270,11 +272,10 @@ def restore_run(
         for variable in variables
     }
     validate_cfg_snapshot(stored.cfg)
-    cfg, cfg_issue = _restore_cfg(stored.cfg, spec=spec)
     if isinstance(spec, GroupedAxesSpec):
         result = spec.result_builder(
             GroupedLoadData(
-                variables=loaded, metadata=payload.metadata, cfg_snapshot=cfg
+                variables=loaded, metadata=payload.metadata, cfg_snapshot=None
             )
         )
         if not isinstance(result, spec.result_type):
@@ -291,6 +292,7 @@ def restore_run(
         }
         fields[spec.z.field_name] = variable.z
         result = spec.result_type(**fields)
+    cfg, cfg_issue = _restore_cfg(stored.cfg, spec=spec)
     if cfg_issue is not None:
         warnings.warn(cfg_issue, CfgUnavailableWarning, stacklevel=2)
     return RestoredRun(record=RunRecord(cfg=cfg, result=result), cfg_issue=cfg_issue)

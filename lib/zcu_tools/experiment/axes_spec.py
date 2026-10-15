@@ -213,7 +213,9 @@ class GroupedLoadData(Generic[T_Config]):
 
     variables maps each DataVariable identity to its memory-unit loaded arrays.
     metadata contains shared file metadata. cfg_snapshot is the reconstructed
-    experiment config, or None when the historical native cfg is incompatible.
+    experiment config when supplied, or None when unavailable. Native restore
+    passes None because it builds and validates the Result before typed cfg.
+    Native result builders must reconstruct from variables, not cfg_snapshot.
     """
 
     variables: Mapping[DataVariable, LoadedVariableData]
