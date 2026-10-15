@@ -36,7 +36,7 @@ def test_direct_record_keys_cannot_select_paths_outside_numeric_identity(tmp_pat
     import pytest
 
     library = EvolutionLibrary(tmp_path)
-    density = np.eye(2, dtype=complex)/2
+    density = np.asarray(np.eye(2, dtype=complex) / 2, dtype=np.complex128)
     with pytest.raises(ValueError, match="identity"):
         library.save_record("../outside", density)
     with pytest.raises(ValueError, match="identity"):
