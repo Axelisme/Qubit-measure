@@ -48,7 +48,13 @@ from ._window_support import WindowSession, bind_point, install_soc
 def window(qapp: QApplication) -> Iterator[WorkflowWindow[Context]]:
     harness = StartHarness()
     view = WorkflowWindow(
-        harness.state, harness.services, harness.owner, registrations=build_registry()
+        harness.state,
+        harness.services,
+        harness.owner,
+        bus=harness.bus,
+        templates={},
+        alias_presets=None,
+        registrations=build_registry(),
     )
     try:
         yield view
@@ -115,6 +121,7 @@ def test_open_restore_and_close_flush(qapp: QApplication, tmp_path: Path) -> Non
         )
     )
     app = WorkflowsGuiBehavior(
+        templates={},
         registrations=build_registry(),
         alias_presets={"default": ALIAS_PRESET},
         cache_dir=tmp_path,
@@ -149,6 +156,7 @@ def test_unreadable_snapshot_reports_and_uses_defaults(
 ) -> None:
     (tmp_path / "t1_workflow_state_v1.json").write_text(payload)
     app = WorkflowsGuiBehavior(
+        templates={},
         registrations=build_registry(),
         alias_presets={"default": ALIAS_PRESET},
         cache_dir=tmp_path,
@@ -180,6 +188,7 @@ def test_clean_skips_read_but_close_replaces_snapshot(
     path = tmp_path / "t1_workflow_state_v1.json"
     path.write_text("deliberately invalid JSON")
     app = WorkflowsGuiBehavior(
+        templates={},
         registrations=build_registry(),
         alias_presets={"default": ALIAS_PRESET},
         clean=True,
@@ -276,7 +285,9 @@ def test_saved_reference_without_captured_library_is_discarded_on_open(
             }
         )
     )
-    app = WorkflowsGuiBehavior(registrations=[drive_registration()], cache_dir=tmp_path)
+    app = WorkflowsGuiBehavior(
+        templates={}, registrations=[drive_registration()], cache_dir=tmp_path
+    )
     app.assemble(None)
     try:
         assert app.window.capture_persisted_state() == WorkflowInputSnapshot(

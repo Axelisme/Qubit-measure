@@ -82,6 +82,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from zcu_lab import load_alias_presets
     from zcu_lab.components import register_all
+    from zcu_lab.templates import TEMPLATES
     from zcu_lab.workflows.registry import build_registry
 
     register_all(component_registry)
@@ -90,6 +91,7 @@ def main(argv: list[str] | None = None) -> int:
         runtime_options_from_args(args, log_root=PROJECT_ROOT),
         extra_logging_namespaces=("zcu_lab",),
         registrations=build_registry(),
+        templates=TEMPLATES,
         loader=build_source_loader(),
         alias_presets=load_alias_presets(),
         project_root=str(PROJECT_ROOT),
