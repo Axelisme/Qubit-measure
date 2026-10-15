@@ -156,7 +156,9 @@ def test_nullable_single_branch_keeps_inner_selector_editable(enabled: bool) -> 
 
     if not enabled:
         assert description.children == ()
-        state.write({("nullable_multi",): {"kind": "inline"}}, env)
+        state.write(
+            {("nullable_multi",): {"kind": "inline", "module": {"kind": "first"}}}, env
+        )
     inner = state.describe(("nullable_multi", "module"), env).target
     assert inner is not None
     assert inner.selection_fixed is False

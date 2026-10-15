@@ -627,7 +627,9 @@ def test_optional_partially_locked_module_describes_fixed_branch_not_value(
     form = Form(OptionalCore, {"probe": Slot("Q.pulses.probe", lock={"freq": 0.0})})
     form.bind_templates(templates(), adapter="synthetic")
     env = environment()
-    state = FormState(form.default_input(env))
+    initial = form.default_input(env)
+    inline = initial.data["probe"]
+    state = FormState(initial)
     if not enabled:
         state.write({("probe",): None}, env)
     row = state.describe((), env).children[0]
@@ -643,7 +645,7 @@ def test_optional_partially_locked_module_describes_fixed_branch_not_value(
 
     if not enabled:
         assert description.children == ()
-        state.write({("probe",): {"kind": "inline"}}, env)
+        state.write({("probe",): inline}, env)
     state.write({("probe", "module", "gain"): 0.6}, env)
     value = state.result(env)
     assert not isinstance(value, FormErrors), value
