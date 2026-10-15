@@ -317,3 +317,64 @@ def test_module_target_refusal_is_inline(module_editor):
     assert item.target_name == "pulse"
     assert messages == []
     ctrl.set_writeback_item_for_pane.side_effect = None
+
+
+def test_module_ledger_summarizes_changes_and_exposes_full_tooltip(module_editor):
+    widget, _, _, _, form, _, _ = module_editor
+    current = widget.findChild(QLabel, "writebackCurrent")
+    proposed = widget.findChild(QLabel, "writebackProposed")
+    assert current.text() == "library entry"
+    assert proposed.text() == "1 changes"
+    assert "freq  6000.0 → 6001.0" in proposed.toolTip()
+    form.state.write({("freq",): 6000.0}, form.env)
+    assert proposed.text() == "no changes"
+    form.state.write({("gain",): 0.4}, form.env)
+    assert proposed.text() == "1 changes"
+    assert "gain  0.2 → 0.4" in proposed.toolTip()
+
+
+def test_missing_library_entry_counts_only_proposed_leaves():
+    from zcu_tools.gui.app.measure.writeback import edit_dialogs
+
+    changes = edit_dialogs.module_changes(None, {"freq": 6012.0, "gain": 0.2})
+    assert [change.path for change in changes] == ["freq", "gain"]
+
+
+def test_invalid_module_ledger_explains_apply_gate_and_recovers(module_editor, qapp):
+    from qtpy.QtWidgets import QCheckBox
+    from zcu_tools.gui.widgets import warning_colour
+
+    from tests.gui.widgets.form._text_input import commit_text_on_focus_loss
+
+    widget, dialog, item, _, _, _, _ = module_editor
+    freq = dialog.findChild(QLineEdit, "form.input.freq")
+    commit_text_on_focus_loss(freq, "abc")
+    proposed = widget.findChild(QLabel, "writebackProposed")
+    assert proposed.text() == "Invalid configuration"
+    assert proposed.palette().color(QPalette.ColorRole.WindowText) == error_colour(
+        widget
+    )
+    hint = next(
+        label
+        for label in widget.findChildren(QLabel)
+        if "Fix or uncheck invalid module" in label.text()
+    )
+    assert item.target_name in hint.text()
+    assert hint.palette().color(QPalette.ColorRole.WindowText) == warning_colour(widget)
+    assert not button(widget, "Apply Selected").isEnabled()
+    palette = widget.palette()
+    palette.setColor(QPalette.ColorRole.Window, QColor("#353535"))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor("#eeeeee"))
+    widget.setPalette(palette)
+    qapp.processEvents()
+    assert proposed.palette().color(QPalette.ColorRole.WindowText) == error_colour(
+        widget
+    )
+    checkbox = widget.findChild(QCheckBox)
+    checkbox.setChecked(False)
+    assert "Select the items to write back" in hint.text()
+    checkbox.setChecked(True)
+    commit_text_on_focus_loss(freq, "6002.0")
+    assert proposed.text() == "1 changes"
+    assert "Select the items to write back" in hint.text()
+    assert button(widget, "Apply Selected").isEnabled()
