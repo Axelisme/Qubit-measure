@@ -758,10 +758,12 @@ class FieldRow:
             self._display_input(local, editable=editable)
             shown = ""
             if local is None and field.has_value and _expression(field):
-                shown = _rounded(field, field.value)
-                if isinstance(field.value, str):
-                    resolved = json.dumps(field.value, ensure_ascii=False)
-                    shown = f"{_input_text(field)} = {resolved}"
+                resolved = (
+                    json.dumps(field.value, ensure_ascii=False)
+                    if isinstance(field.value, str)
+                    else _rounded(field, field.value)
+                )
+                shown = f"= {resolved}"
             self.value.setText(shown)
             self.value.setVisible(bool(shown))
         finally:
