@@ -178,11 +178,18 @@ def test_read_field_rejects_malformed_paths_locally_and_unknown_paths_at_owner(
     with recipe_client(tmp_path, LookbackGui()) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         before = len(client.transport.sent)
-        with pytest.raises(ValueError, match="field"):
-            tab.read_field(field)
-        assert len(client.transport.sent) == before + (
-            0 if not field or ".." in field else 1
-        )
+        if not field or ".." in field:
+            with pytest.raises(ValueError, match="field"):
+                tab.read_field(field)
+            assert len(client.transport.sent) == before
+        else:
+            with pytest.raises(GuiRpcError) as caught:
+                tab.read_field(field)
+            assert caught.value.code == "invalid_params"
+            assert caught.value.reason == "form_path"
+            assert caught.value.data == {"form_path": field.split(".")}
+            assert len(client.transport.sent) == before + 1
+            assert tab.read_field("rounds").input_present
 
 
 def test_read_field_rejects_malformed_wire_without_retry(tmp_path: Path) -> None:

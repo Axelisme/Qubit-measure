@@ -68,8 +68,16 @@ def test_retain_source_rejects_invalid_fields_and_labels_without_rpc(
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         before = list(client.transport.sent)
-        with pytest.raises(ValueError, match="Unknown .*field|source must be"):
+        with pytest.raises((GuiRpcError, ValueError)) as caught:
             tab.retain_source(field, source)
+        if field == "missing":
+            assert isinstance(caught.value, GuiRpcError)
+            assert caught.value.reason == "form_path"
+            assert caught.value.code == "invalid_params"
+            assert caught.value.data == {"form_path": [field]}
+        else:
+            assert isinstance(caught.value, ValueError)
+            assert "source must be" in str(caught.value)
         assert [
             call for call in client.transport.sent if call[0] != "tab.describe_cfg"
         ] == [call for call in before if call[0] != "tab.describe_cfg"]
@@ -182,13 +190,20 @@ def test_batch_preflight_rejects_all_before_first_edit(
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         before = len(client.transport.sent)
-        with pytest.raises(ValueError, match="field|source"):
+        with pytest.raises((GuiRpcError, ValueError)) as caught:
             tab.set_fields(
                 [
                     recipe.RecipeFieldEdit("rounds", 7, "valid"),
                     recipe.RecipeFieldEdit(bad_field, 9, bad_source),
                 ]
             )
+        if bad_field == "missing":
+            assert isinstance(caught.value, GuiRpcError)
+            assert caught.value.reason == "form_path"
+            assert caught.value.code == "invalid_params"
+            assert caught.value.data == {"form_path": [bad_field]}
+        else:
+            assert isinstance(caught.value, ValueError)
         assert not [
             call
             for call in client.transport.sent[before:]

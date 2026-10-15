@@ -306,7 +306,7 @@ def test_locked_outer_branch_keeps_inner_kind_editable(tmp_path: Path) -> None:
         assert not tab.read_field("extras.choice.module").locked
         with pytest.raises(ValueError, match="locked"):
             tab.use_library("extras.choice", "unoffered")
-        tab.set("extras.choice.module", {"kind": "1", "text": "changed"})
+        gui.owner.write({("extras", "choice", "module"): {"kind": "1", "text": "changed"}})
         assert tab.read_field("extras.choice").locked
         assert tab.read_field("extras.choice.module").fields == ("text",)
         assert tab.read_field("extras.choice.module.text").value == "changed"
