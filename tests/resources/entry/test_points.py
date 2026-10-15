@@ -150,7 +150,7 @@ def test_seed_accepts_omitted_components_without_rewriting_setup(
     assert stored["components"] == {}
     module = YAML(typ="safe").load((point_root / "module_cfg.yaml").read_text())
     assert module["format"] == "zcu.module-library"
-    assert module["format_version"] == "1.0"
+    assert module["format_version"] == "2.0"
     assert source.read_bytes() == before
 
 
@@ -440,7 +440,7 @@ def test_clone_copies_only_complete_point_and_module_without_reading_setup(
     root = entry_roots[0] / "entry"
     source = root / "points/source"
     (source / "module_cfg.yaml").write_text(
-        "format: zcu.module-library\nformat_version: '1.0'\ncomponents: {Q1: {}}\n"
+        "format: zcu.module-library\nformat_version: '2.0'\ncomponents: {Q1: {}}\n"
     )
     (source / "data.h5").write_bytes(b"not cloned")
     (source / "image.png").write_bytes(b"not cloned")

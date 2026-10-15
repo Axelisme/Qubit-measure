@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.cfg import CfgSchema
+    from zcu_tools.cfg_model import ModuleSpec, WaveformSpec
 
 
 class SavedPoint(BaseModel):
@@ -42,19 +42,23 @@ class LibraryChange:
 
     kind is module or waveform. action is put (create/overwrite), replace
     (overwrite an existing entry, optionally relocating it), rename (relocate
-    without lowering), or delete (remove without cascading references).
+    an entry with its sources), or delete (remove without cascading references).
     path is the destination for put and the existing source for other actions.
     new_path is required only for replace/rename; replace permits the same path.
-    schema is required only for put/replace and is lowered with the caller's
-    fixed ParameterContext. Invalid combinations raise InvalidInputError.
-    Library owners validate path families, source existence and destinations.
+    module is the persistent Spec written by a module put/replace; waveform is
+    the Spec written by a waveform put/replace. Exactly the field matching kind
+    is set for put/replace, and neither is set for rename/delete. Child library
+    keys inside the Spec stay keys. Invalid combinations raise InvalidInputError.
+    Library owners validate the Spec family, path families, source existence
+    and destinations.
     """
 
     kind: Literal["module", "waveform"]
     action: Literal["put", "replace", "rename", "delete"]
     path: str
     new_path: str | None = None
-    schema: CfgSchema | None = None
+    module: ModuleSpec | None = None
+    waveform: WaveformSpec | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in ("module", "waveform"):
@@ -63,8 +67,11 @@ class LibraryChange:
             raise InvalidInputError(f"Unknown library action: {self.action!r}")
         if (self.new_path is not None) != (self.action in ("replace", "rename")):
             raise InvalidInputError("Only replace/rename require new_path")
-        if (self.schema is not None) != (self.action in ("put", "replace")):
-            raise InvalidInputError("Only put/replace require schema")
+        writes = self.action in ("put", "replace")
+        if (self.module is not None) != (writes and self.kind == "module"):
+            raise InvalidInputError("Only module put/replace require a module Spec")
+        if (self.waveform is not None) != (writes and self.kind == "waveform"):
+            raise InvalidInputError("Only waveform put/replace require a waveform Spec")
 
 
 @dataclass(frozen=True)

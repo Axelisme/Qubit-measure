@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.services import tab_form as resource_api
+from zcu_tools.gui.app.measure.services.form_contracts import source_basis
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.form import FormEnv
@@ -32,7 +32,7 @@ def form_sources(
             parameters=parameters,
             library=None if parameters is None else parameters.library,
         ),
-        source_basis=MeasureCfgBindings.source_basis(state),
+        source_basis=source_basis(state),
     )
 
 

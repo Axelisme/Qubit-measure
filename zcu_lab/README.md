@@ -1,14 +1,14 @@
 # zcu_lab
 
-**Last updated:** 2026-10-15，make_form 與具名裝置欄位
+**Last updated:** 2026-10-15，make_form、具名裝置欄位與具名 alias preset 啟動資料整合
 
 `zcu_lab` 只放實驗定義、實驗室宣告與各 workflow 自己的小工具。`zcu_tools` 提供實驗與前端框架，不反向 import 這個套件。使用者 GUI 入口在 `scripts/`，agent MCP 組合根在 `mcp_servers/`，取得定義後顯式注入框架。
 
 `v2/` 放各實驗的 core 與前端附件，`recipes/` 放量測流程定義。`workflows/` 的 `coherence_fluxdep/`、`mist_fluxdep/`、`overnight/` 各自擁有流程、表單與科學工具，`common/` 只放真正共用的實驗步驟。`workflows/registry.py` 提供有序註冊清單。Window、App、RPC、MCP、表單協調、layout 與 input 保存都由 lib 宿主負責。實驗室宣告留在 root 的 components、definitions 與 templates 模組。
 
-`zcu_lab.ALIAS_PRESET` 是唯一的有序 GUI alias 初值表。它保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列。Measure launcher 以 `alias_preset` 注入 app、Controller 與 services。框架不選裝置，也不從 cache 綁定 flux_dev。Workflow app 直接重用同一來源，交給 shared `build_session_services(alias_rows=...)`。這份表與 `definitions.py` 相鄰，取得 preset 不需提前載入實驗 catalog。
+`alias_presets/*.yaml` 定義具名 GUI alias preset，檔名就是名稱，格式使用 `zcu.aliases`。`default.yaml` 保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列。`load_alias_presets()` 重用 resources reader，讀出名稱到有序 rows 的完整資料，不提前載入實驗 catalog。兩個 launcher 以 `alias_presets` 注入 app，格式錯誤或缺 default 直接中止啟動，改檔後需重開 GUI。Behavior 保留完整資料供 dialog 組裝；底層 session 只收 default rows。框架不選裝置，也不從 cache 綁定 flux_dev。
 
-`templates.TEMPLATES` 是「新建 module／waveform」的持久範本來源。組合根以 `Registry(templates=TEMPLATES)` 注入一次；`definitions.register_all` 從該 registry 讀範本，以 startup 的 `template_catalog` receiver 填入 library 選單，並可用 `components` 傳入共用 ComponentRegistry。Reload 省略這兩個 receiver，保留既有範本與元件註冊。Import 不執行註冊，重複 bootstrap 按 registry 規則報錯。
+`templates.TEMPLATES` 是「新建 module／waveform」的持久範本來源。組合根以 `Registry(templates=TEMPLATES)` 注入一次；Library 新建直接讀 registry 的範本，不另建 catalog。`definitions.register_all` 註冊 adapters，並可用 `components` 傳入共用 ComponentRegistry。Reload 省略此 receiver，保留既有範本與元件註冊。Import 不執行註冊，重複 bootstrap 按 registry 規則報錯。
 
 `components.py` 擁有具體元件 model、wiring、module 槽與內建角色。Model 自行宣告 ext 與 extra 策略，普通字串引用在 resolve 時解析。GUI 與 MCP 組合根明確 bootstrap；notebook caller 可呼叫 `components.register_all(component_registry)`。框架只提供容器、kind 查表、角色解析與來源記錄。
 

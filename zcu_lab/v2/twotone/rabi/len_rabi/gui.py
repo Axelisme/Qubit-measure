@@ -12,7 +12,6 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
-    ModuleWriteback,
     ParameterWriteback,
     ParamMeta,
     RunRequest,
@@ -22,14 +21,11 @@ from zcu_tools.gui.app.measure.adapter import (
     require_soc_handles,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-)
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
+from zcu_lab.v2._support.measure.writeback_helpers import module_writeback
 from zcu_lab.v2.twotone.rabi.len_rabi.core import (
     LenRabiAnalyzeOptions,
     LenRabiCfg,
@@ -163,13 +159,12 @@ class LenRabiAdapter(
             ),
         ):
             key = parameters.library_key(target)
-            spec, value = module_cfg_to_value(pulse)
-            value.with_field("waveform.length", length)
             items.append(
-                ModuleWriteback(
-                    target_name=target,
+                module_writeback(
+                    pulse,
+                    target=target,
                     description=description,
-                    edit_schema=CfgSchema(spec=spec, value=value),
+                    field_updates=(("waveform.length", length),),
                 )
             )
             items.append(

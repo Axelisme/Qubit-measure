@@ -33,12 +33,10 @@ class _PulseFields(_ModuleFields):
     """Pulse scalar knobs, shared by persistent and materialized schemas.
 
     type is pulse. ch is the explicit generator channel; nqz is Nyquist zone 1
-    or 2. freq/mixer_freq/mux_freqs are MHz, phase/mux_phases are degrees,
-    gain/mux_gains are normalized gains, pre_delay/post_delay are µs.
-    freq, phase, gain and delays accept QICK sweeps. Optional mixer_freq and mux
-    arrays configure mixing/multiplexing; None leaves the option unspecified.
-    mask selects mux tones by index. outsel is the optional hardware output
-    selector. ro_ch is the optional readout channel for generator configuration.
+    or 2. freq and mixer_freq are MHz, phase is degrees, gain is normalized,
+    and pre_delay/post_delay are µs. freq, phase, gain and delays accept QICK
+    sweeps. Optional mixer_freq configures mixing; None leaves it unspecified.
+    ro_ch is the optional readout channel for generator configuration.
     """
 
     type: Literal["pulse"] = "pulse"
@@ -62,11 +60,6 @@ class _PulseFields(_ModuleFields):
         float | None,
         FieldMeta(label="Mixer freq", unit="MHz", decimals=3, group="Advanced"),
     ] = None
-    mux_freqs: list[float] | None = None
-    mux_gains: list[float] | None = None
-    mux_phases: list[float] | None = None
-    mask: list[int] | None = None
-    outsel: int | None = None
     ro_ch: int | None = None
 
 

@@ -12,10 +12,6 @@ from zcu_tools.gui.app.measure.remote.handlers.connection_device import (
     h_soc_connect,
 )
 from zcu_tools.gui.app.measure.remote.handlers.context import h_value_read
-from zcu_tools.gui.app.measure.remote.handlers.editor import (
-    h_editor_commit,
-    h_editor_set_field,
-)
 from zcu_tools.gui.app.measure.remote.handlers.run_save import (
     h_tab_load_data,
     h_tab_run_start,
@@ -108,26 +104,6 @@ def test_provider_error_escapes_value_handler_unchanged() -> None:
         ),
         error,
     )
-
-
-@pytest.mark.parametrize("handler_name", ["set", "commit"])
-def test_editor_runtime_errors_escape_handlers_unchanged(handler_name: str) -> None:
-    error = RuntimeError(f"editor {handler_name} programmer bug")
-    ctrl = MagicMock()
-    if handler_name == "set":
-        ctrl.owner_of_editor.return_value = None
-        ctrl.cfg_editor_set_field.side_effect = error
-        call = lambda: h_editor_set_field(
-            cast(Any, SimpleNamespace(ctrl=ctrl)),
-            {"editor_id": "e1", "path": "pulse.freq", "value": 1.0},
-        )
-    else:
-        ctrl.commit_cfg_editor.side_effect = error
-        call = lambda: h_editor_commit(
-            cast(Any, SimpleNamespace(ctrl=ctrl)),
-            {"editor_id": "e1", "name": "module"},
-        )
-    _assert_escapes_unchanged(call, error)
 
 
 def test_load_and_save_runtime_errors_escape_handlers_unchanged() -> None:

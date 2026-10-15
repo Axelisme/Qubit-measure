@@ -63,7 +63,6 @@ from zcu_tools.resources.entry.writeback import (
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import ModuleSpec, WaveformAssetInfo, WaveformSpec
     from zcu_tools.format_version import YamlMap, YamlValue
-    from zcu_tools.gui.cfg import CfgSchema
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.session.context_types import (
         ContextTarget,
@@ -681,23 +680,18 @@ class ContextService:
         )
 
     def apply_library_change(
-        self,
-        parameters: ParameterContext,
-        change: LibraryChange,
-        *,
-        lower_module: Callable[[CfgSchema, ParameterContext], ModuleSpec],
-        lower_waveform: Callable[[CfgSchema, ParameterContext], WaveformSpec],
+        self, parameters: ParameterContext, change: LibraryChange
     ) -> None:
-        """Apply one structure command to the captured target, lowering before writes.
+        """Apply one structure command to the captured target in one transaction.
 
-        parameters supplies fixed expression/reference data and the destination.
-        change uses concrete library roots; it never resolves global aliases.
-        App callbacks lower only put/replace schemas, without writing resources.
-        Rename moves Spec and sources; delete does not cascade references.
-        Replace checks source/destination and commits relocation plus value in
-        one library transaction.
+        parameters supplies the destination target. change uses concrete
+        library roots; it never resolves global aliases. Put/replace write the
+        change's persistent Spec as given, with manual sources; child library
+        keys stay keys. Rename moves Spec and sources; delete does not cascade
+        references. Replace checks source/destination and commits relocation
+        plus value in one library transaction.
         Same-entry nonselected SavedPoint writes do not select or publish.
-        Cross-entry/missing selection/lowering/schema/source/conflict/I/O failures
+        Cross-entry/missing selection/Spec family/source/conflict/I/O failures
         propagate, leaving this command uncommitted and publishing no events.
         """
         self._owner.assert_owner()
@@ -705,13 +699,7 @@ class ContextService:
         selected = self._published_parameters()
         handle = self._write_library(entry, parameters.target, selected)
         with handle.edit() as draft:
-            candidate = self._library_change_candidate(
-                draft.snapshot(),
-                parameters,
-                change,
-                lower_module=lower_module,
-                lower_waveform=lower_waveform,
-            )
+            candidate = self._library_change_candidate(draft.snapshot(), change)
             draft.replace_contents(candidate)
         if parameters.target != selected.target:
             return
@@ -728,13 +716,7 @@ class ContextService:
         )
 
     def _library_change_candidate(
-        self,
-        library: LibrarySnapshot,
-        parameters: ParameterContext,
-        change: LibraryChange,
-        *,
-        lower_module: Callable[[CfgSchema, ParameterContext], ModuleSpec],
-        lower_waveform: Callable[[CfgSchema, ParameterContext], WaveformSpec],
+        self, library: LibrarySnapshot, change: LibraryChange
     ) -> LibrarySnapshot:
         """Prepare one isolated structure change using the resource owner's operations."""
         destination = change.new_path if change.new_path is not None else change.path
@@ -742,19 +724,15 @@ class ContextService:
             return library.deleted(change.path, kind=change.kind)
         if change.action == "rename":
             return library.renamed(change.path, destination, kind=change.kind)
-        if change.schema is None:
-            raise InvalidInputError("Library put/replace requires a schema")
         if change.action == "replace":
             library.entry_value(change.path, kind=change.kind)
             if destination != change.path:
                 library = library.renamed(change.path, destination, kind=change.kind)
-        if change.kind == "module":
-            return library.replaced_module(
-                destination, lower_module(change.schema, parameters)
-            )
-        return library.replaced_waveform(
-            destination, lower_waveform(change.schema, parameters)
-        )
+        if change.module is not None:
+            return library.replaced_module(destination, change.module)
+        if change.waveform is not None:
+            return library.replaced_waveform(destination, change.waveform)
+        raise InvalidInputError("Library put/replace requires a Spec")
 
     def entry_ledger(self, entry_id: str) -> RecordsLedger:
         """Return only the currently opened entry's ledger; never append an event.

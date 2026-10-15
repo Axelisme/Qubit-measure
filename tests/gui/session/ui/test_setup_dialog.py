@@ -134,21 +134,13 @@ def test_setup_dialog_connect_failure_signal_updates_status(qapp):
     assert connect.isEnabled()
 
 
-class SetupController(Controller):
-    """Expose owned background teardown for this real-session widget fixture."""
-
-    def quiesce(self) -> None:
-        """Settle workers and queued terminal callbacks before Qt teardown."""
-        self._background_svc.quiesce()
-
-
 @pytest.fixture
 def entry_dialog(
     qapp: QApplication, tmp_path: Path
 ) -> Generator[tuple[SetupDialog, Controller, State]]:
     """Own a real offline session; opening Setup never connects hardware."""
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
-    controller = SetupController(
+    controller = Controller(
         state, Registry(), None, BaseEventBus(), project_root=str(tmp_path)
     )
     controller.setup_control.new_entry(EntryRequest("remembered"))
@@ -159,7 +151,7 @@ def entry_dialog(
         yield dialog, controller, state
     finally:
         dialog.reject()
-        controller.quiesce()
+        controller.close()
         dialog.deleteLater()
         qapp.processEvents()
 
@@ -467,7 +459,7 @@ def test_working_point_create_without_entry_shows_owner_failure(
     tmp_path: Path,
 ) -> None:
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
-    controller = SetupController(
+    controller = Controller(
         state, Registry(), None, BaseEventBus(), project_root=str(tmp_path)
     )
     dialog = SetupDialog(controller.setup_control)
@@ -479,7 +471,7 @@ def test_working_point_create_without_entry_shows_owner_failure(
         assert "Failed" in setup_status(dialog)
     finally:
         dialog.reject()
-        controller.quiesce()
+        controller.close()
         dialog.deleteLater()
         qapp.processEvents()
 
@@ -691,7 +683,7 @@ def test_missing_result_root_shows_hint_instead_of_error(
     qapp: QApplication, tmp_path: Path
 ) -> None:
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
-    controller = SetupController(
+    controller = Controller(
         state, Registry(), None, BaseEventBus(), project_root=str(tmp_path)
     )
     dialog = SetupDialog(controller.setup_control)
@@ -712,6 +704,6 @@ def test_missing_result_root_shows_hint_instead_of_error(
         assert "red" in status.styleSheet()
     finally:
         dialog.reject()
-        controller.quiesce()
+        controller.close()
         dialog.deleteLater()
         qapp.processEvents()

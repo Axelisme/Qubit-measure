@@ -418,7 +418,7 @@ def test_run_finished_event_preserves_each_selected_subtab(qapp) -> None:
     ctrl.active_operation_count.return_value = 0
     ctrl.has_tab.return_value = True
     ctrl.get_tab_snapshot.return_value = _snapshot(has_run_result=True)
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     tab = MagicMock()
     tab._left_tabs = QTabWidget()
     for label in ("Run", "Analysis", "Post", "Data", "Guide"):
@@ -468,7 +468,7 @@ def test_main_window_run_marker_tracks_state_and_clears(qapp) -> None:
         def update_interaction_state(self, _snapshot: object) -> None:
             pass
 
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     tab_a = _TabStub()
     tab_b = _TabStub()
     window._tab_widgets["tab-a"] = tab_a  # type: ignore[assignment]

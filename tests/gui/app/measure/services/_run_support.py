@@ -23,11 +23,6 @@ from zcu_tools.gui.app.measure.services.operation_gate import (
 )
 from zcu_tools.gui.app.measure.services.run import RunService
 from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-)
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import BasePayload
 from zcu_tools.gui.form_adapter import Form
@@ -42,10 +37,6 @@ from zcu_tools.program.v2 import Module, ProgramV2Cfg
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.app.measure._form_fakes import make_form
-
-
-def empty_schema() -> CfgSchema:
-    return CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
 
 
 def make_state(
