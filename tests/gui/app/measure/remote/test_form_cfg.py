@@ -3,13 +3,14 @@
 import json
 import typing
 from collections.abc import Callable, Iterator
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from pydantic import BaseModel, Field
 from zcu_tools.cfg_model import PulseCfg, Range
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.cfg.resource import CfgPreconditionError, CfgPreconditionReason
+from zcu_tools.gui.form import FormModel
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request
@@ -140,6 +141,48 @@ def test_describe_cfg_rejects_unknown_or_malformed_paths(form_rpc, path) -> None
     reply = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": path})
     assert not reply["ok"]
     assert reply["error"]["code"] == "invalid_params", reply
+
+
+class FailingOptionsExtras(FormModel):
+    amount: float = 1.0
+    broken: ClassVar[bool] = False
+
+    @classmethod
+    def options(cls, env):
+        if cls.broken:
+            raise ValueError("Synthetic declaration failed")
+        return {}
+
+
+class FailingOptionsAdapter(SampleAdapter):
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[SampleCfg]:
+        del ctx
+        return Form(SampleCfg, {"sweep": Range.between(1.0, 2.0, expts=3)}, extras=FailingOptionsExtras, lower=retain_cfg)
+
+
+def test_describe_cfg_does_not_classify_author_valueerror_as_bad_path(form_rpc) -> None:
+    fixture, _, rpc = form_rpc
+    fixture.registry.register("failing-options", FailingOptionsAdapter)
+    tab = fixture.ctrl.new_tab("failing-options")
+    try:
+        FailingOptionsExtras.broken = True
+        reply = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["extras"]})
+        assert not reply["ok"]
+        assert reply["error"]["code"] == "controller_error", reply
+    finally:
+        FailingOptionsExtras.broken = False
+        fixture.ctrl.tab_control.close_tab(tab)
+
+
+def test_describe_cfg_path_errors_keep_request_path(form_rpc) -> None:
+    _, tab, rpc = form_rpc
+    path = ["gain", "child"]
+    reply = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": path})
+    assert not reply["ok"]
+    assert reply["error"]["code"] == "invalid_params"
+    assert reply["error"]["reason"] == "form_path"
+    assert reply["error"]["data"] == {"form_path": path}
 
 
 def test_describe_cfg_root_is_single_layer_and_readable_through_mcp(form_rpc, tmp_path) -> None:
