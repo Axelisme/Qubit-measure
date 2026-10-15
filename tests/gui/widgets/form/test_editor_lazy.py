@@ -1,13 +1,13 @@
 """First expansion builds rows; shape changes leave other rows alone."""
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Annotated, Literal
 
 import pytest
-from pydantic import Field
+from pydantic import Field, JsonValue
 from qtpy.QtWidgets import QApplication, QCheckBox, QComboBox, QLabel, QLineEdit
 from zcu_tools.gui.form import (
-    Display, FormDescription, FormEnv, FormInput, FormModel, FormState, FormWritePath,
+    Display, FormDescription, FormEnv, FormInput, FormModel, FormPath, FormState, FormWritePath, Option,
 )
 from zcu_tools.gui.widgets.form import FormEditor
 
@@ -50,6 +50,31 @@ def view(qapp: QApplication) -> Iterator[tuple[FormEditor[LazyForm], FormState[L
     editor.detach()
     editor.deleteLater()
     qapp.processEvents()
+
+
+def test_expanding_an_empty_selected_layer_removes_the_fold_title(qapp: QApplication) -> None:
+    class FixedBranch(FormModel):
+        branch: Annotated[First, Display(collapsed=True)] = Field(default_factory=First)
+
+        @classmethod
+        def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+            return {("branch",): (Option("Fixed", {"kind": "first", "one": 1.0}, fields=First),)}
+
+    env = FormEnv()
+    state = FormState(FixedBranch.default_input(env))
+    editor = FormEditor(state, env)
+    try:
+        before: dict[str, JsonValue] = state.input.data
+        fold = editor.findChild(QLabel, "form.fold.branch")
+        assert fold is not None
+        mouse_click(fold, fold.rect().center())
+        assert editor.findChild(QLabel, "form.fold.branch") is None
+        assert state.input.data == before
+        assert editor.errors() is None
+    finally:
+        editor.detach()
+        editor.deleteLater()
+        qapp.processEvents()
 
 
 class DescribedState(FormState[LazyForm]):
