@@ -433,22 +433,27 @@ def test_operation_progress_elapsed_uses_operation_clock_not_bar_age(
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
 
     tab_id = fx.ctrl.new_tab("fake")
-    operation_id = fx.ctrl.start_run(tab_id)
-    bar = ProgressBarModel(
-        label="late progress", total=2, start_time=time.monotonic() - 3600
-    )
-    monkeypatch.setattr(
-        fx.service.operation_control,
-        "get_operation_progress",
-        MagicMock(return_value=((1, bar),)),
-    )
     sock = open_client(fx.service.port)
     try:
-        resp = call(sock, "operation.progress", {"operation_id": operation_id})
-        assert resp["ok"] is True
-        assert resp["result"]["active"] is True
-        assert 0 <= resp["result"]["elapsed_s"] < 3600
-        assert bar.elapsed() >= 3600
+        # Control the external clock, not the operation owner or its elapsed helper.
+        with monkeypatch.context() as clock:
+            now = 1000.0
+            clock.setattr(time, "monotonic", lambda: now)
+            operation_id = fx.ctrl.start_run(tab_id)
+            bar = ProgressBarModel(
+                label="late progress", total=2, start_time=now - 3600
+            )
+            monkeypatch.setattr(
+                fx.service.operation_control,
+                "get_operation_progress",
+                MagicMock(return_value=((1, bar),)),
+            )
+            now += 7
+            resp = call(sock, "operation.progress", {"operation_id": operation_id})
+            assert resp["ok"] is True
+            assert resp["result"]["active"] is True
+            assert resp["result"]["elapsed_s"] == 7.0
+            assert bar.elapsed() == 3607.0
         # Do not leave the fake run's worker/diagnostic queued for the next test.
         settled = await_terminal(sock, operation_id)
         assert settled["ok"] and settled["result"]["reason"] == "completed"
