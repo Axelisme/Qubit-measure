@@ -93,9 +93,11 @@ class FormFieldDescription:
     list, or None for a non-selector; () preserves an explicit empty override.
     selected is the first option index matching raw input, or None for missing
     input/no match. No default option is guessed. selection_fixed means the
-    annotation permits one selector branch at this level, without freezing
-    nested choices or fields; it is False without a selector and does not use
-    dynamic menu size. fixed means the declaration or enclosing selection fixes
+    annotation permits one non-null selector branch at this level, without
+    freezing nested choices or fields. Null only enables/disables the field;
+    it does not count as a branch, even while the field is disabled.
+    selection_fixed is False without a selector and does not use dynamic menu
+    size. fixed means the declaration or enclosing selection fixes
     this leaf or the complete option value; fixed_value is that detached JSON
     value (meaningful only when fixed, otherwise None). An outer model branch
     can be selection_fixed while inner choices keep fixed False. Both flags
