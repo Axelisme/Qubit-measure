@@ -576,6 +576,43 @@ def test_reader_preserves_raw_event_and_unknown_fields_without_rewrite(
     assert record_path.read_bytes() == record_before
 
 
+@pytest.mark.parametrize("version", ["1.0", "1.2"])
+def test_legacy_acquired_projects_evidence_and_keeps_raw_cfg(
+    entry_records: tuple[ResultEntry, Path], version: str
+) -> None:
+    entry, records = entry_records
+    event_id = str(uuid4())
+    data = {
+        "format": "zcu.ledger",
+        "format_version": version,
+        "id": event_id,
+        "kind": "acquired",
+        "at": _AT,
+        "entry_id": entry.entry_id,
+        "origin": "notebook",
+        "payload": {
+            "run_id": "historical-run",
+            "tab": "old-experiment",
+            "experiment": "test/spectroscopy",
+            "point": "p",
+            "roles": {"qubit": "Q1"},
+            "cfg_summary": ["retired", {"schema": "opaque"}],
+        },
+    }
+    raw = json.dumps(data)
+    path = records / "ledger.jsonl"
+    path.write_text(raw + "\n", encoding="utf-8")
+    before = path.read_bytes()
+    found = entry.ledger.get(event_id)
+    assert isinstance(found.event.payload, AcquiredPayload)
+    assert found.event.payload.run_id == "historical-run"
+    assert found.event.payload.roles == {"qubit": "Q1"}
+    assert found.event.payload.point == "p"
+    assert entry.ledger.events() == (found.event,)
+    assert found.event_json == raw
+    assert path.read_bytes() == before
+
+
 @pytest.mark.parametrize("version", ["1.0", "1.1"])
 def test_payload_kind_controls_unknown_field_projection(
     entry_records: tuple[ResultEntry, Path], version: str
