@@ -21,6 +21,7 @@ from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot
 
 if TYPE_CHECKING:
+    from .description import FormDescription
     from .options import Option
 
 _logger = getLogger(__name__)
@@ -430,11 +431,30 @@ class FormState[F: FormModel]:
         check_sources(self._model, candidate, env)
         self._install(candidate)
 
+    def describe(self, path: FormWritePath, env: FormEnv) -> FormDescription:
+        """Describe one canonical model-field path and its next layer.
+
+        path is a tuple of field names, () for root. env is the host's fixed
+        capture for choices/options hooks. Return detached named metadata, not
+        JSON Schema or evaluated values. Children have full paths and no
+        descendants; a selected option's lone ordinary model wrapper flattens
+        one display layer without introducing a path alias. Ordinary missing
+        models retain declared fields. Disabled nullable models and unmatched
+        options expose metadata only, never guessed defaults. Unknown paths,
+        inactive descendants and traversal into whole leaves raise ValueError
+        naming the path; unsupported declarations also raise ValueError.
+        Does not validate, evaluate expressions, call defaults, read sources
+        outside declaration hooks, mutate input/base or notify subscribers.
+        """
+        from ._describe import describe
+
+        return describe(self._model, self._data, path, env)
+
     def run_command(self, path: FormWritePath, name: str, env: FormEnv) -> None:
         """Execute a named action on the first option matching current raw input.
 
         path addresses the option field; name is a command identifier from
-        its effective schema list. Resolve declarations with the same fixed
+        its effective description options. Resolve declarations with the same fixed
         env used by the host for writes and sources. Unknown paths, missing
         current input, no matching option or unavailable commands raise
         ValueError, never silently do nothing. The callable returns partial
@@ -443,15 +463,14 @@ class FormState[F: FormModel]:
         validation failures remain drafts for result/preview. No refresh,
         library semantics, I/O policy or separate state is introduced.
         """
-        from ._schema import effective_options
+        from ._selection import resolve
 
-        options = effective_options(self._model, env, self._data).get(path, ())
-        current: JsonValue = self._data
-        for part in path:
-            if not isinstance(current, dict) or part not in current:
-                raise ValueError(f"No current option at {path!r}")
-            current = current[part]
-        option = next((item for item in options if item.matches(current)), None)
+        target = resolve(self._model, self._data, path, env)
+        option = (
+            target.options[target.selected]
+            if target.options is not None and target.selected is not None
+            else None
+        )
         command = (
             next((item for item in option.commands if item.name == name), None)
             if option is not None

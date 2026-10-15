@@ -3,7 +3,7 @@
 from collections.abc import Mapping
 
 import pytest
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel
 from zcu_tools.gui.form import (
     FormEnv,
     FormInput,
