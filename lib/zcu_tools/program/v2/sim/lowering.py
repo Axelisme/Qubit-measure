@@ -8,7 +8,7 @@ sweep point it walks the module list in execution order and emits:
     evolution (reset pulses, drive pulses, idle / free-evolution delays) that
     happen *before* readout, and
   - a :class:`ReadoutPlan` describing the resolved readout settings at this
-    point: probe frequency, ADC integration window, drive gain, and optional
+    point: probe frequency, ADC integration window, drive gain, and
     generator pulse-envelope metadata.
 
 Responsibility boundary (kept deliberately narrow):
@@ -29,7 +29,7 @@ frequency, so that ``omega`` / ``delta`` / ``t`` / ``t1`` / ``t2`` handed to
 
   - cfg pulse ``length`` / ``pre_delay`` / ``post_delay`` / delay  -> µs (QICK
     native unit), used verbatim as the segment duration ``t``.
-  - cfg ``freq`` / ``ro_freq`` -> MHz (QICK native unit).  Detuning is
+  - cfg ``freq`` -> MHz (QICK native unit).  Detuning is
     ``delta = 2*pi*(f_qubit_MHz - f_drive_MHz)`` in rad/µs, following the
     :mod:`bloch` convention ``delta = omega_qubit - omega_drive`` (qubit minus
     drive).  ``f_qubit`` arrives in GHz, so it is scaled by ``1e3`` to MHz.
@@ -82,8 +82,8 @@ from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg, TableLengthPulse
 from zcu_tools.program.v2.modules.readout import (
     AbsReadout,
-    DirectReadout,
     PulseReadout,
+    PulseReadoutCfg,
     TablePulseReadout,
 )
 from zcu_tools.program.v2.modules.reset import (
@@ -130,27 +130,20 @@ class ReadoutPlan:
     Fields
     ------
     f_ro_ghz : float
-        Readout probe frequency in GHz at *this* sweep point (the cfg
-        ``ro_freq`` in MHz, resolved per point and scaled down).  A swept
-        ``ro_freq`` is resolved here to its value at the current sweep index, so
-        the engine reads it back point-by-point without needing to know whether
-        it is swept or fixed — every experiment goes through one unified path.
+        Shared generator/ADC probe frequency in GHz at this sweep point,
+        resolved from cfg.freq or the consuming module's hardware words.
     ro_length_us : float
-        ADC integration window in µs from the semantic readout cfg.  The engine
-        still uses the compiled sample count as the raw-buffer normalization
-        source of truth, but the semantic plan carries this value explicitly.
+        ADC integration window in µs. Compiled sample count remains the raw-buffer
+        normalization source of truth.
     trig_offset_us : float
-        Resolved ADC trigger offset in µs.  Accumulated ``PulseReadout`` uses it
-        to align the integration samples against the generator pulse envelope.
+        Resolved ADC trigger offset in µs, aligning integration to the envelope.
     readout_gain : float
-        Resolved generator gain for a ``PulseReadout``.  ``DirectReadout`` has no
-        drive-gain cfg, so it uses unity.
-    pulse_cfg : PulseCfg | None
-        The generator pulse cfg whose envelope defines the effective signal area,
-        or ``None`` for ``DirectReadout``.
-    pulse_length_us : float | None
-        Resolved generator pulse/envelope length in µs, or ``None`` for
-        ``DirectReadout``.
+        Resolved normalized generator gain.
+    generator_cfg : PulseCfg
+        Generator-only view of the flat readout for envelope sampling. It is not
+        a persistent readout cfg or a separately configurable generator.
+    pulse_length_us : float
+        Resolved generator envelope length in µs.
     pulse_pre_delay_us : float
         Resolved generator pulse pre-delay in µs.  ``PulseReadout`` triggers its
         ADC window and generator pulse from the same module time, but the
@@ -159,11 +152,11 @@ class ReadoutPlan:
 
     f_ro_ghz: float
     ro_length_us: float
-    trig_offset_us: float = 0.0
-    readout_gain: float = 1.0
-    pulse_cfg: PulseCfg | None = None
-    pulse_length_us: float | None = None
-    pulse_pre_delay_us: float = 0.0
+    trig_offset_us: float
+    readout_gain: float
+    generator_cfg: PulseCfg
+    pulse_length_us: float
+    pulse_pre_delay_us: float
 
 
 @dataclass(frozen=True)
@@ -637,6 +630,21 @@ def _dmem_delay_segment(
     return _idle_segment(sim, equilibrium_pop, t_us, idle_detuning)
 
 
+def _readout_generator_cfg(cfg: PulseReadoutCfg) -> PulseCfg:
+    """Project flat generator fields for the existing PulseCfg envelope helpers."""
+    return PulseCfg(
+        ch=cfg.gen_ch,
+        nqz=cfg.nqz,
+        freq=cfg.freq,
+        gain=cfg.gain,
+        phase=cfg.phase,
+        waveform=cfg.waveform,
+        mixer_freq=cfg.mixer_freq,
+        pre_delay=cfg.pre_delay,
+        post_delay=cfg.post_delay,
+    )
+
+
 def _readout_plan(
     module: AbsReadout,
     loop_counts: dict[str, int],
@@ -646,25 +654,12 @@ def _readout_plan(
 ) -> ReadoutPlan:
     """Build the ReadoutPlan from a readout module at one sweep point."""
 
-    if isinstance(module, DirectReadout):
-        ro_freq = module.cfg.ro_freq
+    if isinstance(module, (PulseReadout, TablePulseReadout)):
+        generator_cfg = _readout_generator_cfg(module.cfg)
+        ro_freq = module.cfg.freq
         ro_length = module.cfg.ro_length
         trig_offset = module.cfg.trig_offset
-        f_ro_mhz = _resolve_scalar(ro_freq, loop_counts, point)
-        ro_length_us = _resolve_time(
-            ro_length, loop_counts, point, soccfg, ro_ch=module.cfg.ro_ch
-        )
-        trig_offset_us = _resolve_time(trig_offset, loop_counts, point, soccfg)
-        return ReadoutPlan(
-            f_ro_ghz=f_ro_mhz / _GHZ_TO_MHZ,
-            ro_length_us=ro_length_us,
-            trig_offset_us=trig_offset_us,
-        )
-    if isinstance(module, (PulseReadout, TablePulseReadout)):
-        ro_freq = module.cfg.ro_cfg.ro_freq
-        ro_length = module.cfg.ro_cfg.ro_length
-        trig_offset = module.cfg.ro_cfg.trig_offset
-        readout_gain = _resolve_scalar(module.cfg.pulse_cfg.gain, loop_counts, point)
+        readout_gain = _resolve_scalar(module.cfg.gain, loop_counts, point)
         f_ro_mhz = _resolve_scalar(ro_freq, loop_counts, point)
         if isinstance(module, TablePulseReadout):
             if module.idx_reg not in point:
@@ -685,10 +680,10 @@ def _readout_plan(
                 soccfg,
                 module.freq_words[idx],
                 module.ro_freq_words[idx],
-                gen_ch=module.cfg.pulse_cfg.ch,
-                ro_ch=module.cfg.ro_cfg.ro_ch,
-                mixer_freq=module.cfg.pulse_cfg.mixer_freq,
-                nqz=module.cfg.pulse_cfg.nqz,
+                gen_ch=module.cfg.gen_ch,
+                ro_ch=module.cfg.ro_ch,
+                mixer_freq=module.cfg.mixer_freq,
+                nqz=module.cfg.nqz,
             )
         elif module.gain_val is not None:
             raise UnsupportedModuleError(
@@ -706,8 +701,8 @@ def _readout_plan(
                 dmem_tables,
                 point,
                 soccfg,
-                pulse_cfg=module.cfg.pulse_cfg,
-                ro_ch=module.cfg.ro_cfg.ro_ch,
+                pulse_cfg=generator_cfg,
+                ro_ch=module.cfg.ro_ch,
             )
         elif isinstance(module, PulseReadout) and module.freq_val is not None:
             f_ro_mhz = _load_word_gen_freq_mhz(
@@ -715,8 +710,8 @@ def _readout_plan(
                 dmem_tables,
                 point,
                 soccfg,
-                pulse_cfg=module.cfg.pulse_cfg,
-                ro_ch=module.cfg.ro_cfg.ro_ch,
+                pulse_cfg=generator_cfg,
+                ro_ch=module.cfg.ro_ch,
             )
         elif isinstance(module, PulseReadout) and module.ro_freq_val is not None:
             f_ro_mhz = _load_word_ro_freq_mhz(
@@ -724,22 +719,22 @@ def _readout_plan(
                 dmem_tables,
                 point,
                 soccfg,
-                pulse_cfg=module.cfg.pulse_cfg,
-                ro_ch=module.cfg.ro_cfg.ro_ch,
+                pulse_cfg=generator_cfg,
+                ro_ch=module.cfg.ro_ch,
                 reference_freq_mhz=f_ro_mhz,
             )
         pulse_length_us = _resolve_time(
-            module.cfg.pulse_cfg.waveform.length,
+            module.cfg.waveform.length,
             loop_counts,
             point,
             soccfg,
-            gen_ch=module.cfg.pulse_cfg.ch,
+            gen_ch=module.cfg.gen_ch,
         )
         pulse_pre_delay_us = _resolve_time(
-            module.cfg.pulse_cfg.pre_delay, loop_counts, point, soccfg
+            module.cfg.pre_delay, loop_counts, point, soccfg
         )
         ro_length_us = _resolve_time(
-            ro_length, loop_counts, point, soccfg, ro_ch=module.cfg.ro_cfg.ro_ch
+            ro_length, loop_counts, point, soccfg, ro_ch=module.cfg.ro_ch
         )
         trig_offset_us = _resolve_time(trig_offset, loop_counts, point, soccfg)
         return ReadoutPlan(
@@ -747,7 +742,7 @@ def _readout_plan(
             ro_length_us=ro_length_us,
             trig_offset_us=trig_offset_us,
             readout_gain=readout_gain,
-            pulse_cfg=module.cfg.pulse_cfg,
+            generator_cfg=generator_cfg,
             pulse_length_us=pulse_length_us,
             pulse_pre_delay_us=pulse_pre_delay_us,
         )

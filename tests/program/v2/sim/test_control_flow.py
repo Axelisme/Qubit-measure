@@ -16,7 +16,7 @@ from zcu_tools.program.v2.modules.control import Branch, Repeat
 from zcu_tools.program.v2.modules.delay import Delay
 from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
-from zcu_tools.program.v2.modules.readout import DirectReadoutCfg
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.sim import SimParams, bloch
 from zcu_tools.program.v2.sim.lowering import (
@@ -51,7 +51,15 @@ def _cycles2us(cycles: int) -> float:
 
 
 def _readout() -> Module:
-    return DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=7200.0).build("ro")
+    return PulseReadoutCfg(
+        ro_ch=0,
+        ro_length=1.0,
+        freq=7200.0,
+        gen_ch=1,
+        nqz=1,
+        gain=1.0,
+        waveform=ConstWaveformCfg(length=1.0),
+    ).build("ro")
 
 
 def _pulse_cfg(
