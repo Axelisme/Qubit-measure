@@ -30,7 +30,7 @@ from zcu_tools.gui.session.ui.component_editing import (
     edit_completions,
     field_tooltip,
     parse_field_input,
-    set_red,
+    set_error_foreground,
     show_error,
 )
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
@@ -155,7 +155,7 @@ class AddComponentDialog(QDialog):
         self._error.setObjectName("add_error")
         self._error.setWordWrap(True)
         make_label_selectable(self._error)
-        set_red(self._error, red=True)
+        set_error_foreground(self._error, error=True)
         self._error.setVisible(False)
         layout.addWidget(self._error)
 
@@ -277,11 +277,11 @@ class AddComponentDialog(QDialog):
         )
 
     def _update_required(self) -> None:
-        set_red(self._name_label, red=not self._name.text())
+        set_error_foreground(self._name_label, error=not self._name.text())
         for row in self._rows:
             required = self._required_now(row.spec)
             row.label.setText(f"{row.spec.segments[-1]}{' *' if required else ''}")
-            set_red(row.label, red=required and not row.text())
+            set_error_foreground(row.label, error=required and not row.text())
             if isinstance(row.editor, QLineEdit):
                 row.editor.setPlaceholderText("Required" if required else "(unset)")
 

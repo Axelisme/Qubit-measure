@@ -504,3 +504,19 @@ class TestResetCfgAdapter:
             {"type": "reset/pulse", "pulse_cfg": _reset_pulse_dict()}
         )
         assert isinstance(cfg, PulseResetCfg)
+
+
+@pytest.mark.parametrize("count", [1, 8])
+def test_mux_numeric_cfg_preserves_order_and_list_serialization(count: int):
+    from zcu_tools import cfg_model
+
+    from ._support import mux_raw
+
+    raw = mux_raw(count)
+    cfg = cfg_model.ModuleCfgFactory.from_raw(raw)
+    assert isinstance(cfg, cfg_model.MuxReadoutCfg)
+    assert cfg.to_dict()["tones"] == raw["tones"]
+    assert isinstance(cfg.model_dump()["tones"], list)
+    assert (cfg.pre_delay, cfg.post_delay, cfg.trig_offset) == (0.0, 0.0, 0.0)
+    cfg.tones[0].freq = -100.0
+    assert cfg_model.ModuleCfgFactory.from_raw(raw).to_dict()["tones"] == raw["tones"]

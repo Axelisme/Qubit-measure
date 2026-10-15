@@ -71,7 +71,7 @@ from .ui.interactive_frontend import InteractiveFrontend, InteractiveFrontendEnv
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
-    from zcu_tools.experiment.run_saving import SaveReport
+    from zcu_tools.experiment.artifacts import SaveReport
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
     from zcu_tools.gui.session.alias_presets import AliasPresets
     from zcu_tools.gui.session.arb_waveform import ArbWaveformPort
@@ -89,13 +89,13 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.setup_control import SetupControlPort
     from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
 
+    from .artifacts import SaveControlPort
     from .services import AppServices
     from .services.operation_control import OperationControlPort
     from .services.run_analyze_control import RunAnalyzeControlPort
-    from .services.save_control import SaveControlPort
     from .services.tab_control import TabControlPort
     from .services.tab_form import TabFormResources
-    from .services.writeback_control import WritebackControlPort, WritebackPane
+    from .writeback import WritebackControlPort, WritebackPane
 
 
 logger = logging.getLogger(__name__)

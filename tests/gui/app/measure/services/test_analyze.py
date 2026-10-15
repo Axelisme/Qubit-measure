@@ -26,10 +26,10 @@ from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickInputs,
     FluxPickState,
 )
+from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest, ContextReadiness
-from zcu_tools.gui.app.measure.artifact_tracker import (
+from zcu_tools.gui.app.measure.artifacts import (
     SaveStatus,
 )
 from zcu_tools.gui.app.measure.events.tab import (

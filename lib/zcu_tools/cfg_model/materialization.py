@@ -15,6 +15,8 @@ from .module import (
     BathResetSpec,
     ModuleCfg,
     ModuleSpec,
+    MuxReadoutSpec,
+    MuxReadoutTone,
     NoneResetCfg,
     PulseCfg,
     PulseReadoutSpec,
@@ -54,6 +56,8 @@ def _persistent_raw(value: object) -> object:
             (
                 PulseSpec,
                 PulseReadoutSpec,
+                MuxReadoutSpec,
+                MuxReadoutTone,
                 PulseResetSpec,
                 TwoPulseResetSpec,
                 BathResetSpec,

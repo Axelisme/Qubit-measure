@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
 
 from zcu_tools.datafile import RunMetadata
-from zcu_tools.experiment.run_saving import ArtifactRef, SaveReport
+from zcu_tools.experiment.artifacts import ArtifactRef, SaveReport
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.state import (
@@ -40,7 +40,7 @@ from .adapter import (
     T_AnalyzeParams,
     T_Cfg,
 )
-from .artifact_tracker import (
+from .artifacts import (
     ArtifactDeclaration,
     ArtifactSectionSnapshot,
     ArtifactTracker,

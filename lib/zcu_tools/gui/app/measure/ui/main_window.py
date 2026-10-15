@@ -24,7 +24,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from zcu_tools.experiment.run_saving import ArtifactRef
+from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
 from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
@@ -34,7 +34,15 @@ from zcu_tools.gui.control_identity import ControlStatus
 from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
 from zcu_tools.gui.project import nearest_existing
 from zcu_tools.gui.session.context_types import CommandOrigin, SavedPoint
-from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
+from zcu_tools.gui.widgets import (
+    DialogPresenter,
+    DialogRefStore,
+    QtDialogPresenter,
+    reset_foreground,
+    secondary_colour,
+    set_foreground,
+    warning_colour,
+)
 from zcu_tools.gui.widgets.control_indicator import ControlIndicator
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.entry import RoleResolutionError
@@ -57,7 +65,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller, ViewSnapshot
     from zcu_tools.gui.app.measure.remote import RemoteControlAdapter
     from zcu_tools.gui.app.measure.services import TabSnapshot
-    from zcu_tools.gui.app.measure.services.writeback_control import WritebackPane
+    from zcu_tools.gui.app.measure.writeback import WritebackPane
     from zcu_tools.gui.session.alias_presets import AliasPresets
 
 
@@ -168,7 +176,7 @@ class MainWindow(QMainWindow):
         self._empty_hint = QLabel("")
         self._empty_hint.setObjectName("empty_tabs_hint")
         self._empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty_hint.setStyleSheet("color: gray;")
+        set_foreground(self._empty_hint, secondary_colour(self))
         self._tab_area = QStackedWidget()
         self._tab_area.addWidget(self._empty_hint)
         self._tab_area.addWidget(self._tabs)
@@ -489,17 +497,18 @@ class MainWindow(QMainWindow):
         target = parameters.target if parameters is not None else None
         if entry is None:
             self._entry_label.setText("No entry open")
-            self._entry_label.setStyleSheet("color: gray;")
+            set_foreground(self._entry_label, secondary_colour(self))
         else:
             self._entry_label.setText(entry.name)
-            self._entry_label.setStyleSheet("")
+            reset_foreground(self._entry_label)
         if isinstance(target, SavedPoint):
             self._point_label.setText(target.point)
-            self._point_label.setStyleSheet("")
+            reset_foreground(self._point_label)
         else:
             self._point_label.setText("No point selected")
-            self._point_label.setStyleSheet(
-                "color: orange;" if entry else "color: gray;"
+            set_foreground(
+                self._point_label,
+                warning_colour(self) if entry else secondary_colour(self),
             )
         for tab_id, tab_w in self._tab_widgets.items():
             if self._ctrl.has_tab(tab_id):

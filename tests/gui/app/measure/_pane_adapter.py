@@ -61,9 +61,6 @@ class PaneAdapter(BaseAdapter[SavingCfg, SavingRun, PaneResult, PaneParams]):
 
     experiment_tag: ClassVar[str | None] = "test/saving"
 
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return "panes"
-
     @classmethod
     def analyze_params_cls(cls) -> type[PaneParams]:
         return PaneParams

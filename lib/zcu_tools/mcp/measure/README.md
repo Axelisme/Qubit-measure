@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-15，單層欄位查詢、lean cfg 與 Library／writeback Form
+**Last updated:** 2026-10-16，Load cfg_issue、單層欄位查詢、lean cfg 與 Library／writeback Form
 
 # `zcu_tools/mcp/measure/`
 
@@ -74,7 +74,7 @@ Recipe 不自動挑選重用 tab，也不自動清理。`RecipeSession.open_tab`
 
 Parameter/library reads、cfg、Edit 與 Run 使用同一固定來源。`tab.parameter_read` 不收 aliases，`tab.get_cfg` 不作臨時 preview。`tab.run_start` 在 focus 與 operation 效果前拒絕非空 aliases。None 與 {} 使用畫面上的值。全域 source 變更不刷新既有 Form，取得最新值要明確 Reset。關閉由 `tab_close` 指定。
 
-Load 只載既有結果及分析來源，不覆寫 Form input。RPC/MCP 的 Load 回覆保留結果與分析準備 facts，不含回填狀態。要看數據檔當時的 native cfg，使用結果 Inspect。
+Load 只載既有結果及分析來源，不覆寫 Form input。RPC/MCP 的 Load 回覆保留結果與分析準備 facts。`cfg_issue` 為 null 表示 typed cfg 可用，字串則說明不可用原因；有效數據仍可成功載入。MCP 的 `rpc_call` 原樣傳遞這份 GUI 投影，不另判斷 cfg。原始 cfg 保存在 native 資料檔，透過公開 `datafile.load_run_data` 離線讀取為 `StoredRun`。GUI 不提供原始 cfg 檢視入口。
 
 Author Run 的 cfg、來源與 completion 由 `recipe.py` 的 opaque handles 擁有。Framework 讀 detached snapshots，不讀 handle 的 private backing。`raw_save.py` 捕捉原 Run 的當次同步 Save report，保留全部輸出與該 Run 的 run_id，全部輸出失敗亦保留這個 ID。Author handle 使用這份保存契約。沒有 SaveReport 時 steps.raw_save 為 null，不推論 not_started、unknown 或 Save 是否已送出。save_raw 的傳輸與 admission 失敗照常拋出，recipe 回覆的原因只在 error；不加 requested 旗標。
 

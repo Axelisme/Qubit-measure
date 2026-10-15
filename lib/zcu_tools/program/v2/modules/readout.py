@@ -5,8 +5,12 @@ from collections.abc import Sequence
 from copy import deepcopy
 from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias
 
+import numpy as np
+from numpy.typing import NDArray
 from pydantic import BeforeValidator
 from qick.asm_v2 import QickParam
+
+from zcu_tools.cfg_model import MuxReadoutCfg as CoreMuxReadoutCfg
 
 from ..macro.wmem import PatchWmemFromDmem
 from .base import AbsModuleCfg, Module
@@ -87,7 +91,19 @@ class PulseReadoutCfg(AbsReadoutCfg):
             raise ValueError(f"Unknown parameter: {name}")
 
 
-ReadoutCfg: TypeAlias = PulseReadoutCfg
+class MuxReadoutCfg(CoreMuxReadoutCfg, AbsReadoutCfg):
+    """Native fixed mux settings; numeric fields and validation belong to cfg_model.
+
+    Inherited fields retain MHz, degrees, normalized gain and us units. build
+    captures a copy for mixmux8/static PFBv4; every set_param call is rejected.
+    """
+
+    def build(self, name: str) -> MuxReadout:
+        """Capture these numeric settings as a named fixed mux readout module."""
+        return MuxReadout(name, self)
+
+
+ReadoutCfg: TypeAlias = PulseReadoutCfg | MuxReadoutCfg
 
 
 class AbsReadout(Module):
@@ -352,3 +368,209 @@ class TablePulseReadout(AbsReadout):
                 f"TablePulseReadout table length {len(self.freq_words)} does not "
                 f"match loop {self.idx_reg!r} count {count}"
             )
+
+
+class MuxReadout(AbsReadout):
+    """Fixed mixmux8 playback and simultaneous static PFBv4 acquisition.
+
+    Only explicit tone channels are used, in their original order. Initialization
+    rejects incompatible hardware, duplicate routes and sub-cycle windows. No
+    envelope, tProc readout configuration or hardware parameter update is used.
+    """
+
+    def __init__(self, name: str, cfg: MuxReadoutCfg) -> None:
+        """Copy numeric cfg; name identifies the const mask pulse and diagnostics."""
+        self.name = name
+        self.cfg = deepcopy(cfg)
+        self._program: ModularProgramV2 | None = None
+
+    def init(self, prog: ModularProgramV2) -> None:
+        """Validate cached hardware/routes, then declare all tones and ADC windows.
+
+        Raises ValueError with the module name for incompatible wiring/capacity
+        or illegal rounded durations. QICK frequency/format errors propagate.
+        """
+        self._validate_generator(prog)
+        self._validate_readouts(prog)
+        cfg = self.cfg
+        prog.declare_gen(
+            ch=cfg.gen_ch,
+            nqz=cfg.nqz,
+            mixer_freq=cfg.mixer_freq,
+            ro_ch=cfg.tones[0].ro_ch,
+            mux_freqs=[tone.freq for tone in cfg.tones],
+            mux_gains=[tone.gain for tone in cfg.tones],
+            mux_phases=[tone.phase for tone in cfg.tones],
+        )
+        for tone in cfg.tones:
+            prog.declare_readout(
+                ch=tone.ro_ch,
+                length=cfg.ro_length,
+                freq=tone.freq,
+                phase=0,
+                gen_ch=cfg.gen_ch,
+            )
+        prog.add_pulse(
+            ch=cfg.gen_ch,
+            name=self.name,
+            style="const",
+            mask=list(range(len(cfg.tones))),
+            length=cfg.length,
+        )
+        prog.protect_readout_routes(
+            self.name, cfg.gen_ch, [tone.ro_ch for tone in cfg.tones]
+        )
+        self._program = prog
+
+    def _validate_generator(self, prog: ModularProgramV2) -> None:
+        ch = self.cfg.gen_ch
+        gens = prog.soccfg["gens"]
+        if ch >= len(gens):
+            raise ValueError(f"{self.name}: missing generator {ch}")
+        gen = gens[ch]
+        if (
+            gen["type"] != "axis_sg_mixmux8_v1"
+            or not gen["has_mixer"]
+            or not gen["has_gain"]
+            or not gen["has_phase"]
+            or len(self.cfg.tones) > gen["n_tones"]
+        ):
+            raise ValueError(
+                f"{self.name}: generator {ch} requires mixmux8 mixer/gain/phase capacity"
+            )
+        if ch in prog.gen_chs:
+            raise ValueError(f"{self.name}: generator route {ch} already declared")
+        cycles = prog.us2cycles(self.cfg.length, gen_ch=ch)
+        if not 3 <= cycles < 2**32:
+            raise ValueError(
+                f"{self.name}: generator {ch} rounded length must be 3..2**32-1 cycles"
+            )
+
+    def _validate_readouts(self, prog: ModularProgramV2) -> None:
+        channels: set[int] = set()
+        ports: set[int] = set()
+        path: str | None = None
+        readouts = prog.soccfg["readouts"]
+        for i, tone in enumerate(self.cfg.tones):
+            ch = tone.ro_ch
+            where = f"{self.name}: tone {i} ro_ch {ch}"
+            if ch >= len(readouts) or ch in channels or ch in prog.ro_chs:
+                raise ValueError(f"{where} missing or duplicate readout route")
+            ro = readouts[ch]
+            if (
+                ro["ro_type"] != "axis_pfb_readout_v4"
+                or "tproc_ctrl" in ro
+                or not ro.get("ro_fullpath")
+                or not ro["pfb_dds_on_output"]
+            ):
+                raise ValueError(f"{where} requires static PFBv4")
+            if path is not None and path != ro["ro_fullpath"]:
+                raise ValueError(f"{where} must use the same PFB ro_fullpath")
+            path = ro["ro_fullpath"]
+            port = ro["pfb_port"]
+            if (
+                len(self.cfg.tones) > ro["pfb_nout"]
+                or not 0 <= port < ro["pfb_nout"]
+                or port in ports
+            ):
+                raise ValueError(f"{where} invalid or duplicate PFB output/capacity")
+            if prog.us2cycles(self.cfg.ro_length, ro_ch=ch) <= 0:
+                raise ValueError(f"{where} rounded ADC window must be positive")
+            channels.add(ch)
+            ports.add(port)
+
+    def total_length(self, prog: ModularProgramV2) -> float:
+        """Return blocking us covering actual rounded playback and every ADC window.
+
+        init must have succeeded. Start/post delays round upward on the processor
+        clock; playback and ADC windows use QICK's actual channel-cycle rounding.
+        """
+        if self._program is not prog:
+            raise ValueError(
+                f"{self.name}: initialize this module with this program first"
+            )
+        cfg = self.cfg
+        duration = prog.cycles2us(
+            prog.us2cycles(cfg.length, gen_ch=cfg.gen_ch), gen_ch=cfg.gen_ch
+        )
+        gen_end = round_timestamp(
+            prog,
+            round_timestamp(prog, cfg.pre_delay)
+            + duration
+            + round_timestamp(prog, cfg.post_delay),
+        )
+        adc_duration = max(
+            prog.cycles2us(prog.us2cycles(cfg.ro_length, ro_ch=t.ro_ch), ro_ch=t.ro_ch)
+            for t in cfg.tones
+        )
+        adc_end = round_timestamp(
+            prog, round_timestamp(prog, cfg.trig_offset) + adc_duration
+        )
+        return float(max(gen_end, adc_end))
+
+    def run(
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam:
+        """Play all tones at t+pre_delay and trigger all chains at t+trig_offset.
+
+        init must precede run; returns blocking end in us. Repeated fixed
+        playback is supported, but cfg/program must be rebuilt for any update.
+        """
+        length = self.total_length(prog)
+        prog.pulse(ch=self.cfg.gen_ch, name=self.name, t=t + self.cfg.pre_delay)
+        prog.trigger(
+            [tone.ro_ch for tone in self.cfg.tones], t=t + self.cfg.trig_offset
+        )
+        return t + length
+
+    def collect_iq(
+        self,
+        prog: ModularProgramV2,
+        acquired: Sequence[NDArray[np.float64]],
+        *,
+        read_index: int = 0,
+    ) -> NDArray[np.float64]:
+        """Select one averaged read in tone order, returning (*sweep_shape,N,2).
+
+        Caller must supply the same initialized program's same acquire result:
+        an unclassified averaged list of float64 arrays (reads,*sweep_shape,2).
+        The list carries no source identity, so another acquisition's same-shaped
+        arrays cannot be detected. Raw, single-shot, classified and decimated
+        outputs are not supported. Values (including NaN), normalization and
+        units are preserved; no complex conversion, interpretation or I/O occurs.
+
+        ValueError names this module and the invalid position/tone/channel for
+        missing initialization/channels, list count, read_index, dtype or shape.
+        Unrelated channels' shapes are ignored.
+        """
+        if self._program is None:
+            raise ValueError(f"{self.name}: module is not initialized")
+        positions = {ch: i for i, ch in enumerate(prog.ro_chs)}
+        for i, tone in enumerate(self.cfg.tones):
+            if tone.ro_ch not in positions:
+                raise ValueError(f"{self.name}: tone {i} missing ro_ch {tone.ro_ch}")
+        if self._program is not prog:
+            raise ValueError(
+                f"{self.name}: use the program that initialized this module"
+            )
+        if len(acquired) != len(positions):
+            raise ValueError(
+                f"{self.name}: acquired item count {len(acquired)} != channels {len(positions)}"
+            )
+        if type(read_index) is not int or read_index < 0:
+            raise ValueError(f"{self.name}: read_index must be a nonnegative integer")
+        selected: list[NDArray[np.float64]] = []
+        shape: tuple[int, ...] | None = None
+        for i, tone in enumerate(self.cfg.tones):
+            pos = positions[tone.ro_ch]
+            array = acquired[pos]
+            where = f"{self.name}: tone {i} ro_ch {tone.ro_ch} acquired[{pos}]"
+            if array.dtype != np.float64 or array.ndim < 2 or array.shape[-1] != 2:
+                raise ValueError(f"{where} must be float64 (reads,*sweep_shape,2)")
+            if shape is not None and array.shape != shape:
+                raise ValueError(f"{where} read/sweep shape {array.shape} != {shape}")
+            if read_index >= array.shape[0]:
+                raise ValueError(f"{where} read_index {read_index} out of bounds")
+            shape = array.shape
+            selected.append(array[read_index])
+        return np.stack(selected, axis=-2)

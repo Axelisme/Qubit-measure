@@ -3,11 +3,7 @@
 from typing import ClassVar
 
 from zcu_tools.experiment import RunRecord
-from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
-    SessionEnv,
-)
+from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 
@@ -29,6 +25,3 @@ class SnapshotAdapter(BaseAdapter[SavingCfg, RunRecord[SavingCfg, SavingResult]]
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.NONE, load_data=False, requires_soc=False
     )
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return "snapshot"

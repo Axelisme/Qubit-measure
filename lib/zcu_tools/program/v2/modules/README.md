@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-15 — flat readout and runtime ADC matching
+**Last updated:** 2026-10-16 — fixed mux readout and route protection
 
 High-level cheat-sheet for `program/v2/modules/`. Read before touching this
 package. Implementation detail belongs in code and tests; this file records module
@@ -36,6 +36,16 @@ ADC window and generator playback including `post_delay`, with clock rounding.
 is not a cfg field. `PulseRegistry` includes it in hardware-definition identity,
 so unpaired playback and ADC channels 0 and 1 cannot share a definition by
 accident. Mixer declaration receives the channel only when mixing is configured.
+
+`MuxReadoutCfg` reuses the numeric cfg_model schema. `MuxReadout` declares fixed
+mixmux8 tones and explicit logical outputs on one static PFBv4, then plays one
+all-tone const mask and triggers the outputs together. It protects successful
+route declarations through `ModularProgramV2.protect_readout_routes`, including
+when nested; unprotected routes retain QICK's declaration semantics.
+`collect_iq` selects one standard averaged read using that program's actual
+channel ordering and returns tone-ordered float64 I/Q. The experiment owns
+complex conversion, interpretation and persistence. Mux has no physical
+simulation support.
 
 ## Readout Runtime Words
 

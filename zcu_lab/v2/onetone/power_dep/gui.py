@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -10,7 +9,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     RunRequest,
-    SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
@@ -58,6 +56,3 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
         )
         result = PowerDepExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return f"{ctx.res_name}_gain_{time.strftime('%H%M')}"

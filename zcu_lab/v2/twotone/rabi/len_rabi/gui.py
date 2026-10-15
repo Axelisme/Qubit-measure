@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,7 +14,6 @@ from zcu_tools.gui.app.measure.adapter import (
     ParameterWriteback,
     ParamMeta,
     RunRequest,
-    SessionEnv,
     WritebackItem,
     WritebackRequest,
     require_soc_handles,
@@ -182,6 +180,3 @@ class LenRabiAdapter(
             )
         )
         return items
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return f"{ctx.qub_name}_len_rabi_{time.strftime('%m%d')}"

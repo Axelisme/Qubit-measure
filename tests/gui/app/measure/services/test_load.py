@@ -1,19 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
 from pydantic import Field, JsonValue
-from zcu_tools.datafile import RunMetadata
+from zcu_tools.datafile import StoredRun
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.native_persistence import RestoredRun
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    LoadDataRequest,
-    NoAnalyzeParams,
-)
+from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, NoAnalyzeParams
 from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
@@ -21,16 +19,20 @@ from zcu_tools.gui.app.measure.services.form_contracts import (
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
 from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-from zcu_tools.gui.expected_error import (
-    ExpectedErrorCategory,
-    FailedPreconditionError,
-)
+from zcu_tools.gui.expected_error import ExpectedErrorCategory, FailedPreconditionError
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._form_fakes import make_form
-from tests.gui.app.measure._load_support import historical_metadata
+from tests.gui.app.measure._load_support import historical_metadata, write_native_file
+
+
+@pytest.fixture
+def native_path(tmp_path: Path) -> str:
+    path = tmp_path / "data.h5"
+    write_native_file(path)
+    return str(path)
 
 
 def _make_state(*, load_data: bool = True) -> tuple[State, str, MagicMock]:
@@ -38,6 +40,7 @@ def _make_state(*, load_data: bool = True) -> tuple[State, str, MagicMock]:
     tab_id = "tab-1"
     adapter = MagicMock()
     adapter.capabilities = AdapterCapabilities(load_data=load_data)
+    adapter.experiment_tag = "test/load"
     state.add_tab(
         tab_id,
         Session(
@@ -69,9 +72,10 @@ def _service(state: State) -> tuple[LoadService, MagicMock, MagicMock]:
 
 
 @pytest.mark.parametrize("context_free", [False, True])
-def test_load_retains_request_and_history_without_foreign_analysis_fallback(
+def test_load_retains_history_without_foreign_analysis_fallback(
     result_sources: tuple[ParameterContext, ParameterContext],
     context_free: bool,
+    native_path: str,
 ) -> None:
     state, tab_id, adapter = _make_state()
     q1, q2 = result_sources
@@ -82,40 +86,36 @@ def test_load_retains_request_and_history_without_foreign_analysis_fallback(
     loaded: RunRecord[ExpCfgModel, object] = RunRecord(cfg=None, result=object())
     metadata = historical_metadata()
 
-    def load_and_rebind(
-        _request: LoadDataRequest,
-    ) -> tuple[RunRecord[ExpCfgModel, object], RunMetadata]:
+    def restore_and_rebind(
+        stored: StoredRun,
+    ) -> RestoredRun[RunRecord[ExpCfgModel, object]]:
+        assert stored.metadata == metadata
         state.set_context(replace(state.session_env, parameters=q2))
-        return loaded, metadata
+        return RestoredRun(loaded, "cfg unavailable")
 
-    adapter.load.side_effect = load_and_rebind
+    adapter.restore.side_effect = restore_and_rebind
     service, _emit, _writeback = _service(state)
-    service.load_result(tab_id, "result.h5")
+    service.load_result(tab_id, native_path)
 
-    request = adapter.load.call_args.args[0]
-    assert isinstance(request, LoadDataRequest)
-    assert request.data_path == "result.h5"
-    assert request.parameters is captured
-    if request.parameters is not None:
-        assert request.parameters.value("source_qubit.rate") == 1.0
     assert tab.run.result is loaded
     assert tab.run.parameters is None
     assert tab.run.storage is None
     assert tab.run.source_operation_id is None
-    assert tab.run.metadata is metadata
+    assert tab.run.metadata == metadata
     state.clear_tab_results(tab_id)
     assert tab.run.parameters is None
 
 
 @pytest.mark.parametrize("missing_cfg", [False, True])
 def test_load_result_replaces_run_result_and_invalidates_dependents(
-    missing_cfg: bool,
+    missing_cfg: bool, native_path: str
 ) -> None:
     state, tab_id, adapter = _make_state()
     stale_result = object()
     loaded = RunRecord(cfg=None if missing_cfg else ExpCfgModel(), result=object())
     metadata = historical_metadata()
-    adapter.load.return_value = (loaded, metadata)
+    issue = "cfg unavailable" if missing_cfg else None
+    adapter.restore.return_value = RestoredRun(loaded, issue)
     tab = state.get_tab(tab_id)
     tab.run.result = stale_result
     tab.run.source_path = "/tmp/old.hdf5"
@@ -137,12 +137,12 @@ def test_load_result_replaces_run_result_and_invalidates_dependents(
     save_path_version = state.version.get(f"tab:{tab_id}:save_path")
     svc, emit, writeback = _service(state)
 
-    outcome = svc.load_result(tab_id, "/tmp/new.hdf5")
+    outcome = svc.load_result(tab_id, native_path)
 
     assert tab.run.result is loaded
     assert tab.run.metadata == metadata
     assert tab.run.confirmed_run_id is None
-    assert tab.run.source_path == "/tmp/new.hdf5"
+    assert tab.run.source_path == native_path
     assert tab.analysis.result is None
     assert tab.analysis.plots is None
     assert tab.analysis.params is None
@@ -154,7 +154,7 @@ def test_load_result_replaces_run_result_and_invalidates_dependents(
     assert writeback.teardown_draft.call_count == 2
     emit.assert_not_called()
     assert outcome.result_type == "RunRecord"
-    assert outcome.has_cfg_snapshot is (not missing_cfg)
+    assert outcome.cfg_issue == issue
     assert outcome.has_analyze_params is False
     assert state.version.get(f"tab:{tab_id}:result") == 1
     assert state.version.get(f"tab:{tab_id}:analyze") == 1
@@ -171,7 +171,7 @@ class RepeatsCfg(ExpCfgModel):
 
 @pytest.mark.parametrize("draft", [7, 0, {"expr": "unfinished +"}])
 def test_load_preserves_authored_input_including_invalid_drafts(
-    draft: JsonValue,
+    draft: JsonValue, native_path: str
 ) -> None:
     state, tab_id, adapter = _make_state()
     tab = state.get_tab(tab_id)
@@ -183,11 +183,11 @@ def test_load_preserves_authored_input_including_invalid_drafts(
     cfg_version = state.version.get(f"tab:{tab_id}:cfg")
     loaded = RunRecord(RepeatsCfg(reps=40), object())
     metadata = historical_metadata()
-    adapter.load.return_value = (loaded, metadata)
+    adapter.restore.return_value = RestoredRun(loaded, None)
     service, _emit, _writeback = _service(state)
 
     try:
-        outcome = service.load_result(tab_id, "result.h5")
+        outcome = service.load_result(tab_id, native_path)
 
         assert tab.cfg.input.data == before
         assert tab.cfg.env is env
@@ -195,34 +195,11 @@ def test_load_preserves_authored_input_including_invalid_drafts(
         assert tab.run.result is loaded
         assert loaded.cfg is not None
         assert loaded.cfg.reps == 40
-        assert tab.run.metadata is metadata
-        assert tab.run.source_path == "result.h5"
-        assert outcome.has_cfg_snapshot
+        assert tab.run.metadata == metadata
+        assert tab.run.source_path == native_path
+        assert outcome.cfg_issue is None
     finally:
         tab.cfg.revoke()
-
-
-@dataclass
-class AdapterSnapshot:
-    """Adapter-owned data may expose a cfg other than an experiment model."""
-
-    cfg: object
-
-
-@pytest.mark.parametrize("snapshot", [None, object()])
-def test_load_keeps_input_and_result_with_unavailable_cfg(snapshot: object) -> None:
-    state, tab_id, adapter = _make_state()
-    tab = state.get_tab(tab_id)
-    loaded = AdapterSnapshot(snapshot)
-    adapter.load.return_value = (loaded, historical_metadata())
-    before = tab.cfg.input.data
-    service, _emit, _writeback = _service(state)
-
-    outcome = service.load_result(tab_id, "result.h5")
-
-    assert tab.cfg.input.data == before
-    assert tab.run.result is loaded
-    assert outcome.has_cfg_snapshot is (snapshot is not None)
 
 
 def test_reentrant_load_does_not_replace_result() -> None:
@@ -244,7 +221,7 @@ def test_reentrant_load_does_not_replace_result() -> None:
         unsubscribe()
     assert failures == [CfgPreconditionReason.REENTRANT_MUTATION]
     assert tab.run.result is None
-    adapter.load.assert_not_called()
+    adapter.restore.assert_not_called()
 
 
 def test_load_result_rejects_busy_tab_without_calling_adapter() -> None:
@@ -257,20 +234,20 @@ def test_load_result_rejects_busy_tab_without_calling_adapter() -> None:
 
     assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
     assert exc_info.value.reason_code == ""
-    adapter.load.assert_not_called()
+    adapter.restore.assert_not_called()
     writeback.teardown_draft.assert_not_called()
     assert state.get_tab(tab_id).run.result is None
 
 
-def test_load_result_error_leaves_state_unchanged() -> None:
+def test_load_result_error_leaves_state_unchanged(native_path: str) -> None:
     state, tab_id, adapter = _make_state()
     old = object()
     state.get_tab(tab_id).run.result = old
-    adapter.load.side_effect = ValueError("bad file")
+    adapter.restore.side_effect = ValueError("bad file")
     svc, _emit, writeback = _service(state)
 
     with pytest.raises(LoadDataError, match="Cannot load this data file") as exc_info:
-        svc.load_result(tab_id, "/tmp/bad.hdf5")
+        svc.load_result(tab_id, native_path)
 
     assert exc_info.value.reason_code == "invalid_data_file"
     assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
@@ -280,13 +257,13 @@ def test_load_result_error_leaves_state_unchanged() -> None:
     assert state.version.get(f"tab:{tab_id}:result") == 0
 
 
-def test_load_result_wraps_unsupported_adapter() -> None:
+def test_load_result_wraps_unsupported_adapter(native_path: str) -> None:
     state, tab_id, adapter = _make_state()
-    adapter.load.side_effect = NotImplementedError("unsupported")
+    adapter.restore.side_effect = NotImplementedError("unsupported")
     svc, _emit, writeback = _service(state)
 
     with pytest.raises(LoadDataError, match="does not support loading") as exc_info:
-        svc.load_result(tab_id, "/tmp/file.hdf5")
+        svc.load_result(tab_id, native_path)
 
     assert exc_info.value.reason_code == "unsupported_load"
     assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION

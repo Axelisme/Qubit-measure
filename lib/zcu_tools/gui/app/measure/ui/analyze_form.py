@@ -14,6 +14,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from zcu_tools.gui.widgets import secondary_colour, set_foreground
 from zcu_tools.gui.widgets.form.value_widgets import (
     connect_committed_value_widget,
     make_value_widget,
@@ -60,7 +61,7 @@ class AnalyzeFormWidget(QWidget):
         layout.addLayout(self._form)
         self._empty_hint = QLabel("This analysis has no parameters.")
         self._empty_hint.setObjectName("analysisNoParameters")
-        self._empty_hint.setStyleSheet("color: gray;")
+        set_foreground(self._empty_hint, secondary_colour(self))
         self._empty_hint.setWordWrap(True)
         self._empty_hint.setVisible(False)
         layout.addWidget(self._empty_hint)
