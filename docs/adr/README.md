@@ -70,7 +70,7 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 
 ## Draft
 
-- [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：核准方向、尚未實作。啟動固定 Python environment，FTF 用 YAML 調參；同步 acquire 固定量測要求、逐 round 捕捉環境，backend 固定輸入輸出。物理與依賴邊界已定，具體型別、schema、遷移與驗收待完成。
+- [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：核准方向、尚未實作。啟動固定 Python environment，FTF 用 YAML 調參；同步 acquire 固定量測要求、逐 round 捕捉環境，backend 固定輸入輸出。物理與依賴邊界已定；離線GPU建庫、存檔與模擬時插值的方向已確認，GPU建表及載入尚待驗證。具體型別、schema、遷移與驗收待完成。
 
 
 - [量測成果 Artifact、設定快照與讀回](draft/artifact-persistence.md)：核准方向、尚未實作。設定快照正本只在 `data.h5`，ledger 不存 cfg，Notebook 與 GUI 都讀 `data.h5`。Artifact 與 Writeback 各成子模組，`experiment` 共用核心依項目種類決定格式，GUI 子模組管顯示與 adapter 介面。讀回經 `StoredRun` 與核心 `from_stored`，資料優先、cfg 可缺。待 measure-form 與 cfgschema-retire 落地後實作。

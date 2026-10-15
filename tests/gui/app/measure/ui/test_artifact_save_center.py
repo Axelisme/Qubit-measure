@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 from matplotlib.figure import Figure
-from qtpy.QtCore import QEvent, Qt, QUrl
-from qtpy.QtGui import QDesktopServices, QKeyEvent
+from qtpy.QtCore import QEvent, QPoint, Qt, QUrl
+from qtpy.QtGui import QColor, QDesktopServices, QKeyEvent, QPalette
 from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton
 from zcu_tools.experiment.run_saving import ArtifactRef, OutputResult, SaveReport
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
@@ -286,6 +287,133 @@ def test_folder_actions_follow_latest_outputs_without_creating_directories(
     finally:
         center.deleteLater()
         qapp.processEvents()
+
+
+@pytest.fixture
+def output_center(qapp: QApplication, tmp_path: Path) -> Generator[ArtifactSaveCenter]:
+    tracker, current = snapshot(tmp_path)
+    tracker.apply_report(
+        SaveReport(
+            "20261008T000000Z-a1b2c3",
+            tuple(
+                OutputResult(
+                    member.key,
+                    Output(output.format, output.path),
+                    "failed" if index else "saved",
+                    "copy denied: " + "failure detail " * 12 if index else None,
+                )
+                for section in current.artifacts
+                for artifact in section.artifacts
+                for member in artifact.members
+                for index, output in enumerate(member.outputs)
+            ),
+        )
+    )
+    center = ArtifactSaveCenter(_CAPABILITIES)
+    center.update_from_snapshot(replace(current, artifacts=tracker.snapshot()))
+    center.resize(600, 1000)
+    center.show()
+    qapp.processEvents()
+    yield center
+    center.deleteLater()
+    qapp.processEvents()
+
+
+def test_output_header_precedes_full_width_aligned_path_and_error(
+    output_center: ArtifactSaveCenter,
+) -> None:
+    for edit in output_center.findChildren(QLineEdit):
+        container = edit.parentWidget()
+        assert container is not None
+        labels = container.findChildren(QLabel)
+        name = next(
+            label for label in labels if label.text() == Path(edit.toolTip()).name
+        )
+        status = next(label for label in labels if label.text() in ("", "✓"))
+        folder = container.findChild(QPushButton)
+        assert folder is not None
+        origin = edit.mapTo(output_center, QPoint())
+        name_origin = name.mapTo(output_center, QPoint())
+        status_origin = status.mapTo(output_center, QPoint())
+        folder_origin = folder.mapTo(output_center, QPoint())
+        assert origin.y() >= name_origin.y() + name.height()
+        assert origin.x() == name_origin.x()
+        assert name_origin.x() + name.width() <= status_origin.x()
+        assert status_origin.x() + status.width() <= folder_origin.x()
+        assert status_origin.y() < origin.y()
+        assert folder_origin.y() < origin.y()
+        assert origin.x() + edit.width() == folder_origin.x() + folder.width()
+        failures = [label for label in labels if label.text().startswith("✗")]
+        for failure in failures:
+            error_origin = failure.mapTo(output_center, QPoint())
+            assert error_origin.y() >= origin.y() + edit.height()
+            assert error_origin.x() == origin.x()
+            assert failure.width() == edit.width()
+            assert failure.wordWrap()
+            assert (
+                failure.textInteractionFlags()
+                & Qt.TextInteractionFlag.TextSelectableByMouse
+            )
+
+
+@pytest.mark.parametrize(
+    "window, text", [("#ffffff", "#000000"), ("#353535", "#eeeeec")]
+)
+def test_output_path_is_smaller_secondary_read_only_text(
+    output_center: ArtifactSaveCenter, qapp: QApplication, window: str, text: str
+) -> None:
+    palette = output_center.palette()
+    palette.setColor(QPalette.ColorRole.Window, QColor(window))
+    palette.setColor(QPalette.ColorRole.Base, QColor(window))
+    palette.setColor(QPalette.ColorRole.Text, QColor(text))
+    palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(text))
+    output_center.setPalette(palette)
+    qapp.processEvents()
+    for edit in output_center.findChildren(QLineEdit):
+        name = next(
+            label
+            for label in output_center.findChildren(QLabel)
+            if label.text() == Path(edit.toolTip()).name
+        )
+        assert edit.fontMetrics().height() < name.fontMetrics().height()
+        path_colour = edit.palette().color(QPalette.ColorRole.Text)
+        text_colour = palette.color(QPalette.ColorRole.Text)
+        window_colour = palette.color(QPalette.ColorRole.Window)
+        assert path_colour not in (text_colour, window_colour)
+        assert (
+            min(text_colour.lightness(), window_colour.lightness())
+            < (path_colour.lightness())
+            < max(text_colour.lightness(), window_colour.lightness())
+        )
+        assert not edit.hasFrame()
+        assert edit.isReadOnly()
+        edit.selectAll()
+        assert edit.selectedText() == edit.text()
+
+
+@pytest.mark.parametrize("window", ["#ffffff", "#353535"])
+def test_output_failure_colour_follows_window_palette(
+    output_center: ArtifactSaveCenter,
+    qapp: QApplication,
+    window: str,
+) -> None:
+    from zcu_tools.gui.widgets import error_colour
+
+    palette = output_center.palette()
+    palette.setColor(QPalette.ColorRole.Window, QColor(window))
+    output_center.setPalette(palette)
+    qapp.processEvents()
+    failures = [
+        label
+        for label in output_center.findChildren(QLabel)
+        if label.text().startswith("✗")
+    ]
+    assert failures
+    assert all(
+        label.palette().color(QPalette.ColorRole.WindowText)
+        == error_colour(output_center)
+        for label in failures
+    )
 
 
 def test_whole_artifact_commands_include_json_only_and_saved_items(
