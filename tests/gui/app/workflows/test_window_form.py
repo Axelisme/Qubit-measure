@@ -1,10 +1,16 @@
 """Window form contracts through public native/GUI seams."""
 
+from collections.abc import Mapping
+
 import pytest
 from pydantic import JsonValue
 from qtpy.QtWidgets import QLineEdit
+from zcu_tools.gui.app.workflows.attachment import WorkflowAttachment
+from zcu_tools.gui.app.workflows.catalog import WorkflowCatalog
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
+from zcu_tools.gui.form import FormEnv, FormPath
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.resources.entry import (
     ResultEntry,
 )
@@ -12,8 +18,9 @@ from zcu_tools.resources.entry import (
 from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.gui.widgets.form._text_input import commit_text
 
+from ._reload_source import InjectedCatalog
 from ._sample_input import sample_input
-from ._synthetic import Context
+from ._synthetic import Context, PlanForm, TunablesForm, context_seed, sample_step
 from ._window_support import RpcRequest
 
 
@@ -369,3 +376,53 @@ def test_describe_form_rpc_forwards_structural_expandability(
     assert [(child["name"], child.get("can_expand")) for child in children] == [
         ("scale", False), ("points", False), ("samples", True),
     ]
+
+
+@pytest.mark.parametrize("path", [["unknown"], ["samples", "start"], ["samples", "values", "item"]])
+@pytest.mark.parametrize("caller", ["rpc", "mcp"])
+def test_describe_form_separates_path_rejection_from_declaration_failure(
+    attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
+    catalog_source: InjectedCatalog,
+    rpc: RpcRequest,
+    mcp_tools: ToolTable,
+    path: list[str],
+    caller: str,
+) -> None:
+    window, _harness, _entry = attachment
+    fail_declaration: list[bool] = []
+
+    class FaultyPlan(PlanForm):
+        @classmethod
+        def choices(cls, env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+            if fail_declaration:
+                raise ValueError("Synthetic declaration failure")
+            return super().choices(env)
+
+    catalog_source.catalog = WorkflowCatalog((WorkflowAttachment(
+        step=sample_step, plan_model=FaultyPlan, knobs_model=TunablesForm,
+        plan_to_cfg=FaultyPlan.to_cfg, knobs_to_cfg=TunablesForm.to_cfg,
+        seed=context_seed,
+    ),))
+    window.reload_source()
+    before = window.plan_panel.state.input.data, window.plan_panel.state.base.data
+    params = {"form": "plan", "path": path}
+    if caller == "rpc":
+        reply = rpc("workflow.describe_form", params)
+        assert reply["ok"] is False
+        error = reply["error"]
+        assert isinstance(error, dict) and error["code"] == "invalid_params"
+    else:
+        with pytest.raises(RuntimeError, match="invalid_params"):
+            mcp_tools["workflows_workflow_describe_form"]["handler"](params)
+    fail_declaration.append(True)
+    if caller == "rpc":
+        reply = rpc("workflow.describe_form", {"form": "plan", "path": []})
+        assert reply["ok"] is False
+        error = reply["error"]
+        assert isinstance(error, dict) and error["code"] == "controller_error"
+    else:
+        with pytest.raises(RuntimeError, match="controller_error"):
+            mcp_tools["workflows_workflow_describe_form"]["handler"]({"form": "plan", "path": []})
+    fail_declaration.clear()
+    assert (window.plan_panel.state.input.data, window.plan_panel.state.base.data) == before
+    assert window.controller.binding is None
