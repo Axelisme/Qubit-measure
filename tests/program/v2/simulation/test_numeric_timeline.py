@@ -74,6 +74,18 @@ def test_arb_preserves_signed_complex_scale_sample_axis_and_detached_ownership(
     assert envelope.values[0].real < 0
 
 
+def test_adc_read_windows_retain_each_generator_association():
+    env = white_noise(std_adc=0, n_gens=2, routes=((0, 0), (1, 0)))
+    second = readout("second")
+    second.cfg.gen_ch = 1
+    # Build again so the owned Pulse and flat readout share the selected route.
+    second = second.cfg.build("second")
+    prog = ModularProgramV2(env.soccfg, ProgramV2Cfg(), modules=[readout("first"), second])
+    prog.acquire(env.soc, progress=False)
+    window = env.soc.binding.last_request.timelines[0].readouts[0]
+    assert getattr(window, "generator_channels", ()) == (0, 1)
+
+
 def test_two_adc_sample_counts_order_round_averaging_and_companion_raw():
     env = white_noise(std_adc=0, n_gens=2, n_readouts=2, routes=((1, 1), (0, 0)))
     prog = ModularProgramV2(
