@@ -9,13 +9,14 @@ handlers a chance to execute.
 
 from __future__ import annotations
 
-import time
+import socket
 from functools import partial
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from qtpy.QtCore import QTimer
 from zcu_tools.gui.app.measure.remote import (
     ControlOptions,
     RemoteControlAdapter,
@@ -30,9 +31,17 @@ from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.session import MeasureMcpSession
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
+from tests.gui._qt_waits import qt_until
+
 from ._helpers import call as _raw_call
 from ._helpers import call_mcp_with_qt as _call_mcp_with_qt
-from ._helpers import observe_run_inputs
+from ._helpers import (
+    observe_run_inputs,
+    recv_push,
+    recv_response,
+    recv_until,
+    reset_inbox,
+)
 from ._remote_core_support import (
     RemoteCoreFixture as _Fixture,
 )
@@ -297,9 +306,8 @@ def test_measure_connect_authenticates_and_reconnects_to_token_gated_gui(
         first.stop()
         second = _Fixture(ControlOptions(port=port, token="test-secret"))
         assert second.start() == port
-        deadline = time.monotonic() + 2
-        while bridge.is_connected and time.monotonic() < deadline:
-            time.sleep(0.01)
+        # first.stop() closes the old transport; its reader publishes disconnection.
+        qt_until(lambda: not bridge.is_connected, label="transport disconnect")
         assert not bridge.is_connected
         assert call("rpc_list", {"domain": "adapter"})["methods"]
     finally:
@@ -317,7 +325,7 @@ def test_shutdown_closes_clients(fx):
         # timing the peer observes either a clean EOF (recv -> b"") or a
         # reset (ConnectionResetError); both mean "socket is gone".
         sock.setblocking(True)
-        sock.settimeout(2.0)
+        sock.settimeout(30.0)
         try:
             data = sock.recv(4096)
         except (ConnectionResetError, ConnectionAbortedError, OSError):
@@ -339,7 +347,7 @@ def test_malformed_json_returns_invalid_params(fx):
 
 
 def test_run_start_then_running_tab_then_finishes(fx):
-    """Integration: drive a fake adapter from open to run-finished via polling."""
+    """Drive a fake adapter from open to its real remote operation terminal."""
     sock = _open_client(fx.service.port)
     try:
         _send(
@@ -360,17 +368,17 @@ def test_run_start_then_running_tab_then_finishes(fx):
                 },
             },
         )
-        assert _recv_response(sock)["ok"] is True
+        started = _recv_response(sock)
+        assert started["ok"] is True
 
-        # Poll until run finishes (FakeAdapter completes very quickly).
-        for _ in range(200):
-            _send(sock, {"id": "p", "method": "run.running_tab", "params": {}})
-            resp = _recv_response(sock)
-            if resp["result"]["tab_id"] is None:
-                break
-            time.sleep(0.02)
-        else:
-            pytest.fail("run did not finish in time")
+        # The submitted fake Run must complete; await the real remote operation terminal.
+        terminal = _raw_call(
+            sock,
+            "operation.await",
+            {"operation_id": started["result"]["operation_id"], "timeout": 30},
+        )
+        assert terminal["result"] == {"reason": "completed", "status": "finished"}
+        assert _raw_call(sock, "run.running_tab")["result"]["tab_id"] is None
 
         _send(sock, {"id": "3", "method": "tab.snapshot", "params": {"tab_id": tab_id}})
         snap = _recv_response(sock)
@@ -380,3 +388,51 @@ def test_run_start_then_running_tab_then_finishes(fx):
         assert tab_snapshot["interaction"]["has_run_result"] is True
     finally:
         sock.close()
+
+
+@pytest.mark.requires_loopback
+def test_socket_reader_preserves_fragmented_frames_and_parked_pushes(qapp):
+    """Readiness is not a full frame; unmatched pushes and trailing bytes survive."""
+    reader, writer = socket.socketpair()
+    with reader, writer:
+        reset_inbox(reader)
+        try:
+            writer.sendall(b'\n{"event":"notice","payload":1}\n{"id":"one","ok":')
+            QTimer.singleShot(
+                0, lambda: writer.sendall(b'true}\n{"id":"two","ok":true}\n')
+            )
+            assert recv_response(reader, "one") == {"id": "one", "ok": True}
+            assert recv_push(reader, "notice") == {"event": "notice", "payload": 1}
+            assert recv_response(reader, "two") == {"id": "two", "ok": True}
+        finally:
+            reset_inbox(reader)
+
+
+@pytest.mark.requires_loopback
+def test_socket_reader_reports_eof_before_matching_frame(qapp):
+    reader, writer = socket.socketpair()
+    with reader, writer:
+        reset_inbox(reader)
+        try:
+            writer.sendall(b'{"id":"incomplete"')
+            writer.shutdown(socket.SHUT_WR)
+            with pytest.raises(AssertionError, match="peer closed"):
+                recv_response(reader, "incomplete")
+        finally:
+            reset_inbox(reader)
+
+
+@pytest.mark.requires_loopback
+def test_socket_reader_propagates_matcher_failure(qapp):
+    def broken_matcher(_message):
+        raise ValueError("matcher failed")
+
+    reader, writer = socket.socketpair()
+    with reader, writer:
+        reset_inbox(reader)
+        try:
+            writer.sendall(b'{"id":"one"}\n')
+            with pytest.raises(ValueError, match="matcher failed"):
+                recv_until(reader, broken_matcher)
+        finally:
+            reset_inbox(reader)

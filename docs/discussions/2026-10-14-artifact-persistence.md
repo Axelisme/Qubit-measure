@@ -98,3 +98,7 @@ basis:
 ## 後記（2026-10-15）
 
 本篇「讀回由誰解讀」一節寫 GUI adapter 把 cfg 轉成表單回填，這是錯的。2026-10-13 已裁定 Load 不再填回表單，討論時遺漏了這個前提。使用者 2026-10-15 確認維持該裁定：Load 只載入結果，設定由 Inspect 檢視。修正後的決策見 ADR draft 的「補充裁定」段。
+
+## 轉正後記（2026-10-15）
+
+正式決策由 [ADR-0063](../adr/0063-persistence-ownership.md)、[ADR-0069](../adr/0069-experiment-core-and-frontends.md) 與 [ADR-0067](../adr/0067-gui-application.md) 接替，原 draft 已結案。本篇保留當時的推導，不再作為待實作清單。

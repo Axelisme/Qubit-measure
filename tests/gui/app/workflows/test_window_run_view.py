@@ -10,10 +10,9 @@ never sees a workflow name.
 
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from time import monotonic
 
 import pytest
-from qtpy.QtCore import QEventLoop, QPoint, QRect, Qt, QTimer
+from qtpy.QtCore import QPoint, QRect, Qt
 from qtpy.QtWidgets import (
     QApplication,
     QLabel,
@@ -27,6 +26,7 @@ from qtpy.QtWidgets import (
 from zcu_tools.gui.app.workflows.panel import WorkflowFormPanel
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
 
+from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import key_click, mouse_click, type_text
 
 from ._window_support import (
@@ -59,23 +59,9 @@ def child[W: QWidget](window: QWidget, kind: type[W], name: str) -> W:
 
 
 def wait_for(qapp: QApplication, condition: Callable[[], bool]) -> None:
-    """Run the Qt event loop in short slices until condition holds or 5 s pass."""
-    deadline = monotonic() + 5.0
-    while not condition():
-        assert monotonic() < deadline, "condition not reached within 5 s"
-        loop = QEventLoop()
-        QTimer.singleShot(20, loop.quit)
-        loop.exec()
+    """Observe the submitted run's real Qt status/banner delivery."""
+    qt_until(condition, label="run presentation")
     qapp.processEvents()
-
-
-def settle(qapp: QApplication, seconds: float = 0.2) -> None:
-    """Let several 50 ms status polls run."""
-    deadline = monotonic() + seconds
-    while monotonic() < deadline:
-        loop = QEventLoop()
-        QTimer.singleShot(20, loop.quit)
-        loop.exec()
 
 
 def status_text(window: QWidget) -> str:
@@ -615,9 +601,9 @@ def test_start_errors_stay_below_the_status_through_refreshes(
     assert "count" in error.lower() or "greater" in error.lower()
     assert status_text(window) == finished
 
+    # Each public selection refreshes presentation; terminal polling has stopped.
     window.select_workflow("synthetic_wide")
     window.select_workflow("synthetic_small")
-    settle(qapp)
     assert message(window) == error
     assert status_text(window) == finished
 
@@ -629,7 +615,9 @@ def test_start_exception_stays_below_the_ready_status(
     window = window_session.window
     window.show()
     button(window, "start").click()
-    settle(qapp)
+    # No run was accepted, so no poll is active. Force real refreshes via selection.
+    window.select_workflow("synthetic_small")
+    window.select_workflow("synthetic_wide")
     assert "SoC" in message(window)
     assert status_text(window) == "ready synthetic_wide not started"
 

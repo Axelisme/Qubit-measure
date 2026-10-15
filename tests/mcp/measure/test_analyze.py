@@ -379,9 +379,14 @@ def test_interactive_analysis_completes_after_gui_done(tmp_path, clients, monkey
     execution = started["execution"]
     assert not saving.is_set()
     done.set()  # The GUI user, not an MCP command, completes the original operation.
-    assert saving.wait(2), "completion stopped when the first tool call returned"
+    # The completion worker reaches Save after the GUI completion is released. The 30s limit only guards deadlock.
+    assert saving.wait(30), "completion stopped when the first tool call returned"
     reply = _call_full_execution_stdio(
-        monkeypatch, client, "wait", {"execution": execution, "timeout": 2}
+        # The released worker completes this execution; 30s only guards deadlock.
+        monkeypatch,
+        client,
+        "wait",
+        {"execution": execution, "timeout": 30},
     )
     completed = _data(reply)
     assert completed["execution"] == execution
@@ -539,7 +544,8 @@ def test_cancel_latches_intent_and_retains_original_terminal(
             monkeypatch,
             client,
             "wait",
-            {"execution": started["execution"], "timeout": 2},
+            # The released worker completes this execution; 30s only guards deadlock.
+            {"execution": started["execution"], "timeout": 30},
         )
     )
     assert completed["status"] == ("failed" if outcome == "failed" else "cancelled")
@@ -621,7 +627,8 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
             "operation_id": 71,
         }
         saving.set()
-        assert release.wait(10), "test did not release admitted save"
+        # The test finally releases this responder barrier. The 30s limit only guards deadlock.
+        assert release.wait(30), "test did not release admitted save"
         return _admitted_save_terminal(client, save_outcome, names)
 
     client.transport.replies["tab.save_artifacts"] = save
@@ -632,11 +639,13 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
                     monkeypatch, client, "tab_analyze", {"tab": "t"}
                 )
             )
-            assert saving.wait(2)
+            # The completion worker reaches Save after the GUI completion is released. The 30s limit only guards deadlock.
+            assert saving.wait(30)
             request = pool.submit(
                 client.call, "cancel", {"execution": started["execution"]}
             )
-            assert intent.wait(2)
+            # The submitted cancel call records intent before its GUI RPC. The 30s limit only guards deadlock.
+            assert intent.wait(30)
             pending = client.call(
                 "status", {"execution": started["execution"], "detail": "full"}
             )
@@ -653,14 +662,16 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
             assert pending_summary["artifacts"] == {}
         finally:
             release.set()
-        cancelled = request.result(timeout=3)
+        # The submitted call completes after release/close; 30s only guards deadlock.
+        cancelled = request.result(timeout=30)
     assert cancelled.data["cancel_requested"] is True
     completed = _data(
         _call_full_execution_stdio(
             monkeypatch,
             client,
             "wait",
-            {"execution": started["execution"], "timeout": 2},
+            # The released worker completes this execution; 30s only guards deadlock.
+            {"execution": started["execution"], "timeout": 30},
         )
     )
     assert {
@@ -699,7 +710,8 @@ def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkey
     def send(connection, method, params, *args, **kwargs):
         if method == "tab.save_artifacts":
             save_ready.set()
-            assert blocker_entered.wait(10), "test did not occupy the RPC lock"
+            # The submitted blocker enters the responder before Save can dispatch. The 30s limit only guards deadlock.
+            assert blocker_entered.wait(30), "test did not occupy the RPC lock"
             dispatch_save.set()
         return send_rpc(connection, method, params, *args, **kwargs)
 
@@ -720,7 +732,8 @@ def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkey
             return _result_reply("analysis", ["fit"], {})
         if method == "entry.info":
             blocker_entered.set()
-            assert release_blocker.wait(10), "test did not release the RPC lock"
+            # The test finally releases the occupied RPC. The 30s limit only guards deadlock.
+            assert release_blocker.wait(30), "test did not release the RPC lock"
             return {"project": "test"}
         if method == "operation.cancel":
             return {"status": "finished"}
@@ -734,13 +747,16 @@ def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkey
                     monkeypatch, client, "tab_analyze", {"tab": "t"}
                 )
             )
-            assert save_ready.wait(2)
+            # The completion worker captured the result and next attempts Save. The 30s limit only guards deadlock.
+            assert save_ready.wait(30)
             blocker = pool.submit(
                 client.call, "rpc_call", {"method": "entry.info", "params": {}}
             )
-            assert dispatch_save.wait(2)
+            # The submitted blocker releases the pre-Save boundary. The 30s limit only guards deadlock.
+            assert dispatch_save.wait(30)
             request = pool.submit(client.call, "cancel", {"op": started["op"]})
-            assert intent.wait(2)
+            # The submitted cancel call records intent before its GUI RPC. The 30s limit only guards deadlock.
+            assert intent.wait(30)
             pending = client.call(
                 "status", {"execution": started["execution"], "detail": "full"}
             )
@@ -750,14 +766,17 @@ def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkey
         finally:
             blocker_entered.set()
             release_blocker.set()
-        blocker.result(timeout=3)
-        assert request.result(timeout=3).data["cancel_requested"] is True
+        # The submitted call completes after release/close; 30s only guards deadlock.
+        blocker.result(timeout=30)
+        # The submitted call completes after release/close; 30s only guards deadlock.
+        assert request.result(timeout=30).data["cancel_requested"] is True
     completed = _data(
         _call_full_execution_stdio(
             monkeypatch,
             client,
             "wait",
-            {"execution": started["execution"], "timeout": 2},
+            # The released worker completes this execution; 30s only guards deadlock.
+            {"execution": started["execution"], "timeout": 30},
         )
     )
     assert completed["status"] == "cancelled"
@@ -839,7 +858,8 @@ def test_gui_completion_during_initial_handoff_keeps_the_execution(
 
     def send(connection, method, params, *args, **kwargs):
         if method == "tab.interact":
-            assert saved.wait(3), "analysis did not continue before initial read"
+            # The completion worker saves the figure before the initial interact read. The 30s limit only guards deadlock.
+            assert saved.wait(30), "analysis did not continue before initial read"
         return send_rpc(connection, method, params, *args, **kwargs)
 
     monkeypatch.setattr(GuiConnection, "send_gui_rpc", send)
@@ -875,7 +895,8 @@ def test_gui_completion_during_initial_handoff_keeps_the_execution(
             monkeypatch,
             client,
             "wait",
-            {"execution": started["execution"], "timeout": 2},
+            # The released worker completes this execution; 30s only guards deadlock.
+            {"execution": started["execution"], "timeout": 30},
         )
     )
     assert completed["status"] == "finished"

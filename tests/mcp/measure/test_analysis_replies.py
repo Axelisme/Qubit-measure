@@ -12,6 +12,7 @@ from zcu_tools.mcp.measure.analysis_execution import AnalysisWriteback
 from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.execution_reply import SummaryEstimate
 from zcu_tools.mcp.measure.recipe import RecipeGenerator, RecipeSession
+from zcu_tools.mcp.measure.session import GuiConnection
 
 from ._analyze_support import (
     PNG as _PNG,
@@ -48,6 +49,24 @@ from ._analyze_support import (
 )
 from ._recipe_execution_support import definition
 from ._save_report_support import analysis_report
+from ._support import MeasureClient
+
+
+def release_pending_receipt(
+    client: MeasureClient, pending: Event, *, close_session: bool
+) -> None:
+    """End an actually dispatched receipt via session close or transport EOF."""
+    try:
+        # The submitted call reaches transport dispatch; 30s only guards deadlock.
+        assert pending.wait(30)
+        if close_session:
+            client.context.session.close()
+        else:
+            client.transport.close()
+            assert client.transport.on_closed is not None
+            client.transport.on_closed(None)
+    finally:
+        client.context.bridge.disconnect()
 
 
 def forbidden_recipe(_session: RecipeSession) -> RecipeGenerator:
@@ -351,14 +370,9 @@ def test_analysis_start_failure_retains_a_queryable_execution(
     with ThreadPoolExecutor(max_workers=1) as pool:
         called = pool.submit(client.call, "tab_analyze", {"tab": "t", "stage": stage})
         if receipt in {"lost", "closed"}:
-            assert pending.wait(1)
-            if receipt == "closed":
-                client.context.session.close()
-            else:
-                client.transport.close()
-                assert client.transport.on_closed is not None
-                client.transport.on_closed(None)
-        initial = called.result(timeout=2)
+            release_pending_receipt(client, pending, close_session=receipt == "closed")
+        # EOF/close or the configured failure completes the call; 30s guards deadlock.
+        initial = called.result(timeout=30)
     assert initial.is_error is True
     key = initial.data["execution"]
     before = len(client.transport.sent)
@@ -397,7 +411,8 @@ def test_pending_analysis_receipt_preserves_identity_and_cancel_intent(
     def respond(name, params):
         if name == method:
             pending.set()
-            assert release.wait(2)
+            # The test finally releases this responder barrier. The 30s limit only guards deadlock.
+            assert release.wait(30)
             return _start_reply({"gain": 2.0}, [])
         if name == "operation.cancel":
             return {"status": "cancelling"}
@@ -413,7 +428,8 @@ def test_pending_analysis_receipt_preserves_identity_and_cancel_intent(
     with ThreadPoolExecutor(max_workers=2) as pool:
         called = pool.submit(client.call, "tab_analyze", {"tab": "t", "stage": stage})
         try:
-            assert pending.wait(1)
+            # The submitted analysis call reaches the held transport boundary. The 30s limit only guards deadlock.
+            assert pending.wait(30)
             snapshots = client.context.session.executions.snapshots()
             assert len(snapshots) == 1
             key = snapshots[0].execution
@@ -426,13 +442,16 @@ def test_pending_analysis_receipt_preserves_identity_and_cancel_intent(
             assert len(client.transport.sent) == before
             if cancel:
                 requested = pool.submit(client.call, "cancel", {"execution": key})
-                stopped = requested.result(timeout=0.5)
+                # The submitted call completes after release/close; 30s only guards deadlock.
+                stopped = requested.result(timeout=30)
                 assert stopped.data["cancel_requested"] is True
                 assert stopped.data["gui_cancel"]["status"] == "not_needed"
                 assert len(client.transport.sent) == before
             release.set()
-            initial = called.result(timeout=2)
-            completed = client.call("wait", {"execution": key, "timeout": 2})
+            # The submitted call completes after release/close; 30s only guards deadlock.
+            initial = called.result(timeout=30)
+            # The released worker completes this execution; 30s only guards deadlock.
+            completed = client.call("wait", {"execution": key, "timeout": 30})
         finally:
             release.set()
     assert initial.data["execution"] == key
@@ -472,7 +491,8 @@ def test_cancelled_analysis_queued_before_dispatch_never_starts(
     def respond(method, params):
         assert method == "tab.snapshot"
         occupied.set()
-        assert release.wait(2)
+        # The test finally releases this responder barrier. The 30s limit only guards deadlock.
+        assert release.wait(30)
         return {"tabs": []}
 
     client = _client(tmp_path, clients, respond)
@@ -481,27 +501,27 @@ def test_cancelled_analysis_queued_before_dispatch_never_starts(
     client.tools = build_measure_tools(
         client.context, recipes=client.context.session.recipes.definitions
     )
-    register = client.context.session.executions.start
+    send_rpc = GuiConnection.send_gui_rpc
 
-    def observe_registration(*args, **kwargs):
-        execution = register(*args, **kwargs)
-        registered.set()
-        return execution
+    def observe_dispatch(connection, method, params, *args, **kwargs):
+        if method in {"tab.analyze", "tab.post_analyze"}:
+            registered.set()
+        return send_rpc(connection, method, params, *args, **kwargs)
 
-    # Synchronize the registry seam without replacing its admission logic.
-    monkeypatch.setattr(
-        client.context.session.executions, "start", observe_registration
-    )
+    # Registration precedes this public RPC boundary; admission remains real.
+    monkeypatch.setattr(GuiConnection, "send_gui_rpc", observe_dispatch)
     with ThreadPoolExecutor(max_workers=2) as pool:
         blocker = pool.submit(
             client.call, "rpc_call", {"method": "tab.snapshot", "params": {}}
         )
         try:
-            assert occupied.wait(1)
+            # The submitted RPC enters the blocking responder. The 30s limit only guards deadlock.
+            assert occupied.wait(30)
             called = pool.submit(
                 client.call, "tab_analyze", {"tab": "t", "stage": stage}
             )
-            assert registered.wait(1)
+            # The submitted analysis registers before attempting its GUI RPC. The 30s limit only guards deadlock.
+            assert registered.wait(30)
             snapshots = client.context.session.executions.snapshots()
             assert len(snapshots) == 1
             key = snapshots[0].execution
@@ -512,8 +532,10 @@ def test_cancelled_analysis_queued_before_dispatch_never_starts(
             assert stopped.data["cancel_requested"] is True
             assert len(client.transport.sent) == before
             release.set()
-            blocker.result(timeout=2)
-            completed = called.result(timeout=2)
+            # The submitted call completes after release/close; 30s only guards deadlock.
+            blocker.result(timeout=30)
+            # The submitted call completes after release/close; 30s only guards deadlock.
+            completed = called.result(timeout=30)
         finally:
             release.set()
     assert completed.data["execution"] == key
@@ -584,7 +606,8 @@ def test_execution_query_observes_background_completion_without_reconnect(
             return _start_reply({"model": "fit"}, [])
         if method == "operation.await":
             awaiting.set()
-            assert release.wait(10), "test did not release the GUI operation"
+            # The test finally releases this responder barrier. The 30s limit only guards deadlock.
+            assert release.wait(30), "test did not release the GUI operation"
             return {"reason": "completed", "status": outcome, "error": None}
         if method == "tab.get_analyze_result":
             return _result_reply("analysis", ["fit"], {"model": "fit"})
@@ -599,7 +622,8 @@ def test_execution_query_observes_background_completion_without_reconnect(
         started = _data(
             _call_full_execution_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
         )
-        assert awaiting.wait(2)
+        # The analysis worker enters operation.await after the start receipt. The 30s limit only guards deadlock.
+        assert awaiting.wait(30)
         assert started["status"] == "running"
         execution = started["execution"]
         running = _data(
@@ -618,7 +642,11 @@ def test_execution_query_observes_background_completion_without_reconnect(
         assert _methods(client) == ["tab.analyze", "operation.await"]
         release.set()
         completed_reply = _call_full_execution_stdio(
-            monkeypatch, client, "wait", {"execution": execution, "timeout": 2}
+            # The released worker completes this execution; 30s only guards deadlock.
+            monkeypatch,
+            client,
+            "wait",
+            {"execution": execution, "timeout": 30},
         )
         completed = _data(completed_reply)
         assert completed["status"] == outcome

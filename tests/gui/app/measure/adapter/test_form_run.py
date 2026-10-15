@@ -8,7 +8,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     RunRequest,
-    SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
@@ -39,10 +38,6 @@ class FormAdapter(BaseAdapter[MeasurementCfg, MeasurementCfg]):
     def make_form(ctx: FormContext) -> Form[MeasurementCfg]:
         del ctx
         return Form(MeasurementCfg, {})
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        del ctx
-        return "measurement"
 
 
 def measurement(cfg: ConfigBase) -> MeasurementCfg:

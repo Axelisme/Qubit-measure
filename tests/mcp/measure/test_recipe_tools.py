@@ -13,7 +13,7 @@ from zcu_tools.mcp.measure.session import GuiRpcError
 from ._analyze_support import call_stdio, stdio_data
 from ._recipe_actual_support import cfg_value
 from ._recipe_analysis_support import AnalysisRecipeGui
-from ._recipe_execution_support import ControlledRunGui, definition
+from ._recipe_execution_support import ControlledRunGui, definition, wait_for_event
 from ._support import make_client
 
 
@@ -216,8 +216,9 @@ def test_delivery_error_is_scoped_to_the_current_interactive_stage(
         assert primary.is_error is (failed_stage == "primary")
         # GUI-local done does not replace Primary interaction through an MCP call.
         gui.done["primary"].set()
-        assert gui.awaited["post"].wait(2)
-        post = client.call("wait", {"execution": key, "timeout": 5})
+        wait_for_event(gui.awaited["post"])
+        # Primary done releases the worker to deliver the controlled Post handoff.
+        post = client.call("wait", {"execution": key, "timeout": 30})
         assert post.data["status"] == "interactive"
         assert post.data["analysis"]["stage"] == "post"
         assert post.is_error is post_is_error
@@ -274,7 +275,7 @@ def test_op_control_resolves_original_run_and_preserves_native_outcome(
 ):
     from zcu_tools.mcp.measure import tools_recipes
 
-    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
+    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0)
     controlled = ControlledRunGui()
     gui = WritebackGui()
 
@@ -289,13 +290,19 @@ def test_op_control_resolves_original_run_and_preserves_native_outcome(
     client = make_client(tmp_path, respond, recipes=(SAMPLE,))
     with closing(client.context.session):
         pending = client.call("sample", {})
-        assert controlled.awaited.wait(2)
+        wait_for_event(controlled.awaited)
         key = pending.data["execution"]
+        assert pending.data["status"] == "running"
+        assert controlled.cancel_count == 0
+        # Zero-timeout polling observes the held Run but does not cancel its worker.
+        still_running = client.call("wait", {"execution": key, "timeout": 0})
+        assert still_running.data["status"] == "running" and not still_running.is_error
         run_op = client.call("status", {"execution": key})["run_op"]
         reply = client.call(control, {"op": run_op})
         assert reply.data["execution"] == key
         assert controlled.cancel_count == 1
-        result = client.call("wait", {"execution": key, "timeout": 2})
+        # The control request releases the active operation/question to its next handoff.
+        result = client.call("wait", {"execution": key, "timeout": 30})
         assert result.data["status"] == (
             "cancelled" if control == "cancel" else "awaiting_answer"
         )
@@ -319,7 +326,8 @@ def test_analysis_cancel_routes_to_the_recipe_not_a_separate_execution(tmp_path,
         )
         control = client.call("cancel", target)
         assert control.data["execution"] == key
-        result = client.call("wait", {"execution": key, "timeout": 2})
+        # The control request releases the active operation/question to its next handoff.
+        result = client.call("wait", {"execution": key, "timeout": 30})
         assert result.data["status"] == "cancelled" and not result.is_error
         assert gui.writes == []
 
@@ -339,7 +347,8 @@ def test_question_blocks_new_recipe_and_nonrun_finish_early(tmp_path):
         assert error.value.reason == "not_running"
         assert client.transport.sent == before
         client.call("cancel", {"execution": key})
-        result = client.call("wait", {"execution": key, "timeout": 2})
+        # The control request releases the active operation/question to its next handoff.
+        result = client.call("wait", {"execution": key, "timeout": 30})
         assert result.data["status"] == "cancelled"
 
 
@@ -574,7 +583,8 @@ def test_question_cancel_retains_images_without_rpc_or_writeback(tmp_path, post)
         before = list(client.transport.sent)
         key = question.data["execution"]
         client.call("cancel", {"execution": key})
-        terminal = client.call("wait", {"execution": key, "timeout": 2})
+        # Cancelling the captured question wakes the recipe to its terminal delivery.
+        terminal = client.call("wait", {"execution": key, "timeout": 30})
         assert terminal.data["status"] == "cancelled"
         assert [image.data for image in terminal.images] == [
             image.data for image in question.images

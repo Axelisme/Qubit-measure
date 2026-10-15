@@ -52,49 +52,7 @@ def _make_concrete_adapter() -> BaseAdapter:
         capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)
         exp_cls = MagicMock()
 
-        def make_filename_stem(self, ctx):
-            return "fake_stem"
-
     return _FakeAdapter()
-
-
-def _make_ctx(**kwargs):
-    from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
-
-    from tests.gui.app.measure.remote._helpers import make_ctx
-
-    defaults = dict(
-        parameters=make_ctx().parameters,
-        soc=None,
-        soccfg=None,
-        result_dir="/res",
-        database_path="/db",
-        active_label="label",
-        readiness=ContextReadiness.ACTIVE,
-    )
-    defaults.update(kwargs)
-    return SessionEnv(**defaults)  # type: ignore[arg-type]
-
-
-def test_make_default_save_paths_raises_without_database_path():
-    adapter = _make_concrete_adapter()
-    ctx = _make_ctx(database_path="")
-    with pytest.raises(RuntimeError, match="database_path is required"):
-        adapter.make_default_save_paths(ctx)
-
-
-def test_make_default_save_paths_raises_without_result_dir():
-    adapter = _make_concrete_adapter()
-    ctx = _make_ctx(result_dir="")
-    with pytest.raises(RuntimeError, match="result_dir is required"):
-        adapter.make_default_save_paths(ctx)
-
-
-def test_make_default_save_paths_raises_without_active_label():
-    adapter = _make_concrete_adapter()
-    ctx = _make_ctx(active_label="")
-    with pytest.raises(RuntimeError, match="active_label is required"):
-        adapter.make_default_save_paths(ctx)
 
 
 def test_base_adapter_get_analyze_params_returns_noparams_when_no_params():
@@ -131,9 +89,6 @@ def test_base_adapter_validates_forgotten_real_analyze_params_override():
             capabilities = AdapterCapabilities(analysis=AnalysisMode.FIT)
             exp_cls = MagicMock()
 
-            def make_filename_stem(self, ctx):
-                return "stem"
-
             def analyze(self, req, *, plots: Plots):
                 return NoAnalysisResult()
 
@@ -156,9 +111,6 @@ def test_analyze_params_cls_fallback_when_no_annotation():
     class _UnannotatedAdapter(BaseAdapter):
         capabilities = AdapterCapabilities(analysis=AnalysisMode.FIT)
         exp_cls = MagicMock()
-
-        def make_filename_stem(self, ctx):
-            return "stem"
 
         def get_analyze_params(self, result, ctx):
             return NoAnalyzeParams()

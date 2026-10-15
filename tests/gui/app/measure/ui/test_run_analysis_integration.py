@@ -36,7 +36,7 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.app.measure._components import ResonatorSchema
 from tests.gui.app.measure._form_fakes import configure_form_lookup
-from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
+from tests.gui.app.measure.artifacts._snapshots import with_artifacts
 
 
 def _parameters():
@@ -228,8 +228,8 @@ def test_A2_Analysis_ledger_single_column_folding_and_fixed_bar(
 def test_A3_Writeback_items_show_current_proposed_and_edit(qapp, make_ctrl):
     """Native preview facts retain selection, editing and Apply interactions."""
     from zcu_tools.cfg_model import ConstWaveformCfg, PulseReadoutSpec
-    from zcu_tools.gui.app.measure.services.writeback import WritebackValues
-    from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
+    from zcu_tools.gui.app.measure.writeback import WritebackValues
+    from zcu_tools.gui.app.measure.writeback.widget import WritebackWidget
 
     ctrl = make_ctrl()
     md_item = ParameterWriteback(
@@ -294,10 +294,11 @@ def test_A3_Writeback_items_show_current_proposed_and_edit(qapp, make_ctrl):
         prop = widget.findChildren(QLabel, "writebackProposed")
         assert len(cur) == 3
         assert any("6000.0" in label.text() for label in cur)
-        assert cur[1].text() == cur[2].text() == "—"
+        assert cur[1].text() == cur[2].text() == "new entry"
         assert len(prop) == 3
         assert any("6100.0" in label.text() for label in prop)
-        assert prop[1].text() == prop[2].text() == f"map[{len(proposed)}]"
+        assert prop[1].text() == prop[2].text()
+        assert prop[1].text().endswith(" changes")
         # Every module proposal edits its draft Form, so each row has Edit.
         edits = [
             button
@@ -323,7 +324,7 @@ def test_A3_Writeback_items_show_current_proposed_and_edit(qapp, make_ctrl):
             for dialog in QApplication.topLevelWidgets()
             if isinstance(dialog, QDialog)
             and dialog.isVisible()
-            and dialog.windowTitle().startswith("Edit Value:")
+            and dialog.windowTitle().startswith("Edit value —")
         )
         assert md_dialog is not None
         assert md_dialog.findChild(QLabel, "writebackCurrentReadonly") is not None
@@ -337,7 +338,7 @@ def test_A3_Writeback_items_show_current_proposed_and_edit(qapp, make_ctrl):
 def test_writeback_baseline_captured_via_service(qapp, make_ctrl):
     """The service captures baseline summaries from a fixed ParameterContext."""
     from zcu_tools.cfg_model import ConstWaveformCfg, PulseReadoutSpec
-    from zcu_tools.gui.app.measure.services.writeback import WritebackService
+    from zcu_tools.gui.app.measure.writeback import WritebackService
 
     parameters = _parameters()
     ctrl = make_ctrl()

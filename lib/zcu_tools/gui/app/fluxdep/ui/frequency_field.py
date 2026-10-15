@@ -12,7 +12,7 @@ from collections.abc import Callable
 from qtpy.QtGui import QDoubleValidator, QPalette
 from qtpy.QtWidgets import QLabel, QLineEdit, QVBoxLayout, QWidget
 
-from zcu_tools.gui.widgets.control_indicator import CAUTION_COLOR
+from zcu_tools.gui.widgets import set_foreground, warning_colour
 
 
 class FrequencyField(QWidget):
@@ -39,7 +39,7 @@ class FrequencyField(QWidget):
         self._edit.setValidator(QDoubleValidator())
         self._hint = QLabel(hint_text)
         self._hint.setObjectName(f"{object_name}.required")
-        self._hint.setStyleSheet(f"color: {CAUTION_COLOR};")
+        set_foreground(self._hint, warning_colour(self))
         self._hint.setWordWrap(True)
         self._hint.setHidden(True)
         layout = QVBoxLayout(self)
@@ -68,6 +68,7 @@ class FrequencyField(QWidget):
 
     def mark_needed(self, *, needed: bool) -> bool:
         """Show the hint when needed and the field is blank; return whether it shows."""
+        set_foreground(self._hint, warning_colour(self))
         missing = needed and self.value() is None
         self._hint.setHidden(not missing)
         return missing

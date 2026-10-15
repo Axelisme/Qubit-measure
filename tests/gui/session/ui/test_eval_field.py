@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from qtpy.QtCore import QPoint, QTimer
+from qtpy.QtGui import QPalette
 from qtpy.QtWidgets import (
     QApplication,
     QDoubleSpinBox,
@@ -15,6 +16,7 @@ from qtpy.QtWidgets import (
 from zcu_tools.gui.session.expression import EvalRef
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
+from zcu_tools.gui.widgets import error_colour, mixed_colour
 
 from tests.gui.session.ui._parameter_fakes import make_parameters
 
@@ -50,6 +52,7 @@ def _edit(field: EvalNumericField) -> QLineEdit:
 def _ghost(field: EvalNumericField) -> QLabel:
     ghost = field.findChild(QLabel)
     assert ghost is not None
+    ghost.ensurePolished()
     return ghost
 
 
@@ -75,11 +78,14 @@ def _choose_mode(widget: QWidget, text: str) -> None:
     timeout = QTimer(widget)
     timeout.setSingleShot(True)
     timeout.timeout.connect(close_popup)
-    timeout.start(1000)
+    # The queued chooser closes the real modal menu; this only guards a broken handoff.
+    timeout.start(30_000)
     QTimer.singleShot(0, choose)
-    widget.customContextMenuRequested.emit(QPoint(0, 0))
-    timeout.stop()
-    assert chosen == [text]
+    try:
+        widget.customContextMenuRequested.emit(QPoint(0, 0))
+        assert chosen == [text]
+    finally:
+        timeout.stop()
 
 
 def test_direct_default_read_raw_returns_float(qapp):
@@ -112,15 +118,25 @@ def test_eval_mode_ghost_shows_resolved_value(qapp):
     field.load_expression("0")
     _edit(field).setText("general.ext.flx_int")
     assert _ghost(field).text() == "= 0.5"
-    assert "gray" in _ghost(field).styleSheet()
-    assert "red" not in _ghost(field).styleSheet()
+    assert _ghost(field).palette().color(
+        _ghost(field).foregroundRole()
+    ) == mixed_colour(
+        field.palette().color(QPalette.ColorRole.Text),
+        field.palette().color(QPalette.ColorRole.Window),
+        0.42,
+    )
+    assert _ghost(field).palette().color(
+        _ghost(field).foregroundRole()
+    ) != error_colour(_ghost(field))
 
 
 def test_undefined_name_shows_red_ghost(qapp):
     field = _field(make_parameters({}))
     field.load_expression("general.ext.missing_var")
     assert _ghost(field).text() == "= ?"
-    assert "red" in _ghost(field).styleSheet()
+    assert _ghost(field).palette().color(
+        _ghost(field).foregroundRole()
+    ) == error_colour(_ghost(field))
     assert _ghost(field).toolTip()
 
 
@@ -128,7 +144,9 @@ def test_syntax_error_shows_red_ghost(qapp):
     field = _field(make_parameters({}))
     field.load_expression("general.ext.r_f[")
     assert _ghost(field).text() == "= ?"
-    assert "red" in _ghost(field).styleSheet()
+    assert _ghost(field).palette().color(
+        _ghost(field).foregroundRole()
+    ) == error_colour(_ghost(field))
 
 
 def test_eval_to_direct_carries_resolved_value(qapp):
@@ -190,7 +208,9 @@ def test_no_context_parameter_provider_shows_red_ghost(qapp):
     )
     field.load_expression("general.ext.flx_int")
     assert _ghost(field).text() == "= ?"
-    assert "red" in _ghost(field).styleSheet()
+    assert _ghost(field).palette().color(
+        _ghost(field).foregroundRole()
+    ) == error_colour(_ghost(field))
     assert "no active context" in _ghost(field).toolTip()
 
 
@@ -223,22 +243,34 @@ def test_read_raw_eval_carries_min_max(qapp):
 def test_ghost_above_max_shows_red(qapp):
     field = _field(make_parameters({"x": 200.0}), minimum=0.0, maximum=100.0)
     field.load_expression("general.ext.x")
-    assert "red" in _ghost(field).styleSheet()
+    assert _ghost(field).palette().color(
+        _ghost(field).foregroundRole()
+    ) == error_colour(_ghost(field))
     assert "out of range" in _ghost(field).toolTip()
 
 
 def test_ghost_below_min_shows_red(qapp):
     field = _field(make_parameters({"x": 0.0}), minimum=1e-9)
     field.load_expression("general.ext.x")
-    assert "red" in _ghost(field).styleSheet()
+    assert _ghost(field).palette().color(
+        _ghost(field).foregroundRole()
+    ) == error_colour(_ghost(field))
     assert "out of range" in _ghost(field).toolTip()
 
 
 def test_ghost_in_range_shows_gray(qapp):
     field = _field(make_parameters({"x": 50.0}), minimum=0.0, maximum=100.0)
     field.load_expression("general.ext.x")
-    assert "gray" in _ghost(field).styleSheet()
-    assert "red" not in _ghost(field).styleSheet()
+    assert _ghost(field).palette().color(
+        _ghost(field).foregroundRole()
+    ) == mixed_colour(
+        field.palette().color(QPalette.ColorRole.Text),
+        field.palette().color(QPalette.ColorRole.Window),
+        0.42,
+    )
+    assert _ghost(field).palette().color(
+        _ghost(field).foregroundRole()
+    ) != error_colour(_ghost(field))
     assert _ghost(field).toolTip() == ""
 
 
@@ -258,3 +290,28 @@ def test_context_free_calculation_resolves_but_parameter_path_is_unresolved(qapp
     field.load_expression("qubit.freq")
     assert _ghost(field).text() == "= ?"
     assert _ghost(field).toolTip()
+
+
+@pytest.mark.parametrize("expression", ["unknown_name", "20", "-20"])
+def test_eval_error_uses_theme_foreground(qapp, window_palette, expression):
+    field = _field(minimum=-10, maximum=10)
+    field.setPalette(window_palette)
+    field.load_expression(expression)
+    ghost = _ghost(field)
+    assert ghost.palette().color(ghost.foregroundRole()) == error_colour(ghost)
+    assert ghost.font().italic()
+
+
+def test_eval_success_replaces_error_with_secondary(qapp, window_palette):
+    field = _field(minimum=-10, maximum=10)
+    field.setPalette(window_palette)
+    field.load_expression("unknown_name")
+    field.load_expression("5")
+    ghost = _ghost(field)
+    ghost.ensurePolished()
+    assert ghost.palette().color(ghost.foregroundRole()) == mixed_colour(
+        field.palette().color(QPalette.ColorRole.Text),
+        field.palette().color(QPalette.ColorRole.Window),
+        0.42,
+    )
+    assert ghost.font().italic()

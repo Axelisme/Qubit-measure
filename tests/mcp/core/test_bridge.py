@@ -75,6 +75,8 @@ class _SilentTransport:
         self.closed = True
 
 
+# Each scheduled RPC reaches requests before test-driven reply/disconnect/release.
+# Queue/Future/Event and wire timeouts below are 30s deadlock guards, not speed tests.
 class _ObservedTransport(_SilentTransport):
     """In-process wire peer with explicit request/reply and EOF barriers."""
 
@@ -82,6 +84,7 @@ class _ObservedTransport(_SilentTransport):
         super().__init__()
         self.requests: Queue[dict[str, Any]] = Queue()
         self.release_send = Event()
+        self.send_effects: list[tuple[str, str]] = []
         self._reply: Callable[[dict[str, Any]], None] | None = None
 
     def attach(self, deliver_reply, deliver_event, on_closed) -> None:
@@ -89,11 +92,17 @@ class _ObservedTransport(_SilentTransport):
         self._reply = deliver_reply
 
     def send_line(self, payload: dict[str, Any]) -> None:
-        super().send_line(payload)
-        self.requests.put(payload)
-        if payload["method"] == "failing.send":
-            assert self.release_send.wait(timeout=5)
-            raise ConnectionError("send failed")
+        method = payload["method"]
+        self.send_effects.append(("enter", method))
+        try:
+            super().send_line(payload)
+            self.requests.put(payload)
+            if method == "failing.send":
+                # The test releases this send in finally, including assertion failures.
+                assert self.release_send.wait(timeout=30)
+                raise ConnectionError("send failed")
+        finally:
+            self.send_effects.append(("exit", method))
 
     def reply(self, request: dict[str, Any]) -> None:
         assert self._reply is not None
@@ -280,16 +289,18 @@ def test_launched_child_can_fill_stderr_after_parent_returns(tmp_path: Path) -> 
     script = tmp_path / "scripts" / config.run_script_name
     script.parent.mkdir()
     script.write_text(
-        "import socket, sys, time\n"
+        "import socket, sys\n"
         "from pathlib import Path\n"
         "port = int(sys.argv[sys.argv.index('--control-port') + 1])\n"
         "with socket.socket() as server:\n"
         "    server.bind(('127.0.0.1', port))\n"
         "    server.listen()\n"
-        "    deadline = time.monotonic() + 10\n"
-        "    while not Path('release').exists():\n"
-        "        if time.monotonic() > deadline: raise TimeoutError('release')\n"
-        "        time.sleep(0.01)\n"
+        "    server.settimeout(30)  # Parent sends release after launch returns.\n"
+        "    while True:\n"
+        "        with server.accept()[0] as peer:\n"
+        "            peer.settimeout(30)\n"
+        "            with peer.makefile('rb') as reader:\n"
+        "                if reader.read(7) == b'release': break\n"
         "    sys.stderr.write('warning\\n' * 262144)\n"
         "    sys.stderr.flush()\n"
         "    Path('completed').touch()\n",
@@ -297,10 +308,13 @@ def test_launched_child_can_fill_stderr_after_parent_returns(tmp_path: Path) -> 
     )
     bridge = McpBridge(config)
     try:
-        bridge.launch(tmp_path, _find_free_port(), auto_connect=False)
+        port = _find_free_port()
+        bridge.launch(tmp_path, port, auto_connect=False)
         pid = int(config.pid_file.read_text())
-        (tmp_path / "release").touch()
-        assert bridge.wait_for_gui_exit(pid, timeout=5)
+        # Launch's readiness probe closes an empty connection; this releases stderr.
+        with socket.create_connection(("127.0.0.1", port), timeout=30) as peer:
+            peer.sendall(b"release")
+        assert bridge.wait_for_gui_exit(pid, timeout=30)
         assert (tmp_path / "completed").exists()
     finally:
         if bridge.launched_gui:
@@ -393,7 +407,7 @@ def test_send_rpc_raw_timeout_closes_transport(tmp_path: Path) -> None:
     bridge = McpBridge(_config(tmp_path), transport=transport)
 
     with pytest.raises(GuiTransportTimeoutError) as exc_info:
-        bridge.send_rpc_raw("slow.method", {}, 0.001)
+        bridge.send_rpc_raw("slow.method", {}, 0)
 
     assert exc_info.value.method == "slow.method"
     assert transport.closed is True
@@ -408,19 +422,19 @@ def test_disconnect_releases_all_pending_rpc_without_close_callback(
     bridge = McpBridge(_config(tmp_path), transport=transport)
     with ThreadPoolExecutor(max_workers=2) as pool:
         pending = [
-            pool.submit(bridge.send_rpc_raw, f"slow.{i}", {}, 5) for i in range(2)
+            pool.submit(bridge.send_rpc_raw, f"slow.{i}", {}, 30) for i in range(2)
         ]
-        requests = [transport.requests.get(timeout=1) for _ in pending]
+        requests = [transport.requests.get(timeout=30) for _ in pending]
         try:
             assert bridge.disconnect() == "Disconnected from GUI."
             for result in pending:
                 with pytest.raises(RuntimeError, match="[Dd]isconnect"):
-                    result.result(timeout=1)
+                    result.result(timeout=30)
             assert transport.closed
             assert not bridge.is_connected
             assert bridge.disconnect() == "Not connected."
             with pytest.raises(RuntimeError, match="not connected"):
-                bridge.send_rpc_raw("after.disconnect", {}, 5)
+                bridge.send_rpc_raw("after.disconnect", {}, 30)
         finally:
             for request in requests:
                 transport.reply(request)
@@ -431,16 +445,16 @@ def test_disconnect_does_not_overwrite_a_delivered_reply(tmp_path: Path) -> None
     transport = _ObservedTransport()
     bridge = McpBridge(_config(tmp_path), transport=transport)
     with ThreadPoolExecutor(max_workers=2) as pool:
-        completed = pool.submit(bridge.send_rpc_raw, "finished", {}, 5)
-        finished_request = transport.requests.get(timeout=1)
-        waiting = pool.submit(bridge.send_rpc_raw, "waiting", {}, 5)
-        waiting_request = transport.requests.get(timeout=1)
+        completed = pool.submit(bridge.send_rpc_raw, "finished", {}, 30)
+        finished_request = transport.requests.get(timeout=30)
+        waiting = pool.submit(bridge.send_rpc_raw, "waiting", {}, 30)
+        waiting_request = transport.requests.get(timeout=30)
         try:
             transport.reply(finished_request)
             bridge.disconnect()
-            assert completed.result(timeout=1)["result"] == "finished"
+            assert completed.result(timeout=30)["result"] == "finished"
             with pytest.raises(RuntimeError, match="[Dd]isconnect"):
-                waiting.result(timeout=1)
+                waiting.result(timeout=30)
         finally:
             transport.reply(waiting_request)
             bridge.disconnect()
@@ -453,8 +467,8 @@ def test_transport_failure_releases_other_pending_rpc(
     transport = _ObservedTransport()
     bridge = McpBridge(_config(tmp_path), transport=transport)
     with ThreadPoolExecutor(max_workers=1) as pool:
-        waiting = pool.submit(bridge.send_rpc_raw, "waiting", {}, 5)
-        waiting_request = transport.requests.get(timeout=1)
+        waiting = pool.submit(bridge.send_rpc_raw, "waiting", {}, 30)
+        waiting_request = transport.requests.get(timeout=30)
         try:
             if cause == "eof":
                 transport.unexpected_close()
@@ -464,9 +478,9 @@ def test_transport_failure_releases_other_pending_rpc(
             else:
                 transport.release_send.set()
                 with pytest.raises(ConnectionError, match="send failed"):
-                    bridge.send_rpc_raw("failing.send", {}, 5)
+                    bridge.send_rpc_raw("failing.send", {}, 30)
             with pytest.raises((RuntimeError, ConnectionError)):
-                waiting.result(timeout=1)
+                waiting.result(timeout=30)
             assert not bridge.is_connected
             assert transport.closed
         finally:
@@ -481,20 +495,20 @@ def test_transport_replacement_settles_old_rpc_and_ignores_retired_callbacks(
     bridge = McpBridge(_config(tmp_path), transport=old)
     new = _ObservedTransport()
     with ThreadPoolExecutor(max_workers=2) as pool:
-        old_rpc = pool.submit(bridge.send_rpc_raw, "old", {}, 5)
-        old_request = old.requests.get(timeout=1)
+        old_rpc = pool.submit(bridge.send_rpc_raw, "old", {}, 30)
+        old_request = old.requests.get(timeout=30)
         new_request = None
         try:
             bridge.set_transport(new)
             with pytest.raises(RuntimeError, match="[Dd]isconnect"):
-                old_rpc.result(timeout=1)
-            new_rpc = pool.submit(bridge.send_rpc_raw, "new", {}, 5)
-            new_request = new.requests.get(timeout=1)
+                old_rpc.result(timeout=30)
+            new_rpc = pool.submit(bridge.send_rpc_raw, "new", {}, 30)
+            new_request = new.requests.get(timeout=30)
             old.unexpected_close()
             old.reply(old_request)
             assert not new_rpc.done()
             new.reply(new_request)
-            assert new_rpc.result(timeout=1)["result"] == "new"
+            assert new_rpc.result(timeout=30)["result"] == "new"
             assert bridge.is_connected
         finally:
             old.reply(old_request)
@@ -509,21 +523,27 @@ def test_retired_send_failure_does_not_disconnect_replacement(tmp_path: Path) ->
     bridge = McpBridge(_config(tmp_path), transport=old)
     new = _ObservedTransport()
     with ThreadPoolExecutor(max_workers=2) as pool:
-        old_rpc = pool.submit(bridge.send_rpc_raw, "failing.send", {}, 5)
-        old.requests.get(timeout=1)
+        old_rpc = pool.submit(bridge.send_rpc_raw, "failing.send", {}, 30)
         new_request = None
         try:
+            old.requests.get(timeout=30)
+            assert old.send_effects == [("enter", "failing.send")]
+            assert not old_rpc.done()
             bridge.set_transport(new)
-            new_rpc = pool.submit(bridge.send_rpc_raw, "new", {}, 5)
-            new_request = new.requests.get(timeout=1)
+            new_rpc = pool.submit(bridge.send_rpc_raw, "new", {}, 30)
+            new_request = new.requests.get(timeout=30)
             old.release_send.set()
             with pytest.raises(ConnectionError, match="send failed"):
-                old_rpc.result(timeout=1)
+                old_rpc.result(timeout=30)
+            assert old.send_effects == [
+                ("enter", "failing.send"),
+                ("exit", "failing.send"),
+            ]
             old.unexpected_close()
             assert not new_rpc.done()
             assert bridge.is_connected
             new.reply(new_request)
-            assert new_rpc.result(timeout=1)["result"] == "new"
+            assert new_rpc.result(timeout=30)["result"] == "new"
         finally:
             old.release_send.set()
             old.close()
@@ -573,7 +593,7 @@ def _attach_peer(bridge: McpBridge, listener: socket.socket) -> socket.socket:
     bridge.set_transport(transport)
     transport.open(listener.getsockname()[1])
     peer, _ = listener.accept()
-    peer.settimeout(3)
+    peer.settimeout(30)
     return peer
 
 
@@ -585,7 +605,7 @@ def wire_bridge(
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         listener.bind(("127.0.0.1", 0))
         listener.listen()
-        listener.settimeout(3)
+        listener.settimeout(30)
         try:
             with _attach_peer(bridge, listener) as peer:
                 yield bridge, listener, peer
@@ -600,11 +620,11 @@ def _read_request(peer: socket.socket) -> dict[str, Any]:
 
 def _assert_small_rpc(bridge: McpBridge, peer: socket.socket) -> None:
     with ThreadPoolExecutor(max_workers=1) as worker:
-        reply = worker.submit(bridge.send_rpc_raw, "small", {}, 3)
+        reply = worker.submit(bridge.send_rpc_raw, "small", {}, 30)
         request = _read_request(peer)
         assert request["method"] == "small"
         peer.sendall(encode_line({"id": request["id"], "ok": True, "result": 42}))
-        assert reply.result(timeout=3)["result"] == 42
+        assert reply.result(timeout=30)["result"] == 42
 
 
 @pytest.mark.requires_loopback
@@ -614,7 +634,7 @@ def test_oversized_request_is_not_sent_and_connection_remains_usable(
     bridge, _, peer = wire_bridge
     # UTF-8 bytes, not character count. This exceeds the budget only after encoding.
     with pytest.raises(GuiMessageTooLargeError, match="request.*not sent") as caught:
-        bridge.send_rpc_raw("mutate", {"value": "é" * (MAX_LINE_BYTES // 2)}, 3)
+        bridge.send_rpc_raw("mutate", {"value": "é" * (MAX_LINE_BYTES // 2)}, 30)
     assert caught.value.reason == "message_too_large"
     assert bridge.is_connected
     # The first actual wire request is small; mutate was not partially transmitted.
@@ -627,7 +647,7 @@ def test_exact_limit_response_and_following_frames_remain_usable(
 ) -> None:
     bridge, _, peer = wire_bridge
     with ThreadPoolExecutor(max_workers=1) as worker:
-        reply = worker.submit(bridge.send_rpc_raw, "large", {}, 5)
+        reply = worker.submit(bridge.send_rpc_raw, "large", {}, 30)
         request = _read_request(peer)
         response = {"id": request["id"], "ok": True, "result": ""}
         overhead = len(encode_line(response)) - 1
@@ -635,7 +655,7 @@ def test_exact_limit_response_and_following_frames_remain_usable(
         peer.sendall(
             encode_line(response) + encode_line({"event": "notice", "payload": {}})
         )
-        assert reply.result(timeout=5) == response
+        assert reply.result(timeout=30) == response
     assert bridge.is_connected
     _assert_small_rpc(bridge, peer)
 
@@ -647,7 +667,7 @@ def test_oversized_response_fails_explicitly_and_reconnect_does_not_replay(
 ) -> None:
     bridge, listener, peer = wire_bridge
     with ThreadPoolExecutor(max_workers=1) as worker:
-        reply = worker.submit(bridge.send_rpc_raw, "mutate", {}, 5)
+        reply = worker.submit(bridge.send_rpc_raw, "mutate", {}, 30)
         request = _read_request(peer)
         assert request["method"] == "mutate"
         # Exercise a coalesced preceding frame as well as a fragmented oversized frame.
@@ -662,7 +682,7 @@ def test_oversized_response_fails_explicitly_and_reconnect_does_not_replay(
         with pytest.raises(
             GuiMessageTooLargeError, match="response.*may have executed"
         ):
-            reply.result(timeout=5)
+            reply.result(timeout=30)
     assert not bridge.is_connected
     bridge.disconnect()
     with _attach_peer(bridge, listener) as recovered:

@@ -2,10 +2,12 @@
 
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
+from zcu_tools.mcp.measure import tools_operation
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._support import MeasureClient, WireTransport, make_client
@@ -758,9 +760,13 @@ def test_device_setup_reports_native_terminal_outcome_and_snapshots(
 
 @pytest.mark.parametrize("bound", [300], ids=["bounded-300"])
 def test_device_setup_timeout_retains_handle_without_cancellation(
-    complete_setup_client, bound
+    complete_setup_client, bound, monkeypatch
 ):
     client, gui = complete_setup_client
+    # Control elapsed time without changing the real wait/handle/cancel logic.
+    monkeypatch.setattr(
+        tools_operation, "time", SimpleNamespace(monotonic=lambda: 100.0)
+    )
     gui.wait_reason = "timeout"
     result = client.call("device_setup", {"name": "fake_flux", "cfg": {"value": 1}})
     assert not result.is_error
@@ -773,7 +779,7 @@ def test_device_setup_timeout_retains_handle_without_cancellation(
         if method == "operation.await"
     ]
     assert len(waits) == 1 and waits[0]["timeout"] == bound
-    assert result.data["operation"]["elapsed_s"] < 1
+    assert result.data["operation"]["elapsed_s"] == 0
     gui.wait_reason = "completed"
     assert (
         client.call("wait", {"op": result.data["op"], "timeout": 0})["status"]

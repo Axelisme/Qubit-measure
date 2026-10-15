@@ -1,6 +1,8 @@
 """Typed native persistence contracts with single and heterogeneous grouped specs."""
 
 import json
+import warnings
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import ClassVar, Literal
@@ -8,11 +10,14 @@ from typing import ClassVar, Literal
 import h5py as h5
 import numpy as np
 import pytest
+import zcu_tools.experiment as experiment_api
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 from zcu_tools.datafile import (
+    CfgSnapshot,
     DataVariable,
+    LabberPayload,
+    StoredRun,
     decode_labber_comment,
-    load_grouped_labber_data,
     load_labber_data,
     load_run_data,
     save_run_data,
@@ -229,11 +234,9 @@ def test_specs_reject_invalid_cfg_schema_versions_at_declaration(version: str) -
     "attribute,value",
     [
         ("experiment", "unknown/tag"),
-        ("cfg_type", "UnknownCfg"),
-        ("cfg_schema_version", "4.0"),
     ],
 )
-def test_typed_load_rejects_wrong_identity_and_cfg_major(
+def test_typed_load_rejects_wrong_experiment_identity(
     tmp_path: Path, attribute: str, value: str
 ) -> None:
     path = tmp_path / "wrong.h5"
@@ -268,44 +271,14 @@ def test_same_major_nested_unknown_cfg_is_projected_but_before_validator_sees_ra
         hdf_dataset(file, "cfg")[()] = json.dumps(raw)
     assert load_run_data(path).cfg.values == raw
     if forbidden:
-        with pytest.raises(ValidationError, match="before validator observed"):
-            load_run(path, spec=SINGLE)
+        with pytest.warns(UserWarning, match="before validator observed"):
+            loaded, _ = load_run(path, spec=SINGLE)
+        assert loaded.cfg is None
+        np.testing.assert_allclose(loaded.result.signal, record.result.signal)
     else:
         loaded, snapshot = load_run(path, spec=SINGLE)
         assert loaded.cfg == record.cfg
         assert snapshot == native_metadata(SINGLE.tag).snapshot
-
-
-def test_shared_base_grouped_labber_entry_remains_separate_from_native(
-    tmp_path: Path,
-) -> None:
-    spec = GroupedAxesSpec(
-        variables=(GROUPED.variables[0],),
-        result_type=SingleResult,
-        cfg_type=NativeCfg,
-        tag="test/one-group",
-        result_builder=lambda data: SingleResult(
-            data.variable("resonator").axes[0], data.variable("resonator").z
-        ),
-    )
-
-    class OneGroupedExperiment(PersistableExperiment[SingleResult, NativeCfg]):
-        AXES_SPEC: ClassVar = spec
-
-    record = RunRecord(
-        cfg=NativeCfg(),
-        result=SingleResult(np.array([4000.0, 5000.0]), np.array([2 + 3j, 4 - 5j])),
-    )
-    experiment = OneGroupedExperiment()
-    path = tmp_path / "grouped.hdf5"
-    experiment.save(record, path)
-    loaded = experiment.load(path)
-    assert loaded.cfg == record.cfg
-    np.testing.assert_array_equal(loaded.result.frequency, record.result.frequency)
-    np.testing.assert_allclose(loaded.result.signal, record.result.signal)
-    assert tuple(load_grouped_labber_data(str(path)).variables) == (
-        DataVariable("resonator"),
-    )
 
 
 def test_prepare_single_data_feeds_both_formats_with_same_cfg_and_comment(
@@ -531,4 +504,304 @@ def test_typed_load_selects_declared_variables_and_ignores_extra_variable(
     )
     save_run_data(path, missing, stored.metadata, cfg=stored.cfg, replace=True)
     with pytest.raises(ValueError, match="resonator"):
+        load_run(path, spec=SINGLE)
+
+
+@pytest.fixture(params=[False, True], ids=["single", "grouped"])
+def restorable_run(
+    request: pytest.FixtureRequest,
+) -> tuple[
+    StoredRun,
+    AxesSpec[SingleResult, NativeCfg] | GroupedAxesSpec[SingleResult, NativeCfg],
+]:
+    spec = SINGLE
+    if request.param:
+        spec = GroupedAxesSpec(
+            variables=(GROUPED.variables[0],),
+            result_type=SingleResult,
+            cfg_type=NativeCfg,
+            tag=SINGLE.tag,
+            result_builder=lambda data: SingleResult(
+                data.variable("resonator").axes[0], data.variable("resonator").z
+            ),
+            cfg_schema_version=SINGLE.cfg_schema_version,
+        )
+    record = RunRecord(
+        cfg=NativeCfg(),
+        result=SingleResult(np.array([4000.0, 5000.0]), np.array([2 + 3j, 4 - 5j])),
+    )
+    prepared = prepare_run_data(record, spec=spec, comment="historical raw text")
+    metadata = replace(
+        native_metadata(spec.tag), device_snapshot={"synthetic": {"value": 0.25}}
+    )
+    return StoredRun(
+        payload=prepared.payload, metadata=metadata, cfg=prepared.cfg, extensions=None
+    ), spec
+
+
+def incompatible_cfg(cfg: CfgSnapshot, issue: str) -> CfgSnapshot:
+    """Prepare the historical cfg defects shared by memory and file restore."""
+    if issue == "cfg_type":
+        return replace(cfg, cfg_type="RetiredCfg")
+    if issue == "schema":
+        return replace(cfg, schema_version="4.0")
+    if issue == "nested.count":
+        return replace(cfg, values={"nested": {"count": "bad"}})
+    raise ValueError(f"Unknown cfg defect: {issue}")
+
+
+@pytest.mark.parametrize("issue", [None, "cfg_type", "schema", "nested.count"])
+def test_restore_keeps_data_and_raw_history_when_typed_cfg_is_unavailable(
+    restorable_run: tuple[
+        StoredRun,
+        AxesSpec[SingleResult, NativeCfg] | GroupedAxesSpec[SingleResult, NativeCfg],
+    ],
+    issue: str | None,
+) -> None:
+    stored, spec = restorable_run
+    if issue is not None:
+        stored = replace(stored, cfg=incompatible_cfg(stored.cfg, issue))
+    else:
+        stored = replace(stored, cfg=replace(stored.cfg, schema_version="3.9"))
+        stored.cfg.values["future"] = {"unknown": [1, None]}
+    original_cfg, original_metadata = deepcopy(stored.cfg), deepcopy(stored.metadata)
+    assert hasattr(experiment_api, "restore_run"), "public in-memory restore is missing"
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        restored = experiment_api.restore_run(stored, spec=spec)
+    np.testing.assert_array_equal(restored.record.result.frequency, [4000.0, 5000.0])
+    np.testing.assert_allclose(restored.record.result.signal, [2 + 3j, 4 - 5j])
+    assert stored.cfg == original_cfg
+    assert stored.metadata == original_metadata
+    if issue is None:
+        assert restored.record.cfg == NativeCfg()
+        assert restored.cfg_issue is None
+        assert caught == []
+    else:
+        assert restored.record.cfg is None
+        assert restored.cfg_issue is not None and issue in restored.cfg_issue
+        assert len(caught) == 1
+        assert caught[0].category is experiment_api.CfgUnavailableWarning
+        assert str(caught[0].message) == restored.cfg_issue
+        with pytest.raises(ValueError, match="cfg"):
+            prepare_run_data(restored.record, spec=spec, comment="")
+
+
+@pytest.mark.parametrize("issue", ["cfg_type", "schema", "nested.count"])
+def test_native_wrappers_share_cfg_fallback_and_keep_tuple_history(
+    tmp_path: Path,
+    restorable_run: tuple[
+        StoredRun,
+        AxesSpec[SingleResult, NativeCfg] | GroupedAxesSpec[SingleResult, NativeCfg],
+    ],
+    issue: str,
+) -> None:
+    stored, spec = restorable_run
+    cfg = incompatible_cfg(stored.cfg, issue)
+    path = tmp_path / "history.h5"
+    save_run_data(path, stored.payload, stored.metadata, cfg=cfg)
+    with pytest.warns(UserWarning, match=issue):
+        record, metadata = load_run_with_metadata(path, spec=spec)
+    with pytest.warns(UserWarning, match=issue):
+        old_record, snapshot = load_run(path, spec=spec)
+    assert metadata == stored.metadata
+    assert snapshot == stored.metadata.snapshot
+    assert record.cfg is old_record.cfg is None
+    np.testing.assert_allclose(record.result.signal, [2 + 3j, 4 - 5j])
+    np.testing.assert_array_equal(record.result.signal, old_record.result.signal)
+    assert load_run_data(path).cfg == cfg
+
+
+def test_instance_from_stored_returns_the_shared_restore_result(
+    restorable_run: tuple[
+        StoredRun,
+        AxesSpec[SingleResult, NativeCfg] | GroupedAxesSpec[SingleResult, NativeCfg],
+    ],
+) -> None:
+    stored, spec = restorable_run
+
+    class Experiment(PersistableExperiment[SingleResult, NativeCfg]):
+        AXES_SPEC: ClassVar = spec
+
+    core = Experiment()
+    assert hasattr(core, "from_stored"), "instance in-memory restore is missing"
+    restored = core.from_stored(stored)
+    assert restored.cfg_issue is None
+    assert restored.record.cfg == NativeCfg()
+    np.testing.assert_array_equal(restored.record.result.frequency, [4000.0, 5000.0])
+    np.testing.assert_allclose(restored.record.result.signal, [2 + 3j, 4 - 5j])
+
+
+@pytest.mark.parametrize(
+    "defect", ["tag", "variable", "axis", "unit", "dtype", "shape"]
+)
+def test_restore_rejects_bad_data_before_downgrading_cfg(
+    restorable_run: tuple[
+        StoredRun,
+        AxesSpec[SingleResult, NativeCfg] | GroupedAxesSpec[SingleResult, NativeCfg],
+    ],
+    defect: str,
+) -> None:
+    stored, spec = restorable_run
+    stored = replace(stored, cfg=replace(stored.cfg, cfg_type="RetiredCfg"))
+    wire = stored.payload.variables[DataVariable("resonator")]
+    axes = [(axis.name, axis.unit, axis.values) for axis in wire.axes]
+    name, unit, values = wire.data
+    if defect == "tag":
+        stored = replace(stored, metadata=replace(stored.metadata, experiment="wrong"))
+    elif defect == "variable":
+        stored = replace(stored, payload=replace(stored.payload, variables={}))
+    else:
+        if defect == "axis":
+            axes[0] = ("Wrong", axes[0][1], axes[0][2])
+        elif defect == "unit":
+            unit = "A"
+        elif defect == "dtype":
+            values = np.array(["bad", "data"])
+        else:
+            values = np.array([1j])
+        stored = replace(
+            stored,
+            payload=replace(
+                stored.payload,
+                variables={
+                    DataVariable("resonator"): LabberPayload(
+                        (name, unit, values), axes=axes
+                    )
+                },
+            ),
+        )
+    assert hasattr(experiment_api, "restore_run"), "public in-memory restore is missing"
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with pytest.raises((ValueError, TypeError)):
+            experiment_api.restore_run(stored, spec=spec)
+    assert caught == []
+
+
+class UnexpectedValidatorCfg(ExpCfgModel):
+    @model_validator(mode="before")
+    @classmethod
+    def fail_unexpectedly(cls, _data: object) -> object:
+        raise RuntimeError("unexpected typed cfg validator failure")
+
+
+@dataclass
+class RejectedResult(SingleResult):
+    def __post_init__(self) -> None:
+        raise ValueError("single constructor rejected data")
+
+
+@pytest.fixture
+def cfg_validator_failure_stored() -> StoredRun:
+    prepared = prepare_run_data(
+        RunRecord(
+            cfg=NativeCfg(),
+            result=SingleResult(np.array([4000.0]), np.array([1j])),
+        ),
+        spec=SINGLE,
+        comment="historical",
+    )
+    return StoredRun(
+        payload=prepared.payload,
+        metadata=native_metadata(SINGLE.tag),
+        cfg=replace(prepared.cfg, cfg_type=UnexpectedValidatorCfg.__name__),
+        extensions=None,
+    )
+
+
+@pytest.mark.parametrize(
+    "rejection",
+    [
+        "single_constructor",
+        "grouped_builder",
+        "grouped_result_type",
+        "grouped_validator",
+    ],
+)
+def test_restore_result_rejection_precedes_typed_cfg_validation(
+    cfg_validator_failure_stored: StoredRun, rejection: str
+) -> None:
+    def build(data: GroupedLoadData[UnexpectedValidatorCfg]) -> SingleResult:
+        if rejection == "grouped_builder":
+            raise ValueError("grouped builder rejected data")
+        variable = data.variable("resonator")
+        return SingleResult(variable.axes[0], variable.z)
+
+    def validate(result: SingleResult) -> None:
+        raise ValueError("grouped validator rejected data")
+
+    spec: (
+        AxesSpec[SingleResult, UnexpectedValidatorCfg]
+        | GroupedAxesSpec[SingleResult, UnexpectedValidatorCfg]
+    )
+    if rejection == "single_constructor":
+        spec = AxesSpec(
+            axes=SINGLE.axes,
+            z=SINGLE.z,
+            result_type=RejectedResult,
+            cfg_type=UnexpectedValidatorCfg,
+            tag=SINGLE.tag,
+            data_variable=SINGLE.data_variable,
+            cfg_schema_version=SINGLE.cfg_schema_version,
+        )
+        error_type, message = ValueError, "single constructor rejected data"
+    else:
+        spec = GroupedAxesSpec(
+            variables=(GROUPED.variables[0],),
+            result_type=RejectedResult
+            if rejection == "grouped_result_type"
+            else SingleResult,
+            cfg_type=UnexpectedValidatorCfg,
+            tag=SINGLE.tag,
+            result_builder=build,
+            result_validator=validate if rejection == "grouped_validator" else None,
+            cfg_schema_version=SINGLE.cfg_schema_version,
+        )
+        error_type = TypeError if rejection == "grouped_result_type" else ValueError
+        message = {
+            "grouped_builder": "grouped builder rejected data",
+            "grouped_result_type": "builder must return RejectedResult",
+            "grouped_validator": "grouped validator rejected data",
+        }[rejection]
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with pytest.raises(error_type, match=message):
+            experiment_api.restore_run(cfg_validator_failure_stored, spec=spec)
+    assert caught == []
+
+
+def test_restore_valid_data_propagates_unexpected_cfg_validator_failure(
+    restorable_run: tuple[
+        StoredRun,
+        AxesSpec[SingleResult, NativeCfg] | GroupedAxesSpec[SingleResult, NativeCfg],
+    ],
+) -> None:
+    stored, spec = restorable_run
+    stored = replace(
+        stored, cfg=replace(stored.cfg, cfg_type=UnexpectedValidatorCfg.__name__)
+    )
+    with pytest.raises(RuntimeError, match="unexpected typed cfg validator failure"):
+        experiment_api.restore_run(
+            stored, spec=replace(spec, cfg_type=UnexpectedValidatorCfg)
+        )
+
+
+@pytest.mark.parametrize("defect", ["missing", "json", "envelope"])
+def test_native_load_rejects_malformed_cfg_instead_of_falling_back(
+    tmp_path: Path, defect: str
+) -> None:
+    path = tmp_path / "malformed.h5"
+    record = RunRecord(
+        cfg=NativeCfg(), result=SingleResult(np.array([4000.0]), np.array([1j]))
+    )
+    save_run(record, path, spec=SINGLE, metadata=native_metadata(SINGLE.tag))
+    with h5.File(path, "r+") as file:
+        if defect == "missing":
+            del file["cfg"]
+        elif defect == "json":
+            hdf_dataset(file, "cfg")[()] = "{invalid"
+        else:
+            file["cfg"].attrs["cfg_schema_version"] = "invalid"
+    with pytest.raises(ValueError, match="cfg|JSON"):
         load_run(path, spec=SINGLE)

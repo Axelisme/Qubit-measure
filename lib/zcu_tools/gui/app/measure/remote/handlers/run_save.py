@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
-from zcu_tools.experiment.run_saving import ArtifactRef
+from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.gui.app.measure.services.form_contracts import CfgPreconditionError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.context_types import CommandOrigin

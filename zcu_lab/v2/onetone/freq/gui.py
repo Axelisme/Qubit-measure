@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from numbers import Integral, Real
@@ -16,7 +15,6 @@ from zcu_tools.gui.app.measure.adapter import (
     ParameterWriteback,
     ParamMeta,
     RunRequest,
-    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -300,6 +298,3 @@ class OneToneFreqAdapter(
             )
         )
         return items
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return f"{ctx.res_name}_freq_{time.strftime('%m%d')}"

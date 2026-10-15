@@ -1,6 +1,6 @@
 # cfg_model — 共享配置核心
 
-**Last updated:** 2026-10-15，平鋪 Readout 與 runtime ADC matching
+**Last updated:** 2026-10-16，數字 mux Readout
 
 `cfg_model` 提供不含執行行為或 I/O 的配置模型與具名依賴契約。
 Caller 從 package root import 公開名稱。
@@ -11,6 +11,7 @@ Caller 從 package root import 公開名稱。
 - `ModuleSpec`／`WaveformSpec` 表示持久候選，保留具體 key 的 child 引用。兩個 `spec_from_raw` 入口驗證持久值，不查 library 或 assets，不將 runtime 資訊轉成字串。
 - `ModuleCfg`／`WaveformCfg` 表示已展開的執行參數。它們只提供欄位驗證與 `set_param`，不建立 program runtime 物件。
 - `readout/pulse` 獨立持有平鋪的 generator／ADC 欄位與 waveform。唯一 `freq` 同時供 generator／ADC 使用，waveform 仍可引用 key。Readout 不引用 Pulse，也沒有 DirectReadout；Reset 的 Pulse 引用保持不變。Pulse cfg 不保存 `ro_ch`，ADC matching 由 program runtime 提供。
+- `readout/mux` 的持久 Spec 與數字 cfg 共用驗證。Module 明填 generator、Nyquist zone 與 mixer；有序的 1 至 8 筆 tones 各自保存頻率、gain、phase 與 logical ADC channel。時間使用共用 const duration 與 ADC window，不含 waveform、逐 tone 引用或 sweep。整個 module 可透過固定 snapshot 的 key materialize；`set_param` 拒絕更新，caller 必須重建數字 cfg 與 program。
 - `CfgInputMap`／`CfgInputValue` 是 factory 的未驗證唯讀輸入，接受 recursive mapping／sequence 與 `ConfigBase` token。具體 factory 仍按自己的 schema 驗證，不因 token 已是 model 就信任它。
 - 兩個 cfg factory 透過 `CfgValidationContext` 注入 `ModuleResolver` 與 `WaveformAssetInfo`。單次 materialization 共用引用鏈，錯誤保留 root、chain 與期望 family；既有 cfg child 也重新驗證。
 - Scalar leaf 由 Spec／Cfg 共用。純 Spec 驗證拒絕 composite runtime cfg、QICK sweep、complex、array，以及已綁定資產的 arb leaf。

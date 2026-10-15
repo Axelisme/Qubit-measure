@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,7 +13,6 @@ from zcu_tools.gui.app.measure.adapter import (
     ParameterWriteback,
     ParamMeta,
     RunRequest,
-    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -109,7 +107,3 @@ class LookbackAdapter(
                 proposed_value=req.analyze_result.predict_offset,
             )
         ]
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        del ctx
-        return f"lookback_{time.strftime('%H%M')}"

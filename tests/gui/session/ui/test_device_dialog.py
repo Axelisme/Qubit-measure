@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QEventLoop, QTimer
+from PyQt6.QtCore import QObject, pyqtSignal
+from qtpy.QtGui import QColor
 from qtpy.QtWidgets import (
     QComboBox,
     QFormLayout,
@@ -32,6 +34,7 @@ from zcu_tools.gui.session.services.device import (
 )
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
+from zcu_tools.gui.widgets import error_colour
 
 from tests.gui.session.ui._parameter_fakes import make_parameters
 
@@ -74,10 +77,49 @@ def _field[T: QWidget](root: QWidget, label: str, kind: type[T]) -> T:
     raise AssertionError(f"No field labelled {label!r}")
 
 
-def _wait_for_poll() -> None:
-    loop = QEventLoop()
-    QTimer.singleShot(1200, loop.quit)
-    loop.exec()
+class _PollTimer(QObject):
+    """Control the external repeating timer, retaining real Qt timeout delivery."""
+
+    timeout = pyqtSignal()
+
+    def __init__(self, parent: QObject) -> None:
+        super().__init__(parent)
+        self.running = False
+
+    def setInterval(self, milliseconds: int) -> None:
+        """Accept the production interval without scheduling wall-clock work."""
+        assert milliseconds > 0
+
+    def isActive(self) -> bool:
+        return self.running
+
+    def start(self) -> None:
+        self.running = True
+
+    def stop(self) -> None:
+        self.running = False
+
+    def tick(self) -> None:
+        """Deliver one tick only while the dialog has enabled polling."""
+        if self.running:
+            self.timeout.emit()
+
+
+@pytest.fixture
+def poll_timers(monkeypatch: pytest.MonkeyPatch):
+    timers: list[_PollTimer] = []
+
+    def create(parent: QObject) -> _PollTimer:
+        timer = _PollTimer(parent)
+        timers.append(timer)
+        return timer
+
+    monkeypatch.setattr("zcu_tools.gui.session.ui.device_dialog.QTimer", create)
+    try:
+        yield timers
+    finally:
+        for timer in timers:
+            timer.stop()
 
 
 def _entry(
@@ -348,7 +390,7 @@ def test_device_changed_surfaces_device_when_none_selected(qapp):
     assert item.text().removeprefix("● ") == "fd (FakeDevice)"
 
 
-def test_poll_tick_polls_selected_device(qapp):
+def test_poll_tick_polls_selected_device(qapp, poll_timers):
     """Each tick asks the controller to off-main poll the *selected* device."""
     from zcu_tools.device.fake import FakeDeviceInfo
 
@@ -359,16 +401,37 @@ def test_poll_tick_polls_selected_device(qapp):
     )
 
     dialog = _make_dialog(ctrl)
+    (timer,) = poll_timers
     try:
         _listing(dialog).setCurrentRow(1)  # select "B"
+        timer.tick()
+        ctrl.try_poll_device_info.assert_not_called()
         dialog.show()
-        _wait_for_poll()
-        ctrl.try_poll_device_info.assert_called_with("B")
+        timer.tick()
+        ctrl.try_poll_device_info.assert_called_once_with("B")
+        ctrl.try_poll_device_info.reset_mock()
+        _listing(dialog).setCurrentRow(0)
+        timer.tick()
+        ctrl.try_poll_device_info.assert_called_once_with("A")
+        ctrl.try_poll_device_info.reset_mock()
+        _listing(dialog).setCurrentRow(-1)
+        timer.tick()
+        ctrl.try_poll_device_info.assert_not_called()
+        _listing(dialog).setCurrentRow(1)
+        dialog.hide()
+        timer.tick()
+        ctrl.try_poll_device_info.assert_not_called()
+        dialog.show()
+        timer.tick()
+        ctrl.try_poll_device_info.assert_called_once_with("B")
     finally:
         dialog.close()
+    ctrl.try_poll_device_info.reset_mock()
+    timer.tick()
+    ctrl.try_poll_device_info.assert_not_called()
 
 
-def test_poll_tick_polls_selected_setting_up_device(qapp):
+def test_poll_tick_polls_selected_setting_up_device(qapp, poll_timers):
     """Auto poll still asks for a best-effort refresh while the selected device
     is setting up; the synchronous Refresh button can remain disabled."""
     from zcu_tools.device.fake import FakeDeviceInfo
@@ -391,9 +454,10 @@ def test_poll_tick_polls_selected_setting_up_device(qapp):
         assert _button(dialog, "Refresh").isEnabled() is False
 
         dialog.show()
-        _wait_for_poll()
+        (timer,) = poll_timers
+        timer.tick()
 
-        ctrl.try_poll_device_info.assert_called_with("fd")
+        ctrl.try_poll_device_info.assert_called_once_with("fd")
     finally:
         dialog.close()
 
@@ -1016,3 +1080,94 @@ def test_device_hint_hides_when_a_device_is_listed(qapp):
         assert hint is not None and not hint.isVisibleTo(dialog)
     finally:
         dialog.close()
+
+
+@pytest.mark.parametrize("failure", ["provider", "expression", "bounds", "snapshot"])
+def test_device_error_uses_theme_foreground(qapp, window_palette, failure):
+    from zcu_tools.device.fake import FakeDeviceInfo
+
+    ctrl = _make_ctrl_with_parameters()
+    ctrl.list_devices.return_value = [_entry("fd")]
+    info = FakeDeviceInfo(address="none")
+    ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
+    ctrl.get_device_info.return_value = info
+    dialog = _make_dialog(ctrl)
+    try:
+        dialog.setPalette(window_palette)
+        if failure == "snapshot":
+            ctrl.get_device_snapshot.return_value = DeviceSnapshot(
+                name="fd",
+                type_name="FakeDevice",
+                address="none",
+                status=DeviceStatus.CONNECTED,
+                info=info,
+                error="snapshot failed",
+            )
+        _listing(dialog).setCurrentRow(0)
+        if failure == "snapshot":
+            ctrl.get_bus().emit(DeviceChangedPayload(name="fd"))
+        else:
+            if failure == "provider":
+                ctrl.read_context.side_effect = RuntimeError("capture failed")
+            expression = "1e100" if failure == "bounds" else "unknown_name"
+            _field(_panel(dialog), "Value:", EvalNumericField).load_expression(
+                expression
+            )
+            _apply_button(dialog).click()
+        label = next(
+            label
+            for label in dialog.findChildren(QLabel)
+            if label.text().startswith("fd:") or label.text() == "snapshot failed"
+        )
+        label.ensurePolished()
+        assert label.palette().color(label.foregroundRole()) == error_colour(label)
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize(
+    "status, colour_name",
+    [
+        (DeviceStatus.CONNECTED, "success_colour"),
+        (DeviceStatus.CONNECTING, "secondary_colour"),
+    ],
+)
+def test_device_status_replaces_error_foreground(
+    qapp, window_palette, status, colour_name
+):
+    from dataclasses import replace
+
+    from zcu_tools.device.fake import FakeDeviceInfo
+    from zcu_tools.gui.widgets import secondary_colour, success_colour
+
+    colours: dict[str, Callable[[QWidget], QColor]] = {
+        "success_colour": success_colour,
+        "secondary_colour": secondary_colour,
+    }
+    colour = colours[colour_name]
+    ctrl = _make_ctrl()
+    ctrl.list_devices.return_value = [_entry("fd")]
+    snapshot = _connected_snapshot("fd", FakeDeviceInfo(address="none"))
+    ctrl.get_device_snapshot.return_value = snapshot
+    dialog = _make_dialog(ctrl)
+    try:
+        dialog.setPalette(window_palette)
+        ctrl.get_device_snapshot.return_value = replace(
+            snapshot, error="snapshot failed"
+        )
+        ctrl.get_bus().emit(DeviceChangedPayload(name="fd"))
+        label = next(
+            label
+            for label in dialog.findChildren(QLabel)
+            if label.text() == "snapshot failed"
+        )
+        ctrl.get_device_snapshot.return_value = replace(snapshot, status=status)
+        ctrl.get_bus().emit(DeviceChangedPayload(name="fd"))
+        label.ensurePolished()
+        assert label.palette().color(label.foregroundRole()) == colour(dialog)
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()

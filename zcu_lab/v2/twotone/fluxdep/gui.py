@@ -15,7 +15,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     ParameterWriteback,
     RunRequest,
-    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -142,6 +141,3 @@ class FluxDepAdapter(
                 proposed_value=result.flx_period,
             ),
         ]
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return f"{ctx.qub_name}_qubit_flux"

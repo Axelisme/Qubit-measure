@@ -26,7 +26,7 @@ from zcu_tools.gui.app.measure.services.ports import (
     PostAnalysisPaneSnapshot,
     TabSnapshot,
 )
-from zcu_tools.gui.app.measure.services.writeback import WritebackValues
+from zcu_tools.gui.app.measure.writeback import WritebackValues
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 

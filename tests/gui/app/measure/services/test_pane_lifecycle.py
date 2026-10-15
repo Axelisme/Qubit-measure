@@ -8,27 +8,27 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ContextReadiness,
     ParameterWriteback,
     SessionEnv,
 )
-from zcu_tools.gui.app.measure.artifact_tracker import SaveStatus
+from zcu_tools.gui.app.measure.artifacts import SaveStatus
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
 from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
 from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
 from zcu_tools.gui.app.measure.services.tab import TabService
-from zcu_tools.gui.app.measure.services.writeback import (
-    WritebackDraft,
-    WritebackService,
-)
 from zcu_tools.gui.app.measure.state import (
     Session,
     State,
+)
+from zcu_tools.gui.app.measure.writeback import (
+    WritebackDraft,
+    WritebackService,
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import ExpectedErrorCategory
@@ -652,7 +652,7 @@ def test_load_capability_gate_rejects_concrete_disabled_adapter() -> None:
     class DisabledAdapter:
         capabilities = AdapterCapabilities(load_data=False)
 
-        def load(self, _request: object) -> object:
+        def restore(self, stored: object) -> object:
             return object()
 
     adapter = DisabledAdapter()
@@ -677,7 +677,7 @@ def test_guard_and_load_accept_enabled_concrete_adapter() -> None:
     class EnabledAdapter:
         capabilities = AdapterCapabilities(load_data=True)
 
-        def load(self, _request: object) -> object:
+        def restore(self, stored: object) -> object:
             return object()
 
     state.get_tab(tab_id).adapter = EnabledAdapter()  # type: ignore[assignment]

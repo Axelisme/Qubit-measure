@@ -33,6 +33,7 @@ from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
+from zcu_tools.gui.widgets import error_colour
 from zcu_tools.resources.entry import (
     ComponentSchema,
     ResultEntry,
@@ -218,7 +219,7 @@ def _error(widget: ComponentTreeWidget) -> QLabel:
 
 def _is_red(label: QLabel) -> bool:
     color = label.palette().color(label.foregroundRole())
-    return color.red() > color.green() and color.red() > color.blue()
+    return color == error_colour(label)
 
 
 def _add_button(widget: ComponentTreeWidget) -> QPushButton:
@@ -794,3 +795,11 @@ def test_dialog_role_reference_field_is_a_drop_down_of_matching_components(
     _submit(qapp, dialog)
 
     assert control.read_context().value("D1.sense") == "S1"
+
+
+def test_component_error_uses_theme_foreground(component_widget, window_palette):
+    widget, _ = component_widget
+    widget.setPalette(window_palette)
+    assert not widget.add_component("Ref", "test/required", {})
+    error = _error(widget)
+    assert error.palette().color(error.foregroundRole()) == error_colour(error)

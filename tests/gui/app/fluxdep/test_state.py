@@ -221,7 +221,8 @@ def test_get_spectrum_rejects_foreign_thread_without_mutation():
         ThreadPoolExecutor(max_workers=1) as pool,
         pytest.raises(RuntimeError, match="owner|thread") as caught,
     ):
-        pool.submit(st.get_spectrum, "a").result()
+        # The submitted foreign-thread call must reject without any owner delivery.
+        pool.submit(st.get_spectrum, "a").result(timeout=30)
     assert not isinstance(caught.value, ExpectedError)
     assert st.get_spectrum("a") is entry
     assert st.version.snapshot() == before

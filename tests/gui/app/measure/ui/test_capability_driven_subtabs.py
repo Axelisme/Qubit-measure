@@ -10,16 +10,16 @@ from unittest.mock import MagicMock
 import pytest
 from matplotlib.figure import Figure
 from qtpy.QtWidgets import QLineEdit, QPushButton
-from zcu_tools.experiment.run_saving import ArtifactRef
+from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalysisMode,
 )
+from zcu_tools.gui.app.measure.artifacts import ArtifactSaveCenter
 from zcu_tools.gui.app.measure.services import TabSnapshot
-from zcu_tools.gui.app.measure.services.writeback import WritebackValues
 from zcu_tools.gui.app.measure.state import TabInteractionState
-from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
+from zcu_tools.gui.app.measure.writeback import WritebackValues
 from zcu_tools.gui.control_identity import ControlIdentity
 
 from tests.gui.app.measure._form_fakes import (
@@ -27,7 +27,7 @@ from tests.gui.app.measure._form_fakes import (
     configure_form_lookup,
     make_form,
 )
-from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
+from tests.gui.app.measure.artifacts._snapshots import ready_figures, with_artifacts
 
 
 @dataclass

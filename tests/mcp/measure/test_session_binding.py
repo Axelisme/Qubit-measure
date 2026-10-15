@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import asdict
 from pathlib import Path
-from threading import Event
+from threading import Event, Lock
 from types import SimpleNamespace
 from typing import Any
 
@@ -466,16 +466,19 @@ def test_pending_eof_reports_connection_lost_without_replaying_rpc(
 
     monkeypatch.setattr(client.transport, "send_line", send)
     with ThreadPoolExecutor(max_workers=1) as pool:
+        # EOF, not a transport deadline, ends the dispatched RPC; 30s guards deadlock.
         pending = pool.submit(
-            binding.send_gui_rpc, "context.labels", {}, timeout_seconds=1.0
+            binding.send_gui_rpc, "context.labels", {}, timeout_seconds=30.0
         )
         try:
-            assert sent.wait(1)
+            # The submitted RPC records transport dispatch before EOF or close. The 30s limit only guards deadlock.
+            assert sent.wait(30)
             client.transport.close()
             assert client.transport.on_closed is not None
             client.transport.on_closed(None)
             with pytest.raises(GuiRpcError) as error:
-                pending.result(timeout=1)
+                # The submitted call completes after release/close; 30s only guards deadlock.
+                pending.result(timeout=30)
             assert error.value.reason == "connection_lost"
             assert isinstance(error.value.__context__, ConnectionError)
         finally:
@@ -619,22 +622,52 @@ def make_serialization_client(
     return client, second
 
 
+def record_serial_transport(
+    monkeypatch: pytest.MonkeyPatch, *transports: WireTransport
+) -> tuple[Lock, list[tuple[str, str]]]:
+    """Record transport entry/exit and reject overlapping sends across incarnations."""
+    active = Lock()
+    trace: list[tuple[str, str]] = []
+
+    def observe(transport: WireTransport) -> None:
+        send_line = transport.send_line
+
+        def send(payload: dict[str, Any]) -> None:
+            assert active.acquire(blocking=False), "transport calls overlapped"
+            method = payload["method"]
+            trace.append(("enter", method))
+            try:
+                send_line(payload)
+            finally:
+                trace.append(("exit", method))
+                active.release()
+
+        monkeypatch.setattr(transport, "send_line", send)
+
+    for transport in transports:
+        observe(transport)
+    return active, trace
+
+
 def test_rpc_admission_rechecks_queued_intent_before_dispatch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     client, _ = make_serialization_client(tmp_path, monkeypatch)
     entered, release, attempted = Event(), Event(), Event()
-    preceding_replied, revoked = Event(), Event()
+    preceding_replied, revoked, finished = Event(), Event(), Event()
     admissions: list[str] = []
 
     def reply(params: dict[str, Any]) -> dict[str, Any]:
         entered.set()
-        assert release.wait(3), "test did not release the preceding RPC"
+        # The test finally releases this responder barrier. The 30s limit only guards deadlock.
+        assert release.wait(30), "test did not release the preceding RPC"
         preceding_replied.set()
         return {"ok": True, "result": {"operation_id": 1}}
 
     client.transport.replies["test.start"] = reply
     binding = client.context.session.bind()
+
+    _, trace = record_serial_transport(monkeypatch, client.transport)
 
     def admit() -> None:
         assert preceding_replied.is_set(), "admission ran before acquiring the RPC lock"
@@ -644,20 +677,31 @@ def test_rpc_admission_rechecks_queued_intent_before_dispatch(
 
     def queued_call() -> dict[str, Any]:
         attempted.set()
-        return binding.send_gui_rpc("test.start", {}, before_send=admit)
+        try:
+            return binding.send_gui_rpc("test.start", {}, before_send=admit)
+        finally:
+            finished.set()
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         first = pool.submit(binding.send_gui_rpc, "test.start", {})
         try:
-            assert entered.wait(3)
+            # The submitted RPC reaches the recording responder. The 30s limit only guards deadlock.
+            assert entered.wait(30)
             queued = pool.submit(queued_call)
-            assert attempted.wait(3)
+            # The submitted competitor records its attempt before calling the session. The 30s limit only guards deadlock.
+            assert attempted.wait(30)
+            # No public queue-arrival point: this window affects detection only, never load correctness.
+            assert not finished.wait(0.1), "queued admission crossed the active RPC"
             revoked.set()
         finally:
             release.set()
-        assert first.result(timeout=3)["handle"] == 1
+        # The submitted call completes after release/close; 30s only guards deadlock.
+        assert first.result(timeout=30)["handle"] == 1
         with pytest.raises(ValueError, match="execution cancelled"):
-            queued.result(timeout=3)
+            # The submitted call completes after release/close; 30s only guards deadlock.
+            queued.result(timeout=30)
+    assert finished.is_set()
+    assert trace == [("enter", "test.start"), ("exit", "test.start")]
     assert admissions == ["checked"]
     assert [method for method, _ in client.transport.sent].count("test.start") == 1
 
@@ -666,24 +710,10 @@ def test_rpc_admission_rechecks_queued_intent_before_dispatch(
     assert admissions == ["checked", "checked"]
 
 
-@pytest.mark.parametrize("action", ["rpc", "connect"])
-def test_rpc_and_connect_serialize_catalog_timeout_and_handle_state(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action: str
-) -> None:
-    client, _ = make_serialization_client(tmp_path, monkeypatch)
-    entered, release, attempted, finished = Event(), Event(), Event(), Event()
-    calls = 0
-
-    def reply(params: dict[str, Any]) -> dict[str, Any]:
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            entered.set()
-            assert release.wait(3), "test did not release the first RPC"
-        return {"ok": True, "result": {"operation_id": calls}}
-
-    client.transport.replies["test.start"] = reply
-    binding = client.context.session.bind()
+def record_serial_connection(
+    monkeypatch: pytest.MonkeyPatch, client: MeasureClient, second: WireTransport
+) -> tuple[list[float], list[tuple[str, str]]]:
+    """Observe RPC timeouts and connection replacement without changing either."""
     observed_timeouts: list[float] = []
     real_send = client.context.bridge.send_rpc_raw
 
@@ -695,6 +725,38 @@ def test_rpc_and_connect_serialize_catalog_timeout_and_handle_state(
         return real_send(method, params, timeout_seconds)
 
     monkeypatch.setattr(client.context.bridge, "send_rpc_raw", send)
+    active, trace = record_serial_transport(monkeypatch, client.transport, second)
+    real_connect = client.context.bridge.connect
+
+    def connect(port: int, token: str | None = None) -> str:
+        assert not active.locked(), "connect crossed the active transport call"
+        trace.append(("connect", str(port)))
+        return real_connect(port, token)
+
+    monkeypatch.setattr(client.context.bridge, "connect", connect)
+    return observed_timeouts, trace
+
+
+@pytest.mark.parametrize("action", ["rpc", "connect"])
+def test_rpc_and_connect_serialize_catalog_timeout_and_handle_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action: str
+) -> None:
+    client, second = make_serialization_client(tmp_path, monkeypatch)
+    entered, release, attempted, finished = Event(), Event(), Event(), Event()
+    calls = 0
+
+    def reply(params: dict[str, Any]) -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            entered.set()
+            # The test finally releases this responder barrier. The 30s limit only guards deadlock.
+            assert release.wait(30), "test did not release the first RPC"
+        return {"ok": True, "result": {"operation_id": calls}}
+
+    client.transport.replies["test.start"] = reply
+    binding = client.context.session.bind()
+    observed_timeouts, trace = record_serial_connection(monkeypatch, client, second)
 
     def competing_call() -> dict[str, Any]:
         attempted.set()
@@ -710,20 +772,31 @@ def test_rpc_and_connect_serialize_catalog_timeout_and_handle_state(
     with ThreadPoolExecutor(max_workers=2) as pool:
         first = pool.submit(binding.send_gui_rpc, "test.start", {})
         try:
-            assert entered.wait(3)
+            # The submitted RPC reaches the recording responder. The 30s limit only guards deadlock.
+            assert entered.wait(30)
             other = pool.submit(competing_call)
-            assert attempted.wait(3)
+            # The submitted competitor records its attempt before calling the session. The 30s limit only guards deadlock.
+            assert attempted.wait(30)
+            # No public queue-arrival point: this window affects detection only, never load correctness.
             assert not finished.wait(0.1), "competing call crossed the active RPC"
         finally:
             release.set()
-        old_result = first.result(timeout=3)
-        other_result = other.result(timeout=3)
+        # The submitted call completes after release/close; 30s only guards deadlock.
+        old_result = first.result(timeout=30)
+        # The submitted call completes after release/close; 30s only guards deadlock.
+        other_result = other.result(timeout=30)
+    assert finished.is_set()
+    assert trace[:2] == [("enter", "test.start"), ("exit", "test.start")]
     assert old_result["handle"] == 1
     if action == "rpc":
+        assert trace[2:] == [("enter", "test.start"), ("exit", "test.start")]
         assert other_result["handle"] == 2
         assert observed_timeouts == [6.0, 6.0]
         assert client.context.session.operation_handles == {"job:old": 2}
     else:
+        assert trace[2] == ("connect", "9912")
+        assert ("enter", "rpc.catalog") in trace[3:]
+        assert ("exit", "rpc.catalog") in trace[3:]
         new = client.context.session.bind().send_gui_rpc("test.start", {})
         assert new["handle"] == 2
         assert observed_timeouts == [6.0, 10.0]

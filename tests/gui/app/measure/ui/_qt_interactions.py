@@ -2,20 +2,13 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 from typing import Any
 
 from qtpy.QtCore import QTimer
 from qtpy.QtWidgets import QApplication, QDialog
 
-
-def wait_until(qapp: QApplication, condition: Callable[[], bool]) -> None:
-    deadline = time.monotonic() + 4
-    while not condition() and time.monotonic() < deadline:
-        qapp.processEvents()
-        time.sleep(0.005)
-    assert condition()
+from tests.gui._qt_waits import qt_until
 
 
 def modal_action(
@@ -43,8 +36,13 @@ def modal_action(
         expected, interact = item
 
         def deliver() -> None:
-            dialog = qapp.activeModalWidget()
+            dialog = None
             try:
+                # action() opens the next modal, synchronously or by an owner delivery.
+                qt_until(
+                    lambda: qapp.activeModalWidget() is not None, label="modal open"
+                )
+                dialog = qapp.activeModalWidget()
                 assert isinstance(dialog, expected), (expected, dialog)
                 visited.append(expected)
                 schedule()
@@ -57,11 +55,15 @@ def modal_action(
         QTimer.singleShot(0, deliver)
 
     timer.timeout.connect(abort)
-    timer.start(2000)
+    # action() and the scheduled interactions must complete the nested dialogs.
+    timer.start(30_000)
     schedule()
     try:
         action()
-        wait_until(qapp, lambda: bool(errors) or len(visited) == len(interactions))
+        qt_until(
+            lambda: bool(errors) or len(visited) == len(interactions),
+            label="modal decisions",
+        )
         qapp.processEvents()
     finally:
         timer.stop()

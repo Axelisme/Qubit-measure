@@ -10,6 +10,7 @@ import pytest
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 os.environ["QT_QPA_PLATFORMTHEME"] = "generic"
 
+from qtpy.QtGui import QColor, QPalette
 from qtpy.QtWidgets import QApplication
 
 
@@ -20,6 +21,14 @@ def qapp():
     if app is None:
         app = QApplication([])
     return app
+
+
+@pytest.fixture(params=["white", "#202020"], ids=["light", "dark"])
+def window_palette(qapp, request):
+    """A synthetic Window palette without changing application-wide colours."""
+    palette = QPalette(qapp.palette())
+    palette.setColor(QPalette.ColorRole.Window, QColor(request.param))
+    return palette
 
 
 @pytest.fixture(autouse=True)

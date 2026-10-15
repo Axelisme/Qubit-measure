@@ -7,7 +7,6 @@ operator guide. The core experiment lives in
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -17,7 +16,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     RunRequest,
-    SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
@@ -56,6 +54,3 @@ class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, JpaFluxOneToneRunResult]
     ) -> JpaFluxOneToneRunResult:
         del req
         return RunRecord(cfg, OneToneFluxExp().run(cfg, context=context))
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return f"{ctx.qub_name}_jpa_flux_onetone_{time.strftime('%m%d')}"

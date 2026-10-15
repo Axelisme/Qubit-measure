@@ -28,6 +28,7 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 from tests.experiment._saving_support import SavingResult
+from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._native_save_support import SavingAdapter
 from tests.gui.app.measure._reload_fakes import Loader
 from tests.gui.app.measure.remote._helpers import call, open_client
@@ -77,7 +78,8 @@ def noise_run(qapp, tmp_path, monkeypatch, outcome):
             raise RuntimeError("synthetic source failed")
         if outcome == "stopped" and request.index == 1:
             entered.set()
-            if not release.wait(3):
+            # The caller releases after cancel; fixture teardown also releases on failure.
+            if not release.wait(30):
                 raise RuntimeError("test did not release held round")
         return source(request)
 
@@ -139,10 +141,12 @@ def test_window_rpc_acquisition_saves_iq_and_public_environment_identity(
     env, ctrl, sock, tab, entered, release = noise_run
     started = call(sock, "tab.run_start", {"tab_id": tab})["result"]["operation_id"]
     if outcome == "stopped":
-        assert entered.wait(2)
+        # The accepted run reaches the held second round through real owner delivery.
+        qt_until(entered.is_set, label="held simulation round")
         assert call(sock, "tab.run_cancel")["result"]["cancelled"]
         release.set()
-    terminal = call(sock, "operation.await", {"operation_id": started, "timeout": 3})[
+    # The started run completes (or fails) after release; this deadline only guards hangs.
+    terminal = call(sock, "operation.await", {"operation_id": started, "timeout": 30})[
         "result"
     ]
     if outcome == "failure_then_retry":
@@ -150,8 +154,9 @@ def test_window_rpc_acquisition_saves_iq_and_public_environment_identity(
         state = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0]
         assert not state["result_state"]["available"]
         started = call(sock, "tab.run_start", {"tab_id": tab})["result"]["operation_id"]
+        # The one-shot failure is consumed; the retry now delivers its terminal outcome.
         terminal = call(
-            sock, "operation.await", {"operation_id": started, "timeout": 3}
+            sock, "operation.await", {"operation_id": started, "timeout": 30}
         )["result"]
     assert terminal["status"] == ("cancelled" if outcome == "stopped" else "finished")
     saved = call(sock, "tab.save_data", {"tab_id": tab})

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, Never
 
 import numpy as np
 import pytest
+from matplotlib.axes import Axes
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from zcu_tools.gui.session.services import arb_waveform
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
@@ -13,12 +15,15 @@ from zcu_tools.gui.session.ui.arb_waveform_dialog import (
     ArbWaveformDialog,
     _PreviewCanvas,
 )
+from zcu_tools.gui.widgets import error_colour
 from zcu_tools.resources.waveform_assets import (
     ArbWaveformData,
     ArbWaveformInfo,
     FormulaRecipe,
     render_formula_recipe,
 )
+
+from ._waveform_timer import PreviewClock
 
 
 class _FakeController:
@@ -48,12 +53,19 @@ class _FakeController:
         return self.assets[data_key]
 
     def set_formula(
-        self, data_key: str, recipe: Any, *, overwrite: bool = False
-    ) -> dict[str, object]:
+        self,
+        data_key: str,
+        recipe: FormulaRecipe | dict[str, object],
+        *,
+        overwrite: bool = False,
+    ) -> Literal["created", "overwritten"]:
         if data_key in self.assets and not overwrite:
             raise RuntimeError("exists")
         self.assets[data_key] = render_formula_recipe(recipe)
-        return {"success": True, "status": "overwritten" if overwrite else "created"}
+        return "overwritten" if overwrite else "created"
+
+    def get_preview(self, data_key: str) -> Never:
+        raise AssertionError("The dialog must render locally, not request a remote PNG")
 
     def rename(self, old_data_key: str, new_data_key: str) -> None:
         self.assets[new_data_key] = self.assets.pop(old_data_key)
@@ -67,12 +79,51 @@ def _qt(qapp):
     yield
 
 
-def _qwait(ms: int) -> None:
-    from qtpy.QtCore import QEventLoop, QTimer  # type: ignore[attr-defined]
+@pytest.fixture
+def preview_clock(monkeypatch: pytest.MonkeyPatch):
+    clock = PreviewClock()
+    monkeypatch.setattr(
+        "zcu_tools.gui.session.ui.arb_waveform_dialog.QTimer", clock.timer
+    )
+    try:
+        yield clock
+    finally:
+        clock.close()
 
-    loop = QEventLoop()
-    QTimer.singleShot(ms, loop.quit)
-    loop.exec()
+
+class _Editor:
+    """Locate controls through the dialog's public Qt widget tree."""
+
+    def __init__(self, dialog: ArbWaveformDialog) -> None:
+        from qtpy.QtWidgets import QCheckBox, QGroupBox, QLabel, QLineEdit, QTableWidget
+
+        self.dialog = dialog
+        group = next(
+            g for g in dialog.findChildren(QGroupBox) if g.title() == "Formula Recipe"
+        )
+        self.key = next(iter(group.findChildren(QLineEdit)))
+        self.normalize = next(iter(group.findChildren(QCheckBox)))
+        self.segments = next(iter(group.findChildren(QTableWidget)))
+        self.warning = next(
+            label for label in group.findChildren(QLabel) if not label.text()
+        )
+        self.assets = next(
+            t for t in dialog.findChildren(QTableWidget) if t.columnCount() == 3
+        )
+        self.save = self.button("Save")
+
+    def button(self, text: str):
+        from qtpy.QtWidgets import QPushButton
+
+        return next(
+            b for b in self.dialog.findChildren(QPushButton) if b.text() == text
+        )
+
+
+def _preview_axes(dialog: ArbWaveformDialog) -> Axes:
+    canvas = dialog.findChild(FigureCanvasQTAgg)
+    assert canvas is not None
+    return canvas.figure.axes[0]
 
 
 # ---------------------------------------------------------------------------
@@ -80,79 +131,80 @@ def _qwait(ms: int) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_dialog_validates_segments_and_saves_preview(qapp, monkeypatch) -> None:
-    from qtpy.QtCore import Qt  # type: ignore[attr-defined]
-    from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+def test_dialog_validates_segments_and_saves_preview(
+    qapp, monkeypatch, preview_clock: PreviewClock
+) -> None:
+    from qtpy.QtCore import Qt
+    from qtpy.QtWidgets import (
         QHeaderView,
         QLabel,
         QPushButton,
     )
 
     ctrl = _FakeController()
-    dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
+    dlg = ArbWaveformDialog(ctrl)
+    editor = _Editor(dlg)
 
-    assert dlg._data_key_edit.text() == "arb_data1"
-    assert dlg._segment_table.rowCount() == 3
-    default_formula_item = dlg._segment_table.item(0, 1)
+    assert editor.key.text() == "arb_data1"
+    assert editor.segments.rowCount() == 3
+    default_formula_item = editor.segments.item(0, 1)
     assert default_formula_item is not None
     assert default_formula_item.text().startswith("exp(")
-    assert dlg._save_btn.isEnabled()
-    assert dlg._warning.isHidden()
+    assert editor.save.isEnabled()
+    assert editor.warning.isHidden()
     button_texts = {button.text() for button in dlg.findChildren(QPushButton)}
     assert "New" not in button_texts
     assert "Create ML" not in button_texts
     assert "Preview" not in button_texts
     label_texts = [label.text() for label in dlg.findChildren(QLabel)]
     assert any("<b>I</b>=imaginary unit" in text for text in label_texts)
-    assert dlg._normalize_check.isChecked()
+    assert editor.normalize.isChecked()
 
-    dlg._segment_table.selectRow(0)
-    dlg._insert_after_btn.click()
-    assert dlg._segment_table.rowCount() == 4
-    dlg._delete_segment_btn.click()
-    assert dlg._segment_table.rowCount() == 3
+    editor.segments.selectRow(0)
+    editor.button("Insert After").click()
+    assert editor.segments.rowCount() == 4
+    editor.button("Delete Segment").click()
+    assert editor.segments.rowCount() == 3
 
-    formula_item = dlg._segment_table.item(0, 1)
+    formula_item = editor.segments.item(0, 1)
     assert formula_item is not None
     # "unknown_symbol" has valid structure (non-empty string) but fails render.
     # With the new debounce design, render error surfaces only after the timer fires.
     formula_item.setText("unknown_symbol")
-    # Wait for debounce to fire (250 ms + slack).
-    _qwait(300)
-    assert not dlg._save_btn.isEnabled()
-    assert not dlg._warning.isHidden()
-    assert "unsupported" in dlg._warning.text()
+    preview_clock.drain()
+    assert not editor.save.isEnabled()
+    assert not editor.warning.isHidden()
+    assert "unsupported" in editor.warning.text()
 
     # Fixing the formula triggers cheap validation immediately (no qWait needed).
     formula_item.setText("sin(2*pi*t)")
-    assert dlg._save_btn.isEnabled()
-    assert dlg._warning.isHidden()
-    _qwait(300)
-    assert dlg._preview._i_line is not None
-    label = dlg._preview._i_line.get_label()
+    assert editor.save.isEnabled()
+    assert editor.warning.isHidden()
+    preview_clock.drain()
+    label = _preview_axes(dlg).lines[0].get_label()
     assert isinstance(label, str)
     assert label.startswith("I:")
 
-    dlg._normalize_check.setChecked(False)
-    dlg._save_recipe()
+    editor.normalize.setChecked(False)
+    editor.save.click()
     assert "arb_data1" in ctrl.assets
     recipe = ctrl.assets["arb_data1"].recipe
     assert recipe is not None
     assert recipe.normalize == "none"
-    duration_item = dlg._asset_table.item(0, 1)
+    duration_item = editor.assets.item(0, 1)
     assert duration_item is not None
     assert duration_item.text() == "1.00"
 
-    header = dlg._asset_table.horizontalHeader()
+    header = editor.assets.horizontalHeader()
     assert header is not None
-    assert dlg._asset_table.horizontalScrollBarPolicy() == (
+    assert editor.assets.horizontalScrollBarPolicy() == (
         Qt.ScrollBarPolicy.ScrollBarAlwaysOff
     )
     assert header.sectionResizeMode(0) == QHeaderView.ResizeMode.Stretch
     assert header.sectionResizeMode(1) == QHeaderView.ResizeMode.ResizeToContents
     assert header.sectionResizeMode(2) == QHeaderView.ResizeMode.Stretch
     dlg.refresh()
-    assert dlg._asset_table.horizontalScrollBarPolicy() == (
+    assert editor.assets.horizontalScrollBarPolicy() == (
         Qt.ScrollBarPolicy.ScrollBarAlwaysOff
     )
     assert header.sectionResizeMode(0) == QHeaderView.ResizeMode.Stretch
@@ -163,7 +215,7 @@ def test_dialog_validates_segments_and_saves_preview(qapp, monkeypatch) -> None:
         "zcu_tools.gui.session.ui.arb_waveform_dialog.QInputDialog.getText",
         lambda *args, **kwargs: ("renamed_data", True),
     )
-    dlg._rename_btn.click()
+    editor.button("Rename").click()
     assert "renamed_data" in ctrl.assets
     assert "arb_data1" not in ctrl.assets
 
@@ -210,149 +262,172 @@ def test_preview_canvas_autoscales_y_axis_for_normalized_and_raw(qapp) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_A1_cheap_structure_error_is_immediate(qapp) -> None:
-    """Structural errors (empty formula, non-numeric duration) disable Save synchronously."""
+def test_A1_cheap_structure_error_is_immediate(
+    qapp, preview_clock: PreviewClock
+) -> None:
+    """Structural errors disable Save synchronously and cancel pending rendering."""
     ctrl = _FakeController()
-    dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
+    dlg = ArbWaveformDialog(ctrl)
+    editor = _Editor(dlg)
+    preview_clock.drain()
+    initial_lines = tuple(_preview_axes(dlg).lines)
+    assert initial_lines
+    assert editor.save.isEnabled()
+    deliveries = preview_clock.deliveries
 
-    # Wait for initial debounce to settle so we start from a known-good state.
-    _qwait(300)
-    assert dlg._save_btn.isEnabled()
-
-    duration_item = dlg._segment_table.item(0, 0)
+    duration_item = editor.segments.item(0, 0)
     assert duration_item is not None
-    duration_item.setText("abc")  # non-numeric duration → structure error
+    # A valid edit arranges a render which the next structural error must cancel.
+    duration_item.setText("0.3")
+    duration_item.setText("abc")
+    assert not editor.save.isEnabled()
+    assert not editor.warning.isHidden()
+    assert "duration" in editor.warning.text()
+    preview_clock.drain()
+    assert preview_clock.deliveries == deliveries
+    assert tuple(_preview_axes(dlg).lines) == initial_lines
 
-    # No qWait: cheap validation fires synchronously.
-    assert not dlg._save_btn.isEnabled()
-    assert not dlg._warning.isHidden()
-    assert dlg._structure_error is not None
 
-
-def test_A2_deep_render_error_surfaces_after_debounce(qapp) -> None:
-    """Formula that passes structure but fails render → error only after debounce timer."""
+def test_A2_deep_render_error_surfaces_after_debounce(
+    qapp, preview_clock: PreviewClock
+) -> None:
+    """Deep errors appear only on timeout; a burst renders only its final recipe."""
     ctrl = _FakeController()
-    dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
+    dlg = ArbWaveformDialog(ctrl)
+    editor = _Editor(dlg)
+    preview_clock.drain()
+    initial_lines = tuple(_preview_axes(dlg).lines)
+    assert initial_lines
+    deliveries = preview_clock.deliveries
 
-    # Settle initial render.
-    _qwait(300)
-
-    formula_item = dlg._segment_table.item(0, 1)
-    assert formula_item is not None
-    formula_item.setText("unknown_symbol")
-
-    # Immediately after edit: structure is valid, render_error cleared → Save enabled.
-    assert dlg._save_btn.isEnabled()
-    assert dlg._warning.isHidden()
-    assert dlg._render_error is None
-
-    # After debounce: render ran and found the unknown symbol.
-    _qwait(300)
-    assert not dlg._save_btn.isEnabled()
-    assert not dlg._warning.isHidden()
-    assert dlg._render_error is not None
-    assert "unsupported" in dlg._render_error
-
-
-def test_A3_data_key_change_does_not_trigger_render(qapp, monkeypatch) -> None:
-    """Editing data_key must never call render_formula_recipe."""
-    ctrl = _FakeController()
-    render_call_count = 0
-    original_render = render_formula_recipe
-
-    def counting_render(recipe: Any) -> ArbWaveformData:
-        nonlocal render_call_count
-        render_call_count += 1
-        return original_render(recipe)
-
-    monkeypatch.setattr(
-        "zcu_tools.gui.session.ui.arb_waveform_dialog.render_formula_recipe",
-        counting_render,
-    )
-    dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
-    _qwait(300)  # let initial render fire
-    count_after_init = render_call_count
-
-    # Type into data_key field and wait past debounce window.
-    dlg._data_key_edit.setText("some_valid_key")
-    _qwait(300)
-
-    assert render_call_count == count_after_init, (
-        "data_key edit must not trigger render_formula_recipe"
-    )
-
-    # Invalid data_key → Save disabled synchronously.
-    dlg._data_key_edit.setText("1invalid")
-    assert not dlg._save_btn.isEnabled()
-
-    # Fix data_key → Save re-enabled synchronously (no render needed).
-    dlg._data_key_edit.setText("valid_key")
-    assert dlg._save_btn.isEnabled()
-    assert render_call_count == count_after_init
-
-
-def test_A4_save_uses_valid_recipe_without_waiting_for_debounce(qapp) -> None:
-    """Save uses _valid_recipe set by cheap path; service renders once internally."""
-    ctrl = _FakeController()
-    dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
-    _qwait(300)  # initial render
-
-    # Modify formula; do NOT wait for debounce.
-    formula_item = dlg._segment_table.item(0, 1)
+    formula_item = editor.segments.item(0, 1)
     assert formula_item is not None
     formula_item.setText("sin(2*pi*t)")
-    # cheap path set _valid_recipe immediately; Save is enabled.
-    assert dlg._save_btn.isEnabled()
-    assert dlg._valid_recipe is not None
+    # These are virtual milliseconds, not a wall-clock performance assertion.
+    preview_clock.advance(200)
+    formula_item.setText("unknown_symbol")
+    preview_clock.advance(50)  # The first deadline must have been replaced.
+    assert preview_clock.deliveries == deliveries
+    assert editor.save.isEnabled()
+    assert editor.warning.isHidden()
+    assert tuple(_preview_axes(dlg).lines) == initial_lines
 
-    dlg._save_recipe()
+    preview_clock.drain()
+    assert preview_clock.deliveries == deliveries + 1
+    assert not editor.save.isEnabled()
+    assert not editor.warning.isHidden()
+    assert "unsupported" in editor.warning.text()
+    assert tuple(_preview_axes(dlg).lines) == initial_lines
+
+
+def test_A3_data_key_change_does_not_trigger_render(
+    qapp, preview_clock: PreviewClock
+) -> None:
+    """Key edits neither schedule timeouts nor replace the rendered artists."""
+    ctrl = _FakeController()
+    dlg = ArbWaveformDialog(ctrl)
+    editor = _Editor(dlg)
+    preview_clock.drain()
+    initial_lines = tuple(_preview_axes(dlg).lines)
+    assert initial_lines
+    deliveries = preview_clock.deliveries
+
+    editor.key.setText("some_valid_key")
+    preview_clock.drain()
+    assert preview_clock.deliveries == deliveries
+    assert tuple(_preview_axes(dlg).lines) == initial_lines
+
+    editor.key.setText("1invalid")
+    assert not editor.save.isEnabled()
+    editor.key.setText("valid_key")
+    assert editor.save.isEnabled()
+    preview_clock.drain()
+    assert preview_clock.deliveries == deliveries
+    assert tuple(_preview_axes(dlg).lines) == initial_lines
+
+
+def test_A4_save_uses_valid_recipe_without_waiting_for_debounce(
+    qapp, preview_clock: PreviewClock
+) -> None:
+    """Save persists the latest edits before delivery and cancels pending preview work."""
+    ctrl = _FakeController()
+    dlg = ArbWaveformDialog(ctrl)
+    editor = _Editor(dlg)
+    preview_clock.drain()
+    deliveries = preview_clock.deliveries
+
+    formula_item = editor.segments.item(0, 1)
+    assert formula_item is not None
+    formula_item.setText("sin(2*pi*t)")
+    assert editor.save.isEnabled()
+    editor.save.click()
 
     assert "arb_data1" in ctrl.assets
     stored_recipe = ctrl.assets["arb_data1"].recipe
     assert stored_recipe is not None
     assert stored_recipe.segments[0].formula == "sin(2*pi*t)"
+    saved_lines = tuple(_preview_axes(dlg).lines)
+    assert saved_lines
+    preview_clock.drain()
+    assert preview_clock.deliveries == deliveries
+    assert tuple(_preview_axes(dlg).lines) == saved_lines
+    saved_data = ctrl.assets["arb_data1"]
+    np.testing.assert_allclose(
+        np.asarray(saved_lines[0].get_ydata(), dtype=float),
+        saved_data.idata / saved_data.peak_abs,
+    )
 
 
-def test_A5_render_failure_leaves_no_half_baked_state(qapp) -> None:
-    """After a render failure: _valid_data is None, Save disabled, preview unchanged."""
+def test_A5_render_failure_leaves_no_half_baked_state(
+    qapp, preview_clock: PreviewClock
+) -> None:
+    """Failed rendering retains the last good plot; recovery uses the final edits."""
     ctrl = _FakeController()
-    dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
-    _qwait(300)
-    assert dlg._valid_data is not None  # initial render succeeded
+    dlg = ArbWaveformDialog(ctrl)
+    editor = _Editor(dlg)
+    preview_clock.drain()
+    initial_lines = tuple(_preview_axes(dlg).lines)
+    assert initial_lines
 
-    formula_item = dlg._segment_table.item(0, 1)
+    formula_item = editor.segments.item(0, 1)
     assert formula_item is not None
     formula_item.setText("unknown_symbol")
-    _qwait(300)
+    preview_clock.drain()
+    assert tuple(_preview_axes(dlg).lines) == initial_lines
+    assert not editor.save.isEnabled()
+    assert not editor.warning.isHidden()
 
-    assert dlg._valid_recipe is not None  # cheap path: structure valid
-    assert dlg._valid_data is None  # deep path: render failed, no half-baked data
-    assert not dlg._save_btn.isEnabled()
-    assert not dlg._warning.isHidden()
-
-    # Recovery: fix formula.
     formula_item.setText("cos(2*pi*t)")
-    _qwait(300)
-
-    assert dlg._valid_data is not None
-    assert dlg._save_btn.isEnabled()
-    assert dlg._warning.isHidden()
-    assert dlg._preview._i_line is not None
+    preview_clock.drain()
+    assert editor.save.isEnabled()
+    assert editor.warning.isHidden()
+    recovered_lines = tuple(_preview_axes(dlg).lines)
+    assert recovered_lines != initial_lines
+    # Save independently renders the current recipe through the asset collaborator.
+    editor.save.click()
+    saved_data = ctrl.assets["arb_data1"]
+    assert saved_data.recipe is not None
+    assert saved_data.recipe.segments[0].formula == "cos(2*pi*t)"
+    np.testing.assert_allclose(
+        np.asarray(recovered_lines[0].get_ydata(), dtype=float),
+        saved_data.idata / saved_data.peak_abs,
+    )
 
 
 def test_A6_save_with_deep_invalid_formula_reports_save_failed(
-    qapp, monkeypatch
+    qapp, monkeypatch, preview_clock: PreviewClock
 ) -> None:
     """Save in the optimistic window with a render-failing formula shows 'Save failed'."""
     ctrl = _FakeController()
-    dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
-    _qwait(300)
+    dlg = ArbWaveformDialog(ctrl)
+    editor = _Editor(dlg)
+    preview_clock.drain()
 
-    formula_item = dlg._segment_table.item(0, 1)
+    formula_item = editor.segments.item(0, 1)
     assert formula_item is not None
     formula_item.setText("unknown_symbol")
     # Do NOT wait for debounce — we're in the optimistic Save-enabled window.
-    assert dlg._save_btn.isEnabled()
+    assert editor.save.isEnabled()
 
     critical_calls: list[tuple[str, str]] = []
 
@@ -363,7 +438,7 @@ def test_A6_save_with_deep_invalid_formula_reports_save_failed(
         "zcu_tools.gui.session.ui.arb_waveform_dialog.QMessageBox.critical",
         fake_critical,
     )
-    dlg._save_recipe()
+    editor.save.click()
 
     # Service attempted render → failed → "Save failed" box shown.
     assert len(critical_calls) == 1
@@ -378,7 +453,7 @@ def test_A6_save_with_deep_invalid_formula_reports_save_failed(
 
 
 def test_B7_reload_failure_reports_reload_failed_not_save_failed(
-    qapp, monkeypatch
+    qapp, monkeypatch, preview_clock: PreviewClock
 ) -> None:
     """When save succeeds but reload fails, the user sees 'Reload failed', not 'Save failed'.
 
@@ -387,8 +462,9 @@ def test_B7_reload_failure_reports_reload_failed_not_save_failed(
     _on_asset_selection_changed only catches ArbWaveformError, not RuntimeError.
     """
     ctrl = _FakeController()
-    dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
-    _qwait(300)
+    dlg = ArbWaveformDialog(ctrl)
+    editor = _Editor(dlg)
+    preview_clock.drain()
 
     # Fail only the first call to load_data after save (simulates a
     # transient disk error exactly at reload time, not at subsequent selection loads).
@@ -413,11 +489,14 @@ def test_B7_reload_failure_reports_reload_failed_not_save_failed(
         fake_critical,
     )
 
-    dlg._save_recipe()
+    editor.save.click()
 
     # Asset was saved successfully.
     assert "arb_data1" in ctrl.assets
-    assert dlg._current_data_key == "arb_data1"
+    assert editor.assets.currentRow() >= 0
+    selected = editor.assets.item(editor.assets.currentRow(), 0)
+    assert selected is not None
+    assert selected.text() == "arb_data1"
     # Error reported as "Reload failed", not "Save failed".
     assert len(critical_calls) == 1
     assert critical_calls[0][0] == "Reload failed"
@@ -433,7 +512,7 @@ def test_asset_load_failure_keeps_editor_state(qapp, monkeypatch) -> None:
     from zcu_tools.resources.waveform_assets import ArbWaveformError
 
     ctrl = _FakeController()
-    dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
+    dlg = ArbWaveformDialog(ctrl)
     draft_key = dlg._data_key_edit.text()
 
     # Simulate selecting an asset that lists fine but fails to load.
@@ -461,7 +540,7 @@ def test_asset_load_failure_keeps_editor_state(qapp, monkeypatch) -> None:
 def test_E12_recipe_from_ui_returns_formula_recipe(qapp) -> None:
     """_recipe_from_ui always returns a typed FormulaRecipe, never a plain dict."""
     ctrl = _FakeController()
-    dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
+    dlg = ArbWaveformDialog(ctrl)
 
     result = dlg._recipe_from_ui()
     assert isinstance(result, FormulaRecipe)
@@ -555,3 +634,73 @@ def test_close_is_in_bottom_right_footer(entry_waveform_dialog, qapp) -> None:
     )
     close.click()
     assert not dialog.isVisible()
+
+
+def test_arb_error_uses_theme_foreground(qapp, window_palette):
+    from qtpy.QtWidgets import QLabel, QTableWidget
+
+    state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
+    dialog = ArbWaveformDialog(arb_waveform.ArbWaveformService(state))
+    try:
+        dialog.setPalette(window_palette)
+        segments = next(
+            table
+            for table in dialog.findChildren(QTableWidget)
+            if table.columnCount() == 2
+        )
+        duration = segments.item(0, 0)
+        assert duration is not None
+        duration.setText("not a duration")
+        label = next(
+            label
+            for label in dialog.findChildren(QLabel)
+            if not label.isHidden() and "duration" in label.text().lower()
+        )
+        label.ensurePolished()
+        assert label.palette().color(label.foregroundRole()) == error_colour(label)
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_arb_feedback_switches_between_error_and_info(entry_waveform_dialog, qapp):
+    from qtpy.QtGui import QColor, QPalette
+    from qtpy.QtWidgets import QLabel, QTableWidget
+    from zcu_tools.gui.widgets import warning_colour
+    from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
+
+    dialog, assets = entry_waveform_dialog
+    palette = dialog.palette()
+    palette.setColor(QPalette.ColorRole.Window, QColor("#353535"))
+    palette.setColor(QPalette.ColorRole.Base, QColor("#353535"))
+    palette.setColor(QPalette.ColorRole.Text, QColor("#eeeeee"))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor("#eeeeee"))
+    dialog.setPalette(palette)
+    ArbWaveformDatabase(assets.root_path()).save("raw", [0.0, 1.0], [0.0, 1.0])
+    dialog.refresh()
+    segments = next(
+        table for table in dialog.findChildren(QTableWidget) if table.columnCount() == 2
+    )
+    duration = segments.item(0, 0)
+    assert duration is not None
+    duration.setText("not a duration")
+    label = next(
+        label
+        for label in dialog.findChildren(QLabel)
+        if not label.isHidden() and "duration" in label.text().lower()
+    )
+    label.ensurePolished()
+    assert label.palette().color(label.foregroundRole()) == error_colour(dialog)
+
+    listing = next(
+        table for table in dialog.findChildren(QTableWidget) if table.columnCount() == 3
+    )
+    listing.selectRow(0)
+    assert "no formula recipe" in label.text()
+    assert label.palette().color(label.foregroundRole()) == warning_colour(dialog)
+
+    duration = segments.item(0, 0)
+    assert duration is not None
+    duration.setText("not a duration")
+    assert label.palette().color(label.foregroundRole()) == error_colour(dialog)

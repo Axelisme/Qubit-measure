@@ -690,3 +690,38 @@ def test_table_readout_does_not_share_fixed_pulse_template():
     pulse_names = [name for name in prog.pulses if not name.endswith("_adc")]
     assert len(pulse_names) == 2
     assert len({tuple(prog.pulses[name].get_wavenames()) for name in pulse_names}) == 2
+
+
+def test_unprotected_routes_keep_qick_redeclaration_semantics():
+    prog = _make_prog()
+    prog.declare_gen(0, nqz=1)
+    prog.declare_gen(0, nqz=2)
+    prog.declare_readout(0, length=0.413)
+    prog.declare_readout(0, length=0.827)
+    assert prog.get_time_axis(0, length_only=True) == prog.us2cycles(0.827, ro_ch=0)
+
+
+def test_protected_routes_report_owner_and_reject_overwrite():
+    prog = _make_prog()
+    prog.declare_gen(0, nqz=1)
+    prog.declare_readout(0, length=0.413)
+    assert hasattr(prog, "protect_readout_routes"), (
+        "program must protect declared routes"
+    )
+    prog.protect_readout_routes("owner", 0, [0])
+    with pytest.raises(ValueError, match="owner.*generator.*route.*0"):
+        prog.declare_gen(0, nqz=2)
+    with pytest.raises(ValueError, match="owner.*readout.*route.*0"):
+        prog.declare_readout(0, length=0.827)
+
+
+@pytest.mark.parametrize("declared", ["none", "generator"])
+def test_route_protection_requires_successful_declarations(declared):
+    prog = _make_prog()
+    if declared == "generator":
+        prog.declare_gen(0, nqz=1)
+    assert hasattr(prog, "protect_readout_routes"), (
+        "program must validate route protection"
+    )
+    with pytest.raises(ValueError, match="owner.*(generator|readout).*0"):
+        prog.protect_readout_routes("owner", 0, [0])

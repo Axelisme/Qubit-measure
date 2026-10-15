@@ -29,6 +29,12 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from zcu_tools.gui.widgets import (
+    error_colour,
+    secondary_colour,
+    set_foreground,
+    warning_colour,
+)
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.waveform_assets import (
     ArbWaveformData,
@@ -328,7 +334,7 @@ class ArbWaveformDialog(QDialog):
         self._asset_table.itemSelectionChanged.connect(self._on_asset_selection_changed)
         layout.addWidget(self._asset_table)
         self._empty_assets_hint = QLabel("No waveforms saved yet")
-        self._empty_assets_hint.setStyleSheet("color: gray;")
+        set_foreground(self._empty_assets_hint, secondary_colour(self))
         layout.addWidget(self._empty_assets_hint)
 
         btns = QHBoxLayout()
@@ -777,7 +783,9 @@ class ArbWaveformDialog(QDialog):
     def _set_warning(self, message: str, *, is_error: bool = True) -> None:
         # Error feedback is red; purely informational notices (e.g. the
         # no-recipe selection notice) use a non-alarming amber instead.
-        self._warning.setStyleSheet("color: red;" if is_error else "color: #b36b00;")
+        set_foreground(
+            self._warning, error_colour(self) if is_error else warning_colour(self)
+        )
         self._warning.setText(message)
         self._warning.setVisible(bool(message))
 

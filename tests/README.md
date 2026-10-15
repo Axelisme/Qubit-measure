@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-16，FTF numeric/acquisition 測試 owner
+**Last updated:** 2026-10-16，FTF numeric/acquisition 測試 owner 與確定性等待政策
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -107,12 +107,68 @@ def controller_view(qapp):
 Controller 的 terminal close。見 `tests/gui/session/services/test_device_manager.py`
 的 `_quiesce_services` fixture。
 
-### Qt timer waits
+### 等待、時間與完成條件
 
-`qtpy.QtTest.QTest` 在 PyQt6 runtime 是 C++ namespace，不能實例化；但部分
-stub 會把 `QTest.qWait(ms)` 視為 unbound instance method。GUI 測試需要等待
-debounce timer 時，用本地 helper 包 `QEventLoop + QTimer.singleShot`，不要直接
-呼叫 `QTest.qWait`，也不要用 `cast()` 或 type ignore 壓掉 stub 差異。
+先指出需要建立的先後關係，再用協作者的抵達訊號、受控 owner queue、明確 release 與
+join 建立因果。從公開接縫驗證結果，不以正向短時限抵達、sleep 後斷言或實測耗時上界
+判對錯。拉長 timeout、skip 或 retry 不能取代同步。呼叫開始前 set 的 attempted Event
+只表示準備呼叫，不證明已入列、取得 admission 或進入鎖競爭。
+
+等待必須由已安排且設計上必達的事件結束，例如已提交 RPC 的 responder 抵達、release 後的
+worker 完成或 owner 終局交付。先建立這項因果，再加數十秒級 watchdog 防卡死，通常設為 30 秒。
+在旁邊一行說明必達原因。Watchdog 不是效能門檻，也不能把「收到 cancel 請求」當作
+「工作已停止」。失敗路徑仍須 finally release 全部 blocker、join worker、傳回 worker 例外，
+再關閉 session 或釋放 Qt 物件。Background teardown 繼續使用上節的公開 close／quiesce。
+
+驗證 timeout、debounce 或時鐘契約時，控制外部 timer／虛擬時鐘並明確交付到期事件，
+保留 timeout 的返回值、副作用與後續可完成行為，不等待指定的真實 duration。
+只有公開契約保證可觀察同一分支時才用零時限 poll；timeout 不代表 cancel，也不證明 worker
+已抵達。物理 duration、production 計時與離線 benchmark 不因名稱含時間就改寫。
+
+替身只控制協作者的外部效果，不替換被測邏輯。對外 RPC／transport 的公開方法可以加前置
+delegating wrapper，但必須同時符合下列條件：
+
+- 以相同參數呼叫原方法，原樣 return 或 raise，不偽造回覆。
+- 只在呼叫之前暫停、記錄或 set Event。
+- 不讀寫私有 lock、state 或 owner 內部 helper。
+- 不跳過或替換 admission、序列化、cancel 或 save 實作。
+
+這是邊界觀察，不是任意 monkeypatch 的許可。Mathtext 鎖測試對第三方
+`matplotlib._mathtext.Parser.parse` 的委派觀察只限該外部協作者邊界；它不允許讀寫其餘
+私有屬性、cache 或 lock，也不適用其他第三方私有模組。該測試從公開 parse 入口走真鎖，
+保留 install／prewarm、fresh expression、patch 還原與 release／join；Matplotlib 升級時須
+重新核對內部路徑，屬性消失應明確失敗，不 skip 或 fallback。
+
+### 負向敏感窗與事件終止取樣
+
+「一段時間沒發生」只在找不到公開抵達觀察點、且只驗證某事未發生時，才可保留為短負向
+敏感窗。逐處寫明公開排隊抵達點的缺口。時間只影響抓錯機率，正確實作不會因負載而失敗。
+不得宣稱競爭者已排隊，也不得把正向抵達等待列入此例外。不能只改成沒有同步的 is_set。
+
+互斥案例由 responder／recording transport 記錄進出，競爭者在 holder 持有期間進入就直接失敗。
+Release 後 join，檢查完整順序與最終結果。Queued-intent admission 案例仍保留 attempted 與
+短負向窗，另以確定性順序和真實終局補強；不 patch 私有 lock、lock factory 或 pre-lock helper。
+Blocking waiter 案例保留公開 pending poll、timeout 不取消、release 後的 owner 終局與 join；
+pending poll 不能證明下一次 blocking await 已抵達。
+
+Finish-boundary hammer 等取樣型也只限沒有公開抵達點的負向檢查。迴圈由 leader 完成、release
+等事件結束，之後 join。短窗或取樣次數只影響偵測力，不以「N 次短 wait 內必須看到 X」判成功。
+外圍 30 秒只防卡死，旁註必達原因。仍驗 close-once、空 registry、before／after 等確定性終局，
+不宣稱取樣能命中所有錯誤交錯。需要新的 production 同步接口時，先交由任務決策者裁定，
+不以移入 backlog 代替修復。
+
+### Qt owner-loop 等待
+
+需要真實 Qt signal／owner delivery 的測試保留該整合，統一使用
+`tests/gui/_qt_waits.py::qt_until(completed, *, label="completion")`，不再新增本地 duration helper
+或另一套等待 framework。它以 0ms QTimer probe 在 owner-loop turn 取樣受控 Event 或公開終局
+條件，條件成立才成功。獨立 single-shot 30 秒 timer 只作 watchdog。Probe 次數或經過時間都不是
+成功條件，probe 也不證明 queue arrival。Helper 會把 predicate 例外傳回 caller，並停掉兩個 timer。
+不要在 predicate 重入阻塞 RPC。非 Qt 契約可使用既有 manual owner scheduler。
+
+Debounce 測試控制外部 QTimer 排程或虛擬時鐘，不用 `QTest.qWait`、固定 duration 的
+`QEventLoop + singleShot` 或 stub suppression 解決。單次 `processEvents()` 可以 flush 已交付工作
+或 layout，不能當背景工作完成證據；背景完成仍需上述因果條件與公開 teardown。
 
 ---
 
@@ -223,7 +279,8 @@ experiments, not lab definitions or model-truth calibration oracles.
 
 Library entry 與範本的公開行為由 `tests/gui/session/test_library_entry.py` 驗證，
 Inspect 與 Aliases 由 `tests/gui/session/ui/` 驗證。Measure 的 tab Form resource、
-固定 capture、Run 與 writeback 在 `tests/gui/app/measure/services/`；
+固定 capture 與 Run 在 `tests/gui/app/measure/services/`；writeback draft、Apply 與 widget
+在 `tests/gui/app/measure/writeback/`；
 Library／writeback 的 wire 行為由 `tests/gui/app/measure/remote/` 驗證。
 Writeback 案例區分 Form batch、draft-local edits 與 target 提交，不把 selected Apply 當成跨檔原子交易。
 
@@ -300,8 +357,9 @@ Registry CRUD 使用真 `FakeDevice`。`test_simulated_environment.py` 經真 se
 connect/disconnect 等非 setup mutation 會 skip；`SETTING_UP` 的 selected device 可 poll current driver
 info 來刷新 cache/UI，但 late delivery 若已進入非 setup mutation 不可 bump/emit。
 
-等待 async device connect 時避免裸 `QEventLoop.exec()` 只聽 success signal；測試 helper 應同時觀察
-`operation_failed`，並用 bounded `processEvents()` loop，讓 connect failure 變成 assertion failure 而非 pytest hang。
+等待 async device connect 時同時觀察 success 與 `operation_failed`，以共用 `qt_until` 等到其中
+一項已交付，再斷言結果。不要用只聽 success 的裸 `QEventLoop.exec()` 或 elapsed deadline 的
+`processEvents()` loop；失敗必須回到 caller，不讓 pytest 掛住。
 
 ### Golden / characterization tests
 

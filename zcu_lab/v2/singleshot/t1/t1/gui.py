@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
@@ -12,7 +11,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeResultBase,
     NoAnalyzeParams,
     RunRequest,
-    SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
@@ -66,6 +64,3 @@ class SsT1Adapter(
             req.run_result, T1AnalyzeOptions(confusion_matrix=confusion), plots=plots
         )
         return SsT1AnalyzeResult()
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return f"{ctx.qub_name}_ss_t1_{time.strftime('%m%d')}"

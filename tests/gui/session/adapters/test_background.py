@@ -11,11 +11,11 @@ embedded in the work thunk.
 
 from __future__ import annotations
 
-import time
-
 import pytest
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.scopes import progress_ambient
+
+from tests.gui._qt_waits import qt_until
 
 # Every BackgroundRunner created by a test is registered here so that the
 # autouse quiesce fixture can drain it before its QObjects are GC'd.  A queued
@@ -35,18 +35,13 @@ def _quiesce_bg():
     """Join all worker threads and flush their queued deliveries before GC."""
     yield
     for bg in _LIVE_BG:
-        bg.quiesce()
+        # Submitted Qt work has no remaining blocker; drain its worker and delivery.
+        assert bg.quiesce(timeout_ms=30_000)
     _LIVE_BG.clear()
 
 
-def _pump_until(qapp, predicate, timeout: float = 2.0) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return
-        qapp.processEvents()
-        time.sleep(0.005)
-    qapp.processEvents()
+def _pump_until(qapp, predicate) -> None:
+    qt_until(predicate)
 
 
 def test_dedicated_runs_work_and_delivers_done(qapp):
@@ -175,7 +170,8 @@ def test_terminal_admission_drains_accepted_delivery_and_rejects_submit(
             on_error=delivered.append,
         )
     assert type(caught.value).__name__ == "BackgroundAdmissionClosedError"
-    assert bg.quiesce()
+    # Accepted work returns immediately and posts its terminal result.
+    assert bg.quiesce(timeout_ms=30_000)
     assert delivered == [7]
     with pytest.raises(RuntimeError, match="background") as caught:
         bg.submit(lambda: 9, on_done=delivered.append, on_error=delivered.append)
@@ -191,5 +187,6 @@ def test_repeatable_quiesce_does_not_close_qt_admission(qapp):
             on_done=delivered.append,
             on_error=delivered.append,
         )
-        assert bg.quiesce()
+        # This iteration submitted a result-producing task with no blocker.
+        assert bg.quiesce(timeout_ms=30_000)
     assert delivered == [1, 2]

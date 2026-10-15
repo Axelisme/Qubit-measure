@@ -1,31 +1,30 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 
+from zcu_tools.gui.app.measure.artifacts import ArtifactHandover
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 if TYPE_CHECKING:
-    from zcu_tools.datafile import AnalysisDocument, RunMetadata
+    from zcu_tools.datafile import StoredRun
     from zcu_tools.experiment.context import RunContext
-    from zcu_tools.experiment.native_persistence import PreparedRunData
+    from zcu_tools.experiment.native_persistence import RestoredRun
     from zcu_tools.plotting.plots import Plots
+
+from zcu_tools.gui.app.measure.writeback import WritebackItem
 
 from .interactive import InteractivePluginProvider
 from .types import (
     AdapterCapabilities,
     AdapterGuide,
     AnalyzeRequest,
-    LoadDataRequest,
     NoAnalysisResult,
     NoAnalyzeParams,
     PostAnalyzeRequest,
     PostWritebackRequest,
     RunRequest,
-    SaveDataRequest,
-    SavePaths,
     SessionEnv,
-    WritebackItem,
     WritebackRequest,
 )
 
@@ -37,20 +36,20 @@ __all__ = [
 
 
 @runtime_checkable
-class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
+class ExpAdapterProtocol(ArtifactHandover, InteractivePluginProvider, Protocol):
     """Structural contract the GUI framework requires from an experiment adapter.
 
     This Protocol lists *only* the members the framework actually calls; it
     carries no generics and no implementation. The shared default behaviour
-    (run delegation, save-path policy, no-op analysis, …) lives in
+    (run delegation, persistence payload preparation, no-op analysis, …) lives in
     ``zcu_tools.gui.app.measure.adapter.base.BaseAdapter``, which adapters
     inherit and which satisfies this Protocol structurally.
 
     Keeping the framework side generic-free is deliberate: the GUI handles
     every adapter as an opaque ``ExpAdapterProtocol``. Analyze/writeback
     results remain opaque. cfg is the output of this adapter's own Form;
-    the framework does not check its type. Native acquisition evidence checks only the RunRecord
-    envelope described by run(), not its concrete cfg/result types. Results
+    the framework does not check its type. Run handles also stay opaque, including
+    when native acquisition evidence is captured. Results
     cross Qt ``Signal(object)`` boundaries as plain objects. The cross-method type linkage that pyright
     checks lives entirely inside a single concrete adapter via the generic
     ``BaseAdapter[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]``.
@@ -61,8 +60,8 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
     # rejects the Protocol conformance.
     capabilities: ClassVar[AdapterCapabilities]
     # Declaring persistence spec tag for acquisition metadata; None means this
-    # adapter does not produce native run evidence. Declaring a tag opts into
-    # run()'s RunRecord envelope contract when the tab has a saved origin.
+    # adapter does not produce native run evidence. The tag describes evidence,
+    # not the concrete shape of the adapter-owned run handle.
     # Never infer it from a name.
     experiment_tag: ClassVar[str | None]
 
@@ -84,10 +83,6 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         template catalog after return and owns editable state. Factory and
         template errors propagate at use, never during catalog registration.
         """
-        ...
-
-    def make_save_paths(self, ctx: SessionEnv) -> SavePaths:
-        """Resolve the save-path policy for the given context."""
         ...
 
     @classmethod
@@ -114,25 +109,25 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
 
         req provides accepted device/SoC inputs; cfg is this adapter's validated
         Form output, forwarded unchanged, and context owns this acquisition's plots and stop signal.
-        With experiment_tag set and a saved tab origin, return RunRecord(cfg,
-        result) for native evidence. A bare result then raises TypeError at the
-        Run publication boundary and publishes neither result nor metadata.
-        Without the tag or saved origin, the framework does not manufacture
-        acquisition metadata and retains the adapter's opaque result contract.
+        Return an adapter-owned opaque handle. With experiment_tag set and a
+        saved tab origin, the framework captures native evidence independently
+        of that handle's type. Otherwise it does not manufacture metadata.
+        Saving consumes ArtifactHandover content, never inferred cfg/result fields.
         Acquisition errors follow the operation's terminal policy: without
         accepted user cancellation they fail the operation. Accepted cancellation
         may instead produce a cancelled outcome; Schedule errors remain failures.
         """
         ...
 
-    def load(self, req: LoadDataRequest) -> tuple[object, RunMetadata]:
-        """Read the exact native req.data_path and return (record, history).
+    def restore(self, stored: StoredRun) -> RestoredRun[object]:
+        """Restore framework-read native data admitted for this experiment tag.
 
-        The record stays adapter-owned and opaque to the framework. History is
-        the original RunMetadata, including identity, times and source. Do not
-        recapture it from req.parameters. Raise NotImplementedError for an
-        unsupported core, ValueError for invalid native data and OSError for
-        unreadable files; other core failures propagate.
+        Return an opaque adapter-owned record and cfg_issue: None means typed cfg
+        is available; a nonempty string explains why it is unavailable. Valid
+        data may load successfully without cfg. Do not inspect current inputs,
+        read files or recapture history; the framework uses stored.metadata.
+        Raise NotImplementedError for unsupported restoration and ValueError for
+        invalid experiment data; other core failures propagate before replacement.
         """
         ...
 
@@ -165,33 +160,4 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         self, req: PostWritebackRequest[Any, Any, Any]
     ) -> Sequence[WritebackItem]:
         """Return the writeback items proposed from one post-analysis result."""
-        ...
-
-    def capture_analysis_document(
-        self,
-        result: object,
-        parameters: object | None,
-        *,
-        pane: Literal["analysis", "post_analysis"],
-    ) -> AnalysisDocument:
-        """Capture a completed result and its historical dataclass inputs.
-
-        None parameters means no inputs. Return finite JSON without figures or
-        arrays; invalid result/input types or values raise TypeError/ValueError.
-        The returned document isolates containers at the datafile boundary.
-        No live-context lookup or I/O. BaseAdapter supplies the implementation.
-        """
-        ...
-
-    def prepare_save_data(self, result: object, *, comment: str) -> PreparedRunData:
-        """Prepare this experiment's RunRecord for both native data writers.
-
-        No I/O or metadata capture occurs. Invalid record/cfg/Result/comment or
-        a missing persistence declaration raises TypeError, ValueError or
-        NotImplementedError. Do not mutate result arrays during saving.
-        """
-        ...
-
-    def save(self, req: SaveDataRequest[Any]) -> None:
-        """Persist the run result to disk."""
         ...

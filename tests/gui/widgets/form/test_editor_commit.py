@@ -11,6 +11,7 @@ from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QWidget
 from zcu_tools.gui.form import (
     Display,
     FormEnv,
+    FormErrors,
     FormModel,
     FormState,
     FormWritePath,
@@ -207,6 +208,70 @@ def test_unparseable_text_shows_its_error_only_once_committed(build: Build) -> N
     assert not field_error(view, "count")
     assert validity == [False, True]
     assert state.input.data["count"] == 2
+
+
+def test_errors_changed_reports_local_changes_without_validity_transition(
+    build: Build,
+) -> None:
+    view, _, _ = build(None)
+    changes: list[FormErrors | None] = []
+    validity: list[bool] = []
+    view.errors_changed.connect(changes.append)
+    view.validity_changed.connect(validity.append)
+    count = line(view, "count")
+    amount = line(view, "amount")
+
+    type_text(count, "bad-count")
+    press_enter(count)
+    assert changes == [view.errors()]
+    first = changes[-1]
+    assert first is not None and set(first.messages) == {("count",)}
+
+    type_text(count, "other-count")
+    press_enter(count)
+    assert len(changes) == 2
+    assert changes[-1] == view.errors() and changes[-1] != first
+
+    type_text(amount, "bad-amount")
+    press_enter(amount)
+    assert len(changes) == 3
+    assert changes[-1] == view.errors()
+    assert validity == [False]
+
+    type_text(count, "2")
+    press_enter(count)
+    assert len(changes) == 4
+    remaining = changes[-1]
+    assert remaining == view.errors()
+    assert remaining is not None and set(remaining.messages) == {("amount",)}
+    assert validity == [False]
+
+    type_text(amount, "2")
+    press_enter(amount)
+    assert len(changes) == 5 and changes[-1] is None
+    assert validity == [False, True]
+
+
+def test_errors_changed_reports_state_errors_once_and_stops_after_detach(
+    build: Build,
+) -> None:
+    view, state, _ = build(None)
+    changes: list[FormErrors | None] = []
+    view.errors_changed.connect(changes.append)
+    env = FormEnv()
+
+    state.write({("amount",): -1.0}, env)
+    assert changes == [view.errors()]
+    assert changes[-1] is not None
+    view.refresh(env)
+    state.write({("name",): "new name"}, env)
+    assert len(changes) == 1
+
+    state.write({("amount",): 3.0}, env)
+    assert changes[-1] is None and len(changes) == 2
+    view.detach()
+    state.write({("amount",): -2.0}, env)
+    assert len(changes) == 2
 
 
 def test_expression_text_commits_its_envelope_on_enter(build: Build) -> None:

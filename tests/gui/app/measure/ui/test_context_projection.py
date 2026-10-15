@@ -2,7 +2,8 @@
 
 from typing import NoReturn
 
-from qtpy.QtWidgets import QTabWidget
+from qtpy.QtGui import QColor, QPalette
+from qtpy.QtWidgets import QTabWidget, QWidget
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import RunRequest
 from zcu_tools.gui.app.measure.controller import Controller
@@ -37,6 +38,13 @@ class ProjectionAdapter(SampleAdapter):
         raise AssertionError("This view contract must not start a Run")
 
 
+def _set_window_colours(widget: QWidget, background: str, text: str) -> None:
+    palette = widget.palette()
+    palette.setColor(QPalette.ColorRole.Window, QColor(background))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor(text))
+    widget.setPalette(palette)
+
+
 def test_existing_tab_tracks_unselected_and_active_source(
     qapp, tmp_path, monkeypatch
 ) -> None:
@@ -60,6 +68,10 @@ def test_existing_tab_tracks_unselected_and_active_source(
     )
     ctrl.add_view(window)
     try:
+        from qtpy.QtWidgets import QLabel
+
+        _set_window_colours(window, "white", "black")
+        window.refresh_context_panel()
         tab_id = ctrl.tab_control.new_tab("fake")
         tabs = window.findChild(QTabWidget)
         assert tabs is not None
@@ -89,6 +101,14 @@ def test_existing_tab_tracks_unselected_and_active_source(
         assert ctrl.tab_control.list_tab_ids() == [tab_id]
         assert ctrl.cfg_resources.lookup(tab_id) is cfg
         assert tabs.tabText(0) == title
+        _set_window_colours(window, "#353535", "white")
+        qapp.processEvents()
+        for name in ("current_entry", "current_point"):
+            label = window.findChild(QLabel, name)
+            assert label is not None
+            assert label.palette().color(
+                label.foregroundRole()
+            ) == window.palette().color(QPalette.ColorRole.WindowText), name
     finally:
         assert background.quiesce()
         for tab_id in tuple(ctrl.tab_control.list_tab_ids()):

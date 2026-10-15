@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-import time
-from collections.abc import Callable
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QCoreApplication
 from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
 from zcu_tools.device.sgs100a import RohdeSchwarzSGS100AInfo
 from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.app.measure.services.operation_gate import OperationGate
 from zcu_tools.gui.app.measure.state import DeviceState, DeviceStatus, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.device_errors import DeviceRegistrationError
 from zcu_tools.gui.session.operation_handles import OperationHandles
@@ -31,39 +27,20 @@ from tests.gui._completion_helpers import (
     on_device_connected,
     on_device_operation_failed,
 )
+from tests.gui._qt_waits import qt_until
 from tests.gui.session.services._device_fakes import FakeDeviceRegistry
+from tests.gui.session.services._device_waits import DeviceWorkers
 
-# See tests/gui/session/services/test_device.py for why test-created BackgroundRunners must
-# be quiesced before GC: a queued main-thread delivery to a GC'd runner segfaults.
-_LIVE_BG: list[BackgroundRunner] = []
-
-
-def _bg() -> BackgroundRunner:
-    bg = BackgroundRunner()
-    _LIVE_BG.append(bg)
-    return bg
+_workers = DeviceWorkers()
+_bg = _workers.background
 
 
 @pytest.fixture(autouse=True)
 def _quiesce_services():
-    yield
-    for bg in _LIVE_BG:
-        bg.quiesce()
-    _LIVE_BG.clear()
-
-
-def _drain_until(
-    condition: Callable[[], bool], *, timeout: float = 3.0, label: str = "condition"
-) -> None:
-    app = QCoreApplication.instance()
-    assert app is not None
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        app.processEvents()
-        if condition():
-            return
-        time.sleep(0.01)
-    raise AssertionError(f"timed out waiting for {label}")
+    try:
+        yield
+    finally:
+        _workers.close()
 
 
 def _make_svc(
@@ -75,6 +52,7 @@ def _make_svc(
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
     bus = EventBus()
+    _workers.watch(bus)
     runner = OperationRunner(gate, handles, progress, bg, bus)
     return DeviceService(
         bus,
@@ -98,7 +76,7 @@ def _connect(
     svc.start_connect_device(
         ConnectDeviceRequest(type_name=type_name, name=name, address="")
     )
-    _drain_until(lambda: bool(connected or errors), label=f"connect {name}")
+    qt_until(lambda: bool(connected or errors), label=f"connect {name}")
     assert not errors
 
 

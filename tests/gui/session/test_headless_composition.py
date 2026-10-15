@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import threading
-import time
 from collections.abc import Callable
 from typing import Any
 
 import pytest
+
+from tests.gui._lifecycle_waits import manual_until
 
 
 def test_session_core_connects_and_cancels_on_owner_thread(
@@ -97,13 +98,8 @@ def test_session_core_connects_and_cancels_on_owner_thread(
             f"headless smoke unexpectedly requested {type_name} at {address}"
         )
 
-    def pump_until(predicate: Callable[[], bool], *, timeout: float = 5.0) -> None:
-        deadline = time.monotonic() + timeout
-        while not predicate():
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise AssertionError("owner loop did not reach the expected state")
-            owner.pump_once(block=True, timeout=min(0.05, remaining))
+    def pump_until(predicate: Callable[[], bool]) -> None:
+        manual_until(owner, predicate)
 
     state = SessionState(
         SessionEnv(
@@ -118,8 +114,14 @@ def test_session_core_connects_and_cancels_on_owner_thread(
     progress = ProgressService(OwnerProgressTransport())
     background = ThreadPoolBackgroundExecutor(owner, max_pool_workers=2)
 
+    releases: list[threading.Event] = []
+
     def quiesce_background() -> None:
-        assert background.quiesce(timeout=5.0)
+        for release in releases:
+            release.set()
+        # Accepted workers post terminal delivery; pumping also handles failed assertions.
+        manual_until(owner, lambda: background.quiesce(timeout=30))
+        assert background.quiesce(timeout=30)
 
     request.addfinalizer(quiesce_background)
     runner = OperationRunner(gate, handles, progress, background, bus)
@@ -191,6 +193,7 @@ def test_session_core_connects_and_cancels_on_owner_thread(
     assert gate.snapshot() == ()
 
     cancel_requested = threading.Event()
+    releases.append(cancel_requested)
     cancel_started = threading.Event()
 
     def cancel_work(factory: Any) -> str:
@@ -198,7 +201,8 @@ def test_session_core_connects_and_cancels_on_owner_thread(
         bar = factory(desc="headless-cancel", total=1)
         bar.update()
         cancel_started.set()
-        if not cancel_requested.wait(timeout=5.0):
+        # stop() or the finalizer invokes the cancellation hook.
+        if not cancel_requested.wait(timeout=30):
             raise TimeoutError("cancel hook was not called")
         return "cancelled"
 
@@ -228,7 +232,8 @@ def test_session_core_connects_and_cancels_on_owner_thread(
     assert handles.live_count() == 1
     assert len(gate.snapshot()) == 1
     assert gate.snapshot()[0].note == "headless cancel"
-    assert cancel_started.wait(timeout=3.0)
+    # The accepted cancellation worker signals after posting progress.
+    assert cancel_started.wait(timeout=30)
     pump_until(lambda: bool(session.progress.bars_for_operation(cancel_token)))
     handles.stop(cancel_token, "headless stop")
     pump_until(lambda: handles.poll(cancel_token) is not None)
@@ -241,7 +246,7 @@ def test_session_core_connects_and_cancels_on_owner_thread(
     assert session.progress.bars_for_operation(cancel_token) == ()
     assert gate.snapshot() == ()
     assert handles.live_count() == 0
-    assert background.quiesce(timeout=5.0)
+    assert background.quiesce(timeout=30)
 
     assert terminal_threads == [owner_id, owner_id]
     assert worker_threads and all(thread_id != owner_id for thread_id in worker_threads)
