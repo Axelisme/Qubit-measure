@@ -21,8 +21,6 @@ from .pulse import Pulse, PulseCfg, TableLengthPulse
 from .readout import (
     AbsReadout,
     AbsReadoutCfg,
-    DirectReadout,
-    DirectReadoutCfg,
     PulseReadout,
     PulseReadoutCfg,
     Readout,
@@ -87,9 +85,14 @@ class ModuleCfgFactory:
         if isinstance(core_cfg, core_cfgs.PulseCfg):
             return _pulse_from_core(core_cfg, context=context)
         if isinstance(core_cfg, core_cfgs.PulseReadoutCfg):
-            return PulseReadoutCfg(
-                pulse_cfg=_pulse_from_core(core_cfg.pulse_cfg, context=context),
-                ro_cfg=DirectReadoutCfg.model_validate(core_cfg.ro_cfg.to_dict()),
+            fields = core_cfg.model_dump(mode="python", exclude={"waveform"})
+            return PulseReadoutCfg.model_validate(
+                {
+                    **fields,
+                    "waveform": WaveformCfgFactory.from_core(
+                        core_cfg.waveform, context=context
+                    ),
+                }
             )
         if isinstance(core_cfg, core_cfgs.PulseResetCfg):
             return PulseResetCfg(

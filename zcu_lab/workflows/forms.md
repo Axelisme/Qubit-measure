@@ -1,6 +1,6 @@
 # Workflow form attachments
 
-**Last updated:** 2026-10-15，inline module 不含選填硬體欄位；defaults 只依固定 capture 產生 fresh 初值
+**Last updated:** 2026-10-15，flat readout 必填 ADC 通道；defaults 只依固定 capture 產生 fresh 初值
 
 這個 package 擁有具體 workflow 的表單、to_cfg 與校準 module 轉換，不實作通用 editor、Window 或 Engine。
 Native science 不依賴 GUI。宿主、catalog、泛型 attachment、表單協調、presentation、input 保存、RPC 與 MCP 組裝由 lib 擁有，見 [host README](../../lib/zcu_tools/gui/app/workflows/README.md)。
@@ -39,7 +39,7 @@ Defaults 在同一 capture 解析 $qubit.module.x180.waveform.length，以具體
 
 `common.calibration_modules.resolve_calibration_modules` 集中 Coherence/MIST 的 drive 與 pulse-backed readout 規則。
 三個 plan 表單用 `gui.form_adapter.ModuleInputField` 生成 tagged module 欄位，經公開 `to_spec` 取 key 或持久 Spec，再交 captured core/native factories materialize modules 與 assets。Inline 保留全部 module 家族，ref choices 仍依各欄位的原篩選，nullable reset 保 None。科學檢查仍由 workflows 負責。
-Inline module 子表單與 `input_schema` 不含 `mux_*`、`mask`、`outsel`、`desc` 與 pulse 的選填 `ro_ch`，使用者與 agent 都不設定這些硬體細節；`to_spec` 由 Spec 預設補回。把 library key 複製成 Inline 時，這些欄位捨棄 library 原值、改用預設。必填的 `DirectReadoutCfg.ro_ch`（direct readout 與 pulse readout 的 `ro_cfg`）照常可設定。
+Inline module 子表單與 `input_schema` 不含 `desc`，`to_spec` 使用 Spec 預設值。把 library key 複製成 Inline 時，description 捨棄 library 原值、改用預設。Pulse 不保存 `ro_ch`。Flat `PulseReadoutCfg.ro_ch` 是必填 ADC 通道，表單照常提供編輯。
 Pure arb drive 不能改 Length-Rabi duration，回 qub_pulse consuming-field error；flat_top arb ramp 與 arb readout 保留。
 這裡不提供 gain-Rabi、time-scaling、live repository lookup 或 guessed modules。
 

@@ -73,6 +73,7 @@ class TwoToneExp(PersistableExperiment[TwoToneResult, TwotoneCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=TwoToneResult,
         cfg_type=TwotoneCfg,
+        cfg_schema_version="2.0",
         tag="fastflux/twotone",
     )
 

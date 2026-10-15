@@ -28,7 +28,7 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 的數值 Analysis 保存本次 fit_q
 
 `onetone.flux_dep.FluxDepExp` 用 explicit context 執行同步 run，回傳只有 values／freqs／signals 的純 Result。`measurement` 使用共用 2D 熱圖與掃描線 handle，也能繪製反向通量掃描。核心只負責 acquisition 與 RunRecord 的 canonical save／load，不提供互動 analyze。Notebook 與 GUI 各自捕捉來源並完成選線，重用 Qt-free kernel 與原生圖 builder。GUI preview 不作結果圖。
 
-`onetone.freq.FreqExp` 的 run 回傳純 freqs／signals，支援 linear 與 homophasal 取樣。同步 analyze 接 explicit source 與 FreqAnalyzeOptions，回傳純 FreqAnalysis，向 Plots 發布 `fit` 圖。`onetone.power_dep.PowerDepExp` 只提供量測及保存／載入，earlystop_snr 歸 typed cfg。`onetone.sa.SA_FreqExp` 的 analyze 接 None options、回傳 None，向 Plots 發布 amplitude 圖。三者都用 explicit context 執行 run，保留 canonical Hz 與 complex data。
+`onetone.freq.FreqExp` 的 run 回傳純 freqs／signals，支援 linear 與 homophasal 取樣。同步 analyze 接 explicit source 與 FreqAnalyzeOptions，回傳純 FreqAnalysis，向 Plots 發布 `fit` 圖。`onetone.power_dep.PowerDepExp` 只提供量測及保存／載入，earlystop_snr 歸 typed cfg。兩者都用 explicit context 執行 run，保留 canonical Hz 與 complex data。
 
 `fake.signal.core.FakeExp` 使用 explicit context 產生純 freqs／signals。Acquisition controls 在 typed FakeCfg，measurement 與 abs fit 圖歸本次 Plots。Analyze 接 None options、回傳 None，接受 cfg=None。Save／load 使用 Frequency／Hz 與 complex data 的 canonical record，不再於 load 偽造資料。
 

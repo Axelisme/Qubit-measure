@@ -50,12 +50,12 @@ class _TracePulseRegistry:
         self._next_id = 0
         self.registrations: list[tuple[str, Any]] = []
 
-    def calc_name(self, cfg: Any) -> str:
+    def calc_name(self, cfg: Any, *, ro_ch: int | None = None) -> str:
         name = f"pulse_{self._next_id}"
         self._next_id += 1
         return name
 
-    def register(self, name: str, cfg: Any) -> bool:
+    def register(self, name: str, cfg: Any, *, ro_ch: int | None = None) -> bool:
         self.registrations.append((name, cfg))
         return True
 

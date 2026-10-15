@@ -6,7 +6,8 @@ from zcu_tools.analysis.singleshot import classify_result
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modular import ModularProgramV2
-from zcu_tools.program.v2.modules.readout import DirectReadoutCfg
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 
 @pytest.mark.parametrize("radius", [0.5, 1.0, 1.5, 2.0, 3.0])
@@ -25,10 +26,14 @@ def test_acquire_population_matches_offline_classification(
         soccfg,
         ProgramV2Cfg(reps=1, rounds=1),
         modules=[
-            DirectReadoutCfg(
+            PulseReadoutCfg(
+                gen_ch=0,
+                nqz=1,
+                gain=0.1,
+                waveform=ConstWaveformCfg(length=1.0),
                 ro_ch=0,
                 ro_length=soccfg.cycles2us(100, ro_ch=0),
-                ro_freq=100.0,
+                freq=100.0,
             ).build("readout")
         ],
         sweep=[("sample", len(signals))],

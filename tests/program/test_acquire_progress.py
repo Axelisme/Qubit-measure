@@ -8,7 +8,8 @@ from zcu_tools.gui.session.services.progress import BoundProgressFactory
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modular import ModularProgramV2
-from zcu_tools.program.v2.modules.readout import DirectReadoutCfg
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.progress_bar import use_pbar_factory
 
 
@@ -33,7 +34,17 @@ def _acquire_two_records() -> None:
     program = ModularProgramV2(
         soccfg,
         ProgramV2Cfg(reps=500, rounds=1),
-        modules=[DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=5000.0).build("ro")],
+        modules=[
+            PulseReadoutCfg(
+                gen_ch=0,
+                nqz=1,
+                gain=0.1,
+                waveform=ConstWaveformCfg(length=1.0),
+                ro_ch=0,
+                ro_length=1.0,
+                freq=5000.0,
+            ).build("ro")
+        ],
     )
     # One-round acquisitions expose reps progress rather than a rounds bar.
     for _ in range(2):

@@ -8,7 +8,8 @@ from zcu_tools.device import FakeDevice
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modular import ModularProgramV2
-from zcu_tools.program.v2.modules.readout import DirectReadoutCfg
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.sim import SimParams
 from zcu_tools.program.v2.sim.engine import SimEngine
 from zcu_tools.program.v2.sweep import SweepCfg
@@ -30,6 +31,9 @@ _SIM = SimParams(
     Ql=5000.0,
     Qi=50000.0,
     snr=200.0,
+    timeFly=0.0,
+    readout_decay_rate_per_us=0.0,
+    readout_gain_noise_per_gain=0.0,
     pi_gain_len=0.4,
     seed=12345,
 )
@@ -46,8 +50,14 @@ def _predictor() -> FluxoniumPredictor:
 
 def _compiled_onetone(soccfg) -> ModularProgramV2:
     sw = SweepCfg(start=7000.0, stop=7200.0, expts=11, step=20.0)
-    readout = DirectReadoutCfg(
-        ro_ch=0, ro_length=1.0, ro_freq=sweep2param("ro_freq", sw)
+    readout = PulseReadoutCfg(
+        ro_ch=0,
+        ro_length=1.0,
+        freq=sweep2param("ro_freq", sw),
+        gen_ch=1,
+        nqz=1,
+        gain=1.0,
+        waveform=ConstWaveformCfg(length=1.0),
     ).build("ro")
     prog = ModularProgramV2(
         soccfg,
@@ -162,7 +172,15 @@ def test_acquire_dip_tracks_flux():
             start=rf_g_mhz - 100.0, stop=rf_g_mhz + 100.0, expts=81, step=200.0 / 80
         )
         ro_param = sweep2param("ro_freq", sw)
-        readout = DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=ro_param).build("ro")
+        readout = PulseReadoutCfg(
+            ro_ch=0,
+            ro_length=1.0,
+            freq=ro_param,
+            gen_ch=1,
+            nqz=1,
+            gain=1.0,
+            waveform=ConstWaveformCfg(length=1.0),
+        ).build("ro")
         prog = ModularProgramV2(
             soccfg,
             ProgramV2Cfg(reps=80, rounds=1),

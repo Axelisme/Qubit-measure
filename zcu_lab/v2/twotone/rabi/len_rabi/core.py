@@ -86,6 +86,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=LenRabiResult,
         cfg_type=LenRabiCfg,
+        cfg_schema_version="2.0",
         tag="twotone/ge/rabi_length",
     )
 

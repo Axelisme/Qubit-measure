@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-import warnings
 from abc import abstractmethod
 from collections.abc import Sequence
 from copy import deepcopy
-from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeAlias
+from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias
 
-from pydantic import BeforeValidator, Field, model_validator
+from pydantic import BeforeValidator
 from qick.asm_v2 import QickParam
 
 from ..macro.wmem import PatchWmemFromDmem
-from .base import AbsModuleCfg, Module, resolve_module_ref
+from .base import AbsModuleCfg, Module
 from .dmem import LoadWord
 from .pulse import Pulse, PulseCfg
 from .util import calc_max_length, round_timestamp
+from .waveform import WaveformCfg, resolve_waveform_ref
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
@@ -24,68 +24,70 @@ class AbsReadoutCfg(AbsModuleCfg):
     def build(self, name: str) -> AbsReadout: ...
 
 
-class DirectReadoutCfg(AbsReadoutCfg):
-    type: Literal["readout/direct"] = "readout/direct"
+class PulseReadoutCfg(AbsReadoutCfg):
+    """Native generator/ADC readout, with one shared semantic frequency.
+
+    gen_ch/ro_ch select generator/ADC channels; nqz is Nyquist zone 1 or 2.
+    freq/mixer_freq are MHz, gain is normalized, phase is degrees. waveform is
+    an expanded native envelope (arb holds its absolute asset path). pre_delay
+    and post_delay bracket generator playback in us; ro_length is the ADC window
+    and trig_offset the trigger delay in us. Scalar knobs except mixer_freq accept
+    QICK sweeps. desc is optional prose. type is readout/pulse.
+    """
+
+    type: Literal["readout/pulse"] = "readout/pulse"
+    gen_ch: int
+    nqz: Literal[1, 2]
+    freq: float | QickParam
+    gain: float | QickParam
+    phase: float | QickParam = 0.0
+    waveform: Annotated[WaveformCfg, BeforeValidator(resolve_waveform_ref)]
+    mixer_freq: float | None = None
+    pre_delay: float | QickParam = 0.0
+    post_delay: float | QickParam = 0.0
     ro_ch: int
     ro_length: float | QickParam
-    ro_freq: float | QickParam
     trig_offset: float | QickParam = 0.0
-    gen_ch: int | None = None
-
-    def build(self, name: str) -> DirectReadout:
-        return DirectReadout(name, self)
-
-    def set_param(self, name: str, value: float | QickParam) -> None:
-        if name == "ro_freq":
-            self.ro_freq = value
-        elif name == "ro_length":
-            self.ro_length = value
-        else:
-            raise ValueError(f"Unknown parameter: {name}")
-
-
-class PulseReadoutCfg(AbsReadoutCfg):
-    type: Literal["readout/pulse"] = "readout/pulse"
-    pulse_cfg: Annotated[PulseCfg, BeforeValidator(resolve_module_ref)]
-    ro_cfg: DirectReadoutCfg
-
-    @model_validator(mode="before")
-    @classmethod
-    def _autoderive_ro_fields(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-        pulse_cfg = data.get("pulse_cfg")
-        ro_cfg = data.get("ro_cfg")
-        if isinstance(pulse_cfg, dict) and isinstance(ro_cfg, dict):
-            if "ch" in pulse_cfg:
-                ro_cfg.setdefault("gen_ch", pulse_cfg["ch"])
-            if "freq" in pulse_cfg:
-                ro_cfg.setdefault("ro_freq", pulse_cfg["freq"])
-        return data
 
     def build(self, name: str) -> PulseReadout:
+        """Capture this cfg as a named, blocking QICK readout module."""
         return PulseReadout(name, self)
 
+    def to_pulse_cfg(self) -> PulseCfg:
+        """Return a fresh outer PulseCfg containing only generator settings.
+
+        gen_ch maps to ch; ADC channel, window and trigger settings are omitted.
+        Pass ro_ch separately to Pulse when ADC frequency matching is needed.
+        The waveform and any QickParam values are borrowed, not deep-copied;
+        callers must not mutate these shared nested objects through the result.
+        PulseCfg validation runs as usual and its errors propagate unchanged.
+        """
+        return PulseCfg(
+            ch=self.gen_ch,
+            nqz=self.nqz,
+            freq=self.freq,
+            gain=self.gain,
+            phase=self.phase,
+            waveform=self.waveform,
+            mixer_freq=self.mixer_freq,
+            pre_delay=self.pre_delay,
+            post_delay=self.post_delay,
+        )
+
     def set_param(self, name: str, value: float | QickParam) -> None:
-        if name == "gain":
-            self.pulse_cfg.set_param("gain", value)
-        elif name == "freq":
-            self.pulse_cfg.set_param("freq", value)
-            self.ro_cfg.set_param("ro_freq", value)
-        elif name == "ro_freq":
-            self.ro_cfg.set_param("ro_freq", value)
-        elif name == "length":
-            self.pulse_cfg.set_param("length", value)
-        elif name == "ro_length":
-            self.ro_cfg.set_param("ro_length", value)
+        """Set shared freq (MHz), gain, waveform length or ro_length (us).
+
+        Unsupported names raise ValueError; waveform length restrictions apply.
+        """
+        if name == "length":
+            self.waveform.set_param(name, value)
+        elif name in {"freq", "gain", "ro_length"}:
+            setattr(self, name, value)
         else:
             raise ValueError(f"Unknown parameter: {name}")
 
 
-ReadoutCfg: TypeAlias = Annotated[
-    DirectReadoutCfg | PulseReadoutCfg,
-    Field(discriminator="type"),
-]
+ReadoutCfg: TypeAlias = PulseReadoutCfg
 
 
 class AbsReadout(Module):
@@ -101,41 +103,6 @@ def Readout(name: str, cfg: AbsReadoutCfg) -> AbsReadout:
     return cfg.build(name)
 
 
-class DirectReadout(AbsReadout):
-    def __init__(self, name: str, cfg: DirectReadoutCfg) -> None:
-        self.name = name
-        self.cfg = deepcopy(cfg)
-
-    def init(self, prog: ModularProgramV2) -> None:
-        prog.declare_readout(ch=self.cfg.ro_ch, length=self.cfg.ro_length)
-
-        readout_kwargs = dict()
-        if self.cfg.gen_ch is not None:
-            readout_kwargs["gen_ch"] = self.cfg.gen_ch
-        prog.add_readoutconfig(
-            ch=self.cfg.ro_ch,
-            name=self.name,
-            freq=self.cfg.ro_freq,
-            **readout_kwargs,
-        )
-
-    def total_length(self, prog: ModularProgramV2) -> float | QickParam:
-        return round_timestamp(
-            prog,
-            round_timestamp(prog, self.cfg.trig_offset)
-            + round_timestamp(prog, self.cfg.ro_length, ro_ch=self.cfg.ro_ch),
-        )
-
-    def run(
-        self, prog: ModularProgramV2, t: float | QickParam = 0.0
-    ) -> float | QickParam:
-        ro_ch = self.cfg.ro_ch
-        trig_offset = self.cfg.trig_offset
-        prog.send_readoutconfig(ro_ch, self.name, t=t)  # type: ignore
-        prog.trigger([ro_ch], t=t + trig_offset)
-        return t
-
-
 class PulseReadout(AbsReadout):
     def __init__(
         self,
@@ -146,50 +113,69 @@ class PulseReadout(AbsReadout):
         freq_val: str | None = None,
         ro_freq_val: str | None = None,
     ) -> None:
+        """Capture a flat readout and optional hardware-word register inputs.
+
+        name identifies ADC and pulse templates. cfg is copied and not mutated.
+        gain_val names a hardware gain-word register; freq_val/ro_freq_val are
+        paired generator/ADC frequency-word registers, already lowered for mixer
+        and downconversion sign. Unspecified registers use cfg scalar/sweep values.
+        init must precede run. Invalid QICK settings fail during initialization.
+        """
         self.name = name
         self.cfg = deepcopy(cfg)
         self.gain_val = gain_val
         self.freq_val = freq_val
         self.ro_freq_val = ro_freq_val
-        ro_ch = self.cfg.pulse_cfg.ro_ch
-        if ro_ch is None:
-            ro_ch = self.cfg.ro_cfg.ro_ch
-            self.cfg.pulse_cfg.ro_ch = ro_ch
-        if ro_ch != self.cfg.ro_cfg.ro_ch:
-            warnings.warn(
-                f"{name} pulse_cfg.ro_ch is {ro_ch}, this may not be what you want",
-                stacklevel=1,
-            )
-        self.pulse = Pulse(name=f"{name}_pulse", cfg=self.cfg.pulse_cfg)
-        self.ro_window = DirectReadout(name=f"{name}_adc", cfg=self.cfg.ro_cfg)
+        pulse_cfg = self.cfg.to_pulse_cfg()
+        self.pulse = Pulse(name=f"{name}_pulse", cfg=pulse_cfg, ro_ch=self.cfg.ro_ch)
         self._runtime_pulse: Pulse | None = None
         self._runtime_ro_name: str | None = None
 
+    @property
+    def adc_name(self) -> str:
+        """Registered ADC template name, also used for table-backed word updates."""
+        return f"{self.name}_adc"
+
     def init(self, prog: ModularProgramV2) -> None:
+        """Declare the generator, ADC window and fixed/runtime configuration templates."""
         self.pulse.init(prog)
-        self.ro_window.init(prog)
+        prog.declare_readout(ch=self.cfg.ro_ch, length=self.cfg.ro_length)
+        prog.add_readoutconfig(
+            ch=self.cfg.ro_ch,
+            name=self.adc_name,
+            freq=self.cfg.freq,
+            gen_ch=self.cfg.gen_ch,
+        )
         if self._uses_runtime_pulse:
             self._runtime_pulse = Pulse(
                 name=f"{self.name}_runtime_pulse",
-                cfg=self.cfg.pulse_cfg,
+                cfg=self.pulse.cfg,
+                ro_ch=self.cfg.ro_ch,
                 pulse_id=f"{self.name}_runtime_pulse",
             )
             self._runtime_pulse.init(prog)
         if self.ro_freq_val is not None:
             self._runtime_ro_name = f"{self.name}_adc_runtime"
-            readout_kwargs: dict[str, int] = {}
-            if self.cfg.ro_cfg.gen_ch is not None:
-                readout_kwargs["gen_ch"] = self.cfg.ro_cfg.gen_ch
             prog.add_readoutconfig(
-                ch=self.cfg.ro_cfg.ro_ch,
+                ch=self.cfg.ro_ch,
                 name=self._runtime_ro_name,
-                freq=self.cfg.ro_cfg.ro_freq,
-                **readout_kwargs,
+                freq=self.cfg.freq,
+                gen_ch=self.cfg.gen_ch,
             )
 
     def total_length(self, prog: ModularProgramV2) -> float | QickParam:
+        """Return blocking us after init, covering generator delays and ADC window.
+
+        Trigger offset and ADC length follow their respective clock rounding;
+        generator playback uses Pulse's registered scalar/sweep duration.
+        """
         return calc_max_length(
-            self.ro_window.total_length(prog), self.pulse.total_length(prog)
+            round_timestamp(
+                prog,
+                round_timestamp(prog, self.cfg.trig_offset)
+                + round_timestamp(prog, self.cfg.ro_length, ro_ch=self.cfg.ro_ch),
+            ),
+            self.pulse.total_length(prog),
         )
 
     @property
@@ -199,8 +185,14 @@ class PulseReadout(AbsReadout):
     def run(
         self, prog: ModularProgramV2, t: float | QickParam = 0.0
     ) -> float | QickParam:
+        """Send configuration at t, trigger at t+offset, and pulse at t+pre_delay.
+
+        t and the returned blocking end time are us; scalar and QICK sweeps are
+        supported after init. Re-running leaves captured cfg/templates unchanged.
+        """
         if self.ro_freq_val is None:
-            self.ro_window.run(prog, t)
+            prog.send_readoutconfig(self.cfg.ro_ch, self.adc_name, t=t)
+            prog.trigger([self.cfg.ro_ch], t=t + self.cfg.trig_offset)
         else:
             runtime_ro_name = self._runtime_ro_name
             assert runtime_ro_name is not None
@@ -228,9 +220,9 @@ class PulseReadout(AbsReadout):
     def _run_readout_config_from_regs(
         self, prog: ModularProgramV2, name: str, t: float | QickParam
     ) -> None:
-        ro_ch = self.cfg.ro_cfg.ro_ch
+        ro_ch = self.cfg.ro_ch
         prog.send_readoutconfig_from_regs(ro_ch, name, t=t, freq_reg=self.ro_freq_val)
-        prog.trigger([ro_ch], t=t + self.cfg.ro_cfg.trig_offset)
+        prog.trigger([ro_ch], t=t + self.cfg.trig_offset)
 
 
 class TablePulseReadout(AbsReadout):
@@ -251,6 +243,14 @@ class TablePulseReadout(AbsReadout):
         freq_words: Sequence[int],
         ro_freq_words: Sequence[int],
     ) -> None:
+        """Capture flat cfg and paired uint32 words for a named sweep loop.
+
+        idx_reg must match exactly one declared loop with the same point count.
+        Empty, unequal, or invalid uint32 tables raise ValueError. The first pair
+        must encode cfg.freq; each later pair represents one semantic frequency.
+        Dedicated templates isolate updates from shared pulses. The final update
+        wraps to the first pair before the next outer repetition.
+        """
         self.name = name
         self.idx_reg = idx_reg
         self.freq_words = [int(word) for word in freq_words]
@@ -266,7 +266,8 @@ class TablePulseReadout(AbsReadout):
         self.cfg = self._readout.cfg
         self._readout.pulse = Pulse(
             name=f"{name}_pulse",
-            cfg=self.cfg.pulse_cfg,
+            cfg=self._readout.pulse.cfg,
+            ro_ch=self.cfg.ro_ch,
             pulse_id=f"{name}_table_pulse",
         )
         self._addr_reg = f"{name}_table_addr"
@@ -302,7 +303,7 @@ class TablePulseReadout(AbsReadout):
                 dmem_offset=self._freq_loader.offset,
             ),
             PatchWmemFromDmem(
-                name=self._readout.ro_window.name,
+                name=self._readout.adc_name,
                 idx_reg=self.idx_reg,
                 addr_reg=self._addr_reg,
                 val_reg=self._ro_freq_loader.val_reg,

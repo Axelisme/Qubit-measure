@@ -14,6 +14,8 @@ Library 讀取先驗容器，再逐條驗證四個分組的 Spec 與所屬來源
 
 這是一般讀取不寫檔的 library 例外（ADR-0063），涵蓋 open、refresh、edit 進入與 commit 重讀。合法檔與 header-only 不重寫，也不重複備份。Header／容器或不可歸屬的 provenance 錯誤整份拒絕，不備份、不清理。Ledger I/O、schema、附檔與非預期錯誤直接傳遞。備份失敗不替換主檔；replace 失敗保留原主檔及已完成的備份，不發布候選。這不是跨檔交易或掉電恢復。
 
+Readout 使用獨立、平鋪的 `readout/pulse` Spec，waveform 可保留 key 引用，見 [ADR-0074](../../../../docs/adr/0074-flat-readout-module.md)。舊 nested readout 沿壞條目政策備份並移除，不遷移或相容讀取。
+
 Library 的設計是「元件 → 分組 → pydantic model」，分組名稱不是封閉清單。pulses、readout、reset 與 waveforms 是目前使用的四個分組。
 
 - 現行 `ModuleLibraryDocument.components` 與 `library_key_kind` 仍只接受這四個分組。日後需要第五種分組時再放寬實作限制，不另改設計。實際 key 是 `Q1.pulses.pi` 這類三段路徑，不是角色或隱藏 namespace。
