@@ -72,11 +72,15 @@ def _make_ml() -> ParameterContext:
         "R1.readout.readout_rf",
         module_spec_from_raw(
             {
-                "type": "readout/direct",
                 "ro_ch": 0,
-                "ro_freq": 6000.0,
                 "ro_length": 1.0,
                 "trig_offset": 0.0,
+                "type": "readout/pulse",
+                "freq": 6000.0,
+                "gen_ch": 0,
+                "nqz": 1,
+                "gain": 0.1,
+                "waveform": {"style": "const", "length": 1.0},
             }
         ),
     ).replaced_waveform(
@@ -298,12 +302,12 @@ def test_inspect_dialog_ml_apply_replaces_name_and_opens_fresh_clean_draft(qapp)
     assert old_editor_id is not None
 
     draft = ctrl._drafts[old_editor_id]
-    draft.root.fields["ro_freq"].set_value(6123.0)
+    draft.root.fields["freq"].set_value(6123.0)
     dialog._ml_name_edit.setText("R1.readout.readout_v2")
     dialog._ml_name_edit.textEdited.emit("R1.readout.readout_v2")
     qapp.processEvents()
 
-    assert ml.library.get_module("R1.readout.readout_rf").to_dict()["ro_freq"] == 6000.0
+    assert ml.library.get_module("R1.readout.readout_rf").to_dict()["freq"] == 6000.0
     assert dialog._ml_status_label.text() == "Unsaved"
     assert dialog._ml_apply_btn.isEnabled()
 
@@ -314,7 +318,7 @@ def test_inspect_dialog_ml_apply_replaces_name_and_opens_fresh_clean_draft(qapp)
     assert (
         ctrl.read_context()
         .library.get_module("R1.readout.readout_v2")
-        .to_dict()["ro_freq"]
+        .to_dict()["freq"]
         == 6123.0
     )
     ctrl.replace_cfg_editor.assert_called_once_with(
@@ -325,7 +329,7 @@ def test_inspect_dialog_ml_apply_replaces_name_and_opens_fresh_clean_draft(qapp)
     assert dialog._ml_editor_id != old_editor_id
     assert (
         getattr(
-            dialog._ml_form_widget.read_schema().value.fields["ro_freq"], "value", None
+            dialog._ml_form_widget.read_schema().value.fields["freq"], "value", None
         )
         == 6123.0
     )
@@ -364,7 +368,7 @@ def test_inspect_dialog_ml_context_switch_apply_failure_keeps_draft(qapp, monkey
     _select_ml_child(dialog, 0)
     editor_id = dialog._ml_editor_id
     assert editor_id is not None
-    ctrl._drafts[editor_id].root.fields["ro_freq"].set_value(6123.0)
+    ctrl._drafts[editor_id].root.fields["freq"].set_value(6123.0)
     dialog._ml_name_edit.setText("R1.readout.readout_v2")
     dialog._ml_name_edit.textEdited.emit("R1.readout.readout_v2")
 
@@ -374,9 +378,7 @@ def test_inspect_dialog_ml_context_switch_apply_failure_keeps_draft(qapp, monkey
     ctrl.replace_cfg_editor.side_effect = CfgEditorError("different context")
     dialog._ml_apply_btn.click()
 
-    assert (
-        ml_b.library.get_module("R1.readout.readout_rf").to_dict()["ro_freq"] == 6000.0
-    )
+    assert ml_b.library.get_module("R1.readout.readout_rf").to_dict()["freq"] == 6000.0
     assert dialog._ml_editor_id == editor_id
     assert dialog._ml_name_edit.text() == "R1.readout.readout_v2"
     assert dialog._ml_status_label.text() == "Unsaved"
@@ -392,7 +394,7 @@ def test_inspect_dialog_ml_apply_failure_keeps_live_and_draft(qapp, monkeypatch)
     editor_id = dialog._ml_editor_id
     assert editor_id is not None
     draft = ctrl._drafts[editor_id]
-    draft.root.fields["ro_freq"].set_value(6123.0)
+    draft.root.fields["freq"].set_value(6123.0)
     dialog._ml_name_edit.setText("Q1.waveforms.drive_wav")
     dialog._ml_name_edit.textEdited.emit("Q1.waveforms.drive_wav")
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
@@ -405,7 +407,7 @@ def test_inspect_dialog_ml_apply_failure_keeps_live_and_draft(qapp, monkeypatch)
     assert dialog._ml_editor_id == editor_id
     assert (
         getattr(
-            dialog._ml_form_widget.read_schema().value.fields["ro_freq"], "value", None
+            dialog._ml_form_widget.read_schema().value.fields["freq"], "value", None
         )
         == 6123.0
     )
@@ -454,7 +456,7 @@ def test_inspect_dialog_ml_revert_reloads_live_entry(qapp):
     _select_ml_child(dialog, 0)
     editor_id = dialog._ml_editor_id
     assert editor_id is not None
-    ctrl._drafts[editor_id].root.fields["ro_freq"].set_value(6123.0)
+    ctrl._drafts[editor_id].root.fields["freq"].set_value(6123.0)
     dialog._ml_name_edit.setText("R1.readout.renamed")
     dialog._ml_name_edit.textEdited.emit("R1.readout.renamed")
 
@@ -466,7 +468,7 @@ def test_inspect_dialog_ml_revert_reloads_live_entry(qapp):
     assert dialog._ml_editor_id != editor_id
     assert (
         getattr(
-            dialog._ml_form_widget.read_schema().value.fields["ro_freq"], "value", None
+            dialog._ml_form_widget.read_schema().value.fields["freq"], "value", None
         )
         == 6000.0
     )
@@ -589,11 +591,15 @@ def native_delete_inspector(
             "R1.readout.readout_rf",
             module_spec_from_raw(
                 {
-                    "type": "readout/direct",
                     "ro_ch": 0,
-                    "ro_freq": 6000.0,
                     "ro_length": 1.0,
                     "trig_offset": 0.0,
+                    "type": "readout/pulse",
+                    "freq": 6000.0,
+                    "gen_ch": 0,
+                    "nqz": 1,
+                    "gain": 0.1,
+                    "waveform": {"style": "const", "length": 1.0},
                 }
             ),
         )

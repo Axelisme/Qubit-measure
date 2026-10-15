@@ -296,9 +296,18 @@ class ResultEntry:
             # native model. Copy those values too, in the same working units.
             with self._point_store(destination / "point.yaml").edit() as draft:
                 draft.components = components
+        from zcu_tools.resources.context.library import (
+            MODULE_LIBRARY_FORMAT,
+            MODULE_LIBRARY_VERSION,
+        )
+
         with (destination / "module_cfg.yaml").open("x", encoding="utf-8") as stream:
             YAML(typ="rt").dump(
-                {"format": "zcu.module-library", "format_version": "1.0"}, stream
+                {
+                    "format": MODULE_LIBRARY_FORMAT,
+                    "format_version": f"{MODULE_LIBRARY_VERSION.major}.{MODULE_LIBRARY_VERSION.minor}",
+                },
+                stream,
             )
 
     def _clone_source(self, clone_from: str | PointView) -> tuple[ResultEntry, Path]:

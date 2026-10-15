@@ -38,7 +38,7 @@ class TemplateComponent(ComponentSchema):
 def environment() -> SessionEnv:
     point = PointDocument.model_construct(
         format="zcu.parameter-container",
-        format_version="1.0",
+        format_version="2.0",
         general=PointGeneral(created_at="2026-10-13T00:00:00Z"),
         components={
             "Q1": TemplateComponent(
@@ -54,7 +54,7 @@ def environment() -> SessionEnv:
     library = LibrarySnapshot(
         ModuleLibraryDocument(
             format="zcu.module-library",
-            format_version="1.0",
+            format_version="2.0",
             components={
                 "Q1": ComponentLibrary(
                     pulses={

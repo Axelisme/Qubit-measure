@@ -39,10 +39,14 @@ def _readout_shape(ctrl: MagicMock) -> tuple[CfgSectionSpec, CfgSectionValue]:
         "R1.readout.lib_ro",
         module_spec_from_raw(
             {
-                "type": "readout/direct",
                 "ro_ch": 0,
                 "ro_length": 1.0,
-                "ro_freq": 7000.0,
+                "type": "readout/pulse",
+                "freq": 7000.0,
+                "gen_ch": 0,
+                "nqz": 1,
+                "gain": 0.1,
+                "waveform": {"style": "const", "length": 1.0},
             }
         ),
     )
@@ -64,7 +68,7 @@ def test_library_reference_starts_collapsed_custom_starts_expanded(qapp, ctrl):
         {"mod": ReferenceSpec(kind="module", allowed=[lib_spec], label="Mod")},
         {
             "mod": ReferenceValue(
-                chosen_key="<Custom:Direct Readout>",
+                chosen_key="<Custom:Pulse Readout>",
                 value=lib_val,
             )
         },
@@ -88,7 +92,7 @@ def test_reference_identity_change_reapplies_folding(qapp, ctrl):
     assert ref_widget is not None
     field = ref_widget.field
 
-    field.set_chosen_key("<Custom:Direct Readout>")
+    field.set_chosen_key("<Custom:Pulse Readout>")
     qapp.processEvents()
     assert item.isExpanded() is True
     field.set_chosen_key("R1.readout.lib_ro")

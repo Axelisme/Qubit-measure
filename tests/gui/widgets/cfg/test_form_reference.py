@@ -149,7 +149,7 @@ def reference_controls(form: CfgFormWidget) -> tuple[QComboBox, QPushButton]:
 
 
 def reference_frequency_line(form: CfgFormWidget) -> QLineEdit:
-    editor = tree_widget(form).itemWidget(tree_item(form, "mod.ro_freq"), 1)
+    editor = tree_widget(form).itemWidget(tree_item(form, "mod.freq"), 1)
     assert editor is not None
     entry = editor.findChild(QLineEdit)
     assert entry is not None
@@ -160,10 +160,14 @@ def test_module_ref_convert_then_edit_survives_refresh_and_reselect(qapp):
     lib_spec, lib_value = module_cfg_to_value(
         ModuleCfgFactory.from_raw(
             {
-                "type": "readout/direct",
                 "ro_ch": 0,
                 "ro_length": 1.0,
-                "ro_freq": 7000.0,
+                "type": "readout/pulse",
+                "freq": 7000.0,
+                "gen_ch": 0,
+                "nqz": 1,
+                "gain": 0.1,
+                "waveform": {"style": "const", "length": 1.0},
             }
         )
     )
@@ -204,10 +208,14 @@ def test_module_ref_convert_then_edit_survives_refresh_and_reselect(qapp):
         _, updated_value = module_cfg_to_value(
             ModuleCfgFactory.from_raw(
                 {
-                    "type": "readout/direct",
                     "ro_ch": 0,
                     "ro_length": 1.0,
-                    "ro_freq": 7500.0,
+                    "type": "readout/pulse",
+                    "freq": 7500.0,
+                    "gen_ch": 0,
+                    "nqz": 1,
+                    "gain": 0.1,
+                    "waveform": {"style": "const", "length": 1.0},
                 }
             )
         )
@@ -219,7 +227,7 @@ def test_module_ref_convert_then_edit_survives_refresh_and_reselect(qapp):
         modified = form.read_values().fields["mod"]
         assert isinstance(modified, ReferenceValue)
         assert modified.chosen_key == f"<Custom:{lib_spec.label}>"
-        frequency = modified.value.fields["ro_freq"]
+        frequency = modified.value.fields["freq"]
         assert isinstance(frequency, DirectValue) and frequency.value == 8000.0
         assert combo.currentText() == lib_spec.label
 
@@ -229,7 +237,7 @@ def test_module_ref_convert_then_edit_survives_refresh_and_reselect(qapp):
         reverted = form.read_values().fields["mod"]
         assert isinstance(reverted, ReferenceValue)
         assert reverted.chosen_key == "my_pulse"
-        frequency = reverted.value.fields["ro_freq"]
+        frequency = reverted.value.fields["freq"]
         assert isinstance(frequency, DirectValue) and frequency.value == 7500.0
         assert combo.currentText() == "Lib: my_pulse"
         assert draft.is_valid()

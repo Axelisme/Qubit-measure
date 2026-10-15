@@ -48,7 +48,7 @@ def pulse(*, gain: float = 0.25, waveform: str = "Q1.waveforms.base") -> PulseSp
 def document() -> ModuleLibraryDocument:
     return ModuleLibraryDocument(
         format="zcu.module-library",
-        format_version="1.0",
+        format_version="2.0",
         components={
             "Q1": ComponentLibrary(
                 pulses={"pi": pulse(), "pi2": pulse(gain=0.125)},
@@ -94,7 +94,7 @@ def assets() -> InMemoryWaveformAsset:
 def files(tmp_path: Path) -> tuple[Path, Path]:
     path = tmp_path / "module_cfg.yaml"
     path.write_text(
-        "format: zcu.module-library\nformat_version: '1.0'\n", encoding="utf-8"
+        "format: zcu.module-library\nformat_version: '2.0'\n", encoding="utf-8"
     )
     records = tmp_path / "records"
     records.mkdir()
@@ -202,8 +202,8 @@ def test_missing_document_is_not_created(files: tuple[Path, Path]) -> None:
     [
         "waveforms: {}\nmodules: {}\n",
         "format: wrong\nformat_version: '1.0'\n",
-        "format: zcu.module-library\nformat_version: '2.0'\n",
-        "format: zcu.module-library\nformat_version: '1.0'\nunknown: true\n",
+        "format: zcu.module-library\nformat_version: '1.0'\n",
+        "format: zcu.module-library\nformat_version: '2.0'\nunknown: true\n",
     ],
 )
 def test_open_rejects_invalid_document_without_rewriting(
@@ -703,7 +703,7 @@ def test_source_refresh_failure_retains_snapshot_and_recovery_publishes(
 def test_obsolete_nested_readout_error_names_library_entry(files):
     raw = {
         "format": "zcu.module-library",
-        "format_version": "1.0",
+        "format_version": "2.0",
         "components": {
             "Q1": {
                 "readout": {

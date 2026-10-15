@@ -46,28 +46,23 @@ def sample_schema() -> CfgSchema:
 
 
 def readout_schema() -> CfgSchema:
-    """Return a library readout reference with direct and pulse variants."""
-    variants = [
-        PROGRAM_SHAPES.get("module", tag).make_spec(MAIN_PROGRAM_SPEC_POLICY)
-        for tag in ("readout/direct", "readout/pulse")
-    ]
-    variants[1] = (
-        variants[1]
-        .lock_literal("pulse_cfg.freq", 0.0)
-        .lock_literal("ro_cfg.ro_freq", 0.0)
+    """Return a library readout reference with flat generator and ADC fields."""
+    pulse = (
+        PROGRAM_SHAPES.get("module", "readout/pulse")
+        .make_spec(MAIN_PROGRAM_SPEC_POLICY)
+        .lock_literal("freq", 0.0)
     )
-    pulse = variants[1]
+    variants = [pulse]
     value = make_default_value(pulse)
     for path, item in {
-        "pulse_cfg.ch": 0,
-        "pulse_cfg.nqz": 2,
-        "pulse_cfg.freq": 0.0,
-        "pulse_cfg.gain": 0.1,
-        "pulse_cfg.waveform.length": 1.0,
-        "ro_cfg.ro_ch": 0,
-        "ro_cfg.ro_freq": 0.0,
-        "ro_cfg.ro_length": 1.0,
-        "ro_cfg.trig_offset": 0.0,
+        "gen_ch": 0,
+        "nqz": 2,
+        "freq": 0.0,
+        "gain": 0.1,
+        "waveform.length": 1.0,
+        "ro_ch": 0,
+        "ro_length": 1.0,
+        "trig_offset": 0.0,
     }.items():
         value.with_field(path, item)
     return CfgSchema(

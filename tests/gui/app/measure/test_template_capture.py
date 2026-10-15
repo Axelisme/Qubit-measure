@@ -128,10 +128,9 @@ def test_bound_resonator_creates_original_readout_with_adc_channel(
         ) from error
     readout = ctrl.read_context().library.module_spec("R1.readout.rf")
     assert isinstance(readout, PulseReadoutSpec)
-    assert isinstance(readout.pulse_cfg, PulseSpec)
-    assert readout.pulse_cfg.freq == 6123.0
-    assert readout.pulse_cfg.ch == 1
-    assert readout.ro_cfg.ro_ch == 2
+    assert readout.freq == 6123.0
+    assert readout.gen_ch == 1
+    assert readout.ro_ch == 2
 
 
 def test_bound_empty_resonator_reports_first_missing_leaf_without_write(

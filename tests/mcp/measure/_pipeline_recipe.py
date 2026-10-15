@@ -46,16 +46,9 @@ def pipeline(
         )
     tab.set_fields(
         (
-            RecipeFieldEdit(
-                "modules.readout.module.pulse_cfg.module.freq", frequency_mhz
-            ),
-            RecipeFieldEdit("modules.readout.module.ro_cfg.ro_freq", frequency_mhz),
-            RecipeFieldEdit(
-                "modules.readout.module.ro_cfg.ro_length", readout_length_us
-            ),
-            RecipeFieldEdit(
-                "modules.readout.module.ro_cfg.trig_offset", trigger_offset_us
-            ),
+            RecipeFieldEdit("modules.readout.module.freq", frequency_mhz),
+            RecipeFieldEdit("modules.readout.module.ro_length", readout_length_us),
+            RecipeFieldEdit("modules.readout.module.trig_offset", trigger_offset_us),
             RecipeFieldEdit("rounds", rounds),
         )
     )
@@ -107,17 +100,10 @@ PIPELINE = RecipeDefinition(
     pipeline,
     adapter_name="lookback",
     summary_parameters=(
+        SummaryParameter("frequency_mhz", "modules.readout.module.freq", "MHz"),
+        SummaryParameter("readout_length_us", "modules.readout.module.ro_length", "us"),
         SummaryParameter(
-            "frequency_mhz", "modules.readout.module.pulse_cfg.module.freq", "MHz"
-        ),
-        SummaryParameter(
-            "ro_frequency_mhz", "modules.readout.module.ro_cfg.ro_freq", "MHz"
-        ),
-        SummaryParameter(
-            "readout_length_us", "modules.readout.module.ro_cfg.ro_length", "us"
-        ),
-        SummaryParameter(
-            "trigger_offset_us", "modules.readout.module.ro_cfg.trig_offset", "us"
+            "trigger_offset_us", "modules.readout.module.trig_offset", "us"
         ),
         SummaryParameter("rounds", "rounds"),
         SummaryParameter("readout_ref", "modules.readout"),

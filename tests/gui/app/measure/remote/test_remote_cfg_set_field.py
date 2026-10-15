@@ -524,7 +524,7 @@ def test_tree_enum_scalar_leaf_has_value_and_choices(qapp):
     root = _fakefreq_root()
     tree = build_cfg_observation(root)
     # 'nqz' is an enum scalar (choices [1, 2]) under the readout pulse cfg.
-    nqz = _node(tree, "modules.readout.pulse_cfg.nqz")
+    nqz = _node(tree, "modules.readout.nqz")
     assert nqz["input"]["resolved"] == 2
     assert nqz["choices"] == [1, 2]
 
@@ -537,23 +537,9 @@ def test_tree_moduleref_node_current_options_and_variant_subtree(qapp):
     root = _fakefreq_root()
     readout = _node(build_cfg_observation(root), "modules.readout")
     assert readout["ref"] == "<Custom:Pulse Readout>"
-    assert readout["choices"] == ["Direct Readout", "Pulse Readout"]
-    assert "pulse_cfg" in readout["children"]
-    assert "ro_cfg" in readout["children"]
-
-
-def test_tree_moduleref_only_chosen_variant_expanded(qapp):
-    from zcu_tools.gui.app.measure.remote.cfg_observation import (
-        build_cfg_observation,
-    )
-
-    root = _fakefreq_root()
-    # Switch to the 'Direct Readout' variant; the tree must now expand THAT
-    # variant's sub-tree, not the previous one.
-    _set(root, "modules.readout.ref", "Direct Readout")
-    readout = _node(build_cfg_observation(root), "modules.readout")
-    assert readout["ref"] == "<Custom:Direct Readout>"
-    assert "pulse_cfg" not in readout["children"]
+    assert readout["choices"] == ["Pulse Readout"]
+    assert readout["children"]["gen_ch"]["input"]["resolved"] == 0
+    assert readout["children"]["ro_ch"]["input"]["resolved"] == 0
 
 
 def test_tree_includes_immutable_literal_fields(qapp):
@@ -562,7 +548,7 @@ def test_tree_includes_immutable_literal_fields(qapp):
     )
 
     root = _fakefreq_root()
-    pulse_cfg = _node(build_cfg_observation(root), "modules.readout.pulse_cfg")
+    pulse_cfg = _node(build_cfg_observation(root), "modules.readout")
     for name in ("type", "freq"):
         leaf = pulse_cfg["children"][name]
         assert leaf["kind"] == "literal"
@@ -594,7 +580,7 @@ def test_tree_device_scalar_has_value_and_dynamic_choices(qapp):
 # not mistaken for a (non-existent) library entry name. Regression: a bare label
 # used to be stored verbatim → empty sub-field → lowering "Unknown module
 # reference". Pure binding-target unit (no socket): fake/freq has a readout
-# ModuleRef with variant labels "Direct Readout" / "Pulse Readout".
+# ModuleRef with variant labels "Pulse Readout" / "Pulse Readout".
 # ---------------------------------------------------------------------------
 
 
@@ -605,16 +591,6 @@ def _fakefreq_root():
     return _make_draft(ctrl, cfg.spec, cfg.value)
 
 
-def test_unknown_field_suggests_matching_descendant_path(qapp):
-    from zcu_tools.gui.cfg.binding import SettablePathError
-
-    root = _fakefreq_root()
-    with pytest.raises(SettablePathError) as exc:
-        _set(root, "modules.readout.gain", 0.25)
-
-    assert "modules.readout.pulse_cfg.gain" in str(exc.value)
-
-
 def test_moduleref_bare_label_normalized_to_custom_tag(qapp):
     from zcu_tools.gui.app.measure.remote.path_resolver import (
         project_target_entries,
@@ -622,13 +598,13 @@ def test_moduleref_bare_label_normalized_to_custom_tag(qapp):
 
     root = _fakefreq_root()
     # Bare label, exactly as tab.get_cfg advertises in 'choices'.
-    _set(root, "modules.readout.ref", "Direct Readout")
+    _set(root, "modules.readout.ref", "Pulse Readout")
 
     entry = next(
         e for e in project_target_entries(root) if e["path"] == "modules.readout.ref"
     )
     # Stored as the tagged key, not the bare label.
-    assert entry["value"] == "<Custom:Direct Readout>"
+    assert entry["value"] == "<Custom:Pulse Readout>"
 
 
 def test_moduleref_tagged_key_passes_through(qapp):
@@ -638,12 +614,12 @@ def test_moduleref_tagged_key_passes_through(qapp):
 
     root = _fakefreq_root()
     # An already-tagged key is stored verbatim (no double-wrapping).
-    _set(root, "modules.readout.ref", "<Custom:Direct Readout>")
+    _set(root, "modules.readout.ref", "<Custom:Pulse Readout>")
 
     entry = next(
         e for e in project_target_entries(root) if e["path"] == "modules.readout.ref"
     )
-    assert entry["value"] == "<Custom:Direct Readout>"
+    assert entry["value"] == "<Custom:Pulse Readout>"
 
 
 # ---------------------------------------------------------------------------

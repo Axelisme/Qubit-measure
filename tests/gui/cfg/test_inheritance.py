@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 from zcu_tools.gui.app.measure.specs import (
-    make_direct_readout_spec,
     make_pulse_readout_spec,
 )
 from zcu_tools.gui.cfg import (
@@ -357,89 +356,6 @@ def test_empty_old_all_defaults():
 
 
 # ---------------------------------------------------------------------------
-# Hardcoded cross-spec: Direct Readout ↔ Pulse Readout
-# ---------------------------------------------------------------------------
-
-
-def _direct_readout_val() -> CfgSectionValue:
-    return _val(
-        {
-            "type": DirectValue("readout/direct"),
-            "ro_ch": DirectValue(0),
-            "ro_freq": DirectValue(6500.0),
-            "ro_length": DirectValue(2.0),
-            "trig_offset": DirectValue(0.5),
-        }
-    )
-
-
-def test_direct_to_pulse_injects_into_ro_cfg():
-    old_val = _direct_readout_val()
-
-    result = inherit_from(
-        old_val, make_direct_readout_spec(), make_pulse_readout_spec()
-    )
-
-    # The hook's result is detached, even when the hook returns old input.
-    assert result.fields["ro_cfg"] == old_val
-    assert result.fields["ro_cfg"] is not old_val
-    # pulse_cfg should be default (CfgSectionValue present)
-    assert isinstance(result.fields["pulse_cfg"], CfgSectionValue)
-
-
-def test_direct_to_pulse_ro_cfg_carries_field_values():
-    old_val = _direct_readout_val()
-
-    result = inherit_from(
-        old_val, make_direct_readout_spec(), make_pulse_readout_spec()
-    )
-
-    ro = result.fields["ro_cfg"]
-    assert isinstance(ro, CfgSectionValue)
-    assert ro.fields["ro_ch"] == DirectValue(0)
-    assert ro.fields["ro_freq"] == DirectValue(6500.0)
-    assert ro.fields["ro_length"] == DirectValue(2.0)
-    assert ro.fields["trig_offset"] == DirectValue(0.5)
-
-
-def test_pulse_to_direct_extracts_ro_cfg():
-    ro_val = _direct_readout_val()
-    old_val = _val(
-        {
-            "type": DirectValue("readout/pulse"),
-            "pulse_cfg": _val({}),
-            "ro_cfg": ro_val,
-        }
-    )
-
-    result = inherit_from(
-        old_val, make_pulse_readout_spec(), make_direct_readout_spec()
-    )
-
-    assert result == ro_val
-    assert result is not ro_val
-
-
-def test_pulse_to_direct_missing_ro_cfg_uses_default():
-    old_val = _val(
-        {
-            "type": DirectValue("readout/pulse"),
-            "pulse_cfg": _val({}),
-            # ro_cfg missing
-        }
-    )
-
-    result = inherit_from(
-        old_val, make_pulse_readout_spec(), make_direct_readout_spec()
-    )
-
-    assert isinstance(result, CfgSectionValue)
-    ro_ch = result.fields.get("ro_ch")
-    assert isinstance(ro_ch, DirectValue)
-    assert ro_ch.value == 0
-
-
-# ---------------------------------------------------------------------------
 # make_default_value: complete value tree + optional ref → None (ADR-0010)
 # ---------------------------------------------------------------------------
 
@@ -491,7 +407,7 @@ def test_inherit_from_preserves_disabled_optional_ref():
 
 
 def test_align_locked_literals_projects_linked_ref_into_caller_spec():
-    locked_readout = make_pulse_readout_spec().lock_literal("pulse_cfg.freq", 0.0)
+    locked_readout = make_pulse_readout_spec().lock_literal("freq", 0.0)
     spec = CfgSectionSpec(
         fields={
             "readout": ReferenceSpec(
@@ -500,9 +416,7 @@ def test_align_locked_literals_projects_linked_ref_into_caller_spec():
         }
     )
     readout_value = make_default_value(make_pulse_readout_spec())
-    pulse_cfg = readout_value.fields["pulse_cfg"]
-    assert isinstance(pulse_cfg, CfgSectionValue)
-    pulse_cfg.fields["freq"] = DirectValue(5998.0)
+    readout_value.fields["freq"] = DirectValue(5998.0)
     value = CfgSectionValue(
         fields={"readout": ReferenceValue("readout_rf", readout_value)}
     )
@@ -512,6 +426,4 @@ def test_align_locked_literals_projects_linked_ref_into_caller_spec():
     assert result is value
     readout = result.fields["readout"]
     assert isinstance(readout, ReferenceValue)
-    pulse_cfg = readout.value.fields["pulse_cfg"]
-    assert isinstance(pulse_cfg, CfgSectionValue)
-    assert pulse_cfg.fields["freq"] == DirectValue(0.0)
+    assert readout.value.fields["freq"] == DirectValue(0.0)

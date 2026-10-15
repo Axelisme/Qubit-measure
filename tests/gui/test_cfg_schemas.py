@@ -63,24 +63,37 @@ def test_waveform_cfg_to_value_arb_has_no_length_field():
     assert cast(DirectValue, val.fields["data"]).value == "asset_a"
 
 
-def test_module_cfg_to_value_direct_readout():
-    cfg = {"type": "readout/direct", "ro_freq": 7000.0}
+def test_module_cfg_to_value_pulse_readout():
+    cfg = {
+        "type": "readout/pulse",
+        "freq": 7000.0,
+        "gen_ch": 0,
+        "nqz": 1,
+        "gain": 0.1,
+        "waveform": {"style": "const", "length": 1.0},
+    }
     _spec, val = module_cfg_to_value(cfg)
 
-    assert cast(DirectValue, val.fields["type"]).value == "readout/direct"
-    assert cast(DirectValue, val.fields["ro_freq"]).value == 7000.0
+    assert cast(DirectValue, val.fields["type"]).value == "readout/pulse"
+    assert cast(DirectValue, val.fields["freq"]).value == 7000.0
     # missing key → unset (value is None, no hard-coded default; ADR-0010)
     assert cast(DirectValue, val.fields["ro_length"]).value is None
 
 
-def test_module_cfg_to_value_direct_readout_preserves_gen_ch_round_trip():
+def test_module_cfg_to_value_pulse_readout_preserves_gen_ch_round_trip():
     cfg = {
-        "type": "readout/direct",
         "ro_ch": 5,
-        "ro_freq": 7000.0,
         "ro_length": 2.1,
         "trig_offset": 0.25,
         "gen_ch": 9,
+        "phase": 0.0,
+        "pre_delay": 0.0,
+        "post_delay": 0.0,
+        "type": "readout/pulse",
+        "freq": 7000.0,
+        "nqz": 1,
+        "gain": 0.1,
+        "waveform": {"style": "const", "length": 1.0},
     }
     spec, val = module_cfg_to_value(cfg)
 
@@ -88,22 +101,6 @@ def test_module_cfg_to_value_direct_readout_preserves_gen_ch_round_trip():
 
     raw = schema_to_raw_dict(CfgSchema(spec=spec, value=val), parameters=None)
     assert raw["gen_ch"] == 9
-
-
-def test_module_cfg_to_value_direct_readout_missing_gen_ch_lowers_omitted():
-    cfg = {
-        "type": "readout/direct",
-        "ro_ch": 5,
-        "ro_freq": 7000.0,
-        "ro_length": 2.1,
-        "trig_offset": 0.25,
-    }
-    spec, val = module_cfg_to_value(cfg)
-
-    assert cast(DirectValue, val.fields["gen_ch"]).value is None
-
-    raw = schema_to_raw_dict(CfgSchema(spec=spec, value=val), parameters=None)
-    assert "gen_ch" not in raw
 
 
 def test_module_cfg_to_value_pulse_reset():

@@ -7,7 +7,6 @@ from typing import Any, ClassVar
 
 from zcu_tools.cfg_model import (
     ConfigBase,
-    DirectReadoutCfg,
     PulseCfg,
     PulseReadoutCfg,
     PulseReadoutSpec,
@@ -90,8 +89,8 @@ class RecipeControls(RecipeControlsBase):
 class ExecutionModules(ConfigBase):
     """Nullable module collaborators, not native reset or init pulse execution."""
 
-    reset: DirectReadoutCfg | None = None
-    init_pulse: DirectReadoutCfg | None = None
+    reset: PulseReadoutCfg | None = None
+    init_pulse: PulseCfg | None = None
     readout: PulseReadoutCfg
 
 
@@ -110,21 +109,14 @@ class ExecutionControls(ConfigBase):
 _READOUT_SPEC = PulseReadoutSpec.model_validate(
     {
         "type": "readout/pulse",
-        "pulse_cfg": {
-            "type": "pulse",
-            "ch": 0,
-            "nqz": 1,
-            "freq": 5000.0,
-            "gain": 0.2,
-            "waveform": {"style": "const", "length": 0.1},
-        },
-        "ro_cfg": {
-            "type": "readout/direct",
-            "ro_ch": 0,
-            "ro_freq": 5000.0,
-            "ro_length": 2.0,
-            "trig_offset": 0.1,
-        },
+        "gen_ch": 0,
+        "nqz": 1,
+        "freq": 5000.0,
+        "gain": 0.2,
+        "waveform": {"style": "const", "length": 0.1},
+        "ro_ch": 0,
+        "ro_length": 2.0,
+        "trig_offset": 0.1,
     }
 )
 
@@ -133,17 +125,15 @@ READOUT_TEMPLATE = TemplateDef(
     PulseReadoutSpec,
     "Readout",
     {
-        "pulse_cfg.type": "pulse",
-        "pulse_cfg.ch": 0,
-        "pulse_cfg.nqz": 1,
-        "pulse_cfg.freq": 5000.0,
-        "pulse_cfg.gain": 0.2,
-        "pulse_cfg.waveform.style": "const",
-        "pulse_cfg.waveform.length": 0.1,
-        "ro_cfg.ro_ch": 0,
-        "ro_cfg.ro_freq": 5000.0,
-        "ro_cfg.ro_length": 2.0,
-        "ro_cfg.trig_offset": 0.1,
+        "gen_ch": 0,
+        "nqz": 1,
+        "freq": 5000.0,
+        "gain": 0.2,
+        "waveform.style": "const",
+        "waveform.length": 0.1,
+        "ro_ch": 0,
+        "ro_length": 2.0,
+        "trig_offset": 0.1,
     },
 )
 
@@ -220,7 +210,7 @@ class LookbackGui:
             library=LibrarySnapshot(
                 ModuleLibraryDocument(
                     format="zcu.module-library",
-                    format_version="1.0",
+                    format_version="2.0",
                     components={
                         "R1": ComponentLibrary(readout={"main": _READOUT_SPEC}),
                         "R2": ComponentLibrary(readout={"main": _READOUT_SPEC}),

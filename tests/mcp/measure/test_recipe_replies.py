@@ -152,35 +152,27 @@ def test_writeback_destination_summary_keeps_context_and_project_identity(tmp_pa
         ]
 
 
-def test_pulse_readout_candidate_summary_keeps_nested_values_and_captured_full(
+def test_pulse_readout_candidate_summary_keeps_flat_values_and_captured_full(
     tmp_path,
 ):
     gui = ExecutionGui()
     current: dict[str, Any] = {
-        "type": "readout/pulse",
         "cloned_from": "calibrated_readout",
-        "pulse_cfg": {
-            "type": "pulse",
-            "freq": 5000.0,
-            "gain": 0.1,
-            "phase": 0.0,
-            "waveform": {"style": "const", "length": 2.0},
-            "ch": 0,
-            "nqz": 1,
-        },
-        "ro_cfg": {
-            "type": "readout/direct",
-            "ro_freq": 5000.0,
-            "ro_length": 2.0,
-            "trig_offset": 0.1,
-            "ro_ch": 0,
-            "gen_ch": 0,
-        },
+        "type": "readout/pulse",
+        "freq": 5000.0,
+        "gain": 0.1,
+        "phase": 0.0,
+        "waveform": {"style": "const", "length": 2.0},
+        "gen_ch": 0,
+        "nqz": 1,
+        "ro_length": 2.0,
+        "trig_offset": 0.1,
+        "ro_ch": 0,
     }
     proposed = deepcopy(current)
-    proposed["pulse_cfg"].update(freq=5020.0, gain=0.15)
-    proposed["pulse_cfg"]["waveform"]["length"] = 2.5
-    proposed["ro_cfg"].update(ro_freq=5020.0, ro_length=2.5, trig_offset=0.2)
+    proposed.update(freq=5020.0, gain=0.15)
+    proposed["waveform"]["length"] = 2.5
+    proposed.update(ro_length=2.5, trig_offset=0.2)
 
     def respond(method, params):
         response = gui(method, params)
@@ -212,22 +204,22 @@ def test_pulse_readout_candidate_summary_keeps_nested_values_and_captured_full(
             projected = candidate[source]
             assert projected["type"] == "readout/pulse"
             assert projected["cloned_from"] == "calibrated_readout"
-            assert projected["pulse_cfg"] == {
-                key: expected["pulse_cfg"][key]
-                for key in ("type", "freq", "gain", "phase", "waveform")
-            }
-            assert projected["ro_cfg"] == {
-                key: expected["ro_cfg"][key]
-                for key in ("type", "ro_freq", "ro_length", "trig_offset")
-            }
+            for key in (
+                "freq",
+                "gain",
+                "phase",
+                "waveform",
+                "ro_length",
+                "trig_offset",
+            ):
+                assert projected[key] == expected[key]
             assert full["writeback"]["items"][0][source] == expected
         assert set(candidate["changes"]) == {
-            "pulse_cfg.freq",
-            "pulse_cfg.gain",
-            "pulse_cfg.waveform.length",
-            "ro_cfg.ro_freq",
-            "ro_cfg.ro_length",
-            "ro_cfg.trig_offset",
+            "freq",
+            "gain",
+            "waveform.length",
+            "ro_length",
+            "trig_offset",
         }
 
 
@@ -482,10 +474,7 @@ def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
         full = client.call("status", {"execution": execution, "detail": "full"})
         assert summary["execution"] == full["execution"] == execution
         assert summary["run_id"] == full["raw_save"]["run_id"] == "run-a"
-        assert (
-            cfg_value(gui.publication, "modules.readout.module.pulse_cfg.module.freq")
-            == 6020.0
-        )
+        assert cfg_value(gui.publication, "modules.readout.module.freq") == 6020.0
         assert cfg_value(gui.publication, "rounds") == 7
         assert summary["actual"] == full["actual"]
         assert summary["actual"]["use_reset"] == {
@@ -593,10 +582,7 @@ def test_malformed_completion_fails_at_its_owner_without_losing_run_capture(
         assert reply.data["status"] == "failed"
         assert reply.data["error"]["reason"] == "incompatible_wire"
         assert reply.data["error"]["phase"] == phase
-        assert (
-            cfg_value(gui.publication, "modules.readout.module.pulse_cfg.module.freq")
-            == 6020.0
-        )
+        assert cfg_value(gui.publication, "modules.readout.module.freq") == 6020.0
         assert reply.data["actual"]["rounds"] == {"value": 3, "source": "gui_default"}
         if wire_op == 93:
             assert reply.data["raw_save"]["run_id"] == "run-a"

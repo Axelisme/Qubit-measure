@@ -50,15 +50,14 @@ def readout_value(ctx: SessionEnv) -> ReferenceValue:
     value = make_default_value(readout_shape())
     # Fully specified inline values make run/config tests independent of calibration.
     for path, item in {
-        "pulse_cfg.ch": 0,
-        "pulse_cfg.nqz": 2,
-        "pulse_cfg.freq": 0.0,
-        "pulse_cfg.gain": 0.1,
-        "pulse_cfg.waveform.length": 1.0,
-        "ro_cfg.ro_ch": 0,
-        "ro_cfg.ro_freq": 0.0,
-        "ro_cfg.ro_length": 1.0,
-        "ro_cfg.trig_offset": 0.0,
+        "gen_ch": 0,
+        "nqz": 2,
+        "freq": 0.0,
+        "gain": 0.1,
+        "waveform.length": 1.0,
+        "ro_ch": 0,
+        "ro_length": 1.0,
+        "trig_offset": 0.0,
     }.items():
         value.with_field(path, item)
     return ReferenceValue(make_custom_reference_key("Pulse Readout"), value)
@@ -70,11 +69,10 @@ def captured_readout(ctx: SessionEnv) -> ReferenceValue:
     if parameters is None:
         raise ValueError("Template requires a fixed capture")
     for path, source in {
-        "pulse_cfg.ch": "$resonator.wiring.ch",
-        "pulse_cfg.freq": "$resonator.freq",
-        "ro_cfg.ro_ch": "$resonator.wiring.ro_ch",
-        "ro_cfg.ro_freq": "$resonator.freq",
-        "ro_cfg.trig_offset": "$resonator.ext.time_of_fly",
+        "gen_ch": "$resonator.wiring.ch",
+        "freq": "$resonator.freq",
+        "ro_ch": "$resonator.wiring.ro_ch",
+        "trig_offset": "$resonator.ext.time_of_fly",
     }.items():
         result.value.with_field(path, capture_number(parameters, source))
     return result
