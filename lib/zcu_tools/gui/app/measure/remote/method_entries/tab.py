@@ -118,12 +118,33 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:h_tab_get_cfg",
         MethodSpec(
             5.0,
-            "Read Form schema, input, ordinary leaf values and errors from the "
+            "Read Form input, ordinary leaf values and errors from the "
             "tab's fixed source snapshot. Reads do not refresh sources. "
             "Expressions use {expr: text}; library keys are ordinary strings. "
             "Use Reset to capture new sources. Independent library editors retain "
             "their own interface.",
             (required_string("tab_id"),),
+            readonly=True,
+        ),
+    ),
+    method_entry(
+        "tab.describe_cfg",
+        "tab:h_tab_describe_cfg",
+        MethodSpec(
+            5.0,
+            "Read one current single-layer description and local input_present, "
+            "input, ordinary value and directed errors in one owner turn. "
+            "path is a model-field string array, [] for root. Uses fixed "
+            "Open/Reset sources without capture, defaults or materialization. "
+            "Unknown/inactive/whole-leaf descendants fail with invalid_params, "
+            "reason=form_path and data.form_path. Other author failures retain "
+            "the controller_error boundary. Errors are Form preview root/descendant "
+            "only; use get_cfg or Run admission for lowered cfg errors. Busy and "
+            "observer reads are allowed; no widget is required.",
+            (
+                required_string("tab_id"),
+                required_json("path", "Model-field string array; [] for root"),
+            ),
             readonly=True,
         ),
     ),
@@ -134,7 +155,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Capture current sources once, optionally overriding named aliases "
             "for this Reset only, and restore fresh adapter Form defaults. "
-            "Returns schema, input, values and errors. Overrides are not persisted "
+            "Returns input, values and errors. Overrides are not persisted "
             "or written to global aliases. Busy and notification-reentrant "
             "resets are rejected. Does not clear results or save artifacts.",
             (
@@ -158,7 +179,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Expressions use {expr: text}, complex literals use __complex__, "
             "and library keys are plain strings. Edit range leaves separately. "
             "Invalid values stay editable with errors; structural failures preserve "
-            "the entire input. Returns schema, input, values and errors.",
+            "the entire input. Returns input, values and errors.",
             (
                 required_string("tab_id"),
                 required_json(

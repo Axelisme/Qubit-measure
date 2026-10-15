@@ -1,4 +1,4 @@
-"""Captured schema lifetime and one display evaluation per editor commit."""
+"""Fixed capture refresh and one display evaluation per editor commit."""
 
 from collections.abc import Iterator, Mapping
 from typing import Annotated, Literal
@@ -69,16 +69,11 @@ class CapturedForm(FormModel):
 
 
 class RecordingState(FormState[CapturedForm]):
-    """Count real calls at the schema and preview interfaces without mocking them."""
+    """Count real display evaluations without replacing preview behaviour."""
 
     def __init__(self, env: FormEnv) -> None:
         super().__init__(CapturedForm.default_input(env))
-        self.schema_reads = 0
         self.preview_reads = 0
-
-    def input_schema(self, env: FormEnv) -> dict[str, JsonValue]:
-        self.schema_reads += 1
-        return super().input_schema(env)
 
     def preview(self, env: FormEnv) -> FormPreview:
         self.preview_reads += 1
@@ -112,7 +107,7 @@ def commit_text(editor: FormEditor[CapturedForm], text: str) -> None:
     field.editingFinished.emit()
 
 
-def test_schema_is_reused_until_explicit_refresh(
+def test_explicit_refresh_replaces_captured_choices(
     view: tuple[FormEnv, RecordingState, FormEditor[CapturedForm]],
 ) -> None:
     env, state, editor = view
@@ -127,7 +122,6 @@ def test_schema_is_reused_until_explicit_refresh(
     assert state.input.data["amount"] == 3.0
     assert editor.errors() is None
     assert [selector.itemText(i) for i in range(selector.count())] == ["alpha", "beta"]
-    assert state.schema_reads == 1
 
     editor.refresh(captured_ext_env(allow_beta=False))
     selector = control(editor, QComboBox, "form.input.choice")
@@ -138,10 +132,8 @@ def test_schema_is_reused_until_explicit_refresh(
     errors = editor.errors()
     assert errors is not None and ("choice",) in errors.messages
     assert state.input.data["choice"] == "beta"
-    assert state.schema_reads == 2
     editor.refresh(env)
     assert editor.errors() is None
-    assert state.schema_reads == 3
 
 
 @pytest.mark.parametrize("operation", ["text", "branch", "command"])

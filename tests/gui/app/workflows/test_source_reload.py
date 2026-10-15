@@ -7,7 +7,6 @@ from pathlib import Path
 from time import monotonic, sleep
 
 import pytest
-from pydantic import JsonValue
 from qtpy.QtWidgets import QApplication, QComboBox, QLabel
 from zcu_tools.experiment.workflows import InvalidRunState
 from zcu_tools.gui.app.workflows.app import WorkflowsGuiBehavior
@@ -25,13 +24,6 @@ from tests.gui.app.workflows._start_fakes import StartHarness
 from ._reload_source import ReloadSource
 from ._sample_input import sample_input
 from ._synthetic import ALIAS_PRESET, Context, inline_input
-
-
-def expect_properties(schema: dict[str, JsonValue]) -> dict[str, JsonValue]:
-    """Require a model input schema's object properties before field assertions."""
-    properties = schema["properties"]
-    assert isinstance(properties, dict)
-    return properties
 
 
 @pytest.fixture
@@ -71,9 +63,12 @@ def test_reload_replaces_declarations_and_preserves_compatible_drafts(
     assert saved.plan["new_field"] == 9 and saved.knobs["new_knob"] == 10
     assert window.plan_panel.state.base.data == saved.plan
     assert window.tunables_panel.state.base.data == saved.knobs
-    inspected = window.inspect_form("plan")
+    inspected = window.describe_form("plan", ())
     assert not isinstance(inspected, FormErrors)
-    assert "new_field" in expect_properties(inspected["schema"])
+    assert ["new_field"] in [
+        field["path"] for field in inspected["description"]["children"]
+    ]
+    assert inspected["revision"] is None
     assert any(
         item == {"path": ["scale"], "value": 0.25} for item in inspected["values"]
     )
@@ -182,9 +177,14 @@ def test_current_start_and_tuning_use_new_catalog(
     )
     assert window.tuning_panel is not None
     assert type(window.tuning_panel.panel) is type(window.tunables_panel)
-    inspected = window.inspect_form("tunables", run_id="new")
+    inspected = window.describe_form("tunables", (), run_id="new")
     assert not isinstance(inspected, FormErrors)
-    assert "new_knob" in expect_properties(inspected["schema"])
+    assert ["new_knob"] in [
+        field["path"] for field in inspected["description"]["children"]
+    ]
+    engine = window.tuning_panel.host.engine
+    assert engine is not None
+    assert inspected["revision"] == engine.tunables("new").revision
 
 
 @pytest.mark.uses_wall_clock
@@ -264,7 +264,9 @@ def test_existing_form_rpc_observes_current_catalog(source: ReloadSource) -> Non
     try:
         with ThreadPoolExecutor(max_workers=1) as pool:
             request = pool.submit(
-                service.route, link, Request("1", "workflow.form", {"form": "plan"})
+                service.route,
+                link,
+                Request("1", "workflow.describe_form", {"form": "plan", "path": []}),
             )
             deadline = monotonic() + 3
             while not request.done():
@@ -272,7 +274,10 @@ def test_existing_form_rpc_observes_current_catalog(source: ReloadSource) -> Non
                 harness.owner.pump_once(block=True, timeout=0.01)
             request.result(timeout=1)
         reply = json.loads(link.outbound.get(timeout=1))
-        assert "new_field" in reply["result"]["schema"]["properties"]
+        assert ["new_field"] in [
+            field["path"] for field in reply["result"]["description"]["children"]
+        ]
+        assert reply["result"]["revision"] is None
         assert reply["result"]["input"]["new_field"] == 9
     finally:
         service.on_client_close(link, on_owner_thread=True)

@@ -1,33 +1,62 @@
 """Qt rendering and local text drafts for the caller-owned form state."""
 
+from __future__ import annotations
+
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from weakref import ref
 
 from pydantic import JsonValue
 from PyQt6 import sip
 from PyQt6.QtCore import pyqtSignal
-from qtpy.QtCore import QThread
+from qtpy.QtCore import QSignalBlocker, Qt, QThread
 from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
 from zcu_tools.gui.form import (
     FormEnv,
     FormErrors,
+    FormFieldDescription,
     FormModel,
     FormPath,
+    FormPreview,
     FormState,
     FormWritePath,
     WriteRejected,
 )
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
-from ._controls import ROW_SPACING, FieldRow, GroupBlock, LocalText
-from ._schema_view import FieldView, flatten_fields, project_fields
+from ._controls import FieldRow, GroupBlock, LocalText
+from ._fold import ROW_SPACING
+from ._view import FieldView, project_field
 
-# What decides one row's controls: path, kind, options present, expression,
-# fixed, group and whether a model row folds (a disabled nullable model has
-# no fold). The rows are rebuilt when any field's shape changes.
-type _RowShape = tuple[FormWritePath, str, bool, bool, bool, str | None, bool]
+
+@dataclass
+class _Level:
+    """Qt ownership for one instantiated model or display-group body."""
+
+    path: FormWritePath
+    widget: QWidget
+    layout: QVBoxLayout
+    rows: dict[FormWritePath, FieldRow] = field(default_factory=dict)
+    children: dict[FormWritePath, _Level] = field(default_factory=dict)
+    groups: dict[str, tuple[GroupBlock, _Level]] = field(default_factory=dict)
+
+
+def _shape(field: FieldView) -> tuple[object, ...]:
+    """Control construction inputs, excluding current input and selection."""
+    return (
+        field.kind,
+        field.options is not None,
+        field.expression,
+        field.fixed,
+        field.label,
+        field.unit,
+        field.description,
+        field.placeholder,
+        field.nullable,
+        field.can_expand,
+    )
 
 
 class FormEditor[F: FormModel](QWidget):
@@ -48,9 +77,9 @@ class FormEditor[F: FormModel](QWidget):
     Public child object names use model-field paths joined by dots:
     form.input.<path> is a QLineEdit for text, numeric, complex, expression or
     whole-container input; a QCheckBox for bool; or a non-editable QComboBox
-    for a field whose schema lists x-form-options.
+    for a field whose core description lists options.
     form.mode.<path> is the checkable QAction "Expression" of a field whose
-    schema offers an Expr alternative: the core offers it on text fields
+    description permits expression input: the core offers it on text fields
     (int, float, complex and str values typed into a QLineEdit). It is
     checked in Expression mode. form.input.<path> lists it in actions() and
     in its right-click menu, after the text field's standard items; the row
@@ -70,13 +99,13 @@ class FormEditor[F: FormModel](QWidget):
     its value, without form.mode or a dropdown. A float with Display decimals
     shows its Direct and resolved values rounded to that many digits; text
     typed with more digits stays as typed, and the state keeps every digit.
-    Fields the schema marks hidden (Display(hidden=True), or a one-value
+    Fields the description marks hidden (Display(hidden=True), or a one-value
     structural tag outside a union) have no controls. Their input is kept,
     and their errors appear at the nearest drawn ancestor row or form.error.
-    Every field whose schema lists x-form-options (Literal, Enum, choices,
+    Every field whose description lists options (Literal, Enum, choices,
     tagged unions, and the module and waveform selections a Form generator
     declares) shows one dropdown, form.input.<path>, and nothing else
-    decides its items: each option's label in schema order, with the
+    decides its items: each option's label in declaration order, with the
     option's value as item data. The first option matching the input by the
     core's Option rule is selected. A present input no option matches is
     kept: a last item shows it, a nonempty string as itself and other JSON
@@ -88,7 +117,7 @@ class FormEditor[F: FormModel](QWidget):
     the dropdown (tags its value fixes have no rows); such a row has no
     Enabled box, since a nullable field lists None as an option. The
     dropdown's right-click menu lists the selected option's commands as
-    QActions form.command.<path>.<name> with the schema label as text, also
+    QActions form.command.<path>.<name> with the declared label as text, also
     in form.input.<path>.actions(); triggering one runs that command (see
     __init__). An option without commands opens no menu.
     The editor has no fold buttons: group blocks and model sections fold by
@@ -129,7 +158,12 @@ class FormEditor[F: FormModel](QWidget):
     invalid, False otherwise. Errors add no row height. form.error displays
     model-wide errors and is hidden while empty.
     Mapping-key/index errors appear at their container field.
-    Only current active fields have input controls. Sequences and typed mappings
+    Only current active, instantiated fields have input controls. Model and
+    group descendants are described and built on first expansion, or during
+    initial construction when expanded. Collapsing retains the same widgets
+    and their uncommitted text without writing state. Changing an option or
+    nullable activation replaces only that subtree, not unrelated rows.
+    Sequences and typed mappings
     use JSON text for the whole leaf; they do not expose key/index write paths.
     Complex direct text uses Python complex-number notation, not an expression.
 
@@ -168,7 +202,7 @@ class FormEditor[F: FormModel](QWidget):
         """Build controls for state using env, then subscribe to state changes.
 
         State/source validation errors are displayed, not replaced by defaults.
-        Structural/schema or source failures propagate; failed construction
+        Structural description or source failures propagate; failed construction
         leaves no state subscription. parent controls the ordinary Qt lifetime.
 
         write decides where parsed input goes. When it is None (the default),
@@ -216,8 +250,6 @@ class FormEditor[F: FormModel](QWidget):
         self._editing_enabled = True
         self._local: dict[FormWritePath, LocalText] = {}
         self._rows: dict[FormWritePath, FieldRow] = {}
-        # Field shapes in declaration order, as of the last rebuild.
-        self._shape: tuple[_RowShape, ...] = ()
         self._groups: list[GroupBlock] = []
         # User folds by model path, and by (model level path, group name).
         self._model_expanded: dict[FormWritePath, bool] = {}
@@ -236,8 +268,11 @@ class FormEditor[F: FormModel](QWidget):
         self._layout.addWidget(self._root_error)
         self._content = QWidget(self)
         self._layout.addWidget(self._content)
-        # The host owns the capture lifetime; only refresh replaces this schema.
-        self._schema = state.input_schema(env)
+        content_layout = QVBoxLayout(self._content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(ROW_SPACING)
+        content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._level = _Level((), self._content, content_layout)
         self._publication_count = 0
         self._publish()
         # The state callback must not keep the QWidget alive. No Python slot is
@@ -260,15 +295,15 @@ class FormEditor[F: FormModel](QWidget):
     def refresh(self, env: FormEnv) -> None:
         """Re-evaluate with env and refresh controls, choices, values and errors.
 
-        Recompute input_schema even if env is the same capture; ordinary state
-        publications reuse it. Keep still-active local unparseable or rejected
+        Read current descriptions for instantiated levels with the new env.
+        Never reuse choices or branch metadata from an earlier capture.
+        Keep still-active local unparseable or rejected
         input. Never reset state, run domain defaults, poll sources or echo a
         write. External
         state publications refresh parsed controls through the subscription.
         Inactive branch text is discarded. Raises RuntimeError after detach.
         """
-        state = self._require_state()
-        self._schema = state.input_schema(env)
+        self._require_state()
         self._env = env
         self._publish()
 
@@ -338,7 +373,6 @@ class FormEditor[F: FormModel](QWidget):
             self._unsubscribe = None
         self._state = None
         self._env = None
-        self._schema = {}
         self._local.clear()
         self.setEnabled(False)
 
@@ -358,120 +392,187 @@ class FormEditor[F: FormModel](QWidget):
             raise RuntimeError("FormEditor is detached")
         return self._env
 
-    def _publish(self) -> None:
+    def _publish(self, *, redraw: bool = True) -> None:
         state = self._require_state()
-        env = self._require_env()
-        preview = state.preview(env)
-        fields = project_fields(self._schema, state.input.data, preview)
-        flat = flatten_fields(fields)
-        self._state_errors = preview.errors
-        # Text does not survive its path becoming a model section, nor does a
-        # rejected section input (which has no text) its path becoming a leaf.
+        preview = state.preview(self._require_env())
+        data = state.input.data
+        fields = state.describe((), self._require_env()).children
+        self._sync_level(self._level, fields, data, preview, redraw=redraw)
+        self._rows = {}
+        self._groups = []
+        self._index_level(self._level)
         self._local = {
-            field.path: local
-            for field in flat
-            if (local := self._local.get(field.path)) is not None
-            and local.section == (field.kind == "model")
+            path: local
+            for path, local in self._local.items()
+            if path in self._rows
+            and local.section == (self._rows[path].field.kind == "model")
         }
-        shape = tuple(
-            (
-                field.path,
-                field.kind,
-                field.options is not None,
-                field.expression,
-                field.fixed,
-                field.group,
-                field.kind == "model" and field.active,
-            )
-            for field in flat
-        )
-        # Compare with the stored shape, not one read from self._rows: rows are
-        # in drawing order (a level's group blocks after its ungrouped rows),
-        # which differs from declaration order when a group comes first.
-        if shape != self._shape:
-            self._rebuild(fields)
-            self._shape = shape
-        for field in flat:
-            self._rows[field.path].display(
-                field, self._local.get(field.path), editable=self._editing_enabled
-            )
+        self._state_errors = preview.errors
         self._show_errors()
         self._publication_count += 1
 
-    def _rebuild(self, fields: tuple[FieldView, ...]) -> None:
-        old = self._content
-        self._content = QWidget(self)
-        layout = QVBoxLayout(self._content)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(ROW_SPACING)
-        self._rows = {}
-        self._groups = []
-        self._add_level((), fields, self._content, layout)
-        # One stretch below the last row takes spare height; a stretch inside a
-        # group would make the group grow and spread its rows apart.
-        layout.addStretch()
-        self._layout.replaceWidget(old, self._content)
-        # Retire names immediately; deleteLater waits until the active Qt signal
-        # finishes, so rebuilding a branch cannot delete its emitting selector.
-        old.setParent(None)
-        old.deleteLater()
+    def _fold_changed(self) -> None:
+        # Folding only builds missing rows. It must not redraw existing text
+        # or commit it merely because the user hides its body.
+        self._publish(redraw=False)
 
-    def _add_level(
+    def _clear_level(self, level: _Level) -> None:
+        for child in level.children.values():
+            self._clear_level(child)
+        for _, body in level.groups.values():
+            self._clear_level(body)
+        for path, row in level.rows.items():
+            self._local.pop(path, None)
+            self._retire(row.widget)
+        for block, _ in level.groups.values():
+            self._retire(block.widget)
+        level.rows.clear()
+        level.children.clear()
+        level.groups.clear()
+
+    def _retire(self, widget: QWidget) -> None:
+        # Retire names immediately, but let an emitting Qt control finish.
+        focused = QApplication.focusWidget()
+        if focused is not None and widget.isAncestorOf(focused):
+            # Replacing a branch must not commit text from the retiring row.
+            with QSignalBlocker(focused):
+                widget.setParent(None)
+        else:
+            widget.setParent(None)
+        widget.deleteLater()
+
+    def _sync_level(
         self,
-        path: FormWritePath,
-        fields: tuple[FieldView, ...],
-        parent: QWidget,
-        layout: QVBoxLayout,
+        level: _Level,
+        metadata: tuple[FormFieldDescription, ...],
+        data: dict[str, JsonValue],
+        preview: FormPreview,
+        *,
+        redraw: bool,
     ) -> None:
-        """Add the rows of the model level at path to layout under parent.
-
-        Ungrouped fields come first, then one GroupBlock per Display group in
-        the order of each group's first field, holding that group's fields.
-        """
-        groups: dict[str, list[FieldView]] = {}
-        for field in fields:
-            if field.group is not None:
-                groups.setdefault(field.group, []).append(field)
-        labels = [
-            self._add_row(field, parent, layout)
-            for field in fields
-            if field.group is None
-        ]
-        for name, members in groups.items():
-            block = GroupBlock(
-                path,
-                name,
-                tuple(member.path for member in members),
-                parent,
-                self._group_expanded,
-            )
-            self._groups.append(block)
-            layout.addWidget(block.widget)
-            labels.append(block.label)
-            # Rows in a group block are indented, so they get their own column.
-            _align_labels(
-                [self._add_row(member, block.body, block.rows) for member in members]
-            )
-        _align_labels(labels)
-
-    def _add_row(
-        self, field: FieldView, parent: QWidget, layout: QVBoxLayout
-    ) -> QLabel:
-        """Add field's row, and a model's child level, and return its label."""
-        row = FieldRow(
-            field,
-            parent,
-            self._write,
-            self._unparsed,
-            self._model_expanded,
-            self._run_command,
+        shown = tuple(item for item in metadata if not item.hidden)
+        ungrouped = tuple(item for item in shown if item.group is None)
+        self._sync_rows(level, ungrouped, data, preview, redraw=redraw)
+        grouped: dict[str, list[FormFieldDescription]] = {}
+        for item in shown:
+            if item.group is not None:
+                grouped.setdefault(item.group, []).append(item)
+        for name in tuple(level.groups):
+            if name not in grouped:
+                block, body = level.groups.pop(name)
+                self._clear_level(body)
+                self._retire(block.widget)
+        for name, members in grouped.items():
+            if name not in level.groups:
+                block = GroupBlock(
+                    level.path,
+                    name,
+                    tuple(item.path for item in members),
+                    level.widget,
+                    self._group_expanded,
+                    self._fold_changed,
+                )
+                body = _Level(level.path, block.body, block.rows)
+                level.groups[name] = block, body
+                level.layout.addWidget(block.widget)
+                block.widget.show()
+            block, body = level.groups[name]
+            block.members = tuple(item.path for item in members)
+            if not block.body.isHidden() or body.rows or body.groups:
+                # Group membership is already in this layer's metadata. No
+                # model description is queried until its own body is expanded.
+                self._sync_rows(body, tuple(members), data, preview, redraw=redraw)
+        _align_labels(
+            [row.label for row in level.rows.values()]
+            + [block.label for block, _ in level.groups.values()]
         )
-        self._rows[field.path] = row
-        layout.addWidget(row.widget)
-        if row.group is not None and row.rows is not None:
-            # Recursion back into _add_level: a model's children are a level.
-            self._add_level(field.path, field.children, row.group, row.rows)
-        return row.label
+
+    def _sync_rows(
+        self,
+        level: _Level,
+        metadata: tuple[FormFieldDescription, ...],
+        data: dict[str, JsonValue],
+        preview: FormPreview,
+        *,
+        redraw: bool,
+    ) -> None:
+        wanted = {item.path for item in metadata}
+        for path in tuple(level.rows):
+            if path not in wanted:
+                child = level.children.pop(path, None)
+                if child is not None:
+                    self._clear_level(child)
+                self._local.pop(path, None)
+                self._retire(level.rows.pop(path).widget)
+        for index, item in enumerate(metadata):
+            field = project_field(item, data, preview)
+            row = level.rows.get(field.path)
+            fresh = row is None or _shape(row.field) != _shape(field)
+            if fresh:
+                if row is not None:
+                    child = level.children.pop(field.path, None)
+                    if child is not None:
+                        self._clear_level(child)
+                    self._retire(row.widget)
+                row = FieldRow(
+                    field,
+                    level.widget,
+                    self._write,
+                    self._unparsed,
+                    self._model_expanded,
+                    self._run_command,
+                )
+                row.connect_fold(self._fold_changed)
+                level.rows[field.path] = row
+                level.layout.insertWidget(index, row.widget)
+                row.widget.show()
+            # The new-row branch always assigns row.
+            assert row is not None
+            if row.field.selected != field.selected:
+                child = level.children.pop(field.path, None)
+                if child is not None:
+                    self._clear_level(child)
+                # An earlier empty selection hid the body and fold marker.
+                # Restore the structural hint before considering the new layer.
+                row.set_children_available(available=field.can_expand)
+            local = self._local.get(field.path)
+            if local is not None and local.section != (field.kind == "model"):
+                self._local.pop(field.path)
+                local = None
+            if redraw or fresh:
+                row.display(field, local, editable=self._editing_enabled)
+            self._sync_children(level, row, data, preview, redraw=redraw)
+        _align_labels([row.label for row in level.rows.values()])
+
+    def _sync_children(
+        self,
+        level: _Level,
+        row: FieldRow,
+        data: dict[str, JsonValue],
+        preview: FormPreview,
+        *,
+        redraw: bool,
+    ) -> None:
+        if row.group is None or row.rows is None:
+            return
+        path = row.field.path
+        child = level.children.get(path)
+        if child is None:
+            if row.group.isHidden():
+                return
+            child = _Level(path, row.group, row.rows)
+            level.children[path] = child
+        fields = self._require_state().describe(path, self._require_env()).children
+        row.set_children_available(available=any(not field.hidden for field in fields))
+        self._sync_level(child, fields, data, preview, redraw=redraw)
+
+    def _index_level(self, level: _Level) -> None:
+        self._rows.update(level.rows)
+        for child in level.children.values():
+            self._index_level(child)
+        for block, body in level.groups.values():
+            self._groups.append(block)
+            self._index_level(body)
 
     def _write(
         self, path: FormWritePath, batch: Mapping[FormWritePath, JsonValue]
@@ -535,7 +636,7 @@ class FormEditor[F: FormModel](QWidget):
             block.set_has_errors(
                 has_errors=any(
                     path[: len(member)] == member
-                    for path in by_row
+                    for path in (errors.messages if errors else {})
                     for member in block.members
                 )
             )
@@ -548,7 +649,9 @@ class FormEditor[F: FormModel](QWidget):
         for length in range(len(path), 0, -1):
             prefix = path[:length]
             for candidate in self._rows:
-                if candidate == prefix:
+                if candidate == prefix and self._rows[candidate].widget.isVisibleTo(
+                    self._content
+                ):
                     return candidate
         return None
 

@@ -10,6 +10,7 @@ from zcu_tools.gui.app.measure.remote.method_entries._registry import (
     build_agent_catalog,
 )
 from zcu_tools.gui.app.measure.remote.wire_version import WIRE_VERSION
+from zcu_tools.gui.remote.errors import RemoteError
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.stdio_server import ToolTable
@@ -74,7 +75,18 @@ class WireTransport:
                 "result": {"wire_version": WIRE_VERSION, "gui_version": 79},
             }
         elif self.responder is not None:
-            reply = {"ok": True, "result": self.responder(method, params)}
+            try:
+                reply = {"ok": True, "result": self.responder(method, params)}
+            except RemoteError as error:
+                reply = {
+                    "ok": False,
+                    "error": {
+                        "code": error.code,
+                        "message": error.message,
+                        "reason": error.reason,
+                        "data": error.data,
+                    },
+                }
         else:
             raise AssertionError(f"Unexpected RPC: {method}")
         if self.deliver_reply is None:

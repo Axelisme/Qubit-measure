@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-16，StoredRun Load、cfg_issue、Form wire、shutdown drain 與 raw cfg 非 UI 讀取
+**Last updated:** 2026-10-16，StoredRun Load、cfg_issue、lean cfg、單層 describe_cfg、shutdown drain 與 raw cfg 非 UI 讀取
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -25,7 +25,7 @@ not declare MCP tools and does not own stdio transport.
   only by dispatch.
 - `events.py`：domain payload type to wire event serializer mapping.
 - `dialogs.py`：wire-stable dialog names.
-- `form_observation.py`：tab Form schema/input/values/errors projection and
+- `form_observation.py`：tab Form input/values/errors projection and
   the shared path-array edit decoder.
 - `form_errors.py`：將 measure 的 CfgPreconditionError 轉譯為 remote 錯誤；
   來源 provenance 與 precondition 型別由 services/form_contracts.py 擁有。
@@ -364,8 +364,34 @@ terminal status, not removed aliases. No tool inventory is generated from
 
 ## Cfg Editing
 
-`tab.get_cfg` returns Form schema, authored input, ordinary leaf values and
-directed errors. It has no prefix or widget prerequisite. Each value has a
+`tab.get_cfg` returns authored input, ordinary leaf values and directed errors.
+Edit, Reset, use_inline and writeback entry edits return the same lean observation.
+It preserves missing input, null, expression text and complex tags. Get has no
+prefix or widget prerequisite.
+
+`tab.describe_cfg(tab_id, path)` returns `{description, input_present, input,
+value, errors}` in one owner turn. path is an array of model-field names, with
+`[]` for root. description contains path, target metadata and direct children.
+Children have canonical full paths, including a flattened `module` wrapper.
+Options contain label, writable value and commands, never child descriptions.
+`can_expand` reports structural expandability, not a promise of nonempty children.
+`fixed` and `fixed_value` describe a declaration-fixed complete value.
+`selection_fixed` describes a fixed outer branch, whose inner choices can vary.
+Neither locks editable descendants. An env with only one offered option does
+not establish declaration-level fixed selection.
+
+Describe uses only the resource's fixed capture, input and Form preview. It
+does not call result/to_cfg, materialize references, install defaults or publish.
+Errors are root and target/descendant Form preview errors. Use get_cfg or Run
+admission for lowered cfg errors. Missing input has input_present=false; null
+has input_present=true. value may be an ordinary leaf, partial subtree or null
+when unavailable. Busy, observer and headless reads are allowed. Closed tabs
+and revoked resource handles keep their lifetime rejection.
+Unknown, inactive and whole-leaf descendant paths return invalid_params,
+reason=form_path, data={form_path: path}. Author declaration failures and other
+unexpected ValueErrors remain controller_error, not invalid path errors.
+
+Each get_cfg ordinary value has a
 model-field path array and a JSON value. Tuples become JSON lists; complex
 values use the public reversible `__complex__` tag.
 
@@ -421,7 +447,7 @@ are `invalid_params` with reason `form_errors`, and values carrying the retired
 `__kind` tags are rejected with the `{expr: text}` form before any write.
 
 Module writeback 的 `tab.writeback_set`／`tab.writeback_write` 使用相同 Form 路徑陣列。
-Set 回該項目的 schema、input、values 與 errors；普通 invalid 值可留在 draft，
+Set 回該項目的 input、values 與 errors；普通 invalid 值可留在 draft，
 Apply／Write 只提交有效 Spec。Form batch 的結構錯誤不改該 state，這不保證整個
 多項 writeback 命令的 draft 或 target 原子性。Selected Apply 與首錯前綴見 ADR-0008。
 `editor.*`、editor_changed／editor_closed 與舊 eval／value_ref wire 已退休。

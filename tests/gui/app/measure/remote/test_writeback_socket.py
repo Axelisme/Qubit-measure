@@ -253,7 +253,7 @@ def test_module_edits_by_path_reply_with_form_and_write_the_edited_spec(
             "name": MODULE_PROPOSAL_WAVEFORM,
         }
         assert {"path": ["freq"], "value": 5100.0} in reply["values"]
-        assert "freq" in reply["schema"]["properties"]
+        assert set(reply) == {"item", "input", "values", "errors"}
         written = call(
             sock,
             "tab.writeback_write",

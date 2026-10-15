@@ -44,7 +44,9 @@ Recipe-owned done 回該 recipe 的後續 handoff，standalone analysis 保留�
 
 Standalone `apply_writeback(tab, items=None)` 按穩定 `target_name` 選擇當前 Primary／Post draft，不看 GUI 勾選，也不回答 recipe。省略 items 寫全部，空序列寫零項。MCP 在任何寫入前讀完兩個 pane 的當前 preview，拒絕未知、重複及跨 stage 同名，再解析當前 session ID。這些讀取不授權寫入。寫入維持 Primary 先、Post 後，首錯停止。收據只列 GUI-confirmed writes，保留失敗 stage 的不確定性，不 retry 或 rollback。
 
-Measure `tab.get_cfg` 回 Form schema、authored input、ordinary leaf values 與 directed errors。`tab.edit_cfg`、`tab.reset_cfg` 與 `tab.run_start` 不收 cfg ref 或 expected revision。Edit 以 model-field leaf paths 原子寫入目前 input。Reset 捕捉一次來源並取 adapter defaults，可接受單次 aliases，但不改全域列或 memento。Run 只接受畫面上目前有效的 Form result，在 focus 或 operation 效果前拒絕非空 aliases。直接 RPC 只轉送一次，不隱藏 refresh 或 retry。Recipe 在建立或重用 tab 後都先 Reset，再設定參數與 Run，只有 Reset 收單次 aliases。Fixed sources、source provenance 與 acceptance 見 [[0065]]。Holder、authentication、domain busy 與硬體 guards 分別檢查，不以 cfg 版本授權。
+Measure `tab.get_cfg` 回 Form authored input、ordinary leaf values 與 directed errors。`tab.edit_cfg`、`tab.reset_cfg` 與 `tab.run_start` 不收 cfg ref 或 expected revision。`tab.describe_cfg` 另回單層 metadata 與同次局部 input／value／Form preview errors，不附 lowered cfg errors。Workflows 的 `workflow.form` 不附 schema，`workflow.describe_form` 可描述同次 batch candidate，不提交 draft 或 Engine。
+
+Edit 以 model-field leaf paths 原子寫入目前 input。Reset 捕捉一次來源並取 adapter defaults，可接受單次 aliases，但不改全域列或 memento。Run 只接受畫面上目前有效的 Form result，在 focus 或 operation 效果前拒絕非空 aliases。直接 RPC 只轉送一次，不隱藏 refresh 或 retry。Recipe 在建立或重用 tab 後都先 Reset，再設定參數與 Run，只有 Reset 收單次 aliases。Fixed sources、source provenance 與 acceptance 見 [[0065]]。Holder、authentication、domain busy 與硬體 guards 分別檢查，不以 cfg 版本授權。
 
 共用 ParamSpec 同時擁有 string enum 的宣告驗證、schema 投影與 request membership。Flux plugin 從 domain FluxLineRole 提供選項，typed Action 仍做 domain 驗證。`device.snapshot.unit` 讀 cached Info 的 `value_unit`，YOKO 為 A／V，Fake 為 native。缺 Info 標 none，不按 device type 猜單位，不讀硬體。Zcu_lab flux recipe helper 比對 caller 明填 unit 與 snapshot unit，包括 native，沒有 Fake 特例；none 不是可用 flux 座標。Recipe policy 不延伸到共用 device 或 cfg 安全規則。
 

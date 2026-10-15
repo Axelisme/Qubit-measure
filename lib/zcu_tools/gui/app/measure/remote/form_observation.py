@@ -22,7 +22,7 @@ class FormWrite(TypedDict):
     """One ordinary leaf: path contains model field names; value is encoded JSON."""
 
     path: list[str]
-    value: object
+    value: JsonValue
 
 
 class FormError(TypedDict):
@@ -35,21 +35,19 @@ class FormError(TypedDict):
 class FormObservation(TypedDict):
     """Detached Form view, not an acceptance or a source refresh.
 
-    schema describes editable input in the fixed capture. input retains missing
+    input retains missing
     fields and expression tags. values contains evaluated ordinary leaves, not
     proof of validity. errors includes input and lowered cfg validation failures.
     """
 
-    schema: dict[str, JsonValue]
     input: dict[str, JsonValue]
     values: list[FormWrite]
     errors: list[FormError]
 
 
 def observe_form(resource: TabFormResource) -> FormObservation:
-    """Project current input/schema/preview/errors without capture or mutation."""
+    """Project current input/preview/errors without capture or mutation."""
     return _observation(
-        resource.input_schema(),
         resource.input.data,
         resource.preview(),
         resource.result(),
@@ -63,7 +61,6 @@ def observe_entry(entry: ModuleEntryForm | WaveformEntryForm) -> FormObservation
     evaluated beyond preview/result and the entry is not changed.
     """
     return _observation(
-        entry.state.input_schema(entry.env),
         entry.state.input.data,
         entry.state.preview(entry.env),
         entry.result(),
@@ -85,7 +82,6 @@ def entry_invalid_to_remote(exc: LibraryEntryInvalid) -> RemoteError:
 
 
 def _observation(
-    schema: dict[str, JsonValue],
     data: dict[str, JsonValue],
     preview: FormPreview,
     result: ConfigBase | FormErrors,
@@ -94,7 +90,6 @@ def _observation(
     if isinstance(result, FormErrors):
         errors.update(result.messages)
     return {
-        "schema": schema,
         "input": data,
         "values": [
             {"path": list(path), "value": context_wire_value(value)}

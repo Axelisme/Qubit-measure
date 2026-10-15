@@ -121,12 +121,10 @@ def test_captured_waveform_key_is_a_unique_valid_option_and_stays_a_key() -> Non
     matching = [option for option in options if option.matches(current)]
     assert [option.label for option in matching] == ["Q.waveforms.flat"]
     assert matching[0].value == current == {"kind": "ref", "name": "Q.waveforms.flat"}
-    schema = expect_object(
-        expect_object(state.input_schema(env)["properties"])["waveform"]
-    )
-    projected = schema.get("x-form-options")
-    assert isinstance(projected, list)
-    assert any(expect_object(item)["value"] == current for item in projected)
+    target = state.describe(("waveform",), env).target
+    assert target is not None and target.options is not None
+    assert target.selected is not None
+    assert target.options[target.selected].value == current
     assert result_spec(form, state, env).waveform == "Q.waveforms.flat"
     assert state.input.data["waveform"] == current
 
@@ -144,22 +142,14 @@ def test_waveform_options_keep_all_inline_kinds_with_branch_fields() -> None:
         "Inline: arb",
         "Inline: flat_top",
     ]
-    schema = expect_object(
-        expect_object(form.model.input_schema(env)["properties"])["waveform"]
-    )
-    projected = schema["x-form-options"]
-    assert isinstance(projected, list)
-    const = expect_object(projected[1])
-    assert const["value"] == {"kind": "inline", "module": {"style": "const"}}
-    const_fields = expect_object(
-        expect_object(expect_object(const["fields"])["properties"])["module"]
-    )
-    assert set(expect_object(const_fields["properties"])) == {"length"}
-    flat = expect_object(projected[-1])
-    flat_fields = expect_object(
-        expect_object(expect_object(flat["fields"])["properties"])["module"]
-    )
-    assert set(expect_object(flat_fields["properties"])) == {"length", "raise_waveform"}
+    state = FormState(form.default_input(env))
+    for option, names in (
+        (options[1], {"length"}),
+        (options[-1], {"length", "raise_waveform"}),
+    ):
+        state.write({("waveform",): option.value}, env)
+        children = state.describe(("waveform",), env).children
+        assert {field.path[-1] for field in children} == names
 
 
 def test_waveform_key_command_copies_once_and_disconnects_from_later_sources() -> None:
@@ -361,7 +351,7 @@ def test_tagged_spec_projection_round_trips_without_sources(
     assert result_spec(form, state, env).model_dump() == spec.model_dump()
 
 
-def test_tagged_waveform_name_is_key_only_in_schema_result_defaults_and_restore() -> (
+def test_tagged_waveform_name_is_key_only_in_description_result_defaults_and_restore() -> (
     None
 ):
     form = form_adapter.module_form(PulseSpec)
@@ -375,22 +365,6 @@ def test_tagged_waveform_name_is_key_only_in_schema_result_defaults_and_restore(
     errors = state.result(env)
     assert isinstance(errors, FormErrors)
     assert errors.messages == {("waveform", "name"): "Input should be a valid string"}
-    schema = expect_object(
-        expect_object(state.input_schema(env)["properties"])["waveform"]
-    )
-    branches = schema["oneOf"]
-    assert isinstance(branches, list)
-    ref = next(
-        expect_object(branch)
-        for branch in branches
-        if expect_object(
-            expect_object(expect_object(branch)["properties"])["kind"]
-        ).get("const")
-        == "ref"
-    )
-    assert (
-        expect_object(expect_object(ref["properties"])["name"]).get("type") == "string"
-    )
     restored = FormState(form.input_from_spec(spec, env))
     assert restored.write_compatible(state.input.data, env) == (("waveform", "name"),)
     assert result_spec(form, restored, env).waveform == "$missing.value"
@@ -440,12 +414,8 @@ def test_flat_readout_edits_generator_and_adc_without_expanding_waveform_key() -
 def test_spec_root_tag_is_hidden_and_remains_in_input() -> None:
     form = form_adapter.module_form(PulseSpec)
     env = FormEnv()
-    properties = form.model.input_schema(env)["properties"]
-    assert isinstance(properties, dict)
-    tag = properties["type"]
-    assert isinstance(tag, dict)
-    assert tag.get("hidden") is True
-    assert tag["const"] == "pulse"
+    tag = FormState(form.default_input(env)).describe(("type",), env).target
+    assert tag is not None and tag.hidden and tag.fixed_value == "pulse"
     assert form.default_input(env).data["type"] == "pulse"
 
 
@@ -474,7 +444,6 @@ def test_unsupported_pulse_fields_cannot_be_written_and_use_spec_defaults(
     form = form_adapter.module_form(PulseSpec)
     env = FormEnv()
     state = FormState(form.default_input(env))
-    properties = form.model.input_schema(env)["properties"]
 
     with pytest.raises(ValueError, match="Unknown field path"):
         state.write({(name,): 1}, env)
@@ -485,7 +454,6 @@ def test_unsupported_pulse_fields_cannot_be_written_and_use_spec_defaults(
     state.write(batch, env)
     cfg = result_spec(form, state, env)
 
-    assert isinstance(properties, dict) and name not in properties
     assert getattr(cfg, name) == PulseSpec.model_fields[name].default
 
 
@@ -612,26 +580,24 @@ def test_generated_model_nests_in_module_inline_with_host_choices() -> None:
 
 
 @pytest.mark.parametrize("spec_type", [PulseSpec, PulseReadoutSpec])
-def test_spec_field_meta_reaches_generated_schema(
+def test_spec_field_meta_reaches_generated_description(
     spec_type: type[PulseSpec] | type[PulseReadoutSpec],
 ) -> None:
-    properties = form_adapter.module_form(spec_type).model.input_schema(FormEnv())[
-        "properties"
-    ]
-    assert isinstance(properties, dict)
+    form = form_adapter.module_form(spec_type)
+    env = FormEnv()
+    fields = {
+        field.path[-1]: field
+        for field in FormState(form.default_input(env)).describe((), env).children
+    }
     observed: dict[str, tuple[JsonValue, ...]] = {}
     expected: dict[str, tuple[JsonValue, ...]] = {}
     for name, info in spec_type.model_fields.items():
         meta = get_field_meta(info)
-        field = properties.get(name)
-        if meta is None or not isinstance(field, dict):
+        field = fields.get(name)
+        if meta is None or field is None:
             continue
         expected[name] = (meta.unit, meta.decimals, meta.group)
-        observed[name] = (
-            field.get("unit"),
-            field.get("decimals"),
-            field.get("x-form-group"),
-        )
+        observed[name] = (field.unit, field.decimals, field.group)
     assert expected and observed == expected
 
 
@@ -792,16 +758,12 @@ def test_template_input_nested_kind_reselection_uses_authored_defaults(
     state = FormState(
         form.template_input(Template(template_id), creation_templates, env)
     )
-    node = expect_object(expect_object(state.input_schema(env)["properties"])[child])
-    options = node["x-form-options"]
-    assert isinstance(options, list)
+    target = state.describe((child,), env).target
+    assert target is not None and target.options is not None
+    options = target.options
 
     def choose(kind: str) -> None:
-        value = next(
-            expect_object(item)["value"]
-            for item in options
-            if expect_object(item)["label"] == f"Inline: {kind}"
-        )
+        value = next(item.value for item in options if item.label == f"Inline: {kind}")
         state.write({(child,): value}, env)
 
     assert (

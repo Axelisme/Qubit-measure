@@ -10,8 +10,13 @@ from pydantic import ConfigDict, JsonValue, TypeAdapter
 
 # qtpy.QtGui.QAction resolves to NoReturn for pyright; PyQt6 is the binding.
 from PyQt6.QtGui import QAction
-from qtpy.QtCore import QEvent, QObject, QPoint, QSize, Qt
-from qtpy.QtGui import QColor, QKeyEvent, QMouseEvent, QPaintEvent, QPalette
+from qtpy.QtCore import QEvent, QObject, QPoint, QSignalBlocker, Qt
+from qtpy.QtGui import (
+    QColor,
+    QFocusEvent,
+    QKeyEvent,
+    QPalette,
+)
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -20,16 +25,14 @@ from qtpy.QtWidgets import (
     QLabel,
     QLineEdit,
     QSizePolicy,
-    QStyle,
-    QStyleOptionFocusRect,
-    QStylePainter,
     QVBoxLayout,
     QWidget,
 )
 
 from zcu_tools.core.complex_codec import decode_complex, encode_complex
-from zcu_tools.gui.form import FormValue, FormWritePath
+from zcu_tools.gui.form import FormOptionDescription, FormValue, FormWritePath
 from zcu_tools.gui.widgets.form.value_widgets import (
+    FIELD_INPUT_MIN_WIDTH,
     connect_committed_value_widget,
     make_value_widget,
     write_value_widget,
@@ -37,14 +40,12 @@ from zcu_tools.gui.widgets.form.value_widgets import (
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.gui.widgets.spinbox import trimmed_decimals
 
-from ._schema_view import FieldView, OptionView
+from ._fold import FoldTitle, foldable_rows
+from ._view import FieldView
 
 _JSON = TypeAdapter(JsonValue, config=ConfigDict(allow_inf_nan=False))
-# Vertical density: pixels between sibling rows, between a row's header and
-# its group, and around a nested group's rows (left indents the group).
-ROW_SPACING = 4
+# Pixels between a row's header and its nested group.
 _HEADER_SPACING = 2
-_GROUP_MARGINS = (8, 4, 4, 4)
 # Tooltip line on rows whose input has the right-click Expression action.
 _MODE_HINT = "Right-click to switch Direct / Expression"
 # Share of the palette's Highlight mixed into an Expression input's Base colour:
@@ -58,9 +59,6 @@ _ERROR_RED_DARK = QColor("#ff8a80")
 # Shown in a group block's header while any of its rows shows an error, so a
 # folded group still tells the user where Start is blocked.
 GROUP_ERRORS_NOTE = "Contains errors"
-# A fold title starts with one of these marks, a space, then its label.
-FOLDED_MARK = "\u25b8"
-EXPANDED_MARK = "\u25be"
 # Suffix of the option dropdown item that shows an input no option matches.
 MISSING_SUFFIX = " (missing)"
 # User input a read-only dropdown or checkbox drops. Tab and Backtab key
@@ -75,8 +73,6 @@ _BLOCKED_EVENTS = frozenset(
     }
 )
 _FOCUS_KEYS = frozenset({Qt.Key.Key_Tab, Qt.Key.Key_Backtab})
-# Keys that fold or unfold a fold title that has keyboard focus.
-_FOLD_KEYS = frozenset({Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter})
 
 
 class _UserInputBlock(QObject):
@@ -252,128 +248,25 @@ def _tight_label(text: str, parent: QWidget) -> QLabel:
     return label
 
 
-class _FoldTitle(QLabel):
-    """A bold section title that folds its body on a click or a key.
+class _TextInput(QLineEdit):
+    """Emit one commit on normal focus loss, including after a folded draft.
 
-    Its text is FOLDED_MARK while body is hidden, EXPANDED_MARK while body
-    is shown, then a space and label. A press of the left button flips
-    body's visibility and the mark, then calls toggled(). Tab (not a click)
-    gives the title keyboard focus; while it has focus the style's focus
-    frame is drawn around it, and Space, Return or Enter flips it the same
-    way. Other keys do nothing, and keys typed into other widgets never
-    reach it. It is a title, not an input, so a read-only form still folds;
-    a disabled one gets no mouse or key input.
-    A QLabel that overrides the mouse, key and paint events is the plainest
-    Qt widget that reads as a title and reacts to a click.
+    Qt clears its edited flag even when folding blocks editingFinished. The
+    widget still owns the unchanged text; normal focus loss must retry it.
+    Fold/retirement signal blockers suppress this notification too. Popup
+    focus is temporary, so opening the text menu does not commit.
     """
 
-    def __init__(
-        self,
-        label: str,
-        body: QWidget,
-        parent: QWidget,
-        toggled: Callable[[], None],
-    ) -> None:
-        super().__init__(parent)
-        self._label = label
-        self._body = body
-        self._toggled = toggled
-        font = self.font()
-        font.setBold(True)
-        self.setFont(font)
-        # Never take spare width, so controls sit beside the title.
-        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
-        self._show_mark()
-
-    def sizeHint(self) -> QSize:
-        """QLabel's hint, widened to fit the wider mark.
-
-        A label column gets the fixed width of its widest hint at build;
-        fitting both marks keeps a flipped title from clipping its text.
-        """
-        hint = super().sizeHint()
-        metrics = self.fontMetrics()
-        widest = max(
-            metrics.horizontalAdvance(mark) for mark in (FOLDED_MARK, EXPANDED_MARK)
-        )
-        extra = widest - metrics.horizontalAdvance(self._mark())
-        return QSize(hint.width() + extra, hint.height())
-
-    def mousePressEvent(self, ev: QMouseEvent | None) -> None:
-        """Fold or unfold the body on a left-button press ev."""
-        if ev is None or ev.button() != Qt.MouseButton.LeftButton:
-            super().mousePressEvent(ev)
-            return
-        ev.accept()
-        self._flip()
-
-    def keyPressEvent(self, ev: QKeyEvent | None) -> None:
-        """Fold or unfold the body on a Space, Return or Enter press ev."""
-        if ev is None or ev.key() not in _FOLD_KEYS:
-            super().keyPressEvent(ev)
-            return
-        ev.accept()
-        self._flip()
-
-    def paintEvent(self, a0: QPaintEvent | None) -> None:
-        """Paint the title, then the style's focus frame while it has focus."""
-        super().paintEvent(a0)
-        if not self.hasFocus():
-            return
-        option = QStyleOptionFocusRect()
-        option.initFrom(self)
-        painter = QStylePainter(self)
-        painter.drawPrimitive(QStyle.PrimitiveElement.PE_FrameFocusRect, option)
-        painter.end()
-
-    def _flip(self) -> None:
-        self._body.setVisible(self._body.isHidden())
-        self._show_mark()
-        self._toggled()
-
-    def _mark(self) -> str:
-        return FOLDED_MARK if self._body.isHidden() else EXPANDED_MARK
-
-    def _show_mark(self) -> None:
-        self.setText(f"{self._mark()} {self._label}")
-
-
-def _foldable_rows[K](
-    parent: QWidget,
-    folds: dict[K, bool],
-    key: K,
-    *,
-    label: str,
-    name: str,
-    expanded: bool,
-) -> tuple[QLabel, QGroupBox, QVBoxLayout]:
-    """Build a fold title and the foldable box of rows it folds, under parent.
-
-    Returns the title, named name and showing label after its fold mark;
-    the box; and the box's rows layout, which has nested-group margins and
-    ROW_SPACING. The caller puts the title in a header and the box below
-    it. folds records user folds (True is expanded) across rebuilds: the
-    box starts shown when folds[key] is True; without that key, when
-    expanded is True. Each click on the title flips the box's visibility
-    and the title's mark and records the new state as folds[key].
-    """
-    body = QGroupBox(parent)
-    rows = QVBoxLayout(body)
-    rows.setContentsMargins(*_GROUP_MARGINS)
-    rows.setSpacing(ROW_SPACING)
-    body.setVisible(folds.get(key, expanded))
-
-    def record() -> None:
-        folds[key] = not body.isHidden()
-
-    title = _FoldTitle(label, body, parent, record)
-    title.setObjectName(name)
-    return title, body, rows
+    def focusOutEvent(self, a0: QFocusEvent | None) -> None:
+        """Let Qt update focus styling, then notify the row once."""
+        with QSignalBlocker(self):
+            super().focusOutEvent(a0)
+        if a0 is not None and a0.reason() != Qt.FocusReason.PopupFocusReason:
+            self.editingFinished.emit()
 
 
 class FieldRow:
-    """Keep one schema row stable while publication values change.
+    """Keep one described row stable while publication values change.
 
     field is the displayed FieldView; widget/layout own its Qt row. label is
     the left-aligned title at the start of the header; its parent sets one
@@ -385,7 +278,7 @@ class FieldRow:
     including a disabled nullable model, show the plain field label.
     input is its optional scalar control (read-only text for a fixed one-value
     Literal, which has no mode), or on an option row its one non-editable
-    dropdown: each schema option's label with the option's value as item
+    dropdown: each described option's label with the option's value as item
     data, then, while a present input matches no option, the input's text
     plus MISSING_SUFFIX with the input as data. The dropdown's actions() are
     the selected option's commands, shown as its right-click menu. mode is
@@ -488,6 +381,31 @@ class FieldRow:
         self._tooltip = "\n".join(filter(None, (field.description, hint)))
         self.set_error("")
 
+    def connect_fold(self, callback: Callable[[], None]) -> None:
+        """Call callback after a user fold, if this row has a fold title.
+
+        The callback takes no arguments, runs on the GUI thread and may build
+        children on first expansion. Connecting never calls it immediately.
+        A leaf or disabled model has no fold signal and does nothing.
+        """
+        if isinstance(self.label, FoldTitle):
+            self.label.fold_changed.connect(callback)
+
+    def set_children_available(self, *, available: bool) -> None:
+        """Hide an empty model body's fold marker, or restore it for children.
+
+        available means the first expanded description has drawn children.
+        The body and title remain owned by this row for later publications;
+        empty bodies stay hidden, and no write or fold notification occurs.
+        The public fold object name exists only when the layer can be folded.
+        """
+        if isinstance(self.label, FoldTitle):
+            self.label.setObjectName(self._name("fold") if available else "")
+            self.label.set_foldable(
+                available=available,
+                expanded=self._folds.get(self.field.path, not self.field.collapsed),
+            )
+
     def set_error(self, text: str) -> None:
         """Mark the input or name label; lead the row tooltip with text.
 
@@ -565,11 +483,11 @@ class FieldRow:
         fold box goes into group and rows, below header.
         """
         field = self.field
-        if field.kind != "model" or not field.active:
+        if not field.can_expand:
             label = _tight_label(field.label, self.widget)
             header.addWidget(label)
             return label
-        title, self.group, self.rows = _foldable_rows(
+        title, self.group, self.rows = foldable_rows(
             self.widget,
             self._folds,
             field.path,
@@ -634,10 +552,12 @@ class FieldRow:
     def _build_input(self, header: QHBoxLayout) -> None:
         # Numeric inputs use raw text, not spinbox ranges/validators: partial
         # text belongs to the view and model-invalid values must reach state.
-        widget = make_value_widget(
-            bool if self.field.kind == "boolean" else str, "", None
-        )
-        widget.setParent(self.widget)
+        if self.field.kind == "boolean":
+            widget = make_value_widget(bool, "", None)
+            widget.setParent(self.widget)
+        else:
+            widget = _TextInput(self.widget)
+            widget.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
         widget.setObjectName(self._name("input"))
         self.input = widget
         if isinstance(widget, QLineEdit):
@@ -799,7 +719,7 @@ class FieldRow:
             self._displaying = False
 
     def _display_options(
-        self, options: tuple[OptionView, ...], *, editable: bool
+        self, options: tuple[FormOptionDescription, ...], *, editable: bool
     ) -> None:
         """Show options and select the input's; list its commands as actions.
 
@@ -894,12 +814,14 @@ class GroupBlock:
         members: tuple[FormWritePath, ...],
         parent: QWidget,
         folds: dict[tuple[FormWritePath, str], bool],
+        toggled: Callable[[], None],
     ) -> None:
         """Build the block under parent; the caller adds widget to its layout.
 
         folds is the editor's record of user group folds by (path, name),
         True for expanded: the block starts as folds says, else folded, and
-        records each user fold there. The caller adds member rows to rows.
+        records each user fold there. toggled runs after that change so the
+        caller can lazily add member rows to rows on first expansion.
         """
         self.members = members
         self.widget = QWidget(parent)
@@ -909,7 +831,7 @@ class GroupBlock:
         layout.setSpacing(_HEADER_SPACING)
         header = QHBoxLayout()
         layout.addLayout(header)
-        self.label, self.body, self.rows = _foldable_rows(
+        self.label, self.body, self.rows = foldable_rows(
             self.widget,
             folds,
             (path, name),
@@ -917,6 +839,7 @@ class GroupBlock:
             name="form.fold.group." + ".".join((*path, name)),
             expanded=False,
         )
+        self.label.fold_changed.connect(toggled)
         header.addWidget(self.label)
         layout.addWidget(self.body)
         self._errors_note = QLabel(GROUP_ERRORS_NOTE, self.widget)
