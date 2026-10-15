@@ -425,10 +425,10 @@ class Form[C: ConfigBase]:
     instead of falling back to core defaults. Module locks remove
     the ref branch and use single-value Literal fields in inline content. Optional extras adds an 'extras' section and requires
     a named lower(extras, cfg) callable returning the concrete core cfg type.
-    Generated module input omits optional desc and ro_ch
-    fields; conversion restores their Spec defaults, and copying a library
-    entry inline discards its stored values for them. Templates cannot seed
-    them (see bind_templates); there is no override. FieldMeta label, unit,
+    Generated module input omits optional desc; conversion restores its
+    Spec default, and copying a library entry inline discards its description.
+    Templates cannot seed desc (see bind_templates); there is no override.
+    Readout ro_ch remains required input; Pulse has no persistent ro_ch. FieldMeta label, unit,
     decimals, description and group become Display metadata; locked fields
     drop decimals because they are single-value Literals.
     Generated options(env) declares nullable None, family-limited captured keys
@@ -500,9 +500,9 @@ class Form[C: ConfigBase]:
         The host's registration entry calls this explicitly. adapter is the
         registered definition name, included with the consuming field path in ValueError for unknown IDs,
         incompatible families or malformed seed trees. A template seed for an
-        unsupported module field (optional desc or ro_ch)
+        unsupported module field (optional desc)
         raises the same ValueError, naming the template id and the dotted seed
-        path; to_cfg fills those fields only from Spec defaults. Seeds for other
+        path; to_cfg fills desc only from its Spec default. Seeds for other
         fields, including $-prefixed strings, stay literal. No sources are read.
         Call before default_input when the tree contains Template nodes.
         Definitions remain immutable and the caller's mapping is never retained.
