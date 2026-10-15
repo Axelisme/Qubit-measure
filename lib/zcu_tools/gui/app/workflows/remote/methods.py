@@ -63,6 +63,10 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "Schema fields marked hidden hold fixed values and need no input. "
         "x-form-group only groups fields on screen; grouped fields take input "
         "like any other, and the schema says which are required. "
+        "x-form-options lists a field's choices in schema order, each with "
+        "label, value and optional fields and commands: select one by writing "
+        "its whole value once, then edit its fields (fixed tags are omitted); "
+        "commands are GUI actions with no workflow RPC. "
         'Expressions {"expr": text} are input only for text fields (int, float, '
         "complex and str values whose schema offers that alternative); "
         "Literal/enum, choices, bool and library-key fields take plain values.",

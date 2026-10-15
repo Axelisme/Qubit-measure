@@ -28,6 +28,7 @@ from zcu_tools.gui.form import (
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._form_context import captured_ext_env
+from tests.gui.widgets.form._field_errors import field_error as row_error
 from tests.gui.widgets.form._text_input import commit_text
 
 
@@ -181,7 +182,7 @@ def test_direct_numeric_and_expression_controls_write_only_parsed_input(
     result = state.result(env)
     assert isinstance(result, SampleForm)
     assert result.amount == 2.0
-    assert float(label(editor, "form.value.amount").text()) == 2.0
+    assert label(editor, "form.value.amount").text() == "= 2.0"
     assert editor.local_parse_errors() is None
     assert editor.errors() is None
 
@@ -217,7 +218,7 @@ def test_partial_text_stays_local_and_validity_recovers_after_correction(
     assert isinstance(local, FormErrors)
     assert ("amount",) in local.messages
     assert isinstance(editor.errors(), FormErrors)
-    assert label(editor, "form.error.amount").text()
+    assert row_error(editor, "amount")
     assert observed == [False]
 
     editor.refresh(environment(8.0))
@@ -243,7 +244,7 @@ def test_model_invalid_value_and_expression_remain_in_state_with_errors(
     errors = editor.errors()
     assert isinstance(errors, FormErrors)
     assert ("amount",) in errors.messages
-    assert label(editor, "form.error.amount").text()
+    assert row_error(editor, "amount")
 
     mode(editor, "amount").trigger()
     commit_text(line(editor, "amount"), "absent_name")
@@ -330,7 +331,7 @@ def test_nested_and_root_model_errors_are_visible_in_public_labels(
     errors = editor.errors()
     assert isinstance(errors, FormErrors)
     assert ("section", "stop") in errors.messages
-    assert label(editor, "form.error.section.stop").text()
+    assert row_error(editor, "section.stop")
     commit_text(line(editor, "section.stop"), "3")
     state.write({("amount",): 90.0, ("count",): 20}, env)
     errors = editor.errors()
@@ -411,7 +412,7 @@ def test_refresh_changes_choices_and_evaluation_without_writing_state(
     editor.refresh(environment(8.0))
     assert state.input.data == before
     assert notices == []
-    assert float(label(editor, "form.value.amount").text()) == 8.0
+    assert label(editor, "form.value.amount").text() == "= 8.0"
     errors = editor.errors()
     assert isinstance(errors, FormErrors)
     assert ("mode",) in errors.messages
@@ -544,7 +545,7 @@ def test_invalid_complex_envelope_is_displayed_without_breaking_construction(
     editor = FormEditor(state, env)
     views.append(editor)
     assert isinstance(editor.errors(), FormErrors)
-    assert label(editor, "form.error.amplitude").text()
+    assert row_error(editor, "amplitude")
     assert label(editor, "form.value.amplitude").text() == ""
     commit_text(line(editor, "amplitude"), "2+3j")
     assert state.input.data["amplitude"] == {"__complex__": [2.0, 3.0]}
@@ -619,7 +620,8 @@ def test_nullable_numeric_direct_partial_null_and_expression(
     assert getattr(result, path) == 9
     value = editor.findChild(QLabel, f"form.value.{path}")
     assert isinstance(value, QLabel)
-    assert float(value.text()) == 9
+    assert value.text().startswith("= ")
+    assert float(value.text().removeprefix("= ")) == 9
 
 
 class EmptyChoiceForm(FormModel):

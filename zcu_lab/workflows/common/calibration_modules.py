@@ -3,6 +3,10 @@
 Module input aliases describe generated ref/inline values, not persistent Specs.
 Always use the owning ModuleInputField.to_spec before native materialization;
 never inspect their module content through the static nominal type view.
+Inline module input has no mux_*, mask, outsel or desc fields and no optional
+pulse ro_ch; to_spec fills them from Spec defaults, and copying a library key
+to Inline drops the entry's values for them. DirectReadoutCfg.ro_ch stays
+required input.
 """
 
 from collections.abc import Mapping

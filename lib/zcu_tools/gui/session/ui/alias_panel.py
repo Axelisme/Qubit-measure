@@ -21,6 +21,7 @@ from zcu_tools.gui.session.alias_presets import AliasPresets
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import ContextSourceUnavailableError
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 _EDIT_TRIGGERS = (
     QAbstractItemView.EditTrigger.DoubleClicked
@@ -116,6 +117,7 @@ class AliasPanel(QWidget):
         self._error = QLabel(self)
         self._error.setObjectName("inspect.aliases.error")
         self._error.setWordWrap(True)
+        make_label_selectable(self._error)
         layout.addWidget(self._error)
         self.revert()
 

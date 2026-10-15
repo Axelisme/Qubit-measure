@@ -1,9 +1,10 @@
 """Generic workflow GUI composition behind the shared process runtime."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import ClassVar
 
+from zcu_tools.cfg_model import TemplateDef
 from zcu_tools.device.manager import DeviceManager
 from zcu_tools.gui.app.workflows.persistence import (
     WorkflowInputCodec,
@@ -56,6 +57,7 @@ class WorkflowsGuiBehavior[C](GuiRuntimeBehavior):
         self,
         *,
         registrations: Sequence[Attachment[C]],
+        templates: Mapping[str, TemplateDef],
         loader: SourceCatalogLoader[WorkflowCatalog[C]] | None = None,
         alias_presets: AliasPresets | None = None,
         project_root: str = "",
@@ -70,6 +72,9 @@ class WorkflowsGuiBehavior[C](GuiRuntimeBehavior):
         replacement WorkflowCatalog[C] instances through the same registry;
         None disables source reload. Caller configures bounded/fixed namespaces
         and a builder that imports current registrations on every load.
+        templates is the caller's persistent module/waveform template catalog,
+        used by shared Inspect's New action; an empty mapping is valid. It is
+        passed directly to the Window, without importing a user package.
         alias_presets maps names to ordered authored rows. Omitted or None means
         no catalog and an empty initial table. An explicit mapping must contain
         "default" (possibly empty), or raise ValueError. Invalid table syntax,
@@ -89,6 +94,7 @@ class WorkflowsGuiBehavior[C](GuiRuntimeBehavior):
         self._registrations = tuple(registrations)
         WorkflowCatalog(self._registrations)
         self._loader = loader
+        self._templates = templates
         self.alias_presets: AliasPresets | None = alias_presets
         self._project_root = project_root
         self._clean = clean
@@ -141,6 +147,8 @@ class WorkflowsGuiBehavior[C](GuiRuntimeBehavior):
             self.services,
             self._owner,
             registrations=self._registrations,
+            templates=self._templates,
+            alias_presets=self.alias_presets,
             loader=self._loader,
             on_close=self._close,
         )

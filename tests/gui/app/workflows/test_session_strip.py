@@ -1,166 +1,54 @@
-"""Session chips above the workflow columns follow the shared session.
+"""The session strip above the workflow columns shows only the Entry chip.
 
-Chips refresh on session events, when Setup closes, and on Prepare forms. Their text is read from the shown QLabel and its tooltip.
+The chip follows the shared session's entry and point. Its text is read from
+the shown QLabel.
 """
 
-from dataclasses import replace
-
 import pytest
-from qtpy.QtWidgets import QApplication, QLabel, QPushButton, QWidget
-from zcu_tools.device.fake import FakeDevice
-from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import ContextSourceFault
-from zcu_tools.gui.session.parameters import ParameterContext
-from zcu_tools.gui.session.services.device import ConnectDeviceRequest
-from zcu_tools.program.v2.mocksoc import make_mock_soc
-from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM
+from qtpy.QtWidgets import QApplication, QLabel, QWidget
+from zcu_tools.gui.session.context_types import PointUseRequest
+from zcu_tools.resources.entry import ResultEntry
 
-from ._window_support import QUBIT_KIND, WindowSession, bind_point, install_soc
-
-CHIPS = (
-    "workflow.session.entry",
-    "workflow.source.status",
-    "workflow.session.devices",
-    "workflow.session.zcu",
-)
+from ._window_support import WindowSession, bind_point
 
 
-def chip(window: QWidget, name: str) -> QLabel:
-    found = window.findChild(QLabel, name)
-    assert found is not None, name
-    return found
-
-
-def chip_texts(window: QWidget) -> tuple[str, ...]:
-    return tuple(chip(window, name).text() for name in CHIPS)
-
-
-def test_empty_session_shows_every_chip_without_context(
-    window_session: WindowSession,
-) -> None:
-    window = window_session.window
+def strip_chips(window: QWidget) -> list[QLabel]:
     strip = window.findChild(QWidget, "workflow.session")
     assert strip is not None
-    for name in CHIPS:
-        assert strip.isAncestorOf(chip(window, name))
-    assert chip_texts(window) == (
-        "Entry: none",
-        "Qubit: no context",
-        "Devices: none",
-        "ZCU: not connected",
-    )
+    return strip.findChildren(QLabel)
 
 
-def test_context_events_refresh_entry_point_and_resolved_qubit(
-    window_session: WindowSession,
-) -> None:
-    window = window_session.window
-    bind_point(window_session.harness, window_session.root)
-    assert chip(window, "workflow.session.entry").text() == "Entry: sample / source"
-    assert chip(window, "workflow.source.status").text() == (
-        f"Qubit: Q1 ({QUBIT_KIND})"
-    )
+def entry_text(window: QWidget) -> str:
+    chip = window.findChild(QLabel, "workflow.session.entry")
+    assert chip is not None
+    return chip.text()
 
 
-@pytest.mark.parametrize(
-    "rows", [(), (AliasRow("qubit", "Q9"),)], ids=["unbound", "missing"]
-)
-def test_unavailable_qubit_shows_a_reason_instead_of_a_path(
-    window_session: WindowSession, rows: tuple[AliasRow, ...]
-) -> None:
-    window = window_session.window
-    bind_point(window_session.harness, window_session.root)
-    window_session.harness.services.context.set_alias_rows(rows)
-    text = chip(window, "workflow.source.status").text()
-    assert text.startswith("Qubit unavailable: ")
-    assert len(text) > len("Qubit unavailable: ")
-    assert ".kind" not in text
+def test_strip_shows_exactly_the_entry_chip(window_session: WindowSession) -> None:
+    chips = strip_chips(window_session.window)
+    assert [chip.objectName() for chip in chips] == ["workflow.session.entry"]
+    assert chips[0].text() == "Entry: none"
 
 
-def test_unreadable_source_shows_unavailable_with_its_reason(
-    window_session: WindowSession, qapp: QApplication
-) -> None:
-    """A capture whose point source cannot be read is not an EMPTY context."""
-    window, harness = window_session.window, window_session.harness
-    bind_point(harness, window_session.root)
-    healthy = harness.services.context.read_context()
-    fault = ContextSourceFault(
-        "point", window_session.root / "point.yaml", "OSError", "disk detached"
-    )
-    unreadable = ParameterContext(
-        point=healthy.document(),
-        library=healthy.library,
-        target=healthy.target,
-        roles=None,
-        source_faults=(fault,),
-    )
-    harness.state.set_context(replace(harness.state.session_env, parameters=unreadable))
-    window.setup_dialog.reject()
-    qapp.processEvents()
-
-    label = chip(window, "workflow.source.status")
-    assert label.text().startswith("Qubit unavailable: ")
-    assert "disk detached" in label.text()
-
-
-def test_long_reason_is_elided_without_widening_the_window(
-    window_session: WindowSession, qapp: QApplication
-) -> None:
-    window = window_session.window
-    bind_point(window_session.harness, window_session.root)
-    missing = "Q" + "9" * 300
-    window_session.harness.services.context.set_alias_rows(
-        (AliasRow("qubit", missing),)
-    )
-    label = chip(window, "workflow.source.status")
-    assert label.text().startswith("Qubit unavailable: ")
-    assert missing not in label.text()
-    assert missing in label.toolTip()
-    window.resize(1280, 800)
-    window.show()
-    qapp.processEvents()
-    assert window.minimumSizeHint().width() <= 1280
-    assert label.width() < 1280 // 2
-
-
-def test_device_and_simulator_events_refresh_their_chips(
+def test_entry_chip_follows_opened_entry_and_selected_point(
     window_session: WindowSession,
 ) -> None:
     window, harness = window_session.window, window_session.harness
-    harness.services.device.start_connect_device(
-        ConnectDeviceRequest("FakeDevice", "flux", "none")
+    entry = ResultEntry.create(
+        "sample",
+        result_root=window_session.root / "result",
+        database_root=window_session.root / "Database",
     )
-    harness.background.execute()
-    harness.background.deliver()
-    assert chip(window, "workflow.session.devices").text() == "Devices: flux"
-    driver = harness.services.device.get_connected_devices()["flux"]
-    assert isinstance(driver, FakeDevice)
-    soc, soccfg = make_mock_soc(sim=DEFAULT_SIMPARAM)
-    soc.set_flux_source(driver.get_value)
-    harness.services.soc_connection.install_prepared_mock(soc, soccfg)
-    assert chip(window, "workflow.session.zcu").text() == "ZCU: simulator"
-
-
-def test_setup_close_and_prepare_refresh_without_events(
-    window_session: WindowSession, qapp: QApplication
-) -> None:
-    """A caller-owned state write publishes no event; the next refresh shows it."""
-    window, harness = window_session.window, window_session.harness
-    bind_point(harness, window_session.root)
-    zcu = chip(window, "workflow.session.zcu")
-
-    install_soc(harness)
-    assert zcu.text() == "ZCU: not connected"
-    window.setup_dialog.reject()
-    qapp.processEvents()
-    assert zcu.text() == "ZCU: connected"
-
-    harness.state.set_context(replace(harness.state.session_env, soc=None))
-    assert zcu.text() == "ZCU: connected"
-    prepare = window.findChild(QPushButton, "workflow.source.use")
-    assert prepare is not None
-    prepare.click()
-    assert zcu.text() == "ZCU: not connected"
+    entry.new_point("source", description="strip")
+    entry.new_point("other", description="strip")
+    context = harness.services.context
+    context.install_entry(entry)
+    assert entry_text(window) == "Entry: sample / no point"
+    context.use_point(PointUseRequest("source"))
+    assert entry_text(window) == "Entry: sample / source"
+    context.use_point(PointUseRequest("other"))
+    assert entry_text(window) == "Entry: sample / other"
+    assert len(strip_chips(window)) == 1
 
 
 def test_closed_window_stops_following_session_events(
@@ -169,10 +57,10 @@ def test_closed_window_stops_following_session_events(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     window = window_session.window
-    bind_point(window_session.harness, window_session.root)
-    before = chip(window, "workflow.source.status").text()
+    entry = bind_point(window_session.harness, window_session.root)
     assert window.close()
     qapp.processEvents()
-    window_session.harness.services.context.set_alias_rows(())
-    assert chip(window, "workflow.source.status").text() == before
+    entry.new_point("later", description="after close")
+    window_session.harness.services.context.use_point(PointUseRequest("later"))
+    assert entry_text(window) == "Entry: sample / source"
     assert "raised" not in caplog.text
