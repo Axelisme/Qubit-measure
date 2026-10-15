@@ -126,11 +126,11 @@ class LibraryEntryForm[S: ConfigBase](ABC):
 
         spec is a concrete persistent module or waveform Spec of this form's
         family; it is not modified. Child library keys stay keys. The shared
-        generator leaves out optional hardware fields (desc, mask, outsel,
-        ro_ch, mux_*); the produced Spec has their defaults, not spec's
-        values. arb_names are the arb waveform asset keys captured by the
-        host: every arb waveform data field in this Spec, at the root or
-        inline, accepts only these names, and an empty sequence accepts none.
+        generator leaves out optional desc and ro_ch fields; the produced
+        Spec has their defaults, not spec's values. arb_names are the arb
+        waveform asset keys captured by the host: every arb waveform data
+        field in this Spec, at the root or inline, accepts only these names.
+        An empty sequence accepts none.
         A spec that is not a concrete persistent Spec raises TypeError.
         """
         self._form = module_form(type(spec))

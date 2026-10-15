@@ -16,7 +16,7 @@ Library、Inspect 與 writeback 也使用 FormState／FormEditor，但各自持�
 
 共用 `gui.form` 擁有 input、schema、FormState、preview、result 與錯誤。`widgets/form` 的 FormEditor 依 schema 顯示欄位與選項，不解讀 library 或實驗語義。`gui.form_adapter` 從 core cfg 與持久 Spec 生成 Form，集中 FieldMeta 呈現投影、key-or-inline wrappers 與屏蔽欄位政策。Form core 不讀 FieldMeta。
 
-Library entry 表單由 session 擁有，固定 root 的具體 Spec family。初始 input 與提交都保留 child key，不能把既有 pulse 切成 readout；換 family 要新建 entry。Optional None 維持缺席。生成器略過選填的 desc、mask、outsel、ro_ch 與 mux_*，提交時以 Spec 預設補回，不保留原值；沒有預設的必填欄位仍可編輯。
+Library entry 表單由 session 擁有，固定 root 的具體 Spec family。初始 input 與提交都保留 child key，不能把既有 pulse 切成 readout；換 family 要新建 entry。Optional None 維持缺席。生成器略過選填的 desc 與 ro_ch，提交時以 Spec 預設補回，不保留原值；沒有預設的必填欄位仍可編輯。
 
 None、library keys 與各 Inline kind 在同一個合併下拉。Key 只顯示名稱，不展開唯讀 descendants。普通選 Inline 使用 fresh defaults，不繼承舊分支；明確的 to_inline 指令才從固定 library 複製內容。Advanced 群組預設折疊。Expression 只適用於文字欄位，下拉與勾選欄位不求值。
 

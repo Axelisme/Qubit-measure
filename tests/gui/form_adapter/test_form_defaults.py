@@ -65,7 +65,7 @@ def environment() -> FormEnv:
     library = LibrarySnapshot(
         ModuleLibraryDocument(
             format="zcu.module-library",
-            format_version="1.0",
+            format_version="2.0",
             components={"Q": ComponentLibrary(pulses={"probe": pulse})},
         )
     )
@@ -138,7 +138,6 @@ def test_template_required_nested_defaults_omit_none() -> None:
     assert isinstance(module, dict)
     assert module["phase"] == 0
     assert "mixer_freq" not in module
-    assert "mux_freqs" not in module
     assert module["freq"] == 120
     value = state.result(env)
     assert not isinstance(value, FormErrors), value

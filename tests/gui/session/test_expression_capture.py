@@ -30,7 +30,7 @@ def parameters() -> Generator[ParameterContext]:
             }
         )
         library = LibrarySnapshot(
-            ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+            ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
         )
         yield ParameterContext(
             point=point,

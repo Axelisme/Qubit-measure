@@ -49,7 +49,7 @@ def make_controller(qapp: object) -> Iterator[Callable[[State], Controller]]:
 
     yield make
     for controller in controllers:
-        controller._background_svc.quiesce()
+        controller.close()
 
 
 @pytest.fixture

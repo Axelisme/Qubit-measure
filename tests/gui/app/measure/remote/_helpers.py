@@ -145,14 +145,6 @@ def make_view() -> MagicMock:
     return view
 
 
-class FixtureController(Controller):
-    """Expose deterministic worker teardown to the shared Qt/socket fixtures."""
-
-    def quiesce(self) -> bool:
-        """Join workers and flush owner deliveries before fixture destruction."""
-        return self._background_svc.quiesce()
-
-
 class Fixture:
     """Hold Controller and service for socket tests until explicit stop().
 
@@ -179,7 +171,7 @@ class Fixture:
         self.view = None if headless else make_view()
         self.bus = EventBus()
         fixture_root = str(_context_root()) if project_root is None else project_root
-        self.ctrl = FixtureController(
+        self.ctrl = Controller(
             alias_presets={"default": ALIAS_PRESET},
             state=self.state,
             registry=self.registry,
@@ -235,7 +227,7 @@ class Fixture:
 
     def stop(self) -> None:
         self.service.stop()
-        self.ctrl.quiesce()
+        self.ctrl.close()
 
 
 class FakeTransport:

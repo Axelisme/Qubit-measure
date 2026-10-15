@@ -31,7 +31,7 @@ def _parameters(*, legacy: bool = False) -> ParameterContext:
     parameters = ParameterContext(
         point=_point(),
         library=LibrarySnapshot(
-            ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+            ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
         ),
         target=SavedPoint(entry_id="entry", point="working"),
         roles=RoleBinding(None, {"qubit": RoleSpec("expression/test")}, {"qubit": "Q1"})
@@ -71,7 +71,7 @@ def test_capture_without_alias_table_names_the_unbound_alias_path() -> None:
     parameters = ParameterContext(
         point=_point(),
         library=LibrarySnapshot(
-            ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+            ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
         ),
         target=SavedPoint(entry_id="entry", point="working"),
         roles=None,

@@ -60,8 +60,7 @@ def composed(qapp: QApplication, tmp_path: Path) -> Generator[_Composed]:
         yield _Composed(controller, window)
     finally:
         if controller is not None:
-            # Drain the Controller-owned runner before its Qt views are deleted.
-            vars(controller)["_background_svc"].quiesce()
+            controller.close()
         if window is not None:
             for dialog in window.findChildren(InspectDialog):
                 # hide() skips closeEvent, so a loaded draft asks nothing here.

@@ -39,7 +39,7 @@ from ..document_store import DocumentChange, DocumentStore, DocumentValue
 from ..entry.provenance import Provenance, ProvenanceData, validate_source
 
 MODULE_LIBRARY_FORMAT = "zcu.module-library"
-MODULE_LIBRARY_VERSION = FormatVersion(1, 0)
+MODULE_LIBRARY_VERSION = FormatVersion(2, 0)
 _YAML_MAP = TypeAdapter(YamlMap)
 _YAML_VALUE = TypeAdapter(YamlValue)
 _READOUT_SPEC = TypeAdapter(ReadoutSpec)
