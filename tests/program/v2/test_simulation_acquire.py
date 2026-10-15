@@ -9,7 +9,7 @@ import pytest
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.modular import ModularProgramV2
-from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
+from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 
@@ -156,6 +156,9 @@ def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
     env = environment(std_adc=0, seed=12, n_gens=2, n_readouts=2)
     prog = program(env, reps=1, rounds=2, channels=(1, 0), samples=4)
     other = program(env, reps=1)
+    readout = prog.modules[0]
+    if not isinstance(readout, PulseReadout):
+        raise AssertionError("synthetic program must provide its declared readout")
     value = 0.0
     seen = []
 
@@ -187,7 +190,7 @@ def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
         with pytest.raises(RuntimeError, match="active|reentr"):
             other.acquire(env.soc, progress=False)
         # Acquiring does not recompile live cfg changes between rounds.
-        prog.modules[0].cfg.gain = 0.9
+        readout.cfg.gain = 0.9
 
     env.soc.binding.capture_snapshot = snapshot
     env.soc.binding.execute = source

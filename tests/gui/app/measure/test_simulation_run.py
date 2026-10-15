@@ -3,6 +3,7 @@
 import sys
 from dataclasses import replace
 from threading import Event
+from typing import ClassVar
 
 import numpy as np
 import pytest
@@ -11,6 +12,7 @@ from zcu_tools.datafile import load_run_data
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
+from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
@@ -32,7 +34,7 @@ from tests.gui.app.measure.remote._helpers import call, open_client
 
 
 class NoiseAdapter(SavingAdapter):
-    capabilities = replace(SavingAdapter.capabilities, requires_soc=True)
+    capabilities: ClassVar[AdapterCapabilities] = replace(SavingAdapter.capabilities, requires_soc=True)
 
     def run(self, req, cfg, *, context):
         prog = ModularProgramV2(
@@ -59,10 +61,8 @@ class NoiseAdapter(SavingAdapter):
         )
 
 
-@pytest.mark.parametrize("outcome", ["complete", "stopped", "failure_then_retry"])
-def test_window_rpc_acquisition_saves_iq_and_public_environment_identity(
-    qapp, tmp_path, monkeypatch, outcome
-):
+@pytest.fixture
+def noise_run(qapp, tmp_path, monkeypatch, outcome):
     env = white_noise(std_adc=0, seed=17)
     source = env.soc.binding.execute
     entered, release = Event(), Event()
@@ -116,41 +116,7 @@ def test_window_rpc_acquisition_saves_iq_and_public_environment_identity(
         )
         tab = ctrl.new_tab("noise")
         sock = open_client(remote.start())
-        started = call(sock, "tab.run_start", {"tab_id": tab})["result"]["operation_id"]
-        if outcome == "stopped":
-            assert entered.wait(2)
-            assert call(sock, "tab.run_cancel")["result"]["cancelled"]
-            release.set()
-        terminal = call(
-            sock, "operation.await", {"operation_id": started, "timeout": 3}
-        )["result"]
-        if outcome == "failure_then_retry":
-            assert terminal["status"] == "failed"
-            state = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0]
-            assert not state["result_state"]["available"]
-            started = call(sock, "tab.run_start", {"tab_id": tab})["result"][
-                "operation_id"
-            ]
-            terminal = call(
-                sock, "operation.await", {"operation_id": started, "timeout": 3}
-            )["result"]
-        assert terminal["status"] == (
-            "cancelled" if outcome == "stopped" else "finished"
-        )
-        saved = call(sock, "tab.save_data", {"tab_id": tab})
-        assert saved["ok"], saved
-        runs = ctrl.save_control.list_saved_runs()
-        assert len(runs) == 1 and runs[0].data_path is not None
-        stored = load_run_data(runs[0].data_path)
-        variable = next(iter(stored.payload.variables.values()))
-        np.testing.assert_array_equal(variable.data.values, 0)
-        assert stored.metadata.completion == (
-            "stopped" if outcome == "stopped" else "complete"
-        )
-        assert (
-            getattr(stored.metadata.provenance, "simulation_id", None)
-            == env.soc.binding.provenance.identifier
-        )
+        yield env, ctrl, sock, tab, entered, release
     finally:
         release.set()
         if sock is not None:
@@ -162,3 +128,43 @@ def test_window_rpc_acquisition_saves_iq_and_public_environment_identity(
         window.deleteLater()
         sys.excepthook = old_hook
         qapp.processEvents()
+
+
+@pytest.mark.parametrize("outcome", ["complete", "stopped", "failure_then_retry"])
+def test_window_rpc_acquisition_saves_iq_and_public_environment_identity(noise_run, outcome):
+    env, ctrl, sock, tab, entered, release = noise_run
+    started = call(sock, "tab.run_start", {"tab_id": tab})["result"]["operation_id"]
+    if outcome == "stopped":
+        assert entered.wait(2)
+        assert call(sock, "tab.run_cancel")["result"]["cancelled"]
+        release.set()
+    terminal = call(
+        sock, "operation.await", {"operation_id": started, "timeout": 3}
+    )["result"]
+    if outcome == "failure_then_retry":
+        assert terminal["status"] == "failed"
+        state = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0]
+        assert not state["result_state"]["available"]
+        started = call(sock, "tab.run_start", {"tab_id": tab})["result"][
+            "operation_id"
+        ]
+        terminal = call(
+            sock, "operation.await", {"operation_id": started, "timeout": 3}
+        )["result"]
+    assert terminal["status"] == (
+        "cancelled" if outcome == "stopped" else "finished"
+    )
+    saved = call(sock, "tab.save_data", {"tab_id": tab})
+    assert saved["ok"], saved
+    runs = ctrl.save_control.list_saved_runs()
+    assert len(runs) == 1 and runs[0].data_path is not None
+    stored = load_run_data(runs[0].data_path)
+    variable = next(iter(stored.payload.variables.values()))
+    np.testing.assert_array_equal(variable.data.values, 0)
+    assert stored.metadata.completion == (
+        "stopped" if outcome == "stopped" else "complete"
+    )
+    assert (
+        getattr(stored.metadata.provenance, "simulation_id", None)
+        == env.soc.binding.provenance.identifier
+    )
