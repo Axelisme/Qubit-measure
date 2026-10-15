@@ -59,6 +59,9 @@ class NumericModel:
     collapse_at: optional pure callable of absolute ns returning additional
         Lindblad operators in ns**(-1/2), e.g. flux-dependent baths. Caller must
         keep callbacks deterministic and unchanged while reusing this model.
+    event_times_ns: finite absolute model discontinuities (e.g. bath updates),
+        default empty. Evolution unions these with pulse events on the same 2 ns
+        grid, without imposing a waveform sampling grid.
     Static matrices own read-only copies. Callbacks remain caller-owned. Shape,
     finiteness or Hermiticity violations raise ValueError, including at runtime.
     No physical applicability/convergence certification is performed.
@@ -72,7 +75,11 @@ class NumericModel:
     hamiltonian_at: Callable[[float], ComplexMatrix] | None = None
     collapse_at: Callable[[float], tuple[ComplexMatrix, ...]] | None = None
 
+    event_times_ns: tuple[float, ...] = ()
+
     def __post_init__(self) -> None:
+        if not np.isfinite(self.event_times_ns).all():
+            raise ValueError("model event times must be finite ns")
         h = hermitian_matrix(self.hamiltonian_ghz, "Hamiltonian")
         if not self.identity or h.shape != self.basis.vectors.shape:
             raise ValueError("model identity and Hamiltonian shape must match basis")

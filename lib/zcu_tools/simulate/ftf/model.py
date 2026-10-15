@@ -1,5 +1,7 @@
 """Coupled F1-SQUID-F2 circuit projected once at the round's DC point."""
 
+from collections.abc import Callable
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -19,7 +21,7 @@ from zcu_tools.simulate.dephasing import (
     flux_dephasing,
     photon_dephasing,
 )
-from zcu_tools.simulate.evolution import Basis, DensityState
+from zcu_tools.simulate.evolution import Basis, DensityState, DriveSource, NumericModel
 
 from .local import Matrix, local_circuit, tensor_operator
 from .parameters import FluxoniumCircuit, JointParameters, Resonator, SquidCircuit
@@ -282,6 +284,58 @@ class JointModel:
             gamma += photon_dephasing(pulls.T, linewidth, nth)
         pure = tuple(v @ op @ v.conj().T for op in dephasing_operators(gamma))
         return jump_operators(rates, v) + pure
+
+    def numeric_model(
+        self,
+        flux_at: Callable[[float], RealArray],
+        sources: tuple[DriveSource, ...],
+        *,
+        end_ns: float,
+        bath_segment_ns: float,
+        resonators: tuple[Resonator, Resonator],
+    ) -> NumericModel:
+        """Build fixed-basis continuous H with piecewise instantaneous baths.
+
+        flux_at returns actual reduced (3,) flux at absolute ns; sources holds
+        lab-frame microwave quadratures and zero operators for flux-event sources.
+        end_ns is finite nonnegative evolution end. bath_segment_ns is the user's
+        positive update interval, rounded upward to at least one 2 ns event tick.
+        Baths use segment-start flux, remain fixed during each segment, and are
+        rotated back into this fixed basis. Evolution owns event partitioning and
+        integration; states are never reset. resonators supplies residual photons.
+        Invalid scales raise ValueError. This is not a convergence certification.
+        """
+        if (
+            not np.isfinite([end_ns, bath_segment_ns]).all()
+            or end_ns < 0
+            or bath_segment_ns <= 0
+        ):
+            raise ValueError("finite evolution end and positive bath segment required")
+        step = max(2.0, 2 * float(np.rint(bath_segment_ns / 2)))
+        boundaries = tuple(float(t) for t in np.arange(0.0, end_ns, step))
+        cached: dict[int, tuple[Matrix, ...]] = {}
+        h0 = self.hamiltonian(self.dc_flux)
+
+        def hamiltonian_at(t: float) -> Matrix:
+            return self.hamiltonian(flux_at(t)) - h0
+
+        def collapse_at(t: float) -> tuple[Matrix, ...]:
+            index = int(np.floor(max(t, 0.0) / step))
+            if index not in cached:
+                cached[index] = self.collapse_operators(
+                    flux_at(index * step), resonators
+                )
+            return cached[index]
+
+        return NumericModel(
+            "ftf-joint-v1",
+            self.basis,
+            h0,
+            sources,
+            hamiltonian_at=hamiltonian_at,
+            collapse_at=collapse_at,
+            event_times_ns=boundaries,
+        )
 
     def _occupation(self, resonator: Resonator) -> float:
         if resonator.thermal_occupation is not None:

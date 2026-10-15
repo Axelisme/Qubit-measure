@@ -89,6 +89,16 @@ class Evolution:
         controls = ControlSequence() if controls is None else controls
         self._validate_inputs(initial, controls)
         points = controls.boundaries_ns(start_ns=start_ns, end_ns=end_ns)
+        points = tuple(
+            sorted(
+                set(points)
+                | {
+                    q
+                    for t in self.model.event_times_ns
+                    if points[0] <= (q := quantize_ns(t)) <= points[-1]
+                }
+            )
+        )
         density = initial.density.copy()
         for start, end in zip(points[:-1], points[1:], strict=True):
             middle = (start + end) / 2
