@@ -140,18 +140,17 @@ class _SelectionRouter:
     """Observe real endpoint admission and disconnect without a registry probe."""
 
     def __init__(self) -> None:
-        self.opened: Queue[ClientLink] = Queue()
+        self.routed: Queue[ClientLink] = Queue()
         self.closed: Queue[ClientLink] = Queue()
 
     def on_client_open(self, link: ClientLink) -> None:
         link.app_ctx = set()
-        self.opened.put(link)
 
     def on_client_close(self, link: ClientLink, *, on_owner_thread: bool) -> None:
         self.closed.put(link)
 
     def route(self, link: ClientLink, request: object) -> None:
-        raise AssertionError("selection clients send no RPCs")
+        self.routed.put(link)
 
 
 def _set_subscription(link: ClientLink, *, subscribed: bool) -> None:
@@ -215,7 +214,9 @@ def test_unsubscribe_between_selection_and_delivery_prevents_late_push() -> None
         _selection_endpoint() as (server, router),
         socket.create_connection(("127.0.0.1", server.port), timeout=30) as client,
     ):
-        link = router.opened.get(timeout=30)  # accept invokes on_client_open
+        client.sendall(b'{"id":"ready","method":"ready","params":{}}\n')
+        # Routing this socket's request proves registry admission has completed.
+        link = router.routed.get(timeout=30)
         server.client_state_transaction(
             link, lambda: _set_subscription(link, subscribed=True)
         )
@@ -235,7 +236,9 @@ def test_disconnect_between_selection_and_delivery_prevents_late_push() -> None:
         _selection_endpoint() as (server, router),
         socket.create_connection(("127.0.0.1", server.port), timeout=30) as client,
     ):
-        link = router.opened.get(timeout=30)  # accept invokes on_client_open
+        client.sendall(b'{"id":"ready","method":"ready","params":{}}\n')
+        # Routing this socket's request proves registry admission has completed.
+        link = router.routed.get(timeout=30)
         server.client_state_transaction(
             link, lambda: _set_subscription(link, subscribed=True)
         )
@@ -253,8 +256,12 @@ def test_subscribe_after_selection_does_not_receive_old_event() -> None:
         socket.create_connection(("127.0.0.1", server.port), timeout=30) as first,
         socket.create_connection(("127.0.0.1", server.port), timeout=30) as second,
     ):
-        existing = router.opened.get(timeout=30)  # first accept callback
-        late = router.opened.get(timeout=30)  # second accept callback
+        first.sendall(b'{"id":"first","method":"ready","params":{}}\n')
+        # Only first has sent a request; routing identifies its admitted link.
+        existing = router.routed.get(timeout=30)
+        second.sendall(b'{"id":"second","method":"ready","params":{}}\n')
+        # Wait separately so accept callback order cannot swap the socket links.
+        late = router.routed.get(timeout=30)
         server.client_state_transaction(
             existing, lambda: _set_subscription(existing, subscribed=True)
         )
