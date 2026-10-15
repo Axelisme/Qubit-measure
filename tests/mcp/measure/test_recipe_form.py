@@ -390,8 +390,15 @@ def test_read_field_does_not_expose_option_selected_tag_leaves(
         tab = RecipeSession(client.context).open_tab("lookback")
         tab.use_library("pulse", "Q1.pulses.pi")
         before = gui.owner.input.data
-        with pytest.raises(ValueError, match="field"):
-            tab.read_field(field)
+        if field == "pulse.kind":
+            with pytest.raises(GuiRpcError) as caught:
+                tab.read_field(field)
+            assert caught.value.code == "invalid_params"
+            assert caught.value.reason == "form_path"
+            assert caught.value.data == {"form_path": field.split(".")}
+        else:
+            with pytest.raises(ValueError, match="field"):
+                tab.read_field(field)
         assert gui.owner.input.data == before
         assert tab.read_field("locked_pulse.module.freq").value == 100.0
 
