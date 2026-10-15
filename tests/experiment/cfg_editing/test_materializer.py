@@ -316,7 +316,9 @@ def test_flat_readout_materialization_preserves_authored_generator_and_adc_field
         _POLICY,
     )
     _assert_spec_value_shape(spec, value)
-    assert value.fields["gen_ch"] == DirectValue(2)
+    gen_ch = value.fields.get("gen_ch")
+    assert gen_ch is not None
+    assert gen_ch == DirectValue(2)
     assert value.fields["ro_ch"] == DirectValue(3)
     assert value.fields["freq"] == DirectValue(525.0)
     assert value.fields["ro_length"] == DirectValue(1.5)

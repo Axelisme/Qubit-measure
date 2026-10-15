@@ -285,7 +285,7 @@ class ReadoutCore(ConfigBase):
 def readout_expression_form(expression: Expr | None) -> Form[ReadoutCore]:
     """Author nested defaults on existing persistent Spec families only."""
     seeds = {
-        "type": "pulse",
+        "type": "readout/pulse",
         "gen_ch": 1,
         "nqz": 1,
         "freq": 100.0,
