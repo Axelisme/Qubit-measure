@@ -161,15 +161,14 @@ class AcquiredPayload(_LedgerModel):
     """Acquired run evidence supplied by the acquisition producer.
 
     run_id identifies the run, tab its display name, tab_id its optional stable
-    ID, experiment the spec tag, cfg_summary the JSON configuration summary,
-    point the optional point label, and roles maps role names to component names.
+    ID, experiment the spec tag, point the optional point label, and roles maps
+    role names to component names. Configuration is stored only with run data.
     """
 
     run_id: StrictStr
     tab: StrictStr
     tab_id: StrictStr | None = None
     experiment: StrictStr
-    cfg_summary: JsonObject
     point: StrictStr | None = None
     roles: dict[StrictStr, StrictStr]
 

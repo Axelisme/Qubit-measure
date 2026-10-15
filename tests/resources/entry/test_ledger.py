@@ -215,7 +215,6 @@ def test_all_event_kinds_round_trip_in_append_order(
             run_id="run-1",
             tab="Spectroscopy",
             experiment="test/spectroscopy",
-            cfg_summary={"shots": 10},
             roles={"qubit": "Q1"},
             point="a",
         ),

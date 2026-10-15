@@ -187,7 +187,6 @@ class SavedRun(Generic[CfgT, ResultT]):
                         run_id=self.run_id,
                         tab=self._metadata.experiment,
                         experiment=self._metadata.experiment,
-                        cfg_summary=self._data.cfg.values,
                         point=self._metadata.snapshot.point,
                         roles=dict(self._metadata.snapshot.roles),
                     ),

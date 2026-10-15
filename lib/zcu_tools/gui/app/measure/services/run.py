@@ -208,8 +208,6 @@ class RunService:
                 op.tab_id,
             )
             return
-        if not isinstance(result, RunRecord) or result.cfg is None:
-            raise ValueError("Acquired requires a native RunRecord with cfg")
         if metadata.finished_at is None:
             raise ValueError("Acquired requires an acquisition finish timestamp")
         op.storage.ledger.append(
@@ -224,7 +222,6 @@ class RunService:
                     tab=op.adapter_name,
                     tab_id=op.tab_id,
                     experiment=metadata.experiment,
-                    cfg_summary=result.cfg.model_dump(mode="json"),
                     point=metadata.snapshot.point,
                     roles=dict(metadata.snapshot.roles),
                 ),
