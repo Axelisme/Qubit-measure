@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from pydantic import JsonValue
@@ -10,10 +11,10 @@ from qtpy.QtGui import QColor
 from qtpy.QtWidgets import (
     QDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -21,7 +22,7 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.gui.expected_error import ExpectedError
-from zcu_tools.gui.form import FormErrors, FormWritePath, WriteRejected
+from zcu_tools.gui.form import FormErrors, FormModel, FormWritePath, WriteRejected
 from zcu_tools.gui.widgets import error_colour, secondary_colour, set_foreground
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
@@ -103,7 +104,11 @@ class WritebackEditDialogs:
         item: ModuleWriteback,
         refresh: Callable[..., None],
     ) -> None:
-        """Open the shared draft form; report validity to the owning ledger row."""
+        """Open the shared draft form, or an inline refusal if it is unavailable.
+
+        Re-admit every field/option write and retarget through the controller.
+        Report local and shared validity to the ledger until the view closes.
+        """
         try:
             form = self._ctrl.get_writeback_item_form_for_pane(
                 self._tab_id, self._pane, item.session_id
@@ -112,23 +117,13 @@ class WritebackEditDialogs:
             logger.exception(
                 "failed to resolve writeback draft item %s", item.session_id
             )
-            QMessageBox.critical(self._parent, "Unable to edit writeback", str(exc))
+            _show_module_refusal(self._parent, item, str(exc))
             return
-
         existing = self._module_dialogs.get(item.session_id)
         if existing is not None:
             existing.raise_()
             existing.activateWindow()
             return
-        dialog = QDialog(self._parent)
-        dialog.setWindowTitle(f"Edit Config: {item.target_name}")
-        dialog.setMinimumSize(560, 500)
-
-        layout = QVBoxLayout(dialog)
-
-        hint = QLabel("Edit the configuration below. Edits apply immediately.")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
 
         def write(batch: Mapping[FormWritePath, JsonValue]) -> None:
             self._edit_module_form(
@@ -141,82 +136,46 @@ class WritebackEditDialogs:
                 lambda form: form.state.run_command(path, name, form.env),
             )
 
-        editor = FormEditor(form.state, form.env, write=write, run_command=run_command)
-
-        def _refresh_preview(*_: object) -> None:
-            refresh(
-                valid=editor.errors() is None
-                and not isinstance(form.result(), FormErrors),
+        def retarget(name: str) -> None:
+            self._ctrl.set_writeback_item_for_pane(
+                self._tab_id, self._pane, item.session_id, target_name=name
             )
+            item.target_name = name
+            refresh_preview()
 
-        commit_name = self._add_module_target_row(layout, item, _refresh_preview)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(editor)
-        layout.addWidget(scroll, stretch=1)
-        editor.validity_changed.connect(_refresh_preview)
-        unsubscribe = form.state.subscribe(_refresh_preview)
+        def preview() -> WritebackValues:
+            return self._ctrl.writeback_control.get_writeback_values_for_pane(
+                self._tab_id, self._pane, session_id=item.session_id
+            )[item.session_id]
+
+        editor = FormEditor(form.state, form.env, write=write, run_command=run_command)
+        dialog = _ModuleDialog(self._parent, item, editor, retarget)
+
+        def refresh_preview(*_: object) -> None:
+            valid = editor.errors() is None and not isinstance(
+                form.result(), FormErrors
+            )
+            refresh(valid=valid)
+            dialog.refresh_feedback(preview() if valid else None)
+
+        editor.validity_changed.connect(refresh_preview)
+        unsubscribe = form.state.subscribe(refresh_preview)
         dialog.destroyed.connect(unsubscribe)
         self._module_dialogs[item.session_id] = dialog
-        _refresh_preview()
-        self._add_cfg_close_action(dialog, layout)
+        refresh_preview()
 
-        def _on_finished(*_: object) -> None:
+        def on_finished(*_: object) -> None:
             if self._module_dialogs.get(item.session_id) is not dialog:
                 return
-            # Local unparsed text belongs to this view and is dropped on Close.
-            # Model/expression errors remain in the shared State. Neither writes.
-            try:
-                commit_name()
-            finally:
-                unsubscribe()
-                editor.validity_changed.disconnect(_refresh_preview)
-                editor.detach()
-                self._module_dialogs.pop(item.session_id)
+            unsubscribe()
+            editor.validity_changed.disconnect(refresh_preview)
+            editor.detach()
+            self._module_dialogs.pop(item.session_id)
             refresh(valid=not isinstance(form.result(), FormErrors))
 
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dialog.finished.connect(_on_finished)
+        dialog.finished.connect(on_finished)
         dialog.open()
-
-    def _add_module_target_row(
-        self,
-        layout: QVBoxLayout,
-        item: ModuleWriteback,
-        refresh_preview: Callable[[], None],
-    ) -> Callable[[], None]:
-        """Add Apply-as; return its immediate commit action for Close.
-
-        Blank text reverts to the existing name. A changed nonblank name updates
-        the persistent item via its pane-qualified control and refreshes validity.
-        """
-        name_row = QFormLayout()
-        name_edit = QLineEdit(item.target_name)
-        name_row.addRow("Apply as:", name_edit)
-        layout.addLayout(name_row)
-
-        def commit_name() -> None:
-            text = name_edit.text().strip()
-            if not text:
-                name_edit.setText(item.target_name)
-                return
-            if text == item.target_name:
-                return
-            self._ctrl.set_writeback_item_for_pane(
-                self._tab_id, self._pane, item.session_id, target_name=text
-            )
-            refresh_preview()
-
-        name_edit.editingFinished.connect(commit_name)
-        return commit_name
-
-    def _add_cfg_close_action(self, dialog: QDialog, layout: QVBoxLayout) -> None:
-        """Append a Close action to the modal editor."""
-        button_row = QHBoxLayout()
-        close_button = QPushButton("Close")
-        close_button.clicked.connect(dialog.accept)
-        button_row.addWidget(close_button)
-        layout.addLayout(button_row)
 
 
 class _EditDialog(QDialog):
@@ -242,6 +201,221 @@ class _EditDialog(QDialog):
         label.setWordWrap(True)
         make_label_selectable(label)
         return label
+
+
+@dataclass(frozen=True)
+class ModuleChange:
+    """One changed JSON-like leaf, formatted for library comparison views.
+
+    path is a dotted field/key/index path. current and proposed are display
+    strings (full numeric precision); an absent leaf is shown as an em dash.
+    """
+
+    path: str
+    current: str
+    proposed: str
+
+    def text(self) -> str:
+        """Return the shared dialog/ledger change line."""
+        return f"{self.path}  {self.current} → {self.proposed}"
+
+
+def _module_leaves(value: object, path: str = "") -> dict[str, object]:
+    if isinstance(value, dict) and value:
+        leaves: dict[str, object] = {}
+        for key, child in value.items():
+            child_path = f"{path}.{key}" if path else str(key)
+            leaves.update(_module_leaves(child, child_path))
+        return leaves
+    if isinstance(value, (list, tuple)) and value:
+        leaves = {}
+        for index, child in enumerate(value):
+            child_path = f"{path}.{index}" if path else str(index)
+            leaves.update(_module_leaves(child, child_path))
+        return leaves
+    return {path: value}
+
+
+def module_changes(current: object, proposed: object) -> list[ModuleChange]:
+    """Compare JSON-like library entry previews by leaf, in sorted path order.
+
+    Dict keys and sequence indexes become dotted paths. Empty containers are
+    leaves; additions/removals display an em dash. Equal values are omitted.
+    A missing library entry (current=None) is reported by the caller separately.
+    No preview lookup, draft mutation, or unit conversion occurs here.
+    """
+    before = _module_leaves(current)
+    after = _module_leaves(proposed)
+    changes: list[ModuleChange] = []
+    for path in sorted(before.keys() | after.keys()):
+        if path in before and path in after and before[path] == after[path]:
+            continue
+        changes.append(
+            ModuleChange(
+                path,
+                repr(before[path]) if path in before else "—",
+                repr(after[path]) if path in after else "—",
+            )
+        )
+    return changes
+
+
+def _bounded_lines(lines: list[str], limit: int) -> str:
+    shown = lines[:limit]
+    if len(lines) > limit:
+        shown.append(f"… and {len(lines) - limit} more")
+    return "\n".join(shown)
+
+
+def _show_module_refusal(parent: QWidget, item: ModuleWriteback, message: str) -> None:
+    dialog = _EditDialog(parent)
+    dialog.setWindowTitle(f"Edit module — {item.target_name}")
+    dialog.setMinimumWidth(520)
+    layout = QVBoxLayout(dialog)
+    layout.addWidget(dialog.context_label(item.description))
+    error = dialog.context_label(message)
+    error.setObjectName("writebackEditError")
+    dialog.theme_label(error, error_colour)
+    layout.addWidget(error)
+    buttons = QHBoxLayout()
+    buttons.addStretch(1)
+    done = QPushButton("Done")
+    done.clicked.connect(dialog.accept)
+    buttons.addWidget(done)
+    layout.addLayout(buttons)
+    dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+    dialog.open()
+
+
+class _ModuleDialog(_EditDialog):
+    def __init__(
+        self,
+        parent: QWidget,
+        item: ModuleWriteback,
+        editor: FormEditor[FormModel],
+        retarget: Callable[[str], None],
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f"Edit module — {item.target_name}")
+        self.setMinimumSize(520, 420)
+        self.resize(600, 650)
+        self._item = item
+        self._editor = editor
+        self._retarget = retarget
+        self._retarget_error = ""
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+        layout.addWidget(self.context_label(item.description))
+        self._path = self.context_label("")
+        self.theme_label(self._path, secondary_colour)
+        layout.addWidget(self._path)
+        hint = self.context_label(
+            "Changes go to the writeback draft at once. The library is only written by Apply Selected."
+        )
+        self.theme_label(hint, secondary_colour)
+        layout.addWidget(hint)
+        name_row = QFormLayout()
+        name_row.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
+        )
+        self._name = QLineEdit(item.target_name)
+        self._name.setObjectName("writebackApplyAs")
+        name_row.addRow("Apply as", self._name)
+        layout.addLayout(name_row)
+        self._changes_group = QGroupBox()
+        changes_layout = QVBoxLayout(self._changes_group)
+        self._changes_title = QLabel("Changes from library")
+        font = self._changes_title.font()
+        font.setBold(True)
+        self._changes_title.setFont(font)
+        changes_layout.addWidget(self._changes_title)
+        self._changes = self.context_label("")
+        self._changes.setObjectName("writebackModuleChanges")
+        changes_layout.addWidget(self._changes)
+        layout.addWidget(self._changes_group)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(editor)
+        layout.addWidget(scroll, stretch=1)
+        self._error = self.context_label("")
+        self._error.setObjectName("writebackEditError")
+        self.theme_label(self._error, error_colour)
+        layout.addWidget(self._error)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        done = QPushButton("Done")
+        # Enter finishes a field, not the dialog, like the shared FormEditor.
+        done.setAutoDefault(False)
+        done.clicked.connect(self.accept)
+        buttons.addWidget(done)
+        layout.addLayout(buttons)
+        self._name.editingFinished.connect(self._commit_name)
+
+    def _commit_name(self) -> bool:
+        text = self._name.text().strip()
+        if not text:
+            self._name.setText(self._item.target_name)
+            self._retarget_error = ""
+            self._refresh_errors()
+            return True
+        if text == self._item.target_name:
+            return True
+        try:
+            self._retarget(text)
+        except Exception as exc:
+            logger.exception(
+                "failed to retarget writeback module %s", self._item.session_id
+            )
+            self._retarget_error = str(exc)
+            self._refresh_errors()
+            return False
+        self._retarget_error = ""
+        self._refresh_errors()
+        return True
+
+    def done(self, a0: int) -> None:
+        if self._commit_name():
+            super().done(a0)
+
+    def refresh_feedback(self, values: WritebackValues | None) -> None:
+        if values is None:
+            self._path.setText("Writes to library  Unavailable (invalid configuration)")
+            self._changes_title.setText("Changes from library")
+            self._changes.setText("Unavailable while the configuration is invalid")
+            self._changes.setToolTip("")
+        else:
+            self._path.setText(f"Writes to library  {values.actual_path}")
+            changes = module_changes(values.current, values.proposed)
+            self._changes_title.setText(f"Changes from library ({len(changes)})")
+            lines = [change.text() for change in changes]
+            self._changes.setText(
+                "New library entry"
+                if values.current is None
+                else _bounded_lines(lines, 8)
+                if lines
+                else "No changes"
+            )
+            self._changes.setToolTip("\n".join(lines))
+        self._refresh_errors()
+
+    def _refresh_errors(self) -> None:
+        errors = self._editor.errors()
+        lines = (
+            []
+            if errors is None
+            else [
+                f"{'.'.join(map(str, path)) or 'Configuration'}: {message}"
+                for path, message in errors.messages.items()
+            ]
+        )
+        text = _bounded_lines(lines, 5)
+        if self._retarget_error:
+            text = "\n".join(filter(None, [self._retarget_error, text]))
+        if self._editor.local_parse_errors() is not None:
+            text += "\nInvalid text is discarded when you press Done."
+        self._error.setText(text)
+        self._error.setToolTip("\n".join(lines))
+        self._error.setVisible(bool(text))
 
 
 class _ValueDialog(_EditDialog):
@@ -297,6 +471,12 @@ class _ValueDialog(_EditDialog):
         self._error.setObjectName("writebackEditError")
         self.theme_label(self._error, error_colour)
         layout.addWidget(self._error)
+        self._add_actions(layout)
+        self._name.textChanged.connect(self._validate)
+        self._value.textChanged.connect(self._validate)
+        self._validate()
+
+    def _add_actions(self, layout: QVBoxLayout) -> None:
         buttons = QHBoxLayout()
         buttons.addStretch(1)
         cancel = QPushButton("Cancel")
@@ -308,9 +488,6 @@ class _ValueDialog(_EditDialog):
         buttons.addWidget(cancel)
         buttons.addWidget(self._save_button)
         layout.addLayout(buttons)
-        self._name.textChanged.connect(self._validate)
-        self._value.textChanged.connect(self._validate)
-        self._validate()
 
     def _parsed(self) -> tuple[str, Any]:
         name = _require_target_name(self._name.text())

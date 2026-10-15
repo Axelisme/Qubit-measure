@@ -78,7 +78,11 @@ def test_value_context_and_live_validation(value_editor, qapp):
     assert "Enter a number" in label_text(dialog)
     assert not button(dialog, "Save").isEnabled()
     assert not ctrl.set_writeback_item_for_pane.called
-    error = next(l for l in dialog.findChildren(QLabel) if "Enter a number" in l.text())
+    error = next(
+        label
+        for label in dialog.findChildren(QLabel)
+        if "Enter a number" in label.text()
+    )
     palette = dialog.palette()
     palette.setColor(QPalette.ColorRole.Window, QColor("#353535"))
     palette.setColor(QPalette.ColorRole.WindowText, QColor("#eeeeee"))
@@ -176,7 +180,7 @@ def test_module_leaf_changes_include_additions_removals_and_nested_fields():
 
 @pytest.fixture
 def module_editor(qapp, monkeypatch):
-    from zcu_tools.cfg_model import PulseSpec
+    from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
     from zcu_tools.gui.app.measure.writeback import ModuleWriteback
     from zcu_tools.gui.session.library_entry import ModuleEntryForm
 
@@ -188,7 +192,7 @@ def module_editor(qapp, monkeypatch):
         freq=6001.0,
         phase=0.0,
         gain=0.2,
-        waveform={"style": "const", "length": 2.0},
+        waveform=ConstWaveformCfg(length=2.0),
     )
     form = ModuleEntryForm(spec, parameter_capture(), arb_names=())
     item = ModuleWriteback(
@@ -279,8 +283,8 @@ def test_module_errors_list_path_and_discard_warning(module_editor):
 @pytest.mark.parametrize("finish", ["done", "escape", "close"])
 def test_module_finish_commits_name_and_drops_only_local_text(module_editor, finish):
     from qtpy.QtCore import Qt
-    from qtpy.QtTest import QTest
 
+    from tests.gui._user_input import key_click
     from tests.gui.widgets.form._text_input import commit_text_on_focus_loss
 
     _, dialog, item, _, form, _, messages = module_editor
@@ -292,7 +296,7 @@ def test_module_finish_commits_name_and_drops_only_local_text(module_editor, fin
     if finish == "done":
         button(dialog, "Done").click()
     elif finish == "escape":
-        QTest.keyClick(dialog, Qt.Key.Key_Escape)
+        key_click(dialog, Qt.Key.Key_Escape)
     else:
         dialog.close()
     assert not dialog.isVisible()

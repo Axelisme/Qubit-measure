@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from PyQt6.QtCore import pyqtSignal
 from qtpy.QtCore import QEvent, Qt
 from qtpy.QtGui import QColor
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
     QFrame,
