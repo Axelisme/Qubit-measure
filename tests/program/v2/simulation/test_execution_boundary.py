@@ -26,6 +26,23 @@ class Feedback(Module):
         return t
 
 
+class RawProgram(ModularProgramV2):
+    """A legal hardware program whose raw ISA is outside semantic simulation."""
+
+    def _body(self, cfg):
+        super()._body(cfg)
+        self.asm_inst({"CMD": "NOP"})
+
+
+@pytest.mark.parametrize("method", ["acquire", "acquire_decimated"])
+def test_raw_program_body_rejected_instead_of_silently_ignoring_instructions(method):
+    env = white_noise(std_adc=0)
+    prog = RawProgram(env.soccfg, ProgramV2Cfg(), modules=[readout("readout")])
+    with pytest.raises(ValueError, match="RawProgram.*raw.*unsupported"):
+        getattr(prog, method)(env.soc, progress=False)
+    assert not env.soc.binding.rounds
+
+
 def readout(name):
     return PulseReadoutCfg(
         gen_ch=0,
