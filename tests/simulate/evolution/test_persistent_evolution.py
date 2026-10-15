@@ -90,6 +90,7 @@ def test_persisted_table_is_applied_to_phase_bearing_density(tmp_path):
     np.testing.assert_allclose(continued.density, direct.density, atol=2e-9, rtol=0)
 
 
+@pytest.mark.requires_subprocess
 def test_cross_process_exact_record_readback(tmp_path):
     from zcu_tools.simulate.evolution import EvolutionLibrary
 

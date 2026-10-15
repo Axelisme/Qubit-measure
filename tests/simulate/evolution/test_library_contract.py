@@ -58,6 +58,7 @@ def test_lru_evicts_a_loaded_table_and_reloads_exactly(tmp_path):
     np.testing.assert_array_equal(library.evaluate(family, 0.037, frozen), expected)
 
 
+@pytest.mark.requires_subprocess
 def test_table_cross_process_load_and_evaluation(tmp_path):
     family = _family()
     library = EvolutionLibrary(tmp_path / "data")
