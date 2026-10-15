@@ -73,6 +73,122 @@ def test_bad_specs_are_backed_up_and_removed(
     assert len(backups(path)) == 1
 
 
+def test_complete_pulse_without_type_is_removed_with_its_sources(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "module_cfg.yaml"
+    path.write_text(
+        HEADER
+        + "# missing discriminator, otherwise complete pulse\n"
+        + "components:\n"
+        + "  Q1:\n"
+        + "    pulses:\n"
+        + "      bad: {ch: 0, nqz: 1, freq: 5, gain: 0.1, waveform: {style: const, length: 0.1}}\n"
+        + "    waveforms:\n"
+        + "      pi_half: {style: const, length: 0.1}\n"
+        + "provenance: "
+        + json.dumps(
+            {
+                "Q1.pulses.bad": MANUAL,
+                "Q1.pulses.bad.gain": MANUAL,
+                "Q1.waveforms.pi_half.length": MANUAL,
+            }
+        )
+        + "\n"
+    )
+    original = path.read_bytes()
+
+    snapshot = open_library(path).snapshot()
+
+    assert snapshot.module_keys() == ()
+    assert snapshot.waveform_keys() == ("Q1.waveforms.pi_half",)
+    assert set(snapshot.document().provenance) == {"Q1.waveforms.pi_half.length"}
+    stored = YAML(typ="safe").load(path.read_text())
+    assert stored["components"]["Q1"]["pulses"] == {}
+    assert len(backups(path)) == 1
+    assert backups(path)[0].read_bytes() == original
+
+
+def test_shared_partition_removes_both_bad_roots_and_their_sources(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "module_cfg.yaml"
+    path.write_text(
+        HEADER
+        + "# shared YAML partition\n"
+        + "components:\n"
+        + "  Q1:\n"
+        + "    waveforms: &shared {bad: null, good: {style: const, length: 0.1}}\n"
+        + "  Q2:\n"
+        + "    waveforms: *shared\n"
+        + "provenance: "
+        + json.dumps(
+            {
+                "Q1.waveforms.bad": MANUAL,
+                "Q1.waveforms.bad.length": MANUAL,
+                "Q2.waveforms.bad": MANUAL,
+                "Q2.waveforms.bad.length": MANUAL,
+                "Q1.waveforms.good.length": MANUAL,
+                "Q2.waveforms.good.length": MANUAL,
+            }
+        )
+        + "\n"
+    )
+    original = path.read_bytes()
+
+    snapshot = open_library(path).snapshot()
+
+    assert snapshot.waveform_keys() == ("Q1.waveforms.good", "Q2.waveforms.good")
+    assert snapshot.waveform_spec("Q1.waveforms.good").length == 0.1
+    assert snapshot.waveform_spec("Q2.waveforms.good").length == 0.1
+    assert set(snapshot.document().provenance) == {
+        "Q1.waveforms.good.length",
+        "Q2.waveforms.good.length",
+    }
+    stored = YAML(typ="safe").load(path.read_text())
+    assert stored["components"]["Q1"]["waveforms"] == {"good": GOOD}
+    assert stored["components"]["Q2"]["waveforms"] == {"good": GOOD}
+    assert len(backups(path)) == 1
+    assert backups(path)[0].read_bytes() == original
+
+
+@pytest.mark.parametrize("rejected_component", ["Q1", "Q2"])
+def test_shared_partition_sources_are_validated_per_root(
+    tmp_path: Path, rejected_component: str
+) -> None:
+    path = tmp_path / "module_cfg.yaml"
+    retained_component = "Q2" if rejected_component == "Q1" else "Q1"
+    retained_root = f"{retained_component}.waveforms.pi"
+    path.write_text(
+        HEADER
+        + "components:\n"
+        + "  Q1:\n"
+        + "    waveforms: &shared {pi: {style: const, length: 0.1}}\n"
+        + "  Q2:\n"
+        + "    waveforms: *shared\n"
+        + "provenance: "
+        + json.dumps(
+            {
+                f"{rejected_component}.waveforms.pi.bogus": MANUAL,
+                f"{retained_root}.length": MANUAL,
+            }
+        )
+        + "\n"
+    )
+    original = path.read_bytes()
+
+    snapshot = open_library(path).snapshot()
+
+    assert snapshot.waveform_keys() == (retained_root,)
+    assert snapshot.waveform_spec(retained_root).length == 0.1
+    assert set(snapshot.document().provenance) == {f"{retained_root}.length"}
+    stored = YAML(typ="safe").load(path.read_text())
+    assert stored["components"][rejected_component]["waveforms"] == {}
+    assert stored["components"][retained_component]["waveforms"] == {"pi": GOOD}
+    assert len(backups(path)) == 1
+    assert backups(path)[0].read_bytes() == original
+
+
 @pytest.mark.parametrize("defect", ["schema", "leaf", "missing"])
 def test_entry_local_sources_remove_exact_root_only(
     tmp_path: Path, defect: str
