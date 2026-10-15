@@ -639,7 +639,7 @@ def test_retarget_edit_refreshes_captured_path_current_and_proposal(
             for candidate in qapp.topLevelWidgets()
             if isinstance(candidate, QDialog)
             and candidate.isVisible()
-            and candidate.windowTitle() == "Edit Value: driver.frequency"
+            and candidate.windowTitle() == "Edit value — driver.frequency"
         )
         inputs = dialog.findChildren(QLineEdit)
         assert len(inputs) == 2

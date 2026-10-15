@@ -22,7 +22,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QVBoxLayout,
     QWidget,
 )
-from qtpy.QtWidgets import QMessageBox as QMessageBox
 
 from zcu_tools.gui.form import FormErrors
 from zcu_tools.gui.widgets import (
@@ -755,9 +754,8 @@ class WritebackWidget(QWidget):
         if isinstance(item, ParameterWriteback):
             self._edit_dialogs.edit_value(
                 item,
-                self._display_current(item, compact=False),
+                self._values[item.session_id],
                 lambda: self._refresh_item_preview(item),
-                self._theme_label,
             )
         elif isinstance(item, ModuleWriteback):
             self._edit_dialogs.edit_module(

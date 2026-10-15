@@ -131,7 +131,7 @@ def test_edit_md_item_can_change_target_name(qapp, widget_factory, control_facto
 
     widget = widget_factory(item, None)
     _edit_button(widget).click()
-    dialog = _find_open_dialog("Edit Value:")
+    dialog = _find_open_dialog("Edit value —")
     try:
         line_edits = dialog.findChildren(QLineEdit)
         # First field is "Apply as" (target_name), second is "Value".
@@ -161,7 +161,7 @@ def test_edit_md_item_rejects_blank_target_name(qapp, widget_factory, control_fa
 
     widget = widget_factory(item, None)
     _edit_button(widget).click()
-    dialog = _find_open_dialog("Edit Value:")
+    dialog = _find_open_dialog("Edit value —")
     try:
         name_edit = dialog.findChildren(QLineEdit)[0]
         name_edit.setText("   ")
@@ -170,7 +170,7 @@ def test_edit_md_item_rejects_blank_target_name(qapp, widget_factory, control_fa
         )
         # The validation error pops a modal QMessageBox; stub it so the test
         # does not block on it.
-        with patch("zcu_tools.gui.app.measure.writeback.widget.QMessageBox.critical"):
+        with patch("qtpy.QtWidgets.QMessageBox.critical"):
             save_btn.click()
 
         # Blank name is rejected: target_name unchanged, dialog stays open.
@@ -188,7 +188,7 @@ def test_edit_md_item_parses_complex_value(qapp, widget_factory, control_factory
 
     widget = widget_factory(item, None)
     _edit_button(widget).click()
-    dialog = _find_open_dialog("Edit Value:")
+    dialog = _find_open_dialog("Edit value —")
     try:
         value_edit = dialog.findChildren(QLineEdit)[1]
         value_edit.setText("3-4j")
@@ -214,14 +214,14 @@ def test_edit_md_item_rejects_unparseable_complex(
 
     widget = widget_factory(item, None)
     _edit_button(widget).click()
-    dialog = _find_open_dialog("Edit Value:")
+    dialog = _find_open_dialog("Edit value —")
     try:
         value_edit = dialog.findChildren(QLineEdit)[1]
         value_edit.setText("not a number")
         save_btn = next(
             b for b in dialog.findChildren(QPushButton) if b.text() == "Save"
         )
-        with patch("zcu_tools.gui.app.measure.writeback.widget.QMessageBox.critical"):
+        with patch("qtpy.QtWidgets.QMessageBox.critical"):
             save_btn.click()
 
         # Invalid input rejected: value unchanged, dialog stays open.

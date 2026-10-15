@@ -21,7 +21,17 @@ def label_text(parent) -> str:
 
 
 @pytest.fixture
-def value_editor(qapp, monkeypatch) -> Iterator[tuple]:
+def value_editor(
+    qapp, monkeypatch
+) -> Iterator[
+    tuple[
+        WritebackWidget,
+        QDialog,
+        ParameterWriteback,
+        MagicMock,
+        list[tuple[object, ...]],
+    ]
+]:
     item = ParameterWriteback(
         target_name="$resonator.freq",
         description="Resonator frequency",

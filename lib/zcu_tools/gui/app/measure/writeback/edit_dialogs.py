@@ -5,7 +5,7 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from pydantic import JsonValue
-from qtpy.QtCore import Qt
+from qtpy.QtCore import QEvent, Qt
 from qtpy.QtGui import QColor
 from qtpy.QtWidgets import (
     QDialog,
@@ -22,7 +22,7 @@ from qtpy.QtWidgets import (
 
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.form import FormErrors, FormWritePath, WriteRejected
-from zcu_tools.gui.widgets import secondary_colour
+from zcu_tools.gui.widgets import error_colour, secondary_colour, set_foreground
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.library_entry import ModuleEntryForm
 
     from .control import WritebackPane
+    from .service import WritebackValues
 
 logger = logging.getLogger(__name__)
 
@@ -60,62 +61,28 @@ class WritebackEditDialogs:
     def edit_value(
         self,
         item: ParameterWriteback,
-        current: str,
+        values: WritebackValues,
         refresh: Callable[[], None],
-        theme_label: Callable[[QLabel, Callable[[QWidget], QColor]], None],
     ) -> None:
-        """Open a transactional scalar editor; refresh its ledger row after Save."""
-        dialog = QDialog(self._parent)
-        dialog.setWindowTitle(f"Edit Value: {item.target_name}")
-        layout = QVBoxLayout(dialog)
+        """Open a transactional scalar editor using captured preview facts.
 
-        form = QFormLayout()
-        # Current is read-only (S2); target and proposed are editable.
-        current_label = QLabel(current)
-        make_label_selectable(current_label)
-        current_label.setObjectName("writebackCurrentReadonly")
-        theme_label(current_label, secondary_colour)
-        form.addRow("Current:", current_label)
-        # target_name is the apply destination, decoupled from the stable
-        # session_id (ADR-0008) — editable here so the user can retarget.
-        name_edit = QLineEdit(item.target_name)
-        form.addRow("Apply as:", name_edit)
-        value_edit = QLineEdit(str(item.proposed_value))
-        form.addRow("Proposed:", value_edit)
-        layout.addLayout(form)
+        A successful pane-qualified write updates the persistent item and calls
+        refresh. Validation and controller refusals stay in the open dialog.
+        """
 
-        btn_row = QHBoxLayout()
-        save_btn = QPushButton("Save")
-        cancel_btn = QPushButton("Cancel")
-        btn_row.addWidget(save_btn)
-        btn_row.addWidget(cancel_btn)
-        layout.addLayout(btn_row)
-        cancel_btn.clicked.connect(dialog.reject)
+        def save(name: str, value: Any) -> None:
+            self._ctrl.set_writeback_item_for_pane(
+                self._tab_id,
+                self._pane,
+                item.session_id,
+                target_name=name,
+                proposed_value=value,
+            )
+            item.target_name = name
+            item.proposed_value = value
+            refresh()
 
-        def save() -> None:
-            try:
-                new_name = _require_target_name(name_edit.text())
-                new_value = _coerce_scalar_input(
-                    value_edit.text(),
-                    item.proposed_value,
-                )
-                assert self._tab_id is not None
-                self._ctrl.set_writeback_item_for_pane(
-                    self._tab_id,
-                    self._pane,
-                    item.session_id,
-                    target_name=new_name,
-                    proposed_value=new_value,
-                )
-                item.target_name = new_name
-                item.proposed_value = new_value
-                refresh()
-                dialog.accept()
-            except Exception as exc:
-                logger.exception("failed to edit writeback value %s", item.session_id)
-                QMessageBox.critical(dialog, "Validation Error", str(exc))
-
-        save_btn.clicked.connect(save)
+        dialog = _ValueDialog(self._parent, item, values, save)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.open()
 
@@ -250,6 +217,144 @@ class WritebackEditDialogs:
         close_button.clicked.connect(dialog.accept)
         button_row.addWidget(close_button)
         layout.addLayout(button_row)
+
+
+class _EditDialog(QDialog):
+    """Shared palette-aware text feedback for the two draft editors."""
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self._foregrounds: dict[QLabel, Callable[[QWidget], QColor]] = {}
+
+    def theme_label(self, label: QLabel, colour: Callable[[QWidget], QColor]) -> None:
+        self._foregrounds[label] = colour
+        set_foreground(label, colour(self))
+
+    def changeEvent(self, a0: QEvent | None) -> None:
+        super().changeEvent(a0)
+        if a0 is not None and a0.type() == QEvent.Type.PaletteChange:
+            for label, colour in self._foregrounds.items():
+                set_foreground(label, colour(self))
+
+    def context_label(self, text: str) -> QLabel:
+        label = QLabel(text)
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        label.setWordWrap(True)
+        make_label_selectable(label)
+        return label
+
+
+class _ValueDialog(_EditDialog):
+    def __init__(
+        self,
+        parent: QWidget,
+        item: ParameterWriteback,
+        values: WritebackValues,
+        save: Callable[[str, Any], None],
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f"Edit value — {item.target_name}")
+        self.setMinimumWidth(420)
+        self.resize(520, self.sizeHint().height())
+        self._item = item
+        self._unit = values.unit
+        self._save = save
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.addWidget(self.context_label(item.description))
+        path = self.context_label(f"Writes to  {values.actual_path}")
+        self.theme_label(path, secondary_colour)
+        layout.addWidget(path)
+        form = QFormLayout()
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        current = "—" if values.current is None else str(values.current)
+        if values.current is not None and values.unit:
+            current += f" {values.unit}"
+        current_label = self.context_label(current)
+        current_label.setObjectName("writebackCurrentReadonly")
+        self.theme_label(current_label, secondary_colour)
+        form.addRow("Current", current_label)
+        # Create the target first to retain existing frontend field discovery order.
+        self._name = QLineEdit(item.target_name, self)
+        self._name.setObjectName("writebackApplyAs")
+        self._value = QLineEdit(str(item.proposed_value), self)
+        self._value.setObjectName("writebackValue")
+        proposal = QHBoxLayout()
+        proposal.addWidget(self._value, stretch=1)
+        if values.unit:
+            proposal.addWidget(QLabel(values.unit))
+        form.addRow("Proposed", proposal)
+        if item.stderr is not None:
+            stderr = format(item.stderr, ".6g")
+            if values.unit:
+                stderr += f" {values.unit}"
+            stderr_label = self.context_label(f"± {stderr} (fit stderr)")
+            self.theme_label(stderr_label, secondary_colour)
+            form.addRow("", stderr_label)
+        form.addRow("Apply as", self._name)
+        layout.addLayout(form)
+        self._error = self.context_label("")
+        self._error.setObjectName("writebackEditError")
+        self.theme_label(self._error, error_colour)
+        layout.addWidget(self._error)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        cancel = QPushButton("Cancel")
+        cancel.setAutoDefault(False)
+        cancel.clicked.connect(self.reject)
+        self._save_button = QPushButton("Save")
+        self._save_button.setDefault(True)
+        self._save_button.clicked.connect(self._commit)
+        buttons.addWidget(cancel)
+        buttons.addWidget(self._save_button)
+        layout.addLayout(buttons)
+        self._name.textChanged.connect(self._validate)
+        self._value.textChanged.connect(self._validate)
+        self._validate()
+
+    def _parsed(self) -> tuple[str, Any]:
+        name = _require_target_name(self._name.text())
+        text = self._value.text().strip()
+        if self._unit and text.endswith(self._unit):
+            text = text[: -len(self._unit)].rstrip()
+        original = self._item.proposed_value
+        try:
+            value = _coerce_scalar_input(text, original)
+        except (ValueError, RuntimeError) as exc:
+            if isinstance(original, bool):
+                message = "Enter true or false"
+            elif isinstance(original, int):
+                message = "Enter an integer"
+            elif isinstance(original, complex):
+                message = "Enter a complex number, e.g. 1+2j"
+            else:
+                message = "Enter a number, e.g. 6012.35"
+            raise ValueError(message) from exc
+        return name, value
+
+    def _show_error(self, text: str) -> None:
+        self._error.setText(text)
+        self._error.setVisible(bool(text))
+
+    def _validate(self) -> None:
+        try:
+            self._parsed()
+        except (ValueError, RuntimeError) as exc:
+            self._show_error(str(exc))
+            self._save_button.setEnabled(False)
+        else:
+            self._show_error("")
+            self._save_button.setEnabled(True)
+
+    def _commit(self) -> None:
+        try:
+            name, value = self._parsed()
+            self._save(name, value)
+        except Exception as exc:
+            logger.exception("failed to edit writeback value %s", self._item.session_id)
+            self._show_error(str(exc))
+            return
+        self.accept()
 
 
 def is_scalar_value(value: Any) -> bool:
