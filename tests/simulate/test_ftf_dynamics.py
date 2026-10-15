@@ -141,6 +141,11 @@ def test_dynamic_flux_signed_complex_drive_against_larger_fixed_parent() -> None
     np.testing.assert_allclose(
         np.abs(actual.density), np.abs(expected), atol=1e-5, rtol=0
     )
+    for i, operator in enumerate(operators):
+        # Charge expectations retain coherence phase without depending on the
+        # independent eigensolvers' arbitrary eigenvector phase conventions.
+        expected_charge = np.vdot(reference.y[:, -1], operator @ reference.y[:, -1])
+        np.testing.assert_allclose(np.trace(actual.density @ joint.charge_operator(i)), expected_charge, atol=1e-5, rtol=0)
     assert abs(np.trace(actual.density) - 1) < 1e-9
     assert np.linalg.eigvalsh(actual.density).min() >= -1e-9
 
