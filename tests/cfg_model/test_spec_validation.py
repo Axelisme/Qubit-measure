@@ -15,6 +15,7 @@ from zcu_tools.cfg_model import (
     FlatTopWaveformCfg,
     FlatTopWaveformSpec,
     GaussWaveformCfg,
+    ModuleCfgFactory,
     PulseReadoutSpec,
     PulseSpec,
     WaveformCfgFactory,
@@ -196,3 +197,127 @@ def test_spec_rejects_an_unrecognized_model_instead_of_dumping_its_runtime_field
 
     with pytest.raises(ValueError, match="persistent"):
         module_spec_from_raw(raw)
+
+
+@pytest.mark.parametrize("count", [1, 8])
+def test_mux_persistent_spec_roundtrips_numeric_tones(count: int):
+    from zcu_tools import cfg_model
+
+    from ._support import mux_raw
+
+    raw = mux_raw(count)
+    spec = module_spec_from_raw(raw)
+    assert isinstance(spec, cfg_model.MuxReadoutSpec)
+    assert module_spec_from_raw(spec).to_dict() == spec.to_dict()
+    assert spec.to_dict()["tones"] == raw["tones"]
+    assert ModuleCfgFactory.from_raw(spec).to_dict() == spec.to_dict()
+
+
+@pytest.mark.parametrize("boundary", ["spec", "cfg"])
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("tones", []),
+        ("tones", [{}] * 9),
+        ("gen_ch", True),
+        ("gen_ch", -1),
+        ("gen_ch", 1.5),
+        ("gen_ch", "1"),
+        ("nqz", 0),
+        ("nqz", True),
+        ("nqz", 3),
+        ("mixer_freq", None),
+        ("mixer_freq", float("nan")),
+        ("length", 0.0),
+        ("length", float("inf")),
+        ("ro_length", -1.0),
+        ("pre_delay", -0.1),
+        ("post_delay", float("inf")),
+        ("trig_offset", -0.1),
+        ("waveform", {"style": "const", "length": 1.0}),
+        ("ro_ch", 0),
+        ("ro_chs", [0, 1]),
+    ],
+)
+def test_mux_rejects_invalid_module_fields(
+    boundary: str, field: str, value: CfgInputValue
+):
+    from zcu_tools.cfg_model import ModuleCfgFactory
+
+    from ._support import mux_raw
+
+    validate = module_spec_from_raw if boundary == "spec" else ModuleCfgFactory.from_raw
+    raw = mux_raw()
+    validate(raw)
+    raw[field] = value
+    with pytest.raises(ValueError, match=field):
+        validate(raw)
+
+
+@pytest.mark.parametrize("boundary", ["spec", "cfg"])
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("freq", float("nan")),
+        ("freq", float("inf")),
+        ("freq", "key"),
+        ("freq", QickParam(1.0, {"sweep": 2.0})),
+        ("gain", -1.01),
+        ("gain", 1.01),
+        ("gain", float("inf")),
+        ("phase", float("nan")),
+        ("phase", float("-inf")),
+        ("ro_ch", True),
+        ("ro_ch", -1),
+        ("ro_ch", 0.5),
+        ("ro_ch", "1"),
+        ("name", "resonator"),
+    ],
+)
+def test_mux_rejects_invalid_tone_fields(
+    boundary: str, field: str, value: CfgInputValue
+):
+    from zcu_tools.cfg_model import ModuleCfgFactory
+
+    from ._support import mux_raw
+
+    validate = module_spec_from_raw if boundary == "spec" else ModuleCfgFactory.from_raw
+    raw = mux_raw()
+    validate(raw)
+    raw["tones"] = [{"freq": -1.0, "gain": 0.5, "ro_ch": 4, field: value}]
+    with pytest.raises(ValueError, match=f"{field}|persistent"):
+        validate(raw)
+
+
+@pytest.mark.parametrize("boundary", ["spec", "cfg"])
+@pytest.mark.parametrize(
+    "field", ["gen_ch", "nqz", "mixer_freq", "length", "ro_length"]
+)
+def test_mux_requires_explicit_module_settings(boundary: str, field: str):
+    from zcu_tools.cfg_model import ModuleCfgFactory
+
+    from ._support import mux_raw
+
+    validate = module_spec_from_raw if boundary == "spec" else ModuleCfgFactory.from_raw
+    raw = mux_raw()
+    validate(raw)
+    del raw[field]
+    with pytest.raises(ValueError, match=field):
+        validate(raw)
+
+
+def test_mux_allows_equal_negative_frequencies_full_gain_and_phase_default():
+    from zcu_tools.cfg_model import ModuleCfgFactory
+
+    from ._support import mux_raw
+
+    raw = mux_raw()
+    raw["tones"] = [
+        {"freq": -100.0, "gain": -1.0, "ro_ch": 4},
+        {"freq": -100.0, "gain": 1.0, "ro_ch": 1},
+    ]
+    spec = module_spec_from_raw(raw)
+    assert ModuleCfgFactory.from_raw(spec).to_dict()["tones"] == [
+        {"freq": -100.0, "gain": -1.0, "phase": 0.0, "ro_ch": 4},
+        {"freq": -100.0, "gain": 1.0, "phase": 0.0, "ro_ch": 1},
+    ]

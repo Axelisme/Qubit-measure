@@ -63,12 +63,13 @@ from numpy.polynomial.legendre import leggauss
 from numpy.typing import NDArray
 
 from zcu_tools.program.acquisition import CancelFlagProtocol
-from zcu_tools.program.v2.modules.readout import AbsReadout, PulseReadout
+from zcu_tools.program.v2.modules.readout import AbsReadout, MuxReadout, PulseReadout
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 from . import bloch
 from .lowering import (
     LoweredPoint,
+    UnsupportedModuleError,
     _resolve_scalar,
     inter_shot_relax_segment,
     lower_point,
@@ -405,6 +406,12 @@ class SimEngine:
                 "SimEngine requires a compiled program (loop_dims / avg_level "
                 "are set by compile()); call program.compile() first"
             )
+
+        for module in program.modules:
+            if isinstance(module, MuxReadout):
+                raise UnsupportedModuleError(
+                    f"unsupported readout module {type(module).__name__} {module.name!r}"
+                )
 
         self.program = program
         self.sim = sim

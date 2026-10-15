@@ -765,3 +765,56 @@ def test_obsolete_nested_readout_is_named_and_backed_up_while_flat_readout_loads
     assert "Q1.readout.broken_probe" in warnings[0]
     assert str(backups[0]) in warnings[0]
     assert not library.refresh()
+
+
+def test_mux_and_pulse_readouts_roundtrip_and_materialize_fixed_snapshot(
+    files: tuple[Path, Path],
+) -> None:
+    from zcu_tools import cfg_model
+
+    raw: cfg_model.CfgInputMap = {
+        "type": "readout/mux",
+        "gen_ch": 9,
+        "nqz": 2,
+        "mixer_freq": 6000.0,
+        "length": 2.0,
+        "ro_length": 1.5,
+        "tones": [
+            {"freq": 6020.0, "gain": 0.05, "phase": 90.0, "ro_ch": 4},
+            {"freq": 5980.0, "gain": -0.04, "phase": 0.0, "ro_ch": 1},
+        ],
+    }
+    library = open_library(files)
+    with library.edit() as draft:
+        draft.set_module("Q1.readout.mux", cfg_model.module_spec_from_raw(raw))
+        draft.set_module(
+            "Q1.readout.pulse",
+            cfg_model.module_spec_from_raw(
+                {
+                    "type": "readout/pulse",
+                    "gen_ch": 0,
+                    "nqz": 1,
+                    "freq": 100.0,
+                    "gain": 0.1,
+                    "ro_ch": 0,
+                    "ro_length": 1.0,
+                    "waveform": {"style": "const", "length": 0.5},
+                }
+            ),
+        )
+    fixed = open_library(files).snapshot()
+    spec = fixed.module_spec("Q1.readout.mux")
+    assert isinstance(spec, cfg_model.MuxReadoutSpec)
+    assert fixed.entry_value("Q1.readout.mux", kind="module")["tones"] == raw["tones"]
+    cfg = cfg_model.ModuleCfgFactory.from_raw(
+        "Q1.readout.mux", context=fixed.validation_context()
+    )
+    assert isinstance(cfg, cfg_model.MuxReadoutCfg)
+    assert [(tone.freq, tone.ro_ch) for tone in cfg.tones] == [(6020.0, 4), (5980.0, 1)]
+    assert isinstance(fixed.get_module("Q1.readout.pulse"), PulseReadoutCfg)
+    with library.edit() as draft:
+        draft.set_module("Q1.readout.mux", spec.with_updates(length=3.0))
+    files[0].unlink()
+    cfg.tones.reverse()
+    assert fixed.get_module("Q1.readout.mux").to_dict()["tones"] == raw["tones"]
+    assert fixed.get_module("Q1.readout.mux").to_dict()["length"] == 2.0

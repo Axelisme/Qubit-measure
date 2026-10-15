@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import ConfigDict, Field, field_validator
 from qick.asm_v2 import QickParam
 
 from .base import ConfigBase
@@ -151,6 +151,74 @@ class PulseReadoutCfg(_PulseReadoutFields, AbsReadoutCfg):
             raise ValueError(f"Unknown parameter: {name}")
 
 
+class MuxReadoutTone(ConfigBase):
+    """One ordered, numeric DAC tone and its explicit logical ADC channel.
+
+    freq is finite absolute MHz (negative values are permitted), gain is finite
+    normalized amplitude in [-1, 1], phase is any finite degree value, and ro_ch
+    is a nonnegative integer, never bool. Equal frequencies are permitted. Tone
+    order, not frequency or channel order, defines identity. No rescaling occurs;
+    the author owns summed-signal headroom.
+    """
+
+    model_config = ConfigDict(strict=True, allow_inf_nan=False)
+
+    freq: float
+    gain: Annotated[float, Field(ge=-1.0, le=1.0)]
+    phase: float = 0.0
+    ro_ch: Annotated[int, Field(ge=0)]
+
+
+class _MuxReadoutFields(_ModuleFields):
+    """Numeric readout/mux settings shared by persistent Spec and runtime cfg.
+
+    gen_ch is the explicit nonnegative integer generator channel (not bool).
+    nqz must be integer 1 or 2, and mixer_freq is required finite MHz. tones is
+    an ordered list of 1..8 MuxReadoutTone values, each carrying its own ro_ch.
+    length is the common positive const-playback duration in us; ro_length is
+    the common positive ADC window in us. pre_delay/post_delay bracket playback,
+    and trig_offset delays the common ADC trigger, all finite nonnegative us.
+    desc is optional prose. Only numeric scalars are accepted, not references,
+    expressions, waveforms, QICK sweeps or register words.
+    """
+
+    model_config = ConfigDict(strict=True, allow_inf_nan=False)
+
+    type: Literal["readout/mux"] = "readout/mux"
+    gen_ch: Annotated[int, Field(ge=0)]
+    nqz: Literal[1, 2]
+    mixer_freq: float
+    tones: Annotated[list[MuxReadoutTone], Field(min_length=1, max_length=8)]
+    length: Annotated[float, Field(gt=0)]
+    ro_length: Annotated[float, Field(gt=0)]
+    pre_delay: Annotated[float, Field(ge=0)] = 0.0
+    post_delay: Annotated[float, Field(ge=0)] = 0.0
+    trig_offset: Annotated[float, Field(ge=0)] = 0.0
+
+    @field_validator("nqz", mode="before")
+    @classmethod
+    def _integer_nqz(cls, value: object) -> object:
+        # Literal validation alone accepts True and 1.0 as zone 1.
+        if type(value) is not int:
+            raise ValueError("nqz must be integer 1 or 2, not bool or float")
+        return value
+
+
+class MuxReadoutSpec(_MuxReadoutFields):
+    """Persistent numeric mux module; only the entire module may use a library key."""
+
+
+class MuxReadoutCfg(_MuxReadoutFields, AbsReadoutCfg):
+    """Materialized numeric mux module with no assets, resolver or runtime objects."""
+
+    def set_param(self, name: str, value: float | QickParam) -> None:
+        """Reject every knob with ValueError; rebuild numeric cfg and program instead."""
+        raise ValueError(
+            f"MuxReadout does not support set_param({name!r}, {value!r}); "
+            "rebuild numeric cfg and program instead"
+        )
+
+
 class AbsResetCfg(AbsModuleCfg):
     """Materialized reset family, with zero, one, two, or bath pulse content."""
 
@@ -260,8 +328,12 @@ class BathResetCfg(_BathResetFields, AbsResetCfg):
             raise ValueError(f"Unknown parameter: {name}")
 
 
-type ReadoutSpec = PulseReadoutSpec
-type ReadoutCfg = PulseReadoutCfg
+type ReadoutSpec = Annotated[
+    PulseReadoutSpec | MuxReadoutSpec, Field(discriminator="type")
+]
+type ReadoutCfg = Annotated[
+    PulseReadoutCfg | MuxReadoutCfg, Field(discriminator="type")
+]
 type ResetSpec = Annotated[
     NoneResetCfg | PulseResetSpec | TwoPulseResetSpec | BathResetSpec,
     Field(discriminator="type"),
