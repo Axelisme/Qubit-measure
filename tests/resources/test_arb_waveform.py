@@ -42,6 +42,38 @@ def _save_zero_q_asset(data_key: str = "pulse") -> None:
     )
 
 
+def test_root_bound_repositories_isolate_interleaved_writes_and_captures(
+    tmp_path: Path,
+) -> None:
+    try:
+        first = ArbWaveformDatabase(str(tmp_path / "first"))
+        second = ArbWaveformDatabase(tmp_path / "second")
+    except TypeError as exc:
+        pytest.fail(f"Repositories must accept and own independent roots: {exc}")
+
+    first.save("pulse", idata=[0.0, 0.4], time=[0.0, 0.75])
+    captured = first.bound_info()
+    captured_path = captured.path_for("pulse")
+    second.save("pulse", idata=[0.0, 0.8], time=[0.0, 2.0])
+    assert first.list() == second.list() == ["pulse"]
+    np.testing.assert_array_equal(first.load("pulse").idata, [0.0, 0.4])
+    np.testing.assert_array_equal(second.load("pulse").idata, [0.0, 0.8])
+    assert captured_path == (tmp_path / "first" / "pulse.npz").resolve()
+
+    first.save("pulse", idata=[0.0, 0.3], time=[0.0, 1.5])
+    assert captured.path_for("pulse") == captured_path
+    assert captured.duration("pulse") == 1.5
+    np.testing.assert_array_equal(captured.samples("pulse").idata, [0.0, 0.3])
+    assert second.bound_info().duration("pulse") == 2.0
+
+    second.rename("pulse", "renamed")
+    assert first.list() == ["pulse"]
+    assert second.list() == ["renamed"]
+    first.delete("pulse")
+    assert first.list() == []
+    np.testing.assert_array_equal(second.load("renamed").idata, [0.0, 0.8])
+
+
 def test_import_data_uses_single_file_layout_and_runtime_get(tmp_path):
     root = _init_db(tmp_path)
 

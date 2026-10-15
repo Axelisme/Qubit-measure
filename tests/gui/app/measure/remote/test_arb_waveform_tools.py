@@ -77,6 +77,46 @@ def test_set_list_and_preview_round_trip(fixture: Fixture, tmp_path: Path) -> No
     assert fixture.state.version.get("arb_waveforms") == 1
 
 
+def test_scope_switch_routes_new_writes_and_preserves_captured_assets(
+    fixture: Fixture, tmp_path: Path,
+) -> None:
+    assets = fixture.ctrl.arb_waveforms
+    try:
+        first = ArbWaveformDatabase(
+            arb_waveform.resolve_arb_waveform_root(fixture.state.session_env)
+        )
+    except TypeError as exc:
+        pytest.fail(f"Repositories must accept and own independent roots: {exc}")
+    first.save("pulse", idata=[0.0, 0.4], time=[0.0, 0.75])
+    captured = first.bound_info()
+    captured_path = captured.path_for("pulse")
+
+    fixture.state.session_env = replace(
+        fixture.state.session_env,
+        qub_name="q2",
+        database_path=str(tmp_path / "Database" / "chip_a" / "q2" / "2026" / "06" / "Data_0626"),
+    )
+    recipe = {"segments": [{"duration": 0.002, "formula": "0.8"}], "normalize": "none"}
+    assert dispatch_handler(
+        fixture.ctrl, "arb_waveform.set",
+        {"name": "pulse", "recipe": recipe, "overwrite": False},
+    ) == {"success": True, "status": "created"}
+    assert assets.load_data("pulse").idata.tolist() == [0.8, 0.8, 0.8]
+    assert captured.path_for("pulse") == captured_path
+    assert captured.duration("pulse") == 0.75
+
+    first.save("pulse", idata=[0.0, 0.3], time=[0.0, 1.5])
+    assert captured.duration("pulse") == 1.5
+    assert captured.samples("pulse").idata.tolist() == [0.0, 0.3]
+    assets.rename("pulse", "renamed")
+    assert first.list() == ["pulse"]
+    assert assets.list_data_keys() == ["renamed"]
+    assets.delete("renamed")
+    assert assets.list_data_keys() == []
+    assert first.list() == ["pulse"]
+    assert fixture.state.version.get("arb_waveforms") == 3
+
+
 def test_list_without_project_database_path_returns_empty(fixture: Fixture) -> None:
     fixture.state.session_env = replace(fixture.state.session_env, database_path="")
 
