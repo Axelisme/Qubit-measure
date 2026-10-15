@@ -8,6 +8,7 @@ import pytest
 from pydantic import BaseModel, Field, JsonValue
 from zcu_tools.gui.form import (
     Display,
+    FormConstraints,
     FormEnv,
     FormInput,
     FormModel,
@@ -32,6 +33,47 @@ class Settings(BaseModel):
         Field(gt=0, le=100),
     ]
     label: Annotated[str, Field(min_length=2, max_length=8, pattern="^[a-z]+$")]
+
+
+type BoundedNumber = Annotated[float, Field(ge=1, lt=10)]
+type BoundedText = Annotated[str, Field(min_length=2, max_length=8, pattern="^[a-z]+$")]
+
+
+class NullableConstraints(BaseModel):
+    number: Annotated[float, Field(gt=0, le=100)] | None = Field(
+        default=None, lt=80, title="Optional number"
+    )
+    number_alias: BoundedNumber | None = Field(default=None, le=8)
+    text: (
+        Annotated[str, Field(min_length=2, max_length=8, pattern="^[a-z]+$")] | None
+    ) = None
+    text_alias: BoundedText | None = None
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("number", FormConstraints(gt=0, le=100, lt=80)),
+        ("number_alias", FormConstraints(ge=1, le=8, lt=10)),
+        (
+            "text",
+            FormConstraints(min_length=2, max_length=8, pattern="^[a-z]+$"),
+        ),
+        (
+            "text_alias",
+            FormConstraints(min_length=2, max_length=8, pattern="^[a-z]+$"),
+        ),
+    ],
+)
+def test_nullable_inner_constraints_are_described(
+    name: str, expected: FormConstraints
+) -> None:
+    state = FormState(FormInput(NullableConstraints, {}))
+    target = state.describe((name,), FormEnv()).target
+    assert target is not None
+    assert target.constraints == expected
+    assert target.nullable
+    assert state.input.data == state.base.data == {}
 
 
 class Inline(FormModel):
