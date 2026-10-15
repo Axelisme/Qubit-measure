@@ -660,6 +660,52 @@ def test_background_options_recover_only_enabled_terms(
     )
 
 
+@pytest.mark.parametrize(
+    "count,slope,curvature,noise",
+    [
+        (301, 0.008, 7e-4, 0.0),
+        (101, 0.0, 7e-4, 0.002),
+        (101, 0.008, -7e-4, 0.002),
+        (301, 0.0, 3e-4, 0.002),
+    ],
+)
+def test_seeded_hanger_fit_recovers_resonance_with_phase_curvature(
+    count: int, slope: float, curvature: float, noise: float
+) -> None:
+    freqs = np.linspace(5965.0, 6035.0, count)[1:-1]
+    signals = _hanger_truth(
+        freqs,
+        freq=6000.0,
+        Ql=700.0,
+        Qc_abs=980.0,
+        phi=0.12,
+        a0=1.2 * np.exp(0.3j),
+        edelay=0.021,
+        bg_amp_slope=slope,
+        bg_phase_curvature=curvature,
+    )
+    rng = np.random.default_rng(17)
+    signals += noise * (rng.normal(size=len(freqs)) + 1j * rng.normal(size=len(freqs)))
+
+    params = HangerModel.fit(
+        freqs,
+        signals,
+        edelay_branch_seed=0.021,
+        fit_bg_amp_slope=True,
+        fit_bg_phase_curvature=True,
+    )
+
+    np.testing.assert_allclose(params["freq"], 6000.0, rtol=0, atol=0.05)
+    np.testing.assert_allclose(params["fwhm"], 6000.0 / 700.0, rtol=0.01)
+    np.testing.assert_allclose(params["edelay"], 0.021, rtol=0, atol=2e-5)
+    np.testing.assert_allclose(params["bg_amp_slope"], slope, rtol=0, atol=2e-4)
+    np.testing.assert_allclose(
+        params["bg_phase_curvature"], curvature, rtol=0, atol=2e-5
+    )
+    fitted = HangerModel.calc_signals(freqs, **params)
+    assert np.sqrt(np.mean(np.abs(fitted - signals) ** 2)) < max(1e-6, 2 * noise)
+
+
 def test_fixed_noise_refinement_reduces_complex_residual() -> None:
     freq, Ql, Qc_abs = 6053.0, 710.0, 1040.0
     freqs = _homophasal_like_grid(freq, Ql, 45.0, 601)
