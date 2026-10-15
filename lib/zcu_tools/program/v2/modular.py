@@ -66,6 +66,24 @@ class ModularProgramV2(MyProgramV2):
             t = module.run(self, t)
         self.delay(t=t)
 
+    def validate_module_execution(self) -> None:
+        """Require setup/body behavior to be fully described by declared Modules.
+
+        Semantic consumers call this before interpreting modules rather than raw
+        emitted instructions. Overriding _initialize or _body can introduce ISA
+        outside that description, so this validation raises ValueError naming the
+        concrete program type. make_modules overrides remain supported. It does
+        not compile, execute, mutate, or validate individual Module capabilities;
+        normal hardware acquisition does not call this method.
+        """
+        if (
+            type(self)._body is not ModularProgramV2._body
+            or type(self)._initialize is not ModularProgramV2._initialize
+        ):
+            raise ValueError(
+                f"{type(self).__name__} raw program body/setup simulation unsupported"
+            )
+
     def append_loop_after(self, name: str, *macros: Macro) -> None:
         """Append macros to QICK's exec-after hook for one declared sweep loop."""
         for idx, (loop_name, count, before, after) in enumerate(self.loops):

@@ -35,6 +35,7 @@ def build_request(
 
     if not isinstance(prog, ModularProgramV2):
         raise ValueError("simulation requires a ModularProgramV2 frontend")
+    prog.validate_module_execution()
     if prog.loop_dims is None or prog.avg_level is None:
         prog.compile()
     if prog.loop_dims is None or prog.avg_level is None:
