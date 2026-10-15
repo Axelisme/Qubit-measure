@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-15，Opaque Run／Load、Artifact handover、共用 Form 與 Controller close
+**Last updated:** 2026-10-15，Writeback owner、Opaque Run／Load、Artifact handover、共用 Form 與 Controller close
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -24,8 +24,12 @@ Adapter 的 `data_item(key, result, comment=...)` 與 `analysis_item(key, result
 只交固定 framework items。框架選路徑與格式、同步編碼及逐輸出隔離失敗。
 Data 準備錯誤交給 DataItem.failed 或 from_run，producer 拋錯也轉成該 data outputs 的失敗；
 同選集的圖與分析仍保存。Figure 取已提交 pane，不取未提交草稿。
-Artifact 不 import writeback owners，由 app composition 協調；此單側規則由
-`measure-artifacts-no-writeback` import contract 約束，允許共用 State／events／context。
+`writeback` 集中三類 proposals、opaque draft、WritebackService、WritebackControl 與 widget。
+Adapter 公開入口繼續再匯出 proposal 型別，其他舊位置不保留 shim。
+resources.entry executor 與 remote handler／wire types 留在各自 owner。
+Artifact 與 Writeback 不直接互相 import，由 app composition 協調。
+`measure-artifacts-no-writeback` 與 `measure-writeback-no-artifacts` contracts 約束兩個方向，
+允許共用 State／events／context。
 可提交的 native 結果先由 State 一次發布結果與 `RunPaneState.metadata`，
 再在 terminal 追加 acquired。Origin 沿發起命令的 GUI／MCP，沒有 Save 也追加事件，
 但不建立 run 資料夾。未綁定或沒有 storage 時不造事件，terminal 明確記錄診斷。
@@ -122,9 +126,11 @@ pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 align
 
 - `form_adapter` 從 core cfg 與作者樹推導 Form。`make_form(ctx)`、範本與實驗初值由使用者套件宣告，舊 builder、seeds 與角色 factory 表已退休。
 - `flux_pick_plugin.py`、`flux_pick_frontend.py`、`interactive_flux_pick.py`：measure 選線的終態結果與 click-follow frontend。Caller 傳 FluxPickInputs 和初始數值，不帶具體實驗或參數容器。共用數值及 single-flight 機制仍由既有 kernel/plugin 擁有。
-- `adapter/`：framework-facing contract、request/result/writeback/analyze params、
-  adapter validation 與 protocol signature 所需的 session vocabulary。ModuleWriteback 的
-  proposal 直接使用持久 ModuleSpec，不帶 editor identity。
+- `adapter/`：framework-facing contract、request/result/analyze params、
+  adapter validation 與 protocol signature 所需的 session vocabulary。Writeback 型別由
+  `writeback/` 擁有，adapter 公開入口再匯出。ModuleWriteback proposal 直接使用持久
+  ModuleSpec，不帶 editor identity。
+- `writeback/`：parameter／module／sample proposals、draft、service、control 與 Qt review widget。
 - `services/`：app service layer。Service 依賴 ports，不直接 import sibling service
   implementation；package `__init__` 只做 lazy public re-export。
 - `state.py`：tab/device/pane/path/version-table SSOT 與主線程 mutators；固定的
@@ -134,7 +140,7 @@ pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 align
   `●` marker while Run is active; Run start/terminal EventBus reactions and tab insertion
   repaint from State, so the marker is never persisted or cached as a second busy state.
 - `ui/`：Qt widgets、MainWindow top-level façade、capability-driven `ExpTabWidget`、
-  writeback view、feedback widgets；generic cfg form不屬於app package。
+  feedback widgets；writeback view 由 `writeback/` 擁有，generic cfg form不屬於app package。
   `ExpTabWidget` owns capability-driven left subtab composition (fixed order Run |
   Analysis | Post-Analysis | Data | Guide, with optional Analysis/Post only when
   the adapter declares the capability) and per-pane `FigureContainer` routing

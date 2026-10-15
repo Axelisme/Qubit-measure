@@ -27,11 +27,11 @@ from zcu_tools.gui.app.measure.adapter import (
     T_Cfg,
     T_PostAnalyzeResult,
     T_Result,
-    WritebackItem,
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.types import AnalyzeResult
 from zcu_tools.gui.app.measure.artifacts import AnalysisItem, ArtifactKey, DataItem
+from zcu_tools.gui.app.measure.writeback import WritebackItem
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.interactive import PluginDefinition, Session
 

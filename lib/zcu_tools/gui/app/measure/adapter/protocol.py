@@ -12,6 +12,8 @@ if TYPE_CHECKING:
     from zcu_tools.experiment.native_persistence import RestoredRun
     from zcu_tools.plotting.plots import Plots
 
+from zcu_tools.gui.app.measure.writeback import WritebackItem
+
 from .interactive import InteractivePluginProvider
 from .types import (
     AdapterCapabilities,
@@ -23,7 +25,6 @@ from .types import (
     PostWritebackRequest,
     RunRequest,
     SessionEnv,
-    WritebackItem,
     WritebackRequest,
 )
 

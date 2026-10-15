@@ -27,21 +27,19 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.app.measure.adapter import (
-    ModuleWriteback,
-    ParameterWriteback,
-    WritebackItem,
-)
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.form import FormErrors, FormWritePath, WriteRejected
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
+from .items import ModuleWriteback, ParameterWriteback, WritebackItem
+
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
-    from zcu_tools.gui.app.measure.services.writeback import WritebackValues
-    from zcu_tools.gui.app.measure.services.writeback_control import WritebackPane
     from zcu_tools.gui.session.library_entry import ModuleEntryForm
+
+    from .control import WritebackPane
+    from .service import WritebackValues
 
 logger = logging.getLogger(__name__)
 

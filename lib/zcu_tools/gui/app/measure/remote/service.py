@@ -51,7 +51,7 @@ if TYPE_CHECKING:
     )
     from zcu_tools.gui.app.measure.services.tab_control import TabControlPort
     from zcu_tools.gui.app.measure.services.tab_form import TabFormResource
-    from zcu_tools.gui.app.measure.services.writeback_control import (
+    from zcu_tools.gui.app.measure.writeback import (
         WritebackControlPort,
     )
     from zcu_tools.gui.session.context_control import ContextControlPort

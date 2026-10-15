@@ -228,8 +228,8 @@ def test_A2_Analysis_ledger_single_column_folding_and_fixed_bar(
 def test_A3_Writeback_items_show_current_proposed_and_edit(qapp, make_ctrl):
     """Native preview facts retain selection, editing and Apply interactions."""
     from zcu_tools.cfg_model import DirectReadoutCfg
-    from zcu_tools.gui.app.measure.services.writeback import WritebackValues
-    from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
+    from zcu_tools.gui.app.measure.writeback import WritebackValues
+    from zcu_tools.gui.app.measure.writeback.widget import WritebackWidget
 
     ctrl = make_ctrl()
     md_item = ParameterWriteback(
@@ -329,7 +329,7 @@ def test_A3_Writeback_items_show_current_proposed_and_edit(qapp, make_ctrl):
 def test_writeback_baseline_captured_via_service(qapp, make_ctrl):
     """The service captures baseline summaries from a fixed ParameterContext."""
     from zcu_tools.cfg_model import DirectReadoutCfg
-    from zcu_tools.gui.app.measure.services.writeback import WritebackService
+    from zcu_tools.gui.app.measure.writeback import WritebackService
 
     parameters = _parameters()
     ctrl = make_ctrl()

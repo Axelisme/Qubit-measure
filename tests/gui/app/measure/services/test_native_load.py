@@ -26,13 +26,13 @@ from zcu_tools.gui.app.measure.services.run_analyze_control import (
     RunAnalyzeControlFacet,
 )
 from zcu_tools.gui.app.measure.services.tab import TabService
-from zcu_tools.gui.app.measure.services.writeback import (
+from zcu_tools.gui.app.measure.writeback import (
+    WritebackControlFacet,
     WritebackDraft,
     WritebackEdit,
     WritebackService,
     WritebackWritten,
 )
-from zcu_tools.gui.app.measure.services.writeback_control import WritebackControlFacet
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.aliases import AliasRow

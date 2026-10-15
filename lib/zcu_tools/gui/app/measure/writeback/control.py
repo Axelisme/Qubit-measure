@@ -12,7 +12,7 @@ from zcu_tools.gui.app.measure.events.tab import (
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
-from .writeback import WritebackDraft
+from .service import WritebackDraft
 
 WritebackPane: TypeAlias = Literal["analysis", "post_analysis"]
 
@@ -21,8 +21,8 @@ if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.session.library_entry import ModuleEntryForm
 
-    from .guard import GuardService
-    from .writeback import (
+    from ..services.guard import GuardService
+    from .service import (
         WritebackEdit,
         WritebackService,
         WritebackValues,

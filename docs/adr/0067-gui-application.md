@@ -56,6 +56,13 @@ Dialog 的試算參數是獨立 owner，不寫回元件。Service／remote 明�
 
 ## Adapter capability 與事件
 
+Measure 的 `writeback` package 擁有 Parameter／Module／Sample proposals、opaque draft、
+service、control 與 Qt widget。Adapter 公開入口再匯出 proposal 型別；resources.entry
+executor 與 remote handler／wire types 留在原 owner。`artifacts` 與 `writeback` 不直接
+互相 import，由 app composition 協調，仍可共用 State、events 與 context。
+`.importlinter` 的 `measure-artifacts-no-writeback` 與 `measure-writeback-no-artifacts`
+contracts 分別檢查兩個方向。
+
 Framework 擁有它消費的實驗 adapter interface，實驗側提供宣告和行為，app composition 注入 catalog。`AdapterCapabilities` 明示 SoC 需求、analysis、post-analysis 與 load 的支援範圍。Measure 的 Qt tab 依 analysis／post-analysis 宣告建立控制項；remote 的 writeback subtab params 依宣告拒絕不支援的分析類別。Run guard 依 `requires_soc` 檢查連線；`GuardService.check_load` 與 LoadService 依 `load_data` 拒絕不支援的 load，不要求目前 context。這些局部檢查不代表所有 application 操作入口都已用同一份宣告拒絕不支援的操作。`check_analyze` 只要求 Run result，不要求目前 context，也不檢查 analysis capability。非 interactive 的 analyze 會進 FIT 路徑，post-analyze 入口也未查 post-analysis capability。補齊這些入口的核准目標與轉正條件見 [GUI capability draft](draft/gui-adapter-capability-guards.md)。
 
 Capability 不等於當次 readiness、檔案相容、權限或 hardware lease。Framework 在既有 guard 和 operation 邊界分別判斷部分 context／cfg 與動態 busy 狀態，run guard 呼叫 adapter 的 preflight；preflight 不代替 execution guard 或硬體操作。精確 flags、conditional hooks 和 import-time 驗證見 [measure adapter contract](../../lib/zcu_tools/gui/app/measure/README.md) 及 [experiment adapter owner](../../zcu_lab/v2/gui-contracts.md)。

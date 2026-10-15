@@ -61,7 +61,6 @@ if TYPE_CHECKING:
     from .run import RunService
     from .tab import TabService, TabSnapshot
     from .workspace import WorkspaceService
-    from .writeback import WritebackDraft, WritebackService
 
 __all__ = [
     "AnalyzeService",
@@ -110,8 +109,6 @@ __all__ = [
     "RestoreIssue",
     "RestoreReport",
     "WorkspaceService",
-    "WritebackDraft",
-    "WritebackService",
 ]
 
 _EXPORT_MODULES: dict[str, str] = {
@@ -161,8 +158,6 @@ _EXPORT_MODULES: dict[str, str] = {
     "RestoreIssue": ".ports",
     "RestoreReport": ".ports",
     "WorkspaceService": ".workspace",
-    "WritebackDraft": ".writeback",
-    "WritebackService": ".writeback",
 }
 
 

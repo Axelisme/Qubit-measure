@@ -10,12 +10,14 @@ from typing import TYPE_CHECKING, Any, Literal
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.adapter.analyze_params import describe_analyze_params
 from zcu_tools.gui.app.measure.state import Session, TabInteractionState
+from zcu_tools.gui.app.measure.writeback import WritebackItem
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import FormPath, FormPreview
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.types import ParameterContext
 
-from ..adapter import AdapterGuide, AnalysisMode, WritebackItem
+from ..adapter import AdapterGuide, AnalysisMode
+from ..writeback import WritebackDraft
 from .plot_lifecycle import release_retired_plots
 from .ports import (
     AnalysisPaneSnapshot,
@@ -24,7 +26,6 @@ from .ports import (
     SavePaneSnapshot,
     TabSnapshot,
 )
-from .writeback import WritebackDraft
 
 logger = logging.getLogger(__name__)
 

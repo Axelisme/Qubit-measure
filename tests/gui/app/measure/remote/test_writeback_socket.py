@@ -5,9 +5,9 @@ import pytest
 from pydantic import ValidationError
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.app.measure.adapter import ParameterWriteback
-from zcu_tools.gui.app.measure.services.writeback import WritebackEdit
 from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+from zcu_tools.gui.app.measure.writeback import WritebackEdit
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.resources.entry import AcceptedWrite, RoleSpec
 

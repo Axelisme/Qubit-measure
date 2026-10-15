@@ -18,8 +18,8 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.artifacts import ArtifactSaveCenter
 from zcu_tools.gui.app.measure.services import TabSnapshot
-from zcu_tools.gui.app.measure.services.writeback import WritebackValues
 from zcu_tools.gui.app.measure.state import TabInteractionState
+from zcu_tools.gui.app.measure.writeback import WritebackValues
 from zcu_tools.gui.control_identity import ControlIdentity
 
 from tests.gui.app.measure._form_fakes import (

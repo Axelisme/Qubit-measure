@@ -90,7 +90,7 @@ if TYPE_CHECKING:
     from .services.run_analyze_control import RunAnalyzeControlPort
     from .services.tab_control import TabControlPort
     from .services.tab_form import TabFormResources
-    from .services.writeback_control import WritebackControlPort, WritebackPane
+    from .writeback import WritebackControlPort, WritebackPane
 
 
 logger = logging.getLogger(__name__)
