@@ -9,7 +9,10 @@ import pytest
 from pydantic import BaseModel, Field
 from zcu_tools.cfg_model import PulseCfg, Range
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
-from zcu_tools.gui.cfg.resource import CfgPreconditionError, CfgPreconditionReason
+from zcu_tools.gui.app.measure.services.form_contracts import (
+    CfgPreconditionError,
+    CfgPreconditionReason,
+)
 from zcu_tools.gui.form import FormModel
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink

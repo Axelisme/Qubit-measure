@@ -6,9 +6,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, TypedDict
 
 from zcu_tools.format_version import YamlValue
-from zcu_tools.gui.cfg import is_custom_reference_key
-from zcu_tools.gui.cfg.resource import (
-    CfgInputError,
+from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
 )
@@ -230,9 +228,6 @@ def h_tab_parameter_read(
     modules: dict[str, str | None] = {}
     module_keys = parameters.library.module_keys() if module_refs else ()
     for reference in module_refs:
-        if is_custom_reference_key(reference):
-            modules[reference] = None
-            continue
         try:
             root = parameters.library_key(reference)
         except AttributeError:
@@ -297,8 +292,8 @@ def h_tab_describe_cfg(
     clients. Local errors are Form preview only; use get_cfg or Run admission
     for lowered cfg errors.
     """
-    from ..cfg_observation import cfg_error_to_remote
     from ..form_description import describe_form
+    from ..form_errors import cfg_error_to_remote
 
     raw = params["path"]
     if not isinstance(raw, list) or any(
@@ -312,7 +307,7 @@ def h_tab_describe_cfg(
     path = tuple(str(part) for part in raw)
     try:
         return dict(describe_form(adapter.cfg_lookup(str(params["tab_id"])), path))
-    except (CfgInputError, CfgPreconditionError) as exc:
+    except CfgPreconditionError as exc:
         raise cfg_error_to_remote(exc) from exc
     except FormPathError as exc:
         raise RemoteError(
@@ -326,14 +321,14 @@ def h_tab_describe_cfg(
 def h_tab_reset_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from ..cfg_observation import cfg_error_to_remote
+    from ..form_errors import cfg_error_to_remote
     from ..form_observation import observe_form
 
     tab_id = str(params["tab_id"])
     try:
         resource = adapter.cfg_lookup(tab_id)
         resource.reset(aliases=temporary_aliases(params))
-    except (CfgInputError, CfgPreconditionError) as exc:
+    except CfgPreconditionError as exc:
         raise cfg_error_to_remote(exc) from exc
     follow_tab(adapter, tab_id, "run")
     return dict(observe_form(resource))
@@ -342,7 +337,7 @@ def h_tab_reset_cfg(
 def h_tab_edit_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from ..cfg_observation import cfg_error_to_remote
+    from ..form_errors import cfg_error_to_remote
     from ..form_observation import form_writes, observe_form
 
     tab_id = str(params["tab_id"])
@@ -350,7 +345,7 @@ def h_tab_edit_cfg(
     try:
         resource = adapter.cfg_lookup(tab_id)
         resource.write(batch)
-    except (CfgInputError, CfgPreconditionError) as exc:
+    except CfgPreconditionError as exc:
         raise cfg_error_to_remote(exc) from exc
     except ValueError as exc:
         raise RemoteError(
@@ -377,7 +372,7 @@ def h_tab_read_module(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     """Read detached field-local module values, without source refresh or mutation."""
-    from ..cfg_observation import cfg_error_to_remote
+    from ..form_errors import cfg_error_to_remote
 
     path = module_path(params["field"])
     try:
@@ -406,7 +401,7 @@ def h_tab_use_inline(
     Known form failures become directed RemoteError replies; unexpected failures
     propagate. No source refresh, caller layout construction or retry occurs.
     """
-    from ..cfg_observation import cfg_error_to_remote
+    from ..form_errors import cfg_error_to_remote
     from ..form_observation import observe_form
 
     path = module_path(params["field"])
@@ -426,8 +421,6 @@ def h_tab_use_inline(
                     "Select an Inline option to edit this field.",
                 )
             ) from exc
-        raise cfg_error_to_remote(exc) from exc
-    except CfgInputError as exc:
         raise cfg_error_to_remote(exc) from exc
     except ValueError as exc:
         raise RemoteError(

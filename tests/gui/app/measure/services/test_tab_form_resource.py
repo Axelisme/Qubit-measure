@@ -7,7 +7,10 @@ import pytest
 from pydantic import JsonValue
 from zcu_tools.cfg_model import ConfigBase, Expr, Hidden, PulseSpec
 from zcu_tools.gui.app.measure.services import tab_form as resource_api
-from zcu_tools.gui.cfg.resource import CfgPreconditionError, CfgPreconditionReason
+from zcu_tools.gui.app.measure.services.form_contracts import (
+    CfgPreconditionError,
+    CfgPreconditionReason,
+)
 from zcu_tools.gui.form import FormEnv, FormErrors
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.context_types import SavedPoint

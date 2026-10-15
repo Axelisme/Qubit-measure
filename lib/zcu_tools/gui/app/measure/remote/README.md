@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-15，lean cfg 與單層 describe_cfg
+**Last updated:** 2026-10-15，lean cfg、單層 describe_cfg 與舊 editor 路徑退休
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -25,11 +25,10 @@ not declare MCP tools and does not own stdio transport.
   only by dispatch.
 - `events.py`：domain payload type to wire event serializer mapping.
 - `dialogs.py`：wire-stable dialog names.
-- `path_resolver.py`：flat target projection of an old `CfgDraft`; no wire method uses it.
 - `form_observation.py`：tab Form input/values/errors projection and
   the shared path-array edit decoder.
-- `cfg_observation.py`：old `CfgDraft` tree projection, now used by no wire
-  method, and `cfg_error_to_remote`.
+- `form_errors.py`：將 measure 的 CfgPreconditionError 轉譯為 remote 錯誤；
+  來源 provenance 與 precondition 型別由 services/form_contracts.py 擁有。
 - `load_types.py`：result and analysis Load facts, without Form backfill details.
 - `wire_version.py`：measure-gui wire contract version and GUI code revision.
 
@@ -446,6 +445,14 @@ at `save_as` (a new name) or at `name`. The reply is `{valid, errors}` with
 Form error paths; invalid values leave the library unchanged. Unknown paths
 are `invalid_params` with reason `form_errors`, and values carrying the retired
 `__kind` tags are rejected with the `{expr: text}` form before any write.
+
+Module writeback 的 `tab.writeback_set`／`tab.writeback_write` 使用相同 Form 路徑陣列。
+Set 回該項目的 input、values 與 errors；普通 invalid 值可留在 draft，
+Apply／Write 只提交有效 Spec。Form batch 的結構錯誤不改該 state，這不保證整個
+多項 writeback 命令的 draft 或 target 原子性。Selected Apply 與首錯前綴見 ADR-0008。
+`editor.*`、editor_changed／editor_closed 與舊 eval／value_ref wire 已退休。
+`context.ml_list_roles`／`context.ml_create_from_role`、`value.list`／`value.read` 保留。
+`tab.resolve_parameters` 的 module_refs 一律交 ParameterContext.library_key，不接受 Custom token。
 
 `TabFormResources` owns tab cfg lifetime. Tab creation provides the resource
 before any view attaches; close revokes old handles. Qt detach only stops

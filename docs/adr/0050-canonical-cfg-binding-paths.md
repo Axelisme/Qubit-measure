@@ -1,8 +1,10 @@
 ---
-status: accepted
+status: superseded
 ---
 
 # 0050 — Canonical cfg binding paths
+
+**狀態：** superseded。舊 binding grammar 已移除，現行 Form model-field paths 與 batch 契約見 [[0065]]。以下正文保留歷史設計，不是現行契約。
 
 ## 脈絡
 

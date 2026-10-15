@@ -17,7 +17,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
-from zcu_tools.gui.cfg.resource import CfgPreconditionError
+from zcu_tools.gui.app.measure.services.form_contracts import CfgPreconditionError
 from zcu_tools.gui.form import FormValue
 from zcu_tools.gui.form_adapter import Form, FormContext
 

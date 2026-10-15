@@ -36,9 +36,9 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from zcu_tools.gui.cfg.codec import decode_complex, encode_complex
+from zcu_tools.core.complex_codec import decode_complex, encode_complex
 from zcu_tools.gui.form import FormOptionDescription, FormValue, FormWritePath
-from zcu_tools.gui.widgets.cfg.fields.common import (
+from zcu_tools.gui.widgets.form.value_widgets import (
     FIELD_INPUT_MIN_WIDTH,
     connect_committed_value_widget,
     make_value_widget,

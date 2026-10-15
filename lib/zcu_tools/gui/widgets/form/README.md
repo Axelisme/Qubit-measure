@@ -1,6 +1,6 @@
 # gui/widgets/form — Form draft view
 
-**Last updated:** 2026-10-15，單層描述、首次展開建立 controls 與局部子樹更新
+**Last updated:** 2026-10-15，單層描述、懶建 controls 與共用 value-widget helpers
 
 `FormEditor` 借用 caller-owned `FormState` 與 host 捕捉的 `FormEnv`。Editor 直接讀 `state.describe(path, env)` 與完整 `preview`，不產生 JSON Schema，也不解析 annotation、union 或選項匹配。Core 擁有 choices、active option、固定欄位與 lone ordinary wrapper 攤平規則。攤平只改版面，controls 的完整 path 仍含 wrapper。
 
@@ -15,3 +15,5 @@ Host 可成對傳入 `write=` 與 `run_command=`，使每批 parsed input 與選
 `set_editing_enabled(enabled=False)` 保持表單可讀，不停用整個 widget。文字可選取與複製，fold titles 可展開、折疊與捲動；寫入與 commands 不可用。唯讀時第一次展開的 controls 也遵守這項限制。`refresh(env)` 使用新 capture 重讀已建層的 descriptions，不沿用舊 choices 或 active branch。Detach 與 close 只解除訂閱，不關閉 caller 的 state。
 
 Measure Run panel 使用 tab resource 的 guarded callbacks。Workflows 使用自己的 FormState 與 Apply／Discard／Start policy。Inspect、New Entry 與 writeback 編輯器沿用各自的 entry capture、Apply／Cancel 與 destination guard。共用 editor 不接管這些 lifetime 或提交政策。公開 control object names、keyboard 與 Expression 細節見 `FormEditor` docstring。
+
+共用 scalar 控制項 helpers 位於 `value_widgets.py`，analysis forms 直接重用。Library／Inspect 與 module writeback 不保留第二套 cfg widget。宿主提交邊界見 ADR-0008、ADR-0065。

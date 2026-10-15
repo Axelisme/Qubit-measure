@@ -1,20 +1,8 @@
-"""Captured parameter paths and finished pure-data lowering contracts."""
+"""Scalar expressions evaluated against fixed parameter captures."""
 
 from collections.abc import Generator
 
 import pytest
-from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    DirectValue,
-    EvalValue,
-    LiteralSpec,
-    ScalarSpec,
-    SweepSpec,
-    SweepValue,
-)
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_expr
@@ -69,42 +57,3 @@ def test_no_parameters_allows_math_but_not_parameter_paths() -> None:
     assert evaluate_scalar_expr("sqrt(9) + 2", None) == 5.0
     with pytest.raises(ExpressionError):
         evaluate_scalar_expr("$qubit.rate", None)
-
-
-def test_lowering_uses_capture_and_returns_pure_data_range(
-    parameters: ParameterContext,
-) -> None:
-    schema = CfgSchema(
-        CfgSectionSpec(
-            fields={"freq": ScalarSpec("Frequency", float), "sweep": SweepSpec()}
-        ),
-        CfgSectionValue(
-            fields={"freq": EvalValue("$qubit.rate"), "sweep": SweepValue(0.0, 1.0, 3)}
-        ),
-    )
-    lowered = schema_to_raw_dict(schema, parameters)
-    assert lowered == {
-        "freq": 4300.0,
-        "sweep": {"start": 0.0, "stop": 1.0, "expts": 3, "step": 0.5},
-    }
-
-
-@pytest.mark.parametrize("value", [(1, 2), {1: "bad"}, object()])
-def test_finished_lowering_rejects_unsupported_literal(value: object) -> None:
-    schema = CfgSchema(
-        CfgSectionSpec(fields={"payload": LiteralSpec(value)}),
-        CfgSectionValue(fields={"payload": DirectValue(value)}),
-    )
-    with pytest.raises(RuntimeError):
-        schema_to_raw_dict(schema, None)
-
-
-def test_finished_literal_data_is_independent() -> None:
-    value = {"items": [1, 2]}
-    schema = CfgSchema(
-        CfgSectionSpec(fields={"payload": LiteralSpec(value)}),
-        CfgSectionValue(fields={"payload": DirectValue(value)}),
-    )
-    lowered = schema_to_raw_dict(schema, None)
-    value["items"].append(3)
-    assert lowered == {"payload": {"items": [1, 2]}}

@@ -38,8 +38,6 @@ client = [
   "threadpoolctl",
   "numba",
   "psutil",
-  "requests",
-  "flask",
   "scikit-optimize",
   "qick @ git+https://github.com/openquantumhardware/qick.git@ba47c4425e105558b8c40afb615398485d264ac4",
   "pyyaml",

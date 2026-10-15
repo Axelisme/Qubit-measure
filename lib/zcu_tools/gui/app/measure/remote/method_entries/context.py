@@ -168,9 +168,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Delete a point-local module at a concrete component.partition.name key "
             "(partition is pulses/readout/reset); flat names and aliases are not accepted. "
-            "Echoes {deleted: name}. LINKED cfg refs "
-            "keep the missing key and become invalid until it returns or is edited; "
-            "MODIFIED refs retain their inline Custom value.",
+            "Echoes {deleted: name}. Existing Form captures stay fixed; "
+            "Reset captures the changed library.",
             (required_string("name", "Concrete module key, e.g. Q1.pulses.pi"),),
         ),
     ),
@@ -180,9 +179,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Delete a point-local waveform at a concrete component.waveforms.name key; "
-            "flat names and aliases are not accepted. Echoes {deleted: name}. LINKED cfg refs "
-            "keep the missing key and become invalid until it returns or is edited; "
-            "MODIFIED refs retain their inline Custom value.",
+            "flat names and aliases are not accepted. Echoes {deleted: name}. Existing Form captures stay fixed; "
+            "Reset captures the changed library.",
             (
                 required_string(
                     "name", "Concrete waveform key, e.g. Q1.waveforms.drive"
@@ -198,8 +196,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Rename a point-local module using concrete component.partition.name keys "
             "for old/new (partition is pulses/readout/reset); no flat names or aliases. "
             "Clash fails fast. Echoes "
-            "{renamed: new}. LINKED cfg refs keep the missing 'old' key and become "
-            "invalid until it returns or is edited; MODIFIED refs retain inline Custom.",
+            "{renamed: new}. Existing Form captures stay fixed; Reset captures "
+            "the changed library. Renaming does not rewrite references.",
             (
                 required_string(
                     "old", "Current concrete module key, e.g. Q1.pulses.pi"
@@ -217,8 +215,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Rename a point-local waveform using concrete component.waveforms.name keys "
             "for old/new; no flat names or aliases. Clash fails fast. Echoes "
-            "{renamed: new}. LINKED cfg refs keep the missing 'old' key and become "
-            "invalid until it returns or is edited; MODIFIED refs retain inline Custom.",
+            "{renamed: new}. Existing Form captures stay fixed; Reset captures "
+            "the changed library. Renaming does not rewrite references.",
             (
                 required_string(
                     "old", "Current concrete waveform key, e.g. Q1.waveforms.drive"

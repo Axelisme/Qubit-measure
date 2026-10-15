@@ -716,7 +716,7 @@ def test_reset_tab_cfg_while_running_raises(cf):
     )
     assert cf.state.is_tab_running(tab_id)
 
-    from zcu_tools.gui.cfg.resource import CfgPreconditionError
+    from zcu_tools.gui.app.measure.services.form_contracts import CfgPreconditionError
 
     cfg = cf.ctrl.cfg_resources.lookup(tab_id)
     with pytest.raises(CfgPreconditionError, match="blocked"):

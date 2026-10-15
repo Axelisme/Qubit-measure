@@ -313,7 +313,22 @@ class HangerModel:
         edelay_branch_seed: float | None = None,
         edelay_max_search_radius: float | None = None,
     ) -> HangerParams:
-        """Fit a hanger response, optionally resolving delay aliases within a radius."""
+        """Fit a hanger response on a finite, strictly monotonic frequency grid.
+
+        freqs and the 1-D complex signals must have equal lengths of at least
+        four; frequency units are normally MHz and delay uses inverse frequency
+        units. A supplied edelay is fixed. Otherwise delay is fitted, optionally
+        starting on edelay_branch_seed's alias branch. For background fitting,
+        that seed also initializes the joint fit, but does not fix its delay.
+        The two fit_bg options independently enable log-amplitude slope and
+        quadratic phase curvature; disabled terms remain zero.
+
+        The optional search radii bound automatic delay branch selection and
+        cannot be combined with edelay_branch_seed. With both background options
+        off, the sequential circle/phase fit is unchanged. Returns HangerParams;
+        invalid inputs raise ValueError. Failed background refinement warns and
+        returns the sequential fit, without adding a validity field.
+        """
         validate_complex_fit_inputs(freqs, signals)
         refine_edelay = edelay is None
         if edelay is None:
@@ -329,7 +344,14 @@ class HangerModel:
         if not fit_bg_amp_slope and not fit_bg_phase_curvature:
             return sequential
 
-        initializer = cls._initializer_for_refinement(freqs, signals, edelay)
+        # Circle loss assumes no background; keep the supplied branch seed as
+        # the joint fit's delay starting point rather than its biased refinement.
+        initializer_delay = (
+            edelay_branch_seed
+            if refine_edelay and edelay_branch_seed is not None
+            else edelay
+        )
+        initializer = cls._initializer_for_refinement(freqs, signals, initializer_delay)
 
         refined = cls._refine_complex(
             freqs,
