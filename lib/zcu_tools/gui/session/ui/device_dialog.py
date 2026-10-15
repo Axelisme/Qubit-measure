@@ -6,17 +6,7 @@ import logging
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from zcu_tools.gui.widgets import error_colour
-from zcu_tools.gui.widgets.selectable_text import make_label_selectable
-
-logger = logging.getLogger(__name__)
-
-_ACTIVITY_MARKER_PREFIX = "● "
-_ACTIVITY_MARKER_COLOR = "#286ac7"
-_ACTIVITY_MARKER_TOOLTIP = "Apply in progress"
-
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
-from qtpy.QtGui import QColor, QPalette
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QComboBox,
     QDialog,
@@ -49,10 +39,24 @@ from zcu_tools.gui.session.services.device import (
 )
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
+from zcu_tools.gui.widgets import (
+    accent_colour,
+    error_colour,
+    secondary_colour,
+    set_foreground,
+    success_colour,
+)
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.parameters import ParameterContext
+
+
+logger = logging.getLogger(__name__)
+
+_ACTIVITY_MARKER_PREFIX = "● "
+_ACTIVITY_MARKER_TOOLTIP = "Apply in progress"
 
 
 @runtime_checkable
@@ -273,7 +277,7 @@ class _MemoryDevicePanel(QWidget):
         form.addRow("Address:", self._addr_label)
 
         note = QLabel("Not connected. Press Reconnect to connect.")
-        note.setStyleSheet("color: gray;")
+        set_foreground(note, secondary_colour(self))
         form.addRow(note)
 
     def load_memory(self, type_name: str, name: str, address: str) -> None:
@@ -378,7 +382,7 @@ class DeviceDialog(QDialog):
         left_layout.addWidget(QLabel("Registered Devices:"))
         self._empty_hint = QLabel("No devices registered")
         self._empty_hint.setObjectName("devices_empty_hint")
-        self._empty_hint.setStyleSheet("color: gray;")
+        set_foreground(self._empty_hint, secondary_colour(self))
         left_layout.addWidget(self._empty_hint)
         left_layout.addWidget(self._list, stretch=1)
         # Drop acts on the selected list row, so it sits directly under the list.
@@ -531,13 +535,13 @@ class DeviceDialog(QDialog):
             label = f"{entry.name} ({entry.type_name})"
             if is_setting_up:
                 item = QListWidgetItem(f"{_ACTIVITY_MARKER_PREFIX}{label}")
-                item.setForeground(QColor(_ACTIVITY_MARKER_COLOR))
+                item.setForeground(accent_colour(self))
                 item.setToolTip(_ACTIVITY_MARKER_TOOLTIP)
             elif is_live:
                 item = QListWidgetItem(label)
             else:
                 item = QListWidgetItem(f"{label} [not connected]")
-                item.setForeground(QColor("gray"))
+                item.setForeground(secondary_colour(self))
             item.setData(Qt.ItemDataRole.UserRole, entry.name)  # type: ignore[attr-defined]
             self._list.addItem(item)
         self._empty_hint.setVisible(self._list.count() == 0)
@@ -751,7 +755,7 @@ class DeviceDialog(QDialog):
         self._dev.start_connect_device(
             ConnectDeviceRequest(type_name=dtype, name=name, address=addr)
         )
-        self._add_status.setStyleSheet("color: gray;")
+        set_foreground(self._add_status, secondary_colour(self))
         self._add_status.setText(f"Connecting {name}...")
 
     def _on_forget_clicked(self) -> None:
@@ -798,7 +802,7 @@ class DeviceDialog(QDialog):
         if self._dev.is_memory_device(name):
             self._add_status.setText("")
             self._dev.start_reconnect_device(name)
-            self._add_status.setStyleSheet("color: gray;")
+            set_foreground(self._add_status, secondary_colour(self))
             self._add_status.setText(f"Reconnecting {name}...")
             return
 
@@ -872,9 +876,7 @@ class DeviceDialog(QDialog):
     def _show_error(self, message: str) -> None:
         # Palette foregrounds preserve the inherited Window used for theme selection.
         self._add_status.setStyleSheet("")
-        palette = QPalette()
-        palette.setColor(QPalette.ColorRole.WindowText, error_colour(self))
-        self._add_status.setPalette(palette)
+        set_foreground(self._add_status, error_colour(self))
         self._add_status.setText(message)
 
     def _on_device_changed(self, payload: DeviceChangedPayload) -> None:
@@ -894,13 +896,13 @@ class DeviceDialog(QDialog):
         if snapshot.error is not None:
             self._show_error(snapshot.error)
         elif snapshot.status is DeviceStatus.CONNECTED:
-            self._add_status.setStyleSheet("color: green;")
+            set_foreground(self._add_status, success_colour(self))
             self._add_status.setText(f"Connected {name}.")
         elif snapshot.status in {
             DeviceStatus.CONNECTING,
             DeviceStatus.DISCONNECTING,
         }:
-            self._add_status.setStyleSheet("color: gray;")
+            set_foreground(self._add_status, secondary_colour(self))
             self._add_status.setText(
                 f"{snapshot.status.value.replace('_', ' ').title()}: {name}..."
             )

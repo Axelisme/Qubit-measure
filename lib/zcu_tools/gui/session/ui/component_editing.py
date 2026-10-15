@@ -16,7 +16,7 @@ from qtpy.QtGui import QPalette
 from qtpy.QtWidgets import QLabel
 
 from zcu_tools.format_version import YamlValue
-from zcu_tools.gui.widgets import error_colour
+from zcu_tools.gui.widgets import error_colour, set_foreground
 from zcu_tools.resources.entry import FieldSpec, FieldValueKind, role_candidates
 
 if TYPE_CHECKING:
@@ -132,14 +132,12 @@ def show_error(label: QLabel, exc: BaseException, *, field: str | None = None) -
 
 def set_red(label: QLabel, *, red: bool) -> None:
     """Use the theme error foreground when red is True, else restore the default."""
-    palette = label.palette()
     color = (
         error_colour(label)
         if red
         else QPalette().color(QPalette.ColorGroup.Active, QPalette.ColorRole.WindowText)
     )
-    palette.setColor(QPalette.ColorRole.WindowText, color)
-    label.setPalette(palette)
+    set_foreground(label, color)
 
 
 def _located(location: str, message: str) -> str:

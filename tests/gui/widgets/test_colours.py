@@ -2,8 +2,10 @@
 
 from collections.abc import Callable
 
+import pytest
 from qtpy.QtGui import QColor, QPalette
 from qtpy.QtWidgets import QApplication, QWidget
+from zcu_tools.gui import widgets
 
 
 def test_error_colour_uses_widget_window_lightness(qapp: QApplication) -> None:
@@ -23,10 +25,6 @@ def test_error_colour_uses_widget_window_lightness(qapp: QApplication) -> None:
     finally:
         widget.deleteLater()
         qapp.processEvents()
-
-
-import pytest
-from zcu_tools.gui import widgets
 
 
 @pytest.mark.parametrize(

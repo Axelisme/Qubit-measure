@@ -38,7 +38,12 @@ from zcu_tools.gui.form import FormErrors, FormModel, FormState
 from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
-from zcu_tools.gui.widgets import DialogPresenter, QtDialogPresenter
+from zcu_tools.gui.widgets import (
+    DialogPresenter,
+    QtDialogPresenter,
+    secondary_colour,
+    set_foreground,
+)
 from zcu_tools.gui.widgets.form import FormEditor
 
 from .analyze_form import AnalyzeFormWidget
@@ -457,7 +462,7 @@ class ExpTabWidget(QWidget):
             # Gate hint shown until a primary analyze result exists (form/Run disabled).
             self._post_gate_label = QLabel("Run analyze first to enable post-analysis.")
             self._post_gate_label.setWordWrap(True)
-            self._post_gate_label.setStyleSheet("color: gray;")
+            set_foreground(self._post_gate_label, secondary_colour(self))
             post_layout.addWidget(self._post_gate_label)
 
             self.post_analyze_btn = _primary_action_button("Run Post-Analysis")

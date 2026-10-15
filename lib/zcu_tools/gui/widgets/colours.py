@@ -28,3 +28,45 @@ def error_colour(widget: QWidget) -> QColor:
     """
     window = widget.palette().color(QPalette.ColorRole.Window)
     return QColor(_ERROR_RED_DARK if window.lightness() < 128 else ERROR_RED_LIGHT)
+
+
+def success_colour(widget: QWidget) -> QColor:
+    """Return a success foreground for the current Window palette."""
+    dark = widget.palette().color(QPalette.ColorRole.Window).lightness() < 128
+    return QColor("#81c995" if dark else "#1e7d32")
+
+
+def warning_colour(widget: QWidget) -> QColor:
+    """Return an attention foreground for the current Window palette."""
+    dark = widget.palette().color(QPalette.ColorRole.Window).lightness() < 128
+    return QColor("#f6c26b" if dark else "#8a5a00")
+
+
+def accent_colour(widget: QWidget) -> QColor:
+    """Return an emphasized foreground for the current Window palette."""
+    dark = widget.palette().color(QPalette.ColorRole.Window).lightness() < 128
+    return QColor("#8ab4f8" if dark else "#1f5fae")
+
+
+def secondary_colour(widget: QWidget) -> QColor:
+    """Mute Text toward Window, retaining the palette's own text hue."""
+    palette = widget.palette()
+    return mixed_colour(
+        palette.color(QPalette.ColorRole.Text),
+        palette.color(QPalette.ColorRole.Window),
+        0.42,
+    )
+
+
+def set_foreground(widget: QWidget, colour: QColor) -> None:
+    """Set WindowText, Text and the widget's foregroundRole, keeping other roles.
+
+    Supports labels, buttons and text edits. Item views' individual items use
+    setForeground instead. Callers keep colour declarations out of stylesheets
+    and calculate the colour from the owner of the visible Window background.
+    """
+    palette = widget.palette()
+    palette.setColor(QPalette.ColorRole.WindowText, colour)
+    palette.setColor(QPalette.ColorRole.Text, colour)
+    palette.setColor(widget.foregroundRole(), colour)
+    widget.setPalette(palette)

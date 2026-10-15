@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 from qtpy.QtCore import Qt
-from qtpy.QtGui import QColor, QPalette
+from qtpy.QtGui import QPalette
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QApplication,

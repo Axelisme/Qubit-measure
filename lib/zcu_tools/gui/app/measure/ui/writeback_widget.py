@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any
 from pydantic import JsonValue
 from qtpy import QtCore
 from qtpy.QtCore import Qt, Signal  # type: ignore[attr-defined]
-from qtpy.QtGui import QPalette
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QApplication,
     QCheckBox,
@@ -36,7 +35,13 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.form import FormErrors, FormWritePath, WriteRejected
-from zcu_tools.gui.widgets import error_colour
+from zcu_tools.gui.widgets import (
+    accent_colour,
+    error_colour,
+    secondary_colour,
+    set_foreground,
+    warning_colour,
+)
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
@@ -218,7 +223,9 @@ class _WritebackRow(QFrame):
         self._cur = current
         self._arrow = QLabel("\u2192")
         self._arrow.setObjectName("writebackArrow")
-        self._arrow.setStyleSheet("color: #8a94a3; font-weight: 700;")
+        font = self._arrow.font()
+        font.setBold(True)
+        self._arrow.setFont(font)
         self._arrow.setFixedWidth(18)
         self._prop = proposed
         self._btn = action
@@ -306,9 +313,9 @@ class WritebackWidget(QWidget):
 
         # Ledger panel stylesheet — unified backgrounds/borders (S1).
         self.setStyleSheet(
-            "QFrame#writebackPanel { background: white; border: 1px solid #d7dde7; border-radius: 7px; }"
+            "QFrame#writebackPanel { background: palette(base); border: 1px solid palette(mid); border-radius: 7px; }"
             "QFrame#writebackPanel QLabel, QFrame#writebackPanel QCheckBox { background: transparent; }"
-            "QFrame#writebackRow { background: white; border: none; border-bottom: 1px solid #e8ecf2; }"
+            "QFrame#writebackRow { background: palette(base); border: none; border-bottom: 1px solid palette(midlight); }"
         )
 
         layout = QVBoxLayout(self)
@@ -334,7 +341,7 @@ class WritebackWidget(QWidget):
 
         self._applied_legend = QLabel("* = not applied")
         self._applied_legend.setObjectName("writebackAppliedLegend")
-        self._applied_legend.setStyleSheet("color: #6b7688;")
+        set_foreground(self._applied_legend, secondary_colour(self))
         layout.addWidget(self._applied_legend)
 
         self._rows_container = QFrame()
@@ -359,14 +366,23 @@ class WritebackWidget(QWidget):
     def changeEvent(self, a0: QtCore.QEvent | None) -> None:
         super().changeEvent(a0)
         if a0 is not None and a0.type() == QtCore.QEvent.Type.PaletteChange:
-            for label in self.findChildren(QLabel, "writebackPreviewUnavailable"):
-                label.setPalette(self._error_palette())
+            self._refresh_foregrounds()
 
-    def _error_palette(self) -> QPalette:
-        """Use the ledger's Window palette, not the transparent panel background."""
-        palette = QPalette()
-        palette.setColor(QPalette.ColorRole.WindowText, error_colour(self))
-        return palette
+    def _refresh_foregrounds(self) -> None:
+        # Labels inside the transparent ledger use the owner's Window palette.
+        colours = {
+            "writebackPreviewUnavailable": error_colour,
+            "writebackUnavailableReason": warning_colour,
+            "writebackCurrent": secondary_colour,
+            "writebackActualPath": secondary_colour,
+            "writebackArrow": secondary_colour,
+            "writebackAppliedLegend": secondary_colour,
+            "writebackProposed": accent_colour,
+        }
+        for label in self.findChildren(QLabel):
+            colour = colours.get(label.objectName())
+            if colour is not None:
+                set_foreground(label, colour(self))
 
     def show_preview_unavailable(
         self, reason: str, *, unavailable_reasons: tuple[str, ...] = ()
@@ -385,7 +401,7 @@ class WritebackWidget(QWidget):
         make_label_selectable(label)
         label.setObjectName("writebackPreviewUnavailable")
         label.setTextFormat(Qt.TextFormat.PlainText)
-        label.setPalette(self._error_palette())
+        set_foreground(label, error_colour(self))
         label.setWordWrap(True)
         self._rows_layout.insertWidget(0, label)
 
@@ -504,10 +520,11 @@ class WritebackWidget(QWidget):
         for reason in unavailable_reasons:
             label = QLabel(f"⚠ {reason}")
             make_label_selectable(label)
-            label.setStyleSheet("color: #b7791f;")
+            set_foreground(label, warning_colour(self))
             label.setObjectName("writebackUnavailableReason")
             label.setWordWrap(True)
             self._rows_layout.addWidget(label)
+        self._refresh_foregrounds()
         self._refresh_apply_enabled()
         self._update_responsive()
 
@@ -522,7 +539,7 @@ class WritebackWidget(QWidget):
         current_label = _value_label(item, self._display_current(item, compact=True))
         current_label.setToolTip(self._display_current(item, compact=False))
         current_label.setObjectName("writebackCurrent")
-        current_label.setStyleSheet("color: #5e6b7d;")
+        set_foreground(current_label, secondary_colour(self))
         current_label.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
         )
@@ -535,7 +552,7 @@ class WritebackWidget(QWidget):
         )
         make_label_selectable(actual_path)
         actual_path.setObjectName("writebackActualPath")
-        actual_path.setStyleSheet("color: #6b7688;")
+        set_foreground(actual_path, secondary_colour(self))
         actual_path.setWordWrap(True)
         self._row_widgets[item.session_id] = (
             current_label,
@@ -569,7 +586,10 @@ class WritebackWidget(QWidget):
             )
         else:
             proposed_label.setObjectName("writebackProposed")
-            proposed_label.setStyleSheet("color: #1f5fae; font-weight: 700;")
+            font = proposed_label.font()
+            font.setBold(True)
+            proposed_label.setFont(font)
+            set_foreground(proposed_label, accent_colour(self))
         proposed_label.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
         )
@@ -761,7 +781,7 @@ class WritebackWidget(QWidget):
         current_label = QLabel(self._display_current(item, compact=False))
         make_label_selectable(current_label)
         current_label.setObjectName("writebackCurrentReadonly")
-        current_label.setStyleSheet("color: #6b7688;")
+        set_foreground(current_label, secondary_colour(self))
         form.addRow("Current:", current_label)
         # target_name is the apply destination, decoupled from the stable
         # session_id (ADR-0008) — editable here so the user can retarget.

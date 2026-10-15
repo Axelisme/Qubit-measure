@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from qtpy.QtCore import Qt, QUrl
-from qtpy.QtGui import QColor, QDesktopServices, QPalette, QResizeEvent, QShowEvent
+from qtpy.QtGui import QColor, QDesktopServices, QResizeEvent, QShowEvent
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -37,7 +37,12 @@ from zcu_tools.gui.session.context_types import (
     PointUseRequest,
 )
 from zcu_tools.gui.session.services.project_settings import ConnectionPreferences
-from zcu_tools.gui.widgets import error_colour
+from zcu_tools.gui.widgets import (
+    error_colour,
+    secondary_colour,
+    set_foreground,
+    success_colour,
+)
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.program import describe_soc
 
@@ -617,10 +622,12 @@ class SetupDialog(QDialog):
         description = self._point_descriptions[current.data(Qt.ItemDataRole.UserRole)]
         if description:
             self._selected_description.setText(f"Description: {description}")
-            self._selected_description.setStyleSheet("")
+            set_foreground(
+                self._selected_description, self.palette().color(self.foregroundRole())
+            )
         else:
             self._selected_description.setText("No description")
-            self._selected_description.setStyleSheet("color: gray;")
+            set_foreground(self._selected_description, secondary_colour(self))
 
     def _refresh_clone_combo(self, labels: list[str]) -> None:
         # "(empty)" uses the owner's setup seed and empty library, not unsaved session parameters.
@@ -638,19 +645,17 @@ class SetupDialog(QDialog):
         self._show_status(
             self._project_status,
             msg,
-            error_colour(self).name() if error else "green",
+            error_colour(self) if error else success_colour(self),
         )
 
     def _set_project_hint(self, msg: str) -> None:
-        self._show_status(self._project_status, msg, "gray")
+        self._show_status(self._project_status, msg, secondary_colour(self))
 
     @staticmethod
-    def _show_status(label: QLabel, msg: str, color: str) -> None:
+    def _show_status(label: QLabel, msg: str, color: QColor) -> None:
         label.setText(_breakable(msg))
         label.setToolTip(msg)
-        palette = QPalette()
-        palette.setColor(QPalette.ColorRole.WindowText, QColor(color))
-        label.setPalette(palette)
+        set_foreground(label, color)
 
     # ------------------------------------------------------------------
     # Connection panel handlers
@@ -720,5 +725,5 @@ class SetupDialog(QDialog):
         self._show_status(
             self._conn_status,
             msg,
-            error_colour(self).name() if error else "green",
+            error_colour(self) if error else success_colour(self),
         )
