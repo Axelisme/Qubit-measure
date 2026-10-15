@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from qick.asm_v2 import QickParam
 from zcu_tools.core.simulation import ChannelSignals, RoundSignals
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
@@ -41,6 +42,19 @@ def test_unknown_unexecuted_module_rejected_before_any_signal_generation(method)
     with pytest.raises(ValueError, match="Feedback.*hidden_feedback.*unsupported"):
         getattr(prog, method)(env.soc, progress=False)
     assert not env.soc.binding.rounds
+
+
+def test_swept_trigger_uses_start_and_truncated_loop_step_not_pointwise_rounding():
+    env = white_noise(std_adc=0)
+    cfg = PulseReadoutCfg(
+        gen_ch=0, ro_ch=0, nqz=1, freq=100, gain=0.1,
+        waveform=ConstWaveformCfg(length=0.1), ro_length=0.1,
+        trig_offset=QickParam(0, {"axis": 0.007}),
+    )
+    prog = ModularProgramV2(env.soccfg, ProgramV2Cfg(), modules=[cfg.build("readout")], sweep=[("axis", 3)])
+    prog.acquire(env.soc, progress=False)
+    request = env.soc.binding.last_request
+    assert [t.readouts[0].trigger_us[0] for t in request.timelines] == pytest.approx([0, 1 / 430.08, 2 / 430.08])
 
 
 def test_join_emits_interleaved_read_order_and_companion_raw_from_same_realization():
