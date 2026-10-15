@@ -22,8 +22,6 @@ from .types import (
     PostAnalyzeRequest,
     PostWritebackRequest,
     RunRequest,
-    SaveDataRequest,
-    SavePaths,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
@@ -42,7 +40,7 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
 
     This Protocol lists *only* the members the framework actually calls; it
     carries no generics and no implementation. The shared default behaviour
-    (run delegation, save-path policy, no-op analysis, …) lives in
+    (run delegation, persistence payload preparation, no-op analysis, …) lives in
     ``zcu_tools.gui.app.measure.adapter.base.BaseAdapter``, which adapters
     inherit and which satisfies this Protocol structurally.
 
@@ -84,10 +82,6 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         template catalog after return and owns editable state. Factory and
         template errors propagate at use, never during catalog registration.
         """
-        ...
-
-    def make_save_paths(self, ctx: SessionEnv) -> SavePaths:
-        """Resolve the save-path policy for the given context."""
         ...
 
     @classmethod
@@ -190,8 +184,4 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         a missing persistence declaration raises TypeError, ValueError or
         NotImplementedError. Do not mutate result arrays during saving.
         """
-        ...
-
-    def save(self, req: SaveDataRequest[Any]) -> None:
-        """Persist the run result to disk."""
         ...

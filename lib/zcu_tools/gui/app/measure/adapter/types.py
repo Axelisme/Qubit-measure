@@ -16,17 +16,15 @@ from typing_extensions import TypeVar
 
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import CfgValidationContext, ConfigBase
-    from zcu_tools.datafile import RunMetadata
     from zcu_tools.gui.session.parameters import ParameterContext
     from zcu_tools.resources.entry.ledger_models import JsonObject
-    from zcu_tools.resources.entry.storage import PointStorageBinding
 
 
 # ``SocProtocol``/``SocCfgProtocol`` + the ``SocHandle``/``SocCfgHandle`` aliases,
 # ``ContextReadiness``, and ``SessionEnv`` are session-core value types — they live
 # in ``gui/session/types`` (no experiment cfg-tree coupling). They are re-exported
 # from the adapter package because ``ExpAdapterProtocol``'s signatures speak in
-# them (``make_save_paths(ctx: SessionEnv)``, ``RunRequest.soc: SocHandle``).
+# them (``WritebackRequest.ctx: SessionEnv``, ``RunRequest.soc: SocHandle``).
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.session.types import SessionEnv, SocCfgHandle, SocHandle
 
@@ -233,25 +231,6 @@ class PostAnalyzeRequest(Generic[T_Result, T_AnalyzeResult, T_PostAnalyzeParams]
 
 
 @dataclass(frozen=True)
-class SaveDataRequest(Generic[T_Result]):
-    """Worker inputs captured from one tab, not the current session selection.
-
-    run_result is the pane-owned result; data_path is the reserved output file.
-    parameters is the tab's fixed role capture, None for context-free adapters.
-    storage retains its original entry/point roots, description, roles and ledger
-    capability. metadata is this result's historical Run evidence, or None
-    when no evidence was acquired. comment is the user's annotation.
-    """
-
-    run_result: T_Result
-    data_path: str
-    parameters: ParameterContext | None
-    storage: PointStorageBinding
-    metadata: RunMetadata | None = None
-    comment: str = ""
-
-
-@dataclass(frozen=True)
 class WritebackRequest(Generic[T_Result, T_AnalyzeResult]):
     run_result: T_Result
     analyze_result: T_AnalyzeResult
@@ -329,9 +308,3 @@ class SampleWriteback(WritebackItem):
     """
 
     proposed_value: JsonObject
-
-
-@dataclass
-class SavePaths:
-    data_path: str
-    image_path: str
