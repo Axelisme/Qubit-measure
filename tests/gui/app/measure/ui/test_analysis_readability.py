@@ -418,3 +418,54 @@ def test_writeback_unavailable_reason_uses_owner_warning(qapp, window_palette):
     finally:
         widget.deleteLater()
         qapp.processEvents()
+
+
+def test_all_ledger_and_open_edit_foregrounds_follow_palette_change(
+    scalar_ledger, qapp
+):
+    from qtpy.QtGui import QColor, QPalette
+    from zcu_tools.gui.widgets import accent_colour, secondary_colour, warning_colour
+
+    widget, item = scalar_ledger
+    palette = widget.palette()
+    palette.setColor(QPalette.ColorRole.Window, QColor("white"))
+    palette.setColor(QPalette.ColorRole.Text, QColor("black"))
+    widget.setPalette(palette)
+    widget.populate(
+        [item],
+        {
+            item.session_id: WritebackValues(
+                actual_path="Q1.t1",
+                current=20.0,
+                proposed=item.proposed_value,
+                unit="us",
+            )
+        },
+        unavailable_reasons=("No other destination",),
+    )
+    next(
+        button for button in widget.findChildren(QPushButton) if button.text() == "Edit"
+    ).click()
+    qapp.processEvents()
+    colours = {
+        "writebackCurrent": secondary_colour,
+        "writebackProposed": accent_colour,
+        "writebackActualPath": secondary_colour,
+        "writebackArrow": secondary_colour,
+        "writebackAppliedLegend": secondary_colour,
+        "writebackUnavailableReason": warning_colour,
+        "writebackCurrentReadonly": secondary_colour,
+    }
+    try:
+        palette.setColor(QPalette.ColorRole.Window, QColor("#353535"))
+        palette.setColor(QPalette.ColorRole.Text, QColor("#eeeeee"))
+        widget.setPalette(palette)
+        qapp.processEvents()
+        for name, colour in colours.items():
+            label = widget.findChild(QLabel, name)
+            assert label is not None
+            assert label.palette().color(label.foregroundRole()) == colour(widget), name
+    finally:
+        for dialog in widget.findChildren(QDialog):
+            dialog.reject()
+        qapp.processEvents()

@@ -60,6 +60,14 @@ def test_existing_tab_tracks_unselected_and_active_source(
     )
     ctrl.add_view(window)
     try:
+        from qtpy.QtGui import QColor, QPalette
+        from qtpy.QtWidgets import QLabel
+
+        palette = window.palette()
+        palette.setColor(QPalette.ColorRole.Window, QColor("white"))
+        palette.setColor(QPalette.ColorRole.WindowText, QColor("black"))
+        window.setPalette(palette)
+        window.refresh_context_panel()
         tab_id = ctrl.tab_control.new_tab("fake")
         tabs = window.findChild(QTabWidget)
         assert tabs is not None
@@ -89,6 +97,16 @@ def test_existing_tab_tracks_unselected_and_active_source(
         assert ctrl.tab_control.list_tab_ids() == [tab_id]
         assert ctrl.cfg_resources.lookup(tab_id) is cfg
         assert tabs.tabText(0) == title
+        palette.setColor(QPalette.ColorRole.Window, QColor("#353535"))
+        palette.setColor(QPalette.ColorRole.WindowText, QColor("white"))
+        window.setPalette(palette)
+        qapp.processEvents()
+        for name in ("current_entry", "current_point"):
+            label = window.findChild(QLabel, name)
+            assert label is not None
+            assert label.palette().color(
+                label.foregroundRole()
+            ) == window.palette().color(QPalette.ColorRole.WindowText), name
     finally:
         assert background.quiesce()
         for tab_id in tuple(ctrl.tab_control.list_tab_ids()):

@@ -767,3 +767,31 @@ def test_setup_success_replaces_error_foreground(qapp, window_palette):
         dialog.close()
         dialog.deleteLater()
         qapp.processEvents()
+
+
+def test_selected_description_restores_live_theme_inheritance(entry_dialog, qapp):
+    from qtpy.QtGui import QColor, QPalette
+
+    dialog, controller, _state = entry_dialog
+    palette = dialog.palette()
+    palette.setColor(QPalette.ColorRole.WindowText, QColor("black"))
+    dialog.setPalette(palette)
+    controller.setup_control.new_point(
+        PointCreateRequest("described", "A note", CommandOrigin("gui"))
+    )
+    controller.setup_control.new_point(
+        PointCreateRequest("empty", "", CommandOrigin("gui"))
+    )
+    listing = point_list(dialog)
+    listing.setCurrentRow(1)
+    label = selected_description(dialog)
+    assert label.text() == "No description"
+    listing.setCurrentRow(0)
+    assert label.text() == "Description: A note"
+    palette.setColor(QPalette.ColorRole.Window, QColor("#353535"))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor("white"))
+    dialog.setPalette(palette)
+    qapp.processEvents()
+    assert label.palette().color(label.foregroundRole()) == dialog.palette().color(
+        QPalette.ColorRole.WindowText
+    )

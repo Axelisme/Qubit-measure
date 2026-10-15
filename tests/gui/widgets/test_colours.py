@@ -81,3 +81,31 @@ def test_set_foreground_updates_label_and_edit_text_without_changing_window(qapp
     assert widget.palette().color(QPalette.ColorRole.Text) == colour
     assert widget.palette().color(QPalette.ColorRole.Window) == original_window
     widget.deleteLater()
+
+
+@pytest.mark.parametrize(
+    "role", [QPalette.ColorRole.WindowText, QPalette.ColorRole.Text]
+)
+def test_reset_foreground_restores_live_inheritance(qapp, role):
+    from qtpy.QtWidgets import QLabel
+    from zcu_tools.gui.widgets import reset_foreground, set_foreground
+
+    owner = QWidget()
+    label = QLabel("Normal", owner)
+    try:
+        palette = owner.palette()
+        palette.setColor(QPalette.ColorRole.WindowText, QColor("black"))
+        palette.setColor(QPalette.ColorRole.Text, QColor("black"))
+        owner.setPalette(palette)
+        set_foreground(label, QColor("purple"))
+        assert label.palette().color(role) == QColor("purple")
+        reset_foreground(label)
+        palette.setColor(QPalette.ColorRole.WindowText, QColor("white"))
+        palette.setColor(QPalette.ColorRole.Text, QColor("white"))
+        palette.setColor(QPalette.ColorRole.Window, QColor("#353535"))
+        owner.setPalette(palette)
+        qapp.processEvents()
+        assert label.palette().color(role) == owner.palette().color(role)
+    finally:
+        owner.deleteLater()
+        qapp.processEvents()

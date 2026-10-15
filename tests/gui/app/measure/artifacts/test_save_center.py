@@ -462,3 +462,87 @@ def test_whole_artifact_commands_include_json_only_and_saved_items(
     finally:
         center.deleteLater()
         qapp.processEvents()
+
+
+@pytest.mark.parametrize(
+    "status_name", ["NOT_SAVED", "PARTIALLY_SAVED", "UNSAVED_CHANGES", "SAVED"]
+)
+def test_artifact_status_recolours_on_palette_change(qapp, tmp_path, status_name):
+    from zcu_tools.gui.app.measure.artifacts import SaveStatus
+    from zcu_tools.gui.widgets import accent_colour, secondary_colour, warning_colour
+
+    _, current = snapshot(tmp_path)
+    status = SaveStatus[status_name]
+    current = replace(
+        current,
+        artifacts=tuple(
+            replace(
+                section,
+                artifacts=tuple(
+                    replace(artifact, status=status) for artifact in section.artifacts
+                ),
+            )
+            for section in current.artifacts
+        ),
+    )
+    colour = {
+        SaveStatus.NOT_SAVED: secondary_colour,
+        SaveStatus.PARTIALLY_SAVED: warning_colour,
+        SaveStatus.UNSAVED_CHANGES: warning_colour,
+        SaveStatus.SAVED: accent_colour,
+    }[status]
+    center = ArtifactSaveCenter(_CAPABILITIES)
+    try:
+        palette = center.palette()
+        palette.setColor(QPalette.ColorRole.Window, QColor("white"))
+        palette.setColor(QPalette.ColorRole.Text, QColor("black"))
+        center.setPalette(palette)
+        center.update_from_snapshot(current)
+        statuses = [
+            label
+            for label in center.findChildren(QLabel)
+            if status_name.replace("_", " ") in label.text()
+        ]
+        assert len(statuses) == 3
+        palette.setColor(QPalette.ColorRole.Window, QColor("#353535"))
+        palette.setColor(QPalette.ColorRole.Text, QColor("#eeeeee"))
+        center.setPalette(palette)
+        qapp.processEvents()
+        assert all(
+            label.palette().color(label.foregroundRole()) == colour(center)
+            for label in statuses
+        )
+    finally:
+        center.deleteLater()
+        qapp.processEvents()
+
+
+def test_no_persistence_hint_recolours_on_palette_change(qapp):
+    from zcu_tools.gui.widgets import secondary_colour
+
+    center = ArtifactSaveCenter(_CAPABILITIES)
+    try:
+        palette = center.palette()
+        palette.setColor(QPalette.ColorRole.Window, QColor("white"))
+        palette.setColor(QPalette.ColorRole.Text, QColor("black"))
+        center.setPalette(palette)
+        center.update_from_snapshot(
+            TabSnapshot(
+                adapter_name="no-save",
+                cfg_input={},
+                save=SavePaneSnapshot(saves_to_entry=False),
+            )
+        )
+        label = next(
+            label
+            for label in center.findChildren(QLabel)
+            if "does not save" in label.text()
+        )
+        palette.setColor(QPalette.ColorRole.Window, QColor("#353535"))
+        palette.setColor(QPalette.ColorRole.Text, QColor("#eeeeee"))
+        center.setPalette(palette)
+        qapp.processEvents()
+        assert label.palette().color(label.foregroundRole()) == secondary_colour(center)
+    finally:
+        center.deleteLater()
+        qapp.processEvents()
