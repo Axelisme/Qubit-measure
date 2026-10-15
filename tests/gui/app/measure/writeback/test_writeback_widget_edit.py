@@ -5,7 +5,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import TracebackType
 from typing import Literal
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QCoreApplication, QEvent
@@ -17,7 +17,6 @@ from qtpy.QtWidgets import (
     QDialog,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
 )
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
@@ -48,7 +47,7 @@ from tests.gui.app.measure._synthetic import (
     ModuleProposalAdapter,
     SampleParams,
 )
-from tests.gui.app.measure.ui._qt_interactions import modal_action, wait_until
+from tests.gui.app.measure.ui._qt_interactions import wait_until
 from tests.gui.widgets.form._field_errors import field_error
 from tests.gui.widgets.form._text_input import commit_text_on_focus_loss as commit_text
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
@@ -131,11 +130,10 @@ def test_edit_md_item_can_change_target_name(qapp, widget_factory, control_facto
 
     widget = widget_factory(item, None)
     _edit_button(widget).click()
-    dialog = _find_open_dialog("Edit Value:")
+    dialog = _find_open_dialog("Edit value —")
     try:
-        line_edits = dialog.findChildren(QLineEdit)
-        # First field is "Apply as" (target_name), second is "Value".
-        name_edit, value_edit = line_edits[0], line_edits[1]
+        name_edit = dialog.findChild(QLineEdit, "writebackApplyAs")
+        value_edit = dialog.findChild(QLineEdit, "writebackValue")
         assert name_edit.text() == "r_f"
 
         name_edit.setText("r_f_tuned")
@@ -161,17 +159,15 @@ def test_edit_md_item_rejects_blank_target_name(qapp, widget_factory, control_fa
 
     widget = widget_factory(item, None)
     _edit_button(widget).click()
-    dialog = _find_open_dialog("Edit Value:")
+    dialog = _find_open_dialog("Edit value —")
     try:
-        name_edit = dialog.findChildren(QLineEdit)[0]
+        name_edit = dialog.findChild(QLineEdit, "writebackApplyAs")
         name_edit.setText("   ")
         save_btn = next(
             b for b in dialog.findChildren(QPushButton) if b.text() == "Save"
         )
-        # The validation error pops a modal QMessageBox; stub it so the test
-        # does not block on it.
-        with patch("zcu_tools.gui.app.measure.writeback.widget.QMessageBox.critical"):
-            save_btn.click()
+        assert not save_btn.isEnabled()
+        save_btn.click()
 
         # Blank name is rejected: target_name unchanged, dialog stays open.
         assert item.target_name == "r_f"
@@ -188,9 +184,9 @@ def test_edit_md_item_parses_complex_value(qapp, widget_factory, control_factory
 
     widget = widget_factory(item, None)
     _edit_button(widget).click()
-    dialog = _find_open_dialog("Edit Value:")
+    dialog = _find_open_dialog("Edit value —")
     try:
-        value_edit = dialog.findChildren(QLineEdit)[1]
+        value_edit = dialog.findChild(QLineEdit, "writebackValue")
         value_edit.setText("3-4j")
         save_btn = next(
             b for b in dialog.findChildren(QPushButton) if b.text() == "Save"
@@ -214,15 +210,15 @@ def test_edit_md_item_rejects_unparseable_complex(
 
     widget = widget_factory(item, None)
     _edit_button(widget).click()
-    dialog = _find_open_dialog("Edit Value:")
+    dialog = _find_open_dialog("Edit value —")
     try:
-        value_edit = dialog.findChildren(QLineEdit)[1]
+        value_edit = dialog.findChild(QLineEdit, "writebackValue")
         value_edit.setText("not a number")
         save_btn = next(
             b for b in dialog.findChildren(QPushButton) if b.text() == "Save"
         )
-        with patch("zcu_tools.gui.app.measure.writeback.widget.QMessageBox.critical"):
-            save_btn.click()
+        assert not save_btn.isEnabled()
+        save_btn.click()
 
         # Invalid input rejected: value unchanged, dialog stays open.
         assert item.proposed_value == complex(1, 2)
@@ -322,7 +318,7 @@ def _pulse(ctrl: Controller, name: str) -> PulseSpec:
 
 def _module_dialog(widget: WritebackWidget) -> QDialog:
     _edit_button(widget).click()
-    dialog = _find_open_dialog("Edit Config:")
+    dialog = _find_open_dialog("Edit module —")
     assert dialog.findChild(FormEditor) is not None
     return dialog
 
@@ -371,7 +367,7 @@ def test_module_dialog_edits_shared_form_and_applies_as_new_name(module_widget):
     assert mode is not None
     mode.trigger()
     commit_text(_input(dialog, "gain"), "general.ext.gain / 2")
-    name = dialog.findChildren(QLineEdit)[0]
+    name = dialog.findChild(QLineEdit, "writebackApplyAs")
     name.setText("Q1.pulses.retuned")
     name.editingFinished.emit()
     # A blank Apply-as does not erase the last destination.
@@ -419,7 +415,7 @@ def test_module_option_command_uses_captured_source_and_current_admission(
         sys.excepthook = record_qt_exception
         _edit_button(widget).click()
         assert not errors, f"Module Edit must open through the public Qt seam: {errors}"
-        dialog = _find_open_dialog("Edit Config:")
+        dialog = _find_open_dialog("Edit module —")
         form = ctrl.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
         captured = form.parameters.library.waveform_spec(MODULE_PROPOSAL_WAVEFORM)
         ctrl.apply_writeback_for_pane(tab_id, pane)
@@ -507,7 +503,7 @@ def test_invalid_module_dialog_marks_row_refuses_apply_and_repairs(
     else:
         assert float(_input(dialog, "gain").text()) == pytest.approx(0.3)
     commit_text(_input(dialog, "gain"), "0.45")
-    assert proposed.text().startswith("map[")
+    assert proposed.text().endswith(" changes")
     assert _apply(widget).isEnabled()
     widget.apply_requested.connect(lambda: ctrl.apply_writeback_for_pane(tab_id, pane))
     _apply(widget).click()
@@ -517,17 +513,11 @@ def test_invalid_module_dialog_marks_row_refuses_apply_and_repairs(
 def test_module_dialog_reports_retired_draft_without_opening_form(module_widget, qapp):
     ctrl, widget, tab_id, _pane = _populate_module(module_widget)
     ctrl.tab_control.close_tab(tab_id)
-    messages: list[str] = []
-
-    def acknowledge(dialog: QMessageBox) -> None:
-        messages.append(dialog.text())
-        dialog.accept()
-
-    modal_action(
-        qapp, lambda: _edit_button(widget).click(), [(QMessageBox, acknowledge)]
-    )
-    assert messages and tab_id in messages[0]
-    assert not any(dialog.isVisible() for dialog in widget.findChildren(QDialog))
+    _edit_button(widget).click()
+    dialog = _find_open_dialog("Edit module —")
+    assert tab_id in "\n".join(label.text() for label in dialog.findChildren(QLabel))
+    assert dialog.findChild(FormEditor) is None
+    dialog.accept()
 
 
 @pytest.mark.parametrize("scenario", ["open-local", "closed-state"])
@@ -586,19 +576,16 @@ def test_busy_edit_request_shows_guard_reason_without_opening_dialog(
     module_widget, qapp
 ):
     ctrl, widget, tab_id, _pane = _populate_module(module_widget)
-    messages: list[str] = []
-
-    def acknowledge(dialog: QMessageBox) -> None:
-        messages.append(dialog.text())
-        dialog.accept()
-
     ctrl.set_running(tab_id, running=True)
     try:
-        modal_action(
-            qapp, lambda: _edit_button(widget).click(), [(QMessageBox, acknowledge)]
+        _edit_button(widget).click()
+        dialog = _find_open_dialog("Edit module —")
+        assert (
+            "busy"
+            in "\n".join(label.text() for label in dialog.findChildren(QLabel)).lower()
         )
-        assert messages and "busy" in messages[0].lower()
-        assert not any(dialog.isVisible() for dialog in widget.findChildren(QDialog))
+        assert dialog.findChild(FormEditor) is None
+        dialog.accept()
         assert (
             MODULE_PROPOSAL_TARGET
             not in ctrl.context_control.read_context().library.module_keys()
