@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from zcu_tools.gui.app.measure.services.ports import CfgEdit
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import LibraryChange, SavedPoint
 from zcu_tools.gui.session.value_lookup import ValueInfo
 
@@ -20,32 +20,114 @@ if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
 
+def h_context_aliases_set(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Apply complete ordered authored rows through the context owner.
+
+    Each row has exactly string alias/value fields. The owner validates the
+    whole table, saves an opened entry atomically, then installs/publishes it.
+    Without an entry this is memory-only. Input/storage failures preserve the
+    previous table. Return installed authored rows without resolving them;
+    success does not imply resolvability. No dialog, point or ledger effects.
+    """
+    raw = params["rows"]
+    if not isinstance(raw, list):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "rows must be a list")
+    rows: list[AliasRow] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, dict) or set(item) != {"alias", "value"}:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"rows[{index}] must contain exactly alias and value",
+            )
+        alias, value = item["alias"], item["value"]
+        if not isinstance(alias, str) or not isinstance(value, str):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"rows[{index}].alias and value must be strings",
+            )
+        rows.append(AliasRow(alias, value))
+    adapter.context_control.apply_alias_rows(tuple(rows))
+    return {
+        "rows": [
+            {"alias": row.alias, "value": row.value}
+            for row in adapter.context_control.get_alias_rows()
+        ]
+    }
+
+
+def h_context_set_parameter(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Set one concrete path at the currently selected point, preserving metadata.
+
+    Fix the target and before value with one pre-write capture. Missing/null
+    request values are rejected by the method entry; nested YAML null is valid.
+    Before is null for both unset and explicit null. Return the submitted value,
+    not a post-write readback. No ledger, dialog, selection or retry effects.
+    Owner errors propagate. Run uses its fixed capture, so direct writes during
+    Run are allowed without changing that capture.
+    """
+    path = str(params["path"])
+    if path.startswith("$"):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "path must be a concrete parameter path"
+        )
+    try:
+        value = context_wire_value(params["value"])
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, f"invalid parameter value: {exc}"
+        ) from exc
+    capture = adapter.context_control.read_context()
+    before = context_wire_value(capture.lookup_point(path).value)
+    adapter.context_control.set_parameter(capture.target, path, value, metadata=None)
+    return {"path": path, "before": before, "value": value}
+
+
 def h_context_ml_edit(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
+    """Write one atomic Form edit batch to a library entry; reply {valid, errors}.
+
+    Edits use tab.edit_cfg paths and values. Values carrying the retired
+    __kind tags are rejected with the expression form before any write.
+    """
+    from ..form_observation import form_writes
+
     raw = params["edits"]
     if not isinstance(raw, list) or not raw:
         raise RemoteError(ErrorCode.INVALID_PARAMS, "edits must be a nonempty list")
-    edits: list[CfgEdit] = []
     for index, item in enumerate(raw):
-        if (
-            not isinstance(item, dict)
-            or not isinstance(item.get("path"), str)
-            or not item["path"]
-            or "value" not in item
-        ):
+        value = item.get("value") if isinstance(item, dict) else None
+        if isinstance(value, dict) and "__kind" in value:
             raise RemoteError(
                 ErrorCode.INVALID_PARAMS,
-                f"edits[{index}] requires a nonempty string path and value",
+                f"edits[{index}].value uses a retired __kind tag; write an "
+                'expression as {"expr": "<text>"} and other values directly',
             )
-        edits.append(CfgEdit(item["path"], item["value"]))
+    batch = form_writes(raw)
+    kind = params["kind"]
+    # The method entry restricts kind to these names; this narrows its type.
+    if kind not in ("module", "waveform"):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown library kind {kind!r}")
     save_as = params["save_as"]
-    return adapter.ctrl.edit_library(
-        str(params["kind"]),
+    errors = adapter.ctrl.edit_library_entry(
+        kind,
         str(params["name"]),
-        edits,
+        batch,
         save_as=str(save_as) if save_as is not None else None,
-    ).to_wire()
+    )
+    if errors is None:
+        return {"valid": True, "errors": []}
+    return {
+        "valid": False,
+        "errors": [
+            {"path": list(path), "message": message}
+            for path, message in errors.messages.items()
+        ],
+    }
 
 
 def h_context_labels(
@@ -225,8 +307,7 @@ def h_context_ml_list_roles(
 ) -> Mapping[str, object]:
     """Project template metadata through the unchanged context.ml_list_roles RPC."""
     del params
-    catalog = adapter.ctrl.get_template_catalog()
-    return {"roles": list(catalog.list_meta())}
+    return {"roles": adapter.ctrl.list_templates()}
 
 
 def h_context_ml_create_from_role(
@@ -234,17 +315,16 @@ def h_context_ml_create_from_role(
 ) -> Mapping[str, object]:
     """Create a ModuleLibrary entry from the template ID in wire role_id.
 
-    One-shot: seeds md-linked defaults (lowered against the live md), writes ml.
-    Edit afterwards via editor.new(from_name=...).
+    One-shot: validates captured template Form input and writes its Spec.
+    Edit afterwards via context.ml_edit.
     """
     template_id = str(params["role_id"])
     name = str(params["name"])
     # The item kind is a property of the template, not an independent agent input —
     # derive it from role_id so the agent cannot pass a mismatching pair. An
-    # unknown role_id fails fast as invalid_params; a missing catalog (no project)
-    # surfaces as precondition_failed (mirror h_context_ml_list_roles).
+    # unknown role_id fails fast as invalid_params.
     try:
-        item_kind = adapter.ctrl.get_template_catalog().get(template_id).item_kind
+        item_kind = adapter.ctrl.template_kind(template_id)
     except KeyError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     try:

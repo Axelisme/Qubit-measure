@@ -1,8 +1,10 @@
 # v2 experiment authoring
 
-**Last updated:** 2026-10-13，框架測試與實驗定義分離
+**Last updated:** 2026-10-15，實驗 cfg 與 GUI 持久 Spec 邊界
 
 `zcu_lab/v2/` 擁有使用 program/v2 的具體實驗。每個實驗的 `core.py` 保存 cfg、Result、run 與分析政策。共同實驗介面、Result 保存映射與 cfg 組裝見[框架 README](../../lib/zcu_tools/experiment/README.md)。本頁保留實驗家族、具體 workflow 與撰寫慣例。
+
+GUI adapter 的 module writeback 直接提出持久 ModuleSpec，由共用 Form 編輯，再交 Library owner 保存。Core 仍接收執行用 typed cfg，不依賴 GUI 表單或 draft。作者入口見 [measure authoring](measure-authoring.md)，跨宿主契約見 ADR-0065、ADR-0008。
 
 一般實驗以 [runtime](../../lib/zcu_tools/experiment/v2/runtime/README.md) 的 `SignalBuffer`、`Schedule` 與 `ProgramBuilder` 編排 host loop 與 program acquire。Runtime 的 buffer、stop、retry 和 lifecycle 機制見其文件。
 

@@ -14,7 +14,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from zcu_tools.gui.widgets.cfg.fields import (
+from zcu_tools.gui.widgets.form.value_widgets import (
     connect_committed_value_widget,
     make_value_widget,
     read_value_widget,

@@ -39,8 +39,8 @@ Onetone 的 linear 與 homophasal 取樣繼續使用同一個 Readout。
 `cfg_model` 擁有 Spec、cfg 驗證、引用展開與參數設定。
 `program` 負責 native conversion、QICK 宣告與排程。
 `resources` 擁有 library 文件與 I/O。
-`experiment.cfg_editing` 擁有 editable shape catalog，`gui.form_adapter` 從 Spec 推導 Form。
-這些分工沿用 [[0072]]、[[0051]] 與 [[0073]]。
+`gui.form_adapter` 從 core cfg 與持久 Spec 推導 Form，session 擁有 Library entry 表單。
+這些分工沿用 [[0072]]、[[0065]] 與 [[0073]]，不保留 editable shape catalog。
 
 依賴沿用 `.importlinter` 的 C11、C16、C19 與 `form-adapter-no-host`。
 Readout 不新增 registry、factory 或跨 owner resolver。
@@ -67,7 +67,7 @@ Form 直接編輯 `gen_ch`、`ro_ch`、`freq`、`gain`、`waveform` 與 ADC wind
 `gen_ch`、`ro_ch` 必填且可編輯，不從其他欄位推導或補值。
 Form 只在整個 module 和 waveform 的 inline input 加入 wrapper。
 例如 recipe 頻率路徑為 `modules.readout.module.freq`，持久 Spec 路徑為 `freq`。
-Readout 專屬的 shape inheritance 與自動補值不再存在，generic inheritance 不變。
+Readout 不使用舊 shape inheritance 或自動補值，表單由共用 Form 生成器建立。
 
 舊 nested Readout 與 Direct 條目不遷移，也不加相容讀取。
 正常驗證入口回報具體 library key，作者重建條目。

@@ -8,15 +8,7 @@ import pytest
 from zcu_tools.cfg_model import PulseReadoutSpec, PulseSpec
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.specs import make_pulse_spec
 from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog, TemplateEntry
-from zcu_tools.gui.cfg import (
-    EvalValue,
-    ReferenceValue,
-    make_custom_reference_key,
-    make_default_value,
-)
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
@@ -25,7 +17,7 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import ResultEntry, component_registry
 
 from tests.gui.app.measure._components import register_all
-from tests.gui.app.measure._templates import register_all_templates
+from tests.gui.app.measure._templates import TEMPLATES
 from tests.resources.entry.fakes import registry_state, restore_registry
 
 
@@ -33,7 +25,6 @@ from tests.resources.entry.fakes import registry_state, restore_registry
 class TemplateSession:
     controller: Controller
     entry: ResultEntry
-    catalog: TemplateCatalog
     state: State
 
 
@@ -57,22 +48,19 @@ def session(qapp, tmp_path: Path) -> Generator[TemplateSession]:
         entry.setup.add_component("Empty", kind="resonator")
         entry.new_point("first")
         entry.new_point("second")
-        catalog = TemplateCatalog()
-        register_all_templates(catalog)
         state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
         ctrl = Controller(
             state,
-            Registry(),
+            Registry(templates=TEMPLATES),
             None,
             BaseEventBus(),
-            template_catalog=catalog,
             project_root=str(tmp_path),
         )
         ctrl.setup_control.open_entry(EntryRequest("entry"))
         ctrl.context_control.use_point(PointUseRequest("first"))
         ctrl.context_control.set_alias_rows((AliasRow("resonator", "R1"),))
         try:
-            yield TemplateSession(ctrl, entry, catalog, state)
+            yield TemplateSession(ctrl, entry, state)
             assert registry_state() == installed, (
                 "template capture tests polluted registries"
             )
@@ -136,44 +124,8 @@ def test_bound_empty_resonator_reports_first_missing_leaf_without_write(
     ledger = session.entry.ledger.events()
     with pytest.raises(InvalidInputError) as error:
         ctrl.create_from_template("module", "res_probe", "Empty.readout.probe")
-    assert "$resonator.wiring.ch" in str(error.value)
-    assert "missing parameter" in str(error.value)
+    assert "ch" in str(error.value)
+    assert "Field required" in str(error.value)
     assert ctrl.read_context().library.document() == before.library.document()
     assert session.state.version.get("context") == version
     assert session.entry.ledger.events() == ledger
-
-
-def test_factory_and_apply_keep_same_capture_across_source_and_selection_changes(
-    session: TemplateSession,
-) -> None:
-    ctrl = session.controller
-    origin = ctrl.read_context().target
-    seen: list[object] = []
-
-    def make_value(environment: SessionEnv) -> ReferenceValue:
-        parameters = environment.parameters
-        assert parameters is not None
-        assert parameters.aliases == (AliasRow("resonator", "R1"),)
-        seen.append(parameters.value("$resonator.freq"))
-        ctrl.context_control.set_parameter(origin, "R1.freq", 7000.0)
-        ctrl.context_control.set_alias_rows((AliasRow("resonator", "R2"),))
-        ctrl.context_control.use_point(PointUseRequest("second"))
-        value = make_default_value(make_pulse_spec())
-        value.fields["freq"] = EvalValue("$resonator.freq")
-        return ReferenceValue(make_custom_reference_key("pulse"), value)
-
-    session.catalog.register(
-        TemplateEntry(
-            "fixed_frequency", "Fixed frequency", "module", make_pulse_spec, make_value
-        )
-    )
-    ctrl.create_from_template("module", "fixed_frequency", "R1.pulses.fixed")
-    assert seen == [6123.0]
-    assert ctrl.read_context().target != origin
-    assert ctrl.read_context().library.module_keys() == ()
-    written = ctrl.context_control.read_target(origin).library.module_spec(
-        "R1.pulses.fixed"
-    )
-    assert isinstance(written, PulseSpec)
-    assert written.freq == 6123.0
-    assert ctrl.context_control.read_target(origin).value("R1.freq") == 7000.0

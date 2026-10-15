@@ -15,9 +15,7 @@ from zcu_tools.gui.session.value_lookup import (
     ValueRef,
     ValueRegistry,
     ValueTypeError,
-    decode_value_ref,
     name_from_type,
-    parse_value_ref_text,
     resolve_value_ref,
 )
 
@@ -169,18 +167,13 @@ def test_owner_unregister_and_registration_close_are_scoped() -> None:
         registry.get_as("source.value", float)
 
 
-def test_value_ref_decode_parse_and_resolve() -> None:
+def test_value_ref_resolve() -> None:
     registry = ValueRegistry()
     registry.register(ValueKey("device.flux.value", float), lambda: 0.25, owner="dev")
     registry.register(
         ValueKey("device.flux.name", str), lambda: "flux_yoko", owner="dev"
     )
 
-    assert decode_value_ref(
-        {"__kind": "value_ref", "key": "device.flux.value", "type": "float"}
-    ) == ValueRef("device.flux.value", "float")
-    assert decode_value_ref({"__kind": "eval", "expr": "r_f"}) is None
-    assert parse_value_ref_text(" @{device.flux.name} ") == ValueRef("device.flux.name")
     assert resolve_value_ref(ValueRef("device.flux.value"), registry) == pytest.approx(
         0.25
     )

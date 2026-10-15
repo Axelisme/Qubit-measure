@@ -62,7 +62,9 @@ def saving_view(
             metadata=session.metadata,
             parameters=original.run.parameters,
         )
-        window = MainWindow(ctrl, dialog_presenter=RecordingDialogPresenter())
+        window = MainWindow(
+            ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
+        )
         ctrl.add_view(window)
         window.add_tab_widget(tab_id, "saving")
         center = window.findChild(ArtifactSaveCenter)

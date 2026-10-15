@@ -4,13 +4,13 @@ status: draft
 
 # Pydantic 表單、輸入與宿主提交
 
-**Last updated:** 2026-10-14，選項清單、tagged ref／inline 與不依 previous 的 defaults
+**Last updated:** 2026-10-15，共用 Form 與持久 Spec 編輯
 
 ## 脈絡與範圍
 
-Workflow plan 與 tunables 需要 sequence、nullable、tagged union、typed mapping、expression 和 library module reference。新表單用 Pydantic 表示普通值，用獨立的 input JSON 保存未填與 expression。它不擴充 CfgSchema。Measure tab 使用這份工具，推導與宿主接線見 [[0073]]。
+Workflow plan 與 tunables 需要 sequence、nullable、tagged union、typed mapping、expression 和 library module reference。共用表單用 Pydantic 表示普通值，用獨立的 input JSON 保存未填與 expression。Measure、Library、Inspect、writeback 與 workflows 使用同一核心和 FormEditor。Measure 推導見 [[0073]]，各宿主提交邊界見 [[0065]]、[[0008]]。
 
-保存與來源責任沿 [[0063]]，既有 cfg 機制沿 [[0065]]，GUI 與 remote 的共同 owner 入口沿 [[0067]]。本文描述新表單與 Engine 的分工，不承諾宿主整合或硬體驗收已完成。
+保存與來源責任沿 [[0063]]，表單與固定來源沿 [[0065]]，GUI 與 remote 的共同 owner 入口沿 [[0067]]。本文描述新表單與 Engine 的分工，不承諾宿主整合或硬體驗收已完成。
 
 ## 位置與 owner
 
@@ -111,7 +111,7 @@ FormEnv 借用 host 捕捉的 ParameterContext、LibrarySnapshot，以及裝置�
 
 Host 決定 capture 與重算時機。每次 result 和 changes 使用傳入的 env。工具不 load YAML、不 refresh、不 poll device；frozen dataclass 不承諾凍結 driver 或 waveform asset bytes。
 
-Expression 重用 `gui.session.expression.evaluate_scalar_expr` 的型別、白名單與限制，不建立另一個 parser。Complex 重用 `gui.cfg.codec.encode_complex` 與 `decode_complex`。Editor 重用 `gui.widgets.cfg.fields.common` 的公開 value-widget 入口及 `gui.widgets.spinbox`，不為借用版面而建立 ScalarSpec 或 CfgDraft。
+Expression 重用 `gui.session.expression.evaluate_scalar_expr` 的型別、白名單與限制，不建立另一個 parser。Complex 直接重用 `core.complex_codec.encode_complex` 與 `decode_complex`。Editor 的共用 value-widget helpers 由 `gui.widgets.form.value_widgets` 擁有，並重用 `gui.widgets.spinbox`。舊 cfg widgets 與 codec owner 已移除。
 
 ## Engine 只記普通值
 
@@ -123,10 +123,10 @@ Engine 不保存 expression 原文，也不求值。Input JSON 的 expression �
 
 `.importlinter` 的 `form-core-no-ui-policy` 禁止 core 依賴 app、widgets、remote、session services/UI/adapters、experiment 與 Qt。`form-editor-no-host` 禁止 editor 依賴 app、remote、experiment 與 MCP。C18 保護 Engine 的 GUI independence，C16 禁止 framework import zcu_lab，C13 限制 MCP 的 remote 路徑。
 
-Core 到 gui.session.expression、gui.cfg.codec、resources.context、cfg_model 與 device 型別的依賴沿 C8/C9 的 frontend 方向。C11 保護 cfg_model 不反向依賴 GUI。具體 GUI 附件可以消費 framework 與 native workflow models。現有 C15 只保護 `zcu_lab.v2.**.core`，不涵蓋 `zcu_lab.workflows`。Native workflow definitions 不依賴 GUI 的規則目前以 source review 確認，尚無專屬 contract。
+Core 到 gui.session.expression、core.complex_codec、resources.context、cfg_model 與 device 型別的依賴沿 C8/C9 的 frontend 方向。C11 保護 cfg_model 不反向依賴 GUI。具體 GUI 附件可以消費 framework 與 native workflow models。現有 C15 只保護 `zcu_lab.v2.**.core`，不涵蓋 `zcu_lab.workflows`。Native workflow definitions 不依賴 GUI 的規則目前以 source review 確認，尚無專屬 contract。
 
 公開 FormState、input schema、保存還原、Engine start/update/execute 與 journal 驗證資料契約。Qt editor 測試觀察 editor 到 FormState 的行為。具體表單測試觀察 defaults、result 與 native conversion。文件、設定、依賴宣告與 Qt-free 性質由直接 source review 及 import contracts 確認，不以 tests 另啟程序。
 
 ## 取捨
 
-新表單和 CfgSchema 暫時並存，增加兩種 input 模型，但共用 evaluator、complex codec 與 value widgets。領域 defaults 和 to_cfg 留在具體表單。Core 不承擔提交 policy，host 可以共用資料機制而自行決定 Apply 時機。
+各宿主共用 Form input、evaluator、complex codec 與 FormEditor，不保留 CfgSchema 的第二套編輯模型。領域 defaults 和 to_cfg 留在生成器或具體表單。Core 不承擔提交 policy，host 決定 Apply 時機。

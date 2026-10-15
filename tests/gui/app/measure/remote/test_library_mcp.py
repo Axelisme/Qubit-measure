@@ -3,27 +3,23 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
-from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
+from zcu_tools.cfg_model import ConstWaveformCfg
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.mcp.measure.session import GuiRpcError
 
-from tests.gui.app.measure._templates import register_all_templates
+from tests.gui.app.measure._templates import TEMPLATES
 
 from ._helpers import Fixture, mcp_client
 
 
 @pytest.fixture()
-def library_client(qapp, tmp_path, monkeypatch):
-    catalog = TemplateCatalog()
-    register_all_templates(catalog)
-    fx = Fixture(active_label="ctx001", template_catalog=catalog)
+def library_client(qapp, tmp_path):
+    fx = Fixture(active_label="ctx001", templates=TEMPLATES)
     context = fx.ctrl.context_control
     context.set_waveform(
         context.read_context().target, "Q1.waveforms.seed", ConstWaveformCfg(length=0.1)
     )
     fx.start()
-    monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
     bridge, invoke = mcp_client(fx.service.port, tmp_path)
     try:
         invoke("connect", {"port": fx.service.port})
@@ -154,159 +150,3 @@ def test_ml_roles_and_create_use_gui_role_defaults(library_client):
         },
     )
     assert stored["value"] == modules(fx)["Q1.reset.reset_none"]
-
-
-def test_ml_edit_commits_prefix_and_save_as_preserves_source(library_client):
-    invoke, fx = library_client
-    before = waveforms(fx)["Q1.waveforms.seed"]
-    invoke("rpc_call", {"method": "context.snapshot"})
-    saved = invoke(
-        "rpc_call",
-        {
-            "method": "context.ml_edit",
-            "params": {
-                "name": "Q1.waveforms.seed",
-                "edits": [{"path": "length", "value": 0.25}],
-                "save_as": "Q1.waveforms.copy",
-                "kind": "waveform",
-            },
-        },
-    )
-    assert saved["valid"] is True
-    assert saved["applied"] == 1
-    copy_cfg = invoke(
-        "rpc_call",
-        {
-            "method": "context.snapshot",
-            "params": {"path": "library.components.Q1.waveforms.copy"},
-        },
-    )["value"]
-    assert copy_cfg["length"] == pytest.approx(0.25)
-    assert waveforms(fx)["Q1.waveforms.seed"] == before
-    partial = invoke(
-        "rpc_call",
-        {
-            "method": "context.ml_edit",
-            "params": {
-                "name": "Q1.waveforms.seed",
-                "edits": [
-                    {"path": "length", "value": 0.5},
-                    {"path": "missing", "value": 1.0},
-                    {"path": "length", "value": 0.9},
-                ],
-                "kind": "waveform",
-            },
-        },
-    )
-    assert partial["applied"] == 1
-    assert partial["valid"] is False
-    assert partial["errors"][0]["path"] == "missing"
-    assert waveforms(fx)["Q1.waveforms.seed"]["length"] == 0.5
-    assert waveforms(fx)["Q1.waveforms.copy"] == copy_cfg
-    continued = invoke(
-        "rpc_call",
-        {
-            "method": "context.ml_edit",
-            "params": {
-                "name": "Q1.waveforms.seed",
-                "edits": [{"path": "length", "value": 0.75}],
-                "kind": "waveform",
-            },
-        },
-    )
-    assert continued["valid"] is True
-    assert waveforms(fx)["Q1.waveforms.seed"]["length"] == 0.75
-
-
-def test_ml_edit_first_failure_leaves_save_as_uncreated(library_client):
-    invoke, fx = library_client
-    invoke("rpc_call", {"method": "context.snapshot"})
-    result = invoke(
-        "rpc_call",
-        {
-            "method": "context.ml_edit",
-            "params": {
-                "name": "Q1.waveforms.seed",
-                "save_as": "Q1.waveforms.copy",
-                "edits": [
-                    {"path": "missing", "value": 1.0},
-                    {"path": "length", "value": 0.9},
-                ],
-                "kind": "waveform",
-            },
-        },
-    )
-    assert result["applied"] == 0
-    assert result["valid"] is False
-    assert result["errors"][0]["path"] == "missing"
-    assert "Q1.waveforms.copy" not in waveforms(fx)
-    assert waveforms(fx)["Q1.waveforms.seed"]["length"] == 0.1
-
-
-def test_ml_edit_module_and_eval_use_shared_lowering(library_client):
-    invoke, fx = library_client
-    pulse = PulseSpec.model_validate(
-        {
-            "type": "pulse",
-            "ch": 0,
-            "nqz": 1,
-            "freq": 100.0,
-            "gain": 0.5,
-            "phase": 0.0,
-            "pre_delay": 0.0,
-            "post_delay": 0.0,
-            "waveform": {"style": "const", "length": 0.1},
-        }
-    )
-    fx.ctrl.context_control.set_module(
-        fx.ctrl.read_context().target, "Q1.pulses.pulse", pulse
-    )
-    invoke("rpc_call", {"method": "context.snapshot"})
-    result = invoke(
-        "rpc_call",
-        {
-            "method": "context.ml_edit",
-            "params": {
-                "name": "Q1.pulses.pulse",
-                "kind": "module",
-                "edits": [
-                    {"path": "gain", "value": {"__kind": "eval", "expr": "0.25 + 0.5"}}
-                ],
-            },
-        },
-    )
-    assert result["applied"] == 1
-    assert result["valid"] is True
-    assert modules(fx)["Q1.pulses.pulse"]["gain"] == 0.75
-
-
-@pytest.mark.parametrize("destination", ["seed", "occupied"])
-def test_ml_edit_save_as_rejects_existing_name_without_overwriting(
-    library_client, destination
-):
-    invoke, fx = library_client
-    original = waveforms(fx)["Q1.waveforms.seed"]
-    fx.ctrl.context_control.set_waveform(
-        fx.ctrl.read_context().target,
-        "Q1.waveforms.occupied",
-        ConstWaveformCfg(length=0.3),
-    )
-    occupied = waveforms(fx)["Q1.waveforms.occupied"]
-
-    invoke("rpc_call", {"method": "context.snapshot"})
-    with pytest.raises(GuiRpcError, match="already exists"):
-        invoke(
-            "rpc_call",
-            {
-                "method": "context.ml_edit",
-                "params": {
-                    "name": "Q1.waveforms.seed",
-                    "edits": [{"path": "length", "value": 0.5}],
-                    "save_as": f"Q1.waveforms.{destination}",
-                    "kind": "waveform",
-                },
-            },
-        )
-
-    assert waveforms(fx)["Q1.waveforms.seed"] == original
-    assert waveforms(fx)["Q1.waveforms.occupied"] == occupied

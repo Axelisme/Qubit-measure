@@ -17,10 +17,8 @@ from qtpy.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
-    QTreeWidget,
     QWidget,
 )
-from zcu_tools.cfg_model import ConstWaveformCfg
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
@@ -31,13 +29,6 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    DirectValue,
-    ScalarSpec,
-)
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
@@ -163,48 +154,6 @@ def exp_tab_widget(qapp):
     return ExpTabWidget
 
 
-def test_A1_Run_mounts_tree_with_visual_and_folding(
-    qapp, exp_tab_widget, snapshots, make_ctrl
-):
-    """Run keeps its tree presentation, Reset, editing lock and busy state."""
-    from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
-
-    ctrl = make_ctrl()
-    snap = snapshots("tab-1", analysis=AnalysisMode.FIT, post=False)
-    tab = exp_tab_widget("tab-1", ctrl, snap.capabilities)
-    w = CfgFormWidget(text_input_enhancer=None)
-    try:
-        tab.attach(snap, MagicMock())
-        schema = CfgSchema(
-            spec=CfgSectionSpec(fields={"reps": ScalarSpec(label="Reps", type=int)}),
-            value=CfgSectionValue(fields={"reps": DirectValue(10)}),
-        )
-        draft = MeasureCfgBindings(make_ctrl()).new_draft(schema, parameters=None)
-        w.attach(draft)
-        tree = w.findChild(QTreeWidget)
-        assert tree is not None
-        assert tree.isHeaderHidden()
-        assert tree.indentation() == 10
-        assert tree.font().pixelSize() == 13
-        assert tab.reset_btn.isEnabled() is True, ctrl.control_identity.status()
-        assert isinstance(tab.reset_btn.toolTip(), str)
-        busy_snap = snapshots("tab-1", analysis=AnalysisMode.FIT, post=False)
-        assert busy_snap.interaction is not None
-        busy_snap = dataclasses.replace(
-            busy_snap,
-            interaction=dataclasses.replace(busy_snap.interaction, is_running=True),
-        )
-        tab.update_interaction_state(busy_snap)
-        assert tab.reset_btn.isEnabled() is False
-    finally:
-        w.detach()
-        w.close()
-        tab.detach()
-        tab.close()
-        qapp.processEvents()
-
-
 def _click_header(qapp: QApplication, header: QWidget) -> None:
     center = header.rect().center()
     event = QMouseEvent(
@@ -278,8 +227,7 @@ def test_A2_Analysis_ledger_single_column_folding_and_fixed_bar(
 
 def test_A3_Writeback_items_show_current_proposed_and_edit(qapp, make_ctrl):
     """Native preview facts retain selection, editing and Apply interactions."""
-    from zcu_tools.cfg_model import PulseReadoutCfg
-    from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
+    from zcu_tools.cfg_model import ConstWaveformCfg, PulseReadoutSpec
     from zcu_tools.gui.app.measure.services.writeback import WritebackValues
     from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
 
@@ -289,29 +237,27 @@ def test_A3_Writeback_items_show_current_proposed_and_edit(qapp, make_ctrl):
         description="Resonator freq",
         proposed_value=6100.0,
     )
-    cfg = PulseReadoutCfg(
+    proposal = PulseReadoutSpec(
         gen_ch=0,
         nqz=1,
+        freq=0.0,
         gain=0.1,
         waveform=ConstWaveformCfg(length=1.0),
         ro_ch=0,
         ro_length=1.0,
-        freq=0.0,
     )
-    spec, value = module_cfg_to_value(cfg)
     ml_item = ModuleWriteback(
-        target_name="readout_rf",
-        description="Readout module",
-        edit_schema=CfgSchema(spec, value),
+        target_name="readout_rf", description="Readout module", proposal=proposal
     )
     ml_item2 = ModuleWriteback(
-        target_name="ro_waveform", description="Waveform", edit_schema=None
+        target_name="readout_alt", description="Alternate readout", proposal=proposal
     )
     md_item.session_id, ml_item.session_id, ml_item2.session_id = (
         "param-1",
         "ml-1",
-        "wf-1",
+        "ml-2",
     )
+    proposed = proposal.model_dump(mode="python")
     values = {
         "param-1": WritebackValues(
             actual_path="R1.freq", current=6000.0, proposed=6100.0, unit=None
@@ -319,13 +265,13 @@ def test_A3_Writeback_items_show_current_proposed_and_edit(qapp, make_ctrl):
         "ml-1": WritebackValues(
             actual_path="R1.readout.readout_rf",
             current=None,
-            proposed=cfg.to_dict(),
+            proposed=proposed,
             unit=None,
         ),
-        "wf-1": WritebackValues(
-            actual_path="R1.readout.ro_waveform",
+        "ml-2": WritebackValues(
+            actual_path="R1.readout.readout_alt",
             current=None,
-            proposed=cfg.to_dict(),
+            proposed=proposed,
             unit=None,
         ),
     }
@@ -340,7 +286,7 @@ def test_A3_Writeback_items_show_current_proposed_and_edit(qapp, make_ctrl):
         widget.populate([md_item, ml_item, ml_item2], values)
         checks = widget.findChildren(QCheckBox)
         assert len(checks) == 3
-        for target in ("$resonator.freq", "readout_rf", "ro_waveform"):
+        for target in ("$resonator.freq", "readout_rf", "readout_alt"):
             assert any(target in check.text() for check in checks)
         assert "$resonator.freq" in checks[0].text()
         assert "readout_rf" in checks[1].text()
@@ -351,13 +297,14 @@ def test_A3_Writeback_items_show_current_proposed_and_edit(qapp, make_ctrl):
         assert cur[1].text() == cur[2].text() == "—"
         assert len(prop) == 3
         assert any("6100.0" in label.text() for label in prop)
-        assert prop[1].text() == prop[2].text() == "map[12]"
+        assert prop[1].text() == prop[2].text() == f"map[{len(proposed)}]"
+        # Every module proposal edits its draft Form, so each row has Edit.
         edits = [
             button
             for button in widget.findChildren(QPushButton)
             if button.text() == "Edit"
         ]
-        assert len(edits) == 2
+        assert len(edits) == 3
         apply = next(
             button
             for button in widget.findChildren(QPushButton)
@@ -389,22 +336,12 @@ def test_A3_Writeback_items_show_current_proposed_and_edit(qapp, make_ctrl):
 
 def test_writeback_baseline_captured_via_service(qapp, make_ctrl):
     """The service captures baseline summaries from a fixed ParameterContext."""
-    from zcu_tools.cfg_model import PulseReadoutCfg
-    from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
-    from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
+    from zcu_tools.cfg_model import ConstWaveformCfg, PulseReadoutSpec
     from zcu_tools.gui.app.measure.services.writeback import WritebackService
-    from zcu_tools.gui.app.measure.state import State
-    from zcu_tools.gui.event_bus import BaseEventBus
-
-    from tests.gui.app.measure._cfg_fakes import PublishedHost
 
     parameters = _parameters()
-    state = State(SessionEnv(parameters=parameters, soc=None, soccfg=None))
     ctrl = make_ctrl()
-    cfg_editor = CfgEditorService(
-        PublishedHost(state), ctrl, MagicMock(), MagicMock(), BaseEventBus()
-    )
-    svc = WritebackService(cfg_editor, ctrl)
+    svc = WritebackService(ctrl, arb_names=lambda: ())
     md_item = ParameterWriteback(
         target_name="$resonator.freq", description="freq", proposed_value=6100.0
     )
@@ -413,21 +350,18 @@ def test_writeback_baseline_captured_via_service(qapp, make_ctrl):
         description="missing",
         proposed_value=1,
     )
-    spec, value = module_cfg_to_value(
-        PulseReadoutCfg(
+    module_item = ModuleWriteback(
+        target_name="$resonator.readout.new_mod",
+        description="new",
+        proposal=PulseReadoutSpec(
             gen_ch=0,
             nqz=1,
+            freq=0.0,
             gain=0.1,
             waveform=ConstWaveformCfg(length=1.0),
             ro_ch=0,
             ro_length=1.0,
-            freq=0.0,
-        )
-    )
-    module_item = ModuleWriteback(
-        target_name="$resonator.readout.new_mod",
-        description="new",
-        edit_schema=CfgSchema(spec, value),
+        ),
     )
     draft = svc.create_draft(
         [md_item, md_item2, module_item],

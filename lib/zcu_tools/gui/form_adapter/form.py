@@ -699,7 +699,7 @@ def module_form[S: ConfigBase](spec_type: type[S]) -> Form[S]:
     keys without reading the library, assets or building native cfg. Generated
     str-or-model children use kind=ref/name or kind=inline/module, including
     nested waveform kinds; to_cfg reverses those wrappers. Generated
-    input omits optional desc and ro_ch fields, whose Spec
+    input omits optional desc fields, whose Spec
     defaults return in to_cfg. Use input_from_spec to edit an existing Spec.
     """
     if spec_type not in _PERSISTENT_SPECS:

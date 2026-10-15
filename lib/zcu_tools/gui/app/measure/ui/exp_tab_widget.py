@@ -36,6 +36,7 @@ from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFronten
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.form import FormErrors, FormModel, FormState
 from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
+from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 from zcu_tools.gui.widgets import DialogPresenter, QtDialogPresenter
 from zcu_tools.gui.widgets.form import FormEditor
@@ -768,9 +769,13 @@ class ExpTabWidget(QWidget):
             widget.populate(items, {}, unavailable_reasons=reasons)
             return
         try:
-            values = self._ctrl.writeback_control.get_writeback_values_for_pane(
-                self.tab_id, pane
-            )
+            try:
+                values = self._ctrl.writeback_control.get_writeback_values_for_pane(
+                    self.tab_id, pane
+                )
+            except LibraryEntryInvalid:
+                widget.refresh_module_validity(items, unavailable_reasons=reasons)
+                return
         except (ExpectedError, ValueError, OSError) as error:
             # Isolate the preview: the pane stays usable and names the failure.
             logger.exception("Writeback preview failed for %s %s", self.tab_id, pane)

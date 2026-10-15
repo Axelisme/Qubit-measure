@@ -8,7 +8,7 @@ from pydantic import BaseModel, JsonValue, ValidationError
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticCustomError
 
-from zcu_tools.gui.cfg.codec import decode_complex
+from zcu_tools.core.complex_codec import decode_complex
 from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_expr
 
 from ._json import copy_object, default_json, expr_text

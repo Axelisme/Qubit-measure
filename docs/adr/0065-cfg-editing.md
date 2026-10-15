@@ -10,13 +10,15 @@ Qt、remote 與 Run 必須使用同一份 tab cfg。若 widget 持有唯一可�
 
 Measure 的 `TabFormResource` 擁有一份 Qt-free `FormState` 與固定來源。`TabFormResources` 管理建立、查找、操作禁令與撤銷。Qt、remote 與 Run 都使用同一資源。Frontend 只讀 schema、input、preview 與 errors，寫入走 resource 的公開入口。Form 決定 defaults、形狀、驗證與 core cfg 轉換，wire caller 不重建這些規則。
 
-這條 Form 資源路徑適用於 measure tab。獨立 library、inspect 與 writeback editor 仍由 `CfgEditorService` 管理 `CfgDraft`，保留自己的 tree 與 editing codec。兩者的 read/write 契約不能互換。
+Library、Inspect 與 writeback 也使用 FormState／FormEditor，但各自持有 state 與提交政策，不借用 tab resource。Library 寫入持久 Spec，writeback 的 opaque draft 與 selected Apply 見 [[0008]]。舊 CfgSchema、gui.cfg、widgets.cfg 與 experiment.cfg_editing 已移除。
 
 ## 共用機制與領域 owner
 
-`gui.cfg` 擁有 Spec／Value、`CfgSchema`、input codec、binding、組裝、成品驗證及 lowering 機制。它不辨認 program discriminator、參數容器、ModuleLibrary 或 generation policy。`experiment.cfg_editing` 擁有 module／waveform 的 closed shape catalog、Spec factories 與 raw materialization policy。App 負責 runtime object normalization、選用子集合及 role defaults，composition 注入窄能力，converter 不寫 library。
+共用 `gui.form` 擁有 input、schema、FormState、preview、result 與錯誤。`widgets/form` 的 FormEditor 依 schema 顯示欄位與選項，不解讀 library 或實驗語義。`gui.form_adapter` 從 core cfg 與持久 Spec 生成 Form，集中 FieldMeta 呈現投影、key-or-inline wrappers 與屏蔽欄位政策。Form core 不讀 FieldMeta。
 
-`experiment.cfg_editing` 可依賴 Qt-free `gui.cfg`。Experiment package root 的公開 exports 按需載入，匯入 cfg_editing 不載入 experiment base、device 或 datafile。Library-entry conversion 與兩 app 的 normalization 尚未全部收斂，剩餘目標見 [cfg editing draft](draft/cfg-editing-boundaries.md)。
+Library entry 表單由 session 擁有，固定 root 的具體 Spec family。初始 input 與提交都保留 child key，不能把既有 pulse 切成 readout；換 family 要新建 entry。Optional None 維持缺席。生成器略過選填的 desc，提交時以 Spec 預設補回，不保留原值；沒有預設的必填欄位仍可編輯。
+
+None、library keys 與各 Inline kind 在同一個合併下拉。Key 只顯示名稱，不展開唯讀 descendants。普通選 Inline 使用 fresh defaults，不繼承舊分支；明確的 to_inline 指令才從固定 library 複製內容。Advanced 群組預設折疊。Expression 只適用於文字欄位，下拉與勾選欄位不求值。
 
 實驗 adapter 宣告 `Form(core_cfg, tree)`。Core annotations 定義可編輯形狀，tree 定義起始值、Slot、Template 與 lock。Open 與 Reset 計算 defaults。Memento 保存 Form input，不保存來源覆寫。Make_form、範本與固定來源的契約見 [[0073]]。Reset 可在同一資源內更換形狀與初值；成功後舊 editor state 不再承接寫入。
 
@@ -52,28 +54,24 @@ Core 以 context.devices[cfg.flux_dev] 等具名欄位取 driver。缺名由實�
 
 Form expression 的 `$alias` 與 `$alias.path` 沿固定 ParameterContext 解析，bare concrete paths 使用獨立 namespace。裸 `$alias` 是名稱字串，不參與數值算術或字串插值。缺列或未綁時 errors 指名 alias，不沿用舊解析值。Expression 不刷新來源。
 
-## 獨立 editor 的 reference
+## Library 與 Inspect
 
-獨立 editor 保留 CfgDraft 的 inline/ref mode、readonly descendants 與 common editing codec。Key selection 不複製 library 內容。Local reference conversion 由 cfg owner 處理，wire 不複製 shape、values 或解析規則。這些 tree 欄位不是 measure tab 的 Form DTO。
+`open_library_entry` 從持久 ModuleSpec／WaveformSpec 建立 LibraryEntryForm。Expression 使用開啟時固定的 env，Apply 將求得的數字寫進 Spec，不把 expression 存成 Library 來源。Name、Saved／Unsaved、Revert 與切換條目前的未存確認由 Inspect 管理。表單 Invalid 或有 local parse errors 時不提交。
 
-## Custom reference 的繼承
+New 從 Registry 注入的 TemplateDef 目錄建立 entry input。換範本建新 State 與 Editor，欄位、折疊與捲動回預設，只保留 Name。已綁定的 Slot 保留 child key。生成器負責 defaults 與驗證，caller 不另建 normalization 或 shape catalog。
 
-選擇 Custom 是明確的 resource-bound 命令。Cfg owner 從目前已發布內容準備完整新候選，best-effort 繼承相容輸入，再原子發布。切換 Gauss 至 DRAG 時，共同型別及單位的 length、sigma 可保留，新型別的固定值由 Spec 決定。不相容欄位使用新 shape 的初始值，nested linkage 保留其既定依賴。
+`context.ml_edit` 使用 Form 路徑陣列與值，一次套用該 entry 的整批 edits。只有有效 Spec 才交既有 Library write owner；錯誤帶欄位路徑，Library 不留下成功前綴。Module writeback 使用相同的 entry form 與 observation，但 draft-local editing 與 selected Apply 的交易邊界依 [[0008]]，不宣稱跨項原子性。`ml_list_roles`／`ml_create_from_role` 保留既有名稱與範本入口。
 
-這是操作便利性，不是相容補丁，也不保證候選符合量測條件。普通跨型別 edit 仍要求完整 payload，不因有繼承命令就隱含補值。Qt 不自行讀 owner input 或複製繼承規則。
+## 共用 Inspect 與來源
 
-## 獨立 draft 與尚未完成的範圍
+Inspect、Device 與 ARB UI 及其 service 由 session 提供，host 經公開入口注入必填協作者，不靠 host 差異猜能力。Inspect 有 Parameters、Modules、Aliases 三頁。Parameters 使用自己的 YamlValue／FieldSpec，不屬 Form 遷移。Run 或 agent 接管時，Inspect 表單不可改，但仍可選取文字、展開與捲動。
 
-`CfgDraft` 仍提供獨立 editor 的可編輯 field tree。Binding 列舉及解析 canonical dotted targets，remote 只投影這份 grammar。Measure tab 使用 Form JSON 與 string-array model-field paths。獨立 library/writeback batch 保留 fail-fast、non-atomic 成功前綴，不是 tab atomic edit 的另一入口。
+Aliases 由共用 Inspect 的第三頁編輯，沒有獨立 AliasDialog 或 aliases wire 名稱。Apply 將有序 authored rows 整表交 `apply_alias_rows`；有 opened entry 時先原子保存，再安裝 memory 與發布，無 entry 時只改 memory。失敗保留舊表、檔案、版本與 draft。未存修改走 Save／Discard／Cancel，沒有 Revert。
 
-Legacy `lower_finished_cfg` 接受 expression、reference shape 及 range 窄 ports。有 expression resolver 時會重新求值並檢查型別，可能在使用時讀來源；這不是 measure tab 的 acceptance 路徑。Tab Run 使用已解析並接受的 values，不在 legacy lowering 時偷換成 live source。
-
-Writeback 以 opaque draft 固定 ParameterContext 與分析來源的 run_id。Selected Apply 先準備全部 proposals，再追加 accepted 並依序提交 target setters，首錯保留成功前綴，不提供跨檔原子性或 crash durability。Autofluxdep 的 placement refresh、resource lifetime、固定 Run acceptance，以及 library／writeback Apply 的剩餘收斂仍見 [cfg editing draft](draft/cfg-editing-boundaries.md)。本篇不宣稱整個 multi-app Controller 工作完成。
+MCP 直接呼叫 owning context，不開 dialog、不切頁或焦點。`context.aliases_set` 回已安裝的 authored rows，不解析；解析另讀 snapshot。`context.set_parameter` 用一次 capture 固定具體 target 與 before，保留 metadata、不寫 ledger。這些 mutation 沿既有 owner 與 holder admission，Run 中可寫，但不改既有 Form 或 Run 的固定 capture。`dialog.screenshot` 只擷取目前已開 dialog 的當前頁，不切 Inspect tab。
 
 ## 取捨與相鄰責任
 
-單一 tab resource 讓 GUI、remote 與 Run 共用 Form input、驗證與固定來源，代價是 caller 想使用最新參數時必須明確 Reset。這比 Run 偷換 live source 更容易核對畫面與執行值。Source basis 描述 provenance，不是 cfg admission 門檻。保留獨立 draft，避免把 library Apply 誤當成 tab edit。
+單一表單核心讓各宿主共用 input、驗證與 editor，宿主仍決定 lifetime、來源捕捉與提交時機。來源變更不提示、不自動更新；Measure 要最新值就明確 Reset。Source basis 記錄 provenance，不是 cfg admission 門檻。舊 `@{}` 補全、eval／value_ref wire tags 與 editor.* 事件／RPC 不再提供。`value.list`／`value.read` 與內部 ValueRef／resolve_value_ref 保留，見 [[0037]]。
 
-參數容器／library 寫入權由 [[0067]] 定義；保存與 crash durability 歸 [[0063]]；Autofluxdep run-start base 與逐點 patches 歸 [[0062]]；wire、guard、delivery failure 見 [[0068]]。模組入口見 [cfg owner](../../lib/zcu_tools/gui/cfg/README.md)、[experiment editing owner](../../lib/zcu_tools/experiment/cfg_editing/README.md)、[measure app](../../lib/zcu_tools/gui/app/measure/README.md) 與 [Autofluxdep app](../../lib/zcu_tools/gui/app/autofluxdep/README.md)。
-
-舊篇 [[0008]] 至 [[0012]]、[[0037]]、[[0045]]、[[0046]]、[[0050]] 及 [[0051]] 保留尚適用的局部契約。它們的 tab draft、雙樹、live Run 或成功前綴敘述不覆蓋本篇的 measure tab resource 契約。
+參數容器與 Library 寫入權由 [[0067]] 定義；保存與 crash durability 歸 [[0063]]；workflow run 與 patches 歸 [[0062]]；wire、guard 與 delivery failure 見 [[0068]]。模組入口見 [Form](../../lib/zcu_tools/gui/form/README.md)、[生成器](../../lib/zcu_tools/gui/form_adapter/README.md)、[session](../../lib/zcu_tools/gui/session/README.md) 與 [measure app](../../lib/zcu_tools/gui/app/measure/README.md)。

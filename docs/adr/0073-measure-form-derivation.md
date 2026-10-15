@@ -5,7 +5,7 @@ status: accepted
 # ADR-0073 — Measure 表單從 core cfg 推導
 
 本篇接替 [[0012]] 的 measure definition／seed 契約與 [[0009]] 的角色 default 表。
-Library、writeback 與 Inspect 的 CfgSchema 契約仍見 [[0065]]。
+Library、writeback 與 Inspect 也使用共用 Form，持久 Spec 與提交邊界見 [[0065]]、[[0008]]。
 實驗核心與前端分工見 [[0069]]。
 
 ## 問題
@@ -112,8 +112,8 @@ Measure 不再使用 CfgSchema 的跨 tab refresh／Unavailable 恢復模型。
 ### 持久範本目錄
 
 `cfg_model.TemplateDef` 宣告持久 Spec 型別、label 與 seeds。表在 `zcu_lab.templates`，
-組合根以 `Registry(templates=TEMPLATES)` 注入。TemplateCatalog 使用同一份表建立
-Library 新建選單，reload candidate 從 current Registry 取得表，不重建角色表。
+組合根以 `Registry(templates=TEMPLATES)` 注入。Library 新建選單使用同一份表，
+reload candidate 從 current Registry 取得表，不重建角色表。
 `{qubit}`／`{resonator}` 佔位符預設展開成 `$qubit`／`$resonator`，caller 可明填綁定。
 範本 seeds 疊在 Spec defaults 上。Trig_offset 政策由實驗室的範本工具參數宣告。
 
@@ -143,8 +143,8 @@ Flux_unit 獨立保存在 cfg。Recipe 的公開參數與來源政策不變，he
 由 `form-adapter-no-host` 保護。C15 保護實驗 core 不間接依賴 GUI，C16 禁止框架反向 import zcu_lab。
 
 Builder、Seed wrapper、spec_helpers、角色表與舊 measure tab CfgSchema 資源退休。
-Library、writeback、Inspect 保留 CfgSchema、cfg_editing、TemplateCatalog 與公開
-resolve_library_reference；這些能力不是 measure Form 的相容路徑。
+Library、writeback 與 Inspect 使用相同的 Form 生成器與持久 Spec，不保留
+CfgSchema、cfg_editing 或舊 reference resolver。TemplateDef 目錄由 Registry 注入。
 
 Framework 測試用 synthetic adapter 驗 Form、Open／Reset、固定 capture、Run、
 通知與存還原。實驗定義以真 Registry validate、正式 reload 與必要 Open／Reset

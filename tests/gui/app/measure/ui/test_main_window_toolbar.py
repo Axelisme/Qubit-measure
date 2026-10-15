@@ -17,7 +17,6 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.app.measure.ui.main_window_toolbar import (
     AdapterMenuItem,
@@ -148,11 +147,12 @@ def toolbar_application(
         BaseEventBus(),
         owner_scheduler=scheduler,
         project_root=str(tmp_path),
-        template_catalog=TemplateCatalog(),
     )
     ctrl.setup_control.new_entry(EntryRequest("toolbar"))
     ctrl.setup_control.new_point(PointCreateRequest("point", "", CommandOrigin("gui")))
-    window = MainWindow(ctrl, dialog_presenter=RecordingDialogPresenter())
+    window = MainWindow(
+        ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
+    )
     ctrl.add_view(window)
     tab_id = ctrl.new_tab("stoppable")
     remote = RemoteControlAdapter(

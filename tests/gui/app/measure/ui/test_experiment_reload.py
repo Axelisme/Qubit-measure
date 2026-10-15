@@ -56,7 +56,7 @@ def window_app(qapp) -> Iterator[WindowApp]:
         catalog_loader=loader,
     )
     dialogs = RecordingDialogPresenter()
-    window = MainWindow(ctrl, dialog_presenter=dialogs)
+    window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=dialogs)
     ctrl.add_view(window)
     window.show()
     try:
