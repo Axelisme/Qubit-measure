@@ -472,6 +472,12 @@ class FieldRow:
             # stretching them.
             header.addStretch()
         self._input_style = self.input.styleSheet() if self.input is not None else ""
+        self._input_minimum_height = (
+            self.input.minimumHeight() if self.input is not None else 0
+        )
+        self._input_native_height = (
+            self.input.sizeHint().height() if self.input is not None else 0
+        )
         hint = _MODE_HINT if self.mode is not None else ""
         self._tooltip = "\n".join(filter(None, (field.description, hint)))
         self.set_error("")
@@ -509,16 +515,31 @@ class FieldRow:
                 else _ERROR_COLOUR
             )
             share = _EXPRESSION_TINT if expression else _ERROR_TINT
-            palette.setColor(
-                QPalette.ColorRole.Base,
-                _mixed(shown.color(QPalette.ColorRole.Base), accent, share),
-            )
+            background = _mixed(shown.color(QPalette.ColorRole.Base), accent, share)
+            palette.setColor(QPalette.ColorRole.Base, background)
+            if isinstance(widget, QComboBox):
+                # Non-editable dropdowns paint Button rather than Base.
+                palette.setColor(QPalette.ColorRole.Button, background)
         # A fixed Literal normally uses a transparent background, but its
         # invalid input must still show the error's Base tint.
         style = "" if invalid and self.field.fixed else self._input_style
-        if expression and invalid:
-            style += f"QLineEdit {{ border: 1px solid {_ERROR_COLOUR.name()}; }}"
+        bordered = expression and invalid
+        if bordered:
+            # A border-only Qt stylesheet paints its own default background,
+            # not the input's Base. Keep the Expression interior explicit.
+            background = palette.color(QPalette.ColorRole.Base).name()
+            style += (
+                f"QLineEdit {{ border: 1px solid {_ERROR_COLOUR.name()}; "
+                f"background-color: {background}; }}"
+            )
         widget.setStyleSheet(style)
+        # A stylesheet border has a smaller size hint than the native frame.
+        # Retain the native height so errors never move neighbouring rows.
+        widget.setMinimumHeight(
+            max(self._input_minimum_height, self._input_native_height)
+            if bordered
+            else self._input_minimum_height
+        )
         widget.setPalette(palette)
 
     def clear_value(self) -> None:
