@@ -57,7 +57,7 @@ def test_expanding_an_empty_selected_layer_removes_the_fold_title(qapp: QApplica
         branch: Annotated[First, Display(collapsed=True)] = Field(default_factory=First)
 
         @classmethod
-        def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+        def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
             return {("branch",): (Option("Fixed", {"kind": "first", "one": 1.0}, fields=First),)}
 
     env = FormEnv()

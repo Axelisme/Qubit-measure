@@ -140,20 +140,10 @@ def choose(widget: QComboBox, text: str) -> None:
 def schema_items(
     state: FormState[FormModel], env: FormEnv, name: str
 ) -> list[tuple[str, JsonValue]]:
-    """(label, value) of the top-level field name's effective schema options."""
-    properties = state.input_schema(env)["properties"]
-    assert isinstance(properties, dict)
-    node = properties[name]
-    assert isinstance(node, dict)
-    options = node["x-form-options"]
-    assert isinstance(options, list)
-    result: list[tuple[str, JsonValue]] = []
-    for option in options:
-        assert isinstance(option, dict)
-        label = option["label"]
-        assert isinstance(label, str)
-        result.append((label, option["value"]))
-    return result
+    """(label, value) of the top-level field name's core-described options."""
+    target = state.describe((name,), env).target
+    assert target is not None and target.options is not None
+    return [(option.label, option.value) for option in target.options]
 
 
 def commands(widget: QComboBox) -> list[tuple[str, str, bool]]:

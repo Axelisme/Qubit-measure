@@ -9,6 +9,7 @@ from functools import partial
 from pydantic import ConfigDict, JsonValue, TypeAdapter
 
 # qtpy.QtGui.QAction resolves to NoReturn for pyright; PyQt6 is the binding.
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QAction
 from qtpy.QtCore import QEvent, QObject, QPoint, QSize, Qt
 from qtpy.QtGui import QColor, QKeyEvent, QMouseEvent, QPaintEvent, QPalette
@@ -28,7 +29,7 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.gui.cfg.codec import decode_complex, encode_complex
-from zcu_tools.gui.form import FormValue, FormWritePath
+from zcu_tools.gui.form import FormOptionDescription, FormValue, FormWritePath
 from zcu_tools.gui.widgets.cfg.fields.common import (
     connect_committed_value_widget,
     make_value_widget,
@@ -37,7 +38,7 @@ from zcu_tools.gui.widgets.cfg.fields.common import (
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.gui.widgets.spinbox import trimmed_decimals
 
-from ._schema_view import FieldView, OptionView
+from ._view import FieldView
 
 _JSON = TypeAdapter(JsonValue, config=ConfigDict(allow_inf_nan=False))
 # Vertical density: pixels between sibling rows, between a row's header and
@@ -258,6 +259,8 @@ class _FoldTitle(QLabel):
     Qt widget that reads as a title and reacts to a click.
     """
 
+    fold_changed = pyqtSignal()
+
     def __init__(
         self,
         label: str,
@@ -269,6 +272,7 @@ class _FoldTitle(QLabel):
         self._label = label
         self._body = body
         self._toggled = toggled
+        self._foldable = True
         font = self.font()
         font.setBold(True)
         self.setFont(font)
@@ -318,16 +322,34 @@ class _FoldTitle(QLabel):
         painter.drawPrimitive(QStyle.PrimitiveElement.PE_FrameFocusRect, option)
         painter.end()
 
+    def set_foldable(self, *, available: bool, expanded: bool) -> None:
+        """Show a fold mark only when available; otherwise hide the empty body.
+
+        expanded sets the body's visibility when a previously empty layer
+        gains children. This never emits fold_changed or writes form state.
+        """
+        if self._foldable == available:
+            return
+        self._foldable = available
+        font = self.font()
+        font.setBold(available)
+        self.setFont(font)
+        self._body.setVisible(available and expanded)
+        self._show_mark()
+
     def _flip(self) -> None:
+        if not self._foldable:
+            return
         self._body.setVisible(self._body.isHidden())
         self._show_mark()
         self._toggled()
+        self.fold_changed.emit()
 
     def _mark(self) -> str:
         return FOLDED_MARK if self._body.isHidden() else EXPANDED_MARK
 
     def _show_mark(self) -> None:
-        self.setText(f"{self._mark()} {self._label}")
+        self.setText(f"{self._mark()} {self._label}" if self._foldable else self._label)
 
 
 def _foldable_rows[K](
@@ -338,7 +360,7 @@ def _foldable_rows[K](
     label: str,
     name: str,
     expanded: bool,
-) -> tuple[QLabel, QGroupBox, QVBoxLayout]:
+) -> tuple[_FoldTitle, QGroupBox, QVBoxLayout]:
     """Build a fold title and the foldable box of rows it folds, under parent.
 
     Returns the title, named name and showing label after its fold mark;
@@ -347,7 +369,8 @@ def _foldable_rows[K](
     it. folds records user folds (True is expanded) across rebuilds: the
     box starts shown when folds[key] is True; without that key, when
     expanded is True. Each click on the title flips the box's visibility
-    and the title's mark and records the new state as folds[key].
+    and the title's mark and records the new state as folds[key]. The title's
+    fold_changed signal lets callers build the first expanded layer.
     """
     body = QGroupBox(parent)
     rows = QVBoxLayout(body)
@@ -364,7 +387,7 @@ def _foldable_rows[K](
 
 
 class FieldRow:
-    """Keep one schema row stable while publication values change.
+    """Keep one described row stable while publication values change.
 
     field is the displayed FieldView; widget/layout own its Qt row. label is
     the left-aligned title at the start of the header; its parent sets one
@@ -376,7 +399,7 @@ class FieldRow:
     including a disabled nullable model, show the plain field label.
     input is its optional scalar control (read-only text for a fixed one-value
     Literal, which has no mode), or on an option row its one non-editable
-    dropdown: each schema option's label with the option's value as item
+    dropdown: each described option's label with the option's value as item
     data, then, while a present input matches no option, the input's text
     plus MISSING_SUFFIX with the input as data. The dropdown's actions() are
     the selected option's commands, shown as its right-click menu. mode is
@@ -474,6 +497,31 @@ class FieldRow:
         hint = _MODE_HINT if self.mode is not None else ""
         self.widget.setToolTip("\n".join(filter(None, (field.description, hint))))
 
+    def connect_fold(self, callback: Callable[[], None]) -> None:
+        """Call callback after a user fold, if this row has a fold title.
+
+        The callback takes no arguments, runs on the GUI thread and may build
+        children on first expansion. Connecting never calls it immediately.
+        A leaf or disabled model has no fold signal and does nothing.
+        """
+        if isinstance(self.label, _FoldTitle):
+            self.label.fold_changed.connect(callback)
+
+    def set_children_available(self, *, available: bool) -> None:
+        """Hide an empty model body's fold marker, or restore it for children.
+
+        available means the first expanded description has drawn children.
+        The body and title remain owned by this row for later publications;
+        empty bodies stay hidden, and no write or fold notification occurs.
+        The public fold object name exists only when the layer can be folded.
+        """
+        if isinstance(self.label, _FoldTitle):
+            self.label.setObjectName(self._name("fold") if available else "")
+            self.label.set_foldable(
+                available=available,
+                expanded=self._folds.get(self.field.path, not self.field.collapsed),
+            )
+
     def set_error(self, text: str) -> None:
         """Show text under the row's header; empty text hides the error label."""
         self.error.setText(text)
@@ -494,7 +542,7 @@ class FieldRow:
         fold box goes into group and rows, below header.
         """
         field = self.field
-        if field.kind != "model" or not field.active:
+        if not field.can_expand:
             label = _tight_label(field.label, self.widget)
             header.addWidget(label)
             return label
@@ -738,7 +786,7 @@ class FieldRow:
             self._displaying = False
 
     def _display_options(
-        self, options: tuple[OptionView, ...], *, editable: bool
+        self, options: tuple[FormOptionDescription, ...], *, editable: bool
     ) -> None:
         """Show options and select the input's; list its commands as actions.
 
@@ -833,12 +881,14 @@ class GroupBlock:
         members: tuple[FormWritePath, ...],
         parent: QWidget,
         folds: dict[tuple[FormWritePath, str], bool],
+        toggled: Callable[[], None],
     ) -> None:
         """Build the block under parent; the caller adds widget to its layout.
 
         folds is the editor's record of user group folds by (path, name),
         True for expanded: the block starts as folds says, else folded, and
-        records each user fold there. The caller adds member rows to rows.
+        records each user fold there. toggled runs after that change so the
+        caller can lazily add member rows to rows on first expansion.
         """
         self.members = members
         self.widget = QWidget(parent)
@@ -856,6 +906,7 @@ class GroupBlock:
             name="form.fold.group." + ".".join((*path, name)),
             expanded=False,
         )
+        self.label.fold_changed.connect(toggled)
         header.addWidget(self.label)
         layout.addWidget(self.body)
         self._errors_note = QLabel(GROUP_ERRORS_NOTE, self.widget)
