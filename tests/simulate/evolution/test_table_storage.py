@@ -12,7 +12,12 @@ def _family():
     x = np.array([[0, 1], [1, 0]], dtype=complex)
     y = np.array([[0, -1j], [1j, 0]], dtype=complex)
     return PlateauFamily(
-        NumericModel("storage", basis, np.asarray(0.003*y, dtype=np.complex128), (DriveSource("a", np.asarray(0.012*x, dtype=np.complex128)),)),
+        NumericModel(
+            "storage",
+            basis,
+            np.asarray(0.003 * y, dtype=np.complex128),
+            (DriveSource("a", np.asarray(0.012 * x, dtype=np.complex128)),),
+        ),
         8.0,
         (1 + 0.2j,),
     )
