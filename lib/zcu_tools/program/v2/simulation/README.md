@@ -1,5 +1,7 @@
 # Explicit acquisition environments
 
+**Last updated:** 2026-10-16 — Module timelines and explicit acquisition environments
+
 `SimulationAcquireMixin` enters once through `MyProgramV2`. With a
 `SimulationSoc`, it admits a synchronous call, builds one `AcquireRequest`,
 and supplies numeric round data to the existing QICK acquisition pipeline.
