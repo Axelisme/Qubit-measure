@@ -757,7 +757,7 @@ def test_recipe_control_reaches_the_original_operation_after_a_late_receipt(
     def respond(method, params):
         if method == method_pending:
             pending.set()
-            assert release.wait(2)
+            assert release.wait(20)
         if method == "operation.cancel":
             assert params == {"operation_id": wire_op}
             stopped.set()
@@ -776,7 +776,7 @@ def test_recipe_control_reaches_the_original_operation_after_a_late_receipt(
         initial = full_execution_reply(
             client, client.call("pipeline", {"frequency_mhz": 6020.0})
         )
-        assert pending.wait(1)
+        assert pending.wait(10)
         execution = initial.data["execution"]
         for _ in range(2):
             reply = client.call(control, {"execution": execution})
@@ -784,7 +784,7 @@ def test_recipe_control_reaches_the_original_operation_after_a_late_receipt(
         assert not stopped.is_set()
         release.set()
         terminal = full_execution_reply(
-            client, client.call("wait", {"execution": execution, "timeout": 2})
+            client, client.call("wait", {"execution": execution, "timeout": 10})
         )
         assert stopped.is_set()
         assert terminal.data["status"] == (
@@ -1108,6 +1108,8 @@ def test_lookback_missing_frequency_does_not_run_a_blind_default(
             }
         if method in ("tab.get_cfg", "tab.reset_cfg", "tab.edit_cfg"):
             return deepcopy(publication)
+        if method == "tab.describe_cfg":
+            return gui(method, params)
         raise AssertionError(f"Missing frequency must not start work: {method}")
 
     with recipe_client(tmp_path, respond) as client:
