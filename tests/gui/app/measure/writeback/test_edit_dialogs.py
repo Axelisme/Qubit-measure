@@ -22,7 +22,7 @@ def label_text(parent) -> str:
 
 @pytest.fixture
 def value_editor(
-    qapp, monkeypatch
+    qapp, monkeypatch, request
 ) -> Iterator[
     tuple[
         WritebackWidget,
@@ -35,7 +35,7 @@ def value_editor(
     item = ParameterWriteback(
         target_name="$resonator.freq",
         description="Resonator frequency",
-        proposed_value=6012.345678,
+        proposed_value=getattr(request, "param", 6012.345678),
         stderr=0.0213,
     )
     item.session_id = "param-1"
@@ -113,6 +113,30 @@ def test_value_matching_unit_save_and_cancel(value_editor):
         proposed_value=6013.25,
     )
     assert messages == []
+
+
+def test_numeric_unit_suffix_requires_digit_or_whitespace_boundary(value_editor):
+    _, dialog, item, _, _ = value_editor
+    value = dialog.findChild(QLineEdit, "writebackValue")
+    value.setText("nanMHz")
+    assert not button(dialog, "Save").isEnabled()
+    value.setText("6012.3 kMHz")
+    assert not button(dialog, "Save").isEnabled()
+    for text in ("6012.3 MHz", "6012.3MHz"):
+        value.setText(text)
+        assert button(dialog, "Save").isEnabled()
+    button(dialog, "Save").click()
+    assert item.proposed_value == 6012.3
+
+
+@pytest.mark.parametrize("value_editor", ["abcMHz"], indirect=True)
+def test_string_value_keeps_matching_unit_suffix(value_editor):
+    _, dialog, item, ctrl, _ = value_editor
+    button(dialog, "Save").click()
+    assert item.proposed_value == "abcMHz"
+    assert (
+        ctrl.set_writeback_item_for_pane.call_args.kwargs["proposed_value"] == "abcMHz"
+    )
 
 
 def test_value_controller_refusal_stays_inline(value_editor):
