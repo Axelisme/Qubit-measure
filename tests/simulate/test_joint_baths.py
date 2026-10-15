@@ -38,6 +38,18 @@ def test_joint_capacitive_lc_directional_and_gibbs() -> None:
     )
 
 
+def test_quasiparticle_low_temperature_is_finite_zero_temperature_limit() -> None:
+    from zcu_tools.simulate.baths import QuasiparticleLoss, directional_rates
+
+    energy = np.array([0., 1.])
+    operator = np.array([[0., 1.], [1., 0.]], dtype=complex)
+    bath = QuasiparticleLoss(8., 1e-6)
+    cold = directional_rates(energy, operator, bath, temperature_k=0.)
+    tiny = directional_rates(energy, operator, bath, temperature_k=1e-15)
+    assert cold[0, 1] > 0
+    np.testing.assert_allclose(tiny, cold, rtol=1e-12, atol=0)
+
+
 def test_markov_dephasing_collapse_matches_echo_and_photon_rates() -> None:
     from zcu_tools.simulate.dephasing import (
         dephasing_operators,
