@@ -91,3 +91,18 @@ def test_definition_detaches_seed_mapping_from_its_caller() -> None:
     expanded = definition.expanded_seeds()
     expanded["gain"] = 1.0
     assert definition.expanded_seeds() == {"gain": 0.2}
+
+
+def test_readout_template_accepts_concrete_persistent_spec() -> None:
+    definition = cfg_model.TemplateDef(
+        cfg_model.PulseReadoutSpec,
+        "Synthetic readout",
+        {"freq": cfg_model.Expr("{resonator}.freq"), "gen_ch": 2, "ro_ch": 3},
+    )
+
+    assert definition.module is cfg_model.PulseReadoutSpec
+    assert definition.expanded_seeds() == {
+        "freq": cfg_model.Expr("$resonator.freq"),
+        "gen_ch": 2,
+        "ro_ch": 3,
+    }
