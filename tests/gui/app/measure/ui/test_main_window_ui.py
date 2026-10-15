@@ -1863,11 +1863,17 @@ def test_window_drains_before_persisting_and_stopping_remote(control_factory, qa
 
 
 @pytest.mark.parametrize("programmatic", [False, True])
-def test_window_timeout_waits_for_decision_and_retries(control_factory, qapp, programmatic):
+def test_window_timeout_waits_for_decision_and_retries(
+    control_factory, qapp, programmatic
+):
     dialogs = _DeferredClosePresenter()
     window, ctrl = _setup_window_with_tabs(control_factory, dialogs)
     ctrl.begin_shutdown.side_effect = lambda on_closed: on_closed()
-    ctrl.close.side_effect = [TimeoutError("still running"), TimeoutError("still running"), None]
+    ctrl.close.side_effect = [
+        TimeoutError("still running"),
+        TimeoutError("still running"),
+        None,
+    ]
     remote = MagicMock()
     window.remote_control_service = remote
     window.show()
@@ -2049,7 +2055,9 @@ def test_tab_moved_while_confirmation_pending_closes_captured_widget(
             action_text: str,
             on_decision: Callable[[bool], None],
             default: bool = False,
+            cancel_text: str = "Cancel",
         ) -> None:
+            """Retain the decision and preserve the alternative button label."""
             super().destructive_confirm(
                 parent,
                 title,
@@ -2057,6 +2065,7 @@ def test_tab_moved_while_confirmation_pending_closes_captured_widget(
                 action_text=action_text,
                 on_decision=lambda _: None,
                 default=default,
+                cancel_text=cancel_text,
             )
             decision_cb.append(on_decision)
 
@@ -2098,7 +2107,9 @@ def test_tab_close_suppresses_duplicate_prompt_while_decision_pending(
             action_text: str,
             on_decision: Callable[[bool], None],
             default: bool = False,
+            cancel_text: str = "Cancel",
         ) -> None:
+            """Retain the decision and preserve the alternative button label."""
             super().destructive_confirm(
                 parent,
                 title,
@@ -2106,6 +2117,7 @@ def test_tab_close_suppresses_duplicate_prompt_while_decision_pending(
                 action_text=action_text,
                 on_decision=lambda _: None,
                 default=default,
+                cancel_text=cancel_text,
             )
             decision_cb.append(on_decision)
 
@@ -2296,7 +2308,9 @@ def test_app_close_suppresses_duplicate_prompt_while_decision_pending(
             action_text: str,
             on_decision: Callable[[bool], None],
             default: bool = False,
+            cancel_text: str = "Cancel",
         ) -> None:
+            """Retain the decision and preserve the alternative button label."""
             super().destructive_confirm(
                 parent,
                 title,
@@ -2304,6 +2318,7 @@ def test_app_close_suppresses_duplicate_prompt_while_decision_pending(
                 action_text=action_text,
                 on_decision=lambda _: None,
                 default=default,
+                cancel_text=cancel_text,
             )
             decision_cb.append(on_decision)
 

@@ -128,24 +128,13 @@ class ControllerFixture:
         self.caretaker = PersistenceCaretaker(self.ctrl, cache_dir=cache_dir)
         self.ctrl.attach_caretaker(self.caretaker)
 
-    def quiesce(self) -> None:
-        """Join the Controller's in-flight background work and flush its queued
-        main-thread deliveries (run/analyze/device all share one
-        BackgroundRunner). Must run before the fixture — and thus the Controller
-        and its QObject service graph — is GC'd: a run spawns a dedicated worker
-        thread whose finished→deleteLater and done delivery are posted to the main
-        thread. If the Controller is collected with those still queued, a later
-        test's event pump (QEventLoop.exec / processEvents) dispatches them onto a
-        freed C++ object and segfaults."""
-        self.ctrl._background_svc.quiesce()
-
 
 @pytest.fixture()
 def cf(qapp, tmp_path) -> Iterator[ControllerFixture]:
     # Scope persistence to a temp dir so tests never read/write the real cache.
     fixture = ControllerFixture(cache_dir=tmp_path)
     yield fixture
-    fixture.quiesce()
+    fixture.ctrl.close()
 
 
 def _start_interactive_analysis(cf: ControllerFixture) -> tuple[str, int]:
@@ -195,7 +184,7 @@ def test_get_project_root_falls_back_to_cwd_when_not_injected(qapp, tmp_path):
         bus=BaseEventBus(),
     )
     assert ctrl.get_project_root() == os.getcwd()
-    ctrl._background_svc.quiesce()
+    ctrl.close()
 
 
 # ---------------------------------------------------------------------------
