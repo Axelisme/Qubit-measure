@@ -37,7 +37,7 @@ class ScalarCore(ConfigBase):
 def captured_env(amount: float) -> FormEnv:
     """Construct a detached source with a known arithmetic value."""
     library = LibrarySnapshot(
-        ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+        ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
     )
     parameters = ParameterContext(
         point=PointDocument(
@@ -135,7 +135,7 @@ def test_open_and_reset_factory_replace_shape_and_values_from_current_capture() 
     library = LibrarySnapshot(
         ModuleLibraryDocument(
             format="zcu.module-library",
-            format_version="1.0",
+            format_version="2.0",
             components={
                 "Q1": ComponentLibrary(
                     pulses={

@@ -116,14 +116,9 @@ class ModalLoadAdapter(OldAdapter):
         )
 
 
-class UiController(Controller):
-    def quiesce(self) -> None:
-        self._background_svc.quiesce()
-
-
 @dataclass
 class ControlUi:
-    controller: UiController
+    controller: Controller
     window: MainWindow
     client: socket.socket
     dialogs: RecordingDialogPresenter
@@ -192,7 +187,7 @@ def control_ui(
     registry.register("loadable", ModalLoadAdapter)
     loader = Loader()
     loader.candidate.register("stoppable", StoppableAdapter)
-    ctrl = UiController(
+    ctrl = Controller(
         State(SessionEnv(parameters=None, soc=None, soccfg=None)),
         registry,
         None,
@@ -226,7 +221,7 @@ def control_ui(
             ctrl.operation_control.cancel_operation(operation.op)
         client.close()
         remote.stop()
-        ctrl.quiesce()
+        ctrl.close()
         ctrl.abort_shutdown()
         for tid in tuple(ctrl.list_tab_ids()):
             ctrl.tab_control.close_tab(tid)

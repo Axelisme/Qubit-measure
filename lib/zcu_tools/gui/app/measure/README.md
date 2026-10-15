@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-15，Library／Inspect／writeback 共用 Form 與持久 Spec
+**Last updated:** 2026-10-15，共用 Form／持久 Spec 與 terminal Controller close
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -393,6 +393,14 @@ Retry 的 prepare/load 皆保留 typed error disposition；要求 restart 後不
 Shutdown 暫停 experiment entries；settle 後的未保存資料確認若取消，MainWindow 呼叫
 `Controller.abort_shutdown()` 恢復入口，不自動重啟已取消的 operations，也不重新啟用失敗的
 catalog。開始 shutdown 若拋錯，Controller 恢復原 gate 狀態並保留例外。
+
+`Controller.close(timeout_ms=5000)` 是 Qt owner-thread 的 terminal 收尾入口。
+它永久停止背景 admission，再 drain worker 與 queued owner deliveries，逾時 raise
+`TimeoutError`，保留 owner 後可重試。Production 關窗與 Controller-owning fixture
+都使用此入口。`begin_shutdown` 仍負責取消 operation，不代表硬體斷線或 RF safety。
+MainWindow 在 close 成功前不 persist、不停止 remote、不釋放 View。逾時留窗詢問
+「再等一下／強制關閉」，只有明確 force 才跳過 drain。再等或 dismiss 在下一個
+Qt turn 重試，重複 GUI／RPC request 不代表 force。
 
 Reload 在 owner thread 同步執行，不 pump Qt events；進行中 handle 與 tab busy flags
 共同阻止 reload。Save 在同一 owner thread 同步完成，不建立 handle。共用 `ExperimentAccess` 阻止 local/remote

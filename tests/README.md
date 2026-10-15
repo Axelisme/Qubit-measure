@@ -80,26 +80,32 @@ GUI cache 隔離只支援 Linux，其它平台在 root conftest 載入時直接�
 清掉的 basetemp。這些目錄保留到 process 結束，再由 `atexit` 清理。
 巢狀 `pytest.main()` session 的 teardown 不還原 `XDG_CACHE_HOME`，後續 cleanup 仍使用隔離目錄。
 
-### BackgroundRunner.quiesce() — 測試 teardown 必要模式
+### Background work — 測試 teardown 必要模式
 
-任何 fixture 若持有會透過 `BackgroundRunner` 提交 pool 或
-thread worker 的物件，都必須在 teardown 呼叫 `quiesce()`，**才** `deleteLater()` / 放 GC。
+Fixture 必須在 `deleteLater()` 或放 GC 前等待背景工作與 queued delivery。
+持有 measure Controller 時呼叫 `close()`。直接持有 `BackgroundRunner` 時呼叫
+`quiesce()`。
 
 原因：worker 的 `on_done` 是跨執行緒 queued signal；如果 runner 在 delivery 進到 main-thread queue
 之後就被 GC，下一次 `processEvents()` 會把訊號分發到已釋放的 C++ 物件 → segfault。
 
+持有 measure `Controller` 的 fixture 呼叫公開 `close()`，不讀取內部 runner。
+它先永久停止 admission，再等待 worker 與 queued owner deliveries。逾時會 raise
+`TimeoutError`，teardown 不應吞掉例外或當作已完成。成功後可重複呼叫。
+
 ```python
-# pattern（見 tests/gui/test_controller.py 的 ControllerFixture.quiesce()
-#           和 tests/gui/session/services/test_device_manager.py 的 _quiesce_services fixture）
 @pytest.fixture
-def my_widget(qapp):
-    w = SomeWidgetThatOwnsBackgroundRunner(...)
-    yield w
-    w._debounce.stop()   # 停止任何 debounce timer，防止啟動新 worker
-    w._runner.quiesce()  # join in-flight + flush queued deliveries
-    w.deleteLater()
+def controller_view(qapp):
+    ctrl, view = make_controller_view()
+    yield ctrl, view
+    ctrl.close()
+    view.deleteLater()
     qapp.processEvents()
 ```
+
+直接持有其他 runner 的 fixture 繼續呼叫該 runner 的公開 lifecycle API，不套用
+Controller 的 terminal close。見 `tests/gui/session/services/test_device_manager.py`
+的 `_quiesce_services` fixture。
 
 ### Qt timer waits
 

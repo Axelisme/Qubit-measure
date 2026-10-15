@@ -48,7 +48,7 @@ def pulse(*, gain: float = 0.25, waveform: str = "Q1.waveforms.base") -> PulseSp
 def document() -> ModuleLibraryDocument:
     return ModuleLibraryDocument(
         format="zcu.module-library",
-        format_version="1.0",
+        format_version="2.0",
         components={
             "Q1": ComponentLibrary(
                 pulses={"pi": pulse(), "pi2": pulse(gain=0.125)},
@@ -59,24 +59,17 @@ def document() -> ModuleLibraryDocument:
 
 
 def test_snapshot_public_context_retains_capture_bound_asset_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    before = vars(ArbWaveformDatabase)["_database_path"]
-    try:
-        monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
-        first = tmp_path / "first"
-        ArbWaveformDatabase.init(first)
-        ArbWaveformDatabase.save(
-            "shape", idata=np.array([0.0, 0.5]), time=np.array([0.0, 1.0])
-        )
-        captured = LibrarySnapshot(document(), assets=ArbWaveformDatabase.bound_info())
-        ArbWaveformDatabase.init(tmp_path / "second")
-        context = captured.validation_context()
-        assert context.assets is not None
-        assert context.assets.path_for("shape") == (first / "shape.npz").resolve()
-    finally:
-        monkeypatch.undo()
-        assert vars(ArbWaveformDatabase)["_database_path"] == before
+    first = tmp_path / "first"
+    repository = ArbWaveformDatabase(first)
+    repository.save("shape", idata=np.array([0.0, 0.5]), time=np.array([0.0, 1.0]))
+    captured = LibrarySnapshot(document(), assets=repository.bound_info())
+    other = ArbWaveformDatabase(tmp_path / "second")
+    other.save("shape", idata=[0.9, 0.9], time=[0.0, 9.0])
+    context = captured.validation_context()
+    assert context.assets is not None
+    assert context.assets.path_for("shape") == (first / "shape.npz").resolve()
 
 
 def assets() -> InMemoryWaveformAsset:
@@ -94,7 +87,7 @@ def assets() -> InMemoryWaveformAsset:
 def files(tmp_path: Path) -> tuple[Path, Path]:
     path = tmp_path / "module_cfg.yaml"
     path.write_text(
-        "format: zcu.module-library\nformat_version: '1.0'\n", encoding="utf-8"
+        "format: zcu.module-library\nformat_version: '2.0'\n", encoding="utf-8"
     )
     records = tmp_path / "records"
     records.mkdir()
@@ -201,9 +194,9 @@ def test_missing_document_is_not_created(files: tuple[Path, Path]) -> None:
     "content",
     [
         "waveforms: {}\nmodules: {}\n",
-        "format: wrong\nformat_version: '1.0'\n",
-        "format: zcu.module-library\nformat_version: '2.0'\n",
-        "format: zcu.module-library\nformat_version: '1.0'\nunknown: true\n",
+        "format: wrong\nformat_version: '2.0'\n",
+        "format: zcu.module-library\nformat_version: '1.0'\n",
+        "format: zcu.module-library\nformat_version: '2.0'\nunknown: true\n",
     ],
 )
 def test_open_rejects_invalid_document_without_rewriting(
@@ -604,7 +597,7 @@ def test_refresh_publishes_after_install_and_unsubscribe_is_idempotent(
 def test_invalid_refresh_retains_published_snapshot(files: tuple[Path, Path]) -> None:
     write_document(files, document())
     library = open_library(files)
-    files[0].write_text("format: wrong\nformat_version: '1.0'\n", encoding="utf-8")
+    files[0].write_text("format: wrong\nformat_version: '2.0'\n", encoding="utf-8")
     with pytest.raises(ValueError, match="format"):
         library.refresh()
     assert library.snapshot().value("Q1.pulses.pi.gain") == 0.25

@@ -96,7 +96,7 @@ def app(qapp, tmp_path):
     try:
         yield ctrl, window, state, tab_id
     finally:
-        ctrl._background_svc.quiesce()
+        ctrl.close()
         window.deleteLater()
         qapp.processEvents()
 

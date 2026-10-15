@@ -257,7 +257,7 @@ def environment(
             library=LibrarySnapshot(
                 ModuleLibraryDocument(
                     format="zcu.module-library",
-                    format_version="1.0",
+                    format_version="2.0",
                 )
             ),
             target=SavedPoint(entry_id="entry", point="synthetic"),

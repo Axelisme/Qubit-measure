@@ -1,4 +1,3 @@
-from collections.abc import Iterator
 from copy import deepcopy
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -26,13 +25,6 @@ from zcu_tools.program.v2.modules.waveform import (
     WaveformCfgFactory,
 )
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase, ArbWaveformError
-
-
-@pytest.fixture(scope="module", autouse=True)
-def repository_state_guard() -> Iterator[None]:
-    before = vars(ArbWaveformDatabase)["_database_path"]
-    yield
-    assert vars(ArbWaveformDatabase)["_database_path"] == before
 
 
 def _asset(
@@ -189,15 +181,12 @@ def test_arb_waveform_make_iqdata_uses_full_data_duration(tmp_path: Path):
     prog.us2cycles.assert_called_once_with(gen_ch=0, us=2.0)
 
 
-def test_arb_path_controls_length_samples_and_flat_top_after_global_db_switch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_arb_path_controls_length_samples_and_flat_top_with_another_repository(
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
     path = _asset(tmp_path, idata=[0.0, 0.5, 0.0])
-    ArbWaveformDatabase.init(tmp_path / "other")
-    ArbWaveformDatabase.save(
-        "demo", idata=np.array([0.0, 0.9]), time=np.array([0.0, 9.0])
-    )
+    repository = ArbWaveformDatabase(tmp_path / "other")
+    repository.save("demo", idata=np.array([0.0, 0.9]), time=np.array([0.0, 9.0]))
     cfg = ArbWaveformCfg(data="demo", path=path)
     assert cfg.length == 2.0
     prog = MagicMock()
@@ -219,18 +208,17 @@ def test_arb_path_controls_length_samples_and_flat_top_after_global_db_switch(
 
 @pytest.mark.parametrize("flat_top", [False, True])
 def test_converted_arb_copy_reads_current_capture_duration_and_iq(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flat_top: bool
+    tmp_path: Path, flat_top: bool
 ) -> None:
-    monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
     first = tmp_path / "first"
-    ArbWaveformDatabase.init(first)
-    ArbWaveformDatabase.save(
+    repository = ArbWaveformDatabase(first)
+    repository.save(
         "demo",
         time=np.array([0.0, 1.0, 2.0]),
         idata=np.array([0.0, 0.3, 0.0]),
         qdata=np.array([0.0, 0.4, 0.0]),
     )
-    context = CfgValidationContext(assets=ArbWaveformDatabase.bound_info())
+    context = CfgValidationContext(assets=repository.bound_info())
     core = CoreArbWaveformCfg(data="demo")
     source = (
         CoreFlatTopWaveformCfg(length=6.0, raise_waveform=core) if flat_top else core
@@ -238,8 +226,8 @@ def test_converted_arb_copy_reads_current_capture_duration_and_iq(
     copied = deepcopy(WaveformCfgFactory.from_core(source, context=context))
     native = copied.raise_waveform if isinstance(copied, FlatTopWaveformCfg) else copied
     assert isinstance(native, ArbWaveformCfg)
-    ArbWaveformDatabase.init(tmp_path / "second")
-    ArbWaveformDatabase.save(
+    repository = ArbWaveformDatabase(tmp_path / "second")
+    repository.save(
         "demo",
         time=np.array([0.0, 9.0]),
         idata=np.array([0.9, 0.9]),

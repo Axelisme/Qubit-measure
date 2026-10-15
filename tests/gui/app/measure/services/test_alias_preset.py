@@ -31,7 +31,6 @@ from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.entry.aliases import EntryAliases
 
 from tests.gui._progress_fakes import DirectProgressTransport
-from tests.gui.app.measure.remote._helpers import FixtureController
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
@@ -151,7 +150,7 @@ def test_named_default_initializes_only_entries_without_saved_aliases(
                 EntryAliases(aliases={row.alias: row.value for row in saved})
             )
         try:
-            controller = FixtureController(
+            controller = Controller(
                 state=State(SessionEnv(parameters=None, soc=None, soccfg=None)),
                 registry=Registry(),
                 view=None,
@@ -172,7 +171,7 @@ def test_named_default_initializes_only_entries_without_saved_aliases(
             expected = (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
             assert context.get_alias_rows() == (expected if saved is None else saved)
         finally:
-            controller.quiesce()
+            controller.close()
             qapp.processEvents()
         assert registry_state() == installed
     finally:

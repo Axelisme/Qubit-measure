@@ -19,7 +19,7 @@ type SaveDiscardCancel = Literal["save", "discard", "cancel"]
 
 
 class DialogPresenter(Protocol):
-    """Small dialog port used by widgets that need scriptable test behavior."""
+    """Present messages and user decisions without prescribing a dialog backend."""
 
     def information(self, parent: QWidget, title: str, message: str) -> None: ...
 
@@ -65,7 +65,14 @@ class DialogPresenter(Protocol):
         action_text: str,
         on_decision: Callable[[bool], None],
         default: bool = False,
-    ) -> None: ...
+        cancel_text: str = "Cancel",
+    ) -> None:
+        """Present a destructive action and a labelled non-destructive alternative.
+
+        Deliver True only for the explicit action; alternative or dismissal delivers
+        False. ``default`` selects the action instead of the alternative as default.
+        """
+        ...
 
 
 class QtDialogPresenter:
@@ -158,14 +165,16 @@ class QtDialogPresenter:
         action_text: str,
         on_decision: Callable[[bool], None],
         default: bool = False,
+        cancel_text: str = "Cancel",
     ) -> None:
+        """Open the labelled action/alternative choice; dismissal delivers False."""
         box = self._message_box(parent, QMessageBox.Icon.Warning, title, message)
         action_button = self._require_button(
             box.addButton(action_text, QMessageBox.ButtonRole.DestructiveRole),
             action_text,
         )
         cancel_button = self._require_button(
-            box.addButton(QMessageBox.StandardButton.Cancel), "Cancel"
+            box.addButton(cancel_text, QMessageBox.ButtonRole.RejectRole), cancel_text
         )
         if default:
             box.setDefaultButton(action_button)

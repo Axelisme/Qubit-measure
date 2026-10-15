@@ -7,7 +7,6 @@ import threading
 from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
-from time import monotonic
 
 import pytest
 from qtpy.QtWidgets import (
@@ -61,16 +60,7 @@ def composed(qapp: QApplication, tmp_path: Path) -> Generator[_Composed]:
         yield _Composed(controller, window)
     finally:
         if controller is not None:
-            # This fixture only assembles and opens Inspect; it starts no workers.
-            # Public shutdown plus an owner-loop flush is limited to this case,
-            # not a replacement for quiesce in fixtures that submit background work.
-            closed: list[bool] = []
-            controller.begin_shutdown(lambda: closed.append(True))
-            deadline = monotonic() + 5.0
-            while not closed and monotonic() < deadline:
-                qapp.processEvents()
-            assert closed, "Controller shutdown did not finish within 5 seconds"
-            qapp.processEvents()
+            controller.close()
         if window is not None:
             for dialog in window.findChildren(InspectDialog):
                 # hide() skips closeEvent, so a loaded draft asks nothing here.

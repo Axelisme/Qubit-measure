@@ -145,7 +145,7 @@ def test_reset_during_active_run_preserves_the_publication(live_tab, monkeypatch
         assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == before
     finally:
         release.set()
-        fixture.ctrl.quiesce()
+        fixture.ctrl.close()
         sock.close()
 
 

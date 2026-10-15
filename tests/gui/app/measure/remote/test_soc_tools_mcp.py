@@ -84,7 +84,7 @@ def simulation_client(qapp, tmp_path: Path, request: pytest.FixtureRequest):
         yield fx, invoke
     finally:
         bridge.disconnect()
-        assert vars(fx.ctrl)["_background_svc"].quiesce()
+        fx.ctrl.close()
         fx.stop()
 
 

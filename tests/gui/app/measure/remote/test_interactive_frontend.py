@@ -61,7 +61,7 @@ def mounted_fx(qapp, tmp_path):
         window.show()
         qapp.processEvents()
         yield fixture, window
-        fixture.ctrl.quiesce()
+        fixture.ctrl.close()
         fixture.stop()
         window.deleteLater()
         qapp.processEvents()
