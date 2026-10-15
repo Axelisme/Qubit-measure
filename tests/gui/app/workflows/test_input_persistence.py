@@ -51,7 +51,6 @@ def window(qapp: QApplication) -> Iterator[WorkflowWindow[Context]]:
         harness.state,
         harness.services,
         harness.owner,
-        bus=harness.bus,
         templates={},
         alias_presets=None,
         registrations=build_registry(),

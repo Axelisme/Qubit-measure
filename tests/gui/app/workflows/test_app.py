@@ -231,7 +231,6 @@ def test_window_parent_and_close_callback_retry(
         harness.state,
         harness.services,
         harness.owner,
-        bus=harness.bus,
         templates={},
         alias_presets=None,
         registrations=build_registry(),

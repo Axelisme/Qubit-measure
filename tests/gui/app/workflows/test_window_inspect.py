@@ -6,7 +6,6 @@ button, session writeback, run lock, fresh alias view and injected catalogs.
 
 from pathlib import Path
 
-import pytest
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QApplication,
@@ -179,19 +178,14 @@ def test_composition_supplies_templates_presets_and_the_shared_arb_dialog(
         )
     }
     presets = {"default": (), "probe": (AliasRow("probe", "Q1"),)}
-    try:
-        app = WorkflowsGuiBehavior(
-            registrations=[small_registration()],
-            templates=templates,
-            alias_presets=presets,
-            project_root=str(tmp_path),
-            cache_dir=tmp_path / "cache",
-            clean=True,
-        )
-    except TypeError as error:
-        pytest.fail(
-            f"Workflows must wire the supplied Inspect template catalog: {error}"
-        )
+    app = WorkflowsGuiBehavior(
+        registrations=[small_registration()],
+        templates=templates,
+        alias_presets=presets,
+        project_root=str(tmp_path),
+        cache_dir=tmp_path / "cache",
+        clean=True,
+    )
     app.assemble(None)
     try:
         # Aliases and ARB remain available even before opening a point.

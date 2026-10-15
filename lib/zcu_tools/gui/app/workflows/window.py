@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import JsonValue
 from qick import QickConfig
-from qtpy.QtCore import QSignalBlocker, Qt
+from qtpy.QtCore import QSignalBlocker
 from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import QWidget
 
@@ -62,6 +62,7 @@ from zcu_tools.gui.session.ui.arb_waveform_dialog import ArbWaveformDialog
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
+from zcu_tools.gui.widgets.dialog_lifecycle import DialogRefStore
 from zcu_tools.gui.widgets.dialog_presenter import QtDialogPresenter
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
@@ -103,7 +104,6 @@ class WorkflowWindow[C](QWidget):
         owner: OwnerScheduler,
         *,
         registrations: Sequence[Attachment[C]],
-        bus: BaseEventBus,
         templates: Mapping[str, TemplateDef],
         alias_presets: AliasPresets | None,
         loader: SourceCatalogLoader[WorkflowCatalog[C]] | None = None,
@@ -116,7 +116,7 @@ class WorkflowWindow[C](QWidget):
         top-level; otherwise embedded. EMPTY builds partial source-free drafts.
         registrations is nonempty, ordered and has unique declaration names;
         its first item is the default. Invalid catalogs raise ValueError.
-        bus is the event bus used to build services. templates supplies the
+        The event bus comes from services. templates supplies the
         persistent module/waveform catalog shared Inspect offers under New; an
         empty catalog is valid. alias_presets is the caller's complete named
         catalog for Inspect, or None for no presets. No files are read for either.
@@ -136,7 +136,6 @@ class WorkflowWindow[C](QWidget):
         self._catalog_error: CatalogReloadError | None = None
         self._state = state
         self._services = services
-        self._bus = bus
         self._templates = templates
         self._alias_presets = alias_presets
         self._dialog_presenter = QtDialogPresenter()
@@ -163,9 +162,7 @@ class WorkflowWindow[C](QWidget):
             self.plan_panel,
             self.tunables_panel,
         )
-        self._device_dialog: DeviceDialog | None = None
-        self._inspect_dialog: InspectDialog | None = None
-        self._arb_dialog: ArbWaveformDialog | None = None
+        self._dialogs = DialogRefStore()
         self._controls.selector.addItems(list(current.names))
         self._controls.selector.currentTextChanged.connect(self._selection_changed)
         for button, slot in (
@@ -212,7 +209,7 @@ class WorkflowWindow[C](QWidget):
         polls the selected device, but cannot add, drop, apply or stop. Opening
         reads no hardware and changes no form capture.
         """
-        dialog = self._device_dialog
+        dialog = self._dialogs.get("devices")
         if dialog is not None:
             dialog.raise_()
             dialog.activateWindow()
@@ -222,11 +219,8 @@ class WorkflowWindow[C](QWidget):
             parameter_provider=self._services.context_control.read_context,
             parent=self,
         )
-        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dialog.finished.connect(self._device_dialog_finished)
         dialog.set_read_only(read_only=self._run_view.start_locked)
-        self._device_dialog = dialog
-        dialog.open()
+        self._dialogs.open_named("devices", dialog)
 
     def open_inspect(self) -> None:
         """Open the shared inspector on this session, on the Qt owner thread.
@@ -236,14 +230,14 @@ class WorkflowWindow[C](QWidget):
         From Start until terminal delivery only browsing is allowed. Writes
         outside that interval go through the same context control as Setup.
         """
-        dialog = self._inspect_dialog
+        dialog = self._dialogs.get("inspect")
         if dialog is not None:
             dialog.raise_()
             dialog.activateWindow()
             return
         dialog = InspectDialog(
             self._services.context_control,
-            self._bus,
+            self._services.setup_control.get_bus(),
             templates=self._templates,
             arb_waveforms=self._services.arb_waveform,
             open_arb_waveforms=self._open_arb_waveforms,
@@ -251,32 +245,17 @@ class WorkflowWindow[C](QWidget):
             alias_presets=self._alias_presets,
             parent=self,
         )
-        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dialog.finished.connect(self._inspect_dialog_finished)
         dialog.set_read_only(read_only=self._run_view.start_locked)
-        self._inspect_dialog = dialog
-        dialog.open()
-
-    def _inspect_dialog_finished(self, _result: int) -> None:
-        self._inspect_dialog = None
+        self._dialogs.open_named("inspect", dialog)
 
     def _open_arb_waveforms(self) -> None:
-        dialog = self._arb_dialog
+        dialog = self._dialogs.get("arb")
         if dialog is not None:
             dialog.raise_()
             dialog.activateWindow()
             return
         dialog = ArbWaveformDialog(self._services.arb_waveform, parent=self)
-        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dialog.finished.connect(self._arb_dialog_finished)
-        self._arb_dialog = dialog
-        dialog.open()
-
-    def _arb_dialog_finished(self, _result: int) -> None:
-        self._arb_dialog = None
-
-    def _device_dialog_finished(self, _result: int) -> None:
-        self._device_dialog = None
+        self._dialogs.open_named("arb", dialog)
 
     def _sync_run_locked_controls(self) -> None:
         """Apply the run's Start lock to source controls and shared dialogs.
@@ -296,10 +275,10 @@ class WorkflowWindow[C](QWidget):
         self._controls.reload.setEnabled(
             not locked and self._loader is not None and not restart_required
         )
-        if self._device_dialog is not None:
-            self._device_dialog.set_read_only(read_only=locked)
-        if self._inspect_dialog is not None:
-            self._inspect_dialog.set_read_only(read_only=locked)
+        for key in ("devices", "inspect"):
+            dialog = self._dialogs.get(key)
+            if isinstance(dialog, (DeviceDialog, InspectDialog)):
+                dialog.set_read_only(read_only=locked)
 
     def _use_source_clicked(self) -> None:
         try:
@@ -916,7 +895,8 @@ class WorkflowWindow[C](QWidget):
 
     def _shutdown_on_close(self, event: QCloseEvent | None) -> bool:
         """Resolve Inspect drafts before shutdown; reject cancellation or failure."""
-        if self._inspect_dialog is not None and not self._inspect_dialog.close():
+        inspect = self._dialogs.get("inspect")
+        if inspect is not None and not inspect.close():
             # Cancel must leave the session services alive for continued editing.
             if event is not None:
                 event.ignore()
@@ -970,10 +950,10 @@ class WorkflowWindow[C](QWidget):
         if not self._shutdown_on_close(a0):
             return
         self.setup_dialog.close()
-        if self._device_dialog is not None:
-            self._device_dialog.reject()
-        if self._arb_dialog is not None:
-            self._arb_dialog.reject()
+        for key in ("devices", "arb"):
+            dialog = self._dialogs.get(key)
+            if dialog is not None:
+                dialog.reject()
         self._session.detach()
         self._run_view.close()
         self._figure_views.release()

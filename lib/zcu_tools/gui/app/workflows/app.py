@@ -147,7 +147,6 @@ class WorkflowsGuiBehavior[C](GuiRuntimeBehavior):
             self.services,
             self._owner,
             registrations=self._registrations,
-            bus=self._bus,
             templates=self._templates,
             alias_presets=self.alias_presets,
             loader=self._loader,

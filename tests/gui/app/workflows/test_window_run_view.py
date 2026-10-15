@@ -716,7 +716,6 @@ def unmonitored(
         harness.state,
         harness.services,
         harness.owner,
-        bus=harness.bus,
         templates={},
         alias_presets=None,
         registrations=window_session.source.catalog.attachments,

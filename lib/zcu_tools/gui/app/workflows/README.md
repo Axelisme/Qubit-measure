@@ -1,6 +1,6 @@
 # gui/app/workflows — Workflow host
 
-**Last updated:** 2026-10-15，Inspect… 開共用 Inspect，run 進行中唯讀；session 列只留 Entry chip（文字可選取）；Devices… 開共用 DeviceDialog，run 進行中唯讀；stopping 時 live tuning 唯讀但可讀、停用 Apply 與 Discard；options／tagged input 與 memento 版本；run 進行中 Plan 與 Start Tunables 表單唯讀但可讀（不再停用面板）；run 進行中停用 Prepare forms 與 Reload source；terminal 後保存可編輯的 Start knobs；run view 在 terminal 時重設 Start knobs；具名 alias preset 啟動資料整合
+**Last updated:** 2026-10-15, shared Inspect and Devices dialogs
 
 ## 註冊與組裝
 
@@ -12,7 +12,7 @@
 
 ## Window 版面
 
-`layout.py` 建一次控制項與版面，`session_strip.py` 的 `WorkflowSessionStrip` 顯示 session 列。最上面一列只有一個 Entry chip（`Entry: <entry> / <point>`），之後是 Setup…、Inspect…、Devices…、Prepare forms、Reload source。Qubit、裝置與 ZCU 不在 session 列：框架不認得 qubit，裝置與 ZCU 狀態由 Device 對話框或 workflow 自己的畫面呈現。Chip 只讀 services，收到 context 切換事件時刷新，Setup 關閉與 Prepare forms 後也刷新；過長的文字截斷，完整文字放在 tooltip，不撐寬視窗。Devices… 用 measure GUI 同一個共用 `DeviceDialog`，同樣以 window-modal 開啟、關閉即刪除、已開著時只 raise，吃 session 的 device control 與 parameter provider。Workflows 沒有控制權交接，所以不設 `before_stop`。從 Start 到 terminal delivery（pending、running、pausing、paused、stopping），hardware gate 擋住裝置變更，宿主也拒絕 Prepare forms 與 Reload source：這兩顆停用，Device 對話框（不論 run 前或 run 中開啟）切成唯讀，terminal delivery 後恢復可設定。Setup… 與 Devices… 維持可按；Setup 改的是 session，不影響已 capture 的 run。Inspect…（`workflow.source.inspect`）開啟與 measure 相同的共用 `InspectDialog`，提供 Parameters、Modules 與 Aliases 三頁。它使用 session 的 context control 與 event bus，Modules 可從注入的範本新建條目，也可開共用 ARB 波形管理。Aliases 的 Load preset 使用 Behavior 保留的同一份具名表。對話框以 window-modal 開啟，已開著時只 raise，關閉即刪除；下次開啟重新讀取 alias 表，不保留舊頁面。Inspect… 在 run 中維持可按，從 Start 到 terminal delivery 對話框唯讀，terminal delivery 後恢復編輯。Reload 另外要有 loader，且沒有要求重啟的 reload 失敗。
+`layout.py` 建一次控制項與版面，`session_strip.py` 的 `WorkflowSessionStrip` 顯示 session 列。最上面一列只有一個 Entry chip（`Entry: <entry> / <point>`），之後是 Setup…、Inspect…、Devices…、Prepare forms、Reload source。Qubit、裝置與 ZCU 不在 session 列：框架不認得 qubit，裝置與 ZCU 狀態由 Device 對話框或 workflow 自己的畫面呈現。Chip 只讀 services，收到 context 切換事件時刷新，Setup 關閉與 Prepare forms 後也刷新；過長的文字截斷，完整文字放在 tooltip，不撐寬視窗。Inspect… 與 Devices… 開啟與 measure GUI 相同的共用對話框。兩者在 run 中維持可開啟，從 Start 到 terminal delivery 都唯讀，terminal delivery 後恢復編輯。Prepare forms 與 Reload source 在這段期間停用。Setup… 維持可按；它改的是 session，不影響已 capture 的 run。Reload 另外要有 loader，且沒有要求重啟的 reload 失敗。
 
 下方是可拖動的 QSplitter。左欄依序是 workflow 選單、`Plan`／`Tunables` 兩個分頁與固定在底部的 Start／Pause／Resume／Stop。分頁內容放在 QScrollArea，所以表單展開多少都不影響視窗最小高度；切換 workflow、Prepare 與 Reload 換掉的 panel 放回同一個分頁。右欄依序是 run 狀態列（`run_status.py`）、診斷訊息列 `workflow.run.message` 與 `figure_area.py` 的 `WorkflowFigureArea`。版面只依 widget 結構，不依 workflow 名稱；既有 objectName 保持不變。
 

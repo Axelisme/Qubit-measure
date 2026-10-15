@@ -100,7 +100,6 @@ def build():
             harness.state,
             harness.services,
             harness.owner,
-            bus=harness.bus,
             templates={},
             alias_presets=None,
             registrations=catalog.attachments,
