@@ -41,7 +41,7 @@ def captures() -> Generator[tuple[ParameterContext, ParameterContext]]:
             }
         )
         library = LibrarySnapshot(
-            ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+            ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
         )
         values = tuple(
             ParameterContext(

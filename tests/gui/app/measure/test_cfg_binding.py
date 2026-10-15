@@ -180,7 +180,7 @@ def test_measure_snapshot_missing_capture_is_precondition_failure() -> None:
 
 def test_measure_snapshot_catalog_isolated_from_live_and_returned_values() -> None:
     library = LibrarySnapshot(
-        ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+        ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
     ).replaced_module("Q1.pulses.drive", module_spec_from_raw(_pulse()))
     bindings, host = _bindings(library)
     frozen = bindings.snapshot((), captured_values={}, parameters=host.read_context())
@@ -239,7 +239,7 @@ def test_measure_option_provider_owns_device_and_arb_catalogs() -> None:
 
 def test_measure_catalog_filters_by_shape_and_materializes_resolution() -> None:
     library = LibrarySnapshot(
-        ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+        ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
     ).replaced_module("Q1.pulses.drive", module_spec_from_raw(_pulse()))
     library = library.replaced_module(
         "R1.readout.direct",
@@ -266,7 +266,7 @@ def test_measure_catalog_filters_by_shape_and_materializes_resolution() -> None:
 def test_measure_catalog_corrupt_entry_fast_fails_during_enumeration() -> None:
     document = (
         LibrarySnapshot(
-            ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+            ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
         )
         .replaced_module("Q1.pulses.corrupt", module_spec_from_raw(_pulse()))
         .document()
@@ -280,7 +280,7 @@ def test_measure_catalog_corrupt_entry_fast_fails_during_enumeration() -> None:
 
 def test_measure_keys_inspects_shapes_without_converter_or_normalization() -> None:
     document = LibrarySnapshot(
-        ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+        ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
     ).replaced_module("Q1.pulses.drive", module_spec_from_raw(_pulse()))
     document = document.replaced_module(
         "R1.readout.direct",
@@ -304,7 +304,7 @@ def test_measure_keys_inspects_shapes_without_converter_or_normalization() -> No
 
 def test_measure_resolve_calls_app_converter_exactly_once() -> None:
     library = LibrarySnapshot(
-        ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+        ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
     ).replaced_module("Q1.pulses.drive", module_spec_from_raw(_pulse()))
     bindings, _ = _bindings(library)
 

@@ -94,7 +94,7 @@ def waveform_env(length: float = 0.1) -> FormEnv:
         library=LibrarySnapshot(
             ModuleLibraryDocument(
                 format="zcu.module-library",
-                format_version="1.0",
+                format_version="2.0",
                 components={
                     "Q": ComponentLibrary(
                         waveforms={"flat": ConstWaveformCfg(length=length)}
@@ -710,7 +710,7 @@ def creation_env(
     library = LibrarySnapshot(
         ModuleLibraryDocument(
             format="zcu.module-library",
-            format_version="1.0",
+            format_version="2.0",
             components={"Q": ComponentLibrary(pulses={"probe": library_entry()})},
         )
     )

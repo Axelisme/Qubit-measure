@@ -298,7 +298,7 @@ class ResultEntry:
                 draft.components = components
         with (destination / "module_cfg.yaml").open("x", encoding="utf-8") as stream:
             YAML(typ="rt").dump(
-                {"format": "zcu.module-library", "format_version": "1.0"}, stream
+                {"format": "zcu.module-library", "format_version": "2.0"}, stream
             )
 
     def _clone_source(self, clone_from: str | PointView) -> tuple[ResultEntry, Path]:
