@@ -41,7 +41,7 @@ from ._schema_view import FieldView, OptionView
 
 _JSON = TypeAdapter(JsonValue, config=ConfigDict(allow_inf_nan=False))
 # Vertical density: pixels between sibling rows, between a row's header and
-# its error/group, and around a nested group's rows (left indents the group).
+# its group, and around a nested group's rows (left indents the group).
 ROW_SPACING = 4
 _HEADER_SPACING = 2
 _GROUP_MARGINS = (8, 4, 4, 4)
@@ -51,6 +51,9 @@ _MODE_HINT = "Right-click to switch Direct / Expression"
 # a light tint of the theme's own colours, so text stays readable in light
 # and dark palettes alike.
 _EXPRESSION_TINT = 0.18
+# Fixed red mixed into Base for Direct input errors, independent of Highlight.
+_ERROR_TINT = 0.18
+_ERROR_COLOUR = QColor("#b3261e")
 # Shown in a group block's header while any of its rows shows an error, so a
 # folded group still tells the user where Start is blocked.
 GROUP_ERRORS_NOTE = "Contains errors"
@@ -59,7 +62,7 @@ FOLDED_MARK = "\u25b8"
 EXPANDED_MARK = "\u25be"
 # Suffix of the option dropdown item that shows an input no option matches.
 MISSING_SUFFIX = " (missing)"
-_ERRORS_NOTE_STYLE = "QLabel { color: #b3261e; }"
+_ERRORS_NOTE_STYLE = f"QLabel {{ color: {_ERROR_COLOUR.name()}; }}"
 # User input a read-only dropdown or checkbox drops. Tab and Backtab key
 # presses still pass, so focus can move on past the control.
 _BLOCKED_EVENTS = frozenset(
@@ -387,9 +390,11 @@ class FieldRow:
     the selected option's field rows, in its layout rows (both None for
     other rows, and for a disabled nullable model, which draws no box).
     The unit label comes right after the label and the row's input,
-    dropdown or Enabled box, if any. value/error are public-named
-    presentation labels, hidden while empty: value shows only an
-    Expression-mode resolved value, error shows below the header. These controls never own or evaluate form state.
+    dropdown or Enabled box, if any. value is a public-named label, hidden
+    while empty, showing only an Expression-mode resolved value. Errors tint
+    the input or name label and lead the row tooltip, without adding height.
+    The coloured widget carries the boolean formError property.
+    These controls never own or evaluate form state.
     Typed text is written when Enter is pressed or the field loses focus,
     unless it already shows state's input; switching mode writes at once,
     and switching a computed Expression to Direct writes its computed value.
@@ -430,6 +435,7 @@ class FieldRow:
         self._displaying = False
         # The view-local input this row shows instead of state's, if any.
         self._local: LocalText | None = None
+        self._error = ""
         self.widget = QWidget(parent)
         # Installed on this row's dropdowns and checkboxes; display sets it.
         self._block = _UserInputBlock(self.widget)
@@ -465,19 +471,55 @@ class FieldRow:
             # Keep the Enabled box and unit beside the title instead of
             # stretching them.
             header.addStretch()
-        self.error = QLabel(self.widget)
-        make_label_selectable(self.error)
-        self.error.setObjectName(self._name("error"))
-        self.error.setWordWrap(True)
-        self.error.hide()
-        self.layout.addWidget(self.error)
+        self._input_style = self.input.styleSheet() if self.input is not None else ""
         hint = _MODE_HINT if self.mode is not None else ""
-        self.widget.setToolTip("\n".join(filter(None, (field.description, hint))))
+        self._tooltip = "\n".join(filter(None, (field.description, hint)))
+        self.set_error("")
 
     def set_error(self, text: str) -> None:
-        """Show text under the row's header; empty text hides the error label."""
-        self.error.setText(text)
-        self.error.setVisible(bool(text))
+        """Mark the input or name label; lead the row tooltip with text.
+
+        Empty text restores the normal mode colours and description/hint.
+        No error label or extra layout space is added.
+        """
+        self._error = text
+        self.widget.setToolTip("\n\n".join(filter(None, (text, self._tooltip))))
+        self._show_error()
+
+    def _show_error(self) -> None:
+        """Combine the current mode tint and error mark without stacking colours."""
+        invalid = bool(self._error)
+        widget = self.input
+        if not isinstance(widget, QLineEdit | QComboBox):
+            self.label.setProperty("formError", invalid)
+            palette = QPalette()
+            if invalid:
+                palette.setColor(QPalette.ColorRole.WindowText, _ERROR_COLOUR)
+            self.label.setPalette(palette)
+            return
+        widget.setProperty("formError", invalid)
+        expression = self._expression_selected()
+        # Always mix the inherited Base, not an already tinted input palette.
+        shown = self.widget.palette()
+        palette = QPalette()
+        if expression or invalid:
+            accent = (
+                shown.color(QPalette.ColorRole.Highlight)
+                if expression
+                else _ERROR_COLOUR
+            )
+            share = _EXPRESSION_TINT if expression else _ERROR_TINT
+            palette.setColor(
+                QPalette.ColorRole.Base,
+                _mixed(shown.color(QPalette.ColorRole.Base), accent, share),
+            )
+        # A fixed Literal normally uses a transparent background, but its
+        # invalid input must still show the error's Base tint.
+        style = "" if invalid and self.field.fixed else self._input_style
+        if expression and invalid:
+            style += f"QLineEdit {{ border: 1px solid {_ERROR_COLOUR.name()}; }}"
+        widget.setStyleSheet(style)
+        widget.setPalette(palette)
 
     def clear_value(self) -> None:
         """Clear and hide the resolved-value label, e.g. for unparsed local text."""
@@ -651,19 +693,7 @@ class FieldRow:
         if self.mode is None or self.input is None:
             return
         self.mode.setChecked(expression)
-        # An empty QPalette sets no role, so a Direct input inherits again.
-        palette = QPalette()
-        if expression:
-            shown = self.widget.palette()
-            palette.setColor(
-                QPalette.ColorRole.Base,
-                _mixed(
-                    shown.color(QPalette.ColorRole.Base),
-                    shown.color(QPalette.ColorRole.Highlight),
-                    _EXPRESSION_TINT,
-                ),
-            )
-        self.input.setPalette(palette)
+        self._show_error()
 
     def _input_changed(self) -> None:
         if self._displaying:
