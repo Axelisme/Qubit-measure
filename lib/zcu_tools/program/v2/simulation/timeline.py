@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import replace
 
 import numpy as np
-from qick.asm_v2 import QickParam
+from qick.asm_v2 import QickParam, QickRawParam
 
 from zcu_tools.core.simulation import (
     PointTimeline,
@@ -25,8 +26,14 @@ from ..modules.readout import PulseReadout, TablePulseReadout
 from ..modules.reset import BathReset, NoneReset, PulseReset, TwoPulseReset
 from ..modules.util import round_timestamp
 from ..modules.waveform import ConstWaveformCfg, FlatTopWaveformCfg
-from ..utils import readout_freq_from_word, readout_freq_from_words
-from .dependencies import register_access
+from ..utils import is_qick_param, readout_freq_from_word, readout_freq_from_words
+from .dependencies import register_access, validate_modules
+
+
+def _minimum(value: float | QickParam) -> float:
+    if is_qick_param(value):
+        return value.minval()
+    return float(value)
 
 
 class TimelineInterpreter:
@@ -51,7 +58,9 @@ class TimelineInterpreter:
         self.registers: dict[str, tuple[int, bool]] = {}
         self.iterations: list[tuple[str, int]] = []
         self.templates: dict[int, tuple[int, int]] = {}
-        self.table_readouts: dict[int, TablePulseReadout] = {}
+        self.table_readouts = {
+            id(module): module for module in validate_modules(prog.modules)
+        }
 
     def scalar(self, value: float | QickParam) -> float:
         """Resolve a scalar/sweep in us, MHz, degrees or normalized gain.
@@ -70,7 +79,11 @@ class TimelineInterpreter:
 
     def tick(self, value: float | QickParam) -> float:
         """Return QICK nearest processor-tick quantization in us at this point."""
-        return float(self.prog.cycles2us(self.prog.us2cycles(self.scalar(value))))
+        cycles = self.prog.us2cycles(deepcopy(value))
+        if isinstance(cycles, QickRawParam):
+            cycles.to_steps(self.prog.loop_dict)
+            return self.scalar(cycles / float(self.prog.tproccfg["f_time"]))
+        return float(self.prog.cycles2us(cycles))
 
     def run_point(self, point: dict[str, int]) -> PointTimeline:
         """Evaluate one loop coordinate and return owned immutable controls."""
@@ -102,7 +115,7 @@ class TimelineInterpreter:
         )
         return PointTimeline(tuple(point.items()), tuple(self.events), windows, end)
 
-    def sequence(self, modules, t: float) -> float:
+    def sequence(self, modules, t: float | QickParam) -> float | QickParam:
         """Run a semantic sequence at local us t and return its local end time."""
         for module in modules:
             try:
@@ -113,7 +126,7 @@ class TimelineInterpreter:
                 ) from exc
         return t
 
-    def run(self, module: Module, t: float) -> float:
+    def run(self, module: Module, t: float | QickParam) -> float | QickParam:
         """Dispatch exact supported Module types; reject unknown subclasses."""
         if type(module) is Pulse:
             return self.pulse(module, t)
@@ -121,10 +134,10 @@ class TimelineInterpreter:
             return self.readout(module, t)
         return self.timing(module, t)
 
-    def timing(self, module: Module, t: float) -> float:
+    def timing(self, module: Module, t: float | QickParam) -> float | QickParam:
         """Apply explicit delays, reference waits and parallel branch timing."""
         if type(module) is SoftDelay:
-            return self.scalar(round_timestamp(self.prog, t + module.delay))
+            return round_timestamp(self.prog, t + module.delay)
         if type(module) is Delay:
             self.ref += self.tick(round_timestamp(self.prog, t + module.delay))
             return 0.0
@@ -138,7 +151,7 @@ class TimelineInterpreter:
             return 0.0
         if type(module) is Join:
             self.check_join(module)
-            return max(self.sequence(branch, t) for branch in module.join_modules)
+            return self.join(module, t)
         return self.control(module, t)
 
     def register(self, name: str, *, word: bool = False) -> int:
@@ -154,7 +167,7 @@ class TimelineInterpreter:
             raise ValueError(f"register {name!r}: unsupported word/scalar consumer")
         return value
 
-    def control(self, module: Module, t: float) -> float:
+    def control(self, module: Module, t: float | QickParam) -> float | QickParam:
         """Interpret table and structured-control Modules without executing ISA."""
         if isinstance(module, (LoadValue, LoadWord)) and type(module) in (
             LoadValue,
@@ -188,7 +201,7 @@ class TimelineInterpreter:
             return 0.0
         return self.selected_pulse(module, t)
 
-    def selected_pulse(self, module: Module, t: float) -> float:
+    def selected_pulse(self, module: Module, t: float | QickParam) -> float | QickParam:
         """Resolve computed/table pulses and readout templates before playback."""
         if type(module) is ComputedPulse:
             index = self.register(module.val_reg)
@@ -204,7 +217,7 @@ class TimelineInterpreter:
             return self.table_readout(module, t)
         return self.reset(module, t)
 
-    def repeat(self, module: Repeat, t: float) -> float:
+    def repeat(self, module: Repeat, t: float | QickParam) -> float:
         """Flush pending activity and execute a deterministic register-count loop."""
         self.ref += self.tick(t)
         self.align()
@@ -221,7 +234,7 @@ class TimelineInterpreter:
         self.registers[module.counter_reg] = (n, False)
         return 0.0
 
-    def reset(self, module: Module, t: float) -> float:
+    def reset(self, module: Module, t: float | QickParam) -> float | QickParam:
         """Expand reset wrappers into real pulses only; never set a quantum state."""
         if type(module) is NoneReset:
             return t
@@ -237,7 +250,7 @@ class TimelineInterpreter:
             return self.pulse(module.pi2_pulse, end)
         raise ValueError(f"{type(module).__name__} simulation unsupported")
 
-    def table_length(self, module: TableLengthPulse, t: float) -> float:
+    def table_length(self, module: TableLengthPulse, t: float | QickParam) -> float:
         """Apply selected generator length and runtime duration, with no max padding."""
         index = self.register(module.idx_reg)
         if not 0 <= index < len(module.lengths):
@@ -262,7 +275,9 @@ class TimelineInterpreter:
         self.align(self.prog.cycles2us(duration_cycles))
         return 0.0
 
-    def table_readout(self, module: TablePulseReadout, t: float) -> float:
+    def table_readout(
+        self, module: TablePulseReadout, t: float | QickParam
+    ) -> float | QickParam:
         """Play the current template; only exec-after mutates it for the next point."""
         self.table_readouts[id(module)] = module
         words = self.templates.get(id(module))
@@ -288,6 +303,22 @@ class TimelineInterpreter:
                     module.ro_freq_words[next_index],
                 )
 
+    def join(self, module: Join, t: float | QickParam) -> float | QickParam:
+        """Interleave branches by static minimum time, matching Join emission.
+
+        Each branch has its own local cursor. Swept pulse order stays fixed
+        across hardware points. Cross-branch register dependencies are rejected.
+        """
+        from ..modules.util import merge_max_length
+
+        queues = [list(branch) for branch in module.join_modules]
+        times = [t for _ in queues]
+        while any(queues):
+            candidates = [i for i, queue in enumerate(queues) if queue]
+            index = min(candidates, key=lambda i: _minimum(times[i]))
+            times[index] = self.sequence([queues[index].pop(0)], times[index])
+        return merge_max_length(*times)
+
     def check_join(self, module: Join) -> None:
         """Reject cross-branch register dependencies before choosing branch order."""
         accesses = [register_access(branch) for branch in module.join_modules]
@@ -309,7 +340,9 @@ class TimelineInterpreter:
         if ends:
             self.ref += self.tick(max(0.0, max(ends) - self.ref) + extra)
 
-    def pulse(self, module: Pulse, t: float, *, duration: float | None = None) -> float:
+    def pulse(
+        self, module: Pulse, t: float | QickParam, *, duration: float | None = None
+    ) -> float | QickParam:
         """Emit registered generator controls, preserving nonblocking scheduling."""
         cfg = module.cfg
         if cfg is None:
@@ -331,7 +364,7 @@ class TimelineInterpreter:
         )
         self.events.append(event)
         self.gen_end[cfg.ch] = event.start_us + duration
-        return t + self.scalar(module.total_length(prog)) if module.block_mode else t
+        return t + module.total_length(prog) if module.block_mode else t
 
     def _envelope(self, module: Pulse, duration: float) -> PulseEnvelope | None:
         cfg = module.cfg
@@ -417,8 +450,12 @@ class TimelineInterpreter:
         return gen, ro
 
     def readout(
-        self, module: PulseReadout, t: float, *, words: tuple[int, int] | None = None
-    ) -> float:
+        self,
+        module: PulseReadout,
+        t: float | QickParam,
+        *,
+        words: tuple[int, int] | None = None,
+    ) -> float | QickParam:
         """Emit independent ADC trigger/window and generator playback."""
         cfg = module.cfg
         self.routes[cfg.ro_ch] = cfg.gen_ch
@@ -439,4 +476,4 @@ class TimelineInterpreter:
         self.events[start] = replace(
             event, source=module.name, frequency_mhz=gen_freq, gain=gain
         )
-        return t + self.scalar(module.total_length(self.prog))
+        return t + module.total_length(self.prog)

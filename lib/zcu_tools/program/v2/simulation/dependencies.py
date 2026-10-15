@@ -5,10 +5,63 @@ from collections.abc import Sequence
 from ..modules.base import Module
 from ..modules.computed_pulse import ComputedPulse
 from ..modules.control import Branch, Repeat
-from ..modules.delay import DelayAuto, Join
+from ..modules.delay import Delay, DelayAuto, Join, SoftDelay
 from ..modules.dmem import LoadValue, LoadWord, ScanWith
-from ..modules.pulse import TableLengthPulse
+from ..modules.pulse import Pulse, TableLengthPulse
 from ..modules.readout import PulseReadout, TablePulseReadout
+from ..modules.reset import BathReset, NoneReset, PulseReset, TwoPulseReset
+
+
+def validate_modules(
+    modules: Sequence[Module], path: str = "body"
+) -> list[TablePulseReadout]:
+    """Reject unknown semantic operations even in unexecuted branches.
+
+    Return all table readouts whose hardware loop hooks run independently of
+    whether their branch played a pulse. Errors include concrete type/name and
+    enclosing module path. No program, backend or mutable state is modified.
+    """
+    tables: list[TablePulseReadout] = []
+    supported = (
+        Pulse,
+        PulseReadout,
+        TablePulseReadout,
+        TableLengthPulse,
+        ComputedPulse,
+        Delay,
+        SoftDelay,
+        DelayAuto,
+        Join,
+        LoadValue,
+        LoadWord,
+        Repeat,
+        Branch,
+        ScanWith,
+        NoneReset,
+        PulseReset,
+        TwoPulseReset,
+        BathReset,
+    )
+    for module in modules:
+        location = f"{path}/{type(module).__name__}({module.name!r})"
+        if type(module) not in supported:
+            raise ValueError(f"{location} simulation unsupported")
+        if isinstance(module, TablePulseReadout):
+            tables.append(module)
+        tables.extend(validate_modules(_children(module), location))
+    return tables
+
+
+def _children(module: Module) -> list[Module]:
+    if isinstance(module, Repeat):
+        return module.sub_modules
+    if isinstance(module, Branch):
+        return [child for branch in module.branches for child in branch]
+    if isinstance(module, Join):
+        return [child for branch in module.join_modules for child in branch]
+    if isinstance(module, ScanWith):
+        return [module.repeat_mod]
+    return []
 
 
 def register_access(modules: Sequence[Module]) -> tuple[set[str], set[str]]:

@@ -28,17 +28,27 @@ class Feedback(Module):
 
 def readout(name):
     return PulseReadoutCfg(
-        gen_ch=0, ro_ch=0, nqz=1, freq=100, gain=0.1,
-        waveform=ConstWaveformCfg(length=0.1), ro_length=0.1,
+        gen_ch=0,
+        ro_ch=0,
+        nqz=1,
+        freq=100,
+        gain=0.1,
+        waveform=ConstWaveformCfg(length=0.1),
+        ro_length=0.1,
     ).build(name)
 
 
 @pytest.mark.parametrize("method", ["acquire", "acquire_decimated"])
 def test_unknown_unexecuted_module_rejected_before_any_signal_generation(method):
     env = white_noise(std_adc=0)
-    prog = ModularProgramV2(env.soccfg, ProgramV2Cfg(), modules=[
-        Repeat("never", 0).add_content(Feedback()), readout("readout"),
-    ])
+    prog = ModularProgramV2(
+        env.soccfg,
+        ProgramV2Cfg(),
+        modules=[
+            Repeat("never", 0).add_content(Feedback()),
+            readout("readout"),
+        ],
+    )
     with pytest.raises(ValueError, match="Feedback.*hidden_feedback.*unsupported"):
         getattr(prog, method)(env.soc, progress=False)
     assert not env.soc.binding.rounds
@@ -47,22 +57,33 @@ def test_unknown_unexecuted_module_rejected_before_any_signal_generation(method)
 def test_swept_trigger_uses_start_and_truncated_loop_step_not_pointwise_rounding():
     env = white_noise(std_adc=0)
     cfg = PulseReadoutCfg(
-        gen_ch=0, ro_ch=0, nqz=1, freq=100, gain=0.1,
-        waveform=ConstWaveformCfg(length=0.1), ro_length=0.1,
+        gen_ch=0,
+        ro_ch=0,
+        nqz=1,
+        freq=100,
+        gain=0.1,
+        waveform=ConstWaveformCfg(length=0.1),
+        ro_length=0.1,
         trig_offset=QickParam(0, {"axis": 0.007}),
     )
-    prog = ModularProgramV2(env.soccfg, ProgramV2Cfg(), modules=[cfg.build("readout")], sweep=[("axis", 3)])
+    prog = ModularProgramV2(
+        env.soccfg, ProgramV2Cfg(), modules=[cfg.build("readout")], sweep=[("axis", 3)]
+    )
     prog.acquire(env.soc, progress=False)
     request = env.soc.binding.last_request
-    assert [t.readouts[0].trigger_us[0] for t in request.timelines] == pytest.approx([0, 1 / 430.08, 2 / 430.08])
+    assert [t.readouts[0].trigger_us[0] for t in request.timelines] == pytest.approx(
+        [0, 1 / 430.08, 2 / 430.08]
+    )
 
 
 def test_join_emits_interleaved_read_order_and_companion_raw_from_same_realization():
     env = white_noise(std_adc=0)
-    modules = [Join(
-        [readout("first"), SoftDelay("later", 0.3), readout("third")],
-        [SoftDelay("middle", 0.2), readout("second")],
-    )]
+    modules = [
+        Join(
+            [readout("first"), SoftDelay("later", 0.3), readout("third")],
+            [SoftDelay("middle", 0.2), readout("second")],
+        )
+    ]
     prog = ModularProgramV2(env.soccfg, ProgramV2Cfg(reps=2, rounds=2), modules=modules)
     seen = []
 
@@ -72,7 +93,10 @@ def test_join_emits_interleaved_read_order_and_companion_raw_from_same_realizati
         traces = np.empty((2, 3, samples, 2))
         for execution in range(2):
             for read in range(3):
-                traces[execution, read] = [10 * request.index + 3 * execution + read, -read]
+                traces[execution, read] = [
+                    10 * request.index + 3 * execution + read,
+                    -read,
+                ]
         return RoundSignals((ChannelSignals(0, traces),))
 
     env.soc.binding.execute = execute
@@ -84,4 +108,7 @@ def test_join_emits_interleaved_read_order_and_companion_raw_from_same_realizati
     assert traces.shape == (2, 3, request.readouts[0].samples, 2)
     np.testing.assert_array_equal(traces[:, :, 0, 0], [[5, 6, 7], [8, 9, 10]])
     raw = prog.get_raw()[0]
-    np.testing.assert_array_equal(raw[..., 0], np.array([[10, 11, 12], [13, 14, 15]]) * request.readouts[0].samples)
+    np.testing.assert_array_equal(
+        raw[..., 0],
+        np.array([[10, 11, 12], [13, 14, 15]]) * request.readouts[0].samples,
+    )
