@@ -437,8 +437,10 @@ class FormState[F: FormModel]:
         path is a tuple of field names, () for root. env is the host's fixed
         capture for choices/options hooks. Return detached named metadata, not
         JSON Schema or evaluated values. Children have full paths and no
-        descendants; a selected option's lone ordinary model wrapper flattens
-        one display layer without introducing a path alias. Ordinary missing
+        descendants. Each field's can_expand reports structural reachability
+        without calling child hooks, not a promise of nonempty children. A
+        selected option's lone ordinary model wrapper flattens one display
+        layer without introducing a path alias. Ordinary missing
         models retain declared fields. Disabled nullable models and unmatched
         options expose metadata only, never guessed defaults. Unknown paths,
         inactive descendants and traversal into whole leaves raise ValueError

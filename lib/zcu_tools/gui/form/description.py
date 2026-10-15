@@ -81,7 +81,12 @@ class FormFieldDescription:
     description/unit/placeholder are optional explanatory text. decimals is
     the declared float display precision, not input rounding. hidden hides a
     row, not its validation. group names a same-level display group or None;
-    collapsed is a model's initial fold hint. nullable means null is allowed.
+    collapsed is a model's initial fold hint. can_expand means the current
+    active structure reaches a model or selected option with fields; expansion
+    may still return no children after hooks, fixed-field omission or wrapper
+    flattening. It is false for whole leaves, disabled nullable models and
+    unmatched/no-fields options. It never runs child hooks. nullable means
+    null is allowed.
     expression indicates that an explicit Expr envelope can be evaluated.
     choices is the detached dynamic legal-value list, or None if undeclared;
     an empty tuple allows no value. options is the effective ordered selector
@@ -103,6 +108,7 @@ class FormFieldDescription:
     hidden: bool
     group: str | None
     collapsed: bool
+    can_expand: bool
     nullable: bool
     expression: bool
     choices: tuple[JsonValue, ...] | None

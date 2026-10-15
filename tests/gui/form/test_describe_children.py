@@ -52,7 +52,7 @@ class CapabilityForm(FormModel):
     mapping: dict[str, Child]
 
     @classmethod
-    def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+    def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
         return {
             ("selection",): (
                 Option("None", None),
@@ -91,7 +91,9 @@ def test_expand_capability_matches_parent_and_target_without_changing_draft(
 ) -> None:
     state = FormState(FormInput(CapabilityForm, data))
     env = FormEnv()
-    row = next(child for child in state.describe((), env).children if child.name == name)
+    row = next(
+        child for child in state.describe((), env).children if child.name == name
+    )
     assert row.can_expand is expected
     description = state.describe((name,), env)
     assert description.target is not None
@@ -104,15 +106,16 @@ class SourceGuardedChild(FormModel):
     value: float
 
     @classmethod
-    def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+    def choices(cls, _env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
         raise AssertionError("child choices must not read captured sources yet")
 
     @classmethod
-    def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+    def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
         raise AssertionError("child options must not read captured sources yet")
 
     @classmethod
     def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
+        del env
         raise AssertionError("description must not request defaults")
 
 
@@ -121,7 +124,7 @@ class SourceGuardedForm(FormModel):
     selection: SourceGuardedChild
 
     @classmethod
-    def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+    def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
         return {("selection",): (Option("Active", {}, fields=SourceGuardedChild),)}
 
 
@@ -144,7 +147,7 @@ class WrapperShape(FormModel):
 
 class SelectorShape(WrapperShape):
     @classmethod
-    def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+    def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
         return {("module",): ()}
 
 
@@ -154,7 +157,7 @@ class TextShape(FormModel):
 
 class ChoiceShape(TextShape):
     @classmethod
-    def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+    def choices(cls, _env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
         return {("mode",): ("x",)}
 
 
@@ -165,7 +168,7 @@ class DynamicShapeForm(FormModel):
     choice: ChoiceShape
 
     @classmethod
-    def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+    def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
         return {
             ("wrapper",): (Option("Empty", {}, fields=WrapperShape),),
             ("selector",): (Option("Selector", {}, fields=SelectorShape),),
@@ -188,7 +191,9 @@ def test_expand_capability_preserves_dynamic_wrapper_and_pinned_shape(
 ) -> None:
     state = FormState(FormInput(DynamicShapeForm, {name: value}))
     env = FormEnv()
-    row = next(child for child in state.describe((), env).children if child.name == name)
+    row = next(
+        child for child in state.describe((), env).children if child.name == name
+    )
     assert row.can_expand is True
     description = state.describe((name,), env)
     assert description.target is not None

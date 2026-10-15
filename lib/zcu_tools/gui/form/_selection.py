@@ -139,32 +139,39 @@ class Field:
             self.choices is not None or literal_values(self.info.annotation) is not None
         )
 
-    def children(self, env: FormEnv) -> Level | None:
-        """Resolve the active child model, or None without guessing a selection.
+    @property
+    def active_model(self) -> type[BaseModel] | None:
+        """Return the structurally reachable child model without running hooks.
 
         Ordinary missing/invalid models retain their declared shape. Nullable
         models require an object; selectors require a matching option with
-        fields. Only the reached child's hooks run. No defaults or validation.
+        fields. A reachable model may have no displayed fields after expansion.
         """
         models = model_types(self.info.annotation)
         if not models:
             return None
-        value = self.level.data.get(self.name)
-        pinned = self.level.pinned.get(self.name)
         if self.options is not None:
-            if self.selected is None:
-                return None
-            option = self.options[self.selected]
-            model = option.fields
-            pinned = option.value
-        else:
-            model = models[0] if len(models) == 1 else None
-            if type(None) in alternatives(self.info.annotation) and not isinstance(
-                value, dict
-            ):
-                return None
+            return None if self.selected is None else self.options[self.selected].fields
+        if type(None) in alternatives(self.info.annotation) and not isinstance(
+            self.level.data.get(self.name), dict
+        ):
+            return None
+        return models[0] if len(models) == 1 else None
+
+    def children(self, env: FormEnv) -> Level | None:
+        """Resolve the active child model and read only that child's hooks.
+
+        Return None for structurally unreachable children, as active_model
+        defines. Apply inherited declarations and the child's local overrides
+        with fixed env, without defaults or validation.
+        """
+        model = self.active_model
         if model is None:
             return None
+        value = self.level.data.get(self.name)
+        pinned = self.level.pinned.get(self.name)
+        if self.options is not None and self.selected is not None:
+            pinned = self.options[self.selected].value
         choices = {
             path[1:]: values
             for path, values in self.level.choices.items()

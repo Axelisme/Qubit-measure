@@ -157,6 +157,7 @@ def _metadata(
         hidden=display.hidden or hidden_tag or target.pinned,
         group=display.group,
         collapsed=display.collapsed,
+        can_expand=target.active_model is not None,
         nullable=type(None) in alternatives(info.annotation),
         expression=accepts_expression(info.annotation, target.path)
         and target.choices is None
