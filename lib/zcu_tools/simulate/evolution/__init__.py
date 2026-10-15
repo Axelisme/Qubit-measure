@@ -11,4 +11,4 @@ from .library import BuildPlan, EvolutionLibrary, LibrarySnapshot
 from .model import DriveSource, NumericModel, SolverSettings
 from .solver import Evolution, propagator_power
 from .state import Basis, DensityState, Populations, populations
-from .validation import ValidationLimits
+from .validation import ValidationEvidence, ValidationLimits

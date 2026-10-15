@@ -23,7 +23,12 @@ from .intel import IntelOpenCL
 from .model import NumericModel
 from .reuse import EvaluationReceipt
 from .state import ComplexMatrix
-from .validation import ValidationLimits, interpolate, validate_table
+from .validation import (
+    ValidationEvidence,
+    ValidationLimits,
+    interpolate,
+    validate_table,
+)
 
 
 @dataclass(frozen=True)
@@ -100,6 +105,8 @@ class BuildResult:
     batch: actual GPU batch costs, None when every node was already saved.
     validation_seconds: CPU comparison/heldouts/long-sequence/scale-fit time.
     file_bytes: published file size (zero for partial construction).
+    validation: measured absolute errors, None for partial work. publication_seconds:
+        serialization/atomic write/readback time, separate from numerical validation.
     """
 
     completed_nodes: int
@@ -108,6 +115,8 @@ class BuildResult:
     batch: BatchResult | None
     validation_seconds: float
     file_bytes: int
+    validation: ValidationEvidence | None = None
+    publication_seconds: float = 0.0
 
 
 class EvolutionLibrary:
@@ -205,6 +214,31 @@ class EvolutionLibrary:
         ref = max(matches, key=lambda r: (r.degree, r.identity))
         archive = self._load(ref.path, ref.identity)
         return interpolate(archive.nodes, archive.values, scale)
+
+    def validation(self, reference: TableReference) -> ValidationEvidence:
+        """Read/check a published table's typed absolute validation measurements.
+
+        reference is an immutable content reference from build/snapshot. Corrupt,
+        incomplete or missing evidence raises ValueError, never a zero report.
+        No environment caller needs to parse the numeric file format.
+        """
+        # Metadata inspection does not warm the runtime array LRU.
+        archive = read_archive(reference.path, reference.identity)
+        values = dict(archive.header.evidence)
+        if archive.header.kind != "table" or archive.header.family != reference.family:
+            raise ValueError("invalid validation publication reference")
+        try:
+            return ValidationEvidence(
+                values["density"],
+                values["long"],
+                values["phase"],
+                values["continuation"],
+                values["invariant"],
+                values["calibration"],
+                values["gpu"],
+            )
+        except KeyError as error:
+            raise ValueError("incomplete published validation evidence") from error
 
     def read_record(self, key: str) -> tuple[ComplexMatrix, str] | None:
         """Read an exact deterministic density record, or None if absent.
@@ -368,8 +402,16 @@ class EvolutionLibrary:
         if node_error > plan.limits.gpu_abs:
             raise ValueError(f"GPU node validation failed: {node_error}")
         evidence = validate_table(plan.family, partial.nodes, values, plan.limits)
+        validation_seconds = perf_counter() - start
+        start = perf_counter()
+        limits = tuple(
+            (f"limit_{name}", value) for name, value in asdict(plan.limits).items()
+        )
         header = partial.header.model_copy(
-            update={"kind": "table", "evidence": evidence + (("gpu", node_error),)}
+            update={
+                "kind": "table",
+                "evidence": evidence + (("gpu", node_error),) + limits,
+            }
         )
         table = NumericArchive(header, partial.nodes, values, present)
         digest = sha256(encode_archive(table)).hexdigest()
@@ -388,6 +430,8 @@ class EvolutionLibrary:
             len(indices),
             ref,
             batch,
-            perf_counter() - start,
+            validation_seconds,
             destination.stat().st_size,
+            self.validation(ref),
+            perf_counter() - start,
         )

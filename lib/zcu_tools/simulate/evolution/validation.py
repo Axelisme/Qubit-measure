@@ -12,6 +12,32 @@ from .state import ComplexMatrix
 
 
 @dataclass(frozen=True)
+class ValidationEvidence:
+    """Measured absolute numerical errors for one published plateau table.
+
+    density_abs: largest density element error, covering populations/coherences
+        of basis and Fourier-superposition inputs at 8 independent heldouts.
+    long_abs: same after 512 identical propagators. phase_abs: coherence angle
+        difference in radians for reference magnitude>1e-6. continuation_abs:
+        density element error after two different heldout blocks.
+    invariant_abs: max element of U512†U512-I, not gate infidelity.
+    calibration_scale_abs: recovered dimensionless common amplitude-scale error
+        from a heldout gate's full density observables, fitted in the same range.
+    gpu_node_abs: complex element error at all nodes versus CPU SciPy expm.
+    References share the exact model, basis and quantized controls. These do not
+    estimate basis truncation, bath approximation or physical waveform errors.
+    """
+
+    density_abs: float
+    long_abs: float
+    phase_abs: float
+    continuation_abs: float
+    invariant_abs: float
+    calibration_scale_abs: float
+    gpu_node_abs: float
+
+
+@dataclass(frozen=True)
 class ValidationLimits:
     """Absolute publication limits, never relaxed automatically.
 
