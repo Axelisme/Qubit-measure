@@ -792,5 +792,5 @@ class WritebackWidget(QWidget):
             )
         elif isinstance(item, ModuleWriteback):
             self._edit_dialogs.edit_module(
-                item, lambda *, valid: self._refresh_cfg_item_preview(item, valid=valid)
+                item, lambda valid: self._refresh_cfg_item_preview(item, valid=valid)
             )

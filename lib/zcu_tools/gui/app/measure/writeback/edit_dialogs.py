@@ -102,7 +102,7 @@ class WritebackEditDialogs:
     def edit_module(
         self,
         item: ModuleWriteback,
-        refresh: Callable[..., None],
+        refresh: Callable[[bool], None],
     ) -> None:
         """Open the shared draft form, or an inline refusal if it is unavailable.
 
@@ -155,7 +155,7 @@ class WritebackEditDialogs:
             valid = editor.errors() is None and not isinstance(
                 form.result(), FormErrors
             )
-            refresh(valid=valid)
+            refresh(valid)
             dialog.refresh_feedback(preview() if valid else None)
 
         editor.validity_changed.connect(refresh_preview)
@@ -172,7 +172,7 @@ class WritebackEditDialogs:
             editor.validity_changed.disconnect(refresh_preview)
             editor.detach()
             self._module_dialogs.pop(item.session_id)
-            refresh(valid=not isinstance(form.result(), FormErrors))
+            refresh(not isinstance(form.result(), FormErrors))
 
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.finished.connect(on_finished)
