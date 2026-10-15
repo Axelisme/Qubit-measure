@@ -172,7 +172,6 @@ def test_form_inspection_tool_forwards_candidate_once(
     tmp_path: Path,
 ) -> None:
     native = {
-        "schema": {},
         "input": {"guess_us": {"expr": "2 * 20"}},
         "values": [{"path": ["guess_us"], "value": 40.0}],
         "errors": [],
@@ -372,12 +371,21 @@ def test_describe_form_tool_forwards_candidate_once(
     transport: RecordingTransport,
     tmp_path: Path,
 ) -> None:
-    native = {"description": {"path": ["sample"], "target": None, "children": []},
-              "input": {}, "values": [], "errors": [], "revision": 2}
+    native = {
+        "description": {"path": ["sample"], "target": None, "children": []},
+        "input": {},
+        "values": [],
+        "errors": [],
+        "revision": 2,
+    }
     transport.replies.append(GuiResponse(result=native))
     tools = build_workflow_tools(config, bridge, tmp_path)
-    arguments = {"form": "tunables", "path": ["sample"], "run_id": "run:a",
-                 "batch": [{"path": ["sample", "value"], "value": -1}]}
+    arguments = {
+        "form": "tunables",
+        "path": ["sample"],
+        "run_id": "run:a",
+        "batch": [{"path": ["sample", "value"], "value": -1}],
+    }
     assert "workflows_workflow_describe_form" in tools
     assert tools["workflows_workflow_describe_form"]["handler"](arguments) == native
     assert [(r["method"], r["params"]) for r in transport.requests] == [

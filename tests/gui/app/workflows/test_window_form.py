@@ -272,14 +272,17 @@ def test_describe_form_rpc_uses_call_local_branch(
     if not path:
         assert description["target"] is None
         assert [child["path"] for child in description["children"]] == [
-            ["scale"], ["points"], ["samples"]
+            ["scale"],
+            ["points"],
+            ["samples"],
         ]
     elif path == ["samples"]:
         target = description["target"]
         assert target["options"][target["selected"]]["value"] == {"kind": "linrange"}
         assert {tuple(child["path"]) for child in description["children"]} == {
             ("samples", "start"),
-            ("samples", "stop"), ("samples", "n"),
+            ("samples", "stop"),
+            ("samples", "n"),
         }
     else:
         assert description["target"]["expression"] is True
@@ -306,20 +309,37 @@ def test_describe_form_rpc_keeps_run_capture_and_local_errors_read_only(
     commit_text(local, "-")
     context = harness.services.context
     context.set_parameter(context.read_context().target, "general.ext.value", 99.0)
-    before = host.state.input.data, host.state.base.data, host.accepted_input.data, engine.tunables("tuning")
+    before = (
+        host.state.input.data,
+        host.state.base.data,
+        host.accepted_input.data,
+        engine.tunables("tuning"),
+    )
     for batch in (None, []):
-        reply = rpc("workflow.describe_form", {
-            "form": "tunables", "run_id": "tuning", "path": ["sample", "value"],
-            "batch": batch,
-        })
+        reply = rpc(
+            "workflow.describe_form",
+            {
+                "form": "tunables",
+                "run_id": "tuning",
+                "path": ["sample", "value"],
+                "batch": batch,
+            },
+        )
         assert reply["ok"] is True
         result = reply["result"]
         assert isinstance(result, dict)
         assert result["description"]["target"]["constraints"]["gt"] == 0
         assert result["revision"] == before[3].revision
         assert {"path": ["sample", "value"], "value": 40.0} in result["values"]
-        assert any(e["path"] == ["sample", "factor"] for e in result["errors"]) == (batch is None)
-    assert (host.state.input.data, host.state.base.data, host.accepted_input.data, engine.tunables("tuning")) == before
+        assert any(e["path"] == ["sample", "factor"] for e in result["errors"]) == (
+            batch is None
+        )
+    assert (
+        host.state.input.data,
+        host.state.base.data,
+        host.accepted_input.data,
+        engine.tunables("tuning"),
+    ) == before
     assert local.text() == "-"
 
 
@@ -330,7 +350,22 @@ def test_describe_form_rpc_requires_explicit_attached_target(
     run_id: str | None,
 ) -> None:
     del paused_tuning
-    reply = rpc("workflow.describe_form", {"form": "plan", "path": [], "run_id": run_id})
+    reply = rpc(
+        "workflow.describe_form", {"form": "plan", "path": [], "run_id": run_id}
+    )
     assert reply["ok"] is False
     error = reply["error"]
     assert isinstance(error, dict) and error["code"] == "precondition_failed"
+
+
+def test_describe_form_rpc_forwards_structural_expandability(
+    rpc: RpcRequest,
+) -> None:
+    reply = rpc("workflow.describe_form", {"form": "plan", "path": []})
+    assert reply["ok"] is True
+    result = reply["result"]
+    assert isinstance(result, dict)
+    children = result["description"]["children"]
+    assert [(child["name"], child.get("can_expand")) for child in children] == [
+        ("scale", False), ("points", False), ("samples", True),
+    ]
