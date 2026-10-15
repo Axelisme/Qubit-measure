@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-15 — flat readout and runtime ADC matching
+**Last updated:** 2026-10-16 — fixed mux readout and route protection
 
 High-level cheat-sheet for `program/v2/modules/`. Read before touching this
 package. Implementation detail belongs in code and tests; this file records module
