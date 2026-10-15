@@ -1,5 +1,6 @@
 """Recipe author fields consume the real generated Form wire contract."""
 
+from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
@@ -19,7 +20,14 @@ from zcu_tools.cfg_model import (
 from zcu_tools.gui.app.measure.remote.form_description import description_wire
 from zcu_tools.gui.app.measure.remote.form_observation import form_writes, observe_form
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
-from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormState, Option
+from zcu_tools.gui.form import (
+    FormEnv,
+    FormInput,
+    FormModel,
+    FormPath,
+    FormState,
+    Option,
+)
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import RecipeSession
@@ -275,14 +283,26 @@ class OuterInline(FormModel):
 
 
 class OuterLockedExtras(FormModel):
-    choice: OuterInline = Field(default_factory=lambda: OuterInline(module=NumericOption()))
+    choice: OuterInline = Field(
+        default_factory=lambda: OuterInline(module=NumericOption())
+    )
 
     @classmethod
-    def options(cls, _env):
-        return {("choice",): (
-            Option("Numeric", {"kind": "inline", "module": {"kind": 1}}, fields=OuterInline),
-            Option("String", {"kind": "inline", "module": {"kind": "1"}}, fields=OuterInline),
-        )}
+    def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+        return {
+            ("choice",): (
+                Option(
+                    "Numeric",
+                    {"kind": "inline", "module": {"kind": 1}},
+                    fields=OuterInline,
+                ),
+                Option(
+                    "String",
+                    {"kind": "inline", "module": {"kind": "1"}},
+                    fields=OuterInline,
+                ),
+            )
+        }
 
 
 def keep_author_cfg(extras: OuterLockedExtras, cfg: AuthorCfg) -> AuthorCfg:
@@ -292,7 +312,9 @@ def keep_author_cfg(extras: OuterLockedExtras, cfg: AuthorCfg) -> AuthorCfg:
 def test_locked_outer_branch_keeps_inner_kind_editable(tmp_path: Path) -> None:
     gui = FormGui()
     gui.owner = TabFormResource(
-        lambda _ctx: Form(AuthorCfg, {}, extras=OuterLockedExtras, lower=keep_author_cfg),
+        lambda _ctx: Form(
+            AuthorCfg, {}, extras=OuterLockedExtras, lower=keep_author_cfg
+        ),
         capture=lambda aliases: TabFormSources(FormEnv()),
         mutation_allowed=lambda: True,
     )
@@ -306,7 +328,9 @@ def test_locked_outer_branch_keeps_inner_kind_editable(tmp_path: Path) -> None:
         assert not tab.read_field("extras.choice.module").locked
         with pytest.raises(ValueError, match="locked"):
             tab.use_library("extras.choice", "unoffered")
-        gui.owner.write({("extras", "choice", "module"): {"kind": "1", "text": "changed"}})
+        gui.owner.write(
+            {("extras", "choice", "module"): {"kind": "1", "text": "changed"}}
+        )
         assert tab.read_field("extras.choice").locked
         assert tab.read_field("extras.choice.module").fields == ("text",)
         assert tab.read_field("extras.choice.module.text").value == "changed"

@@ -135,8 +135,11 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "input, ordinary value and directed errors in one owner turn. "
             "path is a model-field string array, [] for root. Uses fixed "
             "Open/Reset sources without capture, defaults or materialization. "
-            "Unknown/inactive/whole-leaf descendants fail. Busy and observer "
-            "reads are allowed; no widget is required.",
+            "Unknown/inactive/whole-leaf descendants fail with invalid_params, "
+            "reason=form_path and data.form_path. Other author failures retain "
+            "the controller_error boundary. Errors are Form preview root/descendant "
+            "only; use get_cfg or Run admission for lowered cfg errors. Busy and "
+            "observer reads are allowed; no widget is required.",
             (
                 required_string("tab_id"),
                 required_json("path", "Model-field string array; [] for root"),

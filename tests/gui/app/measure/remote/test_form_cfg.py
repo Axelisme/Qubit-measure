@@ -283,8 +283,10 @@ def test_describe_cfg_mcp_preserves_path_and_internal_error_boundary(
         if not reply["ok"]:
             error = reply["error"]
             raise RemoteError(
-                error["code"], error["message"],
-                reason=error.get("reason"), data=error.get("data"),
+                error["code"],
+                error["message"],
+                reason=error.get("reason"),
+                data=error.get("data"),
             )
         return reply["result"]
 
@@ -293,20 +295,26 @@ def test_describe_cfg_mcp_preserves_path_and_internal_error_boundary(
         client = make_client(tmp_path, respond)
         with closing(client.context.session):
             with pytest.raises(GuiRpcError) as caught:
-                client.call("rpc_call", {
-                    "method": "tab.describe_cfg",
-                    "params": {"tab_id": tab, "path": path},
-                })
+                client.call(
+                    "rpc_call",
+                    {
+                        "method": "tab.describe_cfg",
+                        "params": {"tab_id": tab, "path": path},
+                    },
+                )
             assert caught.value.code == (
                 "controller_error" if author_failure else "invalid_params"
             )
             if not author_failure:
                 assert caught.value.reason == "form_path"
                 assert caught.value.data == {"form_path": path}
-                assert client.call("rpc_call", {
-                    "method": "tab.describe_cfg",
-                    "params": {"tab_id": tab, "path": ["gain"]},
-                })["description"]["path"] == ["gain"]
+                assert client.call(
+                    "rpc_call",
+                    {
+                        "method": "tab.describe_cfg",
+                        "params": {"tab_id": tab, "path": ["gain"]},
+                    },
+                )["description"]["path"] == ["gain"]
     finally:
         FailingOptionsExtras.broken = False
         fixture.ctrl.tab_control.close_tab(tab)

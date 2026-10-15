@@ -148,7 +148,8 @@ class TabFormResource:
         """Describe one current layer using fixed sources, without publication.
 
         path is canonical model-field names, () for root. Unknown/inactive
-        paths and descendants of whole leaves raise ValueError. Revocation
+        paths and descendants of whole leaves raise FormPathError with the full
+        request path. Other declaration failures retain their exception types. Revocation
         raises RESOURCE_GONE; busy and notification reads are allowed. This
         does not capture sources, materialize refs, or install defaults.
         """

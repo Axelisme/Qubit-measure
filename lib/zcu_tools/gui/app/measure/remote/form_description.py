@@ -59,8 +59,9 @@ class FormFieldWire(TypedDict):
     choices is a legal-value list or None when undeclared. options is the
     ordered selector list or None for a non-selector. selected is the first
     matching index or None for missing/no match. selection_fixed means the
-    annotation permits one selector branch at this level, without freezing
-    inner choices; it carries no value and ignores dynamic menu size. fixed
+    annotation permits one non-null selector branch at this level, without
+    freezing inner choices; nullable None is an enable/disable capability, not
+    a branch. It carries no value and ignores dynamic menu size. fixed
     constrains the complete value, fixed_value is meaningful only when fixed.
     Both flags may be true. constraints are hints.
     """

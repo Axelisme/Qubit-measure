@@ -21,8 +21,8 @@ from zcu_tools.gui.app.measure.remote.form_description import describe_form
 from zcu_tools.gui.app.measure.remote.form_observation import form_writes, observe_form
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
 from zcu_tools.gui.form import FormEnv, FormPathError
-from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.aliases import AliasRow, AliasTable
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.types import ParameterContext
@@ -311,20 +311,21 @@ class LookbackGui:
         self.owner.write(form_writes(params["edits"]))
         self.publication = dict(observe_form(self.owner))
 
+    def _describe(self, path: tuple[str, ...]) -> dict[str, Any]:
+        try:
+            return dict(describe_form(self.owner, path))
+        except FormPathError as error:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                str(error),
+                reason="form_path",
+                data={"form_path": list(error.path)},
+            ) from error
+
     def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         observations = self._observations()
         if method == "tab.describe_cfg":
-            try:
-                observations[method] = dict(
-                    describe_form(self.owner, tuple(params["path"]))
-                )
-            except FormPathError as error:
-                raise RemoteError(
-                    ErrorCode.INVALID_PARAMS,
-                    str(error),
-                    reason="form_path",
-                    data={"form_path": list(error.path)},
-                ) from error
+            observations[method] = self._describe(tuple(params["path"]))
         if method == "tab.parameter_read":
             observations[method] = {
                 "values": {
