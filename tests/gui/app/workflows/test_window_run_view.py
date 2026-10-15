@@ -324,11 +324,12 @@ def test_running_start_forms_stay_readable_and_unfold_but_ignore_typing(
         locked_count = child(plan, QLineEdit, "form.input.count")
         type_text(locked_count, "9")
         key_click(locked_count, Qt.Key.Key_Return)
-        alpha = child(plan, QLineEdit, "form.input.first.alpha")
-        folded_before = not alpha.isVisibleTo(plan)
         title = model_fold(plan, "first")
+        folded_before = title.text().startswith("▸ ")
         mouse_click(title, title.rect().center())
         qapp.processEvents()
+        alpha = child(plan, QLineEdit, "form.input.first.alpha")
+        assert alpha.isReadOnly()
         seen.append(
             Readable(
                 plan_enabled=plan.isEnabled(),

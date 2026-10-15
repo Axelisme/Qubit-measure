@@ -8,7 +8,14 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from PyQt6.QtGui import QAction
 from qtpy.QtCore import Qt
-from qtpy.QtWidgets import QApplication, QCheckBox, QComboBox, QLabel, QWidget
+from qtpy.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QLabel,
+    QLineEdit,
+    QWidget,
+)
 from zcu_tools.cfg_model import (
     ConfigBase,
     ConstWaveformCfg,
@@ -26,6 +33,7 @@ from zcu_tools.gui.form import (
     FormState,
     FormWritePath,
     Option,
+    OptionCommand,
     WriteRejected,
 )
 from zcu_tools.gui.widgets.form import FormEditor
@@ -140,20 +148,10 @@ def choose(widget: QComboBox, text: str) -> None:
 def schema_items(
     state: FormState[FormModel], env: FormEnv, name: str
 ) -> list[tuple[str, JsonValue]]:
-    """(label, value) of the top-level field name's effective schema options."""
-    properties = state.input_schema(env)["properties"]
-    assert isinstance(properties, dict)
-    node = properties[name]
-    assert isinstance(node, dict)
-    options = node["x-form-options"]
-    assert isinstance(options, list)
-    result: list[tuple[str, JsonValue]] = []
-    for option in options:
-        assert isinstance(option, dict)
-        label = option["label"]
-        assert isinstance(label, str)
-        result.append((label, option["value"]))
-    return result
+    """(label, value) of the top-level field name's core-described options."""
+    target = state.describe((name,), env).target
+    assert target is not None and target.options is not None
+    return [(option.label, option.value) for option in target.options]
 
 
 def commands(widget: QComboBox) -> list[tuple[str, str, bool]]:
@@ -601,6 +599,60 @@ def test_host_command_route_receives_the_command_and_its_rejection_shows(
     assert local.messages == {("waveform",): "Busy host"}
     editor.discard_local_text()
     assert editor.errors() is None
+
+
+class FixedShapeForm(FormModel):
+    """One fixed option value, with editable children and an explicit command."""
+
+    shape: Flat
+
+    @classmethod
+    def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+        return {
+            ("shape",): (
+                Option(
+                    "Flat",
+                    {"kind": "flat"},
+                    fields=Flat,
+                    commands=(
+                        OptionCommand(
+                            "lengthen",
+                            "Lengthen",
+                            lambda _env: {"kind": "flat", "length": 8.0},
+                        ),
+                    ),
+                ),
+            )
+        }
+
+
+def test_fixed_option_keeps_editable_children_and_guarded_commands(
+    build: Build,
+) -> None:
+    env = FormEnv()
+    state = new_state(FixedShapeForm, {"shape": {"kind": "flat", "length": 5.0}})
+    calls: list[tuple[FormWritePath, str]] = []
+
+    def run(path: FormWritePath, name: str) -> None:
+        calls.append((path, name))
+        # The host owns execution; this plain model accepts only leaf writes.
+        state.write({("shape", "length"): 8.0}, env)
+
+    editor = build(state, env, lambda batch: state.write(batch, env), run)
+    length = child(editor, QLineEdit, "form.input.shape.length")
+    assert not length.isReadOnly()
+    action = command(editor, "shape", "lengthen")
+    assert action.isEnabled()
+    action.trigger()
+    assert calls == [(("shape",), "lengthen")]
+    assert state.input.data["shape"] == {"kind": "flat", "length": 8.0}
+    assert child(editor, QLineEdit, "form.input.shape.length") is length
+    editor.set_editing_enabled(enabled=False)
+    assert not command(editor, "shape", "lengthen").isEnabled()
+    assert length.isReadOnly()
+    command(editor, "shape", "lengthen").trigger()
+    assert calls == [(("shape",), "lengthen")]
+    assert state.input.data["shape"] == {"kind": "flat", "length": 8.0}
 
 
 def test_read_only_editor_keeps_commands_listed_but_disabled(build: Build) -> None:

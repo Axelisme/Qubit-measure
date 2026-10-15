@@ -25,6 +25,7 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.widgets.form import FormEditor
 
+from tests.gui._user_input import mouse_click
 from tests.gui.widgets.form._text_input import commit_text
 
 type View = tuple[FormEditor[FormModel], FormState[FormModel]]
@@ -336,6 +337,8 @@ def test_an_option_holding_one_ordinary_model_draws_that_models_rows(
     ]
     assert "V" in texts
     assert "Output level" in level_row.toolTip()
+    advanced = child(view, QLabel, "form.fold.group.choice.Advanced")
+    mouse_click(advanced, advanced.rect().center())
     width = child(view, QLineEdit, "form.input.choice.payload.width")
     assert any(
         block.objectName().startswith("form.group.") and block.isAncestorOf(width)

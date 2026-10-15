@@ -16,7 +16,7 @@ from zcu_tools.experiment.workflows import (
     RunStatus,
 )
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.form import FormErrors, FormWritePath
+from zcu_tools.gui.form import FormErrors, FormPathError, FormWritePath
 from zcu_tools.gui.remote.control_service import (
     ControlOptions,
     RemoteControlServiceBase,
@@ -25,6 +25,7 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.method_spec import BoundMethod
 from zcu_tools.gui.session.ports import OwnerScheduler
 
+from .form_description import FormDescriptionReply
 from .methods import GUI_VERSION, METHOD_SPECS, WIRE_VERSION
 
 if TYPE_CHECKING:
@@ -153,8 +154,8 @@ class FormInspectionParams(TypedDict):
 class FormInspectionReply(TypedDict):
     """Same-owner form observation, never submission or a new editing state.
 
-    schema describes accepted partial input in the fixed capture. input retains
-    expressions and missing/null in the complete candidate tree. values lists
+    input retains expressions and missing/null in the complete candidate tree.
+    values lists
     successfully decoded ordinary leaves as path/value entries; complex uses
     the existing __complex__ tag, tuples become lists. errors contains native
     path/message entries and, on read only, renderer-local parse errors.
@@ -162,11 +163,26 @@ class FormInspectionReply(TypedDict):
     it is not a form version. Values do not establish validity or acceptance.
     """
 
-    schema: dict[str, JsonValue]
     input: dict[str, JsonValue]
     values: list[FormWrite]
     errors: list[FormErrorReply]
     revision: int | None
+
+
+class FormDescriptionParams(FormInspectionParams):
+    """path selects model-field names; [] describes root and its direct fields."""
+
+    path: list[str]
+
+
+class FormDescriptionInspectionReply(FormInspectionReply):
+    """description is single-layer metadata for this reply's exact input candidate.
+
+    Inherited input/values/errors/revision retain the form observation semantics.
+    No input, base, accepted input, native state or captured sources are changed.
+    """
+
+    description: FormDescriptionReply
 
 
 class ProgressReply(TypedDict):
@@ -225,10 +241,12 @@ class WorkflowRemoteControlAdapter[C](RemoteControlServiceBase):
     [] never resets defaults. Success returns WorkflowReply with native revision.
     Invalid input stays in draft and projects FormErrors; accepted input/base and
     native values/revision are unchanged. Pending startup is not editable.
-    workflow.form reads schema/input/ordinary values/errors and native revision
+    workflow.form reads input/ordinary values/errors and native revision
     through Window.inspect_form. An optional batch previews a call-local candidate
     without modifying input/base, native state or renderer-local text. An attached
     run requires explicit run_id; pending acceptance is not readable as accepted.
+    workflow.describe_form uses the same target and optional batch, adding the
+    requested path's single-layer description in that same owner turn.
     workflow.status reads the same Controller on the owner. Pause/Resume/Stop
     require explicit run_id and invoke the existing Window control once.
     RunMismatch becomes precondition_failed/run_mismatch with expected/actual;
@@ -284,6 +302,9 @@ class WorkflowRemoteControlAdapter[C](RemoteControlServiceBase):
                     self._tunables, METHOD_SPECS["workflow.tunables"]
                 ),
                 "workflow.form": BoundMethod(self._form, METHOD_SPECS["workflow.form"]),
+                "workflow.describe_form": BoundMethod(
+                    self._describe_form, METHOD_SPECS["workflow.describe_form"]
+                ),
                 "workflow.status": BoundMethod(
                     self._status, METHOD_SPECS["workflow.status"]
                 ),
@@ -385,6 +406,40 @@ class WorkflowRemoteControlAdapter[C](RemoteControlServiceBase):
             messages: list[FormErrorReply] = [
                 {"path": list(path), "message": message}
                 for path, message in result.messages.items()
+            ]
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                "Invalid form preview batch",
+                reason="form_errors",
+                data={"messages": messages},
+            )
+        return result
+
+    def _describe_form(
+        self,
+        _adapter: RemoteControlServiceBase,
+        params: FormDescriptionParams,
+    ) -> FormDescriptionInspectionReply:
+        path = _parse_form_path(params["path"])
+        batch = params["batch"]
+        writes = None if batch is None else _parse_form_batch(batch)
+        try:
+            result = self.ctrl.describe_form(
+                params["form"], path, run_id=params["run_id"], batch=writes
+            )
+        except FormPathError as exc:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                str(exc),
+                reason="form_path",
+                data={"form_path": list(exc.path)},
+            ) from exc
+        except (RunMismatch, InvalidRunState) as exc:
+            raise _project_control_error(exc) from exc
+        if isinstance(result, FormErrors):
+            messages: list[FormErrorReply] = [
+                {"path": list(error_path), "message": message}
+                for error_path, message in result.messages.items()
             ]
             raise RemoteError(
                 ErrorCode.INVALID_PARAMS,
@@ -500,6 +555,21 @@ class WorkflowRemoteControlAdapter[C](RemoteControlServiceBase):
             "operation_id": controller.operation_id,
             "status": _project_status(status),
         }
+
+
+def _parse_form_path(value: object) -> FormWritePath:
+    if not isinstance(value, list):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "path must be an array of field names"
+        )
+    path: list[str] = []
+    for part in value:
+        if not isinstance(part, str) or not part:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, "path must contain nonempty field names"
+            )
+        path.append(part)
+    return tuple(path)
 
 
 def _parse_form_batch(

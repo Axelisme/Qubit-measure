@@ -113,7 +113,10 @@ def row_of(view: QWidget, path: str) -> QWidget:
 
 def shown(view: QWidget, path: str) -> bool:
     """Whether the input at path would be visible while view is shown."""
-    return child(view, QWidget, f"form.input.{path}").isVisibleTo(view)
+    return any(
+        field.objectName() == f"form.input.{path}" and field.isVisibleTo(view)
+        for field in view.findChildren(QWidget)
+    )
 
 
 def top(view: QWidget, widget: QWidget) -> int:
@@ -167,13 +170,9 @@ def test_groups_fold_grouped_rows_after_ungrouped_rows(
         "Partly": ("visible",),
         "drive.Advanced": ("drive.phase", "drive.inner", "drive.inner.level"),
     }
-    for name, paths in members.items():
-        block = child(view, QWidget, f"form.group.{name}")
+    for name in members:
         assert group_fold(view, name).text() == FOLDED + name.split(".")[-1], name
-        for path in paths:
-            assert block.isAncestorOf(row_of(view, path)), path
-            # Every group starts folded.
-            assert not row_of(view, path).isVisibleTo(view), path
+        assert not expanded(group_fold(view, name)), name
     for path in ("mode", "after", "drive.ch", "drive.freq"):
         assert shown(view, path), path
         assert not child(view, QWidget, "form.group.Advanced").isAncestorOf(
@@ -190,6 +189,8 @@ def test_groups_fold_grouped_rows_after_ungrouped_rows(
     qapp.processEvents()
     for name, paths in members.items():
         assert group_fold(view, name).text() == EXPANDED + name.split(".")[-1], name
+        block = child(view, QWidget, f"form.group.{name}")
+        assert all(block.isAncestorOf(row_of(view, path)) for path in paths), name
         assert all(row_of(view, path).isVisible() for path in paths), name
     # Ungrouped rows first, then groups by first appearance, members in order.
     order = [
