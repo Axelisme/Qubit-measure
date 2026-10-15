@@ -6,7 +6,7 @@
 
 Adapter defaults 和 GUI／agent 輸入有時需要 cached device values、session 路徑或 predictor metadata。穩定的參數讀取使用固定 `ParameterContext` 與 typed helpers。Session value lookup 只處理少量跨來源的 scalar 查詢，不取代參數容器或 alias 表。
 
-ContextService 的寫入權威見 [[0067]]；cfg resource、expression 與獨立 draft 的分界見 [[0065]]；context-free definition 和 seed 見 [[0012]]。
+ContextService 的寫入權威見 [[0067]]；Form、expression 與固定來源見 [[0065]]，表單初值與範本見 [[0073]]。
 
 ## 決策
 
@@ -24,30 +24,22 @@ Cached device values 供 defaults 和 resolve-once 輸入使用，不是 Run 的
 
 裸 `$alias` 回傳固定表解析後的名稱字串，例如 `$flux_dev` 得到 `yoko1`。元件與 device 共用這張表，不在 capture 或 preview 預查名稱可用性。缺列或未綁定時指名失敗，不代用同名元件、舊解析值或靜態名稱。名稱不接受數值算術或字串插值。
 
-`EvalValue` 保存 expression 與解析結果。Measure tab 的 cfg resource 在 publication 時計算結果，Run 接受當前 Valid publication 的已解析 values。獨立 draft 的 legacy lowering 可重新求值並檢查型別，失敗就拒絕，不是 tab Run 的入口。
+Form input 以顯式 `{expr: text}` 保存 expression，普通字串保持 literal。只有文字欄位可用 Expression，下拉與勾選欄位沒有這個模式。求值沿宿主的固定 FormEnv，不讀後來的全域來源。Measure Run 使用目前有效的 Form result；Library Apply 將結果數字寫進持久 Spec，不保存 expression。
 
-Cfg expression 的 `$alias` 與 `$alias.path` 是動態 alias 引用。`@{key}` 才是寫入時捕捉一次固定 source view 的數值，轉成括號 literal。捕捉失敗拒絕整批，不保留待未來求值的 token。精確來源與解析邊界由 [[0065]] 和 cfg owner 定義。
+Form defaults 的 expression 在建立 input 時求成 direct 值。使用者輸入的 expression 保留原文，重算仍使用同一 capture。開啟與 Reset 的捕捉時機見 [[0065]]、[[0073]]。
 
 ## Resolve-once 輸入
 
-`ValueRef` 表示「現在讀取 registered value，存入普通值」，不保存 lazy reference。Agent 使用明確 tagged object，例如：
+`ValueRef` 與 `resolve_value_ref` 是內部 typed scalar 讀取入口。呼叫時讀 registered value，回普通值，不保存 lazy reference。Target type、declared type 與 provider type 不相容時拒絕，不以字串猜型別。
 
-```json
-{"__kind":"value_ref","key":"device.flux.value","type":"float"}
-```
-
-這裡的 `flux` 是具體 registered device name，不是 alias。普通 wire 字串不自動解讀為 ValueRef。
-
-GUI 的 `value_source_input.py` 在 `@{prefix` 提供分段 completion。`@{` 列頂層，`device.` 列下一層。Tab／Backtab 接受候選；若候選都是 namespace，controller 補上句點並展開下一層，完整 leaf 才補上 `}`。輸入 `@{full.key} ` 的尾端空格後，controller 讀取一次並用格式化數值替換 token。這是文字輸入便利功能，與 cfg resource 的 expression capture 分開。
-
-Definition 的 typed `value_source(...)` Seed 和 role-default `Source(...)` 在 fresh cfg instantiate 時使用 `SessionEnv.values`，然後存 direct value。Restore 或使用者編輯不重跑 seed。
+Remote 的 `value.list`／`value.read` 保留唯讀 lookup。舊 editor 的 `value_ref` tagged wire、eval tag 與 `@{}` 文字補全已退休。這不移除內部 ValueRef，也不改變已捕捉的 Form／Run 來源。
 
 ## 寫入與限制
 
-ContextService 接收已解析的普通值，透過參數容器或 library owner 提交。Inspect 編輯 concrete point／setup 路徑，不把 ValueRef 當成持久來源。GUI token helper 只替換輸入文字，不自行寫文件。
+ContextService 接收已解析的普通值，透過參數容器或 Library owner 提交。Inspect Parameters 編輯 concrete point／setup 路徑，Modules 提交持久 Spec，都不把 ValueRef 當成持久來源。
 
 數值 expression 使用 `gui.session.expression` 的受限 simpleeval 引擎。它沿固定 ParameterContext 解析參數，限制 AST、函式與數值大小，不使用 Python `eval` 或 SymPy。Lookup 不提供通用複合 source-expression parser，也不應取代穩定的 typed dependencies。
 
 ## 後果
 
-GUI 和 agent 共用 source lookup，但各自提供文字 token 與 tagged-object 輸入。Owner-scoped provider lifecycle 避免舊來源殘留。參數、alias、cached value source 和 Run acceptance 各有明確 owner；新增 lookup key 前，先確認它確實是跨來源需求。
+Owner-scoped provider lifecycle 避免舊來源殘留。唯讀 lookup、內部立即讀值、Form expression 與 Run acceptance 各有自己的用途。新增 lookup key 前，先確認它確實是跨來源需求。

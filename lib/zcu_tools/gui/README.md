@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-14，Alias 編輯成為共用 Inspect 的 Aliases 頁
+**Last updated:** 2026-10-15，共用 Form 與舊 cfg 系統退休
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -90,85 +90,13 @@ controller error與traceback。
 
 `form_adapter` 是 Qt-free 前端框架，從 core cfg 與作者樹生成 `gui.form` 的 FormModel 並轉回 core cfg。各 app 與表單定義從它的公開 root import `Form`；它不依賴任何 app。細節見 [form_adapter README](form_adapter/README.md)。
 
-## Shared Config Core (`cfg/`)
+## 共用表單與持久 Spec
 
-`cfg.binding.CfgDraft`以nominal `SettableTarget`提供同源的
-`iter_settable_targets()` / `resolve_target()` / `set_target()`。唯一grammar是scalar dotted
-leaf、sweep直接edge、reference `.ref`與直接child；legacy `.sweep`/`.value`只回遷移提示。
-`gui.cfg`的custom-reference-key helpers是tag representation唯一constructor/parser。
+`gui.form` 提供 Qt-free FormState、input schema、preview、result 與錯誤，`widgets/form` 的 FormEditor 顯示同一份 caller-owned state。Measure、Library／Inspect、writeback 與 workflows 共用這套工具，宿主各自決定 lifetime、capture 與提交時機。跨宿主契約見 ADR-0065、ADR-0008。
 
-`zcu_tools.gui.cfg` 擁有 Qt-free 的 Spec/Value tree、`CfgSchema` data carrier、
-default/inheritance helpers、raw persistence codec、domain-free raw spec walk，以及generic finished-cfg
-validation/lowering。materialization walker把missing scalar/section、reference shape與Sweep carrier交給
-窄policy，不理解program vocabulary；lowering只依賴expression/reference/range三個callable ports，維持
-static → optional dynamic → lower、snapshot/relink 的現行行為（ADR-0065；局部 lowering 契約見 ADR-0046）。
-`lower_resolved_cfg(schema, make_range=...)` 是另一個明確的 snapshot-only 入口，不接
-expression/reference resolver。它隔離複製後，以已解析 scalar 與各 reference 自身的 cached
-shape 重用既有 static validation/lowering；error 或尚未 resolved 一律拒絕，不解析 raw，
-也不重新推導輸入 controls。原 schema 與回傳 mutable data 互相隔離。
-`lower_finished_cfg` 的 live validation/relink 政策不變；呼叫者自行選擇契約。
-raw persistence codec也公開唯一scalar carrier decoder；eval/direct tag validation不由app重複實作。
-Numeric 與 complex ScalarSpec 的 direct text 由 ScalarField 解析，保存 raw 與 error；
-Widget 只傳入文字並顯示 model 狀態，invalid text 不沿用舊有效值。
-Scalar carriers 的 validation_error 保存當時選項 membership 的失敗；選項恢復只使新 snapshot
-有效，不治癒舊 snapshot。這是 binding 重算的 runtime metadata，persistence 不保存它。
-Sweep start/stop 與
-center 同樣保留 direct raw/error。Sweep points／step 與 centered span 也保存 model-owned
-文字與解析狀態，codec 可往返，finished cfg 拒絕任一 incomplete/invalid control。
-Step 文字反推 points 後保存實際 canonical step；Widget 同時呈現 raw 與 resolved，
-重建 form 不清除未完成輸入。Typed setters 仍拒絕非法型別／範圍。
-Complex 使用一般 direct/eval 路徑。Cfg codec 與 editor 的 complex 值使用 `{"__complex__": [re, im]}`
-並由 shared codec 編解碼；磁碟 expression 仍只保存 expr，不作為執行快照。
+`gui.form_adapter` 集中 core cfg／持久 Spec 的生成與轉換。FieldMeta 的呈現資訊、合併的 None／keys／Inline 選項與屏蔽欄位政策都由生成器處理。Library 寫入直接提交 ModuleSpec／WaveformSpec，保留 child key，不先展開 runtime cfg。表單 expression 使用固定 env，Library 保存求得的數字。
 
-`CfgSchemaAssembler`提供domain-free paired Spec/Value construction：同步declare dotted path、
-Fast Fail duplicate/parent conflict與錯誤default carrier、建立choice binding、對齊locked literal，
-並以one-shot deep-copy snapshot產生`CfgSchema`。它不知道role、Seed、SessionEnv、參數容器、
-ModuleLibrary、logical key或generation policy；measure保有domain builder，重用這層
-tree mechanics（ADR-0065；局部 authoring 見 ADR-0012）。
-
-generic public names由consumer直接從`zcu_tools.gui.cfg`匯入。measure adapter facade只暴露
-framework contract、request/result/writeback/analyze params與protocol signature需要的session
-vocabulary，不forward generic cfg names。Program shape/spec與raw missing/subset policy由
-`experiment.cfg_editing`擁有（ADR-0065；catalog 細節見其 README）。
-
-`gui.cfg.tree`提供三個existing-tree path operations：`resolve_spec_path`穿section與reference
-allowed shapes並拒絕inconsistent leaf types；`read_value_path`/`replace_value_path`穿value section與
-reference value且要求leaf已存在。這層不create、不wrap、不處理lock或domain policy；
-`CfgSectionValue.with_field`只保留scalar wrapping後委派replace。
-
-`zcu_tools.experiment.cfg_editing`是Qt-free measure-domain層：closed catalog擁有七種module與六種
-waveform的discriminator、label與fresh Spec factory；app只綁定Arb choices與readout inheritance
-兩個spec policy，以及可materialize module/waveform subset。program materializer固定missing
-`ch/ro_ch=0`、其它scalar為unset、nested section完整default、required ref採`allowed[0]`；missing style
-是Const，explicit unknown Fast Fail。它不 import program runtime/app/session，`gui.cfg` 也不
-反向import它。
-
-Reference節點統一使用`ReferenceSpec(kind=...)`與`ReferenceValue`；`kind`是shared core只
-轉送的app-local opaque id。module/waveform shape factory與raw materialization policy由
-`experiment.cfg_editing`擁有，resolver與runtime object normalization留在各app，
-既有`module_ref`/`waveform_ref` persistence wire shape不變。
-ReferenceValue 的 runtime snapshot 保存 chosen_key、resolved_label 與 error；missing library
-時保留可編輯 subtree，但 finished cfg 拒絕該 snapshot。Persistence 不保存 resolution metadata，
-重新 attach 時由 binding 解析當前 catalog。
-
-`zcu_tools.gui.cfg.binding`擁有Qt-free的`CfgDraft`、field tree與sweep editors。
-`CfgDraft`集中snapshot、validity、refresh與close lifecycle。`observe()` 回 detached
-`CfgNodeObservation` tree，包含 Literal／readonly、cached options、active reference shape、
-完整 value carriers 與 validity；不查 live sources，不修改 model，也不代替 persistence codec。
-Remote viewer 可投影這份 nominal read contract，不必重建 field-subtype traversal。
-field只依賴expression evaluator、
-opaque option provider與reference catalog三個窄ports，不持controller/environment aggregate。
-scalar field在建構與修改時依宣告型別Fast Fail；section/reference的whole-value更新先完成純資料
-key檢查與replacement build，再一次提交，不會留下partial tree或中間validity event。leaf edit只
-沿ancestor傳遞dirty event，`CfgFormWidget`在UI boundary materialize一次`CfgSchema`。
-close會遞迴關閉整棵field tree並清callbacks，close前cached的root/child之後讀寫或refresh都
-Fast Fail。reference catalog以shape label與optional materialized value精確區分missing、
-unsupported與corrupt。widget只attach draft並render `draft.root`，detach不會close
-service-owned draft。
-
-此package不import `gui.app.*`、`experiment.*`、Qt、`resources`、`notebook`或`device`，
-也沒有broad environment object或global resolver registry。scalar option source與reference
-kind都是shared只轉送的opaque string；measure提供app-local ports與module shape policy。
+Complex 表示轉換直接使用 `core.complex_codec`。Measure 的來源 provenance 與 precondition 型別由 `app/measure/services/form_contracts.py` 擁有，remote 錯誤轉譯由 `app/measure/remote/form_errors.py` 擁有。舊 cfg、widgets/cfg 與 experiment.cfg_editing 不再提供編輯入口。
 
 ## Process Runtime (`runtime.py`)
 
@@ -277,101 +205,11 @@ or an equivalent named registry when remote screenshot/list semantics require
 stable names. Either path keeps a Python reference until `finished` / `destroyed`
 cleanup runs.
 
-## Shared Qt Cfg Widgets (`widgets/cfg/`)
+## 共用 Qt Form editor
 
-`ResourceCfgFormWidget` renders a caller-owned `CfgEditing` handle. Every input
-change, including each keystroke, is submitted at once to the owner's current
-inputs, so the form shows the published cfg and the last input wins.
-A field whose text equals the publication keeps its cursor and selection. A
-rejected input shows its error below the tree and the controls return to the
-published values. Detach unsubscribes without revoking the resource or rerunning
-defaults. This behavior does not change `CfgFormWidget`'s draft binding contract.
+`widgets/form` 擁有 FormEditor 與 `value_widgets.py` 的共用 scalar 控制項 helpers，analysis forms 也使用這些 helpers。Editor 只讀 input schema、preview 與 errors，不求值、不複製 Library，也不擁有 Apply。
 
-`zcu_tools.gui.widgets.cfg`擁有`CfgFormWidget`、field widgets與presentation-only
-decoration contract。widget attach service-owned `CfgDraft`並render `draft.root`；detach會
-unsubscribe並刪除Qt tree，但不會close draft。shared widget只import Qt、`gui.cfg`、
-`gui.cfg.binding`與shared spinbox，不知道app/controller/session/EventBus/ModuleLibrary或
-experiment policy。
-
-shared Qt leaf同時集中scalar input的write/connect dispatch與純`QWidget`→PNG encoding；
-app仍擁有visibility、target lookup、main-thread marshal與remote wire policy。
-`ScalarInputWidget`只顯示已發布的scalar value/options並提交輸入，不解析數字或求值；
-`ScalarWidget`將既有binding field連到同一presentation。
-`SweepInputWidget`與`CenteredSweepInputWidget`同樣只提交edge輸入、顯示publication；
-Points／Step同步仍由cfg owner計算。既有range binding widgets共用這些presentation。
-`ReferenceInputWidget`只呈現已發布的選項、有效性與missing hint，提交Custom選擇、library key或None意圖；既有`ReferenceWidget`是共用renderer的binding adapter。Custom繼承與nested linkage由cfg owner負責，widget不另存可寫value tree。
-`ResourceCfgFormWidget`以`CfgEditing.observe/watch`建立同款dense tree，向目前inputs提交scalar、range與reference輸入；choice可見欄位只投影已發布selector。結構變更在Qt輸入signal結束後重建，穩定欄位則原位刷新。detach解除觀察但不revoke caller的owner；它不建立可寫`CfgDraft`鏡像。既有`CfgFormWidget`的binding caller維持原來路徑。
-Measure tab 使用同一 caller-owned resource；view attach/detach 不建立或撤銷 tab cfg。
-
-Sweep renderers use one balanced two-column Range/Sampling grammar: `SweepWidget` places Start/Stop in the first row and Points/Step in the second, while `CenteredSweepWidget` places Center/Span in the first row and Points/Step in the second. The displayed Points label is presentation-only for the canonical `expts` value; field update methods continue to own synchronization and preserve validation, decoration, snapshot, lowering, and persistence behavior.
-
-每個`CfgFormWidget`持有一個`FrozenFieldRendererRegistry`。沒有顯式注入時，
-`default_cfg_renderers()`會建立全新的builder、為五個 non-section exact field types
-（`LiteralField`、`ScalarField`、`SweepField`、`CenteredSweepField`、`ReferenceField`）註冊固定
-`FieldRenderer(field, context)` factory再freeze；`SectionField` 不在 registry，由 sole tree
-（`TreeCfgWidget`）直接建立 `QTreeWidgetItem` 結構。immutable `FieldRenderContext`只攜帶path、
-top-level標記、label width、decoration resolver、text enhancer與同一frozen registry；不攜帶
-controller/service/app/runtime資料。leaf 與 reference header 走 registry `render()`，而 section
-結構由 tree 直接建立，沒有consumer-side constructor分支、module-global mapping、decorator、string key或
-inheritance fallback。registration會先驗factory call shape，render則驗QWidget與field-widget
-protocol。
-
-`CfgFormWidget.attach()`先成功建立完整root widget，再訂閱caller-owned draft；build失敗不留下
-draft callbacks。detach以stable Python callback解除change/validity subscriptions並刪除Qt tree，
-仍不close draft。
-
-`schema_changed` 按 event-loop tick 收合：同一 tick 內的多次 draft 變更只在單次 0 ms `QTimer`
-觸發時送出一份 `draft.snapshot()`；`validity_changed` 不延後，逐次即時送出。
-
-`CfgFormWidget` accepts an optional field decoration provider keyed by full dotted
-cfg path. The shared renderer applies `hidden`, `enabled`, `tone`, `badge`, and
-`tooltip` metadata without changing the live value model. App-specific semantics
-stay outside the shared layer。measure以generic
-`TextInputEnhancer` seam安裝app-local value-source completion，shared widget不import session。
-
-Normal `LiteralSpec` rows remain hidden, but a decoration may explicitly unhide a
-literal when an app needs to show a generated read-only value in the form.
-
-`CfgFormWidget` has the dense tree as its sole structural presentation
-(S1): there is no structure selector or legacy form fallback. Every existing
-caller receives the tree without opt-in. The widget attaches the same
-caller-owned `CfgDraft`; tree folding, depth presentation, root alignment,
-connectors, and reference shape-row elision are view-only and do not alter
-cfg paths, reference identity, validation, persistence, or lowering. The tree
-hides `Property` / `Value` headers, uses 13 px field text, shows the root row
-at indentation 0 and descendants at 10 px with classic vertical/horizontal
-connectors without triangles via a `QProxyStyle` whose guide lines carry the
-depth colors, supports whole-row folding (click any row that has children;
-a disabled optional reference is collapsed and does not respond to row-fold
-clicks until re-enabled), cycles five depth colors `#5b8dc6`, `#6aae8a`,
-`#b8942f`, `#8a6bc9`, `#4fb3a8` (repeating after the fifth) on the
-corresponding descendant tree guide lines; cfg rows do not use those colors as
-depth backgrounds, and each guide level is colored at its displayed depth (only
-its children advance) and is stable under horizontal scroll via logical-column
-normalization, and elides the guaranteed single materialized reference-shape
-row. Reference rows follow the established editor folding policy: a library
-reference starts collapsed, a custom reference starts expanded, and changing
-the reference identity reapplies that policy; a disabled optional reference is
-collapsed and non-foldable. When a materialized reference shape contains
-exactly one visible nested section, the tree elides that redundant section
-wrapper row and renders its leaf rows directly under the reference without
-altering cfg paths, editors, refresh, or model behavior; shapes with multiple
-visible children remain structurally distinct, and the elision never hides an
-editable `ReferenceField` — only a `SectionField` wrapper. The tree viewport
-follows the available panel height and scrolls only when rendered content
-exceeds the viewport, without a fixed-height threshold. Editor behavior
-remains owned by the five exact non-section `FieldRenderer` factories via the same frozen
-`FrozenFieldRendererRegistry`; section structure is owned solely by the dense tree
-(`TreeCfgWidget` creates `QTreeWidgetItem`s, handles folding/indentation/connectors/elision).
-Choice visibility, literal hiding, decorated labels, and full decoration
-(hidden/enabled/tooltip/tone/badge/suffix) are implemented once in the shared presentation
-policy and used by the sole tree presentation; reference editing (combo population,
-selection, missing hint, validity) is also single-sourced and header-only (no form
-subtree). Section-local refresh (`refresh_section(path)`) only rebuilds the target
-section or reference-elided subtree owner's descendants (e.g., `modules.qub_pulse` for
-`modules.qub_pulse.gain`) and preserves unrelated items/editors and the reference header.
-The seam's executable owner is `zcu_tools.gui.widgets.cfg` and its durable declaration owner
-is this section.
+文字在 Enter 或失去焦點時提交，未解析文字留在 view，宿主提交前檢查 local_parse_errors。唯讀時仍能複製文字、折疊與捲動。選項與 Expression 的呈現、訂閱生命週期見 [FormEditor README](widgets/form/README.md)。
 
 ## EventBus Lifecycle
 

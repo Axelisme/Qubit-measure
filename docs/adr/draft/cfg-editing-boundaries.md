@@ -1,6 +1,10 @@
+---
+status: superseded
+---
+
 # Cfg 編輯接縫與使用邊界
 
-**狀態：部分目標已落實，剩餘範圍待實作。** Measure tab 的 resource lifetime、同步 publication、override、固定 Run acceptance 及 frontend 接線見 [ADR-0065](../0065-cfg-editing.md) 與 [resource contract](cfg-resource-contract.md)。本篇保留 library conversion、selected Apply 與其他 app 的目標，不是它們的現行操作契約，也不把 measure tab 的完成推廣到四個 app。
+**狀態：** 已結案，由 [ADR-0065](../0065-cfg-editing.md)、[ADR-0008](../0008-cfg-editor-session.md) 與 [ADR-0073](../0073-measure-form-derivation.md) 接替。Library 與 writeback 已改用 Form／持久 Spec。來源依開啟或 Reset 固定，不採本草稿的自動 refresh／override 目標。Selected Apply 保留既有首錯成功前綴，不提供跨項原子性。以下保留歷史提案與當時的驗收邊界，不是待實作清單。
 
 ## 實驗編輯接縫
 

@@ -2,62 +2,36 @@
 status: accepted
 ---
 
-# CfgEditor session —— service-owned headless CfgDraft + 可插拔 widget viewer
-
-**狀態：** accepted（已實作）。
-> 現行定位：measure 的 headless session／writeback 局部契約有效；跨 app 分界見 [[0065]]、[[0067]]。
-
-**關聯：** external-refresh 是 [[0067]] Reaction 標準模式；commit 的 ml/md 寫入歸 [[0067]] 單一權威；tab cfg 讀寫收斂見 [[0068]]；agent 樂觀模型見 [[0002]]。
+# ADR-0008 — Headless Form 與 writeback draft
 
 ## 脈絡
 
-agent（MCP RPC）與 user（Qt View）都要編輯三類 cfg：tab 的 cfg、ModuleLibrary 的 module/waveform entry、analyze 算出的 writeback 草稿。三個耦合需求：
+Qt 與 agent 都要編輯 tab cfg、Library entry 與分析產生的 writeback proposal。可編輯狀態不能依賴 dialog 是否開啟，也不能讓 agent 修改一份 GUI 無法顯示的副本。
 
-- **(a) agent 改 cfg 必對 user 即時可見（WYSIWYG）**——不能背著 user 改。
-- **(b) widget 未開時 agent 也要能編輯**——writeback 草稿 / 未開的 tab，沒有 widget 但 agent 要能調。
-- **(c) 表達 EvalValue 與 ref 切換**：欄位值可引用 captured 參數路徑，例如 `freq = $resonator.freq - 0.1`，binding 解析並保存 expr/resolved/error；module/waveform 使用 reference 節點，切換會**動態改變後續可填欄位**，agent 必須「切 ref → 看新欄位 → 再填」漸進進行（無法一次送整份 raw）——這是引入**有狀態 session** 的不可替代理由。
+共用 Form 核心與固定來源見 [[0065]]，Measure 的 Form 定義見 [[0073]]。本篇記錄狀態的擁有者與 writeback 提交邊界。
 
 ## 決策
 
-**`CfgDraft` 永遠由 `CfgEditorService` 以 headless 模式持有；`CfgFormWidget` 是可插拔 viewer。** 直接操作一般cfg-editor session的agent與widget以`editor_id`作為平級client；writeback則由`WritebackService`把這個identity封裝在opaque draft內，不交給workflow、adapter或wire client。
+`gui.form.FormState` 保存可不完整的 input。`gui.widgets.form.FormEditor` 只呈現 caller-owned state 與固定 FormEnv，不擁有提交或保存政策。Detach 不提交文字、不重設 state，也不銷毀宿主的 draft。
 
-- **attach/detach**：`CfgFormWidget.attach(draft)` 接一個 service-owned `CfgDraft`、從 `draft.root` build widget tree；`detach()` disconnect + `deleteLater`，**不 close draft**。widget 的 Qt 重畫經 draft/field `on_change` 取得。
-- **gc 生命週期**：`open(..., gc)`。`gc=True`（agent 自開 ml-entry）受 LRU + 斷線回收；`gc=False`（UI-owned：tab / inspect / writeback）只由 owner 顯式 `teardown`。tab cfg / writeback 草稿種子用 `open_seeded`（無 item_kind → teardown-only、拒絕 commit）。
-- **draft / tab snapshot**：session 持有可編輯的 `CfgDraft`，State 保存該 tab 的完整當前 snapshot。Active draft 的變更由 CfgEditorService 同步發布，composition root 將 tab owner 的 snapshot 寫入 State 並推進整份 cfg revision。Invalid raw、解析結果與錯誤同樣發布，不等待 Widget timer；Widget 在 measure tab 只輸入與呈現，不再經 `schema_changed` 回寫 cfg。Prepared／retired drafts 不發布，inspect／writeback owners 不寫入 tab State。發布不等於 ml/md commit，也不表示 cfg 已通過執行驗證。
-- **commit 只交 CfgSchema 快照**：`CfgEditorSession.commit` 不 lower、不 register，只交出**未-lower 的 `CfgSchema`**；`CfgEditorService.commit(editor_id, name)` 把它交給 ContextService 經 write port 落地（lowering + register 歸 ContextService，見 [[0067]]）。
-- **external refresh 歸 service**（[[0067]] Reaction）：service 訂閱 `MD/ML/CONTEXT/DEVICE_CHANGED`，明確映射到每個 draft 的 `refresh_expressions()`、`refresh_references()` 與 `refresh_options(source_id)`。職責跟著 draft 所有權從 widget 移到 service。
-- **完整 observation**：`CfgDraft.observe()` 回傳 detached、含 Literal／readonly 的 nominal tree，保留 raw、validity、resolved 與 cached reference metadata；GUI 與 agent 讀取同一份 model 狀態，remote 只做 typed projection，不現場 resolve。讀取要建立 cfg observation baseline，必須成功讀取無 prefix 的完整 cfg；prefix 與裸版本不代表完整內容已見。Persistence 的 expression tag 只存 expr，不能代替 observation 或執行快照。Ref 切換後 agent 重讀新結構；commit 失敗保留 session。
-- **失效訪問**：任何原因消失的 editor_id（LRU / tab close / commit / discard / 斷線）一律回 `unknown editor session`（INVALID_PARAMS），**不帶 reason 區分**（修復動作都是重開）。
-- **editor 專屬變更流**（`editor_changed{editor_id, paths}` / `editor_closed{editor_id, reason}`，**不走全域 EventBus**）：service 保留內部變更流；measure MCP 使用 request/reply，**agent 不 subscribe**——agent 改為「下次 `editor.set_field` 撞 `unknown editor session` 才知 session 沒了」，與樂觀模型一致（撞牆→重開）。
-- **tab cfg 讀/寫/發現全收斂到 session model**（[[0068]]）：`tab.get_cfg`／`editor.get` 的完整 observation、`editor.set_field` 的 mutation、tab snapshot 暴露的 `editor_id` 都對該 tab 的 editor session model，**agent 與人同一棵**。原 `cfg.set_field` RPC / `get_tab_live_model_root`（戳 View 的另一棵 model）已刪。
+- Measure tab 由 `TabFormResource` 持有 state、env 與 lifetime。Open／Reset 捕捉來源，Qt、remote 與 Run 使用同一資源。Run 只接受目前有效的 result，不重讀全域來源。
+- Library 與 Inspect 由 session 的 `LibraryEntryForm` 持有 state、固定 ParameterContext 與 arb 名稱。開啟既有 entry 時，生成器直接投影持久 Spec。Apply 取有效 Spec，交 `apply_library_change`，不經 runtime cfg 或 caller lowering。關閉時丟棄 form 即可，沒有 editor session registry、LRU 或 editor_id。
+- Writeback 由 `WritebackService` 持有 opaque draft。每個 module item 配一個 `ModuleEntryForm`，固定建立時的來源。Qt dialog 與 remote 都讀寫這個 state，dialog 是否存在不影響 draft。
 
-## writeback opaque draft（建立在 service-owned 上）
+Form 的狀態可以 Invalid。Preview 只供呈現，不是 Apply 許可。Library Apply 與 module writeback 提交都要求有效 result。文字解析錯誤若仍留在 view，宿主也要拒絕 Apply，不能提交 state 中較早的有效值。關閉 editor 丟棄未解析文字，不寫 Library。
 
-analysis workflow一次算出adapter proposal items，再交給`WritebackService.create_draft()`建立opaque、service-owned draft。每個module/waveform proposal在draft-private entry中配對一棵`gc=False` headless model（種子 = item的`edit_schema`）；adapter item、workflow與wire projection都不持有`editor_id`。Analysis與Post-Analysis pane各自保存自己的opaque draft；read model只投影該pane可見的writeback items。user點開Edit dialog時，Writeback以draft與item session id解析並回傳同一棵`CfgDraft`供widget attach（WYSIWYG）。
+## Writeback proposal 與提交
 
-Draft建立具有strong exception guarantee：任何editor open失敗時，Writeback在拋出原始錯誤前清理該draft已開啟的所有sessions，不把未成功回傳的cleanup責任交給workflow。Teardown先封閉draft再逐一清理，因此可重複呼叫；單一session cleanup失敗不會造成其他session被略過或讓已封閉draft再次close。Apply snapshot各item model並只把selected items組成一個`ContextWrites`交給ContextService（見[[0067]]），不直接修改md/ml。
+Adapter 的 `ModuleWriteback` 直接提供持久 `ModuleSpec`，不提供舊編輯樹或 editor identity。Child library key 保持 key。沒有現存 producer 的 waveform writeback 不保留；parameter 與 sample proposals 沿各自既有契約。
 
-**agent編writeback草稿的入口統一在writeback面：** remote/MCP以required `(tab_id, subtab_id)`定址Analysis或Post-Analysis draft，再以item session id選取draft-private entry；Writeback透過`CfgEditorPort.set_fields`套用ordered、fail-fast edits。`editor_id`不上writeback wire，agent不先取得editor handle。parameter item仍走同一面的value facet。這個封裝只涵蓋writeback draft；`editor.*` RPC對ModuleLibrary ml-entry的直接編輯仍使用`editor_id`，不受影響。
+Analysis 與 Post-Analysis 各保存自己的 opaque draft。Remote 以 `(tab_id, subtab_id)` 定址 pane，再以 item session id 選項目。這個 id 只屬於 draft，不是 editor handle。`tab.writeback_set` 的 module edits 使用 Form 路徑陣列，回同一項目的 schema、input、values 與 errors。結構錯誤拒絕該 Form batch，普通 invalid 值留在 draft，Apply 與 `tab.writeback_write` 拒絕提交。
 
-`CfgEditorPort`包含open、teardown、draft read與field edit所需的窄介面，使`WritebackService`依賴port而非concrete service（[[0067]]）。底層仍是同一個service-owned `CfgDraft`，因此user dialog與agent共享同一份可見草稿。
+Selected Apply 先準備所有選中項目的值與目的地。任一 module form Invalid 時，不 append accepted、不寫 target。準備成功後，既有 Context write owner 先 append accepted，再依序呼叫 setters。Setter 首錯停止，保留 accepted evidence 與成功前綴，不 rollback，也不保證跨檔 crash transaction。`tab.writeback_write` 依序調整 draft；後項失敗可保留前項 draft 修改，這不等於已寫入 target。
 
-## 安全保證（核心動機）
+Draft 固定來源的 run_id 與 SavedPoint。後來切 point、改 alias 或切換 pane 都不改目的地。Host 的 busy、writable、result、context 與 [[0070]] holder admission 仍各自生效。可預期的 `LibraryEntryInvalid` 保留 dialog、row、selection 與 draft，供使用者修正；非預期錯誤向外傳遞。
 
-「agent 的修改必對 user 可見」是**結構保證**：agent 可定址的每一棵 model 都 service-owned 且**隨時可被對應 widget attach 重畫**（tab 存在即可 attach；writeback item 經 Edit 可 attach）。不存在 agent 能改、但任何 surface 永遠無法顯示的 model。
+## 取捨與相鄰責任
 
-## 演化（被取代的設計，保留脈絡）
+GUI 與 remote 共用 headless state，所以 agent 的修改可由相應 editor 呈現，不必先開 dialog。各宿主仍有不同的提交用途，不能把 tab Run、Library Apply 與 writeback selected Apply 當成同一種交易。
 
-CfgEditor session 經兩次轉向才到現行形狀：
-
-1. **headless-only（RPC 專用、不綁 tab/View）**：最初定為「不讓 GUI 操作走它、不加逾時」。**翻轉**——agent 用 `editor.*` 改 tab cfg 時 user 完全看不到過程（headless、無 widget 綁定，commit 後才可見）。於是升為「被多 client 共享的 cfg draft SSOT」，widget 與 agent 平級。
-2. **delegated（委派型）**：widget `populate` 時自建 field tree、委派 service 換 id，「widget 先 populate 才有 session」。**翻轉**——tab/dialog 沒開就沒 widget、沒 draft，agent 無從編輯（writeback / 未開 tab 尤其卡）；且 external refresh 綁在 widget 的 EventBus 訂閱、無 widget 不刷，agent-only 編輯讀到 stale EvalValue。改為現行「`CfgDraft` 永遠 service-owned headless、widget 只 attach」。
-
-兩次轉向都圍繞同一動機：把「agent 改必對 user 可見」從*希望*變成*結構保證*。
-
-## 替代方案與否決理由
-
-- **在 `SectionWidget` 上加 attach/detach**：須複製建構子邏輯、波及每個 field widget class，零收益。改由 `CfgFormWidget` new/deleteLater widget tree。
-- **保留 widget EventBus 訂閱 + 另給 widget-less model 一條 service 刷新路徑**：同一職責兩條路徑、易 race。統一歸 service。
-- **adapter writeback item 持model參照或editor_id**：會把cfg-editor session identity洩漏到adapter dataclass與wire projection。改由`WritebackService`在opaque draft private entry中保存關聯。
-- **agent 變更通知走全域 EventBus**：稀釋 EventBus 的 changed-resource 語義、細粒度欄位變更量大。採 editor 專屬流。
-- **headless 孤兒用閒置逾時回收**：引入時間語義 + 計時器。採無時間語義的數量上限 LRU。
+Context 寫入權威見 [[0067]]，保存與 accepted evidence 見 [[0063]]，wire 與錯誤投影見 [[0068]]。舊 CfgDraft、CfgFormWidget、CfgEditorService 與 editor.* RPC 已退休，不提供相容入口。

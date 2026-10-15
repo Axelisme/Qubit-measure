@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-15，measure Form owner 與舊 builder 退休
+**Last updated:** 2026-10-15，共用 Form／Library／writeback 測試 owner
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -208,29 +208,21 @@ decimated trace 與 branch smoke。效能相關 regression 先找 public simulat
 不是新增測試的獨立驗收條件。既有 `test_engine_optimization_contract.py`
 仍含白箱案例，本次文件整理不代表該檔已遷移。
 
-### Shared GUI cfg import ownership tests
+### Form 與持久 Spec 的測試 owner
 
-`tests/experiment/cfg_editing/`鎖定closed 7 module + 6 waveform discriminator/label/order、program/v2
-runtime parity、nested allowed sets、deep-fresh mutable containers、main及default policy差異、
-strict root-only Mapping/typed inspection、missing/non-string/unknown。materializer tests 另鎖 spec/value 完整對齊、scalar
-missing、nested complete default、required reference `allowed[0]`、missing style Const、explicit unknown與
-Bath ghost rejection。`tests/gui/cfg/test_materialization.py`只測domain-free Spec walk與policy ports；main
-全7+6由measure app cfg tests鎖定。app binding/lowering tests鎖
-shape lookup、converter與`to_dict()`精確call count；role tests鎖registration shape/value count、Controller
-value→shape順序，以及既有26-entry metadata/value golden。
+`tests/gui/form/` 驗證共用 input、schema、expression、options、defaults、state 與 preview。
+`tests/gui/form_adapter/` 驗證 core cfg 生成、持久 Spec 投影、child key 保留與屏蔽欄位政策。
+`tests/gui/widgets/form/` 從 FormEditor 觀察提交、解析錯誤、唯讀、群組與選項，也涵蓋共用 value-widget helpers。
 
-`tests/gui/cfg/binding/test_targets.py`鎖定list/resolve acceptance equality、canonical grammar、
-legacy zero-mutation replacement、schema collision與production registry coverage。remote cfg tests
-鎖定 target wire parity；service/writeback tests 鎖定 shape-only listing 與 batch net diff。
-Import ownership、來源依賴與靜態宣告直接審閱，不以 AST 或獨立程序的匯入結果作測試。
+Library entry 與範本的公開行為由 `tests/gui/session/test_library_entry.py` 驗證，
+Inspect 與 Aliases 由 `tests/gui/session/ui/` 驗證。Measure 的 tab Form resource、
+固定 capture、Run 與 writeback 在 `tests/gui/app/measure/services/`；
+Library／writeback 的 wire 行為由 `tests/gui/app/measure/remote/` 驗證。
+Writeback 案例區分 Form batch、draft-local edits 與 target 提交，不把 selected Apply 當成跨檔原子交易。
 
-measure adapter facade 不 forward `zcu_tools.gui.cfg.__all__` names；generic cfg imports
-應指向 shared owner。
-Import 規則由直接 review 相關檔案確認，對外行為由接縫測試驗證。
-
-`tests/gui/cfg/test_schema_assembler.py`擁有domain-free paired Spec/Value construction contract：
-path/parent conflict與batch preflight、default carrier、optional ref、locked alignment、choice binding、
-caller alias隔離與one-shot build。domain role、Seed與app section policy不得進入這組shared tests。
+Import ownership、來源依賴、靜態宣告與文件內容直接審閱，不以 AST、
+absence assertions 或獨立程序匯入結果作測試。框架案例使用 synthetic adapter／Spec，
+不 import zcu_lab，也不固定個別實驗的預設值。
 
 ### Adapter 與共用工具 tests
 
