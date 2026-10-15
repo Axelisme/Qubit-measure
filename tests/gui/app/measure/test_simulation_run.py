@@ -73,7 +73,7 @@ def test_window_rpc_acquisition_saves_iq_and_public_environment_identity(
         if fail:
             fail = False
             raise RuntimeError("synthetic source failed")
-        if outcome == "stopped" and request.index == 0:
+        if outcome == "stopped" and request.index == 1:
             entered.set()
             if not release.wait(3):
                 raise RuntimeError("test did not release held round")
@@ -143,7 +143,7 @@ def test_window_rpc_acquisition_saves_iq_and_public_environment_identity(
         assert len(runs) == 1 and runs[0].data_path is not None
         stored = load_run_data(runs[0].data_path)
         variable = next(iter(stored.payload.variables.values()))
-        np.testing.assert_array_equal(variable.values, 0)
+        np.testing.assert_array_equal(variable.data.values, 0)
         assert stored.metadata.completion == (
             "stopped" if outcome == "stopped" else "complete"
         )
