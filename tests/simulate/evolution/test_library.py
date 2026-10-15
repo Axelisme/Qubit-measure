@@ -2,7 +2,6 @@
 
 import numpy as np
 from scipy.linalg import expm
-
 from zcu_tools.simulate.evolution import Basis, DriveSource, NumericModel
 
 
@@ -13,15 +12,30 @@ def test_intel_joint_complex128_batch_matches_independent_exponential(tmp_path):
     y = np.array([[0, -1j], [1j, 0]], dtype=complex)
     basis = Basis("batch", ("g", "e"), np.eye(2, dtype=complex))
     model = NumericModel(
-        "batch", basis, np.diag([0, 0.017]).astype(complex),
-        (DriveSource("a", 0.012*x, 0.012*y), DriveSource("b", 0.009*y, 0.009*x)),
+        "batch",
+        basis,
+        np.diag([0, 0.017]).astype(complex),
+        (
+            DriveSource("a", 0.012 * x, 0.012 * y),
+            DriveSource("b", 0.009 * y, 0.009 * x),
+        ),
     )
-    family = PlateauFamily(model, 8.0, (1+0.3j, -0.4+0.2j))
+    family = PlateauFamily(model, 8.0, (1 + 0.3j, -0.4 + 0.2j))
     scales = np.array([-0.75, -0.13, 0.0, 0.37, 0.8])
-    expected = np.array([
-        expm(-2j*np.pi*8*(model.hamiltonian_ghz+s*(0.012*x+0.0036*y-0.0036*y+0.0018*x)))
-        for s in scales
-    ])
+    expected = np.array(
+        [
+            expm(
+                -2j
+                * np.pi
+                * 8
+                * (
+                    model.hamiltonian_ghz
+                    + s * (0.012 * x + 0.0036 * y - 0.0036 * y + 0.0018 * x)
+                )
+            )
+            for s in scales
+        ]
+    )
     cpu = CPUReference().compute(family, scales)
     gpu = IntelOpenCL(tmp_path / "compiler").compute(family, scales)
     np.testing.assert_allclose(cpu.propagators, expected, atol=2e-12, rtol=0)
