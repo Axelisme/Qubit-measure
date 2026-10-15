@@ -136,26 +136,53 @@ from ._helpers import dispatch_handler as _dispatch  # noqa: E402
 
 
 def test_entry_edit_reply_is_lean_and_preserves_invalid_authored_input():
+    from pydantic import TypeAdapter
+    from zcu_tools.gui.app.measure.remote.form_observation import FormObservation
     from zcu_tools.gui.session.context_types import SavedPoint
     from zcu_tools.gui.session.library_entry import ModuleEntryForm
     from zcu_tools.gui.session.parameters import ParameterContext
-    from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
+    from zcu_tools.resources.context.library import (
+        LibrarySnapshot,
+        ModuleLibraryDocument,
+    )
     from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
     parameters = ParameterContext(
-        point=PointDocument(format="zcu.parameter-container", format_version="2.0", general=PointGeneral(created_at="2026-10-15T00:00:00Z")),
-        library=LibrarySnapshot(ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")),
+        point=PointDocument(
+            format="zcu.parameter-container",
+            format_version="2.0",
+            general=PointGeneral(created_at="2026-10-15T00:00:00Z"),
+        ),
+        library=LibrarySnapshot(
+            ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+        ),
         target=SavedPoint(entry_id="synthetic", point="working"),
         roles=None,
     )
-    entry = ModuleEntryForm(PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.2, waveform=ConstWaveformCfg(length=0.1)), parameters, arb_names=())
+    entry = ModuleEntryForm(
+        PulseSpec(
+            ch=0, nqz=1, freq=100.0, gain=0.2, waveform=ConstWaveformCfg(length=0.1)
+        ),
+        parameters,
+        arb_names=(),
+    )
     entry.state.write({("freq",): {"expr": "1 / 0"}}, entry.env)
     ctrl = _ctrl()
     ctrl.writeback_control.get_writeback_item_form_for_pane.return_value = entry
-    reply = _dispatch(ctrl, "tab.writeback_set", {"tab_id": "t", "subtab_id": "analysis", "id": "ml-1", "edits": [{"path": ["gain"], "value": 0.3}]})
+    reply = _dispatch(
+        ctrl,
+        "tab.writeback_set",
+        {
+            "tab_id": "t",
+            "subtab_id": "analysis",
+            "id": "ml-1",
+            "edits": [{"path": ["gain"], "value": 0.3}],
+        },
+    )
     assert set(reply) == {"item", "input", "values", "errors"}
-    assert reply["input"]["freq"] == {"expr": "1 / 0"}
-    assert reply["errors"][0]["path"] == ["freq"]
+    observed = TypeAdapter(FormObservation).validate_python(reply)
+    assert observed["input"]["freq"] == {"expr": "1 / 0"}
+    assert observed["errors"][0]["path"] == ["freq"]
     assert entry.parameters is parameters
 
 

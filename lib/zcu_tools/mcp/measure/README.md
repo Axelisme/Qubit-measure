@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-14，recipe 欄位依選項 fields，library selection 原子拒絕
+**Last updated:** 2026-10-15，單層欄位查詢與 lean cfg
 
 # `zcu_tools/mcp/measure/`
 
@@ -36,11 +36,11 @@ Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.conn
 
 `RecipeTab.use_library` 選實際 library key，不建立舊 ref tree，也不複製內容。Slot 與 nested key 保存 tagged ref 的 kind/name，inline 保存 kind/module。持久 Spec 的 child key 仍是字串。`use_library` 只寫清單中 value 恰為該 ref 的 Option，以一次整個欄位 write 選 key。未列出的 key 在 RPC 前拒絕，訊息指名欄位並列可用 keys。Locked Slot 的固定 inline tag 也在 RPC 前拒絕 key selection；沒有 captured library 的普通欄位不因此變成 locked。
 
-`read_field` 回傳具名 RecipeFormField。input 保留 Form JSON，input_present 區分未填與 null。value 是 ordinary leaf 或 subtree，不能作為有效性的證明。mode 是 key、inline 或 None，key 是實際 library key 或 None。fields 只列選中 Option 的可編輯子欄位，不含 tag；ref 沒有 fields。MCP 依 value 葉的 JSON 型別和值匹配第一項，不從 union 猜 branch。mode 只讀公開 S2 input kind。locked 沿單一 model 的固定 kind.const 判斷，不因缺 key 選項而鎖定。errors 包含絕對 path/message。DTO 不含 CfgSchema kind 或 ref 子欄位 readonly 投影。Tag 葉不是 read_field 路徑。Inline 路徑包含 module，例如 `modules.readout.module.pulse_cfg.module.freq`。Range 使用 start、stop、n，set_sweep 的公開 expts 寫入 n。
+`read_field` 每次只送一次 `tab.describe_cfg`，從同一 owner turn 取得目前的單層描述與局部觀察，再回傳具名 RecipeFormField。不保留上次 observation，也不把兩次 RPC 拼成一份讀取。input 保留 Form JSON，input_present 區分未填與 null。value 是 ordinary leaf 或 subtree，不能作為有效性的證明。mode 是 key、inline 或 None，key 是實際 library key 或 None。fields 只列選中 Option 的可編輯子欄位，不含 tag；ref 沒有 fields。Core 決定目前選項，MCP 不匹配選項或推導 union。mode 只讀公開 S2 input kind。locked 使用公開 selection_fixed 或 fixed metadata，不因缺 key 選項而鎖定。單一普通 model wrapper 攤平後，fields 直接列其中子欄位，實際寫入路徑仍保留 module。errors 包含絕對 path/message。DTO 不含 CfgSchema kind 或 ref 子欄位 readonly 投影。Tag 葉不是 read_field 路徑。Inline 路徑包含 module，例如 `modules.readout.module.pulse_cfg.module.freq`。Range 使用 start、stop、n，set_sweep 的公開 expts 寫入 n。局部 errors 只含 Form preview 的 root 與該欄位／後代錯誤。Lowered cfg 錯誤請讀 get_cfg 或交給 Run admission 檢查。未知、inactive 或 whole-leaf 子路徑由 owner 回 invalid_params／form_path，data.form_path 保留請求路徑。
 
 `RecipeTab.read_module(field)` 回傳具名 RecipeModuleValues，含 detached value、key／inline mode 與 source。Key mode 讀 Reset 的固定 library capture，source 是 library:<key>。Inline mode 只求該欄位的值，source 是 dotted core module path。其他欄位 invalid 不擋讀取，該 module 自身 invalid 才拒絕。值不含 extras lowering、整份 cfg 驗證或 native to_cfg。
 
-`use_inline(field)` 走既有 tab.use_inline RPC。Server 先檢查 holder、busy、lifetime 與通知重入 guard，再以公開 read_module_kind 讀取 core-module 欄位的 input tag，不依賴 draft 驗證。Ref 模式執行同一個 to_inline 選項指令，從開表單／Reset 的固定 library 複製快照，以一次原子 write 發布。Inline 模式即使必填值未填或 expression 無效，也不求值來判斷模式、不改 input、不發布，但仍檢查 guards。回覆沿用完整 Form observation，保留 draft 的 errors。停用或來源無效的欄位拒絕轉換，不補 fallback；要從範本／型別預設開始，明確選 Inline 選項。Caller 之後用 set 寫入 module 葉，例如 tab.use_inline("modules.qub_pulse") 後呼叫 tab.set("modules.qub_pulse.module.freq", 125.0)，不自己組 envelope。
+`use_inline(field)` 走既有 tab.use_inline RPC。Server 先檢查 holder、busy、lifetime 與通知重入 guard，再以公開 read_module_kind 讀取 core-module 欄位的 input tag，不依賴 draft 驗證。Ref 模式執行同一個 to_inline 選項指令，從開表單／Reset 的固定 library 複製快照，以一次原子 write 發布。Inline 模式即使必填值未填或 expression 無效，也不求值來判斷模式、不改 input、不發布，但仍檢查 guards。回覆沿用lean Form observation，保留 draft 的 errors。停用或來源無效的欄位拒絕轉換，不補 fallback；要從範本／型別預設開始，明確選 Inline 選項。Caller 之後用 set 寫入 module 葉，例如 tab.use_inline("modules.qub_pulse") 後呼叫 tab.set("modules.qub_pulse.module.freq", 125.0)，不自己組 envelope。
 
 `retain_module_source(field, summary_field=..., value_path=...)` 記錄通用 scalar projection 及 module source。summary_field 使用 dotted inline 葉路徑；key mode 也用相同身分，即使 input 沒有該葉。value_path 是 module-relative path，不含 inline envelope。Run 讀目前 scalar 值，保留數字而非 library key 或整個 module。無效 projection 不記成功前綴。後續 set 的來源可取代 label，既有 Run capture 不變。Frequency／linewidth policy 仍由 caller 決定。
 
@@ -115,7 +115,7 @@ GUI 在 owner dispatch 檢查目前 holder，不維護每連線 seen baseline。
 
 接手既有或重啟後的 GUI 時，按操作需要讀 tab、SoC、context 與 device snapshots，核對實際狀態，不是建立寫入許可。Context 可能包含大型敏感資料，不可序列化時完整讀取失敗。摘要與 resource counters 不代替內容。
 
-Cfg 使用 `tab.get_cfg` 的 Form schema/input/values/errors。`tab.edit_cfg`、`tab.reset_cfg` 與 `tab.run_start` 不收 ref。Edit 作用於目前 input，Reset 重新捕捉來源及 defaults。Run 只接受目前有效值，並隔離執行值與 source provenance。後續編輯不改已接受 Run，轉移或斷線也不取消它。新 holder 可取消，observer 可 wait。
+Cfg 使用 `tab.get_cfg` 的 Form input/values/errors。欄位能力用 `tab.describe_cfg` 逐層讀取，不下載整棵 schema。`tab.edit_cfg`、`tab.reset_cfg` 與 `tab.run_start` 不收 ref。Edit 作用於目前 input，Reset 重新捕捉來源及 defaults。Run 只接受目前有效值，並隔離執行值與 source provenance。後續編輯不改已接受 Run，轉移或斷線也不取消它。新 holder 可取消，observer 可 wait。
 
 Admission 拒絕、斷線或 timeout 都不自動重送。傳輸失敗不證明 mutation 沒有副作用；先讀現況，再由 caller 決定下一步。
 

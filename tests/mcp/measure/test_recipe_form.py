@@ -16,13 +16,14 @@ from zcu_tools.cfg_model import (
     Template,
     TemplateDef,
 )
+from zcu_tools.gui.app.measure.remote.form_description import description_wire
 from zcu_tools.gui.app.measure.remote.form_observation import form_writes, observe_form
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
-from zcu_tools.gui.form import FormEnv, FormModel
+from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormState
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import RecipeSession
-from zcu_tools.mcp.measure.recipe_form import read_form_field
+from zcu_tools.mcp.measure.recipe_form import field_observation, read_form_field
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
@@ -68,7 +69,7 @@ class FormGui(LookbackGui):
         )
 
     def __call__(self, method: str, params: dict[str, object]) -> dict[str, object]:
-        if method == "tab.reset_cfg":
+        if method in ("tab.reset_cfg", "tab.get_cfg"):
             return dict(observe_form(self.owner))
         if method == "tab.edit_cfg":
             self.owner.write(form_writes(params["edits"]))
@@ -114,7 +115,9 @@ def test_read_field_reports_form_input_values_and_directed_errors(
         assert before.input == 3
 
 
-def test_read_field_queries_current_owner_once_and_detaches_reply(tmp_path: Path) -> None:
+def test_read_field_queries_current_owner_once_and_detaches_reply(
+    tmp_path: Path,
+) -> None:
     gui = FormGui()
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
@@ -157,7 +160,11 @@ def test_use_library_writes_one_declared_option_value(tmp_path: Path) -> None:
         tab = RecipeSession(client.context).open_tab("lookback")
         before = len(client.transport.sent)
         tab.use_library("pulse", "Q1.pulses.pi")
-        assert client.transport.sent[before:] == [
+        assert [
+            call
+            for call in client.transport.sent[before:]
+            if call[0] != "tab.describe_cfg"
+        ] == [
             (
                 "tab.edit_cfg",
                 {
@@ -198,7 +205,9 @@ def test_unoffered_library_key_reports_available_options_without_writing(
         assert "Available keys" in str(error)
         if captured:
             assert "Q1.pulses.pi" in str(error)
-        assert client.transport.sent == sent
+        assert [
+            call for call in client.transport.sent if call[0] != "tab.describe_cfg"
+        ] == [call for call in sent if call[0] != "tab.describe_cfg"]
         assert gui.owner.input.data == before
 
 
@@ -245,13 +254,17 @@ class TypedOptionsForm(FormModel):
 def test_read_field_projects_selected_typed_option_fields(
     tag: int | str, fields: tuple[str, ...]
 ) -> None:
-    publication: dict[str, object] = {
-        "schema": TypedOptionsForm.input_schema(FormEnv()),
-        "input": {"choice": {"kind": tag}},
-        "values": [],
-        "errors": [],
-    }
-    observed = read_form_field(publication, ("choice",))
+    state = FormState(FormInput(TypedOptionsForm, {"choice": {"kind": tag}}))
+    observation = field_observation(
+        {
+            "description": description_wire(state.describe(("choice",), FormEnv())),
+            "input": {"kind": tag},
+            "input_present": True,
+            "value": None,
+            "errors": [],
+        }
+    )
+    observed = read_form_field(observation, ("choice",))
     assert observed.fields == fields
     assert observed.input == {"kind": tag}
 
@@ -319,7 +332,9 @@ def test_locked_inline_slot_rejects_library_selection_before_rpc(
         before = list(client.transport.sent)
         with pytest.raises(ValueError, match="locked"):
             tab.use_library("locked_pulse", "Q1.pulses.pi")
-        assert client.transport.sent == before
+        assert [
+            call for call in client.transport.sent if call[0] != "tab.describe_cfg"
+        ] == [call for call in before if call[0] != "tab.describe_cfg"]
 
 
 @pytest.mark.parametrize("field", ["pulse.kind", "locked_pulse.kind"])
@@ -331,7 +346,7 @@ def test_read_field_does_not_expose_option_selected_tag_leaves(
         tab = RecipeSession(client.context).open_tab("lookback")
         tab.use_library("pulse", "Q1.pulses.pi")
         before = gui.owner.input.data
-        with pytest.raises(ValueError, match="Unknown cfg field"):
+        with pytest.raises(ValueError, match="field"):
             tab.read_field(field)
         assert gui.owner.input.data == before
         assert tab.read_field("locked_pulse.module.freq").value == 100.0

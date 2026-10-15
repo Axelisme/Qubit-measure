@@ -19,6 +19,7 @@ from zcu_tools.gui.cfg.resource import (
     SourceBasis,
 )
 from zcu_tools.gui.form import (
+    FormDescription,
     FormEnv,
     FormErrors,
     FormInput,
@@ -63,7 +64,7 @@ class AcceptedFormConfig:
 class TabFormResource:
     """Own a tab's inputs and captured sources independently of any frontend.
 
-    Open and explicit Reset capture once. Input/schema/preview/result/accept do
+    Open and explicit Reset capture once. Input/describe/preview/result/accept do
     not refresh sources. Only current valid input may be accepted. Frontends
     send commands here; editor_state lends the current FormState for reading
     and subscribing only. Owner-sequence use is required. Mutation guards and
@@ -143,10 +144,16 @@ class TabFormResource:
         self._require_open()
         return self._state
 
-    def input_schema(self) -> dict[str, JsonValue]:
-        """Return the generated editable schema using this tab's fixed sources."""
+    def describe(self, path: FormWritePath = ()) -> FormDescription:
+        """Describe one current layer using fixed sources, without publication.
+
+        path is canonical model-field names, () for root. Unknown/inactive
+        paths and descendants of whole leaves raise ValueError. Revocation
+        raises RESOURCE_GONE; busy and notification reads are allowed. This
+        does not capture sources, materialize refs, or install defaults.
+        """
         self._require_open()
-        return self._state.input_schema(self._sources.env)
+        return self._state.describe(path, self._sources.env)
 
     def preview(self) -> FormPreview:
         """Return partial ordinary leaves and validation errors without publication."""
@@ -235,7 +242,7 @@ class TabFormResource:
         """Execute a current option's named command against the fixed capture.
 
         path is a tuple of model-field names identifying an option field.
-        name comes from that selected option's schema commands, for example
+        name comes from that selected option's description commands, for example
         run_command(("modules", "qub_pulse"), "to_inline"). The Form owner
         computes the replacement; this host never copies or refreshes sources.
         Success commits one atomic FormState write and publishes once through

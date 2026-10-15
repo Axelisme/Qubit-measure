@@ -68,9 +68,11 @@ def test_retain_source_rejects_invalid_fields_and_labels_without_rpc(
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         before = list(client.transport.sent)
-        with pytest.raises(ValueError, match="Unknown cfg field|source must be"):
+        with pytest.raises(ValueError, match="Unknown .*field|source must be"):
             tab.retain_source(field, source)
-        assert client.transport.sent == before
+        assert [
+            call for call in client.transport.sent if call[0] != "tab.describe_cfg"
+        ] == [call for call in before if call[0] != "tab.describe_cfg"]
 
 
 def test_retain_source_rejects_ordinary_model_sections_without_rpc(
@@ -81,7 +83,9 @@ def test_retain_source_rejects_ordinary_model_sections_without_rpc(
         before = list(client.transport.sent)
         with pytest.raises(ValueError, match="scalar or sweep"):
             tab.retain_source("modules", "caller")
-        assert client.transport.sent == before
+        assert [
+            call for call in client.transport.sent if call[0] != "tab.describe_cfg"
+        ] == [call for call in before if call[0] != "tab.describe_cfg"]
 
 
 def test_set_fields_writes_one_batch_and_keeps_none_default(
@@ -112,7 +116,11 @@ def test_set_fields_writes_one_batch_and_keeps_none_default(
                 ),
             ]
         )
-        assert client.transport.sent[before:] == [
+        assert [
+            call
+            for call in client.transport.sent[before:]
+            if call[0] != "tab.describe_cfg"
+        ] == [
             (
                 "tab.edit_cfg",
                 {
@@ -174,14 +182,18 @@ def test_batch_preflight_rejects_all_before_first_edit(
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         before = len(client.transport.sent)
-        with pytest.raises(ValueError, match="cfg field|source"):
+        with pytest.raises(ValueError, match="field|source"):
             tab.set_fields(
                 [
                     recipe.RecipeFieldEdit("rounds", 7, "valid"),
                     recipe.RecipeFieldEdit(bad_field, 9, bad_source),
                 ]
             )
-        assert len(client.transport.sent) == before
+        assert not [
+            call
+            for call in client.transport.sent[before:]
+            if call[0] != "tab.describe_cfg"
+        ]
 
 
 def test_empty_batch_and_default_only_batch_do_not_edit(tmp_path: Path) -> None:
@@ -190,7 +202,11 @@ def test_empty_batch_and_default_only_batch_do_not_edit(tmp_path: Path) -> None:
         before = len(client.transport.sent)
         tab.set_fields([])
         tab.set_fields([recipe.RecipeFieldEdit("rounds", None, "explicit")])
-        assert len(client.transport.sent) == before
+        assert not [
+            call
+            for call in client.transport.sent[before:]
+            if call[0] != "tab.describe_cfg"
+        ]
 
 
 def test_expression_set_and_sweep_are_forwarded_without_client_evaluation(
@@ -233,9 +249,11 @@ def test_batch_invalid_reply_retains_edit_without_rollback(tmp_path: Path) -> No
         with pytest.raises(GuiRpcError) as failure:
             tab.set_fields([recipe.RecipeFieldEdit("rounds", 7, "explicit")])
         assert failure.value.reason == "invalid_cfg"
-        assert [method for method, _ in client.transport.sent[before:]] == [
-            "tab.edit_cfg"
-        ]
+        assert [
+            method
+            for method, _ in client.transport.sent[before:]
+            if method != "tab.describe_cfg"
+        ] == ["tab.edit_cfg"]
 
 
 def test_actual_mixed_sweep_keeps_the_complete_parameter(tmp_path: Path) -> None:
@@ -270,4 +288,6 @@ def test_actual_mixed_sweep_keeps_the_complete_parameter(tmp_path: Path) -> None
                 ]
                 == expected
             )
-        assert client.transport.sent == before
+        assert [
+            call for call in client.transport.sent if call[0] != "tab.describe_cfg"
+        ] == [call for call in before if call[0] != "tab.describe_cfg"]

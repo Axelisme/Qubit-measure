@@ -17,6 +17,7 @@ from zcu_tools.cfg_model import (
     Template,
     TemplateDef,
 )
+from zcu_tools.gui.app.measure.remote.form_description import describe_form
 from zcu_tools.gui.app.measure.remote.form_observation import form_writes, observe_form
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
 from zcu_tools.gui.form import FormEnv
@@ -311,6 +312,10 @@ class LookbackGui:
 
     def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         observations = self._observations()
+        if method == "tab.describe_cfg":
+            observations[method] = dict(
+                describe_form(self.owner, tuple(params["path"]))
+            )
         if method == "tab.parameter_read":
             observations[method] = {
                 "values": {

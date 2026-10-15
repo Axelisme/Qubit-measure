@@ -277,10 +277,42 @@ def temporary_aliases(params: Mapping[str, object]) -> dict[str, str] | None:
 def h_tab_get_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """Read current Form schema/input/ordinary leaves/errors from fixed sources."""
+    """Read current Form input/ordinary leaves/errors from fixed sources."""
     from ..form_observation import observe_form
 
     return dict(observe_form(adapter.cfg_lookup(str(params["tab_id"]))))
+
+
+def h_tab_describe_cfg(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Read one current layer and local observation in the same owner turn.
+
+    params supplies tab_id and path (string array, [] for root). Malformed or
+    unknown paths become invalid_params/form_errors; resource lifetime errors
+    keep their normal cfg projection. Reads allow busy and observer clients.
+    """
+    from ..cfg_observation import cfg_error_to_remote
+    from ..form_description import describe_form
+
+    raw = params["path"]
+    if not isinstance(raw, list) or any(
+        not isinstance(part, str) or not part for part in raw
+    ):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            "path must contain nonempty strings",
+            reason="form_errors",
+        )
+    path = tuple(str(part) for part in raw)
+    try:
+        return dict(describe_form(adapter.cfg_lookup(str(params["tab_id"])), path))
+    except (CfgInputError, CfgPreconditionError) as exc:
+        raise cfg_error_to_remote(exc) from exc
+    except ValueError as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, str(exc), reason="form_errors"
+        ) from exc
 
 
 def h_tab_reset_cfg(

@@ -254,7 +254,7 @@ def test_tab_get_cfg_returns_form_scalar_values(lf):
         assert observed["input"]["reps"] == 100
         leaves = {tuple(item["path"]): item["value"] for item in observed["values"]}
         assert leaves[("reps",)] == 100
-        assert observed["schema"]["properties"]["reps"]
+        assert set(observed) == {"input", "values", "errors"}
         assert observed["errors"] == []
     finally:
         sock.close()

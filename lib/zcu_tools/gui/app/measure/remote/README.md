@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-15，main Form／Markdown guide 與具名 alias preset 整合
+**Last updated:** 2026-10-15，lean cfg 與單層 describe_cfg
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -26,7 +26,7 @@ not declare MCP tools and does not own stdio transport.
 - `events.py`：domain payload type to wire event serializer mapping.
 - `dialogs.py`：wire-stable dialog names.
 - `path_resolver.py`：flat target projection of an old `CfgDraft`; no wire method uses it.
-- `form_observation.py`：tab Form schema/input/values/errors projection and
+- `form_observation.py`：tab Form input/values/errors projection and
   the shared path-array edit decoder.
 - `cfg_observation.py`：old `CfgDraft` tree projection, now used by no wire
   method, and `cfg_error_to_remote`.
@@ -365,8 +365,34 @@ terminal status, not removed aliases. No tool inventory is generated from
 
 ## Cfg Editing
 
-`tab.get_cfg` returns Form schema, authored input, ordinary leaf values and
-directed errors. It has no prefix or widget prerequisite. Each value has a
+`tab.get_cfg` returns authored input, ordinary leaf values and directed errors.
+Edit, Reset, use_inline and writeback entry edits return the same lean observation.
+It preserves missing input, null, expression text and complex tags. Get has no
+prefix or widget prerequisite.
+
+`tab.describe_cfg(tab_id, path)` returns `{description, input_present, input,
+value, errors}` in one owner turn. path is an array of model-field names, with
+`[]` for root. description contains path, target metadata and direct children.
+Children have canonical full paths, including a flattened `module` wrapper.
+Options contain label, writable value and commands, never child descriptions.
+`can_expand` reports structural expandability, not a promise of nonempty children.
+`fixed` and `fixed_value` describe a declaration-fixed complete value.
+`selection_fixed` describes a fixed outer branch, whose inner choices can vary.
+Neither locks editable descendants. An env with only one offered option does
+not establish declaration-level fixed selection.
+
+Describe uses only the resource's fixed capture, input and Form preview. It
+does not call result/to_cfg, materialize references, install defaults or publish.
+Errors are root and target/descendant Form preview errors. Use get_cfg or Run
+admission for lowered cfg errors. Missing input has input_present=false; null
+has input_present=true. value may be an ordinary leaf, partial subtree or null
+when unavailable. Busy, observer and headless reads are allowed. Closed tabs
+and revoked resource handles keep their lifetime rejection.
+Unknown, inactive and whole-leaf descendant paths return invalid_params,
+reason=form_path, data={form_path: path}. Author declaration failures and other
+unexpected ValueErrors remain controller_error, not invalid path errors.
+
+Each get_cfg ordinary value has a
 model-field path array and a JSON value. Tuples become JSON lists; complex
 values use the public reversible `__complex__` tag.
 
