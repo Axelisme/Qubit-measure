@@ -41,3 +41,14 @@ def test_calc_name_stable_with_qickparam():
     cfg1 = _make_cfg(freq=QickParam(start=5000.0, spans={"s": 1.0}))  # pyright: ignore[reportArgumentType]
     cfg2 = _make_cfg(freq=QickParam(start=5000.0, spans={"s": 1.0}))  # pyright: ignore[reportArgumentType]
     assert reg.calc_name(cfg1) == reg.calc_name(cfg2)
+
+
+def test_runtime_adc_channel_is_part_of_registry_identity():
+    reg = PulseRegistry()
+    cfg = _make_cfg()
+    names = [reg.calc_name(cfg, ro_ch=ch) for ch in (None, 0, 1)]
+    assert len(set(names)) == 3
+    for ch in (None, 0, 1):
+        assert reg.register("first", cfg, ro_ch=ch) is True
+        assert reg.register("again", cfg, ro_ch=ch) is False
+    assert reg.count == 3

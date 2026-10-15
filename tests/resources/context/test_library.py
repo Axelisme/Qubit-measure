@@ -698,3 +698,38 @@ def test_source_refresh_failure_retains_snapshot_and_recovery_publishes(
     assert library.refresh()
     assert library.snapshot().meta("Q1.pulses.pi.gain") == source
     assert len(changes) == 1
+
+
+def test_obsolete_nested_readout_error_names_library_entry(files):
+    raw = {
+        "format": "zcu.module-library",
+        "format_version": "1.0",
+        "components": {
+            "Q1": {
+                "readout": {
+                    "broken_probe": {
+                        "type": "readout/pulse",
+                        "pulse_cfg": {
+                            "type": "pulse",
+                            "ch": 0,
+                            "nqz": 1,
+                            "freq": 100.0,
+                            "gain": 0.5,
+                            "waveform": {"style": "const", "length": 0.5},
+                        },
+                        "ro_cfg": {
+                            "type": "readout/direct",
+                            "ro_ch": 0,
+                            "ro_freq": 100.0,
+                            "ro_length": 1.0,
+                        },
+                    }
+                }
+            }
+        },
+    }
+    import json
+
+    files[0].write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="broken_probe"):
+        open_library(files)

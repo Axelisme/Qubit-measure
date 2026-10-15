@@ -22,8 +22,6 @@ from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, Join, SoftDelay
 from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord, ScanWith
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.readout import (
-    DirectReadout,
-    DirectReadoutCfg,
     PulseReadout,
     PulseReadoutCfg,
     Readout,
@@ -98,8 +96,18 @@ def _pulse_cfg(
     )
 
 
-def _direct_ro_cfg(ro_ch=RO_CH, ro_freq=RO_FREQ, ro_length=RO_LENGTH):
-    return DirectReadoutCfg(ro_ch=ro_ch, ro_length=ro_length, ro_freq=ro_freq)
+def _readout_cfg(ro_ch=RO_CH, freq=RO_FREQ, ro_length=RO_LENGTH):
+    return PulseReadoutCfg.model_validate(
+        {
+            "gen_ch": GEN_CH,
+            "nqz": GEN_NQZ,
+            "freq": freq,
+            "gain": GEN_GAIN,
+            "waveform": ConstWaveformCfg(length=WAVEFORM_LEN),
+            "ro_ch": ro_ch,
+            "ro_length": ro_length,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -118,12 +126,14 @@ class TestTempRegScope:
     def test_acquire_temp_reg_nested_scope_is_disjoint(self):
         prog = _make_prog(modules=[])
 
-        with prog.acquire_temp_reg(2) as outer_regs:
-            with prog.acquire_temp_reg(1) as inner_regs:
-                # nested scope must not clobber outer regs
-                assert set(inner_regs).isdisjoint(outer_regs)
-                assert inner_regs == ["temp_reg_2"]
-                assert outer_regs == ["temp_reg_0", "temp_reg_1"]
+        with (
+            prog.acquire_temp_reg(2) as outer_regs,
+            prog.acquire_temp_reg(1) as inner_regs,
+        ):
+            # nested scope must not clobber outer regs
+            assert set(inner_regs).isdisjoint(outer_regs)
+            assert inner_regs == ["temp_reg_2"]
+            assert outer_regs == ["temp_reg_0", "temp_reg_1"]
 
     def test_acquire_temp_reg_zero_returns_empty_list(self):
         prog = _make_prog(modules=[])
@@ -134,9 +144,11 @@ class TestTempRegScope:
     def test_acquire_temp_reg_negative_raises(self):
         prog = _make_prog(modules=[])
 
-        with pytest.raises(ValueError, match="greater than or equal to 0"):
-            with prog.acquire_temp_reg(-1):
-                pass
+        with (
+            pytest.raises(ValueError, match="greater than or equal to 0"),
+            prog.acquire_temp_reg(-1),
+        ):
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -214,7 +226,7 @@ class TestPulseIntegration:
             pulse_id="drive",
         )
         prog = _make_prog(
-            modules=[pulse, Readout("readout", _direct_ro_cfg())],
+            modules=[pulse, Readout("readout", _readout_cfg())],
             sweep=[("length", grid)],
         )
         actual = np.asarray(
@@ -238,7 +250,7 @@ class TestPulseIntegration:
                 pulse,
                 Delay("advance", 0.0),
                 DelayAuto("residual", gens=True, ros=False, tag="residual"),
-                Readout("readout", _direct_ro_cfg()),
+                Readout("readout", _readout_cfg()),
             ],
             sweep=[("length", grid)],
         )
@@ -256,7 +268,7 @@ class TestPulseIntegration:
             block_mode=block_mode,
             pulse_id="drive",
         )
-        prog = _make_prog(modules=[pulse, Readout("readout", _direct_ro_cfg())])
+        prog = _make_prog(modules=[pulse, Readout("readout", _readout_cfg())])
         total = pulse.total_length(prog)
         assert isinstance(total, float)
         # Captured from the unchanged scalar path before the D190 correction.
@@ -299,39 +311,13 @@ class TestPulseIntegration:
 
 
 class TestReadoutIntegration:
-    def test_direct_readout_compiles(self):
-        prog = _make_prog(modules=[DirectReadout("ro", _direct_ro_cfg())])
-        assert prog.binprog is not None
-
-    def test_direct_readout_with_gen_ch(self):
-        # gen_ch links the readout to a declared generator for frequency matching.
-        # Both the gen and readout must be initialised; wrap in separate modules.
-        ro_cfg = DirectReadoutCfg(
-            ro_ch=RO_CH, ro_length=RO_LENGTH, ro_freq=RO_FREQ, gen_ch=GEN_CH
-        )
-        pulse_cfg = _pulse_cfg(ch=GEN_CH)
-        modules = [Pulse("p", pulse_cfg), DirectReadout("ro", ro_cfg)]
-        prog = _make_prog(modules=modules)
-        assert prog.binprog is not None
-
     def test_pulse_readout_compiles(self):
-        cfg = PulseReadoutCfg(
-            pulse_cfg=_pulse_cfg(ch=GEN_CH),
-            ro_cfg=_direct_ro_cfg(ro_ch=GEN_CH),
-        )
+        cfg = _readout_cfg()
         prog = _make_prog(modules=[PulseReadout("ro", cfg)])
         assert prog.binprog is not None
 
     def test_pulse_readout_runtime_freq_words_compile(self):
-        cfg = PulseReadoutCfg(
-            pulse_cfg=_pulse_cfg(ch=GEN_CH, freq=GEN_FREQ),
-            ro_cfg=DirectReadoutCfg(
-                ro_ch=RO_CH,
-                ro_length=RO_LENGTH,
-                ro_freq=RO_FREQ,
-                gen_ch=GEN_CH,
-            ),
-        )
+        cfg = _readout_cfg(freq=GEN_FREQ)
         modules = [
             LoadWord(
                 "load_freq",
@@ -375,15 +361,7 @@ class TestReadoutIntegration:
             mixer_freq=None,
             nqz=GEN_NQZ,
         )
-        cfg = PulseReadoutCfg(
-            pulse_cfg=_pulse_cfg(ch=GEN_CH, freq=freqs[0]),
-            ro_cfg=DirectReadoutCfg(
-                ro_ch=RO_CH,
-                ro_length=RO_LENGTH,
-                ro_freq=freqs[0],
-                gen_ch=GEN_CH,
-            ),
-        )
+        cfg = _readout_cfg(freq=freqs[0])
         prog = ModularProgramV2(
             soccfg,
             ProgramV2Cfg(),
@@ -444,15 +422,7 @@ class TestReadoutIntegration:
         )
 
     def test_table_pulse_readout_rejects_loop_count_mismatch(self):
-        cfg = PulseReadoutCfg(
-            pulse_cfg=_pulse_cfg(ch=GEN_CH),
-            ro_cfg=DirectReadoutCfg(
-                ro_ch=RO_CH,
-                ro_length=RO_LENGTH,
-                ro_freq=GEN_FREQ,
-                gen_ch=GEN_CH,
-            ),
-        )
+        cfg = _readout_cfg(freq=GEN_FREQ)
         with pytest.raises(ValueError, match="does not match loop"):
             _make_prog(
                 modules=[
@@ -468,22 +438,15 @@ class TestReadoutIntegration:
                 n_gens=1,
             )
 
-    def test_readout_factory_direct_compiles(self):
-        prog = _make_prog(modules=[Readout("ro", _direct_ro_cfg())])
-        assert prog.binprog is not None
-
     def test_readout_factory_pulse_compiles(self):
-        cfg = PulseReadoutCfg(
-            pulse_cfg=_pulse_cfg(ch=GEN_CH),
-            ro_cfg=_direct_ro_cfg(ro_ch=GEN_CH),
-        )
+        cfg = _readout_cfg()
         prog = _make_prog(modules=[Readout("ro", cfg)])
         assert prog.binprog is not None
 
     def test_pulse_plus_readout_compiles(self):
         modules = [
             Pulse("drive", _pulse_cfg(ch=GEN_CH)),
-            DirectReadout("ro", _direct_ro_cfg()),
+            Readout("ro", _readout_cfg()),
         ]
         prog = _make_prog(modules=modules)
         assert prog.binprog is not None
@@ -674,3 +637,60 @@ class TestDmemIntegration:
         prog = _make_prog(modules=[s])
         assert prog.binprog is not None
         assert prog.compile_datamem() is not None
+
+
+@pytest.mark.parametrize("mixer", [None, 500.0])
+def test_pulse_runtime_adc_identity_keeps_distinct_qick_definitions(mixer):
+    soccfg = make_mock_soccfg(n_gens=1, n_readouts=2)
+    soccfg["gens"][0]["has_mixer"] = mixer is not None
+    cfg = _pulse_cfg(freq=700.0)
+    cfg.mixer_freq = mixer
+    pulses = [Pulse(f"p{idx}", cfg, ro_ch=ch) for idx, ch in enumerate((None, 0, 0, 1))]
+    prog = ModularProgramV2(soccfg, ProgramV2Cfg(), modules=pulses)
+    assert prog.pulse_registry.count == 3
+    assert pulses[1].pulse_id == pulses[2].pulse_id
+    assert len({pulses[idx].pulse_id for idx in (0, 1, 3)}) == 3
+    for pulse, ch in zip(pulses, (None, 0, 0, 1), strict=True):
+        assert prog.pulses[pulse.pulse_id].params["ro_ch"] == ch
+
+
+@pytest.mark.parametrize("swept", [False, True])
+def test_readout_generator_and_adc_compile_one_frequency(swept):
+    cfg = _readout_cfg(freq=700.0)
+    if swept:
+        cfg.set_param("freq", QickParam(700.0, {"freq": 20.0}))
+    prog = _make_prog(
+        modules=[Readout("ro", cfg)], sweep=[("freq", 3)] if swept else None
+    )
+    names = [name for name in prog.pulses if name != "ro_adc"]
+    assert len(names) == 1
+    gen_freq = prog.get_pulse_param(names[0], "freq", as_array=swept)
+    ro_freq = prog.get_pulse_param("ro_adc", "freq", as_array=swept)
+    np.testing.assert_allclose(
+        gen_freq, [700.0, 710.0, 720.0] if swept else 700.0, atol=1e-4
+    )
+    np.testing.assert_allclose(ro_freq, gen_freq, atol=1e-4)
+
+
+@pytest.mark.parametrize("sweep", [None, [("other", 2)]])
+def test_table_readout_requires_named_loop(sweep):
+    ro = TablePulseReadout(
+        "table", _readout_cfg(), idx_reg="freq", freq_words=[1, 2], ro_freq_words=[3, 4]
+    )
+    with pytest.raises(
+        ValueError, match="requires a sweep loop|exactly one sweep loop"
+    ):
+        _make_prog(modules=[ro], sweep=sweep)
+
+
+def test_table_readout_does_not_share_fixed_pulse_template():
+    cfg = _readout_cfg()
+    table = TablePulseReadout(
+        "table", cfg, idx_reg="freq", freq_words=[1, 2], ro_freq_words=[3, 4]
+    )
+    prog = _make_prog(
+        modules=[Readout("fixed", cfg), table], sweep=[("freq", 2)], reps=2
+    )
+    pulse_names = [name for name in prog.pulses if not name.endswith("_adc")]
+    assert len(pulse_names) == 2
+    assert len({tuple(prog.pulses[name].get_wavenames()) for name in pulse_names}) == 2

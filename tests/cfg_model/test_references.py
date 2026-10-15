@@ -5,7 +5,6 @@ from zcu_tools.cfg_model import (
     ArbWaveformCfg,
     BathResetSpec,
     CfgInputMap,
-    DirectReadoutCfg,
     FlatTopWaveformSpec,
     ModuleSpec,
     NoneResetCfg,
@@ -35,10 +34,6 @@ def pulse() -> PulseSpec:
 @pytest.mark.parametrize(
     "spec",
     [
-        PulseReadoutSpec(
-            pulse_cfg="pulse",
-            ro_cfg=DirectReadoutCfg(ro_ch=0, ro_length=2.5, ro_freq=123.5),
-        ),
         PulseResetSpec(pulse_cfg="pulse"),
         TwoPulseResetSpec(pulse1_cfg="pulse", pulse2_cfg="pulse"),
         BathResetSpec(cavity_tone_cfg="pulse", qubit_tone_cfg="pulse", pi2_cfg="pulse"),
@@ -60,10 +55,6 @@ def test_module_string_children_use_only_module_mapping(spec: ModuleSpec) -> Non
 @pytest.mark.parametrize(
     "spec",
     [
-        PulseReadoutSpec(
-            pulse_cfg=pulse(),
-            ro_cfg=DirectReadoutCfg(ro_ch=0, ro_length=2.5, ro_freq=123.5),
-        ),
         PulseResetSpec(pulse_cfg=pulse()),
         TwoPulseResetSpec(pulse1_cfg=pulse(), pulse2_cfg=pulse()),
         BathResetSpec(cavity_tone_cfg=pulse(), qubit_tone_cfg=pulse(), pi2_cfg=pulse()),
@@ -131,9 +122,7 @@ def test_arb_asset_key_is_kept_through_inline_module_rewriting() -> None:
     assert mapped.waveform.data == "asset"
 
 
-@pytest.mark.parametrize(
-    "spec", [NoneResetCfg(), DirectReadoutCfg(ro_ch=0, ro_length=0.25, ro_freq=200.0)]
-)
+@pytest.mark.parametrize("spec", [NoneResetCfg()])
 def test_reference_free_modules_are_isolated(spec: ModuleSpec) -> None:
     mapped = remap_module_references(spec, modules={}, waveforms={})
     assert mapped == spec
@@ -168,3 +157,22 @@ def test_invalid_persistent_input_is_revalidated() -> None:
         remap_module_references(
             spec, modules={}, waveforms={"wave": "Q1.waveforms.base"}
         )
+
+
+@pytest.mark.parametrize(
+    "waveform", ["wave", FlatTopWaveformSpec(length=1.0, raise_waveform="wave")]
+)
+def test_readout_remaps_waveform_references(waveform):
+    spec = PulseReadoutSpec(
+        gen_ch=0, nqz=1, freq=100.0, gain=0.5, ro_ch=1, ro_length=2.0, waveform=waveform
+    )
+    before = spec.model_dump()
+    mapped = remap_module_references(
+        spec, modules={"wave": "wrong"}, waveforms={"wave": "Q1.waveforms.base"}
+    )
+    assert isinstance(mapped, PulseReadoutSpec)
+    if isinstance(mapped.waveform, FlatTopWaveformSpec):
+        assert mapped.waveform.raise_waveform == "Q1.waveforms.base"
+    else:
+        assert mapped.waveform == "Q1.waveforms.base"
+    assert spec.model_dump() == before
