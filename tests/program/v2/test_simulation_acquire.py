@@ -207,7 +207,17 @@ def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
 
 
 @pytest.mark.parametrize(
-    "invalid", ["nan", "infinity", "overflow", "shape", "missing", "duplicate"]
+    "invalid",
+    [
+        "nan",
+        "infinity",
+        "overflow",
+        "underflow",
+        "shape",
+        "missing",
+        "extra",
+        "duplicate",
+    ],
 )
 @pytest.mark.parametrize("mode", ["integrated", "decimated"])
 def test_invalid_backend_signals_fail_public_acquire_and_allow_retry(invalid, mode):
@@ -220,10 +230,13 @@ def test_invalid_backend_signals_fail_public_acquire_and_allow_retry(invalid, mo
     def malformed(request):
         shape = (1, 1, 2) if mode == "integrated" else (1, 1, 4, 2)
         value = np.zeros(shape)
-        if invalid in ("nan", "infinity", "overflow"):
-            value.flat[0] = {"nan": np.nan, "infinity": np.inf, "overflow": 2.0**63}[
-                invalid
-            ]
+        if invalid in ("nan", "infinity", "overflow", "underflow"):
+            value.flat[0] = {
+                "nan": np.nan,
+                "infinity": np.inf,
+                "overflow": 2.0**63,
+                "underflow": -(2.0**63) - 2048,
+            }[invalid]
         elif invalid == "shape":
             value = np.zeros(shape[1:])
         channels = (ChannelSignals(0, value),)
@@ -231,13 +244,15 @@ def test_invalid_backend_signals_fail_public_acquire_and_allow_retry(invalid, mo
             channels = ()
         elif invalid == "duplicate":
             channels = channels + channels
+        elif invalid == "extra":
+            channels = channels + (ChannelSignals(1, value),)
         return RoundSignals(channels)
 
     env.soc.binding.execute = malformed
     acquire = prog.acquire if mode == "integrated" else prog.acquire_decimated
     reason = (
         "finite|int64"
-        if invalid in ("nan", "infinity", "overflow")
+        if invalid in ("nan", "infinity", "overflow", "underflow")
         else "expected.*got|channels"
     )
     with pytest.raises(ValueError, match=reason):
