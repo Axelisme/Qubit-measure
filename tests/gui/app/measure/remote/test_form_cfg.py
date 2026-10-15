@@ -175,6 +175,36 @@ def test_describe_cfg_does_not_classify_author_valueerror_as_bad_path(form_rpc) 
         fixture.ctrl.tab_control.close_tab(tab)
 
 
+class MissingValuesCfg(SampleCfg):
+    required_value: float
+    nullable_value: float | None = None
+
+
+class MissingValuesAdapter(SampleAdapter):
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[MissingValuesCfg]:
+        del ctx
+        return Form(MissingValuesCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
+
+
+def test_describe_cfg_distinguishes_missing_from_null(form_rpc) -> None:
+    fixture, _, rpc = form_rpc
+    fixture.registry.register("missing-values", MissingValuesAdapter)
+    tab = fixture.ctrl.new_tab("missing-values")
+    try:
+        missing = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["required_value"]})
+        assert missing["ok"], missing
+        null = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["nullable_value"]})
+        assert null["ok"], null
+        assert missing["result"]["input_present"] is False
+        assert null["result"]["input_present"] is True
+        assert missing["result"]["input"] is null["result"]["input"] is None
+        assert missing["result"]["errors"][0]["path"] == ["required_value"]
+        assert null["result"]["errors"] == []
+    finally:
+        fixture.ctrl.tab_control.close_tab(tab)
+
+
 def test_describe_cfg_path_errors_keep_request_path(form_rpc) -> None:
     _, tab, rpc = form_rpc
     path = ["gain", "child"]

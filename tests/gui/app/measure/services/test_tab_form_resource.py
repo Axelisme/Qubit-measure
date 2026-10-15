@@ -202,6 +202,38 @@ def test_resource_edit_preview_run_use_capture_until_reset() -> None:
     assert resource.input.data["amount"] == {"expr": "unfinished +"}
 
 
+def test_describe_keeps_fixed_capture_and_revokes_retained_handle() -> None:
+    captures: list[Mapping[str, str] | None] = []
+    current = 2.0
+
+    def capture(aliases: Mapping[str, str] | None) -> resource_api.TabFormSources:
+        captures.append(aliases)
+        return resource_api.TabFormSources(captured_env(current))
+
+    resource = resource_api.TabFormResource(
+        lambda _ctx: Form(ScalarCore, {}),
+        capture=capture,
+        mutation_allowed=lambda: True,
+    )
+    assert hasattr(resource, "describe"), "Missing fixed-capture description read"
+    resource.write({("amount",): {"expr": "general.ext.amount"}})
+    current = 9.0
+    before = resource.input.data
+    notifications: list[str] = []
+    resource.subscribe(lambda: notifications.append("changed"))
+    description = resource.describe(("amount",))
+    assert description.path == ("amount",)
+    assert description.children == ()
+    assert resource.preview().values[("amount",)] == 2.0
+    assert resource.input.data == before
+    assert captures == [None]
+    assert notifications == []
+    resource.revoke()
+    with pytest.raises(CfgPreconditionError) as gone:
+        resource.describe(("amount",))
+    assert gone.value.reason is CfgPreconditionReason.RESOURCE_GONE
+
+
 def test_rejected_batch_preserves_input_without_publication() -> None:
     resource = resource_api.TabFormResource(
         lambda _ctx: Form(ScalarCore, {}),
