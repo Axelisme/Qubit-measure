@@ -10,6 +10,8 @@ import zcu_tools.device.fake as fake_module
 from _pytest.logging import LogCaptureFixture
 from zcu_tools.device import DeviceBusyError, FakeDevice, FakeDeviceInfo
 
+from ._threads import DeviceThreads
+
 
 def test_fake_device_rampstep_is_actual_step(
     monkeypatch: pytest.MonkeyPatch,
@@ -32,42 +34,46 @@ def test_fake_device_rampstep_is_actual_step(
 
 def test_setup_ramp_allows_concurrent_get_info(
     paused_ramp: tuple[threading.Event, threading.Event],
+    workers: DeviceThreads,
 ) -> None:
     dev = FakeDevice(fast_mode=False)
     cfg = FakeDeviceInfo(address="none", output="on", value=1.0, rampstep=0.25)
     entered, release = paused_ramp
-    worker = threading.Thread(target=lambda: dev.setup(cfg, progress=False))
+    worker = workers.thread(
+        release=release, target=lambda: dev.setup(cfg, progress=False)
+    )
 
     worker.start()
     try:
-        assert entered.wait(5.0)
+        workers.arrived(entered)
         assert 0.0 < dev.get_info().value < cfg.value
     finally:
         release.set()
-        worker.join(timeout=5.0)
+        workers.join(worker)
 
-    assert not worker.is_alive()
     assert dev.get_value() == cfg.value
 
 
 def test_concurrent_setup_raises_device_busy_error(
     paused_ramp: tuple[threading.Event, threading.Event],
+    workers: DeviceThreads,
 ) -> None:
     dev = FakeDevice(fast_mode=False)
     cfg = FakeDeviceInfo(address="none", output="on", value=0.5, rampstep=0.25)
     entered, release = paused_ramp
-    worker = threading.Thread(target=lambda: dev.setup(cfg, progress=False))
+    worker = workers.thread(
+        release=release, target=lambda: dev.setup(cfg, progress=False)
+    )
 
     worker.start()
     try:
-        assert entered.wait(5.0)
+        workers.arrived(entered)
         with pytest.raises(DeviceBusyError):
             dev.setup(cfg.with_updates(value=-0.5), progress=False)
     finally:
         release.set()
-        worker.join(timeout=5.0)
+        workers.join(worker)
 
-    assert not worker.is_alive()
     assert dev.get_value() == cfg.value
 
 
@@ -85,21 +91,23 @@ def test_nested_calls_do_not_deadlock() -> None:
 
 def test_is_busy_true_during_ramp(
     paused_ramp: tuple[threading.Event, threading.Event],
+    workers: DeviceThreads,
 ) -> None:
     dev = FakeDevice(fast_mode=False)
     cfg = FakeDeviceInfo(address="none", output="on", value=0.5, rampstep=0.25)
     entered, release = paused_ramp
-    worker = threading.Thread(target=lambda: dev.setup(cfg, progress=False))
+    worker = workers.thread(
+        release=release, target=lambda: dev.setup(cfg, progress=False)
+    )
 
     worker.start()
     try:
-        assert entered.wait(5.0)
+        workers.arrived(entered)
         assert dev.is_busy() is True
     finally:
         release.set()
-        worker.join(timeout=5.0)
+        workers.join(worker)
 
-    assert not worker.is_alive()
     assert dev.get_value() == cfg.value
     assert dev.is_busy() is False
 

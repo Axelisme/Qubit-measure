@@ -125,7 +125,8 @@ def test_reset_during_active_run_preserves_the_publication(live_tab, monkeypatch
     original_run = SampleAdapter.run
 
     def blocked_run(self, req, raw_cfg, *, context):
-        if not release.wait(timeout=5):
+        # The test finally releases the held collaborator.
+        if not release.wait(timeout=30):
             raise TimeoutError("test did not release the fake run")
         return original_run(self, req, raw_cfg, context=context)
 
@@ -258,7 +259,7 @@ def test_reply_encoding_failure_does_not_roll_back_the_cfg_publication(qapp):
         text = "x" * (4 * 1024 * 1024)
         # The read helper switches to nonblocking; a large request needs sendall
         # to wait for the server's reader thread before pumping owner events.
-        sock.settimeout(10.0)
+        sock.settimeout(30.0)
         rejected_reply = call(
             sock,
             "tab.edit_cfg",
@@ -266,7 +267,7 @@ def test_reply_encoding_failure_does_not_roll_back_the_cfg_publication(qapp):
                 "tab_id": tab_id,
                 "edits": [{"path": ["text"], "value": text}],
             },
-            timeout_s=10.0,
+            timeout_s=30.0,
         )
         assert rejected_reply["error"]["reason"] == "response_encoding_failed"
         assert owner.input.data["text"] == text
@@ -327,12 +328,13 @@ def test_holder_edits_resets_and_runs_current_cfg_without_ref(live_tab):
         started = call(sock, "tab.run_start", {"tab_id": tab_id})
         assert started["ok"], started
         assert started["result"]["operation_id"]
+        # The admitted synthetic operation must publish terminal; 30s only guards a hang.
         call(
             sock,
             "operation.await",
             {
                 "operation_id": started["result"]["operation_id"],
-                "timeout": 3.0,
+                "timeout": 30,
             },
         )
     finally:

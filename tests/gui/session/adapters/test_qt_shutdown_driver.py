@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import time
 
-from qtpy.QtCore import QCoreApplication
 from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
 from zcu_tools.gui.session.operation_handles import (
@@ -16,17 +15,8 @@ from zcu_tools.gui.session.operation_handles import (
     OperationOutcome,
 )
 
-
-def _spin(condition, timeout_ms: int = 3000, step_ms: int = 10) -> bool:
-    app = QCoreApplication.instance()
-    assert app is not None
-    deadline = time.monotonic() + timeout_ms / 1000
-    while time.monotonic() < deadline:
-        app.processEvents()
-        if condition():
-            return True
-        time.sleep(step_ms / 1000)
-    return False
+from tests.gui._lifecycle_waits import running
+from tests.gui._qt_waits import qt_until as _spin
 
 
 def test_begin_closes_immediately_when_idle(qapp) -> None:
@@ -56,22 +46,25 @@ def test_begin_waits_then_closes_when_operation_settles(qapp) -> None:
     assert hook_called == [True]  # cancel_hook invoked on cancel_all
     assert closed == []  # still waiting — handle not settled
 
-    handles.settle(token, OperationOutcome("cancelled"))
-    assert _spin(lambda: closed == [True]), "driver did not close after settle"
+    with running(lambda: handles.settle(token, OperationOutcome("cancelled"))):
+        _spin(lambda: closed == [True], label="driver did not close after settle")
 
 
-def test_timeout_forces_close(qapp) -> None:
+def test_timeout_forces_close(qapp, monkeypatch) -> None:
     del qapp
+    now = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: now[0])
     handles = OperationHandles()
     # A connect has no stop_event → never settles → only the timeout closes it.
     handles.create(origin=EventOrigin(kind="user"))
-    driver = QtShutdownDriver(handles, timeout=0.05)
+    driver = QtShutdownDriver(handles, timeout=10)
     closed: list[bool] = []
 
     driver.begin(lambda: closed.append(True))
     assert closed == []  # waiting on the unstoppable connect
 
-    assert _spin(lambda: closed == [True]), "driver did not force-close on timeout"
+    now[0] += 10
+    _spin(lambda: closed == [True], label="driver did not force-close on timeout")
 
 
 def test_close_callback_exception_is_logged(qapp, caplog) -> None:

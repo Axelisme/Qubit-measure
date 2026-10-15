@@ -70,12 +70,13 @@ from zcu_tools.resources.waveform_assets import FormulaRecipe
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import key_click, type_text
 from tests.gui.app.measure._components import ResonatorSchema
 from tests.gui.app.measure._load_support import write_native_file
 from tests.gui.app.measure._reload_fakes import Loader, OldAdapter
 from tests.gui.app.measure.remote._helpers import recv_response, send
-from tests.gui.app.measure.ui._qt_interactions import modal_action, wait_until
+from tests.gui.app.measure.ui._qt_interactions import modal_action
 from tests.resources.entry.fakes import registry_state, restore_registry
 
 pytestmark = [pytest.mark.requires_loopback, pytest.mark.uses_wall_clock]
@@ -88,7 +89,8 @@ class StoppableAdapter(OldAdapter):
 
     def run(self, req: RunRequest, cfg: ConfigBase, *, context: RunContext) -> object:
         del req, cfg
-        if not context.cancel_signal.event.wait(5):
+        # The test Stop/close action releases this held adapter via cancellation.
+        if not context.cancel_signal.event.wait(30):
             raise RuntimeError("test run was not stopped")
         return object()
 
@@ -220,7 +222,8 @@ def control_ui(
     remote = RemoteControlAdapter(
         ctrl, ControlOptions(port=0), ctrl.owner_scheduler, render_view=window
     )
-    client = socket.create_connection(("127.0.0.1", remote.start()))
+    # remote.start() has bound the listener; only guard a stuck loopback connect.
+    client = socket.create_connection(("127.0.0.1", remote.start()), timeout=30)
     window.show()
     try:
         yield ControlUi(ctrl, window, client, dialogs, tab_id)
@@ -257,7 +260,7 @@ def test_indicator_clicks_lock_reclaim_unlock_and_show_offline(control_ui, qapp)
         and "online" in indicator.text()
     )
     ui.client.close()
-    wait_until(qapp, lambda: not ui.controller.control_identity.status().online)
+    qt_until(lambda: not ui.controller.control_identity.status().online)
     # Disconnect does not release control; only the presence display changes.
     assert ui.controller.control_identity.status().holder == "rpc:measure-agent"
     assert "offline" in indicator.text()
@@ -383,14 +386,10 @@ def test_remote_measurement_stop_reclaims_and_cancels(control_ui, qapp):
     assert ui.controller.control_identity.status().locked
     denied = ui.rpc("tab.new", adapter_name="stoppable")
     assert denied["error"]["reason"] == "not_holder"
-    wait_until(
-        qapp,
-        lambda: (
-            ui.rpc("operation.await", timeout=0, operation_id=handle)["result"].get(
-                "status"
-            )
-            == "cancelled"
-        ),
+    # Stop cancels the admitted Run; await its real terminal, not a sampling RPC probe.
+    assert (
+        ui.rpc("operation.await", timeout=30, operation_id=handle)["result"]["status"]
+        == "cancelled"
     )
     assert ui.controller.get_running_tab_id() is None
 
@@ -402,16 +401,14 @@ def test_remote_device_stop_reclaims_and_cancels(control_ui, qapp):
         "device.connect", name="bias", type_name="FakeDevice", address="none"
     )
     assert connected["ok"]
-    wait_until(
-        qapp,
-        lambda: (
-            ui.rpc(
-                "operation.await",
-                timeout=0,
-                operation_id=connected["result"]["operation_id"],
-            )["result"].get("status")
-            == "finished"
-        ),
+    # The admitted fake connect publishes terminal before setup can start.
+    assert (
+        ui.rpc(
+            "operation.await",
+            timeout=30,
+            operation_id=connected["result"]["operation_id"],
+        )["result"]["status"]
+        == "finished"
     )
     snapshot = ui.rpc("device.snapshot", name="bias")
     assert snapshot["ok"], snapshot
@@ -438,16 +435,12 @@ def test_remote_device_stop_reclaims_and_cancels(control_ui, qapp):
         ]
         == "not_holder"
     )
-    wait_until(
-        qapp,
-        lambda: (
-            ui.rpc(
-                "operation.await",
-                timeout=0,
-                operation_id=setup["result"]["operation_id"],
-            )["result"].get("status")
-            == "cancelled"
-        ),
+    # Stop releases the synthetic ramp and publishes its cancelled terminal.
+    assert (
+        ui.rpc(
+            "operation.await", timeout=30, operation_id=setup["result"]["operation_id"]
+        )["result"]["status"]
+        == "cancelled"
     )
 
 
@@ -842,7 +835,7 @@ def test_shutdown_finishes_load_interaction_before_owner_teardown(
             button(load, "File…").click()
         else:
             ui.window.request_shutdown()
-            wait_until(qapp, lambda: not ui.window.isVisible())
+            qt_until(lambda: not ui.window.isVisible())
             owner_finished.append(bool(finished))
             if load.isVisible():
                 load.reject()
@@ -850,7 +843,7 @@ def test_shutdown_finishes_load_interaction_before_owner_teardown(
     def return_late_choice(chooser: QFileDialog) -> None:
         chooser.selectFile(str(path))
         ui.window.request_shutdown()
-        wait_until(qapp, lambda: not ui.window.isVisible())
+        qt_until(lambda: not ui.window.isVisible())
         owner_finished.append(bool(finished))
         if load_dialogs[0].isVisible():
             load_dialogs[0].reject()

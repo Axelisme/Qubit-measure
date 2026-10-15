@@ -11,7 +11,14 @@ from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._recipe_actual_support import cfg_value
 from ._recipe_analysis_support import AnalysisRecipeGui
-from ._recipe_execution_support import ControlledRunGui, definition, registry
+from ._recipe_execution_support import (
+    ControlledRunGui,
+    completed,
+    definition,
+    handoff,
+    registry,
+    wait_for_event,
+)
 from ._recipe_support import LookbackGui, recipe_client
 
 
@@ -33,12 +40,12 @@ def test_finish_early_rejects_terminal_pending_run(tmp_path, closed: bool):
     ):
         execution = executions.start(client.context, "sample", {})
         if closed:
-            assert gui.awaited.wait(2)
+            wait_for_event(gui.awaited)
             execution.close()
             execution.join()
             assert execution.snapshot().status == "cancelled"
         else:
-            assert execution.wait(5).data["status"] == "failed"
+            assert completed(execution).data["status"] == "failed"
             execution.join()
         before = execution.snapshot()
         sent = list(client.transport.sent)
@@ -82,7 +89,7 @@ def test_unyielded_run_start_failure_retains_fixed_conditions(tmp_path, uncertai
                 },
             }
         execution = executions.start(client.context, "sample", {})
-        reply = execution.wait(5)
+        reply = completed(execution)
         assert reply.data["status"] == "failed"
         assert cfg_value(gui.publication, "rounds") == 8
         assert reply.data["run_op"] is None
@@ -119,7 +126,7 @@ def test_pre_run_cfg_failure_retains_prepared_or_requested_locator(tmp_path, reu
         registry(client.context, definition(sample)) as executions,
     ):
         execution = executions.start(client.context, "sample", {})
-        reply = execution.wait(5)
+        reply = completed(execution)
         assert reply.data["status"] == "failed"
         assert reply.data["tab"] == "t"
         assert reply.data["actual"] is None
@@ -185,12 +192,12 @@ def test_failed_run_control_intent_is_scoped_for_the_next_run(tmp_path, control:
         registry(client.context, definition(sample)) as executions,
     ):
         execution = executions.start(client.context, "sample", {})
-        assert gui.awaited.wait(2)
+        wait_for_event(gui.awaited)
         if control == "cancel":
             execution.cancel()
         else:
             execution.finish_early()
-        reply = execution.wait(5)
+        reply = completed(execution)
         assert caught == ["run_failed"]
         assert stopped == [71]
         assert delivered == (["cancelled"] if control == "cancel" else ["completed"])
@@ -227,12 +234,12 @@ def test_stop_intent_does_not_relabel_failed_native_run(tmp_path, control):
         registry(client.context, definition(sample)) as executions,
     ):
         execution = executions.start(client.context, "sample", {})
-        assert gui.awaited.wait(2)
+        wait_for_event(gui.awaited)
         if control == "cancel":
             execution.cancel()
         else:
             execution.finish_early()
-        reply = execution.wait(5)
+        reply = completed(execution)
         assert reply.data["status"] == "failed"
         assert reply.data["run_outcome"]["status"] == "failed"
         assert caught == ["run_failed"]
@@ -258,7 +265,7 @@ def test_close_question_runs_finally_once_without_delivering_answer(tmp_path):
         registry(client.context, definition(sample)) as executions,
     ):
         execution = executions.start(client.context, "sample", {})
-        assert execution.wait(5).data["status"] == "awaiting_answer"
+        assert handoff(execution).data["status"] == "awaiting_answer"
         execution.close()
         execution.join()
         assert execution.snapshot().status == "cancelled"
@@ -319,7 +326,7 @@ def test_second_save_replaces_report_or_retains_transport_failure(tmp_path, unce
         registry(client.context, recipe_definition) as executions,
     ):
         execution = executions.start(client.context, "sample", {})
-        reply = execution.wait(5)
+        reply = completed(execution)
         sent = list(client.transport.sent)
         snapshot = execution.snapshot()
         summary = project_execution(
@@ -392,7 +399,7 @@ def test_generator_close_failure_is_isolated_with_a_terminal_record(tmp_path):
         registry(client.context, definition(sample)) as executions,
     ):
         execution = executions.start(client.context, "sample", {})
-        assert gui.awaited.wait(2)
+        wait_for_event(gui.awaited)
         execution.close()
         execution.join()
         reply = execution.wait(0)

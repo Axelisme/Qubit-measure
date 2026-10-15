@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 import numpy as np
 import pytest
 from matplotlib.backend_bases import MouseButton, MouseEvent
-from qtpy.QtCore import QEventLoop, QTimer
 from qtpy.QtWidgets import QCheckBox, QComboBox, QLabel, QSlider
 from zcu_tools.analysis.fluxdep.stroke import BrushTool
 from zcu_tools.analysis.fluxdep.twotone import (
@@ -24,6 +22,7 @@ from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidge
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 
+from tests.gui._qt_waits import qt_until
 from tests.gui.app.fluxdep._window import (
     column_tops,
     picker_button,
@@ -61,12 +60,8 @@ def select_all(context) -> None:
 
 
 def wait_for_requests(queue: PreviewQueue, count: int) -> None:
-    deadline = time.monotonic() + 2.0
-    while len(queue.requests) < count and time.monotonic() < deadline:
-        loop = QEventLoop()
-        QTimer.singleShot(10, loop.quit)
-        loop.exec()
-    assert len(queue.requests) >= count
+    # The mounted widget's pending debounce submits to this injected preview queue.
+    qt_until(lambda: len(queue.requests) >= count, label="preview submission")
 
 
 def slider(widget: FindPointsWidget, label: str) -> QSlider:

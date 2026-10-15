@@ -2,7 +2,6 @@
 
 from collections.abc import Generator, Mapping
 from pathlib import Path
-from time import monotonic, sleep
 from typing import ClassVar, NoReturn
 from unittest.mock import MagicMock
 
@@ -44,6 +43,7 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import ComponentSchema, component_registry
 
+from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._synthetic import ALIAS_PRESET, SampleAdapter, SampleCfg
 from tests.gui.app.measure.remote._helpers import Fixture
 
@@ -220,13 +220,10 @@ def test_run_registration_notification_blocks_tab_mutation(
     finally:
         unsubscribe.unsubscribe()
         application.ctrl.cancel_run()
-        deadline = monotonic() + 3.0
-        while (
-            application.ctrl.get_running_tab_id() is not None and monotonic() < deadline
-        ):
-            qapp.processEvents()
-            sleep(0.001)
-        assert application.ctrl.get_running_tab_id() is None
+        # cancel_run() makes the submitted worker publish its terminal owner delivery.
+        qt_until(
+            lambda: application.ctrl.get_running_tab_id() is None, label="Run terminal"
+        )
     assert outcomes == ["blocked"]
     assert cfg.input.data == original
 
@@ -523,13 +520,10 @@ def test_run_registration_and_failed_submission_allow_operation_reads(
     finally:
         subscription.unsubscribe()
         application.ctrl.cancel_run()
-        deadline = monotonic() + 3.0
-        while (
-            application.ctrl.get_running_tab_id() is not None and monotonic() < deadline
-        ):
-            qapp.processEvents()
-            sleep(0.001)
-        assert application.ctrl.get_running_tab_id() is None
+        # cancel_run() makes the submitted worker publish its terminal owner delivery.
+        qt_until(
+            lambda: application.ctrl.get_running_tab_id() is None, label="Run terminal"
+        )
     assert errors == []
     assert observed == [(True, (), ())] * (2 if fail_submit else 1)
 

@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable, Iterator
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QCoreApplication
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
@@ -24,6 +22,8 @@ from zcu_tools.gui.session.services.simulated_environment import (
 )
 from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.program.v2.mocksoc import MockQickSoc
+
+from tests.gui._qt_waits import qt_until as _pump_until
 
 
 @pytest.fixture
@@ -49,24 +49,13 @@ def make_controller(qapp: object) -> Iterator[Callable[[State], Controller]]:
 
     yield make
     for controller in controllers:
-        controller.close()
+        # Accepted simulated-environment/device work has no test-controlled blocker.
+        controller.close(timeout_ms=30_000)
 
 
 @pytest.fixture
 def ctrl(make_controller: Callable[[State], Controller], state: State) -> Controller:
     return make_controller(state)
-
-
-def _pump_until(condition: Callable[[], bool]) -> None:
-    app = QCoreApplication.instance()
-    assert app is not None
-    deadline = time.monotonic() + 3.0
-    while time.monotonic() < deadline:
-        app.processEvents()
-        if condition():
-            return
-        time.sleep(0.005)
-    pytest.fail("Simulated environment did not reach its terminal state")
 
 
 def _start(ctrl: Controller) -> None:

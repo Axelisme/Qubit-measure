@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import ClassVar, Literal
 
 import pytest
-from qtpy.QtCore import QEventLoop, QTimer
 from qtpy.QtWidgets import QApplication
 from zcu_tools.datafile import AnalysisDocument, load_run_data
 from zcu_tools.experiment.artifacts import AnalysisItem, DataItem
@@ -35,6 +34,7 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import AcquiredPayload, ArtifactKey
 
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
+from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._native_save_support import PaneParams, PaneSummary
 
 
@@ -130,29 +130,6 @@ def opaque_host(
         qapp.processEvents()
 
 
-def wait_until_idle(state: State, tab_id: str, qapp: QApplication) -> None:
-    """Pump owner deliveries until completion with a bounded assertion failure."""
-    loop = QEventLoop()
-    timeout = QTimer()
-    timeout.setSingleShot(True)
-    timeout.timeout.connect(loop.quit)
-    poll = QTimer()
-
-    def settled() -> None:
-        if not state.is_tab_busy(tab_id):
-            loop.quit()
-
-    poll.timeout.connect(settled)
-    poll.start(5)
-    timeout.start(5000)
-    try:
-        loop.exec()
-    finally:
-        poll.stop()
-        timeout.stop()
-    assert not state.is_tab_busy(tab_id), "Operation did not settle"
-
-
 @pytest.mark.parametrize("failed_data", [False, True])
 def test_registered_opaque_handle_acquires_analyzes_and_hands_over_items(
     opaque_host: tuple[State, Controller], qapp: QApplication, failed_data: bool
@@ -160,7 +137,8 @@ def test_registered_opaque_handle_acquires_analyzes_and_hands_over_items(
     state, controller = opaque_host
     tab_id = controller.new_tab("failed_data" if failed_data else "opaque")
     controller.run_analyze_control.start_run(tab_id, origin=CommandOrigin("mcp"))
-    wait_until_idle(state, tab_id, qapp)
+    # The admitted synthetic run returns; pump its terminal owner delivery.
+    qt_until(lambda: not state.is_tab_busy(tab_id), label="opaque run terminal")
     tab = state.get_tab(tab_id)
     assert isinstance(tab.run.result, OpaqueRun), (
         "Native evidence must accept an opaque run handle"
@@ -178,7 +156,8 @@ def test_registered_opaque_handle_acquires_analyzes_and_hands_over_items(
     assert not (storage.database_path / "runs").exists()
 
     controller.run_analyze_control.analyze(tab_id, PaneParams())
-    wait_until_idle(state, tab_id, qapp)
+    # The admitted fit returns and commits its pane on the owner thread.
+    qt_until(lambda: not state.is_tab_busy(tab_id), label="opaque analysis terminal")
     assert controller.get_tab_analyze_result(tab_id) == PaneSummary(17.0)
     assert tab.run.result is handle
     controller.context_control.new_point(

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import threading
-import time
 import weakref
+from collections.abc import Callable
 
 import pytest
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
@@ -10,23 +10,41 @@ from zcu_tools.gui.session.adapters.thread_pool_background import (
     ThreadPoolBackgroundExecutor,
 )
 
+from tests.gui._lifecycle_waits import manual_until as _pump_until
+from tests.gui._lifecycle_waits import waiting_call
 
-def _pump_until(
-    scheduler: ManualOwnerScheduler,
-    predicate,
-    *,
-    timeout: float = 2.0,
-) -> None:
-    deadline = time.monotonic() + timeout
-    while not predicate() and time.monotonic() < deadline:
-        scheduler.pump_once(block=True, timeout=0.02)
-    assert predicate()
+
+class RecordingOwner(ManualOwnerScheduler):
+    """Record real terminal queue arrival without running the owner callback."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.posted = threading.Event()
+
+    def post(self, callback: Callable[[], None]) -> None:
+        super().post(callback)
+        self.posted.set()
+
+
+@pytest.fixture
+def make_executor(request: pytest.FixtureRequest):
+    def make(scheduler: ManualOwnerScheduler) -> ThreadPoolBackgroundExecutor:
+        executor = ThreadPoolBackgroundExecutor(scheduler)
+
+        def close() -> None:
+            # Every accepted worker is released by its test; drain terminal acks on failure too.
+            _pump_until(scheduler, lambda: executor.quiesce(30))
+
+        request.addfinalizer(close)
+        return executor
+
+    return make
 
 
 @pytest.mark.parametrize("run_in_pool", [True, False])
-def test_delivers_success_on_owner_thread(run_in_pool: bool) -> None:
+def test_delivers_success_on_owner_thread(make_executor, run_in_pool: bool) -> None:
     scheduler = ManualOwnerScheduler()
-    executor = ThreadPoolBackgroundExecutor(scheduler)
+    executor = make_executor(scheduler)
     owner_id = threading.get_ident()
     delivered: list[tuple[int, int]] = []
 
@@ -39,13 +57,14 @@ def test_delivers_success_on_owner_thread(run_in_pool: bool) -> None:
 
     _pump_until(scheduler, lambda: bool(delivered))
     assert delivered == [(7, owner_id)]
-    assert executor.quiesce()
+    # The observed terminal callback has acked; only worker bookkeeping may remain.
+    assert executor.quiesce(30)
 
 
 @pytest.mark.parametrize("run_in_pool", [True, False])
-def test_delivers_exact_error_on_owner_thread(run_in_pool: bool) -> None:
+def test_delivers_exact_error_on_owner_thread(make_executor, run_in_pool: bool) -> None:
     scheduler = ManualOwnerScheduler()
-    executor = ThreadPoolBackgroundExecutor(scheduler)
+    executor = make_executor(scheduler)
     owner_id = threading.get_ident()
     boom = ValueError("boom")
     delivered: list[tuple[Exception, int]] = []
@@ -62,82 +81,94 @@ def test_delivers_exact_error_on_owner_thread(run_in_pool: bool) -> None:
 
     _pump_until(scheduler, lambda: bool(delivered))
     assert delivered == [(boom, owner_id)]
-    assert executor.quiesce()
+    # The observed terminal callback has acked; only worker bookkeeping may remain.
+    assert executor.quiesce(30)
 
 
-def test_quiesce_waits_for_worker_and_delivery_ack() -> None:
-    scheduler = ManualOwnerScheduler()
-    executor = ThreadPoolBackgroundExecutor(scheduler)
+def test_quiesce_waits_for_worker_and_delivery_ack(make_executor, monkeypatch) -> None:
+    scheduler = RecordingOwner()
+    executor = make_executor(scheduler)
     release = threading.Event()
     delivered: list[str] = []
-    quiesced: list[bool] = []
 
     executor.submit(
-        lambda: release.wait(timeout=1.0),
+        lambda: release.wait(),
         run_in_pool=True,
         on_done=lambda _: delivered.append("done"),
         on_error=lambda error: pytest.fail(str(error)),
     )
 
-    waiter = threading.Thread(target=lambda: quiesced.append(executor.quiesce(1.0)))
-    waiter.start()
-    release.set()
-    _pump_until(scheduler, lambda: bool(delivered))
-    waiter.join(timeout=1.0)
-
-    assert not waiter.is_alive()
-    assert quiesced == [True]
+    with waiting_call(monkeypatch, lambda: executor.quiesce(30)) as (arrived, result):
+        try:
+            # The submitted quiesce worker enters its external condition wait.
+            assert arrived.wait(30)
+            assert delivered == []
+            assert not result.done()
+        finally:
+            release.set()
+            try:
+                # Released work posts a real terminal callback, but only owner pumping acks it.
+                assert scheduler.posted.wait(30)
+                assert delivered == []
+                assert not result.done()
+            finally:
+                _pump_until(scheduler, lambda: bool(delivered))
+    assert result.result() is True
     assert delivered == ["done"]
 
 
-def test_owner_quiesce_does_not_deadlock_queued_delivery() -> None:
-    scheduler = ManualOwnerScheduler()
-    executor = ThreadPoolBackgroundExecutor(scheduler)
-    worker_done = threading.Event()
+def test_owner_quiesce_does_not_deadlock_queued_delivery(make_executor) -> None:
+    scheduler = RecordingOwner()
+    executor = make_executor(scheduler)
     delivered: list[int] = []
 
-    def work() -> int:
-        worker_done.set()
-        return 1
-
     executor.submit(
-        work,
+        lambda: 1,
         run_in_pool=True,
         on_done=delivered.append,
         on_error=lambda error: pytest.fail(str(error)),
     )
-    assert worker_done.wait(timeout=1.0)
+    # submit has arranged a terminal post; record arrival after queue insertion.
+    assert scheduler.posted.wait(timeout=30)
 
-    assert executor.quiesce(1.0) is False
+    assert executor.quiesce(30) is False
     assert delivered == []
     assert scheduler.pump_all() == 1
-    assert executor.quiesce(1.0) is True
+    assert executor.quiesce(30) is True
     assert delivered == [1]
 
 
-def test_timeout_does_not_cancel_or_drop_terminal_delivery() -> None:
+def test_timeout_does_not_cancel_or_drop_terminal_delivery(make_executor) -> None:
     scheduler = ManualOwnerScheduler()
-    executor = ThreadPoolBackgroundExecutor(scheduler)
+    executor = make_executor(scheduler)
     release = threading.Event()
     delivered: list[int] = []
 
     executor.submit(
-        lambda: (release.wait(timeout=1.0), 3)[1],
+        lambda: (release.wait(), 3)[1],
         run_in_pool=False,
         on_done=delivered.append,
         on_error=lambda error: pytest.fail(str(error)),
     )
 
-    assert executor.quiesce(0.001) is False
-    release.set()
-    _pump_until(scheduler, lambda: bool(delivered))
-    assert executor.quiesce(1.0) is True
+    try:
+        assert executor.quiesce(0) is False
+        with pytest.raises(RuntimeError, match="quiescing"):
+            executor.submit(
+                lambda: None, on_done=delivered.append, on_error=delivered.append
+            )
+        assert delivered == []
+    finally:
+        release.set()
+        _pump_until(scheduler, lambda: bool(delivered))
+        # Released work posts its terminal callback; wait only for completion bookkeeping.
+        assert executor.quiesce(30) is True
     assert delivered == [3]
 
 
-def test_quiesce_rejects_new_submissions() -> None:
+def test_quiesce_rejects_new_submissions(make_executor) -> None:
     scheduler = ManualOwnerScheduler()
-    executor = ThreadPoolBackgroundExecutor(scheduler)
+    executor = make_executor(scheduler)
     assert executor.quiesce()
 
     with pytest.raises(RuntimeError, match="quiescing"):
@@ -149,9 +180,9 @@ def test_quiesce_rejects_new_submissions() -> None:
         )
 
 
-def test_terminal_callback_failure_is_acknowledged(caplog) -> None:
+def test_terminal_callback_failure_is_acknowledged(make_executor, caplog) -> None:
     scheduler = ManualOwnerScheduler()
-    executor = ThreadPoolBackgroundExecutor(scheduler)
+    executor = make_executor(scheduler)
 
     def fail_callback(_: object) -> None:
         raise RuntimeError("callback boom")
@@ -164,15 +195,16 @@ def test_terminal_callback_failure_is_acknowledged(caplog) -> None:
     )
     _pump_until(scheduler, lambda: "background terminal callback failed" in caplog.text)
 
-    assert executor.quiesce()
+    # The observed terminal callback has acked; only worker bookkeeping may remain.
+    assert executor.quiesce(30)
 
 
-def test_terminal_delivery_releases_completed_future_result() -> None:
+def test_terminal_delivery_releases_completed_future_result(make_executor) -> None:
     class Payload:
         pass
 
     scheduler = ManualOwnerScheduler()
-    executor = ThreadPoolBackgroundExecutor(scheduler)
+    executor = make_executor(scheduler)
     payload = Payload()
     result_ref = weakref.ref(payload)
     delivered: list[bool] = []
@@ -186,15 +218,18 @@ def test_terminal_delivery_releases_completed_future_result() -> None:
     del payload
     _pump_until(scheduler, lambda: bool(delivered))
 
-    assert executor.quiesce()
+    # The observed terminal callback has acked; only worker bookkeeping may remain.
+    assert executor.quiesce(30)
     assert delivered == [True]
     assert result_ref() is None
 
 
 @pytest.mark.parametrize("run_in_pool", [True, False])
-def test_terminal_quiesce_uses_named_admission_rejection(run_in_pool: bool) -> None:
+def test_terminal_quiesce_uses_named_admission_rejection(
+    make_executor, run_in_pool: bool
+) -> None:
     scheduler = ManualOwnerScheduler()
-    executor = ThreadPoolBackgroundExecutor(scheduler)
+    executor = make_executor(scheduler)
     assert executor.quiesce()
     for _ in range(2):
         with pytest.raises(RuntimeError, match="background") as caught:

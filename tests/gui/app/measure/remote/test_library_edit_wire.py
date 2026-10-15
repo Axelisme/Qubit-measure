@@ -1,12 +1,12 @@
 """context.ml_edit writes library entries through the shared Form over the socket."""
 
 from pathlib import Path
-from time import monotonic
 from typing import Any
 
 import pytest
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 
+from tests.gui._qt_waits import qt_until
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 from ._helpers import Fixture, call, open_client
@@ -49,11 +49,8 @@ def library_socket(qapp, tmp_path: Path):
                     closed = True
 
                 fx.ctrl.begin_shutdown(on_closed)
-                deadline = monotonic() + 1.0
-                while not closed and monotonic() < deadline:
-                    qapp.processEvents()
-                if not closed:
-                    raise RuntimeError("Synchronous library fixture shutdown timed out")
+                # begin_shutdown() schedules the terminal owner notification.
+                qt_until(lambda: closed, label="library fixture shutdown")
                 fx.stop()
                 qapp.processEvents()
         finally:

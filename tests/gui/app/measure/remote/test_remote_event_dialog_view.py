@@ -610,7 +610,7 @@ def test_run_lifecycle_pushes_run_started_then_finished(fx):
             "operation_id": str(result["operation_id"]),
         }
         assert "client_id" not in started["origin"]
-        finished = recv_push(sock, "run_finished", timeout_s=5.0)
+        finished = recv_push(sock, "run_finished")
         assert set(finished) == {"event", "payload", "seq", "origin"}
         assert finished["payload"]["tab_id"] == tab_id
         assert finished["payload"]["outcome"] == "finished"

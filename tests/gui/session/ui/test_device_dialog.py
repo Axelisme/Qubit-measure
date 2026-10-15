@@ -6,7 +6,7 @@ from collections.abc import Callable
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QEventLoop, QTimer
+from PyQt6.QtCore import QObject, pyqtSignal
 from qtpy.QtGui import QColor
 from qtpy.QtWidgets import (
     QComboBox,
@@ -77,10 +77,49 @@ def _field[T: QWidget](root: QWidget, label: str, kind: type[T]) -> T:
     raise AssertionError(f"No field labelled {label!r}")
 
 
-def _wait_for_poll() -> None:
-    loop = QEventLoop()
-    QTimer.singleShot(1200, loop.quit)
-    loop.exec()
+class _PollTimer(QObject):
+    """Control the external repeating timer, retaining real Qt timeout delivery."""
+
+    timeout = pyqtSignal()
+
+    def __init__(self, parent: QObject) -> None:
+        super().__init__(parent)
+        self.running = False
+
+    def setInterval(self, milliseconds: int) -> None:
+        """Accept the production interval without scheduling wall-clock work."""
+        assert milliseconds > 0
+
+    def isActive(self) -> bool:
+        return self.running
+
+    def start(self) -> None:
+        self.running = True
+
+    def stop(self) -> None:
+        self.running = False
+
+    def tick(self) -> None:
+        """Deliver one tick only while the dialog has enabled polling."""
+        if self.running:
+            self.timeout.emit()
+
+
+@pytest.fixture
+def poll_timers(monkeypatch: pytest.MonkeyPatch):
+    timers: list[_PollTimer] = []
+
+    def create(parent: QObject) -> _PollTimer:
+        timer = _PollTimer(parent)
+        timers.append(timer)
+        return timer
+
+    monkeypatch.setattr("zcu_tools.gui.session.ui.device_dialog.QTimer", create)
+    try:
+        yield timers
+    finally:
+        for timer in timers:
+            timer.stop()
 
 
 def _entry(
@@ -351,7 +390,7 @@ def test_device_changed_surfaces_device_when_none_selected(qapp):
     assert item.text().removeprefix("● ") == "fd (FakeDevice)"
 
 
-def test_poll_tick_polls_selected_device(qapp):
+def test_poll_tick_polls_selected_device(qapp, poll_timers):
     """Each tick asks the controller to off-main poll the *selected* device."""
     from zcu_tools.device.fake import FakeDeviceInfo
 
@@ -362,16 +401,37 @@ def test_poll_tick_polls_selected_device(qapp):
     )
 
     dialog = _make_dialog(ctrl)
+    (timer,) = poll_timers
     try:
         _listing(dialog).setCurrentRow(1)  # select "B"
+        timer.tick()
+        ctrl.try_poll_device_info.assert_not_called()
         dialog.show()
-        _wait_for_poll()
-        ctrl.try_poll_device_info.assert_called_with("B")
+        timer.tick()
+        ctrl.try_poll_device_info.assert_called_once_with("B")
+        ctrl.try_poll_device_info.reset_mock()
+        _listing(dialog).setCurrentRow(0)
+        timer.tick()
+        ctrl.try_poll_device_info.assert_called_once_with("A")
+        ctrl.try_poll_device_info.reset_mock()
+        _listing(dialog).setCurrentRow(-1)
+        timer.tick()
+        ctrl.try_poll_device_info.assert_not_called()
+        _listing(dialog).setCurrentRow(1)
+        dialog.hide()
+        timer.tick()
+        ctrl.try_poll_device_info.assert_not_called()
+        dialog.show()
+        timer.tick()
+        ctrl.try_poll_device_info.assert_called_once_with("B")
     finally:
         dialog.close()
+    ctrl.try_poll_device_info.reset_mock()
+    timer.tick()
+    ctrl.try_poll_device_info.assert_not_called()
 
 
-def test_poll_tick_polls_selected_setting_up_device(qapp):
+def test_poll_tick_polls_selected_setting_up_device(qapp, poll_timers):
     """Auto poll still asks for a best-effort refresh while the selected device
     is setting up; the synchronous Refresh button can remain disabled."""
     from zcu_tools.device.fake import FakeDeviceInfo
@@ -394,9 +454,10 @@ def test_poll_tick_polls_selected_setting_up_device(qapp):
         assert _button(dialog, "Refresh").isEnabled() is False
 
         dialog.show()
-        _wait_for_poll()
+        (timer,) = poll_timers
+        timer.tick()
 
-        ctrl.try_poll_device_info.assert_called_with("fd")
+        ctrl.try_poll_device_info.assert_called_once_with("fd")
     finally:
         dialog.close()
 

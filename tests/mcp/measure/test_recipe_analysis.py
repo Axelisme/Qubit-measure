@@ -16,6 +16,7 @@ from zcu_tools.mcp.measure.recipe import (
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._recipe_analysis_support import AnalysisRecipeGui
+from ._recipe_execution_support import wait_for_event
 from ._recipe_support import recipe_client
 from ._save_report_support import analysis_report
 
@@ -242,7 +243,7 @@ def test_two_interactive_stages_join_the_same_completion_owners(tmp_path):
                 assert len(operation.preview_images()) == 1
                 future = pool.submit(operation.complete_in_current_worker)
                 try:
-                    assert gui.awaited[stage].wait(1.0)
+                    wait_for_event(gui.awaited[stage])
                     assert not future.done()
                     progress = session.analysis_snapshot()
                     assert progress is not None and progress.status == "interactive"
@@ -250,12 +251,15 @@ def test_two_interactive_stages_join_the_same_completion_owners(tmp_path):
                         "tab_interact", {"tab": "t", "payload": {"command": "done"}}
                     )
                     assert not reply.is_error
-                    result, status = future.result(timeout=2.0)
+                    # The done command releases this exact native analysis operation.
+                    result, status = future.result(timeout=30)
                     assert isinstance(result, RecipeAnalysis) and status == "completed"
                     assert result.snapshot.writeback == gui.writebacks[stage]
                 finally:
                     gui.done[stage].set()
                     operation.wake()
+                    # The release above lets the submitted completion settle before cleanup.
+                    future.result(timeout=30)
                 assert (
                     sum(
                         method == "tab.writeback_preview"
@@ -279,7 +283,7 @@ def test_lifetime_close_wakes_analysis_without_closing_the_gui_connection(
         with ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(operation.complete_in_current_worker)
             try:
-                assert gui.awaited["primary"].wait(1.0)
+                wait_for_event(gui.awaited["primary"])
             finally:
                 if lifetime == "recipe":
                     closed.set()
@@ -287,9 +291,10 @@ def test_lifetime_close_wakes_analysis_without_closing_the_gui_connection(
                 else:
                     client.context.session.executions.stop_admission()
                     assert not closed.is_set()
-            with pytest.raises(GuiRpcError) as error:
-                future.result(timeout=1.0)
-            assert error.value.reason == "session_closed"
+                with pytest.raises(GuiRpcError) as error:
+                    # Closing the selected lifetime wakes this completion owner.
+                    future.result(timeout=30)
+                assert error.value.reason == "session_closed"
         capture = operation.snapshot()
         assert capture is not None and capture.status == "failed"
         assert capture.start.status == "running"

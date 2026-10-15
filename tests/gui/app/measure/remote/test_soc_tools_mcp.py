@@ -100,8 +100,9 @@ def test_simulation_initialize_binds_live_flux_and_reuses_gui_environment(
     assert invoke("rpc_call", {"method": "device.list"}) == {"devices": []}
 
     started = invoke("rpc_call", {"method": "simulation.initialize"})
+    # The admitted synthetic operation must publish terminal; 30s only guards a hang.
     assert (
-        invoke("wait", {"op": started["handle"], "timeout": 3})["status"] == "finished"
+        invoke("wait", {"op": started["handle"], "timeout": 30})["status"] == "finished"
     )
     soc = fx.state.session_env.soc
     assert isinstance(soc, MockQickSoc)
@@ -122,8 +123,9 @@ def test_simulation_initialize_binds_live_flux_and_reuses_gui_environment(
                 },
             },
         )
+        # The admitted synthetic operation must publish terminal; 30s only guards a hang.
         assert (
-            invoke("wait", {"op": applied["handle"], "timeout": 3})["status"]
+            invoke("wait", {"op": applied["handle"], "timeout": 30})["status"]
             == "finished"
         )
         assert soc.flux_source() == pytest.approx(value)
@@ -132,12 +134,16 @@ def test_simulation_initialize_binds_live_flux_and_reuses_gui_environment(
     gui_op = fx.ctrl.setup_control.start_simulated_environment()
     sock = open_client(fx.service.port)
     try:
-        outcome = call(sock, "operation.await", {"operation_id": gui_op, "timeout": 3})
+        # The admitted synthetic operation must publish terminal; 30s only guards a hang.
+        outcome = call(sock, "operation.await", {"operation_id": gui_op, "timeout": 30})
         assert outcome["result"]["status"] == "finished"
     finally:
         sock.close()
     again = invoke("rpc_call", {"method": "simulation.initialize"})
-    assert invoke("wait", {"op": again["handle"], "timeout": 3})["status"] == "finished"
+    # The admitted synthetic operation must publish terminal; 30s only guards a hang.
+    assert (
+        invoke("wait", {"op": again["handle"], "timeout": 30})["status"] == "finished"
+    )
     assert fx.state.session_env.soc is soc
     assert soc.flux_source() == pytest.approx(0.002)
 
@@ -151,7 +157,8 @@ def test_simulation_initialize_reports_setup_failure(simulation_client, monkeypa
 
     monkeypatch.setattr(FakeDevice, "setup", fail_setup)
     started = invoke("rpc_call", {"method": "simulation.initialize"})
-    outcome = invoke("wait", {"op": started["handle"], "timeout": 3})
+    # The admitted synthetic operation must publish terminal; 30s only guards a hang.
+    outcome = invoke("wait", {"op": started["handle"], "timeout": 30})
     assert outcome["status"] == "failed"
     assert "fake source setup failed" in str(outcome)
     assert fx.state.session_env.soc is None
@@ -164,7 +171,8 @@ def test_simulation_initialize_rejects_concurrent_entry(simulation_client, monke
     setup = FakeDevice.setup
 
     def blocked_setup(self, *args, **kwargs):
-        assert release.wait(5), "test must release simulated device setup"
+        # The test finally releases the held setup collaborator.
+        assert release.wait(30), "test must release simulated device setup"
         return setup(self, *args, **kwargs)
 
     monkeypatch.setattr(FakeDevice, "setup", blocked_setup)
@@ -174,6 +182,7 @@ def test_simulation_initialize_rejects_concurrent_entry(simulation_client, monke
             invoke("rpc_call", {"method": "simulation.initialize"})
     finally:
         release.set()
+    # The admitted synthetic operation must publish terminal; 30s only guards a hang.
     assert (
-        invoke("wait", {"op": started["handle"], "timeout": 3})["status"] == "finished"
+        invoke("wait", {"op": started["handle"], "timeout": 30})["status"] == "finished"
     )

@@ -1,7 +1,6 @@
 """Same-Run primary/post stage ownership with an injected recording pipeline."""
 
 import json
-from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import asdict, replace
 from threading import Event
@@ -21,6 +20,7 @@ from ._recipe_stage_support import (
     start_pipeline,
 )
 from ._recipe_support import PNG
+from ._recipe_sync_support import cancel_while_rpc_held, wait_for_event
 from ._support import full_execution_reply, make_client
 
 
@@ -54,7 +54,7 @@ def test_unconfirmed_analysis_start_retains_unknown_and_saved_prefix(
             return send_line(payload)
         if receipt == "delayed":
             pending.set()
-            assert release.wait(2)
+            wait_for_event(release, "Test must release the admitted RPC")
             return send_line(payload)
         client.transport.sent.append((payload["method"], payload["params"]))
         gui(method, payload["params"])
@@ -65,8 +65,7 @@ def test_unconfirmed_analysis_start_retains_unknown_and_saved_prefix(
 
     monkeypatch.setattr(client.transport, "send_line", send)
     try:
-        initial = start_pipeline(client)
-        assert pending.wait(1)
+        initial = start_pipeline(client, pending)
         execution = initial.data["execution"]
         before = len(client.transport.sent)
         summary = client.call("status", {"execution": execution})
@@ -86,7 +85,8 @@ def test_unconfirmed_analysis_start_retains_unknown_and_saved_prefix(
             client.transport.close()
             assert client.transport.on_closed is not None
             client.transport.on_closed(None)
-        completed = client.call("wait", {"execution": execution, "timeout": 2})
+        # Released work must reach a handoff; timeout only guards deadlock.
+        completed = client.call("wait", {"execution": execution, "timeout": 30})
         confirmed = client.call("status", {"execution": execution})
         if receipt == "delayed":
             assert completed.data["status"] == "awaiting_answer", completed.data
@@ -114,7 +114,7 @@ def test_cancel_during_writeback_retains_stage_and_prevents_next_admission(
     def writeback(params):
         if params["operation_id"] == operation:
             pending.set()
-            assert release.wait(2)
+            wait_for_event(release, "Test must release the admitted RPC")
         return {"ok": True, "result": gui("tab.writeback_preview", params)}
 
     client.transport.replies["tab.writeback_preview"] = writeback
@@ -123,29 +123,15 @@ def test_cancel_during_writeback_retains_stage_and_prevents_next_admission(
         "result": {"status": "finished"},
     }
     try:
-        initial = full_execution_reply(client, start_pipeline(client))
-        assert pending.wait(1)
+        initial = full_execution_reply(client, start_pipeline(client, pending))
         execution = initial.data["execution"]
         status = client.call("status", {"execution": execution, "detail": "full"})
         assert status["analysis_stage"] == stage
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            request = pool.submit(client.call, "cancel", {"execution": execution})
-            try:
-                for _ in range(100):
-                    if client.call("status", {"execution": execution})[
-                        "cancel_requested"
-                    ]:
-                        break
-                    release.wait(0.01)
-                else:
-                    pytest.fail("Cancel intent did not reach the public snapshot")
-            finally:
-                release.set()
-            assert (
-                request.result(timeout=2).data["gui_cancel"]["status"] == "not_needed"
-            )
+        cancelled = cancel_while_rpc_held(client, execution, release)
+        assert cancelled.data["gui_cancel"]["status"] == "not_needed"
+        # RPC released, cancel caller joined: worker can finish; 30s guards deadlock.
         terminal = full_execution_reply(
-            client, client.call("wait", {"execution": execution, "timeout": 2})
+            client, client.call("wait", {"execution": execution, "timeout": 30})
         )
         data = terminal.data
         assert data["status"] == "cancelled", data
@@ -176,7 +162,7 @@ def test_cancel_targets_late_stage_receipt_and_joins_true_outcome(
 
     def start(params):
         pending.set()
-        assert release.wait(2)
+        wait_for_event(release, "Test must release the admitted RPC")
         return {"ok": True, "result": gui(start_method, params)}
 
     def cancel(params):
@@ -202,8 +188,7 @@ def test_cancel_targets_late_stage_receipt_and_joins_true_outcome(
         }
     )
     try:
-        initial = full_execution_reply(client, start_pipeline(client))
-        assert pending.wait(1)
+        initial = full_execution_reply(client, start_pipeline(client, pending))
         execution = initial.data["execution"]
         for _ in range(2):
             assert client.call("cancel", {"execution": execution}).data[
@@ -212,7 +197,9 @@ def test_cancel_targets_late_stage_receipt_and_joins_true_outcome(
         assert not stopped.is_set()
         release.set()
         terminal = full_execution_reply(
-            client, client.call("wait", {"execution": execution, "timeout": 2})
+            # Released work must reach a handoff; timeout only guards deadlock.
+            client,
+            client.call("wait", {"execution": execution, "timeout": 30}),
         )
         data = terminal.data
         assert stopped.is_set()
@@ -245,7 +232,7 @@ def test_cancel_during_post_save_preserves_real_save_outcome(
     def save(params):
         if params["operation_id"] == 104:
             pending.set()
-            assert release.wait(2)
+            wait_for_event(release, "Test must release the admitted RPC")
             if save_failed:
                 return {
                     "ok": False,
@@ -263,26 +250,13 @@ def test_cancel_during_post_save_preserves_real_save_outcome(
         "result": {"status": "finished"},
     }
     try:
-        initial = full_execution_reply(client, start_pipeline(client))
-        assert pending.wait(1)
+        initial = full_execution_reply(client, start_pipeline(client, pending))
         execution = initial.data["execution"]
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            request = pool.submit(client.call, "cancel", {"execution": execution})
-            try:
-                for _ in range(100):
-                    if client.call("status", {"execution": execution})[
-                        "cancel_requested"
-                    ]:
-                        break
-                    release.wait(0.01)
-                else:
-                    pytest.fail("Cancel intent did not reach the public snapshot")
-            finally:
-                release.set()
-            cancelled = request.result(timeout=2)
+        cancelled = cancel_while_rpc_held(client, execution, release)
         assert cancelled.data["gui_cancel"]["status"] == "not_needed"
+        # RPC released, cancel caller joined: worker can finish; 30s guards deadlock.
         terminal = full_execution_reply(
-            client, client.call("wait", {"execution": execution, "timeout": 2})
+            client, client.call("wait", {"execution": execution, "timeout": 30})
         )
         data = terminal.data
         assert data["status"] == ("failed" if save_failed else "cancelled"), data
@@ -323,7 +297,7 @@ def test_close_stops_stage_admission_without_reconnect(
     def respond(params):
         if operation is None or params.get("operation_id") == operation:
             pending.set()
-            assert disconnected.wait(2), "Session must disconnect before joining"
+            wait_for_event(disconnected, "Test must release the admitted RPC")
         return {"ok": True, "result": gui(method_pending, params)}
 
     def disconnect():
@@ -333,8 +307,7 @@ def test_close_stops_stage_admission_without_reconnect(
     client.transport.replies[method_pending] = respond
     monkeypatch.setattr(client.transport, "close", disconnect)
     try:
-        initial = start_pipeline(client)
-        assert pending.wait(1)
+        initial = start_pipeline(client, pending)
         before = len(client.transport.sent)
         client.context.session.close()
         data = client.call(

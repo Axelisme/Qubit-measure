@@ -1,8 +1,8 @@
 """Controller lifecycle contracts through public native/GUI seams."""
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import get_ident
-from time import monotonic
 
 import pytest
 from zcu_tools.experiment.workflows import (
@@ -31,6 +31,7 @@ from tests.experiment.workflows._engine_fakes import (
     State,
     Tunables,
 )
+from tests.gui.app._owner_waits import owner_result, owner_until
 
 from ._controller_support import create_binding, create_controller, declare, identity
 from ._start_fakes import StartHarness
@@ -219,16 +220,18 @@ def test_native_execution_is_off_owner_and_terminal_delivery_returns_to_owner(
             paths=rig.paths,
             identity=identity(),
         )
-        deadline = monotonic() + 5.0
-        while not delivered and monotonic() < deadline:
-            harness.owner.pump_once(block=True, timeout=0.05)
+        # Accepted Engine work posts its terminal callback to the injected owner.
+        owner_until(harness.owner, lambda: delivered, label="native terminal delivery")
         assert delivered == [owner_id]
         assert len(executed) == 1 and executed[0] != owner_id
         assert harness.handles.known_outcome(token) == OperationOutcome("finished")
         assert not harness.gate.snapshot()
     finally:
         controller.stop("run")
-        assert background.quiesce(timeout=5.0)
+        with ThreadPoolExecutor(max_workers=1) as closer:
+            # Stop releases accepted work; pumping acknowledges even failed-test delivery.
+            drained = closer.submit(background.quiesce, timeout=30)
+            assert owner_result(harness.owner, drained, label="native worker drain")
 
 
 def test_pause_resume_updates_the_same_bar(

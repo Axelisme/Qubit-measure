@@ -1,12 +1,12 @@
 """Measure controller library entry editing uses the shared Form entry."""
 
 from pathlib import Path
-from time import monotonic
 
 import pytest
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 
+from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure.remote._helpers import Fixture
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
@@ -43,11 +43,8 @@ def library_app(qapp, tmp_path: Path):
                     closed = True
 
                 fx.ctrl.begin_shutdown(on_closed)
-                deadline = monotonic() + 1.0
-                while not closed and monotonic() < deadline:
-                    qapp.processEvents()
-                if not closed:
-                    raise RuntimeError("Synchronous library fixture shutdown timed out")
+                # begin_shutdown() schedules the terminal owner notification.
+                qt_until(lambda: closed, label="library fixture shutdown")
                 fx.stop()
                 qapp.processEvents()
         finally:
