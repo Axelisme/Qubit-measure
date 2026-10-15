@@ -24,7 +24,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from zcu_tools.experiment.run_saving import ArtifactRef
+from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
 from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
@@ -64,7 +64,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller, ViewSnapshot
     from zcu_tools.gui.app.measure.remote import RemoteControlAdapter
     from zcu_tools.gui.app.measure.services import TabSnapshot
-    from zcu_tools.gui.app.measure.services.writeback_control import WritebackPane
+    from zcu_tools.gui.app.measure.writeback import WritebackPane
     from zcu_tools.gui.session.alias_presets import AliasPresets
 
 

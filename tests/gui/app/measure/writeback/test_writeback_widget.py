@@ -22,16 +22,16 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    ParameterWriteback,
     RunRequest,
     SessionEnv,
-    WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.app.measure.services.writeback import (
+from zcu_tools.gui.app.measure.writeback import (
+    ParameterWriteback,
+    WritebackItem,
     WritebackValues,
 )
-from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
+from zcu_tools.gui.app.measure.writeback.widget import WritebackWidget
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 

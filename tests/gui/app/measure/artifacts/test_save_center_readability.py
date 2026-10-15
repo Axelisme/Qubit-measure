@@ -7,15 +7,14 @@ from pathlib import Path
 import pytest
 from qtpy.QtGui import QPalette
 from qtpy.QtWidgets import QApplication, QLabel, QLineEdit
-from zcu_tools.experiment.run_saving import ArtifactRef, OutputResult, SaveReport
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactDeclaration
+from zcu_tools.experiment.artifacts import ArtifactRef, OutputResult, SaveReport
+from zcu_tools.gui.app.measure.artifacts import ArtifactDeclaration, ArtifactSaveCenter
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.events.completion import (
     SaveArtifactsFinishedPayload,
     SaveDataFinishedPayload,
 )
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.widgets import mixed_colour
 from zcu_tools.resources.entry import ArtifactKey, Output, ResultEntry, SaveLayout

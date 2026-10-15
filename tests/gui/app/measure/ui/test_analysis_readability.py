@@ -19,9 +19,9 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     ParameterWriteback,
 )
-from zcu_tools.gui.app.measure.services.writeback import WritebackValues
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
-from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
+from zcu_tools.gui.app.measure.writeback import WritebackValues
+from zcu_tools.gui.app.measure.writeback.widget import WritebackWidget
 from zcu_tools.gui.widgets import error_colour
 
 

@@ -28,10 +28,6 @@ class _FakeAdapter(BaseAdapter[Any, Any, Any, Any]):
     )
     exp_cls = MagicMock
 
-    def make_filename_stem(self, ctx: Any) -> str:
-        del ctx
-        return "fake"
-
 
 def test_default_capability_has_no_post_analysis() -> None:
     assert AdapterCapabilities().post_analysis is False

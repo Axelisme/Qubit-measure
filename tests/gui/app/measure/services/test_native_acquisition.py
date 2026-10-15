@@ -50,6 +50,7 @@ from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._native_save_support import (
     GUI_ORIGIN,
     NativeSaveSession,
+    SavingAdapter,
 )
 from tests.gui.app.measure._synthetic import ALIAS_PRESET
 from tests.resources.entry.fakes import (
@@ -112,6 +113,45 @@ def _acquire_to_terminal(
     return token, finished[0]
 
 
+class CfglessSavingAdapter(SavingAdapter):
+    """Return usable data without a core configuration snapshot."""
+
+    def run(
+        self,
+        req: RunRequest,
+        cfg: SavingCfg,
+        *,
+        context: RunContext,
+    ) -> RunRecord[SavingCfg, SavingResult]:
+        record = super().run(req, cfg, context=context)
+        return RunRecord(cfg=None, result=record.result)
+
+
+def test_run_without_cfg_records_acquired_evidence(
+    native_session: NativeSaveSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = native_session
+    session.state.get_tab("tab").adapter = CfglessSavingAdapter()
+    token, terminal = _acquire_to_terminal(session, monkeypatch)
+    assert terminal.outcome == "finished"
+    outcome = session.handles.known_outcome(token)
+    assert outcome is not None and outcome.status == "finished"
+    metadata = session.state.get_tab("tab").run.metadata
+    assert metadata is not None
+    events = session.entry.ledger.events()
+    assert len(events) == 1
+    event = events[0]
+    assert event.kind == "acquired" and event.origin == "gui"
+    assert event.at == metadata.finished_at
+    assert isinstance(event.payload, AcquiredPayload)
+    assert event.payload.run_id == metadata.run_id
+    assert event.payload.experiment == metadata.experiment
+    assert event.payload.point == "p"
+    assert event.payload.roles == dict(metadata.snapshot.roles)
+    assert not (session.entry.database_path / "runs").exists()
+
+
 @pytest.mark.parametrize("frontend", ["gui", "mcp"])
 def test_native_run_without_save_records_acquired_at_its_historical_entry(
     native_session: NativeSaveSession,
@@ -145,7 +185,6 @@ def test_native_run_without_save_records_acquired_at_its_historical_entry(
     assert event.payload.run_id == metadata.run_id
     assert event.payload.tab == "saving" and event.payload.tab_id == "tab"
     assert event.payload.experiment == metadata.experiment
-    assert event.payload.cfg_summary == record.cfg.model_dump(mode="json")
     assert event.payload.point == "q"
     assert event.payload.roles == dict(metadata.snapshot.roles)
     assert session.entry.ledger.events() == ()

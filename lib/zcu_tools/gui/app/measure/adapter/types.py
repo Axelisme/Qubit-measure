@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from abc import ABC
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import (
@@ -15,18 +14,15 @@ from typing import (
 from typing_extensions import TypeVar
 
 if TYPE_CHECKING:
-    from zcu_tools.cfg_model import CfgValidationContext, ConfigBase, ModuleSpec
-    from zcu_tools.datafile import RunMetadata
+    from zcu_tools.cfg_model import CfgValidationContext, ConfigBase
     from zcu_tools.gui.session.parameters import ParameterContext
-    from zcu_tools.resources.entry.ledger_models import JsonObject
-    from zcu_tools.resources.entry.storage import PointStorageBinding
 
 
 # ``SocProtocol``/``SocCfgProtocol`` + the ``SocHandle``/``SocCfgHandle`` aliases,
 # ``ContextReadiness``, and ``SessionEnv`` are session-core value types — they live
 # in ``gui/session/types`` (no experiment cfg-tree coupling). They are re-exported
 # from the adapter package because ``ExpAdapterProtocol``'s signatures speak in
-# them (``make_save_paths(ctx: SessionEnv)``, ``RunRequest.soc: SocHandle``).
+# them (``RunRequest.soc: SocHandle``, ``RunRequest.soccfg: SocCfgHandle``).
 from zcu_tools.gui.session.types import SessionEnv, SocCfgHandle, SocHandle
 
 T_Result = TypeVar("T_Result")
@@ -160,19 +156,6 @@ class RunRequest:
 
 
 @dataclass(frozen=True)
-class LoadDataRequest:
-    """Canonical result file path and current-source capture fixed for this Load.
-
-    data_path identifies the file consumed by the adapter. parameters contains
-    the point/library/storage and aliases observed when Load starts, or None
-    when no parameter context is installed. It never replaces native history.
-    """
-
-    data_path: str
-    parameters: ParameterContext | None
-
-
-@dataclass(frozen=True)
 class AnalyzeRequest(Generic[T_Result, T_AnalyzeParams]):
     """Inputs accepted for one primary analysis, independent of later session edits.
 
@@ -232,25 +215,6 @@ class PostAnalyzeRequest(Generic[T_Result, T_AnalyzeResult, T_PostAnalyzeParams]
 
 
 @dataclass(frozen=True)
-class SaveDataRequest(Generic[T_Result]):
-    """Worker inputs captured from one tab, not the current session selection.
-
-    run_result is the pane-owned result; data_path is the reserved output file.
-    parameters is the tab's fixed role capture, None for context-free adapters.
-    storage retains its original entry/point roots, description, roles and ledger
-    capability. metadata is this result's historical Run evidence, or None
-    when no evidence was acquired. comment is the user's annotation.
-    """
-
-    run_result: T_Result
-    data_path: str
-    parameters: ParameterContext | None
-    storage: PointStorageBinding
-    metadata: RunMetadata | None = None
-    comment: str = ""
-
-
-@dataclass(frozen=True)
 class WritebackRequest(Generic[T_Result, T_AnalyzeResult]):
     run_result: T_Result
     analyze_result: T_AnalyzeResult
@@ -270,67 +234,3 @@ class PostWritebackRequest(Generic[T_Result, T_AnalyzeResult, T_PostAnalyzeResul
     analyze_result: T_AnalyzeResult
     post_analyze_result: T_PostAnalyzeResult
     ctx: SessionEnv
-
-
-@dataclass
-class WritebackItem(ABC):
-    """Mutable proposal; stderr is its standard error in working units, or None.
-
-    The destination is a direct container path or captured role path. Selection
-    and session identity belong to the service, not the proposing adapter.
-    """
-
-    stderr: float | None = field(default=None, kw_only=True)
-    # ``target_name`` is the apply destination name (md attr / ml module / ml
-    # waveform — the item subtype names which namespace). It is mutable: agent/UI
-    # may retarget the writeback before applying.
-    target_name: str
-    description: str
-    # ``session_id`` (``<kind>-<n>``, e.g. ``param-1``) is the stable identifier for
-    # UI/wire/dedup. Stamped once by WritebackService when items are computed at
-    # analyze time (never by the adapter), and decoupled from target_name so
-    # retargeting does not change the id.
-    session_id: str = field(default="", init=False)
-    selected: bool = field(default=True, init=False)
-
-
-@dataclass
-class ParameterWriteback(WritebackItem):
-    """Propose a point parameter value at target_name, resolved against the Run capture."""
-
-    proposed_value: Any
-
-
-@dataclass
-class ModuleWriteback(WritebackItem):
-    """Propose a persistent module Spec for the library root target_name.
-
-    proposal is a concrete persistent ModuleSpec (pulse, readout or reset);
-    child library keys stay keys. The writeback draft edits a Form copy of it,
-    so the proposal object is never modified. role_id optionally names the
-    role template this proposal represents while it is reviewed; the library
-    does not persist it.
-    """
-
-    proposal: ModuleSpec
-    role_id: str | None = None
-
-
-@dataclass
-class SampleWriteback(WritebackItem):
-    """Propose producer-defined JSON fields for target_name, a concrete component.
-
-    Only adapters whose Run keeps the flux device fixed provide this proposal.
-    WritebackService adds dev_value/dev_unit from the Run's fixed $flux_dev and
-    device snapshot, replacing those fields if supplied here. Missing captured
-    device facts omit this item with a public reason. The sample can be selected
-    independently; it needs no cfg schema or editor session.
-    """
-
-    proposed_value: JsonObject
-
-
-@dataclass
-class SavePaths:
-    data_path: str
-    image_path: str

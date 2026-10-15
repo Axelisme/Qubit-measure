@@ -290,30 +290,6 @@ def test_cancel_after_acquisition_does_not_relabel_completed_measurement_evidenc
     assert outcome is not None and outcome.status == "cancelled"
 
 
-def test_native_run_rejects_an_unpaired_result_without_publishing_evidence(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    state, tab_id, adapter = make_state()
-    adapter.run.return_value = object()
-    monkeypatch.setattr(
-        "zcu_tools.gui.app.measure.services.run.capture_software_provenance",
-        MagicMock(return_value=_provenance()),
-    )
-    inputs = replace(
-        make_inputs(state, tab_id, adapter),
-        snapshot=_run_snapshot(),
-        experiment_tag="test/native",
-    )
-    service, _gate, background, handles = make_run_service(state)
-    token = service.start_run(inputs, plots=make_plots())
-    background.run_work()
-    assert state.get_tab(tab_id).run.result is None
-    assert state.get_tab(tab_id).run.metadata is None
-    outcome = handles.poll(token)
-    assert outcome is not None and outcome.status == "failed"
-    assert outcome.error == "Native acquisition must return a RunRecord"
-
-
 def test_run_reads_all_connected_devices_after_lease_before_core() -> None:
     state, tab_id, _ = make_state()
     adapter = SnapshotAdapter()

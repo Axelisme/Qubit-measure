@@ -25,23 +25,21 @@ from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.types import ParameterContext
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.adapter import (
-        AdapterCapabilities,
-        WritebackItem,
-    )
-    from zcu_tools.gui.app.measure.artifact_tracker import ArtifactSectionSnapshot
+    from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
+    from zcu_tools.gui.app.measure.artifacts import ArtifactSectionSnapshot
     from zcu_tools.gui.app.measure.state import (
         RetiredPaneResources,
         Session,
         TabInteractionState,
     )
+    from zcu_tools.gui.app.measure.writeback import WritebackItem
     from zcu_tools.gui.session.types import SessionEnv
     from zcu_tools.plotting.figures import FigureCollection
     from zcu_tools.plotting.plots import Plots
     from zcu_tools.resources.entry.ledger_models import JsonObject
 
+    from ..writeback import WritebackDraft
     from .persistence_types import AppPersistedState
-    from .writeback import WritebackDraft
 
 
 @dataclass(frozen=True, slots=True)

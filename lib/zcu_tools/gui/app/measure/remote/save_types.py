@@ -11,13 +11,13 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from zcu_tools.gui.app.measure.artifact_tracker import (
+from zcu_tools.gui.app.measure.artifacts import (
     ArtifactSectionSnapshot,
     SaveStatus,
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.experiment.run_saving import SaveReport
+    from zcu_tools.experiment.artifacts import SaveReport
 
 
 ArtifactStatusWire = Literal["Not saved", "Saved", "Partially saved", "Unsaved changes"]

@@ -3,12 +3,11 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    LoadDataRequest,
-)
+from zcu_tools.datafile import load_run_data
+from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import RoleBinding
@@ -30,8 +29,9 @@ class LoadTabResultOutcome:
     """Committed Load facts, independent of the tab's editable Form input.
 
     tab_id names the receiving tab; data_path is the selected source file.
-    result_type is the adapter result's class name. has_cfg_snapshot reports
-    native cfg presence, not form validity. has_analyze_params reports successful
+    result_type is the opaque adapter record's class name. cfg_issue is None when
+    typed cfg is available, or the adapter's readable unavailability reason.
+    has_analyze_params reports successful
     analysis preparation; analysis_error carries its diagnostic on partial success.
     source_kind identifies the loaded result rather than an acquired Run.
     """
@@ -39,7 +39,7 @@ class LoadTabResultOutcome:
     tab_id: str
     data_path: str
     result_type: str
-    has_cfg_snapshot: bool
+    cfg_issue: str | None
     has_analyze_params: bool
     source_kind: str = "loaded"
     analysis_error: str | None = None
@@ -65,7 +65,7 @@ def _format_invalid_data_message(data_path: str, detail: str) -> str:
 class LoadService:
     """Synchronous canonical result load boundary.
 
-    The service owns the adapter call and state replacement only. The Controller
+    The service owns native file I/O, tag admission and state replacement. The Controller
     initializes analyze params afterward so run-finish and load share that policy.
     """
 
@@ -123,19 +123,18 @@ class LoadService:
                 "This tab does not support loading data files.",
                 reason_code="unsupported_load",
             )
-        request = LoadDataRequest(
-            data_path=data_path,
-            parameters=self._captured_parameters(None),
-        )
+        captured = self._captured_parameters(None)
         # Native history owns aliases; Save needs only the Load-time entry capability.
-        storage = (
-            None
-            if request.parameters is None
-            else request.parameters.bind_aliases((), {}).storage
-        )
+        storage = None if captured is None else captured.bind_aliases((), {}).storage
         logger.info("load_result: tab_id=%r data_path=%r", tab_id, data_path)
         try:
-            result, metadata = tab.adapter.load(request)
+            stored = load_run_data(Path(data_path))
+            if stored.metadata.experiment != tab.adapter.experiment_tag:
+                raise ValueError(
+                    f"Expected experiment tag {tab.adapter.experiment_tag!r}, "
+                    f"got {stored.metadata.experiment!r}"
+                )
+            restored = tab.adapter.restore(stored)
         except NotImplementedError as exc:
             raise LoadDataError(
                 f"This tab does not support loading data files.\n\nDetails: {exc}",
@@ -152,21 +151,21 @@ class LoadService:
                 reason_code="invalid_data_file",
             ) from exc
 
+        metadata = stored.metadata
         history = metadata.snapshot
         parameters = None
         if (
-            request.parameters is not None
-            and request.parameters.target.entry_id == str(history.entry_id)
+            captured is not None
+            and captured.target.entry_id == str(history.entry_id)
             and history.point is not None
         ):
             parameters = self._context.read_target(
                 SavedPoint(entry_id=str(history.entry_id), point=history.point),
                 roles=RoleBinding(None, {}, history.roles),
             )
-        snapshot = getattr(result, "cfg", None)
         retired = self._state.update_tab_loaded_result(
             tab_id,
-            result,
+            restored.record,
             data_path,
             metadata=metadata,
             parameters=parameters,
@@ -176,8 +175,8 @@ class LoadService:
         return LoadTabResultOutcome(
             tab_id=tab_id,
             data_path=data_path,
-            result_type=type(result).__name__,
-            has_cfg_snapshot=snapshot is not None,
+            result_type=type(restored.record).__name__,
+            cfg_issue=restored.cfg_issue,
             has_analyze_params=False,
         )
 

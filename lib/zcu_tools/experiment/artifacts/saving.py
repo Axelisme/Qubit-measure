@@ -13,7 +13,6 @@ from uuid import uuid4
 from matplotlib.figure import Figure
 
 from zcu_tools.datafile import (
-    AnalysisDocument,
     RunMetadata,
     encode_analysis_document,
     save_run_data,
@@ -32,88 +31,13 @@ from zcu_tools.resources.entry import (
 )
 from zcu_tools.resources.entry.ledger_models import validate_origin
 
-from .native_persistence import PreparedRunData
-
-
-@dataclass(frozen=True)
-class ArtifactRef:
-    """Opaque safe section and artifact names, validated like ArtifactKey."""
-
-    section: str
-    name: str
-
-    def __post_init__(self) -> None:
-        """Reject unsafe names through ArtifactKey's existing validation."""
-        ArtifactKey(self.section, self.name, "data")
-
-
-@dataclass(frozen=True)
-class DataMember:
-    """One data key and its prepared SI payload/cfg, shared by both writers.
-
-    key must have member=data. data is prepared from one typed RunRecord;
-    callers must not mutate its arrays while saving.
-    """
-
-    key: ArtifactKey
-    data: PreparedRunData
-
-    def __post_init__(self) -> None:
-        """Require the data member kind; reuse already prepared typed data."""
-        if self.key.member != "data":
-            raise ValueError("DataMember requires member=data")
-
-
-@dataclass(frozen=True)
-class FileMember:
-    """One figure or analysis key with its typed, not-yet-encoded content.
-
-    key must have member=figure with a native Figure, or member=analysis with
-    an AnalysisDocument. The shared saver encodes each member once and reuses
-    its bytes for equivalent outputs. Do not mutate content while saving.
-    """
-
-    key: ArtifactKey
-    content: Figure | AnalysisDocument
-
-    def __post_init__(self) -> None:
-        """Require figure/analysis identity and the corresponding content type."""
-        if self.key.member == "figure":
-            if not isinstance(self.content, Figure):
-                raise TypeError("figure content must be a Figure")
-        elif self.key.member == "analysis":
-            if not isinstance(self.content, AnalysisDocument):
-                raise TypeError("analysis content must be an AnalysisDocument")
-        else:
-            raise ValueError("FileMember requires figure or analysis member")
-
-
-@dataclass(frozen=True)
-class SaveArtifact:
-    """One artifact ref with nonempty, uniquely identified matching members.
-
-    All member keys use ref's section/name. Members retain producer order;
-    data payloads and once-encoded files are reused for equivalent outputs.
-    """
-
-    ref: ArtifactRef
-    members: tuple[DataMember | FileMember, ...]
-
-    def __post_init__(self) -> None:
-        """Require a nonempty selection of unique keys matching this ref."""
-        if not self.members:
-            raise ValueError("artifact requires nonempty members")
-        keys: set[ArtifactKey] = set()
-        for member in self.members:
-            member.__post_init__()
-            if (member.key.section, member.key.name) != (
-                self.ref.section,
-                self.ref.name,
-            ):
-                raise ValueError("member section/artifact must match ref")
-            if member.key in keys:
-                raise ValueError("artifact member keys must be unique; duplicate key")
-            keys.add(member.key)
+from .items import (
+    AnalysisItem,
+    DataItem,
+    DataPreparationFailure,
+    FigureItem,
+    SaveArtifact,
+)
 
 
 @dataclass(frozen=True)
@@ -169,8 +93,9 @@ def save_artifacts(
     exact entry destinations and ledger belongs to that entry. origin is gui,
     notebook or mcp. Validate members,
     but do not preflight path/content conflicts or establish a transaction.
-    Encode each FileMember once. figure_encoder receives each native Figure and
-    returns PNG bytes; None uses Figure.savefig. The callback runs synchronously
+    Data preparation failures mark all data destinations failed without I/O.
+    Encode each figure/analysis item once. figure_encoder receives a native Figure
+    and returns PNG bytes; None uses Figure.savefig. The callback runs synchronously
     on the calling thread, so callers must encode a live GUI Figure on its owner
     thread. AnalysisDocument always uses the datafile analysis encoder.
     Encoding failure marks all destinations of that member failed and still
@@ -189,7 +114,7 @@ def save_artifacts(
     for artifact in artifacts:
         for member in artifact.members:
             outputs = layout.outputs(member.key)
-            if isinstance(member, DataMember):
+            if isinstance(member, DataItem):
                 attempts, current_metadata = _save_data(
                     member, outputs, current_metadata
                 )
@@ -255,8 +180,13 @@ def _failed(key: ArtifactKey, output: Output, error: Exception) -> OutputResult:
 
 
 def _save_data(
-    member: DataMember, outputs: tuple[Output, ...], metadata: RunMetadata
+    member: DataItem, outputs: tuple[Output, ...], metadata: RunMetadata
 ) -> tuple[tuple[OutputResult, ...], RunMetadata]:
+    if isinstance(member.data, DataPreparationFailure):
+        return tuple(
+            OutputResult(member.key, output, "failed", member.data.error)
+            for output in outputs
+        ), metadata
     attempts: dict[Output, OutputResult] = {}
     # Native must see the successful Labber link, but the report retains layout order.
     ordered = sorted(outputs, key=lambda output: output.format != "labber")
@@ -284,7 +214,7 @@ def _save_data(
 
 
 def _save_file(
-    member: FileMember,
+    member: FigureItem | AnalysisItem,
     outputs: tuple[Output, ...],
     figure_encoder: Callable[[Figure], bytes] | None,
 ) -> tuple[OutputResult, ...]:
