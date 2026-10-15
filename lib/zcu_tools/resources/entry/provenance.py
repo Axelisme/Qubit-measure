@@ -80,11 +80,18 @@ class ProvenanceData(BaseModel):
         )
 
 
+class MissingSourceError(ValueError):
+    """A well-addressed provenance source names no event in its local ledger.
+
+    Ledger schema, attachment and I/O failures are not missing-source errors.
+    """
+
+
 def validate_source(provenance: Provenance, ledger: Path, entry_id: str) -> None:
     """Validate a manual or local event source without producing an event.
 
     ledger is this entry's ledger.jsonl path, entry_id its UUID. Unknown sources
-    raise ValueError with their KeyError cause; schema, attachment and I/O errors
+    raise MissingSourceError with their KeyError cause; schema, attachment and I/O errors
     from RecordsLedger.get propagate. Manual sources do not access the ledger.
     """
     if provenance.source == "manual":
@@ -92,6 +99,6 @@ def validate_source(provenance: Provenance, ledger: Path, entry_id: str) -> None
     try:
         RecordsLedger(ledger.parent, entry_id=entry_id).get(provenance.source)
     except KeyError as exc:
-        raise ValueError(
+        raise MissingSourceError(
             f"{ledger}: source {provenance.source!r} does not exist"
         ) from exc
