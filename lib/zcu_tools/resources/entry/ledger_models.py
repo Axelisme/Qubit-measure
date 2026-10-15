@@ -230,8 +230,9 @@ class LedgerEvent(_LedgerModel):
     or import. at is an ISO 8601 UTC timestamp with Z or +00:00. origin identifies
     the frontend as gui, notebook or mcp. record is None on append,
     or records/<id>.json on disk. payload carries the kind-specific evidence.
-    New 1.0 models reject unknown fields; readers can project future-minor fields
-    while preserving the complete raw line separately in LedgerEntry.
+    New 1.0 models reject unknown fields. RecordsLedger readers ignore unknown
+    envelope/payload fields at every supported minor, preserving the complete raw
+    line separately in LedgerEntry.
     """
 
     format: Literal["zcu.ledger"] = "zcu.ledger"
@@ -255,9 +256,11 @@ class LedgerEvent(_LedgerModel):
     def validate_payload(cls, value: object, info: ValidationInfo) -> object:
         """Validate a raw mapping or payload model against the envelope kind.
 
-        info supplies Pydantic's previously validated kind/format_version fields.
-        Known-field/type errors and 1.0 extras raise ValueError; future 1.x keys
-        are ignored by the selected typed model, not used to select a branch.
+        info supplies Pydantic's previously validated kind/format_version fields
+        and the ledger_read context flag used by RecordsLedger. Known-field/type
+        errors always raise ValueError. Unknown keys are ignored when reading or
+        projecting future 1.x, not used to select a branch; new 1.0 inputs reject
+        them.
         """
         models: dict[str, type[BaseModel]] = {
             "acquired": AcquiredPayload,
@@ -271,8 +274,9 @@ class LedgerEvent(_LedgerModel):
             # Invalid/missing kind is reported by its own required field.
             return value
         future = info.data.get("format_version", "1.0") != "1.0"
+        reading = info.context is not None and info.context.get("ledger_read", False)
         return models[kind].model_validate(
-            value, extra="ignore" if future else "forbid"
+            value, extra="ignore" if reading or future else "forbid"
         )
 
     @field_validator("format_version")
