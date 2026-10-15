@@ -259,6 +259,28 @@ class TableLengthPulse(Module):
             flat_top=isinstance(self.cfg.waveform, FlatTopWaveformCfg),
         )
 
+    def playback_parameters(
+        self, prog: ModularProgramV2, index: int
+    ) -> tuple[Pulse, int, int]:
+        """Return the initialized template and selected hardware timing words.
+
+        prog must have initialized this module. index selects lengths in original
+        table order; out-of-range indices raise IndexError. The returned Pulse is
+        borrowed and must not be mutated. The integers are generator cycles for
+        the const/flat segment and tProcessor cycles for the reference increment,
+        including pre/post delays. Flat-top ramps remain in the template. This
+        shares hardware quantization with semantic timeline consumers; it does
+        not pad shorter entries to the maximum candidate. QICK errors propagate.
+        """
+        if not 0 <= index < len(self.lengths):
+            raise IndexError(f"TableLengthPulse index {index} out of bounds")
+        length = self.lengths[index]
+        return (
+            self._template,
+            self._wave_length_cycles(prog, length),
+            self._duration_cycles(prog, length),
+        )
+
     def _wave_length_cycles(self, prog: ModularProgramV2, length: float) -> int:
         wave_length = length
         if isinstance(self.cfg.waveform, FlatTopWaveformCfg):

@@ -41,10 +41,11 @@ def build_request(
         raise ValueError("compiled acquisition layout is missing")
     interpreter = TimelineInterpreter(prog)
     loops = prog.loop_dict
-    timelines = tuple(
-        interpreter.run_point(dict(zip(loops, point, strict=True)))
-        for point in product(*(range(n) for n in loops.values()))
-    )
+    points = []
+    for point in product(*(range(n) for n in loops.values())):
+        points.append(interpreter.run_point(dict(zip(loops, point, strict=True))))
+        interpreter.after_point()
+    timelines = tuple(points)
     dims = tuple(int(n) for n in prog.loop_dims)
     windows = timelines[0].readouts
     if not windows or any(

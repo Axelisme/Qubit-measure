@@ -16,11 +16,17 @@ from zcu_tools.core.simulation import (
 
 from ..modular import ModularProgramV2
 from ..modules.base import Module
+from ..modules.computed_pulse import ComputedPulse
+from ..modules.control import Branch, Repeat
 from ..modules.delay import Delay, DelayAuto, Join, SoftDelay
-from ..modules.pulse import Pulse
-from ..modules.readout import PulseReadout
+from ..modules.dmem import LoadValue, LoadWord, ScanWith
+from ..modules.pulse import Pulse, TableLengthPulse
+from ..modules.readout import PulseReadout, TablePulseReadout
+from ..modules.reset import BathReset, NoneReset, PulseReset, TwoPulseReset
 from ..modules.util import round_timestamp
 from ..modules.waveform import ConstWaveformCfg, FlatTopWaveformCfg
+from ..utils import readout_freq_from_word, readout_freq_from_words
+from .dependencies import register_access
 
 
 class TimelineInterpreter:
@@ -42,6 +48,10 @@ class TimelineInterpreter:
         self.gen_end: dict[int, float] = {}
         self.ro_end: dict[int, float] = {}
         self.routes: dict[int, int] = {}
+        self.registers: dict[str, tuple[int, bool]] = {}
+        self.iterations: list[tuple[str, int]] = []
+        self.templates: dict[int, tuple[int, int]] = {}
+        self.table_readouts: dict[int, TablePulseReadout] = {}
 
     def scalar(self, value: float | QickParam) -> float:
         """Resolve a scalar/sweep in us, MHz, degrees or normalized gain.
@@ -65,6 +75,7 @@ class TimelineInterpreter:
     def run_point(self, point: dict[str, int]) -> PointTimeline:
         """Evaluate one loop coordinate and return owned immutable controls."""
         self.point = point.copy()
+        self.registers.update({name: (index, False) for name, index in point.items()})
         self.ref = 0.0
         self.events = []
         self.reads = {ch: [] for ch in self.prog.ro_chs}
@@ -84,7 +95,10 @@ class TimelineInterpreter:
             for ch, ro in self.prog.ro_chs.items()
         )
         end = max(
-            self.ref + self.tick(t), *self.gen_end.values(), *self.ro_end.values()
+            self.ref + self.tick(t),
+            *self.gen_end.values(),
+            *self.ro_end.values(),
+            *(event.start_us + event.duration_us for event in self.events),
         )
         return PointTimeline(tuple(point.items()), tuple(self.events), windows, end)
 
@@ -101,24 +115,189 @@ class TimelineInterpreter:
 
     def run(self, module: Module, t: float) -> float:
         """Dispatch exact supported Module types; reject unknown subclasses."""
-        kind = type(module)
-        if isinstance(module, Pulse) and kind is Pulse:
+        if type(module) is Pulse:
             return self.pulse(module, t)
-        if isinstance(module, PulseReadout) and kind is PulseReadout:
+        if type(module) is PulseReadout:
             return self.readout(module, t)
-        if isinstance(module, SoftDelay) and kind is SoftDelay:
+        return self.timing(module, t)
+
+    def timing(self, module: Module, t: float) -> float:
+        """Apply explicit delays, reference waits and parallel branch timing."""
+        if type(module) is SoftDelay:
             return self.scalar(round_timestamp(self.prog, t + module.delay))
-        if isinstance(module, Delay) and kind is Delay:
+        if type(module) is Delay:
             self.ref += self.tick(round_timestamp(self.prog, t + module.delay))
             return 0.0
-        if isinstance(module, DelayAuto) and kind is DelayAuto:
-            if isinstance(module.t, str):
-                raise ValueError("runtime delay simulation unsupported")
-            self.align(self.scalar(module.t), gens=module.gens, ros=module.ros)
+        if type(module) is DelayAuto:
+            extra = (
+                self.prog.cycles2us(self.register(module.t))
+                if isinstance(module.t, str)
+                else self.scalar(module.t)
+            )
+            self.align(extra, gens=module.gens, ros=module.ros)
             return 0.0
-        if isinstance(module, Join) and kind is Join:
+        if type(module) is Join:
+            self.check_join(module)
             return max(self.sequence(branch, t) for branch in module.join_modules)
-        raise ValueError(f"{kind.__name__} simulation unsupported")
+        return self.control(module, t)
+
+    def register(self, name: str, *, word: bool = False) -> int:
+        """Read an initialized scalar or exact uint32 word with consumer checking.
+
+        Scalar/word mismatches and undefined registers raise ValueError naming
+        the register; scalar consumers never reinterpret unsigned bit patterns.
+        """
+        if name not in self.registers:
+            raise ValueError(f"undefined register {name!r}")
+        value, is_word = self.registers[name]
+        if word != is_word:
+            raise ValueError(f"register {name!r}: unsupported word/scalar consumer")
+        return value
+
+    def control(self, module: Module, t: float) -> float:
+        """Interpret table and structured-control Modules without executing ISA."""
+        if isinstance(module, (LoadValue, LoadWord)) and type(module) in (
+            LoadValue,
+            LoadWord,
+        ):
+            index = self.register(module.idx_reg)
+            if not 0 <= index < len(module.values):
+                raise ValueError(
+                    f"table index {index} out of bounds via register {module.idx_reg!r}"
+                )
+            self.registers[module.val_reg] = (
+                module.values[index],
+                type(module) is LoadWord,
+            )
+            return t
+        if type(module) is ScanWith:
+            return self.repeat(module.repeat_mod, t)
+        if type(module) is Repeat:
+            return self.repeat(module, t)
+        if type(module) is Branch:
+            self.ref += self.tick(t)
+            self.align()
+            index = self.register(module.compare_reg)
+            if not 0 <= index < len(module.branches):
+                raise ValueError(
+                    f"branch index {index} out of bounds via register {module.compare_reg!r}"
+                )
+            end = self.sequence(module.branches[index], 0.0)
+            self.ref += self.tick(end)
+            self.align()
+            return 0.0
+        return self.selected_pulse(module, t)
+
+    def selected_pulse(self, module: Module, t: float) -> float:
+        """Resolve computed/table pulses and readout templates before playback."""
+        if type(module) is ComputedPulse:
+            index = self.register(module.val_reg)
+            if not 0 <= index < len(module.pulse_modules):
+                raise ValueError(
+                    f"candidate {index} out of bounds via register {module.val_reg!r}"
+                )
+            self.pulse(module.pulse_modules[index], t)
+            return t + module.total_length(self.prog)
+        if type(module) is TableLengthPulse:
+            return self.table_length(module, t)
+        if type(module) is TablePulseReadout:
+            return self.table_readout(module, t)
+        return self.reset(module, t)
+
+    def repeat(self, module: Repeat, t: float) -> float:
+        """Flush pending activity and execute a deterministic register-count loop."""
+        self.ref += self.tick(t)
+        self.align()
+        n = self.register(module.n) if isinstance(module.n, str) else module.n
+        if n < 0:
+            raise ValueError(f"negative repeat count {n}")
+        for index in range(n):
+            self.registers[module.counter_reg] = (index, False)
+            self.iterations.append((module.name, index))
+            end = self.sequence(module.sub_modules, 0.0)
+            self.iterations.pop()
+            self.ref += self.tick(end)
+            self.align()
+        self.registers[module.counter_reg] = (n, False)
+        return 0.0
+
+    def reset(self, module: Module, t: float) -> float:
+        """Expand reset wrappers into real pulses only; never set a quantum state."""
+        if type(module) is NoneReset:
+            return t
+        if type(module) is PulseReset:
+            return self.pulse(module.reset_pulse, t)
+        if type(module) is TwoPulseReset:
+            return max(
+                self.pulse(module.reset_pulse1, t), self.pulse(module.reset_pulse2, t)
+            )
+        if type(module) is BathReset:
+            end = self.pulse(module.res_pulse, t)
+            self.pulse(module.qub_pulse, t)
+            return self.pulse(module.pi2_pulse, end)
+        raise ValueError(f"{type(module).__name__} simulation unsupported")
+
+    def table_length(self, module: TableLengthPulse, t: float) -> float:
+        """Apply selected generator length and runtime duration, with no max padding."""
+        index = self.register(module.idx_reg)
+        if not 0 <= index < len(module.lengths):
+            raise ValueError(
+                f"table index {index} out of bounds via register {module.idx_reg!r}"
+            )
+        template, cycles, duration_cycles = module.playback_parameters(self.prog, index)
+        duration = self.prog.cycles2us(cycles, gen_ch=module.cfg.ch)
+        if isinstance(module.cfg.waveform, FlatTopWaveformCfg):
+            template_length = self.scalar(
+                self.prog.get_pulse_param(template.pulse_id, "length")
+            )
+            total = self.scalar(
+                self.prog.get_pulse_param(template.pulse_id, "total_length")
+            )
+            duration += total - template_length
+        previous_end = self.gen_end.get(module.cfg.ch, 0.0)
+        self.pulse(template, t, duration=duration)
+        # PulseFromLengthReg deliberately does not update compile-time timestamps.
+        # Its duration table, not template length, owns the reference increment.
+        self.gen_end[module.cfg.ch] = previous_end
+        self.align(self.prog.cycles2us(duration_cycles))
+        return 0.0
+
+    def table_readout(self, module: TablePulseReadout, t: float) -> float:
+        """Play the current template; only exec-after mutates it for the next point."""
+        self.table_readouts[id(module)] = module
+        words = self.templates.get(id(module))
+        return self.readout(module.initial_template, t, words=words)
+
+    def after_point(self) -> None:
+        """Execute supported table-template hooks at actual nested-loop boundaries.
+
+        The innermost hardware loop always closes after a point. An outer hook
+        runs only when every inner loop completed. The last entry wraps to entry
+        zero before the next outer repetition. State belongs to this interpreter.
+        """
+        closed: set[str] = set()
+        for name, count in reversed(self.prog.loop_dict.items()):
+            closed.add(name)
+            if self.point[name] != count - 1:
+                break
+        for key, module in self.table_readouts.items():
+            if module.idx_reg in closed:
+                next_index = (self.point[module.idx_reg] + 1) % len(module.freq_words)
+                self.templates[key] = (
+                    module.freq_words[next_index],
+                    module.ro_freq_words[next_index],
+                )
+
+    def check_join(self, module: Join) -> None:
+        """Reject cross-branch register dependencies before choosing branch order."""
+        accesses = [register_access(branch) for branch in module.join_modules]
+        for i, (reads, writes) in enumerate(accesses):
+            for other_reads, other_writes in accesses[i + 1 :]:
+                conflict = writes & (other_reads | other_writes) | reads & other_writes
+                if conflict:
+                    raise ValueError(
+                        f"Join cross-branch register dependency: {sorted(conflict)}"
+                    )
 
     def align(self, extra: float = 0.0, *, gens: bool = True, ros: bool = True) -> None:
         """Advance reference through selected channel timestamps plus extra us."""
@@ -128,16 +307,17 @@ class TimelineInterpreter:
         if ros:
             ends.extend(self.ro_end.values())
         if ends:
-            self.ref += self.tick(max(ends) - self.ref + extra)
+            self.ref += self.tick(max(0.0, max(ends) - self.ref) + extra)
 
-    def pulse(self, module: Pulse, t: float) -> float:
+    def pulse(self, module: Pulse, t: float, *, duration: float | None = None) -> float:
         """Emit registered generator controls, preserving nonblocking scheduling."""
         cfg = module.cfg
         if cfg is None:
             return t
         prog = self.prog
         pulse_id = module.pulse_id
-        duration = self.scalar(prog.get_pulse_param(pulse_id, "total_length"))
+        if duration is None:
+            duration = self.scalar(prog.get_pulse_param(pulse_id, "total_length"))
         event = PulseEvent(
             cfg.ch,
             self.ref + self.tick(t + cfg.pre_delay),
@@ -147,7 +327,7 @@ class TimelineInterpreter:
             self.scalar(prog.get_pulse_param(pulse_id, "gain")),
             self._envelope(module, duration),
             source=module.name,
-            iterations=(),
+            iterations=tuple(self.iterations),
         )
         self.events.append(event)
         self.gen_end[cfg.ch] = event.start_us + duration
@@ -183,19 +363,80 @@ class TimelineInterpreter:
             tuple(float(v) for v in axis), tuple(complex(v) for v in values)
         )
 
-    def readout(self, module: PulseReadout, t: float) -> float:
+    def frequencies(
+        self, module: PulseReadout, words: tuple[int, int] | None
+    ) -> tuple[float, float]:
+        """Decode final frequency words at their explicit readout consumer.
+
+        Return semantic generator and demod MHz, including mixer and ADC alias
+        conventions. Paired words must encode the same semantic frequency.
+        """
+        cfg = module.cfg
+        gen = self.scalar(self.prog.get_pulse_param(module.pulse.pulse_id, "freq"))
+        ro = self.scalar(self.prog.get_pulse_param(module.adc_name, "freq"))
+        gen_word = (
+            self.register(module.freq_val, word=True) if module.freq_val else None
+        )
+        ro_word = (
+            self.register(module.ro_freq_val, word=True) if module.ro_freq_val else None
+        )
+        if words is not None:
+            gen_word, ro_word = words
+        if gen_word is not None and ro_word is not None:
+            gen = readout_freq_from_words(
+                self.prog.soccfg,
+                gen_word,
+                ro_word,
+                gen_ch=cfg.gen_ch,
+                ro_ch=cfg.ro_ch,
+                mixer_freq=cfg.mixer_freq,
+                nqz=cfg.nqz,
+            )
+            return gen, gen
+        if gen_word is not None:
+            gen = readout_freq_from_word(
+                self.prog.soccfg,
+                gen_word,
+                kind="gen",
+                gen_ch=cfg.gen_ch,
+                ro_ch=cfg.ro_ch,
+                mixer_freq=cfg.mixer_freq,
+                nqz=cfg.nqz,
+            )
+        if ro_word is not None:
+            ro = readout_freq_from_word(
+                self.prog.soccfg,
+                ro_word,
+                kind="ro",
+                reference_freq_mhz=gen,
+                gen_ch=cfg.gen_ch,
+                ro_ch=cfg.ro_ch,
+                mixer_freq=cfg.mixer_freq,
+                nqz=cfg.nqz,
+            )
+        return gen, ro
+
+    def readout(
+        self, module: PulseReadout, t: float, *, words: tuple[int, int] | None = None
+    ) -> float:
         """Emit independent ADC trigger/window and generator playback."""
-        if any((module.gain_val, module.freq_val, module.ro_freq_val)):
-            raise ValueError("runtime word consumer simulation unsupported")
         cfg = module.cfg
         self.routes[cfg.ro_ch] = cfg.gen_ch
         trigger = self.ref + self.tick(t + cfg.trig_offset)
-        frequency = self.scalar(self.prog.get_pulse_param(module.adc_name, "freq"))
-        self.reads[cfg.ro_ch].append((trigger, frequency, 0.0))
+        gen_freq, ro_freq = self.frequencies(module, words)
+        self.reads[cfg.ro_ch].append((trigger, ro_freq, 0.0))
         self.ro_end[cfg.ro_ch] = trigger + self.prog.cycles2us(
             self.prog.ro_chs[cfg.ro_ch]["length"], ro_ch=cfg.ro_ch
         )
         start = len(self.events)
         self.pulse(module.pulse, t)
-        self.events[start] = replace(self.events[start], source=module.name)
+        event = self.events[start]
+        gain = event.gain
+        if module.gain_val is not None:
+            word = self.register(module.gain_val, word=True)
+            signed = word if word < 2**31 else word - 2**32
+            gain = signed / self.prog.soccfg.get_maxv(cfg.gen_ch)
+        self.events[start] = replace(
+            event, source=module.name, frequency_mhz=gen_freq, gain=gain
+        )
         return t + self.scalar(module.total_length(self.prog))
