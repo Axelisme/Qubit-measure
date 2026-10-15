@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 from zcu_tools.device.fake import FakeDevice
 from zcu_tools.experiment.ftf import ftf
 from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
@@ -59,3 +60,20 @@ def test_reload_selected_round_without_prior_acquires_or_live_devices(tmp_path: 
     other = next(path for path in paths if read_replay(path).round.index == 0)
     # Same A bias, but independent round stream. No output/noise archive is reused.
     assert not np.array_equal(replay_round(other).channels[0].iq, expected)
+
+    from zcu_tools.resources.simulation_replay import save_replay
+
+    incompatible = restored.acquire.model_copy(update={"versions": (("backend", "future"),)})
+    mismatch = save_replay(tmp_path / "incompatible", incompatible,
+                           restored.round.snapshot, restored.round.index,
+                           restored.round.numeric_manifest)
+    with pytest.raises(ValueError, match="version mismatch"):
+        replay_round(mismatch)
+
+    # Numeric-owner references must be present even if the solver could recompute.
+    records = tuple((library.path / "direct").glob("*.npz"))
+    assert records
+    for record in records:
+        record.unlink()
+    with pytest.raises(FileNotFoundError):
+        replay_round(selected)
