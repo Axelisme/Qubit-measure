@@ -1,7 +1,7 @@
 """Stateless persistence for record-based experiments."""
 
 from pathlib import Path
-from typing import Any, ClassVar, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar
 
 import numpy as np
 
@@ -10,6 +10,7 @@ from zcu_tools.datafile import (
     LabberData,
     RunMetadata,
     RunSnapshot,
+    StoredRun,
     VariableSchema,
     cast_labber_values,
     validate_labber_payload,
@@ -17,6 +18,9 @@ from zcu_tools.datafile import (
 from zcu_tools.experiment.axes_spec import AxesSpec, GroupedAxesSpec
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
+
+if TYPE_CHECKING:
+    from .native_persistence import RestoredRun
 
 T_Result = TypeVar("T_Result")
 T_Config = TypeVar("T_Config", bound=ExpCfgModel)
@@ -92,14 +96,31 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
     ) -> tuple[RunRecord[T_Config, T_Result], RunSnapshot]:
         """Read native typed data and its historical snapshot using this spec.
 
-        Read once without a full file image. Invalid native format, tag, schema,
-        variable or cfg fails with the public located validation error; I/O
-        errors propagate. Do not guess a legacy format or mutate this instance.
+        Read once without a full file image. Invalid native format, tag, variable
+        or cfg envelope fails with a located validation error; I/O errors
+        propagate. Incompatible typed cfg warns and returns cfg=None with valid
+        data. Do not guess a legacy format or mutate this instance.
         Use datafile's generic image seam for unknown-field lossless rewrites.
         """
         from .native_persistence import load_run
 
         return load_run(source, spec=self.persistence_spec())
+
+    def from_stored(
+        self, stored: StoredRun
+    ) -> "RestoredRun[RunRecord[T_Config, T_Result]]":
+        """Restore already-read native data with this instance's declared spec.
+
+        Return a typed record and cfg_issue without I/O or instance mutation.
+        Invalid tag/data/cfg envelope or builder results raise ValueError or
+        TypeError. Incompatible typed cfg retains data with cfg=None and emits
+        CfgUnavailableWarning with the same readable reason as cfg_issue.
+        Missing AXES_SPEC raises NotImplementedError. Historical raw cfg and
+        metadata remain unchanged; no current settings or devices are consulted.
+        """
+        from .native_persistence import restore_run
+
+        return restore_run(stored, spec=self.persistence_spec())
 
     def _validate_canonical_labber_data(
         self, data: LabberData, spec: AxesSpec[T_Result, T_Config]
