@@ -6,7 +6,9 @@ from typing import Annotated, Literal
 import pytest
 from pydantic import Field
 from qtpy.QtWidgets import QApplication, QCheckBox, QComboBox, QLabel, QLineEdit
-from zcu_tools.gui.form import Display, FormEnv, FormInput, FormModel, FormState
+from zcu_tools.gui.form import (
+    Display, FormDescription, FormEnv, FormInput, FormModel, FormState, FormWritePath,
+)
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._user_input import mouse_click
@@ -48,6 +50,34 @@ def view(qapp: QApplication) -> Iterator[tuple[FormEditor[LazyForm], FormState[L
     editor.detach()
     editor.deleteLater()
     qapp.processEvents()
+
+
+class DescribedState(FormState[LazyForm]):
+    """Observe requested public layers without replacing the core's behaviour."""
+
+    def __init__(self, env: FormEnv) -> None:
+        super().__init__(LazyForm.default_input(env))
+        self.requested: set[FormWritePath] = set()
+
+    def describe(self, path: FormWritePath, env: FormEnv) -> FormDescription:
+        self.requested.add(path)
+        return super().describe(path, env)
+
+
+def test_model_description_is_requested_on_first_expansion(qapp: QApplication) -> None:
+    env = FormEnv()
+    state = DescribedState(env)
+    editor = FormEditor(state, env)
+    try:
+        assert ("folded",) not in state.requested
+        fold = title(editor, "folded")
+        mouse_click(fold, fold.rect().center())
+        assert ("folded",) in state.requested
+        assert float(text(editor, "folded.value").text()) == 1.0
+    finally:
+        editor.detach()
+        editor.deleteLater()
+        qapp.processEvents()
 
 
 def title(editor: FormEditor[LazyForm], path: str) -> QLabel:
