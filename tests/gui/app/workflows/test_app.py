@@ -73,6 +73,7 @@ def app(qapp: QApplication, tmp_path: Path) -> Iterator[WorkflowsGuiBehavior[Con
             role_registry.register("qubit", RoleSpec("qubit/*"))
         installed = registry_state()
         behavior = WorkflowsGuiBehavior(
+            templates={},
             registrations=build_registry(),
             alias_presets={"default": ALIAS_PRESET},
             project_root=str(tmp_path),
@@ -109,6 +110,7 @@ def test_named_presets_reach_workflows_composition_without_overwriting_saved_row
         )
     try:
         behavior = WorkflowsGuiBehavior(
+            templates={},
             registrations=build_registry(),
             alias_presets=presets,
             project_root=str(tmp_path),
@@ -141,6 +143,7 @@ def test_workflows_empty_initial_table_is_explicit_or_has_no_catalog(
 ) -> None:
     try:
         behavior = WorkflowsGuiBehavior(
+            templates={},
             registrations=build_registry(),
             alias_presets=presets,
             cache_dir=tmp_path,
@@ -164,7 +167,9 @@ def test_workflows_behavior_rejects_catalog_without_default(
 ) -> None:
     try:
         with pytest.raises(ValueError, match="default"):
-            WorkflowsGuiBehavior(registrations=build_registry(), alias_presets=presets)
+            WorkflowsGuiBehavior(
+                templates={}, registrations=build_registry(), alias_presets=presets
+            )
     except TypeError as error:
         pytest.fail(f"Named alias preset admission is missing: {error}")
 
@@ -226,6 +231,8 @@ def test_window_parent_and_close_callback_retry(
         harness.state,
         harness.services,
         harness.owner,
+        templates={},
+        alias_presets=None,
         registrations=build_registry(),
         parent=parent,
         on_close=on_close,

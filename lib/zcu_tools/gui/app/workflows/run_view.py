@@ -31,7 +31,9 @@ class WorkflowRunView[C]:
     selectable and foldable; see FormEditor.set_editing_enabled) and the Plan
     tab shows its fixed-plan note. Once the run is
     accepted, its tuning panel replaces the Start knobs in the Tunables tab,
-    titled "Tunables (live)"; it is enabled while running, pausing or paused.
+    titled "Tunables (live)"; the user can edit and Apply it while running,
+    pausing or paused. Stopping makes it read-only but readable (folds still
+    work, nothing greys out) and disables its Apply and Discard.
     Paused delivery selects that tab; the banner shows while the run sits
     paused and hides once Resume is submitted. Terminal delivery shows the
     Start knobs again, reset to the run's latest accepted input, keeps the
@@ -207,7 +209,7 @@ class WorkflowRunView[C]:
             page.insertWidget(page.indexOf(self._forms.knobs) + 1, self._tuning)
         live = lifecycle in _LIVE_LIFECYCLES
         if self._tuning is not None:
-            self._tuning.setEnabled(live)
+            self._tuning.set_editing_enabled(enabled=live)
         self._show_tunables(live=self._locked and self._tuning is not None)
         pending = controller.engine is None and controller.has_pending_segment
         controls = self._controls
