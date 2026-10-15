@@ -6,10 +6,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from pydantic import JsonValue
-from qtpy.QtCore import QEvent, QObject, Qt, QTimer
-from qtpy.QtGui import QColor
+from qtpy.QtCore import QEvent, QObject, Qt
 from qtpy.QtWidgets import (
-    QApplication,
     QDialog,
     QFormLayout,
     QGroupBox,
@@ -24,10 +22,11 @@ from qtpy.QtWidgets import (
 
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.form import FormErrors, FormModel, FormWritePath, WriteRejected
-from zcu_tools.gui.widgets import error_colour, secondary_colour, set_foreground
+from zcu_tools.gui.widgets import error_colour, secondary_colour
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
+from .foregrounds import ThemedForegrounds
 from .items import ModuleWriteback, ParameterWriteback
 
 if TYPE_CHECKING:
@@ -159,7 +158,7 @@ class WritebackEditDialogs:
             refresh(valid)
             dialog.refresh_feedback(preview() if valid else None)
 
-        editor.validity_changed.connect(refresh_preview)
+        editor.errors_changed.connect(refresh_preview)
         unsubscribe = form.state.subscribe(refresh_preview)
         dialog.destroyed.connect(unsubscribe)
         self._module_dialogs[item.session_id] = dialog
@@ -167,10 +166,11 @@ class WritebackEditDialogs:
         dialog.adjustSize()
 
         def on_finished(*_: object) -> None:
+            # Ignore late/duplicate finished delivery after this editor was removed.
             if self._module_dialogs.get(item.session_id) is not dialog:
                 return
             unsubscribe()
-            editor.validity_changed.disconnect(refresh_preview)
+            editor.errors_changed.disconnect(refresh_preview)
             editor.detach()
             self._module_dialogs.pop(item.session_id)
             refresh(not isinstance(form.result(), FormErrors))
@@ -185,7 +185,7 @@ class _EditDialog(QDialog):
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
-        self._foregrounds: dict[QLabel, Callable[[QWidget], QColor]] = {}
+        self.foregrounds = ThemedForegrounds(self)
         # A styled parent does not propagate its explicit palette to Qt windows.
         self._palette_owner = parent
         self.setPalette(parent.palette())
@@ -200,15 +200,10 @@ class _EditDialog(QDialog):
             self.setPalette(self._palette_owner.palette())
         return super().eventFilter(a0, a1)
 
-    def theme_label(self, label: QLabel, colour: Callable[[QWidget], QColor]) -> None:
-        self._foregrounds[label] = colour
-        set_foreground(label, colour(self))
-
     def changeEvent(self, a0: QEvent | None) -> None:
         super().changeEvent(a0)
         if a0 is not None and a0.type() == QEvent.Type.PaletteChange:
-            for label, colour in self._foregrounds.items():
-                set_foreground(label, colour(self))
+            self.foregrounds.refresh()
 
     def context_label(self, text: str) -> QLabel:
         label = QLabel(text)
@@ -290,7 +285,7 @@ def _show_module_refusal(parent: QWidget, item: ModuleWriteback, message: str) -
     layout.addWidget(dialog.context_label(item.description))
     error = dialog.context_label(message)
     error.setObjectName("writebackEditError")
-    dialog.theme_label(error, error_colour)
+    dialog.foregrounds.set(error, error_colour)
     layout.addWidget(error)
     buttons = QHBoxLayout()
     buttons.addStretch(1)
@@ -321,12 +316,12 @@ class _ModuleDialog(_EditDialog):
         layout.setSpacing(8)
         layout.addWidget(self.context_label(item.description))
         self._path = self.context_label("")
-        self.theme_label(self._path, secondary_colour)
+        self.foregrounds.set(self._path, secondary_colour)
         layout.addWidget(self._path)
         hint = self.context_label(
             "Changes go to the writeback draft at once.\nThe library is only written by Apply Selected."
         )
-        self.theme_label(hint, secondary_colour)
+        self.foregrounds.set(hint, secondary_colour)
         layout.addWidget(hint)
         name_row = QFormLayout()
         name_row.setFieldGrowthPolicy(
@@ -353,7 +348,7 @@ class _ModuleDialog(_EditDialog):
         layout.addWidget(scroll, stretch=1)
         self._error = self.context_label("")
         self._error.setObjectName("writebackEditError")
-        self.theme_label(self._error, error_colour)
+        self.foregrounds.set(self._error, error_colour)
         layout.addWidget(self._error)
         buttons = QHBoxLayout()
         buttons.addStretch(1)
@@ -364,35 +359,7 @@ class _ModuleDialog(_EditDialog):
         buttons.addWidget(done)
         layout.addLayout(buttons)
         self._name.editingFinished.connect(self._commit_name)
-        self._observe_input_completion()
-
-    def _observe_input_completion(self) -> None:
-        # FormEditor publishes only validity transitions, not changes between
-        # two local-error sets. Observe input completion after its Qt handler,
-        # including controls created later by expanding a lazy form group.
-        self._feedback_timer = QTimer(self)
-        self._feedback_timer.setSingleShot(True)
-        self._feedback_timer.timeout.connect(self._refresh_errors)
-        self.finished.connect(self._feedback_timer.stop)
-        app = QApplication.instance()
-        if app is not None:
-            app.installEventFilter(self)
-            self.finished.connect(lambda: app.removeEventFilter(self))
-
-    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
-        if (
-            isinstance(a0, QWidget)
-            and a1 is not None
-            and a1.type()
-            in (
-                QEvent.Type.FocusOut,
-                QEvent.Type.KeyRelease,
-                QEvent.Type.MouseButtonRelease,
-            )
-            and self._editor.isAncestorOf(a0)
-        ):
-            self._feedback_timer.start(0)
-        return super().eventFilter(a0, a1)
+        editor.errors_changed.connect(self._refresh_errors)
 
     def _commit_name(self) -> bool:
         text = self._name.text().strip()
@@ -431,13 +398,13 @@ class _ModuleDialog(_EditDialog):
             changes = module_changes(values.current, values.proposed)
             self._changes_title.setText(f"Changes from library ({len(changes)})")
             lines = [change.text() for change in changes]
-            self._changes.setText(
-                "New library entry"
-                if values.current is None
-                else _bounded_lines(lines, 8)
-                if lines
-                else "No changes"
-            )
+            if values.current is None:
+                text = "New library entry"
+            elif lines:
+                text = _bounded_lines(lines, 8)
+            else:
+                text = "No changes"
+            self._changes.setText(text)
             self._changes.setToolTip("\n".join(lines))
         self._refresh_errors()
 
@@ -455,7 +422,9 @@ class _ModuleDialog(_EditDialog):
         if self._retarget_error:
             text = "\n".join(filter(None, [self._retarget_error, text]))
         if self._editor.local_parse_errors() is not None:
-            text += "\nInvalid text is discarded when you press Done."
+            text = "\n".join(
+                filter(None, [text, "Invalid text is discarded when you press Done."])
+            )
         self._error.setText(text)
         self._error.setToolTip("\n".join(lines))
         self._error.setVisible(bool(text))
@@ -480,7 +449,7 @@ class _ValueDialog(_EditDialog):
         layout.setSpacing(10)
         layout.addWidget(self.context_label(item.description))
         path = self.context_label(f"Writes to  {values.actual_path}")
-        self.theme_label(path, secondary_colour)
+        self.foregrounds.set(path, secondary_colour)
         layout.addWidget(path)
         form = QFormLayout()
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
@@ -489,11 +458,8 @@ class _ValueDialog(_EditDialog):
             current += f" {values.unit}"
         current_label = self.context_label(current)
         current_label.setObjectName("writebackCurrentReadonly")
-        self.theme_label(current_label, secondary_colour)
+        self.foregrounds.set(current_label, secondary_colour)
         form.addRow("Current", current_label)
-        # Create the target first to retain existing frontend field discovery order.
-        self._name = QLineEdit(item.target_name, self)
-        self._name.setObjectName("writebackApplyAs")
         self._value = QLineEdit(str(item.proposed_value), self)
         self._value.setObjectName("writebackValue")
         proposal = QHBoxLayout()
@@ -506,13 +472,15 @@ class _ValueDialog(_EditDialog):
             if values.unit:
                 stderr += f" {values.unit}"
             stderr_label = self.context_label(f"± {stderr} (fit stderr)")
-            self.theme_label(stderr_label, secondary_colour)
+            self.foregrounds.set(stderr_label, secondary_colour)
             form.addRow("", stderr_label)
+        self._name = QLineEdit(item.target_name, self)
+        self._name.setObjectName("writebackApplyAs")
         form.addRow("Apply as", self._name)
         layout.addLayout(form)
         self._error = self.context_label("")
         self._error.setObjectName("writebackEditError")
-        self.theme_label(self._error, error_colour)
+        self.foregrounds.set(self._error, error_colour)
         layout.addWidget(self._error)
         self._add_actions(layout)
         self._name.textChanged.connect(self._validate)
@@ -535,22 +503,17 @@ class _ValueDialog(_EditDialog):
     def _parsed(self) -> tuple[str, Any]:
         name = _require_target_name(self._name.text())
         text = self._value.text()
-        if self._unit and text.rstrip().endswith(self._unit):
-            text = text.rstrip()[: -len(self._unit)].rstrip()
         original = self._item.proposed_value
-        try:
-            value = _coerce_scalar_input(text, original)
-        except (ValueError, RuntimeError) as exc:
-            if isinstance(original, bool):
-                message = "Enter true or false"
-            elif isinstance(original, int):
-                message = "Enter an integer"
-            elif isinstance(original, complex):
-                message = "Enter a complex number, e.g. 1+2j"
-            else:
-                message = "Enter a number, e.g. 6012.35"
-            raise ValueError(message) from exc
-        return name, value
+        if (
+            isinstance(original, (int, float, complex))
+            and not isinstance(original, bool)
+            and self._unit
+            and text.rstrip().endswith(self._unit)
+        ):
+            number = text.rstrip()[: -len(self._unit)]
+            if number and (number[-1].isdigit() or number[-1].isspace()):
+                text = number.rstrip()
+        return name, _coerce_scalar_input(text, original)
 
     def _show_error(self, text: str) -> None:
         self._error.setText(text)
@@ -559,7 +522,7 @@ class _ValueDialog(_EditDialog):
     def _validate(self) -> None:
         try:
             self._parsed()
-        except (ValueError, RuntimeError) as exc:
+        except ValueError as exc:
             self._show_error(str(exc))
             self._save_button.setEnabled(False)
         else:
@@ -577,12 +540,11 @@ class _ValueDialog(_EditDialog):
         self.accept()
 
 
-def is_scalar_value(value: Any) -> bool:
-    """A md proposed_value the scalar Edit dialog can round-trip.
+def is_scalar_value(value: object) -> bool:
+    """Return whether value can be hand-edited in the scalar value dialog.
 
-    Scalars (bool/int/float/complex/str/None) are hand-editable via
-    ``_coerce_scalar_input``; a non-scalar (list/matrix, e.g. the confusion
-    matrix) is a derived value applied verbatim, so the UI treats it read-only.
+    True for bool, int, float, complex, str and None; False for containers and
+    other objects, which the writeback view presents as read-only values.
     """
     return value is None or isinstance(value, (bool, int, float, complex, str))
 
@@ -591,26 +553,33 @@ def _require_target_name(text: str) -> str:
     """Validate an apply-destination name (mirrors the tab.writeback_set guard)."""
     name = text.strip()
     if not name:
-        raise RuntimeError("Apply-as name must not be empty")
+        raise ValueError("Apply-as name must not be empty")
     return name
 
 
-def _coerce_scalar_input(text: str, original: Any) -> Any:
-    if isinstance(original, bool):
-        lowered = text.strip().lower()
-        if lowered in {"true", "1", "yes", "on"}:
-            return True
-        if lowered in {"false", "0", "no", "off"}:
-            return False
-        raise RuntimeError(f"Invalid bool value: {text}")
-    if isinstance(original, int) and not isinstance(original, bool):
-        return int(text)
-    # complex before float: a complex md value (e.g. a single-shot IQ centre)
-    # parses via Python's ``complex("1+2j")``. ``float`` would reject "1+2j", so
-    # this branch must precede it. ``complex`` also accepts a bare real ("1.5"),
-    # which keeps a real-only re-entry valid.
-    if isinstance(original, complex):
-        return complex(text.strip())
-    if isinstance(original, float):
-        return float(text)
+def _parse_bool(text: str) -> bool:
+    lowered = text.strip().lower()
+    if lowered in {"true", "1", "yes", "on"}:
+        return True
+    if lowered in {"false", "0", "no", "off"}:
+        return False
+    raise ValueError("Enter true or false")
+
+
+# bool precedes int because bool is an int subclass.
+_SCALAR_PARSERS: dict[type, tuple[Callable[[str], object], str]] = {
+    bool: (_parse_bool, "Enter true or false"),
+    int: (int, "Enter an integer"),
+    complex: (complex, "Enter a complex number, e.g. 1+2j"),
+    float: (float, "Enter a number, e.g. 6012.35"),
+}
+
+
+def _coerce_scalar_input(text: str, original: object) -> object:
+    for kind, (parse, message) in _SCALAR_PARSERS.items():
+        if isinstance(original, kind):
+            try:
+                return parse(text.strip())
+            except ValueError as exc:
+                raise ValueError(message) from exc
     return text

@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from PyQt6.QtCore import pyqtSignal
 from qtpy.QtCore import QEvent, Qt
-from qtpy.QtGui import QColor
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -28,12 +27,12 @@ from zcu_tools.gui.widgets import (
     accent_colour,
     error_colour,
     secondary_colour,
-    set_foreground,
     warning_colour,
 )
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 from .edit_dialogs import WritebackEditDialogs, is_scalar_value, module_changes
+from .foregrounds import ThemedForegrounds
 from .items import ModuleWriteback, ParameterWriteback, WritebackItem
 
 if TYPE_CHECKING:
@@ -294,7 +293,7 @@ class WritebackWidget(QWidget):
         self._applied_states: dict[str, bool] = {}
         self._invalid_modules: set[str] = set()
         self._edit_dialogs = WritebackEditDialogs(self, ctrl, tab_id, pane)
-        self._foregrounds: dict[QLabel, Callable[[QWidget], QColor]] = {}
+        self._foregrounds = ThemedForegrounds(self)
 
         # 13 px ledger per spec — item rows show current → proposed.
         font = self.font()
@@ -331,7 +330,7 @@ class WritebackWidget(QWidget):
 
         self._applied_legend = QLabel("* = not applied")
         self._applied_legend.setObjectName("writebackAppliedLegend")
-        self._theme_label(self._applied_legend, secondary_colour)
+        self._foregrounds.set(self._applied_legend, secondary_colour)
         layout.addWidget(self._applied_legend)
 
         self._rows_container = QFrame()
@@ -356,18 +355,7 @@ class WritebackWidget(QWidget):
     def changeEvent(self, a0: QEvent | None) -> None:
         super().changeEvent(a0)
         if a0 is not None and a0.type() == QEvent.Type.PaletteChange:
-            self._refresh_foregrounds()
-
-    def _theme_label(self, label: QLabel, colour: Callable[[QWidget], QColor]) -> None:
-        # Creation and refresh share the same colour declaration, including dialogs.
-        if label not in self._foregrounds:
-            label.destroyed.connect(lambda: self._foregrounds.pop(label, None))
-        self._foregrounds[label] = colour
-        set_foreground(label, colour(self))
-
-    def _refresh_foregrounds(self) -> None:
-        for label, colour in self._foregrounds.items():
-            set_foreground(label, colour(self))
+            self._foregrounds.refresh()
 
     def show_preview_unavailable(
         self, reason: str, *, unavailable_reasons: tuple[str, ...] = ()
@@ -386,7 +374,7 @@ class WritebackWidget(QWidget):
         make_label_selectable(label)
         label.setObjectName("writebackPreviewUnavailable")
         label.setTextFormat(Qt.TextFormat.PlainText)
-        self._theme_label(label, error_colour)
+        self._foregrounds.set(label, error_colour)
         label.setWordWrap(True)
         self._rows_layout.insertWidget(0, label)
 
@@ -505,11 +493,11 @@ class WritebackWidget(QWidget):
         for reason in unavailable_reasons:
             label = QLabel(f"⚠ {reason}")
             make_label_selectable(label)
-            self._theme_label(label, warning_colour)
+            self._foregrounds.set(label, warning_colour)
             label.setObjectName("writebackUnavailableReason")
             label.setWordWrap(True)
             self._rows_layout.addWidget(label)
-        self._refresh_foregrounds()
+        self._foregrounds.refresh()
         self._refresh_apply_enabled()
         self._update_responsive()
 
@@ -524,7 +512,7 @@ class WritebackWidget(QWidget):
         current_label = _value_label(item, self._display_current(item, compact=True))
         current_label.setToolTip(self._display_current(item, compact=False))
         current_label.setObjectName("writebackCurrent")
-        self._theme_label(current_label, secondary_colour)
+        self._foregrounds.set(current_label, secondary_colour)
         current_label.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
         )
@@ -537,7 +525,7 @@ class WritebackWidget(QWidget):
         )
         make_label_selectable(actual_path)
         actual_path.setObjectName("writebackActualPath")
-        self._theme_label(actual_path, secondary_colour)
+        self._foregrounds.set(actual_path, secondary_colour)
         actual_path.setWordWrap(True)
         self._row_widgets[item.session_id] = (
             current_label,
@@ -553,7 +541,7 @@ class WritebackWidget(QWidget):
             proposed_table=proposed_table,
             actual_path=actual_path,
         )
-        self._theme_label(row.arrow, secondary_colour)
+        self._foregrounds.set(row.arrow, secondary_colour)
         row.setToolTip(item.description)
         return row
 
@@ -575,7 +563,7 @@ class WritebackWidget(QWidget):
             font = proposed_label.font()
             font.setBold(True)
             proposed_label.setFont(font)
-            self._theme_label(proposed_label, accent_colour)
+            self._foregrounds.set(proposed_label, accent_colour)
         proposed_label.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
         )
@@ -651,12 +639,12 @@ class WritebackWidget(QWidget):
                 item.target_name for item in self._items if item.session_id in invalid
             ]
             self._hint.setText(f"Fix or uncheck invalid module: {', '.join(targets)}")
-            self._theme_label(self._hint, warning_colour)
+            self._foregrounds.set(self._hint, warning_colour)
         else:
             self._hint.setText(
                 "Select the items to write back. Use Edit to adjust values first."
             )
-            self._theme_label(
+            self._foregrounds.set(
                 self._hint, lambda owner: owner.palette().color(owner.foregroundRole())
             )
 
@@ -724,6 +712,8 @@ class WritebackWidget(QWidget):
             if not compact:
                 return self._module_tooltip(item)
             count = len(module_changes(values.current, values.proposed))
+            if count == 1:
+                return "1 change"
             return f"{count} changes" if count else "no changes"
         proposed = (
             _compact_value(values.proposed) if compact else _full_value(values.proposed)
@@ -780,7 +770,7 @@ class WritebackWidget(QWidget):
             self._invalid_modules.discard(item.session_id)
             self._refresh_item_preview(item)
         proposed_label = self._row_widgets[item.session_id][1]
-        self._theme_label(proposed_label, accent_colour if valid else error_colour)
+        self._foregrounds.set(proposed_label, accent_colour if valid else error_colour)
         self._refresh_apply_enabled()
 
     def _edit_item(self, item: WritebackItem) -> None:

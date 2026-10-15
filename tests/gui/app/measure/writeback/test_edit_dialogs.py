@@ -348,12 +348,12 @@ def test_module_ledger_summarizes_changes_and_exposes_full_tooltip(module_editor
     current = widget.findChild(QLabel, "writebackCurrent")
     proposed = widget.findChild(QLabel, "writebackProposed")
     assert current.text() == "library entry"
-    assert proposed.text() == "1 changes"
+    assert proposed.text() == "1 change"
     assert "freq  6000.0 → 6001.0" in proposed.toolTip()
     form.state.write({("freq",): 6000.0}, form.env)
     assert proposed.text() == "no changes"
     form.state.write({("gain",): 0.4}, form.env)
-    assert proposed.text() == "1 changes"
+    assert proposed.text() == "1 change"
     assert "gain  0.2 → 0.4" in proposed.toolTip()
 
 
@@ -399,7 +399,7 @@ def test_invalid_module_ledger_explains_apply_gate_and_recovers(module_editor, q
     assert "Select the items to write back" in hint.text()
     checkbox.setChecked(True)
     commit_text_on_focus_loss(freq, "6002.0")
-    assert proposed.text() == "1 changes"
+    assert proposed.text() == "1 change"
     assert "Select the items to write back" in hint.text()
     assert button(widget, "Apply Selected").isEnabled()
 

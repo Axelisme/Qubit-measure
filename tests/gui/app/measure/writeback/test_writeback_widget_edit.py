@@ -132,9 +132,8 @@ def test_edit_md_item_can_change_target_name(qapp, widget_factory, control_facto
     _edit_button(widget).click()
     dialog = _find_open_dialog("Edit value —")
     try:
-        line_edits = dialog.findChildren(QLineEdit)
-        # First field is "Apply as" (target_name), second is "Value".
-        name_edit, value_edit = line_edits[0], line_edits[1]
+        name_edit = dialog.findChild(QLineEdit, "writebackApplyAs")
+        value_edit = dialog.findChild(QLineEdit, "writebackValue")
         assert name_edit.text() == "r_f"
 
         name_edit.setText("r_f_tuned")
@@ -162,7 +161,7 @@ def test_edit_md_item_rejects_blank_target_name(qapp, widget_factory, control_fa
     _edit_button(widget).click()
     dialog = _find_open_dialog("Edit value —")
     try:
-        name_edit = dialog.findChildren(QLineEdit)[0]
+        name_edit = dialog.findChild(QLineEdit, "writebackApplyAs")
         name_edit.setText("   ")
         save_btn = next(
             b for b in dialog.findChildren(QPushButton) if b.text() == "Save"
@@ -187,7 +186,7 @@ def test_edit_md_item_parses_complex_value(qapp, widget_factory, control_factory
     _edit_button(widget).click()
     dialog = _find_open_dialog("Edit value —")
     try:
-        value_edit = dialog.findChildren(QLineEdit)[1]
+        value_edit = dialog.findChild(QLineEdit, "writebackValue")
         value_edit.setText("3-4j")
         save_btn = next(
             b for b in dialog.findChildren(QPushButton) if b.text() == "Save"
@@ -213,7 +212,7 @@ def test_edit_md_item_rejects_unparseable_complex(
     _edit_button(widget).click()
     dialog = _find_open_dialog("Edit value —")
     try:
-        value_edit = dialog.findChildren(QLineEdit)[1]
+        value_edit = dialog.findChild(QLineEdit, "writebackValue")
         value_edit.setText("not a number")
         save_btn = next(
             b for b in dialog.findChildren(QPushButton) if b.text() == "Save"
@@ -368,7 +367,7 @@ def test_module_dialog_edits_shared_form_and_applies_as_new_name(module_widget):
     assert mode is not None
     mode.trigger()
     commit_text(_input(dialog, "gain"), "general.ext.gain / 2")
-    name = dialog.findChildren(QLineEdit)[0]
+    name = dialog.findChild(QLineEdit, "writebackApplyAs")
     name.setText("Q1.pulses.retuned")
     name.editingFinished.emit()
     # A blank Apply-as does not erase the last destination.

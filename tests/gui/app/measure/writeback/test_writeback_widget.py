@@ -641,10 +641,8 @@ def test_retarget_edit_refreshes_captured_path_current_and_proposal(
             and candidate.isVisible()
             and candidate.windowTitle() == "Edit value — driver.frequency"
         )
-        inputs = dialog.findChildren(QLineEdit)
-        assert len(inputs) == 2
-        inputs[0].setText("driver.ext.other")
-        inputs[1].setText("9.0")
+        dialog.findChild(QLineEdit, "writebackApplyAs").setText("driver.ext.other")
+        dialog.findChild(QLineEdit, "writebackValue").setText("9.0")
         next(
             button
             for button in dialog.findChildren(QPushButton)
