@@ -692,7 +692,7 @@ def module_form[S: ConfigBase](spec_type: type[S]) -> Form[S]:
     """Build the Form for one concrete persistent module or waveform Spec class.
 
     spec_type is a member class of ModuleSpec or WaveformSpec, such as PulseSpec
-    or DirectReadoutCfg. Union aliases, materialized or native runtime cfgs and
+    or PulseReadoutSpec. Union aliases, materialized or native runtime cfgs and
     other classes raise TypeError. The model is a FormModel usable as a
     FormState root or a ModuleInline module field; hosts add choices through
     their own choices(env). to_cfg returns spec_type and keeps child library

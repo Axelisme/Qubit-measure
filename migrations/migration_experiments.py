@@ -37,7 +37,6 @@ from zcu_lab.v2.mist.power_dep.single_trace import core as mist_power_dep_single
 from zcu_lab.v2.onetone.flux_dep import core as onetone_flux_dep
 from zcu_lab.v2.onetone.freq import core as onetone_freq
 from zcu_lab.v2.onetone.power_dep import core as onetone_power_dep
-from zcu_lab.v2.onetone.sa import core as onetone_sa
 from zcu_lab.v2.singleshot.ac_stark import core as singleshot_ac_stark
 from zcu_lab.v2.singleshot.amp_rabi import core as singleshot_amp_rabi
 from zcu_lab.v2.singleshot.check import core as singleshot_check
@@ -179,7 +178,6 @@ MIGRATION_EXPERIMENTS = (
     _declaration(onetone_flux_dep.FluxDepExp.AXES_SPEC),
     _declaration(onetone_freq.FreqExp.AXES_SPEC),
     _declaration(onetone_power_dep.PowerDepExp.AXES_SPEC),
-    _declaration(onetone_sa.SA_FreqExp.AXES_SPEC),
     _declaration(singleshot_ac_stark.AcStarkExp.AXES_SPEC),
     _declaration(singleshot_amp_rabi.AmpRabiExp.AXES_SPEC),
     _declaration(singleshot_check.CheckExp.AXES_SPEC),
