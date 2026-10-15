@@ -129,6 +129,7 @@ def test_cancel_during_writeback_retains_stage_and_prevents_next_admission(
         assert status["analysis_stage"] == stage
         cancelled = cancel_while_rpc_held(client, execution, release)
         assert cancelled.data["gui_cancel"]["status"] == "not_needed"
+        # RPC released, cancel caller joined: worker can finish; 30s guards deadlock.
         terminal = full_execution_reply(
             client, client.call("wait", {"execution": execution, "timeout": 30})
         )
@@ -253,6 +254,7 @@ def test_cancel_during_post_save_preserves_real_save_outcome(
         execution = initial.data["execution"]
         cancelled = cancel_while_rpc_held(client, execution, release)
         assert cancelled.data["gui_cancel"]["status"] == "not_needed"
+        # RPC released, cancel caller joined: worker can finish; 30s guards deadlock.
         terminal = full_execution_reply(
             client, client.call("wait", {"execution": execution, "timeout": 30})
         )

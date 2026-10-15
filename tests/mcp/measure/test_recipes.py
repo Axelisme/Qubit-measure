@@ -692,6 +692,7 @@ def test_recipe_cancel_blocks_the_next_phase_while_an_admitted_read_finishes(
         control_reply = cancel_while_rpc_held(client, execution, release)
         assert control_reply.data["execution"] == execution
         assert not control_reply.is_error
+        # RPC released, cancel caller joined: worker can finish; 30s guards deadlock.
         terminal = full_execution_reply(
             client, client.call("wait", {"execution": execution, "timeout": 30})
         )
@@ -863,6 +864,7 @@ def test_recipe_cancel_during_admitted_writeback_preserves_result_and_intent(
         control_reply = cancel_while_rpc_held(client, execution, release)
         assert control_reply.data["execution"] == execution
         assert control_reply.data["gui_cancel"]["status"] == "not_needed"
+        # RPC released, cancel caller joined: worker can finish; 30s guards deadlock.
         terminal = full_execution_reply(
             client, client.call("wait", {"execution": execution, "timeout": 30})
         )
