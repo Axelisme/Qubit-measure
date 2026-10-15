@@ -89,6 +89,9 @@ writeback or diagnosis, use rpc_list(domain?), rpc_describe(method), then
 rpc_call(method, params). Every listed public method remains callable even
 when a recipe or shared tool covers it. Raw RPC does not aggregate tool
 results, decode PNG replies, or run the analysis artifact save pipeline.
+For large forms, temporarily avoid direct rpc_call(method="tab.get_cfg") reads
+and prefer recipes or an existing tab.edit_cfg response; remove this guidance
+when lazy-form is complete.
 
 For authorized setup, simulation_initialize uses the GUI coordinator and may
 switch away from real devices. It does not launch a GUI or connect real hardware.
