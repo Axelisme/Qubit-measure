@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from qtpy.QtCore import Qt, QUrl
-from qtpy.QtGui import QDesktopServices, QResizeEvent
+from qtpy.QtCore import QEvent, Qt, QUrl
+from qtpy.QtGui import QColor, QDesktopServices, QPalette, QResizeEvent
 from qtpy.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -26,6 +27,7 @@ from zcu_tools.gui.app.measure.artifact_tracker import (
     OutputSnapshot,
     SaveStatus,
 )
+from zcu_tools.gui.widgets import error_colour, mixed_colour
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.entry import ArtifactKey
 
@@ -51,9 +53,13 @@ _SECTION_TITLE = {
     "post_analysis": "Post-analysis results",
 }
 _NO_PERSISTENCE_HINT = "This experiment does not save to the result entry yet."
-# QLineEdit draws its text inside a frame and cursor inset that contentsRect
-# and textMargins do not report; without this slack the elided text clips.
+# QLineEdit reserves a text/cursor inset even without a frame. contentsRect
+# and textMargins do not report it; without this slack the elided text clips.
 _LINE_EDIT_TEXT_INSET = 8
+# Path text is smaller than the filename above it.
+_PATH_FONT_SCALE = 0.9
+# Share of Window mixed into Text to make the path a secondary foreground.
+_PATH_WINDOW_SHARE = 0.42
 
 
 def _display_path(path: Path, bases: tuple[Path, ...]) -> str:
@@ -94,9 +100,43 @@ class _ElidedPathEdit(QLineEdit):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setReadOnly(True)
         self._display = ""
         self._full = ""
+        self.setReadOnly(True)
+        self.setFrame(False)
+        font = self.font()
+        if font.pointSizeF() > 0:
+            font.setPointSizeF(font.pointSizeF() * _PATH_FONT_SCALE)
+        else:
+            font.setPixelSize(max(1, round(font.pixelSize() * _PATH_FONT_SCALE)))
+        self.setFont(font)
+        self._update_colour()
+
+    def changeEvent(self, a0: QEvent | None) -> None:
+        super().changeEvent(a0)
+        if a0 is not None:
+            if a0.type() == QEvent.Type.PaletteChange:
+                self._update_colour()
+            elif a0.type() == QEvent.Type.FontChange:
+                self._update_text()
+
+    def _update_colour(self) -> None:
+        shown = self.palette()
+        # Read the inherited colours, not our already-muted Text colour.
+        parent = self.parentWidget()
+        source = parent.palette() if parent is not None else QApplication.palette()
+        text = source.color(QPalette.ColorRole.Text)
+        window = source.color(QPalette.ColorRole.Window)
+        secondary = mixed_colour(text, window, _PATH_WINDOW_SHARE)
+        # Avoid re-entry when setPalette triggers another PaletteChange.
+        if (
+            shown.color(QPalette.ColorRole.Text) != secondary
+            or shown.color(QPalette.ColorRole.Base).alpha() != 0
+        ):
+            palette = QPalette()
+            palette.setColor(QPalette.ColorRole.Text, secondary)
+            palette.setColor(QPalette.ColorRole.Base, QColor(0, 0, 0, 0))
+            self.setPalette(palette)
 
     def full_path(self) -> str:
         return self._full
@@ -233,28 +273,43 @@ class ArtifactSaveCenter(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
         row = QHBoxLayout()
+        row.setSpacing(6)
         name = QLabel()
         make_label_selectable(name)
         row.addWidget(name)
+        status = QLabel()
+        row.addWidget(status)
+        row.addStretch()
         edit = _ElidedPathEdit()
-        row.addWidget(edit, stretch=1)
         open_folder = QPushButton("Open folder")
         open_folder.clicked.connect(
             lambda _checked=False, e=edit: self._open_folder(e.full_path())
         )
         row.addWidget(open_folder)
-        status = QLabel()
-        row.addWidget(status)
         layout.addLayout(row)
+        layout.addWidget(edit)
         # A failure message needs the full width to wrap readably.
         error = QLabel()
         make_label_selectable(error)
         error.setTextFormat(Qt.TextFormat.PlainText)
         error.setWordWrap(True)
-        error.setStyleSheet("color: #b00020;")
+        error.setPalette(self._error_palette())
         error.hide()
         layout.addWidget(error)
         return _OutputRow(container, name, edit, status, error)
+
+    def changeEvent(self, a0: QEvent | None) -> None:
+        super().changeEvent(a0)
+        if a0 is not None and a0.type() == QEvent.Type.PaletteChange:
+            palette = self._error_palette()
+            for row in self._output_rows.values():
+                row.error.setPalette(palette)
+
+    def _error_palette(self) -> QPalette:
+        """Return the output-error foreground for the current palette."""
+        palette = QPalette()
+        palette.setColor(QPalette.ColorRole.WindowText, error_colour(self))
+        return palette
 
     def _save_artifact(self, ref: ArtifactRef) -> None:
         if self._save_handler is not None:
