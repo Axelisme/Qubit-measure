@@ -101,6 +101,7 @@ def test_published_validation_reports_recovered_gate_scale_after_reload(tmp_path
 
     library = EvolutionLibrary(tmp_path / "data")
     result = library.build(BuildPlan(_family(), -.1, .1, 6), IntelOpenCL(tmp_path / "compiler"))
+    assert result.validation is not None
     assert result.validation.calibration_scale_abs <= 2e-5
     assert result.validation.density_abs <= 2e-9
     assert result.validation.long_abs <= 2e-7
