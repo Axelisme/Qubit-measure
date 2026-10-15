@@ -26,7 +26,11 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.form_adapter import Form, FormContext
-from zcu_tools.gui.session.context_types import CommandOrigin, EntryRequest, PointCreateRequest
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryRequest,
+    PointCreateRequest,
+)
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import AcquiredPayload, ArtifactKey
 
@@ -55,23 +59,41 @@ class OpaqueAdapter(BaseAdapter[SavingCfg, OpaqueRun, PaneSummary, PaneParams]):
     def run(self, req: RunRequest, cfg: SavingCfg, *, context: RunContext) -> OpaqueRun:
         return OpaqueRun(RunRecord(cfg, SavingCore().run(cfg, context=context)))
 
-    def analyze(self, req: AnalyzeRequest[OpaqueRun, PaneParams], *, plots: Plots) -> PaneSummary:
+    def analyze(
+        self, req: AnalyzeRequest[OpaqueRun, PaneParams], *, plots: Plots
+    ) -> PaneSummary:
         _, axes = plots.subplots("fit")
-        axes.plot(req.run_result.source.result.frequency, req.run_result.source.result.signal.real)
+        axes.plot(
+            req.run_result.source.result.frequency,
+            req.run_result.source.result.signal.real,
+        )
         return PaneSummary(17.0)
 
     def data_item(self, key: ArtifactKey, result: object, *, comment: str) -> DataItem:
         if not isinstance(result, OpaqueRun):
             raise TypeError("Expected this adapter's opaque handle")
-        return DataItem.from_run(key, result.source, spec=SavingCore().persistence_spec(), comment=comment)
+        return DataItem.from_run(
+            key, result.source, spec=SavingCore().persistence_spec(), comment=comment
+        )
 
     def analysis_item(
-        self, key: ArtifactKey, result: object, parameters: object | None,
-        *, pane: Literal["analysis", "post_analysis"],
+        self,
+        key: ArtifactKey,
+        result: object,
+        parameters: object | None,
+        *,
+        pane: Literal["analysis", "post_analysis"],
     ) -> AnalysisItem:
-        return AnalysisItem(key, AnalysisDocument.model_validate({
-            "pane": pane, "parameters": {"captured": 2.0}, "summary": {"opaque_mean": 17.0}
-        }))
+        return AnalysisItem(
+            key,
+            AnalysisDocument.model_validate(
+                {
+                    "pane": pane,
+                    "parameters": {"captured": 2.0},
+                    "summary": {"opaque_mean": 17.0},
+                }
+            ),
+        )
 
 
 class FailingDataAdapter(OpaqueAdapter):
@@ -80,17 +102,25 @@ class FailingDataAdapter(OpaqueAdapter):
 
 
 @pytest.fixture
-def opaque_host(tmp_path: Path, qapp: QApplication) -> Generator[tuple[State, Controller]]:
+def opaque_host(
+    tmp_path: Path, qapp: QApplication
+) -> Generator[tuple[State, Controller]]:
     """Register synthetic adapters in one real offline application host."""
     registry = Registry()
     registry.register("opaque", OpaqueAdapter)
     registry.register("failed_data", FailingDataAdapter)
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     controller = FixtureController(
-        state=state, registry=registry, view=None, bus=BaseEventBus(), project_root=str(tmp_path)
+        state=state,
+        registry=registry,
+        view=None,
+        bus=BaseEventBus(),
+        project_root=str(tmp_path),
     )
     controller.setup_control.new_entry(EntryRequest("opaque-entry"))
-    controller.context_control.new_point(PointCreateRequest("p", "historical", CommandOrigin("gui")))
+    controller.context_control.new_point(
+        PointCreateRequest("p", "historical", CommandOrigin("gui"))
+    )
     try:
         yield state, controller
     finally:
@@ -118,7 +148,9 @@ def test_registered_opaque_handle_acquires_analyzes_and_hands_over_items(
     controller.run_analyze_control.start_run(tab_id, origin=CommandOrigin("mcp"))
     wait_until_idle(state, tab_id, qapp)
     tab = state.get_tab(tab_id)
-    assert isinstance(tab.run.result, OpaqueRun), "Native evidence must accept an opaque run handle"
+    assert isinstance(tab.run.result, OpaqueRun), (
+        "Native evidence must accept an opaque run handle"
+    )
     handle = tab.run.result
     metadata = tab.run.metadata
     storage = tab.run.storage
@@ -135,14 +167,21 @@ def test_registered_opaque_handle_acquires_analyzes_and_hands_over_items(
     wait_until_idle(state, tab_id, qapp)
     assert controller.get_tab_analyze_result(tab_id) == PaneSummary(17.0)
     assert tab.run.result is handle
-    controller.context_control.new_point(PointCreateRequest("q", "later", CommandOrigin("gui")))
-    report = controller.save_control.save_artifacts(tab_id, comment="opaque annotation", origin=CommandOrigin("gui"))
+    controller.context_control.new_point(
+        PointCreateRequest("q", "later", CommandOrigin("gui"))
+    )
+    report = controller.save_control.save_artifacts(
+        tab_id, comment="opaque annotation", origin=CommandOrigin("gui")
+    )
     data = [item for item in report.outputs if item.key.member == "data"]
     other = [item for item in report.outputs if item.key.member != "data"]
     assert len(data) == 2 and len(other) == 3
     assert all(item.status == ("failed" if failed_data else "saved") for item in data)
     if failed_data:
-        assert all(item.error and "opaque data preparation rejected" in item.error for item in data)
+        assert all(
+            item.error and "opaque data preparation rejected" in item.error
+            for item in data
+        )
     else:
         stored = load_run_data(data[0].output.path)
         assert stored.metadata.run_id == metadata.run_id
@@ -152,13 +191,40 @@ def test_registered_opaque_handle_acquires_analyzes_and_hands_over_items(
     document = next(item.output.path for item in other if item.output.format == "json")
     assert json.loads(document.read_text())["summary"] == {"opaque_mean": 17.0}
     committed = state.get_artifact_snapshots(tab_id)
-    projected = {(member.key, output.path): (output.status, output.error)
-                 for section in committed for artifact in section.artifacts
-                 for member in artifact.members for output in member.outputs}
-    assert all(projected[(item.key, item.output.path)] == (item.status, item.error) for item in report.outputs)
+    projected = {
+        (member.key, output.path): (output.status, output.error)
+        for section in committed
+        for artifact in section.artifacts
+        for member in artifact.members
+        for output in member.outputs
+    }
+    assert all(
+        projected[(item.key, item.output.path)] == (item.status, item.error)
+        for item in report.outputs
+    )
     second = controller.save_control.save_artifacts(tab_id, origin=CommandOrigin("mcp"))
     assert second.run_id == report.run_id == metadata.run_id
     assert second.outputs[0].output.path == report.outputs[0].output.path
-    assert second.outputs[1].output.path != report.outputs[1].output.path
+    if not failed_data:
+        assert second.outputs[1].output.path != report.outputs[1].output.path
+    assert all(
+        item.status == ("failed" if failed_data else "saved")
+        for item in second.outputs
+        if item.key.member == "data"
+    )
+    assert all(
+        item.status == "saved" for item in second.outputs if item.key.member != "data"
+    )
+    latest = {
+        (member.key, output.path): (output.status, output.error)
+        for section in state.get_artifact_snapshots(tab_id)
+        for artifact in section.artifacts
+        for member in artifact.members
+        for output in member.outputs
+    }
+    assert all(
+        latest[(item.key, item.output.path)] == (item.status, item.error)
+        for item in second.outputs
+    )
     assert [event.origin for event in storage.ledger.events()] == ["mcp", "gui", "mcp"]
     assert tab.run.result is handle
