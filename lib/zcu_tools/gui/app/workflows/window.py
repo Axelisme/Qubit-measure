@@ -28,7 +28,7 @@ from zcu_tools.experiment.workflows import (
     TunablesSnapshot,
 )
 from zcu_tools.experiment.workflows.clock import UtcClock
-from zcu_tools.gui.app.workflows._form_io import inspect_form_input, prepare_start_form
+from zcu_tools.gui.app.workflows._form_io import FormInspection, prepare_start_form
 from zcu_tools.gui.app.workflows.controller import WorkflowController
 from zcu_tools.gui.app.workflows.figure_area import WorkflowFigureArea
 from zcu_tools.gui.app.workflows.layout import build_workflow_layout
@@ -37,6 +37,7 @@ from zcu_tools.gui.app.workflows.persistence import (
     WorkflowInputSnapshot,
 )
 from zcu_tools.gui.app.workflows.remote import (
+    FormDescriptionInspectionReply,
     FormInspectionReply,
     WorkflowRemoteControlAdapter,
 )
@@ -698,9 +699,37 @@ class WorkflowWindow[C](QWidget):
         FormState; local text is not candidate input. Structural/source write
         errors return FormErrors, model errors are in the reply. No input/base,
         accepted input, local text, Engine state, lease or source is changed.
-        Schema/source declaration failures propagate. Ordinary value projection
+        Source/declaration failures propagate. Ordinary value projection
         preserves the existing complex tag and rejects nonfinite values.
         """
+        return self._form_inspection(form, run_id).read(batch)
+
+    def describe_form(
+        self,
+        form: Literal["plan", "tunables"],
+        path: FormWritePath,
+        *,
+        run_id: str | None = None,
+        batch: Mapping[FormWritePath, JsonValue] | None = None,
+    ) -> FormDescriptionInspectionReply | FormErrors:
+        """Observe and describe one form candidate in the same GUI owner turn.
+
+        form, run_id and batch follow inspect_form's target/preview contract.
+        path is a tuple of model-field names; () describes root. Return the same
+        lean observation plus metadata for path and its direct children, using
+        that exact candidate and fixed env. Model-invalid candidates remain
+        readable. Structural writes return FormErrors; unknown/inactive/whole-
+        leaf descendant paths raise FormPathError. Pending/stale target and source/
+        declaration failures follow inspect_form. No input, base, accepted input,
+        Engine, capture, local text or source is changed and no I/O occurs.
+        """
+        return self._form_inspection(form, run_id).describe(path, batch)
+
+    def _form_inspection(
+        self,
+        form: Literal["plan", "tunables"],
+        run_id: str | None,
+    ) -> FormInspection:
         if form not in ("plan", "tunables"):
             raise ValueError("Unknown workflow form")
         panel = self.plan_panel if form == "plan" else self.tunables_panel
@@ -731,8 +760,7 @@ class WorkflowWindow[C](QWidget):
                 if self.tuning_panel is None:
                     raise RuntimeError("Accepted run has no tuning panel")
                 editor = self.tuning_panel.panel.editor
-        local = editor.local_parse_errors() if batch is None else None
-        return inspect_form_input(state.input, env, batch, local, revision)
+        return FormInspection(state.input, env, editor.local_parse_errors(), revision)
 
     def figure_names(self, run_id: str) -> tuple[str, ...]:
         """List attached native run_id's figure names on the Qt owner, without rendering.

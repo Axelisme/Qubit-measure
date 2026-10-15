@@ -3,7 +3,6 @@
 from collections.abc import Mapping
 
 import pytest
-from jsonschema import Draft202012Validator
 from pydantic import Field, JsonValue
 from pydantic_core import PydanticCustomError
 from zcu_tools.cfg_model import PulseSpec
@@ -171,9 +170,7 @@ def test_public_module_alias_projects_reference_choices() -> None:
             return {("drive", "name"): ("Q1.pulses.pi",)}
 
     env = FormEnv(library=library())
-    validator = Draft202012Validator(ModuleAliasForm.input_schema(env))
     valid: dict[str, JsonValue] = {"drive": {"kind": "ref", "name": "Q1.pulses.pi"}}
-    assert validator.is_valid(valid)
     assert isinstance(
         FormState(FormInput(ModuleAliasForm, valid)).result(env), ModuleAliasForm
     )
@@ -183,7 +180,6 @@ def test_public_module_alias_projects_reference_choices() -> None:
     errors = FormState(FormInput(ModuleAliasForm, invalid)).result(env)
     assert isinstance(errors, FormErrors)
     assert ("drive", "name") in errors.messages
-    assert not validator.is_valid(invalid)
 
 
 def test_same_batch_explicit_inline_content_follows_branch_selection() -> None:

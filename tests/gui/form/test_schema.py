@@ -1,10 +1,9 @@
-"""Input schema is a dynamic public contract, not documentation text."""
+"""Dynamic choices constrain result values at independent model-field paths."""
 
 from collections.abc import Mapping
 from typing import Annotated, Literal
 
 import pytest
-from jsonschema import Draft202012Validator
 from pydantic import BaseModel, Field, JsonValue
 from zcu_tools.gui.form import (
     Display,
@@ -34,27 +33,6 @@ class WholeContainerChoicesForm(FormModel):
             ("samples",): ([1.0],),
             ("phasors",): ([{"__complex__": [1.0, 2.0]}],),
             ("offsets",): ({"drive": {"__complex__": [1.0, 2.0]}},),
-        }
-
-
-class SchemaForm(FormModel):
-    """Project numeric/complex envelopes, nullable values and dynamic enums."""
-
-    amount: Annotated[float, Display(unit="us")] = Field(default=2.0, gt=0)
-    amplitude: complex = 1 + 0j
-    mode: str = "alpha"
-    optional: float | None = None
-
-    @classmethod
-    def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
-        """The same captured choices drive schema and model validation."""
-        return {
-            ("mode",): ("beta",)
-            if (
-                env.parameters is not None
-                and env.parameters.lookup("general.ext.beta_only").value
-            )
-            else ("alpha",)
         }
 
 
@@ -187,11 +165,8 @@ class NestedChoicesForm(FormModel):
         }
 
 
-def test_nested_choices_schema_and_result_keep_reused_and_union_fields_isolated() -> (
-    None
-):
+def test_nested_choices_result_keep_reused_and_union_fields_isolated() -> None:
     env = FormEnv()
-    validator = Draft202012Validator(NestedChoicesForm.input_schema(env))
     for kind in ("alpha", "beta"):
         valid: dict[str, JsonValue] = {
             "restricted": {"mode": "alpha"},
@@ -199,7 +174,6 @@ def test_nested_choices_schema_and_result_keep_reused_and_union_fields_isolated(
             "optional": {"mode": "beta"},
             "branch": {"kind": kind, "mode": "beta"},
         }
-        assert validator.is_valid(valid)
         assert isinstance(
             FormState(FormInput(NestedChoicesForm, valid)).result(env),
             NestedChoicesForm,
@@ -211,7 +185,6 @@ def test_nested_choices_schema_and_result_keep_reused_and_union_fields_isolated(
         )
         for field, bad in invalid_cases:
             invalid: dict[str, JsonValue] = {**valid, field: bad}
-            assert not validator.is_valid(invalid)
             result = FormState(FormInput(NestedChoicesForm, invalid)).result(env)
             assert isinstance(result, FormErrors)
             assert (field, "mode") in result.messages
@@ -221,7 +194,6 @@ def test_nested_choices_schema_and_result_keep_reused_and_union_fields_isolated(
             "restricted": {"mode": "alpha", "level": {"expr": "2"}},
             "optional": None,
         }
-        assert not validator.is_valid(expression)
         result = FormState(FormInput(NestedChoicesForm, expression)).result(env)
         assert isinstance(result, FormErrors)
         assert ("restricted", "level") in result.messages
@@ -229,7 +201,6 @@ def test_nested_choices_schema_and_result_keep_reused_and_union_fields_isolated(
             **valid,
             "restricted": {"mode": "alpha", "level": 3.0},
         }
-        assert not validator.is_valid(numeric_invalid)
         result = FormState(FormInput(NestedChoicesForm, numeric_invalid)).result(env)
         assert isinstance(result, FormErrors)
         assert ("restricted", "level") in result.messages
@@ -238,8 +209,6 @@ def test_nested_choices_schema_and_result_keep_reused_and_union_fields_isolated(
 @pytest.mark.parametrize("kind", ["alpha", "beta"])
 def test_nullable_union_projects_branch_choices_and_complex_input(kind: str) -> None:
     env = FormEnv()
-    validator = Draft202012Validator(NullableChoicesForm.input_schema(env))
-    assert validator.is_valid({"branch": None})
     null_result = FormState(FormInput(NullableChoicesForm, {"branch": None})).result(
         env
     )
@@ -253,7 +222,6 @@ def test_nullable_union_projects_branch_choices_and_complex_input(kind: str) -> 
         valid: dict[str, JsonValue] = {
             "branch": {"kind": kind, "mode": f"local-{kind}", "amplitude": amplitude}
         }
-        assert validator.is_valid(valid)
         result = FormState(FormInput(NullableChoicesForm, valid)).result(env)
         assert isinstance(result, NullableChoicesForm)
         assert result.branch is not None
@@ -261,7 +229,6 @@ def test_nullable_union_projects_branch_choices_and_complex_input(kind: str) -> 
         invalid: dict[str, JsonValue] = {
             "branch": {"kind": kind, "mode": "other", "amplitude": amplitude}
         }
-        assert not validator.is_valid(invalid)
         errors = FormState(FormInput(NullableChoicesForm, invalid)).result(env)
         assert isinstance(errors, FormErrors)
         assert ("branch", "mode") in errors.messages
@@ -284,8 +251,6 @@ def test_nullable_union_rejects_invalid_branch_local_choice_path() -> None:
         ] = None
 
     env = FormEnv()
-    with pytest.raises(ValueError, match="path|field|leaf"):
-        InvalidNullableForm.input_schema(env)
     active = FormState(FormInput(InvalidNullableForm, {"branch": {"kind": "alpha"}}))
     with pytest.raises(ValueError, match="path|field|leaf"):
         active.result(env)
@@ -297,12 +262,10 @@ def test_deepest_local_choices_override_only_overlapping_parent_paths(
     empty_parent: bool, empty_child: bool
 ) -> None:
     env = captured_ext_env(empty_parent=empty_parent, empty_child=empty_child)
-    validator = Draft202012Validator(EnclosingChoicesForm.input_schema(env))
     valid: dict[str, JsonValue] = {
         "restricted": {"mode": "child", "level": 2.0, "nested": {"mode": "deep"}},
         "unrestricted": {"mode": "child", "level": 3.0, "nested": {"mode": "deep"}},
     }
-    assert validator.is_valid(valid) is not empty_child
     result = FormState(FormInput(EnclosingChoicesForm, valid)).result(env)
     if empty_child:
         assert isinstance(result, FormErrors)
@@ -327,7 +290,6 @@ def test_deepest_local_choices_override_only_overlapping_parent_paths(
         }
         restricted[field] = bad
         invalid: dict[str, JsonValue] = {**valid, "restricted": restricted}
-        assert not validator.is_valid(invalid)
         errors = FormState(FormInput(EnclosingChoicesForm, invalid)).result(env)
         assert isinstance(errors, FormErrors)
         path = (
@@ -353,44 +315,10 @@ def test_choices_reject_container_key_and_index_paths(path: FormPath) -> None:
 
     env = FormEnv()
     with pytest.raises(ValueError, match="path|field|leaf|index|mapping"):
-        ContainerChoicesForm.input_schema(env)
+        FormState(ContainerChoicesForm.default_input(env)).describe((), env)
     state = FormState(ContainerChoicesForm.default_input(env))
     with pytest.raises(ValueError, match="path|field|leaf|index|mapping"):
         state.result(env)
-
-
-def test_schema_without_state_describes_partial_expression_complex_and_choices() -> (
-    None
-):
-    env = FormEnv()
-    schema = SchemaForm.input_schema(env)
-    validator = Draft202012Validator(schema)
-    assert validator.is_valid({})
-    assert validator.is_valid(
-        {
-            "amount": {"expr": "general.ext.seed"},
-            "amplitude": {"__complex__": [1.0, 2.0]},
-        }
-    )
-    assert validator.is_valid({"amplitude": {"expr": "1 + 2j"}, "optional": None})
-    assert validator.is_valid({"amount": 3.0, "mode": "alpha"})
-    assert not validator.is_valid({"amount": -1.0})
-    assert not validator.is_valid({"amount": {"expr": 3}})
-    assert not validator.is_valid({"amplitude": {"__complex__": [1.0]}})
-    assert not validator.is_valid({"mode": "beta"})
-    state = FormState(SchemaForm.default_input(env))
-    assert state.input_schema(env) == schema
-
-
-def test_schema_recomputes_dynamic_choices_for_each_request() -> None:
-    alpha_env = FormEnv()
-    beta_env = captured_ext_env(beta_only=True)
-    alpha = Draft202012Validator(SchemaForm.input_schema(alpha_env))
-    beta = Draft202012Validator(SchemaForm.input_schema(beta_env))
-    assert alpha.is_valid({"mode": "alpha"})
-    assert not alpha.is_valid({"mode": "beta"})
-    assert beta.is_valid({"mode": "beta"})
-    assert not beta.is_valid({"mode": "alpha"})
 
 
 def test_public_range_alias_projects_choices_without_reused_field_pollution() -> None:
@@ -406,12 +334,10 @@ def test_public_range_alias_projects_choices_without_reused_field_pollution() ->
             return {("restricted", "n"): (2,)}
 
     env = FormEnv()
-    validator = Draft202012Validator(RangeAliasForm.input_schema(env))
     valid: dict[str, JsonValue] = {
         "restricted": {"kind": "linrange", "n": 2},
         "unrestricted": {"kind": "linrange", "n": 3},
     }
-    assert validator.is_valid(valid)
     result = FormState(FormInput(RangeAliasForm, valid)).result(env)
     assert isinstance(result, RangeAliasForm)
     assert isinstance(result.restricted, LinRange)
@@ -423,9 +349,8 @@ def test_public_range_alias_projects_choices_without_reused_field_pollution() ->
         "restricted": {"kind": "linrange", "n": 2},
         "unrestricted": {"kind": "linrange", "n": {"expr": "3"}},
     }
-    assert validator.is_valid(expression)
-    assert not validator.is_valid(
-        {**expression, "restricted": expression["unrestricted"]}
+    assert isinstance(
+        FormState(FormInput(RangeAliasForm, expression)).result(env), RangeAliasForm
     )
     invalid: dict[str, JsonValue] = {
         "restricted": {"kind": "linrange", "n": 3},
@@ -434,7 +359,6 @@ def test_public_range_alias_projects_choices_without_reused_field_pollution() ->
     errors = FormState(FormInput(RangeAliasForm, invalid)).result(env)
     assert isinstance(errors, FormErrors)
     assert ("restricted", "n") in errors.messages
-    assert not validator.is_valid(invalid)
 
 
 def test_nullable_public_range_alias_projects_choices_and_null() -> None:
@@ -449,17 +373,14 @@ def test_nullable_public_range_alias_projects_choices_and_null() -> None:
             return {("fluxes", "n"): (2,)}
 
     env = FormEnv()
-    validator = Draft202012Validator(NullableAliasForm.input_schema(env))
     values: tuple[JsonValue, ...] = (None, {"kind": "linrange", "n": 2})
     for value in values:
         valid: dict[str, JsonValue] = {"fluxes": value}
-        assert validator.is_valid(valid)
         assert isinstance(
             FormState(FormInput(NullableAliasForm, valid)).result(env),
             NullableAliasForm,
         )
     invalid: dict[str, JsonValue] = {"fluxes": {"kind": "linrange", "n": 3}}
-    assert not validator.is_valid(invalid)
     errors = FormState(FormInput(NullableAliasForm, invalid)).result(env)
     assert isinstance(errors, FormErrors)
     assert ("fluxes", "n") in errors.messages
@@ -472,8 +393,6 @@ def test_whole_container_choices_share_json_value_membership() -> None:
         "phasors": [{"__complex__": [1.0, 2.0]}],
         "offsets": {"drive": {"__complex__": [1.0, 2.0]}},
     }
-    validator = Draft202012Validator(WholeContainerChoicesForm.input_schema(env))
-    assert validator.is_valid(valid)
     result = FormState(FormInput(WholeContainerChoicesForm, valid)).result(env)
     assert isinstance(result, WholeContainerChoicesForm), result
     assert result.samples == (1.0,)
@@ -487,7 +406,6 @@ def test_whole_container_choices_share_json_value_membership() -> None:
     )
     for field, invalid_value in invalid_values:
         invalid = {**valid, field: invalid_value}
-        assert not validator.is_valid(invalid)
         error = FormState(FormInput(WholeContainerChoicesForm, invalid)).result(env)
         assert isinstance(error, FormErrors)
         assert set(error.messages) == {(field,)}

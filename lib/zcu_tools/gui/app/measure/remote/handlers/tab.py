@@ -10,6 +10,7 @@ from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
 )
+from zcu_tools.gui.form import FormPathError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 if TYPE_CHECKING:
@@ -272,10 +273,49 @@ def temporary_aliases(params: Mapping[str, object]) -> dict[str, str] | None:
 def h_tab_get_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """Read current Form schema/input/ordinary leaves/errors from fixed sources."""
+    """Read current Form input/ordinary leaves/errors from fixed sources."""
     from ..form_observation import observe_form
 
     return dict(observe_form(adapter.cfg_lookup(str(params["tab_id"]))))
+
+
+def h_tab_describe_cfg(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Read one current layer and local observation in the same owner turn.
+
+    params supplies tab_id and path (string array, [] for root). Malformed
+    arrays become invalid_params/form_errors. Core FormPathError becomes
+    invalid_params/form_path with data.form_path preserving the requested path.
+    Other declaration failures retain the controller_error boundary; resource
+    lifetime errors keep their cfg projection. Reads allow busy and observer
+    clients. Local errors are Form preview only; use get_cfg or Run admission
+    for lowered cfg errors.
+    """
+    from ..form_description import describe_form
+    from ..form_errors import cfg_error_to_remote
+
+    raw = params["path"]
+    if not isinstance(raw, list) or any(
+        not isinstance(part, str) or not part for part in raw
+    ):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            "path must contain nonempty strings",
+            reason="form_errors",
+        )
+    path = tuple(str(part) for part in raw)
+    try:
+        return dict(describe_form(adapter.cfg_lookup(str(params["tab_id"])), path))
+    except CfgPreconditionError as exc:
+        raise cfg_error_to_remote(exc) from exc
+    except FormPathError as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            str(exc),
+            reason="form_path",
+            data={"form_path": list(exc.path)},
+        ) from exc
 
 
 def h_tab_reset_cfg(

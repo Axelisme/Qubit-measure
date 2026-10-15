@@ -91,7 +91,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "nothing, while invalid values stay in the form and appear in errors. "
             "proposed_value and edits are mutually exclusive (different item kinds). "
             "Echoes the edited {item}; an edits batch also returns the form "
-            "observation {schema, input, values, errors}. Read current/proposed "
+            "observation {input, values, errors}. Read current/proposed "
             "values via tab.writeback_preview.",
             (
                 required_string("tab_id"),

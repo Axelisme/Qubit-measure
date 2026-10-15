@@ -1,5 +1,6 @@
 """Recipe author fields consume the real generated Form wire contract."""
 
+from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
@@ -16,13 +17,21 @@ from zcu_tools.cfg_model import (
     Template,
     TemplateDef,
 )
+from zcu_tools.gui.app.measure.remote.form_description import description_wire
 from zcu_tools.gui.app.measure.remote.form_observation import form_writes, observe_form
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
-from zcu_tools.gui.form import FormEnv, FormModel
+from zcu_tools.gui.form import (
+    FormEnv,
+    FormInput,
+    FormModel,
+    FormPath,
+    FormState,
+    Option,
+)
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import RecipeSession
-from zcu_tools.mcp.measure.recipe_form import read_form_field
+from zcu_tools.mcp.measure.recipe_form import field_observation, read_form_field
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
@@ -68,7 +77,7 @@ class FormGui(LookbackGui):
         )
 
     def __call__(self, method: str, params: dict[str, object]) -> dict[str, object]:
-        if method == "tab.reset_cfg":
+        if method in ("tab.reset_cfg", "tab.get_cfg"):
             return dict(observe_form(self.owner))
         if method == "tab.edit_cfg":
             self.owner.write(form_writes(params["edits"]))
@@ -114,6 +123,25 @@ def test_read_field_reports_form_input_values_and_directed_errors(
         assert before.input == 3
 
 
+def test_read_field_queries_current_owner_once_and_detaches_reply(
+    tmp_path: Path,
+) -> None:
+    gui = FormGui()
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        gui.owner.write({("rounds",): 19})
+        before = len(client.transport.sent)
+        field = tab.read_field("rounds")
+        assert field.input == 19
+        assert field.value == 19
+        assert client.transport.sent[before:] == [
+            ("tab.describe_cfg", {"tab_id": "t", "path": ["rounds"]})
+        ]
+        gui.owner.write({("rounds",): 23})
+        assert field.input == 19
+        assert tab.read_field("rounds").value == 23
+
+
 def test_use_library_sets_actual_key_and_exposes_key_mode(tmp_path: Path) -> None:
     gui = FormGui()
     with recipe_client(tmp_path, gui) as client:
@@ -140,7 +168,11 @@ def test_use_library_writes_one_declared_option_value(tmp_path: Path) -> None:
         tab = RecipeSession(client.context).open_tab("lookback")
         before = len(client.transport.sent)
         tab.use_library("pulse", "Q1.pulses.pi")
-        assert client.transport.sent[before:] == [
+        assert [
+            call
+            for call in client.transport.sent[before:]
+            if call[0] != "tab.describe_cfg"
+        ] == [
             (
                 "tab.edit_cfg",
                 {
@@ -181,7 +213,9 @@ def test_unoffered_library_key_reports_available_options_without_writing(
         assert "Available keys" in str(error)
         if captured:
             assert "Q1.pulses.pi" in str(error)
-        assert client.transport.sent == sent
+        assert [
+            call for call in client.transport.sent if call[0] != "tab.describe_cfg"
+        ] == [call for call in sent if call[0] != "tab.describe_cfg"]
         assert gui.owner.input.data == before
 
 
@@ -228,15 +262,78 @@ class TypedOptionsForm(FormModel):
 def test_read_field_projects_selected_typed_option_fields(
     tag: int | str, fields: tuple[str, ...]
 ) -> None:
-    publication: dict[str, object] = {
-        "schema": TypedOptionsForm.input_schema(FormEnv()),
-        "input": {"choice": {"kind": tag}},
-        "values": [],
-        "errors": [],
-    }
-    observed = read_form_field(publication, ("choice",))
+    state = FormState(FormInput(TypedOptionsForm, {"choice": {"kind": tag}}))
+    observation = field_observation(
+        {
+            "description": description_wire(state.describe(("choice",), FormEnv())),
+            "input": {"kind": tag},
+            "input_present": True,
+            "value": None,
+            "errors": [],
+        }
+    )
+    observed = read_form_field(observation, ("choice",))
     assert observed.fields == fields
     assert observed.input == {"kind": tag}
+
+
+class OuterInline(FormModel):
+    kind: Literal["inline"] = "inline"
+    module: NumericOption | StringOption = Field(discriminator="kind")
+
+
+class OuterLockedExtras(FormModel):
+    choice: OuterInline = Field(
+        default_factory=lambda: OuterInline(module=NumericOption())
+    )
+
+    @classmethod
+    def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+        return {
+            ("choice",): (
+                Option(
+                    "Numeric",
+                    {"kind": "inline", "module": {"kind": 1}},
+                    fields=OuterInline,
+                ),
+                Option(
+                    "String",
+                    {"kind": "inline", "module": {"kind": "1"}},
+                    fields=OuterInline,
+                ),
+            )
+        }
+
+
+def keep_author_cfg(extras: OuterLockedExtras, cfg: AuthorCfg) -> AuthorCfg:
+    return cfg
+
+
+def test_locked_outer_branch_keeps_inner_kind_editable(tmp_path: Path) -> None:
+    gui = FormGui()
+    gui.owner = TabFormResource(
+        lambda _ctx: Form(
+            AuthorCfg, {}, extras=OuterLockedExtras, lower=keep_author_cfg
+        ),
+        capture=lambda aliases: TabFormSources(FormEnv()),
+        mutation_allowed=lambda: True,
+    )
+    gui.owner.describe(("extras", "choice"))
+    assert gui.owner.preview().errors is None
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        outer = tab.read_field("extras.choice")
+        assert outer.locked
+        assert outer.fields == ("module",)
+        assert not tab.read_field("extras.choice.module").locked
+        with pytest.raises(ValueError, match="locked"):
+            tab.use_library("extras.choice", "unoffered")
+        gui.owner.write(
+            {("extras", "choice", "module"): {"kind": "1", "text": "changed"}}
+        )
+        assert tab.read_field("extras.choice").locked
+        assert tab.read_field("extras.choice.module").fields == ("text",)
+        assert tab.read_field("extras.choice.module.text").value == "changed"
 
 
 class RequiredCfg(ConfigBase):
@@ -298,11 +395,14 @@ def test_locked_inline_slot_rejects_library_selection_before_rpc(
         assert locked.mode == "inline"
         assert locked.key is None
         assert locked.locked
-        assert locked.fields == ("module",)
+        assert "freq" in locked.fields
+        assert "gain" in locked.fields
         before = list(client.transport.sent)
         with pytest.raises(ValueError, match="locked"):
             tab.use_library("locked_pulse", "Q1.pulses.pi")
-        assert client.transport.sent == before
+        assert [
+            call for call in client.transport.sent if call[0] != "tab.describe_cfg"
+        ] == [call for call in before if call[0] != "tab.describe_cfg"]
 
 
 @pytest.mark.parametrize("field", ["pulse.kind", "locked_pulse.kind"])
@@ -314,8 +414,15 @@ def test_read_field_does_not_expose_option_selected_tag_leaves(
         tab = RecipeSession(client.context).open_tab("lookback")
         tab.use_library("pulse", "Q1.pulses.pi")
         before = gui.owner.input.data
-        with pytest.raises(ValueError, match="Unknown cfg field"):
-            tab.read_field(field)
+        if field == "pulse.kind":
+            with pytest.raises(GuiRpcError) as caught:
+                tab.read_field(field)
+            assert caught.value.code == "invalid_params"
+            assert caught.value.reason == "form_path"
+            assert caught.value.data == {"form_path": field.split(".")}
+        else:
+            with pytest.raises(ValueError, match="field"):
+                tab.read_field(field)
         assert gui.owner.input.data == before
         assert tab.read_field("locked_pulse.module.freq").value == 100.0
 

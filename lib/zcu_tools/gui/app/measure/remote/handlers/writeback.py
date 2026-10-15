@@ -154,7 +154,7 @@ def h_tab_writeback_set(
     surface (ADR-0008). Requires (tab_id, subtab_id).
 
     Module edits are one Form write batch of {path: [field, ...], value}; the
-    reply adds the item's Form observation (schema, input, values, errors)."""
+    reply adds the item's Form observation (input, values, errors)."""
     tab_id = str(params["tab_id"])
     subtab_id = str(params["subtab_id"])
     if subtab_id not in _VALID_WRITEBACK_SUBTABS:

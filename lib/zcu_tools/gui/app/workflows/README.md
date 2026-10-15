@@ -1,6 +1,6 @@
 # gui/app/workflows — Workflow host
 
-**Last updated:** 2026-10-15, shared Inspect, Devices and ARB run lock
+**Last updated:** 2026-10-15，單層 Form 描述、共用 Inspect／Devices 與 ARB run lock
 
 ## 註冊與組裝
 
@@ -28,7 +28,11 @@ Pause 保留 operation、RUN lease、progress、plan、input capture 與 Plots�
 
 ## Input 與 reload
 
-Wire 4 使用明確 `x-form-options` 的 value／fields／commands 與 tagged ref／inline input。Memento 2 保存這份 input，舊版沿既有 codec／caretaker 拒絕，不 migration 或雙讀。`defaults(env)` 只建 fresh 初值，沒有 previous；相容 saved leaves 的 overlay 仍由 host 完成。
+Wire 5 的 `workflow.form` 回 input／values／errors 與 native revision，不帶 schema。`workflow.describe_form(form, path, run_id, batch)` 沿同一 target selection 和固定 env，在同一 owner turn 回 candidate observation 與單層 description。Root path 是 `[]`，其他 path 使用 model-field names。Read 納入 local parse errors。Batch preview 只讀 parsed candidate，不提交。
+
+Description 的 options 只帶 value／label／commands，selected index 由 core 判定，children 保留完整 path。can_expand 只表示結構可展開，不保證 children 非空。selection_fixed 表示本層只有一個非 null selector 分支，不凍結內層 choices。null 只控制啟停，不算另一個分支，停用時也一樣。fixed／fixed_value 表示完整值固定。Wire 直接投影 core 的這些能力，不重算規則。未知、inactive 或穿入 whole leaf 的 path 以 FormPathError 回報。RPC 將它投影為 invalid_params／form_path，data 帶完整 form_path。其他 ValueError 保留 controller_error。
+
+Memento 2 保存既有 tagged ref／inline input，格式未變。舊版沿既有 codec／caretaker 拒絕，不 migration 或雙讀。`defaults(env)` 只建 fresh 初值，沒有 previous。相容 saved leaves 的 overlay 仍由 host 完成。
 
 `WorkflowForms` 保留各名稱的 parsed RAM drafts，建好候選 panels 後才發布。Prepare 用新 capture 重建 defaults。`SingleFileCaretaker` 保存 parsed FormInput，包括 expression，不保存 renderer-local 未解析文字、native run 或硬體。從 Start 到 terminal delivery，保存的 knobs 來自 run 的 binding，包括還沒 Apply 的 parsed 編輯；terminal 之後來自 Start knobs。`--clean` 只略過啟動讀取，正常 close 仍保存。啟動時 session 是 EMPTY、沒有 captured library，所以存檔裡的 module ref 名稱會被丟棄，其他相容欄位照常還原，訊息列逐一顯示 `Discarded plan: …` 或 `Discarded knobs: …`。
 
@@ -40,7 +44,7 @@ Workflow 透過 `env.plots` 決定畫什麼與何時更新。Window 只管理 Pl
 
 `WorkflowFigureArea` 是每個 run 的 Plots 的 PlotHost，包住共用的 `QtPlotHost` 與 `FigureContainer`，所以 measure 用的 `gui/plotting` 不變。Focus 的圖放大，標題是 figure 名稱加「k / n」。下方縮圖列依該 run 的 `env.plots` 建立順序列出已呈現的圖；focus 那張有醒目的外框，列可橫向捲動並停在 focus 那張。Follow latest 預設勾選，focus 跟著剛呈現或剛 live refresh 的圖；run 結束時的 final flush 不算更新。點縮圖固定 focus 並取消勾選，重新勾選回到最近更新的圖，每次 Start 重設為勾選。縮圖從 canvas 重抓的頻率低於大圖，大圖沿用共用 plotting 的更新收合。宿主只依 figure 名稱排列，不依 workflow 名稱分支。
 
-Records RPC 直接投影 Engine facts。具名圖與 PNG 使用同一 retained Plots，在 Qt owner thread render；status-only 不 render。MCP tools 在 `zcu_tools.mcp.workflows`，只轉送同一 wire declarations，不持有第二份 run、draft 或硬體。Agent 組合根在 `mcp_servers/workflows.py`，它注入 bridge 的 repo root 與 GUI 啟動設定，再由 GUI launcher 注入註冊清單與 source loader。RPC 方法、參數、回覆與 server identity 保持不變。
+Records RPC 直接投影 Engine facts。具名圖與 PNG 使用同一 retained Plots，在 Qt owner thread render；status-only 不 render。MCP tools 在 `zcu_tools.mcp.workflows`，只轉送同一 wire declarations，不持有第二份 run、draft 或硬體。Agent 組合根在 `mcp_servers/workflows.py`，它注入 bridge 的 repo root 與 GUI 啟動設定，再由 GUI launcher 注入註冊清單與 source loader。新增的單層查詢也由同一 method declarations 產生 MCP tool，不另讀 core 或保存 candidate。Server identity 保持不變。
 
 框架測試在 `tests/gui/app/workflows/` 與 `tests/mcp/workflows/` 使用最小合成註冊清單，不依賴 lab 實驗。Workflow 行為比對在 GUI 的模擬模式完成；宿主不擁有科學 trend 資料或更新時機。
 

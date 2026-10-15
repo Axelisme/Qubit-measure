@@ -3,7 +3,7 @@
 import json
 import typing
 from collections.abc import Callable, Iterator
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from pydantic import BaseModel, Field
@@ -13,6 +13,7 @@ from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
 )
+from zcu_tools.gui.form import FormModel
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request
@@ -110,8 +111,216 @@ def test_get_cfg_returns_authored_input_and_ordinary_leaf_values(form_rpc) -> No
     assert {tuple(item["path"]): item["value"] for item in observed["values"]}[
         ("gain",)
     ] == 0.4
-    assert observed["schema"]["properties"]["gain"]
+    assert set(observed) == {"input", "values", "errors"}
     assert observed["errors"] == []
+
+
+def test_describe_cfg_reads_current_local_input_and_errors_as_observer(
+    form_rpc,
+) -> None:
+    fixture, tab, rpc = form_rpc
+    owner = fixture.ctrl.cfg_resources.lookup(tab)
+    owner.write({("gain",): {"expr": "1 / 0"}})
+    before = owner.input.data
+    fixture.ctrl.control_identity.reclaim_local()
+    fixture.state.set_tab_running(tab, running=True)
+    try:
+        reply = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["gain"]})
+        assert reply["ok"], reply
+        local = reply["result"]
+        assert local["description"]["target"]["expression"]
+        assert local["description"]["path"] == ["gain"]
+        assert local["description"]["children"] == []
+        assert local["input_present"] is True
+        assert local["input"] == {"expr": "1 / 0"}
+        assert local["value"] is None
+        assert local["errors"][0]["path"] == ["gain"]
+        assert owner.input.data == before
+    finally:
+        fixture.state.set_tab_running(tab, running=False)
+
+
+@pytest.mark.parametrize("path", [["missing"], ["gain", "child"], [1], "gain"])
+def test_describe_cfg_rejects_unknown_or_malformed_paths(form_rpc, path) -> None:
+    _, tab, rpc = form_rpc
+    reply = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": path})
+    assert not reply["ok"]
+    assert reply["error"]["code"] == "invalid_params", reply
+
+
+class FailingOptionsExtras(FormModel):
+    amount: float = 1.0
+    broken: ClassVar[bool] = False
+
+    @classmethod
+    def options(cls, _env):
+        if cls.broken:
+            raise ValueError("Synthetic declaration failed")
+        return {}
+
+
+def retain_failing_cfg(extras: FailingOptionsExtras, cfg: SampleCfg) -> SampleCfg:
+    return cfg
+
+
+class FailingOptionsAdapter(SampleAdapter):
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[SampleCfg]:
+        del ctx
+        return Form(
+            SampleCfg,
+            {"sweep": Range.between(1.0, 2.0, expts=3)},
+            extras=FailingOptionsExtras,
+            lower=retain_failing_cfg,
+        )
+
+
+def test_describe_cfg_does_not_classify_author_valueerror_as_bad_path(form_rpc) -> None:
+    fixture, _, rpc = form_rpc
+    fixture.registry.register("failing-options", FailingOptionsAdapter)
+    tab = fixture.ctrl.new_tab("failing-options")
+    try:
+        FailingOptionsExtras.broken = True
+        reply = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["extras"]})
+        assert not reply["ok"]
+        assert reply["error"]["code"] == "controller_error", reply
+    finally:
+        FailingOptionsExtras.broken = False
+        fixture.ctrl.tab_control.close_tab(tab)
+
+
+class MissingValuesCfg(SampleCfg):
+    required_value: float
+    nullable_value: float | None = None
+
+
+class MissingValuesAdapter(SampleAdapter):
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[MissingValuesCfg]:
+        del ctx
+        return Form(MissingValuesCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
+
+
+def test_describe_cfg_distinguishes_missing_from_null(form_rpc) -> None:
+    fixture, _, rpc = form_rpc
+    fixture.registry.register("missing-values", MissingValuesAdapter)
+    tab = fixture.ctrl.new_tab("missing-values")
+    try:
+        fixture.ctrl.cfg_resources.lookup(tab).write({("nullable_value",): None})
+        missing = rpc.call(
+            "tab.describe_cfg", {"tab_id": tab, "path": ["required_value"]}
+        )
+        assert missing["ok"], missing
+        null = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["nullable_value"]})
+        assert null["ok"], null
+        assert missing["result"]["input_present"] is False
+        assert null["result"]["input_present"] is True
+        assert missing["result"]["input"] is null["result"]["input"] is None
+        assert missing["result"]["errors"][0]["path"] == ["required_value"]
+        assert null["result"]["errors"] == []
+    finally:
+        fixture.ctrl.tab_control.close_tab(tab)
+
+
+def test_describe_cfg_path_errors_keep_request_path(form_rpc) -> None:
+    _, tab, rpc = form_rpc
+    path = ["gain", "child"]
+    reply = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": path})
+    assert not reply["ok"]
+    assert reply["error"]["code"] == "invalid_params"
+    assert reply["error"]["reason"] == "form_path"
+    assert reply["error"]["data"] == {"form_path": path}
+
+
+def test_describe_cfg_root_is_single_layer_and_readable_through_mcp(
+    form_rpc, tmp_path
+) -> None:
+    from contextlib import closing
+
+    from tests.mcp.measure._support import make_client
+
+    _, tab, rpc = form_rpc
+
+    def respond(method, params):
+        reply = rpc.call(method, params)
+        assert reply["ok"], reply
+        return reply["result"]
+
+    client = make_client(tmp_path, respond)
+    with closing(client.context.session):
+        assert "tab.describe_cfg" in client.context.gui.catalog
+        reply = client.call(
+            "rpc_call",
+            {"method": "tab.describe_cfg", "params": {"tab_id": tab, "path": []}},
+        )
+        observed = reply
+        assert observed["description"]["target"] is None
+        assert "gain" in [
+            child["name"] for child in observed["description"]["children"]
+        ]
+        assert observed["input_present"] is True
+        fields = {child["name"]: child for child in observed["description"]["children"]}
+        assert fields["gain"]["can_expand"] is False
+        assert fields["gain"]["selection_fixed"] is False
+        assert fields["sweep"]["can_expand"] is True
+
+
+@pytest.mark.parametrize("author_failure", [False, True])
+def test_describe_cfg_mcp_preserves_path_and_internal_error_boundary(
+    form_rpc, tmp_path, author_failure: bool
+) -> None:
+    from contextlib import closing
+
+    from zcu_tools.gui.remote.errors import RemoteError
+    from zcu_tools.mcp.measure.session import GuiRpcError
+
+    from tests.mcp.measure._support import make_client
+
+    fixture, _, rpc = form_rpc
+    fixture.registry.register("failing-options", FailingOptionsAdapter)
+    tab = fixture.ctrl.new_tab("failing-options")
+    path = ["extras"] if author_failure else ["gain", "child"]
+
+    def respond(method, params):
+        reply = rpc.call(method, params)
+        if not reply["ok"]:
+            error = reply["error"]
+            raise RemoteError(
+                error["code"],
+                error["message"],
+                reason=error.get("reason"),
+                data=error.get("data"),
+            )
+        return reply["result"]
+
+    try:
+        FailingOptionsExtras.broken = author_failure
+        client = make_client(tmp_path, respond)
+        with closing(client.context.session):
+            with pytest.raises(GuiRpcError) as caught:
+                client.call(
+                    "rpc_call",
+                    {
+                        "method": "tab.describe_cfg",
+                        "params": {"tab_id": tab, "path": path},
+                    },
+                )
+            assert caught.value.code == (
+                "controller_error" if author_failure else "invalid_params"
+            )
+            if not author_failure:
+                assert caught.value.reason == "form_path"
+                assert caught.value.data == {"form_path": path}
+                assert client.call(
+                    "rpc_call",
+                    {
+                        "method": "tab.describe_cfg",
+                        "params": {"tab_id": tab, "path": ["gain"]},
+                    },
+                )["description"]["path"] == ["gain"]
+    finally:
+        FailingOptionsExtras.broken = False
+        fixture.ctrl.tab_control.close_tab(tab)
 
 
 def test_edit_cfg_commits_leaf_batch_and_returns_invalid_input_errors(form_rpc) -> None:

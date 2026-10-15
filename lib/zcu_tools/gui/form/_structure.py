@@ -42,8 +42,8 @@ def alternatives(annotation: object) -> tuple[object, ...]:
 def accepts_expression(annotation: object, path: FormPath) -> bool:
     """Whether a value leaf of this annotation is a text field taking Expr input.
 
-    This is the core's one text-field rule: the input schema offers an Expr
-    alternative, and decode, defaults evaluation and compatible restore
+    This is the core's one text-field rule: the description permits expression
+    input, and decode, defaults evaluation and compatible restore
     accept an Expr envelope, exactly where it returns True. Union members
     are text values (int, float, complex, str), typed into a text field, or
     picked values (Literal, Enum, bool), chosen from a dropdown or checkbox.
@@ -188,26 +188,6 @@ def intrinsic_tags(model: type[BaseModel], key: str) -> tuple[JsonValue, ...]:
         default_json(tag.value if isinstance(tag, Enum) else tag)
         for tag in _tag(model, key)
     )
-
-
-def schema_branch_model(info: FieldInfo, tags: list[JsonValue]) -> type[BaseModel]:
-    """Match an undecorated schema branch's tags to its annotation owner.
-
-    info must declare a string discriminator. Match both JSON type and value,
-    before dynamic choices can change the selector schema. Missing or unmatched
-    tags raise ValueError; invalid declared tags fail through the JSON codec.
-    """
-    key = discriminator(info)
-    if key is None:
-        raise ValueError("Schema branch requires a string discriminator")
-    for model in model_types(info.annotation):
-        for value in intrinsic_tags(model, key):
-            if any(
-                type(candidate) is type(value) and candidate == value
-                for candidate in tags
-            ):
-                return model
-    raise ValueError("Tagged schema branch does not match a declared model")
 
 
 def selected(info: FieldInfo, value: JsonValue) -> type[BaseModel] | None:

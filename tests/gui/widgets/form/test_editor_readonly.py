@@ -290,11 +290,11 @@ def test_folds_still_expand_and_collapse_without_writing(
         ("form.fold.section", "form.input.section.level"),
     ):
         title = child(editor, QLabel, name)
-        content = child(editor, QLineEdit, inner)
-        assert title.isEnabled() and not content.isVisibleTo(editor)
+        assert title.isEnabled()
         assert title.text().startswith("\u25b8 "), name
         fold(title)
         qapp.processEvents()
+        content = child(editor, QLineEdit, inner)
         assert content.isVisibleTo(editor), inner
         assert content.isEnabled(), f"{inner} must not be greyed out"
         assert title.text().startswith("\u25be "), name
@@ -327,12 +327,13 @@ def test_fold_titles_take_tab_focus_and_fold_on_space_or_enter_without_writing(
     ):
         assert name in stops, (name, stops)
         title = child(editor, QLabel, name)
-        content = child(editor, QLineEdit, inner)
         title.setFocus(Qt.FocusReason.TabFocusReason)
         assert title.hasFocus(), name
-        assert not content.isVisibleTo(editor), inner
+        assert title.text().startswith("\u25b8 "), name
         key_click(title, Qt.Key.Key_Space, text=" ")
+        content = child(editor, QLineEdit, inner)
         assert content.isVisibleTo(editor), inner
+        assert content.isReadOnly(), inner
         assert title.text().startswith("\u25be "), name
         key_click(title, Qt.Key.Key_Return, text="\r")
         assert not content.isVisibleTo(editor), inner

@@ -1,10 +1,18 @@
 """Window form contracts through public native/GUI seams."""
 
+from collections.abc import Mapping
+from typing import Annotated, Literal
+
 import pytest
-from pydantic import JsonValue
+from pydantic import Field, JsonValue
 from qtpy.QtWidgets import QLineEdit
+from zcu_tools.gui.app.workflows.attachment import WorkflowAttachment
+from zcu_tools.gui.app.workflows.catalog import WorkflowCatalog
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
+from zcu_tools.gui.form import FormEnv, FormModel, FormPath, FormPathError, Option
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.mcp.core.rpc import GuiInvocationError
+from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.resources.entry import (
     ResultEntry,
 )
@@ -12,8 +20,9 @@ from zcu_tools.resources.entry import (
 from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.gui.widgets.form._text_input import commit_text
 
+from ._reload_source import InjectedCatalog
 from ._sample_input import sample_input
-from ._synthetic import Context
+from ._synthetic import Context, PlanForm, TunablesForm, context_seed, sample_step
 from ._window_support import RpcRequest
 
 
@@ -33,7 +42,6 @@ def test_form_inspection_rpc_reads_constructor_drafts(
         assert isinstance(result, dict)
         assert result["input"] == before[0]
         assert result["revision"] is None
-        assert isinstance(result["schema"], dict)
         assert isinstance(result["values"], list)
         assert isinstance(result["errors"], list)
         assert (panel.state.input.data, panel.state.base.data) == before
@@ -239,3 +247,315 @@ def test_form_inspection_rpc_requires_accepted_explicit_target(
         assert isinstance(error, dict) and error["code"] == expected
     window.stop("pending-form")
     harness.complete_segment()
+
+
+@pytest.mark.parametrize("path", [[], ["samples"], ["samples", "start"]])
+def test_describe_form_rpc_uses_call_local_branch(
+    attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
+    rpc: RpcRequest,
+    path: list[str],
+) -> None:
+    window, _harness, _entry = attachment
+    state = window.plan_panel.state
+    before = state.input.data, state.base.data
+    reply = rpc(
+        "workflow.describe_form",
+        {
+            "form": "plan",
+            "path": path,
+            "batch": [
+                {"path": ["samples", "kind"], "value": "linrange"},
+                {"path": ["samples", "start"], "value": {"expr": "1 / 2"}},
+                {"path": ["samples", "n"], "value": 0},
+            ],
+        },
+    )
+    assert reply["ok"] is True
+    result = reply["result"]
+    assert isinstance(result, dict)
+    assert result["revision"] is None
+    assert {"path": ["samples", "start"], "value": 0.5} in result["values"]
+    assert any(e["path"][-1:] == ["n"] for e in result["errors"])
+    description = result["description"]
+    assert description["path"] == path
+    if not path:
+        assert description["target"] is None
+        assert [child["path"] for child in description["children"]] == [
+            ["scale"],
+            ["points"],
+            ["samples"],
+        ]
+    elif path == ["samples"]:
+        target = description["target"]
+        assert target["options"][target["selected"]]["value"] == {"kind": "linrange"}
+        assert {tuple(child["path"]) for child in description["children"]} == {
+            ("samples", "start"),
+            ("samples", "stop"),
+            ("samples", "n"),
+        }
+    else:
+        assert description["target"]["expression"] is True
+        assert description["target"]["kind"] == "number"
+        assert description["children"] == []
+    assert (state.input.data, state.base.data) == before
+    assert window.controller.binding is None
+
+
+def test_describe_form_rpc_keeps_run_capture_and_local_errors_read_only(
+    attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
+    paused_tuning: list[tuple[int, float, int]],
+    rpc: RpcRequest,
+) -> None:
+    del paused_tuning
+    window, harness, _entry = attachment
+    panel = window.tuning_panel
+    engine = window.controller.engine
+    assert panel is not None and engine is not None
+    host = panel.host
+    host.state.write({("sample", "value"): {"expr": "general.ext.value * 2"}}, host.env)
+    local = panel.panel.editor.findChild(QLineEdit, "form.input.sample.factor")
+    assert isinstance(local, QLineEdit)
+    commit_text(local, "-")
+    context = harness.services.context
+    context.set_parameter(context.read_context().target, "general.ext.value", 99.0)
+    before = (
+        host.state.input.data,
+        host.state.base.data,
+        host.accepted_input.data,
+        engine.tunables("tuning"),
+    )
+    for batch in (None, []):
+        reply = rpc(
+            "workflow.describe_form",
+            {
+                "form": "tunables",
+                "run_id": "tuning",
+                "path": ["sample", "value"],
+                "batch": batch,
+            },
+        )
+        assert reply["ok"] is True
+        result = reply["result"]
+        assert isinstance(result, dict)
+        assert result["description"]["target"]["constraints"]["gt"] == 0
+        assert result["revision"] == before[3].revision
+        assert {"path": ["sample", "value"], "value": 40.0} in result["values"]
+        assert any(e["path"] == ["sample", "factor"] for e in result["errors"]) == (
+            batch is None
+        )
+    assert (
+        host.state.input.data,
+        host.state.base.data,
+        host.accepted_input.data,
+        engine.tunables("tuning"),
+    ) == before
+    assert local.text() == "-"
+
+
+@pytest.mark.parametrize("run_id", [None, "stale"])
+def test_describe_form_rpc_requires_explicit_attached_target(
+    paused_tuning: list[tuple[int, float, int]],
+    rpc: RpcRequest,
+    run_id: str | None,
+) -> None:
+    del paused_tuning
+    reply = rpc(
+        "workflow.describe_form", {"form": "plan", "path": [], "run_id": run_id}
+    )
+    assert reply["ok"] is False
+    error = reply["error"]
+    assert isinstance(error, dict) and error["code"] == "precondition_failed"
+
+
+def test_describe_form_rpc_forwards_structural_expandability(
+    rpc: RpcRequest,
+) -> None:
+    reply = rpc("workflow.describe_form", {"form": "plan", "path": []})
+    assert reply["ok"] is True
+    result = reply["result"]
+    assert isinstance(result, dict)
+    children = result["description"]["children"]
+    assert [(child["name"], child.get("can_expand")) for child in children] == [
+        ("scale", False),
+        ("points", False),
+        ("samples", True),
+    ]
+
+
+@pytest.mark.parametrize(
+    "path", [["unknown"], ["samples", "start"], ["samples", "values", "item"]]
+)
+@pytest.mark.parametrize("caller", ["rpc", "mcp"])
+def test_describe_form_separates_path_rejection_from_declaration_failure(
+    attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
+    catalog_source: InjectedCatalog,
+    rpc: RpcRequest,
+    mcp_tools: ToolTable,
+    path: list[str],
+    caller: str,
+) -> None:
+    window, _harness, _entry = attachment
+    fail_declaration: list[bool] = []
+
+    class FaultyPlan(PlanForm):
+        @classmethod
+        def choices(cls, env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+            if fail_declaration:
+                raise ValueError("Synthetic declaration failure")
+            return super().choices(env)
+
+    catalog_source.catalog = WorkflowCatalog(
+        (
+            WorkflowAttachment(
+                step=sample_step,
+                plan_model=FaultyPlan,
+                knobs_model=TunablesForm,
+                plan_to_cfg=FaultyPlan.to_cfg,
+                knobs_to_cfg=TunablesForm.to_cfg,
+                seed=context_seed,
+            ),
+        )
+    )
+    window.reload_source()
+    before = window.plan_panel.state.input.data, window.plan_panel.state.base.data
+    params: dict[str, object] = {"form": "plan", "path": path}
+    with pytest.raises(FormPathError) as core_error:
+        window.plan_panel.state.describe(tuple(path), window.plan_panel.env)
+    expected = (
+        "invalid_params",
+        str(core_error.value),
+        "form_path",
+        {"form_path": path},
+    )
+    if caller == "rpc":
+        reply = rpc("workflow.describe_form", params)
+        assert reply["ok"] is False
+        error = reply["error"]
+        assert isinstance(error, dict)
+        assert (
+            error["code"],
+            error["message"],
+            error.get("reason"),
+            error.get("data"),
+        ) == expected
+    else:
+        with pytest.raises(GuiInvocationError) as mcp_error:
+            mcp_tools["workflows_workflow_describe_form"]["handler"](params)
+        invocation = mcp_error.value
+        assert (
+            invocation.code,
+            invocation.message,
+            invocation.reason,
+            invocation.data,
+        ) == expected
+    fail_declaration.append(True)
+    try:
+        if caller == "rpc":
+            reply = rpc("workflow.describe_form", {"form": "plan", "path": []})
+            assert reply["ok"] is False
+            error = reply["error"]
+            assert isinstance(error, dict)
+            assert error["code"] == "controller_error"
+            assert "Synthetic declaration failure" in error["message"]
+            assert error.get("reason") is None
+            assert error.get("data") is None
+        else:
+            with pytest.raises(GuiInvocationError) as mcp_error:
+                mcp_tools["workflows_workflow_describe_form"]["handler"](
+                    {"form": "plan", "path": []}
+                )
+            invocation = mcp_error.value
+            assert invocation.code == "controller_error"
+            assert "Synthetic declaration failure" in invocation.message
+            assert invocation.reason is None
+            assert invocation.data is None
+    finally:
+        fail_declaration.clear()
+    assert (
+        window.plan_panel.state.input.data,
+        window.plan_panel.state.base.data,
+    ) == before
+    assert window.controller.binding is None
+
+
+def test_describe_form_projects_fixed_branch_without_freezing_inner_selection(
+    attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
+    catalog_source: InjectedCatalog,
+    rpc: RpcRequest,
+) -> None:
+    window, _harness, _entry = attachment
+
+    class First(FormModel):
+        kind: Literal["first"] = "first"
+        value: float = 1.0
+
+    class Second(FormModel):
+        kind: Literal["second"] = "second"
+        value: float = 2.0
+
+    class Inline(FormModel):
+        kind: Literal["inline"] = "inline"
+        module: Annotated[First | Second, Field(discriminator="kind")] = Field(
+            default_factory=First
+        )
+
+    class FixedPlan(PlanForm):
+        source: Inline = Field(default_factory=Inline)
+        tag: Literal["only"] = "only"
+
+        @classmethod
+        def options(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[Option, ...]]:
+            return {
+                ("source",): (
+                    Option(
+                        "First",
+                        {"kind": "inline", "module": {"kind": "first"}},
+                        fields=Inline,
+                    ),
+                    Option(
+                        "Second",
+                        {"kind": "inline", "module": {"kind": "second"}},
+                        fields=Inline,
+                    ),
+                )
+            }
+
+    catalog_source.catalog = WorkflowCatalog(
+        (
+            WorkflowAttachment(
+                step=sample_step,
+                plan_model=FixedPlan,
+                knobs_model=TunablesForm,
+                plan_to_cfg=FixedPlan.to_cfg,
+                knobs_to_cfg=TunablesForm.to_cfg,
+                seed=context_seed,
+            ),
+        )
+    )
+    window.reload_source()
+    reply = rpc("workflow.describe_form", {"form": "plan", "path": []})
+    assert reply["ok"] is True
+    result = reply["result"]
+    assert isinstance(result, dict)
+    rows = {row["name"]: row for row in result["description"]["children"]}
+    assert (
+        rows["source"].get("selection_fixed"),
+        rows["source"]["fixed"],
+        rows["source"]["fixed_value"],
+    ) == (True, False, None)
+    assert (
+        rows["tag"].get("selection_fixed"),
+        rows["tag"]["fixed"],
+        rows["tag"]["fixed_value"],
+    ) == (True, True, "only")
+    reply = rpc("workflow.describe_form", {"form": "plan", "path": ["source"]})
+    assert reply["ok"] is True
+    result = reply["result"]
+    assert isinstance(result, dict)
+    description = result["description"]
+    assert description["target"]["selection_fixed"] is True
+    assert description["target"]["fixed"] is False
+    assert [
+        (row["name"], row["selection_fixed"], row["fixed"])
+        for row in description["children"]
+    ] == [("module", False, False)]
