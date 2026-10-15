@@ -7,7 +7,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QEventLoop, QTimer
 from qtpy.QtWidgets import QApplication
 from zcu_tools.datafile import (
     SoftwareProvenance,
@@ -47,6 +46,7 @@ from zcu_tools.resources.entry import (
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
 from tests.gui._progress_fakes import DirectProgressTransport
+from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._native_save_support import (
     GUI_ORIGIN,
     NativeSaveSession,
@@ -90,23 +90,17 @@ def _acquire_to_terminal(
     )
     session.state.get_tab("tab").cfg.reset()
     inputs = GuardService(session.state).capture_run_inputs("tab")
-    loop = QEventLoop()
-    timer = QTimer()
-    timer.setSingleShot(True)
-    timer.timeout.connect(loop.quit)
     finished: list[RunFinishedPayload] = []
 
     def terminal(payload: RunFinishedPayload) -> None:
         finished.append(payload)
-        loop.quit()
 
     subscription = session.bus.subscribe(RunFinishedPayload, terminal)
     try:
         token = run.start_run(inputs, plots=Plots(NonPresentingHost()), origin=origin)
-        timer.start(5000)
-        loop.exec()
+        # The admitted offline run returns and publishes its terminal payload.
+        qt_until(lambda: bool(finished), label="native acquisition terminal")
     finally:
-        timer.stop()
         subscription.unsubscribe()
     assert len(finished) == 1
     assert not session.state.is_tab_busy("tab")
@@ -276,23 +270,17 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
     )
     origin = GUI_ORIGIN if frontend == "gui" else CommandOrigin("mcp")
     finished: list[RunFinishedPayload] = []
-    loop, timer = QEventLoop(), QTimer()
-    timer.setSingleShot(True)
-    timer.timeout.connect(loop.quit)
 
     def terminal(payload: RunFinishedPayload) -> None:
         finished.append(payload)
-        loop.quit()
 
     subscription = bus.subscribe(RunFinishedPayload, terminal)
     try:
         tab.cfg.reset(aliases=None if target is None else {"driver": target})
         services.run_analyze_control.start_run(tab_id, origin=origin)
-        timer.start(5000)
-        if not finished:
-            loop.exec()
+        # The admitted role-bound run returns and publishes its terminal payload.
+        qt_until(lambda: bool(finished), label="role acquisition terminal")
     finally:
-        timer.stop()
         subscription.unsubscribe()
     assert len(finished) == 1 and finished[0].outcome == "finished"
     metadata, parameters = tab.run.metadata, tab.run.parameters

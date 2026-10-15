@@ -4,9 +4,11 @@ import json
 import logging
 import multiprocessing
 import os
+from dataclasses import dataclass
 from multiprocessing.connection import Connection
+from multiprocessing.synchronize import Event
 from pathlib import Path
-from typing import IO, Never
+from typing import IO, Literal, Never
 
 import pytest
 from filelock import FileLock
@@ -394,34 +396,73 @@ def test_commit_reread_cleans_disk_without_resurrecting_deleted_root(
         library.snapshot().waveform_spec("Q1.waveforms.bad")
 
 
-def _locked_reader(path: Path, connection: Connection, operation: str) -> None:
+@dataclass(frozen=True)
+class _ReadObservation:
+    """One target-file I/O boundary in the child after its go message."""
+
+    phase: Literal["enter", "leave"]  # Before the read or after return/raise.
+    released: bool  # Parent ended its protected phase before this observation.
+
+
+def _locked_reader(
+    path: Path, connection: Connection, operation: str, release_intent: Event
+) -> None:
+    """Run the real library operation and report armed filesystem read boundaries.
+
+    Setup reads precede ready and are excluded. After go, attempting is only a
+    pre-call announcement, not lock arrival. Each observed read delegates to the
+    original Path method and preserves its bytes or exception. The parent's
+    release-intent event ends the protected phase before the actual unlock, so a
+    correctly locked read cannot be mistaken for overlap after unlock.
+    """
+    observations: list[_ReadObservation] = []
+    armed = False
+    read_bytes = Path.read_bytes
+
+    def observe_read(target: Path) -> bytes:
+        if target != path or not armed:
+            return read_bytes(target)
+        observations.append(_ReadObservation("enter", release_intent.is_set()))
+        try:
+            return read_bytes(target)
+        finally:
+            observations.append(_ReadObservation("leave", release_intent.is_set()))
+
     try:
-        library = None if operation == "open" else open_library(path)
-        if operation == "commit":
-            if library is None:
-                raise RuntimeError("commit requires a bound library")
-            with library.edit() as draft:
-                draft.set_waveform("Q1.waveforms.new", ConstWaveformCfg(length=0.2))
-                connection.send("ready")
-                connection.recv()
-                connection.send("attempting")
-        else:
-            connection.send("ready")
-            connection.recv()
-            connection.send("attempting")
-            if operation == "open":
-                library = open_library(path)
-            elif library is None:
-                raise RuntimeError("refresh/edit requires a bound library")
-            elif operation == "refresh":
-                library.refresh()
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(Path, "read_bytes", observe_read)
+            library = None if operation == "open" else open_library(path)
+            if operation == "commit":
+                if library is None:
+                    raise RuntimeError("commit requires a bound library")
+                with library.edit() as draft:
+                    draft.set_waveform("Q1.waveforms.new", ConstWaveformCfg(length=0.2))
+                    connection.send("ready")
+                    # Parent sends go after ready while holding the sidecar lock.
+                    assert connection.poll(30), "parent did not send go"
+                    assert connection.recv() == "go"
+                    armed = True
+                    connection.send("attempting")
             else:
-                with library.edit():
-                    pass
-        connection.send("done")
+                connection.send("ready")
+                # Parent sends go after ready while holding the sidecar lock.
+                assert connection.poll(30), "parent did not send go"
+                assert connection.recv() == "go"
+                armed = True
+                connection.send("attempting")
+                if operation == "open":
+                    library = open_library(path)
+                elif library is None:
+                    raise RuntimeError("refresh/edit requires a bound library")
+                elif operation == "refresh":
+                    library.refresh()
+                else:
+                    with library.edit():
+                        pass
+        connection.send(("done", observations))
     except Exception as exc:
         logging.exception("Locked reader failed")
-        connection.send(repr(exc))
+        connection.send((repr(exc), observations))
     finally:
         connection.close()
 
@@ -434,25 +475,58 @@ def test_cleanup_waits_for_sidecar_and_backs_up_latest_bytes(
     path.write_text(HEADER + "components: {Q1: {waveforms: {}}}\n")
     context = multiprocessing.get_context("fork")
     parent, child = context.Pipe()
-    process = context.Process(target=_locked_reader, args=(path, child, operation))
-    process.start()
+    release_intent = context.Event()
+    process = context.Process(
+        target=_locked_reader, args=(path, child, operation, release_intent)
+    )
     try:
-        assert parent.poll(5)
+        process.start()
+        child.close()
+        # Started child completes its valid-file setup and then sends ready.
+        assert parent.poll(30), "reader setup did not finish"
         assert parent.recv() == "ready"
         with FileLock(str(path) + ".lock"):
             parent.send("go")
-            assert parent.poll(5)
+            # Go releases the child's receive, which sends the pre-call message.
+            assert parent.poll(30), "reader did not acknowledge go"
             assert parent.recv() == "attempting"
+            # No public queue-arrival point: this only samples non-completion;
+            # scheduling affects detection power, never correct-reader success.
             assert not parent.poll(0.15), "reader bypassed the sidecar lock"
             original = mixed(path)
-        assert parent.poll(5)
-        assert parent.recv() == "done"
-        process.join(5)
+            # End the protected phase BEFORE unlocking: no post-unlock race.
+            release_intent.set()
+        # Unlock lets the arranged real read/cleanup/commit finish and send done.
+        assert parent.poll(30), "reader did not finish after unlock"
+        status, observations = parent.recv()
+        assert status == "done", status
+        # Terminal was sent; only process shutdown remains, not lock acquisition.
+        process.join(30)
+        assert not process.is_alive(), "terminal reader did not exit"
         assert process.exitcode == 0
+        assert observations, "operation did not read the target file"
+        assert all(item.released for item in observations), observations
+        assert [item.phase for item in observations] == ["enter", "leave"] * (
+            len(observations) // 2
+        )
+        assert len(backups(path)) == 1
         assert backups(path)[0].read_bytes() == original
+        snapshot = open_library(path).snapshot()
+        expected = ("Q1.waveforms.pi_half",)
+        if operation == "commit":
+            expected = ("Q1.waveforms.new", *expected)
+        assert snapshot.waveform_keys() == expected
+        assert len(backups(path)) == 1, "cleaned file must not need another cleanup"
     finally:
-        if process.is_alive():
-            process.terminate()
-            process.join(5)
-        parent.close()
-        child.close()
+        release_intent.set()
+        try:
+            if process.pid is not None:
+                if process.is_alive():
+                    process.terminate()
+                # Already exited or terminated; watchdog only bounds OS shutdown.
+                process.join(30)
+                assert not process.is_alive(), "reader cleanup did not exit"
+                process.close()
+        finally:
+            parent.close()
+            child.close()

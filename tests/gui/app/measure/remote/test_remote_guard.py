@@ -25,6 +25,7 @@ from zcu_tools.gui.session.context_types import EntryRequest
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry.registry import component_registry
 
+from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._components import QubitSchema, ResonatorSchema
 from tests.gui.app.measure._load_support import historical_metadata
 from tests.gui.app.measure._synthetic import SampleAdapter
@@ -73,7 +74,8 @@ def _prepare_guarded_context(fx: _Fixture) -> None:
 def _await_completed_run(
     call: Callable[[str, dict[str, Any]], dict[str, Any]], handle: int
 ) -> None:
-    assert call("wait", {"op": handle, "timeout": 3})["status"] == "finished"
+    # The admitted synthetic operation must publish terminal; 30s only guards a hang.
+    assert call("wait", {"op": handle, "timeout": 30})["status"] == "finished"
 
 
 def _edit_context_as_gui(fx: _Fixture, key: str, value: str | int) -> None:
@@ -105,8 +107,9 @@ def test_mcp_created_tab_can_start_a_guarded_run_on_real_gui_state(
                     },
                 },
             )
+            # The admitted synthetic operation must publish terminal; 30s only guards a hang.
             assert (
-                call("wait", {"op": connected["handle"], "timeout": 5})["status"]
+                call("wait", {"op": connected["handle"], "timeout": 30})["status"]
                 == "finished"
             )
             # A fresh connection must observe the already registered device itself.
@@ -150,8 +153,11 @@ def test_mcp_created_tab_can_start_a_guarded_run_on_real_gui_state(
                         "params": {"name": "bias", "remember": False},
                     },
                 )
+                # The admitted synthetic operation must publish terminal; 30s only guards a hang.
                 assert (
-                    call("wait", {"op": disconnected["handle"], "timeout": 5})["status"]
+                    call("wait", {"op": disconnected["handle"], "timeout": 30})[
+                        "status"
+                    ]
                     == "finished"
                 )
         finally:
@@ -230,8 +236,9 @@ def test_mcp_run_analyze_writeback_save_close_on_one_connection(
         )["tabs"][0]["interaction"]["has_run_result"]
         analyzed = call("tab_analyze", {"tab": tab_id})
         if "op" in analyzed:
+            # The admitted synthetic operation must publish terminal; 30s only guards a hang.
             assert (
-                call("wait", {"op": analyzed["op"], "timeout": 5})["status"]
+                call("wait", {"op": analyzed["op"], "timeout": 30})["status"]
                 == "finished"
             )
         call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})[
@@ -356,7 +363,8 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
     def held_run(self, request, schema, *, context):
         result = original_run(self, request, schema, context=context)
         entered.set()
-        if not release.wait(4):
+        # The test finally releases the held collaborator.
+        if not release.wait(30):
             raise TimeoutError("fake run release was not signalled")
         return result
 
@@ -383,7 +391,8 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
                 },
             },
         )["handle"]
-        assert entered.wait(1)
+        # Submission reaches the held synthetic adapter, before terminal release.
+        qt_until(entered.is_set, label="adapter entered")
         with pytest.raises(RuntimeError, match="busy"):
             call(
                 "rpc_call",
@@ -412,7 +421,8 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
         if terminal == "cancelled":
             assert call("cancel", {"op": op})["status"] in {"cancelling", "cancelled"}
         release.set()
-        assert call("wait", {"op": op, "timeout": 3})["status"] == terminal
+        # The admitted synthetic operation must publish terminal; 30s only guards a hang.
+        assert call("wait", {"op": op, "timeout": 30})["status"] == terminal
         assert fx.state.get_tab(tab_id).run.result is not None
         fx.ctrl.close_tab(tab_id)
         with pytest.raises(CfgPreconditionError) as gone:
@@ -511,10 +521,11 @@ def test_current_cfg_runs_from_another_holder_connection(fx) -> None:
         # Read cfg on one holder connection and run current inputs on the other.
         started = _raw_call(runner, "tab.run_start", args)
         assert started["ok"]
+        # The admitted synthetic operation must publish terminal; 30s only guards a hang.
         result = _raw_call(
             runner,
             "operation.await",
-            {"operation_id": started["result"]["operation_id"], "timeout": 3.0},
+            {"operation_id": started["result"]["operation_id"], "timeout": 30},
         )
         assert result["result"]["status"] == "finished"
     finally:

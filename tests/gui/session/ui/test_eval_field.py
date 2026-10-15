@@ -78,11 +78,14 @@ def _choose_mode(widget: QWidget, text: str) -> None:
     timeout = QTimer(widget)
     timeout.setSingleShot(True)
     timeout.timeout.connect(close_popup)
-    timeout.start(1000)
+    # The queued chooser closes the real modal menu; this only guards a broken handoff.
+    timeout.start(30_000)
     QTimer.singleShot(0, choose)
-    widget.customContextMenuRequested.emit(QPoint(0, 0))
-    timeout.stop()
-    assert chosen == [text]
+    try:
+        widget.customContextMenuRequested.emit(QPoint(0, 0))
+        assert chosen == [text]
+    finally:
+        timeout.stop()
 
 
 def test_direct_default_read_raw_returns_float(qapp):

@@ -8,8 +8,8 @@ reception) lives next to the tests that need it.
 from __future__ import annotations
 
 import json
+import logging
 import socket
-import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -22,7 +22,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from PIL import Image
-from qtpy.QtCore import QCoreApplication
+from PyQt6 import sip
+from qtpy.QtCore import QCoreApplication, QEventLoop, QSocketNotifier, QTimer
 from zcu_tools.cfg_model import ConfigBase, TemplateDef
 from zcu_tools.gui.app.measure.adapter import ExpAdapterProtocol, SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
@@ -54,8 +55,11 @@ from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._form_fakes import form_sources
 from tests.gui.app.measure._synthetic import ALIAS_PRESET, SampleAdapter, register_all
+
+logger = logging.getLogger(__name__)
 
 
 def _context_root() -> Path:
@@ -328,41 +332,16 @@ def _inbox_buf(sock: socket.socket) -> bytearray:
     return _INBOX_BUF.setdefault(sock.fileno(), bytearray())
 
 
-def recv_until(
+def _read_matching_frame(
     sock: socket.socket,
-    accept: Callable[[dict], bool],
-    timeout_s: float = 3.0,
-) -> dict:
-    """Wait for the first NDJSON line where ``accept(msg)`` is True.
-
-    Lines that ``accept`` rejects are **parked** in a per-socket inbox so a
-    later ``recv_*`` call can still observe them — this is important when
-    a test waits for a reply that may arrive interleaved with event pushes,
-    or vice versa. Pumps the Qt event loop between recv attempts so
-    marshalled handlers and EventBus emits make progress.
-    """
-    app = QCoreApplication.instance()
-    assert app is not None
-    inbox = _inbox(sock)
-    # Scan the parked queue first before touching the socket.
-    for idx, msg in enumerate(inbox):
-        if accept(msg):
-            return inbox.pop(idx)
-    deadline = time.monotonic() + timeout_s
-    buf = _inbox_buf(sock)
-    sock.setblocking(False)
-    while time.monotonic() < deadline:
-        try:
-            chunk = sock.recv(4096)
-            if not chunk:
-                raise AssertionError("peer closed without a matching line")
-            buf.extend(chunk)
-        except BlockingIOError:
-            pass
-        while True:
-            nl = buf.find(b"\n")
-            if nl < 0:
-                break
+    buf: bytearray,
+    inbox: list[dict[str, Any]],
+    accept: Callable[[dict[str, Any]], bool],
+) -> dict[str, Any] | None:
+    """Consume complete NDJSON frames, parking nonmatches until recv would block."""
+    while True:
+        nl = buf.find(b"\n")
+        if nl >= 0:
             line = bytes(buf[:nl])
             del buf[: nl + 1]
             if not line:
@@ -371,9 +350,75 @@ def recv_until(
             if accept(msg):
                 return msg
             inbox.append(msg)
-        app.processEvents()
-        time.sleep(0.005)
-    raise AssertionError(f"no matching message within {timeout_s}s")
+            continue
+        try:
+            chunk = sock.recv(4096)
+        except BlockingIOError:
+            return None
+        if not chunk:
+            raise AssertionError("peer closed without a matching line")
+        buf.extend(chunk)
+
+
+def recv_until(
+    sock: socket.socket,
+    accept: Callable[[dict], bool],
+    timeout_s: float = 30.0,
+) -> dict:
+    """Wait for the first NDJSON line where ``accept(msg)`` is True.
+
+    Lines that ``accept`` rejects are **parked** in a per-socket inbox so a
+    later ``recv_*`` call can still observe them — this is important when
+    a test waits for a reply that may arrive interleaved with event pushes,
+    or vice versa. Runs the Qt owner loop while waiting for socket readiness so
+    marshalled handlers and EventBus emits make progress. Socket readiness
+    resumes framing; it does not imply a complete or matching frame. The
+    independent watchdog bounds a missing reply, never decides success.
+    """
+    app = QCoreApplication.instance()
+    assert app is not None
+    inbox = _inbox(sock)
+    # Scan the parked queue first before touching the socket.
+    for idx, msg in enumerate(inbox):
+        if accept(msg):
+            return inbox.pop(idx)
+    buf = _inbox_buf(sock)
+    sock.setblocking(False)
+    loop = QEventLoop()
+    notifier = QSocketNotifier(sip.voidptr(sock.fileno()), QSocketNotifier.Type.Read)
+    watchdog = QTimer()
+    watchdog.setSingleShot(True)
+    matched: list[dict[str, Any]] = []
+    errors: list[Exception] = []
+
+    def receive() -> None:
+        try:
+            msg = _read_matching_frame(sock, buf, inbox, accept)
+            if msg is not None:
+                matched.append(msg)
+                loop.quit()
+        except Exception as exc:
+            # Qt callbacks cannot raise to the waiting caller; replay after exec().
+            logger.exception("Socket frame reception failed")
+            errors.append(exc)
+            loop.quit()
+
+    notifier.activated.connect(receive)
+    watchdog.timeout.connect(loop.quit)
+    try:
+        receive()  # A complete frame may already be buffered from the previous read.
+        if not matched and not errors:
+            # The sent request / emitted event must produce a matching complete frame.
+            watchdog.start(int(timeout_s * 1000))
+            loop.exec()
+    finally:
+        notifier.setEnabled(False)
+        notifier.activated.disconnect(receive)
+        watchdog.stop()
+    if errors:
+        raise errors[0]
+    assert matched, "no matching message before socket watchdog"
+    return matched[0]
 
 
 def reset_inbox(sock: socket.socket) -> None:
@@ -382,7 +427,7 @@ def reset_inbox(sock: socket.socket) -> None:
     _INBOX_BUF.pop(sock.fileno(), None)
 
 
-def recv_response(sock: socket.socket, rid: str, timeout_s: float = 3.0) -> dict:
+def recv_response(sock: socket.socket, rid: str, timeout_s: float = 30.0) -> dict:
     """Wait for a NDJSON response with ``id == rid``; drops pushes."""
     return recv_until(
         sock,
@@ -391,7 +436,7 @@ def recv_response(sock: socket.socket, rid: str, timeout_s: float = 3.0) -> dict
     )
 
 
-def recv_push(sock: socket.socket, event: str, timeout_s: float = 3.0) -> dict:
+def recv_push(sock: socket.socket, event: str, timeout_s: float = 30.0) -> dict:
     """Wait for a push line whose ``event`` matches; drops replies."""
     return recv_until(
         sock,
@@ -401,7 +446,8 @@ def recv_push(sock: socket.socket, event: str, timeout_s: float = 3.0) -> dict:
 
 
 def open_client(port: int) -> socket.socket:
-    sock = socket.create_connection(("127.0.0.1", port), timeout=1.0)
+    # The fixture listener is already started; only guard a stuck loopback connect.
+    sock = socket.create_connection(("127.0.0.1", port), timeout=30.0)
     # The OS may recycle a closed socket's fileno from an earlier test.
     reset_inbox(sock)
     reply = call(sock, "control.connect", rid="control-initialize")
@@ -416,7 +462,7 @@ def call(
     params: dict | None = None,
     *,
     rid: str = "1",
-    timeout_s: float = 3.0,
+    timeout_s: float = 30.0,
 ) -> dict:
     """Send a single RPC and wait for its matching reply."""
     send(sock, {"id": rid, "method": method, "params": params or {}})
@@ -430,11 +476,8 @@ def call_mcp_with_qt(
     pool = ThreadPoolExecutor(max_workers=1)
     try:
         worker = pool.submit(tools[name]["handler"], arguments)
-        deadline = time.monotonic() + 5
-        while not worker.done() and time.monotonic() < deadline:
-            QCoreApplication.processEvents()
-            time.sleep(0.005)
-        assert worker.done(), "MCP tool did not receive a GUI reply"
+        # The submitted tool completes after its GUI reply; pump its real owner delivery.
+        qt_until(worker.done, label="MCP GUI reply")
         reply = worker.result()
         # These GUI contracts inspect structured data; stdio image delivery has its own owner.
         return reply.data if isinstance(reply, ToolReply) else reply

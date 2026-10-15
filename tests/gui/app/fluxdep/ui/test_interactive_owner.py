@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-import time
 from copy import deepcopy
 
 import pytest
-from qtpy.QtCore import QEventLoop, QTimer
 from zcu_tools.gui.app.fluxdep.app import FluxDepGuiBehavior
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import EventOrigin
 
+from tests.gui._qt_waits import qt_until
 from tests.gui.app.fluxdep._window import (
     editor,
     picker_button,
@@ -62,16 +61,6 @@ def test_agent_follows_named_draft_and_remote_user_can_switch_display(
         view.close()
         view.deleteLater()
         qapp.processEvents()
-
-
-def _wait_for_alignment(plugin, qapp) -> None:
-    deadline = time.monotonic() + 3.0
-    while plugin.alignment_busy and time.monotonic() < deadline:
-        loop = QEventLoop()
-        QTimer.singleShot(10, loop.quit)
-        loop.exec()
-        qapp.processEvents()
-    assert not plugin.alignment_busy
 
 
 @pytest.mark.parametrize("spec_type", ["OneTone", "TwoTone"])
@@ -130,12 +119,8 @@ def test_production_twotone_preview_and_finish_advance_stage(
     widget = window.findChild(FindPointsWidget)
     assert context is not None
     assert widget is not None
-    deadline = time.monotonic() + 3.0
-    while widget.preview_view() is None and time.monotonic() < deadline:
-        loop = QEventLoop()
-        QTimer.singleShot(10, loop.quit)
-        loop.exec()
-        qapp.processEvents()
+    # Mounting the real widget schedules preview computation and owner delivery.
+    qt_until(lambda: widget.preview_view() is not None, label="TwoTone preview")
     view = widget.preview_view()
     assert view is not None
     expected = analyze_twotone_pick(context.plugin.inputs, context.session.snapshot())
@@ -160,7 +145,8 @@ def test_production_background_delivery_and_gui_finish_publish_same_session(
     context = ctrl.interactive.current_line_pick()
     assert context is not None
     context.plugin.start_alignment(context.session)
-    _wait_for_alignment(context.plugin, qapp)
+    # start_alignment submitted the real worker; busy clears on owner delivery.
+    qt_until(lambda: not context.plugin.alignment_busy, label="alignment delivery")
     assert context.plugin.info()["alignment_error"] is None
     assert context.session.can_undo()
     context.session.undo()

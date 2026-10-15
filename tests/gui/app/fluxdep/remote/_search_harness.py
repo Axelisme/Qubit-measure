@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import time
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
@@ -26,6 +25,7 @@ from zcu_tools.gui.session.adapters.thread_pool_background import (
 from zcu_tools.gui.session.ports import ProgressEvent
 from zcu_tools.gui.session.services.progress import ProgressService
 
+from tests.gui.app._owner_waits import owner_result
 from tests.gui.app.fluxdep.remote._route_harness import RouteHarness, RouteReply
 
 _T = TypeVar("_T")
@@ -114,15 +114,9 @@ class PumpedRouteHarness(RouteHarness):
 
         return self.io_pool.submit(invoke)
 
-    def wait(self, future: Future[_T], timeout: float = 5.0) -> _T:
-        """Pump owner delivery until a Future completes, or fail after timeout."""
-        deadline = time.monotonic() + timeout
-        while not future.done():
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError("RPC/search fixture did not complete")
-            self.owner.pump_once(block=True, timeout=min(0.01, remaining))
-        return future.result()
+    def wait(self, future: Future[_T]) -> _T:
+        """Deliver this submitted RPC's owner calls through its actual return."""
+        return owner_result(self.owner, future, label="search RPC")
 
     def request(self, link: ClientLink, method: str, **params: object) -> RouteReply:
         """Run an IO request while pumping the native owner-loop delivery."""
@@ -131,11 +125,10 @@ class PumpedRouteHarness(RouteHarness):
     def close(self) -> None:
         """Cancel search, drain native background deliveries, then close links."""
         self.ctrl.search.begin_close()
-        deadline = time.monotonic() + 5.0
-        while not self.background.quiesce(timeout=0):
-            if time.monotonic() >= deadline:
-                raise TimeoutError("search background did not drain")
-            self.owner.pump_once(block=True, timeout=0.01)
+        with ThreadPoolExecutor(max_workers=1) as closer:
+            # Released search work posts terminal delivery; quiesce joins its ack.
+            drained = closer.submit(self.background.quiesce, timeout=30)
+            assert owner_result(self.owner, drained, label="search drain")
         self.owner.pump_all()
         self.io_pool.shutdown(wait=True)
         super().close()

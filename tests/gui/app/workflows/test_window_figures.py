@@ -6,10 +6,9 @@ the focused figure's title, the Follow latest box and the strip's scroll
 position; the host never sees a workflow name.
 """
 
-from collections.abc import Callable, Sequence
-from time import monotonic
+from collections.abc import Sequence
 
-from qtpy.QtCore import QEventLoop, QPoint, QRect, QTimer
+from qtpy.QtCore import QPoint, QRect
 from qtpy.QtGui import QImage
 from qtpy.QtWidgets import (
     QApplication,
@@ -22,6 +21,8 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
 
+from tests.gui._qt_waits import qt_until
+
 from ._window_support import FigurePoint, WindowSession, bind_point, install_soc
 
 RUN_ID = "figures"
@@ -31,17 +32,6 @@ def child[W: QWidget](window: QWidget, kind: type[W], name: str) -> W:
     found = window.findChildren(kind, name)
     assert len(found) == 1, name
     return found[0]
-
-
-def wait_for(qapp: QApplication, condition: Callable[[], bool]) -> None:
-    """Run the Qt event loop in short slices until condition holds or 5 s pass."""
-    deadline = monotonic() + 5.0
-    while not condition():
-        assert monotonic() < deadline, "condition not reached within 5 s"
-        loop = QEventLoop()
-        QTimer.singleShot(20, loop.quit)
-        loop.exec()
-    qapp.processEvents()
 
 
 def start_figures(
@@ -284,9 +274,11 @@ def test_thumbnails_show_the_live_figure_content(
     )
     assert lifecycle(window) == "paused"
     button = thumbnail(window, "a/one")
-    wait_for(qapp, lambda: not picture(button).isNull())
+    # The paused producer drew the figure; its thumbnail refresh is queued in Qt.
+    qt_until(lambda: not picture(button).isNull(), label="paused thumbnail")
     paused = picture(button)
 
     resume(session, qapp)
     assert lifecycle(window) == "done"
-    wait_for(qapp, lambda: picture(button) != paused)
+    # Resume drew new content; final owner flush must replace the retained thumbnail.
+    qt_until(lambda: picture(button) != paused, label="resumed thumbnail")

@@ -4,7 +4,6 @@ import json
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from time import monotonic, sleep
 
 import pytest
 from qtpy.QtWidgets import QApplication, QComboBox, QLabel
@@ -19,6 +18,8 @@ from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request
 from zcu_tools.resources.entry import ResultEntry
 
+from tests.gui._qt_waits import qt_until
+from tests.gui.app._owner_waits import owner_result
 from tests.gui.app.workflows._start_fakes import StartHarness
 
 from ._reload_source import ReloadSource
@@ -205,14 +206,22 @@ def test_active_reload_rejects_before_preflight_in_pending_running_and_paused(
         window.reload_source()
     with ThreadPoolExecutor(max_workers=1) as pool:
         producer = pool.submit(harness.background.execute)
-        deadline = monotonic() + 3
-        while window.controller.status() is None:
-            assert monotonic() < deadline, "Native acceptance did not arrive"
-            sleep(0.01)
-        with pytest.raises(InvalidRunState):
-            window.reload_source()
-        window.pause("active")
-        producer.result(timeout=3)
+        try:
+            # Submitted Engine work publishes native acceptance before its wait point.
+            qt_until(
+                lambda: window.controller.status() is not None,
+                label="native acceptance",
+            )
+            with pytest.raises(InvalidRunState):
+                window.reload_source()
+            window.pause("active")
+            # Accepted Pause interrupts the native wait and returns the producer.
+            producer.result(timeout=30)
+        finally:
+            if not producer.done():
+                window.stop("active")
+                # Stop interrupts the same accepted wait even if an assertion failed.
+                producer.result(timeout=30)
     harness.owner.pump_all()
     harness.background.deliver()
     status = window.controller.status()
@@ -249,7 +258,8 @@ def test_reload_requires_owner_thread_before_reading_source(
     with ThreadPoolExecutor(max_workers=1) as pool:
         request = pool.submit(window.reload_source)
         with pytest.raises(CatalogReloadError, match="owner thread"):
-            request.result(timeout=3)
+            # The scheduled foreign-thread reload rejects before touching source files.
+            request.result(timeout=30)
     assert window.capture_persisted_state().plan["legacy"] == 4
 
 
@@ -268,12 +278,8 @@ def test_existing_form_rpc_observes_current_catalog(source: ReloadSource) -> Non
                 link,
                 Request("1", "workflow.describe_form", {"form": "plan", "path": []}),
             )
-            deadline = monotonic() + 3
-            while not request.done():
-                assert monotonic() < deadline, "RPC did not settle on owner"
-                harness.owner.pump_once(block=True, timeout=0.01)
-            request.result(timeout=1)
-        reply = json.loads(link.outbound.get(timeout=1))
+            owner_result(harness.owner, request, label="reloaded form RPC")
+        reply = json.loads(link.outbound.get_nowait())
         assert ["new_field"] in [
             field["path"] for field in reply["result"]["description"]["children"]
         ]

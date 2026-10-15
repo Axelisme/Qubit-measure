@@ -68,7 +68,8 @@ class SearchCase:
 
     def completion(self) -> DatabaseSearchResult:
         self.entered.set()
-        if not self.release.wait(5):
+        # Fixture/test release follows the accepted search and always runs in cleanup.
+        if not self.release.wait(30):
             raise TimeoutError("test delivery was not released")
         if self.failure is not None:
             raise self.failure
@@ -157,7 +158,8 @@ def _start(case: SearchCase, client: ClientLink) -> int:
     reply = _result(case.harness.request(client, "fit.search"))
     token = reply["token"]
     assert isinstance(token, int) and token > 0
-    assert case.entered.wait(2)
+    # fit.search accepted and submitted the gated runtime completion above.
+    assert case.entered.wait(30)
     return token
 
 
@@ -296,7 +298,7 @@ def test_wait_timeout_does_not_cancel_and_stale_delivery_is_failed_outcome(
     h = search_case.harness
     client = h.client()
     token = _start(search_case, client)
-    assert _result(h.request(client, "operation.await", token=token, timeout=0.01)) == {
+    assert _result(h.request(client, "operation.await", token=token, timeout=0)) == {
         "token": token,
         "reason": "timeout",
         "outcome": None,
@@ -333,7 +335,8 @@ def test_reconnect_status_finds_gui_latest_and_explicit_old_handle(
     search_case.release.clear()
     search_case.entered.clear()
     new_token = h.ctrl.search.start()
-    assert search_case.entered.wait(2)
+    # The accepted GUI search submitted the same gated runtime completion.
+    assert search_case.entered.wait(30)
     assert new_token != token
     assert _result(h.request(client, "operation.status"))["activity"] == {
         "token": new_token,

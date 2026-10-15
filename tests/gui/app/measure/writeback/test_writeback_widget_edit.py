@@ -41,13 +41,13 @@ from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._progress_fakes import DirectProgressTransport
+from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._synthetic import (
     MODULE_PROPOSAL_TARGET,
     MODULE_PROPOSAL_WAVEFORM,
     ModuleProposalAdapter,
     SampleParams,
 )
-from tests.gui.app.measure.ui._qt_interactions import wait_until
 from tests.gui.widgets.form._field_errors import field_error
 from tests.gui.widgets.form._text_input import commit_text_on_focus_loss as commit_text
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
@@ -266,11 +266,19 @@ def module_widget(tmp_path: Path, qapp: QApplication, request: pytest.FixtureReq
         context.set_parameter(context.read_context().target, "general.ext.gain", 0.4)
         tab_id = ctrl.new_tab("synthetic/module")
         ctrl.start_run(tab_id)
-        wait_until(qapp, lambda: ctrl.active_operation_count() == 0)
+        # The admitted synthetic run returns; pump its terminal owner delivery.
+        qt_until(
+            lambda: ctrl.active_operation_count() == 0,
+            label="module writeback run terminal delivery",
+        )
         run = ctrl.get_tab_snapshot(tab_id).run
         assert run is not None and run.result is not None
         ctrl.analyze(tab_id, SampleParams())
-        wait_until(qapp, lambda: ctrl.active_operation_count() == 0)
+        # The admitted fit returns; its terminal owner delivery installs the draft.
+        qt_until(
+            lambda: ctrl.active_operation_count() == 0,
+            label="module writeback analysis terminal delivery",
+        )
         analysis = state.get_tab(tab_id).analysis
         assert analysis.result is not None and analysis.writeback_draft is not None
         pane: Literal["analysis", "post_analysis"] = request.param

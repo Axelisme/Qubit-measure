@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 
 import pytest
-from qtpy.QtCore import QEventLoop, QTimer
 from qtpy.QtWidgets import QApplication, QCheckBox, QLabel, QScrollArea
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import (
@@ -30,6 +29,7 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.resources.entry.registry import component_registry
 
+from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._components import ResonatorSchema
 from tests.gui.app.measure._synthetic import (
     PairAdapter,
@@ -158,23 +158,10 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     cfg.write({("rounds",): 1})
     ctrl.start_run(tab_id)
 
-    def wait_for(predicate: Callable[[], bool]) -> None:
-        loop = QEventLoop()
-        deadline, poll = QTimer(loop), QTimer(loop)
-        deadline.setSingleShot(True)
-        deadline.timeout.connect(loop.quit)
-        poll.timeout.connect(lambda: loop.quit() if predicate() else None)
-        deadline.start(20000)
-        poll.start(5)
-        loop.exec()
-        poll.stop()
-        deadline.stop()
-        assert predicate()
-
-    wait_for(lambda: ctrl.get_tab_snapshot(tab_id).run.result is not None)
-    wait_for(lambda: not ctrl.get_tab_snapshot(tab_id).interaction.is_running)
+    qt_until(lambda: ctrl.get_tab_snapshot(tab_id).run.result is not None)
+    qt_until(lambda: not ctrl.get_tab_snapshot(tab_id).interaction.is_running)
     ctrl.analyze(tab_id, tab.analyze_form.read_params())
-    wait_for(lambda: ctrl.get_tab_snapshot(tab_id).analysis.has_writeback_draft)
+    qt_until(lambda: ctrl.get_tab_snapshot(tab_id).analysis.has_writeback_draft)
     items = ctrl.get_tab_snapshot(tab_id).analysis.writeback_items
     assert len(items) == 1
     current, proposed = ctrl.get_writeback_summaries_for_pane(tab_id, "analysis")[

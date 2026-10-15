@@ -6,7 +6,6 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
-from time import monotonic
 from types import TracebackType
 
 import pytest
@@ -37,6 +36,7 @@ from zcu_tools.resources.entry import (
     role_registry,
 )
 
+from tests.gui.app._owner_waits import owner_result
 from tests.resources.entry.fakes import Driver, registry_state, restore_registry
 
 from ._recording_transport import WindowTransport, WireRoute
@@ -171,12 +171,8 @@ def wire_route(
 
             def request(original: Request) -> dict[str, object]:
                 pending = io.submit(service.route, link, original)
-                deadline = monotonic() + 3
-                while not pending.done():
-                    assert monotonic() < deadline, "RPC did not settle on the owner"
-                    harness.owner.pump_once(block=True, timeout=0.01)
-                pending.result(timeout=1)
-                return json.loads(link.outbound.get(timeout=1))
+                owner_result(harness.owner, pending, label="workflow RPC")
+                return json.loads(link.outbound.get_nowait())
 
             yield request
     finally:

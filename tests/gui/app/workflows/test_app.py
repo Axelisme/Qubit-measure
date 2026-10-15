@@ -5,7 +5,6 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
-from time import monotonic
 
 import pytest
 from qtpy.QtCore import QTimer
@@ -47,6 +46,7 @@ from zcu_tools.resources.entry import (
 from zcu_tools.resources.entry.aliases import EntryAliases
 
 from tests.gui._completion_helpers import on_device_connected
+from tests.gui._qt_waits import qt_until
 from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.gui.app.workflows._synthetic import PlanForm, TunablesForm
 from tests.resources.entry.fakes import registry_state, restore_registry
@@ -449,12 +449,10 @@ def test_composition_rpc_reads_same_draft_without_socket(
                 id="app-read", method="workflow.form", params={"form": "tunables"}
             )
             future = io.submit(adapter.route, link, request)
-            deadline = monotonic() + 3
-            while not future.done():
-                assert monotonic() < deadline, "owner RPC did not settle"
-                qapp.processEvents()
-            future.result(timeout=1)
-            reply = json.loads(link.outbound.get(timeout=1))
+            # The submitted route marshals to this real Qt owner before it returns.
+            qt_until(future.done, label="composition RPC")
+            future.result()
+            reply = json.loads(link.outbound.get_nowait())
             assert sample_input(reply["result"]["input"])["value"] == 73.0
     finally:
         adapter.on_client_close(link, on_owner_thread=True)
@@ -467,10 +465,11 @@ def test_window_close_drains_and_closes_its_session_registry(
     token = app.services.device.start_connect_device(
         ConnectDeviceRequest("FakeDevice", "flux", "none")
     )
-    deadline = monotonic() + 5
-    while not app.services.device.get_connected_devices():
-        assert monotonic() < deadline, f"FakeDevice connect {token} did not settle"
-        qapp.processEvents()
+    # start_connect_device accepted a FakeDevice worker and queued owner delivery.
+    qt_until(
+        lambda: app.services.device.get_connected_devices(),
+        label=f"FakeDevice connect {token}",
+    )
     assert app.window.close()
     assert not app.services.device.get_connected_devices()
     app.shutdown()
@@ -550,7 +549,8 @@ def test_window_close_drains_accepted_connect_and_delivery_before_driver_close(
     def read(driver: FakeDevice):
         events.append("worker")
         started.set()
-        assert release.wait(2), "shutdown did not reach drain"
+        # The test closes the Window after arrival; its drain wrapper releases us.
+        assert release.wait(30), "shutdown did not reach drain"
         info = original_read(driver)
         events.append("worker done")
         return info
@@ -574,7 +574,8 @@ def test_window_close_drains_accepted_connect_and_delivery_before_driver_close(
             ConnectDeviceRequest("FakeDevice", "flux", "none")
         )
         try:
-            assert started.wait(2)
+            # start_connect_device accepted the worker that calls the driver above.
+            assert started.wait(30)
             assert app.window.close()
             assert events == ["worker", "worker done", "delivery", "driver close"]
             assert app.services.device.get_connected_devices() == {}

@@ -9,6 +9,7 @@ from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
 
 from ._recipe_support import PNG, ExecutionGui
+from ._recipe_sync_support import start_recipe_at
 from ._support import MeasureClient
 
 RAW_REPORT = SaveReport(
@@ -69,11 +70,9 @@ POST_REPORT = SaveReport(
 )
 
 
-def start_pipeline(client: MeasureClient) -> ToolReply:
-    """Start the synthetic pipeline through public admission with a short local wait for blocked RPCs."""
-    return client.context.session.recipes.start(
-        client.context, "pipeline", {"frequency_mhz": 5000.0, "post": True}
-    ).wait(0.01)
+def start_pipeline(client: MeasureClient, arrived: Event) -> ToolReply:
+    """Admit the synthetic stages and poll only after the fake's target RPC arrives."""
+    return start_recipe_at(client, arrived, {"frequency_mhz": 5000.0, "post": True})
 
 
 def skip_writeback(client: MeasureClient, question: ToolReply) -> ToolReply:

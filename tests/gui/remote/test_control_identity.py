@@ -268,6 +268,7 @@ def test_queued_write_checks_current_holder_at_execution(tmp_path):
         original = result(h.request(a, "project.info"))
         pending = h.request_async(a, "project.setup", chip_name="bad", qub_name="bad")
         h.ctrl.control_identity.reclaim_local()
+        # The queued owner request runs after the explicit holder transfer.
         reason(h.wait(pending), "not_holder")
         assert result(h.request(a, "project.info")) == original
     finally:

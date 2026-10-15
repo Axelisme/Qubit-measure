@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import dataclasses
 import threading
-import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QCoreApplication
 from zcu_tools.experiment.native_persistence import RestoredRun
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -59,6 +57,7 @@ from tests.gui._controller_adapter import (
     RecordingAdapter,
     RecordingCfg,
 )
+from tests.gui._qt_waits import qt_until as _wait_for
 from tests.gui.app.measure._load_support import write_native_file
 from tests.gui.app.measure.remote._helpers import _context_root
 
@@ -130,7 +129,8 @@ def cf(qapp, tmp_path) -> Iterator[ControllerFixture]:
     # Scope persistence to a temp dir so tests never read/write the real cache.
     fixture = ControllerFixture(cache_dir=tmp_path)
     yield fixture
-    fixture.ctrl.close()
+    # Test producers are released before teardown; close drains their queued delivery.
+    fixture.ctrl.close(timeout_ms=30_000)
 
 
 def _start_interactive_analysis(cf: ControllerFixture) -> tuple[str, int]:
@@ -140,18 +140,6 @@ def _start_interactive_analysis(cf: ControllerFixture) -> tuple[str, int]:
     cf.view.mount_interactive_analysis.assert_called_once()
     assert cf.ctrl.run_analyze_control.get_interactive(tab_id) is not None
     return tab_id, token
-
-
-def _wait_for(condition, timeout_ms: int = 3000, step_ms: int = 10) -> bool:
-    app = QCoreApplication.instance()
-    assert app is not None
-    deadline = time.monotonic() + timeout_ms / 1000
-    while time.monotonic() < deadline:
-        app.processEvents()
-        if condition():
-            return True
-        time.sleep(step_ms / 1000)
-    return False
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +190,8 @@ def test_close_drains_worker_and_owner_delivery_and_closes_admission(cf):
             callback_admission.append(exc)
 
     cf.ctrl.run_background(lambda: "result", on_done, errors.append)
-    cf.ctrl.close()
+    # The submitted result producer has no blocker and must deliver during close.
+    cf.ctrl.close(timeout_ms=30_000)
 
     assert delivered == [("result", owner_thread)]
     assert errors == []
@@ -221,13 +210,15 @@ def test_close_timeout_keeps_admission_closed_and_can_be_retried(cf):
 
     def compute() -> str:
         started.set()
-        if not release.wait(5):
+        # The test releases compute in finally; only guard a stuck caller.
+        if not release.wait(30):
             raise RuntimeError("test did not release worker")
         return "finished"
 
     cf.ctrl.run_background(compute, delivered.append, errors.append)
     try:
-        assert started.wait(2)
+        # run_background has scheduled compute, which signals entry.
+        assert started.wait(30)
         with pytest.raises(TimeoutError):
             cf.ctrl.close(timeout_ms=0)
         assert delivered == []
@@ -235,7 +226,8 @@ def test_close_timeout_keeps_admission_closed_and_can_be_retried(cf):
             cf.ctrl.run_background(lambda: "new", delivered.append, errors.append)
     finally:
         release.set()
-    cf.ctrl.close()
+    # compute was released in finally and will post its terminal result.
+    cf.ctrl.close(timeout_ms=30_000)
     assert delivered == ["finished"]
     assert errors == []
     cf.ctrl.close()
@@ -353,7 +345,7 @@ def test_start_run_passes_lowered_committed_state_cfg(cf):
     cf.ctrl.start_run(
         tab_id,
     )
-    assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
+    _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
     assert captured["cfg"].reps == 42
     assert cf.ctrl.get_tab_snapshot(tab_id).run.result is acquired
@@ -373,7 +365,7 @@ def test_run_finished_updates_tab_state(cf):
     cf.ctrl.start_run(
         tab_id,
     )
-    assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
+    _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     assert cf.state.get_tab(tab_id).run.result is not None
 
 
@@ -382,7 +374,7 @@ def test_run_finished_emits_run_finished(cf):
     cf.ctrl.start_run(
         tab_id,
     )
-    assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
+    _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     cf.bus.emit.assert_any_call(
         RunFinishedPayload(tab_id=tab_id, outcome="finished"),
     )
@@ -393,7 +385,7 @@ def test_run_finished_calls_refresh_tab(cf):
     cf.ctrl.start_run(
         tab_id,
     )
-    assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
+    _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     cf.bus.emit.assert_any_call(
         TabContentChangedPayload(tab_id, TabContentFact.RUN_RESULT_COMMITTED)
     )
@@ -427,7 +419,8 @@ def test_result_commit_survives_analysis_preparation_failure(
 
         def partial_run(*_args, **_kwargs):
             entered.set()
-            if not release.wait(3):
+            # Cancellation assertions release the accepted run in finally.
+            if not release.wait(30):
                 raise RuntimeError("test did not release partial run")
             return loaded
 
@@ -436,11 +429,11 @@ def test_result_commit_survives_analysis_preparation_failure(
         cf.ctrl.start_run(tab_id)
         if source == "cancelled":
             try:
-                assert _wait_for(entered.is_set)
+                _wait_for(entered.is_set)
                 cf.ctrl.cancel_run()
             finally:
                 release.set()
-        assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
+        _wait_for(lambda: not cf.state.is_tab_running(tab_id))
         assert terminal == [
             RunFinishedPayload(
                 tab_id=tab_id,
@@ -492,7 +485,7 @@ def test_run_finished_skips_analyze_init_for_non_analysis_adapter(cf):
     cf.ctrl.start_run(
         tab_id,
     )
-    assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
+    _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     # The non-analysis adapter's analyze-params builder is never touched, so the
     # run completes without surfacing an error dialog.
     no_analysis.get_analyze_params.assert_not_called()
@@ -516,7 +509,7 @@ def test_run_failed_shows_status_message(cf):
     cf.ctrl.start_run(
         tab_id,
     )
-    assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
+    _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     assert cf.view.show_error_dialog.called
     msg = cf.view.show_error_dialog.call_args[0][1]
     assert "boom" in msg
@@ -531,7 +524,7 @@ def test_run_failed_clears_run_lock(cf):
     cf.ctrl.start_run(
         tab_id,
     )
-    assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
+    _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     assert cf.state.is_run_active() is False
 
 
@@ -560,7 +553,7 @@ def test_start_run_while_running_raises(cf):
             )
     finally:
         ev.set()
-        _wait_for(lambda: not cf.state.is_tab_running(tab_id), timeout_ms=2000)
+        _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
 
 def test_start_run_while_device_setup_active_raises(cf):
@@ -674,7 +667,7 @@ def test_device_connect_updates_state_and_presents_ui_feedback(
     cf.ctrl.device_control.start_connect_device(
         ConnectDeviceRequest(type_name="FakeDevice", name="flux", address="addr")
     )
-    assert _wait_for(lambda: not cf.ctrl.device_control.get_active_device_operations())
+    _wait_for(lambda: not cf.ctrl.device_control.get_active_device_operations())
 
     dev = cf.state.get_device("flux")
     assert dev is not None and dev.status is DeviceStatus.CONNECTED
@@ -683,7 +676,7 @@ def test_device_connect_updates_state_and_presents_ui_feedback(
     cf.ctrl.device_control.start_disconnect_device(
         DisconnectDeviceRequest(name="flux", remember=False)
     )
-    assert _wait_for(lambda: cf.state.get_device("flux") is None)
+    _wait_for(lambda: cf.state.get_device("flux") is None)
     cf.view.show_status_message.assert_any_call("Device disconnected: flux")
 
 
@@ -692,7 +685,7 @@ def test_run_completion_prepares_pure_tab_snapshot(cf):
     cf.ctrl.start_run(
         tab_id,
     )
-    assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
+    _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
     snapshot = cf.ctrl.get_tab_snapshot(tab_id)
 
@@ -750,17 +743,19 @@ def test_reset_tab_cfg_while_running_raises(cf):
     cf.ctrl.start_run(
         tab_id,
     )
-    assert cf.state.is_tab_running(tab_id)
+    try:
+        assert cf.state.is_tab_running(tab_id)
 
-    from zcu_tools.gui.app.measure.services.form_contracts import CfgPreconditionError
+        from zcu_tools.gui.app.measure.services.form_contracts import (
+            CfgPreconditionError,
+        )
 
-    cfg = cf.ctrl.cfg_resources.lookup(tab_id)
-    with pytest.raises(CfgPreconditionError, match="blocked"):
-        cfg.reset()
-
-    # cleanup
-    ev.set()
-    _wait_for(lambda: not cf.state.is_tab_running(tab_id), timeout_ms=2000)
+        cfg = cf.ctrl.cfg_resources.lookup(tab_id)
+        with pytest.raises(CfgPreconditionError, match="blocked"):
+            cfg.reset()
+    finally:
+        ev.set()
+        _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
 
 def test_get_adapter_names_includes_fake(cf):

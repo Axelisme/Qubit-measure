@@ -1,7 +1,7 @@
 """Generator execution contracts through injected definitions and recording GUI."""
 
 from dataclasses import replace
-from threading import Event
+from threading import Event, Timer
 
 import pytest
 from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
@@ -18,7 +18,14 @@ from zcu_tools.mcp.measure.recipe_execution import RecipeExecutions
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._recipe_analysis_support import AnalysisRecipeGui
-from ._recipe_execution_support import ControlledRunGui, definition, registry
+from ._recipe_execution_support import (
+    ControlledRunGui,
+    completed,
+    definition,
+    handoff,
+    registry,
+    wait_for_event,
+)
 from ._recipe_support import LookbackGui, recipe_client
 from ._save_report_support import analysis_report
 
@@ -57,7 +64,7 @@ def test_generator_run_analysis_and_snapshot_capture_do_not_query_gui(tmp_path):
         registry(client.context, definition(sample, schema)) as executions,
     ):
         execution = executions.start(client.context, "sample", {"gain": 4})
-        reply = execution.wait(5)
+        reply = completed(execution)
         assert reply.data["status"] == "finished" and not reply.is_error
         assert deliveries == ["completed", "completed", "completed"]
         assert finally_ran.is_set()
@@ -124,20 +131,21 @@ def test_two_interactive_stages_resume_in_background_without_tool_wait(tmp_path)
         registry(client.context, definition(sample)) as executions,
     ):
         execution = executions.start(client.context, "sample", {})
-        first = execution.wait(5)
+        first = handoff(execution)
         assert first.data["status"] == "interactive"
         assert first.data["analysis_stage"] == "primary"
         assert first.images
         assert not reached_post.is_set()
         gui.done["primary"].set()
-        assert reached_post.wait(2)
-        second = execution.wait(5)
+        wait_for_event(gui.awaited["post"])
+        assert reached_post.is_set()
+        second = handoff(execution)
         assert second.data["status"] == "interactive"
         assert second.data["analysis_stage"] == "post"
         assert not resumed.is_set()
         gui.done["post"].set()
-        assert resumed.wait(2)
-        final = execution.wait(5)
+        final = completed(execution)
+        assert resumed.is_set()
         assert final.data["status"] == "finished"
         assert (
             final.data["analysis"]["writeback"]["items"][0]["target_name"]
@@ -166,7 +174,7 @@ def test_question_captures_items_and_answer_only_delivers_decision(tmp_path, ans
         registry(client.context, definition(sample)) as executions,
     ):
         execution = executions.start(client.context, "sample", {})
-        question = execution.wait(5)
+        question = handoff(execution)
         assert question.data["status"] == "awaiting_answer"
         assert question.data["question_items"] == ("frequency",)
         assert (
@@ -188,6 +196,33 @@ def test_question_captures_items_and_answer_only_delivers_decision(tmp_path, ans
         assert duplicate.value.reason == "not_awaiting_answer"
 
 
+def test_completed_rejects_unexpected_question_handoff(tmp_path):
+    def sample(session: RecipeSession) -> RecipeGenerator:
+        run, _ = yield session.open_tab("lookback").run()
+        assert isinstance(run, RecipeRun)
+        _, _ = yield run.analyze("primary")
+        yield run.propose_writeback(["frequency"])
+
+    with (
+        recipe_client(tmp_path, AnalysisRecipeGui()) as client,
+        registry(client.context, definition(sample)) as executions,
+    ):
+        execution = executions.start(client.context, "sample", {})
+        assert handoff(execution).data["status"] == "awaiting_answer"
+        # A broken completion helper may join this unanswered question forever.
+        # This safety fuse closes it after the helper's own 30s watchdog can diagnose it.
+        fuse = Timer(60, execution.close)
+        try:
+            fuse.start()
+            with pytest.raises(AssertionError, match="nonterminal.*awaiting_answer"):
+                completed(execution)
+        finally:
+            fuse.cancel()
+            execution.close()
+            fuse.join()
+            execution.join()
+
+
 def test_question_cancel_delivers_none_and_clears_one_intent(tmp_path):
     delivered: list[object] = []
 
@@ -204,9 +239,9 @@ def test_question_cancel_delivers_none_and_clears_one_intent(tmp_path):
         registry(client.context, definition(sample)) as executions,
     ):
         execution = executions.start(client.context, "sample", {})
-        assert execution.wait(5).data["status"] == "awaiting_answer"
+        assert handoff(execution).data["status"] == "awaiting_answer"
         execution.cancel()
-        assert execution.wait(5).data["status"] == "cancelled"
+        assert completed(execution).data["status"] == "cancelled"
         assert delivered == [None, "cancelled"]
         assert not execution.snapshot().cancel_requested
 
@@ -228,7 +263,7 @@ def test_native_run_stop_delivers_partial_handle_and_correct_status(tmp_path, co
         registry(client.context, definition(sample)) as executions,
     ):
         execution = executions.start(client.context, "sample", {})
-        assert gui.awaited.wait(2)
+        wait_for_event(gui.awaited)
         with pytest.raises(GuiRpcError) as busy:
             executions.start(client.context, "sample", {})
         assert busy.value.reason == "recipe_busy"
@@ -240,7 +275,7 @@ def test_native_run_stop_delivers_partial_handle_and_correct_status(tmp_path, co
                 execution.cancel() if control == "cancel" else execution.finish_early()
             )
             assert reply.data["gui_cancel"]["status"] == "requested"
-        reply = execution.wait(5)
+        reply = completed(execution)
         expected = "finished_early" if control == "finish_early" else "cancelled"
         assert delivered == [expected]
         assert reply.data["status"] == (
@@ -265,12 +300,12 @@ def test_interactive_cancel_delivers_none_without_another_analysis_worker(tmp_pa
         registry(client.context, definition(sample)) as executions,
     ):
         execution = executions.start(client.context, "sample", {})
-        assert execution.wait(5).data["status"] == "interactive"
+        assert handoff(execution).data["status"] == "interactive"
         with pytest.raises(GuiRpcError) as error:
             execution.finish_early()
         assert error.value.reason == "not_running"
         execution.cancel()
-        assert execution.wait(5).data["status"] == "cancelled"
+        assert completed(execution).data["status"] == "cancelled"
         assert delivered == [None, "cancelled"]
 
 
@@ -284,7 +319,7 @@ def test_between_yield_cancel_suppresses_once_but_keeps_fast_steps(tmp_path):
         run, _ = yield tab.run()
         assert isinstance(run, RecipeRun)
         between.set()
-        assert continue_recipe.wait(2)
+        wait_for_event(continue_recipe)
         tab.set("rounds", 9)
         analysis, status = yield run.analyze("primary")
         delivered.extend((analysis, status))
@@ -298,12 +333,12 @@ def test_between_yield_cancel_suppresses_once_but_keeps_fast_steps(tmp_path):
         registry(client.context, definition(sample)) as executions,
     ):
         execution = executions.start(client.context, "sample", {})
-        assert between.wait(2)
         try:
+            wait_for_event(between)
             execution.cancel()
         finally:
             continue_recipe.set()
-        reply = execution.wait(5)
+        reply = completed(execution)
         assert reply.data["status"] == "finished"
         assert delivered == [None, "cancelled", "completed"]
         assert (
@@ -344,7 +379,7 @@ def test_native_failure_is_thrown_at_yield_and_finally_runs(tmp_path, caught):
         registry(client.context, definition(sample)) as executions,
     ):
         execution = executions.start(client.context, "sample", {})
-        reply = execution.wait(5)
+        reply = completed(execution)
         assert reply.data["status"] == ("finished" if caught else "failed")
         assert failures == ["run_failed"]
         assert reply.data["run_outcome"]["status"] == "failed"
@@ -375,10 +410,10 @@ def test_close_serializes_finally_and_never_resumes_a_closed_generator(
     ):
         execution = executions.start(client.context, "sample", {})
         if interactive:
-            assert execution.wait(5).data["status"] == "interactive"
+            assert handoff(execution).data["status"] == "interactive"
         else:
             assert isinstance(gui, ControlledRunGui)
-            assert gui.awaited.wait(2)
+            wait_for_event(gui.awaited)
         executions.stop_admission()
         executions.join()
         assert finally_ran.is_set()
@@ -406,14 +441,14 @@ def test_needs_parameters_and_invalid_keywords_fail_without_starting_run(tmp_pat
         registry(client.context, definition(sample)) as executions,
     ):
         before = list(client.transport.sent)
-        rejected = executions.start(client.context, "sample", {"extra": 1}).wait(5)
+        rejected = completed(executions.start(client.context, "sample", {"extra": 1}))
         assert rejected.is_error and rejected.data["status"] == "failed"
         assert rejected.data["error"]["phase"] == "preparing"
         assert "extra" in rejected.data["error"]["message"]
         assert not finally_ran.is_set()
         assert client.transport.sent == before
         execution = executions.start(client.context, "sample", {})
-        reply = execution.wait(5)
+        reply = completed(execution)
         assert reply.data["status"] == "needs_parameters"
         assert reply.data["missing"][0]["parameter"] == "frequency"
         assert finally_ran.is_set()
@@ -452,7 +487,7 @@ def test_registry_validates_definitions_and_rejects_unknown_identity(tmp_path):
             executions.get("missing")
         assert identity.value.reason == "unknown_execution"
         first = executions.start(client.context, "sample", {})
-        first.wait(5)
+        completed(first)
         calls = list(client.transport.sent)
         with pytest.raises(GuiRpcError) as binding:
             executions.start(replace(client.context), "sample", {})
