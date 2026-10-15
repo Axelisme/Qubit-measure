@@ -104,14 +104,13 @@ def readout_dpm_writeback_items(
         target="readout_dpm",
         desc="Optimized readout (DPM)",
         field_updates=(
-            ("pulse_cfg.freq", best_ro_freq),
-            ("ro_cfg.ro_freq", best_ro_freq),
-            ("pulse_cfg.gain", best_ro_gain),
+            ("freq", best_ro_freq),
+            ("gain", best_ro_gain),
             (
-                "pulse_cfg.waveform.length",
+                "waveform.length",
                 best_ro_length + READOUT_DPM_PULSE_TAIL_US,
             ),
-            ("ro_cfg.ro_length", best_ro_length),
+            ("ro_length", best_ro_length),
         ),
         role_id="readout_dpm",
     )

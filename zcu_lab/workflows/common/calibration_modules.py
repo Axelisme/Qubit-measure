@@ -188,11 +188,10 @@ def calibration_seed(
     raise ValueError. No fit, capture, live source or device read occurs.
     """
     frequency = qub_pulse.freq
-    pulse = readout.pulse_cfg
     if (
         not isinstance(frequency, float)
-        or not isinstance(pulse.freq, float)
-        or not isinstance(pulse.gain, float)
+        or not isinstance(readout.freq, float)
+        or not isinstance(readout.gain, float)
     ):
         raise ValueError("Initial calibration requires scalar module frequency/gain")
-    return Calibrated(frequency, pi_length_us, pulse.freq, pulse.gain)
+    return Calibrated(frequency, pi_length_us, readout.freq, readout.gain)
