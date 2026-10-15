@@ -8,7 +8,16 @@ from pydantic import Field, JsonValue
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication, QCheckBox, QComboBox, QLabel, QLineEdit
 from zcu_tools.gui.form import (
-    Display, FormDescription, FormEnv, FormInput, FormModel, FormPath, FormState, FormWritePath, Option,
+    Display,
+    FormDescription,
+    FormEnv,
+    FormInput,
+    FormModel,
+    FormPath,
+    FormState,
+    FormWritePath,
+    Option,
+    WriteRejected,
 )
 from zcu_tools.gui.widgets.form import FormEditor
 
@@ -40,12 +49,22 @@ class LazyForm(FormModel):
 
 
 @pytest.fixture
-def view(qapp: QApplication) -> Iterator[tuple[FormEditor[LazyForm], FormState[LazyForm]]]:
+def view(
+    qapp: QApplication,
+) -> Iterator[tuple[FormEditor[LazyForm], FormState[LazyForm]]]:
     env = FormEnv()
-    state = FormState(FormInput(LazyForm, {
-        "stable": 5.0, "folded": {"value": -1.0}, "advanced": 3.0,
-        "branch": {"kind": "first", "one": 1.0}, "optional": {"value": 1.0},
-    }))
+    state = FormState(
+        FormInput(
+            LazyForm,
+            {
+                "stable": 5.0,
+                "folded": {"value": -1.0},
+                "advanced": 3.0,
+                "branch": {"kind": "first", "one": 1.0},
+                "optional": {"value": 1.0},
+            },
+        )
+    )
     editor = FormEditor(state, env)
     yield editor, state
     editor.detach()
@@ -53,7 +72,9 @@ def view(qapp: QApplication) -> Iterator[tuple[FormEditor[LazyForm], FormState[L
     qapp.processEvents()
 
 
-def test_expanding_an_empty_selected_layer_removes_the_fold_title(qapp: QApplication) -> None:
+def test_expanding_an_empty_selected_layer_removes_the_fold_title(
+    qapp: QApplication,
+) -> None:
     class Empty(FormModel):
         kind: Literal["empty"] = "empty"
 
@@ -121,9 +142,13 @@ def text(editor: FormEditor[LazyForm], path: str) -> QLineEdit:
     return found
 
 
-@pytest.mark.parametrize("path,fold_path", [("folded.value", "folded"), ("advanced", "group.Advanced")])
+@pytest.mark.parametrize(
+    "path,fold_path", [("folded.value", "folded"), ("advanced", "group.Advanced")]
+)
 def test_first_expansion_builds_controls_and_collapse_keeps_uncommitted_text(
-    view: tuple[FormEditor[LazyForm], FormState[LazyForm]], path: str, fold_path: str,
+    view: tuple[FormEditor[LazyForm], FormState[LazyForm]],
+    path: str,
+    fold_path: str,
 ) -> None:
     editor, state = view
     before = state.input.data
@@ -139,11 +164,16 @@ def test_first_expansion_builds_controls_and_collapse_keeps_uncommitted_text(
     assert state.input.data == before
 
 
-@pytest.mark.parametrize("path,fold_path", [("folded.value", "folded"), ("advanced", "group.Advanced")])
+@pytest.mark.parametrize(
+    "path,fold_path", [("folded.value", "folded"), ("advanced", "group.Advanced")]
+)
 @pytest.mark.parametrize("draft", ["12.5", "unfinished -"])
 def test_collapsing_focused_text_neither_commits_nor_parses_it(
-    view: tuple[FormEditor[LazyForm], FormState[LazyForm]], qapp: QApplication,
-    path: str, fold_path: str, draft: str,
+    view: tuple[FormEditor[LazyForm], FormState[LazyForm]],
+    qapp: QApplication,
+    path: str,
+    fold_path: str,
+    draft: str,
 ) -> None:
     editor, state = view
     editor.resize(700, 900)
@@ -170,9 +200,64 @@ def test_collapsing_focused_text_neither_commits_nor_parses_it(
     assert field.text() == draft
 
 
+@pytest.mark.parametrize("reject", [False, True])
+def test_restored_focused_draft_commits_once_on_normal_focus_loss(
+    qapp: QApplication, reject: bool,
+) -> None:
+    env = FormEnv()
+    state = FormState(LazyForm.default_input(env))
+    batches: list[dict[FormWritePath, JsonValue]] = []
+    publications: list[int] = []
+
+    def write(batch: Mapping[FormWritePath, JsonValue]) -> None:
+        batches.append(dict(batch))
+        if reject:
+            raise WriteRejected("Host busy")
+        state.write(batch, env)
+
+    unsubscribe = state.subscribe(lambda: publications.append(1))
+    editor = FormEditor(state, env, write=write, run_command=lambda _path, _name: None)
+    try:
+        editor.show()
+        qapp.processEvents()
+        fold = title(editor, "folded")
+        mouse_click(fold, fold.rect().center())
+        field = text(editor, "folded.value")
+        field.setFocus()
+        assert field.hasFocus()
+        field.selectAll()
+        type_text(field, "12.5")
+        before = state.input.data
+        mouse_click(fold, fold.rect().center())
+        qapp.processEvents()
+        assert batches == [] and publications == []
+        assert state.input.data == before
+        mouse_click(fold, fold.rect().center())
+        field.setFocus()
+        assert field.hasFocus()
+        text(editor, "stable").setFocus()
+        qapp.processEvents()
+        assert batches == [{("folded", "value"): 12.5}]
+        assert field.text() == "12.5"
+        if reject:
+            assert state.input.data == before
+            assert publications == []
+            errors = editor.local_parse_errors()
+            assert errors is not None and errors.messages == {("folded", "value"): "Host busy"}
+        else:
+            assert state.input.data["folded"] == {"value": 12.5}
+            assert publications == [1]
+    finally:
+        unsubscribe()
+        editor.detach()
+        editor.deleteLater()
+        qapp.processEvents()
+
+
 @pytest.mark.parametrize("operation", ["option", "nullable"])
 def test_shape_change_keeps_unrelated_widgets_and_fold_state(
-    view: tuple[FormEditor[LazyForm], FormState[LazyForm]], operation: str,
+    view: tuple[FormEditor[LazyForm], FormState[LazyForm]],
+    operation: str,
 ) -> None:
     editor, _ = view
     stable = text(editor, "stable")
