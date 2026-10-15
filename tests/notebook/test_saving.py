@@ -238,6 +238,38 @@ def test_device_operation_interrupt_escapes_and_preserves_previous_record() -> N
     assert exp.acquisition_for(previous) == evidence
 
 
+@pytest.mark.parametrize("failure", ["missing_cfg", "invalid_shape"])
+def test_preparation_failure_retains_partial_handle_and_saves_files(
+    point: PointView, ledger: RecordsLedger, failure: str
+) -> None:
+    exp = experiment()
+    source = exp.run(SavingCfg())
+    if failure == "missing_cfg":
+        source.cfg = None
+    else:
+        source.result.signal = source.result.signal[:1]
+    try:
+        exp.save_run(
+            point, source=source, figures={"fit": saving_figure()},
+            analysis=(analysis_document(),),
+        )
+    except PartialSaveError as error:
+        partial = error
+    except Exception as error:
+        pytest.fail(f"Data preparation aborted independent files: {error}")
+    else:
+        pytest.fail("Invalid data must be reported as a partial save")
+    assert partial.run.run_id == exp.acquisition_for(source).run_id
+    assert partial.run.report == partial.report
+    data = [item for item in partial.report.outputs if item.key.member == "data"]
+    files = [item for item in partial.report.outputs if item.key.member != "data"]
+    assert len(data) == 2
+    assert all(item.status == "failed" and item.error for item in data)
+    assert len(files) == 3
+    assert all(item.status == "saved" and item.output.path.is_file() for item in files)
+    assert [event.kind for event in ledger.events()] == ["acquired", "saved"]
+
+
 def test_real_caller_writes_all_formats_and_retains_acquisition(
     point: PointView,
     tmp_path: Path,
