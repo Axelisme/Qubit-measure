@@ -278,7 +278,7 @@ def test_describe_form_rpc_uses_call_local_branch(
         target = description["target"]
         assert target["options"][target["selected"]]["value"] == {"kind": "linrange"}
         assert {tuple(child["path"]) for child in description["children"]} == {
-            ("samples", "kind"), ("samples", "start"),
+            ("samples", "start"),
             ("samples", "stop"), ("samples", "n"),
         }
     else:
