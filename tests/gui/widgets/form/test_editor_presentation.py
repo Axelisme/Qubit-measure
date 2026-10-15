@@ -416,3 +416,66 @@ def test_expression_errors_keep_the_mode_tint_and_add_a_red_border(
     assert not field_error(view, "amount")
     assert text.palette().color(QPalette.ColorRole.Base) == expression_base
     assert text.styleSheet() == normal_style
+
+
+@pytest.mark.parametrize("dark", [False, True], ids=["light", "dark"])
+@pytest.mark.parametrize("path", ["unit", "amount"], ids=["dropdown", "expression"])
+def test_error_background_is_painted_without_changing_row_height(
+    editor: tuple[FormEditor[PresentationForm], FormState[PresentationForm]],
+    qapp: QApplication,
+    dark: bool,
+    path: str,
+) -> None:
+    view, state = editor
+    palette = QPalette()
+    palette.setColor(QPalette.ColorRole.Base, QColor("#242424" if dark else "#fafafa"))
+    palette.setColor(
+        QPalette.ColorRole.Button, QColor("#303030" if dark else "#efefef")
+    )
+    palette.setColor(QPalette.ColorRole.Text, QColor("#eeeeee" if dark else "#151515"))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor("#4488cc"))
+    view.setPalette(palette)
+    if path == "amount":
+        mode(view, path).trigger()
+        commit_text(child(view, QLineEdit, f"form.input.{path}"), "5000 + 0.125")
+    control = child(view, QWidget, f"form.input.{path}")
+    lay_out(view, qapp)
+
+    def interior() -> QColor:
+        # Blank patch left of a combo's arrow and away from borders and text.
+        pixels = control.grab().toImage()
+        x, y = pixels.width() - 40, pixels.height() // 2
+        patch = [
+            pixels.pixelColor(x + dx, y + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+        ]
+        return QColor(
+            round(sum(c.red() for c in patch) / len(patch)),
+            round(sum(c.green() for c in patch) / len(patch)),
+            round(sum(c.blue() for c in patch) / len(patch)),
+        )
+
+    normal = interior()
+    geometry = (
+        control.height(),
+        child(view, QLineEdit, "form.input.after").y(),
+        view.sizeHint().height(),
+    )
+    if path == "amount":
+        commit_text(child(view, QLineEdit, f"form.input.{path}"), "absent_name")
+    else:
+        state.write({(path,): "missing"}, FormEnv())
+    lay_out(view, qapp)
+    invalid = interior()
+    assert field_error(view, path)
+    if path == "amount":
+        # Compare rendered colours, not just palette roles: a border-only Qt
+        # stylesheet can otherwise paint a white interior over the mode tint.
+        assert invalid == normal
+    else:
+        assert invalid.red() - invalid.green() > normal.red() - normal.green()
+        assert invalid.red() - invalid.blue() > normal.red() - normal.blue()
+    assert (
+        control.height(),
+        child(view, QLineEdit, "form.input.after").y(),
+        view.sizeHint().height(),
+    ) == geometry
