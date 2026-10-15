@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -62,13 +61,6 @@ class _FakeController:
 
     def delete(self, data_key: str) -> None:
         del self.assets[data_key]
-
-
-@pytest.fixture(scope="module", autouse=True)
-def repository_state_guard() -> Iterator[None]:
-    before = vars(ArbWaveformDatabase)["_database_path"]
-    yield
-    assert vars(ArbWaveformDatabase)["_database_path"] == before
 
 
 @pytest.fixture(autouse=True)
@@ -483,7 +475,6 @@ def test_save_button_persists_without_remote_png(
 ) -> None:
     from qtpy.QtWidgets import QPushButton
 
-    monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
     state = SessionState(
         SessionEnv(
             parameters=None,
@@ -521,18 +512,12 @@ def test_save_button_persists_without_remote_png(
 
 
 @pytest.fixture
-def entry_waveform_dialog(qapp, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def entry_waveform_dialog(qapp, tmp_path: Path):
     """Bind the waveform service to an entry installed by the real context owner."""
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.session.services.context import ContextService
     from zcu_tools.resources.entry import ResultEntry
 
-    # No public reset exists; restore the process-global path the way this module does.
-    monkeypatch.setattr(
-        ArbWaveformDatabase,
-        "_database_path",
-        vars(ArbWaveformDatabase)["_database_path"],
-    )
     state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
     context = ContextService(
         state, BaseEventBus(), bind_assets=ArbWaveformDatabase.info_at

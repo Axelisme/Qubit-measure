@@ -1,6 +1,6 @@
 # gui/form_adapter — 從 core cfg 生成 Form
 
-**Last updated:** 2026-10-15，單層描述與 captured factory
+**Last updated:** 2026-10-15，單層描述、captured factory 與 Pulse 表單屏蔽範圍縮減
 
 本 package 是 GUI 的 Qt-free 前端框架。它把 core cfg 宣告與作者寫的起始樹翻譯成 `gui.form` 的 `FormModel`，再把表單結果轉回驗證過的 core cfg。它供 measure、workflows、library 與 writeback 的表單定義共用。Measure 的註冊、protocol 與分頁 Form resource 使用 `Form`，workflows 的手寫 plan 表單使用 `ModuleInputField`。
 
@@ -19,7 +19,7 @@
 生成器擁有兩條翻譯政策，host 與 `gui.form` 不重做：
 
 - `FieldMeta` 的 label、unit、decimals、description、group 轉成 `Display`，core 欄位與 module 欄位共用同一個翻譯。被鎖定的欄位是單值 Literal，不帶 decimals。Sweep 的 decimals 只傳到生成 LinRange 的 start／stop float 欄位，不套外層 model 或 n。
-- 生成 module 欄位時，選填的 `desc`、`mask`、`outsel`、`ro_ch` 與 `mux_*` 不在 model、input、description 與寫入路徑。`to_cfg` 驗證成 Spec 時由 Spec 預設補回。從 library 複製成 inline 或 `input_from_spec` 時，這些欄位的原值被丟棄，所以編輯後會變回預設。必填且沒有預設的欄位，例如 `DirectReadoutCfg.ro_ch`，照常可編輯。範本 seed 這些欄位時，註冊入口拒絕，訊息寫出 template id 與 seed 路徑；`to_cfg` 只由 Spec 預設補回。其他欄位的字串 seed 照舊是字面值。目前沒有露出覆寫機制。
+- 生成 module 欄位時，選填的 `desc` 與 `ro_ch` 不在 model、input、description 與寫入路徑。`to_cfg` 驗證成 Spec 時由 Spec 預設補回。從 library 複製成 inline 或 `input_from_spec` 時，這些欄位的原值被丟棄，所以編輯後會變回預設。必填且沒有預設的欄位，例如 `DirectReadoutCfg.ro_ch`，照常可編輯。範本 seed 這些欄位時，註冊入口拒絕，訊息寫出 template id 與 seed 路徑；`to_cfg` 只由 Spec 預設補回。其他欄位的字串 seed 照舊是字面值。目前沒有露出覆寫機制。
 
 生成的 `options(env)` 宣告可留空欄位的 None、依持久 Spec family 篩選的 captured library keys，以及每個可編輯 Inline kind。只有結構 tag 的 kind 不列為 Inline。所有 key input 使用 `{"kind": "ref", "name": key}`，inline 使用 `{"kind": "inline", "module": content}`，可留空時也接受 null。Options 的 value 只帶 key 或所選 kind 的 tag。fields 指向該 kind 的 wrapper 子表單，describe 所選欄位才列 children，不重複固定 tag。Ref 選項不帶 fields，也不顯示 entry 內容。普通換分支使用 `defaults(env)` 的 fresh 範本／型別初值，不接收 previous、不複製來源，也不保留其他 kind 的草稿。
 

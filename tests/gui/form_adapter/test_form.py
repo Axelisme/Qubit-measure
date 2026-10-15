@@ -207,7 +207,7 @@ def test_invalid_authored_tree_fails_at_construction(scenario: str) -> None:
 def alias_env() -> FormEnv:
     """Capture aliases without connected drivers, point I/O or hardware."""
     library = LibrarySnapshot(
-        ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+        ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
     )
     parameters = ParameterContext(
         point=PointDocument(

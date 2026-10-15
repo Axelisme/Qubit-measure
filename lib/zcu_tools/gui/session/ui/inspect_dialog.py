@@ -43,6 +43,7 @@ from zcu_tools.gui.session.events import (
 )
 from zcu_tools.gui.session.library_entry import (
     LIBRARY_WRITE_ERRORS,
+    LibraryEntryInvalid,
     LibraryKind,
     ModuleEntryForm,
     WaveformEntryForm,
@@ -505,8 +506,8 @@ class InspectDialog(QDialog):
 
     def _apply(self) -> bool:
         """Write the draft under Name; True after the write, False to keep it."""
-        entry, key = self._entry, self._selected
-        if entry is None or key is None:
+        entry, editor, key = self._entry, self._editor, self._selected
+        if entry is None or editor is None or key is None:
             return False
         new_name = self._name_edit.text().strip()
         if not new_name:
@@ -516,6 +517,9 @@ class InspectDialog(QDialog):
             return False
         self._applying = True
         try:
+            local_errors = editor.local_parse_errors()
+            if local_errors is not None:
+                raise LibraryEntryInvalid(entry.kind, local_errors)
             self._ctrl.apply_library_change(
                 entry.parameters, entry.replace(key[1], new_name)
             )

@@ -20,7 +20,7 @@ def captured_ext_env(**ext: JsonValue) -> FormEnv:
             library=LibrarySnapshot(
                 ModuleLibraryDocument(
                     format="zcu.module-library",
-                    format_version="1.0",
+                    format_version="2.0",
                 )
             ),
             target=SavedPoint(entry_id="entry", point="synthetic"),

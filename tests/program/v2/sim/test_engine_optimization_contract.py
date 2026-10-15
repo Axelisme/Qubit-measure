@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-
 import numpy as np
 import pytest
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
@@ -12,7 +10,6 @@ from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.sim import engine as engine_module
 from zcu_tools.program.v2.sim.engine import (
     SimEngine,
 )
@@ -25,13 +22,6 @@ _rf_g_mhz = _engine_support.ground_resonator_frequency_mhz
 _pi_pulse_prog = _engine_support.pi_pulse_program
 _f_qubit_mhz = _engine_support.qubit_frequency_mhz
 _readout = _engine_support.readout
-
-
-@pytest.fixture(autouse=True)
-def _clear_segment_propagator_lru() -> Iterator[None]:
-    engine_module._cached_segment_propagator.cache_clear()
-    yield
-    engine_module._cached_segment_propagator.cache_clear()
 
 
 class _CancelFlag:

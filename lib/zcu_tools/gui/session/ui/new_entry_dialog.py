@@ -23,6 +23,7 @@ from zcu_tools.cfg_model import Template, TemplateDef
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.library_entry import (
     LIBRARY_WRITE_ERRORS,
+    LibraryEntryInvalid,
     LibraryKind,
     ModuleEntryForm,
     WaveformEntryForm,
@@ -210,8 +211,8 @@ class NewEntryDialog(QDialog):
         return name
 
     def _on_create(self) -> None:
-        entry = self._entry
-        if entry is None:
+        entry, editor = self._entry, self._editor
+        if entry is None or editor is None:
             return
         name = self._name_edit.text().strip()
         if not name:
@@ -225,6 +226,9 @@ class NewEntryDialog(QDialog):
             )
             return
         try:
+            local_errors = editor.local_parse_errors()
+            if local_errors is not None:
+                raise LibraryEntryInvalid(entry.kind, local_errors)
             self._ctrl.apply_library_change(entry.parameters, entry.put(name))
         except LIBRARY_WRITE_ERRORS as exc:
             logger.info("Library entry create failed: %s", exc)

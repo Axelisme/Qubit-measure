@@ -234,11 +234,7 @@ def test_edit_md_item_rejects_unparseable_complex(
 
 
 class _WidgetController(Controller):
-    """Own deterministic worker teardown for the isolated Qt fixture."""
-
-    def quiesce(self) -> bool:
-        """Join workers and flush their deliveries before Qt objects are deleted."""
-        return self._background_svc.quiesce()
+    """Publish synthetic busy state for the isolated Qt fixture."""
 
     def set_running(self, tab_id: str, *, running: bool) -> None:
         """Publish a synthetic busy state through the real State owner."""
@@ -298,11 +294,11 @@ def module_widget(tmp_path: Path, qapp: QApplication, request: pytest.FixtureReq
         yield ctrl, widget, tab_id, pane
         assert registry_state() == installed
     finally:
+        ctrl.close()
         if widget is not None:
             for dialog in widget.findChildren(QDialog):
                 dialog.reject()
             widget.deleteLater()
-        assert ctrl.quiesce()
         if tab_id is not None and ctrl.has_tab(tab_id):
             ctrl.tab_control.close_tab(tab_id)
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
