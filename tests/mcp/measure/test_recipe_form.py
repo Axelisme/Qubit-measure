@@ -275,7 +275,7 @@ class OuterInline(FormModel):
 
 
 class OuterLockedExtras(FormModel):
-    choice: OuterInline
+    choice: OuterInline = Field(default_factory=lambda: OuterInline(module=NumericOption()))
 
     @classmethod
     def options(cls, _env):
@@ -372,7 +372,7 @@ def test_locked_inline_slot_rejects_library_selection_before_rpc(
         assert locked.mode == "inline"
         assert locked.key is None
         assert locked.locked
-        assert "freq" not in locked.fields
+        assert "freq" in locked.fields
         assert "gain" in locked.fields
         before = list(client.transport.sent)
         with pytest.raises(ValueError, match="locked"):
