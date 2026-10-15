@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import numpy as np
@@ -160,12 +159,6 @@ def save_jpa_auto_grouped_result(
         comment=comment,
         tag=tag,
     )
-
-
-def load_jpa_auto_grouped_result(
-    source: Path,
-) -> RunRecord[JPAOptCfg, JPAOptimizeResult]:
-    return JPA_AUTO_GROUPED_AXES_SPEC.load(source)
 
 
 def _validate_jpa_auto_arrays(

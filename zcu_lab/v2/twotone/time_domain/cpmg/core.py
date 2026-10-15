@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, ClassVar
 
 import numpy as np
@@ -118,10 +117,6 @@ def save_cpmg_grouped_result(
         comment=comment,
         tag=tag,
     )
-
-
-def load_cpmg_grouped_result(source: Path) -> RunRecord[CPMG_Cfg, CPMG_Result]:
-    return CPMG_GROUPED_AXES_SPEC.load(source)
 
 
 def _validate_cpmg_arrays(
