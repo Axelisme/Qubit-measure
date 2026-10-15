@@ -65,38 +65,38 @@ class CapabilityForm(FormModel):
 
 
 @pytest.mark.parametrize(
-    "name,data,expected",
+    "name,data,expected,nonempty",
     [
-        ("ordinary", {}, True),
-        ("ordinary", {"ordinary": {"value": "invalid"}}, True),
-        ("empty", {}, False),
-        ("optional", {}, False),
-        ("optional", {"optional": None}, False),
-        ("optional", {"optional": {}}, True),
-        ("hidden", {}, True),
-        ("selection", {}, False),
-        ("selection", {"selection": None}, False),
-        ("selection", {"selection": {"kind": "unknown"}}, False),
-        ("selection", {"selection": {"kind": "ref", "name": "saved"}}, False),
-        ("selection", {"selection": {"kind": "inline"}}, True),
-        ("selection", {"selection": {"kind": "empty"}}, False),
-        ("selection", {"selection": {"kind": "tag-only"}}, False),
-        ("scalar", {}, False),
-        ("sequence", {"sequence": [{"value": 1}]}, False),
-        ("mapping", {"mapping": {"key": {"value": 1}}}, False),
+        ("ordinary", {}, True, True),
+        ("ordinary", {"ordinary": {"value": "invalid"}}, True, True),
+        ("empty", {}, True, False),
+        ("optional", {}, False, False),
+        ("optional", {"optional": None}, False, False),
+        ("optional", {"optional": {}}, True, True),
+        ("hidden", {}, True, True),
+        ("selection", {}, False, False),
+        ("selection", {"selection": None}, False, False),
+        ("selection", {"selection": {"kind": "unknown"}}, False, False),
+        ("selection", {"selection": {"kind": "ref", "name": "saved"}}, False, False),
+        ("selection", {"selection": {"kind": "inline"}}, True, True),
+        ("selection", {"selection": {"kind": "empty"}}, True, False),
+        ("selection", {"selection": {"kind": "tag-only"}}, True, False),
+        ("scalar", {}, False, False),
+        ("sequence", {"sequence": [{"value": 1}]}, False, False),
+        ("mapping", {"mapping": {"key": {"value": 1}}}, False, False),
     ],
 )
-def test_child_capability_matches_target_children_without_changing_draft(
-    name: str, data: dict[str, JsonValue], expected: bool
+def test_expand_capability_matches_parent_and_target_without_changing_draft(
+    name: str, data: dict[str, JsonValue], expected: bool, nonempty: bool
 ) -> None:
     state = FormState(FormInput(CapabilityForm, data))
     env = FormEnv()
     row = next(child for child in state.describe((), env).children if child.name == name)
-    assert row.has_children is expected
+    assert row.can_expand is expected
     description = state.describe((name,), env)
     assert description.target is not None
-    assert description.target.has_children is expected
-    assert bool(description.children) is expected
+    assert description.target.can_expand is expected
+    assert bool(description.children) is nonempty
     assert state.input.data == state.base.data == data
 
 
@@ -131,8 +131,67 @@ def test_parent_capability_does_not_execute_child_source_hooks(
 ) -> None:
     state = FormState(FormInput(SourceGuardedForm, data))
     rows = state.describe((), FormEnv()).children
-    assert {row.name: row.has_children for row in rows} == {
+    assert {row.name: row.can_expand for row in rows} == {
         "child": True,
         "selection": "selection" in data,
     }
     assert state.input.data == state.base.data == data
+
+
+class WrapperShape(FormModel):
+    module: Empty
+
+
+class SelectorShape(WrapperShape):
+    @classmethod
+    def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+        return {("module",): ()}
+
+
+class TextShape(FormModel):
+    mode: str
+
+
+class ChoiceShape(TextShape):
+    @classmethod
+    def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+        return {("mode",): ("x",)}
+
+
+class DynamicShapeForm(FormModel):
+    wrapper: WrapperShape
+    selector: SelectorShape
+    text: TextShape
+    choice: ChoiceShape
+
+    @classmethod
+    def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+        return {
+            ("wrapper",): (Option("Empty", {}, fields=WrapperShape),),
+            ("selector",): (Option("Selector", {}, fields=SelectorShape),),
+            ("text",): (Option("Text", {"mode": "x"}, fields=TextShape),),
+            ("choice",): (Option("Choice", {"mode": "x"}, fields=ChoiceShape),),
+        }
+
+
+@pytest.mark.parametrize(
+    "name,value,child_names",
+    [
+        ("wrapper", {}, []),
+        ("selector", {}, ["module"]),
+        ("text", {"mode": "x"}, ["mode"]),
+        ("choice", {"mode": "x"}, []),
+    ],
+)
+def test_expand_capability_preserves_dynamic_wrapper_and_pinned_shape(
+    name: str, value: JsonValue, child_names: list[str]
+) -> None:
+    state = FormState(FormInput(DynamicShapeForm, {name: value}))
+    env = FormEnv()
+    row = next(child for child in state.describe((), env).children if child.name == name)
+    assert row.can_expand is True
+    description = state.describe((name,), env)
+    assert description.target is not None
+    assert description.target.can_expand is True
+    assert [child.name for child in description.children] == child_names
+    assert state.input.data == state.base.data == {name: value}
