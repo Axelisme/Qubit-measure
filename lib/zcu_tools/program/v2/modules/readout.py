@@ -53,6 +53,27 @@ class PulseReadoutCfg(AbsReadoutCfg):
         """Capture this cfg as a named, blocking QICK readout module."""
         return PulseReadout(name, self)
 
+    def to_pulse_cfg(self) -> PulseCfg:
+        """Return a fresh outer PulseCfg containing only generator settings.
+
+        gen_ch maps to ch; ADC channel, window and trigger settings are omitted.
+        Pass ro_ch separately to Pulse when ADC frequency matching is needed.
+        The waveform and any QickParam values are borrowed, not deep-copied;
+        callers must not mutate these shared nested objects through the result.
+        PulseCfg validation runs as usual and its errors propagate unchanged.
+        """
+        return PulseCfg(
+            ch=self.gen_ch,
+            nqz=self.nqz,
+            freq=self.freq,
+            gain=self.gain,
+            phase=self.phase,
+            waveform=self.waveform,
+            mixer_freq=self.mixer_freq,
+            pre_delay=self.pre_delay,
+            post_delay=self.post_delay,
+        )
+
     def set_param(self, name: str, value: float | QickParam) -> None:
         """Set shared freq (MHz), gain, waveform length or ro_length (us).
 
@@ -105,17 +126,7 @@ class PulseReadout(AbsReadout):
         self.gain_val = gain_val
         self.freq_val = freq_val
         self.ro_freq_val = ro_freq_val
-        pulse_cfg = PulseCfg(
-            ch=self.cfg.gen_ch,
-            nqz=self.cfg.nqz,
-            freq=self.cfg.freq,
-            gain=self.cfg.gain,
-            phase=self.cfg.phase,
-            waveform=self.cfg.waveform,
-            mixer_freq=self.cfg.mixer_freq,
-            pre_delay=self.cfg.pre_delay,
-            post_delay=self.cfg.post_delay,
-        )
+        pulse_cfg = self.cfg.to_pulse_cfg()
         self.pulse = Pulse(name=f"{name}_pulse", cfg=pulse_cfg, ro_ch=self.cfg.ro_ch)
         self._runtime_pulse: Pulse | None = None
         self._runtime_ro_name: str | None = None

@@ -83,7 +83,6 @@ from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg, TableLengthPulse
 from zcu_tools.program.v2.modules.readout import (
     AbsReadout,
     PulseReadout,
-    PulseReadoutCfg,
     TablePulseReadout,
 )
 from zcu_tools.program.v2.modules.reset import (
@@ -630,21 +629,6 @@ def _dmem_delay_segment(
     return _idle_segment(sim, equilibrium_pop, t_us, idle_detuning)
 
 
-def _readout_generator_cfg(cfg: PulseReadoutCfg) -> PulseCfg:
-    """Project flat generator fields for the existing PulseCfg envelope helpers."""
-    return PulseCfg(
-        ch=cfg.gen_ch,
-        nqz=cfg.nqz,
-        freq=cfg.freq,
-        gain=cfg.gain,
-        phase=cfg.phase,
-        waveform=cfg.waveform,
-        mixer_freq=cfg.mixer_freq,
-        pre_delay=cfg.pre_delay,
-        post_delay=cfg.post_delay,
-    )
-
-
 def _readout_plan(
     module: AbsReadout,
     loop_counts: dict[str, int],
@@ -655,7 +639,7 @@ def _readout_plan(
     """Build the ReadoutPlan from a readout module at one sweep point."""
 
     if isinstance(module, (PulseReadout, TablePulseReadout)):
-        generator_cfg = _readout_generator_cfg(module.cfg)
+        generator_cfg = module.cfg.to_pulse_cfg()
         ro_freq = module.cfg.freq
         ro_length = module.cfg.ro_length
         trig_offset = module.cfg.trig_offset
