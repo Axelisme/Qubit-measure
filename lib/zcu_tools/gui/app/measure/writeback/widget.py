@@ -6,7 +6,8 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from pydantic import JsonValue
-from qtpy.QtCore import QEvent, Qt, Signal  # type: ignore[attr-defined]
+from PyQt6.QtCore import pyqtSignal
+from qtpy.QtCore import QEvent, Qt
 from qtpy.QtGui import QColor
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QApplication,
@@ -208,7 +209,6 @@ class _WritebackRow(QFrame):
         *,
         cb: QCheckBox,
         current: QLabel,
-        arrow: QLabel,
         proposed: QLabel,
         action: QWidget,
         proposed_table: QTableWidget | None,
@@ -220,11 +220,12 @@ class _WritebackRow(QFrame):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._cb = cb
         self._cur = current
-        self._arrow = arrow
-        font = self._arrow.font()
+        self.arrow = QLabel("\u2192")
+        self.arrow.setObjectName("writebackArrow")
+        font = self.arrow.font()
         font.setBold(True)
-        self._arrow.setFont(font)
-        self._arrow.setFixedWidth(18)
+        self.arrow.setFont(font)
+        self.arrow.setFixedWidth(18)
         self._prop = proposed
         self._btn = action
         self._proposed_table = proposed_table
@@ -239,9 +240,9 @@ class _WritebackRow(QFrame):
         self._change.setSpacing(7)
         self._cur.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._prop.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._change.addWidget(self._cur, 2)
-        self._change.addWidget(self._arrow)
+        self._change.addWidget(self.arrow)
         self._change.addWidget(self._prop, 2)
         self._outer.addLayout(self._heading)
         self._outer.addLayout(self._change)
@@ -284,7 +285,7 @@ class WritebackWidget(QWidget):
       vertical scrolling to the existing Analysis-pane outer scroll.
     """
 
-    apply_requested: Signal = Signal()  # apply the persistent draft as-is
+    apply_requested = pyqtSignal()  # apply the persistent draft as-is
 
     def __init__(
         self,
@@ -553,18 +554,15 @@ class WritebackWidget(QWidget):
             actual_path,
             cb,
         )
-        arrow = QLabel("\u2192")
-        arrow.setObjectName("writebackArrow")
-        self._theme_label(arrow, secondary_colour)
         row = _WritebackRow(
             cb=cb,
             current=current_label,
-            arrow=arrow,
             proposed=proposed_label,
             action=self._make_action(item),
             proposed_table=proposed_table,
             actual_path=actual_path,
         )
+        self._theme_label(row.arrow, secondary_colour)
         row.setToolTip(item.description)
         return row
 

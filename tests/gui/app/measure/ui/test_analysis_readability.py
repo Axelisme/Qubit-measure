@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QEvent
-from qtpy.QtGui import QColor
+from qtpy.QtGui import QColor, QPalette
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -352,8 +352,6 @@ def test_preview_error_uses_theme_foreground(qapp, window_palette):
 
 
 def test_preview_error_recolours_on_palette_change(qapp):
-    from qtpy.QtGui import QColor, QPalette
-
     widget = WritebackWidget(MagicMock(), tab_id="t")
     try:
         palette = widget.palette()
@@ -386,7 +384,6 @@ def test_preview_error_recolours_on_palette_change(qapp):
 def test_writeback_semantic_foregrounds_refresh_with_owner_palette(
     scalar_ledger, qapp, name, colour_name
 ):
-    from qtpy.QtGui import QColor, QPalette
     from zcu_tools.gui.widgets import accent_colour, secondary_colour
 
     colours: dict[str, Callable[[QWidget], QColor]] = {
@@ -427,7 +424,6 @@ def test_writeback_unavailable_reason_uses_owner_warning(qapp, window_palette):
 def test_all_ledger_and_open_edit_foregrounds_follow_palette_change(
     scalar_ledger, qapp
 ):
-    from qtpy.QtGui import QColor, QPalette
     from zcu_tools.gui.widgets import accent_colour, secondary_colour, warning_colour
 
     widget, item = scalar_ledger
