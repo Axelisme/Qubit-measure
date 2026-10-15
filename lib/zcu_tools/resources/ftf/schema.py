@@ -213,7 +213,13 @@ class Receiver(Values):
     @model_validator(mode="after")
     def covariance(self) -> Self:
         matrix = np.array(self.noise_psd_adc2_ns)
-        if not np.array_equal(matrix, matrix.T) or np.linalg.eigvalsh(matrix).min() < 0:
+        # Rank-one PSD matrices can acquire a negative eigenvalue of roundoff
+        # size. This is a relative machine-precision test, not a noise floor.
+        roundoff = 8 * np.finfo(float).eps * float(np.max(np.abs(matrix)))
+        if (
+            not np.array_equal(matrix, matrix.T)
+            or np.linalg.eigvalsh(matrix).min() < -roundoff
+        ):
             raise ValueError(
                 "noise_psd_adc2_ns: must be symmetric positive semidefinite"
             )
