@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-15，Writeback owner、Opaque Run／Load、Artifact handover、共用 Form 與 Controller close
+**Last updated:** 2026-10-16，Writeback owner、Opaque Run／Load、Artifact handover、共用 Form、Controller close 與 raw cfg 非 UI 讀取
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -503,7 +503,9 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
 
 - `load_tab_result` 接受 RestoredRun 的 opaque record 與明示 cfg_issue。
   BaseAdapter.restore 委派 core.from_stored，不讀檔案或目前表單。cfg_issue 為 null 表示 typed cfg 可用，
-  字串則解釋不可用原因；缺 cfg 仍可成功載入數據。Inspect 從檔案讀 raw cfg。
+  字串則解釋不可用原因；缺 cfg 仍可成功載入數據。
+  原始 cfg 保存在 native 資料檔，透過公開 `datafile.load_run_data` 離線讀取為 `StoredRun`。
+  GUI 不提供原始 cfg 檢視入口。
   WB 不從 Load-time calibration 補 pulse module、改槽或 pi_product。
   Load 保留表單原輸入與固定來源，不要求 draft 有效。
   Run/Load 先提交 primary result。Analysis preparation 失敗不撤回它，只報 diagnostic。
@@ -646,8 +648,10 @@ and detaches the editor before the tab closes.
 Load replaces results, not Form input. Valid, invalid and unfinished drafts
 keep their authored values and expression text, including extras. Load does not
 validate the current draft or infer input from native cfg. The adapter owns
-its record and cfg diagnostic; Inspect reads the file's raw cfg. Native Load's historical analysis
-source and Save storage retain their separate Load-time ownership.
+its record and cfg diagnostic. Raw cfg stays in the native data file and is
+available offline as `StoredRun` through the public `datafile.load_run_data` API.
+The GUI provides no raw cfg inspection entry point. Native Load's historical
+analysis source and Save storage retain their separate Load-time ownership.
 
 Workspace saves authored Form input JSON, including expression text. Restore
 captures new sources and overlays compatible leaves through the resource,

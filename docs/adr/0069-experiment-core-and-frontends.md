@@ -87,7 +87,7 @@ PersistableExperiment.from_stored 使用公開 restore_run(stored, spec=...)，�
 
 Restore 先驗證 native 格式、experiment tag、必要 variables、axes、unit、dtype、shape 與 builder result，再處理 typed cfg。缺 /cfg、非法 JSON 或非法 CfgSnapshot envelope 仍是格式錯誤。合法 envelope 的 cfg_type、schema major 或 concrete model values 不相容時，保留有效資料、令 RunRecord.cfg=None，並發出 CfgUnavailableWarning；cfg_issue 攜帶同一原因。同 major 的 minor 與未知 cfg keys 沿既有 known projection，StoredRun 保留 raw cfg JSON 與歷史 metadata，不重拍來源或裝置。
 
-GroupedLoadData.cfg_snapshot 允許 None，資料 builder 讀 variables，不拿目前 cfg 補值。正常 run 仍有有效 cfg。需要 cfg 的分析或 data 保存入口明確拒絕 cfg=None，不需要 cfg 的分析照常，不由 NotebookAdapter 一律阻擋。GUI Load 不回填表單，也不從 Form、library、default 或 live device 補回歷史 cfg。原始 cfg 由 Inspect 檢視。
+GroupedLoadData.cfg_snapshot 允許 None，資料 builder 讀 variables，不拿目前 cfg 補值。正常 run 仍有有效 cfg。需要 cfg 的分析或 data 保存入口明確拒絕 cfg=None，不需要 cfg 的分析照常，不由 NotebookAdapter 一律阻擋。GUI Load 不回填表單，也不從 Form、library、default 或 live device 補回歷史 cfg。原始 cfg 保存在 native 資料檔，透過公開 datafile.load_run_data 離線讀取為 StoredRun，GUI 不提供檢視入口。使用者裁定見 [[0063]]。
 
 使用者於 2026-10-14 對框架讀檔後交 StoredRun 給 adapter 回答：「看起來沒問題」；對資料優先、cfg 可缺回答：「我認為可以」。2026-10-15 以「1可以，2採用忽略不支援欄位的方式，3同意，4一起做吧」確認 Load 不回填與 Labber-only 先離線遷移。
 

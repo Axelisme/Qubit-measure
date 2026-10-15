@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-15，StoredRun Load、cfg_issue、Form wire 與 shutdown drain
+**Last updated:** 2026-10-16，StoredRun Load、cfg_issue、Form wire、shutdown drain 與 raw cfg 非 UI 讀取
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -435,7 +435,9 @@ input.
 
 `tab.load_data` and `tab.open_file` return `cfg_issue`: null means typed cfg is
 available; a string explains why valid data loaded without it. This diagnostic
-does not change Load success or Form input. Inspect reads the file's raw cfg.
+does not change Load success or Form input. Raw cfg stays in the native data
+file and is available offline as `StoredRun` through the public
+`datafile.load_run_data` API. The GUI provides no raw cfg inspection entry point.
 The framework admits the native experiment tag before adapter restoration and
 retains StoredRun history independently of the adapter's opaque record.
 

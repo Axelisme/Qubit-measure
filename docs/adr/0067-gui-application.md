@@ -60,7 +60,7 @@ Measure 的 `artifacts` package 擁有 ArtifactTracker、SaveService、SaveContr
 
 Adapter 的 data_item 與 analysis_item 只交框架固定內容，不選格式、路徑或寫檔。Figure 取已提交 pane 的具名原生圖。框架在 owner thread 同步編碼，資料準備失敗交共用 experiment.artifacts 報出對應 data outputs，其他圖與分析仍嘗試保存。
 
-LoadService 擁有 native 讀檔與 tag 比對，再呼叫 adapter.restore(stored)。BaseAdapter 委派核心 from_stored；框架只讀 RestoredRun 的 opaque record 與 cfg_issue，不探測歷史 cfg。cfg 不可用仍是成功 Load，reply 的 cfg_issue 是原因字串或 null，不再提供 has_cfg_snapshot。讀檔、restore 或歷史來源建立失敗時保留舊成果。Load 不回填表單，Inspect 保留 raw cfg 檢視；metadata、分析來源與 storage 分界見 [[0063]]，typed restore 見 [[0069]]。
+LoadService 擁有 native 讀檔與 tag 比對，再呼叫 adapter.restore(stored)。BaseAdapter 委派核心 from_stored；框架只讀 RestoredRun 的 opaque record 與 cfg_issue，不探測歷史 cfg。cfg 不可用仍是成功 Load，reply 的 cfg_issue 是原因字串或 null，不再提供 has_cfg_snapshot。讀檔、restore 或歷史來源建立失敗時保留舊成果。Load 不回填表單。原始 cfg 保存在 native 資料檔，透過公開 datafile.load_run_data 離線讀取為 StoredRun，GUI 不提供檢視入口。使用者裁定、metadata、分析來源與 storage 分界見 [[0063]]，typed restore 見 [[0069]]。
 
 使用者於 2026-10-14 裁定：「擴充空間，那這兩個功能的定位應該是gui框架下的一個子模塊，對外解耦，對內可擴充。」並釐清：「Artifact目前，一個Artifact是一個寫入單位，但內部支援多個不同的項目。」對 adapter 只交內容、框架決定格式回答：「好，同意做法一」。
 
