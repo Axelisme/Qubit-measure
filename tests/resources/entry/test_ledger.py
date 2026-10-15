@@ -545,34 +545,39 @@ def test_invalid_existing_event_blocks_read_and_append_without_rewrite(
         assert path.read_bytes() == before
 
 
-def test_future_minor_preserves_raw_event_and_unknown_payload_without_rewrite(
-    entry_records: tuple[ResultEntry, Path],
+@pytest.mark.parametrize("version", ["1.0", "1.2"])
+def test_reader_preserves_raw_event_and_unknown_fields_without_rewrite(
+    entry_records: tuple[ResultEntry, Path], version: str
 ) -> None:
     entry, records = entry_records
     event = _accepted(entry.entry_id)
-    entry.ledger.append(event)
+    entry.ledger.append(event, record={"fit": [1, 2]})
     path = records / "ledger.jsonl"
     data = json.loads(path.read_text())
-    data["format_version"] = "1.2"
+    data["format_version"] = version
     data["future_header"] = {"new": True}
     data["payload"]["future_payload"] = [1, None]
     raw = "  " + json.dumps(data, ensure_ascii=False, indent=None) + "  "
     path.write_text(raw + "\n", encoding="utf-8")
     before = path.read_bytes()
+    record_path = records / f"{event.id}.json"
+    record_before = record_path.read_bytes()
     found = entry.ledger.get(event.id)
     assert found.event.id == event.id
-    assert found.event.format_version == "1.2"
+    assert found.event.format_version == version
     assert found.event.payload == event.payload
+    assert found.record == {"fit": [1, 2]}
     assert found.event_json == raw
     assert entry.ledger.events() == (found.event,)
     assert path.read_bytes() == before
-    with pytest.raises(ValueError, match="version"):
-        entry.ledger.append(found.event)
-    assert path.read_bytes() == before
+    entry.ledger.append(_accepted(entry.entry_id))
+    assert path.read_bytes().startswith(before)
+    assert entry.ledger.get(event.id).event_json == raw
+    assert record_path.read_bytes() == record_before
 
 
 @pytest.mark.parametrize("version", ["1.0", "1.1"])
-def test_payload_kind_controls_future_field_projection(
+def test_payload_kind_controls_unknown_field_projection(
     entry_records: tuple[ResultEntry, Path], version: str
 ) -> None:
     entry, records = entry_records
@@ -594,15 +599,11 @@ def test_payload_kind_controls_future_field_projection(
     raw = json.dumps(data)
     path.write_text(raw + "\n", encoding="utf-8")
     before = path.read_bytes()
-    if version == "1.0":
-        with pytest.raises(ValueError, match="extra"):
-            entry.ledger.events()
-    else:
-        found = entry.ledger.get(event.id)
-        assert isinstance(found.event.payload, SavedPayload)
-        assert found.event.payload == event.payload
-        assert found.event_json == raw
-        assert entry.ledger.events() == (found.event,)
+    found = entry.ledger.get(event.id)
+    assert isinstance(found.event.payload, SavedPayload)
+    assert found.event.payload == event.payload
+    assert found.event_json == raw
+    assert entry.ledger.events() == (found.event,)
     assert path.read_bytes() == before
 
     data["payload"]["run_id"] = 123
