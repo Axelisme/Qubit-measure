@@ -6,6 +6,7 @@ from typing import ClassVar
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 from zcu_tools.datafile import load_run_data, save_run_data
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment import (
@@ -35,10 +36,10 @@ class NativeCfg(ExpCfgModel):
 
 @dataclass
 class NativeResult:
-    frequency: np.ndarray
-    signal: np.ndarray
-    delay: np.ndarray = field(default_factory=lambda: np.array([]))
-    decay: np.ndarray = field(default_factory=lambda: np.array([]))
+    frequency: NDArray[np.float64]
+    signal: NDArray[np.complex128]
+    delay: NDArray[np.float64] = field(default_factory=lambda: np.array([]))
+    decay: NDArray[np.float64] = field(default_factory=lambda: np.array([]))
 
 
 class NativeCore(PersistableExperiment[NativeResult, NativeCfg]):
@@ -53,7 +54,7 @@ class NativeCore(PersistableExperiment[NativeResult, NativeCfg]):
     def run(self, config: NativeCfg, *, context: RunContext) -> NativeResult:
         return NativeResult(
             np.array([4000.0, 5000.0]),
-            np.array([2 + 3j, 4 - 5j]) * config.gain,
+            np.array([2 + 3j, 4 - 5j], dtype=np.complex128) * config.gain,
         )
 
     def analyze(
@@ -92,6 +93,15 @@ class GroupedCore(NativeCore):
         return replace(
             result, delay=np.array([1.0, 2.0, 3.0]), decay=np.array([0.5, 0.3, 0.1])
         )
+
+
+def assert_loaded_result(result: NativeResult, *, grouped: bool) -> None:
+    """Check the synthetic experiment's known memory-unit data."""
+    np.testing.assert_allclose(result.frequency, [4000.0, 5000.0])
+    np.testing.assert_allclose(result.signal, [4 + 6j, 8 - 10j])
+    if grouped:
+        np.testing.assert_allclose(result.delay, [1.0, 2.0, 3.0])
+        np.testing.assert_allclose(result.decay, [0.5, 0.3, 0.1])
 
 
 @pytest.mark.parametrize("grouped", [False, True], ids=["single", "grouped"])
@@ -152,11 +162,7 @@ def test_native_load_publishes_shared_restore_and_retains_previous_on_failure(
         np.testing.assert_allclose(
             getattr(loaded.result, name), getattr(expected.result, name)
         )
-    np.testing.assert_allclose(loaded.result.frequency, [4000.0, 5000.0])
-    np.testing.assert_allclose(loaded.result.signal, [4 + 6j, 8 - 10j])
-    if grouped:
-        np.testing.assert_allclose(loaded.result.delay, [1.0, 2.0, 3.0])
-        np.testing.assert_allclose(loaded.result.decay, [0.5, 0.3, 0.1])
+    assert_loaded_result(loaded.result, grouped=grouped)
 
     offline = NotebookAdapter(host=NonPresentingHost())(core)
     analyzed = offline.analyze(None, source=loaded)
@@ -182,7 +188,7 @@ def test_labber_only_export_is_rejected_without_replacing_notebook_results(
     evidence = adapter.acquisition_for(previous)
     exported = adapter.save(tmp_path / "export.hdf5")
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="format"):
         adapter.load(exported)
 
     assert adapter.last_run is previous

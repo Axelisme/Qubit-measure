@@ -17,7 +17,6 @@ from zcu_tools.datafile import (
     LabberPayload,
     StoredRun,
     decode_labber_comment,
-    load_grouped_labber_data,
     load_labber_data,
     load_run_data,
     save_run_data,
@@ -279,38 +278,6 @@ def test_same_major_nested_unknown_cfg_is_projected_but_before_validator_sees_ra
         loaded, snapshot = load_run(path, spec=SINGLE)
         assert loaded.cfg == record.cfg
         assert snapshot == native_metadata(SINGLE.tag).snapshot
-
-
-def test_shared_base_grouped_labber_entry_remains_separate_from_native(
-    tmp_path: Path,
-) -> None:
-    spec = GroupedAxesSpec(
-        variables=(GROUPED.variables[0],),
-        result_type=SingleResult,
-        cfg_type=NativeCfg,
-        tag="test/one-group",
-        result_builder=lambda data: SingleResult(
-            data.variable("resonator").axes[0], data.variable("resonator").z
-        ),
-    )
-
-    class OneGroupedExperiment(PersistableExperiment[SingleResult, NativeCfg]):
-        AXES_SPEC: ClassVar = spec
-
-    record = RunRecord(
-        cfg=NativeCfg(),
-        result=SingleResult(np.array([4000.0, 5000.0]), np.array([2 + 3j, 4 - 5j])),
-    )
-    experiment = OneGroupedExperiment()
-    path = tmp_path / "grouped.hdf5"
-    experiment.save(record, path)
-    loaded = experiment.load(path)
-    assert loaded.cfg == record.cfg
-    np.testing.assert_array_equal(loaded.result.frequency, record.result.frequency)
-    np.testing.assert_allclose(loaded.result.signal, record.result.signal)
-    assert tuple(load_grouped_labber_data(str(path)).variables) == (
-        DataVariable("resonator"),
-    )
 
 
 def test_prepare_single_data_feeds_both_formats_with_same_cfg_and_comment(

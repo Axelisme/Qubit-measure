@@ -1,14 +1,12 @@
 """Declarative, per-experiment persistence spec (ADR-0063).
 
-An ``AxesSpec`` decouples an experiment's in-memory frozen Result dataclass from
-its on-disk (Labber) representation, and drives the base ``save()``/``load()``
-symmetrically: it names each sweep axis + the log channel, carries the per-axis
-unit scale, and supplies the typed Result builder (``result_type``) plus the cfg
-restorer (``cfg_type.validate_or_warn``).
+An ``AxesSpec`` maps an experiment's in-memory Result dataclass to native data
+and Labber exports. It names each sweep axis and signal channel, carries unit
+scales, and supplies the Result builder and cfg type for shared native restore.
 
-Axes are declared **inner-first** to match ``labber_io``'s native convention
-(``z.shape == tuple(len(ax) for ax in reversed(axes))`` — inner axis last), so
-``save`` and ``load`` are exact inverses with zero caller-side transpose.
+Axes are declared **inner-first**:
+``z.shape == tuple(len(ax) for ax in reversed(axes))`` (inner axis last).
+Callers do not transpose arrays when saving or restoring native data.
 """
 
 from __future__ import annotations
@@ -26,13 +24,11 @@ from zcu_tools.datafile import (
     AxisSchema,
     DataVariable,
     ExperimentPayload,
-    GroupedLabberData,
     LabberMetadata,
     LabberPayload,
     VariableSchema,
     cast_labber_values,
     format_ext,
-    load_grouped_labber_data,
     save_grouped_labber_data,
     validate_labber_payload,
     write_labber,
@@ -104,7 +100,7 @@ class AxesSpec(Generic[T_Result, T_Config]):
     data_variable is the explicit native group key, defaulting to data, never
     inferred from a label. cfg_schema_version is declaration-owned major.minor,
     defaulting to 1.0. Invalid Result fields fail at declaration time. Existing
-    save/load remain Labber; native save_run/load_run consume this same spec.
+    save exports Labber; native load/save_run/load_run consume this same spec.
     """
 
     axes: tuple[Axis, ...]  # inner-first
@@ -217,7 +213,7 @@ class GroupedLoadData(Generic[T_Config]):
 
     variables maps each DataVariable identity to its memory-unit loaded arrays.
     metadata contains shared file metadata. cfg_snapshot is the reconstructed
-    experiment config, or None when the saved comment cannot validate as that cfg.
+    experiment config, or None when the historical native cfg is incompatible.
     """
 
     variables: Mapping[DataVariable, LoadedVariableData]
@@ -430,8 +426,8 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
     memory-unit arrays; result_validator, when supplied, checks results on save
     and load. Invalid declarations raise ValueError; non-dataclass types or wrong
     builder return types raise TypeError. cfg_schema_version is the declaration's
-    major.minor cfg version, defaulting to 1.0. Existing Labber save/load require
-    a common grid; native persistence permits different grids for each variable.
+    major.minor cfg version, defaulting to 1.0. Labber exports require a common
+    grid; native persistence permits different grids for each variable.
     """
 
     variables: tuple[VariableSpec, ...]
@@ -527,82 +523,6 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
                 source.cfg, schema_version=self.cfg_schema_version
             ),
             comment=comment,
-        )
-
-    def load(self, source: Path) -> RunRecord[T_Config, T_Result]:
-        """Read canonical grouped Labber at an exact local path into a record.
-
-        Required variables, axes, units or shape mismatches raise ValueError;
-        I/O errors propagate. Missing cfg or non-envelope comment text returns
-        cfg=None with valid Result data. Recognized envelopes with invalid
-        cfg/comment/timestamp field types raise ValueError. A valid envelope
-        whose cfg object fails cfg_type validation warns and retains Result data
-        with cfg=None. This entry does not guess native or legacy layouts.
-        """
-        grouped = load_grouped_labber_data(
-            str(source),
-            required_variables=self.required_variables,
-        )
-        return self.record_from_grouped_data(grouped, source=str(source))
-
-    def record_from_grouped_data(
-        self,
-        grouped: GroupedLabberData,
-        *,
-        source: str | None = None,
-    ) -> RunRecord[T_Config, T_Result]:
-        self._validate_grouped_variables(grouped)
-        cfg_snapshot = self._cfg_from_comment(grouped.metadata.comment, source=source)
-        loaded_variables = {
-            variable.data_variable: variable.loaded_from_payload(
-                grouped.variables[variable.data_variable],
-                context=(
-                    f"{self.result_type.__name__} grouped variable "
-                    f"{str(variable.data_variable)!r}"
-                ),
-            )
-            for variable in self.variables
-        }
-        load_data = GroupedLoadData(
-            variables=loaded_variables,
-            metadata=grouped.metadata,
-            cfg_snapshot=cfg_snapshot,
-        )
-        result = self.result_builder(load_data)
-        if not isinstance(result, self.result_type):
-            raise TypeError(
-                f"GroupedAxesSpec builder returned {type(result).__name__}; "
-                f"expected {self.result_type.__name__}"
-            )
-        if self.result_validator is not None:
-            self.result_validator(result)
-        return RunRecord(cfg=cfg_snapshot, result=result)
-
-    def _validate_grouped_variables(self, grouped: GroupedLabberData) -> None:
-        expected = set(self.required_variables)
-        present = set(grouped.variables)
-        missing = expected - present
-        unknown = present - expected
-        if missing:
-            names = ", ".join(sorted(missing))
-            raise ValueError(f"missing required data variable(s): {names}")
-        if unknown:
-            names = ", ".join(sorted(unknown))
-            raise ValueError(f"unknown data variable(s): {names}")
-
-    def _cfg_from_comment(
-        self, comment: str, *, source: str | None = None
-    ) -> T_Config | None:
-        if not comment:
-            return None
-        from zcu_tools.experiment.utils import parse_comment
-
-        cfg_dict, _, _ = parse_comment(comment)
-        if cfg_dict is None:
-            return None
-        return self.cfg_type.validate_or_warn(
-            cfg_dict,
-            source=source or "<grouped>",
         )
 
 
