@@ -127,7 +127,7 @@ def test_join_cross_branch_register_dependency_rejected_before_backend():
     prog = ModularProgramV2(env.soccfg, ProgramV2Cfg(), modules=modules)
     with pytest.raises(ValueError, match="Join.*register.*selection"):
         prog.acquire(env.soc, progress=False)
-    assert env.soc.binding.rounds == []
+    assert not env.soc.binding.rounds
 
 
 def test_unknown_word_consumer_fails_with_module_coordinate_and_register():
@@ -136,4 +136,4 @@ def test_unknown_word_consumer_fails_with_module_coordinate_and_register():
     prog = ModularProgramV2(env.soccfg, ProgramV2Cfg(), modules=modules)
     with pytest.raises(ValueError, match="DelayAuto.*invalid_wait.*reps.*cycles.*word"):
         prog.acquire(env.soc, progress=False)
-    assert env.soc.binding.rounds == []
+    assert not env.soc.binding.rounds
