@@ -1,8 +1,35 @@
 """Native history for tests that isolate cfg projection or presentation."""
 
+from dataclasses import replace
+from pathlib import Path
 from uuid import UUID
 
-from zcu_tools.datafile import RunMetadata, RunSnapshot, SoftwareProvenance
+from zcu_tools.datafile import (
+    RunMetadata,
+    RunSnapshot,
+    SoftwareProvenance,
+    save_run_data,
+)
+from zcu_tools.experiment.native_persistence import prepare_run_data
+from zcu_tools.experiment.records import RunRecord
+
+from tests.experiment._saving_support import SavingCfg, SavingCore
+
+
+def write_native_file(
+    path: Path, *, tag: str = "test/load", gain: float = 1.0
+) -> RunMetadata:
+    """Write offline three-point native data with fixed history at an exact path."""
+    core = SavingCore()
+    cfg = SavingCfg(gain=gain)
+    prepared = prepare_run_data(
+        RunRecord(cfg, core.run(cfg, context=None)),
+        spec=replace(core.persistence_spec(), tag=tag),
+        comment="history",
+    )
+    metadata = replace(historical_metadata(), experiment=tag)
+    save_run_data(path, prepared.payload, metadata, cfg=prepared.cfg)
+    return metadata
 
 
 def historical_metadata() -> RunMetadata:

@@ -5,7 +5,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Literal
 
-from zcu_tools.experiment.run_saving import ArtifactRef, SaveReport
+from zcu_tools.experiment.artifacts import ArtifactRef, SaveReport
 from zcu_tools.resources.entry import ArtifactKey, OutputFormat, SaveLayout
 
 

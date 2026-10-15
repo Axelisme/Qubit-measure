@@ -20,11 +20,11 @@ from zcu_tools.experiment import (
     GroupedAxesSpec,
     RunRecord,
 )
-from zcu_tools.experiment.native_persistence import prepare_run_data
-from zcu_tools.experiment.run_saving import (
+from zcu_tools.experiment.artifacts import (
+    AnalysisItem,
     ArtifactRef,
-    DataMember,
-    FileMember,
+    DataItem,
+    FigureItem,
     SaveArtifact,
     SaveReport,
     save_artifacts,
@@ -96,9 +96,14 @@ class SavedRun(Generic[CfgT, ResultT]):
         None records no roles. Wrong role origins raise ValueError before any
         output or event. Snapshot only cached context and prepare typed data.
         Do not create run folders or append events until save. Invalid
-        source/spec raises TypeError/ValueError; bound storage errors propagate.
+        source/spec becomes failed data outputs; bound storage errors propagate.
         """
-        self._data = prepare_run_data(source, spec=spec, comment="")
+        self._data = DataItem.from_run(
+            ArtifactKey("run", "measurement_data", "data"),
+            source,
+            spec=spec,
+            comment="",
+        )
         self._storage = capture_point_storage(ctx, roles=roles)
         self._point = ctx
         self._metadata = RunMetadata(
@@ -163,13 +168,7 @@ class SavedRun(Generic[CfgT, ResultT]):
         """
         if comment is not None:
             comment = TypeAdapter(str).validate_python(comment, strict=True)
-            self._data = replace(
-                self._data,
-                payload=replace(
-                    self._data.payload,
-                    metadata=replace(self._data.payload.metadata, comment=comment),
-                ),
-            )
+            self._data = self._data.with_comment(comment)
         if figures is not None:
             self._figures = dict(figures)
         if analysis is not None:
@@ -187,7 +186,6 @@ class SavedRun(Generic[CfgT, ResultT]):
                         run_id=self.run_id,
                         tab=self._metadata.experiment,
                         experiment=self._metadata.experiment,
-                        cfg_summary=self._data.cfg.values,
                         point=self._metadata.snapshot.point,
                         roles=dict(self._metadata.snapshot.roles),
                     ),
@@ -292,20 +290,16 @@ class SavedRun(Generic[CfgT, ResultT]):
         artifacts = [
             SaveArtifact(
                 ArtifactRef("run", "measurement_data"),
-                (
-                    DataMember(
-                        ArtifactKey("run", "measurement_data", "data"), self._data
-                    ),
-                ),
+                (self._data,),
             )
         ]
-        analysis_members = [
-            FileMember(ArtifactKey("analysis", "results", "figure", name), figure)
+        analysis_members: list[FigureItem | AnalysisItem] = [
+            FigureItem(ArtifactKey("analysis", "results", "figure", name), figure)
             for name, figure in self._figures.items()
         ]
-        post_members: list[FileMember] = []
+        post_members: list[FigureItem | AnalysisItem] = []
         for document in self._analysis:
-            member = FileMember(
+            member = AnalysisItem(
                 ArtifactKey(document.pane, "results", "analysis", document.pane),
                 document,
             )

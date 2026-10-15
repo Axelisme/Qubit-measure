@@ -215,7 +215,6 @@ def test_all_event_kinds_round_trip_in_append_order(
             run_id="run-1",
             tab="Spectroscopy",
             experiment="test/spectroscopy",
-            cfg_summary={"shots": 10},
             roles={"qubit": "Q1"},
             point="a",
         ),
@@ -545,34 +544,76 @@ def test_invalid_existing_event_blocks_read_and_append_without_rewrite(
         assert path.read_bytes() == before
 
 
-def test_future_minor_preserves_raw_event_and_unknown_payload_without_rewrite(
-    entry_records: tuple[ResultEntry, Path],
+@pytest.mark.parametrize("version", ["1.0", "1.2"])
+def test_reader_preserves_raw_event_and_unknown_fields_without_rewrite(
+    entry_records: tuple[ResultEntry, Path], version: str
 ) -> None:
     entry, records = entry_records
     event = _accepted(entry.entry_id)
-    entry.ledger.append(event)
+    entry.ledger.append(event, record={"fit": [1, 2]})
     path = records / "ledger.jsonl"
     data = json.loads(path.read_text())
-    data["format_version"] = "1.2"
+    data["format_version"] = version
     data["future_header"] = {"new": True}
     data["payload"]["future_payload"] = [1, None]
     raw = "  " + json.dumps(data, ensure_ascii=False, indent=None) + "  "
     path.write_text(raw + "\n", encoding="utf-8")
     before = path.read_bytes()
+    record_path = records / f"{event.id}.json"
+    record_before = record_path.read_bytes()
     found = entry.ledger.get(event.id)
     assert found.event.id == event.id
-    assert found.event.format_version == "1.2"
+    assert found.event.format_version == version
     assert found.event.payload == event.payload
+    assert found.record == {"fit": [1, 2]}
     assert found.event_json == raw
     assert entry.ledger.events() == (found.event,)
     assert path.read_bytes() == before
-    with pytest.raises(ValueError, match="version"):
-        entry.ledger.append(found.event)
+    entry.ledger.append(_accepted(entry.entry_id))
+    assert path.read_bytes().startswith(before)
+    assert entry.ledger.get(event.id).event_json == raw
+    assert record_path.read_bytes() == record_before
+
+
+@pytest.mark.parametrize("version", ["1.0", "1.2"])
+def test_legacy_acquired_projects_evidence_and_keeps_raw_cfg(
+    entry_records: tuple[ResultEntry, Path], version: str
+) -> None:
+    entry, records = entry_records
+    event_id = str(uuid4())
+    data = {
+        "format": "zcu.ledger",
+        "format_version": version,
+        "id": event_id,
+        "kind": "acquired",
+        "at": _AT,
+        "entry_id": entry.entry_id,
+        "origin": "notebook",
+        "payload": {
+            "run_id": "historical-run",
+            "tab": "old-experiment",
+            "experiment": "test/spectroscopy",
+            "point": "p",
+            "roles": {"qubit": "Q1"},
+            "cfg_summary": ["retired", {"schema": "opaque"}],
+        },
+    }
+    raw = json.dumps(data)
+    path = records / "ledger.jsonl"
+    path.write_text(raw + "\n", encoding="utf-8")
+    before = path.read_bytes()
+    found = entry.ledger.get(event_id)
+    assert isinstance(found.event.payload, AcquiredPayload)
+    assert found.event.payload.run_id == "historical-run"
+    assert found.event.payload.roles == {"qubit": "Q1"}
+    assert found.event.payload.point == "p"
+    assert entry.ledger.events() == (found.event,)
+    assert found.event_json == raw
     assert path.read_bytes() == before
 
 
 @pytest.mark.parametrize("version", ["1.0", "1.1"])
-def test_payload_kind_controls_future_field_projection(
+def test_payload_kind_controls_unknown_field_projection(
     entry_records: tuple[ResultEntry, Path], version: str
 ) -> None:
     entry, records = entry_records
@@ -594,15 +635,11 @@ def test_payload_kind_controls_future_field_projection(
     raw = json.dumps(data)
     path.write_text(raw + "\n", encoding="utf-8")
     before = path.read_bytes()
-    if version == "1.0":
-        with pytest.raises(ValueError, match="extra"):
-            entry.ledger.events()
-    else:
-        found = entry.ledger.get(event.id)
-        assert isinstance(found.event.payload, SavedPayload)
-        assert found.event.payload == event.payload
-        assert found.event_json == raw
-        assert entry.ledger.events() == (found.event,)
+    found = entry.ledger.get(event.id)
+    assert isinstance(found.event.payload, SavedPayload)
+    assert found.event.payload == event.payload
+    assert found.event_json == raw
+    assert entry.ledger.events() == (found.event,)
     assert path.read_bytes() == before
 
     data["payload"]["run_id"] = 123

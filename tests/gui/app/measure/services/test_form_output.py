@@ -53,10 +53,6 @@ class ChoiceAdapter(BaseAdapter[ChoiceCfg, str]):
         self.executed.append(cfg)
         return "complete"
 
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        del ctx
-        return "choice"
-
 
 @pytest.mark.parametrize("phase", ["guard", "run"])
 def test_form_output_is_forwarded_without_rebuilding(phase: str) -> None:

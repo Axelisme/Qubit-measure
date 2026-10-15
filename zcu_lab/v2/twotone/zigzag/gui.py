@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -12,7 +11,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     RunRequest,
-    SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
@@ -48,6 +46,3 @@ class ZigZagAdapter(BaseAdapter[ZigZagCfg, ZigZagRunResult]):
         del req
         result = ZigZagExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
-
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        return f"{ctx.qub_name}_zigzag_{time.strftime('%m%d')}"

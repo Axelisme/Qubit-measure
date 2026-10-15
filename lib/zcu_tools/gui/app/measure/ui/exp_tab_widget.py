@@ -29,9 +29,9 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.experiment.run_saving import ArtifactRef
+from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
+from zcu_tools.gui.app.measure.artifacts import ArtifactSaveCenter
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.form import FormErrors, FormModel, FormState
@@ -41,10 +41,10 @@ from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 from zcu_tools.gui.widgets import DialogPresenter, QtDialogPresenter
 from zcu_tools.gui.widgets.form import FormEditor
 
+from ..writeback import WritebackWidget
 from .analyze_form import AnalyzeFormWidget
 from .data_figure_preview_gallery import DataFigurePreviewGallery
 from .guide_view import GuideView
-from .writeback_widget import WritebackWidget
 
 logger = logging.getLogger(__name__)
 
@@ -64,11 +64,10 @@ _RED_STOP_STYLESHEET = (
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
-    from zcu_tools.gui.app.measure.adapter import WritebackItem
     from zcu_tools.gui.app.measure.controller import Controller
     from zcu_tools.gui.app.measure.services import TabSnapshot
-    from zcu_tools.gui.app.measure.services.writeback_control import WritebackPane
     from zcu_tools.gui.app.measure.state import TabInteractionState
+    from zcu_tools.gui.app.measure.writeback import WritebackItem, WritebackPane
     from zcu_tools.plotting.figures import FigureCollection
 
 

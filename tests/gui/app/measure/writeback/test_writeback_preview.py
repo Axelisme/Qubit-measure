@@ -6,8 +6,11 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import Field
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
-from zcu_tools.gui.app.measure.adapter import ModuleWriteback, ParameterWriteback
-from zcu_tools.gui.app.measure.services.writeback import WritebackService
+from zcu_tools.gui.app.measure.writeback import (
+    ModuleWriteback,
+    ParameterWriteback,
+    WritebackService,
+)
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.aliases import AliasRow

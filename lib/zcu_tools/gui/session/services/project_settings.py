@@ -68,8 +68,8 @@ def derive_project_paths(chip_name: str, qub_name: str, root: str) -> tuple[str,
     ``Database/chip/qub/YYYY/MM/Data_MMDD`` — the notebook's ``create_datafolder``
     return value, with the date in the path itself. Save-path builders therefore
     join filenames directly under ``ctx.database_path`` and must NOT re-append the
-    date (see BaseAdapter.make_default_save_paths). The date is *today's* at the
-    moment this is called, so restore paths (which re-derive) always land in the
+    date. The date is *today's* at the moment this is called, so restore paths
+    (which re-derive) always land in the
     current day's folder rather than a stale persisted one.
 
     Both the setup dialog and the mock/RPC project helpers derive through here so

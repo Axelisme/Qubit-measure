@@ -17,7 +17,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from zcu_tools.gui.app.measure.services.save_control import SavedRunInfo
+from zcu_tools.gui.app.measure.artifacts import SavedRunInfo
 
 
 class RunLoadDialog(QDialog):

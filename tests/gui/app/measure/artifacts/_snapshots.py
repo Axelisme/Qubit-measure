@@ -11,9 +11,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from matplotlib.figure import Figure
-from zcu_tools.experiment.run_saving import ArtifactRef
+from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
-from zcu_tools.gui.app.measure.artifact_tracker import (
+from zcu_tools.gui.app.measure.artifacts import (
     ArtifactDeclaration,
     ArtifactTracker,
 )

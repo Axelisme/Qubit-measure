@@ -1,44 +1,37 @@
 from __future__ import annotations
 
 import dataclasses
-import os
-from abc import ABC, abstractmethod
+from abc import ABC
 from collections.abc import Callable, Sequence
 from inspect import signature
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, cast
 
-from zcu_tools.datafile import AnalysisDocument, RunMetadata
+from zcu_tools.datafile import AnalysisDocument, StoredRun
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.native_persistence import (
-    PreparedRunData,
-    load_run_with_metadata,
-    prepare_run_data,
-)
+from zcu_tools.experiment.native_persistence import RestoredRun
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalysisMode,
     AnalyzeRequest,
-    LoadDataRequest,
     NoAnalyzeParams,
     PostAnalyzeRequest,
     PostAnalyzeResultBase,
     PostWritebackRequest,
     RunRequest,
-    SaveDataRequest,
-    SavePaths,
     SessionEnv,
     T_AnalyzeParams,
     T_AnalyzeResult,
     T_Cfg,
     T_PostAnalyzeResult,
     T_Result,
-    WritebackItem,
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.types import AnalyzeResult
+from zcu_tools.gui.app.measure.artifacts import AnalysisItem, ArtifactKey, DataItem
+from zcu_tools.gui.app.measure.writeback import WritebackItem
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.interactive import PluginDefinition, Session
 
@@ -107,10 +100,9 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     """Shared implementation for experiment adapters.
 
     Concrete adapters subclass this and fill in the experiment-specific knowledge
-    (``make_form``, ``make_filename_stem``
-    and — when the experiment supports analysis — ``get_analyze_params``/``analyze``).
-    Everything else (run delegation, save-path policy,
-    save) is provided here once.
+    (``make_form`` and — when the experiment supports analysis —
+    ``get_analyze_params``/``analyze``). Run delegation and persistence payload
+    preparation are provided here once.
 
     The class is generic over the four experiment types. Adapters without analysis
     omit the last two parameters (PEP 696 defaults fill in ``NoAnalysisResult`` /
@@ -267,28 +259,28 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     def _validate_load_capability(cls, *, enabled: bool) -> None:
         """Require a declared loader, or forbid an override when loading is disabled."""
         # Loading is a capability gate, not a runtime probe. A concrete adapter
-        # may provide its own loader, or it may opt into BaseAdapter.load when the
+        # may provide its own loader, or it may opt into BaseAdapter.restore when the
         # experiment class can be constructed without arguments and exposes a
         # canonical callable loader. A disabled capability must not hide an
         # accidental adapter override.
         if enabled:
-            if not cls._is_method_implemented("load"):
+            if not cls._is_method_implemented("restore"):
                 exp_cls = getattr(cls, "exp_cls", None)
                 has_canonical_loader = isinstance(exp_cls, type) and (
                     _can_construct_without_args(exp_cls)
-                    and callable(getattr(exp_cls, "load", None))
+                    and callable(getattr(exp_cls, "from_stored", None))
                 )
                 if not has_canonical_loader:
                     raise TypeError(
                         f"{cls.__name__} declares load_data=True but has neither "
-                        "a concrete load() override nor a no-argument exp_cls with "
-                        "a callable canonical loader"
+                        "a concrete restore() override nor a no-argument exp_cls with "
+                        "a callable from_stored"
                     )
         else:
             cls._forbid_method(
-                "load",
+                "restore",
                 "declares load_data=False",
-                "remove load() or set load_data=True",
+                "remove restore() or set load_data=True",
             )
 
     # -- experiment-specific contract (subclass must fill) -----------------
@@ -321,10 +313,6 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         propagate to GuardService's admission error translation.
         """
         del req, cfg
-
-    @abstractmethod
-    def make_filename_stem(self, ctx: SessionEnv) -> str:
-        """Return the filename stem used by the default save path template."""
 
     # -- analysis (raising no-op default; override when analysis != NONE) --
 
@@ -478,32 +466,31 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         del req
         return cast(T_Result, self.exp_cls().run(cfg, context=context))
 
-    def load(self, req: LoadDataRequest) -> tuple[object, RunMetadata]:
-        """Read req.data_path as an exact native file using this core's spec.
+    def restore(self, stored: StoredRun) -> RestoredRun[T_Result]:
+        """Restore already-read native data through the core's from_stored contract.
 
-        Return the typed cfg/Result record and its full historical metadata.
-        req.parameters is the Load-time capture, not a replacement for file history.
-        Missing persistence declarations or required constructor arguments raise
-        NotImplementedError. Native validation raises ValueError; I/O and core
-        constructor failures propagate. No Labber fallback or history recapture.
+        stored contains validated generic data and original history, not current
+        form inputs. Return the adapter-owned record and explicit cfg diagnostic.
+        Missing from_stored or required constructor arguments raise
+        NotImplementedError. Invalid data raises ValueError; core constructor
+        failures propagate. No I/O, Labber fallback or history recapture occurs.
         """
         if not _can_construct_without_args(self.exp_cls):
             raise NotImplementedError(
                 f"{type(self).__name__} does not support loading native result files"
             )
         exp = self.exp_cls()
-        persistence_spec = getattr(exp, "persistence_spec", None)
-        if not callable(persistence_spec):
+        from_stored = getattr(exp, "from_stored", None)
+        if not callable(from_stored):
             raise NotImplementedError(
                 f"{type(self).__name__} does not support loading native result files"
             )
         try:
-            spec = exp.persistence_spec()
+            return exp.from_stored(stored)
         except NotImplementedError as exc:
             raise NotImplementedError(
                 f"{type(self).__name__} does not support loading native result files"
             ) from exc
-        return load_run_with_metadata(Path(req.data_path), spec=spec)
 
     def get_writeback_items(
         self, req: WritebackRequest[T_Result, T_AnalyzeResult]
@@ -524,40 +511,15 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         del req
         return []
 
-    def make_default_save_paths(self, ctx: SessionEnv) -> SavePaths:
-        """Default save path policy shared by most adapters."""
-        if not ctx.database_path:
-            raise RuntimeError("SessionEnv.database_path is required for save paths")
-        if not ctx.result_dir:
-            raise RuntimeError("SessionEnv.result_dir is required for save paths")
-        if not ctx.active_label:
-            raise RuntimeError("SessionEnv.active_label is required for save paths")
-
-        stem = self.make_filename_stem(ctx)
-        # ctx.database_path is already the dated data folder
-        # (Database/chip/qub/YYYY/MM/Data_MMDD; derive_project_paths owns the date),
-        # so join the filename directly — do NOT re-append the date here.
-        data_dir = ctx.database_path
-        image_dir = os.path.join(ctx.result_dir, "exps", ctx.active_label, "image")
-        # Data filename carries the flux label (single_qubit.md:
-        # '{stem}@{em.label}') so the same experiment at different flux points
-        # stays distinct within a day's data folder.
-        return SavePaths(
-            data_path=os.path.join(data_dir, f"{stem}@{ctx.active_label}"),
-            image_path=os.path.join(image_dir, f"{stem}.png"),
-        )
-
-    def make_save_paths(self, ctx: SessionEnv) -> SavePaths:
-        return self.make_default_save_paths(ctx)
-
-    def capture_analysis_document(
+    def analysis_item(
         self,
+        key: ArtifactKey,
         result: object,
         parameters: object | None,
         *,
         pane: Literal["analysis", "post_analysis"],
-    ) -> AnalysisDocument:
-        """Capture one completed pane's historical inputs and numeric summary.
+    ) -> AnalysisItem:
+        """Hand over one pane's historical inputs and summary under its assigned key.
 
         result must implement AnalyzeResult.to_summary_dict. parameters is the
         dataclass instance used for that result, or None for no inputs, never
@@ -578,24 +540,23 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
             raise TypeError(
                 "Historical analysis parameters must be a dataclass or None"
             )
-        return AnalysisDocument.model_validate(
+        document = AnalysisDocument.model_validate(
             {"pane": pane, "parameters": inputs, "summary": result.to_summary_dict()}
         )
+        return AnalysisItem(key, document)
 
-    def prepare_save_data(self, result: object, *, comment: str) -> PreparedRunData:
-        """Map one completed RunRecord through this adapter's persistence spec.
+    def data_item(self, key: ArtifactKey, result: object, *, comment: str) -> DataItem:
+        """Hand over a typed RunRecord under the framework-assigned data key.
 
-        The record must contain this experiment's typed cfg and Result. Return
-        the shared SI payload and cfg snapshot without paths, metadata capture
-        or I/O. Invalid record/cfg/Result/comment and missing declarations raise
-        the owning experiment's TypeError, ValueError or NotImplementedError.
-        Arrays remain shared; do not mutate the record while saving.
+        This default supports core record adapters. Opaque adapters override it
+        to unwrap their own handle and return framework content. Preparation
+        failures, including missing cfg, become failed data outputs. A non-record
+        raises TypeError, which Save isolates the same way. No paths, format
+        selection, metadata capture or I/O occurs. Arrays remain shared; do not
+        mutate the record while saving.
         """
         if not isinstance(result, RunRecord):
             raise TypeError("Native saving requires a RunRecord")
-        return prepare_run_data(
-            result, spec=self.exp_cls().persistence_spec(), comment=comment
+        return DataItem.from_run(
+            key, result, spec=self.exp_cls().persistence_spec(), comment=comment
         )
-
-    def save(self, req: SaveDataRequest[T_Result]) -> None:
-        self.exp_cls().save(req.run_result, Path(req.data_path), comment=req.comment)

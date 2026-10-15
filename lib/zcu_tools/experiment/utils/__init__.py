@@ -1,4 +1,4 @@
-from .comment import make_comment, make_labber_cfg_snapshot, parse_comment
+from .comment import make_comment, make_labber_cfg_snapshot
 from .device import (
     check_flux_unit,
     set_flux,
@@ -22,5 +22,4 @@ __all__ = [
     # comment
     "make_comment",
     "make_labber_cfg_snapshot",
-    "parse_comment",
 ]
