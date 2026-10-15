@@ -80,7 +80,9 @@ def test_concrete_cfg_set_param_rejects_unknown_name(make_cfg: CfgFactory):
         cfg.set_param("__unknown_param__", 1.0)
 
 
-@pytest.mark.parametrize("name", ["freq", "gain", "phase", "length", "ro_length", "tones.0.freq"])
+@pytest.mark.parametrize(
+    "name", ["freq", "gain", "phase", "length", "ro_length", "tones.0.freq"]
+)
 def test_mux_set_param_requires_cfg_and_program_rebuild(name: str):
     from zcu_tools.cfg_model import ModuleCfgFactory
 

@@ -217,17 +217,31 @@ def test_mux_persistent_spec_roundtrips_numeric_tones(count: int):
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("tones", []), ("tones", [{}] * 9),
-        ("gen_ch", True), ("gen_ch", -1), ("gen_ch", 1.5), ("gen_ch", "1"),
-        ("nqz", 0), ("nqz", True), ("nqz", 3),
-        ("mixer_freq", None), ("mixer_freq", float("nan")),
-        ("length", 0.0), ("length", float("inf")), ("ro_length", -1.0),
-        ("pre_delay", -0.1), ("post_delay", float("inf")), ("trig_offset", -0.1),
+        ("tones", []),
+        ("tones", [{}] * 9),
+        ("gen_ch", True),
+        ("gen_ch", -1),
+        ("gen_ch", 1.5),
+        ("gen_ch", "1"),
+        ("nqz", 0),
+        ("nqz", True),
+        ("nqz", 3),
+        ("mixer_freq", None),
+        ("mixer_freq", float("nan")),
+        ("length", 0.0),
+        ("length", float("inf")),
+        ("ro_length", -1.0),
+        ("pre_delay", -0.1),
+        ("post_delay", float("inf")),
+        ("trig_offset", -0.1),
         ("waveform", {"style": "const", "length": 1.0}),
-        ("ro_ch", 0), ("ro_chs", [0, 1]),
+        ("ro_ch", 0),
+        ("ro_chs", [0, 1]),
     ],
 )
-def test_mux_rejects_invalid_module_fields(boundary: str, field: str, value: CfgInputValue):
+def test_mux_rejects_invalid_module_fields(
+    boundary: str, field: str, value: CfgInputValue
+):
     from zcu_tools.cfg_model import ModuleCfgFactory
 
     from ._support import mux_raw
@@ -244,15 +258,25 @@ def test_mux_rejects_invalid_module_fields(boundary: str, field: str, value: Cfg
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("freq", float("nan")), ("freq", float("inf")), ("freq", "key"),
+        ("freq", float("nan")),
+        ("freq", float("inf")),
+        ("freq", "key"),
         ("freq", QickParam(1.0, {"sweep": 2.0})),
-        ("gain", -1.01), ("gain", 1.01), ("gain", float("inf")),
-        ("phase", float("nan")), ("phase", float("-inf")),
-        ("ro_ch", True), ("ro_ch", -1), ("ro_ch", 0.5), ("ro_ch", "1"),
+        ("gain", -1.01),
+        ("gain", 1.01),
+        ("gain", float("inf")),
+        ("phase", float("nan")),
+        ("phase", float("-inf")),
+        ("ro_ch", True),
+        ("ro_ch", -1),
+        ("ro_ch", 0.5),
+        ("ro_ch", "1"),
         ("name", "resonator"),
     ],
 )
-def test_mux_rejects_invalid_tone_fields(boundary: str, field: str, value: CfgInputValue):
+def test_mux_rejects_invalid_tone_fields(
+    boundary: str, field: str, value: CfgInputValue
+):
     from zcu_tools.cfg_model import ModuleCfgFactory
 
     from ._support import mux_raw
@@ -266,7 +290,9 @@ def test_mux_rejects_invalid_tone_fields(boundary: str, field: str, value: CfgIn
 
 
 @pytest.mark.parametrize("boundary", ["spec", "cfg"])
-@pytest.mark.parametrize("field", ["gen_ch", "nqz", "mixer_freq", "length", "ro_length"])
+@pytest.mark.parametrize(
+    "field", ["gen_ch", "nqz", "mixer_freq", "length", "ro_length"]
+)
 def test_mux_requires_explicit_module_settings(boundary: str, field: str):
     from zcu_tools.cfg_model import ModuleCfgFactory
 

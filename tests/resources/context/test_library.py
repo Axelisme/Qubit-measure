@@ -773,8 +773,12 @@ def test_mux_and_pulse_readouts_roundtrip_and_materialize_fixed_snapshot(
     from zcu_tools import cfg_model
 
     raw: cfg_model.CfgInputMap = {
-        "type": "readout/mux", "gen_ch": 9, "nqz": 2, "mixer_freq": 6000.0,
-        "length": 2.0, "ro_length": 1.5,
+        "type": "readout/mux",
+        "gen_ch": 9,
+        "nqz": 2,
+        "mixer_freq": 6000.0,
+        "length": 2.0,
+        "ro_length": 1.5,
         "tones": [
             {"freq": 6020.0, "gain": 0.05, "phase": 90.0, "ro_ch": 4},
             {"freq": 5980.0, "gain": -0.04, "phase": 0.0, "ro_ch": 1},
@@ -783,11 +787,21 @@ def test_mux_and_pulse_readouts_roundtrip_and_materialize_fixed_snapshot(
     library = open_library(files)
     with library.edit() as draft:
         draft.set_module("Q1.readout.mux", cfg_model.module_spec_from_raw(raw))
-        draft.set_module("Q1.readout.pulse", cfg_model.module_spec_from_raw({
-            "type": "readout/pulse", "gen_ch": 0, "nqz": 1, "freq": 100.0,
-            "gain": 0.1, "ro_ch": 0, "ro_length": 1.0,
-            "waveform": {"style": "const", "length": 0.5},
-        }))
+        draft.set_module(
+            "Q1.readout.pulse",
+            cfg_model.module_spec_from_raw(
+                {
+                    "type": "readout/pulse",
+                    "gen_ch": 0,
+                    "nqz": 1,
+                    "freq": 100.0,
+                    "gain": 0.1,
+                    "ro_ch": 0,
+                    "ro_length": 1.0,
+                    "waveform": {"style": "const", "length": 0.5},
+                }
+            ),
+        )
     fixed = open_library(files).snapshot()
     spec = fixed.module_spec("Q1.readout.mux")
     assert isinstance(spec, cfg_model.MuxReadoutSpec)
