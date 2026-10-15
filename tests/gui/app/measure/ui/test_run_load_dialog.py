@@ -151,11 +151,11 @@ def test_main_window_routes_dialog_selection_to_existing_load(
     if action == "query-error":
         ctrl.save_control.list_saved_runs.side_effect = ValueError("corrupt ledger")
     ctrl.load_tab_result.return_value = LoadTabResultOutcome(
-        "tab",
-        str(rows[0].data_path),
-        "Result",
-        True,
-        False,
+        tab_id="tab",
+        data_path=str(rows[0].data_path),
+        result_type="Result",
+        cfg_issue=None,
+        has_analyze_params=False,
     )
     dialogs = RecordingDialogPresenter()
     window = MainWindow(ctrl, dialog_presenter=dialogs)
