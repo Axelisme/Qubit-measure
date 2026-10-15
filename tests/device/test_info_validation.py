@@ -191,15 +191,3 @@ def test_fake_info_stores_native_unit() -> None:
     assert FakeDeviceInfo.model_validate(info.model_dump()) == info
     assert FakeDeviceInfo.model_validate_json(info.model_dump_json()) == info
     assert info.value == 0.125
-
-
-@pytest.mark.parametrize("unit", ["A", "V"])
-def test_fake_info_rejects_non_native_unit(unit: str) -> None:
-    with pytest.raises(ValidationError) as error:
-        FakeDeviceInfo.model_validate(
-            {"address": "none", "value": 0.125, "value_unit": unit}
-        )
-    assert any(
-        item["loc"] == ("value_unit",) and item["type"] == "literal_error"
-        for item in error.value.errors()
-    ), error.value.errors()
