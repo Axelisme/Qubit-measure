@@ -23,6 +23,38 @@ def test_execution_grid_converts_spectral_density_to_sample_covariance() -> None
     np.testing.assert_allclose(plan.grids[1].phase_rad, np.pi/2, atol=1e-12)
 
 
+def test_public_integrated_thermal_mixture_matches_conditional_field_mean() -> None:
+    from zcu_tools.experiment.ftf import ftf, plan_point
+    from zcu_tools.simulate.adc import ADC
+
+    document = ftf_document()
+    model = document["model"]
+    if not isinstance(model, dict):
+        raise TypeError("synthetic model fixture must be a mapping")
+    model["temperature_k"] = .08
+    settings = parse_ftf(document)
+    env = ftf(settings)
+    try:
+        readout = PulseReadoutCfg(gen_ch=0, ro_ch=0, nqz=1, freq=6000., gain=.4, waveform=ConstWaveformCfg(length=.08), ro_length=.1)
+        program = ModularProgramV2(env.soccfg, ProgramV2Cfg(reps=2048), modules=[readout.build("ro")])
+        averaged = np.asarray(program.acquire(env.soc, progress=False)[0]).reshape(-1, 2)[0]
+        request = env.soc.binding.last_request
+        if request is None:
+            raise AssertionError("completed simulation retains its numeric request")
+        plan = plan_point(settings, env.soc.binding.rounds[0].snapshot, request.timelines[0])
+        response = ADC(plan.readout_model, rtol=1e-8, atol=1e-10).response(plan.pulses, plan.grid)
+        energy = plan.joint.energies_ghz
+        weights = np.exp(-.04799243073366221*(energy-energy[0])/.08)
+        weights /= weights.sum()
+        conditional = response.traces.mean(axis=1)
+        expected = weights@conditional
+        variance = weights@(conditional-expected)**2
+        assert variance.max() > 1.
+        np.testing.assert_allclose(averaged, expected, rtol=0, atol=6*np.sqrt(variance.max()/2048)+1/request.readouts[0].samples)
+    finally:
+        env.devices.close_all_devices()
+
+
 def test_public_decimated_receiver_noise_psd_and_offset() -> None:
     from zcu_tools.experiment.ftf import ftf
 
