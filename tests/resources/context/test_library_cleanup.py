@@ -126,7 +126,9 @@ def test_container_and_orphan_errors_do_not_backup_even_with_bad_specs(
     path = tmp_path / "module_cfg.yaml"
     path.write_text(HEADER + content + "\n")
     original = path.read_bytes()
-    with pytest.raises(ValueError, match="components|provenance|[Ss]ource|[Ii]nvalid"):
+    with pytest.raises(
+        ValueError, match="components|provenance|[Ss]ource|[Ii]nvalid|library root"
+    ):
         open_library(path)
     assert path.read_bytes() == original
     assert backups(path) == []
@@ -273,7 +275,7 @@ def test_commit_reread_cleans_disk_without_resurrecting_deleted_root(
     )
     assert capture.waveform_keys() == ("Q1.waveforms.bad",)
     with pytest.raises(KeyError):
-        library.snapshot().get_waveform("Q1.waveforms.bad")
+        library.snapshot().waveform_spec("Q1.waveforms.bad")
 
 
 def _locked_reader(path: Path, connection: Connection, operation: str) -> None:
