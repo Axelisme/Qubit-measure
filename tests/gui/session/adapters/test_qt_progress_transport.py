@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import pytest
 
+from tests.gui._lifecycle_waits import running
+from tests.gui._qt_waits import qt_until
+
 pytest.importorskip("qtpy")
 
 
 def test_emit_from_worker_thread_delivers_on_main_thread(qapp):
     import threading
 
-    from qtpy.QtCore import QThread  # type: ignore[attr-defined]
-    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
     from zcu_tools.gui.session.adapters.qt_progress_transport import (
         QtProgressTransport,
     )
@@ -23,17 +24,12 @@ def test_emit_from_worker_thread_delivers_on_main_thread(qapp):
 
     transport.set_receiver(lambda ev: received.append((ev, threading.current_thread())))
 
-    class _Worker(QThread):
-        def run(self) -> None:
-            for i in range(3):
-                transport.emit(ProgressEvent(1, 0, ProgressEventKind.UPDATE, n=i))
+    def emit_updates() -> None:
+        for i in range(3):
+            transport.emit(ProgressEvent(1, 0, ProgressEventKind.UPDATE, n=i))
 
-    worker = _Worker()
-    worker.start()
-    worker.wait()
-    # Drain the queued signals delivered to the main thread.
-    for _ in range(10):
-        QApplication.processEvents()
+    with running(emit_updates):
+        qt_until(lambda: len(received) == 3)
 
     assert [ev.n for ev, _ in received] == [0, 1, 2]  # order preserved
     assert all(thr is main_thread for _, thr in received)  # delivered on main
