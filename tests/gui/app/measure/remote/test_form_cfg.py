@@ -256,6 +256,60 @@ def test_describe_cfg_root_is_single_layer_and_readable_through_mcp(
             child["name"] for child in observed["description"]["children"]
         ]
         assert observed["input_present"] is True
+        fields = {child["name"]: child for child in observed["description"]["children"]}
+        assert fields["gain"]["can_expand"] is False
+        assert fields["gain"]["selection_fixed"] is False
+        assert fields["sweep"]["can_expand"] is True
+
+
+@pytest.mark.parametrize("author_failure", [False, True])
+def test_describe_cfg_mcp_preserves_path_and_internal_error_boundary(
+    form_rpc, tmp_path, author_failure: bool
+) -> None:
+    from contextlib import closing
+
+    from zcu_tools.gui.remote.errors import RemoteError
+    from zcu_tools.mcp.measure.session import GuiRpcError
+
+    from tests.mcp.measure._support import make_client
+
+    fixture, _, rpc = form_rpc
+    fixture.registry.register("failing-options", FailingOptionsAdapter)
+    tab = fixture.ctrl.new_tab("failing-options")
+    path = ["extras"] if author_failure else ["gain", "child"]
+
+    def respond(method, params):
+        reply = rpc.call(method, params)
+        if not reply["ok"]:
+            error = reply["error"]
+            raise RemoteError(
+                error["code"], error["message"],
+                reason=error.get("reason"), data=error.get("data"),
+            )
+        return reply["result"]
+
+    try:
+        FailingOptionsExtras.broken = author_failure
+        client = make_client(tmp_path, respond)
+        with closing(client.context.session):
+            with pytest.raises(GuiRpcError) as caught:
+                client.call("rpc_call", {
+                    "method": "tab.describe_cfg",
+                    "params": {"tab_id": tab, "path": path},
+                })
+            assert caught.value.code == (
+                "controller_error" if author_failure else "invalid_params"
+            )
+            if not author_failure:
+                assert caught.value.reason == "form_path"
+                assert caught.value.data == {"form_path": path}
+                assert client.call("rpc_call", {
+                    "method": "tab.describe_cfg",
+                    "params": {"tab_id": tab, "path": ["gain"]},
+                })["value"] == 0.5
+    finally:
+        FailingOptionsExtras.broken = False
+        fixture.ctrl.tab_control.close_tab(tab)
 
 
 def test_edit_cfg_commits_leaf_batch_and_returns_invalid_input_errors(form_rpc) -> None:
