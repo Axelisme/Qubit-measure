@@ -8,7 +8,14 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from PyQt6.QtGui import QAction
 from qtpy.QtCore import Qt
-from qtpy.QtWidgets import QApplication, QCheckBox, QComboBox, QLabel, QLineEdit, QWidget
+from qtpy.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QLabel,
+    QLineEdit,
+    QWidget,
+)
 from zcu_tools.cfg_model import (
     ConfigBase,
     ConstWaveformCfg,
@@ -604,16 +611,24 @@ class FixedShapeForm(FormModel):
         return {
             ("shape",): (
                 Option(
-                    "Flat", {"kind": "flat"}, fields=Flat,
-                    commands=(OptionCommand(
-                        "lengthen", "Lengthen", lambda _env: {"kind": "flat", "length": 8.0}
-                    ),),
+                    "Flat",
+                    {"kind": "flat"},
+                    fields=Flat,
+                    commands=(
+                        OptionCommand(
+                            "lengthen",
+                            "Lengthen",
+                            lambda _env: {"kind": "flat", "length": 8.0},
+                        ),
+                    ),
                 ),
             )
         }
 
 
-def test_fixed_option_keeps_editable_children_and_guarded_commands(build: Build) -> None:
+def test_fixed_option_keeps_editable_children_and_guarded_commands(
+    build: Build,
+) -> None:
     env = FormEnv()
     state = new_state(FixedShapeForm, {"shape": {"kind": "flat", "length": 5.0}})
     calls: list[tuple[FormWritePath, str]] = []

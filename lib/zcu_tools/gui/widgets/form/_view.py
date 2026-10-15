@@ -30,8 +30,9 @@ class FieldView:
     detached selector list and matching index (None for no list/no match).
     raw/present describe authored input; a missing fixed leaf displays its
     fixed value without writing it. value/has_value identify a preview leaf.
-    decimals rounds display only. fixed makes the input read-only. group is
-    the same-level display group name, or None for an ungrouped row.
+    decimals rounds display only. fixed marks a declaration-fixed scalar or
+    option value, not read-only children or commands. group is the same-level
+    display group name, or None for an ungrouped row.
     """
 
     path: FormWritePath
@@ -56,6 +57,34 @@ class FieldView:
     group: str | None
 
 
+def _control_presentation(
+    field: FormFieldDescription,
+) -> tuple[_Kind, tuple[FormOptionDescription, ...] | None]:
+    """Choose the Qt control category and menu from core-owned metadata.
+
+    A fixed option value fixes its tags, not its editable descendants or
+    explicit commands. Only a fixed scalar without actions is plain text.
+    No branch matching or annotation interpretation occurs here.
+    """
+    options = field.options
+    if (
+        field.fixed
+        and field.kind != "model"
+        and not field.can_expand
+        and (options is None or not any(option.commands for option in options))
+    ):
+        options = None
+    if options is not None:
+        return ("model" if field.can_expand else "choice"), options
+    if field.kind == "model":
+        return "model", options
+    if field.kind in ("integer", "number", "complex", "boolean"):
+        return field.kind, options
+    if field.kind in ("sequence", "mapping"):
+        return "json", options
+    return "text", options
+
+
 def project_field(
     field: FormFieldDescription, data: dict[str, JsonValue], preview: FormPreview
 ) -> FieldView:
@@ -74,17 +103,7 @@ def project_field(
             present = False
             break
         current = current[name]
-    kind: _Kind
-    if field.options is not None and not field.fixed:
-        kind = "model" if field.can_expand else "choice"
-    elif field.kind == "model":
-        kind = "model"
-    elif field.kind in ("integer", "number", "complex", "boolean"):
-        kind = field.kind
-    elif field.kind in ("sequence", "mapping"):
-        kind = "json"
-    else:
-        kind = "text"
+    kind, options = _control_presentation(field)
     return FieldView(
         path=field.path,
         kind=kind,
@@ -97,7 +116,7 @@ def project_field(
         active=not field.nullable or (present and current is not None),
         can_expand=field.can_expand,
         expression=field.expression and not field.fixed,
-        options=None if field.fixed else field.options,
+        options=options,
         selected=field.selected,
         raw=current if present or not field.fixed else field.fixed_value,
         present=present,

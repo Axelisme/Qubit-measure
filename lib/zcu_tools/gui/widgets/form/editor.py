@@ -9,17 +9,17 @@ from weakref import ref
 from pydantic import JsonValue
 from PyQt6 import sip
 from PyQt6.QtCore import pyqtSignal
-from qtpy.QtCore import QThread, Qt
+from qtpy.QtCore import QSignalBlocker, Qt, QThread
 from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
 from zcu_tools.gui.form import (
     FormEnv,
-    FormFieldDescription,
-    FormPreview,
     FormErrors,
+    FormFieldDescription,
     FormModel,
     FormPath,
+    FormPreview,
     FormState,
     FormWritePath,
     WriteRejected,
@@ -28,6 +28,7 @@ from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 from ._controls import ROW_SPACING, FieldRow, GroupBlock, LocalText
 from ._view import FieldView, project_field
+
 
 @dataclass
 class _Level:
@@ -44,9 +45,16 @@ class _Level:
 def _shape(field: FieldView) -> tuple[object, ...]:
     """Control construction inputs, excluding current input and selection."""
     return (
-        field.kind, field.options is not None, field.expression, field.fixed,
-        field.label, field.unit, field.description, field.placeholder,
-        field.nullable, field.can_expand,
+        field.kind,
+        field.options is not None,
+        field.expression,
+        field.fixed,
+        field.label,
+        field.unit,
+        field.description,
+        field.placeholder,
+        field.nullable,
+        field.can_expand,
     )
 
 
@@ -389,7 +397,8 @@ class FormEditor[F: FormModel](QWidget):
         self._groups = []
         self._index_level(self._level)
         self._local = {
-            path: local for path, local in self._local.items()
+            path: local
+            for path, local in self._local.items()
             if path in self._rows
             and local.section == (self._rows[path].field.kind == "model")
         }
@@ -418,7 +427,13 @@ class FormEditor[F: FormModel](QWidget):
 
     def _retire(self, widget: QWidget) -> None:
         # Retire names immediately, but let an emitting Qt control finish.
-        widget.setParent(None)
+        focused = QApplication.focusWidget()
+        if focused is not None and widget.isAncestorOf(focused):
+            # Replacing a branch must not commit text from the retiring row.
+            with QSignalBlocker(focused):
+                widget.setParent(None)
+        else:
+            widget.setParent(None)
         widget.deleteLater()
 
     def _sync_level(
@@ -445,12 +460,17 @@ class FormEditor[F: FormModel](QWidget):
         for name, members in grouped.items():
             if name not in level.groups:
                 block = GroupBlock(
-                    level.path, name, tuple(item.path for item in members),
-                    level.widget, self._group_expanded, self._fold_changed,
+                    level.path,
+                    name,
+                    tuple(item.path for item in members),
+                    level.widget,
+                    self._group_expanded,
+                    self._fold_changed,
                 )
                 body = _Level(level.path, block.body, block.rows)
                 level.groups[name] = block, body
                 level.layout.addWidget(block.widget)
+                block.widget.show()
             block, body = level.groups[name]
             block.members = tuple(item.path for item in members)
             if not block.body.isHidden() or body.rows or body.groups:
@@ -490,18 +510,26 @@ class FormEditor[F: FormModel](QWidget):
                         self._clear_level(child)
                     self._retire(row.widget)
                 row = FieldRow(
-                    field, level.widget, self._write, self._unparsed,
-                    self._model_expanded, self._run_command,
+                    field,
+                    level.widget,
+                    self._write,
+                    self._unparsed,
+                    self._model_expanded,
+                    self._run_command,
                 )
                 row.connect_fold(self._fold_changed)
                 level.rows[field.path] = row
                 level.layout.insertWidget(index, row.widget)
+                row.widget.show()
             # The new-row branch always assigns row.
             assert row is not None
             if row.field.selected != field.selected:
                 child = level.children.pop(field.path, None)
                 if child is not None:
                     self._clear_level(child)
+                # An earlier empty selection hid the body and fold marker.
+                # Restore the structural hint before considering the new layer.
+                row.set_children_available(available=field.can_expand)
             local = self._local.get(field.path)
             if local is not None and local.section != (field.kind == "model"):
                 self._local.pop(field.path)
@@ -616,7 +644,9 @@ class FormEditor[F: FormModel](QWidget):
         for length in range(len(path), 0, -1):
             prefix = path[:length]
             for candidate in self._rows:
-                if candidate == prefix and self._rows[candidate].widget.isVisibleTo(self._content):
+                if candidate == prefix and self._rows[candidate].widget.isVisibleTo(
+                    self._content
+                ):
                     return candidate
         return None
 

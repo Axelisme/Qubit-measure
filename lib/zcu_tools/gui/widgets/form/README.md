@@ -6,7 +6,9 @@
 
 Editor 初次只建立可見層與初始展開的 model rows。Group 預設折疊，model 沿 `Display(collapsed=...)`。Core 的 `can_expand` 只提供結構上的展開能力，首次展開才查下一層；實際沒有可畫 children 時，該列回到普通標題，不留空白區塊。收起已建區塊會保留 QWidget 與未提交文字，不偷寫 state。換 option 或啟停 nullable model 只替換該子樹，無關 rows 與使用者設定的 folds 保持不變。Editor 以已建立的 Qt 子層記錄展開情況，不另持 writable draft。
 
-文字欄位在 Enter 或 focus loss 提交，typing 本身不改 state。Expression action、dropdown、checkbox 與 Enabled 立即提交。未解析或 host 拒絕的輸入保留在 view，`local_parse_errors()` 讓 host 阻止提交。`discard_local_text()` 只丟掉 view-local 輸入，不重設 FormState。外部 publication 仍以 state 的輸入更新已建 controls。完整 preview 與 local errors 決定 validity，折疊、hidden 或尚未建立的 child 不會隱藏錯誤；錯誤標示落在可見祖先或 group 標題。
+文字欄位在 Enter 或一般 focus loss 提交，typing 本身不改 state。折疊與移除舊分支引起的 focus loss 不提交，重新展開後的一般 focus loss 仍提交保留文字。Expression action、dropdown、checkbox 與 Enabled 立即提交。未解析或 host 拒絕的輸入保留在 view，`local_parse_errors()` 讓 host 阻止提交。`discard_local_text()` 只丟掉 view-local 輸入，不重設 FormState。外部 publication 仍以 state 的輸入更新已建 controls。完整 preview 與 local errors 決定 validity，折疊、hidden 或尚未建立的 child 不會隱藏錯誤；錯誤標示落在可見祖先或 group 標題。
+
+`selection_fixed` 不鎖內層選項。`fixed` option.value 也不凍結 children 或移除 commands；只有固定 scalar 且沒有 command 時畫成唯讀文字。
 
 Host 可成對傳入 `write=` 與 `run_command=`，使每批 parsed input 與選項指令走同一 guard。Editor 不另寫 state。Host 以 `WriteRejected(message)` 拒絕時，文字保留且顯示訊息；dropdown、checkbox 與 Enabled 回到已發布值。其他例外照常拋出。沒有 callback 時，editor 直接呼叫 FormState 的公開寫入與指令介面。
 

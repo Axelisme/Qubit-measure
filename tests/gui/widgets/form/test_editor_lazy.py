@@ -202,7 +202,8 @@ def test_collapsing_focused_text_neither_commits_nor_parses_it(
 
 @pytest.mark.parametrize("reject", [False, True])
 def test_restored_focused_draft_commits_once_on_normal_focus_loss(
-    qapp: QApplication, reject: bool,
+    qapp: QApplication,
+    reject: bool,
 ) -> None:
     env = FormEnv()
     state = FormState(LazyForm.default_input(env))
@@ -243,7 +244,9 @@ def test_restored_focused_draft_commits_once_on_normal_focus_loss(
             assert state.input.data == before
             assert publications == []
             errors = editor.local_parse_errors()
-            assert errors is not None and errors.messages == {("folded", "value"): "Host busy"}
+            assert errors is not None and errors.messages == {
+                ("folded", "value"): "Host busy"
+            }
         else:
             assert state.input.data["folded"] == {"value": 12.5}
             assert publications == [1]
@@ -254,12 +257,16 @@ def test_restored_focused_draft_commits_once_on_normal_focus_loss(
         qapp.processEvents()
 
 
-def test_replacing_a_focused_branch_does_not_commit_retired_text(qapp: QApplication) -> None:
+def test_replacing_a_focused_branch_does_not_commit_retired_text(
+    qapp: QApplication,
+) -> None:
     env = FormEnv()
     state = FormState(LazyForm.default_input(env))
     batches: list[dict[FormWritePath, JsonValue]] = []
     editor = FormEditor(
-        state, env, write=lambda batch: batches.append(dict(batch)),
+        state,
+        env,
+        write=lambda batch: batches.append(dict(batch)),
         run_command=lambda _path, _name: None,
     )
     try:

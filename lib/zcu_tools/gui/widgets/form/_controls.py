@@ -11,9 +11,17 @@ from pydantic import ConfigDict, JsonValue, TypeAdapter
 # qtpy.QtGui.QAction resolves to NoReturn for pyright; PyQt6 is the binding.
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QAction
-from qtpy.QtCore import QEvent, QObject, QPoint, QSize, Qt
-from qtpy.QtGui import QColor, QKeyEvent, QMouseEvent, QPaintEvent, QPalette
+from qtpy.QtCore import QEvent, QObject, QPoint, QSignalBlocker, QSize, Qt
+from qtpy.QtGui import (
+    QColor,
+    QFocusEvent,
+    QKeyEvent,
+    QMouseEvent,
+    QPaintEvent,
+    QPalette,
+)
 from qtpy.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QGroupBox,
@@ -31,6 +39,7 @@ from qtpy.QtWidgets import (
 from zcu_tools.gui.cfg.codec import decode_complex, encode_complex
 from zcu_tools.gui.form import FormOptionDescription, FormValue, FormWritePath
 from zcu_tools.gui.widgets.cfg.fields.common import (
+    FIELD_INPUT_MIN_WIDTH,
     connect_committed_value_widget,
     make_value_widget,
     write_value_widget,
@@ -340,7 +349,14 @@ class _FoldTitle(QLabel):
     def _flip(self) -> None:
         if not self._foldable:
             return
-        self._body.setVisible(self._body.isHidden())
+        focused = QApplication.focusWidget()
+        if focused is not None and self._body.isAncestorOf(focused):
+            # Hiding a focused text field emits editingFinished. Folding is
+            # navigation, not a commit: keep its widget-local text untouched.
+            with QSignalBlocker(focused):
+                self._body.hide()
+        else:
+            self._body.setVisible(self._body.isHidden())
         self._show_mark()
         self._toggled()
         self.fold_changed.emit()
@@ -384,6 +400,23 @@ def _foldable_rows[K](
     title = _FoldTitle(label, body, parent, record)
     title.setObjectName(name)
     return title, body, rows
+
+
+class _TextInput(QLineEdit):
+    """Emit one commit on normal focus loss, including after a folded draft.
+
+    Qt clears its edited flag even when folding blocks editingFinished. The
+    widget still owns the unchanged text; normal focus loss must retry it.
+    Fold/retirement signal blockers suppress this notification too. Popup
+    focus is temporary, so opening the text menu does not commit.
+    """
+
+    def focusOutEvent(self, a0: QFocusEvent | None) -> None:
+        """Let Qt update focus styling, then notify the row once."""
+        with QSignalBlocker(self):
+            super().focusOutEvent(a0)
+        if a0 is not None and a0.reason() != Qt.FocusReason.PopupFocusReason:
+            self.editingFinished.emit()
 
 
 class FieldRow:
@@ -611,10 +644,12 @@ class FieldRow:
     def _build_input(self, header: QHBoxLayout) -> None:
         # Numeric inputs use raw text, not spinbox ranges/validators: partial
         # text belongs to the view and model-invalid values must reach state.
-        widget = make_value_widget(
-            bool if self.field.kind == "boolean" else str, "", None
-        )
-        widget.setParent(self.widget)
+        if self.field.kind == "boolean":
+            widget = make_value_widget(bool, "", None)
+            widget.setParent(self.widget)
+        else:
+            widget = _TextInput(self.widget)
+            widget.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
         widget.setObjectName(self._name("input"))
         self.input = widget
         if isinstance(widget, QLineEdit):

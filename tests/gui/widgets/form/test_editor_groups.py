@@ -113,8 +113,10 @@ def row_of(view: QWidget, path: str) -> QWidget:
 
 def shown(view: QWidget, path: str) -> bool:
     """Whether the input at path would be visible while view is shown."""
-    field = view.findChild(QWidget, f"form.input.{path}")
-    return field is not None and field.isVisibleTo(view)
+    return any(
+        field.objectName() == f"form.input.{path}" and field.isVisibleTo(view)
+        for field in view.findChildren(QWidget)
+    )
 
 
 def top(view: QWidget, widget: QWidget) -> int:
