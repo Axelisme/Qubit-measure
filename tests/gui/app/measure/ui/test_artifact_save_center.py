@@ -11,7 +11,7 @@ from matplotlib.figure import Figure
 from qtpy.QtCore import QEvent, Qt, QUrl
 from qtpy.QtGui import QDesktopServices, QKeyEvent
 from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton
-from zcu_tools.experiment.run_saving import ArtifactRef, OutputResult, SaveReport
+from zcu_tools.experiment.artifacts import ArtifactRef, OutputResult, SaveReport
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.artifact_tracker import (
     ArtifactDeclaration,

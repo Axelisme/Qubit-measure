@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from zcu_tools.experiment.run_saving import ArtifactRef, SaveReport
+from zcu_tools.experiment.artifacts import ArtifactRef, SaveReport
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.session.services.context import ContextService

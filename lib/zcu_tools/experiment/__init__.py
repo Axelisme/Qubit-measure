@@ -8,6 +8,18 @@ if TYPE_CHECKING:
         capture_software_provenance,
         new_run_id,
     )
+    from .artifacts import (
+        AnalysisItem,
+        ArtifactItem,
+        ArtifactRef,
+        DataItem,
+        DataPreparationFailure,
+        FigureItem,
+        OutputResult,
+        SaveArtifact,
+        SaveReport,
+        save_artifacts,
+    )
     from .axes_spec import (
         IDENTITY,
         MHZ_TO_HZ,
@@ -42,15 +54,6 @@ if TYPE_CHECKING:
         save_run,
     )
     from .records import AnalysisRecord, RunRecord
-    from .run_saving import (
-        ArtifactRef,
-        DataMember,
-        FileMember,
-        OutputResult,
-        SaveArtifact,
-        SaveReport,
-        save_artifacts,
-    )
 
 __all__ = [
     "config",
@@ -73,8 +76,11 @@ __all__ = [
     "RecordExperiment",
     "PersistableRecordExperiment",
     "ArtifactRef",
-    "DataMember",
-    "FileMember",
+    "ArtifactItem",
+    "DataItem",
+    "FigureItem",
+    "AnalysisItem",
+    "DataPreparationFailure",
     "SaveArtifact",
     "OutputResult",
     "SaveReport",
@@ -115,13 +121,16 @@ _EXPORT_MODULES = {
     "AnalysisRecord": ".records",
     "RecordExperiment": ".interfaces",
     "PersistableRecordExperiment": ".interfaces",
-    "ArtifactRef": ".run_saving",
-    "DataMember": ".run_saving",
-    "FileMember": ".run_saving",
-    "SaveArtifact": ".run_saving",
-    "OutputResult": ".run_saving",
-    "SaveReport": ".run_saving",
-    "save_artifacts": ".run_saving",
+    "ArtifactRef": ".artifacts",
+    "ArtifactItem": ".artifacts",
+    "DataItem": ".artifacts",
+    "FigureItem": ".artifacts",
+    "AnalysisItem": ".artifacts",
+    "DataPreparationFailure": ".artifacts",
+    "SaveArtifact": ".artifacts",
+    "OutputResult": ".artifacts",
+    "SaveReport": ".artifacts",
+    "save_artifacts": ".artifacts",
     "SynchronousExperiment": ".interfaces",
     "PersistableExperiment": ".base",
     "Axis": ".axes_spec",

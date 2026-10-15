@@ -17,8 +17,8 @@ from qtpy.QtWidgets import (
     QStackedWidget,
     QTabWidget,
 )
+from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,

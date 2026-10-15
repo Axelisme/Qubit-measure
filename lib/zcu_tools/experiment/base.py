@@ -6,14 +6,9 @@ from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar
 import numpy as np
 
 from zcu_tools.datafile import (
-    AxisSchema,
-    LabberData,
     RunMetadata,
     RunSnapshot,
     StoredRun,
-    VariableSchema,
-    cast_labber_values,
-    validate_labber_payload,
 )
 from zcu_tools.experiment.axes_spec import AxesSpec, GroupedAxesSpec
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -29,7 +24,7 @@ T_Config = TypeVar("T_Config", bound=ExpCfgModel)
 class PersistableExperiment(Generic[T_Result, T_Config]):
     """Stateless persistence through a single or grouped AXES_SPEC declaration.
 
-    save/load remain explicit Labber entries; save_run/load_run are native.
+    save exports Labber; load reads native data through from_stored.
     Callers choose the RunRecord and exact local Path. Loading returns a new
     record without changing this instance. Callers own path reservation and
     native replace policy. No entry guesses the other file format.
@@ -122,23 +117,6 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
 
         return restore_run(stored, spec=self.persistence_spec())
 
-    def _validate_canonical_labber_data(
-        self, data: LabberData, spec: AxesSpec[T_Result, T_Config]
-    ) -> None:
-        schema = VariableSchema(
-            variable=spec.data_variable,
-            axes=tuple(
-                AxisSchema(name=axis.label, unit=axis.unit, dtype=np.dtype(axis.dtype))
-                for axis in spec.axes
-            ),
-            signal_name=spec.z.label,
-            signal_unit=spec.z.unit,
-            signal_dtype=np.dtype(spec.z.dtype),
-        )
-        validate_labber_payload(
-            data.payload, schema=schema, context=f"{type(self).__name__} canonical"
-        )
-
     def save(
         self,
         source: RunRecord[T_Config, T_Result],
@@ -193,42 +171,16 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
         )
 
     def load(self, source: Path) -> RunRecord[T_Config, T_Result]:
-        """Read declared single/grouped Labber data into a new memory-unit record.
+        """Read native data.h5 into a new single/grouped memory-unit record.
 
-        source is an exact local Path. Incorrect variables, axes, units or shape
-        raise ValueError and I/O errors propagate. Missing cfg or non-envelope
-        comment text returns cfg=None with valid Result data. Recognized comment
-        envelopes with invalid cfg/comment/timestamp field types raise ValueError.
-        A valid envelope whose cfg object fails the declared cfg model warns and
-        returns cfg=None while keeping valid Result data. This entry does not
-        guess native or legacy layouts.
+        source is an exact local Path. Use the same from_stored conversion as
+        other native callers, without hardware or instance mutation. Invalid
+        format, tag, data or cfg envelope raises ValueError; I/O errors propagate.
+        Incompatible typed cfg emits CfgUnavailableWarning and retains valid data
+        with cfg=None. Labber-only files require offline conversion with the
+        migrations tools; there is no legacy fallback. save remains a separate
+        Labber export, not the inverse of this entry.
         """
-        from zcu_tools.datafile import load_labber_data
-        from zcu_tools.experiment.utils import parse_comment
+        from zcu_tools.datafile import load_run_data
 
-        spec = self.persistence_spec()
-        if isinstance(spec, GroupedAxesSpec):
-            return spec.load(source)
-
-        filepath = str(source)
-        ld = load_labber_data(filepath)
-        self._validate_canonical_labber_data(ld, spec)
-
-        cfg_snapshot = None
-        if ld.comment:
-            cfg_dict, _, _ = parse_comment(ld.comment)
-            if cfg_dict is not None:
-                cfg_snapshot = spec.cfg_type.validate_or_warn(cfg_dict, source=filepath)
-
-        kwargs: dict[str, Any] = {
-            ax.field_name: (
-                np.asarray(ld.axes[i].values, dtype=np.float64) / ax.scale
-            ).astype(ax.dtype)
-            for i, ax in enumerate(spec.axes)
-        }
-        kwargs[spec.z.field_name] = cast_labber_values(
-            ld.z,
-            np.dtype(spec.z.dtype),
-            context=f"{type(self).__name__} canonical z channel {spec.z.label!r}",
-        )
-        return RunRecord(cfg=cfg_snapshot, result=spec.result_type(**kwargs))
+        return self.from_stored(load_run_data(source)).record

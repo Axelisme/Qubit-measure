@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 
 from zcu_tools.datafile import RunMetadata
-from zcu_tools.experiment.run_saving import (
+from zcu_tools.experiment.artifacts import (
+    AnalysisItem,
     ArtifactRef,
-    DataMember,
-    FileMember,
+    DataItem,
+    FigureItem,
     SaveArtifact,
     SaveReport,
     save_artifacts,
@@ -87,7 +89,7 @@ class SaveService:
         Mismatch diagnostics identify both sources; no automatic rebinding occurs.
         Within the same entry, retain the historical run_id and point for all
         output paths and the saved event, regardless of later global selections.
-        Output failures appear in the complete report; mapping or ledger errors
+        Output failures appear in the complete report; ledger errors
         propagate without a report. State publication completes before return.
         """
         plan = self._capture(
@@ -117,7 +119,7 @@ class SaveService:
         comment=None retains the annotation. origin attributes this command.
         All mapping, PNG encoding, writes and ledger append finish before return.
         Output failures retain diagnostics and do not stop independent outputs;
-        mapping/ledger errors propagate without a report. No Save handle exists.
+        ledger errors propagate without a report. No Save handle exists.
         """
         plan = self._capture(tab_id, artifacts, comment, origin)
         return self._save(tab_id, plan)
@@ -165,19 +167,10 @@ class SaveService:
         for artifact in selected:
             ref = artifact.ref
             if ref.section == "run":
-                prepared = tab.adapter.prepare_save_data(
-                    tab.run.result, comment=annotation
+                item = self._capture_data(
+                    tab_id, ArtifactKey(ref.section, ref.name, "data"), annotation
                 )
-                captured.append(
-                    SaveArtifact(
-                        ref,
-                        (
-                            DataMember(
-                                ArtifactKey(ref.section, ref.name, "data"), prepared
-                            ),
-                        ),
-                    )
-                )
+                captured.append(SaveArtifact(ref, (item,)))
                 continue
             if ref.section == "analysis":
                 pane = tab.analysis
@@ -187,19 +180,29 @@ class SaveService:
                 pane_name = "post_analysis"
             else:
                 raise ValueError(f"Unsupported pane section {ref.section!r}")
-            members: list[FileMember] = []
+            members: list[FigureItem | AnalysisItem] = []
             for key in artifact.members:
                 if key.member == "figure":
                     if pane.plots is None or key.member_name is None:
                         raise ValueError("Declared figure has no pane content")
-                    content = pane.plots[key.member_name]
+                    members.append(FigureItem(key, pane.plots[key.member_name]))
                 else:
                     content = tab.adapter.capture_analysis_document(
                         pane.result, pane.result_params, pane=pane_name
                     )
-                members.append(FileMember(key, content))
+                    members.append(AnalysisItem(key, content))
             captured.append(SaveArtifact(ref, tuple(members)))
         return _SavePlan(tuple(captured), layout, metadata, storage, origin, annotation)
+
+    def _capture_data(self, tab_id: str, key: ArtifactKey, comment: str) -> DataItem:
+        tab = self._state.get_tab(tab_id)
+        try:
+            prepared = tab.adapter.prepare_save_data(tab.run.result, comment=comment)
+        except Exception as error:
+            # Preparation belongs to this data item, not the whole Save All.
+            logging.exception("Failed preparing data item %s", key)
+            return DataItem.failed(key, error)
+        return DataItem(key, prepared)
 
     def _save(
         self, tab_id: str, plan: _SavePlan, *, data_only: bool = False
