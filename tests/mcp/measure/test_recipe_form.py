@@ -19,7 +19,7 @@ from zcu_tools.cfg_model import (
 from zcu_tools.gui.app.measure.remote.form_description import description_wire
 from zcu_tools.gui.app.measure.remote.form_observation import form_writes, observe_form
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
-from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormState
+from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormState, Option
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import RecipeSession
@@ -269,6 +269,50 @@ def test_read_field_projects_selected_typed_option_fields(
     assert observed.input == {"kind": tag}
 
 
+class OuterInline(FormModel):
+    kind: Literal["inline"] = "inline"
+    module: NumericOption | StringOption = Field(discriminator="kind")
+
+
+class OuterLockedExtras(FormModel):
+    choice: OuterInline
+
+    @classmethod
+    def options(cls, _env):
+        return {("choice",): (
+            Option("Numeric", {"kind": "inline", "module": {"kind": 1}}, fields=OuterInline),
+            Option("String", {"kind": "inline", "module": {"kind": "1"}}, fields=OuterInline),
+        )}
+
+
+def keep_author_cfg(extras: OuterLockedExtras, cfg: AuthorCfg) -> AuthorCfg:
+    return cfg
+
+
+def test_locked_outer_branch_keeps_inner_kind_editable(tmp_path: Path) -> None:
+    gui = FormGui()
+    gui.owner = TabFormResource(
+        lambda _ctx: Form(AuthorCfg, {}, extras=OuterLockedExtras, lower=keep_author_cfg),
+        capture=lambda aliases: TabFormSources(FormEnv()),
+        mutation_allowed=lambda: True,
+    )
+    gui.owner.write({("extras", "choice"): {
+        "kind": "inline", "module": {"kind": 1, "amount": 7.0},
+    }})
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        outer = tab.read_field("extras.choice")
+        assert outer.locked
+        assert outer.fields == ("module",)
+        assert not tab.read_field("extras.choice.module").locked
+        with pytest.raises(ValueError, match="locked"):
+            tab.use_library("extras.choice", "unoffered")
+        tab.set("extras.choice.module", {"kind": "1", "text": "changed"})
+        assert tab.read_field("extras.choice").locked
+        assert tab.read_field("extras.choice.module").fields == ("text",)
+        assert tab.read_field("extras.choice.module.text").value == "changed"
+
+
 class RequiredCfg(ConfigBase):
     pulse: PulseCfg
 
@@ -328,7 +372,8 @@ def test_locked_inline_slot_rejects_library_selection_before_rpc(
         assert locked.mode == "inline"
         assert locked.key is None
         assert locked.locked
-        assert locked.fields == ("module",)
+        assert "freq" not in locked.fields
+        assert "gain" in locked.fields
         before = list(client.transport.sent)
         with pytest.raises(ValueError, match="locked"):
             tab.use_library("locked_pulse", "Q1.pulses.pi")
