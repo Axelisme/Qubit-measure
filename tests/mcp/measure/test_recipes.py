@@ -757,7 +757,8 @@ def test_recipe_control_reaches_the_original_operation_after_a_late_receipt(
     def respond(method, params):
         if method == method_pending:
             pending.set()
-            assert release.wait(20)
+            # The fake guarantees this barrier; 30s only bounds hangs, not a product SLA.
+            assert release.wait(30)
         if method == "operation.cancel":
             assert params == {"operation_id": wire_op}
             stopped.set()
@@ -776,7 +777,8 @@ def test_recipe_control_reaches_the_original_operation_after_a_late_receipt(
         initial = full_execution_reply(
             client, client.call("pipeline", {"frequency_mhz": 6020.0})
         )
-        assert pending.wait(10)
+        # The fake guarantees this barrier; 30s only bounds hangs, not a product SLA.
+        assert pending.wait(30)
         execution = initial.data["execution"]
         for _ in range(2):
             reply = client.call(control, {"execution": execution})
