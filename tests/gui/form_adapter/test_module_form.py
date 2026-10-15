@@ -48,15 +48,7 @@ from zcu_tools.resources.context.library import (
 )
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
-UNSUPPORTED_PULSE_FIELDS = (
-    "desc",
-    "mux_freqs",
-    "mux_gains",
-    "mux_phases",
-    "mask",
-    "outsel",
-    "ro_ch",
-)
+UNSUPPORTED_PULSE_FIELDS = ("desc", "ro_ch")
 
 PULSE_LEAVES: dict[FormWritePath, JsonValue] = {
     ("ch",): 2,
@@ -536,8 +528,6 @@ def library_entry() -> PulseSpec:
             "freq": 100.0,
             "gain": 0.25,
             "desc": "stored entry",
-            "mask": [0],
-            "outsel": 1,
             "ro_ch": 5,
             "waveform": "Q.flat",
         }
@@ -554,7 +544,6 @@ def writeback_proposal() -> PulseReadoutSpec:
                 "nqz": 2,
                 "freq": 6000.0,
                 "gain": 0.1,
-                "mux_freqs": [6000.0],
                 "ro_ch": 3,
                 "waveform": "Q.square",
             },
@@ -566,10 +555,10 @@ def writeback_proposal() -> PulseReadoutSpec:
 @pytest.mark.parametrize(
     ("spec", "unsupported"),
     [
-        (library_entry(), {("desc",), ("mask",), ("outsel",), ("ro_ch",)}),
+        (library_entry(), {("desc",), ("ro_ch",)}),
         (
             writeback_proposal(),
-            {("desc",), ("pulse_cfg", "mux_freqs"), ("pulse_cfg", "ro_ch")},
+            {("desc",), ("pulse_cfg", "ro_ch")},
         ),
     ],
     ids=["library-entry", "writeback-proposal"],

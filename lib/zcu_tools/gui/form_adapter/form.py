@@ -425,7 +425,7 @@ class Form[C: ConfigBase]:
     instead of falling back to core defaults. Module locks remove
     the ref branch and use single-value Literal fields in inline content. Optional extras adds an 'extras' section and requires
     a named lower(extras, cfg) callable returning the concrete core cfg type.
-    Generated module input omits optional desc, mask, outsel, ro_ch and mux_*
+    Generated module input omits optional desc and ro_ch
     fields; conversion restores their Spec defaults, and copying a library
     entry inline discards its stored values for them. Templates cannot seed
     them (see bind_templates); there is no override. FieldMeta label, unit,
@@ -500,7 +500,7 @@ class Form[C: ConfigBase]:
         The host's registration entry calls this explicitly. adapter is the
         registered definition name, included with the consuming field path in ValueError for unknown IDs,
         incompatible families or malformed seed trees. A template seed for an
-        unsupported module field (optional desc, mask, outsel, ro_ch or mux_*)
+        unsupported module field (optional desc or ro_ch)
         raises the same ValueError, naming the template id and the dotted seed
         path; to_cfg fills those fields only from Spec defaults. Seeds for other
         fields, including $-prefixed strings, stay literal. No sources are read.
@@ -699,7 +699,7 @@ def module_form[S: ConfigBase](spec_type: type[S]) -> Form[S]:
     keys without reading the library, assets or building native cfg. Generated
     str-or-model children use kind=ref/name or kind=inline/module, including
     nested waveform kinds; to_cfg reverses those wrappers. Generated
-    input omits optional desc, mask, outsel, ro_ch and mux_* fields, whose Spec
+    input omits optional desc and ro_ch fields, whose Spec
     defaults return in to_cfg. Use input_from_spec to edit an existing Spec.
     """
     if spec_type not in _PERSISTENT_SPECS:

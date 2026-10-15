@@ -28,7 +28,6 @@ def pulse() -> PulseSpec:
         gain=0.25,
         waveform="wave",
         desc="wave",
-        mux_freqs=[12.0],
     )
 
 
@@ -80,7 +79,7 @@ def test_inline_pulses_rewrite_waveforms_without_mutating_input(
     assert children
     assert all(child.waveform == "Q1.waveforms.base" for child in children)
     assert all(child.desc == "wave" for child in children)
-    children[0].mux_freqs = [99.0]
+    children[0].gain = 0.75
     assert spec.model_dump() == original
 
 
@@ -96,6 +95,8 @@ def test_nested_inline_flat_top_rewrites_only_its_ramp_reference() -> None:
     assert mapped.waveform.length == 0.125
     assert mapped.freq == 123.5
     assert mapped.desc == "wave"
+    mapped.waveform.length = 0.5
+    assert spec.waveform.length == 0.125
     assert spec.waveform.raise_waveform == "ramp"
 
 
