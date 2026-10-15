@@ -12,7 +12,6 @@ from pydantic import ConfigDict, JsonValue, TypeAdapter
 from PyQt6.QtGui import QAction
 from qtpy.QtCore import QEvent, QObject, QPoint, QSignalBlocker, Qt
 from qtpy.QtGui import (
-    QColor,
     QFocusEvent,
     QKeyEvent,
     QPalette,
@@ -31,6 +30,7 @@ from qtpy.QtWidgets import (
 
 from zcu_tools.core.complex_codec import decode_complex, encode_complex
 from zcu_tools.gui.form import FormOptionDescription, FormValue, FormWritePath
+from zcu_tools.gui.widgets import ERROR_RED_LIGHT, error_colour, mixed_colour
 from zcu_tools.gui.widgets.form.value_widgets import (
     FIELD_INPUT_MIN_WIDTH,
     connect_committed_value_widget,
@@ -54,8 +54,6 @@ _MODE_HINT = "Right-click to switch Direct / Expression"
 _EXPRESSION_TINT = 0.18
 # Fixed red mixed into Base for Direct input errors, independent of Highlight.
 _ERROR_TINT = 0.18
-_ERROR_RED_LIGHT = QColor("#b3261e")
-_ERROR_RED_DARK = QColor("#ff8a80")
 # Shown in a group block's header while any of its rows shows an error, so a
 # folded group still tells the user where Start is blocked.
 GROUP_ERRORS_NOTE = "Contains errors"
@@ -203,21 +201,6 @@ def _direct_input(value: FormValue) -> JsonValue:
     if isinstance(value, complex):
         return _JSON.validate_python(encode_complex(value))
     return _JSON.validate_python(value)
-
-
-def _error_colour(widget: QWidget) -> QColor:
-    """Keep error text and borders readable against the theme's Window."""
-    window = widget.palette().color(QPalette.ColorRole.Window)
-    return _ERROR_RED_DARK if window.lightness() < 128 else _ERROR_RED_LIGHT
-
-
-def _mixed(base: QColor, accent: QColor, share: float) -> QColor:
-    """base moved toward accent by share (0 keeps base, 1 gives accent)."""
-    return QColor(
-        round(base.red() + (accent.red() - base.red()) * share),
-        round(base.green() + (accent.green() - base.green()) * share),
-        round(base.blue() + (accent.blue() - base.blue()) * share),
-    )
 
 
 def _show_text_menu(widget: QLineEdit, action: QAction, pos: QPoint) -> None:
@@ -425,7 +408,7 @@ class FieldRow:
             palette = QPalette()
             if invalid:
                 palette.setColor(
-                    QPalette.ColorRole.WindowText, _error_colour(self.widget)
+                    QPalette.ColorRole.WindowText, error_colour(self.widget)
                 )
             self.label.setPalette(palette)
             return
@@ -438,10 +421,12 @@ class FieldRow:
             accent = (
                 shown.color(QPalette.ColorRole.Highlight)
                 if expression
-                else _ERROR_RED_LIGHT
+                else ERROR_RED_LIGHT
             )
             share = _EXPRESSION_TINT if expression else _ERROR_TINT
-            background = _mixed(shown.color(QPalette.ColorRole.Base), accent, share)
+            background = mixed_colour(
+                shown.color(QPalette.ColorRole.Base), accent, share
+            )
             palette.setColor(QPalette.ColorRole.Base, background)
             if isinstance(widget, QComboBox):
                 # Non-editable dropdowns paint Button rather than Base.
@@ -455,7 +440,7 @@ class FieldRow:
             # not the input's Base. Keep the Expression interior explicit.
             background = palette.color(QPalette.ColorRole.Base).name()
             style += (
-                f"QLineEdit {{ border: 1px solid {_error_colour(self.widget).name()}; "
+                f"QLineEdit {{ border: 1px solid {error_colour(self.widget).name()}; "
                 f"background-color: {background}; }}"
             )
         widget.setStyleSheet(style)
@@ -853,6 +838,6 @@ class GroupBlock:
 
         The fold does not change: a folded group stays folded.
         """
-        colour = _error_colour(self.widget)
+        colour = error_colour(self.widget)
         self._errors_note.setStyleSheet(f"QLabel {{ color: {colour.name()}; }}")
         self._errors_note.setVisible(has_errors)
