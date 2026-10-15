@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from qtpy.QtCore import QEvent, Qt, QUrl
 from qtpy.QtGui import QColor, QDesktopServices, QPalette, QResizeEvent
 from qtpy.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -117,7 +118,16 @@ class _ElidedPathEdit(QLineEdit):
 
     def _update_colour(self) -> None:
         shown = self.palette()
-        secondary = shown.color(QPalette.ColorRole.PlaceholderText)
+        # Read the inherited colours, not our already-muted Text colour.
+        parent = self.parentWidget()
+        source = parent.palette() if parent is not None else QApplication.palette()
+        text = source.color(QPalette.ColorRole.Text)
+        window = source.color(QPalette.ColorRole.Window)
+        secondary = QColor(
+            round(text.red() + (window.red() - text.red()) * 0.42),
+            round(text.green() + (window.green() - text.green()) * 0.42),
+            round(text.blue() + (window.blue() - text.blue()) * 0.42),
+        )
         if (
             shown.color(QPalette.ColorRole.Text) != secondary
             or shown.color(QPalette.ColorRole.Base).alpha() != 0
