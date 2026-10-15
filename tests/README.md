@@ -210,7 +210,7 @@ decimated trace 與 branch smoke。效能相關 regression 先找 public simulat
 
 ### Form 與持久 Spec 的測試 owner
 
-`tests/gui/form/` 驗證共用 input、schema、expression、options、defaults、state 與 preview。
+`tests/gui/form/` 驗證共用 input、單層 describe、expression、options、defaults、state 與 preview。
 `tests/gui/form_adapter/` 驗證 core cfg 生成、持久 Spec 投影、child key 保留與屏蔽欄位政策。
 `tests/gui/widgets/form/` 從 FormEditor 觀察提交、解析錯誤、唯讀、群組與選項，也涵蓋共用 value-widget helpers。
 

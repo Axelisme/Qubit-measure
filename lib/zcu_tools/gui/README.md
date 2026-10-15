@@ -92,7 +92,7 @@ controller error與traceback。
 
 ## 共用表單與持久 Spec
 
-`gui.form` 提供 Qt-free FormState、input schema、preview、result 與錯誤，`widgets/form` 的 FormEditor 顯示同一份 caller-owned state。Measure、Library／Inspect、writeback 與 workflows 共用這套工具，宿主各自決定 lifetime、capture 與提交時機。跨宿主契約見 ADR-0065、ADR-0008。
+`gui.form` 提供 Qt-free FormState、單層 describe、preview、result 與錯誤，`widgets/form` 的 FormEditor 顯示同一份 caller-owned state。Measure、Library／Inspect、writeback 與 workflows 共用這套工具，宿主各自決定 lifetime、capture 與提交時機。跨宿主契約見 ADR-0065、ADR-0008。
 
 `gui.form_adapter` 集中 core cfg／持久 Spec 的生成與轉換。FieldMeta 的呈現資訊、合併的 None／keys／Inline 選項與屏蔽欄位政策都由生成器處理。Library 寫入直接提交 ModuleSpec／WaveformSpec，保留 child key，不先展開 runtime cfg。表單 expression 使用固定 env，Library 保存求得的數字。
 

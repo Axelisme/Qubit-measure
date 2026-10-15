@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Annotated
 
 import pytest
@@ -114,27 +113,15 @@ def test_sweep_decimals_decorate_only_float_endpoints(authored: bool) -> None:
         PreciseSweepCfg,
         {"sweep": nodes.Range.between("2 + 1", 9.0, 4)} if authored else {},
     )
-    try:
-        schema = form.model.input_schema(FormEnv())
-    except ValueError as exc:
-        raise AssertionError("Sweep precision must reach its float endpoints") from exc
-    properties = schema["properties"]
-    assert isinstance(properties, dict)
-    sweep = properties["sweep"]
-    assert isinstance(sweep, dict)
-    assert sweep.get("decimals") is None
-    assert sweep["title"] == "Flux"
-    assert sweep["unit"] == "A"
-    endpoints = sweep["properties"]
-    assert isinstance(endpoints, dict)
-    for name in ("start", "stop"):
-        endpoint = endpoints[name]
-        assert isinstance(endpoint, dict)
-        assert endpoint["decimals"] == 4
-    count = endpoints["n"]
-    assert isinstance(count, dict)
-    assert count.get("decimals") is None
-    assert count["title"] == "Expts"
+    env = FormEnv()
+    state = FormState(form.default_input(env))
+    description = state.describe(("sweep",), env)
+    sweep = description.target
+    assert sweep is not None and sweep.decimals is None
+    assert sweep.title == "Flux" and sweep.unit == "A"
+    fields = {field.path[-1]: field for field in description.children}
+    assert fields["start"].decimals == fields["stop"].decimals == 4
+    assert fields["n"].decimals is None and fields["n"].title == "Expts"
 
 
 class DeviceCfg(ConfigBase):
@@ -189,13 +176,9 @@ def test_core_tree_generates_schema_defaults_and_typed_cfg() -> None:
         amount=6,
         text="$literal",
     )
-    schema = form.model.input_schema(env)
-    properties = schema["properties"]
-    assert isinstance(properties, Mapping)
-    count_schema = properties["count"]
-    assert isinstance(count_schema, Mapping)
-    assert count_schema["title"] == "Repeats"
-    assert count_schema["description"] == "Repeat count."
+    count = state.describe(("count",), env).target
+    assert count is not None
+    assert count.title == "Repeats" and count.description == "Repeat count."
     state.write({("count",): 8}, env)
     assert isinstance(state.result(env), FormErrors)
 
@@ -320,13 +303,12 @@ class DisplayedCfg(ConfigBase):
     )
 
 
-def test_field_meta_label_unit_and_decimals_reach_input_schema() -> None:
-    schema = form_adapter.Form(DisplayedCfg, {}).model.input_schema(FormEnv())
-    properties = schema["properties"]
-    assert isinstance(properties, dict)
-    amplitude = properties["amplitude"]
-    assert isinstance(amplitude, dict)
-    assert (amplitude["title"], amplitude["unit"], amplitude["decimals"]) == (
+def test_field_meta_label_unit_and_decimals_reach_description() -> None:
+    form = form_adapter.Form(DisplayedCfg, {})
+    env = FormEnv()
+    amplitude = FormState(form.default_input(env)).describe(("amplitude",), env).target
+    assert amplitude is not None
+    assert (amplitude.title, amplitude.unit, amplitude.decimals) == (
         "Amplitude",
         "V",
         3,
@@ -337,23 +319,22 @@ class GroupedCfg(ConfigBase):
     amplitude: Annotated[float, FieldMeta(decimals=3, group="Advanced")] = 0.5
 
 
-def test_field_meta_group_reaches_input_schema() -> None:
-    schema = form_adapter.Form(GroupedCfg, {}).model.input_schema(FormEnv())
-    properties = schema["properties"]
-    assert isinstance(properties, dict)
-    amplitude = properties["amplitude"]
-    assert isinstance(amplitude, dict)
-    assert amplitude["x-form-group"] == "Advanced"
+def test_field_meta_group_reaches_description() -> None:
+    form = form_adapter.Form(GroupedCfg, {})
+    env = FormEnv()
+    amplitude = FormState(form.default_input(env)).describe(("amplitude",), env).target
+    assert amplitude is not None and amplitude.group == "Advanced"
 
 
-def test_locked_field_with_decimals_metadata_has_input_schema() -> None:
+def test_locked_field_with_decimals_metadata_has_description() -> None:
     form = form_adapter.Form(DisplayedCfg, {"amplitude": nodes.Locked(0.25)})
     env = FormEnv()
 
-    properties = form.model.input_schema(env)["properties"]
-    result = FormState(form.default_input(env)).result(env)
+    state = FormState(form.default_input(env))
+    amplitude = state.describe(("amplitude",), env).target
+    result = state.result(env)
 
-    assert isinstance(properties, dict) and "amplitude" in properties
+    assert amplitude is not None and amplitude.fixed and amplitude.fixed_value == 0.25
     assert not isinstance(result, FormErrors)
     cfg = form.to_cfg(result, env)
     assert isinstance(cfg, DisplayedCfg) and cfg.amplitude == 0.25

@@ -9,7 +9,6 @@ from enum import StrEnum
 from typing import Literal
 
 import pytest
-from jsonschema import Draft202012Validator
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.form import (
@@ -111,32 +110,6 @@ def _object(value: JsonValue) -> dict[str, JsonValue]:
     return value
 
 
-def _offers_expr(node: JsonValue) -> bool:
-    """Whether a schema node or any alternative below it is the Expr envelope."""
-    if isinstance(node, list):
-        return any(_offers_expr(item) for item in node)
-    if not isinstance(node, dict):
-        return False
-    properties = node.get("properties")
-    if isinstance(properties, dict) and set(properties) == {"expr"}:
-        return True
-    return any(_offers_expr(node.get(key)) for key in ("anyOf", "oneOf"))
-
-
-def _key_node(schema: dict[str, JsonValue], field: str) -> JsonValue:
-    """The schema node of a picked leaf; for a key-or-inline field, its key."""
-    node = _object(_object(schema["properties"])[field])
-    if field == "drive":
-        branches = node["oneOf"]
-        assert isinstance(branches, list)
-        for branch in branches:
-            properties = _object(_object(branch)["properties"])
-            if "name" in properties:
-                return properties["name"]
-        raise AssertionError("SyntheticModuleInput schema lacks its ref branch")
-    return node
-
-
 @pytest.mark.parametrize(
     "field",
     [
@@ -153,15 +126,15 @@ def _key_node(schema: dict[str, JsonValue], field: str) -> JsonValue:
 def test_dropdown_and_checkbox_leaves_have_no_expr_alternative(
     env: FormEnv, field: str
 ) -> None:
-    schema = PickedForm.input_schema(env)
-    assert not _offers_expr(_key_node(schema, field))
+    path = ("drive", "name") if field == "drive" else (field,)
+    target = FormState(PickedForm.default_input(env)).describe(path, env).target
+    assert target is not None and not target.expression
 
 
 @pytest.mark.parametrize("field", TEXT_FIELDS)
 def test_text_fields_keep_their_expr_alternative(env: FormEnv, field: str) -> None:
-    schema = PickedForm.input_schema(env)
-    assert _offers_expr(_object(schema["properties"])[field])
-    assert Draft202012Validator(schema).is_valid({field: {"expr": "1"}})
+    target = FormState(PickedForm.default_input(env)).describe((field,), env).target
+    assert target is not None and target.expression
 
 
 # Each expression resolves without error, so a result that evaluated it would
@@ -184,9 +157,6 @@ def test_expr_on_a_picked_leaf_is_an_error_at_that_leaf_without_evaluation(
 ) -> None:
     state = FormState(PickedForm.default_input(env))
     envelope: JsonValue = {"expr": text}
-    assert not Draft202012Validator(state.input_schema(env)).is_valid(
-        _nested(path, envelope)
-    )
     state.write({path: envelope}, env)
     errors = state.result(env)
     assert isinstance(errors, FormErrors)
@@ -265,11 +235,11 @@ MIXED_MESSAGE = "a union of text and picked values is not supported"
 
 
 @pytest.mark.parametrize(("form", "data", "path"), MIXED_FORMS)
-def test_input_schema_rejects_a_union_of_text_and_picked_values(
+def test_description_rejects_a_union_of_text_and_picked_values(
     env: FormEnv, form: type[FormModel], data: dict[str, JsonValue], path: str
 ) -> None:
     with pytest.raises(ValueError, match=f"^{re.escape(path)}: {MIXED_MESSAGE}$"):
-        form.input_schema(env)
+        FormState(FormInput(form, data)).describe(tuple(path.split(".")), env)
 
 
 @pytest.mark.parametrize(("form", "data", "path"), MIXED_FORMS)
@@ -279,18 +249,6 @@ def test_result_rejects_a_union_of_text_and_picked_values(
     state = FormState(FormInput(form, data))
     with pytest.raises(ValueError, match=f"^{re.escape(path)}: {MIXED_MESSAGE}$"):
         state.result(env)
-
-
-def _nested(path: FormWritePath, value: JsonValue) -> dict[str, JsonValue]:
-    """Input that holds value at path, one nested object per path part."""
-    data: JsonValue = value
-    for part in reversed(path):
-        data = {part: data}
-    assert isinstance(data, dict)
-    if path[0] == "drive":
-        drive = _object(data["drive"])
-        data["drive"] = {"kind": "ref", **drive}
-    return data
 
 
 def _read(data: Mapping[str, JsonValue], path: FormWritePath) -> JsonValue:

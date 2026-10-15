@@ -588,14 +588,10 @@ def test_alias_static_default_is_valid_and_selectable(binding: str | None) -> No
     )
     assert form.to_cfg(result, env) == expected
 
-    properties = form.model.input_schema(env)["properties"]
-    assert isinstance(properties, dict)
     for name, default in (("device", ""), ("nullable_device", "standby")):
-        field = properties[name]
-        assert isinstance(field, dict)
-        options = field["x-form-options"]
-        assert isinstance(options, list)
-        values = [option["value"] for option in options if isinstance(option, dict)]
+        field = state.describe((name,), env).target
+        assert field is not None and field.options is not None
+        values = [option.value for option in field.options]
         assert default in values, "The core static default must be selectable"
         assert values.count(default) == 1
         assert all(device in values for device in env.devices)

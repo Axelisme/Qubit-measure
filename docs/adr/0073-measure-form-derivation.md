@@ -44,7 +44,7 @@ Adapter 可以公開不同於 core 的輸入。需要 extras 時，Form 接受�
 使用者 2026-10-13：「採用，更新草稿，form.py慣例也記進去」。
 
 Core 的 `Annotated[..., FieldMeta(...)]` 保存 label、unit、decimals、description 與 group。
-group 是 MCP schema 可用的前端中立分類名稱 hint，因此與其他欄位描述一起放在 core。
+group 是 MCP 單層欄位描述可用的前端中立分類名稱 hint，因此與其他欄位描述一起放在 core。
 前端決定實際的 widget、排版與折疊行為。
 沒有標記的欄位由生成器使用欄位名。FieldMeta 不改序列化格式。
 使用者 2026-10-12：「我想放core會比較簡單，而維護實驗的作者都是已一整個實驗為單位」。
@@ -83,7 +83,10 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
 缺來源或求值失敗不補數字 fallback；必要欄位維持未填。
 使用者寫入的 expression 保留原式。換分支用 fresh defaults，不繼承 previous input。
 `to_inline` 是明確複製固定 library 內容的指令。Widget 與 MCP 只消費 core 提供的
-Option label、value、fields 與 commands，不猜 union 或 library 結構。
+description 的 Option label、value 與 commands，不猜 union 或 library 結構。
+Option.fields 仍是作者宣告，不進選單回覆；查所選 path 才列直接 children。
+單一普通 wrapper 攤平一層，但完整 model-field path 不變。
+FormEditor 首次展開才建子表單，Inspect／New Entry／writeback 與 workflows 使用相同描述。
 
 Module／waveform 使用持久 Spec 與 FieldMeta。硬體專屬的不支援欄位由生成器屏蔽；
 必填 ADC ro_ch 保留。List 推導與多 qubit 顯示不在本設計內。

@@ -279,7 +279,7 @@ class _Section:
     def _alias_choices(
         self, env: FormEnv
     ) -> dict[tuple[str | int, ...], tuple[JsonValue, ...]]:
-        """Share core device defaults and captured names with schema and validation."""
+        """Share core device defaults and captured names with descriptions and validation."""
         result: dict[tuple[str | int, ...], tuple[JsonValue, ...]] = {}
         for name, node in self.tree.items():
             if not isinstance(node, AliasName) or node.choices_source != "devices":

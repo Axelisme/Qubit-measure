@@ -4,7 +4,6 @@ from collections.abc import Mapping
 from typing import Annotated, Literal
 
 import pytest
-from jsonschema import Draft202012Validator
 from pydantic import Field, JsonValue
 from zcu_tools.gui.form import (
     FormEnv,
@@ -65,12 +64,11 @@ def name_env() -> FormEnv:
         ("section", {"name": {"expr": "$device"}}, NameSection(name="yoko1")),
     ],
 )
-def test_string_envelopes_share_schema_preview_result_and_restore(
+def test_string_envelopes_share_preview_result_and_restore(
     name_env: FormEnv, field: str, value: JsonValue, expected: object
 ) -> None:
     state = FormState(NamesForm.default_input(name_env))
     authored: dict[str, JsonValue] = {field: value}
-    assert Draft202012Validator(state.input_schema(name_env)).is_valid(authored)
     state.write({(field,): value}, name_env)
     result = state.result(name_env)
     assert isinstance(result, NamesForm), result
@@ -89,8 +87,6 @@ def test_string_envelopes_share_schema_preview_result_and_restore(
     literal = state.result(name_env)
     assert isinstance(literal, NamesForm)
     assert literal.name == "$device" and literal.optional is None
-    invalid = {field: {"expr": 3}}
-    assert not Draft202012Validator(state.input_schema(name_env)).is_valid(invalid)
 
 
 @pytest.mark.parametrize("expression", ["$missing", "$unbound", "1 + 2"])
@@ -177,13 +173,8 @@ class NumericSelectorForm(FormModel):
 def test_structural_selectors_reject_expression_envelopes(
     name_env: FormEnv, model: type[FormModel], tag: JsonValue
 ) -> None:
-    validator = Draft202012Validator(model.input_schema(name_env))
     name = "short" if tag in ("first", 1) else "a sufficiently long name"
     ordinary: dict[str, JsonValue] = {"branch": {"kind": tag, "name": name}}
-    assert validator.is_valid(ordinary)
-    assert not validator.is_valid(
-        {"branch": {"kind": {"expr": "$device"}, "name": "short"}}
-    )
     result = FormState(FormInput(model, ordinary)).result(name_env)
     assert isinstance(result, model), result
 
@@ -201,13 +192,10 @@ def test_single_model_selector_rejects_expression_without_evaluating_tag(
         "branch": {"kind": "first", "name": {"expr": "$device"}}
     }
     state = FormState(FormInput(SingleSelectorForm, ordinary))
-    validator = Draft202012Validator(state.input_schema(name_env))
-    assert validator.is_valid(ordinary)
     assert isinstance(state.result(name_env), SingleSelectorForm)
     envelope: dict[str, JsonValue] = {
         "branch": {"kind": {"expr": "$device"}, "name": "short"}
     }
-    assert not validator.is_valid(envelope)
     assert name_env.parameters is not None
     env = FormEnv(
         parameters=name_env.parameters.bind_aliases((AliasRow("device", "first"),), {})

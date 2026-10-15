@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from pydantic import JsonValue
 from zcu_tools.cfg_model import (
     ArbWaveformCfg,
     ConstWaveformCfg,
@@ -17,8 +16,6 @@ from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.events import MlChangedPayload
 from zcu_tools.gui.session.library_entry import (
     LibraryEntryInvalid,
-    ModuleEntryForm,
-    WaveformEntryForm,
     open_library_entry,
 )
 from zcu_tools.gui.session.services.context import ContextService
@@ -73,17 +70,6 @@ def _seed(session: LibrarySession, pulse: PulseSpec | None = None) -> ParameterC
     return session.control.read_context()
 
 
-def _schema_property(
-    entry: ModuleEntryForm | WaveformEntryForm, name: str
-) -> dict[str, JsonValue]:
-    """Return the root input schema node of field name."""
-    properties = entry.state.input_schema(entry.env)["properties"]
-    assert isinstance(properties, dict)
-    node = properties[name]
-    assert isinstance(node, dict)
-    return node
-
-
 def test_numeric_edit_keeps_the_child_waveform_key(session: LibrarySession) -> None:
     capture = _seed(session)
     entry = open_library_entry(capture, "module", PULSE, arb_names=())
@@ -113,7 +99,8 @@ def test_expression_stores_the_number_from_the_open_capture(
 def test_root_tag_is_fixed_to_the_entry_family(session: LibrarySession) -> None:
     capture = _seed(session)
     entry = open_library_entry(capture, "module", PULSE, arb_names=())
-    assert _schema_property(entry, "type")["const"] == "pulse"
+    tag = entry.state.describe(("type",), entry.env).target
+    assert tag is not None and tag.fixed_value == "pulse"
     entry.state.write({("type",): "readout/pulse"}, entry.env)
     with pytest.raises(LibraryEntryInvalid) as error:
         entry.put(PULSE)
@@ -126,8 +113,8 @@ def test_root_tag_is_fixed_to_the_entry_family(session: LibrarySession) -> None:
 def test_root_tag_is_hidden_from_the_entry_form(session: LibrarySession) -> None:
     capture = _seed(session)
     entry = open_library_entry(capture, "module", PULSE, arb_names=("data",))
-    tag = _schema_property(entry, "type")
-    assert tag.get("hidden") is True
+    tag = entry.state.describe(("type",), entry.env).target
+    assert tag is not None and tag.hidden
     assert entry.state.input.data["type"] == "pulse"
 
 
@@ -200,7 +187,8 @@ def test_arb_data_options_are_the_names_captured_at_open(
     entry = open_library_entry(
         capture, "waveform", "Q1.waveforms.arb", arb_names=("first", "second")
     )
-    assert _schema_property(entry, "data")["enum"] == ["first", "second"]
+    data = entry.state.describe(("data",), entry.env).target
+    assert data is not None and data.choices == ("first", "second")
     entry.state.write({("data",): "third"}, entry.env)
     with pytest.raises(LibraryEntryInvalid) as error:
         entry.put("Q1.waveforms.arb")

@@ -72,12 +72,12 @@ class Display:
     item unspecified. collapsed is an initial fold hint only for model fields.
     decimals is how many digits a float field shows after the decimal point,
     rounded with trailing zeros trimmed; None shows the full value. It never
-    rounds input. A negative count raises ValueError here; input_schema raises
+    rounds input. A negative count raises ValueError here; describe raises
     ValueError when the field is not a float. hidden=True keeps the field out
     of the editor only: its value and defaults stay in the input, it is still
-    validated, and the input schema still lists it. group names a foldable
+    validated, and the description still lists it. group names a foldable
     display group within the field's model level, such as "Advanced"; the
-    input schema marks the field with x-form-group and the editor draws the
+    description supplies the field group name and the editor draws the
     level's groups after its ungrouped fields. None leaves the field
     ungrouped; an empty name raises ValueError here. Groups never change
     validation, defaults, choices or input.
@@ -203,7 +203,7 @@ class FormModel(BaseModel):
     mappings. default_input is final.
     No instances carry input, environment, revision or editing state. Ordinary
     nested BaseModel types remain supported without inheriting FormModel.
-    default_input, input_schema and FormInput reject untagged str | Model
+    default_input and FormInput reject untagged str | Model
     fields with ValueError naming the field path, even in inactive branches.
     Use a tagged ref/inline union instead.
     """
@@ -264,13 +264,13 @@ class FormModel(BaseModel):
         Paths contain model-field names and target scalar or whole-container
         leaves, including fields inside nullable/tagged-union models. They do
         not address mapping keys, sequence indexes or ordinary model sections.
-        input_schema and result reject invalid declared paths with ValueError.
-        Validation and input schema share these options, without restricting
+        describe and result reject invalid declared paths with ValueError.
+        Validation and descriptions share these options, without restricting
         another field that reuses the same nested model. When enclosing and
         nested FormModels declare options for the same leaf, the deepest local
         declaration wins, including empty options. Nonoverlapping enclosing
         options remain in effect. A choice leaf takes one of its options,
-        not an Expr envelope: input_schema gives it no Expr alternative and
+        not an Expr envelope: describe reports expression=False and
         result reports an envelope there without evaluating it.
         Empty options for one declared path permit no value. Consumers needing
         an absent captured device/library source raise field_error at that path.
@@ -282,7 +282,7 @@ class FormModel(BaseModel):
         """Declare ordered named selections by relative model-field path.
 
         Paths address fields, including model/union sections, not sequence
-        indexes or mapping keys. Unknown paths raise ValueError in schema and
+        indexes or mapping keys. Unknown paths raise ValueError in describe and
         command execution. The deepest nested declaration wins, including an
         empty tuple, which means no selections and never falls back to a
         parent or automatic list. Nonoverlapping parent paths remain effective.
@@ -291,51 +291,10 @@ class FormModel(BaseModel):
         active branch; inactive branch declarations cannot provide an action.
         Declarations do not add validation: Pydantic and choices remain authoritative. Read env only as a fixed
         borrowed capture, never refresh or mutate it; source failures propagate.
-        The default hook is empty. Consumers read input_schema's effective
-        x-form-options list, not this declaration hook or union structure.
+        The default hook is empty. Consumers read the effective
+        options in FormState.describe, not this declaration hook or union structure.
         """
         return {}
-
-    @classmethod
-    def input_schema(cls, env: FormEnv) -> dict[str, JsonValue]:
-        """Describe accepted input without constructing editing state.
-
-        x-form-options supplies effective ordered {label, value, fields?,
-        commands?} selections. fields is an embedded partial object schema,
-        without tags fixed by value; commands exposes only {name, label}.
-        Literal/Enum, choices and tagged unions get automatic selections;
-        options(env) declarations replace them. Bool and ordinary nullable
-        models keep their checkbox/Enabled contract. Selection matches each
-        value leaf, first match wins; no match preserves current input.
-        Include an Expr alternative ({"expr": text}) for each text field: an
-        int, float, complex or str value leaf. Leaves whose values are picked
-        get none: Literal and Enum (schema enum/const), bool, leaves with
-        current choices and a KeyRef name. Include the shared complex tag, Field constraints, Display metadata and current
-        choices enums. Display decimals and hidden appear only where declared.
-        A model field without a Display label is titled by its field name,
-        underscores as spaces and only the first letter capitalized. A model
-        reached without a union selector keeps its one-value structural tag
-        marked hidden: the tag field of a tagged-union branch that this form,
-        ModuleInput declares for the model or a base class; LinRange.kind is
-        also structural even though ranges have only one supported shape.
-        Structural selectors accept only ordinary typed tags, never Expr
-        envelopes. Each intrinsic tag has one x-form-options item, including
-        aliases, with fields shared by tags of the same model. Branch identity
-        comes from model annotations, independently of dynamic choices.
-        Each reachable branch is concrete; named unions tagged on the same key
-        expand into their members. An untagged str | Model raises ValueError
-        naming its path; use a tagged ref/inline union. Upper-layer generators
-        declare library/inline selections through options(env), not markers.
-        A missing ModuleRef key fails the source check at name. This
-        schema describes partial JSON input, not just a valid model. Domain
-        source failures from choices propagate; no refresh or file access occurs.
-        A field whose union mixes text members (int, float, complex, str)
-        with picked members (Literal, Enum, bool) raises ValueError naming
-        its path: no control both types and picks a value.
-        """
-        from ._schema import input_schema
-
-        return input_schema(cls, env)
 
 
 class FormInput[F: FormModel]:
@@ -346,7 +305,7 @@ class FormInput[F: FormModel]:
 
         Missing keys remain missing and None remains explicit null. Text-field
         expressions (int, float, complex and str leaves; see
-        FormModel.input_schema) use {"expr": text}; ordinary strings remain
+        FormState.describe) use {"expr": text}; ordinary strings remain
         literal. Complex literals use {"__complex__": [re, im]}.
         Structural selectors require ordinary typed tags, not Expr envelopes.
         Non-JSON/nonfinite data raises ValueError; unknown fields, malformed tags
@@ -524,7 +483,7 @@ class FormState[F: FormModel]:
         Return a model or path-directed errors, including a used missing source;
         ordinary model-wide errors use (). Each call uses the supplied env.
         Input at a field whose union mixes text and picked members raises
-        ValueError naming its path, as input_schema does.
+        ValueError naming its path, as describe does.
         """
         from ._evaluate import result
 
@@ -604,10 +563,6 @@ class FormState[F: FormModel]:
                 self._callbacks.remove(callback)
 
         return unsubscribe
-
-    def input_schema(self, env: FormEnv) -> dict[str, JsonValue]:
-        """Delegate the form class's input_schema; state is not schema authority."""
-        return self._model.input_schema(env)
 
     def write_compatible(
         self, saved: Mapping[str, JsonValue], env: FormEnv
