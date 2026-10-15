@@ -698,7 +698,7 @@ def test_unprotected_routes_keep_qick_redeclaration_semantics():
     prog.declare_gen(0, nqz=2)
     prog.declare_readout(0, length=0.413)
     prog.declare_readout(0, length=0.827)
-    assert len(prog.get_time_axis(0)) == prog.us2cycles(0.827, ro_ch=0)
+    assert prog.get_time_axis(0, length_only=True) == prog.us2cycles(0.827, ro_ch=0)
 
 
 def test_protected_routes_report_owner_and_reject_overwrite():
