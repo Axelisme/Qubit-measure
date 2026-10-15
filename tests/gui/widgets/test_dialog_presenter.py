@@ -1,9 +1,43 @@
 """Observable decisions and labels of the Qt dialog presenter."""
 
 import pytest
-from qtpy.QtCore import QTimer
+from qtpy.QtCore import QTimer, QTranslator
 from qtpy.QtWidgets import QMessageBox, QWidget
 from zcu_tools.gui.widgets.dialog_presenter import QtDialogPresenter
+
+
+class _DiscardTranslation(QTranslator):
+    """Mimic a platform whose standard Discard label is longer."""
+
+    def isEmpty(self) -> bool:
+        return False
+
+    def translate(
+        self,
+        context: str | None,
+        sourceText: str | None,
+        disambiguation: str | None = None,
+        n: int = -1,
+    ) -> str:
+        if context == "QPlatformTheme" and sourceText in ("Discard", "&Discard"):
+            return "Close without Saving"
+        return ""
+
+
+@pytest.fixture
+def translated_discard(qapp):
+    translator = _DiscardTranslation()
+    qapp.installTranslator(translator)
+    try:
+        reference = QMessageBox()
+        button = reference.addButton(QMessageBox.StandardButton.Discard)
+        assert button is not None
+        assert button.text() == "Close without Saving"
+        reference.deleteLater()
+        yield
+    finally:
+        qapp.removeTranslator(translator)
+        qapp.processEvents()
 
 
 @pytest.mark.parametrize(
@@ -17,7 +51,7 @@ from zcu_tools.gui.widgets.dialog_presenter import QtDialogPresenter
     ids=["save", "discard", "cancel", "dismiss"],
 )
 def test_unsaved_choice_has_explicit_discard_label_and_preserves_decisions(
-    qapp, decision, expected
+    qapp, translated_discard, decision, expected
 ):
     parent = QWidget()
     observed: list[tuple[str, bool]] = []
