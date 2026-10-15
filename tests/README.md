@@ -101,9 +101,6 @@ def my_widget(qapp):
     qapp.processEvents()
 ```
 
-如果 fixture 持有的是 `Controller`（它持有具體 `BackgroundRunner`），改呼叫
-`ctrl._background_svc.quiesce()`（見 `tests/gui/test_controller.py`）。
-
 ### Qt timer waits
 
 `qtpy.QtTest.QTest` 在 PyQt6 runtime 是 C++ namespace，不能實例化；但部分

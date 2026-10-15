@@ -314,7 +314,7 @@ Qt 與 remote 直接呼 facet；remote 投影同步 native Save report。 `Write
 `WritebackControlFacet` expose persistent writeback draft read/edit/apply by
 composing `GuardService`, `WritebackService`, `State`, and a resource-version
 provider; remote writeback handlers use this facet instead of the giant
-`Controller` surface. Cfg-editor remains a separate domain. Qt and remote
+`Controller` surface. Qt and remote
 writeback forwards are pane-qualified; no flat writeback forward remains.
 
 Inside the Qt view, `MainWindow` remains the top-level View / `RenderHost` facade
