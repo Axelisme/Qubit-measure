@@ -29,21 +29,24 @@ def _points(expts: object) -> None:
         raise ValueError("expts must be an integer of at least two")
 
 
-# A frequency leaf pairs its dotted Form leaf with its module-relative value path.
-# The Form leaf carries S2 inline envelopes (module); read_module values do not.
-type _FrequencyLeaf = tuple[str, tuple[str, ...]]
+# A frequency leaf carries its dotted Form path, source module, and value projection.
+# The Form path includes S2 inline envelopes (module); read_module values do not.
+type _FrequencyLeaf = tuple[str, str | None, tuple[str, ...]]
 
 
 def _frequency_fields(
     tab: RecipeTab, field: str
 ) -> tuple[list[_FrequencyLeaf], str | None]:
+    """Return scalar paths with their source module/projection and outer edit root."""
     parts = field.split(".")
     # Find the module before reading a leaf that does not exist in key input.
     for length in range(1, len(parts)):
         parent_path = ".".join(parts[:length])
         parent = tab.read_field(parent_path)
         if parent.mode in {"key", "inline"}:
-            return [(field, _module_value_path(parent_path, field))], parent_path
+            return [
+                (field, parent_path, _module_value_path(parent_path, field))
+            ], parent_path
     node = tab.read_field(field)
     if node.mode in {"key", "inline"}:
         fields = (
@@ -52,19 +55,29 @@ def _frequency_fields(
             else tab.read_field(f"{field}.module").fields
         )
         if "ro_freq" in fields:
-            leaves = [(f"{field}.module.ro_freq", ("ro_freq",))]
+            leaves: list[_FrequencyLeaf] = [
+                (f"{field}.module.ro_freq", field, ("ro_freq",))
+            ]
         elif "pulse_cfg" in fields and "ro_cfg" in fields:
-            # Generated Forms wrap pulse_cfg in an inline envelope; ro_cfg is plain.
+            # A key outer module owns both projections; inline exposes the child.
+            pulse_source = field if node.mode == "key" else f"{field}.module.pulse_cfg"
+            pulse_value_path = (
+                ("pulse_cfg", "freq") if node.mode == "key" else ("freq",)
+            )
             leaves = [
-                (f"{field}.module.pulse_cfg.module.freq", ("pulse_cfg", "freq")),
-                (f"{field}.module.ro_cfg.ro_freq", ("ro_cfg", "ro_freq")),
+                (
+                    f"{field}.module.pulse_cfg.module.freq",
+                    pulse_source,
+                    pulse_value_path,
+                ),
+                (f"{field}.module.ro_cfg.ro_freq", field, ("ro_cfg", "ro_freq")),
             ]
         else:
             raise GuiRpcError("Unsupported readout shape", reason="invalid_cfg")
         return leaves, field
     if node.fields:
         raise ValueError(f"Not a frequency field: {field}")
-    return [(field, ())], None
+    return [(field, None, ())], None
 
 
 def _module_value_path(module_field: str, field: str) -> tuple[str, ...]:
@@ -74,10 +87,48 @@ def _module_value_path(module_field: str, field: str) -> tuple[str, ...]:
     return tuple(field.removeprefix(prefix).split("."))
 
 
-def _usable_frequency(
-    tab: RecipeTab, leaf: _FrequencyLeaf, module_field: str | None
-) -> bool:
-    field, value_path = leaf
+def set_nested_module_scalar(
+    tab: RecipeTab,
+    outer_field: str,
+    child_field: str,
+    edit: RecipeFieldEdit,
+    outer_value_path: tuple[str, ...],
+) -> None:
+    """Set or retain a scalar whose nested module may still be a library key.
+
+    tab is opened with fixed Reset sources. outer_field and child_field are
+    complete public S2 module paths. edit carries the complete scalar path
+    directly under child_field, its value, and its unchanged provenance label.
+    outer_value_path is the core-relative projection from outer_field to that
+    scalar, without inline wrappers. A supplied value converts a key outer
+    module and then the child through use_inline before set. None retains an
+    outer key first, otherwise a child key, with the same absolute summary
+    field. If both modules are inline, set(None) preserves input and records
+    gui_default. Child-relative projection follows the public scalar path.
+    Path, validation, lock-admission, and source/connection errors propagate
+    from RecipeTab without refresh, fallback, or rollback.
+    No caller layout construction or returned-data patching occurs.
+    """
+    child_value_path = _module_value_path(child_field, edit.field)
+    if edit.value is not None:
+        if tab.read_field(outer_field).mode == "key":
+            tab.use_inline(outer_field)
+        tab.use_inline(child_field)
+    elif tab.read_field(outer_field).mode == "key":
+        tab.retain_module_source(
+            outer_field, summary_field=edit.field, value_path=outer_value_path
+        )
+        return
+    elif tab.read_field(child_field).mode == "key":
+        tab.retain_module_source(
+            child_field, summary_field=edit.field, value_path=child_value_path
+        )
+        return
+    tab.set(edit.field, edit.value, source=edit.source)
+
+
+def _usable_frequency(tab: RecipeTab, leaf: _FrequencyLeaf) -> bool:
+    field, module_field, value_path = leaf
     if module_field is not None and tab.read_field(module_field).mode == "key":
         value: object = tab.read_module(module_field).value
         for part in value_path:
@@ -85,6 +136,10 @@ def _usable_frequency(
                 return False
             value = value.get(part)
         return _finite(value)
+    if module_field is not None and value_path == ("pulse_cfg", "freq"):
+        pulse_field = f"{module_field}.module.pulse_cfg"
+        if tab.read_field(pulse_field).mode == "key":
+            return _finite(tab.read_module(pulse_field).value.get("freq"))
     state = tab.read_field(field)
     return not state.errors and _finite(state.value)
 
@@ -98,9 +153,12 @@ def _write_frequency_fields(
     """Convert only for edits, apply one scalar batch, then verify all frequencies."""
     if edits and module_field is not None:
         tab.use_inline(module_field)
+        pulse_field = f"{module_field}.module.pulse_cfg"
+        if any(edit.field == f"{pulse_field}.module.freq" for edit in edits):
+            tab.use_inline(pulse_field)
     tab.set_fields(edits)
     for leaf in leaves:
-        if not _usable_frequency(tab, leaf, module_field):
+        if not _usable_frequency(tab, leaf):
             raise GuiRpcError(f"Invalid {leaf[0]} frequency", reason="invalid_cfg")
 
 
@@ -118,7 +176,9 @@ def set_frequency(
     tab is opened; field is a dotted scalar frequency or core readout module root.
     Inline leaf paths include module, for example modules.qub_pulse.module.freq.
     Key input stays unchanged when retaining library values; explicit/calibrated
-    writes first ask the owner to convert the whole module to inline.
+    writes first ask the owner to convert the whole module to inline. A nested
+    pulse key is converted only when its frequency is edited; otherwise its
+    library value and source are retained through the public module read.
     A readout root supports the generated Form shapes of the selected readout:
     pulse readout writes <root>.module.pulse_cfg.module.freq and
     <root>.module.ro_cfg.ro_freq; direct readout writes <root>.module.ro_freq.
@@ -137,12 +197,14 @@ def set_frequency(
     if frequency_mhz is not None and not _finite(frequency_mhz):
         raise ValueError("frequency_mhz must be finite and not boolean")
     leaves, module_field = _frequency_fields(tab, field)
-    key = tab.read_field(module_field).key if module_field is not None else None
-    library = (
-        tab.read_library_root(key) if frequency_mhz is None and prefer_library else None
-    )
+    library_roots = {
+        path: tab.read_library_root(tab.read_field(source_field).key)
+        if frequency_mhz is None and prefer_library and source_field is not None
+        else None
+        for path, source_field, _ in leaves
+    }
     needs_calibration = frequency_mhz is None and any(
-        library is None or not _usable_frequency(tab, leaf, module_field)
+        library_roots[leaf[0]] is None or not _usable_frequency(tab, leaf)
         for leaf in leaves
     )
     calibrated = tab.read_value(calibration) if needs_calibration else None
@@ -152,7 +214,7 @@ def set_frequency(
         path = leaf[0]
         if frequency_mhz is not None:
             edits.append(RecipeFieldEdit(path, frequency_mhz, "explicit"))
-        elif library is not None and _usable_frequency(tab, leaf, module_field):
+        elif library_roots[path] is not None and _usable_frequency(tab, leaf):
             retained.append(leaf)
         elif _finite(calibrated):
             edits.append(
@@ -164,10 +226,10 @@ def set_frequency(
                 f"Provide an explicit frequency, valid library, or calibrated {calibration}",
             )
     _write_frequency_fields(tab, module_field, leaves, edits)
-    for path, value_path in retained:
-        if module_field is not None:
+    for path, source_field, value_path in retained:
+        if source_field is not None:
             tab.retain_module_source(
-                module_field,
+                source_field,
                 summary_field=path,
                 value_path=value_path,
             )

@@ -6,13 +6,19 @@ from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParame
 from zcu_tools.mcp.measure.recipe import (
     MissingParameter,
     RecipeDefinition,
+    RecipeFieldEdit,
     RecipeGenerator,
     RecipeNeedsParameters,
     RecipeRun,
     RecipeSession,
 )
 
-from .helpers import FrequencySweepCalibration, set_frequency, set_frequency_sweep
+from .helpers import (
+    FrequencySweepCalibration,
+    set_frequency,
+    set_frequency_sweep,
+    set_nested_module_scalar,
+)
 
 
 def _validate_inputs(
@@ -134,20 +140,19 @@ def twotone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool
             summary_field="modules.qub_pulse.module.gain",
             value_path=("gain",),
         )
-        tab.retain_module_source(
-            "modules.qub_pulse",
-            summary_field="modules.qub_pulse.module.waveform.module.length",
-            value_path=("waveform", "length"),
-        )
     else:
         if gain is not None or pulse_length_us is not None:
             tab.use_inline("modules.qub_pulse")
         tab.set("modules.qub_pulse.module.gain", gain, source="explicit")
-        tab.set(
-            "modules.qub_pulse.module.waveform.module.length",
-            pulse_length_us,
-            source="explicit",
-        )
+    set_nested_module_scalar(
+        tab,
+        "modules.qub_pulse",
+        "modules.qub_pulse.module.waveform",
+        RecipeFieldEdit(
+            "modules.qub_pulse.module.waveform.module.length", pulse_length_us
+        ),
+        ("waveform", "length"),
+    )
     tab.set("reps", reps, source="explicit")
     tab.set("rounds", rounds, source="explicit")
 

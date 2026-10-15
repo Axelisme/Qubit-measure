@@ -3,13 +3,18 @@
 from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import (
     RecipeDefinition,
+    RecipeFieldEdit,
     RecipeGenerator,
     RecipeNeedsParameters,
     RecipeRun,
     RecipeSession,
 )
 
-from .helpers import FrequencySweepCalibration, set_frequency_sweep
+from .helpers import (
+    FrequencySweepCalibration,
+    set_frequency_sweep,
+    set_nested_module_scalar,
+)
 
 
 def onetone_spectrum_over_power(  # noqa: PLR0913 - Preserve typed tool keywords.
@@ -68,14 +73,13 @@ def onetone_spectrum_over_power(  # noqa: PLR0913 - Preserve typed tool keywords
         stop=None if gain_range is None else gain_range[1],
         expts=gain_points,
     )
-    if tab.read_field("modules.readout").mode == "key":
-        tab.retain_module_source(
-            "modules.readout",
-            summary_field="modules.readout.module.pulse_cfg.module.gain",
-            value_path=("pulse_cfg", "gain"),
-        )
-    else:
-        tab.set("modules.readout.module.pulse_cfg.module.gain", None)
+    set_nested_module_scalar(
+        tab,
+        "modules.readout",
+        "modules.readout.module.pulse_cfg",
+        RecipeFieldEdit("modules.readout.module.pulse_cfg.module.gain", None),
+        ("pulse_cfg", "gain"),
+    )
     tab.set("reps", reps)
     tab.set("rounds", rounds)
     run, status = yield tab.run()

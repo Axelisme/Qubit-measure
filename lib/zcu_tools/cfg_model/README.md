@@ -1,12 +1,12 @@
 # cfg_model — 共享配置核心
 
-**Last updated:** 2026-10-13，持久 Spec 共用 FieldMeta 呈現資訊
+**Last updated:** 2026-10-15，FieldMeta 分類名稱與前端政策的責任邊界
 
 `cfg_model` 提供不含執行行為或 I/O 的配置模型與具名依賴契約。
 Caller 從 package root import 公開名稱。
 
 - `ConfigBase` 提供 Pydantic 欄位驗證、巢狀更新與序列化。非 module consumer 的行為保持不變。
-- `FieldMeta` 在 core 與持久 Spec 欄位承載 label、unit、decimals、description 與 group，不改驗證或序列化的值。前端用 `get_field_meta` 讀取，分組與畫面政策留在前端。`Expr`、`Range`、`AliasName`、`Hidden`、`Locked`、`Slot` 與 `Template` 是前端中立的起始值宣告。它們不求值、不讀來源。上層 Form 將它們翻成輸入與 cfg；`TemplateDef` 的持久 Spec 目錄由呼叫者注入。
+- `FieldMeta` 在 core 與持久 Spec 欄位承載 label、unit、decimals、description 與 group，不改驗證或序列化的值。group 是 MCP schema 可用的前端中立分類名稱 hint，因此由 core 保存。前端用 `get_field_meta` 讀取，並決定實際的 widget、排版與折疊行為。`Expr`、`Range`、`AliasName`、`Hidden`、`Locked`、`Slot` 與 `Template` 是前端中立的起始值宣告。它們不求值、不讀來源。上層 Form 將它們翻成輸入與 cfg；`TemplateDef` 的持久 Spec 目錄由呼叫者注入。
 - `WaveformSamples` 由 core.waveform_format 擁有。它攜帶一次 asset 讀取的 reference time axis 與 normalized I/Q samples，不從 cfg_model re-export。
 - `ModuleSpec`／`WaveformSpec` 表示持久候選，保留具體 key 的 child 引用。兩個 `spec_from_raw` 入口驗證持久值，不查 library 或 assets，不將 runtime 資訊轉成字串。
 - `ModuleCfg`／`WaveformCfg` 表示已展開的執行參數。它們只提供欄位驗證與 `set_param`，不建立 program runtime 物件。

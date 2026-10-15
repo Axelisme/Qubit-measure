@@ -43,9 +43,11 @@ Adapter 可以公開不同於 core 的輸入。需要 extras 時，Form 接受�
 
 使用者 2026-10-13：「採用，更新草稿，form.py慣例也記進去」。
 
-Core 的 `Annotated[..., FieldMeta(...)]` 保存 label、unit、decimals 與 description。
+Core 的 `Annotated[..., FieldMeta(...)]` 保存 label、unit、decimals、description 與 group。
+group 是 MCP schema 可用的前端中立分類名稱 hint，因此與其他欄位描述一起放在 core。
+前端決定實際的 widget、排版與折疊行為。
 沒有標記的欄位由生成器使用欄位名。FieldMeta 不改序列化格式。
-前端的 widget 選擇與分組不放 core。使用者 2026-10-12：「我想放core會比較簡單，而維護實驗的作者都是已一整個實驗為單位」。
+使用者 2026-10-12：「我想放core會比較簡單，而維護實驗的作者都是已一整個實驗為單位」。
 
 ### Form 的形狀與初值
 
