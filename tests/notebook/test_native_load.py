@@ -73,7 +73,7 @@ class GroupedCore(NativeCore):
             VariableSpec(
                 "signal",
                 (VariableAxisSpec("Frequency", "Hz", "frequency", scale=1e6),),
-                VariableZSpec("signal", "Signal", "V", scale=1e-3),
+                VariableZSpec("signal", "Signal", "V", scale=1e-3, dtype=np.complex128),
             ),
             VariableSpec(
                 "decay",
