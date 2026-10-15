@@ -12,8 +12,12 @@ from zcu_tools.experiment.utils.device import check_flux_unit, set_flux
 def test_fixed_fake_coordinate_roundtrip_and_flux(unit: Literal["V", "A"]) -> None:
     device = FakeDevice(fast_mode=True, value_unit=unit)
     try:
-        device.setup(FakeDeviceInfo(address="none", value_unit=unit, value=0.12,
-                                    rampstep=0.04, output="on"), progress=False)
+        device.setup(
+            FakeDeviceInfo(
+                address="none", value_unit=unit, value=0.12, rampstep=0.04, output="on"
+            ),
+            progress=False,
+        )
         info = device.get_info()
         assert info.value_unit == unit
         assert info.value == pytest.approx(0.12)
@@ -32,8 +36,10 @@ def test_setup_cannot_change_fake_coordinate_or_write_before_rejection() -> None
         device.set_value(0.25)
         before = device.get_info()
         with pytest.raises(ValueError, match="unit"):
-            device.setup(FakeDeviceInfo(address="none", value_unit="A", value=0.9,
-                                       output="on"), progress=False)
+            device.setup(
+                FakeDeviceInfo(address="none", value_unit="A", value=0.9, output="on"),
+                progress=False,
+            )
         assert device.get_info() == before
         with pytest.raises(ValueError, match="unit"):
             set_flux(device, 1.0, unit="native", stop=StopSignal())
