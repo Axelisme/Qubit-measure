@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-15，Guide view renders through markdown-it-py
+**Last updated:** 2026-10-15，Opaque Run 與 Artifact handover
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -17,6 +17,15 @@ Run 框架在 hardware lease 後、adapter.run 前讀取全部已連線 device �
 任一讀取失敗拒絕 Run，不寫設定、不進 adapter/core、不以 State cache 補值，無 device 記 `{}`。
 這份實驗前 snapshot 沿 RunMetadata.device_snapshot 保存，不被後續 sweep 改寫。
 Native Save 寫入既有 `/device`，不查 live hardware；實際 sweep 值由 cfg 與 persisted axes 記錄。
+Run handle 保持 adapter-owned opaque，不因 native evidence 要求 RunRecord 或讀 cfg／result 欄位。
+`artifacts` 集中 tracker、SaveService、SaveControl、保存中心與 `ArtifactHandover` 契約。
+State、controller、remote 和 Qt caller 使用該 package 公開入口；不保留舊位置 shim。
+Adapter 的 `data_item(key, result, comment=...)` 與 `analysis_item(key, result, parameters, pane=...)`
+只交固定 framework items。框架選路徑與格式、同步編碼及逐輸出隔離失敗。
+Data 準備錯誤交給 DataItem.failed 或 from_run，producer 拋錯也轉成該 data outputs 的失敗；
+同選集的圖與分析仍保存。Figure 取已提交 pane，不取未提交草稿。
+Artifact 不 import writeback owners，由 app composition 協調；此單側規則由
+`measure-artifacts-no-writeback` import contract 約束，允許共用 State／events／context。
 可提交的 native 結果先由 State 一次發布結果與 `RunPaneState.metadata`，
 再在 terminal 追加 acquired。Origin 沿發起命令的 GUI／MCP，沒有 Save 也追加事件，
 但不建立 run 資料夾。未綁定或沒有 storage 時不造事件，terminal 明確記錄診斷。

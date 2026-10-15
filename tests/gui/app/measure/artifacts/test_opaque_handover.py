@@ -1,13 +1,13 @@
 """Registered opaque run handles cross Run, Analyze and synchronous Save unchanged."""
 
 import json
-import time
 from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, Literal
 
 import pytest
+from qtpy.QtCore import QEventLoop, QTimer
 from qtpy.QtWidgets import QApplication
 from zcu_tools.datafile import AnalysisDocument, load_run_data
 from zcu_tools.experiment.artifacts import AnalysisItem, DataItem
@@ -54,6 +54,7 @@ class OpaqueAdapter(BaseAdapter[SavingCfg, OpaqueRun, PaneSummary, PaneParams]):
 
     @staticmethod
     def make_form(ctx: FormContext) -> Form[SavingCfg]:
+        del ctx
         return Form(SavingCfg, {})
 
     def run(self, req: RunRequest, cfg: SavingCfg, *, context: RunContext) -> OpaqueRun:
@@ -132,10 +133,24 @@ def opaque_host(
 
 def wait_until_idle(state: State, tab_id: str, qapp: QApplication) -> None:
     """Pump owner deliveries until completion with a bounded assertion failure."""
-    deadline = time.monotonic() + 5.0
-    while state.is_tab_busy(tab_id) and time.monotonic() < deadline:
-        qapp.processEvents()
-        time.sleep(0.005)
+    loop = QEventLoop()
+    timeout = QTimer()
+    timeout.setSingleShot(True)
+    timeout.timeout.connect(loop.quit)
+    poll = QTimer()
+
+    def settled() -> None:
+        if not state.is_tab_busy(tab_id):
+            loop.quit()
+
+    poll.timeout.connect(settled)
+    poll.start(5)
+    timeout.start(5000)
+    try:
+        loop.exec()
+    finally:
+        poll.stop()
+        timeout.stop()
     assert not state.is_tab_busy(tab_id), "Operation did not settle"
 
 
@@ -188,8 +203,11 @@ def test_registered_opaque_handle_acquires_analyzes_and_hands_over_items(
         assert stored.metadata.snapshot == metadata.snapshot
         assert stored.payload.metadata.comment == "opaque annotation"
     assert all(item.status == "saved" and item.output.path.is_file() for item in other)
-    document = next(item.output.path for item in other if item.output.format == "json")
-    assert json.loads(document.read_text())["summary"] == {"opaque_mean": 17.0}
+    assert json.loads(
+        next(
+            item.output.path for item in other if item.output.format == "json"
+        ).read_text()
+    )["summary"] == {"opaque_mean": 17.0}
     committed = state.get_artifact_snapshots(tab_id)
     projected = {
         (member.key, output.path): (output.status, output.error)

@@ -687,10 +687,10 @@ def test_loaded_foreign_origin_save_rejects_before_mapping_or_io(
             if p.is_file()
         }
 
-        def reject_mapping(result: object, *, comment: str) -> None:
+        def reject_mapping(key: object, result: object, *, comment: str) -> None:
             raise AssertionError("Origin rejection must precede data mapping")
 
-        monkeypatch.setattr(tab.adapter, "prepare_save_data", reject_mapping)
+        monkeypatch.setattr(tab.adapter, "data_item", reject_mapping)
         save = session.save_artifacts if save_all else session.save
         with pytest.raises(FailedPreconditionError) as error:
             save()

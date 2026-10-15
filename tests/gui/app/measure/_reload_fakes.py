@@ -6,9 +6,9 @@ from collections.abc import Callable
 from typing import ClassVar, Literal
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.datafile import AnalysisDocument, RunMetadata
-from zcu_tools.experiment.native_persistence import PreparedRunData
+from zcu_tools.datafile import RunMetadata
 from zcu_tools.gui.app.measure.adapter import LoadDataRequest
+from zcu_tools.gui.app.measure.artifacts import AnalysisItem, ArtifactKey, DataItem
 from zcu_tools.gui.app.measure.catalog import CatalogReloadError, PreparedCatalogReload
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.form_adapter import Form, FormContext
@@ -37,18 +37,19 @@ class OldAdapter(DummyAdapter):
         del req
         raise NotImplementedError("Reload fake does not load native data")
 
-    def capture_analysis_document(
+    def analysis_item(
         self,
+        key: ArtifactKey,
         result: object,
         parameters: object | None,
         *,
         pane: Literal["analysis", "post_analysis"],
-    ) -> AnalysisDocument:
+    ) -> AnalysisItem:
         """Reject result/parameters for either pane; no analysis is persisted."""
         del result, parameters, pane
         raise TypeError("Reload fake does not capture analysis documents")
 
-    def prepare_save_data(self, result: object, *, comment: str) -> PreparedRunData:
+    def data_item(self, key: ArtifactKey, result: object, *, comment: str) -> DataItem:
         """Reject any result/comment; this fake has no persistence declaration."""
         del result, comment
         raise NotImplementedError("Reload fake does not prepare native data")

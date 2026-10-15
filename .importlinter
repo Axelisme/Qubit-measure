@@ -400,3 +400,16 @@ forbidden_modules =
     PyQt6
     PySide2
     PySide6
+
+# Artifact and writeback commands meet only at app composition. Shared State,
+# events and adapter types remain usable; the writeback package moves separately.
+[importlinter:contract:measure-artifacts-no-writeback]
+name = Measure artifacts do not import writeback owners
+type = forbidden
+source_modules =
+    zcu_tools.gui.app.measure.artifacts
+forbidden_modules =
+    zcu_tools.gui.app.measure.services.writeback
+    zcu_tools.gui.app.measure.services.writeback_control
+    zcu_tools.gui.app.measure.ui.writeback_widget
+allow_indirect_imports = True

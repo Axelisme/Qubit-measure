@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from zcu_tools.experiment.artifacts import ArtifactRef, OutputResult, SaveReport
-from zcu_tools.gui.app.measure.artifact_tracker import (
+from zcu_tools.gui.app.measure.artifacts import (
     ArtifactDeclaration,
     ArtifactTracker,
     SaveStatus,

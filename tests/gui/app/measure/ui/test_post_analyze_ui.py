@@ -29,7 +29,7 @@ from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
 from tests.gui.app.measure._form_fakes import configure_form_lookup
-from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
+from tests.gui.app.measure.artifacts._snapshots import ready_figures, with_artifacts
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure

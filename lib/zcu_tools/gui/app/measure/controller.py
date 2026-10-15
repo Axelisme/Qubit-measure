@@ -79,11 +79,11 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.setup_control import SetupControlPort
 
     from .arb_waveform import ArbWaveformPort
+    from .artifacts import SaveControlPort
     from .services import AppServices
     from .services.cfg_editor import ChangeListener
     from .services.operation_control import OperationControlPort
     from .services.run_analyze_control import RunAnalyzeControlPort
-    from .services.save_control import SaveControlPort
     from .services.tab_control import TabControlPort
     from .services.tab_form import TabFormResources
     from .services.writeback_control import WritebackControlPort, WritebackPane

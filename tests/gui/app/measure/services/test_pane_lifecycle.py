@@ -16,7 +16,7 @@ from zcu_tools.gui.app.measure.adapter import (
     ParameterWriteback,
     SessionEnv,
 )
-from zcu_tools.gui.app.measure.artifact_tracker import SaveStatus
+from zcu_tools.gui.app.measure.artifacts import SaveStatus
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
 from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService

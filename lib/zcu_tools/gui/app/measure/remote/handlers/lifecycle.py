@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.app.measure.artifact_tracker import SaveStatus
+from zcu_tools.gui.app.measure.artifacts import SaveStatus
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 if TYPE_CHECKING:

@@ -13,7 +13,7 @@ from zcu_tools.gui.app.measure.adapter import (
     ContextReadiness,
     SessionEnv,
 )
-from zcu_tools.gui.app.measure.artifact_tracker import (
+from zcu_tools.gui.app.measure.artifacts import (
     SaveStatus,
 )
 from zcu_tools.gui.app.measure.services.ports import TabSnapshot

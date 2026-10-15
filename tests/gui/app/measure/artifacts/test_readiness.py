@@ -8,11 +8,11 @@ from unittest.mock import MagicMock
 import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.gui.app.measure.artifacts import SaveService
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.events.tab import TabInteractionChangedPayload
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.app_services import build_app_services
-from zcu_tools.gui.app.measure.services.save import SaveService
 from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError

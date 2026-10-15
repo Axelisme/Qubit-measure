@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from zcu_tools.gui.app.measure.artifact_tracker import (
+from zcu_tools.gui.app.measure.artifacts import (
     ArtifactSectionSnapshot,
     SaveStatus,
 )

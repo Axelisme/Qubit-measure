@@ -44,7 +44,7 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.app.measure._components import ResonatorSchema
 from tests.gui.app.measure._form_fakes import configure_form_lookup
-from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
+from tests.gui.app.measure.artifacts._snapshots import with_artifacts
 
 
 def _parameters():

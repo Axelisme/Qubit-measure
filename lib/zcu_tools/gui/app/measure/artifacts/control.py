@@ -13,10 +13,10 @@ from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.resources.entry import AcquiredPayload, SavedPayload
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.app.measure.services.guard import GuardService
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.resources.entry import RecordsLedger
 
-    from .guard import GuardService
     from .save import SaveService
 
 

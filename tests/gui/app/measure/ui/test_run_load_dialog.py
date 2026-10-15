@@ -15,9 +15,9 @@ from qtpy.QtWidgets import (
     QTableWidget,
 )
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AdapterGuide
+from zcu_tools.gui.app.measure.artifacts import SavedRunInfo
 from zcu_tools.gui.app.measure.services.load import LoadTabResultOutcome
 from zcu_tools.gui.app.measure.services.ports import SavePaneSnapshot, TabSnapshot
-from zcu_tools.gui.app.measure.services.save_control import SavedRunInfo
 from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog

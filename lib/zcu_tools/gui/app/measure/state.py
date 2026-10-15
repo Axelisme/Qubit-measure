@@ -40,7 +40,7 @@ from .adapter import (
     T_AnalyzeParams,
     T_Cfg,
 )
-from .artifact_tracker import (
+from .artifacts import (
     ArtifactDeclaration,
     ArtifactSectionSnapshot,
     ArtifactTracker,

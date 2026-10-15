@@ -187,22 +187,22 @@ class SaveService:
                         raise ValueError("Declared figure has no pane content")
                     members.append(FigureItem(key, pane.plots[key.member_name]))
                 else:
-                    content = tab.adapter.capture_analysis_document(
-                        pane.result, pane.result_params, pane=pane_name
+                    members.append(
+                        tab.adapter.analysis_item(
+                            key, pane.result, pane.result_params, pane=pane_name
+                        )
                     )
-                    members.append(AnalysisItem(key, content))
             captured.append(SaveArtifact(ref, tuple(members)))
         return _SavePlan(tuple(captured), layout, metadata, storage, origin, annotation)
 
     def _capture_data(self, tab_id: str, key: ArtifactKey, comment: str) -> DataItem:
         tab = self._state.get_tab(tab_id)
         try:
-            prepared = tab.adapter.prepare_save_data(tab.run.result, comment=comment)
+            return tab.adapter.data_item(key, tab.run.result, comment=comment)
         except Exception as error:
             # Preparation belongs to this data item, not the whole Save All.
             logging.exception("Failed preparing data item %s", key)
             return DataItem.failed(key, error)
-        return DataItem(key, prepared)
 
     def _save(
         self, tab_id: str, plan: _SavePlan, *, data_only: bool = False

@@ -54,7 +54,7 @@ from tests.gui.app.measure._form_fakes import (
     configure_form_lookup,
     make_form,
 )
-from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
+from tests.gui.app.measure.artifacts._snapshots import with_artifacts
 from tests.gui.widgets.form._text_input import commit_text
 
 CAPABILITIES = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)

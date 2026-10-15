@@ -60,7 +60,7 @@ if TYPE_CHECKING:
         AdapterCapabilities,
         WritebackItem,
     )
-    from zcu_tools.gui.app.measure.artifact_tracker import ArtifactSectionSnapshot
+    from zcu_tools.gui.app.measure.artifacts import ArtifactSectionSnapshot
     from zcu_tools.gui.app.measure.state import (
         RetiredPaneResources,
         Session,

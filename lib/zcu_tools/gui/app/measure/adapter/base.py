@@ -10,9 +10,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, cast
 from zcu_tools.datafile import AnalysisDocument, RunMetadata
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.native_persistence import (
-    PreparedRunData,
     load_run_with_metadata,
-    prepare_run_data,
 )
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -36,6 +34,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.types import AnalyzeResult
+from zcu_tools.gui.app.measure.artifacts import AnalysisItem, ArtifactKey, DataItem
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.interactive import PluginDefinition, Session
 
@@ -516,14 +515,15 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         del req
         return []
 
-    def capture_analysis_document(
+    def analysis_item(
         self,
+        key: ArtifactKey,
         result: object,
         parameters: object | None,
         *,
         pane: Literal["analysis", "post_analysis"],
-    ) -> AnalysisDocument:
-        """Capture one completed pane's historical inputs and numeric summary.
+    ) -> AnalysisItem:
+        """Hand over one pane's historical inputs and summary under its assigned key.
 
         result must implement AnalyzeResult.to_summary_dict. parameters is the
         dataclass instance used for that result, or None for no inputs, never
@@ -544,21 +544,23 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
             raise TypeError(
                 "Historical analysis parameters must be a dataclass or None"
             )
-        return AnalysisDocument.model_validate(
+        document = AnalysisDocument.model_validate(
             {"pane": pane, "parameters": inputs, "summary": result.to_summary_dict()}
         )
+        return AnalysisItem(key, document)
 
-    def prepare_save_data(self, result: object, *, comment: str) -> PreparedRunData:
-        """Map one completed RunRecord through this adapter's persistence spec.
+    def data_item(self, key: ArtifactKey, result: object, *, comment: str) -> DataItem:
+        """Hand over a typed RunRecord under the framework-assigned data key.
 
-        The record must contain this experiment's typed cfg and Result. Return
-        the shared SI payload and cfg snapshot without paths, metadata capture
-        or I/O. Invalid record/cfg/Result/comment and missing declarations raise
-        the owning experiment's TypeError, ValueError or NotImplementedError.
-        Arrays remain shared; do not mutate the record while saving.
+        This default supports core record adapters. Opaque adapters override it
+        to unwrap their own handle and return framework content. Preparation
+        failures, including missing cfg, become failed data outputs. A non-record
+        raises TypeError, which Save isolates the same way. No paths, format
+        selection, metadata capture or I/O occurs. Arrays remain shared; do not
+        mutate the record while saving.
         """
         if not isinstance(result, RunRecord):
             raise TypeError("Native saving requires a RunRecord")
-        return prepare_run_data(
-            result, spec=self.exp_cls().persistence_spec(), comment=comment
+        return DataItem.from_run(
+            key, result, spec=self.exp_cls().persistence_spec(), comment=comment
         )

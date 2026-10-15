@@ -41,7 +41,7 @@ from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.app.measure._form_fakes import configure_form_lookup
-from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
+from tests.gui.app.measure.artifacts._snapshots import ready_figures, with_artifacts
 
 
 @pytest.fixture

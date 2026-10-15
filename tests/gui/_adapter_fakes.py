@@ -7,10 +7,9 @@ from dataclasses import dataclass
 from typing import ClassVar, Literal
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.datafile import AnalysisDocument, RunMetadata
+from zcu_tools.datafile import RunMetadata
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.native_persistence import PreparedRunData
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
@@ -23,6 +22,7 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
     WritebackRequest,
 )
+from zcu_tools.gui.app.measure.artifacts import AnalysisItem, ArtifactKey, DataItem
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
@@ -140,16 +140,17 @@ class DummyAdapter:
         del req
         return []
 
-    def capture_analysis_document(
+    def analysis_item(
         self,
+        key: ArtifactKey,
         result: object,
         parameters: object | None,
         *,
         pane: Literal["analysis", "post_analysis"],
-    ) -> AnalysisDocument:
+    ) -> AnalysisItem:
         """Reject native analysis persistence unsupported by this collaborator."""
         raise NotImplementedError("DummyAdapter has no native analysis document")
 
-    def prepare_save_data(self, result: object, *, comment: str) -> PreparedRunData:
+    def data_item(self, key: ArtifactKey, result: object, *, comment: str) -> DataItem:
         """Reject native run persistence unsupported by this collaborator."""
         raise NotImplementedError("DummyAdapter has no native run evidence")

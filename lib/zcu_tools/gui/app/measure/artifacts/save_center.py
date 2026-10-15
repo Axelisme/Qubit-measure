@@ -21,7 +21,7 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.experiment.artifacts import ArtifactRef
-from zcu_tools.gui.app.measure.artifact_tracker import (
+from zcu_tools.gui.app.measure.artifacts import (
     ArtifactSnapshot,
     OutputSnapshot,
     SaveStatus,

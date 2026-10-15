@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 
+from zcu_tools.gui.app.measure.artifacts import ArtifactHandover
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 if TYPE_CHECKING:
-    from zcu_tools.datafile import AnalysisDocument, RunMetadata
+    from zcu_tools.datafile import RunMetadata
     from zcu_tools.experiment.context import RunContext
-    from zcu_tools.experiment.native_persistence import PreparedRunData
     from zcu_tools.plotting.plots import Plots
 
 from .interactive import InteractivePluginProvider
@@ -35,7 +35,7 @@ __all__ = [
 
 
 @runtime_checkable
-class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
+class ExpAdapterProtocol(ArtifactHandover, InteractivePluginProvider, Protocol):
     """Structural contract the GUI framework requires from an experiment adapter.
 
     This Protocol lists *only* the members the framework actually calls; it
@@ -47,8 +47,8 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
     Keeping the framework side generic-free is deliberate: the GUI handles
     every adapter as an opaque ``ExpAdapterProtocol``. Analyze/writeback
     results remain opaque. cfg is the output of this adapter's own Form;
-    the framework does not check its type. Native acquisition evidence checks only the RunRecord
-    envelope described by run(), not its concrete cfg/result types. Results
+    the framework does not check its type. Run handles also stay opaque, including
+    when native acquisition evidence is captured. Results
     cross Qt ``Signal(object)`` boundaries as plain objects. The cross-method type linkage that pyright
     checks lives entirely inside a single concrete adapter via the generic
     ``BaseAdapter[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]``.
@@ -59,8 +59,8 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
     # rejects the Protocol conformance.
     capabilities: ClassVar[AdapterCapabilities]
     # Declaring persistence spec tag for acquisition metadata; None means this
-    # adapter does not produce native run evidence. Declaring a tag opts into
-    # run()'s RunRecord envelope contract when the tab has a saved origin.
+    # adapter does not produce native run evidence. The tag describes evidence,
+    # not the concrete shape of the adapter-owned run handle.
     # Never infer it from a name.
     experiment_tag: ClassVar[str | None]
 
@@ -108,11 +108,10 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
 
         req provides accepted device/SoC inputs; cfg is this adapter's validated
         Form output, forwarded unchanged, and context owns this acquisition's plots and stop signal.
-        With experiment_tag set and a saved tab origin, return RunRecord(cfg,
-        result) for native evidence. A bare result then raises TypeError at the
-        Run publication boundary and publishes neither result nor metadata.
-        Without the tag or saved origin, the framework does not manufacture
-        acquisition metadata and retains the adapter's opaque result contract.
+        Return an adapter-owned opaque handle. With experiment_tag set and a
+        saved tab origin, the framework captures native evidence independently
+        of that handle's type. Otherwise it does not manufacture metadata.
+        Saving consumes ArtifactHandover content, never inferred cfg/result fields.
         Acquisition errors follow the operation's terminal policy: without
         accepted user cancellation they fail the operation. Accepted cancellation
         may instead produce a cancelled outcome; Schedule errors remain failures.
@@ -159,29 +158,4 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         self, req: PostWritebackRequest[Any, Any, Any]
     ) -> Sequence[WritebackItem]:
         """Return the writeback items proposed from one post-analysis result."""
-        ...
-
-    def capture_analysis_document(
-        self,
-        result: object,
-        parameters: object | None,
-        *,
-        pane: Literal["analysis", "post_analysis"],
-    ) -> AnalysisDocument:
-        """Capture a completed result and its historical dataclass inputs.
-
-        None parameters means no inputs. Return finite JSON without figures or
-        arrays; invalid result/input types or values raise TypeError/ValueError.
-        The returned document isolates containers at the datafile boundary.
-        No live-context lookup or I/O. BaseAdapter supplies the implementation.
-        """
-        ...
-
-    def prepare_save_data(self, result: object, *, comment: str) -> PreparedRunData:
-        """Prepare this experiment's RunRecord for both native data writers.
-
-        No I/O or metadata capture occurs. Invalid record/cfg/Result/comment or
-        a missing persistence declaration raises TypeError, ValueError or
-        NotImplementedError. Do not mutate result arrays during saving.
-        """
         ...

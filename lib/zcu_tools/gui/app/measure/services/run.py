@@ -16,7 +16,6 @@ from zcu_tools.experiment.acquisition import (
     new_run_id,
 )
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.measure.events.tab import (
@@ -396,8 +395,6 @@ class RunService:
             completion = "stopped" if stop_event.is_set() else "complete"
             finished_at = datetime.now(UTC)
             if operation.metadata is not None:
-                if not isinstance(result, RunRecord):
-                    raise TypeError("Native acquisition must return a RunRecord")
                 operation.metadata = replace(
                     operation.metadata,
                     finished_at=finished_at.isoformat(),

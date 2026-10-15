@@ -25,7 +25,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
     ParameterWriteback,
 )
-from zcu_tools.gui.app.measure.artifact_tracker import (
+from zcu_tools.gui.app.measure.artifacts import (
     ArtifactSectionSnapshot,
     ArtifactSnapshot,
     SaveStatus,
@@ -53,7 +53,7 @@ from zcu_tools.resources.entry import (
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.measure._form_fakes import configure_form_lookup, make_form
-from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
+from tests.gui.app.measure.artifacts._snapshots import ready_figures, with_artifacts
 from tests.gui.widgets.form._text_input import commit_text
 
 

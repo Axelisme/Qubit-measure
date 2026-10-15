@@ -3,6 +3,7 @@
 import json
 import threading
 from collections.abc import Generator
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -19,7 +20,7 @@ from zcu_tools.datafile import (
 from zcu_tools.experiment import RunRecord
 from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import SessionEnv
-from zcu_tools.gui.app.measure.artifact_tracker import (
+from zcu_tools.gui.app.measure.artifacts import (
     ArtifactSectionSnapshot,
     SaveStatus,
 )
@@ -58,8 +59,7 @@ from tests.gui.app.measure._native_save_support import (
     declare_panes,
 )
 from tests.gui.app.measure.remote._helpers import FixtureController
-
-from ._native_acquisition_support import RoleSavingAdapter
+from tests.gui.app.measure.services._native_acquisition_support import RoleSavingAdapter
 
 
 @pytest.mark.parametrize("failure", ["missing_cfg", "invalid_shape"])
@@ -557,22 +557,21 @@ def test_save_encoding_and_io_complete_on_owner_with_member_failure_isolation(
 ) -> None:
     from matplotlib.figure import Figure
     from zcu_tools.experiment.artifacts import saving as artifact_saving
-    from zcu_tools.gui.app.measure.services import save as saving
 
     session = native_session
     plots = declare_panes(session)
     owner_id = threading.get_ident()
     encoded: list[Figure] = []
     io_threads: list[int] = []
-    render = saving.render_save_figure_png
+    render = Figure.savefig
     native_write = artifact_saving.save_run_data
 
-    def encode(figure: Figure) -> bytes:
+    def encode(figure: Figure, sink: BytesIO, *, format: str, dpi: float) -> None:
         assert threading.get_ident() == owner_id
         encoded.append(figure)
         if figure is plots["fit"]:
             raise RuntimeError("encoder failed")
-        return render(figure)
+        render(figure, sink, format=format, dpi=dpi)
 
     def write(
         destination: Path,
@@ -593,7 +592,7 @@ def test_save_encoding_and_io_complete_on_owner_with_member_failure_isolation(
             extensions=extensions,
         )
 
-    monkeypatch.setattr(saving, "render_save_figure_png", encode)
+    monkeypatch.setattr(Figure, "savefig", encode)
     monkeypatch.setattr(artifact_saving, "save_run_data", write)
     completed = session.save_artifacts()
     assert encoded == [plots["fit"], plots["residual"]]
@@ -803,7 +802,7 @@ def test_tab_snapshot_reads_committed_sections_without_payload_or_path_planning(
 
     monkeypatch.setattr(SaveLayout, "outputs", forbidden)
     monkeypatch.setattr(
-        session.state.get_tab("tab").adapter, "capture_analysis_document", forbidden
+        session.state.get_tab("tab").adapter, "analysis_item", forbidden
     )
     tab_service = TabService(
         session.state,
