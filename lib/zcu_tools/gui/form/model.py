@@ -45,6 +45,23 @@ type FormValue = (
 """Ordinary evaluated data, including whole sequences and their nested values."""
 
 
+class FormPathError(ValueError):
+    """A requested model-field path is unknown or structurally unreachable.
+
+    path is the full requested tuple of model-field names, not only the prefix
+    where traversal failed. message explains an unknown field, inactive branch
+    or traversal into a whole leaf. FormState.describe and run_command raise
+    this type for these request errors. Other declaration, source and command
+    failures keep their original exception types. Catch ValueError to include
+    this category, or FormPathError to handle only correctable path requests.
+    """
+
+    def __init__(self, path: FormWritePath, message: str) -> None:
+        """Store the full requested path and use message as the exception text."""
+        super().__init__(message)
+        self.path = path
+
+
 @dataclass(frozen=True)
 class Display:
     """Presentation metadata carried by Annotated fields.
@@ -437,12 +454,15 @@ class FormState[F: FormModel]:
         path is a tuple of field names, () for root. env is the host's fixed
         capture for choices/options hooks. Return detached named metadata, not
         JSON Schema or evaluated values. Children have full paths and no
-        descendants; a selected option's lone ordinary model wrapper flattens
-        one display layer without introducing a path alias. Ordinary missing
+        descendants. Each field's can_expand reports structural reachability
+        without calling child hooks, not a promise of nonempty children. A
+        selected option's lone ordinary model wrapper flattens one display
+        layer without introducing a path alias. Ordinary missing
         models retain declared fields. Disabled nullable models and unmatched
         options expose metadata only, never guessed defaults. Unknown paths,
-        inactive descendants and traversal into whole leaves raise ValueError
-        naming the path; unsupported declarations also raise ValueError.
+        inactive descendants and traversal into whole leaves raise FormPathError
+        with the full requested path. Unsupported declarations and other
+        non-path failures keep their original exception types.
         Does not validate, evaluate expressions, call defaults, read sources
         outside declaration hooks, mutate input/base or notify subscribers.
         """
@@ -455,9 +475,11 @@ class FormState[F: FormModel]:
 
         path addresses the option field; name is a command identifier from
         its effective description options. Resolve declarations with the same fixed
-        env used by the host for writes and sources. Unknown paths, missing
-        current input, no matching option or unavailable commands raise
-        ValueError, never silently do nothing. The callable returns partial
+        env used by the host for writes and sources. Unknown paths, inactive
+        descendants and whole-leaf traversal raise FormPathError with the full
+        requested path. Missing current input, no matching option or unavailable
+        commands raise ValueError, never silently do nothing. Other failures
+        keep their original exception types. The callable returns partial
         input for path; install it through one atomic write and notify once.
         Callable/source/structural failures leave state unchanged; ordinary
         validation failures remain drafts for result/preview. No refresh,
