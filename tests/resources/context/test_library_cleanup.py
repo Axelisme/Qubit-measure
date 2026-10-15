@@ -126,7 +126,7 @@ def test_container_and_orphan_errors_do_not_backup_even_with_bad_specs(
     path = tmp_path / "module_cfg.yaml"
     path.write_text(HEADER + content + "\n")
     original = path.read_bytes()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="components|provenance|[Ss]ource|[Ii]nvalid"):
         open_library(path)
     assert path.read_bytes() == original
     assert backups(path) == []
@@ -188,7 +188,7 @@ def test_cleanup_io_failure_retains_disk_and_published_snapshot(
         monkeypatch.setattr(Path, "open", fail_backup)
     else:
         monkeypatch.setattr(os, "replace", fail_replace)
-    with pytest.raises(OSError):
+    with pytest.raises(OSError, match="denied"):
         library.refresh()
     assert path.read_bytes() == original
     assert library.snapshot().waveform_keys() == ()
@@ -232,6 +232,14 @@ def test_ledger_failures_are_not_entry_rejections(
     assert backups(path) == []
 
 
+def _write_invalid_source(library: ModuleLibrary) -> None:
+    with library.edit() as draft:
+        draft.set_waveform("Q1.waveforms.new", ConstWaveformCfg(length=0.2))
+        draft.accept_source(
+            "Q1.waveforms.new", provenance=Provenance("absent", None, None, "now", None)
+        )
+
+
 def test_edit_cleanup_persists_even_when_new_draft_source_is_rejected(
     tmp_path: Path,
 ) -> None:
@@ -239,11 +247,8 @@ def test_edit_cleanup_persists_even_when_new_draft_source_is_rejected(
     path.write_text(HEADER)
     library = open_library(path)
     original = mixed(path)
-    with pytest.raises(ValueError), library.edit() as draft:
-        draft.set_waveform("Q1.waveforms.new", ConstWaveformCfg(length=0.2))
-        draft.accept_source(
-            "Q1.waveforms.new", provenance=Provenance("absent", None, None, "now", None)
-        )
+    with pytest.raises(ValueError, match="absent"):
+        _write_invalid_source(library)
     assert backups(path)[0].read_bytes() == original
     assert open_library(path).snapshot().waveform_keys() == ("Q1.waveforms.pi_half",)
     assert library.snapshot().waveform_keys() == ()
@@ -297,6 +302,7 @@ def _locked_reader(path: Path, connection: Connection, operation: str) -> None:
                     pass
         connection.send("done")
     except Exception as exc:
+        logging.exception("Locked reader failed")
         connection.send(repr(exc))
     finally:
         connection.close()
