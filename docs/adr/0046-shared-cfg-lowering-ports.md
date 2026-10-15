@@ -1,10 +1,11 @@
 ---
-status: accepted
+status: superseded
 ---
 
 # 0046 — Shared cfg lowering ports
 
-**狀態：** accepted（2026-07-10）。
+**狀態：** superseded。舊 lowering ports 已移除，Form 生成與持久 Spec 提交見 [[0065]]、[[0073]]。以下正文保留歷史設計，不是現行契約。
+
 **關聯：** [[0011]]、[[0062]]、[[0045]]、[[0051]]。
 
 ## 背景

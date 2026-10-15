@@ -1,6 +1,5 @@
 """Sample proposals and original cause projection through existing wire methods."""
 
-from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -8,20 +7,12 @@ import pytest
 from pydantic import TypeAdapter
 from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.gui.app.measure import adapter as proposals
-from zcu_tools.gui.app.measure.services.ports import (
-    AnalysisPaneSnapshot,
-    CfgEdit,
-    CfgEditorPort,
-    CfgEditResult,
-    TabSnapshot,
-)
+from zcu_tools.gui.app.measure.services.ports import AnalysisPaneSnapshot, TabSnapshot
 from zcu_tools.gui.app.measure.services.writeback import (
     WritebackDraft,
     WritebackEdit,
     WritebackService,
 )
-from zcu_tools.gui.cfg import CfgSchema
-from zcu_tools.gui.cfg.binding import CfgDraft, SettableTarget
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
@@ -34,39 +25,11 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
-from zcu_tools.gui.session.types import ParameterContext, SessionEnv
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from ._helpers import dispatch_handler
-
-
-class NoCfgEditors(CfgEditorPort):
-    """The parameter/sample tests do not open cfg-editor sessions."""
-
-    def open_seeded(
-        self,
-        seed: CfgSchema,
-        *,
-        parameters: ParameterContext | None,
-        gc: bool = False,
-        owner_key: str | None = None,
-    ) -> tuple[str, tuple[SettableTarget, ...]]:
-        raise AssertionError("unexpected cfg editor")
-
-    def teardown(self, editor_id: str, *, reason: str = "discarded") -> None:
-        raise AssertionError("unexpected cfg teardown")
-
-    def get_draft(self, editor_id: str) -> CfgDraft:
-        raise AssertionError("unexpected cfg draft")
-
-    def set_field(self, editor_id: str, path: str, value: object) -> CfgEditResult:
-        raise AssertionError("unexpected cfg edit")
-
-    def set_fields(
-        self, editor_id: str, edits: Sequence[CfgEdit], *, agent_edit: bool = False
-    ) -> CfgEditResult:
-        raise AssertionError("unexpected cfg edits")
 
 
 class RejectingContext(ContextService):
@@ -176,7 +139,9 @@ def test_sample_write_receipt_reads_latest_jsonl_before_and_after_at_fixed_point
 ) -> None:
     entry, context = context_at(tmp_path)
     context.set_alias_rows((AliasRow("flux_dev", "bias_at_run"),))
-    service = WritebackService(NoCfgEditors(), ContextControlFacet(context=context))
+    service = WritebackService(
+        ContextControlFacet(context=context), arb_names=lambda: ()
+    )
     draft = service.create_draft(
         [proposals.SampleWriteback("Q1", "sample", proposed_value={"t1_us": 20.09})],
         parameters=context.read_context(),
@@ -244,7 +209,9 @@ def test_sample_preview_selection_and_apply_use_run_device_snapshot(
     entry, context = context_at(tmp_path)
     context.set_alias_rows((AliasRow("flux_dev", "bias_at_run"),))
     capture = context.read_context()
-    service = WritebackService(NoCfgEditors(), ContextControlFacet(context=context))
+    service = WritebackService(
+        ContextControlFacet(context=context), arb_names=lambda: ()
+    )
     draft = service.create_draft(
         [
             proposals.ParameterWriteback(
@@ -300,7 +267,6 @@ def test_sample_preview_selection_and_apply_use_run_device_snapshot(
     assert receipt["written"] == {
         "parameter": [],
         "ml_modules": [],
-        "ml_waveforms": [],
         "samples": ["Q1"],
     }
     assert entry.use_point("a").description is None
@@ -338,7 +304,9 @@ def test_sample_omission_reason_is_projected_without_a_sample(
     _entry, context = context_at(tmp_path)
     if bound:
         context.set_alias_rows((AliasRow("flux_dev", "bias_at_run"),))
-    service = WritebackService(NoCfgEditors(), ContextControlFacet(context=context))
+    service = WritebackService(
+        ContextControlFacet(context=context), arb_names=lambda: ()
+    )
     draft = service.create_draft(
         [
             proposals.SampleWriteback(
@@ -366,7 +334,9 @@ def test_sample_omission_reason_is_projected_without_a_sample(
 
 def test_partial_failure_preserves_expected_cause_wire_category(tmp_path: Path) -> None:
     entry, context = context_at(tmp_path, rejecting=True)
-    service = WritebackService(NoCfgEditors(), ContextControlFacet(context=context))
+    service = WritebackService(
+        ContextControlFacet(context=context), arb_names=lambda: ()
+    )
     draft = service.create_draft(
         [
             proposals.ParameterWriteback(

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
+from pydantic import JsonValue
 from qtpy.QtCore import Qt, Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QApplication,
@@ -29,17 +30,18 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 from zcu_tools.gui.app.measure.adapter import (
     ModuleWriteback,
     ParameterWriteback,
-    WaveformWriteback,
     WritebackItem,
 )
-from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enhancer
-from zcu_tools.gui.widgets.cfg import CfgFormWidget
+from zcu_tools.gui.expected_error import ExpectedError
+from zcu_tools.gui.form import FormErrors, FormWritePath, WriteRejected
+from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
     from zcu_tools.gui.app.measure.services.writeback import WritebackValues
     from zcu_tools.gui.app.measure.services.writeback_control import WritebackPane
+    from zcu_tools.gui.session.library_entry import ModuleEntryForm
 
 logger = logging.getLogger(__name__)
 
@@ -291,6 +293,8 @@ class WritebackWidget(QWidget):
         self._items: list[WritebackItem] = []
         self._checks: dict[str, QCheckBox] = {}
         self._applied_states: dict[str, bool] = {}
+        self._invalid_modules: set[str] = set()
+        self._module_dialogs: dict[str, QDialog] = {}
 
         # 13 px ledger per spec — item rows show current → proposed.
         font = self.font()
@@ -388,15 +392,69 @@ class WritebackWidget(QWidget):
         unit=None adds no whitespace. Empty items clear the view. Items remain
         the persistent draft objects so checkbox and Edit commands use the same
         stable identities.
-        Local cfg editing may retain invalid input. Its row shows proposed as
+        Local module editing may retain invalid State input. Its row shows proposed as
         "Invalid configuration" and current/path as "Unavailable (invalid
         configuration)", while preserving selection and updating unapplied
         state. Repairing input restores owner preview facts. Valid preview
         target/source/I/O failures still propagate; invalid input never becomes
-        a missing value or an unmarked stale preview.
+        a missing value or an unmarked stale preview. Unparseable view text
+        also marks the row invalid and locks Apply while its dialog is open.
+        Closing drops that view text and restores the real State result, without
+        writing the library. State model/expression errors survive closing.
         """
         for item in items:
             values[item.session_id]
+        # Owner preview facts are valid. Only open views can still hold local
+        # parse errors; closed State errors must be repaired before this read.
+        self._invalid_modules.intersection_update(self._module_dialogs)
+        self._render_rows(items, values, unavailable_reasons=unavailable_reasons)
+
+    def refresh_module_validity(
+        self,
+        items: Sequence[WritebackItem],
+        *,
+        unavailable_reasons: tuple[str, ...] = (),
+    ) -> None:
+        """Reproject items when strict bulk preview rejects an invalid module.
+
+        items are the persistent pane items, as in populate. Read each module's
+        shared Form result, retaining open local errors. Invalid module rows keep
+        selection and Edit but show Invalid configuration with unavailable current
+        value/path. Read valid items through the service's single-item preview;
+        parameter/sample facts are unchanged. Rebuild rows without closing dialogs
+        or modifying drafts/library. unavailable_reasons follow the rows.
+        Form access, target/source and I/O failures propagate; no preview values
+        are fabricated and the bulk preview contract is not changed.
+        """
+        invalid: set[str] = set()
+        values: dict[str, WritebackValues] = {}
+        for item in items:
+            if isinstance(item, ModuleWriteback):
+                form = self._ctrl.get_writeback_item_form_for_pane(
+                    self._tab_id, self._pane, item.session_id
+                )
+                local_invalid = (
+                    item.session_id in self._module_dialogs
+                    and item.session_id in self._invalid_modules
+                )
+                if local_invalid or isinstance(form.result(), FormErrors):
+                    invalid.add(item.session_id)
+                    continue
+            values.update(
+                self._ctrl.writeback_control.get_writeback_values_for_pane(
+                    self._tab_id, self._pane, session_id=item.session_id
+                )
+            )
+        self._invalid_modules = invalid
+        self._render_rows(items, values, unavailable_reasons=unavailable_reasons)
+
+    def _render_rows(
+        self,
+        items: Sequence[WritebackItem],
+        values: Mapping[str, WritebackValues],
+        *,
+        unavailable_reasons: tuple[str, ...],
+    ) -> None:
         self._values = values
         self._hint.setVisible(True)
         self._apply_btn.setVisible(True)
@@ -422,6 +480,11 @@ class WritebackWidget(QWidget):
             row = self._make_row(item)
             self._rows_layout.addWidget(row)
             self._rows.append(row)
+            if (
+                isinstance(item, ModuleWriteback)
+                and item.session_id in self._invalid_modules
+            ):
+                self._refresh_cfg_item_preview(item, valid=False)
 
         for reason in unavailable_reasons:
             label = QLabel(f"⚠ {reason}")
@@ -434,7 +497,6 @@ class WritebackWidget(QWidget):
         self._update_responsive()
 
     def _make_row(self, item: WritebackItem) -> _WritebackRow:
-        fact = self._values[item.session_id]
         cb = QCheckBox()
         cb.setChecked(item.selected)
         cb.setToolTip(item.description)
@@ -450,8 +512,12 @@ class WritebackWidget(QWidget):
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
         )
         current_label.setWordWrap(False)
-        proposed_label, proposed_table = self._make_proposed_view(item, fact)
-        actual_path = QLabel(fact.actual_path)
+        proposed_label, proposed_table = self._make_proposed_view(item)
+        actual_path = QLabel(
+            "Unavailable (invalid configuration)"
+            if item.session_id in self._invalid_modules
+            else self._values[item.session_id].actual_path
+        )
         make_label_selectable(actual_path)
         actual_path.setObjectName("writebackActualPath")
         actual_path.setStyleSheet("color: #6b7688;")
@@ -466,7 +532,7 @@ class WritebackWidget(QWidget):
             cb=cb,
             current=current_label,
             proposed=proposed_label,
-            action=self._make_action(item, fact),
+            action=self._make_action(item),
             proposed_table=proposed_table,
             actual_path=actual_path,
         )
@@ -474,12 +540,12 @@ class WritebackWidget(QWidget):
         return row
 
     def _make_proposed_view(
-        self, item: WritebackItem, fact: WritebackValues
+        self, item: WritebackItem
     ) -> tuple[QLabel, QTableWidget | None]:
         proposed_label = _value_label(item, self._display_proposed(item, compact=True))
         proposed_label.setToolTip(self._display_proposed(item, compact=False))
         is_matrix = isinstance(item, ParameterWriteback) and _is_matrix_value(
-            fact.proposed
+            self._values[item.session_id].proposed
         )
         if is_matrix:
             proposed_label.setObjectName("writebackProposedChip")
@@ -494,27 +560,27 @@ class WritebackWidget(QWidget):
         )
         proposed_label.setWordWrap(False)
         table = None
-        if (
-            is_matrix
-            and isinstance(fact.proposed, (list, tuple))
-            and _should_show_table(fact.proposed)
-        ):
-            table = _make_matrix_table(fact.proposed)
+        if is_matrix:
+            proposed = self._values[item.session_id].proposed
+            if isinstance(proposed, (list, tuple)) and _should_show_table(proposed):
+                table = _make_matrix_table(proposed)
         return proposed_label, table
 
-    def _make_action(self, item: WritebackItem, fact: WritebackValues) -> QWidget:
+    def _make_action(self, item: WritebackItem) -> QWidget:
         if self._is_editable(item):
             button = QPushButton("Edit")
             button.setFixedSize(56, 26)
             button.clicked.connect(lambda _=False, it=item: self._edit_item(it))
             return button
         if isinstance(item, ParameterWriteback) and not _is_scalar_md_value(
-            fact.proposed
+            self._values[item.session_id].proposed
         ):
             button = QPushButton("Copy")
             button.setFixedSize(56, 26)
             button.clicked.connect(
-                lambda _=False, val=fact.proposed: self._copy_value(val)
+                lambda _=False, val=self._values[item.session_id].proposed: (
+                    self._copy_value(val)
+                )
             )
             return button
         placeholder = QLabel("")
@@ -556,7 +622,10 @@ class WritebackWidget(QWidget):
         self._refresh_apply_enabled()
 
     def _refresh_apply_enabled(self, *_: int) -> None:
-        self._apply_btn.setEnabled(any(cb.isChecked() for cb in self._checks.values()))
+        selected = {key for key, cb in self._checks.items() if cb.isChecked()}
+        self._apply_btn.setEnabled(
+            bool(selected) and not bool(selected & self._invalid_modules)
+        )
 
     def _on_apply_clicked(self) -> None:
         self.apply_requested.emit()
@@ -568,11 +637,7 @@ class WritebackWidget(QWidget):
             # — shown read-only, no Edit dialog (the scalar coercion can't parse a
             # matrix and the user does not hand-tune it).
             return _is_scalar_md_value(item.proposed_value)
-        if isinstance(item, ModuleWriteback):
-            return item.edit_schema is not None
-        if isinstance(item, WaveformWriteback):
-            return item.edit_schema is not None
-        return False
+        return isinstance(item, ModuleWriteback)
 
     def _get_applied_states(self) -> dict[str, bool]:
         getter = getattr(self._ctrl, "get_writeback_applied_for_pane", None)
@@ -601,6 +666,8 @@ class WritebackWidget(QWidget):
 
     def _display_current(self, item: WritebackItem, *, compact: bool) -> str:
         """Current value text: compact for the label, full for its tooltip."""
+        if item.session_id in self._invalid_modules:
+            return "Unavailable (invalid configuration)"
         values = self._values[item.session_id]
         if values.current is None:
             return "\u2014"
@@ -613,6 +680,8 @@ class WritebackWidget(QWidget):
 
     def _display_proposed(self, item: WritebackItem, *, compact: bool) -> str:
         """Proposed value (± stderr) text: compact for the label, full for its tooltip."""
+        if item.session_id in self._invalid_modules:
+            return "Invalid configuration"
         values = self._values[item.session_id]
         proposed = (
             _compact_value(values.proposed) if compact else _full_value(values.proposed)
@@ -644,11 +713,9 @@ class WritebackWidget(QWidget):
         actual_path.setText(fact.actual_path)
         self._refresh_item_applied_presentation(item, checkbox)
 
-    def _refresh_cfg_item_preview(
-        self, item: ModuleWriteback | WaveformWriteback, *, valid: bool
-    ) -> None:
-        # Incomplete edits belong to the attached model, not finished lowering.
+    def _refresh_cfg_item_preview(self, item: ModuleWriteback, *, valid: bool) -> None:
         if not valid:
+            self._invalid_modules.add(item.session_id)
             current_label, proposed_label, actual_path, checkbox = self._row_widgets[
                 item.session_id
             ]
@@ -656,14 +723,18 @@ class WritebackWidget(QWidget):
             proposed_label.setText("Invalid configuration")
             current_label.setText("Unavailable (invalid configuration)")
             actual_path.setText("Unavailable (invalid configuration)")
-            return
-        self._refresh_item_preview(item)
+            proposed_label.setToolTip("Invalid configuration")
+            current_label.setToolTip("Unavailable (invalid configuration)")
+        else:
+            self._invalid_modules.discard(item.session_id)
+            self._refresh_item_preview(item)
+        self._refresh_apply_enabled()
 
     def _edit_item(self, item: WritebackItem) -> None:
         if isinstance(item, ParameterWriteback):
             self._edit_md_item(item)
-        elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
-            self._edit_cfg_item(item)
+        elif isinstance(item, ModuleWriteback):
+            self._edit_module_item(item)
 
     def _edit_md_item(self, item: ParameterWriteback) -> None:
         dialog = QDialog(self)
@@ -720,13 +791,24 @@ class WritebackWidget(QWidget):
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.open()
 
-    def _edit_cfg_item(
-        self,
-        item: ModuleWriteback | WaveformWriteback,
+    def _edit_module_form(
+        self, session_id: str, edit: Callable[[ModuleEntryForm], None]
     ) -> None:
-        assert self._tab_id is not None
+        """Re-admit a write or option command and translate only expected refusals."""
         try:
-            draft = self._ctrl.get_writeback_item_draft_for_pane(
+            form = self._ctrl.get_writeback_item_form_for_pane(
+                self._tab_id, self._pane, session_id
+            )
+            edit(form)
+        except ExpectedError as exc:
+            raise WriteRejected(str(exc)) from exc
+
+    def _edit_module_item(
+        self,
+        item: ModuleWriteback,
+    ) -> None:
+        try:
+            form = self._ctrl.get_writeback_item_form_for_pane(
                 self._tab_id, self._pane, item.session_id
             )
         except Exception as exc:
@@ -736,6 +818,11 @@ class WritebackWidget(QWidget):
             QMessageBox.critical(self, "Unable to edit writeback", str(exc))
             return
 
+        existing = self._module_dialogs.get(item.session_id)
+        if existing is not None:
+            existing.raise_()
+            existing.activateWindow()
+            return
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Edit Config: {item.target_name}")
         dialog.setMinimumSize(560, 500)
@@ -746,61 +833,88 @@ class WritebackWidget(QWidget):
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
-        # target_name is the apply destination, decoupled from the stable
-        # session_id (ADR-0008) — editable so the user can retarget. Like the cfg
-        # edits below, a valid change applies immediately; a blank field is left
-        # on the previous name (revert on focus-out).
+        def write(batch: Mapping[FormWritePath, JsonValue]) -> None:
+            self._edit_module_form(
+                item.session_id, lambda form: form.state.write(batch, form.env)
+            )
+
+        def run_command(path: FormWritePath, name: str) -> None:
+            self._edit_module_form(
+                item.session_id,
+                lambda form: form.state.run_command(path, name, form.env),
+            )
+
+        editor = FormEditor(form.state, form.env, write=write, run_command=run_command)
+
+        def _refresh_preview(*_: object) -> None:
+            self._refresh_cfg_item_preview(
+                item,
+                valid=editor.errors() is None
+                and not isinstance(form.result(), FormErrors),
+            )
+
+        commit_name = self._add_module_target_row(layout, item, _refresh_preview)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(editor)
+        layout.addWidget(scroll, stretch=1)
+        editor.validity_changed.connect(_refresh_preview)
+        unsubscribe = form.state.subscribe(_refresh_preview)
+        dialog.destroyed.connect(unsubscribe)
+        self._module_dialogs[item.session_id] = dialog
+        _refresh_preview()
+        self._add_cfg_close_action(dialog, layout)
+
+        def _on_finished(*_: object) -> None:
+            if self._module_dialogs.get(item.session_id) is not dialog:
+                return
+            # Local unparsed text belongs to this view and is dropped on Close.
+            # Model/expression errors remain in the shared State. Neither writes.
+            try:
+                commit_name()
+            finally:
+                unsubscribe()
+                editor.validity_changed.disconnect(_refresh_preview)
+                editor.detach()
+                self._module_dialogs.pop(item.session_id)
+            self._refresh_cfg_item_preview(
+                item, valid=not isinstance(form.result(), FormErrors)
+            )
+
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.finished.connect(_on_finished)
+        dialog.open()
+
+    def _add_module_target_row(
+        self,
+        layout: QVBoxLayout,
+        item: ModuleWriteback,
+        refresh_preview: Callable[[], None],
+    ) -> Callable[[], None]:
+        """Add Apply-as; return its immediate commit action for Close.
+
+        Blank text reverts to the existing name. A changed nonblank name updates
+        the persistent item via its pane-qualified control and refreshes validity.
+        """
         name_row = QFormLayout()
         name_edit = QLineEdit(item.target_name)
         name_row.addRow("Apply as:", name_edit)
         layout.addLayout(name_row)
 
-        def _commit_name() -> None:
+        def commit_name() -> None:
             text = name_edit.text().strip()
             if not text:
-                name_edit.setText(item.target_name)  # revert, no blank target
+                name_edit.setText(item.target_name)
                 return
             if text == item.target_name:
                 return
-            assert self._tab_id is not None
             self._ctrl.set_writeback_item_for_pane(
-                self._tab_id,
-                self._pane,
-                item.session_id,
-                target_name=text,
+                self._tab_id, self._pane, item.session_id, target_name=text
             )
-            item.target_name = text
-            self._refresh_cfg_item_preview(item, valid=draft.is_valid())
+            refresh_preview()
 
-        name_edit.editingFinished.connect(_commit_name)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        form_widget = CfgFormWidget(
-            text_input_enhancer=make_value_source_input_enhancer(self._ctrl)
-        )
-        form_widget.attach(draft)
-
-        def _on_draft_changed(*_: object) -> None:
-            self._refresh_cfg_item_preview(item, valid=draft.is_valid())
-
-        draft.on_change.connect(_on_draft_changed)
-        scroll.setWidget(form_widget)
-        layout.addWidget(scroll, stretch=1)
-
-        self._add_cfg_close_action(dialog, layout)
-
-        def _on_finished(*_: object) -> None:
-            try:
-                _commit_name()
-            finally:
-                draft.on_change.disconnect(_on_draft_changed)
-                form_widget.detach()
-            self._refresh_cfg_item_preview(item, valid=draft.is_valid())
-
-        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dialog.finished.connect(_on_finished)
-        dialog.open()
+        name_edit.editingFinished.connect(commit_name)
+        return commit_name
 
     def _add_cfg_close_action(self, dialog: QDialog, layout: QVBoxLayout) -> None:
         """Append a Close action to the modal editor."""

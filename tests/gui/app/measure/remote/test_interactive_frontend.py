@@ -54,7 +54,7 @@ def mounted_fx(qapp, tmp_path):
         fixture.state.set_context(
             replace(fixture.state.session_env, soc=None, soccfg=None)
         )
-        window = MainWindow(fixture.ctrl)
+        window = MainWindow(fixture.ctrl, templates=lambda: {})
         fixture.ctrl.add_view(window)
         fixture.service.render_view = window
         fixture.start()

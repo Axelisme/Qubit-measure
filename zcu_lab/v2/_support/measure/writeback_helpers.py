@@ -8,12 +8,11 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
+from zcu_tools.cfg_model import module_spec_from_raw
 from zcu_tools.gui.app.measure.adapter import ModuleWriteback
-from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
-from zcu_tools.gui.cfg import CfgSchema
-from zcu_tools.program.v2.modules import PulseReadoutCfg
+from zcu_tools.program.v2.modules import AbsModuleCfg, PulseReadoutCfg
 
 from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
 
@@ -56,6 +55,39 @@ def _resolve_readout_dpm_values(
     return best_ro_freq, best_ro_gain, best_ro_length
 
 
+def module_writeback(
+    module: AbsModuleCfg,
+    *,
+    target: str,
+    description: str,
+    field_updates: Sequence[tuple[str, float]] = (),
+    role_id: str | None = None,
+) -> ModuleWriteback:
+    """Propose the persistent Spec of a Run-time module with fitted fields replaced.
+
+    module is a materialized module from the Run cfg snapshot and is not
+    modified; its child pulses and waveforms become inline Specs. Each
+    (dotted path, value) in field_updates replaces that field, for example
+    ("pulse_cfg.waveform.length", 1.2), before validation, so a swept source
+    value can be replaced by its fitted scalar. A path through a missing
+    section raises KeyError; a result that is not a valid persistent module
+    Spec raises ValueError. target, description and role_id fill the item.
+    """
+    raw: dict[str, Any] = module.to_dict()
+    for path, value in field_updates:
+        *sections, leaf = path.split(".")
+        node = raw
+        for section in sections:
+            node = node[section]
+        node[leaf] = value
+    return ModuleWriteback(
+        target_name=target,
+        description=description,
+        proposal=module_spec_from_raw(raw),
+        role_id=role_id,
+    )
+
+
 def pulse_readout_module_writeback_items(
     cfg_snapshot: _HasReadoutModules | None,
     *,
@@ -71,15 +103,12 @@ def pulse_readout_module_writeback_items(
     if not isinstance(readout_cfg, PulseReadoutCfg):
         return []
 
-    spec, value = module_cfg_to_value(readout_cfg)
-    for field_path, field_value in field_updates:
-        value.with_field(field_path, field_value)
-
     return [
-        ModuleWriteback(
-            target_name=target,
+        module_writeback(
+            readout_cfg,
+            target=target,
             description=desc,
-            edit_schema=CfgSchema(spec=spec, value=value),
+            field_updates=field_updates,
             role_id=role_id,
         )
     ]

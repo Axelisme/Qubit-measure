@@ -53,7 +53,6 @@ def test_remote_control_adapter_start_rolls_back_bind_error(qapp) -> None:
     assert len(adapter._bus_subs) == 0
     assert all(not bus._meta_subs.get(event_key) for event_key in EVENT_SERIALIZERS)
     assert all(not bus._subs.get(event_key) for event_key in EVENT_SERIALIZERS)
-    assert ctrl_mock.set_cfg_editor_change_listener.call_args_list[-1].args == (None,)
     ctrl_mock.add_diagnostic_sink.assert_called_once_with(adapter)
     ctrl_mock.remove_diagnostic_sink.assert_called_once_with(adapter)
 
@@ -136,6 +135,5 @@ def test_remote_control_adapter_start_rolls_back_advertise_error(qapp) -> None:
     assert len(adapter._bus_subs) == 0
     assert all(not bus._meta_subs.get(event_key) for event_key in EVENT_SERIALIZERS)
     assert all(not bus._subs.get(event_key) for event_key in EVENT_SERIALIZERS)
-    assert ctrl_mock.set_cfg_editor_change_listener.call_args_list[-1].args == (None,)
     ctrl_mock.add_diagnostic_sink.assert_called_once_with(adapter)
     ctrl_mock.remove_diagnostic_sink.assert_called_once_with(adapter)
