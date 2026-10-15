@@ -6,7 +6,9 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from pydantic import JsonValue
+from qtpy import QtCore
 from qtpy.QtCore import Qt, Signal  # type: ignore[attr-defined]
+from qtpy.QtGui import QPalette
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QApplication,
     QCheckBox,
@@ -34,6 +36,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.form import FormErrors, FormWritePath, WriteRejected
+from zcu_tools.gui.widgets import error_colour
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
@@ -353,6 +356,18 @@ class WritebackWidget(QWidget):
 
         self._refresh_apply_enabled()
 
+    def changeEvent(self, a0: QtCore.QEvent | None) -> None:
+        super().changeEvent(a0)
+        if a0 is not None and a0.type() == QtCore.QEvent.Type.PaletteChange:
+            for label in self.findChildren(QLabel, "writebackPreviewUnavailable"):
+                label.setPalette(self._error_palette())
+
+    def _error_palette(self) -> QPalette:
+        """Use the ledger's Window palette, not the transparent panel background."""
+        palette = QPalette()
+        palette.setColor(QPalette.ColorRole.WindowText, error_colour(self))
+        return palette
+
     def show_preview_unavailable(
         self, reason: str, *, unavailable_reasons: tuple[str, ...] = ()
     ) -> None:
@@ -370,7 +385,7 @@ class WritebackWidget(QWidget):
         make_label_selectable(label)
         label.setObjectName("writebackPreviewUnavailable")
         label.setTextFormat(Qt.TextFormat.PlainText)
-        label.setStyleSheet("color: #b00020;")
+        label.setPalette(self._error_palette())
         label.setWordWrap(True)
         self._rows_layout.insertWidget(0, label)
 

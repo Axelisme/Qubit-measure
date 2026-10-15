@@ -11,6 +11,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from qtpy.QtCore import Qt, Signal  # type: ignore[attr-defined]
+from qtpy.QtGui import QPalette
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QDoubleSpinBox,
     QHBoxLayout,
@@ -24,6 +25,7 @@ from zcu_tools.gui.session.expression import (
     coerce_eval_result,
     evaluate_numeric_expr,
 )
+from zcu_tools.gui.widgets import error_colour
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
@@ -226,7 +228,7 @@ class EvalNumericField(QWidget):
                 self._ghost.setToolTip(
                     f"out of range [{self._minimum}, {self._maximum}]"
                 )
-                self._ghost.setStyleSheet("color: red; font-style: italic;")
+                self._set_ghost_error_colour()
             else:
                 self._ghost.setText(text)
                 self._ghost.setToolTip("")
@@ -234,7 +236,16 @@ class EvalNumericField(QWidget):
         except Exception as exc:
             self._ghost.setText("= ?")
             self._ghost.setToolTip(str(exc))
-            self._ghost.setStyleSheet("color: red; font-style: italic;")
+            self._set_ghost_error_colour()
+
+    def _set_ghost_error_colour(self) -> None:
+        self._ghost.setStyleSheet("")
+        font = self._ghost.font()
+        font.setItalic(True)
+        self._ghost.setFont(font)
+        palette = QPalette()
+        palette.setColor(QPalette.ColorRole.WindowText, error_colour(self))
+        self._ghost.setPalette(palette)
 
     # ------------------------------------------------------------------
     # Context menu (right-click toggle)

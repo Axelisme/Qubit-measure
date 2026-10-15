@@ -10,6 +10,7 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from numpy.typing import NDArray
 from qtpy.QtCore import Qt, QTimer
+from qtpy.QtGui import QColor, QPalette
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -29,6 +30,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from zcu_tools.gui.widgets import error_colour
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.waveform_assets import (
     ArbWaveformData,
@@ -777,7 +779,10 @@ class ArbWaveformDialog(QDialog):
     def _set_warning(self, message: str, *, is_error: bool = True) -> None:
         # Error feedback is red; purely informational notices (e.g. the
         # no-recipe selection notice) use a non-alarming amber instead.
-        self._warning.setStyleSheet("color: red;" if is_error else "color: #b36b00;")
+        palette = QPalette()
+        color = error_colour(self) if is_error else QColor("#b36b00")
+        palette.setColor(QPalette.ColorRole.WindowText, color)
+        self._warning.setPalette(palette)
         self._warning.setText(message)
         self._warning.setVisible(bool(message))
 

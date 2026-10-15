@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from qtpy.QtCore import Qt, QUrl
-from qtpy.QtGui import QDesktopServices, QResizeEvent, QShowEvent
+from qtpy.QtGui import QColor, QDesktopServices, QPalette, QResizeEvent, QShowEvent
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -37,6 +37,7 @@ from zcu_tools.gui.session.context_types import (
     PointUseRequest,
 )
 from zcu_tools.gui.session.services.project_settings import ConnectionPreferences
+from zcu_tools.gui.widgets import error_colour
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.program import describe_soc
 
@@ -634,7 +635,11 @@ class SetupDialog(QDialog):
         self._clone_combo.setCurrentIndex(max(idx, 0))
 
     def _set_project_status(self, msg: str, *, error: bool = False) -> None:
-        self._show_status(self._project_status, msg, "red" if error else "green")
+        self._show_status(
+            self._project_status,
+            msg,
+            error_colour(self).name() if error else "green",
+        )
 
     def _set_project_hint(self, msg: str) -> None:
         self._show_status(self._project_status, msg, "gray")
@@ -643,7 +648,9 @@ class SetupDialog(QDialog):
     def _show_status(label: QLabel, msg: str, color: str) -> None:
         label.setText(_breakable(msg))
         label.setToolTip(msg)
-        label.setStyleSheet(f"color: {color};")
+        palette = QPalette()
+        palette.setColor(QPalette.ColorRole.WindowText, QColor(color))
+        label.setPalette(palette)
 
     # ------------------------------------------------------------------
     # Connection panel handlers
@@ -710,4 +717,8 @@ class SetupDialog(QDialog):
         self._cfg_text.setVisible(True)
 
     def _set_conn_status(self, msg: str, *, error: bool = False) -> None:
-        self._show_status(self._conn_status, msg, "red" if error else "green")
+        self._show_status(
+            self._conn_status,
+            msg,
+            error_colour(self).name() if error else "green",
+        )

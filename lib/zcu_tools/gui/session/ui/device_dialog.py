@@ -6,6 +6,7 @@ import logging
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from zcu_tools.gui.widgets import error_colour
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 logger = logging.getLogger(__name__)
@@ -15,7 +16,7 @@ _ACTIVITY_MARKER_COLOR = "#286ac7"
 _ACTIVITY_MARKER_TOOLTIP = "Apply in progress"
 
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
-from qtpy.QtGui import QColor  # type: ignore[attr-defined]
+from qtpy.QtGui import QColor, QPalette
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QComboBox,
     QDialog,
@@ -838,8 +839,7 @@ class DeviceDialog(QDialog):
             try:
                 parameters = self._parameter_provider()
             except Exception as exc:
-                self._add_status.setStyleSheet("color: red;")
-                self._add_status.setText(f"{name}: {exc}")
+                self._show_error(f"{name}: {exc}")
                 return None
             resolved_updates: dict[str, object] = {}
             for key, val in updates.items():
@@ -849,15 +849,13 @@ class DeviceDialog(QDialog):
                             evaluate_numeric_expr(val.expr, parameters), val.type_
                         )
                     except Exception as exc:
-                        self._add_status.setStyleSheet("color: red;")
-                        self._add_status.setText(f"{name}: field '{key}': {exc}")
+                        self._show_error(f"{name}: field '{key}': {exc}")
                         return None
                     # Bounds check: eval must respect the same inclusive range as
                     # the direct spinbox path — prevents e.g. rampstep=0 reaching
                     # the driver where it would cause ZeroDivisionError.
                     if not (val.minimum <= float(coerced) <= val.maximum):
-                        self._add_status.setStyleSheet("color: red;")
-                        self._add_status.setText(
+                        self._show_error(
                             f"{name}: field '{key}': value {coerced} out of range"
                             f" [{val.minimum}, {val.maximum}]"
                         )
@@ -870,6 +868,14 @@ class DeviceDialog(QDialog):
             resolved_updates = dict(updates)
 
         return resolved_updates
+
+    def _show_error(self, message: str) -> None:
+        # Palette foregrounds preserve the inherited Window used for theme selection.
+        self._add_status.setStyleSheet("")
+        palette = QPalette()
+        palette.setColor(QPalette.ColorRole.WindowText, error_colour(self))
+        self._add_status.setPalette(palette)
+        self._add_status.setText(message)
 
     def _on_device_changed(self, payload: DeviceChangedPayload) -> None:
         name = payload.name
@@ -886,8 +892,7 @@ class DeviceDialog(QDialog):
         if snapshot is None:
             return
         if snapshot.error is not None:
-            self._add_status.setStyleSheet("color: red;")
-            self._add_status.setText(snapshot.error)
+            self._show_error(snapshot.error)
         elif snapshot.status is DeviceStatus.CONNECTED:
             self._add_status.setStyleSheet("color: green;")
             self._add_status.setText(f"Connected {name}.")
