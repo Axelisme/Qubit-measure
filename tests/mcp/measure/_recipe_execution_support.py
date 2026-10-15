@@ -4,12 +4,13 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from threading import Event
 
+from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.recipe import (
     RecipeDefinition,
     RecipeGenerator,
     RecipeInputSchema,
 )
-from zcu_tools.mcp.measure.recipe_execution import RecipeExecutions
+from zcu_tools.mcp.measure.recipe_execution import RecipeExecution, RecipeExecutions
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 from ._recipe_support import ExecutionGui
@@ -73,3 +74,21 @@ class ControlledRunGui(ExecutionGui):
             self.settled.set()
             return {"status": "cancelling"}
         return super().__call__(method, params)
+
+
+def wait_for_event(event: Event) -> None:
+    """Observe a worker/RPC arrival after starting it or releasing its predecessor."""
+    # The caller has arranged this arrival; the deadline only diagnoses a stuck worker.
+    assert event.wait(30), "Worker did not reach the arranged handoff"
+
+
+def handoff(execution: RecipeExecution) -> ToolReply:
+    """Await a started recipe's next interactive/question delivery."""
+    # Start or the previous stage's release causes this local delivery.
+    return execution.wait(30)
+
+
+def completed(execution: RecipeExecution) -> ToolReply:
+    """Drain an unblocked recipe before reading its terminal local capture."""
+    execution.join()
+    return execution.wait(0)
