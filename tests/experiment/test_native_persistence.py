@@ -13,6 +13,7 @@ import pytest
 import zcu_tools.experiment as experiment_api
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 from zcu_tools.datafile import (
+    CfgSnapshot,
     DataVariable,
     LabberPayload,
     StoredRun,
@@ -538,6 +539,17 @@ def restorable_run(
     ), spec
 
 
+def incompatible_cfg(cfg: CfgSnapshot, issue: str) -> CfgSnapshot:
+    """Prepare the historical cfg defects shared by memory and file restore."""
+    if issue == "cfg_type":
+        return replace(cfg, cfg_type="RetiredCfg")
+    if issue == "schema":
+        return replace(cfg, schema_version="4.0")
+    if issue == "nested.count":
+        return replace(cfg, values={"nested": {"count": "bad"}})
+    raise ValueError(f"Unknown cfg defect: {issue}")
+
+
 @pytest.mark.parametrize("issue", [None, "cfg_type", "schema", "nested.count"])
 def test_restore_keeps_data_and_raw_history_when_typed_cfg_is_unavailable(
     restorable_run: tuple[
@@ -547,14 +559,8 @@ def test_restore_keeps_data_and_raw_history_when_typed_cfg_is_unavailable(
     issue: str | None,
 ) -> None:
     stored, spec = restorable_run
-    if issue == "cfg_type":
-        stored = replace(stored, cfg=replace(stored.cfg, cfg_type="RetiredCfg"))
-    elif issue == "schema":
-        stored = replace(stored, cfg=replace(stored.cfg, schema_version="4.0"))
-    elif issue == "nested.count":
-        stored = replace(
-            stored, cfg=replace(stored.cfg, values={"nested": {"count": "bad"}})
-        )
+    if issue is not None:
+        stored = replace(stored, cfg=incompatible_cfg(stored.cfg, issue))
     else:
         stored = replace(stored, cfg=replace(stored.cfg, schema_version="3.9"))
         stored.cfg.values["future"] = {"unknown": [1, None]}
@@ -591,13 +597,7 @@ def test_native_wrappers_share_cfg_fallback_and_keep_tuple_history(
     issue: str,
 ) -> None:
     stored, spec = restorable_run
-    cfg = stored.cfg
-    if issue == "cfg_type":
-        cfg = replace(cfg, cfg_type="RetiredCfg")
-    elif issue == "schema":
-        cfg = replace(cfg, schema_version="4.0")
-    else:
-        cfg = replace(cfg, values={"nested": {"count": "bad"}})
+    cfg = incompatible_cfg(stored.cfg, issue)
     path = tmp_path / "history.h5"
     save_run_data(path, stored.payload, stored.metadata, cfg=cfg)
     with pytest.warns(UserWarning, match=issue):
@@ -677,6 +677,114 @@ def test_restore_rejects_bad_data_before_downgrading_cfg(
         with pytest.raises((ValueError, TypeError)):
             experiment_api.restore_run(stored, spec=spec)
     assert caught == []
+
+
+class UnexpectedValidatorCfg(ExpCfgModel):
+    @model_validator(mode="before")
+    @classmethod
+    def fail_unexpectedly(cls, _data: object) -> object:
+        raise RuntimeError("unexpected typed cfg validator failure")
+
+
+@dataclass
+class RejectedResult(SingleResult):
+    def __post_init__(self) -> None:
+        raise ValueError("single constructor rejected data")
+
+
+@pytest.fixture
+def cfg_validator_failure_stored() -> StoredRun:
+    prepared = prepare_run_data(
+        RunRecord(
+            cfg=NativeCfg(),
+            result=SingleResult(np.array([4000.0]), np.array([1j])),
+        ),
+        spec=SINGLE,
+        comment="historical",
+    )
+    return StoredRun(
+        payload=prepared.payload,
+        metadata=native_metadata(SINGLE.tag),
+        cfg=replace(prepared.cfg, cfg_type=UnexpectedValidatorCfg.__name__),
+        extensions=None,
+    )
+
+
+@pytest.mark.parametrize(
+    "rejection",
+    [
+        "single_constructor",
+        "grouped_builder",
+        "grouped_result_type",
+        "grouped_validator",
+    ],
+)
+def test_restore_result_rejection_precedes_typed_cfg_validation(
+    cfg_validator_failure_stored: StoredRun, rejection: str
+) -> None:
+    def build(data: GroupedLoadData[UnexpectedValidatorCfg]) -> SingleResult:
+        if rejection == "grouped_builder":
+            raise ValueError("grouped builder rejected data")
+        variable = data.variable("resonator")
+        return SingleResult(variable.axes[0], variable.z)
+
+    def validate(result: SingleResult) -> None:
+        raise ValueError("grouped validator rejected data")
+
+    spec: (
+        AxesSpec[SingleResult, UnexpectedValidatorCfg]
+        | GroupedAxesSpec[SingleResult, UnexpectedValidatorCfg]
+    )
+    if rejection == "single_constructor":
+        spec = AxesSpec(
+            axes=SINGLE.axes,
+            z=SINGLE.z,
+            result_type=RejectedResult,
+            cfg_type=UnexpectedValidatorCfg,
+            tag=SINGLE.tag,
+            data_variable=SINGLE.data_variable,
+            cfg_schema_version=SINGLE.cfg_schema_version,
+        )
+        error_type, message = ValueError, "single constructor rejected data"
+    else:
+        spec = GroupedAxesSpec(
+            variables=(GROUPED.variables[0],),
+            result_type=RejectedResult
+            if rejection == "grouped_result_type"
+            else SingleResult,
+            cfg_type=UnexpectedValidatorCfg,
+            tag=SINGLE.tag,
+            result_builder=build,
+            result_validator=validate if rejection == "grouped_validator" else None,
+            cfg_schema_version=SINGLE.cfg_schema_version,
+        )
+        error_type = TypeError if rejection == "grouped_result_type" else ValueError
+        message = {
+            "grouped_builder": "grouped builder rejected data",
+            "grouped_result_type": "builder must return RejectedResult",
+            "grouped_validator": "grouped validator rejected data",
+        }[rejection]
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with pytest.raises(error_type, match=message):
+            experiment_api.restore_run(cfg_validator_failure_stored, spec=spec)
+    assert caught == []
+
+
+def test_restore_valid_data_propagates_unexpected_cfg_validator_failure(
+    restorable_run: tuple[
+        StoredRun,
+        AxesSpec[SingleResult, NativeCfg] | GroupedAxesSpec[SingleResult, NativeCfg],
+    ],
+) -> None:
+    stored, spec = restorable_run
+    stored = replace(
+        stored, cfg=replace(stored.cfg, cfg_type=UnexpectedValidatorCfg.__name__)
+    )
+    with pytest.raises(RuntimeError, match="unexpected typed cfg validator failure"):
+        experiment_api.restore_run(
+            stored, spec=replace(spec, cfg_type=UnexpectedValidatorCfg)
+        )
 
 
 @pytest.mark.parametrize("defect", ["missing", "json", "envelope"])
