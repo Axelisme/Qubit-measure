@@ -2,7 +2,7 @@
 
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from threading import Event
+from threading import Event, Timer
 
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.recipe import (
@@ -10,7 +10,11 @@ from zcu_tools.mcp.measure.recipe import (
     RecipeGenerator,
     RecipeInputSchema,
 )
-from zcu_tools.mcp.measure.recipe_execution import RecipeExecution, RecipeExecutions
+from zcu_tools.mcp.measure.recipe_execution import (
+    TERMINAL_STATUSES,
+    RecipeExecution,
+    RecipeExecutions,
+)
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 from ._recipe_support import ExecutionGui
@@ -89,6 +93,28 @@ def handoff(execution: RecipeExecution) -> ToolReply:
 
 
 def completed(execution: RecipeExecution) -> ToolReply:
-    """Drain an unblocked recipe before reading its terminal local capture."""
-    execution.join()
-    return execution.wait(0)
+    """Return the captured reply once public progress is terminal.
+
+    The caller must arrange every external release needed for completion, including
+    interactive stages. Transient handoffs may still be visible while they settle.
+    An independent 30s watchdog raises with the last nonterminal status if the
+    recipe stalls or reaches an unexpected handoff. It never closes the execution;
+    the caller's registry/session lifetime remains responsible for close and drain.
+    """
+    expired = Event()
+    # The caller's arranged releases cause completion; this timer only guards deadlock.
+    watchdog = Timer(30, expired.set)
+    try:
+        watchdog.start()
+        status = execution.snapshot().status
+        while status not in TERMINAL_STATUSES:
+            assert not expired.is_set(), (
+                f"Recipe stalled at nonterminal status: {status}"
+            )
+            # Yield CPU only; neither this return value nor a sample count proves completion.
+            expired.wait(0.01)
+            status = execution.snapshot().status
+        return execution.wait(0)
+    finally:
+        watchdog.cancel()
+        watchdog.join()

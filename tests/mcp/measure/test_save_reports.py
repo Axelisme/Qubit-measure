@@ -538,6 +538,5 @@ def test_cancel_does_not_suppress_sync_save_or_run_preview(
             assert "tab.get_figure" in methods
             assert "tab.analyze" not in methods
         finally:
+            # Unblock the responder before the enclosing session closes and drains workers.
             release.set()
-            # Drain the released worker before closing its session, including on assertion failure.
-            client.context.session.recipes.join()

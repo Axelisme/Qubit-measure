@@ -396,11 +396,16 @@ def test_socket_reader_preserves_fragmented_frames_and_parked_pushes(qapp):
     reader, writer = socket.socketpair()
     with reader, writer:
         reset_inbox(reader)
-        writer.sendall(b'\n{"event":"notice","payload":1}\n{"id":"one","ok":')
-        QTimer.singleShot(0, lambda: writer.sendall(b'true}\n{"id":"two","ok":true}\n'))
-        assert recv_response(reader, "one") == {"id": "one", "ok": True}
-        assert recv_push(reader, "notice") == {"event": "notice", "payload": 1}
-        assert recv_response(reader, "two") == {"id": "two", "ok": True}
+        try:
+            writer.sendall(b'\n{"event":"notice","payload":1}\n{"id":"one","ok":')
+            QTimer.singleShot(
+                0, lambda: writer.sendall(b'true}\n{"id":"two","ok":true}\n')
+            )
+            assert recv_response(reader, "one") == {"id": "one", "ok": True}
+            assert recv_push(reader, "notice") == {"event": "notice", "payload": 1}
+            assert recv_response(reader, "two") == {"id": "two", "ok": True}
+        finally:
+            reset_inbox(reader)
 
 
 @pytest.mark.requires_loopback
@@ -408,10 +413,13 @@ def test_socket_reader_reports_eof_before_matching_frame(qapp):
     reader, writer = socket.socketpair()
     with reader, writer:
         reset_inbox(reader)
-        writer.sendall(b'{"id":"incomplete"')
-        writer.shutdown(socket.SHUT_WR)
-        with pytest.raises(AssertionError, match="peer closed"):
-            recv_response(reader, "incomplete")
+        try:
+            writer.sendall(b'{"id":"incomplete"')
+            writer.shutdown(socket.SHUT_WR)
+            with pytest.raises(AssertionError, match="peer closed"):
+                recv_response(reader, "incomplete")
+        finally:
+            reset_inbox(reader)
 
 
 @pytest.mark.requires_loopback
@@ -422,6 +430,9 @@ def test_socket_reader_propagates_matcher_failure(qapp):
     reader, writer = socket.socketpair()
     with reader, writer:
         reset_inbox(reader)
-        writer.sendall(b'{"id":"one"}\n')
-        with pytest.raises(ValueError, match="matcher failed"):
-            recv_until(reader, broken_matcher)
+        try:
+            writer.sendall(b'{"id":"one"}\n')
+            with pytest.raises(ValueError, match="matcher failed"):
+                recv_until(reader, broken_matcher)
+        finally:
+            reset_inbox(reader)
