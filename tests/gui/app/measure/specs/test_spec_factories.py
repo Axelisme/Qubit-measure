@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import cast
-
 from zcu_tools.gui.app.measure.specs import (
     make_pulse_readout_spec,
     make_pulse_spec,
@@ -12,17 +10,15 @@ from zcu_tools.gui.app.measure.specs import (
 from zcu_tools.gui.cfg import ReferenceSpec
 
 
-def test_pulse_readout_factory_returns_fresh_nested_specs():
+def test_pulse_readout_factory_returns_fresh_waveform_specs():
     first = make_pulse_readout_spec()
     second = make_pulse_readout_spec()
-
-    first_pulse = first.fields["pulse_cfg"]
-    second_pulse = second.fields["pulse_cfg"]
-    assert first_pulse is not second_pulse
-
-    first_ro = first.fields["ro_cfg"]
-    second_ro = second.fields["ro_cfg"]
-    assert first_ro is not second_ro
+    first_waveform = first.fields["waveform"]
+    second_waveform = second.fields["waveform"]
+    assert isinstance(first_waveform, ReferenceSpec)
+    assert isinstance(second_waveform, ReferenceSpec)
+    assert first_waveform is not second_waveform
+    assert first_waveform.allowed[0] is not second_waveform.allowed[0]
 
 
 def test_waveform_style_factory_returns_expected_fresh_shape():
@@ -39,7 +35,9 @@ def test_pulse_factory_embeds_fresh_waveform_allowed_specs():
     first = make_pulse_spec()
     second = make_pulse_spec()
 
-    first_waveform = cast(ReferenceSpec, first.fields["waveform"])
-    second_waveform = cast(ReferenceSpec, second.fields["waveform"])
+    first_waveform = first.fields["waveform"]
+    assert isinstance(first_waveform, ReferenceSpec)
+    second_waveform = second.fields["waveform"]
+    assert isinstance(second_waveform, ReferenceSpec)
     assert first_waveform is not second_waveform
     assert first_waveform.allowed[0] is not second_waveform.allowed[0]

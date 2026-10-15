@@ -73,14 +73,6 @@ _ROOT_PULSE = {
     "pre_delay": None,
     "post_delay": None,
 }
-_NEUTRAL_DIRECT_READOUT = {
-    "type": "readout/direct",
-    "ro_ch": 0,
-    "ro_freq": 0.0,
-    "ro_length": 0.0,
-    "trig_offset": 0.0,
-    "gen_ch": None,
-}
 _PULSE_REFERENCE = {
     "chosen_key": "<Custom:Pulse>",
     "value": _NEUTRAL_PULSE,
@@ -93,23 +85,14 @@ _PULSE_REFERENCE = {
         ("module", {"type": "pulse"}, _ROOT_PULSE),
         (
             "module",
-            {"type": "readout/direct"},
-            {
-                "type": "readout/direct",
-                "ro_ch": 0,
-                "ro_freq": None,
-                "ro_length": None,
-                "trig_offset": None,
-                "gen_ch": None,
-            },
-        ),
-        (
-            "module",
             {"type": "readout/pulse"},
             {
+                **{key: value for key, value in _ROOT_PULSE.items() if key != "ch"},
                 "type": "readout/pulse",
-                "pulse_cfg": _NEUTRAL_PULSE,
-                "ro_cfg": _NEUTRAL_DIRECT_READOUT,
+                "gen_ch": None,
+                "ro_ch": 0,
+                "ro_length": None,
+                "trig_offset": None,
             },
         ),
         ("module", {"type": "reset/none"}, {"type": "reset/none"}),
@@ -223,16 +206,10 @@ def test_program_module_missing_defaults_are_complete(discriminator: str) -> Non
         assert isinstance(waveform, ReferenceValue)
         assert parse_custom_reference_key(waveform.chosen_key) == "Const"
         assert waveform.value.fields["length"] == DirectValue(0.0)
-    elif discriminator == "readout/direct":
-        assert value.fields["ro_ch"] == DirectValue(0)
-        assert value.fields["ro_freq"] == DirectValue(None)
     elif discriminator == "readout/pulse":
-        pulse = value.fields["pulse_cfg"]
-        readout = value.fields["ro_cfg"]
-        assert isinstance(pulse, CfgSectionValue)
-        assert isinstance(readout, CfgSectionValue)
-        assert pulse.fields["freq"] == DirectValue(0.0)
-        assert readout.fields["ro_freq"] == DirectValue(0.0)
+        assert value.fields["ro_ch"] == DirectValue(0)
+        assert value.fields["freq"] == DirectValue(None)
+        assert value.fields["ro_length"] == DirectValue(None)
 
 
 @pytest.mark.parametrize(
@@ -316,6 +293,33 @@ def test_program_materializer_rejects_legal_module_outside_policy_subset() -> No
     )
 
     with pytest.raises(RuntimeError) as exc_info:
-        materialize_program_module({"type": "readout/direct"}, policy)
+        materialize_program_module({"type": "reset/pulse"}, policy)
 
-    assert str(exc_info.value) == "Unsupported module type 'readout/direct'"
+    assert str(exc_info.value) == "Unsupported module type 'reset/pulse'"
+
+
+def test_flat_readout_materialization_preserves_authored_generator_and_adc_fields() -> (
+    None
+):
+    spec, value = materialize_program_module(
+        {
+            "type": "readout/pulse",
+            "gen_ch": 2,
+            "ro_ch": 3,
+            "nqz": 1,
+            "freq": 525.0,
+            "gain": 0.3,
+            "ro_length": 1.5,
+            "trig_offset": 0.2,
+            "waveform": {"style": "const", "length": 0.4},
+        },
+        _POLICY,
+    )
+    _assert_spec_value_shape(spec, value)
+    assert value.fields["gen_ch"] == DirectValue(2)
+    assert value.fields["ro_ch"] == DirectValue(3)
+    assert value.fields["freq"] == DirectValue(525.0)
+    assert value.fields["ro_length"] == DirectValue(1.5)
+    waveform = value.fields["waveform"]
+    assert isinstance(waveform, ReferenceValue)
+    assert waveform.value.fields["length"] == DirectValue(0.4)

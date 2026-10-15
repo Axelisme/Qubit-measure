@@ -403,6 +403,47 @@ def test_tagged_waveform_name_is_key_only_in_schema_result_defaults_and_restore(
     assert result_spec(form, restored, env).waveform == "$missing.value"
 
 
+@pytest.mark.parametrize("missing", ["gen_ch", "ro_ch"])
+def test_flat_readout_requires_explicit_channels(missing: str) -> None:
+    form = form_adapter.module_form(PulseReadoutSpec)
+    env = FormEnv()
+    data = form.input_from_spec(writeback_proposal(), env).data
+    data.pop(missing)
+    state = FormState(FormInput(form.model, data))
+
+    errors = state.result(env)
+
+    assert isinstance(errors, FormErrors)
+    assert errors.messages == {(missing,): "Field required"}
+
+
+def test_flat_readout_edits_generator_and_adc_without_expanding_waveform_key() -> None:
+    form = form_adapter.module_form(PulseReadoutSpec)
+    env = FormEnv()
+    source = writeback_proposal()
+    state = FormState(form.input_from_spec(source, env))
+    state.write(
+        {
+            ("gen_ch",): 2,
+            ("ro_ch",): 4,
+            ("freq",): {"expr": "500 + 25"},
+            ("gain",): 0.3,
+            ("ro_length",): 1.5,
+            ("trig_offset",): 0.2,
+            ("waveform",): {"kind": "ref", "name": "Q.waveforms.ramp"},
+        },
+        env,
+    )
+
+    cfg = result_spec(form, state, env)
+
+    assert (cfg.gen_ch, cfg.ro_ch, cfg.freq, cfg.gain) == (2, 4, 525.0, 0.3)
+    assert (cfg.ro_length, cfg.trig_offset) == (1.5, 0.2)
+    assert cfg.waveform == "Q.waveforms.ramp"
+    assert cfg.desc is None
+    assert source == writeback_proposal()
+
+
 def test_spec_root_tag_is_hidden_and_remains_in_input() -> None:
     form = form_adapter.module_form(PulseSpec)
     env = FormEnv()

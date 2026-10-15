@@ -45,7 +45,6 @@ def test_catalog_has_exact_ordered_closed_vocabulary() -> None:
         (shape.discriminator, shape.label) for shape in PROGRAM_SHAPES.modules()
     ] == [
         ("pulse", "Pulse"),
-        ("readout/direct", "Direct Readout"),
         ("readout/pulse", "Pulse Readout"),
         ("reset/none", "None Reset"),
         ("reset/pulse", "Pulse Reset"),
@@ -78,7 +77,7 @@ def test_catalog_singleton_rejects_internal_collection_reassignment(
         (
             "module",
             "unknown",
-            "pulse, readout/direct, readout/pulse, reset/none, reset/pulse, "
+            "pulse, readout/pulse, reset/none, reset/pulse, "
             "reset/two_pulse, reset/bath",
         ),
         (
@@ -247,7 +246,7 @@ def test_pulse_root_label_override_does_not_create_another_shape() -> None:
     assert pulse_shape.label == "Pulse"
 
 
-def test_cross_app_specs_differ_only_by_two_policy_fields() -> None:
+def test_cross_app_specs_differ_only_by_arb_choices_source() -> None:
     for shape in (*PROGRAM_SHAPES.modules(), *PROGRAM_SHAPES.waveforms()):
         main = shape.make_spec(_MAIN_POLICY)
         autoflux = shape.make_spec(_AUTOFLUX_POLICY)
