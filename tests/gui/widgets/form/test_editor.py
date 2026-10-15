@@ -182,7 +182,7 @@ def test_direct_numeric_and_expression_controls_write_only_parsed_input(
     result = state.result(env)
     assert isinstance(result, SampleForm)
     assert result.amount == 2.0
-    assert float(label(editor, "form.value.amount").text()) == 2.0
+    assert label(editor, "form.value.amount").text() == "= 2.0"
     assert editor.local_parse_errors() is None
     assert editor.errors() is None
 
@@ -412,7 +412,7 @@ def test_refresh_changes_choices_and_evaluation_without_writing_state(
     editor.refresh(environment(8.0))
     assert state.input.data == before
     assert notices == []
-    assert float(label(editor, "form.value.amount").text()) == 8.0
+    assert label(editor, "form.value.amount").text() == "= 8.0"
     errors = editor.errors()
     assert isinstance(errors, FormErrors)
     assert ("mode",) in errors.messages
@@ -620,7 +620,8 @@ def test_nullable_numeric_direct_partial_null_and_expression(
     assert getattr(result, path) == 9
     value = editor.findChild(QLabel, f"form.value.{path}")
     assert isinstance(value, QLabel)
-    assert float(value.text()) == 9
+    assert value.text().startswith("= ")
+    assert float(value.text().removeprefix("= ")) == 9
 
 
 class EmptyChoiceForm(FormModel):

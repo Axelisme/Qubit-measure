@@ -65,7 +65,7 @@ def test_string_mode_writes_expression_and_projects_preview_and_errors(
     assert state.preview(env).values[(field,)] == "yoko1"
     shown = editor.findChild(QLabel, f"form.value.{field}")
     assert isinstance(shown, QLabel)
-    assert '$device = "yoko1"' in shown.text()
+    assert shown.text() == '= "yoko1"'
     commit_text(text, "$unbound")
     assert "unbound" in field_error(editor, field)
     assert shown.text() == ""

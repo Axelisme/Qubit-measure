@@ -228,7 +228,7 @@ def test_expression_text_commits_its_envelope_on_enter(build: Build) -> None:
 
     assert batches[-1] == {("amount",): {"expr": "1 / 4"}}
     assert state.input.data["amount"] == {"expr": "1 / 4"}
-    assert label(view, "form.value.amount").text() == "0.25"
+    assert label(view, "form.value.amount").text() == "= 0.25"
 
 
 def test_rejected_text_stays_local_until_an_accepted_commit(build: Build) -> None:

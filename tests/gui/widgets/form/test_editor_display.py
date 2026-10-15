@@ -152,7 +152,7 @@ def test_decimals_round_the_shown_number_without_rounding_input(build: Build) ->
     assert isinstance(mode, QAction)
     mode.trigger()
     commit_text(child(view, QLineEdit, "form.input.delay"), "1 / 3")
-    assert child(view, QLabel, "form.value.delay").text() == "0.333"
+    assert child(view, QLabel, "form.value.delay").text() == "= 0.333"
 
 
 def test_one_value_literal_is_read_only_text_without_modes(build: Build) -> None:

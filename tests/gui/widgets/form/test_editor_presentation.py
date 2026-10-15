@@ -177,7 +177,9 @@ def test_expression_rows_show_the_resolved_value_or_the_error(
     commit_text(text, "general.ext.seed / 2")
     echo = child(view, QLabel, "form.value.amount")
     assert not echo.isHidden()
-    assert float(echo.text()) == 2.0
+    assert echo.text() == "= 2.0"
+    commit_text(text, "5000 + 0.125")
+    assert echo.text() == "= 5000.125"
     assert not field_error(view, "amount")
 
     commit_text(text, "absent_name")
