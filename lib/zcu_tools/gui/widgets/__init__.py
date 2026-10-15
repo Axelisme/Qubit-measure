@@ -7,6 +7,7 @@ itself this package DOES pull in Qt — import a widget only after the matplotli
 backend is selected (i.e. when building the UI).
 """
 
+from zcu_tools.gui.widgets.colours import error_colour
 from zcu_tools.gui.widgets.dialog_lifecycle import DialogRefStore
 from zcu_tools.gui.widgets.dialog_presenter import (
     DialogPresenter,
@@ -20,5 +21,6 @@ __all__ = [
     "DialogRefStore",
     "QtDialogPresenter",
     "SaveDiscardCancel",
+    "error_colour",
     "widget_to_png_bytes",
 ]

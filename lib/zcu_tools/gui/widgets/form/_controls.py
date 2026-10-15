@@ -29,6 +29,8 @@ from qtpy.QtWidgets import (
 
 from zcu_tools.core.complex_codec import decode_complex, encode_complex
 from zcu_tools.gui.form import FormValue, FormWritePath
+from zcu_tools.gui.widgets import error_colour
+from zcu_tools.gui.widgets.colours import ERROR_RED_LIGHT
 from zcu_tools.gui.widgets.form.value_widgets import (
     connect_committed_value_widget,
     make_value_widget,
@@ -53,8 +55,6 @@ _MODE_HINT = "Right-click to switch Direct / Expression"
 _EXPRESSION_TINT = 0.18
 # Fixed red mixed into Base for Direct input errors, independent of Highlight.
 _ERROR_TINT = 0.18
-_ERROR_RED_LIGHT = QColor("#b3261e")
-_ERROR_RED_DARK = QColor("#ff8a80")
 # Shown in a group block's header while any of its rows shows an error, so a
 # folded group still tells the user where Start is blocked.
 GROUP_ERRORS_NOTE = "Contains errors"
@@ -207,12 +207,6 @@ def _direct_input(value: FormValue) -> JsonValue:
     if isinstance(value, complex):
         return _JSON.validate_python(encode_complex(value))
     return _JSON.validate_python(value)
-
-
-def _error_colour(widget: QWidget) -> QColor:
-    """Keep error text and borders readable against the theme's Window."""
-    window = widget.palette().color(QPalette.ColorRole.Window)
-    return _ERROR_RED_DARK if window.lightness() < 128 else _ERROR_RED_LIGHT
 
 
 def _mixed(base: QColor, accent: QColor, share: float) -> QColor:
@@ -507,7 +501,7 @@ class FieldRow:
             palette = QPalette()
             if invalid:
                 palette.setColor(
-                    QPalette.ColorRole.WindowText, _error_colour(self.widget)
+                    QPalette.ColorRole.WindowText, error_colour(self.widget)
                 )
             self.label.setPalette(palette)
             return
@@ -520,7 +514,7 @@ class FieldRow:
             accent = (
                 shown.color(QPalette.ColorRole.Highlight)
                 if expression
-                else _ERROR_RED_LIGHT
+                else ERROR_RED_LIGHT
             )
             share = _EXPRESSION_TINT if expression else _ERROR_TINT
             background = _mixed(shown.color(QPalette.ColorRole.Base), accent, share)
@@ -537,7 +531,7 @@ class FieldRow:
             # not the input's Base. Keep the Expression interior explicit.
             background = palette.color(QPalette.ColorRole.Base).name()
             style += (
-                f"QLineEdit {{ border: 1px solid {_error_colour(self.widget).name()}; "
+                f"QLineEdit {{ border: 1px solid {error_colour(self.widget).name()}; "
                 f"background-color: {background}; }}"
             )
         widget.setStyleSheet(style)
@@ -930,6 +924,6 @@ class GroupBlock:
 
         The fold does not change: a folded group stays folded.
         """
-        colour = _error_colour(self.widget)
+        colour = error_colour(self.widget)
         self._errors_note.setStyleSheet(f"QLabel {{ color: {colour.name()}; }}")
         self._errors_note.setVisible(has_errors)
