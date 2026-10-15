@@ -10,7 +10,7 @@ from ._support import make_client
 def test_connected_attach_rejects_path_without_altering_gui(tmp_path, launch):
     client = make_client(tmp_path)
     try:
-        client.call("rpc_call", {"method": "control.status"})
+        client.context.session.ensure_connected()
         before = list(client.transport.sent)
         with pytest.raises((ValueError, GuiRpcError), match='unchanged.*launch="new"'):
             client.call("connect", {"launch": launch, "simulate": "/tmp/env.py"})

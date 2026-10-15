@@ -4,7 +4,7 @@ import inspect
 import sys
 
 import pytest
-from zcu_tools.device.fake import FakeDevice
+from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
 from zcu_tools.gui.app.measure.registry import Registry
@@ -68,6 +68,7 @@ def test_startup_publishes_same_live_manager_before_remembered_devices(qapp, tmp
 
 def test_environment_install_failure_closes_returned_manager(qapp, tmp_path, monkeypatch):
     class FailingInfoDevice(FakeDevice):
+        info_model = FakeDeviceInfo
         def get_info(self):
             raise RuntimeError("snapshot unavailable")
 
