@@ -1,5 +1,7 @@
 """Writeback preview and explicit apply against the real owner-thread socket."""
 
+from socket import socket
+
 import numpy as np
 import pytest
 from pydantic import ValidationError
@@ -11,6 +13,7 @@ from zcu_tools.gui.app.measure.writeback import WritebackEdit
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.resources.entry import AcceptedWrite, RoleSpec
 
+from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._synthetic import (
     MODULE_PROPOSAL_TARGET,
     MODULE_PROPOSAL_WAVEFORM,
@@ -21,6 +24,19 @@ from tests.gui.app.measure._synthetic import (
 
 from ._helpers import Fixture, call, mcp_client, open_client
 from ._point_application import PointAdapter, PointApplication
+
+
+def assert_terminal_finished(fx: Fixture, client: socket, operation_id: int) -> None:
+    """Deliver the arranged synthetic operation and assert its terminal wire status."""
+    # The admitted offline run/fit returns; only its owner delivery ends this wait.
+    qt_until(
+        lambda: fx.ctrl.active_operation_count() == 0,
+        label="writeback socket operation terminal",
+    )
+    reply = call(
+        client, "operation.await", {"operation_id": operation_id, "timeout": 0}
+    )
+    assert reply["result"]["status"] == "finished", reply
 
 
 def assert_rejected_write_preserves_context(fx, sock, tab, value):
@@ -115,17 +131,7 @@ def test_complete_md_values_survive_preview_and_write_socket(
             lambda: fx.ctrl.start_run(tab),
             lambda: fx.ctrl.analyze(tab, SampleParams()),
         ):
-            assert (
-                call(
-                    sock,
-                    "operation.await",
-                    {
-                        "operation_id": operation(),
-                        "timeout": 2,
-                    },
-                )["result"]["status"]
-                == "finished"
-            )
+            assert_terminal_finished(fx, sock, operation())
         params = {"tab_id": tab, "subtab_id": "analysis"}
         if isinstance(before, complex):
             preview = call(sock, "tab.writeback_preview", params)
@@ -205,10 +211,7 @@ def _analyzed_module_tab(fx: Fixture, sock) -> str:
         lambda: fx.ctrl.start_run(tab),
         lambda: fx.ctrl.analyze(tab, SampleParams()),
     ):
-        reply = call(
-            sock, "operation.await", {"operation_id": operation(), "timeout": 2}
-        )
-        assert reply["result"]["status"] == "finished", reply
+        assert_terminal_finished(fx, sock, operation())
     assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
     assert call(sock, "context.snapshot", {})["ok"]
     return tab
@@ -357,19 +360,9 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
     try:
         tab = fx.ctrl.new_tab("fake")
         run = fx.ctrl.start_run(tab)
-        assert (
-            call(sock, "operation.await", {"operation_id": run, "timeout": 2})[
-                "result"
-            ]["status"]
-            == "finished"
-        )
+        assert_terminal_finished(fx, sock, run)
         analyze = fx.ctrl.analyze(tab, SampleParams())
-        assert (
-            call(sock, "operation.await", {"operation_id": analyze, "timeout": 2})[
-                "result"
-            ]["status"]
-            == "finished"
-        )
+        assert_terminal_finished(fx, sock, analyze)
         assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
         assert call(sock, "context.snapshot", {})["ok"]
         params = {"tab_id": tab, "subtab_id": "analysis"}
@@ -439,6 +432,20 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
         fx.stop()
 
 
+def terminal_result(
+    application: PointApplication, operation_id: int
+) -> dict[str, object]:
+    """Deliver the arranged synthetic operation, then read its terminal wire result."""
+    # The admitted synthetic fit returns; deliver its real terminal before polling.
+    qt_until(
+        lambda: application.controller.active_operation_count() == 0,
+        label="captured writeback fit terminal",
+    )
+    return application.result(
+        "operation.await", {"operation_id": operation_id, "timeout": 0}
+    )
+
+
 def test_native_preview_and_window_keep_captured_path_and_stderr(
     application: PointApplication, qapp, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -481,10 +488,7 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
     application.state.replace_run_pane(
         tab, RunPaneState(result=1.0, parameters=captured)
     )
-    analyzed = application.result(
-        "operation.await",
-        {"operation_id": controller.analyze(tab, SampleParams()), "timeout": 2},
-    )
+    analyzed = terminal_result(application, controller.analyze(tab, SampleParams()))
     assert analyzed["status"] == "finished", analyzed
     context.set_parameter(captured.target, "Q1.ext.value", 19.9)
     application.result("point.new", {"label": "b"})
