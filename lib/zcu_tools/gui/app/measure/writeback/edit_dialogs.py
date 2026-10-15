@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from pydantic import JsonValue
-from qtpy.QtCore import QEvent, Qt
+from qtpy.QtCore import QEvent, QObject, Qt
 from qtpy.QtGui import QColor
 from qtpy.QtWidgets import (
     QDialog,
@@ -185,6 +185,19 @@ class _EditDialog(QDialog):
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self._foregrounds: dict[QLabel, Callable[[QWidget], QColor]] = {}
+        # A styled parent does not propagate its explicit palette to Qt windows.
+        self._palette_owner = parent
+        self.setPalette(parent.palette())
+        parent.installEventFilter(self)
+
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        if (
+            a0 is self._palette_owner
+            and a1 is not None
+            and a1.type() == QEvent.Type.PaletteChange
+        ):
+            self.setPalette(self._palette_owner.palette())
+        return super().eventFilter(a0, a1)
 
     def theme_label(self, label: QLabel, colour: Callable[[QWidget], QColor]) -> None:
         self._foregrounds[label] = colour
