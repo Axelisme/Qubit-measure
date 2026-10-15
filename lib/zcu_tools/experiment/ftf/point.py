@@ -33,6 +33,8 @@ def _envelope(event: PulseEvent) -> Envelope:
         np.array(event.envelope.values, dtype=complex) * event.gain, dtype=np.complex128
     )
     # Program owns linear playback with the final sample held through pulse end.
+    if len(times) == 1:
+        return Envelope.flat(complex(values[0]))
     return Envelope.sampled(times, values, outside="hold")
 
 
