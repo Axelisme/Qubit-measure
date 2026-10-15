@@ -78,3 +78,16 @@ def test_concrete_cfg_set_param_rejects_unknown_name(make_cfg: CfgFactory):
 
     with pytest.raises(ValueError, match=error):
         cfg.set_param("__unknown_param__", 1.0)
+
+
+@pytest.mark.parametrize("name", ["freq", "gain", "phase", "length", "ro_length", "tones.0.freq"])
+def test_mux_set_param_requires_cfg_and_program_rebuild(name: str):
+    from zcu_tools.cfg_model import ModuleCfgFactory
+
+    from ._support import mux_raw
+
+    cfg = ModuleCfgFactory.from_raw(mux_raw())
+    before = cfg.to_dict()
+    with pytest.raises(ValueError, match="rebuild.*cfg.*program"):
+        cfg.set_param(name, 2.0)
+    assert cfg.to_dict() == before
