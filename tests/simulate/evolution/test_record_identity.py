@@ -30,3 +30,14 @@ def test_removing_dynamic_hamiltonian_cannot_hit_its_exact_record(tmp_path):
     assert static_solver.last_evaluation.origin == "direct"
     np.testing.assert_array_equal(actual.density, state.density)
     assert np.max(np.abs(actual.density - dynamic.density)) > 0.1
+
+
+def test_direct_record_keys_cannot_select_paths_outside_numeric_identity(tmp_path):
+    import pytest
+
+    library = EvolutionLibrary(tmp_path)
+    density = np.eye(2, dtype=complex)/2
+    with pytest.raises(ValueError, match="identity"):
+        library.save_record("../outside", density)
+    with pytest.raises(ValueError, match="identity"):
+        library.read_record("not-a-digest")
