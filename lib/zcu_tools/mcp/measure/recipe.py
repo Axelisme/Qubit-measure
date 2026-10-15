@@ -20,6 +20,7 @@ from threading import Condition, Event
 from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict, TypeGuard
 
 from zcu_tools.format_version import YamlValue
+from zcu_tools.gui.app.measure.remote.form_description import FormFieldObservation
 from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
 from zcu_tools.mcp.measure.analysis_execution import (
@@ -40,12 +41,13 @@ from zcu_tools.mcp.measure.recipe_capture import (
 from zcu_tools.mcp.measure.recipe_form import (
     RecipeFormField,
     RecipeModuleValues,
-    field_schema,
+    directed_errors,
+    field_observation,
     library_option_value,
     module_scalar,
     read_form_field,
     read_module_values,
-    slot_schema,
+    slot_description,
 )
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
@@ -461,7 +463,6 @@ class _TabBinding:
     """Cfg preparation state hidden behind an author tab handle.
 
     tools is the execution's fixed connection. tab is the GUI locator.
-    publication is the last Form observation, never refreshed on failure.
     Parameter sources are read from the tab's fixed Open/Reset environment.
     origins records sources by public/derived field name for the later Run
     capture, including individual sweep labels. summary_parameters selects the fixed Run facts to capture.
@@ -469,7 +470,6 @@ class _TabBinding:
 
     tools: MeasureToolContext
     tab: str
-    publication: dict[str, object]
     observe_run: Callable[[RunOperation], None]
     observe_analysis: Callable[[AnalyzeOperation], None]
     observe_writeback: Callable[[WritebackReceipt], None]
@@ -806,12 +806,11 @@ class RecipeSession:
         reset: dict[str, object] = {"tab_id": tab}
         if overrides:
             reset["aliases"] = overrides
-        publication = self._tools.send_gui_rpc("tab.reset_cfg", reset)
+        self._tools.send_gui_rpc("tab.reset_cfg", reset)
         return RecipeTab(
             _TabBinding(
                 self._tools,
                 tab,
-                _cfg_object(publication),
                 observe_run=self._observe_run,
                 observe_analysis=self._observe_analysis,
                 observe_writeback=self._observe_writeback,
@@ -827,7 +826,7 @@ class RecipeTab:
     """Opaque tab handle returned by RecipeSession.open_tab.
 
     Field names are dot-separated Form model fields, not wire path lists.
-    Methods keep a detached Form observation and record parameter sources.
+    Methods read current field observations and record parameter sources.
     GUI errors propagate without re-read, retry or rollback. Authors obtain
     this handle from open_tab rather than constructing the private binding.
     """
@@ -863,17 +862,16 @@ class RecipeTab:
         return self._library_reference(reference)
 
     def read_field(self, field: str) -> RecipeFormField:
-        """Read a detached field from the last Form observation, without RPC.
+        """Read one current detached field with exactly one describe_cfg RPC.
 
-        field is a non-empty dotted model-field path. Inline paths include
-        module, for example modules.readout.module.freq. Range count
-        is n, not set_sweep's public expts argument. RecipeFormField exposes
-        input, input_present, ordinary value, key/inline mode, actual key, lock,
-        current child field names and directed errors. It reconstructs no old
-        CfgSchema kind or ref-readonly subtree. Successful edits replace the
-        observation without changing previously returned states. Failed edits
-        do not refresh it. Unknown/malformed paths raise ValueError; malformed
-        wire raises GuiRpcError(incompatible_wire), not invalid_cfg.
+        field is a nonempty dotted canonical model-field path. Inline paths
+        include module; Range count is n, not set_sweep's expts. Description,
+        input_present/input, ordinary value and directed errors are captured in
+        the same owner turn, even when other fields are invalid. Errors are local
+        Form preview errors; get_cfg or Run checks lowered cfg errors. No cached
+        observation, source refresh or mutation is used. Unknown/inactive paths
+        fail at the owner; malformed paths raise ValueError and malformed wire
+        raises GuiRpcError(incompatible_wire). Earlier returned views stay detached.
         """
         return self._node(field)
 
@@ -927,18 +925,27 @@ class RecipeTab:
         return root
 
     def _node(self, name: str) -> RecipeFormField:
-        return read_form_field(self._binding.publication, tuple(_field_path(name)))
+        path = tuple(_field_path(name))
+        return read_form_field(self._describe(path), path)
 
-    def _edit(self, edits: list[_CfgEdit]) -> None:
+    def _describe(self, path: tuple[str, ...]) -> FormFieldObservation:
+        return field_observation(
+            self._binding.tools.send_gui_rpc(
+                "tab.describe_cfg", {"tab_id": self._binding.tab, "path": list(path)}
+            )
+        )
+
+    def _edit(self, edits: list[_CfgEdit]) -> Mapping[str, object] | None:
         if edits:
-            reply = self._binding.tools.send_gui_rpc(
+            return self._binding.tools.send_gui_rpc(
                 "tab.edit_cfg",
                 {
                     "tab_id": self._binding.tab,
                     "edits": edits,
                 },
             )
-            self._binding.publication = _cfg_object(reply)
+
+        return None
 
     def use_library(
         self, field: str, name: str | None, *, required: str | None = None
@@ -950,13 +957,13 @@ class RecipeTab:
         absent selection returns MissingParameter without editing. Explicit
         unoffered keys raise GuiRpcError(invalid_cfg) before any write, naming
         the field and current available keys. Owner validation errors propagate.
-        An inline-only locked Slot rejects explicit selection before any RPC.
+        An inline-only locked Slot rejects explicit selection before mutation.
         This method does not copy or materialize library content. GUI and source
         failures propagate without retry, refresh or fallback.
         """
         path = tuple(_field_path(field))
-        schema, _, _ = field_schema(self._binding.publication, path)
-        slot = slot_schema(schema)
+        observation = self._describe(path)
+        slot = slot_description(observation)
         if slot is None:
             raise ValueError(f"Not a module reference field: {field}")
         if name is not None:
@@ -964,7 +971,7 @@ class RecipeTab:
                 raise ValueError("library name must be non-empty")
             if slot == "locked":
                 raise ValueError(f"Cannot select a library key at locked Slot: {field}")
-            selection = library_option_value(schema, name, field)
+            selection = library_option_value(observation, name, field)
             self._edit([{"path": list(path), "value": selection}])
         selected = self.read_field(field)
         if name is not None and (selected.errors or selected.key != name):
@@ -981,8 +988,7 @@ class RecipeTab:
     def disable_library(self, field: str) -> None:
         """Write null to an optional Slot; the Form owner validates nullability."""
         path = tuple(_field_path(field))
-        schema, _, _ = field_schema(self._binding.publication, path)
-        if slot_schema(schema) is None:
+        if slot_description(self._describe(path)) is None:
             raise ValueError(f"Not a module reference field: {field}")
         self._edit([{"path": list(path), "value": None}])
         selected = self.read_field(field)
@@ -1019,15 +1025,14 @@ class RecipeTab:
         Disabled or unresolved modules fail with a directed error; select an
         Inline option explicitly to start from template/type defaults.
         No caller layout construction or full-cfg/extras lowering occurs here.
-        A changed input uses one atomic write/publication; this handle retains
-        the returned Form view. Source, structural and connection failures
+        A changed input uses one atomic write/publication; subsequent reads see
+        the current Form view. Source, structural and connection failures
         propagate without refresh, retry, fallback or rollback.
         """
         _field_path(field)
-        reply = self._binding.tools.send_gui_rpc(
+        self._binding.tools.send_gui_rpc(
             "tab.use_inline", {"tab_id": self._binding.tab, "field": field}
         )
-        self._binding.publication = _cfg_object(reply)
 
     def retain_module_source(
         self, field: str, *, summary_field: str, value_path: tuple[str, ...]
@@ -1080,7 +1085,7 @@ class RecipeTab:
         errors raise ValueError. Expressions go unchanged to the GUI owner.
         The resource returns one complete Form observation. Check directed
         errors before recording sources; invalid replies raise invalid_cfg
-        but retain the returned input and preview.
+        but leave the owner's committed draft intact.
         GUI/connection failures propagate without refresh, retry or rollback;
         the resource owns the atomic write.
         """
@@ -1097,14 +1102,14 @@ class RecipeTab:
                 wire.append(
                     {"path": _field_path(edit.field), "value": deepcopy(edit.value)}
                 )
-        self._edit(wire)
+        reply = self._edit(wire)
         for edit in planned:
-            if edit.value is not None:
-                node = self._node(edit.field)
-                if node.errors:
-                    raise GuiRpcError(
-                        f"Invalid {edit.field} value", reason="invalid_cfg"
-                    )
+            if (
+                reply is not None
+                and edit.value is not None
+                and directed_errors(reply, tuple(_field_path(edit.field)))
+            ):
+                raise GuiRpcError(f"Invalid {edit.field} value", reason="invalid_cfg")
         for edit in planned:
             self._binding.origins[edit.field] = (
                 edit.source if edit.value is not None else "gui_default"
@@ -1123,7 +1128,7 @@ class RecipeTab:
         provenance label for supplied values. Unknown/non-scalar fields and invalid
         carriers/labels raise ValueError before dispatch. The GUI parses expressions
         and validates values; returned errors raise GuiRpcError(invalid_cfg) without
-        retry or rollback. Retain the returned publication and its revision.
+        retry or rollback. Earlier returned field views remain detached.
         """
         self.set_fields((RecipeFieldEdit(field, value, source),))
 
@@ -1221,7 +1226,10 @@ class RecipeTab:
         consume_cancel = self._binding.consume_cancel
         if consume_cancel is not None and consume_cancel():
             return suppressed
-        if self._binding.publication["errors"]:
+        current = self._binding.tools.send_gui_rpc(
+            "tab.get_cfg", {"tab_id": self._binding.tab}
+        )
+        if current["errors"]:
             raise GuiRpcError("Recipe cfg is not Valid", reason="invalid_cfg")
         actual = capture_actual(self._actual_fields())
         binding = _RunBinding(

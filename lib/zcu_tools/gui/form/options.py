@@ -18,7 +18,7 @@ class OptionCommand:
     partial JSON input to write at the option's field, not a whole form batch.
     It must not mutate state or captured sources. Source failures propagate
     before any write; ordinary invalid returned values remain editable drafts.
-    The schema exposes only name and label, never the callable.
+    The description exposes only name and label, never the callable.
     """
 
     name: str
@@ -38,7 +38,8 @@ class Option:
     scalar or object (whole JSON sequences are also legal leaf values). fields
     is an optional BaseModel class describing editable object children, not an
     instance or library entry; it is legal only with an object value. Core
-    projects it to an embedded input schema, omitting tags fixed by value.
+    describes its direct children only on expansion, omitting tags fixed by value.
+    The selection list never serializes fields or descendants.
     commands are explicit actions with unique names, available on this option.
     Invalid JSON, fields or duplicate command names raise ValueError here.
     The copied value property never exposes mutable storage.

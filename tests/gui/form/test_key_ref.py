@@ -8,7 +8,7 @@ from zcu_tools.gui import form
 @pytest.mark.parametrize(
     "name", ["$missing.value", {"expr": "1 / 0"}], ids=["literal", "envelope"]
 )
-def test_key_ref_defaults_schema_result_and_restore_do_not_evaluate_names(
+def test_key_ref_defaults_description_result_and_restore_do_not_evaluate_names(
     name: JsonValue,
 ) -> None:
     assert hasattr(form, "KeyRef"), "Missing key-only reference input type"
@@ -16,10 +16,8 @@ def test_key_ref_defaults_schema_result_and_restore_do_not_evaluate_names(
     env = form.FormEnv()
     state = form.FormState(model.default_input(env))
     assert state.input.data == {"kind": "ref", "name": name}
-    properties = model.input_schema(env)["properties"]
-    assert isinstance(properties, dict)
-    schema = properties["name"]
-    assert isinstance(schema, dict) and schema.get("type") == "string"
+    field = state.describe(("name",), env).target
+    assert field is not None and field.kind == "string" and not field.expression
     result = state.result(env)
     if isinstance(name, str):
         assert isinstance(result, form.KeyRef) and result.name == name

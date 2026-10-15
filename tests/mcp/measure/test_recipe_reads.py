@@ -126,11 +126,15 @@ def test_read_field_retains_range_input_and_directed_errors(tmp_path: Path) -> N
         assert state.value["stop"] == 2.0
         assert state.errors[0].path == ("range", "start")
         assert state.errors[0].message
-        assert state.fields == ("kind", "start", "stop", "n")
-        assert len(client.transport.sent) == before
+        assert state.fields == ("start", "stop", "n")
+        assert client.transport.sent[before:] == [
+            ("tab.describe_cfg", {"tab_id": "t", "path": ["range"]})
+        ]
 
 
-def test_read_field_uses_last_successful_publication(tmp_path: Path) -> None:
+def test_read_field_observes_current_input_and_propagates_failed_edits(
+    tmp_path: Path,
+) -> None:
     gui = LookbackGui()
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
@@ -141,9 +145,9 @@ def test_read_field_uses_last_successful_publication(tmp_path: Path) -> None:
         ref = tab.read_field("modules.readout")
         assert ref.mode == "inline"
         assert ref.key is None
-        assert ref.fields == ("module",)
+        assert "freq" in ref.fields
         assert tab.read_field("modules").fields == ("reset", "init_pulse", "readout")
-        assert len(client.transport.sent) == before
+        assert len(client.transport.sent) == before + 4
         tab.set("rounds", 7)
         current = tab.read_field("rounds")
         assert current.input == current.value == 7
@@ -160,21 +164,49 @@ def test_read_field_uses_last_successful_publication(tmp_path: Path) -> None:
         with pytest.raises(GuiRpcError, match="stale cfg"):
             tab.set("rounds", 9)
         assert tab.read_field("rounds") == current
-        assert [method for method, _ in client.transport.sent[before:]] == [
-            "tab.edit_cfg"
-        ]
+        assert [
+            method
+            for method, _ in client.transport.sent[before:]
+            if method != "tab.describe_cfg"
+        ] == ["tab.edit_cfg"]
 
 
 @pytest.mark.parametrize("field", ["", "missing", "modules..readout", "rounds.child"])
-def test_read_field_rejects_unknown_paths_without_rpc(
+def test_read_field_rejects_malformed_paths_locally_and_unknown_paths_at_owner(
     tmp_path: Path, field: str
 ) -> None:
     with recipe_client(tmp_path, LookbackGui()) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         before = len(client.transport.sent)
-        with pytest.raises(ValueError, match="field"):
-            tab.read_field(field)
-        assert len(client.transport.sent) == before
+        if not field or ".." in field:
+            with pytest.raises(ValueError, match="field"):
+                tab.read_field(field)
+            assert len(client.transport.sent) == before
+        else:
+            with pytest.raises(GuiRpcError) as caught:
+                tab.read_field(field)
+            assert caught.value.code == "invalid_params"
+            assert caught.value.reason == "form_path"
+            assert caught.value.data == {"form_path": field.split(".")}
+            assert len(client.transport.sent) == before + 1
+            assert tab.read_field("rounds").input_present
+
+
+def test_read_field_rejects_malformed_wire_without_retry(tmp_path: Path) -> None:
+    with recipe_client(tmp_path, LookbackGui()) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        reply = client.context.gui.send_gui_rpc(
+            "tab.describe_cfg", {"tab_id": "t", "path": ["rounds"]}
+        )
+        reply["input_present"] = "yes"
+        client.transport.replies["tab.describe_cfg"] = {"ok": True, "result": reply}
+        before = len(client.transport.sent)
+        with pytest.raises(GuiRpcError) as failure:
+            tab.read_field("rounds")
+        assert failure.value.reason == "incompatible_wire"
+        assert client.transport.sent[before:] == [
+            ("tab.describe_cfg", {"tab_id": "t", "path": ["rounds"]})
+        ]
 
 
 def test_read_device_preserves_cached_unit_without_setup(tmp_path: Path) -> None:

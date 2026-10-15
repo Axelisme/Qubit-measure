@@ -6,9 +6,9 @@ WIRE_VERSION; it reports GUI_VERSION without comparing it.
 
 from __future__ import annotations
 
-# Bump for RPC method/parameter or reply/event shape changes.
-WIRE_VERSION = 104
+# The combined lazy-description and flat Readout contract differs from both v104 branches.
+WIRE_VERSION = 105
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 137
+GUI_VERSION = 138

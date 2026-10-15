@@ -12,7 +12,7 @@ def field_display(info: FieldInfo, *, locked: bool) -> Display | None:
     label, unit, description and group copy unchanged. decimals copies unless
     locked is True: a locked field becomes a single-value Literal, which has no
     float precision to show. The field is not modified; Display rejects
-    negative decimals, and input_schema rejects decimals on a non-float field.
+    negative decimals, and describe rejects decimals on a non-float field.
     """
     meta = get_field_meta(info)
     if meta is None:

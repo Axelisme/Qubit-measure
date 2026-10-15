@@ -103,8 +103,24 @@ def test_author_rejects_unknown_fields_without_editing(tmp_path, field):
     gui = LookbackGui()
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
-        with pytest.raises(ValueError, match="field"):
-            tab.set(field, 5)
+        before = gui.owner.input.data
+        edits_before = sum(
+            method == "tab.edit_cfg" for method, _ in client.transport.sent
+        )
+        if field in ("missing", "rounds.child"):
+            with pytest.raises(GuiRpcError) as error:
+                tab.set(field, 5)
+            assert error.value.code == "invalid_params"
+            assert error.value.reason == "form_path"
+            assert error.value.data == {"form_path": field.split(".")}
+        else:
+            with pytest.raises(ValueError, match="field"):
+                tab.set(field, 5)
+        assert gui.owner.input.data == before
+        assert (
+            sum(method == "tab.edit_cfg" for method, _ in client.transport.sent)
+            == edits_before
+        )
 
 
 @pytest.mark.parametrize(
@@ -152,7 +168,10 @@ def test_author_explicit_invalid_library_does_not_fall_back(tmp_path):
         assert "modules.readout" in str(error.value)
         assert "Available keys" in str(error.value)
         assert tab.read_field("modules.readout") == initial
-        assert client.transport.sent == before
+        assert client.transport.sent[len(before) :] == [
+            ("tab.describe_cfg", {"tab_id": "t", "path": ["modules", "readout"]}),
+            ("tab.describe_cfg", {"tab_id": "t", "path": ["modules", "readout"]}),
+        ]
 
 
 @pytest.mark.parametrize("expts", [0, 1, 1.5, True])

@@ -59,33 +59,6 @@ def obj(value: JsonValue) -> dict[str, JsonValue]:
     return value
 
 
-def test_schema_offers_typed_default_options_without_consumer_union_inference() -> None:
-    properties = obj(Picks.input_schema(FormEnv())["properties"])
-    assert obj(properties["count"]).get("x-form-options") == [
-        {"label": "1", "value": 1},
-        {"label": "2", "value": 2},
-    ]
-    assert obj(properties["speed"]).get("x-form-options") == [
-        {"label": "slow", "value": "slow"},
-        {"label": "fast", "value": "fast"},
-    ]
-    assert obj(properties["device"]).get("x-form-options") == [
-        {"label": "a", "value": "a"},
-        {"label": "b", "value": "b"},
-    ]
-    options = obj(properties["branch"]).get("x-form-options")
-    assert isinstance(options, list)
-    assert [obj(option)["value"] for option in options] == [
-        {"kind": "first"},
-        {"kind": "second"},
-    ]
-    assert [obj(option)["label"] for option in options] == ["first", "second"]
-    fields = obj(obj(options[0])["fields"])
-    assert set(obj(fields["properties"])) == {"shared"}
-    assert "x-form-options" not in obj(properties["flag"])
-    assert "x-form-options" not in obj(properties["enabled"])
-
-
 def test_option_matches_typed_leaves_first_match_and_missing_without_mutation() -> None:
     assert hasattr(api, "Option"), "core must expose named Option"
     Option = api.Option
@@ -188,15 +161,13 @@ class CommandForm(FormModel):
 def test_declared_options_project_commands_and_execute_one_atomic_write() -> None:
     assert hasattr(api, "OptionCommand"), "core must expose option command contract"
     env = FormEnv()
-    schema = CommandForm.input_schema(env)
-    choices = obj(obj(schema["properties"])["value"])["x-form-options"]
-    assert isinstance(choices, list)
-    assert obj(choices[0])["commands"] == [
-        {"name": "convert", "label": "Convert"},
-        {"name": "fail", "label": "Fail"},
-    ]
-    assert set(obj(obj(obj(choices[1])["fields"])["properties"])) == {"name"}
     state = FormState(CommandForm.default_input(env))
+    target = state.describe(("value",), env).target
+    assert target is not None and target.options is not None
+    assert [(item.name, item.label) for item in target.options[0].commands] == [
+        ("convert", "Convert"),
+        ("fail", "Fail"),
+    ]
     events: list[dict[str, JsonValue]] = []
     state.subscribe(lambda: events.append(state.input.data))
     with pytest.raises(ValueError, match="unavailable source"):
@@ -237,18 +208,20 @@ class NestedOptions(FormModel):
 def test_nested_options_keep_deepest_empty_and_nonoverlapping_parent_declarations() -> (
     None
 ):
-    assert hasattr(api, "Option"), "core must expose named Option"
-    props = obj(NestedOptions.input_schema(FormEnv())["properties"])
-    child = obj(obj(props["child"])["properties"])
-    sibling = obj(obj(props["sibling"])["properties"])
-    assert obj(child["empty"])["x-form-options"] == []
-    assert obj(child["local"])["x-form-options"] == [{"label": "Local", "value": 1}]
-    assert obj(child["parent"])["x-form-options"] == [
-        {"label": "Parent retained", "value": 1}
-    ]
-    assert obj(sibling["parent"])["x-form-options"] == [
-        {"label": "Sibling", "value": 2}
-    ]
+    env = FormEnv()
+    state = FormState(NestedOptions.default_input(env))
+    child = {item.path[-1]: item for item in state.describe(("child",), env).children}
+    sibling = {
+        item.path[-1]: item for item in state.describe(("sibling",), env).children
+    }
+    assert child["empty"].options == ()
+    for field, label, value in (
+        (child["local"], "Local", 1),
+        (child["parent"], "Parent retained", 1),
+        (sibling["parent"], "Sibling", 2),
+    ):
+        assert field.options is not None
+        assert [(item.label, item.value) for item in field.options] == [(label, value)]
 
 
 class ActiveBranch(FormModel):
@@ -386,51 +359,10 @@ def test_unknown_declared_option_path_fails_before_state_changes() -> None:
     state = FormState(UnknownOptionPath.default_input(env))
     before = state.input.data
     with pytest.raises(ValueError, match="option.*path"):
-        UnknownOptionPath.input_schema(env)
+        state.describe((), env)
     with pytest.raises(ValueError, match="option.*path"):
         state.run_command(("value",), "unused", env)
     assert state.input.data == before
-
-
-class OuterInline(FormModel):
-    kind: Literal["inline"] = "inline"
-    module: First | Second = Field(discriminator="kind")
-    mode: Literal["fast", "slow"] = "fast"
-
-
-class NestedSelection(FormModel):
-    value: Source | OuterInline = Field(discriminator="kind")
-
-    @classmethod
-    def options(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[api.Option, ...]]:
-        return {
-            ("value",): (
-                api.Option(
-                    "Inline first",
-                    {"kind": "inline", "module": {"kind": "first"}},
-                    fields=OuterInline,
-                ),
-            )
-        }
-
-
-def test_option_fields_project_nested_selected_branch_without_consumer_inference() -> (
-    None
-):
-    assert hasattr(api, "Option"), "core must expose named Option"
-    options = obj(obj(NestedSelection.input_schema(FormEnv())["properties"])["value"])[
-        "x-form-options"
-    ]
-    assert isinstance(options, list)
-    fields = obj(obj(options[0])["fields"])
-    properties = obj(fields["properties"])
-    module = obj(properties["module"])
-    assert set(obj(module.get("properties"))) == {"shared"}
-    assert set(properties) == {"module", "mode"}
-    assert obj(properties["mode"])["x-form-options"] == [
-        {"label": "fast", "value": "fast"},
-        {"label": "slow", "value": "slow"},
-    ]
 
 
 class NullablePicks(FormModel):
@@ -439,11 +371,12 @@ class NullablePicks(FormModel):
 
 
 def test_nullable_literal_and_enum_options_include_typed_null() -> None:
-    props = obj(NullablePicks.input_schema(FormEnv())["properties"])
+    env = FormEnv()
+    state = FormState(NullablePicks.default_input(env))
     for name, nonnull in (("number", [1, 2]), ("speed", ["slow", "fast"])):
-        options = obj(props[name])["x-form-options"]
-        assert isinstance(options, list)
-        values = [obj(option)["value"] for option in options]
+        target = state.describe((name,), env).target
+        assert target is not None and target.options is not None
+        values = [option.value for option in target.options]
         assert None in values
         assert [value for value in values if value is not None] == nonnull
 
@@ -578,27 +511,21 @@ def test_every_intrinsic_tag_is_a_typed_option_sharing_its_branch_fields(
     model: type[FormModel], tags: list[JsonValue], alias: JsonValue
 ) -> None:
     env = FormEnv()
-    properties = obj(model.input_schema(env)["properties"])
-    options = obj(properties["branch"]).get("x-form-options")
-    assert isinstance(options, list)
-    values = [obj(option)["value"] for option in options]
+    state = FormState(FormInput(model, {"branch": {"kind": alias, "shared": 6.0}}))
+    description = state.describe(("branch",), env)
+    target = description.target
+    assert target is not None and target.options is not None
+    values = [option.value for option in target.options]
     assert values == [{"kind": tag} for tag in tags]
     assert [type(obj(value)["kind"]) for value in values] == [type(t) for t in tags]
-    assert [obj(option)["label"] for option in options] == [str(tag) for tag in tags]
-    first, second, plain = (obj(obj(option)["fields"]) for option in options)
-    # Tags of one branch select the same editable fields, without the tag.
-    assert first == second
-    assert set(obj(first["properties"])) == {"shared", "a_only"}
-    assert set(obj(plain["properties"])) == {"shared", "b_only"}
-
-    state = FormState(FormInput(model, {"branch": {"kind": alias, "shared": 6.0}}))
-    current = state.input.data["branch"]
-    matching = [
-        obj(option)["label"]
-        for option in options
-        if api.Option(str(obj(option)["label"]), obj(option)["value"]).matches(current)
-    ]
-    assert matching == [str(alias)]
+    assert [option.label for option in target.options] == [str(tag) for tag in tags]
+    assert target.selected == tags.index(alias)
+    assert {child.path[-1] for child in description.children} == {"shared", "a_only"}
+    state.write({("branch",): {"kind": tags[-1]}}, env)
+    assert {child.path[-1] for child in state.describe(("branch",), env).children} == {
+        "shared",
+        "b_only",
+    }
     result = state.result(env)
     assert not isinstance(result, FormErrors)
-    assert obj(result.model_dump(mode="json")["branch"])["kind"] == alias
+    assert obj(result.model_dump(mode="json")["branch"])["kind"] == tags[-1]

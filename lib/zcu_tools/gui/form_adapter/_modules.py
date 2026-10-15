@@ -341,7 +341,7 @@ def editable_spec(
     str-or-model children become tagged ref/name or inline/module wrappers;
     persistent seed and lock paths still name Spec fields, without envelopes.
     Optional desc is removed, so input,
-    schema and writes cannot set them; validating as the Spec restores defaults.
+    descriptions and writes cannot set them; validating as the Spec restores defaults.
     The Spec's validators are inherited; the Spec class is not modified.
     """
     annotations: dict[str, object] = {}

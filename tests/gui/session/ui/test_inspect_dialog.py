@@ -466,9 +466,9 @@ def test_read_only_locks_inputs_but_keeps_scrolling_and_folds(
     assert _status(dialog) == "Saved"
 
     advanced = _group_fold(dialog, "Advanced")
-    nqz = _child(dialog, QWidget, "form.input.nqz")
-    assert not nqz.isVisibleTo(dialog)
+    assert advanced.text().startswith("▸ ")
     key_click(advanced, Qt.Key.Key_Space)
+    nqz = _child(dialog, QWidget, "form.input.nqz")
     assert nqz.isVisibleTo(dialog)
     qapp.processEvents()
     bar = _child(dialog, QScrollArea, "inspect.entry.scroll").verticalScrollBar()
@@ -577,7 +577,7 @@ def test_template_switch_keeps_only_the_name_and_creates_the_new_template(
     assert name.text() == "Q1.pulses.my_pulse"
     assert float(_child(new, QLineEdit, "form.input.gain").text()) == 0.1
     assert float(_child(new, QLineEdit, "form.input.freq").text()) == 200.0
-    assert not _child(new, QWidget, "form.input.nqz").isVisibleTo(new)
+    assert _group_fold(new, "Advanced").text().startswith("▸ ")
     bar = _child(new, QScrollArea, "inspect.new_entry.scroll").verticalScrollBar()
     assert bar is not None and bar.value() == 0
 
