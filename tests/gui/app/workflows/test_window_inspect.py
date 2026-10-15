@@ -129,6 +129,34 @@ def test_inspect_locks_from_start_through_terminal_delivery(
     assert child(dialog, QPushButton, "inspect.aliases.add").isEnabled()
 
 
+def test_open_arb_locks_until_run_terminal_delivery(
+    window_session: WindowSession, qapp: QApplication
+) -> None:
+    prepare(window_session, qapp)
+    window = window_session.window
+    inspect = open_inspect(window, qapp)
+    button(inspect, "Arb Waveforms…").click()
+    qapp.processEvents()
+    dialog = next(d for d in window.findChildren(ArbWaveformDialog) if d.isVisible())
+    key = child(dialog, QLineEdit, "")
+    key.setText("pre_run_draft")
+    assert not key.isReadOnly()
+    assert button(dialog, "Save").isEnabled()
+
+    assert isinstance(window.start("arb-lock"), int)
+    assert key.isReadOnly()
+    assert not button(dialog, "Save").isEnabled()
+    window_session.harness.background.execute()
+    qapp.processEvents()
+    assert key.isReadOnly()
+    assert not button(dialog, "Save").isEnabled()
+    window_session.harness.background.deliver()
+    qapp.processEvents()
+    assert not key.isReadOnly()
+    assert button(dialog, "Save").isEnabled()
+    assert key.text() == "pre_run_draft"
+
+
 def test_inspect_opened_while_paused_is_read_only_until_stop(
     window_session: WindowSession, qapp: QApplication
 ) -> None:
@@ -141,7 +169,14 @@ def test_inspect_opened_while_paused_is_read_only_until_stop(
     select_waveform(dialog)
     assert child(window, QPushButton, "workflow.source.inspect").isEnabled()
     assert child(dialog, QLineEdit, "form.input.length").isReadOnly()
-    assert not button(dialog, "Arb Waveforms…").isEnabled()
+    button(dialog, "Arb Waveforms…").click()
+    qapp.processEvents()
+    arb = next(d for d in window.findChildren(ArbWaveformDialog) if d.isVisible())
+    assert not button(arb, "Save").isEnabled()
+    arb_key = arb.findChild(QLineEdit)
+    assert arb_key is not None and arb_key.isReadOnly()
+    arb.close()
+    qapp.processEvents()
     window.stop("inspect-paused")
     qapp.processEvents()
     assert not child(dialog, QLineEdit, "form.input.length").isReadOnly()

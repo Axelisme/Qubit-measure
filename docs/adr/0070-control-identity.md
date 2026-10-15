@@ -54,7 +54,9 @@ Remote 時，GUI 停用欄位與寫入容器，不改變子元件原本的 busy�
 
 Local 有任何 modal dialog 時，owner connect 自動取得與 acquire 回 `local_busy`，訊息為「Local 使用中」。Qt app remote adapter 在 owner turn 查詢 `QApplication.activeModalWidget()`；共用 ControlIdentity 不依賴 Qt。相關 file chooser 使用非 native option，讓 Qt 能查到。Readonly 連線、既有冪等 connect 與 Remote 同 label 重連不因純檢視 modal 而拒絕。拒絕不轉移 holder、不寫入 domain。
 
-Dialog 不接控制狀態，也不在 chooser／confirmation 返回後重查 holder。Local 的合法輸入、取消、path、busy 與 validation 沿各 owner 契約。Finished 仍可退休單次輸入，防止關閉後的晚到提交。Inspect 與 Device 的 Remote 查看入口提供靜態 read-only mode；Inspect 不開放 Add、library mutation 或 Arb Waveforms 寫入入口。
+Dialog 不接控制狀態，也不在 chooser／confirmation 返回後重查 holder。Local 的合法輸入、取消、path、busy 與 validation 沿各 owner 契約。Finished 仍可退休單次輸入，防止關閉後的晚到提交。Inspect、Devices 與 ARB Waveforms 的 Remote 查看入口提供靜態 read-only mode；Inspect 不開放 Add 與 library mutation；Arb Waveforms 入口仍可開，ARB 依宿主規則以唯讀開啟，不提供寫入。
+
+2026-10-15，使用者裁決「要不要唯讀應該是dialog提供一個方法」「讓gui根據需要控制是否唯讀吧」。共用 session 對話框 Inspect、Devices 與 ARB Waveforms 只提供 `set_read_only(...)`，不讀控制權或 run 狀態。宿主決定何時唯讀，並對自己的共用對話框套用同一條規則。Measure 依開啟時的控制權設定，不追蹤已開啟對話框的控制權變化。Workflows 依 run lock，從 Start 到 terminal delivery 維持唯讀，並同步更新已開啟的對話框。新增的共用對話框也提供 `set_read_only`，接上宿主的同一條規則。
 
 Measure 量測 Stop 與 device operation Stop 在 Remote 仍可按。按下先收回成 Local 鎖定，再請求取消。Stop 是僅有的自動收回入口，取消不代表硬體已停止。Remote 關主窗先確認，拒絕不開始 teardown，接受沿既有 shutdown／cancel／cleanup 契約，不另加 reclaim。Fluxdep 沒有硬體緊急 Stop。
 
