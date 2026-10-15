@@ -643,27 +643,36 @@ class TestReadoutPlan:
                 soccfg=partial_soccfg,
             )
 
+    @pytest.mark.parametrize(
+        ("gen_ch", "ro_ch", "mixer_freq"),
+        [(0, 0, None), (1, 1, 5500.0), (1, 1, 6500.0)],
+        ids=["no-mixer", "positive-dds", "negative-dds"],
+    )
     def test_pulse_readout_validates_paired_frequency_words(
-        self,
+        self, gen_ch: int, ro_ch: int, mixer_freq: float | None
     ) -> None:
-        soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+        soccfg = make_mock_soccfg(n_gens=2, n_readouts=2)
+        # Different channel clocks expose accidental decoding through channel 0.
+        soccfg["gens"][1].update(fs=6144.0, f_dds=6144.0, fs_mult=25, has_mixer=True)
+        soccfg["readouts"][1].update(fs=1228.8, f_dds=1228.8, fs_mult=5)
         freq_words, ro_freq_words = readout_freq_words(
             soccfg,
             (5990.0, 6000.0),
-            gen_ch=0,
-            ro_ch=0,
-            mixer_freq=None,
+            gen_ch=gen_ch,
+            ro_ch=ro_ch,
+            mixer_freq=mixer_freq,
             nqz=1,
         )
         ro = PulseReadout(
             "ro",
             PulseReadoutCfg(
                 waveform=ConstWaveformCfg(length=1.0),
-                gen_ch=0,
+                gen_ch=gen_ch,
                 nqz=1,
                 freq=5990.0,
                 gain=0.25,
-                ro_ch=0,
+                mixer_freq=mixer_freq,
+                ro_ch=ro_ch,
                 ro_length=1.5,
             ),
             freq_val="freq_word",
@@ -679,7 +688,6 @@ class TestReadoutPlan:
             ),
             ro,
         ]
-
         lp = lower_point(
             modules,
             [("freq", len(freq_words))],
@@ -689,50 +697,82 @@ class TestReadoutPlan:
             _identity_cycles2us,
             soccfg=soccfg,
         )
+        assert lp.readout.f_ro_ghz == pytest.approx(6.0, rel=0.0, abs=2e-9)
 
-        assert lp.readout.f_ro_ghz == pytest.approx(
-            soccfg.reg2freq(freq_words[1], gen_ch=0) / 1e3
-        )
+        # A wrong ADC downconversion sign must not become another valid probe.
+        wrong_ro_words = [-word % 2**32 for word in ro_freq_words]
+        inconsistent = [
+            modules[0],
+            LoadWord(
+                "wrong_adc_sign",
+                wrong_ro_words,
+                idx_reg="freq",
+                val_reg="ro_freq_word",
+            ),
+            ro,
+        ]
+        with pytest.raises(UnsupportedModuleError, match="words are inconsistent"):
+            lower_point(
+                inconsistent,
+                [("freq", len(freq_words))],
+                _SIM,
+                _F_QUBIT_GHZ,
+                {"freq": 1},
+                _identity_cycles2us,
+                soccfg=soccfg,
+            )
 
-    def test_table_pulse_readout_resolves_current_point_words(self) -> None:
-        soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
-        freqs_mhz = [5990.0, 6000.0, 6010.0]
+    @pytest.mark.parametrize(
+        ("gen_ch", "ro_ch", "mixer_freq"),
+        [(0, 0, None), (1, 1, 5500.0), (1, 1, 6500.0)],
+        ids=["no-mixer", "positive-dds", "negative-dds"],
+    )
+    def test_table_pulse_readout_resolves_current_point_words(
+        self, gen_ch: int, ro_ch: int, mixer_freq: float | None
+    ) -> None:
+        soccfg = make_mock_soccfg(n_gens=2, n_readouts=2)
+        soccfg["gens"][1].update(fs=6144.0, f_dds=6144.0, fs_mult=25, has_mixer=True)
+        soccfg["readouts"][1].update(fs=1228.8, f_dds=1228.8, fs_mult=5)
+        freqs_mhz = [5990.0, 6000.0, 5990.0, 6010.0]
         freq_words, ro_freq_words = readout_freq_words(
             soccfg,
             freqs_mhz,
-            gen_ch=0,
-            ro_ch=0,
-            mixer_freq=None,
+            gen_ch=gen_ch,
+            ro_ch=ro_ch,
+            mixer_freq=mixer_freq,
             nqz=1,
         )
         ro = TablePulseReadout(
             "ro",
             PulseReadoutCfg(
                 waveform=ConstWaveformCfg(length=1.0),
-                gen_ch=0,
+                gen_ch=gen_ch,
                 nqz=1,
                 freq=freqs_mhz[0],
                 gain=0.25,
-                ro_ch=0,
+                mixer_freq=mixer_freq,
+                ro_ch=ro_ch,
                 ro_length=1.5,
             ),
             idx_reg="freq",
             freq_words=freq_words,
             ro_freq_words=ro_freq_words,
         )
-
-        lp = lower_point(
-            [ro],
-            [("freq", len(freq_words))],
-            _SIM,
-            _F_QUBIT_GHZ,
-            {"freq": 2},
-            _identity_cycles2us,
-            soccfg=soccfg,
-        )
-
-        assert lp.readout.f_ro_ghz == pytest.approx(
-            soccfg.reg2freq(freq_words[2], gen_ch=0) / 1e3
+        frequencies = [
+            lower_point(
+                [ro],
+                [("outer", 2), ("freq", len(freq_words))],
+                _SIM,
+                _F_QUBIT_GHZ,
+                {"outer": outer, "freq": index},
+                _identity_cycles2us,
+                soccfg=soccfg,
+            ).readout.f_ro_ghz
+            for outer in range(2)
+            for index in range(len(freq_words))
+        ]
+        assert frequencies == pytest.approx(
+            [5.99, 6.0, 5.99, 6.01, 5.99, 6.0, 5.99, 6.01], rel=0.0, abs=2e-9
         )
 
     def test_pulse_readout_ro_only_word_unwraps_nearest_cfg_frequency(
