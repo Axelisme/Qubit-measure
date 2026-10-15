@@ -34,7 +34,7 @@ from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.control import Branch
 from zcu_tools.program.v2.modules.delay import Delay
 from zcu_tools.program.v2.modules.pulse import PulseCfg
-from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutCfg
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM, SimParams
 from zcu_tools.program.v2.sim.engine import (
@@ -63,6 +63,16 @@ from ._engine_support import (
 )
 from ._engine_support import (
     readout as _readout,
+)
+
+# Qubit/coherence fixtures use an ideal full-window readout. Pulse-specific
+# regressions retain the physical delay, backaction, and noise settings.
+_PULSE_SIM = _SIM.model_copy(
+    update={
+        "timeFly": DEFAULT_SIMPARAM.timeFly,
+        "readout_decay_rate_per_us": DEFAULT_SIMPARAM.readout_decay_rate_per_us,
+        "readout_gain_noise_per_gain": DEFAULT_SIMPARAM.readout_gain_noise_per_gain,
+    }
 )
 
 
@@ -132,7 +142,15 @@ def _seed_progression_program(soccfg: QickConfig) -> ModularProgramV2:
     rf_g = _rf_g_mhz()
     sw = SweepCfg(start=rf_g - 25.0, stop=rf_g + 25.0, expts=7, step=50.0 / 6.0)
     ro_param = sweep2param("ro_freq", sw)
-    readout = DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=ro_param).build("ro")
+    readout = PulseReadoutCfg(
+        ro_ch=0,
+        ro_length=1.0,
+        freq=ro_param,
+        gen_ch=1,
+        nqz=1,
+        gain=1.0,
+        waveform=ConstWaveformCfg(length=1.0),
+    ).build("ro")
     prog = ModularProgramV2(
         soccfg,
         ProgramV2Cfg(reps=1, rounds=1),
@@ -420,9 +438,15 @@ def test_engine_onetone_dip():
 
     sw = SweepCfg(start=rf_g - 100.0, stop=rf_g + 100.0, expts=81, step=200.0 / 80)
     ro_param = sweep2param("ro_freq", sw)
-    readout_module = DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=ro_param).build(
-        "ro"
-    )
+    readout_module = PulseReadoutCfg(
+        ro_ch=0,
+        ro_length=1.0,
+        freq=ro_param,
+        gen_ch=1,
+        nqz=1,
+        gain=1.0,
+        waveform=ConstWaveformCfg(length=1.0),
+    ).build("ro")
     prog = ModularProgramV2(
         soccfg,
         ProgramV2Cfg(reps=80, rounds=2),
@@ -471,7 +495,15 @@ def test_engine_qub_pulse_with_swept_ro_freq_dip_tracks_pe():
             waveform=ConstWaveformCfg(length=0.4),
         ).build("qub")
         ro_param = sweep2param("ro_freq", sw)
-        ro = DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=ro_param).build("ro")
+        ro = PulseReadoutCfg(
+            ro_ch=0,
+            ro_length=1.0,
+            freq=ro_param,
+            gen_ch=1,
+            nqz=1,
+            gain=1.0,
+            waveform=ConstWaveformCfg(length=1.0),
+        ).build("ro")
         prog = ModularProgramV2(
             soccfg,
             ProgramV2Cfg(reps=80, rounds=2, relax_delay=_RESET_RELAX_DELAY),
@@ -646,17 +678,23 @@ def test_engine_singleshot_accumulated_mean_invariant():
 # ---------------------------------------------------------- readout normalization
 
 
-def _normalized_ground_raw_direct(
+def _normalized_ground_raw(
     *, ro_length: float, reps: int = 12_000
 ) -> tuple[NDArray[np.complex128], int]:
-    """Run a ground-state DirectReadout and return raw samples divided by length."""
+    """Run a ground-state full-window readout and return raw samples divided by length."""
 
     sim = _SIM.model_copy(update={"snr": 25.0, "Temp": 0.0})
     soc, soccfg = make_mock_soc(sim=sim)
     ro_freq = _rf_g_mhz()
-    readout = DirectReadoutCfg(ro_ch=0, ro_length=ro_length, ro_freq=ro_freq).build(
-        "ro"
-    )
+    readout = PulseReadoutCfg(
+        ro_ch=0,
+        ro_length=ro_length,
+        freq=ro_freq,
+        gen_ch=1,
+        nqz=1,
+        gain=1.0,
+        waveform=ConstWaveformCfg(length=ro_length),
+    ).build("ro")
     prog = ModularProgramV2(
         soccfg,
         ProgramV2Cfg(reps=reps, rounds=1),
@@ -674,8 +712,8 @@ def _normalized_ground_raw_direct(
 def test_engine_length_normalization_keeps_mean_and_reduces_noise():
     """Integrated raw sums normalize to stable means and 1/sqrt(length) noise."""
 
-    short, n_short = _normalized_ground_raw_direct(ro_length=0.5)
-    long, n_long = _normalized_ground_raw_direct(ro_length=2.0)
+    short, n_short = _normalized_ground_raw(ro_length=0.5)
+    long, n_long = _normalized_ground_raw(ro_length=2.0)
 
     mean_short = np.mean(short)
     mean_long = np.mean(long)
@@ -741,24 +779,22 @@ def _pulse_readout(
 ) -> Module:
     """A PulseReadout (const envelope) for the decimated/lookback path.
 
-    Decimated needs a PulseReadout because its ``pulse_cfg`` defines the readout
-    envelope shape rendered in the time domain.
+    Its generator waveform defines the envelope rendered in the time domain.
     """
 
     pulse_len = ro_length if pulse_length is None else pulse_length
-    pulse_cfg = PulseCfg(
-        ch=0,
+    return PulseReadoutCfg(
+        gen_ch=0,
         nqz=1,
         gain=gain,
         freq=ro_freq_mhz,
         phase=0.0,
         pre_delay=pre_delay,
         waveform=ConstWaveformCfg(length=pulse_len),
-    )
-    ro_cfg = DirectReadoutCfg(
-        ro_ch=0, ro_length=ro_length, ro_freq=ro_freq_mhz, trig_offset=trig_offset
-    )
-    return PulseReadoutCfg(pulse_cfg=pulse_cfg, ro_cfg=ro_cfg).build("ro")
+        ro_ch=0,
+        ro_length=ro_length,
+        trig_offset=trig_offset,
+    ).build("ro")
 
 
 def _decimated_seed_trace(soc: MockQickSoc, soccfg: QickConfig) -> NDArray[np.float64]:
@@ -835,7 +871,7 @@ def _ground_normalized_raw_std(readout: Module, *, sim: SimParams) -> float:
 def test_engine_pulse_readout_gain_scales_raw_blob_centers():
     """PulseReadout raw deterministic centres scale linearly with readout gain."""
 
-    sim = _SIM.model_copy(
+    sim = _PULSE_SIM.model_copy(
         update={
             "snr": 1.0e9,
             "readout_photons_per_gain2": 1.0,
@@ -857,7 +893,7 @@ def test_engine_pulse_readout_gain_scales_raw_blob_centers():
 def test_engine_readout_gain_noise_scales_with_pulse_readout_gain() -> None:
     """The second Gaussian source is proportional to linear readout gain."""
 
-    sim = _SIM.model_copy(
+    sim = _PULSE_SIM.model_copy(
         update={
             "snr": 1.0e9,
             "Temp": 0.0,
@@ -879,7 +915,7 @@ def test_engine_readout_gain_noise_scales_with_pulse_readout_gain() -> None:
 def test_engine_pulse_readout_signal_samples_use_trigger_alignment() -> None:
     """Accumulated PulseReadout integrates only pulse envelope inside the ADC window."""
 
-    sim = _SIM.model_copy(update={"snr": 1.0e9, "readout_photons_per_gain2": 1.0})
+    sim = _PULSE_SIM.model_copy(update={"snr": 1.0e9, "readout_photons_per_gain2": 1.0})
 
     def raw_peak(trig_offset: float) -> float:
         _soc, soccfg = make_mock_soc(sim=sim)
@@ -910,7 +946,7 @@ def test_engine_pulse_readout_signal_samples_use_trigger_alignment() -> None:
 def test_engine_pulse_readout_signal_samples_include_pulse_pre_delay() -> None:
     """PulseReadout envelope starts after its generator pre_delay."""
 
-    sim = _SIM.model_copy(update={"snr": 1.0e9, "readout_photons_per_gain2": 1.0})
+    sim = _PULSE_SIM.model_copy(update={"snr": 1.0e9, "readout_photons_per_gain2": 1.0})
     pulse_length = 0.2
     pre_delay = 0.3
 
@@ -941,25 +977,6 @@ def test_engine_pulse_readout_signal_samples_include_pulse_pre_delay() -> None:
     assert early == pytest.approx(0.0, abs=1e-12)
 
 
-def test_engine_direct_readout_skips_photon_backaction() -> None:
-    """DirectReadout has no generator gain, so critical-photon checks do not apply."""
-
-    f_qubit_ghz = _f_qubit_mhz() * 1e-3
-    sim = _SIM.model_copy(update={"bare_rf": f_qubit_ghz, "snr": 1.0e9})
-    soc, soccfg = make_mock_soc(sim=sim)
-    prog = ModularProgramV2(
-        soccfg,
-        ProgramV2Cfg(reps=3, rounds=1),
-        modules=[
-            DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=_f_qubit_mhz()).build("ro")
-        ],
-    )
-
-    result = prog.acquire(soc, progress=False)
-
-    assert result[0].shape == (1, 2)
-
-
 def test_engine_acquire_decimated_returns_timefly_shifted_trace():
     """acquire_decimated on a sim soc renders a model-A time-domain trace.
 
@@ -967,7 +984,7 @@ def test_engine_acquire_decimated_returns_timefly_shifted_trace():
     readout envelope shifted by ``sim.timeFly``: ~0 before timeFly, finite after.
     """
 
-    soc, soccfg = make_mock_soc(sim=_SIM)
+    soc, soccfg = make_mock_soc(sim=_PULSE_SIM)
 
     # reps=1, single trigger -> qick returns the simple (length, 2) decimated shape.
     prog = ModularProgramV2(
@@ -986,7 +1003,7 @@ def test_engine_acquire_decimated_returns_timefly_shifted_trace():
     ts = prog.get_time_axis(ro_index=0)  # program-time axis (trig_offset == 0 here)
     mag = np.abs(trace[:, 0] + 1j * trace[:, 1])
 
-    tof = _SIM.timeFly
+    tof = _PULSE_SIM.timeFly
     # The signal floor is set by the per-sample noise (full_scale / snr); the in-
     # window amplitude is ~full_scale * |steady S21|, far above it.  Compare the
     # pre-timeFly region (noise only) to the in-window region (envelope present).
@@ -999,7 +1016,7 @@ def test_engine_acquire_decimated_returns_timefly_shifted_trace():
 def test_engine_acquire_decimated_uses_pulse_length_not_adc_window():
     """The ADC window can outlive the generator pulse envelope."""
 
-    sim = _SIM.model_copy(update={"snr": 1.0e9})
+    sim = _PULSE_SIM.model_copy(update={"snr": 1.0e9})
     soc, soccfg = make_mock_soc(sim=sim)
     pulse_length = 0.6
     ro_length = 2.0
@@ -1031,7 +1048,7 @@ def test_engine_acquire_decimated_uses_pulse_length_not_adc_window():
 def test_engine_acquire_decimated_amplitude_scales_with_readout_gain():
     """Decimated/lookback traces use the same linear readout gain amplitude."""
 
-    sim = _SIM.model_copy(update={"snr": 1.0e9, "readout_photons_per_gain2": 1.0})
+    sim = _PULSE_SIM.model_copy(update={"snr": 1.0e9, "readout_photons_per_gain2": 1.0})
 
     def inside_mean(gain: float) -> float:
         soc, soccfg = make_mock_soc(sim=sim)
@@ -1317,25 +1334,9 @@ def test_engine_deterministic_branch_smoke():
 
 
 @pytest.mark.parametrize(
-    ("backaction", "expected_first", "expected_total"),
+    ("expected_first", "expected_total"),
     [
         pytest.param(
-            False,
-            [
-                [976207, -1388589],
-                [986314, -1380900],
-                [969173, -1390124],
-                [966243, -1380643],
-                [980165, -1377391],
-                [985207, -1388874],
-                [989316, -1400165],
-                [973850, -1380632],
-            ],
-            -38313825784,
-            id="direct-readout",
-        ),
-        pytest.param(
-            True,
             [
                 [46328, -72590],
                 [56435, -64901],
@@ -1352,7 +1353,7 @@ def test_engine_deterministic_branch_smoke():
     ],
 )
 def test_engine_large_round_preserves_population_and_seed_stream(
-    backaction: bool, expected_first: list[list[int]], expected_total: int
+    expected_first: list[list[int]], expected_total: int
 ) -> None:
     """Large single-node rounds keep population numerics and redraw per round."""
 
@@ -1377,19 +1378,15 @@ def test_engine_large_round_preserves_population_and_seed_stream(
         phase=0.0,
         waveform=ConstWaveformCfg(length=0.08),
     ).build("drive")
-    ro_cfg = DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=sim.bare_rf * 1000.0)
-    if backaction:
-        pulse_cfg = PulseCfg(
-            ch=0,
-            nqz=1,
-            gain=0.1,
-            freq=sim.bare_rf * 1000.0,
-            phase=0.0,
-            waveform=ConstWaveformCfg(length=1.0),
-        )
-        readout = PulseReadoutCfg(pulse_cfg=pulse_cfg, ro_cfg=ro_cfg).build("ro")
-    else:
-        readout = ro_cfg.build("ro")
+    readout = PulseReadoutCfg(
+        gen_ch=0,
+        nqz=1,
+        gain=0.1,
+        freq=sim.bare_rf * 1000.0,
+        waveform=ConstWaveformCfg(length=1.0),
+        ro_ch=0,
+        ro_length=1.0,
+    ).build("ro")
     prog = ModularProgramV2(
         soccfg,
         ProgramV2Cfg(reps=100_003, rounds=1, relax_delay=0.0),

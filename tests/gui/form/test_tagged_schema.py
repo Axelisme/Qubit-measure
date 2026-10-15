@@ -1,10 +1,9 @@
-"""Tagged input schemas preserve native identity and branch-local constraints."""
+"""Tagged input preserves native identity and branch-local constraints."""
 
 from collections.abc import Callable, Mapping
 from typing import Annotated, Literal
 
 import pytest
-from jsonschema import Draft202012Validator
 from pydantic import Field, JsonValue
 from pydantic.json_schema import SkipJsonSchema
 from zcu_tools.gui.form import (
@@ -83,15 +82,6 @@ def test_discriminator_identity_survives_dynamic_choices_refresh() -> None:
     before = state.input.data
     for empty in (False, True, False):
         env = captured_ext_env(empty_tags=empty)
-        schema = DiscriminatorChoicesForm.input_schema(env)
-        properties = schema["properties"]
-        assert isinstance(properties, dict)
-        branch = properties["branch"]
-        assert isinstance(branch, dict)
-        variants = branch["oneOf"]
-        assert isinstance(variants, list)
-        validator = Draft202012Validator(schema)
-        assert validator.is_valid(before) is not empty
         result = state.result(env)
         if empty:
             assert isinstance(result, FormErrors)
@@ -149,21 +139,6 @@ class SchemaIdentityForm(FormModel):
         }
 
 
-def schema_object(value: JsonValue) -> dict[str, JsonValue]:
-    """Require a public JSON Schema object; fail an assertion otherwise."""
-    assert isinstance(value, dict)
-    return value
-
-
-def range_count_options(node: dict[str, JsonValue]) -> JsonValue:
-    """Read the ordinary n options from a linear range schema."""
-    fields = schema_object(node["properties"])
-    # A choice leaf has no Expr alternative, so its node holds the enum.
-    count = schema_object(fields["n"])
-    assert "anyOf" not in count
-    return count["enum"]
-
-
 def test_container_discriminator_identity_and_retained_discriminator_identity_refresh() -> (
     None
 ):
@@ -177,24 +152,14 @@ def test_container_discriminator_identity_and_retained_discriminator_identity_re
         (False, False),
     ):
         env = captured_ext_env(empty_containers=empty, three_only=three_only)
-        schema = SchemaIdentityForm.input_schema(env)
-        fields = schema_object(schema["properties"])
-        for name in ("sequence", "fixed", "mapping"):
-            node = schema_object(fields[name])
-            if empty:
-                assert node["not"] == {}
-            else:
-                assert node["enum"] == [before[name]]
         allowed_n = 3 if three_only else 2
-        assert range_count_options(schema_object(fields["restricted"])) == [allowed_n]
-        validator = Draft202012Validator(schema)
-        assert validator.is_valid(before) == (not empty and not three_only)
+        count = state.describe(("restricted", "n"), env).target
+        assert count is not None and count.choices == (allowed_n,)
         candidate: dict[str, JsonValue] = {
             **before,
             "restricted": {"kind": "linrange", "n": allowed_n},
         }
         if not empty:
-            assert validator.is_valid(candidate)
             candidate_result = FormState(
                 FormInput(SchemaIdentityForm, candidate)
             ).result(env)
@@ -225,7 +190,6 @@ def test_container_discriminator_identity_and_retained_discriminator_identity_re
         **before,
         "unrestricted": {"kind": "linrange", "n": 0},
     }
-    assert not Draft202012Validator(schema).is_valid(invalid)
     errors = FormState(FormInput(SchemaIdentityForm, invalid)).result(env)
     assert isinstance(errors, FormErrors)
     assert ("unrestricted", "n") in errors.messages
@@ -248,10 +212,8 @@ class TypedTagCollisionForm(FormModel):
 
 def test_discriminator_identity_keeps_numeric_and_string_tags_distinct() -> None:
     env = FormEnv()
-    schema = TypedTagCollisionForm.input_schema(env)
     for tag in (1, 2, "1"):
         data: dict[str, JsonValue] = {"branch": {"kind": tag}}
-        assert Draft202012Validator(schema).is_valid(data)
         result = FormState(FormInput(TypedTagCollisionForm, data)).result(env)
         assert isinstance(result, TypedTagCollisionForm)
         assert result.branch.kind == tag
@@ -286,10 +248,8 @@ def test_skipped_discriminator_choice_keeps_normal_field_and_identity(
     model: type[OmittedChoiceForm | InvalidJsonChoiceForm],
 ) -> None:
     env = FormEnv()
-    schema = model.input_schema(env)
     for tag in (1, 2):
         data: dict[str, JsonValue] = {"branch": {"kind": tag, "amount": 7.0}}
-        assert Draft202012Validator(schema).is_valid(data)
         state = FormState(FormInput(model, data))
         result = state.result(env)
         assert isinstance(result, (OmittedChoiceForm, InvalidJsonChoiceForm))
@@ -368,7 +328,7 @@ class UnionTagForm(FormModel):
 
 
 @pytest.mark.parametrize("model", [AliasTagForm, UnionTagForm])
-def test_literal_tag_declaration_keeps_schema_and_result_agreement(
+def test_literal_tag_declaration_keeps_result_agreement(
     model: type[AliasTagForm | UnionTagForm],
 ) -> None:
     env = FormEnv()
@@ -381,13 +341,10 @@ def test_literal_tag_declaration_keeps_schema_and_result_agreement(
         (False, False),
     ):
         env = captured_ext_env(empty_amounts=empty, nine_only=nine_only)
-        schema = model.input_schema(env)
-        validator = Draft202012Validator(schema)
         for tag in (1, 2):
             for amount in (7.0, 9.0):
                 data: dict[str, JsonValue] = {"branch": {"kind": tag, "amount": amount}}
                 accepted = not empty and amount == (9.0 if nine_only else 7.0)
-                assert validator.is_valid(data) is accepted
                 candidate = FormState(FormInput(model, data))
                 result = candidate.result(env)
                 if accepted:
@@ -401,7 +358,6 @@ def test_literal_tag_declaration_keeps_schema_and_result_agreement(
                     assert ("branch", "amount") in result.messages
                 assert candidate.input.data == data
         string_data: dict[str, JsonValue] = {"branch": {"kind": "1", "text_only": 4.0}}
-        assert validator.is_valid(string_data)
         string_state = FormState(FormInput(model, string_data))
         string_result = string_state.result(env)
         assert isinstance(string_result, model)
@@ -494,14 +450,11 @@ def test_skipped_choice_keeps_branch_ownership_through_choices_refresh(
         (False, False),
     ):
         env = captured_ext_env(empty_amounts=empty, nine_only=nine_only)
-        schema = model.input_schema(env)
-        validator = Draft202012Validator(schema)
         allowed = 9.0 if nine_only else 7.0
         for tag in (1, 2):
             for amount in (7.0, 9.0):
                 data: dict[str, JsonValue] = {"branch": {"kind": tag, "amount": amount}}
                 accepted = not empty and amount == allowed
-                assert validator.is_valid(data) is accepted
                 candidate = FormState(FormInput(model, data))
                 result = candidate.result(env)
                 if accepted:
@@ -514,7 +467,6 @@ def test_skipped_choice_keeps_branch_ownership_through_choices_refresh(
                     assert isinstance(result, FormErrors)
                     assert ("branch", "amount") in result.messages
                 assert candidate.input.data == data
-        assert validator.is_valid(string_before)
         string_result = string_state.result(env)
         assert isinstance(string_result, model)
         assert isinstance(string_result.branch, StringNumericTagBranch)
@@ -522,7 +474,6 @@ def test_skipped_choice_keeps_branch_ownership_through_choices_refresh(
         assert type(string_result.branch.kind) is str
         assert string_result.branch.text_only == 4.0
         assert string_state.input.data == string_before
-        assert validator.is_valid(before) == (not empty and not nine_only)
         current = state.result(env)
         if empty or nine_only:
             assert isinstance(current, FormErrors)

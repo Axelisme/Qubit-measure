@@ -87,7 +87,7 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
         result_type=PowerResult,
         cfg_type=PowerCfg,
         tag="jpa/power",
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
     )
 
     def run(self, cfg: PowerCfg, *, context: RunContext) -> PowerResult:

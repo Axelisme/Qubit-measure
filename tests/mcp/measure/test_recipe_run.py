@@ -22,18 +22,13 @@ def test_run_starts_immediately_with_detached_conditions(tmp_path):
             summary_parameters=(
                 SummaryParameter("rounds", "rounds"),
                 SummaryParameter("reset", "modules.reset"),
-                SummaryParameter(
-                    "frequency", "modules.readout.module.pulse_cfg.module.freq"
-                ),
+                SummaryParameter("frequency", "modules.readout.module.freq"),
             ),
         ).open_tab("lookback")
         tab.set("rounds", 7)
         tab.disable_library("modules.reset")
         tab.read_value("$resonator.freq")
-        for path in (
-            "modules.readout.module.pulse_cfg.module.freq",
-            "modules.readout.module.ro_cfg.ro_freq",
-        ):
+        for path in ("modules.readout.module.freq",):
             tab.set(path, {"expr": "$resonator.freq"}, source="$resonator.freq")
         operation = tab.run()
         assert gui.ran
@@ -50,9 +45,7 @@ def test_run_starts_immediately_with_detached_conditions(tmp_path):
             "value": None,
             "source": "disabled",
         }
-        assert before.actual["fields"][
-            "modules.readout.module.pulse_cfg.module.freq"
-        ] == {
+        assert before.actual["fields"]["modules.readout.module.freq"] == {
             "value": 6100.0,
             "source": "$resonator.freq",
         }

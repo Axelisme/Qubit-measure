@@ -8,9 +8,12 @@ from zcu_tools.cfg_model import (
     PulseCfg,
     PulseSpec,
 )
+from zcu_tools.gui.app.measure.services.form_contracts import (
+    CfgPreconditionError,
+    CfgPreconditionReason,
+)
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
-from zcu_tools.gui.cfg.resource import CfgPreconditionError, CfgPreconditionReason
-from zcu_tools.gui.form import FormEnv
+from zcu_tools.gui.form import FormEnv, FormPathError
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
@@ -223,10 +226,13 @@ def test_option_command_rejection_is_atomic(path: tuple[str, ...], name: str) ->
     notifications: list[str] = []
     resource.subscribe(lambda: notifications.append("changed"))
     assert hasattr(resource, "run_command"), "Missing guarded option command host"
-    with pytest.raises(
-        ValueError, match="Unavailable option command|No current option"
-    ):
-        resource.run_command(path, name)
+    if path in (("missing",), ("pulse", "module", "freq")):
+        with pytest.raises(FormPathError) as invalid_path:
+            resource.run_command(path, name)
+        assert invalid_path.value.path == path
+    else:
+        with pytest.raises(ValueError, match="Unavailable option command"):
+            resource.run_command(path, name)
     assert resource.input.data == before
     assert notifications == []
     resource.run_command(("pulse",), "to_inline")

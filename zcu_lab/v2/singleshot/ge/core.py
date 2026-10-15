@@ -296,6 +296,7 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=GE_Result,
         cfg_type=GE_Cfg,
+        cfg_schema_version="2.0",
         tag="singleshot/ge",
     )
 

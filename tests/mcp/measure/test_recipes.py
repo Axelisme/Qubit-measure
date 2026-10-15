@@ -744,6 +744,7 @@ def test_recipe_control_reaches_the_original_operation_after_a_late_receipt(
         initial = full_execution_reply(
             client, start_recipe_at(client, pending, {"frequency_mhz": 6020.0})
         )
+
         execution = initial.data["execution"]
         for _ in range(2):
             reply = client.call(control, {"execution": execution})
@@ -990,10 +991,9 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
         assert reply.images[0].data == PNG
         assert data["elapsed_s"] >= 0
         for path, value in {
-            "modules.readout.module.pulse_cfg.module.freq": 6020.0,
-            "modules.readout.module.ro_cfg.ro_freq": 6020.0,
-            "modules.readout.module.ro_cfg.ro_length": expected[0],
-            "modules.readout.module.ro_cfg.trig_offset": expected[1],
+            "modules.readout.module.freq": 6020.0,
+            "modules.readout.module.ro_length": expected[0],
+            "modules.readout.module.trig_offset": expected[1],
             "rounds": 7,
         }.items():
             assert cfg_value(gui.publication, path) == value
@@ -1020,8 +1020,8 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
         assert by_path["modules", "reset"] is None
         assert by_path["modules", "init_pulse"] is None
         for key, value in zip(("ro_length", "trig_offset"), expected, strict=True):
-            assert by_path["modules", "readout", "module", "ro_cfg", key] == value
-            assert type(by_path["modules", "readout", "module", "ro_cfg", key]) is float
+            assert by_path["modules", "readout", "module", key] == value
+            assert type(by_path["modules", "readout", "module", key]) is float
 
 
 @pytest.mark.parametrize("reuse_tab_id", [None, "kept"])
@@ -1057,6 +1057,8 @@ def test_lookback_missing_frequency_does_not_run_a_blind_default(
             }
         if method in ("tab.get_cfg", "tab.reset_cfg", "tab.edit_cfg"):
             return deepcopy(publication)
+        if method == "tab.describe_cfg":
+            return gui(method, params)
         raise AssertionError(f"Missing frequency must not start work: {method}")
 
     with recipe_client(tmp_path, respond) as client:

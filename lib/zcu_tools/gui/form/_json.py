@@ -5,7 +5,7 @@ from collections.abc import Mapping
 
 from pydantic import BaseModel, JsonValue
 
-from zcu_tools.gui.cfg.codec import encode_complex
+from zcu_tools.core.complex_codec import encode_complex
 
 
 def copy_json(value: object) -> JsonValue:

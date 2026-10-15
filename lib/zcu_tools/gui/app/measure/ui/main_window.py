@@ -6,7 +6,7 @@ Implements ViewProtocol; all state lives in Controller/State, never here.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal
 
 from qtpy.QtCore import Qt, QTimer
@@ -31,7 +31,7 @@ from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport
 from zcu_tools.gui.app.measure.services.load import LoadDataError
 from zcu_tools.gui.control_identity import ControlStatus
-from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
 from zcu_tools.gui.project import nearest_existing
 from zcu_tools.gui.session.context_types import CommandOrigin, SavedPoint
 from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
@@ -53,10 +53,12 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
+    from zcu_tools.cfg_model import TemplateDef
     from zcu_tools.gui.app.measure.controller import Controller, ViewSnapshot
     from zcu_tools.gui.app.measure.remote import RemoteControlAdapter
     from zcu_tools.gui.app.measure.services import TabSnapshot
     from zcu_tools.gui.app.measure.services.writeback_control import WritebackPane
+    from zcu_tools.gui.session.alias_presets import AliasPresets
 
 
 # ---------------------------------------------------------------------------
@@ -102,13 +104,22 @@ class _MainWindowTabActions:
 
 
 class MainWindow(QMainWindow):
-    """Present current session sources and pane-owned historical results."""
+    """Present current session sources and pane-owned historical results.
+
+    templates returns the composition's current template catalog, read
+    whenever Inspect opens. dialog_presenter shows the window's and Inspect's
+    questions and messages; None uses Qt message boxes. alias_presets is the
+    composition's named alias catalog that Inspect's Load preset offers;
+    omission or None means no catalog.
+    """
 
     def __init__(
         self,
         controller: Controller,
         *,
+        templates: Callable[[], Mapping[str, TemplateDef]],
         dialog_presenter: DialogPresenter | None = None,
+        alias_presets: AliasPresets | None = None,
     ) -> None:
         super().__init__()
         self._ctrl = controller
@@ -119,7 +130,12 @@ class MainWindow(QMainWindow):
             self._dialog_refs
         )
         self._dialog_registry = MainDialogRegistry(
-            self._ctrl, parent=self, dialog_refs=self._dialog_refs
+            self._ctrl,
+            parent=self,
+            dialog_refs=self._dialog_refs,
+            templates=templates,
+            dialog_presenter=self._dialog_presenter,
+            alias_presets=alias_presets,
         )
         self._events = MainWindowEventCoordinator(self._ctrl, host=self)
         self._initialize_close_state()
@@ -888,11 +904,20 @@ class MainWindow(QMainWindow):
     def apply_tab_writeback(
         self, tab_id: str, pane: WritebackPane = "analysis"
     ) -> None:
+        """Apply this pane's draft, presenting ExpectedError without discarding it.
+
+        An unknown tab is ignored. Expected guard/input refusals use the existing
+        error presenter; the draft stays editable. Other failures propagate.
+        """
         logger.info("apply_tab_writeback: tab_id=%r pane=%r", tab_id, pane)
         if not self._ctrl.has_tab(tab_id):
             logger.warning("apply_tab_writeback: unknown tab_id=%r — ignoring", tab_id)
             return
-        result = self._ctrl.apply_writeback_for_pane(tab_id, pane)
+        try:
+            result = self._ctrl.apply_writeback_for_pane(tab_id, pane)
+        except ExpectedError as error:
+            self.show_error_dialog("Writeback failed", str(error))
+            return
         applied_ids = result.get("applied_ids", [])
         if applied_ids:
             self.show_status_message(f"Writeback applied: {', '.join(applied_ids)}")

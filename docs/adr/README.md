@@ -8,7 +8,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Module Boundaries
 
-- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：各 package 的定位、五層、穩定工具與有狀態模組的分類、core 共用 waveform 格式、cfg_model 契約與債務清單。分層、無循環與 core 只依賴 utils 由 .importlinter C8–C13／C19 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；離線遷移專用程式只放 `migrations/`。剩餘債務以 `ignore_imports` 記帳。
+- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：各 package 的定位、五層、穩定工具與有狀態模組的分類、core 共用 waveform 格式、cfg_model 契約、library 容器版本政策與債務清單。分層、無循環與 core 只依賴 utils 由 .importlinter C8–C13／C19 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；離線遷移專用程式只放 `migrations/`。剩餘債務以 `ignore_imports` 記帳。
 
 ## Concurrency / Lifecycle
 
@@ -24,27 +24,29 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Cfg / Value Model
 
+- [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Readout 自有 generator／ADC 欄位、單一頻率、waveform 引用、runtime ADC matching 與表單路徑。
+
 - [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：make_form、固定捕捉、adapter 黑箱、持久範本與具名裝置欄位。
-- [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用機制、measure tab resource 的原子 publication／固定 Run acceptance、唯讀 ref／顯式 inline 轉換、Custom reference 繼承及獨立 draft 的現況分界；library conversion、selected Apply 與其他 app 的剩餘目標見 [Cfg draft](draft/cfg-editing-boundaries.md)，measure slice 的設計與驗收邊界見 [resource contract](draft/cfg-resource-contract.md)。
-- [0008 — Measure CfgEditor session](0008-cfg-editor-session.md)：measure headless session 與 opaque writeback 的局部契約仍有效；其中 tab auto-commit／雙樹不是共用目標。
-- [0009 — Spec/Value fluent + LiteralSpec lock](0009-spec-value-fluent-and-literal-lock.md)：Spec／Value 和角色預設的局部契約，概要見 [cfg owner](../../lib/zcu_tools/gui/cfg/README.md)；Measure authoring 與角色 default 表由 [[0073]] 接替。
-- [0010 — Complete value tree](0010-value-tree-complete-none-for-empty.md)：完整 Value tree 與停用表示的局部契約。
-- [0011 — Finished-cfg validation](0011-cfgschema-validate-boundary.md)：成品驗證的局部條件；舊篇所述 app-local lowering 位置已更新。
+- [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用 Form、持久 Spec、Library／Inspect／writeback 的提交邊界、固定來源與共用 Inspect Aliases 頁。
+- [0008 — Headless Form 與 writeback draft](0008-cfg-editor-session.md)：Headless Form 的宿主所有權、opaque writeback draft、ModuleSpec proposal 與 selected Apply 的成功前綴。
+- [0009 — Spec/Value fluent + LiteralSpec lock](0009-spec-value-fluent-and-literal-lock.md)：已被 [[0065]]、[[0073]] 的 Form／持久 Spec 取代，保留歷史設計。
+- [0010 — Complete value tree](0010-value-tree-complete-none-for-empty.md)：已被 [[0065]] 的 Form input／result 取代，保留歷史設計。
+- [0011 — Finished-cfg validation](0011-cfgschema-validate-boundary.md)：已被 [[0065]]、[[0073]] 的 Form result 與 adapter 邊界取代。
 - [0012 — Context-free measure definition](0012-cfgbuilder-value-layer-fluent-assembly.md)：舊 definition／seed 契約，由 [[0073]] 取代。
-- [0037 — Session value lookup](0037-measure-gui-value-lookup-resolve-once.md)：lookup 與 resolve-once 輸入的 measure 局部契約。
-- [0045 — Shared GUI cfg core](0045-shared-gui-cfg-core-ownership.md)：renderer registry／import surface 的局部細節仍有效；舊 program owner 路徑已過時。
-- [0046 — Shared cfg lowering ports](0046-shared-cfg-lowering-ports.md)：generic lowering 操作與 ports；live-key 說明不得推定為核准的 refresh／override 目標。
-- [0050 — Canonical cfg binding paths](0050-canonical-cfg-binding-paths.md)：target grammar／diff 的局部契約；成功前綴是現況而非核准的 atomic batch 目標。
-- [0051 — Program cfg shape catalog](0051-canonical-program-cfg-shape-catalog.md)：program shape／raw materialization 局部契約；目前 owner 已移至 `experiment.cfg_editing`。
+- [0037 — Session value lookup](0037-measure-gui-value-lookup-resolve-once.md)：唯讀 value lookup、內部 ValueRef／resolve_value_ref、Form expression 與固定 capture；舊 token／tagged wire 已退休。
+- [0045 — Shared GUI cfg core](0045-shared-gui-cfg-core-ownership.md)：已被 [[0065]]、[[0073]] 的 Form owner 分工取代。
+- [0046 — Shared cfg lowering ports](0046-shared-cfg-lowering-ports.md)：已被 [[0065]]、[[0073]] 的 Form 轉換與持久 Spec 提交取代。
+- [0050 — Canonical cfg binding paths](0050-canonical-cfg-binding-paths.md)：已被 [[0065]] 的 Form model-field paths 與 batch 契約取代。
+- [0051 — Program cfg shape catalog](0051-canonical-program-cfg-shape-catalog.md)：已被 [[0065]]、[[0073]] 的持久 Spec 與生成器取代。
 
 ## Remote / Transport
 
-- [0070 — GUI 與 agent 的控制身份](0070-control-identity.md)：measure／fluxdep 的單一 holder、固定連線身份、GUI 編輯停用、明確收回與 ref-free cfg acceptance。
+- [0070 — GUI 與 agent 的控制身份](0070-control-identity.md)：measure／fluxdep 的單一 holder、固定連線身份、GUI 編輯停用、共用對話框由宿主決定唯讀、明確收回與 ref-free cfg acceptance。
 - [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：共用傳輸、holder dispatch 和 app policy 分界、事件與錯誤投影、measure 固定工具及 live catalog、穩定名稱寫回、analysis-only JSON 投影，以及 Fluxdep pipeline／interactive 控制、獨立 workflows app 的同一 GUI/MCP run。尚未實作的 GUI 收合見 [draft](draft/remote-event-coalescing.md)。
 
 ## Persistence
 
-- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分各保存對象的 owner、完整性、失敗與引用邊界。SaveLayout 計算 run 輸出位置，獨立 writers 處理格式，上層編排 batch 與 ledger；參數容器使用工作單位與顯式定義注入。
+- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分各保存對象的 owner、完整性、失敗與引用邊界。SaveLayout 計算 run 輸出位置，獨立 writers 處理格式，上層編排 batch 與 ledger；參數容器使用工作單位與顯式定義注入；library 讀取可在同鎖內先備份再清理壞條目。
 
 ## Experiment runtime／Workflows
 
@@ -74,21 +76,22 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 - [量測成果 Artifact、設定快照與讀回](draft/artifact-persistence.md)：核准方向、尚未實作。設定快照正本只在 `data.h5`，ledger 不存 cfg，Notebook 與 GUI 都讀 `data.h5`。Artifact 與 Writeback 各成子模組，`experiment` 共用核心依項目種類決定格式，GUI 子模組管顯示與 adapter 介面。讀回經 `StoredRun` 與核心 `from_stored`，資料優先、cfg 可缺。待 measure-form 與 cfgschema-retire 落地後實作。
 
 
-- [Pydantic 表單、輸入與宿主提交](draft/pydantic-form-tool.md)：Qt-free core 與 editor 分離，共用 defaults hook、evaluator 與 complex codec。Expression 保存在 input，Engine journal 只記普通值。保留獨立 CfgSchema editor；Measure 推導與宿主接線見 [[0073]]。
+- [Pydantic 表單、輸入與宿主提交](draft/pydantic-form-tool.md)：Qt-free core 與 editor 分離，共用 defaults hook、evaluator 與 complex codec。Expression 保存在 input，Engine journal 只記普通值。各宿主共用 FormEditor，Library／writeback 提交持久 Spec；Measure 推導見 [[0073]]。
 
 - [Agent 介面分層](draft/agent-interface-layers.md)：L0 實驗環境、L1 GUI／Notebook、L2 recipe、L3 workflow 與跨實驗分析的定位；L1 由 agent 決定在哪一步介入，L2 recipe 與 L3 workflow 由自己決定在哪裡 yield；自動推導歸 recipe、workflow 內部或 GUI adapter 的初始參數生成；層間以共享狀態交接，選層由上而下。Workflow yield 由進行中的重構實作；無人回應時停在 yield，預設決定與 L0 強制有需求再設計。
 - [GUI 事件收合](draft/remote-event-coalescing.md)：GUI 訂閱端依 payload type 與 tab 的 per-tick 收合尚未落實；cfg 表單 snapshot 收合已實作。
-- [Cfg 編輯接縫與使用邊界](draft/cfg-editing-boundaries.md)：measure tab 的 resource、refresh／override、當前 Valid acceptance 與 atomic batch 已落實；library-entry editing port、selected Apply 與其他 app 仍待收斂。
-- [Cfg 資源公開契約與同步發布](draft/cfg-resource-contract.md)：measure tab 的 resource-bound editing、可寫節點、同步 publication、expression capture 與固定 acceptance 設計及驗收記錄；其他 app 未因這條接線完成而全面遷移。
 - [GUI adapter capability 入口檢查](draft/gui-adapter-capability-guards.md)：analysis／post-analysis application 入口的完整拒絕尚待實作。
 - [Operation 關閉與 disconnect](draft/operation-lifecycle-boundaries.md)：shutdown 期限、無 handle 背景工作與 GUI device/factory owner 的未落實目標。
 
 ## Retired
 
+- [Cfg 編輯接縫與使用邊界](draft/cfg-editing-boundaries.md)：已結案並由 0065、0008、0073 接替，正文只供歷史追溯。
+- [Cfg 資源公開契約與同步發布](draft/cfg-resource-contract.md)：已結案並由 0065、0008、0073 接替，正文只供歷史追溯。
+
 - [具名 workflows 與可丟棄的步驟執行](retired/workflows-engine.md)：期 0 候選草稿，workflow 執行契約由 0062 接替。
 - [0018 — Autofluxdep resolver builder](retired/0018-autofluxdep-orchestrator-requirement-resolver-builder-currying.md) 與 [Autofluxdep 逐項宣告依賴與 predictor 載入](retired/autofluxdep-explicit-dependencies.md)：autofluxdep 已於 04799f2f2 移除。
 
-以下舊篇保留原號與正文；現行 GUI 決策見 0067，Operation 見 0066，Remote／Transport 見 0068，Persistence 見 0063，workflow 見 0062，process startup 見 0064。Cfg 來源篇尚有有效局部契約，未整篇退役。
+以下舊篇保留原號與正文；現行 GUI 決策見 0067，Operation 見 0066，Remote／Transport 見 0068，Persistence 見 0063，workflow 見 0062，process startup 見 0064。Cfg 來源篇 0009、0010、0011、0045、0046、0050、0051 已標為 superseded，保留原路徑與歷史正文。
 
 - [0013 — Remote adapter second view](retired/0013-remote-adapter-as-second-view.md)、[0014 — Shared GUI transport](retired/0014-gui-shared-transport-layer.md)、[0047 — Expected errors](retired/0047-typed-expected-error-taxonomy.md)、[0049 — Lazy push](retired/0049-subscriber-aware-lazy-push.md)、[0052 — Event attribution](retired/0052-event-meta-and-frontend-attribution.md)、[0059 — MCP RPC catalog](retired/0059-measure-mcp-rpc-channel.md)、[0060 — Measure agent interface](retired/0060-measure-agent-interface-shared-gui-view.md)：跨模組邊界由 0068 接替；0052 未落實的 GUI 收合見 draft。
 - [0004 — Service dependency three questions](retired/0004-service-dependency-three-questions.md)：依賴語意與方向由 0067 接替。

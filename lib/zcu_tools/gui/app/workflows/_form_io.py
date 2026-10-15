@@ -8,12 +8,13 @@ projects ordinary leaves without committing to draft/base or Engine.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from math import isfinite
 
 from pydantic import JsonValue
 from pydantic_core import PydanticCustomError
 
-from zcu_tools.gui.cfg.codec import encode_complex
+from zcu_tools.core.complex_codec import encode_complex
 from zcu_tools.gui.form import (
     FormEnv,
     FormErrors,
@@ -25,7 +26,8 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.widgets.form import FormEditor
 
-from .remote import FormInspectionReply
+from .remote import FormDescriptionInspectionReply, FormInspectionReply
+from .remote.form_description import project_form_description
 
 
 def prepare_start_form[F: FormModel](
@@ -81,48 +83,94 @@ def _encode_form_value(value: FormValue) -> JsonValue:
     return value
 
 
-def inspect_form_input(
-    input: FormInput[FormModel],
-    env: FormEnv,
-    batch: Mapping[FormWritePath, JsonValue] | None,
-    local_errors: FormErrors | None,
-    revision: int | None,
-) -> FormInspectionReply | FormErrors:
-    """Project input/candidate and partial ordinary values without publication.
+@dataclass(frozen=True)
+class FormInspection:
+    """Call-local observation source selected by the Window on its owner thread.
 
-    input is the parsed current FormInput, including expression original text.
-    env/revision are fixed owner observations, not sources to refresh; revision
-    may be None before Start. batch=None reads input; an explicit batch previews
-    edits via the core's write contract in call-local state. local_errors is the
-    editor's parse report for reads, or None for batch preview. Return the typed
-    schema/input/ordinary leaves/errors projection or directed FormErrors for
-    rejected writes, without changing input/base/editor/Engine. Declaration and
-    unexpected failures propagate; nonfinite ordinary values raise ValueError.
-    No source capture, I/O or hardware access occurs.
+    input is the selected parsed draft, env its fixed evaluation capture.
+    local_errors is the selected editor's unparsed-text report, used only for
+    reads. revision is the attached Engine's native revision or None before
+    Start; it is not a guard. This source never captures or publishes state.
+    read/describe construct one private candidate per call from this input.
     """
-    state = FormState(input)
-    if batch is not None:
-        try:
-            state.write(batch, env)
-        except PydanticCustomError as exc:
-            if exc.type != "form_field" or exc.context is None:
-                raise
-            return FormErrors({exc.context["path"]: exc.context["message"]})
-        except ValueError as exc:
-            return FormErrors({(): str(exc)})
-    preview = state.preview(env)
-    errors = dict(preview.errors.messages) if preview.errors is not None else {}
-    if local_errors is not None:
-        errors.update(local_errors.messages)
-    return {
-        "schema": state.input_schema(env),
-        "input": state.input.data,
-        "values": [
-            {"path": list(path), "value": _encode_form_value(value)}
-            for path, value in preview.values.items()
-        ],
-        "errors": [
-            {"path": list(path), "message": message} for path, message in errors.items()
-        ],
-        "revision": revision,
-    }
+
+    input: FormInput[FormModel]
+    env: FormEnv
+    local_errors: FormErrors | None
+    revision: int | None
+
+    def _candidate(
+        self,
+        batch: Mapping[FormWritePath, JsonValue] | None,
+    ) -> FormState[FormModel] | FormErrors:
+        state = FormState(self.input)
+        if batch is not None:
+            try:
+                state.write(batch, self.env)
+            except PydanticCustomError as exc:
+                if exc.type != "form_field" or exc.context is None:
+                    raise
+                return FormErrors({exc.context["path"]: exc.context["message"]})
+            except ValueError as exc:
+                return FormErrors({(): str(exc)})
+        return state
+
+    def _observe(
+        self, state: FormState[FormModel], *, include_local: bool
+    ) -> FormInspectionReply:
+        preview = state.preview(self.env)
+        errors = dict(preview.errors.messages) if preview.errors is not None else {}
+        if include_local and self.local_errors is not None:
+            errors.update(self.local_errors.messages)
+        return {
+            "input": state.input.data,
+            "values": [
+                {"path": list(path), "value": _encode_form_value(value)}
+                for path, value in preview.values.items()
+            ],
+            "errors": [
+                {"path": list(path), "message": message}
+                for path, message in errors.items()
+            ],
+            "revision": self.revision,
+        }
+
+    def read(
+        self,
+        batch: Mapping[FormWritePath, JsonValue] | None,
+    ) -> FormInspectionReply | FormErrors:
+        """Read draft or preview parsed edits without publication or I/O.
+
+        batch=None reads this source with local parse errors. An explicit batch
+        (including {}) previews edits to current parsed input, ignoring local
+        text. Return lean input/ordinary values/errors/revision or directed
+        FormErrors for rejected writes. Model-invalid input stays readable.
+        Source/declaration failures propagate; nonfinite values raise ValueError.
+        """
+        state = self._candidate(batch)
+        if isinstance(state, FormErrors):
+            return state
+        return self._observe(state, include_local=batch is None)
+
+    def describe(
+        self,
+        path: FormWritePath,
+        batch: Mapping[FormWritePath, JsonValue] | None,
+    ) -> FormDescriptionInspectionReply | FormErrors:
+        """Describe path and observe the exact same call-local candidate.
+
+        path is a tuple of model-field names; () is root. batch follows read's
+        contract, including local errors only when None. Return lean observation
+        plus single-layer core metadata, never another draft or live-branch
+        lookup. Rejected writes return FormErrors. Unknown/inactive/whole-leaf
+        descendant paths raise FormPathError from core; declaration/source and
+        unexpected failures propagate. No defaults, captures or I/O are added.
+        """
+        state = self._candidate(batch)
+        if isinstance(state, FormErrors):
+            return state
+        description = state.describe(path, self.env)
+        return {
+            **self._observe(state, include_local=batch is None),
+            "description": project_form_description(description),
+        }

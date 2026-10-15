@@ -1,13 +1,19 @@
-"""Measure Form wire projection, using the tab's fixed owner capture."""
+"""Measure Form wire projection, using each Form owner's fixed capture."""
 
 from collections.abc import Mapping
 from typing import TypedDict
 
 from pydantic import JsonValue, TypeAdapter
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource
-from zcu_tools.gui.form import FormErrors, FormWritePath
+from zcu_tools.gui.form import FormErrors, FormPath, FormPreview, FormWritePath
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.session.library_entry import (
+    LibraryEntryInvalid,
+    ModuleEntryForm,
+    WaveformEntryForm,
+)
 
 from .handlers._wire_values import context_wire_value
 
@@ -16,7 +22,7 @@ class FormWrite(TypedDict):
     """One ordinary leaf: path contains model field names; value is encoded JSON."""
 
     path: list[str]
-    value: object
+    value: JsonValue
 
 
 class FormError(TypedDict):
@@ -26,38 +32,77 @@ class FormError(TypedDict):
     message: str
 
 
-class TabFormObservation(TypedDict):
+class FormObservation(TypedDict):
     """Detached Form view, not an acceptance or a source refresh.
 
-    schema describes editable input in the fixed capture. input retains missing
+    input retains missing
     fields and expression tags. values contains evaluated ordinary leaves, not
     proof of validity. errors includes input and lowered cfg validation failures.
     """
 
-    schema: dict[str, JsonValue]
     input: dict[str, JsonValue]
     values: list[FormWrite]
     errors: list[FormError]
 
 
-def observe_form(resource: TabFormResource) -> TabFormObservation:
-    """Project current input/schema/preview/errors without capture or mutation."""
-    preview = resource.preview()
+def observe_form(resource: TabFormResource) -> FormObservation:
+    """Project current input/preview/errors without capture or mutation."""
+    return _observation(
+        resource.input.data,
+        resource.preview(),
+        resource.result(),
+    )
+
+
+def observe_entry(entry: ModuleEntryForm | WaveformEntryForm) -> FormObservation:
+    """Project a library entry Form like observe_form, at the entry's fixed env.
+
+    errors include input errors and Spec validation errors. Nothing is
+    evaluated beyond preview/result and the entry is not changed.
+    """
+    return _observation(
+        entry.state.input.data,
+        entry.state.preview(entry.env),
+        entry.result(),
+    )
+
+
+def entry_invalid_to_remote(exc: LibraryEntryInvalid) -> RemoteError:
+    """Report a rejected entry Form as invalid_params with its field errors.
+
+    data.errors lists every {path, message} with the same rows as an
+    observation's errors; reason is form_errors.
+    """
+    return RemoteError(
+        ErrorCode.INVALID_PARAMS,
+        str(exc),
+        reason="form_errors",
+        data={"errors": _error_rows(exc.errors.messages)},
+    )
+
+
+def _observation(
+    data: dict[str, JsonValue],
+    preview: FormPreview,
+    result: ConfigBase | FormErrors,
+) -> FormObservation:
     errors = dict(preview.errors.messages) if preview.errors is not None else {}
-    result = resource.result()
     if isinstance(result, FormErrors):
         errors.update(result.messages)
     return {
-        "schema": resource.input_schema(),
-        "input": resource.input.data,
+        "input": data,
         "values": [
             {"path": list(path), "value": context_wire_value(value)}
             for path, value in preview.values.items()
         ],
-        "errors": [
-            {"path": list(path), "message": message} for path, message in errors.items()
-        ],
+        "errors": _error_rows(errors),
     }
+
+
+def _error_rows(messages: Mapping[FormPath, str]) -> list[FormError]:
+    return [
+        {"path": list(path), "message": message} for path, message in messages.items()
+    ]
 
 
 def form_writes(raw: object) -> Mapping[FormWritePath, JsonValue]:

@@ -102,6 +102,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=FreqResult,
         cfg_type=FreqCfg,
+        cfg_schema_version="2.0",
         tag="twotone/reset/dual_tone/freq",
     )
 

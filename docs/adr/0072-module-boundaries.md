@@ -76,7 +76,9 @@ Datafile／resources → core 的方向由 C8、C9、C12 約束。此函式只�
 - **內容**：`ConfigBase`；module 與 waveform 的 cfg schema（欄位、驗證、`set_param`）；有狀態模組之間溝通用的 Protocol，例如 `ModuleResolver`（依名稱取 module 或 waveform cfg）與 `WaveformAssetInfo`（依名稱查波形長度）。
 - **依賴**：cfg_model 只依賴外部函式庫、utils 與 core.waveform_format，不讀寫檔案。
 - **准入**：型別只有在兩個以上有狀態模組都需要時才放進來。
-- **改動**：核心 schema 會寫進檔案，例如每個工作點的 `module_cfg.yaml`。改核心等於改格式，要處理格式版本。
+- **改動**：核心 schema 會寫進檔案，例如每個工作點的 `module_cfg.yaml`。Library 的 format／format_version 只描述 header 與容器結構，不描述個別 module／waveform Spec 的欄位。新增、刪除或修改 Spec 欄位不自動升 library 版本。目前 library 維持 2.0，不遷移、不加相容讀取；entry schema 仍依現行定義驗證，不能以 forward minor 放寬 extra 策略。
+
+使用者於 2026-10-15 裁決：「只是改Module而已真的需要升Library版本嗎？就像加一個Component原件定義，不應該讓舊版本不能讀對吧」「不要一次驗證，而是best-effort」「1可以，2A，3保留2.0」。Library 逐條驗證既有資料，合法條目不因另一筆 Spec 過時而失去可讀性。壞條目的備份與讀取清理例外由 [[0063]] 規定。
 
 `program` 以 `type`／`style` 對應到執行用的 Module builder，取代 cfg 上的 `build()`。`resources` 的 module library 以核心 schema 作為 DocumentStore 的 model，並實作核心的 Protocol。驗證 context 注入固定 library 與 asset capability。Program 的 ModuleCfgFactory.from_core 集中轉換成 native cfg，透過 assets.path_for 取得絕對路徑。Native arb 只保留 data key 與必填 path，不保留 provider，不查 global DB。
 
@@ -104,7 +106,7 @@ Datafile／resources → core 的方向由 C8、C9、C12 約束。此函式只�
 
 `zcu_tools`、`zcu_lab`、離線 `migrations` 與 repo 的 `mcp_servers` 都是 import-linter 的 root packages。只為離線遷移存在的程式與對照表放在 `migrations/`，`zcu_lab` 與 `zcu_tools` 不 import 它，遷移完成後可整個刪除。使用者於 2026-10-14 裁定：「我自己會預期，我遷移完後刪除migrations就可以了」。組合根顯式注入 measure registry、workflow 註冊清單與 MCP recipes，framework 不反向載入使用者定義。Tests 的 lab 獨立性由刪除 `zcu_lab/` 後的整套 pytest 驗收，不新增 tests import contract。
 
-債務以確切的 module 對逐條列在 `ignore_imports`，不用萬用字元，每組註解寫明「債務，由誰移除」。萬用字元只用於合法例外，例如 C1 的 `cfg_editing → gui.cfg`，註解寫明「不是債務」。`ignore_imports` 只減不增。
+債務以確切的 module 對逐條列在 `ignore_imports`，不用萬用字元，每組註解寫明「債務，由誰移除」。舊 cfg_editing → gui.cfg 例外隨兩個模組退休而移除，不是可仿照的依賴。`ignore_imports` 只減不增。
 
 ## 債務
 

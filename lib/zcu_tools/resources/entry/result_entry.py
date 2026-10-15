@@ -249,8 +249,13 @@ class ResultEntry:
         origin. origin identifies the importing frontend as gui, notebook or mcp.
         description=None preserves seed/clone metadata; a string explicitly sets it,
         including empty text, within this creation/cleanup scope.
-        No source files, data or images change. Failure removes only the new point;
-        completed imports may remain orphaned. No cross-file transaction is provided.
+        Reading the source library may first back up its original bytes and
+        clean invalid entries and their sources from its module_cfg. Clone copies
+        only retained entries and imports only retained sources. Data and images
+        are not copied or changed; other source files are unchanged.
+        Failure removes only the new point. Completed source-library cleanup and
+        its backup remain, and completed imports may remain orphaned. No cross-file
+        transaction is provided.
         """
         validate_origin(origin)
         destination = _entry_path(
@@ -296,9 +301,18 @@ class ResultEntry:
             # native model. Copy those values too, in the same working units.
             with self._point_store(destination / "point.yaml").edit() as draft:
                 draft.components = components
+        from zcu_tools.resources.context.library import (
+            MODULE_LIBRARY_FORMAT,
+            MODULE_LIBRARY_VERSION,
+        )
+
         with (destination / "module_cfg.yaml").open("x", encoding="utf-8") as stream:
             YAML(typ="rt").dump(
-                {"format": "zcu.module-library", "format_version": "2.0"}, stream
+                {
+                    "format": MODULE_LIBRARY_FORMAT,
+                    "format_version": f"{MODULE_LIBRARY_VERSION.major}.{MODULE_LIBRARY_VERSION.minor}",
+                },
+                stream,
             )
 
     def _clone_source(self, clone_from: str | PointView) -> tuple[ResultEntry, Path]:
@@ -345,14 +359,10 @@ class ResultEntry:
             store.refresh()
             point_document = store.snapshot()
             shutil.copyfile(source / "point.yaml", destination / "point.yaml")
-        library_store = self._library_store(source / "module_cfg.yaml")
+        library_store = source_entry._library_store(source / "module_cfg.yaml")
         with library_store.locked():
             library_store.refresh()
             library_document = library_store.snapshot()
-            library_document.validate_content(
-                ledger=source_entry._result_path / "records/ledger.jsonl",
-                entry_id=source_entry.entry_id,
-            )
             shutil.copyfile(source / "module_cfg.yaml", destination / "module_cfg.yaml")
         event_ids = tuple(
             dict.fromkeys(
@@ -370,8 +380,20 @@ class ResultEntry:
             draft.general.created_at = (
                 datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             )
-        # New destination is private until both independent file commits succeed.
-        cloned_library = self._library_store(destination / "module_cfg.yaml")
+        # This private copy has already passed source-owner cleanup. Its foreign
+        # IDs must be rewritten before destination-owner source validation.
+        from zcu_tools.resources.context.library import (
+            MODULE_LIBRARY_FORMAT,
+            MODULE_LIBRARY_VERSION,
+            ModuleLibraryDocument,
+        )
+
+        cloned_library = DocumentStore(
+            destination / "module_cfg.yaml",
+            ModuleLibraryDocument,
+            format=MODULE_LIBRARY_FORMAT,
+            supported_version=MODULE_LIBRARY_VERSION,
+        )
         with cloned_library.edit() as draft:
             for metadata in draft.provenance.values():
                 if metadata.source in imports:
@@ -390,17 +412,12 @@ class ResultEntry:
 
     def _library_store(self, source: Path) -> DocumentStore[ModuleLibraryDocument]:
         # Library imports entry provenance; defer composition until both packages load.
-        from zcu_tools.resources.context.library import (
-            MODULE_LIBRARY_FORMAT,
-            MODULE_LIBRARY_VERSION,
-            ModuleLibraryDocument,
-        )
+        from zcu_tools.resources.context.library_store import open_library_store
 
-        return DocumentStore(
+        return open_library_store(
             source,
-            ModuleLibraryDocument,
-            format=MODULE_LIBRARY_FORMAT,
-            supported_version=MODULE_LIBRARY_VERSION,
+            ledger=self._result_path / "records/ledger.jsonl",
+            entry_id=self.entry_id,
         )
 
     def _import_sources(
@@ -468,9 +485,11 @@ class ResultEntry:
         label follows use_point's safe single-segment rules. Only module_cfg.yaml
         is loaded; the point and assets are not read and no active point is selected.
         Omit assets for Spec-only reads/edits; materializing Arb requires a provider.
-        The existing library must have a valid header, schema and local provenance.
-        Invalid labels raise ValueError; missing files and validation/I/O errors
-        propagate. Opening creates no missing document.
+        The existing library must have a valid header and container. Invalid
+        existing Specs or entry-local provenance are backed up and removed under
+        the document lock; new edits remain strict. Invalid labels raise ValueError;
+        missing files, container errors and ledger I/O/schema failures propagate.
+        Opening creates no missing document or parent directory.
         """
         # Avoid the library -> entry.provenance -> ResultEntry import cycle.
         from zcu_tools.resources.context.library import ModuleLibrary

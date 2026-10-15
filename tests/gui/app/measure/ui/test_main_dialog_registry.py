@@ -7,10 +7,15 @@ from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtWidgets import QDialog, QWidget
+from qtpy.QtWidgets import QDialog, QLineEdit, QPushButton, QWidget
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.ui.main_dialog_registry import MainDialogRegistry
+from zcu_tools.gui.session.services.arb_waveform import ArbWaveformService
+from zcu_tools.gui.session.state import SessionState
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.gui.widgets import DialogRefStore
+
+from tests.gui._dialog_fakes import RecordingDialogPresenter
 
 
 class _FactoryRegistry(MainDialogRegistry):
@@ -18,7 +23,14 @@ class _FactoryRegistry(MainDialogRegistry):
         self, parent: QWidget, factory: Callable[[DialogName], QDialog]
     ) -> None:
         self.refs = DialogRefStore()
-        super().__init__(MagicMock(), parent=parent, dialog_refs=self.refs)
+        super().__init__(
+            MagicMock(),
+            parent=parent,
+            dialog_refs=self.refs,
+            templates=lambda: {},
+            dialog_presenter=RecordingDialogPresenter(),
+            alias_presets=None,
+        )
         self._factory = factory
 
     def _build_dialog(self, name: DialogName, *, writable: bool) -> QDialog:
@@ -78,6 +90,40 @@ class _TransientDialog(_PersistentDialog):
     def reject(self) -> None:
         self.visible = False
         self.finished.emit(0)
+
+
+def test_arb_writability_is_applied_when_opened(qapp) -> None:
+    parent = QWidget()
+    ctrl = MagicMock()
+    ctrl.arb_waveforms = ArbWaveformService(
+        SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
+    )
+    registry = MainDialogRegistry(
+        ctrl,
+        parent=parent,
+        dialog_refs=DialogRefStore(),
+        templates=lambda: {},
+        dialog_presenter=RecordingDialogPresenter(),
+        alias_presets=None,
+    )
+    try:
+        for writable in (False, True):
+            registry.open(DialogName.ARB_WAVEFORM, writable=writable)
+            dialog = registry.dialog(DialogName.ARB_WAVEFORM)
+            assert dialog is not None
+            key = dialog.findChild(QLineEdit)
+            assert key is not None
+            assert key.isReadOnly() is not writable
+            save = next(
+                b for b in dialog.findChildren(QPushButton) if b.text() == "Save"
+            )
+            assert save.isEnabled() is writable
+            registry.close(DialogName.ARB_WAVEFORM)
+            qapp.processEvents()
+    finally:
+        registry.close(DialogName.ARB_WAVEFORM)
+        parent.deleteLater()
+        qapp.processEvents()
 
 
 def test_persistent_predictor_dialog_is_reused_when_hidden(qapp) -> None:

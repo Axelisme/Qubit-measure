@@ -276,61 +276,27 @@ def test_template_nested_slot_is_direct_key_or_unfilled_invalid(unbound: bool) -
 
 
 class ReadoutCore(ConfigBase):
-    """A pulse readout derives ADC frequency/channel from omitted defaults."""
+    """A synthetic core owns one flat pulse readout."""
 
     readout: PulseReadoutCfg
-
-
-def test_template_nested_lock_and_none_omission_preserve_spec_derivation() -> None:
-    catalog = {
-        "readout": TemplateDef(
-            PulseReadoutSpec,
-            "Readout",
-            {
-                "pulse_cfg.type": "pulse",
-                "pulse_cfg.ch": 1,
-                "pulse_cfg.nqz": 1,
-                "pulse_cfg.freq": 100,
-                "pulse_cfg.gain": 0.3,
-                "pulse_cfg.waveform.style": "const",
-                "pulse_cfg.waveform.length": 0.2,
-                "ro_cfg.ro_ch": 0,
-                "ro_cfg.ro_length": 0.2,
-                "ro_cfg.trig_offset": 0,
-            },
-        )
-    }
-    form = Form(
-        ReadoutCore, {"readout": Template("readout", lock={"pulse_cfg.freq": 0.0})}
-    )
-    form.bind_templates(catalog, adapter="synthetic-readout")
-    env = environment()
-    state = FormState(form.default_input(env))
-    value = state.result(env)
-    assert not isinstance(value, FormErrors), value
-    cfg = form.to_cfg(value, env)
-    assert isinstance(cfg, ReadoutCore), cfg
-    assert cfg.readout.pulse_cfg.freq == 0
-    assert cfg.readout.ro_cfg.gen_ch == 1
-    assert cfg.readout.ro_cfg.ro_freq == 0
 
 
 def readout_expression_form(expression: Expr | None) -> Form[ReadoutCore]:
     """Author nested defaults on existing persistent Spec families only."""
     seeds = {
-        "pulse_cfg.type": "pulse",
-        "pulse_cfg.ch": 1,
-        "pulse_cfg.nqz": 1,
-        "pulse_cfg.freq": 100.0,
-        "pulse_cfg.gain": 0.3,
-        "pulse_cfg.waveform.style": "cosine",
-        "pulse_cfg.waveform.length": expression if expression is not None else 0.2,
-        "ro_cfg.ro_ch": 0,
-        "ro_cfg.ro_length": 0.2,
+        "type": "readout/pulse",
+        "gen_ch": 1,
+        "nqz": 1,
+        "freq": 100.0,
+        "gain": 0.3,
+        "waveform.style": "cosine",
+        "waveform.length": expression if expression is not None else 0.2,
+        "ro_ch": 0,
+        "ro_length": 0.2,
     }
     if expression is not None:
-        seeds["ro_cfg.trig_offset"] = expression
-        seeds["pulse_cfg.phase"] = expression
+        seeds["trig_offset"] = expression
+        seeds["phase"] = expression
     form = Form(ReadoutCore, {"readout": Template("synthetic-readout")})
     form.bind_templates(
         {"synthetic-readout": TemplateDef(PulseReadoutSpec, "Readout", seeds)},
@@ -347,12 +313,10 @@ def test_nested_template_expression_failure_requires_input(expression: str) -> N
     result = state.result(env)
     assert isinstance(result, FormErrors), result
     assert result.messages == {
-        ("readout", "module", "ro_cfg", "trig_offset"): "Field required",
-        ("readout", "module", "pulse_cfg", "module", "phase"): "Field required",
+        ("readout", "module", "trig_offset"): "Field required",
+        ("readout", "module", "phase"): "Field required",
         (
             "readout",
-            "module",
-            "pulse_cfg",
             "module",
             "waveform",
             "module",
@@ -361,12 +325,10 @@ def test_nested_template_expression_failure_requires_input(expression: str) -> N
     }
     state.write(
         {
-            ("readout", "module", "ro_cfg", "trig_offset"): 0.4,
-            ("readout", "module", "pulse_cfg", "module", "phase"): 0.4,
+            ("readout", "module", "trig_offset"): 0.4,
+            ("readout", "module", "phase"): 0.4,
             (
                 "readout",
-                "module",
-                "pulse_cfg",
                 "module",
                 "waveform",
                 "module",
@@ -381,9 +343,9 @@ def test_nested_template_expression_failure_requires_input(expression: str) -> N
     cfg = form.to_cfg(result, env)
     if isinstance(cfg, FormErrors):
         pytest.fail(str(cfg.messages))
-    assert cfg.readout.ro_cfg.trig_offset == 0.4
-    assert cfg.readout.pulse_cfg.phase == 0.4
-    assert cfg.readout.pulse_cfg.waveform.length == 0.4
+    assert cfg.readout.trig_offset == 0.4
+    assert cfg.readout.phase == 0.4
+    assert cfg.readout.waveform.length == 0.4
 
 
 @pytest.mark.parametrize("expression", [None, Expr("2 * .2")])
@@ -398,17 +360,12 @@ def test_nested_template_expression_and_static_defaults_are_isolated(
     assert isinstance(readout, dict)
     module = readout["module"]
     assert isinstance(module, dict)
-    ro = module["ro_cfg"]
-    pulse_wrapper = module["pulse_cfg"]
-    assert isinstance(pulse_wrapper, dict)
-    pulse = pulse_wrapper["module"]
-    assert isinstance(ro, dict) and isinstance(pulse, dict)
-    waveform_wrapper = pulse["waveform"]
+    waveform_wrapper = module["waveform"]
     assert isinstance(waveform_wrapper, dict)
     waveform = waveform_wrapper["module"]
     assert isinstance(waveform, dict)
     expected = 0.0 if expression is None else 0.4
-    assert ro["trig_offset"] == pulse["phase"] == expected
+    assert module["trig_offset"] == module["phase"] == expected
     assert waveform["length"] == (0.2 if expression is None else 0.4)
     result = state.result(env)
     if isinstance(result, FormErrors):
@@ -416,23 +373,22 @@ def test_nested_template_expression_and_static_defaults_are_isolated(
     cfg = form.to_cfg(result, env)
     if isinstance(cfg, FormErrors):
         pytest.fail(str(cfg.messages))
-    assert cfg.readout.ro_cfg.trig_offset == cfg.readout.pulse_cfg.phase == expected
-    assert cfg.readout.pulse_cfg.waveform.length == waveform["length"]
+    assert cfg.readout.trig_offset == cfg.readout.phase == expected
+    assert cfg.readout.waveform.length == waveform["length"]
     # Another form's failed seeds must not affect this form or persistent Specs.
     failed.default_input(env)
     native = PulseReadoutCfg.model_validate(
         {
-            "pulse_cfg": {
-                "ch": 1,
-                "nqz": 1,
-                "freq": 100,
-                "gain": 0.3,
-                "waveform": {"style": "cosine", "length": 0.2},
-            },
-            "ro_cfg": {"ro_ch": 0, "ro_length": 0.2},
+            "gen_ch": 1,
+            "nqz": 1,
+            "freq": 100,
+            "gain": 0.3,
+            "waveform": {"style": "cosine", "length": 0.2},
+            "ro_ch": 0,
+            "ro_length": 0.2,
         }
     )
-    assert native.ro_cfg.trig_offset == native.pulse_cfg.phase == 0
+    assert native.trig_offset == native.phase == 0
     assert state.result(env) == result
 
 
@@ -442,7 +398,7 @@ def test_missing_discriminator_error_names_template_and_nested_field(
 ) -> None:
     template_id = "partial-readout" if nested else "partial-pulse"
     spec = PulseReadoutSpec if nested else PulseSpec
-    path = "pulse_cfg.waveform" if nested else "waveform"
+    path = "waveform"
     form = (
         Form(ReadoutCore, {"readout": Template(template_id)})
         if nested
@@ -502,9 +458,9 @@ def test_template_binding_error_names_adapter_and_field_path(fault: str) -> None
     node = Template("missing") if fault == "unknown" else Template("pulse")
     catalog = templates()
     if fault == "family":
-        from zcu_tools.cfg_model import DirectReadoutCfg
+        from zcu_tools.cfg_model import NoneResetCfg
 
-        catalog["pulse"] = TemplateDef(DirectReadoutCfg, "Wrong family", {})
+        catalog["pulse"] = TemplateDef(NoneResetCfg, "Wrong family", {})
     elif fault == "tag":
         catalog["pulse"] = TemplateDef(
             PulseSpec, "Bad tag", {"waveform.style": "unknown"}
@@ -525,15 +481,14 @@ def test_unsupported_template_seed_names_template_and_seed_path(nested: bool) ->
         "waveform.length": 0.2,
     }
     if nested:
-        seeds = {f"pulse_cfg.{path}": value for path, value in pulse.items()}
-        seeds |= {
-            "ro_cfg.ro_ch": 0,
-            "ro_cfg.ro_length": 0.2,
-            "pulse_cfg.ro_ch": 2,
-        }
-        definition = TemplateDef(PulseReadoutSpec, "Noisy readout", seeds)
-        form = Form(ReadoutCore, {"readout": Template("noisy")})
-        path = "pulse_cfg.ro_ch"
+        seeds = {**pulse, "desc": "note"}
+        definition = TemplateDef(
+            BathResetSpec,
+            "Noisy reset",
+            {f"cavity_tone_cfg.{path}": value for path, value in seeds.items()},
+        )
+        form = Form(ResetCore, {"reset": Template("noisy")})
+        path = "cavity_tone_cfg.desc"
     else:
         definition = TemplateDef(PulseSpec, "Noisy pulse", {**pulse, "desc": "note"})
         form = Form(Core, {"probe": Template("noisy")})
@@ -587,14 +542,10 @@ def test_alias_static_default_is_valid_and_selectable(binding: str | None) -> No
     )
     assert form.to_cfg(result, env) == expected
 
-    properties = form.model.input_schema(env)["properties"]
-    assert isinstance(properties, dict)
     for name, default in (("device", ""), ("nullable_device", "standby")):
-        field = properties[name]
-        assert isinstance(field, dict)
-        options = field["x-form-options"]
-        assert isinstance(options, list)
-        values = [option["value"] for option in options if isinstance(option, dict)]
+        field = state.describe((name,), env).target
+        assert field is not None and field.options is not None
+        values = [option.value for option in field.options]
         assert default in values, "The core static default must be selectable"
         assert values.count(default) == 1
         assert all(device in values for device in env.devices)
@@ -614,3 +565,53 @@ def test_alias_static_default_is_valid_and_selectable(binding: str | None) -> No
         assert isinstance(rejected, FormErrors)
         assert rejected.messages == {(name,): "Value is not among current choices"}
         state.write({(name,): default}, env)
+
+
+@pytest.mark.parametrize("enabled", [False, True], ids=["disabled", "enabled"])
+def test_optional_partially_locked_module_describes_fixed_branch_not_value(
+    enabled: bool,
+) -> None:
+    class OptionalCore(ConfigBase):
+        probe: PulseCfg | None = None
+
+    form = Form(OptionalCore, {"probe": Slot("Q.pulses.probe", lock={"freq": 0.0})})
+    form.bind_templates(templates(), adapter="synthetic")
+    env = environment()
+    initial = form.default_input(env)
+    inline = initial.data["probe"]
+    state = FormState(initial)
+    if not enabled:
+        state.write({("probe",): None}, env)
+    row = state.describe((), env).children[0]
+    description = state.describe(("probe",), env)
+    assert description.target == row
+    assert row.nullable is True
+    assert row.selection_fixed is True
+    assert row.fixed is False
+    assert row.fixed_value is None
+    assert row.options is not None
+    assert [option.label for option in row.options] == ["None", "Inline"]
+    assert row.can_expand is enabled
+
+    if not enabled:
+        assert description.children == ()
+        state.write({("probe",): inline}, env)
+    state.write({("probe", "module", "gain"): 0.6}, env)
+    value = state.result(env)
+    assert not isinstance(value, FormErrors), value
+    cfg = form.to_cfg(value, env)
+    assert isinstance(cfg, OptionalCore) and cfg.probe is not None
+    assert cfg.probe.freq == 0.0
+    assert cfg.probe.gain == 0.6
+
+    state.write({("probe",): None}, env)
+    value = state.result(env)
+    assert not isinstance(value, FormErrors), value
+    cfg = form.to_cfg(value, env)
+    assert isinstance(cfg, OptionalCore) and cfg.probe is None
+    disabled = state.describe(("probe",), env)
+    assert disabled.target is not None
+    assert disabled.target.selection_fixed is True
+    assert disabled.target.fixed is False
+    assert disabled.target.nullable is True
+    assert disabled.children == ()

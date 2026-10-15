@@ -75,6 +75,7 @@ class LookbackExp(PersistableExperiment[LookbackResult, LookbackCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=LookbackResult,
         cfg_type=LookbackCfg,
+        cfg_schema_version="2.0",
         tag="lookback",
     )
 
@@ -99,10 +100,7 @@ class LookbackExp(PersistableExperiment[LookbackResult, LookbackCfg]):
                 Readout("readout", cfg=modules.readout),
             ],
         )
-        times = (
-            program.get_time_axis(ro_index=0)
-            + run_cfg.modules.readout.ro_cfg.trig_offset
-        )
+        times = program.get_time_axis(ro_index=0) + run_cfg.modules.readout.trig_offset
         assert isinstance(times, np.ndarray)
 
         signals_buffer = SignalBuffer(
@@ -126,7 +124,7 @@ class LookbackExp(PersistableExperiment[LookbackResult, LookbackCfg]):
         Ts = result.times
         signals = result.signals
         cfg = source.cfg
-        ro_cfg = cfg.modules.readout.ro_cfg if cfg is not None else None
+        readout_cfg = cfg.modules.readout if cfg is not None else None
 
         if options.smooth is not None:
             signals = gaussian_filter1d(signals, options.smooth)
@@ -150,9 +148,9 @@ class LookbackExp(PersistableExperiment[LookbackResult, LookbackCfg]):
         ax.plot(Ts, y, label="mag")
         if options.plot_fit:
             ax.axvline(offset, color="r", linestyle="--", label="predict_offset")
-        if ro_cfg is not None:
-            trig_offset = float(ro_cfg.trig_offset)
-            ro_length = float(ro_cfg.ro_length)
+        if readout_cfg is not None:
+            trig_offset = float(readout_cfg.trig_offset)
+            ro_length = float(readout_cfg.ro_length)
             ax.axvline(trig_offset, color="g", linestyle="--", label="ro start")
             ax.axvline(
                 trig_offset + ro_length, color="g", linestyle="--", label="ro end"

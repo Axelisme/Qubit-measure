@@ -98,6 +98,8 @@ def attachment(
             harness.state,
             harness.services,
             harness.owner,
+            templates={},
+            alias_presets=None,
             registrations=catalog_source.catalog.attachments,
             loader=catalog_source.loader,
         )

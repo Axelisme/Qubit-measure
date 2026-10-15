@@ -43,6 +43,7 @@ from zcu_tools.resources.entry import (
     component_registry,
     role_registry,
 )
+from zcu_tools.resources.entry.aliases import EntryAliases
 
 from tests.gui._completion_helpers import on_device_connected
 from tests.gui._qt_waits import qt_until
@@ -72,8 +73,9 @@ def app(qapp: QApplication, tmp_path: Path) -> Iterator[WorkflowsGuiBehavior[Con
             role_registry.register("qubit", RoleSpec("qubit/*"))
         installed = registry_state()
         behavior = WorkflowsGuiBehavior(
+            templates={},
             registrations=build_registry(),
-            alias_rows=ALIAS_PRESET,
+            alias_presets={"default": ALIAS_PRESET},
             project_root=str(tmp_path),
         )
         try:
@@ -89,6 +91,87 @@ def app(qapp: QApplication, tmp_path: Path) -> Iterator[WorkflowsGuiBehavior[Con
             assert registry_state() == installed, "app test polluted definitions"
     finally:
         restore_registry(before)
+
+
+@pytest.mark.parametrize("saved", [None, (), (AliasRow("saved", "R1"),)])
+def test_named_presets_reach_workflows_composition_without_overwriting_saved_rows(
+    saved: tuple[AliasRow, ...] | None, tmp_path: Path, qapp: QApplication
+) -> None:
+    presets = {
+        "default": (AliasRow("drive", "Q7"), AliasRow("sense", "$drive.resonator")),
+        "probe": (AliasRow("probe", "Q2"), AliasRow("spare", "")),
+    }
+    entry = ResultEntry.create(
+        "sample", result_root=tmp_path / "result", database_root=tmp_path / "Database"
+    )
+    if saved is not None:
+        entry.save_aliases(
+            EntryAliases(aliases={row.alias: row.value for row in saved})
+        )
+    try:
+        behavior = WorkflowsGuiBehavior(
+            templates={},
+            registrations=build_registry(),
+            alias_presets=presets,
+            project_root=str(tmp_path),
+            cache_dir=tmp_path / "cache",
+            clean=True,
+        )
+    except TypeError as error:
+        pytest.fail(f"Public composition must accept named alias presets: {error}")
+    try:
+        behavior.assemble(None)
+        assert behavior.alias_presets == presets
+        context = behavior.services.context
+        assert context.get_alias_rows() == presets["default"]
+        context.install_entry(entry)
+        assert context.get_alias_rows() == (
+            presets["default"] if saved is None else saved
+        )
+        # Edits to the installed table do not edit caller preset definitions.
+        context.set_alias_rows((AliasRow("replacement", "R2"),))
+        assert behavior.alias_presets == presets
+    finally:
+        behavior.shutdown()
+        behavior.window.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("presets", [None, {"default": ()}])
+def test_workflows_empty_initial_table_is_explicit_or_has_no_catalog(
+    presets: dict[str, tuple[AliasRow, ...]] | None, tmp_path: Path, qapp: QApplication
+) -> None:
+    try:
+        behavior = WorkflowsGuiBehavior(
+            templates={},
+            registrations=build_registry(),
+            alias_presets=presets,
+            cache_dir=tmp_path,
+            clean=True,
+        )
+    except TypeError as error:
+        pytest.fail(f"Public composition must accept named alias presets: {error}")
+    try:
+        behavior.assemble(None)
+        assert behavior.services.context.get_alias_rows() == ()
+        assert behavior.alias_presets == presets
+    finally:
+        behavior.shutdown()
+        behavior.window.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("presets", [{}, {"probe": (AliasRow("probe", "Q2"),)}])
+def test_workflows_behavior_rejects_catalog_without_default(
+    presets: dict[str, tuple[AliasRow, ...]],
+) -> None:
+    try:
+        with pytest.raises(ValueError, match="default"):
+            WorkflowsGuiBehavior(
+                templates={}, registrations=build_registry(), alias_presets=presets
+            )
+    except TypeError as error:
+        pytest.fail(f"Named alias preset admission is missing: {error}")
 
 
 def button(window: WorkflowWindow[Context], name: str) -> QPushButton:
@@ -148,6 +231,8 @@ def test_window_parent_and_close_callback_retry(
         harness.state,
         harness.services,
         harness.owner,
+        templates={},
+        alias_presets=None,
         registrations=build_registry(),
         parent=parent,
         on_close=on_close,

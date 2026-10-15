@@ -89,10 +89,7 @@ writeback or diagnosis, use rpc_list(domain?), rpc_describe(method), then
 rpc_call(method, params). Every listed public method remains callable even
 when a recipe or shared tool covers it. Raw RPC does not aggregate tool
 results, decode PNG replies, or run the analysis artifact save pipeline.
-For large forms, replies from tab.get_cfg, tab.edit_cfg, tab.reset_cfg, and
-tab.use_inline all include the full schema, which can be several MB.
-Prefer recipe tools and avoid reading these replies directly via rpc_call;
-remove this guidance when lazy-form is complete.
+
 
 For authorized setup, simulation_initialize uses the GUI coordinator and may
 switch away from real devices. It does not launch a GUI or connect real hardware.
@@ -158,14 +155,20 @@ receipt, not terminal results; use wait or status to confirm the outcome.
 Terminal executions are not rewritten. Unregistered cancel(op) uses the direct
 GUI hook and may report operation_failed for an already failed operation.
 
-Tab cfg reads and edits return Form schema/input/values/errors. Ordinary strings
-are literal; expressions use {expr: text}, complex uses the reversible __complex__
-tag, and library keys are actual keys. Read x-form-options in schema order:
-each item has label/value and optional editable fields or commands. Select by
-writing its whole value once; selected fields omit fixed tags, and ref options
-have no fields. Match every value leaf by JSON type and value, first match wins.
-Do not infer choices from unions. Unmatched input and errors remain unchanged.
-Recipe read_field exposes only selected fields; tag leaves are not read paths.
+Tab get_cfg, edit_cfg, reset_cfg and use_inline return Form input/values/errors,
+without schema. Use tab.describe_cfg(path=[]) for root fields, then request a
+child's full model-field path for its metadata and direct children. Options
+contain label/value and commands, not fields; the owner reports selected.
+Select by writing the option's whole value once. A single ordinary wrapper may
+be flattened in children, but paths still include it. Ref options have no children.
+Describe replies include current local input_present/input/value and Form preview
+errors from one owner turn. For lowered cfg errors use get_cfg or Run admission.
+Recipe read_field makes one fresh describe_cfg RPC per call, not a cached read.
+Its locked flag is selection_fixed or fixed; inner choices may remain editable.
+Ordinary strings are literal; expressions use {expr: text}, complex uses the
+reversible __complex__ tag, and library keys are actual keys. Read description
+options in order; do not infer choices from unions. Invalid input remains editable.
+Tag leaves are not Recipe read_field paths.
 Inline leaf paths include module. use_inline runs the owner's guarded to_inline
 command against fixed library capture, not a private copy path.
 Edit unique model-field leaf paths;

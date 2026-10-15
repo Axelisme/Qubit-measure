@@ -1,0 +1,635 @@
+from __future__ import annotations
+
+import time
+from pathlib import Path
+from typing import Any, Literal, Never
+
+import numpy as np
+import pytest
+from matplotlib.axes import Axes
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from zcu_tools.gui.session.services import arb_waveform
+from zcu_tools.gui.session.state import SessionState
+from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.gui.session.ui.arb_waveform_dialog import (
+    ArbWaveformDialog,
+    _PreviewCanvas,
+)
+from zcu_tools.resources.waveform_assets import (
+    ArbWaveformData,
+    ArbWaveformInfo,
+    FormulaRecipe,
+    render_formula_recipe,
+)
+
+from ._waveform_timer import PreviewClock
+
+
+class _FakeController:
+    def __init__(self) -> None:
+        self.assets: dict[str, ArbWaveformData] = {}
+
+    def list_infos(self) -> list[ArbWaveformInfo]:
+        return [
+            ArbWaveformInfo(
+                data_key=name,
+                duration=data.duration,
+                sample_count=int(data.time.size),
+                has_q=data.has_q,
+                peak_abs=data.peak_abs,
+                has_recipe=data.recipe is not None,
+                mtime=time.time(),
+                file_size=0,
+                recipe=data.recipe,
+            )
+            for name, data in sorted(self.assets.items())
+        ]
+
+    def list_data_keys(self) -> list[str]:
+        return sorted(self.assets)
+
+    def load_data(self, data_key: str) -> ArbWaveformData:
+        return self.assets[data_key]
+
+    def set_formula(
+        self,
+        data_key: str,
+        recipe: FormulaRecipe | dict[str, object],
+        *,
+        overwrite: bool = False,
+    ) -> Literal["created", "overwritten"]:
+        if data_key in self.assets and not overwrite:
+            raise RuntimeError("exists")
+        self.assets[data_key] = render_formula_recipe(recipe)
+        return "overwritten" if overwrite else "created"
+
+    def get_preview(self, data_key: str) -> Never:
+        raise AssertionError("The dialog must render locally, not request a remote PNG")
+
+    def rename(self, old_data_key: str, new_data_key: str) -> None:
+        self.assets[new_data_key] = self.assets.pop(old_data_key)
+
+    def delete(self, data_key: str) -> None:
+        del self.assets[data_key]
+
+
+@pytest.fixture(autouse=True)
+def _qt(qapp):
+    yield
+
+
+@pytest.fixture
+def preview_clock(monkeypatch: pytest.MonkeyPatch):
+    clock = PreviewClock()
+    monkeypatch.setattr(
+        "zcu_tools.gui.session.ui.arb_waveform_dialog.QTimer", clock.timer
+    )
+    try:
+        yield clock
+    finally:
+        clock.close()
+
+
+class _Editor:
+    """Locate controls through the dialog's public Qt widget tree."""
+
+    def __init__(self, dialog: ArbWaveformDialog) -> None:
+        from qtpy.QtWidgets import QCheckBox, QGroupBox, QLabel, QLineEdit, QTableWidget
+
+        self.dialog = dialog
+        group = next(
+            g for g in dialog.findChildren(QGroupBox) if g.title() == "Formula Recipe"
+        )
+        self.key = next(iter(group.findChildren(QLineEdit)))
+        self.normalize = next(iter(group.findChildren(QCheckBox)))
+        self.segments = next(iter(group.findChildren(QTableWidget)))
+        self.warning = next(
+            label for label in group.findChildren(QLabel) if not label.text()
+        )
+        self.assets = next(
+            t for t in dialog.findChildren(QTableWidget) if t.columnCount() == 3
+        )
+        self.save = self.button("Save")
+
+    def button(self, text: str):
+        from qtpy.QtWidgets import QPushButton
+
+        return next(
+            b for b in self.dialog.findChildren(QPushButton) if b.text() == text
+        )
+
+
+def _preview_axes(dialog: ArbWaveformDialog) -> Axes:
+    canvas = dialog.findChild(FigureCanvasQTAgg)
+    assert canvas is not None
+    return canvas.figure.axes[0]
+
+
+# ---------------------------------------------------------------------------
+# Existing tests (updated for debounce state machine)
+# ---------------------------------------------------------------------------
+
+
+def test_dialog_validates_segments_and_saves_preview(
+    qapp, monkeypatch, preview_clock: PreviewClock
+) -> None:
+    from qtpy.QtCore import Qt
+    from qtpy.QtWidgets import (
+        QHeaderView,
+        QLabel,
+        QPushButton,
+    )
+
+    ctrl = _FakeController()
+    dlg = ArbWaveformDialog(ctrl)
+    editor = _Editor(dlg)
+
+    assert editor.key.text() == "arb_data1"
+    assert editor.segments.rowCount() == 3
+    default_formula_item = editor.segments.item(0, 1)
+    assert default_formula_item is not None
+    assert default_formula_item.text().startswith("exp(")
+    assert editor.save.isEnabled()
+    assert editor.warning.isHidden()
+    button_texts = {button.text() for button in dlg.findChildren(QPushButton)}
+    assert "New" not in button_texts
+    assert "Create ML" not in button_texts
+    assert "Preview" not in button_texts
+    label_texts = [label.text() for label in dlg.findChildren(QLabel)]
+    assert any("<b>I</b>=imaginary unit" in text for text in label_texts)
+    assert editor.normalize.isChecked()
+
+    editor.segments.selectRow(0)
+    editor.button("Insert After").click()
+    assert editor.segments.rowCount() == 4
+    editor.button("Delete Segment").click()
+    assert editor.segments.rowCount() == 3
+
+    formula_item = editor.segments.item(0, 1)
+    assert formula_item is not None
+    # "unknown_symbol" has valid structure (non-empty string) but fails render.
+    # With the new debounce design, render error surfaces only after the timer fires.
+    formula_item.setText("unknown_symbol")
+    preview_clock.drain()
+    assert not editor.save.isEnabled()
+    assert not editor.warning.isHidden()
+    assert "unsupported" in editor.warning.text()
+
+    # Fixing the formula triggers cheap validation immediately (no qWait needed).
+    formula_item.setText("sin(2*pi*t)")
+    assert editor.save.isEnabled()
+    assert editor.warning.isHidden()
+    preview_clock.drain()
+    label = _preview_axes(dlg).lines[0].get_label()
+    assert isinstance(label, str)
+    assert label.startswith("I:")
+
+    editor.normalize.setChecked(False)
+    editor.save.click()
+    assert "arb_data1" in ctrl.assets
+    recipe = ctrl.assets["arb_data1"].recipe
+    assert recipe is not None
+    assert recipe.normalize == "none"
+    duration_item = editor.assets.item(0, 1)
+    assert duration_item is not None
+    assert duration_item.text() == "1.00"
+
+    header = editor.assets.horizontalHeader()
+    assert header is not None
+    assert editor.assets.horizontalScrollBarPolicy() == (
+        Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    )
+    assert header.sectionResizeMode(0) == QHeaderView.ResizeMode.Stretch
+    assert header.sectionResizeMode(1) == QHeaderView.ResizeMode.ResizeToContents
+    assert header.sectionResizeMode(2) == QHeaderView.ResizeMode.Stretch
+    dlg.refresh()
+    assert editor.assets.horizontalScrollBarPolicy() == (
+        Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    )
+    assert header.sectionResizeMode(0) == QHeaderView.ResizeMode.Stretch
+    assert header.sectionResizeMode(1) == QHeaderView.ResizeMode.ResizeToContents
+    assert header.sectionResizeMode(2) == QHeaderView.ResizeMode.Stretch
+
+    monkeypatch.setattr(
+        "zcu_tools.gui.session.ui.arb_waveform_dialog.QInputDialog.getText",
+        lambda *args, **kwargs: ("renamed_data", True),
+    )
+    editor.button("Rename").click()
+    assert "renamed_data" in ctrl.assets
+    assert "arb_data1" not in ctrl.assets
+
+
+def test_preview_canvas_autoscales_y_axis_for_normalized_and_raw(qapp) -> None:
+    data = render_formula_recipe(
+        {
+            "segments": [{"duration": 0.002, "formula": "0.25 + 0.5*I"}],
+            "normalize": "none",
+        }
+    )
+    canvas = _PreviewCanvas()
+
+    canvas.plot("subunit", data, normalize=True)
+
+    assert canvas._i_line is not None
+    assert canvas._q_line is not None
+    assert canvas._ax.get_ylabel() == "Normalized amplitude"
+    assert np.asarray(canvas._i_line.get_ydata(), dtype=float)[0] == pytest.approx(
+        0.25 / data.peak_abs
+    )
+    assert np.asarray(canvas._q_line.get_ydata(), dtype=float)[0] == pytest.approx(
+        0.5 / data.peak_abs
+    )
+    normalized_y_min, normalized_y_max = canvas._ax.get_ylim()
+    assert -0.1 < normalized_y_min < 0.0
+    assert 1.0 < normalized_y_max < 1.1
+
+    canvas.plot("subunit", data, normalize=False)
+
+    assert canvas._i_line is not None
+    assert canvas._q_line is not None
+    assert canvas._ax.get_ylabel() == "Amplitude"
+    assert np.asarray(canvas._i_line.get_ydata(), dtype=float)[0] == pytest.approx(0.25)
+    assert np.asarray(canvas._q_line.get_ydata(), dtype=float)[0] == pytest.approx(0.5)
+    raw_y_min, raw_y_max = canvas._ax.get_ylim()
+    assert -0.1 < raw_y_min < 0.0
+    assert 0.5 < raw_y_max < 1.0
+    assert raw_y_max < normalized_y_max
+
+
+# ---------------------------------------------------------------------------
+# A. Debounce state machine tests
+# ---------------------------------------------------------------------------
+
+
+def test_A1_cheap_structure_error_is_immediate(
+    qapp, preview_clock: PreviewClock
+) -> None:
+    """Structural errors disable Save synchronously and cancel pending rendering."""
+    ctrl = _FakeController()
+    dlg = ArbWaveformDialog(ctrl)
+    editor = _Editor(dlg)
+    preview_clock.drain()
+    initial_lines = tuple(_preview_axes(dlg).lines)
+    assert initial_lines
+    assert editor.save.isEnabled()
+    deliveries = preview_clock.deliveries
+
+    duration_item = editor.segments.item(0, 0)
+    assert duration_item is not None
+    # A valid edit arranges a render which the next structural error must cancel.
+    duration_item.setText("0.3")
+    duration_item.setText("abc")
+    assert not editor.save.isEnabled()
+    assert not editor.warning.isHidden()
+    assert "duration" in editor.warning.text()
+    preview_clock.drain()
+    assert preview_clock.deliveries == deliveries
+    assert tuple(_preview_axes(dlg).lines) == initial_lines
+
+
+def test_A2_deep_render_error_surfaces_after_debounce(
+    qapp, preview_clock: PreviewClock
+) -> None:
+    """Deep errors appear only on timeout; a burst renders only its final recipe."""
+    ctrl = _FakeController()
+    dlg = ArbWaveformDialog(ctrl)
+    editor = _Editor(dlg)
+    preview_clock.drain()
+    initial_lines = tuple(_preview_axes(dlg).lines)
+    assert initial_lines
+    deliveries = preview_clock.deliveries
+
+    formula_item = editor.segments.item(0, 1)
+    assert formula_item is not None
+    formula_item.setText("sin(2*pi*t)")
+    # These are virtual milliseconds, not a wall-clock performance assertion.
+    preview_clock.advance(200)
+    formula_item.setText("unknown_symbol")
+    preview_clock.advance(50)  # The first deadline must have been replaced.
+    assert preview_clock.deliveries == deliveries
+    assert editor.save.isEnabled()
+    assert editor.warning.isHidden()
+    assert tuple(_preview_axes(dlg).lines) == initial_lines
+
+    preview_clock.drain()
+    assert preview_clock.deliveries == deliveries + 1
+    assert not editor.save.isEnabled()
+    assert not editor.warning.isHidden()
+    assert "unsupported" in editor.warning.text()
+    assert tuple(_preview_axes(dlg).lines) == initial_lines
+
+
+def test_A3_data_key_change_does_not_trigger_render(
+    qapp, preview_clock: PreviewClock
+) -> None:
+    """Key edits neither schedule timeouts nor replace the rendered artists."""
+    ctrl = _FakeController()
+    dlg = ArbWaveformDialog(ctrl)
+    editor = _Editor(dlg)
+    preview_clock.drain()
+    initial_lines = tuple(_preview_axes(dlg).lines)
+    assert initial_lines
+    deliveries = preview_clock.deliveries
+
+    editor.key.setText("some_valid_key")
+    preview_clock.drain()
+    assert preview_clock.deliveries == deliveries
+    assert tuple(_preview_axes(dlg).lines) == initial_lines
+
+    editor.key.setText("1invalid")
+    assert not editor.save.isEnabled()
+    editor.key.setText("valid_key")
+    assert editor.save.isEnabled()
+    preview_clock.drain()
+    assert preview_clock.deliveries == deliveries
+    assert tuple(_preview_axes(dlg).lines) == initial_lines
+
+
+def test_A4_save_uses_valid_recipe_without_waiting_for_debounce(
+    qapp, preview_clock: PreviewClock
+) -> None:
+    """Save persists the latest edits before delivery and cancels pending preview work."""
+    ctrl = _FakeController()
+    dlg = ArbWaveformDialog(ctrl)
+    editor = _Editor(dlg)
+    preview_clock.drain()
+    deliveries = preview_clock.deliveries
+
+    formula_item = editor.segments.item(0, 1)
+    assert formula_item is not None
+    formula_item.setText("sin(2*pi*t)")
+    assert editor.save.isEnabled()
+    editor.save.click()
+
+    assert "arb_data1" in ctrl.assets
+    stored_recipe = ctrl.assets["arb_data1"].recipe
+    assert stored_recipe is not None
+    assert stored_recipe.segments[0].formula == "sin(2*pi*t)"
+    saved_lines = tuple(_preview_axes(dlg).lines)
+    assert saved_lines
+    preview_clock.drain()
+    assert preview_clock.deliveries == deliveries
+    assert tuple(_preview_axes(dlg).lines) == saved_lines
+    saved_data = ctrl.assets["arb_data1"]
+    np.testing.assert_allclose(
+        np.asarray(saved_lines[0].get_ydata(), dtype=float),
+        saved_data.idata / saved_data.peak_abs,
+    )
+
+
+def test_A5_render_failure_leaves_no_half_baked_state(
+    qapp, preview_clock: PreviewClock
+) -> None:
+    """Failed rendering retains the last good plot; recovery uses the final edits."""
+    ctrl = _FakeController()
+    dlg = ArbWaveformDialog(ctrl)
+    editor = _Editor(dlg)
+    preview_clock.drain()
+    initial_lines = tuple(_preview_axes(dlg).lines)
+    assert initial_lines
+
+    formula_item = editor.segments.item(0, 1)
+    assert formula_item is not None
+    formula_item.setText("unknown_symbol")
+    preview_clock.drain()
+    assert tuple(_preview_axes(dlg).lines) == initial_lines
+    assert not editor.save.isEnabled()
+    assert not editor.warning.isHidden()
+
+    formula_item.setText("cos(2*pi*t)")
+    preview_clock.drain()
+    assert editor.save.isEnabled()
+    assert editor.warning.isHidden()
+    recovered_lines = tuple(_preview_axes(dlg).lines)
+    assert recovered_lines != initial_lines
+    # Save independently renders the current recipe through the asset collaborator.
+    editor.save.click()
+    saved_data = ctrl.assets["arb_data1"]
+    assert saved_data.recipe is not None
+    assert saved_data.recipe.segments[0].formula == "cos(2*pi*t)"
+    np.testing.assert_allclose(
+        np.asarray(recovered_lines[0].get_ydata(), dtype=float),
+        saved_data.idata / saved_data.peak_abs,
+    )
+
+
+def test_A6_save_with_deep_invalid_formula_reports_save_failed(
+    qapp, monkeypatch, preview_clock: PreviewClock
+) -> None:
+    """Save in the optimistic window with a render-failing formula shows 'Save failed'."""
+    ctrl = _FakeController()
+    dlg = ArbWaveformDialog(ctrl)
+    editor = _Editor(dlg)
+    preview_clock.drain()
+
+    formula_item = editor.segments.item(0, 1)
+    assert formula_item is not None
+    formula_item.setText("unknown_symbol")
+    # Do NOT wait for debounce — we're in the optimistic Save-enabled window.
+    assert editor.save.isEnabled()
+
+    critical_calls: list[tuple[str, str]] = []
+
+    def fake_critical(parent: Any, title: str, msg: str) -> None:
+        critical_calls.append((title, msg))
+
+    monkeypatch.setattr(
+        "zcu_tools.gui.session.ui.arb_waveform_dialog.QMessageBox.critical",
+        fake_critical,
+    )
+    editor.save.click()
+
+    # Service attempted render → failed → "Save failed" box shown.
+    assert len(critical_calls) == 1
+    assert critical_calls[0][0] == "Save failed"
+    # No asset was stored.
+    assert "arb_data1" not in ctrl.assets
+
+
+# ---------------------------------------------------------------------------
+# B. save/load split try
+# ---------------------------------------------------------------------------
+
+
+def test_B7_reload_failure_reports_reload_failed_not_save_failed(
+    qapp, monkeypatch, preview_clock: PreviewClock
+) -> None:
+    """When save succeeds but reload fails, the user sees 'Reload failed', not 'Save failed'.
+
+    The patched load fails only on the first call so that the subsequent
+    _on_asset_selection_changed triggered by refresh() can load normally;
+    _on_asset_selection_changed only catches ArbWaveformError, not RuntimeError.
+    """
+    ctrl = _FakeController()
+    dlg = ArbWaveformDialog(ctrl)
+    editor = _Editor(dlg)
+    preview_clock.drain()
+
+    # Fail only the first call to load_data after save (simulates a
+    # transient disk error exactly at reload time, not at subsequent selection loads).
+    original_load = ctrl.load_data
+    fail_next: list[bool] = [True]  # mutable cell; no nonlocal needed
+
+    def failing_load_once(data_key: str) -> ArbWaveformData:
+        if data_key in ctrl.assets and fail_next[0]:
+            fail_next[0] = False
+            raise RuntimeError("disk read failure")
+        return original_load(data_key)
+
+    monkeypatch.setattr(ctrl, "load_data", failing_load_once)
+
+    critical_calls: list[tuple[str, str]] = []
+
+    def fake_critical(parent: Any, title: str, msg: str) -> None:
+        critical_calls.append((title, msg))
+
+    monkeypatch.setattr(
+        "zcu_tools.gui.session.ui.arb_waveform_dialog.QMessageBox.critical",
+        fake_critical,
+    )
+
+    editor.save.click()
+
+    # Asset was saved successfully.
+    assert "arb_data1" in ctrl.assets
+    assert editor.assets.currentRow() >= 0
+    selected = editor.assets.item(editor.assets.currentRow(), 0)
+    assert selected is not None
+    assert selected.text() == "arb_data1"
+    # Error reported as "Reload failed", not "Save failed".
+    assert len(critical_calls) == 1
+    assert critical_calls[0][0] == "Reload failed"
+
+
+def test_asset_load_failure_keeps_editor_state(qapp, monkeypatch) -> None:
+    """Selecting an asset whose load fails must not mutate editor state.
+
+    The load runs before _current_data_key / the data_key field are updated, so
+    a failed selection leaves the draft intact — its recipe cannot be saved
+    under the unloadable key (item-3 fail-fast / consistency fix).
+    """
+    from zcu_tools.resources.waveform_assets import ArbWaveformError
+
+    ctrl = _FakeController()
+    dlg = ArbWaveformDialog(ctrl)
+    draft_key = dlg._data_key_edit.text()
+
+    # Simulate selecting an asset that lists fine but fails to load.
+    monkeypatch.setattr(dlg, "_selected_data_key", lambda: "broken")
+
+    def _raise_load(data_key: str) -> ArbWaveformData:
+        raise ArbWaveformError("corrupt asset", reason="load_failed")
+
+    monkeypatch.setattr(ctrl, "load_data", _raise_load)
+
+    dlg._on_asset_selection_changed()
+
+    assert dlg._data_key_edit.text() == draft_key
+    assert dlg._current_data_key is None
+    # Warning is shown (the dialog is never .show()n in tests, so check the
+    # explicit hidden flag rather than isVisible(), which needs a shown ancestry).
+    assert not dlg._warning.isHidden()
+
+
+# ---------------------------------------------------------------------------
+# E. Typed recipe
+# ---------------------------------------------------------------------------
+
+
+def test_E12_recipe_from_ui_returns_formula_recipe(qapp) -> None:
+    """_recipe_from_ui always returns a typed FormulaRecipe, never a plain dict."""
+    ctrl = _FakeController()
+    dlg = ArbWaveformDialog(ctrl)
+
+    result = dlg._recipe_from_ui()
+    assert isinstance(result, FormulaRecipe)
+    assert len(result.segments) == 3
+    assert result.normalize in ("peak", "none")
+
+
+def test_save_button_persists_without_remote_png(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from qtpy.QtWidgets import QPushButton
+
+    state = SessionState(
+        SessionEnv(
+            parameters=None,
+            soc=None,
+            soccfg=None,
+            database_path=str(tmp_path),
+        )
+    )
+    assets = arb_waveform.ArbWaveformService(state)
+    errors: list[tuple[str, str]] = []
+
+    def unavailable(*_args: object, **_kwargs: object) -> str:
+        raise OSError("PNG export unavailable")
+
+    monkeypatch.setattr(arb_waveform, "render_preview_png", unavailable)
+    monkeypatch.setattr(
+        "zcu_tools.gui.session.ui.arb_waveform_dialog.QMessageBox.critical",
+        lambda _parent, title, message: errors.append((title, message)),
+    )
+    dialog = ArbWaveformDialog(assets)
+    try:
+        save = next(
+            button
+            for button in dialog.findChildren(QPushButton)
+            if button.text() == "Save"
+        )
+        assert save.isEnabled()
+        save.click()
+        assert assets.list_data_keys() == ["arb_data1"]
+        assert assets.load_data("arb_data1").recipe is not None
+        assert state.version.get("arb_waveforms") == 1
+        assert errors == []
+    finally:
+        dialog.close()
+
+
+def test_empty_assets_hint_tracks_refresh(entry_waveform_dialog) -> None:
+    from qtpy.QtWidgets import QLabel
+
+    dialog, assets = entry_waveform_dialog
+    hint = next(
+        (
+            label
+            for label in dialog.findChildren(QLabel)
+            if label.text() == "No waveforms saved yet"
+        ),
+        None,
+    )
+    assert hint is not None
+    assert hint.isVisible()
+    recipe = FormulaRecipe.from_raw(
+        {"segments": [{"duration": 0.1, "formula": "1"}], "normalize": "peak"}
+    )
+    assets.set_formula("wave", recipe, overwrite=False)
+    dialog.refresh()
+    assert not hint.isVisible()
+    assets.delete("wave")
+    dialog.refresh()
+    assert hint.isVisible()
+
+
+def test_close_is_in_bottom_right_footer(entry_waveform_dialog, qapp) -> None:
+    from qtpy.QtCore import QPoint
+    from qtpy.QtWidgets import QPushButton, QSplitter
+
+    dialog, _ = entry_waveform_dialog
+    close = next(b for b in dialog.findChildren(QPushButton) if b.text() == "Close")
+    splitter = dialog.findChild(QSplitter)
+    assert splitter is not None
+    close_top = close.mapTo(dialog, QPoint(0, 0))
+    splitter_bottom = splitter.mapTo(dialog, QPoint(0, splitter.height()))
+    assert close_top.y() >= splitter_bottom.y()
+    assert close_top.x() > dialog.width() / 2
+    dialog.resize(dialog.width() + 100, dialog.height() + 100)
+    qapp.processEvents()
+    assert (
+        close.mapTo(dialog, QPoint(0, 0)).y()
+        >= splitter.mapTo(dialog, QPoint(0, splitter.height())).y()
+    )
+    close.click()
+    assert not dialog.isVisible()

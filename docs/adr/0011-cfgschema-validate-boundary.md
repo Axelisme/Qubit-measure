@@ -1,8 +1,10 @@
 ---
-status: accepted
+status: superseded
 ---
 
 # Finished-cfg validation — adapter 必回傳完整合法 value 樹，靜態檢查在成品邊界
+
+**狀態：** superseded。CfgSchema 成品驗證由 [[0065]] 的 Form result 與 [[0073]] 的 adapter 邊界接替。以下正文保留歷史設計，不是現行契約。
 
 ## 脈絡
 

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-15，terminal Controller close and timeout choices
+**Last updated:** 2026-10-15，單層 Form description、ARB 唯讀與 terminal Controller close
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -46,14 +46,23 @@ analyze 不檢查 adapter 的 analysis capability。操作期間的 busy／硬�
 [Operation ADR](../../../../../docs/adr/0066-operation-lifecycle.md) 與
 [capability draft](../../../../../docs/adr/draft/gui-adapter-capability-guards.md)。
 
-`CfgEditorService` 按 `editor_id` 保存 cfg draft。可回收的 library-entry
-session 受 LRU／disconnect 回收；由 UI owner 建立的 seeded session 由 owner
-顯式 teardown。Widget attach／detach 不取得 draft 的銷毀權。
+Library entry 的開啟、提交與取代由 controller 交給 session 的
+`LibraryEntryForm`：controller 開啟時捕捉 parameters 與 arb 名稱，表單由呼叫端
+持有，寫入與捨棄不經 controller。`context.ml_edit` 經 controller 的
+`edit_library_entry` 走同一個表單：整批寫入一次，只有 Valid 才寫 library。
+Library 新建從 `Registry.templates` 讀 `TemplateDef`。Controller 的 `list_templates`
+保留 role discovery 的欄位與順序，`create_from_template` 以固定 capture 建立
+session 的 `new_library_entry`，驗證 Spec 後提交 put。Expr seeds 求成初值，
+Slot 已綁定時保留 child library key。換範本建立新 State，不重設既有 State。
+LibraryEntryForm 由呼叫端持有，關閉時丟棄，不另建 editor session。FormEditor 的
+建立與卸載只管理 view，不取得 state 的提交權。
 Tab cfg 由 `Session.cfg` 的 `TabFormResource` 擁有。Open／Reset 捕捉來源，
 preview、result 和 Run 都使用這份來源。Input、來源與 guard 不交給 view 管理。
-Library、Inspect 與 writeback 保留獨立 `CfgDraft`，其共用機制見
-[Cfg ADR](../../../../../docs/adr/0065-cfg-editing.md) 與
-[GUI cfg README](../../cfg/README.md)。分頁 Form 契約見本頁 Config model。
+Writeback 的 module proposal 是持久 `ModuleSpec`；draft 為每個 module item
+持有一個 session 的 `ModuleEntryForm`，固定在建立時的 capture 與 arb 名稱。
+Preview 與 apply 都取同一個 entry form 的 Spec，不另建編輯樹。
+共用編輯契約見 [Cfg ADR](../../../../../docs/adr/0065-cfg-editing.md)。
+分頁 Form 契約見本頁 Config model。
 
 `State` 保存可觀察的 app 資料，`ContextService` 寫入參數容器／library；services
 依用途讀 owner 的 read contract、單向呼叫 command 或訂閱已提交 fact。
@@ -104,12 +113,9 @@ pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 align
 
 - `form_adapter` 從 core cfg 與作者樹推導 Form。`make_form(ctx)`、範本與實驗初值由使用者套件宣告，舊 builder、seeds 與角色 factory 表已退休。
 - `flux_pick_plugin.py`、`flux_pick_frontend.py`、`interactive_flux_pick.py`：measure 選線的終態結果與 click-follow frontend。Caller 傳 FluxPickInputs 和初始數值，不帶具體實驗或參數容器。共用數值及 single-flight 機制仍由既有 kernel/plugin 擁有。
-- `adapter/`：framework-facing contract、measure-owned finished-cfg ports、analyze params、
-  adapter validation與protocol signature需要的session vocabulary；不forward generic cfg API。
-- `specs/`：`experiment.cfg_editing`的main policy adapter；只綁定Arb asset choices與readout
-  cross-shape inheritance，不擁有program field/label清單。
-- `cfg_schemas.py`：main raw/typed cfg normalization與policy facade；全七種module/六種waveform的
-  spec walk、missing/nested/reference規則由`experiment.cfg_editing`materializer擁有。
+- `adapter/`：framework-facing contract、request/result/writeback/analyze params、
+  adapter validation 與 protocol signature 所需的 session vocabulary。ModuleWriteback 的
+  proposal 直接使用持久 ModuleSpec，不帶 editor identity。
 - `services/`：app service layer。Service 依賴 ports，不直接 import sibling service
   implementation；package `__init__` 只做 lazy public re-export。
 - `state.py`：tab/device/pane/path/version-table SSOT 與主線程 mutators；固定的
@@ -127,12 +133,8 @@ pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 align
   the container; busy tabs cannot close or rebuild, so the captured worker target
   outlives the operation without a lease). It receives tab actions through a narrow
   `TabActions` port with pane-qualified writeback (`apply_post_writeback`);
-  `MainWindow` adapts those actions to top-level handlers. Run uses the sole
-  shared cfg tree (S1 corrected: 13 px, root at 0, descendants at 10 px with
-  connectors, five depth colors `#5b8dc6`/`#6aae8a`/`#b8942f`/`#8a6bc9`/`#4fb3a8`
-  cycle on guide lines stable under horizontal scroll, rows no longer use depth
-  backgrounds, whole-row folding, reference shape elision, viewport follows
-  available panel height with scrolling only when content exceeds viewport);
+  `MainWindow` adapts those actions to top-level handlers. Run 使用共用 FormEditor，
+  None／keys／Inline 合併下拉，Expression 在文字欄位右鍵切換，Advanced 預設折疊。
   Run action row is status-free with Reset 20% / Run 80% of available width；
   idle Reset與Run同高，Reset為一般按鈕、Run為blue primary，running時隱藏Reset並讓red Stop佔滿整列，
   settled後恢復20/80（A5）； Analysis uses an app-local single-column 13 px ledger with
@@ -147,7 +149,7 @@ pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 align
   draft via `Controller`/`WritebackControl` pane-qualified forwarding, while
   `WritebackService` remains stage-agnostic and fixes each draft's destination
   and role resolution at creation. Its preview returns per-item `WritebackValues`
-  with the actual path, latest stored value and capture-lowered proposal. Both
+  with the actual path, latest stored value and capture-evaluated proposal. Both
   panes obtain these facts through `writeback_control`; Qt does not resolve paths.
   Qt and remote preview also display the proposal's existing stderr. Qt rows use
   resources-provided static unit labels without conversion; ext and fields
@@ -157,7 +159,7 @@ pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 align
   apply/edit的app-owned fact會讓本地與remote入口都觸發同一writeback重投影；
   centered Current → Proposed columns on a shared-background continuous-boundary
   panel (white rows with bottom dividers), and equal 56×26 Edit/Copy actions。
-  Scalar parameter 與 editable module/waveform items 使用 Edit；non-scalar parameter 的
+  Scalar parameter 與 editable module items 使用 Edit；non-scalar parameter 的
   current/proposed headings使用一致的bounded summary（例如`3 × 3 matrix`）。small
   proposed matrix另外顯示read-only matrix view，current value維持summary-only；Copy會把
   complete proposed JSON放入clipboard。其它arbitrary long values只顯示bounded summary，
@@ -240,13 +242,9 @@ pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 align
 
 Shared layers:
 
-- `zcu_tools.gui.cfg`：Qt-free Spec/Value model、`CfgSchema` data carrier、inheritance、
-  persistence codec、domain-free raw spec walk與generic finished-cfg validation/lowering ports。
-- `zcu_tools.experiment.cfg_editing`：Qt-free closed program module/waveform shape catalog與fresh Spec
-  factories，以及program missing/nested/reference/subset materialization policy；main以app-local policy
-  啟用Arb choices、readout inheritance與完整7+6 materializable catalog。
-- `zcu_tools.gui.widgets.cfg`：shared `CfgFormWidget`、field renderers、decoration contract與
-  instance-owned frozen exact renderer registry。
+- `zcu_tools.gui.form`：Qt-free input、FormState、按 model-field path 查詢的單層 description、preview 與 result。
+- `zcu_tools.gui.form_adapter`：core cfg／持久 Spec 推導、FieldMeta 呈現投影與 key-or-inline 轉換。
+- `zcu_tools.gui.widgets.form`：FormEditor 與共用 value-widget helpers。
 - `zcu_tools.gui.session`：context、SoC、device、project settings、predictor、operation
   handles、operation runner、progress/shutdown service、shared dialogs。
 - `zcu_tools.gui.remote`：NDJSON RPC endpoint、framing、wire errors、router base。
@@ -281,19 +279,22 @@ Run、Analyze、PostAnalyze 從回傳的 `SessionServices.runner` 取用同一 l
 progress owner。這個入口不改 operation policy、hardware exclusion、取消或
 owner-thread delivery，也不另建 infrastructure bundle。
 
-Measure launcher 從使用者套件的 `ALIAS_PRESET` 取得唯一的有序初值表，以
-`alias_preset` 經 `MeasureGuiBehavior`、`Controller` 與 `build_app_services` 注入 session。
-框架不宣告領域初值。獨立 caller 可提供自己的 rows，省略或空 tuple 都建立空表。
+Measure launcher 讀取使用者套件的具名 preset，以 `alias_presets` 經
+`MeasureGuiBehavior`、`Controller` 與 `build_app_services` 注入 default rows。
+Behavior 的公開 `alias_presets` 欄位保留完整名稱與有序表，再經 `MainWindow` 與
+`MainDialogRegistry` 交給 Inspect 的 Load preset。
+框架不宣告領域初值，也不讀 preset 檔。Caller 省略或傳 None 時建立空表。
+顯式 mapping 必須含 default，否則 raise ValueError；default 的空 tuple 合法。
 ContextService 保留 authored softlinks 與空列，在第一份非空元件 snapshot 以
 role registry 的唯一候選填 primary 空列。每次開 entry 有 `aliases.yaml` 就載入。
 無檔才重設 preset，重新啟用 primary 初始化。已保存的空表與空列不自填。切 point 不重讀檔或換表，明確
 提交表後不再初始化，直到下次開 entry。Preset 的 flux_dev 空列不猜裝置，也不從 cache 填值。
 參數捕捉經 `read_context(aliases=...)` 固定當次 point、library、storage 與有序表。
 GUI adapter 不宣告角色，捕捉不從 GUI focus 或 adapter 的 via 推論 alias。
-Shared `session.ui.alias_dialog.AliasDialog` 是 Measure 與 workflows 的同一 owner。
-Dialog Apply 先驗整表，再由 entry owner 原子保存，成功才安裝 memory 並發布 event。
-EMPTY 時只改 memory。失敗保留舊表、舊檔與 draft，dialog 保持開啟可 retry。
-Apply 不關閉 dialog，Cancel 不撤回已 Apply 的內容。`set_alias_rows` 仍只改 memory。
+Alias 表在共用 Inspect 的 Aliases 頁（`session.ui.alias_panel.AliasPanel`）編輯，工具列沒有獨立 Aliases 按鈕。
+Apply 先驗整表，再由 entry owner 原子保存，成功才安裝 memory 並發布 event。
+EMPTY 時只改 memory。失敗保留舊表、舊檔與 draft，頁面顯錯可 retry。
+關閉 Inspect 時未存 draft 走 Save／Discard／Cancel，Discard 不撤回已 Apply 的內容。`set_alias_rows` 仍只改 memory。
 Tab 不顯示角色列，也不持有自己的 alias 表。
 
 App-local driving-adapter facets mirror the shared session control pattern.
@@ -313,7 +314,7 @@ Qt 與 remote 直接呼 facet；remote 投影同步 native Save report。 `Write
 `WritebackControlFacet` expose persistent writeback draft read/edit/apply by
 composing `GuardService`, `WritebackService`, `State`, and a resource-version
 provider; remote writeback handlers use this facet instead of the giant
-`Controller` surface. Cfg-editor remains a separate domain. Qt and remote
+`Controller` surface. Qt and remote
 writeback forwards are pane-qualified; no flat writeback forward remains.
 
 Inside the Qt view, `MainWindow` remains the top-level View / `RenderHost` facade
@@ -371,7 +372,7 @@ Key ownership rules:
 `ExperimentReloadService` 擁有 RAM-only snapshot 與重載／恢復狀態，透過注入的
 `ExperimentCatalogLoader` 載入新 registry，透過 Workspace 的正常 close/apply seam
 重建全部 tabs。Controller 只轉接，工具列與 MainWindow 負責整批 destructive confirmation
-和 failure/recovery presentation。Template catalog、hardware context 與 framework 不重建。
+和 failure/recovery presentation。Registry 的持久範本、hardware context 與 framework 不重建。
 
 `catalog_loader.py` 提供通用 `SourceExperimentCatalogLoader`。組合根用 `SourcePackage`
 宣告 framework 與使用者 source 目錄，並指定 reload、preserved 與 catalog module。
@@ -417,8 +418,8 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
 ## Run / Analyze Workflow
 
 1. A tab is created from a registered experiment adapter.
-2. The tab owns a persistent `CfgResource`, independent of widget lifetime.
-   Run renders its publications through `ResourceCfgFormWidget`; Analysis
+2. Tab 持有獨立於 widget lifetime 的 `TabFormResource`。
+   Run 以 `FormEditor` 呈現同一個 FormState；Analysis
    renders its params through the app-local 13 px ledger with whole-header
    folding and a full-width `Analyze` immediately below parameters.
 
@@ -446,15 +447,28 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    terminal callbacks back to the main thread.
 6. RunService uses State directly for busy checks and atomic result/evidence
    publication. AnalyzeService retains its narrow `AnalyzeStatePort`.
-7. Writeback items are generated from analysis results and edited through the same
-   cfg-editor machinery before commit. `WritebackService.create_draft` captures
+7. Writeback items are generated from analysis results. Module proposals are
+   persistent Specs, edited through each draft's shared `ModuleEntryForm` and
+   `FormState`. `WritebackService.create_draft` captures
    the destination ParameterContext and its fixed role names. Preview facts
    expose the actual destination, latest stored current value and complete proposal.
    Scalar parameter rows show values and stderr with static schema unit labels
    from resources; ext and fields without static units show no label. Labels never
    convert values. Draft-local retarget refreshes the destination facts and unit.
-   Module/waveform items show bounded change summaries without units and keep
-   full cfg editing in `Edit`. Primary and post workflows own proposal timing;
+   Module items show bounded change summaries without units. Their `Edit`
+   dialog mounts `FormEditor` directly on the draft's state and captured env;
+   `Apply as:` retargets the same item. Invalid State input survives Close and
+   refuses Apply. Unparseable local text also marks the row Invalid and locks
+   Apply while open; Close drops only that local text and shows the State's
+   result, without writing the library. Field writes go through the existing
+   pane-qualified writeback guard. A refusal keeps the user's text in the open
+   editor and displays the guard's reason without changing the shared state.
+   A host refresh after module validation fails keeps Invalid rows and reads
+   valid items through the service's single-item preview. MainWindow presents
+   expected Apply refusals without discarding the draft; other failures propagate.
+   The existing busy and Remote enable gates remain unchanged.
+   Parameter and sample proposals retain their separate write contracts.
+   Primary and post workflows own proposal timing;
    the Writeback service remains stage-free. Sample proposals name a concrete
    component and producer JSON fields. GUI adds dev_value/dev_unit from the
    Run-fixed $flux_dev binding and device snapshot. Missing binding, device,
@@ -626,57 +640,19 @@ migration.
 GUI flux forms provide A, V and native units with initial A. This initial value
 does not come from device info. Core and Notebook cfg require an explicit unit.
 
-### Independent CfgSchema drafts
+### Library、Inspect 與 writeback
 
-Library, Inspect and writeback retain `CfgSchema` and `CfgDraft`; they do not use
-the tab Form resource. Their Spec/Value model, reference materialization and
-codec stay with `gui.cfg` and `experiment.cfg_editing` as described in
-[Cfg ADR](../../../../../docs/adr/0065-cfg-editing.md). Library sessions retain
-the opened ParameterContext and target; a later point selection does not retarget
-Apply. Their fail-fast draft batches retain successful prefixes and are not the
-tab resource's atomic write contract.
+Library／Inspect 使用 session 的 LibraryEntryForm，root 固定具體 Spec family。
+Apply 直接交持久 Spec，保留 child key，屏蔽欄位由生成器預設補回。Name、未存提示、
+Revert 與切換條目前的確認由共用 Inspect 管理。Parameters 頁仍使用 YamlValue／FieldSpec，
+Modules 用 FormEditor，Aliases 是第三頁。Run／Remote 唯讀只鎖寫入，仍可複製、折疊與捲動。
 
-以下 `CfgFormWidget` binding 路徑供獨立 library／inspect／writeback draft 使用。
-每個 `CfgFormWidget` 持有自己的 frozen exact registry；沒有顯式注入時，
-`default_cfg_renderers()` 為五個 non-section exact field types
-（`LiteralField`、`ScalarField`、`SweepField`、`CenteredSweepField`、`ReferenceField`）註冊固定
-`FieldRenderer(field, context)`，`SectionField` 不在 registry 而由 sole tree
-（`TreeCfgWidget`）直接建立 `QTreeWidgetItem` 結構。immutable `FieldRenderContext` 只攜帶 path、
-top-level 標記、label width、decoration resolver、text enhancer 與同一 frozen registry；leaf 與
-reference header 走 registry `render()`，而 section 結構由 tree 直接建立，沒有 consumer-side
-constructor dispatch、global decorator registration 或 inheritance fallback。attach 在成功 build
-tree root 後才訂閱 draft，detach 會解除 change/validity callbacks 但不 close draft。`CfgFormWidget`
-accepts an optional field decoration provider keyed by full value tree path. The shared widget
-owns only generic presentation metadata (`hidden`/`enabled`/tone/badge/tooltip/label suffix) and
-computes the default decoration from the spec; app-specific policy such as generated fields stays in
-the caller. `LiteralSpec` fields stay hidden by default, but a decoration provider can explicitly
-reveal them as framed read-only values for generated or locked review fields. Decoration is a view
-contract only: domain enforcement remains in the owning controller/runtime.
-
-`CfgFormWidget.set_editing_enabled()` locks only the rendered form content, not
-the widget shell or its `QScrollArea`. Busy/read-only hosts keep the cfg pane
-scrollable while child editor controls are disabled, and the desired editing
-state persists across `detach()` / `attach()` swaps of the service-owned draft.
-
-Nested `CfgSectionSpec` fields render as tree items with whole-row folding
-(`QTreeWidgetItem` at 10 px indentation, 13 px text, classic connectors); the section header
-is the item label and does not create an additional parent-row label. This avoids
-duplicated section labels and keeps the single tree presentation consistent
-across Run and module/waveform editors.
-
-`ChoiceSectionSpec` is the shared selector-driven display contract for sections
-whose fields depend on a local mode/strategy. The section still owns a complete
-union `CfgSectionValue`; each `ChoiceBinding` names the selector field and the
-fields rendered for each selector value. `CfgFormWidget` refreshes only the
-affected section subtree (including reference-elided subtree owner, e.g.
-`modules.qub_pulse` for `modules.qub_pulse.gain`) when a selector or decoration changes,
-while hidden inactive fields keep their values in the model and lower/persist through the
-normal section path. Decoration-provider changes follow the same section-local (section or
-reference) refresh path instead of reattaching the full `CfgDraft`-backed form. Field widgets
-expose a typed `refresh_section(path) -> bool` surface, and decoration state is consumed
-through the shared `FieldDecoration` surface rather than ad-hoc attribute probing.
-Unknown `ChoiceSectionSpec` selector values fast-fail instead of hiding all
-controlled fields.
+Writeback module item 持有 ModuleEntryForm，Qt 與 remote 共用同一 state。
+Form Invalid 或 view 有 local parse errors 時拒絕 Apply，關閉只丟棄未解析文字。
+LibraryEntryInvalid 保留 row、selection、dialog 與 draft，由 presenter 顯錯；
+非預期錯誤向外傳遞。Host 保留 busy、writable、result、context 與 holder 規則。
+Selected Apply 先準備全部選中值，再由既有 owner append accepted 並依序提交，
+首錯保留成功前綴，不提供跨檔交易。詳見 ADR-0008、ADR-0065。
 
 ## Operation Model
 
@@ -736,7 +712,7 @@ commit explicitly clears canvases when the new State has no figure.
 
 `remote/` is the GUI-process driving adapter, peer to `ui/` rather than an
 application service. It owns app-specific request coercion and wire projection:
-method registry, event serialization, main-thread dispatch, holder admission, editor lifecycle, and diagnostics.
+method registry, event serialization, main-thread dispatch, holder admission, and diagnostics.
 It projects internal tab interaction/content facts to the coarse
 `{tab_id, requery:["tab.snapshot"]}` event envelope; GUI refresh masks and
 pane figure details stay internal to `MainWindowEventCoordinator`. The wire event
@@ -773,27 +749,13 @@ caching, raise/show policy, and per-dialog screenshots; `MainWindow` remains the
 remote named-dialog surface delegate reference retention and `finished` /
 `destroyed` cleanup to the shared dialog lifecycle helper.
 
-`InspectDialog` adapts the measure controller into the shared
-`InspectDialogBase` by passing `context_control`; the subclass keeps the concrete
-controller only for measure-only CfgEditor and template-catalog actions. Measure owns
-the Parameters component tree and a separate Modules composition:
-the Modules tree exposes only New/Delete collection actions, while the right pane
-embeds the service-owned `CfgFormWidget` with Name, Saved/Unsaved, Revert, and
-Apply on one row (there is no Raw pane or Modify/Rename action). Selecting an entry
-opens one `gc=False` editor session; field and Name edits stay in that draft.
-Apply calls the replacement write interface, which validates and lowers before the
-single ContextService-owned name+cfg mutation, then reopens a fresh clean draft on
-the resulting selection. Collision, invalid, or lowering failures leave the live
-entry and draft intact. Editor 固定開啟時的 ParameterContext。同 entry 切換 point
-不改 captured SavedPoint 目的地。提交要求目前已選取工作點，跨 entry 拒絕，
-保留 editor draft 供 Revert／Discard。開啟 entry 不自選 point，
-parameters=None、readiness=EMPTY。Entry metadata、point list 與 setup source
-binding 仍可讀。Run、WB 與目前 point 的 Inspect Set 停用並提示先選取或建立
-工作點。SoC、device 與獨立 predictor 保留各自能力。
-Dirty selection transaction 後套用 pending refresh，讓 tree 顯示提交後的名稱。 Revert
-reloads live content, and dirty selection/close requires Apply, Discard, or Cancel.
-New remains a retained non-blocking template catalog dialog; the Modules tree Delete
-key is direct only at the tree focus boundary, while the button confirms.
+Inspect 是 session 的共用 `InspectDialog`。`MainDialogRegistry` 傳入它的全部必填協作者：
+`context_control`、event bus、組合根給的 `registry.templates` 讀取函式（每次開 Inspect 讀一次，
+reload 後的新範本在下次開啟生效）、`Controller.arb_waveforms`、window 的 DialogPresenter，
+以及開 `DialogName.ARB_WAVEFORM` 的入口，讓 ARB 對話框保有具名管理與 remote screenshot，
+加上組合根的具名 alias preset catalog。
+Measure 不再有自己的 Inspect 子類別或 ARB 實作；行為與 Modules 分頁見
+[session README](../../session/README.md)。Inspect、Devices 與 ARB 的唯讀 mode 都由宿主在開啟時依控制權的 `writable` 設定。從 Inspect 開的 ARB 沿用該 Inspect 的 `writable`。這三個對話框不加 run lock，也不追蹤開啟後的控制權變化。
 `SetupDialog` receives `setup_control`, so project/context/SoC bootstrap UI no
 longer depends on the concrete controller façade. The persistent measure
 `PredictorDialog` receives both `predictor_control` and `device_control`, so the
@@ -840,7 +802,7 @@ Esc, focus loss, hide, invalid placement or an external commit drop it.
 
 ### Arbitrary waveform remote contract
 
-`Controller.arb_waveforms` 直接提供既有資產 owner 的窄 port，不再逐項轉接。
+`Controller.arb_waveforms` 直接提供 session bundle 的 `ArbWaveformService`（`gui/session`），不再逐項轉接。
 GUI dialog 只接收此 domain port；cfg source 僅依賴列出 keys 的 read port。
 `arb_waveform.set` 成功只回傳 `success=true` 與 `status=created|overwritten`。
 保存不請求 preview；需要 PNG 時另呼叫 `arb_waveform.preview`，回傳 recipe 與

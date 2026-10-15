@@ -54,24 +54,8 @@ def _frequency_fields(
             if node.mode == "key"
             else tab.read_field(f"{field}.module").fields
         )
-        if "ro_freq" in fields:
-            leaves: list[_FrequencyLeaf] = [
-                (f"{field}.module.ro_freq", field, ("ro_freq",))
-            ]
-        elif "pulse_cfg" in fields and "ro_cfg" in fields:
-            # A key outer module owns both projections; inline exposes the child.
-            pulse_source = field if node.mode == "key" else f"{field}.module.pulse_cfg"
-            pulse_value_path = (
-                ("pulse_cfg", "freq") if node.mode == "key" else ("freq",)
-            )
-            leaves = [
-                (
-                    f"{field}.module.pulse_cfg.module.freq",
-                    pulse_source,
-                    pulse_value_path,
-                ),
-                (f"{field}.module.ro_cfg.ro_freq", field, ("ro_cfg", "ro_freq")),
-            ]
+        if "freq" in fields:
+            leaves: list[_FrequencyLeaf] = [(f"{field}.module.freq", field, ("freq",))]
         else:
             raise GuiRpcError("Unsupported readout shape", reason="invalid_cfg")
         return leaves, field
@@ -85,6 +69,26 @@ def _module_value_path(module_field: str, field: str) -> tuple[str, ...]:
     if not field.startswith(prefix):
         raise ValueError(f"Not an inline module frequency field: {field}")
     return tuple(field.removeprefix(prefix).split("."))
+
+
+def set_module_scalar(tab: RecipeTab, module_field: str, edit: RecipeFieldEdit) -> None:
+    """Edit a flat module scalar, retaining key input/source when value is None.
+
+    module_field is a complete public S2 module path; edit.field is a scalar
+    directly under its inline module envelope. Explicit values convert the
+    module with use_inline before writing. None retains a key's scalar value
+    and provenance; inline input follows RecipeTab.set's default retention.
+    Path, validation, lock and source errors propagate without fallback.
+    """
+    value_path = _module_value_path(module_field, edit.field)
+    if edit.value is not None:
+        tab.use_inline(module_field)
+    elif tab.read_field(module_field).mode == "key":
+        tab.retain_module_source(
+            module_field, summary_field=edit.field, value_path=value_path
+        )
+        return
+    tab.set(edit.field, edit.value, source=edit.source)
 
 
 def set_nested_module_scalar(
@@ -136,10 +140,6 @@ def _usable_frequency(tab: RecipeTab, leaf: _FrequencyLeaf) -> bool:
                 return False
             value = value.get(part)
         return _finite(value)
-    if module_field is not None and value_path == ("pulse_cfg", "freq"):
-        pulse_field = f"{module_field}.module.pulse_cfg"
-        if tab.read_field(pulse_field).mode == "key":
-            return _finite(tab.read_module(pulse_field).value.get("freq"))
     state = tab.read_field(field)
     return not state.errors and _finite(state.value)
 
@@ -153,9 +153,6 @@ def _write_frequency_fields(
     """Convert only for edits, apply one scalar batch, then verify all frequencies."""
     if edits and module_field is not None:
         tab.use_inline(module_field)
-        pulse_field = f"{module_field}.module.pulse_cfg"
-        if any(edit.field == f"{pulse_field}.module.freq" for edit in edits):
-            tab.use_inline(pulse_field)
     tab.set_fields(edits)
     for leaf in leaves:
         if not _usable_frequency(tab, leaf):
@@ -176,12 +173,9 @@ def set_frequency(
     tab is opened; field is a dotted scalar frequency or core readout module root.
     Inline leaf paths include module, for example modules.qub_pulse.module.freq.
     Key input stays unchanged when retaining library values; explicit/calibrated
-    writes first ask the owner to convert the whole module to inline. A nested
-    pulse key is converted only when its frequency is edited; otherwise its
-    library value and source are retained through the public module read.
-    A readout root supports the generated Form shapes of the selected readout:
-    pulse readout writes <root>.module.pulse_cfg.module.freq and
-    <root>.module.ro_cfg.ro_freq; direct readout writes <root>.module.ro_freq.
+    writes first ask the owner to convert the whole module to inline. Retained
+    library values and sources use the public module read. A readout root
+    writes its single frequency at <root>.module.freq for generator and ADC.
     Other readout shapes raise GuiRpcError(invalid_cfg).
     calibration is a caller-owned logical scalar path (not a formula). required
     names the missing tool parameter when no source is usable. Explicit finite

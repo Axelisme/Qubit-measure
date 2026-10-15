@@ -1,9 +1,10 @@
 """Generic workflow GUI composition behind the shared process runtime."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import ClassVar
 
+from zcu_tools.cfg_model import TemplateDef
 from zcu_tools.device.manager import DeviceManager
 from zcu_tools.gui.app.workflows.persistence import (
     WorkflowInputCodec,
@@ -17,7 +18,7 @@ from zcu_tools.gui.runtime import GuiAssembly, GuiRuntimeBehavior, GuiRuntimeSpe
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
-from zcu_tools.gui.session.aliases import AliasRow
+from zcu_tools.gui.session.alias_presets import AliasPresets, validate_alias_presets
 from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
@@ -56,8 +57,9 @@ class WorkflowsGuiBehavior[C](GuiRuntimeBehavior):
         self,
         *,
         registrations: Sequence[Attachment[C]],
+        templates: Mapping[str, TemplateDef],
         loader: SourceCatalogLoader[WorkflowCatalog[C]] | None = None,
-        alias_rows: tuple[AliasRow, ...] = (),
+        alias_presets: AliasPresets | None = None,
         project_root: str = "",
         clean: bool = False,
         cache_dir: Path | None = None,
@@ -70,8 +72,17 @@ class WorkflowsGuiBehavior[C](GuiRuntimeBehavior):
         replacement WorkflowCatalog[C] instances through the same registry;
         None disables source reload. Caller configures bounded/fixed namespaces
         and a builder that imports current registrations on every load.
-        alias_rows is the ordered shared-session fallback preset; () means no
-        aliases. It never declares workflow roles or chooses connected devices.
+        templates is the caller's persistent module/waveform template catalog,
+        used by shared Inspect's New action; an empty mapping is valid. It is
+        passed directly to the Window, without importing a user package.
+        alias_presets maps names to ordered authored rows. Omitted or None means
+        no catalog and an empty initial table. An explicit mapping must contain
+        "default" (possibly empty), or raise ValueError. Invalid table syntax,
+        duplicates or forward links raise InvalidInputError. The public
+        alias_presets field retains the complete catalog for dialog composition;
+        no file location or reload is retained. Assembly uses default rows for
+        entries without saved aliases; saved empty and nonempty tables win.
+        Presets never declare workflow roles or choose connected devices.
 
         Empty project_root means the launch cwd. clean skips reading the previous
         input file, but successful close still flushes current input. cache_dir
@@ -79,10 +90,12 @@ class WorkflowsGuiBehavior[C](GuiRuntimeBehavior):
         Component definitions must be registered before Setup opens an entry.
         An existing QApplication is required for assemble, not for this call.
         """
+        validate_alias_presets(alias_presets)
         self._registrations = tuple(registrations)
         WorkflowCatalog(self._registrations)
         self._loader = loader
-        self._alias_rows = alias_rows
+        self._templates = templates
+        self.alias_presets: AliasPresets | None = alias_presets
         self._project_root = project_root
         self._clean = clean
         self._cache_dir = cache_dir
@@ -125,13 +138,17 @@ class WorkflowsGuiBehavior[C](GuiRuntimeBehavior):
             bind_assets=ArbWaveformDatabase.info_at,
             project_root=self._project_root,
             device_registry=self._devices,
-            alias_rows=self._alias_rows,
+            alias_rows=()
+            if self.alias_presets is None
+            else self.alias_presets["default"],
         )
         self.window = WorkflowWindow(
             self.state,
             self.services,
             self._owner,
             registrations=self._registrations,
+            templates=self._templates,
+            alias_presets=self.alias_presets,
             loader=self._loader,
             on_close=self._close,
         )

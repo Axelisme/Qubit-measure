@@ -96,6 +96,7 @@ class FreqDepExp(PersistableExperiment[FreqResult, FreqCfg]):
         z=ZSpec("signals", "Population", "a.u.", dtype=np.float64),
         result_type=FreqResult,
         cfg_type=FreqCfg,
+        cfg_schema_version="2.0",
         tag="singleshot/mist/freq",
     )
 

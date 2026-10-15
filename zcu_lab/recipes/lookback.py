@@ -21,14 +21,14 @@ def _set_readout_timing(
     """Keep omitted key values and provenance; convert only for explicit edits."""
     for field, value, value_path in (
         (
-            "modules.readout.module.ro_cfg.ro_length",
+            "modules.readout.module.ro_length",
             readout_length_us,
-            ("ro_cfg", "ro_length"),
+            ("ro_length",),
         ),
         (
-            "modules.readout.module.ro_cfg.trig_offset",
+            "modules.readout.module.trig_offset",
             trigger_offset_us,
-            ("ro_cfg", "trig_offset"),
+            ("trig_offset",),
         ),
     ):
         if value is not None:
@@ -137,17 +137,10 @@ DEFINITION = RecipeDefinition(
     run=lookback,
     adapter_name="lookback",
     summary_parameters=(
+        SummaryParameter("frequency_mhz", "modules.readout.module.freq", "MHz"),
+        SummaryParameter("readout_length_us", "modules.readout.module.ro_length", "us"),
         SummaryParameter(
-            "frequency_mhz", "modules.readout.module.pulse_cfg.module.freq", "MHz"
-        ),
-        SummaryParameter(
-            "ro_frequency_mhz", "modules.readout.module.ro_cfg.ro_freq", "MHz"
-        ),
-        SummaryParameter(
-            "readout_length_us", "modules.readout.module.ro_cfg.ro_length", "us"
-        ),
-        SummaryParameter(
-            "trigger_offset_us", "modules.readout.module.ro_cfg.trig_offset", "us"
+            "trigger_offset_us", "modules.readout.module.trig_offset", "us"
         ),
         SummaryParameter("rounds", "rounds"),
         SummaryParameter("readout_ref", "modules.readout"),

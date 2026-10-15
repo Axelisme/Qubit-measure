@@ -81,6 +81,7 @@ class IRB_Exp(PersistableExperiment[IRBResult, IRBCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=IRBResult,
         cfg_type=IRBCfg,
+        cfg_schema_version="2.0",
         tag="twotone/ge/irb",
     )
 

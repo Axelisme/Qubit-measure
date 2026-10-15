@@ -43,10 +43,7 @@ from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapte
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.services.caretaker import create_persistence_caretaker
 from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
-from zcu_tools.gui.app.measure.ui.arb_waveform_dialog import ArbWaveformDialog
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
-from zcu_tools.gui.app.measure.ui.inspect_dialog import InspectDialog
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
 from zcu_tools.gui.event_bus import BaseEventBus
@@ -60,8 +57,10 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.gui.session.events import MdChangedPayload
 from zcu_tools.gui.session.ui.add_component_dialog import AddComponentDialog
+from zcu_tools.gui.session.ui.arb_waveform_dialog import ArbWaveformDialog
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
+from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
 from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.gui.widgets.form import FormEditor
@@ -198,7 +197,6 @@ def control_ui(
         owner_scheduler=QtOwnerScheduler(),
         project_root=str(tmp_path),
         catalog_loader=loader,
-        template_catalog=TemplateCatalog(),
     )
     ctrl.attach_caretaker(
         create_persistence_caretaker(ctrl, cache_dir=tmp_path / "cache")
@@ -208,6 +206,7 @@ def control_ui(
     dialogs = RecordingDialogPresenter(confirm_answers=[False])
     window = MainWindow(
         ctrl,
+        templates=lambda: {},
         dialog_presenter=None if getattr(request, "param", None) == "qt" else dialogs,
     )
     ctrl.add_view(window)
@@ -341,7 +340,14 @@ def test_remote_disables_writes_but_keeps_tabs_figures_inspect_and_screenshots(
     assert button(inspect, "Refresh").isEnabled()
     assert all(tree.isEnabled() for tree in inspect.findChildren(QTreeWidget))
     assert not button(inspect, "New").isEnabled()
-    assert not button(inspect, "Arb Waveforms…").isEnabled()
+    button(inspect, "Arb Waveforms…").click()
+    qapp.processEvents()
+    arb = next(d for d in ui.window.findChildren(ArbWaveformDialog) if d.isVisible())
+    assert not button(arb, "Save").isEnabled()
+    arb_key = arb.findChild(QLineEdit)
+    assert arb_key is not None and arb_key.isReadOnly()
+    arb.close()
+    qapp.processEvents()
     add_component = inspect.findChild(QPushButton, "component_add")
     if add_component is None:
         raise LookupError("Inspect lacks its component Add control")
@@ -435,7 +441,6 @@ def test_remote_device_stop_reclaims_and_cancels(control_ui, qapp):
     [
         DialogName.SETUP,
         DialogName.PREDICTOR,
-        DialogName.ALIASES,
         DialogName.ARB_WAVEFORM,
         DialogName.INSPECT,
         DialogName.DEVICE,
@@ -664,6 +669,8 @@ def test_load_file_return_accept_and_cancel_preserve_result_contract(
         assert after.result is before.result
 
 
+# Inspect asks through the window presenter; "qt" keeps real message boxes.
+@pytest.mark.parametrize("control_ui", ["qt"], indirect=True)
 @pytest.mark.parametrize("decision", ["local", "cancel"])
 def test_inspect_delete_confirmation_uses_live_library_owner(
     control_ui, qapp, decision
@@ -745,6 +752,7 @@ def test_unsaved_tab_close_confirmation_accept_and_cancel(control_ui, qapp, deci
     assert ui.controller.has_tab(tab_id) is (decision != "local")
 
 
+@pytest.mark.parametrize("control_ui", ["qt"], indirect=True)
 @pytest.mark.parametrize("decision", ["local", "cancel"])
 def test_inspect_dirty_save_and_cancel(control_ui, qapp, decision):
     ui = control_ui
@@ -851,6 +859,7 @@ def test_shutdown_finishes_load_interaction_before_owner_teardown(
     assert not ui.window.isVisible()
 
 
+@pytest.mark.parametrize("control_ui", ["qt"], indirect=True)
 def test_inspect_delete_confirmation_pins_the_original_saved_point(control_ui, qapp):
     ui = control_ui
     original = ui.controller.context_control.read_context()

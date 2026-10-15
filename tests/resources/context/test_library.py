@@ -1,5 +1,7 @@
 """Specs, materialization, provenance and single-file publication contracts."""
 
+import json
+import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -9,6 +11,7 @@ import pytest
 from zcu_tools.cfg_model import (
     ConstWaveformCfg,
     PulseCfg,
+    PulseReadoutCfg,
     PulseSpec,
     waveform_spec_from_raw,
 )
@@ -667,7 +670,7 @@ def test_atomic_replace_failure_does_not_publish_candidate_or_sources(
     assert changes == []
 
 
-def test_source_refresh_failure_retains_snapshot_and_recovery_publishes(
+def test_missing_source_refresh_removes_root_and_explicit_replacement_publishes(
     files: tuple[Path, Path],
 ) -> None:
     write_document(files, document())
@@ -683,11 +686,82 @@ def test_source_refresh_failure_retains_snapshot_and_recovery_publishes(
         stderr=0.01,
     )
     write_document(files, changed)
-    with pytest.raises(ValueError, match="does not exist"):
-        library.refresh()
+    assert library.refresh()
+    assert library.snapshot().module_keys() == ("Q1.pulses.pi2",)
     assert library.snapshot().meta("Q1.pulses.pi.gain") is None
-    assert changes == []
+    assert len(changes) == 1
     source = local_source(files)
+    write_document(files, changed)
     assert library.refresh()
     assert library.snapshot().meta("Q1.pulses.pi.gain") == source
-    assert len(changes) == 1
+    assert len(changes) == 2
+
+
+def test_obsolete_nested_readout_is_named_and_backed_up_while_flat_readout_loads(
+    files: tuple[Path, Path], caplog: pytest.LogCaptureFixture
+) -> None:
+    raw = {
+        "format": "zcu.module-library",
+        "format_version": "2.0",
+        "components": {
+            "Q1": {
+                "readout": {
+                    "probe": {
+                        "type": "readout/pulse",
+                        "gen_ch": 1,
+                        "nqz": 1,
+                        "freq": 100.0,
+                        "gain": 0.5,
+                        "waveform": "Q1.waveforms.base",
+                        "ro_ch": 0,
+                        "ro_length": 1.0,
+                    },
+                    "broken_probe": {
+                        "type": "readout/pulse",
+                        "pulse_cfg": {
+                            "type": "pulse",
+                            "ch": 0,
+                            "nqz": 1,
+                            "freq": 100.0,
+                            "gain": 0.5,
+                            "waveform": {"style": "const", "length": 0.5},
+                        },
+                        "ro_cfg": {
+                            "type": "readout/direct",
+                            "ro_ch": 0,
+                            "ro_freq": 100.0,
+                            "ro_length": 1.0,
+                        },
+                    },
+                },
+                "waveforms": {"base": {"style": "const", "length": 0.5}},
+            }
+        },
+    }
+    path = files[0]
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    original = path.read_bytes()
+
+    with caplog.at_level(logging.WARNING):
+        library = open_library(files)
+
+    snapshot = library.snapshot()
+    assert snapshot.module_keys() == ("Q1.readout.probe",)
+    cfg = snapshot.get_module("Q1.readout.probe")
+    assert isinstance(cfg, PulseReadoutCfg)
+    assert (cfg.gen_ch, cfg.ro_ch, cfg.freq) == (1, 0, 100.0)
+    assert cfg.waveform.length == 0.5
+    with pytest.raises(KeyError, match="broken_probe"):
+        snapshot.module_spec("Q1.readout.broken_probe")
+    backups = list(path.parent.glob("*.bak*"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == original
+    warnings = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno == logging.WARNING
+    ]
+    assert len(warnings) == 1
+    assert "Q1.readout.broken_probe" in warnings[0]
+    assert str(backups[0]) in warnings[0]
+    assert not library.refresh()

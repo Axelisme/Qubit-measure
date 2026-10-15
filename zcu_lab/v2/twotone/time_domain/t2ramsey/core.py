@@ -96,6 +96,7 @@ class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=T2RamseyResult,
         cfg_type=T2RamseyCfg,
+        cfg_schema_version="2.0",
         tag="twotone/ge/t2ramsey",
     )
 

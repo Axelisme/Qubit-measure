@@ -55,19 +55,11 @@ def test_generated_module_options_offer_typed_keys_and_single_inline(
     assert key.fields is None
     inline = options[-1]
     assert inline.value == {"kind": "inline", "module": {"type": "pulse"}}
-    properties = expect_object(form.model.input_schema(env)["properties"])
-    projected = expect_object(properties["probe"])["x-form-options"]
-    assert isinstance(projected, list)
-    fields = expect_object(expect_object(projected[-1])["fields"])
-    module = expect_object(expect_object(fields["properties"])["module"])
-    assert set(expect_object(module["properties"])) >= {
-        "ch",
-        "freq",
-        "gain",
-        "waveform",
-    }
-    assert "type" not in expect_object(module["properties"])
-    assert "kind" not in expect_object(fields["properties"])
+    state = FormState(form.default_input(env))
+    state.write({("probe",): inline.value}, env)
+    children = state.describe(("probe",), env).children
+    assert {field.path[-1] for field in children} >= {"ch", "freq", "gain", "waveform"}
+    assert all(field.path[:2] == ("probe", "module") for field in children)
 
 
 def test_generated_multi_kind_options_keep_editable_kinds_and_filter_keys() -> None:
@@ -84,20 +76,17 @@ def test_generated_multi_kind_options_keep_editable_kinds_and_filter_keys() -> N
         {"kind": "inline", "module": {"type": kind}}
         for kind in ("reset/pulse", "reset/two_pulse", "reset/bath")
     ]
-    schema = form.model.input_schema(env)
-    projected = expect_object(expect_object(schema["properties"])["reset"])[
-        "x-form-options"
-    ]
-    assert isinstance(projected, list)
+    state = FormState(form.default_input(env))
     expected_fields = [
         {"pulse_cfg"},
         {"pulse1_cfg", "pulse2_cfg"},
         {"cavity_tone_cfg", "qubit_tone_cfg", "pi2_cfg"},
     ]
-    for item, names in zip(projected, expected_fields, strict=True):
-        fields = expect_object(expect_object(item)["fields"])
-        module = expect_object(expect_object(fields["properties"])["module"])
-        assert set(expect_object(module["properties"])) == names
+    for option, names in zip(options[("reset",)], expected_fields, strict=True):
+        state.write({("reset",): option.value}, env)
+        assert {
+            field.path[-1] for field in state.describe(("reset",), env).children
+        } == names
 
 
 def test_module_key_command_copies_captured_content_in_one_write() -> None:
@@ -109,15 +98,10 @@ def test_module_key_command_copies_captured_content_in_one_write() -> None:
             {"modules": {"probe": {"kind": "ref", "name": "Q.pulses.probe"}}},
         )
     )
-    probe = expect_object(
-        expect_object(state.input_schema(env)["properties"])["modules"]
-    )
-    options = expect_object(expect_object(probe["properties"])["probe"])[
-        "x-form-options"
-    ]
-    assert isinstance(options, list)
-    assert expect_object(options[0]).get("commands") == [
-        {"name": "to_inline", "label": "Convert to inline"}
+    target = state.describe(("modules", "probe"), env).target
+    assert target is not None and target.options is not None
+    assert [(item.name, item.label) for item in target.options[0].commands] == [
+        ("to_inline", "Convert to inline")
     ]
     notifications: list[str] = []
     state.subscribe(lambda: notifications.append("changed"))
@@ -185,50 +169,6 @@ def test_generated_inline_selection_uses_fresh_template_not_the_key_or_previous_
     )
 
 
-def kind_selection_schema(
-    schema: dict[str, JsonValue], root: str, root_label: str, depth: int
-) -> tuple[tuple[str, ...], list[JsonValue]]:
-    """Read public option fields; return the target path and its selections."""
-    root_schema = expect_object(expect_object(schema["properties"])[root])
-    root_options = root_schema["x-form-options"]
-    assert isinstance(root_options, list)
-    root_option = next(
-        expect_object(item)
-        for item in root_options
-        if expect_object(item)["label"] == root_label
-    )
-    path = (root, "module")
-    options = root_options
-    if depth:
-        fields = expect_object(root_option["fields"])
-        module_schema = expect_object(expect_object(fields["properties"])["module"])
-        if depth == 2:
-            pulse_schema = expect_object(
-                expect_object(module_schema["properties"])["pulse_cfg"]
-            )
-            pulse_options = pulse_schema["x-form-options"]
-            assert isinstance(pulse_options, list)
-            pulse_fields = expect_object(
-                next(
-                    expect_object(item)["fields"]
-                    for item in pulse_options
-                    if expect_object(item)["label"] == "Inline"
-                )
-            )
-            module_schema = expect_object(
-                expect_object(pulse_fields["properties"])["module"]
-            )
-            path = (*path, "pulse_cfg", "module")
-        waveform_options = expect_object(
-            expect_object(module_schema["properties"])["waveform"]
-        )["x-form-options"]
-        assert isinstance(waveform_options, list)
-        options = waveform_options
-        path = (*path, "waveform", "module")
-
-    return path, options
-
-
 @pytest.mark.parametrize(
     "depth", [0, 1, 2], ids=["module", "waveform", "nested-waveform"]
 )
@@ -269,9 +209,15 @@ def test_template_kind_reselection_at_each_depth_is_fresh(
     form.bind_templates({"authored": definition}, adapter="synthetic")
     env = module_env() if depth == 0 else FormEnv()
     state = FormState(form.default_input(env))
-    path, options = kind_selection_schema(
-        state.input_schema(env), root, root_label, depth
-    )
+    selection_path = (root,)
+    if depth:
+        if depth == 2:
+            selection_path = (*selection_path, "module", "pulse_cfg")
+        selection_path = (*selection_path, "module", "waveform")
+    path = (*selection_path, "module")
+    target = state.describe(selection_path, env).target
+    assert target is not None and target.options is not None
+    options = target.options
 
     def current() -> dict[str, JsonValue]:
         value = state.input.data
@@ -280,12 +226,8 @@ def test_template_kind_reselection_at_each_depth_is_fresh(
         return value
 
     def choose(label: str) -> None:
-        option = next(
-            expect_object(item)
-            for item in options
-            if expect_object(item)["label"] == label
-        )
-        value = expect_object(option["value"])
+        option = next(item for item in options if item.label == label)
+        value = expect_object(option.value)
         value = expect_object(value["module"])
         tag = "style" if depth else "type"
         state.write(
@@ -388,7 +330,7 @@ def test_module_reference_or_inline_materializes_to_native_core(mode: str) -> No
     assert cfg.modules.probe.ch == (1 if mode == "ref" else 2)
     assert cfg.modules.probe.freq == (100 if mode == "ref" else 200)
     assert cfg.modules.probe.waveform.length == (0.1 if mode == "ref" else 0.2)
-    assert form.model.input_schema(env)
+    assert state.describe((), env).children
 
 
 @pytest.mark.parametrize("mode", ["ref", "inline"])
@@ -462,7 +404,6 @@ def stored_env() -> FormEnv:
                                     "freq": 100,
                                     "gain": 0.3,
                                     "desc": "stored",
-                                    "ro_ch": 4,
                                     "waveform": {"style": "const", "length": 0.1},
                                 }
                             )
@@ -474,7 +415,7 @@ def stored_env() -> FormEnv:
     )
 
 
-@pytest.mark.parametrize("name", ["desc", "ro_ch"])
+@pytest.mark.parametrize("name", ["desc"])
 def test_inline_module_rejects_unsupported_field_writes(name: str) -> None:
     form = Form(ModuleCore, {})
     env = module_env()
@@ -518,10 +459,10 @@ def test_inline_copy_of_library_entry_replaces_unsupported_values_with_defaults(
     assert isinstance(cfg, ModuleCore), cfg
     probe = cfg.modules.probe
     assert (probe.freq, probe.gain) == (100, 0.3)
-    assert (probe.desc, probe.ro_ch) == (None, None)
+    assert probe.desc is None
 
 
-def test_locked_module_field_with_spec_decimals_has_input_schema() -> None:
+def test_locked_module_field_with_spec_decimals_has_description() -> None:
     from zcu_tools.cfg_model import Slot
 
     form = Form(
@@ -533,7 +474,8 @@ def test_locked_module_field_with_spec_decimals_has_input_schema() -> None:
     state = FormState(form.default_input(env))
     value = state.result(env)
 
-    assert isinstance(form.model.input_schema(env)["properties"], dict)
+    target = state.describe(("modules", "probe"), env).target
+    assert target is not None and target.selection_fixed
     assert not isinstance(value, FormErrors), value
     cfg = form.to_cfg(value, env)
     assert isinstance(cfg, ModuleCore) and cfg.modules.probe.freq == 100.0

@@ -194,19 +194,14 @@ def critical_photon_number(
 
 
 def readout_photon_ratio(
-    gain: float | None,
+    gain: float,
     n_crit: float,
     photons_per_gain2: float,
 ) -> float:
     """Return ``n_bar / n_crit`` for a PulseReadout gain.
 
-    ``DirectReadout`` has no explicit drive gain (``gain is None``), so it
-    contributes no generator photons.  A PulseReadout must pass an explicit
-    gain² -> photon calibration.
+    The explicit gain² -> photon calibration sets the photon population.
     """
-
-    if gain is None:
-        return 0.0
 
     amplitude = float(gain)
     if not math.isfinite(amplitude):
@@ -245,7 +240,7 @@ def _validate_non_negative_finite(name: str, value: float) -> float:
 
 
 def readout_backaction(
-    gain: float | None,
+    gain: float,
     n_crit: float,
     photons_per_gain2: float,
     *,
@@ -322,26 +317,17 @@ def _validate_sample_times(sample_times_us: NDArray[np.float64]) -> NDArray[np.f
 
 
 def readout_envelope_samples(
-    readout_cfg: PulseCfg | None,
-    pulse_length_us: float | None,
+    readout_cfg: PulseCfg,
+    pulse_length_us: float,
     sample_times_us: NDArray[np.float64],
 ) -> NDArray[np.float64]:
     """Return the readout envelope sampled on the ADC integration axis.
 
-    ``DirectReadout`` has no generator envelope and therefore contributes one
-    unit per integrated sample.  ``PulseReadout`` returns the resolved generator
-    envelope over the same compiled ADC sample axis.  The returned values are
-    dimensionless and peak-normalized.
+    The generator envelope is sampled over the compiled ADC sample axis.
+    Returned values are dimensionless and peak-normalized.
     """
 
     ts = _validate_sample_times(sample_times_us)
-    if readout_cfg is None:
-        if pulse_length_us is not None:
-            raise ValueError("pulse_length_us must be None when readout_cfg is None")
-        return np.ones(ts.shape, dtype=np.float64)
-
-    if pulse_length_us is None:
-        raise ValueError("pulse_length_us is required when readout_cfg is provided")
     pulse_length = float(pulse_length_us)
     if not math.isfinite(pulse_length) or pulse_length <= 0.0:
         raise ValueError(
@@ -352,8 +338,8 @@ def readout_envelope_samples(
 
 
 def effective_signal_samples(
-    readout_cfg: PulseCfg | None,
-    pulse_length_us: float | None,
+    readout_cfg: PulseCfg,
+    pulse_length_us: float,
     sample_times_us: NDArray[np.float64],
 ) -> float:
     """Return the envelope-weighted signal area in compiled ADC samples.
@@ -367,8 +353,8 @@ def effective_signal_samples(
 
 
 def effective_noise_samples(
-    readout_cfg: PulseCfg | None,
-    pulse_length_us: float | None,
+    readout_cfg: PulseCfg,
+    pulse_length_us: float,
     sample_times_us: NDArray[np.float64],
 ) -> float:
     """Return the envelope-weighted Gaussian-noise scale in ADC samples.
@@ -468,8 +454,7 @@ def decimated_trace(
         Program-time axis in µs (``cycles2us(get_time_axis) + trig_offset``),
         same axis lookback plots.
     readout_cfg
-        The readout pulse cfg whose waveform defines the envelope shape (for a
-        PulseReadout this is ``ro_module.cfg.pulse_cfg``).
+        The generator-only PulseCfg view whose waveform defines the envelope shape.
     pulse_length
         The resolved generator pulse/envelope length (µs) at this sweep point;
         the envelope is zero outside ``[0, pulse_length)``. This is deliberately
@@ -488,7 +473,7 @@ def decimated_trace(
         and readout configs that do not delay the generator pulse.
     readout_q_signal_avg
         Average excited-state survival across the ADC readout window.  Defaults
-        to 1.0 for DirectReadout and zero-decay PulseReadout.
+        to 1.0 for zero-decay readout.
 
     Returns
     -------

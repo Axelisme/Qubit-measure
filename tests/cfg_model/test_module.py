@@ -10,7 +10,6 @@ from zcu_tools.cfg_model import (
     CfgInputValue,
     CfgValidationContext,
     ConstWaveformCfg,
-    DirectReadoutCfg,
     GaussWaveformCfg,
     ModuleCfgFactory,
     NoneResetCfg,
@@ -18,14 +17,11 @@ from zcu_tools.cfg_model import (
     PulseReadoutCfg,
     PulseResetCfg,
     PulseSpec,
-    ReadoutCfg,
     ResetCfg,
     TwoPulseResetCfg,
 )
 
 from ._support import Resolver
-
-_READOUT_ADAPTER: TypeAdapter[ReadoutCfg] = TypeAdapter(ReadoutCfg)
 
 
 def _make_cfg(length=0.2, pre=0.0, post=0.0):
@@ -76,214 +72,64 @@ def test_pulsecfg_set_param_unknown_rejected():
         cfg.set_param("ch", 1)
 
 
-def _direct_dict(**kw: CfgInputValue) -> CfgInputMap:
-    base: dict[str, CfgInputValue] = {
-        "type": "readout/direct",
-        "ro_ch": 0,
-        "ro_length": 1.0,
-        "ro_freq": 5000.0,
-    }
-    base.update(kw)
-    return base
-
-
-def _pulse_dict(**kw: CfgInputValue) -> CfgInputMap:
-    d: dict[str, CfgInputValue] = {
+def _readout_raw() -> dict[str, CfgInputValue]:
+    return {
         "type": "readout/pulse",
-        "pulse_cfg": {
-            "type": "pulse",
-            "waveform": {"style": "const", "length": 0.5},
-            "ch": 3,
-            "nqz": 1,
-            "freq": 7000.0,
-            "gain": 0.8,
-        },
-        "ro_cfg": {"type": "readout/direct", "ro_ch": 0, "ro_length": 2.0},
+        "gen_ch": 3,
+        "nqz": 1,
+        "freq": 700.0,
+        "gain": 0.8,
+        "waveform": {"style": "const", "length": 0.5},
+        "ro_ch": 0,
+        "ro_length": 2.0,
     }
-    d.update(kw)
-    return d
 
 
-def _make_pulse_cfg(ch=0, freq=5000.0):
-    return PulseCfg(
-        waveform=ConstWaveformCfg(length=0.5),
-        ch=ch,
-        nqz=1,
-        freq=freq,
-        gain=0.8,
+def test_flat_readout_factory_and_knobs_are_isolated():
+    raw = _readout_raw()
+    before = deepcopy(raw)
+    cfg = ModuleCfgFactory.from_raw(raw)
+    assert isinstance(cfg, PulseReadoutCfg)
+    assert (cfg.gen_ch, cfg.ro_ch, cfg.freq) == (3, 0, 700.0)
+    for name, value in [
+        ("freq", 800.0),
+        ("gain", 0.3),
+        ("length", 1.0),
+        ("ro_length", 3.0),
+    ]:
+        cfg.set_param(name, value)
+    assert (cfg.freq, cfg.gain, cfg.waveform.length, cfg.ro_length) == (
+        800.0,
+        0.3,
+        1.0,
+        3.0,
     )
+    with pytest.raises(ValueError, match="Unknown parameter: ro_freq"):
+        cfg.set_param("ro_freq", 900.0)
+    assert raw == before
 
 
-def _make_direct_cfg(ro_ch=0, ro_freq=5000.0):
-    return DirectReadoutCfg(ro_ch=ro_ch, ro_length=1.0, ro_freq=ro_freq)
-
-
-def _make_pulse_ro_cfg(ch=3, ro_ch=None):
-    return PulseReadoutCfg(
-        pulse_cfg=_make_pulse_cfg(ch=ch, freq=7000.0),
-        ro_cfg=_make_direct_cfg(
-            ro_ch=ro_ch if ro_ch is not None else ch, ro_freq=7000.0
-        ),
-    )
-
-
-class TestDirectReadoutCfg:
-    def test_validate_basic(self):
-        cfg = DirectReadoutCfg.model_validate(_direct_dict())
-        assert isinstance(cfg, DirectReadoutCfg)
-        assert cfg.ro_ch == 0
-        assert cfg.ro_length == 1.0
-        assert cfg.ro_freq == 5000.0
-        assert cfg.trig_offset == 0.0
-        assert cfg.gen_ch is None
-
-    def test_validate_with_optional_fields(self):
-        cfg = DirectReadoutCfg.model_validate(_direct_dict(trig_offset=0.05, gen_ch=1))
-        assert cfg.trig_offset == 0.05
-        assert cfg.gen_ch == 1
-
-    def test_module_adapter_dispatch(self):
-        cfg = ModuleCfgFactory.from_raw(_direct_dict())
-        assert isinstance(cfg, DirectReadoutCfg)
-        assert cfg.trig_offset == 0.0
-        assert cfg.gen_ch is None
-
-    def test_extra_field_rejected(self):
-        with pytest.raises(ValidationError, match="unknown_field"):
-            DirectReadoutCfg.model_validate(_direct_dict(unknown_field=99))
-
-    def test_set_param_ro_freq(self):
-        cfg = _make_direct_cfg()
-        cfg.set_param("ro_freq", 6000.0)
-        assert cfg.ro_freq == 6000.0
-
-    def test_set_param_ro_length(self):
-        cfg = _make_direct_cfg()
-        cfg.set_param("ro_length", 3.0)
-        assert cfg.ro_length == 3.0
-
-    def test_set_param_unknown_raises(self):
-        cfg = _make_direct_cfg()
-        with pytest.raises(ValueError, match="Unknown parameter: ro_ch"):
-            cfg.set_param("ro_ch", 5)
-
-
-class TestPulseReadoutCfg:
-    def test_explicit_ro_ch_not_overwritten(self):
-        d = _pulse_dict(ro_cfg={"type": "readout/direct", "ro_ch": 9, "ro_length": 2.0})
-        cfg = PulseReadoutCfg.model_validate(d)
-        assert cfg.ro_cfg.ro_ch == 9
-
-    def test_explicit_ro_freq_not_overwritten(self):
-        d = _pulse_dict(
-            ro_cfg={
-                "type": "readout/direct",
-                "ro_ch": 3,
-                "ro_length": 2.0,
-                "ro_freq": 9999.0,
-            }
-        )
-        cfg = PulseReadoutCfg.model_validate(d)
-        assert cfg.ro_cfg.ro_freq == 9999.0
-
-    def test_pulse_cfg_as_string_uses_typed_context(self):
-        resolver = Resolver()
-        pulse = PulseSpec(
-            ch=0,
-            nqz=1,
-            freq=5000.0,
-            gain=0.8,
-            waveform=ConstWaveformCfg(length=0.5),
-        )
-        resolver.modules["library_pulse"] = pulse
-        d: CfgInputMap = {
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {
             "type": "readout/pulse",
-            "pulse_cfg": "library_pulse",
-            "ro_cfg": {"ro_ch": 0, "ro_length": 1.0, "ro_freq": 5000.0},
-        }
-        input_before = deepcopy(d)
-        spec_before = pulse.model_dump()
-
-        cfg = ModuleCfgFactory.from_raw(
-            d, context=CfgValidationContext(modules=resolver)
-        )
-
-        assert isinstance(cfg, PulseReadoutCfg)
-        assert isinstance(cfg.pulse_cfg, PulseCfg)
-        assert cfg.pulse_cfg.ch == 0
-        assert cfg.pulse_cfg.freq == 5000.0
-        assert cfg.pulse_cfg.gain == 0.8
-        assert cfg.pulse_cfg.waveform.length == 0.5
-        assert cfg.ro_cfg.ro_ch == 0
-        assert cfg.ro_cfg.ro_length == 1.0
-        assert cfg.ro_cfg.ro_freq == 5000.0
-        cfg.pulse_cfg.set_param("gain", 0.2)
-        cfg.set_param("ro_freq", 6000.0)
-        assert d == input_before
-        assert pulse.model_dump() == spec_before
-
-    def test_validate_basic(self):
-        cfg = PulseReadoutCfg.model_validate(_pulse_dict())
-        assert isinstance(cfg, PulseReadoutCfg)
-        assert isinstance(cfg.pulse_cfg, PulseCfg)
-        assert isinstance(cfg.ro_cfg, DirectReadoutCfg)
-
-    def test_auto_derives_ro_ch_from_pulse_ch(self):
-        cfg = PulseReadoutCfg.model_validate(_pulse_dict())
-        assert cfg.ro_cfg.gen_ch == 3  # derived from pulse_cfg.ch
-
-    def test_auto_derives_ro_freq_from_pulse_freq(self):
-        cfg = PulseReadoutCfg.model_validate(_pulse_dict())
-        assert cfg.ro_cfg.ro_freq == 7000.0  # derived from pulse_cfg.freq
-
-    def test_module_adapter_dispatch(self):
-        cfg = ModuleCfgFactory.from_raw(_pulse_dict())
-        assert isinstance(cfg, PulseReadoutCfg)
-        assert isinstance(cfg.pulse_cfg, PulseCfg)
-        assert isinstance(cfg.ro_cfg, DirectReadoutCfg)
-
-    def test_set_param_gain(self):
-        cfg = _make_pulse_ro_cfg()
-        cfg.set_param("gain", 0.3)
-        assert cfg.pulse_cfg.gain == 0.3
-
-    def test_set_param_freq_updates_both(self):
-        cfg = _make_pulse_ro_cfg()
-        cfg.set_param("freq", 8000.0)
-        assert cfg.pulse_cfg.freq == 8000.0
-        assert cfg.ro_cfg.ro_freq == 8000.0
-
-    def test_set_param_ro_freq_only_updates_ro(self):
-        cfg = _make_pulse_ro_cfg()
-        original_pulse_freq = cfg.pulse_cfg.freq
-        cfg.set_param("ro_freq", 8500.0)
-        assert cfg.ro_cfg.ro_freq == 8500.0
-        assert cfg.pulse_cfg.freq == original_pulse_freq
-
-    def test_set_param_length_updates_waveform(self):
-        cfg = _make_pulse_ro_cfg()
-        cfg.set_param("length", 1.0)
-        assert cfg.pulse_cfg.waveform.length == 1.0
-
-    def test_set_param_ro_length(self):
-        cfg = _make_pulse_ro_cfg()
-        cfg.set_param("ro_length", 3.0)
-        assert cfg.ro_cfg.ro_length == 3.0
-
-    def test_set_param_unknown_raises(self):
-        cfg = _make_pulse_ro_cfg()
-        with pytest.raises(ValueError, match="Unknown parameter: ro_ch"):
-            cfg.set_param("ro_ch", 5)
-
-
-class TestReadoutCfgAdapter:
-    def test_dispatch_direct(self):
-        cfg = _READOUT_ADAPTER.validate_python(_direct_dict())
-        assert isinstance(cfg, DirectReadoutCfg)
-
-    def test_dispatch_pulse(self):
-        cfg = _READOUT_ADAPTER.validate_python(_pulse_dict())
-        assert isinstance(cfg, PulseReadoutCfg)
+            "pulse_cfg": {
+                "type": "pulse",
+                "ch": 0,
+                "nqz": 1,
+                "freq": 100.0,
+                "gain": 0.5,
+                "waveform": {"style": "const", "length": 0.5},
+            },
+            "ro_cfg": {"type": "readout/direct", "ro_ch": 0, "ro_length": 1.0},
+        },
+        {**_readout_raw(), "ro_freq": 100.0},
+    ],
+)
+def test_readout_rejects_nested_or_independent_adc_frequency(raw: CfgInputMap):
+    with pytest.raises(ValueError, match="extra_forbidden|Field required"):
+        ModuleCfgFactory.from_raw(raw)
 
 
 _RESET_ADAPTER: TypeAdapter[ResetCfg] = TypeAdapter(ResetCfg)

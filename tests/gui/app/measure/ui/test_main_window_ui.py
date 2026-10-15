@@ -98,7 +98,7 @@ def test_main_window_role_failure_is_presented_without_registering_tab(
         "qubit", "R1", "qubit/*", "wrong kind"
     )
     dialogs = RecordingDialogPresenter()
-    window = MainWindow(ctrl, dialog_presenter=dialogs)
+    window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=dialogs)
     window.create_tab("fake")
     assert len(dialogs.calls) == 1
     assert "qubit" in dialogs.calls[0].message
@@ -675,7 +675,7 @@ def test_main_window_load_data_dialog_calls_controller(
         analysis_error=analysis_error,
     )
     dialogs = RecordingDialogPresenter()
-    window = MainWindow(ctrl, dialog_presenter=dialogs)
+    window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=dialogs)
     window._tab_widgets["tab-1"] = MagicMock()
     window.show_status_message = MagicMock()
 
@@ -725,7 +725,7 @@ def test_main_window_successful_writeback_relies_on_event_owned_projection(
         "applied_ids": ["param-1"],
         "written": {"parameter": ["r_f"], "ml_modules": [], "ml_waveforms": []},
     }
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     window._tab_widgets["tab-1"] = MagicMock()
     window.refresh_tab_writeback = MagicMock()
     window.show_status_message = MagicMock()
@@ -747,7 +747,7 @@ def test_status_bar_message_is_mouse_selectable(control_factory, qapp):
     ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     ctrl.get_bus.return_value = EventBus()
     ctrl.list_tab_ids.return_value = []
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
 
     assert len(_status_bar_labels(window, "Ready")) == 1
 
@@ -767,7 +767,7 @@ def test_main_window_toolbar_does_not_show_arb_waveforms(control_factory, qapp):
     ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     ctrl.get_bus.return_value = EventBus()
 
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     texts = {button.text() for button in window.findChildren(QPushButton)}
 
     assert "Inspect…" in texts
@@ -781,7 +781,7 @@ def test_main_window_named_dialog_facade_delegates_to_registry(control_factory, 
 
     ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     ctrl.get_bus.return_value = EventBus()
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     registry = MagicMock()
     registry.visible_names.return_value = [DialogName.PREDICTOR]
     registry.take_screenshot.return_value = b"png"
@@ -805,7 +805,7 @@ def test_show_error_dialog_retains_until_close(control_factory, qapp):
 
     ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     ctrl.get_bus.return_value = EventBus()
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
 
     window.show_error_dialog("Broken", "Something failed")
     qapp.processEvents()
@@ -835,7 +835,7 @@ def test_main_window_load_data_dialog_cancel_is_noop(
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
     ctrl.save_control.list_saved_runs.return_value = ()
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     window._tab_widgets["tab-1"] = MagicMock()
 
     def cancel(dialog: RunLoadDialog) -> int:
@@ -866,7 +866,7 @@ def test_main_window_load_data_dialog_shows_user_facing_error(
         "Cannot load this data file into the current tab.\n\nDetails: bad axes",
         reason_code="invalid_data_file",
     )
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     window._tab_widgets["tab-1"] = MagicMock()
     window.show_error_dialog = MagicMock()
     monkeypatch.setattr(
@@ -904,7 +904,7 @@ def test_main_window_run_lock_keeps_new_tab_available(control_factory, qapp):
         is_running=tab_id == "tab-1",
     )
 
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     tab_one = MagicMock()
     tab_two = MagicMock()
     window._tab_widgets["tab-1"] = tab_one
@@ -926,7 +926,7 @@ def test_main_window_tabs_are_movable_and_close_uses_moved_widget(
     ctrl = _apply_window_defaults(_editor_wiring_ctrl(control_factory))
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.side_effect = lambda tab_id: tab_id in {"tab-a", "tab-b"}
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     tab_a = ExpTabWidget(
         "tab-a",
         ctrl,
@@ -967,7 +967,7 @@ def test_main_window_soc_changed_refreshes_run_lock(control_factory, qapp):
     ctrl.has_tab.return_value = True
     ctrl.get_tab_snapshot.return_value = _snapshot("tab-1", has_soc=False)
 
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     tab = MagicMock()
     window._tab_widgets["tab-1"] = tab
 
@@ -987,7 +987,7 @@ def test_main_window_content_event_queries_single_tab_snapshot(control_factory, 
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.get_tab_snapshot.return_value = _snapshot("tab-1")
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     window._tab_widgets["tab-1"] = MagicMock()
 
     bus.emit(TabContentChangedPayload("tab-1", TabContentFact.RUN_RESULT_COMMITTED))
@@ -1019,7 +1019,7 @@ def test_main_window_interaction_event_refreshes_finished_analysis_figure(
         figure=figure,
         writeback_items=(writeback_item,),
     )
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     tab = MagicMock()
     window._tab_widgets["tab-1"] = tab
 
@@ -1057,7 +1057,7 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_analyze_st
         has_figure=True,
         figure=figure,
     )
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     tab = MagicMock()
     window._tab_widgets["tab-1"] = tab
 
@@ -1095,7 +1095,7 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_run_start(
         has_figure=True,
         figure=figure,
     )
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     tab = MagicMock()
     window._tab_widgets["tab-1"] = tab
 
@@ -1133,7 +1133,7 @@ def test_main_window_interaction_event_shows_post_figure_after_primary(
         figure=primary,
         post_figure=post,
     )
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     tab = MagicMock()
     window._tab_widgets["tab-1"] = tab
 
@@ -1185,7 +1185,7 @@ def test_analysis_terminal_restore_rebuilds_real_primary_then_post_canvas(
         post_figure=post,
     )
     ctrl.get_tab_snapshot.return_value = snapshot
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     tab = ExpTabWidget(
         "tab-1",
         ctrl,
@@ -1240,7 +1240,7 @@ def test_loaded_content_clears_stale_real_canvas_when_state_has_no_figure(
         post_figure=None,
     )
     ctrl.get_tab_snapshot.return_value = snapshot
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     tab = ExpTabWidget(
         "tab-1",
         ctrl,
@@ -1272,7 +1272,7 @@ def test_finished_run_preserves_selected_subtab(control_factory, qapp):
     ctrl.get_bus.return_value = bus
     ctrl.get_running_tab_id.return_value = None
     ctrl.get_tab_snapshot.return_value = _snapshot("tab-1", has_run_result=True)
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     tab = MagicMock()
     tab._left_tabs = QTabWidget()
     for label in ("Run", "Analysis", "Data"):
@@ -1296,7 +1296,7 @@ def test_stopped_run_does_not_auto_switch_to_analysis_tab(control_factory, qapp)
     ctrl.get_bus.return_value = bus
     ctrl.get_running_tab_id.return_value = None
     ctrl.get_tab_snapshot.return_value = _snapshot("tab-1", has_run_result=True)
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     tab = MagicMock()
     window._tab_widgets["tab-1"] = tab
 
@@ -1317,7 +1317,7 @@ def test_non_analysis_adapter_run_preserves_selected_subtab(control_factory, qap
     ctrl.get_tab_snapshot.return_value = _snapshot(
         "tab-1", has_run_result=True, supports_analysis=False, analyze_params=None
     )
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     tab = MagicMock()
     tab._left_tabs = QTabWidget()
     for label in ("Run", "Data", "Guide"):
@@ -1346,7 +1346,7 @@ def test_refresh_analyze_form_skips_non_analysis_adapter_without_raising(
     ctrl.get_tab_snapshot.return_value = _snapshot(
         "tab-1", has_run_result=True, supports_analysis=False, analyze_params=None
     )
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     tab = MagicMock()
     window._tab_widgets["tab-1"] = tab
 
@@ -1541,7 +1541,7 @@ def test_main_window_confirms_and_begins_shutdown_when_operations_active(
     configure_form_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 2
-    window = MainWindow(ctrl, dialog_presenter=dialogs)
+    window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=dialogs)
     event = QCloseEvent()
 
     window.closeEvent(event)
@@ -1561,7 +1561,7 @@ def test_main_window_declining_confirmation_keeps_window_open(control_factory, q
     configure_form_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 1
-    window = MainWindow(ctrl, dialog_presenter=dialogs)
+    window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=dialogs)
     event = QCloseEvent()
 
     window.closeEvent(event)
@@ -1587,7 +1587,7 @@ def test_main_window_persists_session_on_close_when_idle(control_factory, qapp):
     # The real coordinator runs on_closed once nothing is pending; here drive it
     # synchronously so the deferred turn exercises _perform_close.
     ctrl.begin_shutdown.side_effect = lambda on_closed: on_closed()
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     event = QCloseEvent()
 
     window.closeEvent(event)
@@ -1628,7 +1628,7 @@ def test_main_window_close_removes_event_bus_subscriptions(control_factory, qapp
     ctrl.get_bus.return_value = bus
     ctrl.active_operation_count.return_value = 0
     ctrl.begin_shutdown.side_effect = lambda on_closed: on_closed()
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
 
     payload_types = (
         TabInteractionChangedPayload,
@@ -1663,7 +1663,7 @@ def test_new_tab_menu_supports_nested_paths(control_factory, qapp, monkeypatch):
         "twotone/rabi/length",
         "twotone/rabi/amp",
     ]
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
 
     def _find_action_by_data(menu: QMenu, target: str):
         for action in menu.actions():
@@ -1760,7 +1760,7 @@ def _setup_window_with_tabs(
     ctrl.active_operation_count.return_value = active_operations
     ctrl.has_tab.side_effect = lambda tid: True
     dialogs = dialog_presenter or RecordingDialogPresenter()
-    window = MainWindow(ctrl, dialog_presenter=dialogs)
+    window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=dialogs)
     return window, ctrl
 
 
@@ -2593,7 +2593,9 @@ def run_form(
         runs.append(owner.accept())
 
     ctrl.start_run.side_effect = start
-    window = MainWindow(ctrl, dialog_presenter=RecordingDialogPresenter())
+    window = MainWindow(
+        ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
+    )
     window.add_tab_widget("pending-tab", "fake")
     window.resize(1100, 700)
     window.show()
@@ -2709,7 +2711,7 @@ def test_reset_replaces_published_input_with_defaults(
     # Reopen through the public view lifecycle using the same cfg owner.
     fx.window.remove_tab_widget("pending-tab")
     fx.window.deleteLater()
-    fx.window = MainWindow(fx.ctrl, dialog_presenter=dialogs)
+    fx.window = MainWindow(fx.ctrl, templates=lambda: {}, dialog_presenter=dialogs)
     fx.window.add_tab_widget("pending-tab", "fake")
     tab = fx.window.findChildren(ExpTabWidget)[0]
     line = tab.findChild(QLineEdit, "form.input.value")

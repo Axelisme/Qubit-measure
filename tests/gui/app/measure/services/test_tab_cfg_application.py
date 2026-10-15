@@ -18,10 +18,13 @@ from zcu_tools.gui.app.measure.services.app_services import (
     AppServices,
     build_app_services,
 )
+from zcu_tools.gui.app.measure.services.form_contracts import (
+    CfgPreconditionError,
+    CfgPreconditionReason,
+)
 from zcu_tools.gui.app.measure.services.guard import GuardError, GuardService, RunInputs
 from zcu_tools.gui.app.measure.services.run import RunService
 from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.cfg.resource import CfgPreconditionError, CfgPreconditionReason
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormModel
@@ -270,11 +273,10 @@ def global_sources(
     registry.register("missing-slot", MissingModuleSlotAdapter)
     try:
         services = build_app_services(
-            alias_preset=ALIAS_PRESET,
+            alias_presets={"default": ALIAS_PRESET},
             state=state,
             bus=EventBus(),
             registry=registry,
-            cfg_editor_ctrl=MagicMock(),
             progress_transport=MagicMock(),
             resource_versions=state.version.snapshot,
             render_host=lambda: None,

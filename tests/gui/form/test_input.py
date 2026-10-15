@@ -68,12 +68,11 @@ class InactiveToneForm(FormModel):
         (InactiveToneForm, "section.tone"),
     ],
 )
-@pytest.mark.parametrize("entry", ["schema", "defaults", "state"])
+@pytest.mark.parametrize("entry", ["defaults", "state"])
 def test_form_entry_rejects_untagged_string_or_model_with_field_path(
     model: type[FormModel], path: str, entry: str
 ) -> None:
     operations: dict[str, Callable[[], object]] = {
-        "schema": lambda: model.input_schema(FormEnv()),
         "defaults": lambda: model.default_input(FormEnv()),
         "state": lambda: FormState(FormInput(model, {})),
     }

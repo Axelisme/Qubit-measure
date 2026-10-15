@@ -12,7 +12,6 @@ from zcu_tools.gui.app.measure.remote.handlers.arb_waveform import (
 from zcu_tools.gui.app.measure.remote.handlers.connection_device import (
     h_device_connect,
 )
-from zcu_tools.gui.app.measure.remote.handlers.editor import h_editor_new
 from zcu_tools.gui.app.measure.remote.handlers.run_save import (
     h_tab_load_data,
     h_tab_run_start,
@@ -24,7 +23,6 @@ from zcu_tools.gui.app.measure.remote.handlers.view import (
 from zcu_tools.gui.app.measure.remote.handlers.writeback import (
     h_tab_writeback_set,
 )
-from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorError
 from zcu_tools.gui.app.measure.services.guard import GuardError
 from zcu_tools.gui.app.measure.services.load import LoadDataError
 from zcu_tools.gui.expected_error import (
@@ -157,10 +155,6 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
     )
     load_adapter = SimpleNamespace(run_analyze_control=load_control)
 
-    editor_ctrl = MagicMock()
-    editor_ctrl.open_cfg_editor.side_effect = CfgEditorError("unknown module")
-    editor_adapter = SimpleNamespace(ctrl=editor_ctrl)
-
     device_control = MagicMock()
     device_control.start_connect_device.side_effect = FailedPreconditionError(
         "Device busy"
@@ -211,13 +205,6 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
                 "invalid_data_file",
                 None,
             ),
-        ),
-        (
-            lambda: h_editor_new(
-                cast(Any, editor_adapter),
-                {"item_kind": "module", "from_name": "missing"},
-            ),
-            (ErrorCode.INVALID_PARAMS, "unknown module", "", None),
         ),
         (
             lambda: h_device_connect(

@@ -85,6 +85,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=FreqResult,
         cfg_type=FreqCfg,
+        cfg_schema_version="2.0",
         tag="twotone/ge/ro_optimize/freq",
     )
 
@@ -102,7 +103,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         freqs = sweep2array(
             cfg.sweep.freq,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules.readout.pulse_cfg.ch},
+            {"soccfg": soccfg, "gen_ch": modules.readout.gen_ch},
         )
 
         viewer = context.plots.liveplot_1d(

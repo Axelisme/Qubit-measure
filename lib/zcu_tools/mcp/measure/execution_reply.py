@@ -173,7 +173,6 @@ def _module_summary(value: Any) -> dict[str, Any] | None:
             "gain",
             "phase",
             "cloned_from",
-            "ro_freq",
             "ro_length",
             "trig_offset",
         )
@@ -186,7 +185,7 @@ def _module_summary(value: Any) -> dict[str, Any] | None:
             for key, item in waveform.items()
             if not isinstance(item, (dict, list))
         }
-    for key in ("pulse_cfg", "ro_cfg"):
+    for key in ("pulse_cfg",):
         if key in value:
             summary[key] = _module_summary(value[key])
     return summary

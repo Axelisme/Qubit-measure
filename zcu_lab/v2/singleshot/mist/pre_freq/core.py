@@ -103,6 +103,7 @@ class PreFreqExp(PersistableExperiment[PreFreqResult, PreFreqCfg]):
         z=ZSpec("signals", "Population", "a.u.", dtype=np.float64),
         result_type=PreFreqResult,
         cfg_type=PreFreqCfg,
+        cfg_schema_version="2.0",
         tag="singleshot/mist/pre_freq",
     )
 

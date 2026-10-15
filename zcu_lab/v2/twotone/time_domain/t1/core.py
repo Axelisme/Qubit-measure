@@ -104,6 +104,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=T1Result,
         cfg_type=T1Cfg,
+        cfg_schema_version="2.0",
         tag="twotone/ge/t1",
     )
 
@@ -278,6 +279,7 @@ class T1WithToneExp(PersistableExperiment[T1Result, T1WithToneCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=T1Result,
         cfg_type=T1WithToneCfg,
+        cfg_schema_version="2.0",
         tag="twotone/ge/t1_with_tone",
     )
 
@@ -407,6 +409,7 @@ class ScanT1WithToneExp(PersistableExperiment[ScanT1WithToneResult, ScanT1WithTo
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=ScanT1WithToneResult,
         cfg_type=ScanT1WithToneCfg,
+        cfg_schema_version="2.0",
         tag="twotone/ge/t1_with_tone_sweep",
     )
 
