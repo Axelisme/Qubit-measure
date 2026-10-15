@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-15，Opaque Run 與 Artifact handover
+**Last updated:** 2026-10-15，Opaque Run／Load、StoredRun restore 與 Artifact handover
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -205,8 +205,9 @@ pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 align
   Qt 顯示本次輸出的 path/status/error，包含實際 Labber path。
   Mapping／ledger 錯誤直接傳遞，不偽造 report 或回滾已寫文件。
   保存不產生 acquisition identity，也不重讀 live point。
-  RPC／MCP 直接投影回傳報告。Native Load 讀回 typed record 與原 RunMetadata。
-  Load 在 adapter 呼叫前固定 request 與不帶 alias 的 Save storage capability。
+  RPC／MCP 直接投影回傳報告。Native Load 由框架讀取 StoredRun 並比對 experiment tag，
+  再交 adapter.restore(stored)。框架不檢查 record.cfg，歷史 metadata 直接取自 StoredRun。
+  Load 在 adapter 呼叫前固定目前來源與不帶 alias 的 Save storage capability。
   Analyze/WB 另用檔案 point 與 resolved alias names，一次透過 context owner 讀取。
   歷史 point 的檔案、schema 或 kind 錯誤在發布結果前傳遞，舊結果不變。
   Save 在 mapping 或輸出 I/O 前比對 native 歷史 entry 與這份 result source storage。
@@ -472,8 +473,10 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    persistence. Native Load retains the original identity, and analysis without
    native metadata uses `None`.
 
-- `load_tab_result` 載入 typed RunRecord，保留 Record.cfg 作為結果來源快照，供 Inspect 與分析讀取。
-  缺 cfg 時保留可用資料，不捏造設定。WB 不從 Load-time calibration 補 pulse module、改槽或 pi_product。
+- `load_tab_result` 接受 RestoredRun 的 opaque record 與明示 cfg_issue。
+  BaseAdapter.restore 委派 core.from_stored，不讀檔案或目前表單。cfg_issue 為 null 表示 typed cfg 可用，
+  字串則解釋不可用原因；缺 cfg 仍可成功載入數據。Inspect 從檔案讀 raw cfg。
+  WB 不從 Load-time calibration 補 pulse module、改槽或 pi_product。
   Load 保留表單原輸入與固定來源，不要求 draft 有效。
   Run/Load 先提交 primary result。Analysis preparation 失敗不撤回它，只報 diagnostic。
   Named figures 和各 pane 的 presentation lifecycle 分開管理。
@@ -614,8 +617,8 @@ and detaches the editor before the tab closes.
 
 Load replaces results, not Form input. Valid, invalid and unfinished drafts
 keep their authored values and expression text, including extras. Load does not
-validate the current draft or infer input from native cfg. The result retains
-its native cfg for Inspect and analysis. Native Load's historical analysis
+validate the current draft or infer input from native cfg. The adapter owns
+its record and cfg diagnostic; Inspect reads the file's raw cfg. Native Load's historical analysis
 source and Save storage retain their separate Load-time ownership.
 
 Workspace saves authored Form input JSON, including expression text. Restore

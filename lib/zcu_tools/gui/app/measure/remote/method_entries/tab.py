@@ -32,7 +32,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Create a tab, load a result file without a SoC, and focus it. "
             "A load failure closes the new "
             "tab and restores prior focus. Returns the load outcome including "
-            "tab_id and analysis_error. Failed analysis preparation "
+            "tab_id, cfg_issue (null or the typed-cfg unavailability reason) "
+            "and analysis_error. Form input is unchanged. Failed analysis preparation "
             "retains the loaded result and the new tab.",
             (required_string("adapter_name"), required_string("data_path")),
         ),

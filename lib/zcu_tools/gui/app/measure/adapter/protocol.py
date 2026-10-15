@@ -7,8 +7,9 @@ from zcu_tools.gui.app.measure.artifacts import ArtifactHandover
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 if TYPE_CHECKING:
-    from zcu_tools.datafile import RunMetadata
+    from zcu_tools.datafile import StoredRun
     from zcu_tools.experiment.context import RunContext
+    from zcu_tools.experiment.native_persistence import RestoredRun
     from zcu_tools.plotting.plots import Plots
 
 from .interactive import InteractivePluginProvider
@@ -16,7 +17,6 @@ from .types import (
     AdapterCapabilities,
     AdapterGuide,
     AnalyzeRequest,
-    LoadDataRequest,
     NoAnalysisResult,
     NoAnalyzeParams,
     PostAnalyzeRequest,
@@ -118,14 +118,15 @@ class ExpAdapterProtocol(ArtifactHandover, InteractivePluginProvider, Protocol):
         """
         ...
 
-    def load(self, req: LoadDataRequest) -> tuple[object, RunMetadata]:
-        """Read the exact native req.data_path and return (record, history).
+    def restore(self, stored: StoredRun) -> RestoredRun[object]:
+        """Restore framework-read native data admitted for this experiment tag.
 
-        The record stays adapter-owned and opaque to the framework. History is
-        the original RunMetadata, including identity, times and source. Do not
-        recapture it from req.parameters. Raise NotImplementedError for an
-        unsupported core, ValueError for invalid native data and OSError for
-        unreadable files; other core failures propagate.
+        Return an opaque adapter-owned record and cfg_issue: None means typed cfg
+        is available; a nonempty string explains why it is unavailable. Valid
+        data may load successfully without cfg. Do not inspect current inputs,
+        read files or recapture history; the framework uses stored.metadata.
+        Raise NotImplementedError for unsupported restoration and ValueError for
+        invalid experiment data; other core failures propagate before replacement.
         """
         ...
 
