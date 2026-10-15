@@ -279,31 +279,17 @@ def test_failed_library_commit_removes_new_point_but_keeps_completed_import(
     assert entry.ledger.get(imports[0].id).record == foreign.ledger.get(event.id).record
 
 
-@pytest.mark.parametrize(
-    "failure", ["missing_event", "attachment", "source_schema", "source_path", "header"]
-)
+@pytest.mark.parametrize("failure", ["attachment", "header"])
 def test_library_clone_failure_cleans_destination_and_keeps_source(
     entry: ResultEntry,
     foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
     failure: str,
 ) -> None:
     foreign, _point, event = foreign_recorded_point
-    document = write_source_library(foreign, event)
+    write_source_library(foreign, event)
     source = foreign.result_path / "points/source/module_cfg.yaml"
-    if failure == "missing_event":
-        (foreign.result_path / "records/ledger.jsonl").write_text("", encoding="utf-8")
-    elif failure == "attachment":
+    if failure == "attachment":
         (foreign.result_path / f"records/{event.id}.json").unlink()
-    elif failure == "source_schema":
-        source.write_text(
-            source.read_text().replace('"stderr":0.01', '"stderr":"invalid"'),
-            encoding="utf-8",
-        )
-    elif failure == "source_path":
-        document.provenance["Q1.pulses.pi.absent"] = document.provenance.pop(
-            "Q1.pulses.pi.gain"
-        )
-        source.write_text(document.model_dump_json(), encoding="utf-8")
     else:
         source.write_text(
             source.read_text().replace(
@@ -444,7 +430,7 @@ def test_nested_import_remains_locally_resolvable_after_source_entries_move(
     assert cloned.meta("Q1.rate") == point.meta("Q1.rate")
 
 
-@pytest.mark.parametrize("failure", ["absent_event", "record", "point", "header"])
+@pytest.mark.parametrize("failure", ["record", "point", "header"])
 def test_foreign_source_failure_does_not_publish_destination_or_modify_source(
     entry: ResultEntry,
     entry_roots: tuple[Path, Path],
@@ -456,9 +442,7 @@ def test_foreign_source_failure_does_not_publish_destination_or_modify_source(
     write_source_library(foreign, event)
     source = results / "other/points/source/point.yaml"
     ledger_path = results / "other/records/ledger.jsonl"
-    if failure == "absent_event":
-        ledger_path.write_text("", encoding="utf-8")
-    elif failure == "record":
+    if failure == "record":
         (results / f"other/records/{event.id}.json").unlink()
     elif failure == "point":
         document = YAML(typ="rt").load(source.read_text())
@@ -592,3 +576,43 @@ def test_constructor_bound_view_clones_without_later_identity_registration(
     assert len(foreign.ledger.events()) == 1
     for path in ("Q1.rate", "Q1.duration"):
         assert cloned.meta(path) == view.meta(path)
+
+
+@pytest.mark.parametrize(
+    "defect", ["spec", "missing_event", "source_schema", "source_path"]
+)
+@pytest.mark.parametrize("same_entry", [True, False])
+def test_clone_cleans_source_before_copy_and_import(
+    entry: ResultEntry,
+    foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
+    defect: str,
+    same_entry: bool,
+) -> None:
+    foreign, _point, event = foreign_recorded_point
+    value = write_source_library(foreign, event).model_dump(mode="json")
+    source = foreign.result_path / "points/source/module_cfg.yaml"
+    if defect == "spec":
+        value["components"]["Q1"]["pulses"]["pi"]["mask"] = 3
+    elif defect == "missing_event":
+        value["provenance"]["Q1.pulses.pi.gain"]["source"] = "absent"
+    elif defect == "source_schema":
+        value["provenance"]["Q1.pulses.pi.gain"]["stderr"] = "invalid"
+    else:
+        value["provenance"]["Q1.pulses.pi.absent"] = value["provenance"].pop(
+            "Q1.pulses.pi.gain"
+        )
+    source.write_text(json.dumps(value), encoding="utf-8")
+    original = source.read_bytes()
+    destination = foreign if same_entry else entry
+    destination.new_point(
+        "clean-copy", clone_from="source" if same_entry else "other/source"
+    )
+    copied = destination.module_library("clean-copy").snapshot()
+    assert copied.module_keys() == ()
+    assert copied.waveform_keys() == ("Q1.waveforms.base",)
+    assert set(copied.document().provenance) == {"Q1.waveforms.base.length"}
+    assert len(destination.ledger.events()) == (1 if same_entry else 0)
+    backups = list(source.parent.glob("*.bak*"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == original
+    assert foreign.module_library("source").snapshot().module_keys() == ()

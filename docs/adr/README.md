@@ -8,7 +8,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Module Boundaries
 
-- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：各 package 的定位、五層、穩定工具與有狀態模組的分類、core 共用 waveform 格式、cfg_model 契約與債務清單。分層、無循環與 core 只依賴 utils 由 .importlinter C8–C13／C19 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；離線遷移專用程式只放 `migrations/`。剩餘債務以 `ignore_imports` 記帳。
+- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：各 package 的定位、五層、穩定工具與有狀態模組的分類、core 共用 waveform 格式、cfg_model 契約、library 容器版本政策與債務清單。分層、無循環與 core 只依賴 utils 由 .importlinter C8–C13／C19 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；離線遷移專用程式只放 `migrations/`。剩餘債務以 `ignore_imports` 記帳。
 
 ## Concurrency / Lifecycle
 
@@ -46,7 +46,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Persistence
 
-- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分各保存對象的 owner、完整性、失敗與引用邊界。SaveLayout 計算 run 輸出位置，獨立 writers 處理格式，上層編排 batch 與 ledger；參數容器使用工作單位與顯式定義注入。
+- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分各保存對象的 owner、完整性、失敗與引用邊界。SaveLayout 計算 run 輸出位置，獨立 writers 處理格式，上層編排 batch 與 ledger；參數容器使用工作單位與顯式定義注入；library 讀取可在同鎖內先備份再清理壞條目。
 
 ## Experiment runtime／Workflows
 
