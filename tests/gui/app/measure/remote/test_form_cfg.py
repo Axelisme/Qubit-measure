@@ -112,7 +112,9 @@ def test_get_cfg_returns_authored_input_and_ordinary_leaf_values(form_rpc) -> No
     assert observed["errors"] == []
 
 
-def test_describe_cfg_reads_current_local_input_and_errors_as_observer(form_rpc) -> None:
+def test_describe_cfg_reads_current_local_input_and_errors_as_observer(
+    form_rpc,
+) -> None:
     fixture, tab, rpc = form_rpc
     owner = fixture.ctrl.cfg_resources.lookup(tab)
     owner.write({("gain",): {"expr": "1 / 0"}})
@@ -148,17 +150,26 @@ class FailingOptionsExtras(FormModel):
     broken: ClassVar[bool] = False
 
     @classmethod
-    def options(cls, env):
+    def options(cls, _env):
         if cls.broken:
             raise ValueError("Synthetic declaration failed")
         return {}
+
+
+def retain_failing_cfg(extras: FailingOptionsExtras, cfg: SampleCfg) -> SampleCfg:
+    return cfg
 
 
 class FailingOptionsAdapter(SampleAdapter):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[SampleCfg]:
         del ctx
-        return Form(SampleCfg, {"sweep": Range.between(1.0, 2.0, expts=3)}, extras=FailingOptionsExtras, lower=retain_cfg)
+        return Form(
+            SampleCfg,
+            {"sweep": Range.between(1.0, 2.0, expts=3)},
+            extras=FailingOptionsExtras,
+            lower=retain_failing_cfg,
+        )
 
 
 def test_describe_cfg_does_not_classify_author_valueerror_as_bad_path(form_rpc) -> None:
@@ -192,7 +203,10 @@ def test_describe_cfg_distinguishes_missing_from_null(form_rpc) -> None:
     fixture.registry.register("missing-values", MissingValuesAdapter)
     tab = fixture.ctrl.new_tab("missing-values")
     try:
-        missing = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["required_value"]})
+        fixture.ctrl.cfg_resources.lookup(tab).write({("nullable_value",): None})
+        missing = rpc.call(
+            "tab.describe_cfg", {"tab_id": tab, "path": ["required_value"]}
+        )
         assert missing["ok"], missing
         null = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["nullable_value"]})
         assert null["ok"], null
@@ -215,7 +229,9 @@ def test_describe_cfg_path_errors_keep_request_path(form_rpc) -> None:
     assert reply["error"]["data"] == {"form_path": path}
 
 
-def test_describe_cfg_root_is_single_layer_and_readable_through_mcp(form_rpc, tmp_path) -> None:
+def test_describe_cfg_root_is_single_layer_and_readable_through_mcp(
+    form_rpc, tmp_path
+) -> None:
     from contextlib import closing
 
     from tests.mcp.measure._support import make_client
@@ -230,10 +246,15 @@ def test_describe_cfg_root_is_single_layer_and_readable_through_mcp(form_rpc, tm
     client = make_client(tmp_path, respond)
     with closing(client.context.session):
         assert "tab.describe_cfg" in client.context.gui.catalog
-        reply = client.call("rpc_call", {"method": "tab.describe_cfg", "params": {"tab_id": tab, "path": []}})
+        reply = client.call(
+            "rpc_call",
+            {"method": "tab.describe_cfg", "params": {"tab_id": tab, "path": []}},
+        )
         observed = reply
         assert observed["description"]["target"] is None
-        assert "gain" in [child["name"] for child in observed["description"]["children"]]
+        assert "gain" in [
+            child["name"] for child in observed["description"]["children"]
+        ]
         assert observed["input_present"] is True
 
 
