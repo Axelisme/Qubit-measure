@@ -33,7 +33,7 @@ from zcu_tools.gui.widgets import (
 )
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
-from .edit_dialogs import WritebackEditDialogs, is_scalar_value
+from .edit_dialogs import WritebackEditDialogs, is_scalar_value, module_changes
 from .items import ModuleWriteback, ParameterWriteback, WritebackItem
 
 if TYPE_CHECKING:
@@ -360,8 +360,9 @@ class WritebackWidget(QWidget):
 
     def _theme_label(self, label: QLabel, colour: Callable[[QWidget], QColor]) -> None:
         # Creation and refresh share the same colour declaration, including dialogs.
+        if label not in self._foregrounds:
+            label.destroyed.connect(lambda: self._foregrounds.pop(label, None))
         self._foregrounds[label] = colour
-        label.destroyed.connect(lambda: self._foregrounds.pop(label, None))
         set_foreground(label, colour(self))
 
     def _refresh_foregrounds(self) -> None:
@@ -643,9 +644,21 @@ class WritebackWidget(QWidget):
 
     def _refresh_apply_enabled(self, *_: int) -> None:
         selected = {key for key, cb in self._checks.items() if cb.isChecked()}
-        self._apply_btn.setEnabled(
-            bool(selected) and not bool(selected & self._invalid_modules)
-        )
+        invalid = selected & self._invalid_modules
+        self._apply_btn.setEnabled(bool(selected) and not bool(invalid))
+        if invalid:
+            targets = [
+                item.target_name for item in self._items if item.session_id in invalid
+            ]
+            self._hint.setText(f"Fix or uncheck invalid module: {', '.join(targets)}")
+            self._theme_label(self._hint, warning_colour)
+        else:
+            self._hint.setText(
+                "Select the items to write back. Use Edit to adjust values first."
+            )
+            self._theme_label(
+                self._hint, lambda owner: owner.palette().color(owner.foregroundRole())
+            )
 
     def _on_apply_clicked(self) -> None:
         self.apply_requested.emit()
@@ -689,6 +702,10 @@ class WritebackWidget(QWidget):
         if item.session_id in self._invalid_modules:
             return "Unavailable (invalid configuration)"
         values = self._values[item.session_id]
+        if isinstance(item, ModuleWriteback):
+            if not compact:
+                return self._module_tooltip(item)
+            return "new entry" if values.current is None else "library entry"
         if values.current is None:
             return "\u2014"
         current = (
@@ -703,6 +720,11 @@ class WritebackWidget(QWidget):
         if item.session_id in self._invalid_modules:
             return "Invalid configuration"
         values = self._values[item.session_id]
+        if isinstance(item, ModuleWriteback):
+            if not compact:
+                return self._module_tooltip(item)
+            count = len(module_changes(values.current, values.proposed))
+            return f"{count} changes" if count else "no changes"
         proposed = (
             _compact_value(values.proposed) if compact else _full_value(values.proposed)
         )
@@ -714,6 +736,15 @@ class WritebackWidget(QWidget):
         if values.unit is not None:
             proposed += f" {values.unit}"
         return proposed
+
+    def _module_tooltip(self, item: ModuleWriteback) -> str:
+        values = self._values[item.session_id]
+        lines = [
+            change.text() for change in module_changes(values.current, values.proposed)
+        ]
+        if values.current is None:
+            lines.insert(0, "New library entry")
+        return "\n".join(lines) if lines else "No changes"
 
     def _refresh_item_preview(self, item: WritebackItem) -> None:
         self._values = {
@@ -748,6 +779,8 @@ class WritebackWidget(QWidget):
         else:
             self._invalid_modules.discard(item.session_id)
             self._refresh_item_preview(item)
+        proposed_label = self._row_widgets[item.session_id][1]
+        self._theme_label(proposed_label, accent_colour if valid else error_colour)
         self._refresh_apply_enabled()
 
     def _edit_item(self, item: WritebackItem) -> None:

@@ -504,7 +504,7 @@ def test_invalid_module_dialog_marks_row_refuses_apply_and_repairs(
     else:
         assert float(_input(dialog, "gain").text()) == pytest.approx(0.3)
     commit_text(_input(dialog, "gain"), "0.45")
-    assert proposed.text().startswith("map[")
+    assert proposed.text().endswith(" changes")
     assert _apply(widget).isEnabled()
     widget.apply_requested.connect(lambda: ctrl.apply_writeback_for_pane(tab_id, pane))
     _apply(widget).click()

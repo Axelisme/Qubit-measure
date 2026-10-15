@@ -163,6 +163,7 @@ class WritebackEditDialogs:
         dialog.destroyed.connect(unsubscribe)
         self._module_dialogs[item.session_id] = dialog
         refresh_preview()
+        dialog.adjustSize()
 
         def on_finished(*_: object) -> None:
             if self._module_dialogs.get(item.session_id) is not dialog:
@@ -244,7 +245,7 @@ def module_changes(current: object, proposed: object) -> list[ModuleChange]:
     A missing library entry (current=None) is reported by the caller separately.
     No preview lookup, draft mutation, or unit conversion occurs here.
     """
-    before = _module_leaves(current)
+    before = {} if current is None else _module_leaves(current)
     after = _module_leaves(proposed)
     changes: list[ModuleChange] = []
     for path in sorted(before.keys() | after.keys()):
@@ -298,7 +299,6 @@ class _ModuleDialog(_EditDialog):
         super().__init__(parent)
         self.setWindowTitle(f"Edit module — {item.target_name}")
         self.setMinimumSize(520, 420)
-        self.resize(600, 650)
         self._item = item
         self._editor = editor
         self._retarget = retarget
@@ -310,7 +310,7 @@ class _ModuleDialog(_EditDialog):
         self.theme_label(self._path, secondary_colour)
         layout.addWidget(self._path)
         hint = self.context_label(
-            "Changes go to the writeback draft at once. The library is only written by Apply Selected."
+            "Changes go to the writeback draft at once.\nThe library is only written by Apply Selected."
         )
         self.theme_label(hint, secondary_colour)
         layout.addWidget(hint)
@@ -491,9 +491,9 @@ class _ValueDialog(_EditDialog):
 
     def _parsed(self) -> tuple[str, Any]:
         name = _require_target_name(self._name.text())
-        text = self._value.text().strip()
-        if self._unit and text.endswith(self._unit):
-            text = text[: -len(self._unit)].rstrip()
+        text = self._value.text()
+        if self._unit and text.rstrip().endswith(self._unit):
+            text = text.rstrip()[: -len(self._unit)].rstrip()
         original = self._item.proposed_value
         try:
             value = _coerce_scalar_input(text, original)
