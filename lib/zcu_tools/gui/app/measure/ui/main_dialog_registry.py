@@ -40,7 +40,7 @@ def _visible_dialog_names(
 class MainDialogRegistry:
     """Retain the named dialogs exposed through ``MainWindow``.
 
-    Keep each dialog's modal presentation. Inspect and Device receive a static
+    Keep each dialog's modal presentation. Inspect, Device and ARB receive a static
     read-only mode from the main window when opened for Remote viewing.
     """
 
@@ -136,10 +136,12 @@ class MainDialogRegistry:
         if name is DialogName.ARB_WAVEFORM:
             from zcu_tools.gui.session.ui.arb_waveform_dialog import ArbWaveformDialog
 
-            return ArbWaveformDialog(
+            dialog = ArbWaveformDialog(
                 self._ctrl.arb_waveforms,
                 parent=self._parent,
             )
+            dialog.set_read_only(read_only=not writable)
+            return dialog
         raise ValueError(f"Unknown DialogName: {name!r}")  # pragma: no cover
 
     def open(self, name: DialogName, *, writable: bool = True) -> None:

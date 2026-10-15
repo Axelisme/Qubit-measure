@@ -255,6 +255,7 @@ class WorkflowWindow[C](QWidget):
             dialog.activateWindow()
             return
         dialog = ArbWaveformDialog(self._services.arb_waveform, parent=self)
+        dialog.set_read_only(read_only=self._run_view.start_locked)
         self._dialogs.open_named("arb", dialog)
 
     def _sync_run_locked_controls(self) -> None:
@@ -263,7 +264,7 @@ class WorkflowWindow[C](QWidget):
         From Start until terminal delivery (pending, running, pausing, paused,
         stopping) the host rejects Prepare forms and Reload source, so both are
         disabled. The hardware gate rejects device changes; the host also locks
-        source edits through Inspect. Open Device and Inspect dialogs are
+        source edits through Inspect. Open Device, Inspect and ARB dialogs are
         read-only. Reload also needs a loader and no restart-required reload
         failure. Setup, Inspect and Devices stay enabled: Setup changes the
         session, not the run's capture.
@@ -275,9 +276,9 @@ class WorkflowWindow[C](QWidget):
         self._controls.reload.setEnabled(
             not locked and self._loader is not None and not restart_required
         )
-        for key in ("devices", "inspect"):
+        for key in ("devices", "inspect", "arb"):
             dialog = self._dialogs.get(key)
-            if isinstance(dialog, (DeviceDialog, InspectDialog)):
+            if isinstance(dialog, (DeviceDialog, InspectDialog, ArbWaveformDialog)):
                 dialog.set_read_only(read_only=locked)
 
     def _use_source_clicked(self) -> None:
