@@ -39,7 +39,7 @@ type BoundedNumber = Annotated[float, Field(ge=1, lt=10)]
 type BoundedText = Annotated[str, Field(min_length=2, max_length=8, pattern="^[a-z]+$")]
 
 
-class NullableConstraints(BaseModel):
+class NullableConstraints(FormModel):
     number: Annotated[float, Field(gt=0, le=100)] | None = Field(
         default=None, lt=80, title="Optional number"
     )
