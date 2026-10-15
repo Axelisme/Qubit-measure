@@ -202,6 +202,23 @@ def test_demodulation_carrier_and_finite_complex_envelope():
     assert_allclose(actual, np.column_stack((values.real, values.imag)), atol=2e-8)
 
 
+def test_lookback_does_not_move_readout_population_origin():
+    from zcu_tools.simulate.adc import ADC, ReadoutPulse, SampleGrid
+
+    rates = np.array([[0, 0.04, 0], [0, 0, 0], [0, 0, 0]])
+    frequencies = np.array([[6.0, 6.02], [6.03, 5.99], [5.98, 6.04]])
+    adc = ADC(readout(frequencies=frequencies, rates=rates, offset=(0.3, -0.2)))
+    pulses = (ReadoutPulse(10, 40, 1.0, 6.0),)
+    after = SampleGrid(np.array([14.0, 22, 34]), 6.0)
+    lookback = SampleGrid(np.array([-10.0, -2, 6, 14, 22, 34]), 6.0)
+    response = adc.response(pulses, lookback)
+    no_lookback = adc.response(pulses, after)
+    excited = np.exp(-0.04 * (34 - 10))
+    assert_allclose(response.final_populations[1], [1 - excited, excited, 0], atol=2e-9)
+    assert_allclose(response.traces[:, 3:], no_lookback.traces, atol=2e-8)
+    assert_allclose(response.traces[:, :3], np.tile([0.3, -0.2], (3, 3, 1)), atol=2e-9)
+
+
 def test_invalid_rates_covariance_and_population_are_rejected():
     from zcu_tools.simulate.adc import PopulationInput, Receiver
 
