@@ -306,7 +306,7 @@ def test_describe_cfg_mcp_preserves_path_and_internal_error_boundary(
                 assert client.call("rpc_call", {
                     "method": "tab.describe_cfg",
                     "params": {"tab_id": tab, "path": ["gain"]},
-                })["value"] == 0.5
+                })["description"]["path"] == ["gain"]
     finally:
         FailingOptionsExtras.broken = False
         fixture.ctrl.tab_control.close_tab(tab)
