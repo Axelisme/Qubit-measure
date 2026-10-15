@@ -27,7 +27,7 @@ from ..modules.reset import BathReset, NoneReset, PulseReset, TwoPulseReset
 from ..modules.util import round_timestamp
 from ..modules.waveform import ConstWaveformCfg, FlatTopWaveformCfg
 from ..utils import is_qick_param, readout_freq_from_word, readout_freq_from_words
-from .dependencies import register_access, validate_modules
+from .dependencies import register_access, validate_loop_hooks, validate_modules
 
 
 def _minimum(value: float | QickParam) -> float:
@@ -58,9 +58,9 @@ class TimelineInterpreter:
         self.registers: dict[str, tuple[int, bool]] = {}
         self.iterations: list[tuple[str, int]] = []
         self.templates: dict[int, tuple[int, int]] = {}
-        self.table_readouts = {
-            id(module): module for module in validate_modules(prog.modules)
-        }
+        tables = validate_modules(prog.modules)
+        validate_loop_hooks(prog.loops, tables)
+        self.table_readouts = {id(module): module for module in tables}
 
     def scalar(self, value: float | QickParam) -> float:
         """Resolve a scalar/sweep in us, MHz, degrees or normalized gain.

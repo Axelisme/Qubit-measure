@@ -36,9 +36,27 @@ class SimulationSoc(QickConfig):
         self._poll_done = False
 
     def install_request(self, request: AcquireRequest) -> None:
+        """Admit detached controls only when every used channel is wired.
+
+        request is borrowed until release_request. Validate every execution's
+        generator and ADC routes before retaining it or invoking the backend.
+        ValueError identifies an unbound generator's source module/channel, or
+        an unbound generator/ADC route. This method does not generate signals.
+        """
+        bound_gens = {gen for gen, _ in self.routes}
+        for events in request.controls:
+            for event in events:
+                if event.gen_ch not in bound_gens:
+                    raise ValueError(
+                        f"{event.source!r} generator {event.gen_ch} is not bound"
+                    )
+        windows = (
+            (window for point in request.timelines for window in point.readouts)
+            if request.timelines
+            else iter(request.readouts)
+        )
         if any(
-            (window.gen_ch, window.channel) not in self.routes
-            for window in request.readouts
+            (window.gen_ch, window.channel) not in self.routes for window in windows
         ):
             raise ValueError("program uses an unbound generator/ADC route")
         self._request = request

@@ -46,7 +46,9 @@ def test_raw_program_body_rejected_instead_of_silently_ignoring_instructions(met
 
 def test_raw_loop_hook_rejected_before_any_backend_round():
     env = white_noise(std_adc=0)
-    prog = ModularProgramV2(env.soccfg, ProgramV2Cfg(), modules=[readout("readout")], sweep=[("axis", 2)])
+    prog = ModularProgramV2(
+        env.soccfg, ProgramV2Cfg(), modules=[readout("readout")], sweep=[("axis", 2)]
+    )
     prog.append_loop_after("axis", AsmInst(inst={"CMD": "NOP"}, addr_inc=1))
     prog.compile()
     with pytest.raises(ValueError, match="axis.*raw.*unsupported"):
@@ -56,8 +58,12 @@ def test_raw_loop_hook_rejected_before_any_backend_round():
 
 def test_unwired_generator_pulse_is_not_silently_accepted():
     env = white_noise(std_adc=0, n_gens=2, routes=((0, 0),))
-    drive = PulseCfg(ch=1, nqz=1, freq=50, gain=0.2, waveform=ConstWaveformCfg(length=0.1)).build("unwired_drive")
-    prog = ModularProgramV2(env.soccfg, ProgramV2Cfg(), modules=[drive, readout("readout")])
+    drive = PulseCfg(
+        ch=1, nqz=1, freq=50, gain=0.2, waveform=ConstWaveformCfg(length=0.1)
+    ).build("unwired_drive")
+    prog = ModularProgramV2(
+        env.soccfg, ProgramV2Cfg(), modules=[drive, readout("readout")]
+    )
     with pytest.raises(ValueError, match="unwired_drive.*1.*bound"):
         prog.acquire(env.soc, progress=False)
     assert not env.soc.binding.rounds

@@ -2,6 +2,9 @@
 
 from collections.abc import Sequence
 
+from qick.asm_v2 import AsmV2
+
+from ..macro.wmem import PatchWmemFromDmem
 from ..modules.base import Module
 from ..modules.computed_pulse import ComputedPulse
 from ..modules.control import Branch, Repeat
@@ -50,6 +53,37 @@ def validate_modules(
             tables.append(module)
         tables.extend(validate_modules(_children(module), location))
     return tables
+
+
+def validate_loop_hooks(
+    loops: Sequence[tuple[str, int, AsmV2 | None, AsmV2 | None]],
+    tables: Sequence[TablePulseReadout],
+) -> None:
+    """Admit only the table readout's defined exec-after template updates.
+
+    loops are compiled hardware-loop declarations; tables are validated semantic
+    modules. Before-hooks and arbitrary ASM/ALU hooks raise ValueError naming the
+    loop. No hook is run and no wmem/table state is changed by this validation.
+    """
+    allowed = {
+        (module.idx_reg, name)
+        for module in tables
+        for name in (
+            module.initial_template.pulse.pulse_id,
+            module.initial_template.adc_name,
+        )
+    }
+    for name, _, before, after in loops:
+        if before is not None and before.macro_list:
+            raise ValueError(f"loop {name!r} raw before-hook simulation unsupported")
+        if after is None:
+            continue
+        for macro in after.macro_list:
+            if (
+                type(macro) is not PatchWmemFromDmem
+                or (name, macro.name) not in allowed
+            ):
+                raise ValueError(f"loop {name!r} raw after-hook simulation unsupported")
 
 
 def _children(module: Module) -> list[Module]:
