@@ -20,6 +20,7 @@ from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._user_input import key_click
 from tests.gui._user_input import type_text as type_keys
+from tests.gui.widgets.form._field_errors import field_error
 
 
 class CommitForm(FormModel):
@@ -182,12 +183,11 @@ def test_unparseable_text_shows_its_error_only_once_committed(build: Build) -> N
     validity: list[bool] = []
     view.validity_changed.connect(validity.append)
     count = line(view, "count")
-    error = label(view, "form.error.count")
 
     type_text(count, "x")
 
     assert view.local_parse_errors() is None
-    assert error.isHidden()
+    assert not field_error(view, "count")
     assert validity == []
 
     press_enter(count)
@@ -195,7 +195,7 @@ def test_unparseable_text_shows_its_error_only_once_committed(build: Build) -> N
     local = view.local_parse_errors()
     assert local is not None
     assert set(local.messages) == {("count",)}
-    assert not error.isHidden()
+    assert field_error(view, "count")
     assert validity == [False]
     assert batches == []
     assert state.input.data["count"] == 2
@@ -204,7 +204,7 @@ def test_unparseable_text_shows_its_error_only_once_committed(build: Build) -> N
     press_enter(count)
 
     assert view.local_parse_errors() is None
-    assert error.isHidden()
+    assert not field_error(view, "count")
     assert validity == [False, True]
     assert state.input.data["count"] == 2
 
@@ -248,7 +248,7 @@ def test_rejected_text_stays_local_until_an_accepted_commit(build: Build) -> Non
     assert batches == []
     assert state.input.data["amount"] == 2.0
     assert amount.text() == "12"
-    assert label(view, "form.error.amount").text() == "Amount is too large"
+    assert field_error(view, "amount") == "Amount is too large"
     local = view.local_parse_errors()
     assert local is not None
     assert set(local.messages) == {("amount",)}

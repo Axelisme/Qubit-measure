@@ -55,6 +55,7 @@ from tests.gui.app.measure._form_fakes import (
     make_form,
 )
 from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
+from tests.gui.widgets.form._field_errors import field_error
 from tests.gui.widgets.form._text_input import commit_text
 
 CAPABILITIES = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)
@@ -174,7 +175,7 @@ def test_editor_input_reaches_the_resource_and_validity_gates_run(
     view.tab.update_interaction_state(snapshot())
 
     assert view.resource.input.data["reps"] == 100
-    assert child(view.tab, QLabel, "form.error.reps").text() != ""
+    assert field_error(view.tab, "reps") != ""
     assert not view.tab.run_btn.isEnabled()
     assert view.tab.run_btn.toolTip().startswith("Config invalid")
     reason = view.tab.cfg_invalid_reason()

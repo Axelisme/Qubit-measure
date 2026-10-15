@@ -13,6 +13,7 @@ from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
+from tests.gui.widgets.form._field_errors import field_error
 from tests.gui.widgets.form._text_input import commit_text
 
 
@@ -66,9 +67,7 @@ def test_string_mode_writes_expression_and_projects_preview_and_errors(
     assert isinstance(shown, QLabel)
     assert '$device = "yoko1"' in shown.text()
     commit_text(text, "$unbound")
-    error = editor.findChild(QLabel, f"form.error.{field}")
-    assert isinstance(error, QLabel)
-    assert "unbound" in error.text()
+    assert "unbound" in field_error(editor, field)
     assert shown.text() == ""
     assert editor.errors() is not None
     # Hydration retains expression mode and never replaces authored input.
