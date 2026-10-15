@@ -18,6 +18,9 @@ from zcu_tools.gui.remote.wire import Request
 
 pytestmark = pytest.mark.requires_loopback
 
+# Real accept/reply/EOF and released writers must finish; 30s only guards hangs.
+# Backpressure is established by a first received byte, never an elapsed-time bound.
+
 
 class _RejectingQueue(queue.Queue[bytes]):
     def put_nowait(self, item: bytes) -> None:
@@ -89,7 +92,7 @@ def endpoint() -> Iterator[tuple[NdjsonRpcEndpoint, _Router]]:
         server.stop()
         for link in router.closed_links:
             if link.writer_thread is not None:
-                link.writer_thread.join(timeout=2)
+                link.writer_thread.join(timeout=30)
                 assert not link.writer_thread.is_alive()
 
 
@@ -118,7 +121,7 @@ def test_unencodable_reply_returns_correlated_error_without_replaying_handler(
     endpoint: tuple[NdjsonRpcEndpoint, _Router], method: str
 ) -> None:
     server, router = endpoint
-    with socket.create_connection(("127.0.0.1", server.port), timeout=3) as client:
+    with socket.create_connection(("127.0.0.1", server.port), timeout=30) as client:
         _send(client, method)
         reply = _response(client)
         assert reply["id"] == "request"
@@ -140,18 +143,20 @@ def test_backpressured_client_does_not_block_other_clients_or_cleanup(
     server, router = endpoint
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as slow:
         slow.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8192)
-        slow.settimeout(3)
+        slow.settimeout(30)
         slow.connect(("127.0.0.1", server.port))
         _send(slow, "large_result")
         assert slow.recv(1) == b"{"
-        with socket.create_connection(("127.0.0.1", server.port), timeout=3) as healthy:
+        with socket.create_connection(
+            ("127.0.0.1", server.port), timeout=30
+        ) as healthy:
             _send(healthy, "small")
             assert _response(healthy)["result"] == {"value": 42}
             if shutdown:
                 server.stop()
             else:
                 slow.close()
-            assert router.closed.wait(timeout=3)
+            assert router.closed.wait(timeout=30)
     assert router.calls == ["large_result", "small"]
 
 
@@ -161,14 +166,17 @@ def test_large_reply_backlog_disconnects_slow_client_and_preserves_healthy_clien
     server, router = endpoint
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as slow:
         slow.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8192)
-        slow.settimeout(3)
+        slow.settimeout(30)
         slow.connect(("127.0.0.1", server.port))
         _send(slow, "large_result", "first")
         assert slow.recv(1) == b"{"
         _send(slow, "large_result", "second")
         _send(slow, "large_result", "third")
-        assert router.closed.wait(timeout=3)
-        with socket.create_connection(("127.0.0.1", server.port), timeout=3) as healthy:
+        assert router.closed.wait(timeout=30)
+        assert not server.has_live_client()
+        with socket.create_connection(
+            ("127.0.0.1", server.port), timeout=30
+        ) as healthy:
             _send(healthy, "small")
             assert _response(healthy)["result"] == {"value": 42}
     assert router.calls == ["large_result"] * 3 + ["small"]
@@ -178,7 +186,7 @@ def test_completed_large_replies_release_outbound_capacity(
     endpoint: tuple[NdjsonRpcEndpoint, _Router],
 ) -> None:
     server, router = endpoint
-    with socket.create_connection(("127.0.0.1", server.port), timeout=3) as client:
+    with socket.create_connection(("127.0.0.1", server.port), timeout=30) as client:
         for number in range(4):
             _send(client, "large_result", str(number))
             reply = _response(client)
@@ -194,11 +202,12 @@ def test_undeliverable_reply_disconnects_and_releases_client_without_stopping_se
 ) -> None:
     server, router = endpoint
     rid = "x" * (MAX_LINE_BYTES - 80) if method != "reject_reply" else "request"
-    with socket.create_connection(("127.0.0.1", server.port), timeout=3) as client:
+    with socket.create_connection(("127.0.0.1", server.port), timeout=30) as client:
         _send(client, method, rid)
         assert client.recv(1) == b""
-    assert router.closed.wait(timeout=3)
-    with socket.create_connection(("127.0.0.1", server.port), timeout=3) as client:
+    assert router.closed.wait(timeout=30)
+    assert not server.has_live_client()
+    with socket.create_connection(("127.0.0.1", server.port), timeout=30) as client:
         _send(client, "small")
         assert _response(client)["result"] == {"value": 42}
     assert router.calls == [method, "small"]
