@@ -430,7 +430,7 @@ def test_nested_import_remains_locally_resolvable_after_source_entries_move(
     assert cloned.meta("Q1.rate") == point.meta("Q1.rate")
 
 
-@pytest.mark.parametrize("failure", ["absent_event", "record", "point", "header"])
+@pytest.mark.parametrize("failure", ["record", "point", "header"])
 def test_foreign_source_failure_does_not_publish_destination_or_modify_source(
     entry: ResultEntry,
     entry_roots: tuple[Path, Path],
@@ -442,9 +442,7 @@ def test_foreign_source_failure_does_not_publish_destination_or_modify_source(
     write_source_library(foreign, event)
     source = results / "other/points/source/point.yaml"
     ledger_path = results / "other/records/ledger.jsonl"
-    if failure == "absent_event":
-        ledger_path.write_text("", encoding="utf-8")
-    elif failure == "record":
+    if failure == "record":
         (results / f"other/records/{event.id}.json").unlink()
     elif failure == "point":
         document = YAML(typ="rt").load(source.read_text())

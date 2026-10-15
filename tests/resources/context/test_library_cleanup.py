@@ -263,8 +263,8 @@ def test_commit_reread_cleans_disk_without_resurrecting_deleted_root(
         original = mixed(path)
     assert backups(path)[0].read_bytes() == original
     assert library.snapshot().waveform_keys() == (
-        "Q1.waveforms.pi_half",
         "Q1.waveforms.new",
+        "Q1.waveforms.pi_half",
     )
     assert capture.waveform_keys() == ("Q1.waveforms.bad",)
     with pytest.raises(KeyError):
@@ -307,7 +307,7 @@ def test_cleanup_waits_for_sidecar_and_backs_up_latest_bytes(
     tmp_path: Path, operation: str
 ) -> None:
     path = tmp_path / "module_cfg.yaml"
-    path.write_text(HEADER)
+    path.write_text(HEADER + "components: {Q1: {waveforms: {}}}\n")
     context = multiprocessing.get_context("fork")
     parent, child = context.Pipe()
     process = context.Process(target=_locked_reader, args=(path, child, operation))
