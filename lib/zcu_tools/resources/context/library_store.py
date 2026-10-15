@@ -1,5 +1,6 @@
 """Library disk admission and entry-local cleanup, shared by handles and clone."""
 
+from copy import copy
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -13,6 +14,7 @@ from .library import (
     MODULE_LIBRARY_VERSION,
     ComponentLibrary,
     ModuleLibraryDocument,
+    has_persistent_source_suffix,
     library_key_kind,
 )
 
@@ -73,6 +75,9 @@ def _valid_entry(
     ledger: Path,
     entry_id: str,
 ) -> bool:
+    # PulseSpec defaults are for authored values, not missing disk discriminators.
+    if partition == "pulses" and (not isinstance(raw, dict) or "type" not in raw):
+        return False
     # Current entry extra rules apply even inside a forward-minor container.
     try:
         component = ComponentLibrary.model_validate({partition: {name: raw}})
@@ -84,11 +89,8 @@ def _valid_entry(
             provenance = ProvenanceData.model_validate(record)
         except ValidationError:
             return False
-        value = spec
-        for segment in path.split(".")[3:]:
-            if not isinstance(value, dict) or segment not in value:
-                return False
-            value = value[segment]
+        if not has_persistent_source_suffix(spec, tuple(path.split(".")[3:])):
+            return False
         try:
             validate_source(provenance.to_provenance(), ledger, entry_id)
         except MissingSourceError:
@@ -123,7 +125,13 @@ def _clean_disk_entries(
             entry_id=entry_id,
         ):
             removed.append(root)
+            # YAML aliases may share either ancestor. Detach this root's path
+            # before removal so siblings keep their own Spec/source admission.
+            partitions = copy(partitions)
+            entries = copy(entries)
             del entries[name]
+            partitions[partition] = entries
+            components[component] = partitions
     provenance = document.get("provenance", {})
     if not isinstance(provenance, dict):
         raise ValueError("Library provenance must be a mapping")

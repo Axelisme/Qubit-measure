@@ -143,6 +143,21 @@ def library_key_kind(path: str) -> Literal["module", "waveform"]:
     return kind
 
 
+def has_persistent_source_suffix(spec: YamlValue, suffix: tuple[str, ...]) -> bool:
+    """Return whether suffix addresses persisted Spec data, without materializing.
+
+    spec is an entry's YAML-value projection; suffix contains relative mapping
+    keys, with an empty tuple addressing the root. Missing keys, scalar descent
+    and list indexing return False. No reference expansion or asset I/O occurs.
+    """
+    value = spec
+    for segment in suffix:
+        if not isinstance(value, dict) or segment not in value:
+            return False
+        value = value[segment]
+    return True
+
+
 def _validate_names(document: ModuleLibraryDocument) -> None:
     for component, library in document.components.items():
         if not component or "." in component:
@@ -519,10 +534,8 @@ def _validate_document(
     for path, record in document.provenance.items():
         root, kind, suffix = _path_root(path)
         value: YamlValue = snapshot.entry_value(root, kind=kind)
-        for segment in suffix:
-            if not isinstance(value, dict) or segment not in value:
-                raise ValueError(f"Source path is not a persistent Spec leaf: {path!r}")
-            value = value[segment]
+        if not has_persistent_source_suffix(value, suffix):
+            raise ValueError(f"Source path is not a persistent Spec leaf: {path!r}")
         validate_source(record.to_provenance(), ledger, entry_id)
 
 
