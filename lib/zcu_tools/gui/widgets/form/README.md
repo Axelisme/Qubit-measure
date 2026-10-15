@@ -1,6 +1,6 @@
 # gui/widgets/form — Form draft view
 
-**Last updated:** 2026-10-15, field errors tint controls and lead row tooltips without adding height; bold click fold titles (▸／▾) replace the Expand/Collapse buttons, take Tab focus and fold on Space or Enter, and a section's unit follows its name; one schema per captured env and one publication per accepted commit; text commits on Enter or focus loss, Expression-to-Direct fills the computed value, and an option holding one ordinary model draws that model's rows; the shared FormEditor, value-widget helpers and host submission boundary
+**Last updated:** 2026-10-15, field errors tint controls and lead row tooltips
 
 FormEditor renders caller-owned FormState using a host-captured FormEnv. Parsed input writes the draft. A text row commits its text when the user presses Enter or the field loses focus, not on each keystroke, so typing does not change state, preview or the host's Run admission; text that already shows the state's input writes nothing. Read-only rows and a detached editor commit nothing, and an external publication redraws a row's uncommitted text with the state's input. Checkboxes, dropdowns, the Enabled box and the Expression action write at once. Incomplete text and parse errors stay in the Qt view. The generic local_parse_errors query lets hosts reject submission while state still holds an earlier valid value.
 

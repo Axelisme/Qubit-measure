@@ -53,7 +53,8 @@ _MODE_HINT = "Right-click to switch Direct / Expression"
 _EXPRESSION_TINT = 0.18
 # Fixed red mixed into Base for Direct input errors, independent of Highlight.
 _ERROR_TINT = 0.18
-_ERROR_COLOUR = QColor("#b3261e")
+_ERROR_RED_LIGHT = QColor("#b3261e")
+_ERROR_RED_DARK = QColor("#ff8a80")
 # Shown in a group block's header while any of its rows shows an error, so a
 # folded group still tells the user where Start is blocked.
 GROUP_ERRORS_NOTE = "Contains errors"
@@ -211,7 +212,7 @@ def _direct_input(value: FormValue) -> JsonValue:
 def _error_colour(widget: QWidget) -> QColor:
     """Keep error text and borders readable against the theme's Window."""
     window = widget.palette().color(QPalette.ColorRole.Window)
-    return QColor("#ff8a80" if window.lightness() < 128 else "#b3261e")
+    return _ERROR_RED_DARK if window.lightness() < 128 else _ERROR_RED_LIGHT
 
 
 def _mixed(base: QColor, accent: QColor, share: float) -> QColor:
@@ -495,10 +496,10 @@ class FieldRow:
         """
         self._error = text
         self.widget.setToolTip("\n\n".join(filter(None, (text, self._tooltip))))
-        self._show_error()
+        self._restyle_input()
 
-    def _show_error(self) -> None:
-        """Combine the current mode tint and error mark without stacking colours."""
+    def _restyle_input(self) -> None:
+        """Apply the current mode tint and error styling without stacking colours."""
         invalid = bool(self._error)
         widget = self.input
         if not isinstance(widget, QLineEdit | QComboBox):
@@ -519,7 +520,7 @@ class FieldRow:
             accent = (
                 shown.color(QPalette.ColorRole.Highlight)
                 if expression
-                else _ERROR_COLOUR
+                else _ERROR_RED_LIGHT
             )
             share = _EXPRESSION_TINT if expression else _ERROR_TINT
             background = _mixed(shown.color(QPalette.ColorRole.Base), accent, share)
@@ -721,7 +722,7 @@ class FieldRow:
         if self.mode is None or self.input is None:
             return
         self.mode.setChecked(expression)
-        self._show_error()
+        self._restyle_input()
 
     def _input_changed(self) -> None:
         if self._displaying:

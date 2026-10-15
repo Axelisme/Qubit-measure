@@ -57,22 +57,28 @@ def test_unsaved_choice_has_explicit_discard_label_and_preserves_decisions(
     observed: list[tuple[str, bool]] = []
 
     def answer() -> None:
-        box = parent.findChild(QMessageBox)
-        assert box is not None
-        discard = box.button(QMessageBox.StandardButton.Discard)
-        assert discard is not None
-        observed.append(
-            (
-                discard.text(),
-                box.defaultButton() is box.button(QMessageBox.StandardButton.Cancel),
+        box = qapp.activeModalWidget()
+        try:
+            assert isinstance(box, QMessageBox)
+            discard = box.button(QMessageBox.StandardButton.Discard)
+            assert discard is not None
+            observed.append(
+                (
+                    discard.text(),
+                    box.defaultButton()
+                    is box.button(QMessageBox.StandardButton.Cancel),
+                )
             )
-        )
-        if decision is None:
-            box.reject()
-        else:
-            button = box.button(decision)
-            assert button is not None
-            button.click()
+            if decision is None:
+                box.reject()
+            else:
+                button = box.button(decision)
+                assert button is not None
+                button.click()
+        finally:
+            # Failed callback assertions must also end the nested exec() loop.
+            if box is not None and box.isVisible():
+                box.close()
 
     try:
         QTimer.singleShot(0, answer)

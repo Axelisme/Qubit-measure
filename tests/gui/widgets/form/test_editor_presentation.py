@@ -1,5 +1,6 @@
 """Direct rows show no echo, choice rows list only choices, and rows stay dense."""
 
+import re
 from collections.abc import Iterator
 from typing import Literal, Self
 
@@ -78,6 +79,18 @@ TOP_LEAVES = {
     "after": "After",
 }
 INNER_LEAVES = {"inner.gain": "Gain", "inner.phase": "Phase"}
+
+
+def _palette(dark: bool) -> QPalette:
+    """Synthetic light or dark colours shared by presentation tests."""
+    palette = QPalette()
+    palette.setColor(QPalette.ColorRole.Base, QColor("#242424" if dark else "#fafafa"))
+    palette.setColor(
+        QPalette.ColorRole.Window, QColor("#353535" if dark else "#fafafa")
+    )
+    palette.setColor(QPalette.ColorRole.Text, QColor("#eeeeee" if dark else "#151515"))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor("#4488cc"))
+    return palette
 
 
 def alias_env() -> FormEnv:
@@ -304,13 +317,7 @@ def test_error_tints_and_tooltips_restore_in_both_palettes(
     dark: bool,
 ) -> None:
     view, state = editor
-    palette = QPalette()
-    palette.setColor(QPalette.ColorRole.Base, QColor("#242424" if dark else "#fafafa"))
-    palette.setColor(
-        QPalette.ColorRole.Window, QColor("#353535" if dark else "#fafafa")
-    )
-    palette.setColor(QPalette.ColorRole.Text, QColor("#eeeeee" if dark else "#151515"))
-    palette.setColor(QPalette.ColorRole.Highlight, QColor("#4488cc"))
+    palette = _palette(dark)
     view.setPalette(palette)
     lay_out(view, qapp)
     paths = ("amount", "unit", "enabled", "inner")
@@ -378,16 +385,8 @@ def test_expression_errors_keep_the_mode_tint_and_add_a_red_border(
     qapp: QApplication,
     dark: bool,
 ) -> None:
-    import re
-
     view, state = editor
-    palette = QPalette()
-    palette.setColor(QPalette.ColorRole.Base, QColor("#242424" if dark else "#fafafa"))
-    palette.setColor(QPalette.ColorRole.Text, QColor("#eeeeee" if dark else "#151515"))
-    palette.setColor(QPalette.ColorRole.Highlight, QColor("#4488cc"))
-    palette.setColor(
-        QPalette.ColorRole.Window, QColor("#353535" if dark else "#fafafa")
-    )
+    palette = _palette(dark)
     view.setPalette(palette)
     mode(view, "amount").trigger()
     text = child(view, QLineEdit, "form.input.amount")
@@ -434,13 +433,10 @@ def test_error_background_is_painted_without_changing_row_height(
     path: str,
 ) -> None:
     view, state = editor
-    palette = QPalette()
-    palette.setColor(QPalette.ColorRole.Base, QColor("#242424" if dark else "#fafafa"))
+    palette = _palette(dark)
     palette.setColor(
         QPalette.ColorRole.Button, QColor("#303030" if dark else "#efefef")
     )
-    palette.setColor(QPalette.ColorRole.Text, QColor("#eeeeee" if dark else "#151515"))
-    palette.setColor(QPalette.ColorRole.Highlight, QColor("#4488cc"))
     view.setPalette(palette)
     if path == "amount":
         mode(view, path).trigger()
