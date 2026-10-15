@@ -10,6 +10,7 @@ from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules import ModuleCfg, ModuleCfgFactory, readout
 from zcu_tools.program.v2.modules.base import Module
+from zcu_tools.program.v2.modules.control import Repeat
 
 from tests.program.v2._mux_support import (
     AcquisitionSoc,
@@ -290,10 +291,13 @@ class RouteReuse(Module):
 
 
 @pytest.mark.parametrize("route", ["gen", "readout"])
-def test_later_module_cannot_overwrite_mux_routes(route):
+@pytest.mark.parametrize("nested", [False, True])
+def test_later_module_cannot_overwrite_mux_routes(route, nested):
     module = native_mux().build("mux")
-    with pytest.raises(ValueError, match="route"):
-        RecordingProgram(mux_soccfg(), [module, RouteReuse(route)])
+    first = Repeat("repeat", 2).add_content(module) if nested else module
+    channel = 0 if route == "gen" else 4
+    with pytest.raises(ValueError, match=f"mux.*{route}.*route.*{channel}"):
+        RecordingProgram(mux_soccfg(), [first, RouteReuse(route)])
 
 
 @pytest.mark.parametrize("collision", ["gen", "readout"])
