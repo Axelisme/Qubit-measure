@@ -8,6 +8,7 @@ reception) lives next to the tests that need it.
 from __future__ import annotations
 
 import json
+import logging
 import socket
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -21,6 +22,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from PIL import Image
+from PyQt6 import sip
 from qtpy.QtCore import QCoreApplication, QEventLoop, QSocketNotifier, QTimer
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.adapter import ExpAdapterProtocol, SessionEnv
@@ -54,8 +56,11 @@ from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._form_fakes import form_sources
 from tests.gui.app.measure._synthetic import ALIAS_PRESET, SampleAdapter, register_all
+
+logger = logging.getLogger(__name__)
 
 
 def _context_root() -> Path:
@@ -324,6 +329,34 @@ def _inbox_buf(sock: socket.socket) -> bytearray:
     return _INBOX_BUF.setdefault(sock.fileno(), bytearray())
 
 
+def _read_matching_frame(
+    sock: socket.socket,
+    buf: bytearray,
+    inbox: list[dict[str, Any]],
+    accept: Callable[[dict[str, Any]], bool],
+) -> dict[str, Any] | None:
+    """Consume complete NDJSON frames, parking nonmatches until recv would block."""
+    while True:
+        nl = buf.find(b"\n")
+        if nl >= 0:
+            line = bytes(buf[:nl])
+            del buf[: nl + 1]
+            if not line:
+                continue
+            msg = json.loads(line.decode("utf-8"))
+            if accept(msg):
+                return msg
+            inbox.append(msg)
+            continue
+        try:
+            chunk = sock.recv(4096)
+        except BlockingIOError:
+            return None
+        if not chunk:
+            raise AssertionError("peer closed without a matching line")
+        buf.extend(chunk)
+
+
 def recv_until(
     sock: socket.socket,
     accept: Callable[[dict], bool],
@@ -349,36 +382,21 @@ def recv_until(
     buf = _inbox_buf(sock)
     sock.setblocking(False)
     loop = QEventLoop()
-    notifier = QSocketNotifier(sock.fileno(), QSocketNotifier.Type.Read)
+    notifier = QSocketNotifier(sip.voidptr(sock.fileno()), QSocketNotifier.Type.Read)
     watchdog = QTimer()
     watchdog.setSingleShot(True)
-    matched: list[dict] = []
+    matched: list[dict[str, Any]] = []
     errors: list[Exception] = []
 
     def receive() -> None:
         try:
-            while True:
-                nl = buf.find(b"\n")
-                if nl >= 0:
-                    line = bytes(buf[:nl])
-                    del buf[: nl + 1]
-                    if not line:
-                        continue
-                    msg = json.loads(line.decode("utf-8"))
-                    if accept(msg):
-                        matched.append(msg)
-                        loop.quit()
-                        return
-                    inbox.append(msg)
-                    continue
-                try:
-                    chunk = sock.recv(4096)
-                except BlockingIOError:
-                    return
-                if not chunk:
-                    raise AssertionError("peer closed without a matching line")
-                buf.extend(chunk)
+            msg = _read_matching_frame(sock, buf, inbox, accept)
+            if msg is not None:
+                matched.append(msg)
+                loop.quit()
         except Exception as exc:
+            # Qt callbacks cannot raise to the waiting caller; replay after exec().
+            logger.exception("Socket frame reception failed")
             errors.append(exc)
             loop.quit()
 
@@ -425,6 +443,7 @@ def recv_push(sock: socket.socket, event: str, timeout_s: float = 30.0) -> dict:
 
 
 def open_client(port: int) -> socket.socket:
+    # The fixture listener is already started; only guard a stuck loopback connect.
     sock = socket.create_connection(("127.0.0.1", port), timeout=30.0)
     # The OS may recycle a closed socket's fileno from an earlier test.
     reset_inbox(sock)
@@ -454,11 +473,8 @@ def call_mcp_with_qt(
     pool = ThreadPoolExecutor(max_workers=1)
     try:
         worker = pool.submit(tools[name]["handler"], arguments)
-        deadline = time.monotonic() + 5
-        while not worker.done() and time.monotonic() < deadline:
-            QCoreApplication.processEvents()
-            time.sleep(0.005)
-        assert worker.done(), "MCP tool did not receive a GUI reply"
+        # The submitted tool completes after its GUI reply; pump its real owner delivery.
+        qt_until(worker.done, label="MCP GUI reply")
         reply = worker.result()
         # These GUI contracts inspect structured data; stdio image delivery has its own owner.
         return reply.data if isinstance(reply, ToolReply) else reply

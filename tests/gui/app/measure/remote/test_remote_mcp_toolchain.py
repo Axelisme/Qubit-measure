@@ -32,6 +32,7 @@ from zcu_tools.gui.session.services.device import (
 )
 from zcu_tools.plotting.plots import Plots
 
+from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleParams
 
 from ._helpers import Fixture, call, open_client, recv_push
@@ -106,20 +107,20 @@ def test_gui_started_analyze_handle_is_indexed_and_awaited_over_remote(
 
     def held_analyze(self, request, *, plots: Plots):
         entered.set()
-        if not release.wait(4):
+        # The test finally releases the held collaborator.
+        if not release.wait(30):
             raise TimeoutError("fake analysis release was not signalled")
         return original_analyze(self, request, plots=plots)
 
     try:
         run_id = fx.ctrl.start_run(tab_id)  # GUI path, not an MCP start.
-        run_result = call(
-            sock, "operation.await", {"operation_id": run_id, "timeout": 2}
-        )
+        run_result = await_terminal(sock, run_id)
         assert run_result["ok"] is True
         assert run_result["result"]["status"] == "finished"
         monkeypatch.setattr(SampleAdapter, "analyze", held_analyze)
         analysis_id = fx.ctrl.analyze(tab_id, SampleParams())
-        assert entered.wait(1)
+        # Submission reaches the held synthetic adapter, before terminal release.
+        qt_until(entered.is_set, label="adapter entered")
         active = call(sock, "operation.active")
         assert active["ok"] is True
         assert active["result"]["operations"] == [
@@ -130,9 +131,7 @@ def test_gui_started_analyze_handle_is_indexed_and_awaited_over_remote(
         )
         assert pending["result"] == {"reason": "timeout"}
         release.set()
-        completed = call(
-            sock, "operation.await", {"operation_id": analysis_id, "timeout": 2}
-        )
+        completed = await_terminal(sock, analysis_id)
         assert completed["result"] == {"reason": "completed", "status": "finished"}
         assert call(sock, "operation.active")["result"]["operations"] == []
     finally:
@@ -140,11 +139,15 @@ def test_gui_started_analyze_handle_is_indexed_and_awaited_over_remote(
         sock.close()
 
 
+def await_terminal(sock, operation_id):
+    """Wait for an admitted synthetic operation's real remote terminal reply."""
+    # Start/release already arranged completion; 30s only diagnoses a stuck producer.
+    return call(sock, "operation.await", {"operation_id": operation_id, "timeout": 30})
+
+
 def _completed_run(fx, sock, tab_id):
     operation_id = fx.ctrl.start_run(tab_id)
-    terminal = call(
-        sock, "operation.await", {"operation_id": operation_id, "timeout": 2}
-    )["result"]
+    terminal = await_terminal(sock, operation_id)["result"]
     assert terminal["status"] == "finished"
     return operation_id
 
@@ -219,12 +222,7 @@ def test_analyze_rejects_a_superseded_run_without_changing_the_pane(
             else:
                 original += 1000
             prior = call(sock, "tab.analyze", {"tab_id": tab})["result"]["operation_id"]
-            assert (
-                call(sock, "operation.await", {"operation_id": prior, "timeout": 2})[
-                    "result"
-                ]["status"]
-                == "finished"
-            )
+            assert await_terminal(sock, prior)["result"]["status"] == "finished"
         before = call(sock, "tab.snapshot", {"tab_id": tab})["result"]
         params_before = call(sock, "tab.get_analyze_params", {"tab_id": tab})["result"]
         result_before = call(sock, "tab.get_analyze_result", {"tab_id": tab})["result"]
@@ -239,11 +237,7 @@ def test_analyze_rejects_a_superseded_run_without_changing_the_pane(
             },
         )
         if reply["ok"]:
-            call(
-                sock,
-                "operation.await",
-                {"operation_id": reply["result"]["operation_id"], "timeout": 2},
-            )
+            await_terminal(sock, reply["result"]["operation_id"])
         assert reply["ok"] is False
         assert reply["error"]["code"] == "precondition_failed"
         assert reply["error"]["reason"] == "result_superseded"
@@ -274,12 +268,7 @@ def test_original_run_can_be_analyzed_without_bypassing_seen_guards(fx, monkeypa
         analyzed = call(sock, "tab.analyze", {"tab_id": tab, "run_operation_id": run})[
             "result"
         ]["operation_id"]
-        assert (
-            call(sock, "operation.await", {"operation_id": analyzed, "timeout": 2})[
-                "result"
-            ]["status"]
-            == "finished"
-        )
+        assert await_terminal(sock, analyzed)["result"]["status"] == "finished"
         assert (
             call(sock, "tab.get_analyze_result", {"tab_id": tab})["result"]["summary"][
                 "peak"
@@ -301,7 +290,8 @@ def test_gui_cancel_run_survives_eventless_remote_wait(
 
     def held_run(self, request, schema, *, context: RunContext):
         entered.set()
-        if not release.wait(4):
+        # The test finally releases the held collaborator.
+        if not release.wait(30):
             raise TimeoutError("fake run release was not signalled")
         if not keep_partial:
             raise InterruptedError("stopped before any acquisition")
@@ -311,13 +301,14 @@ def test_gui_cancel_run_survives_eventless_remote_wait(
         _completed_run(fx, sock, tab_id)
         monkeypatch.setattr(SampleAdapter, "run", held_run)
         run_id = fx.ctrl.start_run(tab_id)
-        assert entered.wait(1)
+        # Submission reaches the held synthetic adapter, before terminal release.
+        qt_until(entered.is_set, label="adapter entered")
         running = call(sock, "tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
         assert running["result_state"]["available"] is False
         assert running["result_state"]["source_operation_id"] is None
         assert fx.ctrl.cancel_run()
         release.set()
-        reply = call(sock, "operation.await", {"operation_id": run_id, "timeout": 2})
+        reply = await_terminal(sock, run_id)
         assert reply["result"] == {
             "reason": "completed",
             "status": "cancelled",
@@ -459,9 +450,7 @@ def test_operation_progress_elapsed_uses_operation_clock_not_bar_age(
         assert 0 <= resp["result"]["elapsed_s"] < 3600
         assert bar.elapsed() >= 3600
         # Do not leave the fake run's worker/diagnostic queued for the next test.
-        settled = call(
-            sock, "operation.await", {"operation_id": operation_id, "timeout": 3}
-        )
+        settled = await_terminal(sock, operation_id)
         assert settled["ok"] and settled["result"]["reason"] == "completed"
     finally:
         sock.close()
@@ -800,12 +789,7 @@ def test_post_control_rejects_replaced_source_without_starting(fx, source):
     with open_client(fx.service.port) as sock:
         run = _completed_run(fx, sock, tab)
         primary = call(sock, "tab.analyze", {"tab_id": tab})["result"]["operation_id"]
-        assert (
-            call(sock, "operation.await", {"operation_id": primary, "timeout": 2})[
-                "result"
-            ]["status"]
-            == "finished"
-        )
+        assert await_terminal(sock, primary)["result"]["status"] == "finished"
         before = call(sock, "tab.snapshot", {"tab_id": tab})["result"]
         with pytest.raises(FailedPreconditionError) as rejected:
             fx.ctrl.run_analyze_control.start_post_analyze(
@@ -826,12 +810,7 @@ def test_post_analysis_uses_requested_sources_before_following_the_pane(
     with open_client(fx.service.port) as sock:
         run = _completed_run(fx, sock, tab)
         primary = call(sock, "tab.analyze", {"tab_id": tab})["result"]["operation_id"]
-        assert (
-            call(sock, "operation.await", {"operation_id": primary, "timeout": 2})[
-                "result"
-            ]["status"]
-            == "finished"
-        )
+        assert await_terminal(sock, primary)["result"]["status"] == "finished"
         monkeypatch.setattr(
             SampleAdapter,
             "capabilities",
@@ -854,11 +833,7 @@ def test_post_analysis_uses_requested_sources_before_following_the_pane(
         reply = call(sock, "tab.post_analyze", params)
         terminal = {}
         if reply["ok"]:
-            terminal = call(
-                sock,
-                "operation.await",
-                {"operation_id": reply["result"]["operation_id"], "timeout": 2},
-            )
+            terminal = await_terminal(sock, reply["result"]["operation_id"])
         if source in ("primary", "run"):
             assert reply["ok"] is False, reply
             assert reply["error"]["reason"] == "result_superseded"

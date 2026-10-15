@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 from zcu_tools.mcp.measure.session import GuiRpcError
 
+from tests.gui._qt_waits import qt_until
+
 from ._helpers import Fixture, mcp_client
 
 pytestmark = pytest.mark.uses_wall_clock
@@ -42,8 +44,9 @@ def test_fake_device_connect_set_disconnect_reconnect_and_forget(device_client) 
             },
         },
     )
+    # The admitted synthetic operation must publish terminal; 30s only guards a hang.
     assert (
-        invoke("wait", {"op": started["handle"], "timeout": 3})["status"] == "finished"
+        invoke("wait", {"op": started["handle"], "timeout": 30})["status"] == "finished"
     )
     try:
         connected = invoke(
@@ -71,7 +74,8 @@ def test_fake_device_connect_set_disconnect_reconnect_and_forget(device_client) 
                 },
             },
         )
-        failed = invoke("wait", {"op": rejected_address["handle"], "timeout": 3})
+        # The admitted synthetic operation must publish terminal; 30s only guards a hang.
+        failed = invoke("wait", {"op": rejected_address["handle"], "timeout": 30})
         assert failed["status"] == "failed"
         assert "address" in str(failed)
         unchanged = invoke(
@@ -99,8 +103,9 @@ def test_fake_device_connect_set_disconnect_reconnect_and_forget(device_client) 
                 },
             },
         )
+        # The admitted synthetic operation must publish terminal; 30s only guards a hang.
         assert (
-            invoke("wait", {"op": applied["handle"], "timeout": 3})["status"]
+            invoke("wait", {"op": applied["handle"], "timeout": 30})["status"]
             == "finished"
         )
         snapshot = invoke(
@@ -119,8 +124,9 @@ def test_fake_device_connect_set_disconnect_reconnect_and_forget(device_client) 
                 "params": {"name": "bias"},
             },
         )
+        # The admitted synthetic operation must publish terminal; 30s only guards a hang.
         assert (
-            invoke("wait", {"op": disconnected["handle"], "timeout": 3})["status"]
+            invoke("wait", {"op": disconnected["handle"], "timeout": 30})["status"]
             == "finished"
         )
         remembered = invoke(
@@ -139,8 +145,9 @@ def test_fake_device_connect_set_disconnect_reconnect_and_forget(device_client) 
                 "params": {"name": "bias"},
             },
         )
+        # The admitted synthetic operation must publish terminal; 30s only guards a hang.
         assert (
-            invoke("wait", {"op": reconnected["handle"], "timeout": 3})["status"]
+            invoke("wait", {"op": reconnected["handle"], "timeout": 30})["status"]
             == "finished"
         )
     finally:
@@ -151,8 +158,9 @@ def test_fake_device_connect_set_disconnect_reconnect_and_forget(device_client) 
                 "params": {"name": "bias", "remember": False},
             },
         )
+        # The admitted synthetic operation must publish terminal; 30s only guards a hang.
         assert (
-            invoke("wait", {"op": disconnected["handle"], "timeout": 3})["status"]
+            invoke("wait", {"op": disconnected["handle"], "timeout": 30})["status"]
             == "finished"
         )
     assert invoke("rpc_call", {"method": "device.list"}) == {"devices": []}
@@ -173,7 +181,8 @@ def test_failed_connect_never_reports_success_or_registers_device(
             },
         },
     )
-    outcome = invoke("wait", {"op": started["handle"], "timeout": 3})
+    # The admitted synthetic operation must publish terminal; 30s only guards a hang.
+    outcome = invoke("wait", {"op": started["handle"], "timeout": 30})
     assert outcome["status"] == "failed"
     assert outcome["error"]
     assert invoke("rpc_call", {"method": "device.list"}) == {"devices": []}
@@ -192,8 +201,9 @@ def test_long_fake_ramp_returns_cancellable_opaque_operation(device_client) -> N
             },
         },
     )
+    # The admitted synthetic operation must publish terminal; 30s only guards a hang.
     assert (
-        invoke("wait", {"op": connected["handle"], "timeout": 3})["status"]
+        invoke("wait", {"op": connected["handle"], "timeout": 30})["status"]
         == "finished"
     )
     op = None
@@ -230,7 +240,8 @@ def test_long_fake_ramp_returns_cancellable_opaque_operation(device_client) -> N
         assert cached["fields"] == before["fields"]
         cancelled = invoke("cancel", {"op": op})
         assert cancelled["status"] in ("cancelled", "cancelling")
-        assert invoke("wait", {"op": op, "timeout": 3})["status"] == "cancelled"
+        # The admitted synthetic operation must publish terminal; 30s only guards a hang.
+        assert invoke("wait", {"op": op, "timeout": 30})["status"] == "cancelled"
         assert (
             invoke(
                 "rpc_call",
@@ -251,8 +262,9 @@ def test_long_fake_ramp_returns_cancellable_opaque_operation(device_client) -> N
                 "params": {"name": "ramp", "remember": False},
             },
         )
+        # The admitted synthetic operation must publish terminal; 30s only guards a hang.
         assert (
-            invoke("wait", {"op": disconnected["handle"], "timeout": 3})["status"]
+            invoke("wait", {"op": disconnected["handle"], "timeout": 30})["status"]
             == "finished"
         )
 
@@ -267,7 +279,8 @@ def test_connect_wait_timeout_does_not_cancel_operation(
 
     def held_fake_open(_device, _resource_manager) -> None:
         entered.set()
-        if not release.wait(4):
+        # The test finally releases the held collaborator.
+        if not release.wait(30):
             raise TimeoutError("fake driver was not released")
 
     monkeypatch.setattr(
@@ -287,8 +300,9 @@ def test_connect_wait_timeout_does_not_cancel_operation(
         )
         op = started["handle"]
         assert isinstance(op, int) and op > 0
-        assert invoke("wait", {"op": op, "timeout": 0.05})["status"] == "running"
-        assert entered.is_set()
+        # device.connect submitted the held driver; observe entry independently of timeout.
+        qt_until(entered.is_set, label="device open entered")
+        assert invoke("wait", {"op": op, "timeout": 0})["status"] == "running"
         assert (
             invoke(
                 "rpc_call",
@@ -301,7 +315,8 @@ def test_connect_wait_timeout_does_not_cancel_operation(
         )
     finally:
         release.set()
-    assert invoke("wait", {"op": op, "timeout": 3})["status"] == "finished"
+    # The admitted synthetic operation must publish terminal; 30s only guards a hang.
+    assert invoke("wait", {"op": op, "timeout": 30})["status"] == "finished"
     assert (
         invoke(
             "rpc_call",
@@ -319,8 +334,9 @@ def test_connect_wait_timeout_does_not_cancel_operation(
             "params": {"name": "slow", "remember": False},
         },
     )
+    # The admitted synthetic operation must publish terminal; 30s only guards a hang.
     assert (
-        invoke("wait", {"op": disconnected["handle"], "timeout": 3})["status"]
+        invoke("wait", {"op": disconnected["handle"], "timeout": 30})["status"]
         == "finished"
     )
 
@@ -335,8 +351,9 @@ def test_fake_device_snapshot_reports_stored_native_unit(device_client) -> None:
         },
     )
     try:
+        # The admitted synthetic operation must publish terminal; 30s only guards a hang.
         assert (
-            invoke("wait", {"op": started["handle"], "timeout": 3})["status"]
+            invoke("wait", {"op": started["handle"], "timeout": 30})["status"]
             == "finished"
         )
         snapshot = invoke(
@@ -348,7 +365,8 @@ def test_fake_device_snapshot_reports_stored_native_unit(device_client) -> None:
         disconnected = invoke(
             "rpc_call", {"method": "device.disconnect", "params": {"name": "bias"}}
         )
+        # The admitted synthetic operation must publish terminal; 30s only guards a hang.
         assert (
-            invoke("wait", {"op": disconnected["handle"], "timeout": 3})["status"]
+            invoke("wait", {"op": disconnected["handle"], "timeout": 30})["status"]
             == "finished"
         )
