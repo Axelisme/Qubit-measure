@@ -4,7 +4,9 @@ import json
 import logging
 import multiprocessing
 import os
+from multiprocessing.connection import Connection
 from pathlib import Path
+from typing import IO, Never
 
 import pytest
 from filelock import FileLock
@@ -21,6 +23,7 @@ MANUAL = {"source": "manual", "kind": None, "run_id": None, "at": "now", "stderr
 
 
 def open_library(path: Path) -> ModuleLibrary:
+    (path.parent / "records").mkdir(exist_ok=True)
     return ModuleLibrary(
         path, ledger=path.parent / "records/ledger.jsonl", entry_id=ENTRY_ID
     )
@@ -31,7 +34,7 @@ def backups(path: Path) -> list[Path]:
 
 
 def mixed(path: Path, partition: str = "waveforms", bad: object = None) -> bytes:
-    partitions = {"waveforms": {"pi_half": GOOD}}
+    partitions: dict[str, dict[str, object]] = {"waveforms": {"pi_half": GOOD}}
     partitions.setdefault(partition, {})["bad"] = bad
     path.write_text(
         HEADER
@@ -166,12 +169,19 @@ def test_cleanup_io_failure_retains_disk_and_published_snapshot(
     original = mixed(path)
     real_open = Path.open
 
-    def fail_backup(self: Path, mode: str = "r", *args, **kwargs):
+    def fail_backup(
+        self: Path,
+        mode: str = "r",
+        buffering: int = -1,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> IO[str] | IO[bytes]:
         if "x" in mode:
             raise OSError("backup denied")
-        return real_open(self, mode, *args, **kwargs)
+        return real_open(self, mode, buffering, encoding, errors, newline)
 
-    def fail_replace(source, destination):
+    def fail_replace(source: str | Path, destination: str | Path) -> Never:
         raise OSError("replace denied")
 
     if failure == "backup":
@@ -211,7 +221,7 @@ def test_ledger_failures_are_not_entry_rejections(
     )
     original = path.read_bytes()
 
-    def reject_get(self: RecordsLedger, event_id: str):
+    def reject_get(self: RecordsLedger, event_id: str) -> Never:
         raise failure
 
     monkeypatch.setattr(RecordsLedger, "get", reject_get)
@@ -261,10 +271,12 @@ def test_commit_reread_cleans_disk_without_resurrecting_deleted_root(
         library.snapshot().get_waveform("Q1.waveforms.bad")
 
 
-def _locked_reader(path: Path, connection, operation: str) -> None:
+def _locked_reader(path: Path, connection: Connection, operation: str) -> None:
     try:
         library = None if operation == "open" else open_library(path)
         if operation == "commit":
+            if library is None:
+                raise RuntimeError("commit requires a bound library")
             with library.edit() as draft:
                 draft.set_waveform("Q1.waveforms.new", ConstWaveformCfg(length=0.2))
                 connection.send("ready")
@@ -276,6 +288,8 @@ def _locked_reader(path: Path, connection, operation: str) -> None:
             connection.send("attempting")
             if operation == "open":
                 library = open_library(path)
+            elif library is None:
+                raise RuntimeError("refresh/edit requires a bound library")
             elif operation == "refresh":
                 library.refresh()
             else:
