@@ -57,6 +57,9 @@ def exact_key(
             p.phase_mode,
             p.breakpoints_ns,
             p.envelope.identity,
+            None
+            if p.envelope.constant is None
+            else (complex(p.envelope.constant).real, complex(p.envelope.constant).imag),
         )
         for p in controls.pulses
     ]
@@ -68,6 +71,8 @@ def exact_key(
         scipy.__version__,
         model.identity,
         model.dynamics_identity,
+        model.hamiltonian_at is not None,
+        model.collapse_at is not None,
         basis.identity,
         basis.labels,
         pulse_keys,
