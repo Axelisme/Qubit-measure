@@ -1,15 +1,17 @@
 """Window form contracts through public native/GUI seams."""
 
 from collections.abc import Mapping
+from typing import Annotated, Literal
 
 import pytest
-from pydantic import JsonValue
+from pydantic import Field, JsonValue
 from qtpy.QtWidgets import QLineEdit
 from zcu_tools.gui.app.workflows.attachment import WorkflowAttachment
 from zcu_tools.gui.app.workflows.catalog import WorkflowCatalog
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
-from zcu_tools.gui.form import FormEnv, FormPath
+from zcu_tools.gui.form import FormEnv, FormModel, FormPath, FormPathError, Option
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.mcp.core.rpc import GuiInvocationError
 from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.resources.entry import (
     ResultEntry,
@@ -374,11 +376,15 @@ def test_describe_form_rpc_forwards_structural_expandability(
     assert isinstance(result, dict)
     children = result["description"]["children"]
     assert [(child["name"], child.get("can_expand")) for child in children] == [
-        ("scale", False), ("points", False), ("samples", True),
+        ("scale", False),
+        ("points", False),
+        ("samples", True),
     ]
 
 
-@pytest.mark.parametrize("path", [["unknown"], ["samples", "start"], ["samples", "values", "item"]])
+@pytest.mark.parametrize(
+    "path", [["unknown"], ["samples", "start"], ["samples", "values", "item"]]
+)
 @pytest.mark.parametrize("caller", ["rpc", "mcp"])
 def test_describe_form_separates_path_rejection_from_declaration_failure(
     attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
@@ -398,31 +404,158 @@ def test_describe_form_separates_path_rejection_from_declaration_failure(
                 raise ValueError("Synthetic declaration failure")
             return super().choices(env)
 
-    catalog_source.catalog = WorkflowCatalog((WorkflowAttachment(
-        step=sample_step, plan_model=FaultyPlan, knobs_model=TunablesForm,
-        plan_to_cfg=FaultyPlan.to_cfg, knobs_to_cfg=TunablesForm.to_cfg,
-        seed=context_seed,
-    ),))
+    catalog_source.catalog = WorkflowCatalog(
+        (
+            WorkflowAttachment(
+                step=sample_step,
+                plan_model=FaultyPlan,
+                knobs_model=TunablesForm,
+                plan_to_cfg=FaultyPlan.to_cfg,
+                knobs_to_cfg=TunablesForm.to_cfg,
+                seed=context_seed,
+            ),
+        )
+    )
     window.reload_source()
     before = window.plan_panel.state.input.data, window.plan_panel.state.base.data
     params = {"form": "plan", "path": path}
+    with pytest.raises(FormPathError) as core_error:
+        window.plan_panel.state.describe(tuple(path), window.plan_panel.env)
+    expected = (
+        "invalid_params",
+        str(core_error.value),
+        "form_path",
+        {"form_path": path},
+    )
     if caller == "rpc":
         reply = rpc("workflow.describe_form", params)
         assert reply["ok"] is False
         error = reply["error"]
-        assert isinstance(error, dict) and error["code"] == "invalid_params"
+        assert isinstance(error, dict)
+        assert (
+            error["code"],
+            error["message"],
+            error.get("reason"),
+            error.get("data"),
+        ) == expected
     else:
-        with pytest.raises(RuntimeError, match="invalid_params"):
+        with pytest.raises(GuiInvocationError) as mcp_error:
             mcp_tools["workflows_workflow_describe_form"]["handler"](params)
+        invocation = mcp_error.value
+        assert (
+            invocation.code,
+            invocation.message,
+            invocation.reason,
+            invocation.data,
+        ) == expected
     fail_declaration.append(True)
-    if caller == "rpc":
-        reply = rpc("workflow.describe_form", {"form": "plan", "path": []})
-        assert reply["ok"] is False
-        error = reply["error"]
-        assert isinstance(error, dict) and error["code"] == "controller_error"
-    else:
-        with pytest.raises(RuntimeError, match="controller_error"):
-            mcp_tools["workflows_workflow_describe_form"]["handler"]({"form": "plan", "path": []})
-    fail_declaration.clear()
-    assert (window.plan_panel.state.input.data, window.plan_panel.state.base.data) == before
+    try:
+        if caller == "rpc":
+            reply = rpc("workflow.describe_form", {"form": "plan", "path": []})
+            assert reply["ok"] is False
+            error = reply["error"]
+            assert isinstance(error, dict)
+            assert error["code"] == "controller_error"
+            assert "Synthetic declaration failure" in error["message"]
+            assert error.get("reason") is None
+            assert error.get("data") is None
+        else:
+            with pytest.raises(GuiInvocationError) as mcp_error:
+                mcp_tools["workflows_workflow_describe_form"]["handler"](
+                    {"form": "plan", "path": []}
+                )
+            invocation = mcp_error.value
+            assert invocation.code == "controller_error"
+            assert "Synthetic declaration failure" in invocation.message
+            assert invocation.reason is None
+            assert invocation.data is None
+    finally:
+        fail_declaration.clear()
+    assert (
+        window.plan_panel.state.input.data,
+        window.plan_panel.state.base.data,
+    ) == before
     assert window.controller.binding is None
+
+
+def test_describe_form_projects_fixed_branch_without_freezing_inner_selection(
+    attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
+    catalog_source: InjectedCatalog,
+    rpc: RpcRequest,
+) -> None:
+    window, _harness, _entry = attachment
+
+    class First(FormModel):
+        kind: Literal["first"] = "first"
+        value: float = 1.0
+
+    class Second(FormModel):
+        kind: Literal["second"] = "second"
+        value: float = 2.0
+
+    class Inline(FormModel):
+        kind: Literal["inline"] = "inline"
+        module: Annotated[First | Second, Field(discriminator="kind")] = Field(
+            default_factory=First
+        )
+
+    class FixedPlan(PlanForm):
+        source: Inline = Field(default_factory=Inline)
+        tag: Literal["only"] = "only"
+
+        @classmethod
+        def options(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[Option, ...]]:
+            return {
+                ("source",): (
+                    Option(
+                        "First",
+                        {"kind": "inline", "module": {"kind": "first"}},
+                        fields=Inline,
+                    ),
+                    Option(
+                        "Second",
+                        {"kind": "inline", "module": {"kind": "second"}},
+                        fields=Inline,
+                    ),
+                )
+            }
+
+    catalog_source.catalog = WorkflowCatalog(
+        (
+            WorkflowAttachment(
+                step=sample_step,
+                plan_model=FixedPlan,
+                knobs_model=TunablesForm,
+                plan_to_cfg=FixedPlan.to_cfg,
+                knobs_to_cfg=TunablesForm.to_cfg,
+                seed=context_seed,
+            ),
+        )
+    )
+    window.reload_source()
+    reply = rpc("workflow.describe_form", {"form": "plan", "path": []})
+    assert reply["ok"] is True
+    result = reply["result"]
+    assert isinstance(result, dict)
+    rows = {row["name"]: row for row in result["description"]["children"]}
+    assert (
+        rows["source"].get("selection_fixed"),
+        rows["source"]["fixed"],
+        rows["source"]["fixed_value"],
+    ) == (True, False, None)
+    assert (
+        rows["tag"].get("selection_fixed"),
+        rows["tag"]["fixed"],
+        rows["tag"]["fixed_value"],
+    ) == (True, True, "only")
+    reply = rpc("workflow.describe_form", {"form": "plan", "path": ["source"]})
+    assert reply["ok"] is True
+    result = reply["result"]
+    assert isinstance(result, dict)
+    description = result["description"]
+    assert description["target"]["selection_fixed"] is True
+    assert description["target"]["fixed"] is False
+    assert [
+        (row["name"], row["selection_fixed"], row["fixed"])
+        for row in description["children"]
+    ] == [("module", False, False)]
