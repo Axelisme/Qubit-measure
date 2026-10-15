@@ -216,7 +216,7 @@ def test_native_readout_conversion_binds_arb_to_explicit_capture(tmp_path, flat_
 
     first = tmp_path / "first"
     first.mkdir()
-    np.savez(first / "shape.npz", time=[0.0, 0.5], idata=[0.0, 1.0])
+    np.savez(first / "shape.npz", time=[0.0, 0.5], idata=[0.0, 1.0], qdata=[0.0, 0.0])
     context = core.CfgValidationContext(assets=ArbWaveformDatabase.info_at(first))
     raw = {
         "type": "readout/pulse",
