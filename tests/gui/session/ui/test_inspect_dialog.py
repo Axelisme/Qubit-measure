@@ -368,6 +368,51 @@ def test_dirty_close_requires_an_explicit_decision(session: _Session) -> None:
     assert written.gain == 0.9
 
 
+@pytest.mark.parametrize("action", ["switch", "close"])
+def test_unsaved_save_rejects_local_parse_errors_and_keeps_the_draft(
+    session: _Session, action: str
+) -> None:
+    presenter = RecordingDialogPresenter()
+    dialog = _open(session, presenter)
+    _select(dialog, PULSE)
+    name = _child(dialog, QLineEdit, "inspect.entry.name")
+    commit_text(name, "Q1.pulses.renamed")
+    commit_text(_child(dialog, QLineEdit, "form.input.freq"), "234")
+    gain = _child(dialog, QLineEdit, "form.input.gain")
+    commit_text(gain, "oops")
+    before = _library(session).document()
+    assert _status(dialog) == "Unsaved"
+    assert not _child(dialog, QPushButton, "inspect.entry.apply").isEnabled()
+
+    presenter.queue_save_discard_cancel("save")
+    if action == "switch":
+        _select(dialog, WAVEFORM)
+    else:
+        dialog.close()
+
+    assert _library(session).document() == before
+    assert dialog.isVisible()
+    assert _child(dialog, QLineEdit, "form.input.gain") is gain
+    assert gain.text() == "oops"
+    assert name.text() == "Q1.pulses.renamed"
+    assert _child(dialog, QLineEdit, "form.input.freq").text() == "234"
+    assert _status(dialog) == "Unsaved"
+    selected = _child(dialog, QTreeWidget, "inspect.library").currentItem()
+    assert selected is not None and selected.text(0) == PULSE
+
+    commit_text(gain, "0.6")
+    presenter.queue_save_discard_cancel("save")
+    if action == "switch":
+        _select(dialog, WAVEFORM)
+        assert _child(dialog, QLineEdit, "inspect.entry.name").text() == WAVEFORM
+    else:
+        dialog.close()
+        assert not dialog.isVisible()
+    written = _library(session).module_spec("Q1.pulses.renamed")
+    assert isinstance(written, PulseSpec)
+    assert (written.freq, written.gain, written.waveform) == (234.0, 0.6, WAVEFORM)
+
+
 def test_read_only_locks_inputs_but_keeps_scrolling_and_folds(
     session: _Session, qapp: QApplication
 ) -> None:
@@ -514,6 +559,39 @@ def test_template_switch_keeps_only_the_name_and_creates_the_new_template(
     )
     assert _status(dialog) == "Saved"
     presenter.assert_no_unexpected_messages()
+
+
+def test_create_rejects_local_parse_errors_and_keeps_the_draft(
+    session: _Session,
+) -> None:
+    presenter = RecordingDialogPresenter()
+    dialog = _open(session, presenter)
+    new = _new_dialog(dialog)
+    name = _child(new, QLineEdit, "inspect.new_entry.name")
+    name.clear()
+    _type(name, "Q1.pulses.my_pulse")
+    commit_text(_child(new, QLineEdit, "form.input.freq"), "321")
+    gain = _child(new, QLineEdit, "form.input.gain")
+    commit_text(gain, "0.7")
+    commit_text(gain, "oops")
+    before = _library(session).document()
+
+    _button(new, "Create").click()
+
+    assert _library(session).document() == before
+    assert new.isVisible()
+    assert _child(new, QLineEdit, "form.input.gain") is gain
+    assert gain.text() == "oops"
+    assert name.text() == "Q1.pulses.my_pulse"
+    assert _child(new, QLineEdit, "form.input.freq").text() == "321"
+
+    commit_text(gain, "0.8")
+    _button(new, "Create").click()
+    written = _library(session).module_spec("Q1.pulses.my_pulse")
+    assert isinstance(written, PulseSpec)
+    assert (written.freq, written.gain) == (321.0, 0.8)
+    assert not new.isVisible()
+    assert _child(dialog, QLineEdit, "inspect.entry.name").text() == name.text()
 
 
 def test_new_entry_rejects_a_name_taken_in_its_family(session: _Session) -> None:
