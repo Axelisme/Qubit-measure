@@ -204,3 +204,47 @@ def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
     assert [r.index for r in seen] == [0, 1]
     maxv = env.soccfg.get_maxv(1)
     assert seen[0].acquire.controls[0][0].gain == int(0.1 * maxv) / maxv
+
+
+@pytest.mark.parametrize(
+    "invalid", ["nan", "infinity", "overflow", "shape", "missing", "duplicate"]
+)
+@pytest.mark.parametrize("mode", ["integrated", "decimated"])
+def test_invalid_backend_signals_fail_public_acquire_and_allow_retry(invalid, mode):
+    from zcu_tools.core.simulation import ChannelSignals, RoundSignals
+
+    env = environment(std_adc=0, seed=45)
+    prog = program(env, reps=1, samples=4)
+    source = env.soc.binding.execute
+
+    def malformed(request):
+        shape = (1, 1, 2) if mode == "integrated" else (1, 1, 4, 2)
+        value = np.zeros(shape)
+        if invalid in ("nan", "infinity", "overflow"):
+            value.flat[0] = {"nan": np.nan, "infinity": np.inf, "overflow": 2.0**63}[
+                invalid
+            ]
+        elif invalid == "shape":
+            value = np.zeros((1, 2))
+        channels = (ChannelSignals(0, value),)
+        if invalid == "missing":
+            channels = ()
+        elif invalid == "duplicate":
+            channels = channels + channels
+        return RoundSignals(channels)
+
+    env.soc.binding.execute = malformed
+    acquire = prog.acquire if mode == "integrated" else prog.acquire_decimated
+    reason = (
+        "finite|int64"
+        if invalid in ("nan", "infinity", "overflow")
+        else "shape|channels"
+    )
+    with pytest.raises(ValueError, match=reason):
+        acquire(env.soc, progress=False)
+    failed_sequence = env.soc.binding.last_request.sequence
+    env.soc.binding.execute = source
+    result = acquire(env.soc, progress=False)
+    np.testing.assert_array_equal(result, 0)
+    np.testing.assert_array_equal(raw_of(prog), 0)
+    assert env.soc.binding.last_request.sequence == failed_sequence + 1
