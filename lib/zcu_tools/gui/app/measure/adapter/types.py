@@ -159,19 +159,6 @@ class RunRequest:
 
 
 @dataclass(frozen=True)
-class LoadDataRequest:
-    """Canonical result file path and current-source capture fixed for this Load.
-
-    data_path identifies the file consumed by the adapter. parameters contains
-    the point/library/storage and aliases observed when Load starts, or None
-    when no parameter context is installed. It never replaces native history.
-    """
-
-    data_path: str
-    parameters: ParameterContext | None
-
-
-@dataclass(frozen=True)
 class AnalyzeRequest(Generic[T_Result, T_AnalyzeParams]):
     """Inputs accepted for one primary analysis, independent of later session edits.
 

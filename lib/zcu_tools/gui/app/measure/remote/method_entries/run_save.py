@@ -47,8 +47,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Load an exact native result file and its original history into an "
             "already-open adapter tab. The tab "
             "then has a run result and can be analyzed without a SoC connection. "
-            "The native cfg remains part of the loaded result, not Form input. "
-            "analysis_error "
+            "Form input stays unchanged. cfg_issue is null when typed cfg is "
+            "available, or a readable reason when valid data loads without cfg. "
+            "Inspect reads the file's original raw cfg. analysis_error "
             "reports analysis preparation failure without undoing the load; "
             "has_analyze_params is false until preparation succeeds.",
             (

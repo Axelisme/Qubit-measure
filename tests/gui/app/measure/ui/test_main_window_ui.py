@@ -670,7 +670,7 @@ def test_main_window_load_data_dialog_calls_controller(
         tab_id="tab-1",
         data_path="/tmp/result.hdf5",
         result_type="Result",
-        has_cfg_snapshot=False,
+        cfg_issue="cfg unavailable",
         has_analyze_params=analysis_error is None,
         analysis_error=analysis_error,
     )

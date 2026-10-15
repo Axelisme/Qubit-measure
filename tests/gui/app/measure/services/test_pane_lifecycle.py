@@ -652,7 +652,7 @@ def test_load_capability_gate_rejects_concrete_disabled_adapter() -> None:
     class DisabledAdapter:
         capabilities = AdapterCapabilities(load_data=False)
 
-        def load(self, _request: object) -> object:
+        def restore(self, stored: object) -> object:
             return object()
 
     adapter = DisabledAdapter()
@@ -677,7 +677,7 @@ def test_guard_and_load_accept_enabled_concrete_adapter() -> None:
     class EnabledAdapter:
         capabilities = AdapterCapabilities(load_data=True)
 
-        def load(self, _request: object) -> object:
+        def restore(self, stored: object) -> object:
             return object()
 
     state.get_tab(tab_id).adapter = EnabledAdapter()  # type: ignore[assignment]

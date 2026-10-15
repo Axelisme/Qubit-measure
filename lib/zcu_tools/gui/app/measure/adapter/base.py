@@ -7,11 +7,11 @@ from inspect import signature
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, cast
 
-from zcu_tools.datafile import AnalysisDocument, RunMetadata
+from zcu_tools.datafile import AnalysisDocument, StoredRun
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.native_persistence import (
     PreparedRunData,
-    load_run_with_metadata,
+    RestoredRun,
     prepare_run_data,
 )
 from zcu_tools.experiment.records import RunRecord
@@ -20,7 +20,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalysisMode,
     AnalyzeRequest,
-    LoadDataRequest,
     NoAnalyzeParams,
     PostAnalyzeRequest,
     PostAnalyzeResultBase,
@@ -263,28 +262,28 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     def _validate_load_capability(cls, *, enabled: bool) -> None:
         """Require a declared loader, or forbid an override when loading is disabled."""
         # Loading is a capability gate, not a runtime probe. A concrete adapter
-        # may provide its own loader, or it may opt into BaseAdapter.load when the
+        # may provide its own loader, or it may opt into BaseAdapter.restore when the
         # experiment class can be constructed without arguments and exposes a
         # canonical callable loader. A disabled capability must not hide an
         # accidental adapter override.
         if enabled:
-            if not cls._is_method_implemented("load"):
+            if not cls._is_method_implemented("restore"):
                 exp_cls = getattr(cls, "exp_cls", None)
                 has_canonical_loader = isinstance(exp_cls, type) and (
                     _can_construct_without_args(exp_cls)
-                    and callable(getattr(exp_cls, "load", None))
+                    and callable(getattr(exp_cls, "from_stored", None))
                 )
                 if not has_canonical_loader:
                     raise TypeError(
                         f"{cls.__name__} declares load_data=True but has neither "
-                        "a concrete load() override nor a no-argument exp_cls with "
-                        "a callable canonical loader"
+                        "a concrete restore() override nor a no-argument exp_cls with "
+                        "a callable from_stored"
                     )
         else:
             cls._forbid_method(
-                "load",
+                "restore",
                 "declares load_data=False",
-                "remove load() or set load_data=True",
+                "remove restore() or set load_data=True",
             )
 
     # -- experiment-specific contract (subclass must fill) -----------------
@@ -470,32 +469,31 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         del req
         return cast(T_Result, self.exp_cls().run(cfg, context=context))
 
-    def load(self, req: LoadDataRequest) -> tuple[object, RunMetadata]:
-        """Read req.data_path as an exact native file using this core's spec.
+    def restore(self, stored: StoredRun) -> RestoredRun[T_Result]:
+        """Restore already-read native data through the core's from_stored contract.
 
-        Return the typed cfg/Result record and its full historical metadata.
-        req.parameters is the Load-time capture, not a replacement for file history.
-        Missing persistence declarations or required constructor arguments raise
-        NotImplementedError. Native validation raises ValueError; I/O and core
-        constructor failures propagate. No Labber fallback or history recapture.
+        stored contains validated generic data and original history, not current
+        form inputs. Return the adapter-owned record and explicit cfg diagnostic.
+        Missing from_stored or required constructor arguments raise
+        NotImplementedError. Invalid data raises ValueError; core constructor
+        failures propagate. No I/O, Labber fallback or history recapture occurs.
         """
         if not _can_construct_without_args(self.exp_cls):
             raise NotImplementedError(
                 f"{type(self).__name__} does not support loading native result files"
             )
         exp = self.exp_cls()
-        persistence_spec = getattr(exp, "persistence_spec", None)
-        if not callable(persistence_spec):
+        from_stored = getattr(exp, "from_stored", None)
+        if not callable(from_stored):
             raise NotImplementedError(
                 f"{type(self).__name__} does not support loading native result files"
             )
         try:
-            spec = exp.persistence_spec()
+            return exp.from_stored(stored)
         except NotImplementedError as exc:
             raise NotImplementedError(
                 f"{type(self).__name__} does not support loading native result files"
             ) from exc
-        return load_run_with_metadata(Path(req.data_path), spec=spec)
 
     def get_writeback_items(
         self, req: WritebackRequest[T_Result, T_AnalyzeResult]

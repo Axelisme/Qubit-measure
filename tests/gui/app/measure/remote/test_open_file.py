@@ -4,12 +4,13 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 import pytest
+from zcu_tools.datafile import StoredRun
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.native_persistence import RestoredRun
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
-    LoadDataRequest,
 )
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
@@ -17,7 +18,7 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
 )
 
-from tests.gui.app.measure._load_support import historical_metadata
+from tests.gui.app.measure._load_support import write_native_file
 from tests.gui.app.measure._reload_fakes import OldAdapter
 
 from ._helpers import Fixture, call, open_client, reset_inbox
@@ -31,7 +32,7 @@ class LoadedCfg(ExpCfgModel):
 
 @dataclass
 class LoadedResult:
-    data_path: str
+    gain: object
 
 
 class FileAdapter(OldAdapter):
@@ -39,18 +40,24 @@ class FileAdapter(OldAdapter):
         load_data=True, analysis=AnalysisMode.NONE
     )
 
-    def load(self, req: LoadDataRequest):
-        if req.data_path == "bad.h5":
-            raise ValueError("wrong experiment")
-        cfg = None if req.data_path == "no-cfg.h5" else LoadedCfg()
-        return RunRecord(
-            cfg=cfg, result=LoadedResult(req.data_path)
-        ), historical_metadata()
+    experiment_tag: ClassVar[str | None] = "test/load"
+
+    def restore(self, stored: StoredRun):
+        gain = stored.cfg.values["gain"]
+        cfg = None if gain == 2.0 else LoadedCfg()
+        return RestoredRun(
+            RunRecord(cfg=cfg, result=LoadedResult(gain)),
+            "cfg unavailable" if cfg is None else None,
+        )
 
 
 @pytest.fixture
-def app(qapp):
-    fx = Fixture(empty_project=True)
+def app(qapp, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    write_native_file(tmp_path / "saved.h5")
+    write_native_file(tmp_path / "no-cfg.h5", gain=2.0)
+    write_native_file(tmp_path / "bad.h5", tag="wrong/experiment")
+    fx = Fixture(empty_project=True, project_root=str(tmp_path))
     fx.ctrl.setup_control.new_entry(EntryRequest("fake_qubit"))
     fx.ctrl.setup_control.new_point(
         PointCreateRequest("working", "", CommandOrigin("gui"))
@@ -79,7 +86,7 @@ def test_open_file_loads_without_soc_with_result(app, path):
     assert fx.state.session_env.soc is None
     assert fx.state.get_tab(tab).run.result == RunRecord(
         cfg=None if path == "no-cfg.h5" else LoadedCfg(),
-        result=LoadedResult(path),
+        result=LoadedResult(2.0 if path == "no-cfg.h5" else 1.0),
     )
     snapshot = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0]
     assert snapshot["run_id"] is None

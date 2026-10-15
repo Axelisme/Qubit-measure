@@ -2,19 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.measure.remote.handlers.run_save import h_tab_load_data
-from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadTabResultOutcome
-from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
-
 from zcu_tools.datafile import StoredRun
 from zcu_tools.experiment.native_persistence import RestoredRun
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
+from zcu_tools.gui.app.measure.remote.handlers.run_save import h_tab_load_data
+from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadTabResultOutcome
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 from tests.gui._adapter_fakes import DummyAdapter
 from tests.gui.app.measure._load_support import write_native_file
@@ -125,7 +123,7 @@ def test_tab_load_data_dispatch_returns_serializable_outcome(analysis_error) -> 
         tab_id="tab-1",
         data_path="/tmp/result.hdf5",
         result_type="Result",
-        has_cfg_snapshot=True,
+        cfg_issue=None,
         has_analyze_params=analysis_error is None,
         analysis_error=analysis_error,
     )
@@ -146,7 +144,7 @@ def test_tab_load_data_dispatch_returns_serializable_outcome(analysis_error) -> 
         "tab_id": "tab-1",
         "data_path": "/tmp/result.hdf5",
         "result_type": "Result",
-        "has_cfg_snapshot": True,
+        "cfg_issue": None,
         "has_analyze_params": analysis_error is None,
         "source_kind": "loaded",
         "analysis_error": analysis_error,

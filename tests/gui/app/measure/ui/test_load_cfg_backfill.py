@@ -4,13 +4,13 @@ from typing import ClassVar
 import pytest
 from qtpy.QtCore import QMetaObject, Qt
 from qtpy.QtWidgets import QFileDialog, QPushButton, QTabWidget
-from zcu_tools.datafile import RunMetadata
+from zcu_tools.datafile import StoredRun
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.native_persistence import RestoredRun
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
-    LoadDataRequest,
 )
 from zcu_tools.gui.app.measure.app import _make_empty_ctx
 from zcu_tools.gui.app.measure.controller import Controller
@@ -26,7 +26,7 @@ from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
-from tests.gui.app.measure._load_support import historical_metadata
+from tests.gui.app.measure._load_support import write_native_file
 from tests.gui.app.measure._reload_fakes import Loader, OldAdapter
 from tests.gui.app.measure.remote._helpers import (
     call,
@@ -57,15 +57,22 @@ class LoadAdapter(OldAdapter):
         del ctx
         return Form(RuntimeCfg, {})
 
-    def load(
-        self, req: LoadDataRequest
-    ) -> tuple[RunRecord[RuntimeCfg, Result], RunMetadata]:
-        cfg = None if req.data_path.endswith("missing.hdf5") else RuntimeCfg(knob=42)
-        return RunRecord(cfg=cfg, result=Result(req.data_path)), historical_metadata()
+    experiment_tag: ClassVar[str | None] = "test/load"
+
+    def restore(self, stored: StoredRun) -> RestoredRun[RunRecord[RuntimeCfg, Result]]:
+        cfg = None if stored.cfg.values["gain"] == 2.0 else RuntimeCfg(knob=42)
+        return RestoredRun(
+            RunRecord(cfg=cfg, result=Result("native")),
+            "cfg unavailable" if cfg is None else None,
+        )
 
 
 @pytest.fixture
-def app(qapp, tmp_path):
+def app(qapp, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    write_native_file(tmp_path / "result.hdf5")
+    write_native_file(tmp_path / "missing.hdf5", gain=2.0)
+    write_native_file(tmp_path / "bad.hdf5")
     state = State(_make_empty_ctx())
     registry = Registry()
     registry.register("demo", LoadAdapter)
@@ -155,11 +162,11 @@ def test_failed_mcp_load_restores_non_neighbor_visible_tab(
     assert window.get_view_snapshot()["active_tab_id"] == focused
 
     def reject_load(
-        self: LoadAdapter, req: LoadDataRequest
-    ) -> RunRecord[RuntimeCfg, Result]:
+        self: LoadAdapter, stored: StoredRun
+    ) -> RestoredRun[RunRecord[RuntimeCfg, Result]]:
         raise LoadDataError("bad data", reason_code="invalid_data_file")
 
-    monkeypatch.setattr(LoadAdapter, "load", reject_load)
+    monkeypatch.setattr(LoadAdapter, "restore", reject_load)
     remote = RemoteControlAdapter(
         controller=ctrl,
         opts=ControlOptions(port=0),
@@ -196,7 +203,8 @@ def test_qt_load_status_reports_the_loaded_path(app, qapp, tmp_path, path):
     """Load shows results only, so the status names the file and nothing else."""
     _, window, _, _ = app
     selected = tmp_path / path
-    selected.touch()
+    if not selected.exists():
+        write_native_file(selected, gain=2.0 if path == "missing.hdf5" else 1.0)
     expected = f"Loaded data from {selected}"
     tab = window.findChild(ExpTabWidget)
     assert tab is not None

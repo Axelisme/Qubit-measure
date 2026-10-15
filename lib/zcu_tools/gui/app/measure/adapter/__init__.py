@@ -23,7 +23,6 @@ from .types import (
     AnalyzeResult,
     AnalyzeResultBase,
     ExperimentProtocol,
-    LoadDataRequest,
     ModuleWriteback,
     NoAnalysisResult,
     NoAnalyzeParams,

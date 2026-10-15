@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 from qtpy.QtCore import QCoreApplication
 from zcu_tools.device.fake import FakeDevice
+from zcu_tools.experiment.native_persistence import RestoredRun
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     ContextReadiness,
@@ -59,7 +60,7 @@ from tests.gui._controller_adapter import (
     RecordingAdapter,
     RecordingCfg,
 )
-from tests.gui.app.measure._load_support import historical_metadata
+from tests.gui.app.measure._load_support import write_native_file
 from tests.gui.app.measure.remote._helpers import _context_root
 
 # ---------------------------------------------------------------------------
@@ -358,7 +359,9 @@ def test_run_finished_calls_refresh_tab(cf):
 
 
 @pytest.mark.parametrize("source", ["run", "cancelled", "load"])
-def test_result_commit_survives_analysis_preparation_failure(cf, monkeypatch, source):
+def test_result_commit_survives_analysis_preparation_failure(
+    cf, monkeypatch, source, tmp_path
+):
     tab_id = cf.ctrl.new_tab("fake")
     adapter = cf.state.get_tab(tab_id).adapter
     monkeypatch.setattr(
@@ -372,9 +375,7 @@ def test_result_commit_survives_analysis_preparation_failure(cf, monkeypatch, so
 
     loaded = SimpleNamespace(cfg_snapshot=None)
     monkeypatch.setattr(adapter, "get_analyze_params", fail_params)
-    monkeypatch.setattr(
-        adapter, "load", lambda _request: (loaded, historical_metadata())
-    )
+    monkeypatch.setattr(adapter, "restore", lambda _stored: RestoredRun(loaded, None))
     cf.state.update_tab_analyze_param_instance(tab_id, object())
     facts = []
     cf.bus.subscribe(TabContentChangedPayload, facts.append)
@@ -412,7 +413,10 @@ def test_result_commit_survives_analysis_preparation_failure(cf, monkeypatch, so
             "Run result retained. Analysis preparation failed: analysis defaults unavailable",
         )
     else:
-        outcome = cf.ctrl.load_tab_result(tab_id, "loaded.hdf5")
+        path = tmp_path / "loaded.hdf5"
+        write_native_file(path)
+        monkeypatch.setattr(adapter, "experiment_tag", "test/load")
+        outcome = cf.ctrl.load_tab_result(tab_id, str(path))
         assert outcome.analysis_error == "analysis defaults unavailable"
         assert outcome.has_analyze_params is False
         expected_fact = TabContentFact.LOADED_RESULT_COMMITTED
@@ -561,6 +565,7 @@ class _LoadedAnalyzeParams:
 
 def test_load_tab_result_allows_unselected_context_without_soc_and_initializes_analyze(
     cf,
+    tmp_path,
 ):
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.set_context(
@@ -580,21 +585,23 @@ def test_load_tab_result_allows_unselected_context_without_soc_and_initializes_a
     from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
 
     adapter.capabilities = AdapterCapabilities(requires_soc=False, load_data=True)
-    adapter.load.return_value = (loaded, historical_metadata())
+    adapter.experiment_tag = "test/load"
+    adapter.restore.return_value = RestoredRun(loaded, None)
     adapter.get_analyze_params.return_value = _LoadedAnalyzeParams(threshold=0.7)
     cf.state.get_tab(tab_id).adapter = adapter
     cf.bus.emit.reset_mock()
 
-    outcome = cf.ctrl.load_tab_result(tab_id, "/tmp/loaded.hdf5")
+    path = tmp_path / "loaded.hdf5"
+    metadata = write_native_file(path)
+    outcome = cf.ctrl.load_tab_result(tab_id, str(path))
 
     assert cf.state.get_tab(tab_id).run.result is loaded
-    assert cf.state.get_tab(tab_id).run.source_path == "/tmp/loaded.hdf5"
+    assert cf.state.get_tab(tab_id).run.source_path == str(path)
     assert cf.state.get_tab(tab_id).analysis.params == _LoadedAnalyzeParams(
         threshold=0.7
     )
-    request = adapter.load.call_args.args[0]
-    assert request.data_path == "/tmp/loaded.hdf5"
-    assert not hasattr(request, "soc")
+    stored = adapter.restore.call_args.args[0]
+    assert stored.metadata == metadata
     assert outcome.has_analyze_params is True
     cf.bus.emit.assert_any_call(
         TabContentChangedPayload(tab_id, TabContentFact.LOADED_RESULT_COMMITTED)
