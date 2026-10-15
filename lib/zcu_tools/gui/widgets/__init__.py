@@ -12,6 +12,7 @@ from zcu_tools.gui.widgets.colours import (
     accent_colour,
     error_colour,
     mixed_colour,
+    reset_foreground,
     secondary_colour,
     set_foreground,
     success_colour,
@@ -37,6 +38,7 @@ __all__ = [
     "accent_colour",
     "secondary_colour",
     "set_foreground",
+    "reset_foreground",
     "mixed_colour",
     "widget_to_png_bytes",
 ]

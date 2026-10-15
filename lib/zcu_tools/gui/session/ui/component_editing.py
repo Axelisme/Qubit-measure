@@ -12,11 +12,10 @@ from typing import TYPE_CHECKING
 
 import yaml
 from pydantic import TypeAdapter, ValidationError
-from qtpy.QtGui import QPalette
 from qtpy.QtWidgets import QLabel
 
 from zcu_tools.format_version import YamlValue
-from zcu_tools.gui.widgets import error_colour, set_foreground
+from zcu_tools.gui.widgets import error_colour, reset_foreground, set_foreground
 from zcu_tools.resources.entry import FieldSpec, FieldValueKind, role_candidates
 
 if TYPE_CHECKING:
@@ -126,18 +125,16 @@ def show_error(label: QLabel, exc: BaseException, *, field: str | None = None) -
     summary = error_summary(exc)
     label.setText(summary if field is None else f"{field}: {summary}")
     label.setToolTip(str(exc))
-    set_red(label, red=True)
+    set_error_foreground(label, error=True)
     label.setVisible(True)
 
 
-def set_red(label: QLabel, *, red: bool) -> None:
-    """Use the theme error foreground when red is True, else restore the default."""
-    color = (
-        error_colour(label)
-        if red
-        else QPalette().color(QPalette.ColorGroup.Active, QPalette.ColorRole.WindowText)
-    )
-    set_foreground(label, color)
+def set_error_foreground(label: QLabel, *, error: bool) -> None:
+    """Apply the label's theme error colour, or restore inheritance when error is False."""
+    if error:
+        set_foreground(label, error_colour(label))
+    else:
+        reset_foreground(label)
 
 
 def _located(location: str, message: str) -> str:

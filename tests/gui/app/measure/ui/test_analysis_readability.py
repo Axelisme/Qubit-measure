@@ -1,10 +1,12 @@
 """Observable display-only contracts for analysis parameters and writeback."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QEvent
+from qtpy.QtGui import QColor
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -13,6 +15,7 @@ from qtpy.QtWidgets import (
     QLineEdit,
     QPushButton,
     QTabWidget,
+    QWidget,
 )
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -384,10 +387,13 @@ def test_writeback_semantic_foregrounds_refresh_with_owner_palette(
     scalar_ledger, qapp, name, colour_name
 ):
     from qtpy.QtGui import QColor, QPalette
-    from zcu_tools.gui import widgets
+    from zcu_tools.gui.widgets import accent_colour, secondary_colour
 
-    colour = getattr(widgets, colour_name, None)
-    assert callable(colour), f"{colour_name} must be public"
+    colours: dict[str, Callable[[QWidget], QColor]] = {
+        "secondary_colour": secondary_colour,
+        "accent_colour": accent_colour,
+    }
+    colour = colours[colour_name]
     widget, _ = scalar_ledger
     palette = widget.palette()
     palette.setColor(QPalette.ColorRole.Window, QColor("#353535"))
@@ -401,10 +407,8 @@ def test_writeback_semantic_foregrounds_refresh_with_owner_palette(
 
 
 def test_writeback_unavailable_reason_uses_owner_warning(qapp, window_palette):
-    from zcu_tools.gui import widgets
+    from zcu_tools.gui.widgets import warning_colour
 
-    colour = getattr(widgets, "warning_colour", None)
-    assert callable(colour), "warning_colour must be public"
     widget = WritebackWidget(MagicMock(), tab_id="t")
     try:
         widget.setPalette(window_palette)
@@ -414,7 +418,7 @@ def test_writeback_unavailable_reason_uses_owner_warning(qapp, window_palette):
         label = widget.findChild(QLabel, "writebackUnavailableReason")
         assert label is not None
         label.ensurePolished()
-        assert label.palette().color(label.foregroundRole()) == colour(widget)
+        assert label.palette().color(label.foregroundRole()) == warning_colour(widget)
     finally:
         widget.deleteLater()
         qapp.processEvents()

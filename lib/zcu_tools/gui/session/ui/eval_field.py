@@ -230,7 +230,7 @@ class EvalNumericField(QWidget):
                 self._ghost.setToolTip(
                     f"out of range [{self._minimum}, {self._maximum}]"
                 )
-                self._set_ghost_error_colour()
+                set_foreground(self._ghost, error_colour(self))
             else:
                 self._ghost.setText(text)
                 self._ghost.setToolTip("")
@@ -238,10 +238,7 @@ class EvalNumericField(QWidget):
         except Exception as exc:
             self._ghost.setText("= ?")
             self._ghost.setToolTip(str(exc))
-            self._set_ghost_error_colour()
-
-    def _set_ghost_error_colour(self) -> None:
-        set_foreground(self._ghost, error_colour(self))
+            set_foreground(self._ghost, error_colour(self))
 
     # ------------------------------------------------------------------
     # Context menu (right-click toggle)

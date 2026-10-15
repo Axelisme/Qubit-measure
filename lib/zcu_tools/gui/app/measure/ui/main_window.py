@@ -38,6 +38,7 @@ from zcu_tools.gui.widgets import (
     DialogPresenter,
     DialogRefStore,
     QtDialogPresenter,
+    reset_foreground,
     secondary_colour,
     set_foreground,
     warning_colour,
@@ -499,14 +500,10 @@ class MainWindow(QMainWindow):
             set_foreground(self._entry_label, secondary_colour(self))
         else:
             self._entry_label.setText(entry.name)
-            set_foreground(
-                self._entry_label, self.palette().color(self.foregroundRole())
-            )
+            reset_foreground(self._entry_label)
         if isinstance(target, SavedPoint):
             self._point_label.setText(target.point)
-            set_foreground(
-                self._point_label, self.palette().color(self.foregroundRole())
-            )
+            reset_foreground(self._point_label)
         else:
             self._point_label.setText("No point selected")
             set_foreground(

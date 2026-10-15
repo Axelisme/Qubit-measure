@@ -5,7 +5,6 @@ from collections.abc import Callable
 import pytest
 from qtpy.QtGui import QColor, QPalette
 from qtpy.QtWidgets import QApplication, QWidget
-from zcu_tools.gui import widgets
 
 
 def test_error_colour_uses_widget_window_lightness(qapp: QApplication) -> None:
@@ -71,16 +70,19 @@ def test_semantic_foregrounds_follow_window_palette(qapp, name):
 
 
 def test_set_foreground_updates_label_and_edit_text_without_changing_window(qapp):
-    apply = getattr(widgets, "set_foreground", None)
-    assert callable(apply), "set_foreground must be public"
+    from zcu_tools.gui.widgets import set_foreground
+
     widget = QWidget()
-    original_window = widget.palette().color(QPalette.ColorRole.Window)
-    colour = QColor("purple")
-    apply(widget, colour)
-    assert widget.palette().color(QPalette.ColorRole.WindowText) == colour
-    assert widget.palette().color(QPalette.ColorRole.Text) == colour
-    assert widget.palette().color(QPalette.ColorRole.Window) == original_window
-    widget.deleteLater()
+    try:
+        original_window = widget.palette().color(QPalette.ColorRole.Window)
+        colour = QColor("purple")
+        set_foreground(widget, colour)
+        assert widget.palette().color(QPalette.ColorRole.WindowText) == colour
+        assert widget.palette().color(QPalette.ColorRole.Text) == colour
+        assert widget.palette().color(QPalette.ColorRole.Window) == original_window
+    finally:
+        widget.deleteLater()
+        qapp.processEvents()
 
 
 @pytest.mark.parametrize(

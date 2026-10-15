@@ -874,8 +874,6 @@ class DeviceDialog(QDialog):
         return resolved_updates
 
     def _show_error(self, message: str) -> None:
-        # Palette foregrounds preserve the inherited Window used for theme selection.
-        self._add_status.setStyleSheet("")
         set_foreground(self._add_status, error_colour(self))
         self._add_status.setText(message)
 

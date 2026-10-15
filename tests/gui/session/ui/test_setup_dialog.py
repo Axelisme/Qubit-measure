@@ -736,10 +736,8 @@ def test_setup_error_uses_theme_foreground(qapp, window_palette, action):
 
 
 def test_setup_success_replaces_error_foreground(qapp, window_palette):
-    from zcu_tools.gui import widgets
+    from zcu_tools.gui.widgets import success_colour
 
-    colour = getattr(widgets, "success_colour", None)
-    assert callable(colour), "success_colour must be public"
     ctrl = _make_ctrl()
     ctrl.open_entry.side_effect = RuntimeError("entry failed")
     dialog = SetupDialog(ctrl)
@@ -762,7 +760,7 @@ def test_setup_success_replaces_error_foreground(qapp, window_palette):
         )
         entry_button(dialog, "Open").click()
         label.ensurePolished()
-        assert label.palette().color(label.foregroundRole()) == colour(dialog)
+        assert label.palette().color(label.foregroundRole()) == success_colour(dialog)
     finally:
         dialog.close()
         dialog.deleteLater()

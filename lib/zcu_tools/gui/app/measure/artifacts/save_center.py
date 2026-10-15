@@ -301,6 +301,12 @@ class ArtifactSaveCenter(QWidget):
     def changeEvent(self, a0: QEvent | None) -> None:
         super().changeEvent(a0)
         if a0 is not None and a0.type() == QEvent.Type.PaletteChange:
+            for ref, artifact_row in self._rows.items():
+                set_foreground(
+                    artifact_row.status,
+                    _STATUS_COLOR[self._snapshots[ref].status](self),
+                )
+            set_foreground(self._no_persistence_hint, secondary_colour(self))
             for row in self._output_rows.values():
                 set_foreground(row.error, error_colour(self))
 

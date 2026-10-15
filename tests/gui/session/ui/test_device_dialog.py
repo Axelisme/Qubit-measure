@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QEventLoop, QTimer
+from qtpy.QtGui import QColor
 from qtpy.QtWidgets import (
     QComboBox,
     QFormLayout,
@@ -1077,10 +1079,13 @@ def test_device_status_replaces_error_foreground(
     from dataclasses import replace
 
     from zcu_tools.device.fake import FakeDeviceInfo
-    from zcu_tools.gui import widgets
+    from zcu_tools.gui.widgets import secondary_colour, success_colour
 
-    colour = getattr(widgets, colour_name, None)
-    assert callable(colour), f"{colour_name} must be public"
+    colours: dict[str, Callable[[QWidget], QColor]] = {
+        "success_colour": success_colour,
+        "secondary_colour": secondary_colour,
+    }
+    colour = colours[colour_name]
     ctrl = _make_ctrl()
     ctrl.list_devices.return_value = [_entry("fd")]
     snapshot = _connected_snapshot("fd", FakeDeviceInfo(address="none"))

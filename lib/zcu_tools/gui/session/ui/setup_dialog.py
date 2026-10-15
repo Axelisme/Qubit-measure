@@ -39,6 +39,7 @@ from zcu_tools.gui.session.context_types import (
 from zcu_tools.gui.session.services.project_settings import ConnectionPreferences
 from zcu_tools.gui.widgets import (
     error_colour,
+    reset_foreground,
     secondary_colour,
     set_foreground,
     success_colour,
@@ -622,9 +623,7 @@ class SetupDialog(QDialog):
         description = self._point_descriptions[current.data(Qt.ItemDataRole.UserRole)]
         if description:
             self._selected_description.setText(f"Description: {description}")
-            set_foreground(
-                self._selected_description, self.palette().color(self.foregroundRole())
-            )
+            reset_foreground(self._selected_description)
         else:
             self._selected_description.setText("No description")
             set_foreground(self._selected_description, secondary_colour(self))
