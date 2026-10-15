@@ -6,10 +6,10 @@ from typing import Any
 
 import pytest
 from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
-from zcu_tools.mcp.measure import tools_recipes
 
 from ._recipe_actual_support import cfg_value
 from ._recipe_support import PNG, ExecutionGui, recipe_client
+from ._recipe_sync_support import start_recipe_at, wait_for_event
 from ._support import full_execution_reply, make_client
 
 
@@ -304,7 +304,6 @@ def test_run_start_failure_preserves_confirmed_rejection_or_ambiguity(
 ):
     gui = ExecutionGui()
     pending = Event()
-    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     with recipe_client(tmp_path, gui) as client:
         if receipt in {"handler_timeout", "internal", "not_holder", "busy"}:
             code = {
@@ -335,14 +334,17 @@ def test_run_start_failure_preserves_confirmed_rejection_or_ambiguity(
                 return None
 
             monkeypatch.setattr(client.transport, "send_line", send)
-        initial = client.call("pipeline", {"frequency_mhz": 6020.0})
-        execution = initial.data["execution"]
+        admitted = client.context.session.recipes.start(
+            client.context, "pipeline", {"frequency_mhz": 6020.0}
+        )
+        execution = admitted.snapshot().execution
         if receipt == "lost":
-            assert pending.wait(1)
+            wait_for_event(pending, "Run start must be sent before disconnect")
             client.transport.close()
             assert client.transport.on_closed is not None
             client.transport.on_closed(None)
-        completed = client.call("wait", {"execution": execution, "timeout": 2})
+        # Released work must reach a handoff; timeout only guards deadlock.
+        completed = client.call("wait", {"execution": execution, "timeout": 30})
         assert completed.data["status"] == "failed", completed.data
         before = len(client.transport.sent)
         summary = client.call("status", {"execution": execution})
@@ -368,14 +370,12 @@ def test_unconfirmed_run_receipt_stays_unknown_until_the_original_start_returns(
     def respond(method, params):
         if method == "tab.run_start":
             pending.set()
-            assert release.wait(2)
+            wait_for_event(release, "Test must release the admitted RPC")
         return gui(method, params)
 
-    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     with recipe_client(tmp_path, respond) as client:
         try:
-            initial = client.call("pipeline", {"frequency_mhz": 6020.0})
-            assert pending.wait(1)
+            initial = start_recipe_at(client, pending, {"frequency_mhz": 6020.0})
             execution = initial.data["execution"]
             before = len(client.transport.sent)
             summary = client.call("status", {"execution": execution})
@@ -385,7 +385,8 @@ def test_unconfirmed_run_receipt_stays_unknown_until_the_original_start_returns(
             assert full["run_start"]["status"] == "unknown"
             assert len(client.transport.sent) == before
             release.set()
-            completed = client.call("wait", {"execution": execution, "timeout": 2})
+            # Released work must reach a handoff; timeout only guards deadlock.
+            completed = client.call("wait", {"execution": execution, "timeout": 30})
             assert completed.data["status"] == "awaiting_answer", completed.data
             confirmed = client.call("status", {"execution": execution})
             assert confirmed["steps"]["run"] == {
@@ -423,14 +424,12 @@ def test_unconfirmed_analysis_start_reports_its_phase_without_new_reads(
     def respond(method, params):
         if method == "tab.analyze":
             pending.set()
-            assert release.wait(2)
+            wait_for_event(release, "Test must release the admitted RPC")
         return gui(method, params)
 
-    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     with recipe_client(tmp_path, respond) as client:
         try:
-            initial = client.call("pipeline", {"frequency_mhz": 6020.0})
-            assert pending.wait(1)
+            initial = start_recipe_at(client, pending, {"frequency_mhz": 6020.0})
             execution = initial.data["execution"]
             before = len(client.transport.sent)
             summary = client.call("status", {"execution": execution})
@@ -442,7 +441,8 @@ def test_unconfirmed_analysis_start_reports_its_phase_without_new_reads(
             assert summary["question_items"] is None
             assert len(client.transport.sent) == before
             release.set()
-            question = client.call("wait", {"execution": execution, "timeout": 2})
+            # Released work must reach a handoff; timeout only guards deadlock.
+            question = client.call("wait", {"execution": execution, "timeout": 30})
             assert question.data["status"] == "awaiting_answer", question.data
             assert question.data["steps"]["analysis"]["primary"]["status"] == "finished"
             assert [method for method, _ in client.transport.sent].count(
@@ -475,7 +475,8 @@ def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
         assert question.data["status"] == "awaiting_answer", question.data
         execution = question.data["execution"]
         client.call("answer", {"recipe": execution, "decision": "skipped"})
-        completed = client.call("wait", {"execution": execution, "timeout": 2})
+        # Released work must reach a handoff; timeout only guards deadlock.
+        completed = client.call("wait", {"execution": execution, "timeout": 30})
         assert completed.data["status"] == "finished", completed.data
         before = len(client.transport.sent)
         summary = client.call("status", {"execution": execution})
@@ -643,18 +644,18 @@ def test_recipe_connection_loss_retains_known_prefix_without_reconnecting(
 
     monkeypatch.setattr(client.transport, "send_line", send)
     monkeypatch.setattr(client.context.bridge, "connect", unexpected_connect)
-    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     try:
         initial = full_execution_reply(
-            client, client.call("pipeline", {"frequency_mhz": 6000.0})
+            client, start_recipe_at(client, pending, {"frequency_mhz": 6000.0})
         )
-        assert pending.wait(1)
         client.transport.close()
         assert client.transport.on_closed is not None
         client.transport.on_closed(None)
         execution = initial.data["execution"]
         terminal = full_execution_reply(
-            client, client.call("wait", {"execution": execution, "timeout": 2})
+            # Released work must reach a handoff; timeout only guards deadlock.
+            client,
+            client.call("wait", {"execution": execution, "timeout": 30}),
         )
         assert terminal.data["status"] == "failed"
         assert terminal.data["error"]["reason"] == "connection_lost"

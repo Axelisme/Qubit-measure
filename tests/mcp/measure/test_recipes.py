@@ -14,6 +14,7 @@ from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._recipe_actual_support import cfg_value
 from ._recipe_support import PNG, ExecutionGui, recipe_client
+from ._recipe_sync_support import cancel_while_rpc_held, start_recipe_at, wait_for_event
 from ._support import full_execution_reply, make_client
 
 RAW_REPORT = SaveReport(
@@ -73,33 +74,21 @@ def test_lookback_initial_wait_returns_while_the_same_execution_continues(
     gui = ExecutionGui()
     run_waiting = Event()
     release_run = Event()
-    returned = Event()
-    replies: list[ToolReply] = []
 
     def respond(method, params):
         if method == "operation.await" and params["operation_id"] == 71:
             run_waiting.set()
-            if not release_run.wait(0.02):
-                return {"reason": "timeout"}
+            wait_for_event(release_run, "Test must release the original Run await")
         return gui(method, params)
 
     client = make_client(tmp_path, respond)
-    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
-
-    def call_recipe():
-        replies.append(
-            full_execution_reply(
-                client, client.call("pipeline", {"frequency_mhz": 6020.0})
-            )
-        )
-        returned.set()
-
-    caller = Thread(target=call_recipe)
-    caller.start()
+    # Exercise the tool's timeout branch without relying on worker scheduling speed.
+    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0)
     try:
-        assert run_waiting.wait(1)
-        assert returned.wait(1), "Initial wait must not wait for Run completion"
-        initial = replies[0].data
+        returned = client.call("pipeline", {"frequency_mhz": 6020.0})
+        wait_for_event(run_waiting, "Original Run must reach operation.await")
+        assert returned.data["status"] == "running"
+        initial = full_execution_reply(client, returned).data
         assert initial["status"] == "running"
         execution = initial["execution"]
         initial["actual"].clear()
@@ -114,7 +103,9 @@ def test_lookback_initial_wait_returns_while_the_same_execution_continues(
         assert len(client.transport.sent) == before
         release_run.set()
         completed = full_execution_reply(
-            client, client.call("wait", {"execution": execution, "timeout": 2})
+            # Released Run must reach the question; timeout only guards deadlock.
+            client,
+            client.call("wait", {"execution": execution, "timeout": 30}),
         )
         assert completed.data["status"] == "awaiting_answer", completed.data
         assert completed.data["run_op"] == status["run_op"]
@@ -128,9 +119,7 @@ def test_lookback_initial_wait_returns_while_the_same_execution_continues(
         assert methods.count("tab.analyze") == 1
     finally:
         release_run.set()
-        caller.join(2)
         client.context.session.close()
-    assert not caller.is_alive()
 
 
 @pytest.fixture
@@ -236,9 +225,11 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(
     assert next_handoff.data["execution"] == execution
     assert next_handoff.data["question_items"] == ("trigger_offset",)
     assert not next_handoff.data["writeback"]["receipts"]
-    assert writeback_read.wait(2), "Recipe must resume after interactive analysis"
+    wait_for_event(writeback_read, "Recipe must resume after interactive analysis")
     finished = full_execution_reply(
-        client, client.call("wait", {"execution": execution, "timeout": 2})
+        # Released work must reach a handoff; timeout only guards deadlock.
+        client,
+        client.call("wait", {"execution": execution, "timeout": 30}),
     )
     assert finished.data["status"] == "awaiting_answer", finished.data
     assert finished.data["analysis"]["execution"] == analysis_execution
@@ -268,11 +259,10 @@ def test_session_close_drains_recipe_work_and_rejects_new_admission(
             and params["operation_id"] == held_op
         ):
             pending.set()
-            assert disconnected.wait(2), "Session must disconnect before joining"
+            wait_for_event(disconnected, "Test must release the admitted RPC")
         return gui(method, params)
 
     client = make_client(tmp_path, respond)
-    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     close_transport = client.transport.close
 
     def disconnect():
@@ -281,8 +271,7 @@ def test_session_close_drains_recipe_work_and_rejects_new_admission(
 
     monkeypatch.setattr(client.transport, "close", disconnect)
     try:
-        initial = client.call("pipeline", {"frequency_mhz": 6020.0})
-        assert pending.wait(1)
+        initial = start_recipe_at(client, pending, {"frequency_mhz": 6020.0})
         client.context.session.close()
         before = len(client.transport.sent)
         result = client.call(
@@ -322,20 +311,20 @@ def test_lookback_cancel_latches_one_control_and_stops_after_original_run(
         return gui(method, params)
 
     client = make_client(tmp_path, respond)
-    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     try:
         initial = full_execution_reply(
-            client, client.call("pipeline", {"frequency_mhz": 6020.0})
+            client, start_recipe_at(client, running, {"frequency_mhz": 6020.0})
         )
         execution = initial.data["execution"]
-        assert running.wait(1)
         started = client.call("status", {"execution": execution})
         cancelled = client.call("cancel", {"execution": execution})
         assert cancelled.data["cancel_requested"]
         assert cancelled.data["execution"] == execution
         client.call("cancel", {"op": started["run_op"]})
         terminal = full_execution_reply(
-            client, client.call("wait", {"execution": execution, "timeout": 2})
+            # Released work must reach a handoff; timeout only guards deadlock.
+            client,
+            client.call("wait", {"execution": execution, "timeout": 30}),
         )
         assert terminal.data["status"] == "cancelled"
         assert terminal.data["run_outcome"]["status"] == "cancelled"
@@ -380,13 +369,11 @@ def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
         return reply
 
     client = make_client(tmp_path, respond)
-    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     try:
         initial = full_execution_reply(
-            client, client.call("pipeline", {"frequency_mhz": 6020.0})
+            client, start_recipe_at(client, running, {"frequency_mhz": 6020.0})
         )
         execution = initial.data["execution"]
-        assert running.wait(1)
         started = client.call("status", {"execution": execution})
         early = client.call("finish_early", {"op": started["run_op"]})
         assert early.data == {
@@ -404,7 +391,9 @@ def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
             client.call("cancel", {"execution": execution})
         release_run.set()
         result = full_execution_reply(
-            client, client.call("wait", {"execution": execution, "timeout": 2})
+            # Released work must reach a handoff; timeout only guards deadlock.
+            client,
+            client.call("wait", {"execution": execution, "timeout": 30}),
         )
         assert result.data["status"] == (
             "awaiting_answer" if expected == "finished" else expected
@@ -462,7 +451,7 @@ def admitted_raw_save(tmp_path, monkeypatch, request):
     def respond(method, params):
         if method == "tab.save_data":
             saving.set()
-            assert release_save.wait(2)
+            wait_for_event(release_save, "Test must release the admitted RPC")
         reply = gui(method, params)
         return (
             expected_report
@@ -471,12 +460,10 @@ def admitted_raw_save(tmp_path, monkeypatch, request):
         )
 
     client = make_client(tmp_path, respond)
-    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     try:
         initial = full_execution_reply(
-            client, client.call("pipeline", {"frequency_mhz": 6020.0})
+            client, start_recipe_at(client, saving, {"frequency_mhz": 6020.0})
         )
-        assert saving.wait(1)
         yield (
             client,
             initial.data["execution"],
@@ -515,7 +502,9 @@ def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
     assert cancelled.data["cancel_requested"]
     release_save.set()
     final = full_execution_reply(
-        client, client.call("wait", {"execution": execution, "timeout": 2})
+        # Released work must reach a handoff; timeout only guards deadlock.
+        client,
+        client.call("wait", {"execution": execution, "timeout": 30}),
     )
     assert not final.is_error  # Successful query, even when execution failed.
     assert final.data["status"] == "cancelled"
@@ -579,7 +568,9 @@ def test_recipe_cancel_after_analysis_admission_joins_the_true_outcome(
         assert cancelled.data["cancel_requested"]
         assert cancelled.data["gui_cancel"]["status"] == "requested"
         terminal = full_execution_reply(
-            client, client.call("wait", {"execution": execution, "timeout": 2})
+            # Released work must reach a handoff; timeout only guards deadlock.
+            client,
+            client.call("wait", {"execution": execution, "timeout": 30}),
         )
         assert terminal.data["phase"] == "terminal"
         assert terminal.data["status"] == outcome
@@ -630,12 +621,10 @@ def test_recipe_cancel_delegates_to_the_existing_analysis_owner(
         return gui(method, params)
 
     client = make_client(tmp_path, respond)
-    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     try:
         initial = full_execution_reply(
-            client, client.call("pipeline", {"frequency_mhz": 6020.0})
+            client, start_recipe_at(client, analyzing, {"frequency_mhz": 6020.0})
         )
-        assert analyzing.wait(1)
         execution = initial.data["execution"]
         state = client.call("status", {"execution": execution})
         key = "execution" if selector == "execution" else "op"
@@ -649,7 +638,9 @@ def test_recipe_cancel_delegates_to_the_existing_analysis_owner(
         assert cancelled.data["gui_cancel"]["status"] == "requested"
         client.call("cancel", {"execution": execution})
         terminal = full_execution_reply(
-            client, client.call("wait", {"execution": execution, "timeout": 2})
+            # Released work must reach a handoff; timeout only guards deadlock.
+            client,
+            client.call("wait", {"execution": execution, "timeout": 30}),
         )
         assert terminal.data["status"] == "cancelled"
         assert terminal.data["analysis"]["status"] == "cancelled"
@@ -678,7 +669,6 @@ def test_recipe_cancel_blocks_the_next_phase_while_an_admitted_read_finishes(
     gui = ExecutionGui()
     pending = Event()
     release = Event()
-    control_replies = []
 
     def respond(method, params):
         at_boundary = method == pending_method and (
@@ -688,42 +678,22 @@ def test_recipe_cancel_blocks_the_next_phase_while_an_admitted_read_finishes(
         )
         if at_boundary:
             pending.set()
-            assert release.wait(2)
+            wait_for_event(release, "Test must release the admitted RPC")
         if method == "operation.cancel":
             return {"status": "finished"}
         return gui(method, params)
 
     client = make_client(tmp_path, respond)
-    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
-    controller = None
     try:
         initial = full_execution_reply(
-            client, client.call("pipeline", {"frequency_mhz": 6020.0})
+            client, start_recipe_at(client, pending, {"frequency_mhz": 6020.0})
         )
-        assert pending.wait(1)
         execution = initial.data["execution"]
-        controller = Thread(
-            target=lambda: control_replies.append(
-                client.call("cancel", {"execution": execution})
-            )
-        )
-        controller.start()
-        state = client.call("status", {"execution": execution})
-        for _ in range(100):
-            state = client.call("status", {"execution": execution})
-            if state["cancel_requested"]:
-                break
-            release.wait(0.01)
-        assert state["cancel_requested"]
-        assert forbidden_method not in [method for method, _ in client.transport.sent]
-        release.set()
-        controller.join(2)
-        assert not controller.is_alive()
-        # The worker may consume the one-shot intent before the control reply.
-        assert control_replies[0].data["execution"] == execution
-        assert not control_replies[0].is_error
+        control_reply = cancel_while_rpc_held(client, execution, release)
+        assert control_reply.data["execution"] == execution
+        assert not control_reply.is_error
         terminal = full_execution_reply(
-            client, client.call("wait", {"execution": execution, "timeout": 2})
+            client, client.call("wait", {"execution": execution, "timeout": 30})
         )
         assert terminal.data["status"] == "cancelled"
         assert not terminal.data["cancel_requested"]
@@ -733,8 +703,6 @@ def test_recipe_cancel_blocks_the_next_phase_while_an_admitted_read_finishes(
         assert terminal.data["raw_save"] == asdict(RAW_REPORT)
     finally:
         release.set()
-        if controller is not None:
-            controller.join(2)
         client.context.session.close()
 
 
@@ -757,7 +725,7 @@ def test_recipe_control_reaches_the_original_operation_after_a_late_receipt(
     def respond(method, params):
         if method == method_pending:
             pending.set()
-            assert release.wait(2)
+            wait_for_event(release, "Test must release the admitted RPC")
         if method == "operation.cancel":
             assert params == {"operation_id": wire_op}
             stopped.set()
@@ -771,12 +739,10 @@ def test_recipe_control_reaches_the_original_operation_after_a_late_receipt(
         return gui(method, params)
 
     client = make_client(tmp_path, respond)
-    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     try:
         initial = full_execution_reply(
-            client, client.call("pipeline", {"frequency_mhz": 6020.0})
+            client, start_recipe_at(client, pending, {"frequency_mhz": 6020.0})
         )
-        assert pending.wait(1)
         execution = initial.data["execution"]
         for _ in range(2):
             reply = client.call(control, {"execution": execution})
@@ -784,7 +750,9 @@ def test_recipe_control_reaches_the_original_operation_after_a_late_receipt(
         assert not stopped.is_set()
         release.set()
         terminal = full_execution_reply(
-            client, client.call("wait", {"execution": execution, "timeout": 2})
+            # Released work must reach a handoff; timeout only guards deadlock.
+            client,
+            client.call("wait", {"execution": execution, "timeout": 30}),
         )
         assert stopped.is_set()
         assert terminal.data["status"] == (
@@ -823,19 +791,18 @@ def test_recipe_cancel_during_preparation_keeps_the_missing_parameter_handoff(
     def respond(method, params):
         if method == "tab.edit_cfg":
             pending.set()
-            assert release.wait(2)
+            wait_for_event(release, "Test must release the admitted RPC")
         return gui(method, params)
 
     client = make_client(tmp_path, respond)
-    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     try:
-        initial = client.call("pipeline", {})
-        assert pending.wait(1)
+        initial = start_recipe_at(client, pending, {})
         execution = initial.data["execution"]
         cancelled = client.call("cancel", {"execution": execution})
         assert cancelled.data["cancel_requested"]
         release.set()
-        terminal = client.call("wait", {"execution": execution, "timeout": 2})
+        # Released work must reach a handoff; timeout only guards deadlock.
+        terminal = client.call("wait", {"execution": execution, "timeout": 30})
         assert terminal.data["status"] == "needs_parameters"
         assert terminal.data["cancel_requested"]
         assert terminal.data["tab"] == "t"
@@ -877,45 +844,27 @@ def test_recipe_cancel_during_admitted_writeback_preserves_result_and_intent(
     gui = ExecutionGui()
     reading = Event()
     release = Event()
-    controller = None
-    control_replies: list[ToolReply] = []
 
     def respond(method, params):
         if method == "tab.writeback_preview":
             reading.set()
-            assert release.wait(2)
+            wait_for_event(release, "Test must release the admitted RPC")
         if method == "operation.cancel":
             assert params == {"operation_id": 93}
             return {"status": "finished"}
         return gui(method, params)
 
     client = make_client(tmp_path, respond)
-    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     try:
         initial = full_execution_reply(
-            client, client.call("pipeline", {"frequency_mhz": 6020.0})
+            client, start_recipe_at(client, reading, {"frequency_mhz": 6020.0})
         )
-        assert reading.wait(1)
         execution = initial.data["execution"]
-        controller = Thread(
-            target=lambda: control_replies.append(
-                client.call("cancel", {"execution": execution})
-            )
-        )
-        controller.start()
-        for _ in range(100):
-            if client.call("status", {"execution": execution})["cancel_requested"]:
-                break
-            release.wait(0.01)
-        else:
-            pytest.fail("Cancel must latch before the admitted preview returns")
-        release.set()
-        controller.join(2)
-        assert not controller.is_alive()
-        assert control_replies[0].data["execution"] == execution
-        assert control_replies[0].data["gui_cancel"]["status"] == "not_needed"
+        control_reply = cancel_while_rpc_held(client, execution, release)
+        assert control_reply.data["execution"] == execution
+        assert control_reply.data["gui_cancel"]["status"] == "not_needed"
         terminal = full_execution_reply(
-            client, client.call("wait", {"execution": execution, "timeout": 2})
+            client, client.call("wait", {"execution": execution, "timeout": 30})
         )
         assert terminal.data["status"] == "cancelled"
         assert not terminal.data["cancel_requested"]
@@ -927,8 +876,6 @@ def test_recipe_cancel_during_admitted_writeback_preserves_result_and_intent(
         assert methods.count("operation.cancel") == 1
     finally:
         release.set()
-        if controller is not None:
-            controller.join(2)
         client.context.session.close()
 
 
