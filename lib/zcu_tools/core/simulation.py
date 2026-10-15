@@ -18,15 +18,32 @@ AcquisitionMode = Literal["integrated", "decimated"]
 
 
 @dataclass(frozen=True)
+class PulseEnvelope:
+    """Owned immutable signed complex envelope, continuously linearly interpolated.
+
+    Attributes:
+        sample_us: Strictly increasing local times in us from pulse start. These
+            are the actual waveform sample axis, not solver integration steps.
+        values: Dimensionless complex DAC amplitudes at sample_us, preserving
+            original scale and sign. No peak normalization is applied. Interpolate
+            real and imaginary parts linearly; hold the final sample through pulse
+            end and use zero outside the event. Gain is applied separately.
+    """
+
+    sample_us: tuple[float, ...]
+    values: tuple[complex, ...]
+
+
+@dataclass(frozen=True)
 class PulseEvent:
-    """One constant generator pulse in a single execution's numeric timeline.
+    """One generator pulse in a single execution's numeric timeline.
 
     Attributes:
         gen_ch: Zero-based generator index in the bound board configuration.
         start_us: Pulse start in us from this execution's common time origin,
             also used by ReadoutWindow.trigger_us. Not a wall-clock timestamp.
         duration_us: Pulse duration in us, quantized on the generator clock by
-            the current frontend. The event describes a constant pulse only.
+            the frontend; independent of the ADC duration.
         frequency_mhz: Generator frequency in MHz after QICK DDS quantization,
             matched to the readout channel by the current frontend.
         phase_deg: Generator phase in degrees after QICK phase-word conversion.
@@ -34,6 +51,13 @@ class PulseEvent:
         gain: Signed normalized DAC amplitude after gain-word quantization,
             relative to the generator's maximum gain word. Nominal full scale
             is -1 to 1; this record does not enforce that range.
+        envelope: Owned immutable continuous complex amplitude, or None for
+            unity throughout duration_us. Never includes gain or carrier phase.
+        phase_reference_us: Common carrier phase origin in execution us. Phase at
+            time t is phase_deg + 360 * frequency_mhz * (t-phase_reference_us).
+            Pulses do not independently reset their oscillator phase.
+        source: Originating Module name for diagnostics, detached from the Module.
+        iterations: Enclosing semantic loop (name, zero-based index) coordinates.
     """
 
     gen_ch: int
@@ -42,6 +66,10 @@ class PulseEvent:
     frequency_mhz: float
     phase_deg: float
     gain: float
+    envelope: PulseEnvelope | None = None
+    phase_reference_us: float = 0.0
+    source: str = ""
+    iterations: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -60,6 +88,10 @@ class ReadoutWindow:
             as PulseEvent.start_us. Tuple order is trigger emission order,
             not a separate chronological sort. Read r uses trigger_us[r] and
             samples equally spaced samples on this ADC's grid.
+        frequency_mhz: Demodulation frequencies in MHz, one per trigger. Empty
+            for legacy shape-only windows; populated in every PointTimeline.
+        phase_deg: Demodulation phases in degrees, one per trigger; empty for
+            shape-only windows. The common phase origin is execution time zero.
     """
 
     channel: int
@@ -67,11 +99,34 @@ class ReadoutWindow:
     samples: int
     sample_rate_mhz: float
     trigger_us: tuple[float, ...]
+    frequency_mhz: tuple[float, ...] = ()
+    phase_deg: tuple[float, ...] = ()
 
     @property
     def reads(self) -> int:
         """Return the number of reads per execution, len(trigger_us)."""
         return len(self.trigger_us)
+
+
+@dataclass(frozen=True)
+class PointTimeline:
+    """Detached numeric controls for one execution with time origin zero.
+
+    Attributes:
+        coordinates: Quantized hardware-loop (name, zero-based index) pairs in
+            outermost-first order, including reps. Control values in events are
+            already rounded by the board's clocks/DDS; indices are not voltages.
+        events: Generator events in semantic emission order, not time-sorted.
+        readouts: ADC declaration order; each window retains trigger emission
+            order and this execution's trigger/demod values.
+        duration_us: End of the body in execution us, including blocking waits
+            and pending channel activity but excluding inter-shot relax_delay.
+    """
+
+    coordinates: tuple[tuple[str, int], ...]
+    events: tuple[PulseEvent, ...]
+    readouts: tuple[ReadoutWindow, ...]
+    duration_us: float
 
 
 @dataclass(frozen=True)
@@ -92,8 +147,11 @@ class AcquireRequest:
             not sorted by channel number. Each window defines its read order.
         controls: One tuple of PulseEvent objects per flattened execution in
             loop_dims C order. Events retain frontend emission order and share
-            that execution's time origin. The current scalar frontend repeats
-            the same timeline for every execution.
+            that execution's time origin; identical to timelines[i].events.
+        timelines: Detached per-execution controls, coordinates and ADC timing.
+            Empty only for callers constructing legacy shape-only records.
+            readouts above supplies fixed shapes; timelines carries dynamic
+            triggers and demodulation values without changing those shapes.
         root_seed: Nonnegative integer entropy supplied by the environment
             author or generated once by the binding when seed is omitted.
         sequence: Zero-based, monotonically increasing acquire identity from
@@ -116,6 +174,7 @@ class AcquireRequest:
     root_seed: int
     sequence: int
     rng_version: str
+    timelines: tuple[PointTimeline, ...] = ()
 
     @property
     def executions(self) -> int:

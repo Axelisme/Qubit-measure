@@ -25,9 +25,7 @@ from zcu_tools.program.v2.modules.waveform import (
         CosineWaveformCfg(length=0.25),
         GaussWaveformCfg(length=0.25, sigma=0.05),
         DragWaveformCfg(length=0.25, sigma=0.05, delta=200, alpha=0.5),
-        FlatTopWaveformCfg(
-            length=0.25, raise_waveform=CosineWaveformCfg(length=0.1)
-        ),
+        FlatTopWaveformCfg(length=0.25, raise_waveform=CosineWaveformCfg(length=0.1)),
     ],
     ids=["const", "cosine", "gauss", "drag", "flat_top"],
 )
@@ -37,13 +35,22 @@ def test_parallel_pulses_retain_envelopes_phase_and_separate_adc_duration(wavefo
         ch=1, nqz=1, freq=80, gain=-0.4, phase=37, waveform=waveform
     ).build("drive")
     readout = PulseReadoutCfg(
-        gen_ch=0, ro_ch=0, nqz=1, freq=100, gain=0.1,
-        waveform=ConstWaveformCfg(length=0.1), ro_length=0.5,
+        gen_ch=0,
+        ro_ch=0,
+        nqz=1,
+        freq=100,
+        gain=0.1,
+        waveform=ConstWaveformCfg(length=0.1),
+        ro_length=0.5,
         trig_offset=0.02,
     ).build("readout")
     prog = ModularProgramV2(
-        env.soccfg, ProgramV2Cfg(reps=2),
-        modules=[Delay("origin", 0.5), Join(pulse, [SoftDelay("offset", 0.1), readout])],
+        env.soccfg,
+        ProgramV2Cfg(reps=2),
+        modules=[
+            Delay("origin", 0.5),
+            Join(pulse, [SoftDelay("offset", 0.1), readout]),
+        ],
     )
     try:
         prog.acquire(env.soc, progress=False)
@@ -64,7 +71,10 @@ def test_parallel_pulses_retain_envelopes_phase_and_separate_adc_duration(wavefo
     trigger = origin + round((offset + 0.02) * 430.08) / 430.08
     assert request.timelines[0].readouts[0].trigger_us[0] == pytest.approx(trigger)
     assert request.readouts[0].samples == prog.ro_chs[0]["length"]
-    assert request.readouts[0].samples / request.readouts[0].sample_rate_mhz > receiver.duration_us
+    assert (
+        request.readouts[0].samples / request.readouts[0].sample_rate_mhz
+        > receiver.duration_us
+    )
     assert drive.source == "drive"
     if waveform.style == "const":
         assert drive.envelope is None  # unity envelope, signed gain stays separate
@@ -75,7 +85,11 @@ def test_parallel_pulses_retain_envelopes_phase_and_separate_adc_duration(wavefo
         assert np.all(np.diff(envelope.sample_us) > 0)
         assert max(abs(v) for v in envelope.values) <= 1.001
         if waveform.style == "drag":
-            assert min(v.imag for v in envelope.values) < 0 < max(v.imag for v in envelope.values)
+            assert (
+                min(v.imag for v in envelope.values)
+                < 0
+                < max(v.imag for v in envelope.values)
+            )
     assert request.controls[1] == events
     # Frozen request survives later mutation of its originating module cfg.
     pulse.cfg.gain = 0.9
