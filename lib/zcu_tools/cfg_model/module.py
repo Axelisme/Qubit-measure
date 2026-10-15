@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from copy import deepcopy
 from typing import Annotated, Literal
 
-from pydantic import Field, JsonValue, model_validator
+from pydantic import Field
 from qick.asm_v2 import QickParam
 
 from .base import ConfigBase
@@ -38,7 +37,7 @@ class _PulseFields(_ModuleFields):
     freq, phase, gain and delays accept QICK sweeps. Optional mixer_freq and mux
     arrays configure mixing/multiplexing; None leaves the option unspecified.
     mask selects mux tones by index. outsel is the optional hardware output
-    selector. ro_ch is the optional readout channel for generator configuration.
+    selector. Readout-channel matching is supplied at runtime, not persisted.
     """
 
     type: Literal["pulse"] = "pulse"
@@ -67,7 +66,6 @@ class _PulseFields(_ModuleFields):
     mux_phases: list[float] | None = None
     mask: list[int] | None = None
     outsel: int | None = None
-    ro_ch: int | None = None
 
 
 class PulseSpec(_PulseFields):
@@ -92,106 +90,70 @@ class PulseCfg(_PulseFields, AbsModuleCfg):
 
 
 class AbsReadoutCfg(AbsModuleCfg):
-    """Materialized readout family with direct or pulse-driven acquisition."""
+    """Materialized readout family with generator-driven acquisition."""
 
 
-class DirectReadoutCfg(AbsReadoutCfg):
-    """Direct readout: ro_ch is the ADC channel, gen_ch an optional associated generator.
+class _PulseReadoutFields(_ModuleFields):
+    """Independent generator and ADC settings for type readout/pulse.
 
-    ro_length/trig_offset are µs and ro_freq is MHz; all accept QICK sweeps.
-    type is readout/direct.
+    gen_ch selects the generator and ro_ch the ADC. nqz is Nyquist zone 1 or 2.
+    freq is the shared generator/ADC frequency in MHz; mixer_freq is an optional
+    generator mixer frequency in MHz. gain is normalized and phase is degrees.
+    pre_delay/post_delay are generator delays in us; ro_length is the integration
+    window in us and trig_offset is the trigger delay in us. Frequency, gain,
+    phase and timing accept QICK sweeps in materialized cfgs, not persistent Specs.
     """
 
-    type: Literal["readout/direct"] = "readout/direct"
+    type: Literal["readout/pulse"] = "readout/pulse"
+    gen_ch: Annotated[int, FieldMeta(label="Gen ch")]
+    nqz: Annotated[Literal[1, 2], FieldMeta(label="NQZ", group="Advanced")]
+    freq: Annotated[float | QickParam, FieldMeta(label="Freq", unit="MHz", decimals=2)]
+    gain: Annotated[float | QickParam, FieldMeta(label="Gain", decimals=4)]
+    phase: Annotated[
+        float | QickParam,
+        FieldMeta(label="Phase", unit="deg", decimals=2, group="Advanced"),
+    ] = 0.0
+    mixer_freq: Annotated[
+        float | None,
+        FieldMeta(label="Mixer freq", unit="MHz", decimals=2, group="Advanced"),
+    ] = None
+    pre_delay: Annotated[
+        float | QickParam,
+        FieldMeta(label="Pre-delay", unit="us", decimals=3, group="Advanced"),
+    ] = 0.0
+    post_delay: Annotated[
+        float | QickParam,
+        FieldMeta(label="Post-delay", unit="us", decimals=3, group="Advanced"),
+    ] = 0.0
     ro_ch: Annotated[int, FieldMeta(label="RO ch")]
     ro_length: Annotated[
         float | QickParam, FieldMeta(label="RO length", unit="us", decimals=3)
     ]
-    ro_freq: Annotated[
-        float | QickParam, FieldMeta(label="RO Freq", unit="MHz", decimals=2)
-    ]
     trig_offset: Annotated[
         float | QickParam, FieldMeta(label="Trig offset", unit="us", decimals=3)
     ] = 0.0
-    gen_ch: Annotated[int | None, FieldMeta(label="Gen ch", group="Advanced")] = None
-
-    def set_param(self, name: str, value: float | QickParam) -> None:
-        """Set ro_freq (MHz) or ro_length (µs); other names raise ValueError."""
-        if name == "ro_freq":
-            self.ro_freq = value
-        elif name == "ro_length":
-            self.ro_length = value
-        else:
-            raise ValueError(f"Unknown parameter: {name}")
-
-
-class _PulseReadoutFields(_ModuleFields):
-    """Pulse readout scalar schema; ro_cfg is the associated direct ADC configuration.
-
-    type is readout/pulse. Inline pulse mappings supply missing gen_ch/ro_freq
-    from ch/freq. Explicit ro_cfg values win. String pulse references are resolved
-    by materialization before this derivation; this schema does not look up keys.
-    """
-
-    type: Literal["readout/pulse"] = "readout/pulse"
-    ro_cfg: Annotated[DirectReadoutCfg, FieldMeta(label="Direct Readout")]
-
-    @model_validator(mode="before")
-    @classmethod
-    def _autoderive_ro_fields(cls, data: object) -> object:
-        if not isinstance(data, dict):
-            return data
-        return cls.derive_input_fields(data)
-
-    @classmethod
-    def derive_input_fields(cls, data: dict[str, JsonValue]) -> dict[str, JsonValue]:
-        """Copy persistent-space input and fill missing direct readout fields.
-
-        data is an unvalidated Spec JSON mapping. When pulse_cfg and ro_cfg are
-        both inline mappings, pulse ch/freq supply missing gen_ch/ro_freq.
-        Explicit readout values win. A string pulse ref, absent section or
-        non-mapping input section supplies nothing; no library is read.
-        Other leaves, including invalid or incomplete ones, remain unchanged.
-        The returned mapping and nested containers are detached from data.
-        """
-        result = deepcopy(data)
-        pulse = result.get("pulse_cfg")
-        ro = result.get("ro_cfg")
-        if isinstance(pulse, dict) and isinstance(ro, dict):
-            if "ch" in pulse:
-                ro.setdefault("gen_ch", pulse["ch"])
-            if "freq" in pulse:
-                ro.setdefault("ro_freq", pulse["freq"])
-        return result
 
 
 class PulseReadoutSpec(_PulseReadoutFields):
-    """Persistent pulse readout; pulse_cfg is a concrete key or inline PulseSpec."""
+    """Persistent readout; waveform is a concrete key or inline WaveformSpec."""
 
-    pulse_cfg: Annotated[str | PulseSpec, FieldMeta(label="Pulse")]
+    waveform: Annotated[str | WaveformSpec, FieldMeta(label="Waveform")]
 
 
 class PulseReadoutCfg(_PulseReadoutFields, AbsReadoutCfg):
-    """Materialized pulse readout; pulse_cfg is an expanded PulseCfg."""
+    """Materialized readout; waveform is an expanded, validated WaveformCfg."""
 
-    pulse_cfg: PulseCfg
+    waveform: WaveformCfg
 
     def set_param(self, name: str, value: float | QickParam) -> None:
-        """Set gain/freq/length on the pulse or ro_freq/ro_length on ADC configuration.
+        """Set freq (MHz), gain, length or ro_length (us); otherwise raise ValueError.
 
-        freq also updates ro_freq. Unsupported names/values raise ValueError.
+        freq supplies both generator and ADC. Waveform length restrictions apply.
         """
-        if name == "gain":
-            self.pulse_cfg.set_param("gain", value)
-        elif name == "freq":
-            self.pulse_cfg.set_param("freq", value)
-            self.ro_cfg.set_param("ro_freq", value)
-        elif name == "ro_freq":
-            self.ro_cfg.set_param("ro_freq", value)
-        elif name == "length":
-            self.pulse_cfg.set_param("length", value)
-        elif name == "ro_length":
-            self.ro_cfg.set_param("ro_length", value)
+        if name == "length":
+            self.waveform.set_param(name, value)
+        elif name in {"freq", "gain", "ro_length"}:
+            setattr(self, name, value)
         else:
             raise ValueError(f"Unknown parameter: {name}")
 
@@ -305,12 +267,8 @@ class BathResetCfg(_BathResetFields, AbsResetCfg):
             raise ValueError(f"Unknown parameter: {name}")
 
 
-type ReadoutSpec = Annotated[
-    DirectReadoutCfg | PulseReadoutSpec, Field(discriminator="type")
-]
-type ReadoutCfg = Annotated[
-    DirectReadoutCfg | PulseReadoutCfg, Field(discriminator="type")
-]
+type ReadoutSpec = PulseReadoutSpec
+type ReadoutCfg = PulseReadoutCfg
 type ResetSpec = Annotated[
     NoneResetCfg | PulseResetSpec | TwoPulseResetSpec | BathResetSpec,
     Field(discriminator="type"),

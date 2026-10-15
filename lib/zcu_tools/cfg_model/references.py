@@ -34,7 +34,9 @@ def remap_waveform_references(
     return waveform_spec_from_raw(candidate)
 
 
-def _remap_pulse(spec: PulseSpec, waveforms: Mapping[str, str]) -> PulseSpec:
+def _remap_module_waveform[T: PulseSpec | PulseReadoutSpec](
+    spec: T, waveforms: Mapping[str, str]
+) -> T:
     candidate = spec.model_copy(deep=True)
     if isinstance(candidate.waveform, str):
         candidate.waveform = waveforms[candidate.waveform]
@@ -50,7 +52,11 @@ def _pulse_child(
     modules: Mapping[str, str],
     waveforms: Mapping[str, str],
 ) -> str | PulseSpec:
-    return modules[child] if isinstance(child, str) else _remap_pulse(child, waveforms)
+    return (
+        modules[child]
+        if isinstance(child, str)
+        else _remap_module_waveform(child, waveforms)
+    )
 
 
 def remap_module_references(
@@ -63,7 +69,7 @@ def remap_module_references(
 
     spec must satisfy module_spec_from_raw. modules and waveforms map literal
     legacy keys within their respective source partitions to explicit new keys.
-    Pulse waveform references use waveforms; readout/reset pulse references use
+    Pulse/readout waveform references use waveforms; reset pulse references use
     modules. Inline children follow the same typed schema recursively. Scalar
     fields, description strings and Arb asset keys remain unchanged.
     No canonical-key fallback, evaluation, lookup or I/O occurs.
@@ -71,9 +77,9 @@ def remap_module_references(
     raise KeyError; invalid persistent inputs or rewritten values raise ValueError.
     """
     candidate = module_spec_from_raw(spec)
-    if isinstance(candidate, PulseSpec):
-        candidate = _remap_pulse(candidate, waveforms)
-    elif isinstance(candidate, (PulseReadoutSpec, PulseResetSpec)):
+    if isinstance(candidate, (PulseSpec, PulseReadoutSpec)):
+        candidate = _remap_module_waveform(candidate, waveforms)
+    elif isinstance(candidate, PulseResetSpec):
         candidate.pulse_cfg = _pulse_child(candidate.pulse_cfg, modules, waveforms)
     elif isinstance(candidate, TwoPulseResetSpec):
         candidate.pulse1_cfg = _pulse_child(candidate.pulse1_cfg, modules, waveforms)

@@ -25,6 +25,15 @@ if TYPE_CHECKING:
 
 
 class PulseCfg(AbsModuleCfg):
+    """Native generator pulse; ADC matching is a Pulse runtime input.
+
+    ch selects the generator, nqz is Nyquist zone 1 or 2. freq/mixer_freq and
+    mux_freqs are MHz; phase/mux_phases are degrees; gain/mux_gains are normalized.
+    waveform is the native envelope; pre_delay/post_delay are us. Frequency,
+    phase, gain and delays accept QICK sweeps. Optional mux arrays, tone-index mask
+    and outsel configure the hardware. desc is optional prose; type is pulse.
+    """
+
     type: Literal["pulse"] = "pulse"
     waveform: Annotated[WaveformCfg, BeforeValidator(resolve_waveform_ref)]
     ch: int
@@ -41,7 +50,6 @@ class PulseCfg(AbsModuleCfg):
     mux_phases: list[float] | None = None
     mask: list[int] | None = None
     outsel: int | None = None
-    ro_ch: int | None = None
 
     def build(self, name: str) -> Pulse:
         return Pulse(name, self)
@@ -63,12 +71,22 @@ class Pulse(Module):
         tag: str | None = None,
         block_mode: bool = True,
         pulse_id: str | None = None,
+        *,
+        ro_ch: int | None = None,
     ) -> None:
+        """Capture a pulse and optional runtime ADC channel for frequency matching.
+
+        ro_ch is None for unpaired playback or an ADC channel number. It affects
+        QICK frequency rounding, mixer declaration and pulse registry identity.
+        cfg is copied; None emits no pulse. Explicit pulse_id disables sharing.
+        tag names timing measurements; block_mode waits through pre/post delays.
+        """
         self.name = name
         self.cfg = deepcopy(cfg) if cfg is not None else None
         self.tag = tag
         self.block_mode = block_mode
         self.pulse_id = pulse_id
+        self.ro_ch = ro_ch
 
     def init(self, prog: ModularProgramV2) -> None:
         if self.cfg is None:
@@ -76,10 +94,10 @@ class Pulse(Module):
 
         self.waveform: AbsWaveform = self.cfg.waveform.build(f"{self.name}_waveform")
         if self.pulse_id is None:
-            self.pulse_id = prog.pulse_registry.calc_name(self.cfg)
+            self.pulse_id = prog.pulse_registry.calc_name(self.cfg, ro_ch=self.ro_ch)
 
             # auto reuse pulse
-            if prog.pulse_registry.register(self.name, self.cfg):
+            if prog.pulse_registry.register(self.name, self.cfg, ro_ch=self.ro_ch):
                 self.init_pulse(prog, self.pulse_id)
         else:  # if provided pulse_id, always init pulse (no reuse)
             self.init_pulse(prog, self.pulse_id)
@@ -88,7 +106,7 @@ class Pulse(Module):
         cfg = self.cfg
         assert cfg is not None
 
-        ro_ch = cfg.ro_ch if cfg.mixer_freq is not None else None
+        ro_ch = self.ro_ch if cfg.mixer_freq is not None else None
         prog.declare_gen(
             cfg.ch,
             nqz=cfg.nqz,
@@ -109,7 +127,7 @@ class Pulse(Module):
         prog.add_pulse(
             cfg.ch,
             pulse_id,
-            ro_ch=cfg.ro_ch,
+            ro_ch=self.ro_ch,
             **pulse_kwargs,
             **self.waveform.to_wav_kwargs(),
         )
