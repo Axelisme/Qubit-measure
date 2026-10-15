@@ -418,7 +418,7 @@ def test_describe_form_separates_path_rejection_from_declaration_failure(
     )
     window.reload_source()
     before = window.plan_panel.state.input.data, window.plan_panel.state.base.data
-    params = {"form": "plan", "path": path}
+    params: dict[str, object] = {"form": "plan", "path": path}
     with pytest.raises(FormPathError) as core_error:
         window.plan_panel.state.describe(tuple(path), window.plan_panel.env)
     expected = (
