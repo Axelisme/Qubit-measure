@@ -101,7 +101,7 @@ class FluxExp(PersistableExperiment[FluxResult, FluxCfg]):
         result_type=FluxResult,
         cfg_type=FluxCfg,
         tag="jpa/flux",
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
     )
 
     def run(self, cfg: FluxCfg, *, context: RunContext) -> FluxResult:

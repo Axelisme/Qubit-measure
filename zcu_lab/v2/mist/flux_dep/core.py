@@ -101,7 +101,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
         result_type=FluxDepResult,
         cfg_type=FluxDepCfg,
         tag="mist/flux_dep",
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
     )
 
     def run(

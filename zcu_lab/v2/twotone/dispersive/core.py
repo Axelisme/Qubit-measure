@@ -134,6 +134,7 @@ class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=DispersiveResult,
         cfg_type=DispersiveCfg,
+        cfg_schema_version="2.0",
         tag="twotone/ge/dispersive",
     )
 

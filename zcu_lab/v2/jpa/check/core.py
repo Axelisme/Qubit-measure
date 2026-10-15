@@ -78,7 +78,7 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
         result_type=CheckResult,
         cfg_type=CheckCfg,
         tag="jpa/check",
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
     )
 
     def run(self, cfg: CheckCfg, *, context: RunContext) -> CheckResult:
@@ -90,7 +90,7 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
         freqs = sweep2array(
             cfg.sweep.freq,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules.readout.pulse_cfg.ch},
+            {"soccfg": soccfg, "gen_ch": modules.readout.gen_ch},
         )
 
         viewer = context.plots.liveplot_1d(
