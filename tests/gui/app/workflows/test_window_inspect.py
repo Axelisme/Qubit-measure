@@ -129,6 +129,34 @@ def test_inspect_locks_from_start_through_terminal_delivery(
     assert child(dialog, QPushButton, "inspect.aliases.add").isEnabled()
 
 
+def test_open_arb_locks_until_run_terminal_delivery(
+    window_session: WindowSession, qapp: QApplication
+) -> None:
+    prepare(window_session, qapp)
+    window = window_session.window
+    inspect = open_inspect(window, qapp)
+    button(inspect, "Arb Waveforms…").click()
+    qapp.processEvents()
+    dialog = next(d for d in window.findChildren(ArbWaveformDialog) if d.isVisible())
+    key = child(dialog, QLineEdit, "")
+    key.setText("pre_run_draft")
+    assert not key.isReadOnly()
+    assert button(dialog, "Save").isEnabled()
+
+    assert isinstance(window.start("arb-lock"), int)
+    assert key.isReadOnly()
+    assert not button(dialog, "Save").isEnabled()
+    window_session.harness.background.execute()
+    qapp.processEvents()
+    assert key.isReadOnly()
+    assert not button(dialog, "Save").isEnabled()
+    window_session.harness.background.deliver()
+    qapp.processEvents()
+    assert not key.isReadOnly()
+    assert button(dialog, "Save").isEnabled()
+    assert key.text() == "pre_run_draft"
+
+
 def test_inspect_opened_while_paused_is_read_only_until_stop(
     window_session: WindowSession, qapp: QApplication
 ) -> None:
