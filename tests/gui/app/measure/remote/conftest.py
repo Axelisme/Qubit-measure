@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from zcu_tools.gui.app.measure.adapter import SessionEnv
+from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.state import State
@@ -14,7 +15,7 @@ from tests.resources.entry.fakes import register_fakes, registry_state, restore_
 
 from ._helpers import open_client
 from ._interactive_support import InteractiveFixture
-from ._point_application import PointAdapter, PointApplication, PointController
+from ._point_application import PointAdapter, PointApplication
 
 
 @pytest.fixture(scope="module")
@@ -43,7 +44,7 @@ def application(
     registry = Registry()
     registry.register("pointed", PointAdapter)
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
-    controller = PointController(
+    controller = Controller(
         state, registry, None, BaseEventBus(), project_root=str(tmp_path)
     )
     remote = RemoteControlAdapter(
@@ -55,7 +56,7 @@ def application(
     finally:
         client.close()
         remote.stop()
-        controller.quiesce()
+        controller.close()
         for tab_id in tuple(state.list_tab_ids()):
             controller.tab_control.close_tab(tab_id)
         qapp.processEvents()
@@ -66,7 +67,7 @@ def fx(qapp, tmp_path):
     fixture = InteractiveFixture(project_root=str(tmp_path))
     fixture.start()
     yield fixture
-    fixture.ctrl.quiesce()
+    fixture.ctrl.close()
     for widget in fixture.widgets:
         widget.teardown()
         widget.deleteLater()

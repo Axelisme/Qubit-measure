@@ -749,6 +749,20 @@ class Controller(SessionControllerMixin):
         interactive) — Handles owns the lifecycle (ADR-0066)."""
         return self._operation_handles.live_count()
 
+    def close(self, timeout_ms: int = 5000) -> None:
+        """Permanently stop background admission and drain workers and deliveries.
+
+        Call on the Qt owner thread before releasing this Controller or its View.
+        ``timeout_ms`` is the drain wait in milliseconds. A failed drain raises
+        TimeoutError and leaves admission closed; retain the owner and retry close.
+        Successful repeated calls are harmless. This does not cancel operations,
+        decide whether to discard data, disconnect devices, or establish RF safety;
+        use begin_shutdown for operation cancellation before final teardown.
+        """
+        self._background_svc.stop_accepting()
+        if not self._background_svc.quiesce(timeout_ms):
+            raise TimeoutError("Controller background work did not drain in time")
+
     def begin_shutdown(self, on_closed: Callable[[], None]) -> None:
         """Cancel every live operation, wait (with a timeout) for them to stop,
         then run ``on_closed`` — the View's actual teardown.

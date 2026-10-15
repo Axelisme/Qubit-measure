@@ -236,7 +236,7 @@ def _copy_spec(
     }
 
 
-_UNSUPPORTED_FIELDS = frozenset({"desc", "mask", "outsel", "ro_ch"})
+_UNSUPPORTED_FIELDS = frozenset({"desc", "ro_ch"})
 
 
 def _unsupported(name: str, info: FieldInfo) -> bool:
@@ -245,9 +245,7 @@ def _unsupported(name: str, info: FieldInfo) -> bool:
     Spec defaults restore them when input is validated as the Spec. A required
     field, such as DirectReadoutCfg.ro_ch, has no default to restore and stays.
     """
-    return not info.is_required() and (
-        name in _UNSUPPORTED_FIELDS or name.startswith("mux_")
-    )
+    return not info.is_required() and name in _UNSUPPORTED_FIELDS
 
 
 def _editable(
@@ -343,7 +341,7 @@ def editable_spec(
     QickParam alternatives are removed. FieldMeta becomes Display metadata.
     str-or-model children become tagged ref/name or inline/module wrappers;
     persistent seed and lock paths still name Spec fields, without envelopes.
-    Optional desc, mask, outsel, ro_ch and mux_* fields are removed, so input,
+    Optional desc and ro_ch fields are removed, so input,
     schema and writes cannot set them; validating as the Spec restores defaults.
     The Spec's validators are inherited; the Spec class is not modified.
     """

@@ -64,7 +64,7 @@ def foreign_recorded_point(
         draft.set_meta("Q1.duration", {"source": "outside/run", "stderr": -1})
         draft.description = "source environment"
     (results / "other/points/source/module_cfg.yaml").write_text(
-        "format: zcu.module-library\nformat_version: '1.0'\ncomponents: {Q1: {}}\n",
+        "format: zcu.module-library\nformat_version: '2.0'\ncomponents: {Q1: {}}\n",
         encoding="utf-8",
     )
     return foreign, point, event
@@ -76,7 +76,7 @@ def write_source_library(
     """Publish valid Specs with shared, library-only and manual source leaves."""
     value = ModuleLibraryDocument(
         format="zcu.module-library",
-        format_version="1.0",
+        format_version="2.0",
         components={
             "Q1": ComponentLibrary(
                 pulses={
@@ -307,7 +307,7 @@ def test_library_clone_failure_cleans_destination_and_keeps_source(
     else:
         source.write_text(
             source.read_text().replace(
-                '"format_version":"1.0"', '"format_version":"2.0"'
+                '"format_version":"2.0"', '"format_version":"1.0"'
             ),
             encoding="utf-8",
         )
