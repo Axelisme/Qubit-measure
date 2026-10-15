@@ -456,8 +456,10 @@ def test_read_only_locks_inputs_but_keeps_scrolling_and_folds(
     gain = _child(dialog, QLineEdit, "form.input.gain")
     assert gain.isReadOnly()
     assert _child(dialog, QLineEdit, "inspect.entry.name").isReadOnly()
-    for text in ("New", "Delete", "Arb Waveforms…"):
+    for text in ("New", "Delete"):
         assert not _button(dialog, text).isEnabled(), text
+    # The host opens ARB read-only by its own rule; the entry stays reachable.
+    assert _button(dialog, "Arb Waveforms…").isEnabled()
     assert not _child(dialog, QPushButton, "inspect.entry.apply").isEnabled()
     _type(gain, "9")
     assert float(gain.text()) == 0.25

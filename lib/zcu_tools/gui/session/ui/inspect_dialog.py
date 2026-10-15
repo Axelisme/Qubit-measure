@@ -293,17 +293,17 @@ class InspectDialog(QDialog):
     def set_read_only(self, *, read_only: bool) -> None:
         """Lock or unlock every input while keeping the dialog readable.
 
-        Read-only disables New, Delete, Arb Waveforms, Revert, Apply, the
-        component tree's edits and the Aliases page's writes and Load preset; the Name, the
+        Read-only disables New, Delete, Revert, Apply, the component tree's
+        edits and the Aliases page's writes and Load preset; the Name, the
         entry form and the alias table stay readable, scrollable and foldable
-        but ignore input. A draft made before locking stays shown and closing
+        but ignore input. Arb Waveforms stays clickable: the host opens the
+        ARB dialog read-only under its own rule. A draft made before locking stays shown and closing
         no longer asks about it. Call again with False to unlock.
         """
         self._read_only = read_only
         self._component_tree.set_read_only(read_only=read_only)
         self._aliases.set_read_only(read_only=read_only)
         self._new_btn.setEnabled(not read_only)
-        self._arb_waveform_btn.setEnabled(not read_only)
         if self._editor is not None:
             self._editor.set_editing_enabled(enabled=not read_only)
         self._update_controls()
@@ -591,8 +591,8 @@ class InspectDialog(QDialog):
         self._populate_from_context()
 
     def _on_arb_waveforms_clicked(self) -> None:
-        if not self._read_only:
-            self._open_arb_waveforms()
+        # Also while read-only: the host opens ARB under its own read-only rule.
+        self._open_arb_waveforms()
 
     def _on_new_clicked(self) -> None:
         if self._read_only:
