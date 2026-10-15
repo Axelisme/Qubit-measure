@@ -35,7 +35,7 @@ from zcu_tools.cfg_model import (
 )
 from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue
 
-from ..document_store import DocumentChange, DocumentStore, DocumentValue
+from ..document_store import DocumentChange, DocumentValue
 from ..entry.provenance import Provenance, ProvenanceData, validate_source
 
 MODULE_LIBRARY_FORMAT = "zcu.module-library"
@@ -141,6 +141,21 @@ def library_key_kind(path: str) -> Literal["module", "waveform"]:
     if suffix:
         raise ValueError(f"Expected a library root, not a leaf: {path!r}")
     return kind
+
+
+def has_persistent_source_suffix(spec: YamlValue, suffix: tuple[str, ...]) -> bool:
+    """Return whether suffix addresses persisted Spec data, without materializing.
+
+    spec is an entry's YAML-value projection; suffix contains relative mapping
+    keys, with an empty tuple addressing the root. Missing keys, scalar descent
+    and list indexing return False. No reference expansion or asset I/O occurs.
+    """
+    value = spec
+    for segment in suffix:
+        if not isinstance(value, dict) or segment not in value:
+            return False
+        value = value[segment]
+    return True
 
 
 def _validate_names(document: ModuleLibraryDocument) -> None:
@@ -519,10 +534,8 @@ def _validate_document(
     for path, record in document.provenance.items():
         root, kind, suffix = _path_root(path)
         value: YamlValue = snapshot.entry_value(root, kind=kind)
-        for segment in suffix:
-            if not isinstance(value, dict) or segment not in value:
-                raise ValueError(f"Source path is not a persistent Spec leaf: {path!r}")
-            value = value[segment]
+        if not has_persistent_source_suffix(value, suffix):
+            raise ValueError(f"Source path is not a persistent Spec leaf: {path!r}")
         validate_source(record.to_provenance(), ledger, entry_id)
 
 
@@ -678,23 +691,21 @@ class ModuleLibrary:
         path is the point-local module_cfg.yaml; assets is its fixed capability,
         or None for Spec-only operations. Materializing Arb requires a provider.
         ledger names the entry's records/ledger.jsonl; entry_id is its UUID.
-        Header/schema/source/I/O errors propagate. Opening does not read assets.
+        Invalid existing Specs or entry-local provenance are backed up and
+        removed under the document lock. Container/header, ledger I/O/schema
+        and unexpected errors propagate without publication. Reads can write
+        cleanup; new edits remain strict. Opening does not read assets.
         """
         self._path = path.resolve()
         self._assets = assets
         self._ledger = ledger.resolve()
         self._entry_id = entry_id
-        self._store = DocumentStore(
-            self._path,
-            ModuleLibraryDocument,
-            format=MODULE_LIBRARY_FORMAT,
-            supported_version=MODULE_LIBRARY_VERSION,
-            validate=self._validate,
-        )
+        # Defer composition: the store policy uses the document models above.
+        from .library_store import open_library_store
 
-    def _validate(self, document: ModuleLibraryDocument) -> None:
-        """Validate this handle's persistent document and entry-scoped source evidence."""
-        document.validate_content(ledger=self._ledger, entry_id=self._entry_id)
+        self._store = open_library_store(
+            self._path, ledger=self._ledger, entry_id=self._entry_id
+        )
 
     @property
     def source_path(self) -> Path:
@@ -726,7 +737,9 @@ class ModuleLibrary:
     def refresh(self) -> bool:
         """Reload and publish changed valid content; return whether it changed.
 
-        Source/schema/header/I/O failures propagate and retain published state.
+        Existing invalid entries are backed up and removed before publication.
+        Container/header, ledger I/O/schema and unexpected failures propagate
+        and retain published state.
         """
         return self._store.refresh()
 

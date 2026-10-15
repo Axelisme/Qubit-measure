@@ -667,7 +667,7 @@ def test_atomic_replace_failure_does_not_publish_candidate_or_sources(
     assert changes == []
 
 
-def test_source_refresh_failure_retains_snapshot_and_recovery_publishes(
+def test_missing_source_refresh_removes_root_and_explicit_replacement_publishes(
     files: tuple[Path, Path],
 ) -> None:
     write_document(files, document())
@@ -683,11 +683,12 @@ def test_source_refresh_failure_retains_snapshot_and_recovery_publishes(
         stderr=0.01,
     )
     write_document(files, changed)
-    with pytest.raises(ValueError, match="does not exist"):
-        library.refresh()
+    assert library.refresh()
+    assert library.snapshot().module_keys() == ("Q1.pulses.pi2",)
     assert library.snapshot().meta("Q1.pulses.pi.gain") is None
-    assert changes == []
+    assert len(changes) == 1
     source = local_source(files)
+    write_document(files, changed)
     assert library.refresh()
     assert library.snapshot().meta("Q1.pulses.pi.gain") == source
-    assert len(changes) == 1
+    assert len(changes) == 2

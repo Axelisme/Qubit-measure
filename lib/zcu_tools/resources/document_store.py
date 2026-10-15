@@ -24,6 +24,7 @@ from collections.abc import Callable, Generator, Iterator, Mapping
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
 from io import StringIO
 from math import isnan
@@ -449,6 +450,7 @@ class DocumentStore[T: BaseModel]:
         format: str,
         supported_version: FormatVersion = _SUPPORTED_VERSION,
         validate: Callable[[T], None] | None = None,
+        read_cleanup: Callable[[YamlMap, FormatVersion], tuple[str, ...]] | None = None,
         lock_path: Path | None = None,
         lock_timeout: float = 10.0,
     ) -> None:
@@ -472,14 +474,27 @@ class DocumentStore[T: BaseModel]:
 
         Missing/unreadable files, YAML/header/version/schema errors, invalid
         physical values and validate exceptions propagate without publication.
-        Initialization reads without acquiring the sidecar, allowing creation
-        under a caller-held lock. Writers must replace atomically, as edit does.
+        By default initialization reads without acquiring the sidecar, allowing
+        creation under a caller-held lock. Writers must replace atomically.
+
+        read_cleanup opts into locked disk-read cleanup, including initialization.
+        After header validation it receives independent round-trip YAML nodes
+        and their admitted format version.
+        It must reject container errors, remove only invalid existing entries,
+        and return their names, or an empty tuple without changing the mapping.
+        The full candidate passes model/validate before any write. Nonempty
+        cleanup copies the original bytes to an exclusive timestamped sibling
+        backup, then atomically replaces the document and logs one warning.
+        Backup/replace failures propagate without publishing; a completed backup
+        survives replace failure. Cleanup never runs on new draft validation.
+        Later body/commit failure does not roll back completed read cleanup.
         """
         self._path = path
         self._model = model
         self._format = format
         self._supported_version = supported_version
         self._validate = validate
+        self._read_cleanup = read_cleanup
         self._lock_path = lock_path or Path(f"{path}.lock")
         self._lock_timeout = lock_timeout
         self._lock = FileLock(str(self._lock_path))
@@ -487,7 +502,13 @@ class DocumentStore[T: BaseModel]:
         self._observers: dict[int, Callable[[DocumentChange], None]] = {}
         self._next_subscription_id = 0
         self._deferred_until_unlock: list[DocumentChange] = []
-        self._document, _, self._snapshot = self._read()
+        if read_cleanup is None:
+            self._document, _, self._snapshot = self._read()
+        else:
+            # FileLock would create a missing parent; opening is not creation.
+            self._path.parent.stat()
+            with self.locked():
+                self._document, _, self._snapshot = self._read()
 
     def snapshot(self) -> T:
         """Return a deep independent copy in working units, without I/O or notice."""
@@ -618,13 +639,54 @@ class DocumentStore[T: BaseModel]:
         """
         yaml = YAML(typ="rt")
         yaml.preserve_quotes = True
-        with self._path.open(encoding="utf-8") as stream:
-            raw = yaml.load(stream)
+        original = self._path.read_bytes()
+        raw = yaml.load(original.decode("utf-8"))
         # Validate the recursive shape without discarding ruamel's round-trip nodes.
         TypeAdapter(YamlMap).validate_python(raw, strict=True)
         document = cast(YamlMap, raw)
+        removed: tuple[str, ...] = ()
+        if self._read_cleanup is not None:
+            version = validate_header(
+                document,
+                expected_format=self._format,
+                supported_version=self._supported_version,
+                source=self._path,
+            )
+            document = deepcopy(document)
+            removed = self._read_cleanup(document, version)
         normalized, snapshot = self._model_snapshot(document)
+        if removed:
+            backup = self._backup_original(original)
+            self._replace_document(document)
+            logging.getLogger(__name__).warning(
+                "%s: backed up to %s; removed entries: %s",
+                self._path,
+                backup,
+                ", ".join(removed),
+            )
         return document, normalized, snapshot
+
+    def _backup_original(self, original: bytes) -> Path:
+        """Copy pre-cleanup bytes without overwriting any existing sibling."""
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%S%f")
+        attempt = 0
+        while True:
+            suffix = f".{attempt}" if attempt else ""
+            backup = self._path.with_name(
+                f"{self._path.stem}.{timestamp}{suffix}.bak{self._path.suffix}"
+            )
+            try:
+                stream = backup.open("xb")
+            except FileExistsError:
+                attempt += 1
+                continue
+            try:
+                with stream:
+                    stream.write(original)
+            except BaseException:
+                backup.unlink(missing_ok=True)
+                raise
+            return backup
 
     def _model_snapshot(self, document: YamlMap) -> tuple[YamlMap, T]:
         """Check the header, validate T and custom rules without converting values.
