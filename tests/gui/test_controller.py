@@ -42,7 +42,11 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
 )
-from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
+from zcu_tools.gui.session.ports import (
+    BackgroundAdmissionClosedError,
+    OperationConflictError,
+    OperationKind,
+)
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
     DisconnectDeviceRequest,
@@ -197,6 +201,59 @@ def test_get_project_root_falls_back_to_cwd_when_not_injected(qapp, tmp_path):
 # ---------------------------------------------------------------------------
 # new_tab / close_tab
 # ---------------------------------------------------------------------------
+
+
+def test_close_drains_worker_and_owner_delivery_and_closes_admission(cf):
+    owner_thread = threading.get_ident()
+    delivered: list[tuple[object, int]] = []
+    errors: list[Exception] = []
+    callback_admission: list[Exception] = []
+
+    def on_done(value: object) -> None:
+        delivered.append((value, threading.get_ident()))
+        try:
+            cf.ctrl.run_background(lambda: "late", delivered.append, errors.append)
+        except BackgroundAdmissionClosedError as exc:
+            callback_admission.append(exc)
+
+    cf.ctrl.run_background(lambda: "result", on_done, errors.append)
+    cf.ctrl.close()
+
+    assert delivered == [("result", owner_thread)]
+    assert errors == []
+    assert len(callback_admission) == 1
+    cf.ctrl.close()
+    with pytest.raises(BackgroundAdmissionClosedError):
+        cf.ctrl.run_background(lambda: "new", delivered.append, errors.append)
+    assert delivered == [("result", owner_thread)]
+
+
+def test_close_timeout_keeps_admission_closed_and_can_be_retried(cf):
+    release = threading.Event()
+    started = threading.Event()
+    delivered: list[object] = []
+    errors: list[Exception] = []
+
+    def compute() -> str:
+        started.set()
+        if not release.wait(5):
+            raise RuntimeError("test did not release worker")
+        return "finished"
+
+    cf.ctrl.run_background(compute, delivered.append, errors.append)
+    try:
+        assert started.wait(2)
+        with pytest.raises(TimeoutError):
+            cf.ctrl.close(timeout_ms=0)
+        assert delivered == []
+        with pytest.raises(BackgroundAdmissionClosedError):
+            cf.ctrl.run_background(lambda: "new", delivered.append, errors.append)
+    finally:
+        release.set()
+    cf.ctrl.close()
+    assert delivered == ["finished"]
+    assert errors == []
+    cf.ctrl.close()
 
 
 def test_new_tab_adds_entry_to_state(cf):

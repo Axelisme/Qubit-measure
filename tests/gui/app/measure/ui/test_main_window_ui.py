@@ -1827,7 +1827,9 @@ class _DeferredClosePresenter(RecordingDialogPresenter):
         action_text: str,
         on_decision: Callable[[bool], None],
         default: bool = False,
+        cancel_text: str = "Cancel",
     ) -> None:
+        """Retain the decision callback while recording both button labels."""
         super().destructive_confirm(
             parent,
             title,
@@ -1835,8 +1837,107 @@ class _DeferredClosePresenter(RecordingDialogPresenter):
             action_text=action_text,
             on_decision=lambda _confirmed: None,
             default=default,
+            cancel_text=cancel_text,
         )
         self.destructive_decisions.append(on_decision)
+
+
+def test_window_drains_before_persisting_and_stopping_remote(control_factory, qapp):
+    dialogs = RecordingDialogPresenter()
+    window, ctrl = _setup_window_with_tabs(control_factory, dialogs)
+    effects: list[str] = []
+    ctrl.close.side_effect = lambda: effects.append("drained")
+    ctrl.persist_all.side_effect = lambda: effects.append("persisted")
+    remote = MagicMock()
+    remote.stop.side_effect = lambda: effects.append("remote stopped")
+    window.remote_control_service = remote
+    ctrl.begin_shutdown.side_effect = lambda on_closed: on_closed()
+    window.show()
+
+    window.close()
+    qapp.processEvents()
+
+    assert effects == ["drained", "persisted", "remote stopped"]
+    assert not window.isVisible()
+    assert dialogs.calls == []
+
+
+@pytest.mark.parametrize("programmatic", [False, True])
+def test_window_timeout_waits_for_decision_and_retries(control_factory, qapp, programmatic):
+    dialogs = _DeferredClosePresenter()
+    window, ctrl = _setup_window_with_tabs(control_factory, dialogs)
+    ctrl.begin_shutdown.side_effect = lambda on_closed: on_closed()
+    ctrl.close.side_effect = [TimeoutError("still running"), TimeoutError("still running"), None]
+    remote = MagicMock()
+    window.remote_control_service = remote
+    window.show()
+
+    if programmatic:
+        window.request_shutdown()
+    else:
+        window.close()
+    qapp.processEvents()
+
+    assert window.isVisible()
+    ctrl.persist_all.assert_not_called()
+    remote.stop.assert_not_called()
+    assert len(dialogs.destructive_decisions) == 1
+    assert "背景工作仍在執行" in dialogs.calls[-1].message
+    assert dialogs.calls[-1].action_text == "強制關閉"
+    assert dialogs.calls[-1].cancel_text == "再等一下"
+
+    # Reentrant GUI/RPC requests cannot turn a pending decision into force.
+    window.close()
+    window.request_shutdown()
+    window.request_shutdown()
+    qapp.processEvents()
+    assert window.isVisible()
+    assert len(dialogs.destructive_decisions) == 1
+    assert ctrl.close.call_count == 1
+
+    dialogs.destructive_decisions.pop(0)(False)
+    qapp.processEvents()
+    assert window.isVisible()
+    assert len(dialogs.destructive_decisions) == 1
+    assert ctrl.close.call_count == 2
+    ctrl.persist_all.assert_not_called()
+    remote.stop.assert_not_called()
+
+    dialogs.destructive_decisions.pop(0)(False)
+    qapp.processEvents()
+    assert not window.isVisible()
+    ctrl.persist_all.assert_called_once()
+    remote.stop.assert_called_once()
+    assert ctrl.close.call_count == 3
+
+
+@pytest.mark.parametrize("programmatic", [False, True])
+def test_window_timeout_requires_explicit_force(control_factory, qapp, programmatic):
+    dialogs = _DeferredClosePresenter()
+    window, ctrl = _setup_window_with_tabs(control_factory, dialogs)
+    ctrl.begin_shutdown.side_effect = lambda on_closed: on_closed()
+    ctrl.close.side_effect = TimeoutError("still running")
+    remote = MagicMock()
+    window.remote_control_service = remote
+    window.show()
+
+    if programmatic:
+        window.request_shutdown()
+    else:
+        window.close()
+    qapp.processEvents()
+
+    assert window.isVisible()
+    ctrl.persist_all.assert_not_called()
+    remote.stop.assert_not_called()
+    assert len(dialogs.destructive_decisions) == 1
+    dialogs.destructive_decisions.pop(0)(True)
+    qapp.processEvents()
+
+    assert not window.isVisible()
+    ctrl.persist_all.assert_called_once()
+    remote.stop.assert_called_once()
+    assert ctrl.close.call_count == 1
 
 
 def test_tab_close_without_result_closes_immediately(control_factory, qapp):
