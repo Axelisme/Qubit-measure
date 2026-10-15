@@ -6,7 +6,7 @@ import pytest
 from qtpy.QtCore import QEvent, Qt
 from qtpy.QtGui import QKeyEvent
 from qtpy.QtWidgets import QApplication, QComboBox, QLineEdit, QTextEdit
-from zcu_tools.experiment.run_saving import ArtifactRef, OutputResult, SaveReport
+from zcu_tools.experiment.artifacts import ArtifactRef, OutputResult, SaveReport
 from zcu_tools.gui.app.measure.artifact_tracker import SaveStatus
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload

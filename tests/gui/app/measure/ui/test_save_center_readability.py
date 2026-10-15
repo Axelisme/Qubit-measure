@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from qtpy.QtWidgets import QApplication, QLabel, QLineEdit
-from zcu_tools.experiment.run_saving import ArtifactRef, OutputResult, SaveReport
+from zcu_tools.experiment.artifacts import ArtifactRef, OutputResult, SaveReport
 from zcu_tools.gui.app.measure.artifact_tracker import ArtifactDeclaration
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.events.completion import (

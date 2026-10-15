@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 from matplotlib.figure import Figure
 from qtpy.QtWidgets import QLabel, QPushButton, QTabWidget
-from zcu_tools.experiment.run_saving import ArtifactRef
+from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,

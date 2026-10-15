@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from zcu_tools.experiment.run_saving import ArtifactRef, OutputResult, SaveReport
+from zcu_tools.experiment.artifacts import ArtifactRef, OutputResult, SaveReport
 from zcu_tools.gui.app.measure.artifact_tracker import (
     ArtifactDeclaration,
     ArtifactTracker,

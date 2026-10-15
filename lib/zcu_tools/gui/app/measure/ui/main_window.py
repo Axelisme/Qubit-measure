@@ -24,7 +24,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from zcu_tools.experiment.run_saving import ArtifactRef
+from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
 from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
