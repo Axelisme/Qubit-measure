@@ -225,7 +225,7 @@ def test_invalid_backend_signals_fail_public_acquire_and_allow_retry(invalid, mo
                 invalid
             ]
         elif invalid == "shape":
-            value = np.zeros((1, 2))
+            value = np.zeros(shape[1:])
         channels = (ChannelSignals(0, value),)
         if invalid == "missing":
             channels = ()
