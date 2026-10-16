@@ -36,7 +36,7 @@ def sampling_editor(qapp):
 def test_sampling_context_menu_and_visible_effective_coordinates(
     sampling_editor, tmp_path: Path
 ):
-    editor, driver = sampling_editor
+    _, driver = sampling_editor
     driver.screenshot(tmp_path / "01-range-expts.png")
     driver.invoke_context_action(
         object_name="form.input.sweep.n", action="Switch to Step"
@@ -102,9 +102,48 @@ def test_sampling_context_menu_and_visible_effective_coordinates(
     )
     driver.screenshot(tmp_path / "09-rejected-local-text.png")
     assert driver.observe(object_name="form.input.sweep.step").text == "unfinished"
+
+
+@pytest.fixture
+def readonly_valid_sampling_editor(sampling_editor):
+    editor, driver = sampling_editor
+    driver.invoke_context_action(
+        object_name="form.input.sweep.n", action="Switch to Step"
+    )
     editor.set_editing_enabled(enabled=False)
+    return driver
+
+
+def test_readonly_sampling_command_cannot_convert_valid_step(
+    readonly_valid_sampling_editor: ComponentDriver, tmp_path: Path
+):
+    driver = readonly_valid_sampling_editor
+    driver.screenshot(tmp_path / "01-readonly-valid-step.png")
     driver.invoke_context_action(
         object_name="form.input.sweep.step", action="Switch to Expts"
     )
-    driver.screenshot(tmp_path / "10-readonly-step.png")
+    driver.screenshot(tmp_path / "02-readonly-command.png")
+    assert float(driver.observe(object_name="form.input.sweep.step").text) == 0.25
+
+
+@pytest.fixture
+def readonly_sampling_editor(sampling_editor):
+    editor, driver = sampling_editor
+    driver.invoke_context_action(
+        object_name="form.input.sweep.n", action="Switch to Step"
+    )
+    driver.enter_text(object_name="form.input.sweep.step", value="unfinished")
+    editor.set_editing_enabled(enabled=False)
+    return driver
+
+
+def test_readonly_sampling_command_cannot_replace_local_text(
+    readonly_sampling_editor: ComponentDriver, tmp_path: Path
+):
+    driver = readonly_sampling_editor
+    driver.screenshot(tmp_path / "01-readonly-step.png")
+    driver.invoke_context_action(
+        object_name="form.input.sweep.step", action="Switch to Expts"
+    )
+    driver.screenshot(tmp_path / "02-readonly-command.png")
     assert driver.observe(object_name="form.input.sweep.step").text == "unfinished"

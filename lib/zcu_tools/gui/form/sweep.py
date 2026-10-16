@@ -2,6 +2,7 @@
 
 import math
 from collections.abc import Mapping
+from functools import cached_property
 from typing import Annotated, Literal, Self
 
 from pydantic import Field, JsonValue, model_validator
@@ -151,20 +152,60 @@ def _to_expts(data: Mapping[str, JsonValue], env: FormEnv) -> dict[str, JsonValu
 
 
 _CENTER = InputCommand(
-    "to_center", "Switch to Center / Span", ("start", "stop"), _to_center
+    "to_center",
+    "Switch to Center / Span",
+    ("start", "stop"),
+    _to_center,
+    result_tag=("kind", "center"),
 )
-_RANGE = InputCommand("to_range", "Switch to Range", ("center", "span"), _to_range)
+_STEP_CENTER = InputCommand(
+    "to_center",
+    "Switch to Center / Span",
+    ("start", "stop"),
+    _to_center,
+    result_tag=("kind", "center_step"),
+)
+_RANGE = InputCommand(
+    "to_range",
+    "Switch to Range",
+    ("center", "span"),
+    _to_range,
+    result_tag=("kind", "linrange"),
+)
+_STEP_RANGE = InputCommand(
+    "to_range",
+    "Switch to Range",
+    ("center", "span"),
+    _to_range,
+    result_tag=("kind", "linrange_step"),
+)
 _RANGE_STEP = InputCommand(
-    "to_step", "Switch to Step", ("start", "stop", "n"), _to_step
+    "to_step",
+    "Switch to Step",
+    ("start", "stop", "n"),
+    _to_step,
+    result_tag=("kind", "linrange_step"),
 )
 _CENTER_STEP = InputCommand(
-    "to_step", "Switch to Step", ("center", "span", "n"), _to_step
+    "to_step",
+    "Switch to Step",
+    ("center", "span", "n"),
+    _to_step,
+    result_tag=("kind", "center_step"),
 )
 _RANGE_EXPTS = InputCommand(
-    "to_expts", "Switch to Expts", ("start", "stop", "step"), _to_expts
+    "to_expts",
+    "Switch to Expts",
+    ("start", "stop", "step"),
+    _to_expts,
+    result_tag=("kind", "linrange"),
 )
 _CENTER_EXPTS = InputCommand(
-    "to_expts", "Switch to Expts", ("center", "span", "step"), _to_expts
+    "to_expts",
+    "Switch to Expts",
+    ("center", "span", "step"),
+    _to_expts,
+    result_tag=("kind", "center"),
 )
 
 
@@ -215,22 +256,23 @@ class StepRange(FormModel):
     """
 
     kind: Literal["linrange_step"] = "linrange_step"
-    start: Annotated[float, _CENTER]
-    stop: Annotated[float, _CENTER]
+    start: Annotated[float, _STEP_CENTER]
+    stop: Annotated[float, _STEP_CENTER]
     step: Annotated[float, _RANGE_EXPTS]
 
     @model_validator(mode="after")
     def _effective_stop(self) -> Self:
         try:
-            count = _step_count(self.stop - self.start, self.step)
+            count = self.n
         except ValueError as exc:
             raise field_error(("step",), str(exc)) from exc
         self.stop = self.start + self.step * (count - 1)
         return self
 
-    @property
+    @cached_property
     def n(self) -> int:
-        """Return the effective count, including the first point."""
+        """Return the validated count, retained before endpoint projection."""
+        # Subtracting projected endpoints at a large offset can lose a step.
         return _step_count(self.stop - self.start, self.step)
 
 
@@ -244,14 +286,14 @@ class StepCenter(FormModel):
     """
 
     kind: Literal["center_step"] = "center_step"
-    center: Annotated[float, _RANGE]
-    span: Annotated[float, _RANGE]
+    center: Annotated[float, _STEP_RANGE]
+    span: Annotated[float, _STEP_RANGE]
     step: Annotated[float, _CENTER_EXPTS]
 
     @model_validator(mode="after")
     def _effective_coordinates(self) -> Self:
         try:
-            count = _step_count(self.span, self.step)
+            count = self.n
         except ValueError as exc:
             raise field_error(("step",), str(exc)) from exc
         start = self.start
@@ -269,9 +311,9 @@ class StepCenter(FormModel):
         """Return the effective final endpoint in caller units."""
         return self.center + self.span / 2
 
-    @property
+    @cached_property
     def n(self) -> int:
-        """Return the effective count, including the first point."""
+        """Return the validated count, retained before coordinate projection."""
         return _step_count(self.span, self.step)
 
 

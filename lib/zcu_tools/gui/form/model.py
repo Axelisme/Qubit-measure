@@ -73,13 +73,16 @@ class InputCommand:
     views reject local parse errors only on those paths. run receives detached
     parent input and fixed env, returns the complete replacement parent object,
     and must not mutate sources. ValueError rejects conversion atomically.
-    Declarations belong in field Annotated metadata, not view state.
+    result_tag optionally identifies the replacement branch as (field, literal
+    value). Such actions are available only when the enclosing annotation accepts
+    that tag. Declarations belong in field Annotated metadata, not view state.
     """
 
     name: str
     label: str
     inputs: tuple[str, ...]
     run: Callable[[Mapping[str, JsonValue], FormEnv], dict[str, JsonValue]]
+    result_tag: tuple[str, str] | None = None
 
 
 @dataclass(frozen=True)

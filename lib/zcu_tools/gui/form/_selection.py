@@ -13,7 +13,14 @@ from pydantic.fields import FieldInfo
 from ._json import default_json
 from ._sources import local_choices
 from ._structure import alternatives, discriminator, intrinsic_tags, model_types
-from .model import FormEnv, FormModel, FormPath, FormPathError, FormWritePath
+from .model import (
+    FormEnv,
+    FormModel,
+    FormPath,
+    FormPathError,
+    FormWritePath,
+    InputCommand,
+)
 from .options import Option
 
 
@@ -112,6 +119,7 @@ class Level:
     overlaid inherited paths. data is raw input only; missing/invalid ordinary
     models use an empty mapping without generating defaults. pinned carries
     the enclosing selected option's partial value for structural-tag omission.
+    variants retains enclosing annotation branches for command-result admission.
     """
 
     model: type[BaseModel]
@@ -120,6 +128,7 @@ class Level:
     choices: Mapping[FormPath, tuple[JsonValue, ...]]
     options: Mapping[FormPath, tuple[Option, ...]]
     pinned: Mapping[str, JsonValue] = field(default_factory=dict)
+    variants: tuple[type[BaseModel], ...] = ()
 
     def field(self, name: str) -> Field:
         """Resolve a declared direct field; undeclared names raise KeyError."""
@@ -154,6 +163,22 @@ class Field:
     def path(self) -> FormWritePath:
         """Full model-field path, never a display alias."""
         return (*self.level.prefix, self.name)
+
+    @property
+    def input_commands(self) -> tuple[InputCommand, ...]:
+        """Actions whose declared result branch the enclosing annotation accepts."""
+        return tuple(
+            item
+            for item in self.info.metadata
+            if isinstance(item, InputCommand)
+            and (
+                item.result_tag is None
+                or any(
+                    item.result_tag[1] in intrinsic_tags(model, item.result_tag[0])
+                    for model in self.level.variants
+                )
+            )
+        )
 
     @property
     def pinned(self) -> bool:
@@ -249,6 +274,7 @@ class Field:
             {**choices, **local_choices(model, env)},
             {**options, **_local_options(model, env)},
             pinned if isinstance(pinned, dict) else {},
+            model_types(self.info.annotation),
         )
 
 
@@ -262,7 +288,14 @@ def root_level(
     model: type[FormModel], data: Mapping[str, JsonValue], env: FormEnv
 ) -> Level:
     """Read only root hooks; nested declarations are read when reached."""
-    return Level(model, (), data, local_choices(model, env), _local_options(model, env))
+    return Level(
+        model,
+        (),
+        data,
+        local_choices(model, env),
+        _local_options(model, env),
+        variants=(model,),
+    )
 
 
 def resolve(

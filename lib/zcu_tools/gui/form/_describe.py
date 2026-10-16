@@ -26,7 +26,7 @@ from .description import (
     FormFieldKind,
     FormOptionDescription,
 )
-from .model import Display, FormEnv, FormModel, FormWritePath, InputCommand
+from .model import Display, FormEnv, FormModel, FormWritePath
 from .options import Option
 from .sweep import CenterSpan, LinRange, StepCenter, StepRange
 
@@ -217,8 +217,7 @@ def _metadata(
                 target.level.prefix,
                 tuple((*target.level.prefix, name) for name in item.inputs),
             )
-            for item in info.metadata
-            if isinstance(item, InputCommand)
+            for item in target.input_commands
         ),
     )
 

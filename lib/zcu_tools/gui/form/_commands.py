@@ -9,7 +9,6 @@ from .model import (
     FormInput,
     FormModel,
     FormState,
-    InputCommand,
 )
 
 
@@ -18,11 +17,7 @@ def run_input_command[F: FormModel](
 ) -> bool:
     """Run matching field metadata; False leaves option command resolution in charge."""
     command = next(
-        (
-            item
-            for item in target.info.metadata
-            if isinstance(item, InputCommand) and item.name == name
-        ),
+        (item for item in target.input_commands if item.name == name),
         None,
     )
     if command is None:

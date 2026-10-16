@@ -50,7 +50,7 @@ Display 只承載欄位呈現資訊。順序沿欄位宣告，段落沿 nested m
 
 掃描使用 tagged `SweepInput`。`LinRange`／`CenterSpan` 保存座標與 n，`StepRange`／`StepCenter` 保存座標與 step。Span 是帶方向的完整寬度。生成表單預設 Range + Expts，手寫表單可使用同一個 SweepInput。Step 驗證保留 start 與 step，以 floor count 投影實際 stop／center／span。接近整數的商使用 1e-9 相對容差，不普遍 round。步長大於非零區間、零步長或方向錯誤保留錯誤草稿，不能縮成單點。Input 保存原稿，preview／result 提供有效端點，不回寫 input。不提供 explicit-list 分支。
 
-數值欄位的 `InputCommand` metadata 宣告 name、label、參與 sibling names 與完整 parent replacement callable。Description 將 target 與參與 inputs 投影成完整 canonical paths。`run_command` 在固定 env 中求值參與欄位，原子替換 parent，不套普通分支 defaults。座標指令不要求 n／step 有效，採樣指令要求座標與目前採樣值有效；無關欄位錯誤不阻擋。未參與的 input 保留原文與缺席狀態。缺座標、expression 或換算失敗 raise `FormCommandError(ValueError)`，不安裝部分結果。普通 OptionCommand 與 union selector 仍使用 fresh defaults。
+數值欄位的 `InputCommand` metadata 宣告 name、label、參與 sibling names 與完整 parent replacement callable。`result_tag` 宣告換算後的 branch；description 與 execution 只提供 enclosing annotation 接受的目標。單一 LinRange 不提供換成其他 kind 的指令，手寫表單使用 SweepInput 接入四種表示。Description 將 target 與參與 inputs 投影成完整 canonical paths。`run_command` 在固定 env 中求值參與欄位，原子替換 parent，不套普通分支 defaults。座標指令不要求 n／step 有效，採樣指令要求座標與目前採樣值有效；無關欄位錯誤不阻擋。未參與的 input 保留原文與缺席狀態。缺座標、expression 或換算失敗 raise `FormCommandError(ValueError)`，不安裝部分結果。普通 OptionCommand 與 union selector 仍使用 fresh defaults。
 
 Range／Center 的右鍵指令只在成功時把座標 expression 改成 direct 數字。Expts／Step 指令也求值座標，成功後將全部參與欄位換成 direct 數字。之後的新 expression 照常保存。Input、preview 與 result 的讀取不正規化原稿，也不保留舊模式快取。`Display(selector=False)` 隱藏 dropdown，但保留 selector metadata 與 active branch；數值欄位的 commands 提供顯式操作。
 

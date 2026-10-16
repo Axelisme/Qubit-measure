@@ -1,72 +1,68 @@
-"""Registered workflow forms share sweep commands and persisted active input."""
+"""Registered handwritten workflow forms share sweep commands and restored input."""
 
 from pathlib import Path
+from typing import Annotated
 
-from zcu_tools.cfg_model import ConfigBase, Range
-from zcu_tools.gui.app.workflows.attachment import WorkflowAttachment
-from zcu_tools.gui.app.workflows.window import WorkflowWindow
-from zcu_tools.gui.form_adapter import Form
-from zcu_tools.program.v2.sweep import SweepCfg
+import pytest
+from pydantic import Field
+from zcu_tools.gui.app.workflows.persistence import WorkflowInputSnapshot
+from zcu_tools.gui.form import Display, FormModel, LinRange, SweepInput
 
 from tests.gui._user_input import ComponentDriver
 
-from ._synthetic import Context, Plan, TunablesForm, sample_step
+
+class SweepPlanForm(FormModel):
+    sweep: Annotated[SweepInput, Display(selector=False)] = Field(
+        default_factory=lambda: LinRange(start=10, stop=4, n=4)
+    )
 
 
-class SweepPlanCfg(ConfigBase):
-    sweep: SweepCfg
+@pytest.fixture
+def coordinate_window(sweep_window):
+    return ComponentDriver(sweep_window(SweepPlanForm, None))
 
 
-def test_registered_workflow_sweep_restores_center_expression(
-    qapp, tmp_path: Path, attachment
+@pytest.fixture
+def restored_coordinate_window(sweep_window):
+    saved = WorkflowInputSnapshot(
+        plan={
+            "sweep": {"kind": "center", "center": {"expr": "3 + 4"}, "span": -6, "n": 4}
+        }
+    )
+    return ComponentDriver(sweep_window(SweepPlanForm, saved))
+
+
+def test_registered_workflow_sweep_commands_and_prepare(
+    coordinate_window: ComponentDriver, tmp_path: Path
 ):
-    form = Form(SweepPlanCfg, {"sweep": Range.between(10, 4, 4)})
-    registration = WorkflowAttachment(
-        step=sample_step,
-        plan_model=form.model,
-        knobs_model=TunablesForm,
-        plan_to_cfg=lambda value, env, snapshot: Plan(snapshot=snapshot),
-        knobs_to_cfg=TunablesForm.to_cfg,
-        seed=lambda plan, value: Context(1),
+    driver = coordinate_window
+    driver.screenshot(tmp_path / "01-workflow-range.png")
+    driver.invoke_context_action(
+        object_name="form.input.sweep.stop", action="Switch to Center / Span"
     )
-    _, harness, _ = attachment
-    window = WorkflowWindow(
-        harness.state,
-        harness.services,
-        harness.owner,
-        templates={},
-        alias_presets=None,
-        registrations=(registration,),
+    driver.screenshot(tmp_path / "02-workflow-center.png")
+    assert driver.observe(object_name="form.input.sweep.span").text == "-6.0"
+    driver.invoke_context_action(
+        object_name="form.input.sweep.center", action="Expression"
     )
-    window.resize(1100, 900)
-    window.show()
-    qapp.processEvents()
-    driver = ComponentDriver(window)
-    try:
-        driver.screenshot(tmp_path / "01-workflow-range.png")
-        driver.invoke_context_action(
-            object_name="form.input.sweep.stop", action="Switch to Center / Span"
-        )
-        driver.screenshot(tmp_path / "02-workflow-center.png")
-        assert driver.observe(object_name="form.input.sweep.span").text == "-6.0"
-        driver.invoke_context_action(
-            object_name="form.input.sweep.center", action="Expression"
-        )
-        driver.enter_text(object_name="form.input.sweep.center", value="3 + 4")
-        driver.screenshot(tmp_path / "03-workflow-expression.png")
-        saved = window.capture_persisted_state()
-        window.prepare_forms()
-        driver.screenshot(tmp_path / "04-workflow-reset.png")
-        assert float(driver.observe(object_name="form.input.sweep.start").text) == 10.0
-        window.restore_persisted_state(saved)
-        # Restore replaces panels; scope queries to the new public panel, not
-        # retired hidden controls waiting for Qt's deferred deletion.
-        driver = ComponentDriver(window.plan_panel)
-        driver.screenshot(tmp_path / "05-workflow-restored.png")
-        assert driver.observe(object_name="form.input.sweep.center").text == "3 + 4"
-        assert driver.observe(object_name="form.input.sweep.n").text == "4"
-        assert window.capture_persisted_state() == saved
-    finally:
-        window.close()
-        window.deleteLater()
-        qapp.processEvents()
+    driver.enter_text(object_name="form.input.sweep.center", value="3 + 4")
+    driver.screenshot(tmp_path / "03-workflow-expression.png")
+    assert driver.observe(object_name="form.input.sweep.center").text == "3 + 4"
+    driver.click("Prepare forms")
+    driver.screenshot(tmp_path / "04-workflow-reset.png")
+    start = next(
+        item
+        for item in driver.visible().widgets
+        if item.object_name == "form.input.sweep.start"
+    )
+    assert float(start.text) == 10.0
+
+
+def test_registered_workflow_restores_center_expression(
+    restored_coordinate_window: ComponentDriver, tmp_path: Path
+):
+    driver = restored_coordinate_window
+    driver.screenshot(tmp_path / "01-workflow-restored.png")
+    assert driver.observe(object_name="form.input.sweep.center").text == "3 + 4"
+    assert float(driver.observe(object_name="form.input.sweep.span").text) == -6.0
+    assert driver.observe(object_name="form.input.sweep.n").text == "4"
