@@ -4,5 +4,5 @@ Pure numeric GHz/ns/K inputs only. Environment owns YAML/device/channel mapping;
 Evolution owns propagation and ADC owns the shared-line conditional field solve.
 """
 
-from .model import JointModel
+from .model import FluxDynamics, JointModel
 from .parameters import FluxoniumCircuit, JointParameters, Resonator, SquidCircuit

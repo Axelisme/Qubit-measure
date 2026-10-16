@@ -69,6 +69,30 @@ class FilteredFlux:
             raise ValueError("flux line source names must be unique")
         self.controls, self.lines, self.rtol, self.atol = controls, lines, rtol, atol
 
+    @property
+    def event_times_ns(self) -> tuple[float, ...]:
+        """Return delayed absolute source events for numeric model partitioning.
+
+        Includes quantized pulse support, envelope breakpoints and phase changes
+        before each line's delay is applied, matching at(). Lowpass tails remain
+        continuous and untruncated; these events impose no integration step size.
+        The evolution owner rounds their delayed absolute coordinates to 2 ns.
+        """
+        events: set[float] = set()
+        for line in self.lines:
+            for pulse in self.controls.pulses:
+                if pulse.source == line.source:
+                    events.update(
+                        quantize_ns(t) + line.delay_ns
+                        for t in (pulse.start_ns, pulse.end_ns, *pulse.breakpoints_ns)
+                    )
+            events.update(
+                quantize_ns(event.time_ns) + line.delay_ns
+                for event in self.controls.phase_events
+                if event.source == line.source
+            )
+        return tuple(sorted(events))
+
     def at(self, time_ns: float) -> NDArray[np.float64]:
         """Return actual flux shape (3,) at absolute finite ns, including tail.
 

@@ -123,7 +123,7 @@ class Evolution:
             key = exact_key(
                 self.model, self.settings, initial, controls, (points[0], points[-1])
             )
-            record = self.library.read_record(key)
+            record = self.library.read_record(key, snapshot=self.tables)
             if record is not None:
                 state = DensityState(self.model.basis, record[0])
                 self.last_evaluation = EvaluationReceipt(

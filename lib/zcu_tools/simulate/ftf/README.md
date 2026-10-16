@@ -33,13 +33,15 @@ transitions raise; near-degeneracy validity remains a model assumption.
 
 `numeric_model` returns an independent `NumericModel` with continuous H(flux(t))
 and piecewise instantaneous baths in the same fixed coordinates. Bath updates use
-segment-start flux. The requested segment length rounds to the nearest 2 ns,
+segment-start flux. Explicit flux callback events, including delayed pulse
+support and envelope/phase changes, also refresh the baths and partition the
+continuous Hamiltonian. The requested segment length rounds to the nearest 2 ns,
 with a minimum of one tick. Evolution unions these model events with source
 boundaries. It owns integration and never resets the density at a bath update.
 `fixed_numeric_model` supplies the same Hamiltonian and full baths at an explicit
 constant reduced flux, without callbacks or bath-update boundaries. It is not
-valid for a driven flux source or passive tail. Dynamic callback models can carry
-a stable dependency identity for persistent direct records. Numeric matrices,
+valid for a driven flux source or passive tail. `FluxDynamics` keeps the callback's actual event coordinates and optional
+stable dependency identity together for persistent direct records. Numeric matrices,
 basis and actual controls still participate in their separate exact key.
 
 `collapse_operators` combines multilevel relaxation with CP flux/residual-photon

@@ -4,9 +4,9 @@ status: draft
 
 # 模擬環境、FTF preset 與參數檔
 
-**狀態：** 已核准方向的設計草稿。環境、FTF 數值工具與離線表的現行入口見各 owner README。持久單 round 重播與完整校準效能驗收仍待完成。本文保留使用者裁決原話，不以早期候選敘述替代現行 owner 契約。
+**狀態：** 已核准方向的設計草稿。明確環境、FTF 數值工具、離線表及持久單 round 重播已交付，現行入口見各 owner README。F1／F2 校準已跑通，conditional Ramsey 取得一點，依「能跑起來」標準接受。這些歷史證據屬舊 backend，並非目前版本的精度或成本保證。本文保留使用者裁決原話，不以早期候選敘述替代現行 owner 契約。
 
-**關聯：** [[0064]] 啟動組裝、[[0068]] remote transport、[[0069]] 現行裝置環境、[[0071]] coherence 單位、[模組定位](../0072-module-boundaries.md)。遷移完成前，現行 simulate 功能仍以 [[0069]] 為準。早期選項比較保留於[討論快照](../../discussions/2026-10-13-simulation-environment-ftf-preset.md)。
+**關聯：** [[0064]] 啟動組裝、[[0068]] remote transport、[[0069]] 實驗核心與前端、[[0071]] coherence 單位、[模組定位](../0072-module-boundaries.md)。模擬入口與責任以本文及各 owner README 為準，舊 TLS 遷移已完成。早期選項比較保留於[討論快照](../../discussions/2026-10-13-simulation-environment-ftf-preset.md)。
 
 ## 目的
 
@@ -40,7 +40,7 @@ YAML 不是通用 environment DSL。Launcher／runtime 不辨識 FTF 欄位，�
 
 Builder 回傳前失敗，由 builder 清理已建立資源；成功回傳後，由宿主負責安排清理，不等 GUI State 發布成功才交接。安裝失敗時，宿主透過同一 manager 清理本次資源，不開放 Run／remote readiness，也不回退正常模式或白雜訊。部分 close 失敗保留失敗裝置與錯誤，不自動 retry，不宣稱清理成功；原始啟動錯誤與清理錯誤都保留。
 
-啟動失敗的清理不能只依賴成功顯示視窗後的關閉事件。正常關閉仍遵守既有 operation／Run gate，不因持有 manager 而繞過使用資源的工作。這不新增通用交易框架；具體型別與方法名稱、初始 State 發布及 remembered-device 政策仍待完成。
+啟動失敗的清理不能只依賴成功顯示視窗後的關閉事件。正常關閉仍遵守既有 operation／Run gate，不因持有 manager 而繞過使用資源的工作。`SimulationEnvironment` 回傳同一 manager，`DeviceService` 先發布 live devices 再還原偏好。同名 live 不被替換，其餘 remembered devices 保持離線。這不新增通用交易框架。
 
 2026-10-13，使用者提出：「我覺得可以有FTF的enviroment或preset，內部有個yaml檔來放一些超參數，這樣方便用戶調」。對 Python 組裝、YAML 調參的分工確認：「好，繼續，同時你可以將我們的討論記錄到docs/discusssion中了」。更早的原則原話為「我第一版想做簡單一點的，不要做出什麼複雜的DSL架構，可以考慮宣告本身是python腳本」，原始日期未保留，於2026-10-13彙整。
 
@@ -62,7 +62,7 @@ Builder 回傳前失敗，由 builder 清理已建立資源；成功回傳後，
 | Program 量測要求 | Pulse、gain、frequency、phase、timing、sweep、readout 與抽樣要求；YAML 不提供隱藏 pulse 來覆寫它。 |
 | 校準估計 | 從 I/Q 推得，可用於後續量測，不直接改模型真值。 |
 
-Loader 驗證必要／未知欄位、units、維度與數值合法性，失敗中止；solver 只收具名數值，不讀 YAML 或資料容器。完整 schema、預設值與 Python 型別仍待完成，不把 prototype 參數當通用預設。
+Loader 驗證必要／未知欄位、units、維度與數值合法性，失敗中止；solver 只收具名數值，不讀 YAML 或資料容器。`resources.ftf.FTFSettings` 定義具名 schema 與預設值，`parse_ftf` 提供 field-path 診斷。範例參數不代表任意模型的精度保證。
 
 2026-10-14，使用者提出：「可以考慮讓FakeDevice在建立時設定使用的參數，預設是native這樣」。對建立時指定且建立後固定的提案，回答「認同，再來要做什麼？」。FakeDevice 接受 value_unit=native／V／A，預設 native；driver 保存單位，Info 如實回報。Value 與 rampstep 使用同一單位，不自動換算。Setup 不切換單位，傳入不符單位時在寫入前拒絕；要換單位就重建裝置。
 
@@ -77,7 +77,7 @@ FTF builder 明確選 V／A，flux helper 比對實際 driver 單位，不以預
 
 ### 每 round 捕捉輸入，不承接前次量子態
 
-每次 acquire 固定一份 AcquireRequest，包含控制 timeline、量化座標、readout routes/windows、layout／mode 與 acquire 抽樣身份。每 round 真正執行前捕捉 EnvironmentSnapshot，包含裝置值與所用模型／校準設定版本；兩者加 round 身份組成 RoundRequest。型別名稱暫定，組合採具名欄位，不使用 dict 覆寫或 live device 引用。
+每次 acquire 固定一份 AcquireRequest，包含控制 timeline、量化座標、readout routes/windows、layout／mode 與 acquire 抽樣身份。每 round 真正執行前捕捉 EnvironmentSnapshot，包含裝置值與所用模型／校準設定版本；兩者加 round 身份組成 RoundRequest。這些具名型別由 `core.simulation` 提供，組合採具名欄位，不使用 dict 覆寫或 live device 引用。
 
 2026-10-14，使用者提出：「我預期在acquire時會記一筆acquire request，而每個round又記一筆環境的參數，這兩筆合成一個模擬的request，這樣合理嗎？」對此拆分確認「好，繼續」。原因是「因為可以預見一種使用場景，每round間隔改一次flux device值」。下一 round 必須看到新值；不逐 ADC getter 重讀裝置，也不在 prepare_round 過早固定環境。
 
@@ -96,7 +96,7 @@ SimulationAcquireMixin 由 program owner 提供，只在 MyProgramV2 共同基�
 使用者其後縮減範圍：「我目前沒有step_round的需求，有沒有簡單的方案」，並確認同步方案：「好，那用這個方案」。第一版僅支援同步模擬 acquire／acquire_decimated：
 
 - 有 binding 時，在建立 request、消耗 acquire 抽樣序號或安裝本次資料來源前拒絕 step_rounds=True；沒有 binding 時原樣委派，正常硬體分步能力不變。
-- 保留 mixin 前置於 ImproveAcquireMixin 的安排，只包住同步呼叫。取得本次資源後以 try/finally 清理資料來源、暫存及重入標記，保留已完成結果、environment binding 與確定性 cache。正式 MRO／型別仍須驗證。
+- 保留 mixin 前置於 ImproveAcquireMixin 的安排，只包住同步呼叫。取得本次資源後以 try/finally 清理資料來源、暫存及重入標記，保留已完成結果、environment binding 與確定性 cache。公開 acquisition 測試涵蓋此 MRO 與型別接縫。
 - 同 program／模擬 SoC 只在呼叫期間防重入。拒絕在覆寫原工作前完成，不能進入會清掉原工作的新呼叫清理範圍。
 - 不新增 AcquireLifecycleMixin、abort 入口、跨方法分步使用權或整組 prepare／finish lifecycle wrapper。同步 callback 例外會回到外層 acquire。
 
@@ -157,7 +157,7 @@ f = Φ/Φ0, EJmax = EJ1 + EJ2, d = (EJ2 - EJ1)/(EJ1 + EJ2)
 
 [T1 工具](../../../lib/zcu_tools/notebook/analysis/t1_curve/README.md)使用 Temp、Q_cap、Q_ind、x_qp；[T2 工具](../../../lib/zcu_tools/notebook/analysis/t2_curve/README.md)另有 A_phi、n_th。Temp 單位為 K。有效01 equilibrium T1 不能當每條 jump 的 directional rate；echo characteristic rate 也不能當任意 Ramsey／gate 的精確模型。
 
-數值公式由數值 owner 提供，分析與模擬共用，不由 preset 複製或 solver 呼叫 Notebook workflow。T1 純計算已有 simulate.fluxonium.coherence；T2 純計算的搬遷與 interface 仍待設計，不新增逆向 import 或放寬 contracts。舊 T1、pointwise Q、Purcell 單位修正已獨立合併，契約見 [[0071]]，不再列為此 task 待辦，也不自動改歷史 fit／Q。新 joint kernel 仍須獨立單位、零溫與小 gap 驗證。
+數值公式由數值 owner 提供，分析與模擬共用，不由 preset 複製或 solver 呼叫 Notebook workflow。`simulate.spectra` 集中 loss spectra，`simulate.baths` 與 `simulate.fluxonium.coherence` 共用。`simulate.dephasing` 提供 T2 純計算與 CP 多能階 dephasing，Notebook 呼叫數值 owner，不新增逆向 import 或放寬 contracts。舊 T1、pointwise Q、Purcell 單位修正已獨立合併，契約見 [[0071]]，不再列為此 task 待辦，也不自動改歷史 fit／Q。新 joint kernel 仍須獨立單位、零溫與小 gap 驗證。
 
 ### 多體 directional rates 與 coupler 耗散
 
@@ -229,7 +229,7 @@ FTF環境目錄提供 `build_database.py` 類型的離線入口，直接讀取�
 
 模型、表及快取可重用，量子態不隱含承接上次呼叫。同一 shot 內由上層明確接續，跨 shot／round 不繼承。表版本由上層在已定邊界固定，數值工具不自行猜測 round。資料格式與路徑分工沿用上節，演化資料不交給 resources。
 
-依賴仍受 [[0072]] 的 C8 分層、C9 無循環及 C12 穩定工具不依賴有狀態能力模組約束。這不建立 simulate→program／resources 的新依賴，不放寬 ignore_imports；子模組內部 interface 與需要的新增 contract 留待實作設計。
+依賴仍受 [[0072]] 的 C8 分層、C9 無循環及 C12 穩定工具不依賴有狀態能力模組約束。這不建立 simulate→program／resources 的新依賴，不放寬 ignore_imports；`program-simulation-entry` contract 限制一般 program 只依賴公開 mixin 入口，入口可委派 frontend 與 adapter。
 
 ### 多體演化與讀出模型
 
@@ -261,7 +261,7 @@ Lookback／acquire_decimated 使用相同有限 pulse 與條件平均場，輸�
 
 對含 N 個 samples 的窗口，decimated 的每 quadrature sample 為 N(0,std_adc²)；integrated 回 sample sum，可直接抽等價的 N(0,N×std_adc²)。這些分布定義在 adapter rounding 前；int64 rounding、normalization 與 averaging 仍走共用 acquisition。Companion raw 從同一 decimated trace 求和，不另抽 noise，raw／averaged 共用資料。
 
-此 preset 遵守共同 seed、round identity、重播與清理契約，不使用全域 RNG，不作任何失敗 fallback。不新增非零 mean、相關 noise 或物理模型；具體設定入口與預設值尚待完成。
+此 preset 遵守共同 seed、round identity、重播與清理契約，不使用全域 RNG，不作任何失敗 fallback。不新增非零 mean、相關 noise 或物理模型；公開入口是 `experiment.simulation.white_noise(std_adc=1.0, seed=None, ...)`，回傳相同的具名環境 bundle。
 
 ### 舊 TLS 與 Notebook 遷移
 
@@ -271,14 +271,15 @@ Lookback／acquire_decimated 使用相同有限 pulse 與條件平均場，輸�
 
 保留參數化 make_mock_soccfg 的離線設定／編譯能力，QICK adapter 仍歸 program。舊類別可重用的內部邏輯可移到新入口，但不保留舊雙模式 API。Framework fixtures 按被測 seam 使用合成 executor，不一律執行 FTF。只服務已刪邏輯的 tests 一併移除，不新增「舊內容不存在」的斷言。
 
-## 尚待完成
+## 交付狀態與限制
 
-以下是未完成設計或驗證，不重新打開已核准方向：
+- Program 提供具名環境 binding、Module timeline 與 request／signal 契約。GUI 先發布同一 manager 的 live devices，再還原 remembered devices。正常硬體路徑不變，模擬的 raw compile hooks 明確拒絕。
+- Resources 提供 FTF YAML schema 與 checked JSON private replay 容器。Experiment 組合環境及單 round 重播，EvolutionLibrary 解析並驗證原數值內容引用。重播固定原 table／exact record 來源，不因後來發布 direct record 改道。
+- Evolution 提供 Intel OpenCL complex128 離線建庫、部分續建、驗證發布、磁碟讀回與持久 exact records。每個 instance 的 resident-array LRU 預算為 4,000,000,000 bytes，不是 process RAM 上限。Runtime 不建表，也不要求 GPU。
+- 舊 TLS、隱式白雜訊及雙模式 mock API 已移除，Notebook 使用新環境。沒有相容層。參數化 make_mock_soccfg 仍支援離線編譯。
 
-- Environment bundle、binding、timeline／request／signal 的 Python 型別與公開方法；初始狀態發布、remembered-device 政策、細部 owner、import edges 與 contracts。Bundle 使用同一 DeviceManager 與回傳時交接清理責任已定；program/v2 frontend 與少量公開接口方向已定。
-- White_noise 的設定入口、預設值與組裝型別；FTF YAML 完整 schema／預設值、校準欄位、waveform 解碼，以及 joint rate／dephasing API、T2 純計算搬遷與數值 reference。Gain、basis、bath、readout 及不做 runtime 適用域檢查已定。
-- Private replay 記錄的保存及引用解析。Seed 身份、獨立抽樣、確定性 cache 與公開／private 界線已定。
-- 離線演化表的檔案schema、有效性identity、owner、執行期補算／保存／發布、部分建庫與4GB快取管理。GPU批次建庫、磁碟讀回及完整acquire成本仍待驗證；離線預算與執行期載入插值的方向已定。
-- 舊 TLS、隱式白雜訊與雙模式 mock API 的實際 caller／fixture 遷移，以及 Notebook 改用新環境。刪除範圍與不留相容層已定；公開驗證接縫及交付順序已確認，完整 acquire benchmark 的案例與數值門檻由實作交付，不以研究數字當產品保證。
+I/Q-only 練習在原版本已跑通 F1、F2，conditional Ramsey 只取得一點。驗收採「能跑起來」，不代表全 16 點完成或原精度達標。歷史正式 workload 的完整 acquire 成本為 cold 平均 2.864 秒／point、warm direct-record 平均 0.457 秒／point，不能稱平均 1 秒已達標。演算法優化另行處理。
 
-尚未修改正式 import 或新增 import contract，不能把本草稿當作完整實作已驗收。2026-10-16 的當次授權只定稿規格與拆 tickets，交給獨立 agent 實作。本 session 不修改正式功能、不操作硬體、不 landing，也不恢復已暫停的數值研究。
+現行 FTF backend 是 `ftf-direct-v3`，包含 delayed flux 真實事件分段與重播來源固定。舊版本 private archive 透過公開 replay 入口明確報版本不符，不靜默重解或升級。原校準、raw、seal 與成本證據維持原版本，沒有以 v3 重跑；此處不宣稱 v3 已重新驗證科學精度或效能。
+
+固定 original basis 的內部自洽驗證與跨 basis population 比較仍保留。跨 basis phase／complex 偏差照實保留，不作通過條件。模擬的絕對頻率與相位有 MHz 級 basis 偏差，不適合對照外部能譜或硬體絕對值。這些限制不改變既定物理模型，也不構成 runtime 收斂認證。

@@ -42,16 +42,9 @@ class ADC(ConditionalReadout):
         solver/callback failures. No QICK normalization, rounding, transition
         trajectory variance or cross-shot memory is modeled.
         """
-        if populations.state_labels != self.model.state_labels:
-            raise ValueError("population state order must match readout model")
-        if type(shots) is not int or shots < 0:
-            raise ValueError("shots must be a nonnegative integer")
-        conditional = self.response(pulses, grid)
-        rng = np.random.Generator(
-            np.random.PCG64(np.random.SeedSequence((identity.seed, *identity.stream)))
-        )
-        states = rng.choice(len(populations.values), size=shots, p=populations.values)
-        return self._draw(conditional, states, rng, identity)
+        return self.sample_windows(populations, pulses, (grid,), identity, shots=shots)[
+            0
+        ]
 
     def sample_windows(
         self,

@@ -88,14 +88,29 @@ class TableReference:
 
 
 @dataclass(frozen=True)
+class RecordReference:
+    """Pinned exact density: key is the request SHA256; identity is its file SHA256.
+
+    Both identities are lowercase 64-digit hexadecimal strings, resolved only
+    within the explicitly selected library's direct-record directory.
+    """
+
+    key: str
+    identity: str
+
+
+@dataclass(frozen=True)
 class LibrarySnapshot:
     """Fixed tuple of published versions, chosen by an acquire/round owner.
 
     tables: validated content references. New publications do not mutate this
-    snapshot. Direct records are independent and immediately reusable.
+    snapshot. replay_records: None permits normal discovery of exact records;
+    a tuple restricts replay to those original exact contents, even when empty.
+    New exact publications cannot override the original table/direct selection.
     """
 
     tables: tuple[TableReference, ...]
+    replay_records: tuple[RecordReference, ...] | None = None
 
 
 class _ReplayManifest(BaseModel):
@@ -280,7 +295,9 @@ class EvolutionLibrary:
         file digests, numeric headers and publication metadata must match. All
         references are checked from disk even when arrays are resident. Missing,
         damaged or mismatched artifacts raise before any evolution, never become
-        misses or silently use newly published tables. Direct paths resolve in
+        misses or silently use newly published tables or unlisted exact records.
+        The returned snapshot pins exact-record keys and file digests too.
+        Direct paths resolve in
         this explicitly pathed library. No arrays are installed in the RAM LRU.
         """
         record = _ReplayManifest.model_validate_json(manifest)
@@ -299,7 +316,10 @@ class EvolutionLibrary:
             archive = read_archive(self._record_path(key), digest)
             if archive.header.kind != "direct" or archive.header.key != key:
                 raise ValueError("replay direct record identity mismatch")
-        return record.snapshot
+        return LibrarySnapshot(
+            record.snapshot.tables,
+            tuple(RecordReference(key, digest) for key, digest in record.records),
+        )
 
     def evaluate(
         self, family: PlateauFamily, scale: float, snapshot: LibrarySnapshot
@@ -357,17 +377,27 @@ class EvolutionLibrary:
             raise ValueError("direct record requires a SHA256 numeric identity")
         return self.path / "direct" / f"{key}.npz"
 
-    def read_record(self, key: str) -> tuple[ComplexMatrix, str] | None:
+    def read_record(
+        self, key: str, *, snapshot: LibrarySnapshot | None = None
+    ) -> tuple[ComplexMatrix, str] | None:
         """Read an exact deterministic density record, or None if absent.
 
         key is the library-generated lowercase 64-digit SHA256 exact request
-        identity, not a path; invalid keys raise ValueError. Corruption/key
-        mismatch fails explicitly; records are never promoted to U tables.
+        identity, not a path; invalid keys raise ValueError. snapshot optionally
+        restricts lookup to pinned replay records. An unlisted key is a miss;
+        a missing/changed pinned file raises instead of selecting newer content.
+        Corruption/key mismatch fails; records are never promoted to U tables.
         """
         path = self._record_path(key)
-        if not path.exists():
+        digest = None
+        if snapshot is not None and snapshot.replay_records is not None:
+            reference = next((r for r in snapshot.replay_records if r.key == key), None)
+            if reference is None:
+                return None
+            digest = reference.identity
+        elif not path.exists():
             return None
-        archive = read_archive(path)
+        archive = read_archive(path, digest)
         if archive.header.kind != "direct" or archive.header.key != key:
             raise ValueError("direct record identity mismatch")
         return archive.values, sha256(path.read_bytes()).hexdigest()

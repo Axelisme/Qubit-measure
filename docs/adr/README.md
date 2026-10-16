@@ -70,7 +70,7 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 
 ## Draft
 
-- [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：已交付明確環境、white_noise、Module 控制、獨立數值工具、FTF 與離線資料重用。I/Q-only 校準、持久單 round 重播與完整效能驗收待交付。啟動固定 Python environment，FTF 用 YAML 調參；同步 acquire 固定量測要求、逐 round 捕捉環境，backend 固定輸入輸出。物理與依賴邊界已定；simulate.evolution 擁有 Intel OpenCL 閉系統 plateau 建表、驗證發布、持久 exact records 與 bounded RAM，experiment.ftf 注入路徑並固定 round 版本。非零 bath 與其他控制保留直接演化，持久單 round 重播與完整效能驗收另有交付。
+- [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：已交付明確環境、white_noise、Module 控制、獨立數值工具、FTF、Intel OpenCL 離線建庫與 bounded RAM、持久 exact records 及單 round 重播。F1／F2 已跑通，conditional Ramsey 僅一點，依「能跑起來」接受；歷史成本不代表 1 秒目標達標，也不是現行 v3 的重驗證。Python environment 固定啟動模式，FTF 用具名 YAML 調參。Experiment 組裝與協調 replay，EvolutionLibrary 固定並驗證原數值內容，非零 bath 與其他未覆蓋控制保留直接演化。
 
 
 - [Pydantic 表單、輸入與宿主提交](draft/pydantic-form-tool.md)：Qt-free core 與 editor 分離，共用 defaults hook、evaluator 與 complex codec。Expression 保存在 input，Engine journal 只記普通值。各宿主共用 FormEditor，Library／writeback 提交持久 Spec；Measure 推導見 [[0073]]。

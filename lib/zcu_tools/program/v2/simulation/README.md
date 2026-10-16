@@ -68,7 +68,8 @@ is no automatic retry. `Controller.close()` drains work but does not close drive
 or callback crosses this boundary. Time is us, frequency MHz, phase degrees and
 gain normalized DAC amplitude. The frontend interprets exact supported Module
 classes, not arbitrary tProcessor instructions. Unknown subclasses (including mux
-readouts), raw program setup/body overrides, raw loop hooks and undefined or
+readouts), raw program setup/body/cleanup or make_program overrides, raw loop
+hooks and undefined or
 incorrectly typed registers fail before the backend produces any data. Errors
 identify the concrete Module type/name, loop coordinates and relevant register.
 

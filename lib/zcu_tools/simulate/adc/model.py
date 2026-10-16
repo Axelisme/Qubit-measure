@@ -29,7 +29,9 @@ class Receiver:
         covariance in ADC sample units squared, per sample. Degenerate and zero
         matrices are valid. Samples/shots are independent; noise is added after
         gain/phase/offset, not scaled by gain. PSD means positive semidefinite,
-        not power spectral density. Invalid input raises ValueError.
+        not power spectral density. Symmetry/PSD allow only float64 roundoff
+        relative to the largest absolute matrix entry. Invalid input raises
+        ValueError, including non-PSD covariances at arbitrarily small scales.
     """
 
     gain: float = 1.0
@@ -42,12 +44,17 @@ class Receiver:
         covariance = readonly_array(self.noise_covariance, "noise covariance")
         if not np.isfinite([self.gain, self.phase_rad]).all() or offset.shape != (2,):
             raise ValueError("receiver gain/phase must be finite and offset shape (2,)")
-        if covariance.shape != (2, 2) or not np.allclose(
-            covariance, covariance.T, rtol=0, atol=1e-12
-        ):
+        if covariance.shape != (2, 2):
             raise ValueError("noise covariance must be symmetric shape (2,2)")
-        if np.linalg.eigvalsh(covariance).min() < -1e-12:
-            raise ValueError("noise covariance must be positive semidefinite")
+        scale = float(np.max(np.abs(covariance)))
+        if scale:
+            # Normalize first so roundoff tolerance follows even tiny covariances.
+            normalized = covariance / scale
+            tolerance = 8 * np.finfo(np.float64).eps
+            if not np.allclose(normalized, normalized.T, rtol=0, atol=tolerance):
+                raise ValueError("noise covariance must be symmetric shape (2,2)")
+            if np.linalg.eigvalsh(normalized).min() < -tolerance:
+                raise ValueError("noise covariance must be positive semidefinite")
         object.__setattr__(self, "offset", offset)
         object.__setattr__(self, "noise_covariance", covariance)
 

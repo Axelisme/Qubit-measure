@@ -1,6 +1,7 @@
 """Coupled F1-SQUID-F2 circuit projected once at the round's DC point."""
 
 from collections.abc import Callable
+from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
@@ -21,12 +22,39 @@ from zcu_tools.simulate.dephasing import (
     flux_dephasing,
     photon_dephasing,
 )
-from zcu_tools.simulate.evolution import Basis, DensityState, DriveSource, NumericModel
+from zcu_tools.simulate.evolution import (
+    Basis,
+    DensityState,
+    DriveSource,
+    NumericModel,
+    quantize_ns,
+)
 
 from .local import Matrix, local_circuit, tensor_operator
 from .parameters import FluxoniumCircuit, JointParameters, Resonator, SquidCircuit
 
 RealArray = NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class FluxDynamics:
+    """Dependency description for a continuous absolute-ns flux callback.
+
+    identity: stable descriptor of all circuit, line, control and bath inputs,
+        or None when persistent exact records are not used.
+    event_times_ns: finite absolute callback events, including delayed pulse
+        support and envelope/phase changes. Empty means no additional events.
+        JointModel unions them with bath ticks; Evolution quantizes the union.
+    This record keeps event geometry and persistence identity with one callback
+    description. Invalid event coordinates raise ValueError.
+    """
+
+    identity: str | None = None
+    event_times_ns: tuple[float, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not np.isfinite(self.event_times_ns).all():
+            raise ValueError("flux event times must be finite ns")
 
 
 class JointModel:
@@ -339,7 +367,7 @@ class JointModel:
         end_ns: float,
         bath_segment_ns: float,
         resonators: tuple[Resonator, Resonator],
-        dynamics_identity: str | None = None,
+        dynamics: FluxDynamics | None = None,
     ) -> NumericModel:
         """Build fixed-basis continuous H with piecewise instantaneous baths.
 
@@ -350,10 +378,13 @@ class JointModel:
         Baths use segment-start flux, remain fixed during each segment, and are
         rotated back into this fixed basis. Evolution owns event partitioning and
         integration; states are never reset. resonators supplies residual photons.
-        dynamics_identity: stable descriptor of callback dependencies for exact
-        persistence; caller includes flux-line/control
-        contents, circuit/bath/resonator values and numeric conventions.
-        Invalid scales raise ValueError. This is not a convergence certification.
+        dynamics: callback event geometry and optional stable persistence identity;
+        None supplies no extra events or persistent identity.
+        Its events (including source delays) join bath updates on the evolution
+        owner's 2 ns grid. Baths refresh there too; no density/filter resets.
+        For exact persistence its identity describes flux-line/control contents,
+        circuit/bath/resonator values and numeric conventions. Invalid scales or
+        events raise ValueError. This is not a convergence certification.
         """
         if (
             not np.isfinite([end_ns, bath_segment_ns]).all()
@@ -361,8 +392,21 @@ class JointModel:
             or bath_segment_ns <= 0
         ):
             raise ValueError("finite evolution end and positive bath segment required")
+        dynamics = FluxDynamics() if dynamics is None else dynamics
         step = max(2.0, 2 * float(np.rint(bath_segment_ns / 2)))
-        boundaries = tuple(float(t) for t in np.arange(0.0, end_ns, step))
+        boundaries = tuple(
+            sorted(
+                {
+                    0.0,
+                    *(float(t) for t in np.arange(0.0, end_ns, step)),
+                    *(
+                        q
+                        for t in dynamics.event_times_ns
+                        if 0 <= (q := quantize_ns(t)) < end_ns
+                    ),
+                }
+            )
+        )
         cached: dict[int, tuple[Matrix, ...]] = {}
         h0 = self.hamiltonian(self.dc_flux)
 
@@ -370,10 +414,10 @@ class JointModel:
             return self.hamiltonian(flux_at(t)) - h0
 
         def collapse_at(t: float) -> tuple[Matrix, ...]:
-            index = int(np.floor(max(t, 0.0) / step))
+            index = max(0, int(np.searchsorted(boundaries, t, side="right")) - 1)
             if index not in cached:
                 cached[index] = self.collapse_operators(
-                    flux_at(index * step), resonators
+                    flux_at(boundaries[index]), resonators
                 )
             return cached[index]
 
@@ -385,7 +429,7 @@ class JointModel:
             hamiltonian_at=hamiltonian_at,
             collapse_at=collapse_at,
             event_times_ns=boundaries,
-            dynamics_identity=dynamics_identity,
+            dynamics_identity=dynamics.identity,
         )
 
     def _occupation(self, resonator: Resonator) -> float:

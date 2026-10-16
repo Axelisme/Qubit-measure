@@ -10,8 +10,15 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.constants import e, h, hbar, k
-from scipy.special import kve
+from scipy.constants import h, k
+
+from .spectra import (
+    capacitive_spectrum,
+    charge_impedance_spectrum,
+    flux_line_spectrum,
+    inductive_spectrum,
+    quasiparticle_spectrum,
+)
 
 RealArray = NDArray[np.float64]
 ComplexArray = NDArray[np.complex128]
@@ -133,49 +140,25 @@ def gibbs_weights(energies_ghz: RealArray, *, temperature_k: float) -> RealArray
 
 def _down_spectrum(gap: float, temperature: float, channel: LossChannel) -> float:
     omega = 2 * np.pi * gap
-    thermal = 1.0 if temperature == 0 else -1 / np.expm1(-H_OVER_K * gap / temperature)
     if isinstance(channel, CapacitiveLoss):
-        return float(32 * np.pi * channel.ec_ghz / channel.quality_factor * thermal)
-    if isinstance(channel, InductiveLoss):
-        return float(4 * np.pi * channel.el_ghz / channel.quality_factor * thermal)
-    if isinstance(channel, ChargeImpedance):
-        return float(16 * np.pi * omega * channel.resistance_ohm / (h / e**2) * thermal)
-    if isinstance(channel, FluxLineLoss):
-        return float(
-            2
-            * (2 * np.pi) ** 2
-            * channel.mutual_phi0_per_a**2
-            * omega
-            * hbar
-            / channel.resistance_ohm
-            * 1e18
-            * thermal
+        spectrum = capacitive_spectrum(
+            omega, temperature, channel.ec_ghz, channel.quality_factor
         )
-    delta_ghz = channel.gap_ev * e / h / 1e9
-    # sinh(x)*K0(x)/(1-exp(-2x)) = kve(0,x)/2 avoids both overflow and underflow.
-    factor = np.sqrt(np.pi / 2)
-    if temperature > 0:
-        x = H_OVER_K * gap / (2 * temperature)
-        # Scipy's scaled Bessel implementation loses range at huge x. Its
-        # asymptotic expansion has relative remainder O(x^-3) here and preserves
-        # the T=0 limit without exp/sinh overflow or NaN-to-zero repair.
-        factor = (
-            float(np.sqrt(np.pi / 2) * (1 - 0.125 / x + (9 / 128) / x / x))
-            if x > 1e6
-            else float(np.sqrt(x) * kve(0, x))
+    elif isinstance(channel, InductiveLoss):
+        spectrum = inductive_spectrum(
+            omega, temperature, channel.el_ghz, channel.quality_factor
         )
-    admittance = (
-        np.sqrt(2 / np.pi)
-        * 8
-        / (h / e**2)
-        * channel.ej_ghz
-        / delta_ghz
-        * (2 * delta_ghz / gap) ** 1.5
-        * channel.density
-        * factor
-        / 2
-    )
-    return float(2 * hbar * omega / e**2 * admittance)
+    elif isinstance(channel, ChargeImpedance):
+        spectrum = charge_impedance_spectrum(omega, temperature, channel.resistance_ohm)
+    elif isinstance(channel, FluxLineLoss):
+        spectrum = flux_line_spectrum(
+            omega, temperature, channel.mutual_phi0_per_a, channel.resistance_ohm
+        )
+    else:
+        spectrum = quasiparticle_spectrum(
+            omega, temperature, channel.ej_ghz, channel.density, channel.gap_ev
+        )
+    return float(spectrum)
 
 
 def directional_rates(

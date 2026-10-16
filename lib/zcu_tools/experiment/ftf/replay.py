@@ -8,7 +8,7 @@ from zcu_tools.device import DeviceManager
 from zcu_tools.resources.simulation_replay import read_replay
 from zcu_tools.simulate.evolution import NUMERIC_VERSION, EvolutionLibrary
 
-BACKEND_VERSION = "ftf-direct-v2"
+BACKEND_VERSION = "ftf-direct-v3"
 
 
 def replay_versions() -> tuple[tuple[str, str], ...]:

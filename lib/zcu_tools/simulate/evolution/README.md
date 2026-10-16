@@ -62,7 +62,10 @@ illegal input, solver and write errors propagate.
 `replay_manifest(snapshot, content_identities)` returns an opaque checked JSON
 manifest for the original table set and exact record content used by a round.
 `restore_replay(manifest)` checks every referenced file from disk and returns
-that frozen table set, without discovering new publications or warming arrays.
+that frozen table set with pinned exact-record references, without discovering
+new publications or warming arrays. Replay ignores later exact records that
+were not part of the original evaluation. A listed exact record must still match
+its original file digest at lookup; an unlisted record cannot override a U table.
 The numeric owner resolves record keys and checks versions, digests and metadata.
 Caller archives retain this opaque string, not an independent NPZ parser. Files
 remain in the explicitly selected library; deleting them breaks replay rather

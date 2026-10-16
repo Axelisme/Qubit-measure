@@ -22,7 +22,11 @@ No density, source filter state or receiver noise is inherited by another shot.
 
 `plan_point` is an author diagnostic interface. It converts each execution's
 QICK us/MHz/degrees into ns/GHz/radians, preserving signed complex waveforms and
-common carrier phase. Local numeric phase advances to the quantized support
+common carrier phase. The flux-line owner supplies delayed support,
+envelope and phase events to the numeric model, so a short delayed pulse in an
+idle interval cannot disappear merely because the allowed integration step is
+large. Passive tails remain continuous, without imposing a global fine grid.
+Local numeric phase advances to the quantized support
 start using the numeric owner's nearest-2-ns geometry, so rounding a pulse start
 does not shift its common oscillator reference. The plan contains independent
 numeric inputs, not QICK buffers. `FTFSource` explicitly calls `Evolution.evolve`, `populations`, then
@@ -62,9 +66,13 @@ rounds save checked content-addressed private inputs through
 snapshot and sampling identity. Detached complex waveform samples and full
 settings survive source-file edits. `replay_round(round_path)` runs only that
 round, without drivers, earlier acquisitions or current YAML. Exact numerical
-and RNG dependency versions must match. Backend `ftf-direct-v2` identifies the
-corrected common-origin conversion; archives from the earlier backend fail
-explicitly instead of silently executing different phase arithmetic.
+and RNG dependency versions must match. Backend `ftf-direct-v3` identifies
+actual delayed-flux event partitioning and fixed replay source selection, in
+addition to the common-origin phase conversion. Archives from v2 and earlier
+fail explicitly rather than silently executing different numeric arithmetic.
+Historical F1/F2 calibration, the single accepted conditional Ramsey point and
+cold/warm cost evidence remain evidence for their original backend only. They
+have not been rerun with v3; no new precision or performance claim follows.
 EvolutionLibrary owns opaque manifests
 that pin/check the original publications and exact records before any solve.
 Missing/damaged references fail, even if current inputs could be solved again.

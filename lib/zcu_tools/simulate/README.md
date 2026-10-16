@@ -80,7 +80,10 @@ There is no backend registry or automatic runtime table construction.
 
 [`ftf`](ftf/README.md) builds the fixed-coordinate F1-SQUID-F2 joint model with
 full charge couplings, native-before-projection n², directional multilevel baths
-and parent virtual readout transitions. `baths` owns numeric GHz/ns/K loss spectra;
+and parent virtual readout transitions. `spectra` owns shared scalar/array loss spectra in angular GHz/ns/K;
+`baths` uses them for joint directional rates, while fluxonium coherence combines
+both directions for equilibrium T1. Default Q models and caller-supplied Q,
+impedance and admittance options retain their existing definitions;
 `dephasing` owns both the shared Notebook pure-rate formulas and CP multilevel
 Markov dephasing. `lines.FilteredFlux` applies causal source delay/lowpass before
 loop mixing and retains passive tails within a shot. These tools do not read

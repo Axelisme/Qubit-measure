@@ -72,15 +72,18 @@ class ModularProgramV2(MyProgramV2):
         """Require setup/body behavior to be fully described by declared Modules.
 
         Semantic consumers call this before interpreting modules rather than raw
-        emitted instructions. Overriding _initialize or _body can introduce ISA
-        outside that description, so this validation raises ValueError naming the
-        concrete program type. make_modules overrides remain supported. It does
+        emitted instructions. Overriding make_program, _initialize, _body or
+        _cleanup can introduce ISA outside that description, so validation raises
+        ValueError naming the concrete program type. make_modules overrides
+        remain supported. It does
         not compile, execute, mutate, or validate individual Module capabilities;
         normal hardware acquisition does not call this method.
         """
         if (
             type(self)._body is not ModularProgramV2._body
             or type(self)._initialize is not ModularProgramV2._initialize
+            or type(self).make_program is not ModularProgramV2.make_program
+            or type(self)._cleanup is not ModularProgramV2._cleanup
         ):
             raise ValueError(
                 f"{type(self).__name__} raw program body/setup simulation unsupported"

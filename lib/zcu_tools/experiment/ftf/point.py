@@ -19,7 +19,7 @@ from zcu_tools.simulate.evolution import (
     NumericModel,
     quantize_ns,
 )
-from zcu_tools.simulate.ftf import JointModel, Resonator
+from zcu_tools.simulate.ftf import FluxDynamics, JointModel, Resonator
 from zcu_tools.simulate.lines import FilteredFlux, FluxLine
 
 from .numeric import joint_parameters
@@ -221,18 +221,21 @@ def plan_point(
             end_ns=start,
             bath_segment_ns=settings.solver.bath_segment_ns,
             resonators=resonators,
-            dynamics_identity=sha256(
-                json.dumps(
-                    (
-                        settings.model.model_dump(mode="json"),
-                        [s.model_dump(mode="json") for s in settings.flux_sources],
-                        [r.model_dump(mode="json") for r in settings.resonators],
-                        tuple(float(value) for value in dc),
-                        settings.solver.bath_segment_ns,
-                    ),
-                    sort_keys=True,
-                ).encode()
-            ).hexdigest(),
+            dynamics=FluxDynamics(
+                event_times_ns=flux.event_times_ns,
+                identity=sha256(
+                    json.dumps(
+                        (
+                            settings.model.model_dump(mode="json"),
+                            [s.model_dump(mode="json") for s in settings.flux_sources],
+                            [r.model_dump(mode="json") for r in settings.resonators],
+                            tuple(float(value) for value in dc),
+                            settings.solver.bath_segment_ns,
+                        ),
+                        sort_keys=True,
+                    ).encode()
+                ).hexdigest(),
+            ),
         )
     else:
         # With no flux-source events anywhere in this shot there is no filter
