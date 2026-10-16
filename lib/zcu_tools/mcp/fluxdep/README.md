@@ -1,6 +1,6 @@
 # Fluxdep MCP control
 
-**Last updated:** 2026-10-14, Filter drafts start from the published brush selection
+**Last updated:** 2026-10-16, Filter drafts start from the published brush selection; accepted ADR navigation
 
 Fluxdep MCP composes native GUI RPCs into handwritten agent decision tools over
 one shared bridge. It is an independent, optional L3 cross-experiment analysis

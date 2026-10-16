@@ -58,8 +58,6 @@ Library 的設計是「元件 → 分組 → Pydantic model」。分組是擴充
 
 Component 的 module slot 指向下游實驗要使用的模組，不用來為每一種校準方案保存一個 slot。參數累積、哪些實驗只提參數、哪些收尾實驗建立或更新模組，都由實驗作者決定。Framework 不提供通用的齊全檢查或累積機制。具體欄位、reset 名稱及 pair 方向留在實驗作者文件，不提升成框架規則。使用者於 2026-10-16 以「都採用建議」確認這個歸檔範圍。
 
-收尾使用實際測過的 tested_reset，而非以累積的 ext 覆蓋成未測過的組合。使用者於 2026-10-11 對直接用 tested_reset 的方案裁定「A」，修正依據為原話「如果本身就在掃tested_reset直接拿來用就行」。這個實驗設計例子不改 [[0008]] 的 writeback 提交邊界。
-
 ### Mux group 是實驗室的 component 定義
 
 `zcu_lab.components.MuxGroupSchema` 宣告 `group/mux`，沿既有 ComponentRegistry 註冊。
