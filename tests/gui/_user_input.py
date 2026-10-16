@@ -7,7 +7,7 @@ tests send the same Qt events through QApplication.sendEvent instead.
 from dataclasses import dataclass
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
+from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt, QTimer
 from PyQt6.QtGui import QKeyEvent, QMouseEvent
 from PyQt6.QtWidgets import (
     QAbstractButton,
@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QPlainTextEdit,
     QStatusBar,
     QStyle,
@@ -338,6 +339,74 @@ class ComponentDriver:
                 ).center()
             mouse_click(widget, point)
         QApplication.processEvents()
+
+    def select_menu(self, opener: str, path: tuple[str, ...]) -> None:
+        """Click opener and select exact captions in its blocking QMenu.
+
+        A queued owner event delivers real mouse/key input inside QMenu.exec().
+        Each caption must uniquely identify a visible action in that menu;
+        missing/ambiguous captions raise LookupError after dismissing the menu.
+        Disabled openers/actions are no-ops. Intermediate captions must be
+        submenus. The 30-second watchdog guards the already-scheduled delivery,
+        not menu performance. No QAction.trigger or target GUI patching is used.
+        """
+        if not path:
+            raise ValueError("Supply a nonempty menu caption path")
+        button = self._find(opener, None)
+        if not self._can_interact(button):
+            return
+        errors: list[Exception] = []
+
+        def choose() -> None:
+            try:
+                self._select_menu_path(path)
+            except (LookupError, RuntimeError, ValueError) as error:
+                # Return Qt callback failures to the scenario after exec unwinds.
+                errors.append(error)
+                self._dismiss_menus()
+
+        def timed_out() -> None:
+            errors.append(TimeoutError("Blocking menu input delivery did not finish"))
+            self._dismiss_menus()
+
+        watchdog = QTimer()
+        watchdog.setSingleShot(True)
+        watchdog.timeout.connect(timed_out)
+        watchdog.start(30_000)
+        QTimer.singleShot(0, choose)
+        try:
+            self.click(opener)
+        finally:
+            watchdog.stop()
+        if errors:
+            raise errors[0]
+
+    @staticmethod
+    def _dismiss_menus() -> None:
+        while isinstance(menu := QApplication.activePopupWidget(), QMenu):
+            key_click(menu, Qt.Key.Key_Escape)
+
+    @staticmethod
+    def _select_menu_path(path: tuple[str, ...]) -> None:
+        for index, caption in enumerate(path):
+            menu = QApplication.activePopupWidget()
+            if not isinstance(menu, QMenu):
+                raise LookupError(f"No visible popup menu for {caption!r}")
+            actions = [a for a in menu.actions() if a.isVisible()]
+            action = _unique(
+                caption,
+                [a for a in actions if a.text() == caption],
+                [a.text() for a in actions],
+            )
+            if not action.isEnabled():
+                ComponentDriver._dismiss_menus()
+                return
+            if index < len(path) - 1 and action.menu() is None:
+                raise LookupError(f"{caption!r} is not a submenu")
+            mouse_click(menu, menu.actionGeometry(action).center())
+            if index < len(path) - 1:
+                key_click(menu, Qt.Key.Key_Right)
+            QApplication.processEvents()
 
     def enter_text(
         self,
