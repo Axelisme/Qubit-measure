@@ -114,15 +114,23 @@ def generate_tools(
     non_generated: frozenset[str],
     send_fn: SendFn,
 ) -> ToolTable:
-    """Generate one MCP tool per method spec (skipping ``non_generated``)."""
+    """Generate one MCP tool per method spec (skipping ``non_generated``).
+
+    The spec description becomes the agent-facing tool description verbatim.
+    Raises ``ValueError`` when a generated method has a blank description.
+    """
     out: ToolTable = {}
     for method, spec in method_specs.items():
         if method in non_generated:
             continue
         tool_name = spec.tool_name or config.tool_prefix + method.replace(".", "_")
+        if not spec.description.strip():
+            raise ValueError(
+                f"generated MCP tool {tool_name!r} for {method!r} has no description"
+            )
         out[tool_name] = {
             "handler": make_forwarder(method, spec, send_fn),
-            "description": spec.description or method,
+            "description": spec.description,
             "inputSchema": build_input_schema(spec.params),
         }
     return out

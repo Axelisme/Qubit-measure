@@ -10,6 +10,7 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
 from zcu_tools.mcp.core.stdio_server import (
@@ -17,6 +18,7 @@ from zcu_tools.mcp.core.stdio_server import (
     StdioLoopHooks,
     ToolTable,
     coerce_arg,
+    generate_tools,
     run_stdio_loop,
 )
 
@@ -328,3 +330,39 @@ def test_malformed_line_is_reported_and_the_loop_continues(
 def test_coerce_arg_rejects_non_list_array() -> None:
     with pytest.raises(TypeError, match="expected list"):
         coerce_arg("1,2", JsonType.ARRAY)
+
+
+def _unused_send(method: str, *_args: object, **_kwargs: object) -> dict[str, Any]:
+    raise AssertionError(f"unexpected RPC {method}")
+
+
+def test_generated_tool_uses_spec_description_verbatim() -> None:
+    tools = generate_tools(
+        _CONFIG,
+        {"project.info": MethodSpec(5.0, "Read the project.")},
+        frozenset(),
+        _unused_send,
+    )
+
+    assert tools["demo_project_info"]["description"] == "Read the project."
+
+
+def test_blank_description_on_generated_method_fails_fast() -> None:
+    with pytest.raises(ValueError, match="'demo_project_info'.*'project.info'"):
+        generate_tools(
+            _CONFIG,
+            {"project.info": MethodSpec(5.0, "  ")},
+            frozenset(),
+            _unused_send,
+        )
+
+
+def test_non_generated_method_needs_no_description() -> None:
+    tools = generate_tools(
+        _CONFIG,
+        {"resources.versions": MethodSpec(5.0, "")},
+        frozenset({"resources.versions"}),
+        _unused_send,
+    )
+
+    assert tools == {}
