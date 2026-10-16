@@ -68,7 +68,7 @@ def test_replay_recomputes_statistics_without_numeric_records(tmp_path: Path) ->
         save_replay,
     )
 
-    from tests.experiment.test_ftf_templates import (
+    from tests.experiment._ftf_templates import (
         expect_statistics,
         request,
         settings,
