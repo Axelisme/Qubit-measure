@@ -252,7 +252,7 @@ def test_recipe_ref_read_is_detached_and_does_not_authorize_descendant_write() -
     assert hasattr(resource, "select_recipe_module"), "Missing logical selector command"
     resource.select_recipe_module(("pulse",), "use_library", key="Q1.pulses.pi")
     before = resource.input.data
-    base = resource.editor_state.base
+    base = resource.editor_state.base.data
     notifications: list[str] = []
     resource.subscribe(lambda: notifications.append("changed"))
     observed = resource.read_recipe_field(("pulse", "waveform", "length"))
@@ -267,7 +267,7 @@ def test_recipe_ref_read_is_detached_and_does_not_authorize_descendant_write() -
     assert observed.source.key == "Q1.pulses.pi"
     assert observed.source.spec_path == ("waveform", "length")
     assert resource.input.data == before
-    assert resource.editor_state.base == base
+    assert resource.editor_state.base.data == base
     assert notifications == []
     from zcu_tools.gui.form_adapter import LogicalEdit, LogicalEditError
 
@@ -291,7 +291,7 @@ def test_recipe_copy_and_batch_install_once_without_replacing_base() -> None:
     assert hasattr(resource, "edit_recipe_fields"), "Missing logical batch command"
     from zcu_tools.gui.form_adapter import LogicalEdit
 
-    base = resource.editor_state.base
+    base = resource.editor_state.base.data
     resource.select_recipe_module(("pulse",), "use_library", key="Q1.pulses.pi")
     assert resource.select_recipe_module(("pulse",), "use_inline") is True
     notifications: list[str] = []
@@ -305,7 +305,7 @@ def test_recipe_copy_and_batch_install_once_without_replacing_base() -> None:
     ]) is True
     assert resource.read_recipe_field(("pulse", "freq")).value == 130.0
     assert resource.read_recipe_field(("pulse", "freq")).input == {"expr": "125 + 5"}
-    assert resource.editor_state.base == base
+    assert resource.editor_state.base.data == base
     assert notifications == ["changed"]
     assert state_notifications == ["changed"]
     resource.edit_recipe_fields([LogicalEdit(("amount",), {"expr": "1 / 0"})])
