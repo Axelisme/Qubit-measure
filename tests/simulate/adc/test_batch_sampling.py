@@ -8,6 +8,14 @@ from zcu_tools.core.simulation import RoundSignals, RoundStatistics, SamplingIde
 from zcu_tools.simulate import adc
 
 
+def legacy_rng_state():
+    """Return the global MT19937 tuple rather than a non-legacy RNG dictionary."""
+    state = np.random.get_state(legacy=True)
+    if isinstance(state, dict):
+        raise TypeError("global RNG must expose the legacy MT19937 state")
+    return state
+
+
 def channels(*, covariance=None) -> tuple[adc.ChannelReadout, ...]:
     traces = np.array([[[[[1.0, 2.0], [3.0, 4.0]], [[11.0, 12.0], [13.0, 14.0]]]]])
     traces = np.concatenate((traces, traces + 100), axis=0)
@@ -74,7 +82,7 @@ def test_round_draws_reproduce_without_mutating_inputs_or_global_rng(sampler):
     populations = np.array([[[0.25, 0.75], [1.0, 0.0]]])
     original = populations.copy()
     inputs = channels()
-    global_state = np.random.get_state(legacy=True)
+    global_state = legacy_rng_state()
     kwargs = dict(reps=17, seed=73, acquire_sequence=2, round_index=3)
     first = sampler(populations, inputs, **kwargs)
     second = sampler(populations, inputs, **kwargs)
@@ -87,7 +95,7 @@ def test_round_draws_reproduce_without_mutating_inputs_or_global_rng(sampler):
     else:
         pytest.fail("sampler returned inconsistent result types")
     np.testing.assert_array_equal(populations, original)
-    after = np.random.get_state(legacy=True)
+    after = legacy_rng_state()
     assert global_state[0] == after[0]
     np.testing.assert_array_equal(global_state[1], after[1])
     assert global_state[2:] == after[2:]
