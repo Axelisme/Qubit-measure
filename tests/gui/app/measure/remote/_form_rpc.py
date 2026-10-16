@@ -4,9 +4,11 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from zcu_tools.cfg_model import PulseCfg, Range
+from pydantic import create_model
+from zcu_tools.cfg_model import PulseCfg, PulseSpec, Range
 from zcu_tools.gui.app.measure.remote import RemoteControlAdapter
-from zcu_tools.gui.form_adapter import Form, FormContext
+from zcu_tools.gui.form import FormModel
+from zcu_tools.gui.form_adapter import Form, FormContext, ModuleInputField
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request
 
@@ -42,6 +44,34 @@ class FormRpc:
 
 class ModuleRpcCfg(SampleCfg):
     pulse: PulseCfg | None = None
+
+
+class OrdinaryRecipeSection(FormModel):
+    value: int = 1
+
+
+_recipe_drive = ModuleInputField(PulseSpec)
+RecipeGroup = create_model(
+    "RecipeGroup", __base__=FormModel, drive=(_recipe_drive.annotation, ...)
+)
+RecipeExtras = create_model(
+    "RecipeExtras",
+    __base__=FormModel,
+    real=(OrdinaryRecipeSection, OrdinaryRecipeSection()),
+    group=(RecipeGroup | None, None),
+)
+
+
+class ContainerRpcAdapter(SampleAdapter):
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[SampleCfg]:
+        del ctx
+        return Form(
+            SampleCfg,
+            {"sweep": Range.between(1.0, 2.0, expts=3)},
+            extras=RecipeExtras,
+            lower=lambda _extras, cfg: cfg,
+        )
 
 
 class ModuleRpcAdapter(SampleAdapter):

@@ -185,6 +185,26 @@ def test_batch_rejection_has_original_index_and_no_success_prefix(
     assert input.to_json() == before
 
 
+@pytest.mark.parametrize("value", [{}, 4])
+def test_structure_rejection_reports_first_edit_without_changing_input(value) -> None:
+    form = adapter.Form(LogicalCfg, {})
+    env = FormEnv()
+    input = form.default_input(env)
+    before = input.to_json()
+    with pytest.raises(adapter.LogicalEditError) as failure:
+        form.prepare_logical_edits(
+            input,
+            [
+                adapter.LogicalEdit(("real",), value),
+                adapter.LogicalEdit(("reps",), 12),
+            ],
+            env,
+        )
+    assert failure.value.reason_code == "form_structure"
+    assert (failure.value.path, failure.value.edit_index) == (("real",), 0)
+    assert input.to_json() == before
+
+
 def test_selector_metadata_selection_disable_and_unavailable_source_are_distinct() -> (
     None
 ):
