@@ -31,6 +31,7 @@ from zcu_tools.program.v2.modules.waveform import (
 )
 from zcu_tools.program.v2.simulation.frontend import build_request
 from zcu_tools.program.v2.simulation.timeline import TimelineInterpreter
+from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.program.v2.utils import readout_freq_words
 
 
@@ -83,7 +84,22 @@ def receiver():
 
 def example(case, env):
     """Return modules and sweep axes for one supported semantic mechanism."""
-    sweep = [("axis", 3)]
+    if case in ("sweep", "join", "flat_top", "flat_top_sweep"):
+        return waveform_example(case)
+    if case in (
+        "variable_repeat",
+        "fixed_repeat",
+        "branch_route",
+        "branch",
+        "computed",
+    ):
+        return control_example(case)
+    return table_example(case, env)
+
+
+def waveform_example(case):
+    """Swept clocks, Join scheduling and flat-top envelope scenarios."""
+    sweep: list[tuple[str, SweepCfg | int]] = [("axis", 3)]
     tail = [receiver().build("readout")]
     if case == "sweep":
         cfg = drive()
@@ -97,6 +113,32 @@ def example(case, env):
             Delay("delay", 0.011),
             *tail,
         ], [("outer", 2), *sweep]
+    if case == "join":
+        return [
+            Join(
+                [SoftDelay("swept", QickParam(0.1, {"axis": 0.3})), drive().build("a")],
+                [SoftDelay("fixed", 0.2), receiver().build("b")],
+            )
+        ], sweep
+    if case in ("flat_top", "flat_top_sweep"):
+        return [
+            drive(
+                waveform=FlatTopWaveformCfg(
+                    length=QickParam(0.1078125, {"axis": 0.015625})
+                    if case == "flat_top_sweep"
+                    else 0.3,
+                    raise_waveform=GaussWaveformCfg(length=0.1, sigma=0.02),
+                )
+            ).build("flat"),
+            *tail,
+        ], sweep
+    raise AssertionError(case)
+
+
+def control_example(case):
+    """Register-dependent selection, Repeat masks and structural branches."""
+    sweep: list[tuple[str, SweepCfg | int]] = [("axis", 3)]
+    tail = [receiver().build("readout")]
     if case == "variable_repeat":
         return [
             LoadValue("count", [0, 2, 1], "axis", "n"),
@@ -122,6 +164,24 @@ def example(case, env):
             ComputedPulse("gate", val_reg="selected", pulses=candidates),
             *tail,
         ], sweep
+    if case == "branch":
+        return [
+            LoadValue("select", [1, 0, 1], "axis", "selected"),
+            Branch(
+                "choice",
+                drive().build("a"),
+                [drive().build("b"), drive().build("c")],
+                compare_by="selected",
+            ),
+            *tail,
+        ], sweep
+    raise AssertionError(case)
+
+
+def table_example(case, env):
+    """Consumer word decoding, variable lengths and loop table hooks."""
+    sweep: list[tuple[str, SweepCfg | int]] = [("axis", 3)]
+    tail = [receiver().build("readout")]
     if case == "words":
         gen, adc = readout_freq_words(
             env.soccfg, [100, 200, 300], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
@@ -140,17 +200,6 @@ def example(case, env):
                 gain_val="gain_word",
             ),
         ], sweep
-    if case == "branch":
-        return [
-            LoadValue("select", [1, 0, 1], "axis", "selected"),
-            Branch(
-                "choice",
-                drive().build("a"),
-                [drive().build("b"), drive().build("c")],
-                compare_by="selected",
-            ),
-            *tail,
-        ], sweep
     if case == "length":
         return [
             TableLengthPulse(
@@ -167,25 +216,6 @@ def example(case, env):
                 "readout", receiver(), idx_reg="axis", freq_words=gen, ro_freq_words=adc
             )
         ], [("outer", 2), *sweep]
-    if case == "join":
-        return [
-            Join(
-                [SoftDelay("swept", QickParam(0.1, {"axis": 0.3})), drive().build("a")],
-                [SoftDelay("fixed", 0.2), receiver().build("b")],
-            )
-        ], sweep
-    if case in ("flat_top", "flat_top_sweep"):
-        return [
-            drive(
-                waveform=FlatTopWaveformCfg(
-                    length=QickParam(0.1078125, {"axis": 0.015625})
-                    if case == "flat_top_sweep"
-                    else 0.3,
-                    raise_waveform=GaussWaveformCfg(length=0.1, sigma=0.02),
-                )
-            ).build("flat"),
-            *tail,
-        ], sweep
     raise AssertionError(case)
 
 
@@ -271,7 +301,7 @@ def test_templates_materialize_like_scalar_interpretation(case):
 def test_reps_dependent_timeline_rejected_before_backend(dependency):
     env = white_noise(std_adc=0, n_gens=2, routes=((0, 0), (1, 0)))
     cfg = drive()
-    modules = [cfg.build("drive"), receiver().build("readout")]
+    modules: list[Module] = [cfg.build("drive"), receiver().build("readout")]
     if dependency == "sweep":
         cfg.gain = QickParam(0.1, {"reps": 0.2})
         modules[0] = cfg.build("drive")
