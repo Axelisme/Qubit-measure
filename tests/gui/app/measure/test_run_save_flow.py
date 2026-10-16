@@ -2,15 +2,25 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 from matplotlib.figure import Figure
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QFileDialog, QWidget
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.adapter import RunRequest
+from zcu_tools.gui.app.measure.adapter import (
+    AdapterCapabilities,
+    AnalysisMode,
+    AnalyzeRequest,
+    ParameterWriteback,
+    RunRequest,
+    WritebackItem,
+    WritebackRequest,
+)
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.persistence_types import (
     AppPersistedState,
@@ -22,16 +32,59 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
 )
+from zcu_tools.plotting.plots import Plots
+from zcu_tools.resources.entry import ComponentSchema
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
 from tests.gui import _user_input
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._app_launch import launched_measure_app
-from tests.gui.app.measure._native_save_support import SavingAdapter
+from tests.gui.app.measure._native_save_support import (
+    PaneParams,
+    PaneSummary,
+    SavingAdapter,
+)
+from tests.resources.entry.fakes import registry_state
+from tests.resources.entry.view_support import registered_model
+
+
+class CalibrationSchema(ComponentSchema):
+    """Two independently addressable values for selective writeback in Inspect."""
+
+    first: float = 1.0
+    second: float = 2.0
 
 
 class PlottedSavingAdapter(SavingAdapter):
-    """Persistable deterministic signal, with its curve drawn on the real host."""
+    """Persistable signal with plotted analysis and two independent proposals."""
+
+    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
+        analysis=AnalysisMode.FIT, load_data=True, requires_soc=False
+    )
+
+    def analyze(
+        self,
+        req: AnalyzeRequest[RunRecord[SavingCfg, SavingResult], PaneParams],
+        *,
+        plots: Plots,
+    ) -> PaneSummary:
+        _, axes = plots.subplots("fit")
+        axes.plot(
+            req.run_result.result.frequency,
+            req.run_result.result.signal.real,
+            label="Synthetic fit",
+        )
+        axes.legend()
+        return PaneSummary()
+
+    def get_writeback_items(
+        self,
+        req: WritebackRequest[RunRecord[SavingCfg, SavingResult], PaneSummary],
+    ) -> Sequence[WritebackItem]:
+        return [
+            ParameterWriteback("calibration.first", "First", 11.0),
+            ParameterWriteback("calibration.second", "Second", 22.0),
+        ]
 
     def run(
         self, req: RunRequest, cfg: SavingCfg, *, context: RunContext
@@ -54,11 +107,19 @@ class PlottedSavingAdapter(SavingAdapter):
 def measure_window(qapp, tmp_path: Path) -> Generator[QWidget]:
     registry = Registry()
     registry.register("synthetic", PlottedSavingAdapter)
-    with launched_measure_app(qapp, tmp_path, registry=registry) as app:
+    before = registry_state()
+    with (
+        registered_model("synthetic/calibration", CalibrationSchema),
+        launched_measure_app(qapp, tmp_path, registry=registry) as app,
+    ):
+        installed = registry_state()
         # Fixture bootstrap only: create an isolated entry/point before restoring tabs.
         app.controller.setup_control.new_entry(EntryRequest("component-flow"))
         app.controller.setup_control.new_point(
             PointCreateRequest("p", "Synthetic component flow", CommandOrigin("gui"))
+        )
+        app.controller.context_control.add_component(
+            "calibration", "synthetic/calibration", {}
         )
         app.controller.restore_persisted_state(
             AppPersistedState(
@@ -69,6 +130,8 @@ def measure_window(qapp, tmp_path: Path) -> Generator[QWidget]:
             )
         )
         yield app.window
+        assert registry_state() == installed
+    assert registry_state() == before
 
 
 def test_run_curve_then_save_all_reports_native_save_in_bottom_status(
@@ -134,3 +197,143 @@ def test_disabled_save_all_click_keeps_no_result_and_no_save_message(
     flow.screenshot(shots / "05-still-no-result.png")
     assert flow.legends().texts == ()
     assert flow.observe("Run").enabled
+
+
+def test_invalid_cfg_enter_explains_run_block_and_repair_clears_reason(
+    measure_window: QWidget, tmp_path: Path
+) -> None:
+    flow = _user_input.ComponentDriver(measure_window)
+    shots = tmp_path / "invalid-cfg"
+    flow.screenshot(shots / "01-setup.png")
+    flow.click("Close")
+    flow.screenshot(shots / "02-ready.png")
+    assert flow.observe("Run").enabled
+    flow.enter_text(object_name="form.input.gain", value="not-a-number")
+    flow.screenshot(shots / "03-invalid.png")
+    assert not flow.observe("Run").enabled
+    reason = flow.status().text
+    assert "gain" in reason.lower()
+    assert reason.strip()
+    flow.enter_text(object_name="form.input.gain", value="2.0")
+    flow.screenshot(shots / "04-repaired.png")
+    assert flow.observe("Run").enabled
+    assert flow.status().text != reason
+    assert "gain" not in flow.status().text.lower()
+    assert flow.dialogs() == ()
+
+
+def _run_and_save_signal(flow: _user_input.ComponentDriver, shots: Path) -> str:
+    """Run the offline signal and return the native path shown in Save's tooltip."""
+    flow.click("Run")
+    flow.screenshot(shots / "03-run-requested.png")
+    # The offline worker draws Signal before its terminal delivery restores Run.
+    qt_until(
+        lambda: (
+            flow.legends().texts == ("Signal",)
+            and any(w.text == "Run" and w.enabled for w in flow.visible().widgets)
+        ),
+        label="synthetic run before native save",
+    )
+    flow.screenshot(shots / "04-run-complete.png")
+    flow.select_tab("Data")
+    flow.screenshot(shots / "05-data.png")
+    flow.click("Save All")
+    flow.screenshot(shots / "06-saved.png")
+    assert flow.status().text.startswith("Saved ")
+    paths = [
+        w.tooltip for w in flow.visible().widgets if w.tooltip.endswith("/data.h5")
+    ]
+    assert len(paths) == 1
+    return paths[0]
+
+
+def _load_saved_signal(
+    flow: _user_input.ComponentDriver,
+    shots: Path,
+    native_path: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Choose the saved file through Load's modal and the external file chooser."""
+    # QFileDialog is the external chooser boundary; the real Load dialog and
+    # native reader still run. No application methods or result owners are patched.
+    monkeypatch.setattr(
+        QFileDialog, "getOpenFileName", lambda *a, **kw: (native_path, "")
+    )
+    dialog_errors: list[Exception] = []
+
+    def choose_native_file() -> None:
+        try:
+            assert flow.dialogs()[0].title == "Load Data"
+            flow.screenshot(shots / "07-load-dialog.png")
+            flow.click("File…")
+        except (AssertionError, LookupError, OSError) as error:
+            dialog_errors.append(error)
+            flow.click("Cancel")
+
+    # The next owner turn enters the real modal Load dialog; its nested loop
+    # delivers this callback, which chooses File through the driver.
+    QTimer.singleShot(0, choose_native_file)
+    flow.click("Load Data")
+    if dialog_errors:
+        raise dialog_errors[0]
+    flow.screenshot(shots / "08-loaded.png")
+    assert flow.status().text == f"Loaded data from {native_path}"
+    assert flow.dialogs() == ()
+
+
+def test_load_then_analyze_and_apply_only_selected_proposal(
+    measure_window: QWidget, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flow = _user_input.ComponentDriver(measure_window)
+    shots = tmp_path / "load-analyze-apply"
+    flow.screenshot(shots / "01-setup.png")
+    flow.click("Close")
+    flow.screenshot(shots / "02-ready.png")
+    native_path = _run_and_save_signal(flow, shots)
+    _load_saved_signal(flow, shots, native_path, monkeypatch)
+    flow.select_tab("Analysis")
+    flow.screenshot(shots / "09-analysis-ready.png")
+    assert flow.observe("Analyze").enabled
+    assert flow.legends().texts == ()
+    flow.click("Analyze")
+    flow.screenshot(shots / "10-analyze-requested.png")
+    # This deterministic analysis returns its named fit; terminal delivery mounts
+    # that canvas and publishes the proposal ledger on the owner thread.
+    qt_until(
+        lambda: (
+            flow.legends().texts == ("Synthetic fit",)
+            and any(w.text == "calibration.first*" for w in flow.visible().widgets)
+        ),
+        label="loaded result fit and writeback preview",
+    )
+    flow.screenshot(shots / "11-analyzed.png")
+    assert flow.legends().texts == ("Synthetic fit",)
+    assert flow.observe("calibration.first*").checked is True
+    assert flow.observe("calibration.second*").checked is True
+    flow.click("calibration.second*")
+    flow.screenshot(shots / "12-second-unselected.png")
+    assert flow.observe("calibration.second*").checked is False
+    assert flow.observe("Apply Selected").enabled
+    flow.click("Apply Selected")
+    flow.screenshot(shots / "13-applied.png")
+    assert any(
+        w.kind == "QCheckBox" and w.text == "calibration.first" and w.checked is True
+        for w in flow.visible().widgets
+    )
+    assert flow.observe("calibration.second*").visible
+    assert flow.observe("* = not applied").visible
+    flow.click("Inspect…")
+    flow.screenshot(shots / "14-inspect.png")
+    assert flow.dialogs()[0].title == "Inspect Context"
+    flow.expand_tree(("calibration",), object_name="component_tree")
+    flow.screenshot(shots / "15-inspect-values.png")
+    values = {
+        row.path: row.columns[1]
+        for row in flow.visible().tree_rows
+        if row.tree_name == "component_tree"
+    }
+    assert values[("calibration", "first")] == "11.0"
+    assert values[("calibration", "second")] == "2.0"
+    flow.click("Close")
+    flow.screenshot(shots / "16-inspect-closed.png")
+    assert flow.dialogs() == ()

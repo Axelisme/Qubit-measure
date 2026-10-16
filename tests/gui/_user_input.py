@@ -85,9 +85,7 @@ class TreeRowObservation:
 
     tree_name: str  # Containing tree's objectName; empty if the UI provides none.
     path: tuple[str, ...]  # Root-to-row captions from column zero, not domain keys.
-    columns: tuple[
-        str, ...
-    ]  # Displayed column texts in left-to-right order, no units converted.
+    columns: tuple[str, ...]  # Display order, hidden columns empty; units unchanged.
     expanded: bool  # Whether the row currently exposes its children.
 
 
@@ -246,13 +244,20 @@ class ComponentDriver:
                 TreeRowObservation(
                     tree.objectName(),
                     path,
-                    tuple(item.text(i) for i in range(tree.columnCount())),
+                    self._tree_columns(tree, item),
                     item.isExpanded(),
                 )
                 for tree in self._window.findChildren(QTreeWidget)
                 if tree.isVisible()
                 for item, path in self._visible_tree_items(tree)
             ),
+        )
+
+    @staticmethod
+    def _tree_columns(tree: QTreeWidget, item: QTreeWidgetItem) -> tuple[str, ...]:
+        return tuple(
+            "" if tree.isColumnHidden(i) else item.text(i)
+            for i in range(tree.columnCount())
         )
 
     @staticmethod
@@ -304,10 +309,7 @@ class ComponentDriver:
         item = _unique(
             repr(path),
             candidates,
-            [
-                repr(tuple(i.text(c) for c in range(tree.columnCount())))
-                for i in candidates
-            ],
+            [repr(self._tree_columns(tree, i)) for i in candidates],
         )
         if not item.isExpanded() and item.flags() & Qt.ItemFlag.ItemIsEnabled:
             rect = tree.visualItemRect(item)
