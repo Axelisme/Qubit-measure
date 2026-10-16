@@ -3,6 +3,7 @@
 from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
+from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
 from zcu_lab.v2.twotone.reset.bath.length.core import LengthCfg
 
 
@@ -26,7 +27,7 @@ def make_form(ctx: FormContext) -> Form[LengthCfg]:
                 else Template("readout"),
             },
             "sweep": {"length": Range.between(0.05, 15.0, expts=201)},
-            "relax_delay": 10.5,
+            "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 100,
             "rounds": 1000,
             "initial_delay": Hidden(),
