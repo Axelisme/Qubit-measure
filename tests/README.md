@@ -38,7 +38,9 @@ recording adapter 放明確可 import 的支援模組，不把 `conftest.py` 當
 直接呼叫 Controller／`MainWindow` 指令方法的 smoke 不算 UI 驗證，review 須標出這項缺口。
 
 判定只讀 driver 的具名可見狀態快照，包括底部 status、元件 enabled／visible／tooltip、
-可見對話框及其文字、欄位顯示值與圖例文字。不讀 Controller、state store 或私有屬性。
+可見對話框及其文字、欄位顯示值、圖例文字、圖上軸標與可見曲線數。
+曲線觀察只讀公開 Matplotlib artist 的可見狀態，仍須看 PNG 確認外觀，不拿結果資料當判定。
+不讀 Controller、state store 或私有屬性。
 背景工作依下方的 [Qt owner-loop 等待](#qt-owner-loop-等待)規則，用公開終局條件等待。
 
 框架情境用合成 adapter，放在對應 owner 的 `tests/` 路徑。
