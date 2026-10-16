@@ -18,6 +18,10 @@ from .defaults import static_defaults
 from .model import FormEnv, FormModel, FormPath, FormWritePath, InputPolicy
 
 
+class StructureError(ValueError):
+    """Invalid write structure, distinct from author/provider ValueErrors."""
+
+
 def unwrap(annotation: object) -> object:
     """Expand named aliases and Annotated metadata to the value annotation."""
     while isinstance(annotation, TypeAliasType) or get_origin(annotation) is Annotated:
@@ -295,11 +299,11 @@ def _field_at(
     model: type[BaseModel], data: dict[str, JsonValue], path: FormWritePath
 ) -> tuple[dict[str, JsonValue], str, FieldInfo]:
     if not path:
-        raise ValueError(f"Invalid write path: {path!r}")
+        raise StructureError(f"Invalid write path: {path!r}")
     name, *tail = path
     info = model.model_fields.get(name)
     if info is None:
-        raise ValueError(f"Unknown field path: {path!r}")
+        raise StructureError(f"Unknown field path: {path!r}")
     if not tail:
         return data, name, info
     value = data.get(name)
@@ -309,9 +313,9 @@ def _field_at(
             value = static_defaults(child)
             data[name] = value
         if not isinstance(value, dict):
-            raise ValueError(f"Inactive, missing or invalid model path: {path!r}")
+            raise StructureError(f"Inactive, missing or invalid model path: {path!r}")
         return _field_at(child, value, tuple(tail))
-    raise ValueError(
+    raise StructureError(
         f"Not a writable child path (mapping, sequence or scalar): {path!r}"
     )
 
@@ -331,7 +335,7 @@ def _switch(
         return False
     old = parent.get(key)
     if key in parent and old is None:
-        raise ValueError(f"Activate null section before child write: {path!r}")
+        raise StructureError(f"Activate null section before child write: {path!r}")
     if isinstance(old, dict) and old.get(tag_key) == value:
         return True
     branch = next(
@@ -339,7 +343,7 @@ def _switch(
         None,
     )
     if branch is None:
-        raise ValueError(f"Unknown discriminator at path {path!r}: {value!r}")
+        raise StructureError(f"Unknown discriminator at path {path!r}: {value!r}")
     try:
         new = _branch_defaults(branch, env)
     except PydanticCustomError as exc:
@@ -368,7 +372,7 @@ def _select_object(
     old = parent.get(key)
     branch = selected(info, value if tag in value else old)
     if branch is None:
-        raise ValueError(f"Missing or unknown discriminator at {path!r}")
+        raise StructureError(f"Missing or unknown discriminator at {path!r}")
     try:
         if not isinstance(old, dict) or selected(info, old) is not branch:
             seed = _branch_defaults(branch, env)
@@ -393,7 +397,7 @@ def _partial_model(
     for name, item in value.items():
         info = model.model_fields.get(name)
         if info is None:
-            raise ValueError(f"Unknown field in partial branch object: {name!r}")
+            raise StructureError(f"Unknown field in partial branch object: {name!r}")
         if (
             isinstance(item, dict)
             and model_types(info.annotation)
@@ -401,7 +405,7 @@ def _partial_model(
         ):
             child = selected(info, item)
             if child is None:
-                raise ValueError(f"Ambiguous partial model field: {name!r}")
+                raise StructureError(f"Ambiguous partial model field: {name!r}")
             prior = seed.get(name)
             try:
                 seed[name] = _partial_model(
@@ -431,9 +435,9 @@ def build_candidate(
     paths = tuple(batch)
     for path in paths:
         if not path:
-            raise ValueError(f"Invalid write path: {path!r}")
+            raise StructureError(f"Invalid write path: {path!r}")
         if any(path != other and other[: len(path)] == path for other in paths):
-            raise ValueError(f"Overlapping paths: {path!r}")
+            raise StructureError(f"Overlapping paths: {path!r}")
     copied = {path: copy_json(value) for path, value in batch.items()}
     result = copy_object(data)
     pending: dict[FormWritePath, JsonValue] = {}
@@ -462,7 +466,7 @@ def _require_leaf(info: FieldInfo, value: JsonValue, path: FormWritePath) -> Non
             for t in types
         ):
             return
-        raise ValueError(f"Whole model replacement is not a leaf path: {path!r}")
+        raise StructureError(f"Whole model replacement is not a leaf path: {path!r}")
 
 
 def _field_leaves(
@@ -500,8 +504,8 @@ def _compatible(info: FieldInfo, value: JsonValue, path: FormPath) -> bool:
     types = alternatives(info.annotation)
     if value is None:
         return type(None) in types
-    if isinstance(value, dict) and text_field:
-        if expr_text(value) is not None:
+    if isinstance(value, dict):
+        if text_field and expr_text(value) is not None:
             return True
         if set(value) == {"__complex__"} and complex in types:
             from zcu_tools.core.complex_codec import decode_complex

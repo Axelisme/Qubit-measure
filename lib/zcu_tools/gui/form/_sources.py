@@ -93,7 +93,7 @@ def check_sources(
 
     Missing fields with static defaults still consume their declared sources.
     Invalid ordinary drafts are not validated here. Directed source failures
-    raise PydanticCustomError; library roots are read as Specs, never cfgs.
+    raise PydanticCustomError; domain hooks own the consumed source policy.
     validate_paths rejects invalid local choices declarations with ValueError;
     enclosing container keys/indexes only prefix errors, not declarations.
     Nested local options override enclosing options at the same leaf path.

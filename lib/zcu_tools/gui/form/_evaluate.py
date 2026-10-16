@@ -360,7 +360,7 @@ def evaluate_defaults(
     """Return a detached copy of defaults data with Expr leaves turned into values.
 
     data is what model.defaults returned. Each text-field leaf (see
-    accepts_expression; a choice leaf included, a ModuleRef name not) holding
+    expression_allowed; a choice leaf included, an explicitly restricted field not) holding
     exactly {"expr": text}, in model or nested/selected-branch sections, is
     evaluated once with env.parameters and replaced by its JSON value. A leaf
     is removed instead when its expression raises ExpressionError (a missing

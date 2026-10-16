@@ -10,7 +10,7 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from logging import getLogger
-from typing import TYPE_CHECKING, Annotated, Literal, Self, final
+from typing import TYPE_CHECKING, Literal, Self, final
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from pydantic_core import PydanticCustomError
