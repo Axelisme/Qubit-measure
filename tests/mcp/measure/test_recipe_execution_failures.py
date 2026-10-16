@@ -6,7 +6,7 @@ from threading import Event
 import pytest
 from zcu_tools.mcp.measure.execution_reply import project_execution
 from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
-from zcu_tools.mcp.measure.recipe import RecipeGenerator, RecipeRun, RecipeSession
+from zcu_tools.mcp.measure.recipe import RecipeGenerator, RecipeRun, RecipeSession, ask
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._recipe_actual_support import cfg_value
@@ -25,7 +25,7 @@ from ._recipe_support import LookbackGui, recipe_client
 @pytest.mark.parametrize("closed", [False, True])
 def test_finish_early_rejects_terminal_pending_run(tmp_path, closed: bool):
     def sample(session: RecipeSession) -> RecipeGenerator:
-        _, _ = yield session.open_tab("lookback").run()
+        yield from session.open_tab("lookback").run_step()
 
     gui = ControlledRunGui()
 
@@ -64,7 +64,7 @@ def test_unyielded_run_start_failure_retains_fixed_conditions(tmp_path, uncertai
         try:
             tab = session.open_tab("lookback")
             tab.set("rounds", 8)
-            _, _ = yield tab.run()
+            yield from tab.run_step()
         finally:
             finally_calls.append("closed")
 
@@ -111,7 +111,7 @@ def test_unyielded_run_start_failure_retains_fixed_conditions(tmp_path, uncertai
 def test_pre_run_cfg_failure_retains_prepared_or_requested_locator(tmp_path, reuse):
     def sample(session: RecipeSession) -> RecipeGenerator:
         tab = session.open_tab("lookback", reuse=reuse)
-        _, _ = yield tab.run()
+        yield from tab.run_step()
 
     gui = LookbackGui()
 
@@ -147,10 +147,11 @@ def test_failed_run_control_intent_is_scoped_for_the_next_run(tmp_path, control:
     def sample(session: RecipeSession) -> RecipeGenerator:
         tab = session.open_tab("lookback")
         try:
-            _, _ = yield tab.run()
+            yield from tab.run_step()
         except GuiRpcError as error:
             caught.append(error.reason)
-        _, status = yield tab.run()
+        result = yield from tab.run_step()
+        status = result.status
         delivered.append(status)
 
     gui = ControlledRunGui()
@@ -215,7 +216,7 @@ def test_stop_intent_does_not_relabel_failed_native_run(tmp_path, control):
 
     def sample(session: RecipeSession) -> RecipeGenerator:
         try:
-            _, _ = yield session.open_tab("lookback").run()
+            yield from session.open_tab("lookback").run_step()
         except GuiRpcError as error:
             caught.append(error.reason)
             raise
@@ -252,10 +253,11 @@ def test_close_question_runs_finally_once_without_delivering_answer(tmp_path):
 
     def sample(session: RecipeSession) -> RecipeGenerator:
         try:
-            run, _ = yield session.open_tab("lookback").run()
+            result = yield from session.open_tab("lookback").run_step()
+            run = result.run
             assert isinstance(run, RecipeRun)
-            _, _ = yield run.analyze("primary")
-            _, _ = yield run.propose_writeback()
+            yield from run.analyze_step("primary")
+            yield from ask(run.propose_writeback())
             resumed.set()
         finally:
             finally_calls.append("closed")
@@ -301,7 +303,8 @@ def test_second_save_replaces_report_or_retains_transport_failure(tmp_path, unce
     )
 
     def sample(session: RecipeSession) -> RecipeGenerator:
-        run, _ = yield session.open_tab("lookback").run()
+        result = yield from session.open_tab("lookback").run_step()
+        run = result.run
         assert isinstance(run, RecipeRun)
         completed_reports.append(run.save_raw())
         completed_reports.append(run.save_raw())
@@ -366,7 +369,7 @@ def test_worker_start_failure_returns_a_queryable_terminal_record(
     tmp_path, monkeypatch
 ):
     def sample(session: RecipeSession) -> RecipeGenerator:
-        yield session.open_tab("lookback").run()
+        yield from session.open_tab("lookback").run_step()
 
     def fail_start(thread):
         raise RuntimeError("thread unavailable")
@@ -389,7 +392,7 @@ def test_worker_start_failure_returns_a_queryable_terminal_record(
 def test_generator_close_failure_is_isolated_with_a_terminal_record(tmp_path):
     def sample(session: RecipeSession) -> RecipeGenerator:
         try:
-            _, _ = yield session.open_tab("lookback").run()
+            yield from session.open_tab("lookback").run_step()
         finally:
             raise RuntimeError("finally failed")
 

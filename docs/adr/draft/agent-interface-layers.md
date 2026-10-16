@@ -35,7 +35,9 @@ Notebook 是使用者在 L1 的入口，agent 目前不經 Notebook 操作。
 
 正常使用時，agent 只提供真正需要它判斷的資訊。自動推導得出的參數由 recipe 或 workflow 補齊，agent 不必逐一傳入。自動流程遇到需要判斷的狀況時，停在判斷交接處，把資訊和選項交給 agent。
 
-L1 與 L2 的差別在於誰決定介入點。L1 由 agent 決定，它可以在任兩步之間停下、讀取或修改。L2 由 recipe 決定，recipe 在明確需要 agent 的位置 yield，其餘步驟自動執行。Yield 可以落在輸入端（缺少必要參數）、中途（互動分析交接 tab，agent 以 `tab_interact` 完成選取）或輸出端（寫回確認）。Agent 需要在 recipe 沒有 yield 的位置調整步驟時，改用 L1。
+L1 與 L2 的差別在於誰決定介入點。L1 由 agent 決定，它可以在任兩步之間停下、讀取或修改。L2 由 recipe 決定，只在明確需要 agent 的位置交還控制權，其餘步驟自動執行。交接可以落在輸入端（缺少必要參數）、中途（互動分析交接 tab，agent 以 `tab_interact` 完成選取）或輸出端（寫回確認）。Agent 需要在 recipe 沒有交接的位置調整步驟時，改用 L1。
+
+Recipe 作者以兩種 `yield from` helper 區分目的。`tab.run_step()` 與 `run.analyze_step(...)` 是工作步驟，等待 GUI 操作並回傳具名結果，不表示每一步都要 agent 回答。分析需要互動時，driver 才交接 tab。`ask(run.propose_writeback())` 則明確交還控制權，等待 agent 或使用者回答寫回問題。`ask` 目前只接受已捕捉的 `WritebackQuestion`，回答本身不寫入資料。工作步驟與提問結果都保留 status；取消以 cancelled 結果交給作者收尾並 return，不改為例外。Operation 由 helper 交給 driver，不直接 yield，也不可迭代。
 
 L3 workflow 與 L2 用同一種協作方式。Workflow 決定在哪裡 yield，其餘步驟自動執行。差別在於 workflow 的一次執行跨越多次實驗，yield 可以出現在任一次實驗之間或之內。
 
