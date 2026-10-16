@@ -3,7 +3,14 @@
 import pytest
 from pydantic import JsonValue
 from zcu_tools.cfg_model import ConfigBase, Expr, Range
-from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormPathError, FormState
+from zcu_tools.gui.form import (
+    FormEnv,
+    FormErrors,
+    FormInput,
+    FormModel,
+    FormPathError,
+    FormState,
+)
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.program.v2.sweep import SweepCfg
 
@@ -13,7 +20,7 @@ class CoordinateCfg(ConfigBase):
     other: float = 1
 
 
-def switch(state, env, field, label):
+def switch(state: FormState[FormModel], env: FormEnv, field: str, label: str) -> None:
     target = state.describe(("sweep", field), env).target
     commands = getattr(target, "commands", ())
     command = next((item for item in commands if item.label == label), None)
@@ -25,7 +32,9 @@ def test_descending_coordinate_roundtrip_and_lowering():
     env = FormEnv()
     form = Form(CoordinateCfg, {"sweep": Range.between(10, 4, 4)})
     state = FormState(form.default_input(env))
-    original = form.to_cfg(state.result(env), env)
+    initial = state.result(env)
+    assert not isinstance(initial, FormErrors)
+    original = form.to_cfg(initial, env)
     state.write(
         {("sweep", "start"): {"expr": "5 * 2"}, ("sweep", "n"): {"expr": "2 * 2"}}, env
     )

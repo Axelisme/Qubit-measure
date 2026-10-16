@@ -774,7 +774,9 @@ def test_coordinate_rpc_retains_host_guards(form_rpc, guard):
             {"tab_id": tab, "path": ["sweep", "start"], "name": "to_center"},
         )
         assert not reply["ok"]
-        assert reply["error"].get("reason") in {"tab_busy", "not_holder"}, reply
+        assert reply["error"].get("reason") == (
+            "mutation_blocked" if guard == "busy" else "not_holder"
+        ), reply
         assert owner.input.to_json() == before
     finally:
         fixture.state.set_tab_running(tab, running=False)
