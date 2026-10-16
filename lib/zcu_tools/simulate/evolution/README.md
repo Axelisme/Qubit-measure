@@ -1,6 +1,30 @@
-# Evolution data reuse
+# Evolution APIs and data reuse
 
-**Last updated:** 2026-10-16
+**Last updated:** 2026-04-23
+
+## Segment engine contracts
+
+The batch API uses ns, GHz and rad. `SecularModel` carries energy eigenvalues,
+drive quadratures, directional rates and pure dephasing at one quantized flux
+level. `ModelSource` caches each level under a lock. The model builder owns
+secular applicability and device limits. Engine records own read-only array
+copies and reject invalid shapes and numeric invariants at construction.
+
+`EnvelopeSpec` describes unity or sampled complex amplitudes. Its shared
+`values` method interpolates real and imaginary parts and holds the final
+sample. `TimelineBatch` supplies all points of a template. `EvolutionResult`
+represents densities at readout start in the DC eigenbasis. `Engine` currently
+provides signatures only and raises `NotImplementedError`.
+
+The internal `kernel` module defines `SegmentTable`, `Kernel` and the opaque
+`Prepared.nbytes` contract. Only apply receives density arrays. The shared
+contract suite lives in `tests/simulate/evolution/contract/kernel_suite.py`.
+Kernel tests inherit `KernelContract` and provide a `kernel_case` fixture with
+accepted rows, a synthetic model and input densities. The suite compares against
+an independent strict DOP853 reference and checks row splitting and preparation
+without density access. The demo kernel stays in tests.
+
+## Existing Evolution API
 
 `Evolution` owns event geometry, solver selection, U lookup and exact density
 records. The caller supplies a model, continuous controls and an explicit initial
