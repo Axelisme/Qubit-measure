@@ -1,6 +1,6 @@
 # Fixed-coordinate FTF numerics
 
-**Last updated:** 2026-10-16
+**Last updated:** 2026-10-17
 
 `JointParameters` supplies F1/C/F2 numeric circuits and signed full-charge
 couplings in GHz. `JointModel` selects fixed local levels at DC, forms their
@@ -55,6 +55,25 @@ local product space, beyond the M evolution states. It includes counter-rotating
 terms and provides a response for every retained leakage/coupler state. Native
 states outside that local parent remain truncated by user choice. No zero-pull
 sink or runtime dispersive/convergence policy is inserted.
+
+`secular_model(joint, level, sources, resonators=...)` supplies instantaneous
+energy-basis energies, microwave quadratures, directional rates and pure rates.
+Levels are integer F1/C/F2 offsets from the round's absolute DC flux, with
+1e-3 Phi0 spacing. `model_source` wraps this builder in evolution's thread-safe
+cache with DC Gibbs density and an exact `flux_expansion`. Model identities
+include absolute DC, level, circuits, temperature, resonators and drive operators,
+so an engine can share its prepare cache across rounds without aliasing DC points.
+The collapse-operator and secular representations share the pure-rate calculation.
+
+`FluxTrack` carries one source slot across all template points in ns/GHz/rad.
+`schedule` filters source signals before loop mixing, then quantizes each DAC
+interval's midpoint and merges equal levels. `flux_waveform` retains unsnapped
+flux on DAC nodes for linear interpolation. Both use an absolute tail bound of
+5e-4 Phi0 per loop, summed over absolute pulse contributions; waveform appends a
+terminal DC sample. Filtering integrates sampled linear complex envelopes and
+carriers analytically across the point arrays, without per-point quadrature.
+`readout_model(joint, resonators)` supplies the existing ADC model at DC, with a
+zero reference frequency and neutral receiver for composition to calibrate.
 
 This package takes numeric GHz/ns/K values only. `baths` owns directional spectra,
 `dephasing` owns pure-rate formulas, `lines` owns causal scalar delay/lowpass,
