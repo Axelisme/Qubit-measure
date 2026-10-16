@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from operator import call
+from collections.abc import Callable
 from unittest.mock import MagicMock
 
 import pytest
@@ -21,9 +21,10 @@ from zcu_tools.program.v2.modules.dmem import (
 )
 
 
-def test_load_value_rejects_positional_storage_options() -> None:
+@pytest.mark.parametrize("invalid_call", [LoadValue], ids=["LoadValue"])
+def test_load_value_rejects_positional_storage_options(invalid_call: Callable[..., object]) -> None:
     with pytest.raises(TypeError, match="positional"):
-        call(LoadValue, "lookup", [1, 2], "idx", "value", False, True)
+        invalid_call("lookup", [1, 2], "idx", "value", False, True)
 
 
 def _execute_lookup_alu(expr: AluExpr, registers: dict[str, int]) -> int:

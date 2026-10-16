@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from operator import call
+from collections.abc import Callable
 
 import numpy as np
 import pytest
@@ -14,11 +14,11 @@ from zcu_tools.analysis.fluxdep import (
 )
 
 
-def test_cast2real_and_norm_rejects_positional_phase_option() -> None:
+@pytest.mark.parametrize("invalid_call", [cast2real_and_norm], ids=["cast2real_and_norm"])
+def test_cast2real_and_norm_rejects_positional_phase_option(invalid_call: Callable[..., object]) -> None:
     signals = np.ones((3, 5), dtype=np.complex128)
-    # call exercises invalid runtime input without declaring it type-correct.
     with pytest.raises(TypeError, match="positional"):
-        call(cast2real_and_norm, signals, False, 1, "gaussian")
+        invalid_call(signals, False, 1, "gaussian")
 
 
 def test_cast2real_and_norm_keeps_constant_rows_finite() -> None:
