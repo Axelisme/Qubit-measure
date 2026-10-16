@@ -354,12 +354,12 @@ def _read_reference(
     metadata: FormFieldDescription,
     env: FormEnv,
     root: type[FormModel],
-    *,
-    input_present: bool,
-    raw: JsonValue,
 ) -> LogicalFieldObservation:
     path = position.path
+    target = position.target
     readonly = position.source is not None
+    input_present = not readonly and target.name in target.level.data
+    raw = target.level.data.get(target.name) if input_present else None
     try:
         level, source = _content(position, env, path, writing=False)
     except LogicalSourceError as exc:
@@ -426,15 +426,7 @@ def read(
     raw = target.level.data.get(target.name) if input_present else None
     source = position.source
     if selector is not None and selector.mode == "key":
-        observed = _read_reference(
-            position,
-            selector,
-            metadata,
-            env,
-            root,
-            input_present=input_present,
-            raw=raw,
-        )
+        observed = _read_reference(position, selector, metadata, env, root)
         return _with_input_errors(input, observed, env)
     level, _ = _content(position, env, path, writing=False)
     if level is not None:

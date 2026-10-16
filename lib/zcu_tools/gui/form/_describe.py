@@ -259,7 +259,7 @@ def describe(
             path, None, _children(root_level(model, data, env), tags)
         )
     target = resolve(model, data, path, env)
-    metadata = _metadata(target, tags)
+    metadata = describe_field(target, roots=(model,))
     level = target.children(env)
     if level is None:
         return FormDescription(path, metadata, ())
