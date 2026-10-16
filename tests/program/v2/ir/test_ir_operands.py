@@ -1,3 +1,4 @@
+import re
 from typing import Any
 
 import pytest
@@ -203,7 +204,7 @@ def test_parse_alu_expr_error_paths(raw, message):
     ],
 )
 def test_parse_alu_expr_preserves_operator_cause(raw: str, message: str) -> None:
-    with pytest.raises(ValueError) as caught:
+    with pytest.raises(ValueError, match=re.escape(message)) as caught:
         parse_alu_expr(raw)
 
     assert type(caught.value) is ValueError

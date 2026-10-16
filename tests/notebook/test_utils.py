@@ -21,7 +21,9 @@ def test_get_ip_address_preserves_ioctl_cause(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(fcntl, "ioctl", fail_ioctl)
 
-    with pytest.raises(OSError) as caught:
+    with pytest.raises(
+        OSError, match=r"^Interface synthetic0 not found or has no IPv4 address\.$"
+    ) as caught:
         get_ip_address("synthetic0")
 
     assert type(caught.value) is OSError
