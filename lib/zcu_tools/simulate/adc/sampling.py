@@ -2,12 +2,13 @@
 
 import numpy as np
 
+from zcu_tools.core.simulation import SamplingIdentity
+
 from .request import (
     ADCSamples,
     PopulationInput,
     ReadoutPulse,
     SampleGrid,
-    SamplingIdentity,
 )
 from .response import ConditionalReadout
 

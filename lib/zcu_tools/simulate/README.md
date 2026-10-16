@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-10-16，FTF joint circuits and independent numeric tools
+**Last updated:** 2026-10-17，segment engine and recomputed replay
 
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
@@ -9,36 +9,24 @@ prediction tools remain separate. ADR-0072 defines the package dependency rules.
 ## Evolution and explicit populations
 
 Import records and functions from `zcu_tools.simulate.evolution`.
-`NumericModel` owns a fixed `Basis`, static Hamiltonian and source quadratures.
-Optional numeric callbacks provide additive time-dependent Hamiltonians and baths
-in that same basis. Hamiltonian coefficients are H/h in GHz, time is ns, phase
-is radians, and Lindblad operators include their rates in ns**(-1/2).
-The solver applies the Hamiltonian factor `-2*pi*1j`; source amplitudes have no
-hidden factor of one half or per-waveform normalization.
+`SecularModel` supplies energy-basis Hamiltonians, drive quadratures, directional
+rates and pure dephasing. `ModelSource` provides these models at quantized flux
+levels. Energies use H/h in GHz, time is ns and phase is radians.
 
-`Evolution.evolve` requires an explicit `DensityState` on every call. It returns
-only the final density, not an internal-step trajectory. Pass the previous result
-and the same full absolute `ControlSequence` when continuing a shot. A new shot
-must receive its own initial state. Instances do not remember quantum states.
+`Engine.evolve` takes a `ModelSource` with the initial DC density and a sequence
+of `TimelineBatch` records. It returns densities at readout start in the DC
+energy basis, not an internal-step trajectory. FTF uses the segment engine's fast algorithms by
+default. The engine segments controls, selects kernels and shares deterministic
+preparations across points and acquires. It never carries quantum states into a
+new shot. Numeric tolerances do not certify basis convergence or the physical
+validity of a model.
 
-Model event times partition bath discontinuities alongside source events.
-The solver rounds all event coordinates to the nearest 2 ns from origin zero,
-with ties to even. It unions the coordinates before forming intervals. It never
-rounds interval lengths independently. Envelopes stay continuous in pulse-local
-coordinates across other sources' events. `Envelope.sampled` preserves the
-original arbitrary-waveform axis and signed complex values.
-
-Within each joint interval the solver uses a static matrix exponential, adaptive
-DOP853, or an exact-frequency period plus tail. Integer propagator powers use
-binary multiplication. Only flat, exactly commensurate closed controls qualify
-for period reuse. Dissipative evolution solves the full Lindblad equation.
-Solver tolerances control numerical integration, not basis convergence or the
-physical validity of a model. Solver output is never repaired by clipping
-negative density eigenvalues or renormalizing the trace.
+`ControlSequence`, `Envelope` and `NumericModel` remain inputs to independent
+continuous-flux and model tools. They do not define an acquisition backend.
 
 Call `populations(state, target_basis)` explicitly before readout. Basis vectors
 are ordered columns in common ambient coordinates. The result preserves target
-state labels and can be recorded independently of ADC generation.
+state labels and can be recorded independently of ADC generation. For engine\nbatches, call `batch_populations(densities, source_basis, target_basis)`; it\nreturns a real array in target state order without clipping solver residuals.
 
 ## ADC readout
 
@@ -65,16 +53,17 @@ state per shot, then adds independent per-sample receiver noise. It does not dra
 jump times or solve an ODE per shot. The result includes float64 traces and their
 exact discrete sums from one realization. Offset is added once per sample.
 A zero or singular positive-semidefinite 2x2 I/Q noise covariance is valid.
-`SamplingIdentity` selects a local PCG64 stream, without changing global RNG state.
+`SamplingIdentity`, imported from `zcu_tools.core.simulation`, selects a local
+PCG64 stream without changing global RNG state. The ADC and deferred integrated
+raw generation share this identity format.
 
 Environment code owns unit conversion from QICK us/MHz/degrees to ns/GHz/radians
 and composes evolution, explicit populations and ADC. Program adapters still own
 channel order, QICK buffer shapes, nearest-even int64 conversion and acquisition
-normalization. [`evolution`](evolution/README.md) also owns optional offline
-Intel OpenCL U tables, checked numeric files and persistent exact density
-records. GPU construction is offline only. Runtime fixes published versions at
-the environment-selected boundary and directly solves uncovered legal requests.
-There is no backend registry or automatic runtime table construction.
+normalization. [`evolution`](evolution/README.md) uses the segment engine's fast
+algorithms by default and retains prepared data in memory. It does not read or
+write an offline U-table library or persistent density records. Private replay
+recomputes from archived inputs under matching numeric and RNG versions.
 
 ## FTF circuits and noise
 

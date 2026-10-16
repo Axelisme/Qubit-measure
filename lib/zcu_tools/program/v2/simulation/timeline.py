@@ -235,7 +235,9 @@ class TimelineInterpreter:
                 raise ValueError(
                     f"candidate {index} out of bounds via register {module.val_reg!r}"
                 )
+            start = len(self.events)
             self.pulse(module.pulse_modules[index], t)
+            self.events[start] = replace(self.events[start], source=module.name)
             return t + module.total_length(self.prog)
         if type(module) is TableLengthPulse:
             return self.table_length(module, t)
@@ -384,7 +386,7 @@ class TimelineInterpreter:
             self.scalar(prog.get_pulse_param(pulse_id, "freq")),
             self.scalar(prog.get_pulse_param(pulse_id, "phase")),
             self.scalar(prog.get_pulse_param(pulse_id, "gain")),
-            self._envelope(module, duration),
+            self.envelope(module, duration),
             source=module.name,
             iterations=tuple(self.iterations),
         )
@@ -392,7 +394,14 @@ class TimelineInterpreter:
         self.gen_end[cfg.ch] = event.start_us + duration
         return t + module.total_length(prog) if module.block_mode else t
 
-    def _envelope(self, module: Pulse, duration: float) -> PulseEnvelope | None:
+    def envelope(self, module: Pulse, duration: float) -> PulseEnvelope | None:
+        """Detach the compiled DAC envelope for a Pulse and playback duration us.
+
+        module must be initialized in this interpreter's program. Const returns
+        None; flat-top adds the half-gain plateau without sampling its interior.
+        duration supplies the actual total quantized playback length, including
+        both ramps. Returned tuples never borrow the compiled sample buffers.
+        """
         cfg = module.cfg
         if cfg is None or isinstance(cfg.waveform, ConstWaveformCfg):
             return None

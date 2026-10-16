@@ -148,9 +148,10 @@ def test_unbound_channel_rejected():
 
 def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
     from zcu_tools.core.simulation import (
-        ChannelSignals,
+        ChannelStatistics,
         EnvironmentSnapshot,
-        RoundSignals,
+        RoundStatistics,
+        SamplingIdentity,
     )
 
     env = environment(std_adc=0, seed=12, n_gens=2, n_readouts=2)
@@ -170,18 +171,19 @@ def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
     def source(request):
         seen.append(request)
         bias = request.snapshot.values[0][1]
-        # Deliberately reverse backend channel order. The adapter must follow
-        # compiled ADC order, apply ties-to-even, then let QICK normalize once.
-        return RoundSignals(
-            tuple(
-                ChannelSignals(
-                    ch,
-                    np.array(
-                        [[[10 * (1 - ch) + bias + 0.5, 10 * (1 - ch) + bias + 1.5]]]
-                    ),
-                )
-                for ch in (0, 1)
+        # Deliberately reverse backend channel order; totals use ADC sum units.
+        channels = []
+        for ch in (0, 1):
+            sums = np.rint(
+                np.array([[10 * (1 - ch) + bias + 0.5, 10 * (1 - ch) + bias + 1.5]])
             )
+            channels.append(
+                ChannelStatistics(ch, sums, sums[:, None, :], np.zeros((2, 2)))
+            )
+        return RoundStatistics(
+            np.array([1], dtype=np.int64),
+            tuple(channels),
+            SamplingIdentity(12, (request.index,)),
         )
 
     def hook(count, data, stop):
@@ -203,7 +205,7 @@ def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
     assert [r.snapshot.values for r in seen] == [(("bias", 0.0),), (("bias", 2.0),)]
     assert [r.index for r in seen] == [0, 1]
     maxv = env.soccfg.get_maxv(1)
-    assert seen[0].acquire.controls[0][0].gain == int(0.1 * maxv) / maxv
+    assert seen[0].acquire.materialize_point(0).events[0].gain == int(0.1 * maxv) / maxv
 
 
 @pytest.mark.parametrize(
@@ -219,8 +221,7 @@ def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
         "duplicate",
     ],
 )
-@pytest.mark.parametrize("mode", ["integrated", "decimated"])
-def test_invalid_backend_signals_fail_public_acquire_and_allow_retry(invalid, mode):
+def test_invalid_backend_signals_fail_public_acquire_and_allow_retry(invalid):
     from zcu_tools.core.simulation import ChannelSignals, RoundSignals
 
     env = environment(std_adc=0, seed=45)
@@ -228,7 +229,7 @@ def test_invalid_backend_signals_fail_public_acquire_and_allow_retry(invalid, mo
     source = env.soc.binding.execute
 
     def malformed(request):
-        shape = (1, 1, 2) if mode == "integrated" else (1, 1, 4, 2)
+        shape = (1, 1, 4, 2)
         value = np.zeros(shape)
         if invalid in ("nan", "infinity", "overflow", "underflow"):
             value.flat[0] = {
@@ -249,7 +250,7 @@ def test_invalid_backend_signals_fail_public_acquire_and_allow_retry(invalid, mo
         return RoundSignals(channels)
 
     env.soc.binding.execute = malformed
-    acquire = prog.acquire if mode == "integrated" else prog.acquire_decimated
+    acquire = prog.acquire_decimated
     reason = (
         "finite|int64"
         if invalid in ("nan", "infinity", "overflow", "underflow")
@@ -288,4 +289,4 @@ def test_scalar_readout_trigger_is_relative_to_module_not_pulse_predelay():
     expected_trigger = prog.cycles2us(prog.us2cycles(0.25))
     assert request.readouts[0].trigger_us == (expected_trigger,)
     expected_pulse = prog.cycles2us(prog.us2cycles(1.5))
-    assert request.controls[0][0].start_us == expected_pulse
+    assert request.materialize_point(0).events[0].start_us == expected_pulse

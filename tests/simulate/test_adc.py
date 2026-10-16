@@ -135,7 +135,8 @@ def test_state_conditioned_moments_match_independent_block_exponential():
 
 
 def test_shot_sampling_noise_reproducibility_and_sums_share_one_realization():
-    from zcu_tools.simulate.adc import ADC, PopulationInput, SamplingIdentity
+    from zcu_tools.core.simulation import SamplingIdentity
+    from zcu_tools.simulate.adc import ADC, PopulationInput
 
     covariance = np.array([[0.16, 0.06], [0.06, 0.09]])
     m = signal_model(covariance=covariance)
@@ -167,7 +168,8 @@ def test_shot_sampling_noise_reproducibility_and_sums_share_one_realization():
     "covariance", [np.zeros((2, 2)), np.array([[0.04, 0.04], [0.04, 0.04]])]
 )
 def test_zero_gain_zero_or_singular_psd_noise_and_state_order(covariance):
-    from zcu_tools.simulate.adc import ADC, PopulationInput, SamplingIdentity
+    from zcu_tools.core.simulation import SamplingIdentity
+    from zcu_tools.simulate.adc import ADC, PopulationInput
 
     m = signal_model(gain=0, offset=(0.7, -0.3), covariance=covariance)
     pulses, grid = pulse_and_grid()

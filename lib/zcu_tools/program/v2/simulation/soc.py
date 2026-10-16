@@ -1,11 +1,14 @@
 """QICK transport adapter requiring an explicitly assembled simulation binding."""
 
+from math import prod
+
+import numpy as np
 from qick import QickConfig
 
-from zcu_tools.core.simulation import AcquireRequest
+from zcu_tools.core.simulation import AcquireRequest, RoundSignals, RoundStatistics
 
 from .binding import SimulationBinding
-from .signals import pack_signals
+from .signals import copy_statistics, pack_signals
 
 
 class SimulationSoc(QickConfig):
@@ -34,6 +37,8 @@ class SimulationSoc(QickConfig):
         self._accumulated = {}
         self._decimated = {}
         self._poll_done = False
+        self._statistics: RoundStatistics | None = None
+        self._raw_layout = (1, 0)
 
     def install_request(self, request: AcquireRequest) -> None:
         """Admit detached controls only when every used channel is wired.
@@ -44,23 +49,18 @@ class SimulationSoc(QickConfig):
         an unbound generator/ADC route. This method does not generate signals.
         """
         bound_gens = {gen for gen, _ in self.routes}
-        for events in request.controls:
-            for event in events:
-                if event.gen_ch not in bound_gens:
+        for template in request.templates:
+            for event in template.events:
+                if np.any(event.active) and event.gen_ch not in bound_gens:
                     raise ValueError(
                         f"{event.source!r} generator {event.gen_ch} is not bound"
                     )
-        windows = (
-            (window for point in request.timelines for window in point.readouts)
-            if request.timelines
-            else iter(request.readouts)
-        )
-        if any(
-            (gen_ch, window.channel) not in self.routes
-            for window in windows
-            for gen_ch in (window.generator_channels or (window.gen_ch,))
-        ):
-            raise ValueError("program uses an unbound generator/ADC route")
+            for window in template.readouts:
+                if any(
+                    (int(gen), window.channel) not in self.routes
+                    for gen in np.unique(window.generator_channels)
+                ):
+                    raise ValueError("program uses an unbound generator/ADC route")
         self._request = request
         self.binding.last_request = request
         self._round_index = 0
@@ -68,37 +68,52 @@ class SimulationSoc(QickConfig):
     def release_request(self) -> None:
         self._request = None
 
-    def _execute_round(self) -> None:
+    def run_round(self) -> RoundStatistics | RoundSignals:
+        """Execute the next installed round and detach/validate its numeric result.
+
+        Statistics remain compact until an accumulated getter is used. Signals
+        populate the usual buffers immediately. Raise on absent request or invalid
+        backend data; a successful call advances the software round index.
+        """
         if self._request is None:
             raise RuntimeError("simulation has no active acquisition request")
-        signals = self.binding.sample_round(self._request, self._round_index)
-        self._accumulated, self._decimated = pack_signals(self._request, signals)
+        result = self.binding.sample_round(self._request, self._round_index)
+        self._statistics = None
+        if isinstance(result, RoundStatistics):
+            result = copy_statistics(self._request, result)
+            self._statistics = result
+            self._raw_layout = (self._request.reps, self._request.avg_level)
+            self._accumulated, self._decimated = {}, {}
+        else:
+            self._accumulated, self._decimated = pack_signals(self._request, result)
         self._round_index += 1
+        return result
 
     def start_tproc(self) -> None:
-        self._execute_round()
+        self.run_round()
 
     def start_readout(self, total_shots, counter_addr, ch_list, reads_per_shot) -> None:
         if self._request is None:
             raise RuntimeError("simulation has no active acquisition request")
         expected = [(w.channel, w.reads) for w in self._request.readouts]
         if (
-            total_shots != self._request.executions
+            total_shots != prod(self._request.loop_dims)
             or list(zip(ch_list, reads_per_shot, strict=True)) != expected
         ):
             raise ValueError("QICK readout layout differs from simulation request")
         del counter_addr
         self._poll_done = False
-        self._execute_round()
+        self.run_round()
 
     def poll_data(self, totaltime=0.1, timeout=None):
         del totaltime, timeout
         if self._poll_done or self._request is None:
             return []
         self._poll_done = True
+        self._materialize_accumulated()
         return [
             (
-                self._request.executions,
+                prod(self._request.loop_dims),
                 ([self._accumulated[w.channel] for w in self._request.readouts], {}),
             )
         ]
@@ -111,7 +126,17 @@ class SimulationSoc(QickConfig):
         return self._decimated[ch][address : address + length].copy()
 
     def get_accumulated(self, ch, address, length):
+        self._materialize_accumulated()
         return self._accumulated[ch][address : address + length].copy()
+
+    def _materialize_accumulated(self) -> None:
+        if self._statistics is not None and not self._accumulated:
+            self._accumulated = {
+                ch: raw.reshape(-1, 2)
+                for ch, raw in self._statistics.materialize_raw(
+                    *self._raw_layout
+                ).items()
+            }
 
     def stop_tproc(self, *args, **kwargs) -> None: ...
     def start_src(self, *args, **kwargs) -> None: ...

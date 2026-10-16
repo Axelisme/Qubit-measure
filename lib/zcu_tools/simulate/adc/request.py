@@ -6,6 +6,8 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.core.simulation import SamplingIdentity
+
 from .model import RealArray, readonly_array
 
 
@@ -132,29 +134,6 @@ class PopulationInput:
         if abs(float(values.sum()) - 1) > 1e-10:
             raise ValueError("populations must sum to one")
         object.__setattr__(self, "values", values)
-
-
-@dataclass(frozen=True)
-class SamplingIdentity:
-    """Explicit deterministic shot/noise stream identity, without global RNG.
-
-    seed: nonnegative integer root entropy.
-    stream: tuple of nonnegative integer identity components chosen by the
-        environment (e.g. acquire,round,execution,read). Equal full identity and
-        equal calls reproduce arrays; changing identity selects a new stream.
-        NumPy SeedSequence((seed,*stream)) with PCG64 defines this implementation's
-        realization; cross-NumPy-version bitwise replay is not promised here.
-    No acquire/round identity is guessed, and nothing is persisted by this tool.
-    """
-
-    seed: int
-    stream: tuple[int, ...] = ()
-
-    def __post_init__(self) -> None:
-        if any(type(x) is not int or x < 0 for x in (self.seed, *self.stream)):
-            raise ValueError(
-                "sampling identity components must be nonnegative integers"
-            )
 
 
 @dataclass(frozen=True)

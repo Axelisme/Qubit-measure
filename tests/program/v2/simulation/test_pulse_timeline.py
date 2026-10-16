@@ -59,19 +59,22 @@ def test_parallel_pulses_retain_envelopes_phase_and_separate_adc_duration(wavefo
     except ValueError as exc:
         pytest.fail(f"supported pulse/timing modules must acquire: {exc}")
     request = request_of(env)
-    events = request.controls[0]
+    events = request.materialize_point(0).events
     drive = next(event for event in events if event.gen_ch == 1)
     receiver = next(event for event in events if event.gen_ch == 0)
     assert drive.start_us == pytest.approx(0.5, abs=0.003)
     assert receiver.start_us == pytest.approx(0.6, abs=0.005)
-    assert drive.duration_us == pytest.approx(0.25, abs=0.006)
+    drive_end = max(e.start_us + e.duration_us for e in events if e.gen_ch == 1)
+    assert drive_end - drive.start_us == pytest.approx(0.25, abs=0.006)
     assert drive.gain == pytest.approx(-0.4, abs=1 / 32766)
     assert drive.phase_deg == pytest.approx(37, abs=1e-5)
     assert drive.phase_reference_us == receiver.phase_reference_us == 0
     origin = math.ceil(0.5 * 430.08) / 430.08
     offset = math.ceil(0.1 * 430.08) / 430.08
     trigger = origin + round((offset + 0.02) * 430.08) / 430.08
-    assert request.timelines[0].readouts[0].trigger_us[0] == pytest.approx(trigger)
+    assert request.materialize_point(0).readouts[0].trigger_us[0] == pytest.approx(
+        trigger
+    )
     assert request.readouts[0].samples == prog.ro_chs[0]["length"]
     assert (
         request.readouts[0].samples / request.readouts[0].sample_rate_mhz
@@ -92,7 +95,7 @@ def test_parallel_pulses_retain_envelopes_phase_and_separate_adc_duration(wavefo
                 < 0
                 < max(v.imag for v in envelope.values)
             )
-    assert request.controls[1] == events
+    assert request.materialize_point(0).events == events
     # Frozen request survives later mutation of its originating module cfg.
     if pulse.cfg is None:
         raise AssertionError("drive fixture must provide a configured pulse")

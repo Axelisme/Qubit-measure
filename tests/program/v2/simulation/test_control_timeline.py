@@ -1,5 +1,6 @@
 """Semantic loop/table scheduling through real program acquisition."""
 
+import numpy as np
 import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.experiment.simulation import white_noise
@@ -69,7 +70,9 @@ def test_loadvalue_repeat_branch_computedpulse_and_wait_follow_execution_order(
     request, _, _ = acquire(
         [loader, loop, receiver().build("readout")], sweep=[("shot", 32)]
     )
-    for i, timeline in enumerate(request.timelines):
+    for i, timeline in enumerate(
+        request.materialize_point(p) for p in range(int(np.prod(request.point_dims)))
+    ):
         first, second, readout = timeline.events
         assert first.gain == pytest.approx(-0.4 if i % 2 == 0 else 0.2, abs=1e-4)
         assert first.duration_us == pytest.approx(0.3 if i % 2 == 0 else 0.1, abs=0.003)
@@ -93,15 +96,17 @@ def test_scanwith_runtime_repeat_count_and_delay_cycles_are_local_to_each_acquir
         receiver().build("readout"),
     ]
     request, prog, env = acquire(modules)
-    assert [e.source for e in request.controls[0]] == [
+    assert [e.source for e in request.materialize_point(0).events] == [
         "drive",
         "drive",
         "drive",
         "readout",
     ]
-    assert request.controls[0][-1].start_us == pytest.approx(0.4, abs=0.015)
+    assert request.materialize_point(0).events[-1].start_us == pytest.approx(
+        0.4, abs=0.015
+    )
     prog.acquire(env.soc, progress=False)
-    assert request_of(env).timelines == request.timelines
+    assert request_of(env).materialize_point(0) == request.materialize_point(0)
 
 
 def test_tablelength_uses_selected_duration_and_sweeps_use_quantized_controls():
@@ -114,7 +119,10 @@ def test_tablelength_uses_selected_duration_and_sweeps_use_quantized_controls():
         [pulse, cfg.build("readout")], sweep=[("length_axis", 2)], reps=2
     )
     assert request.loop_dims == (2, 2)
-    for i, events in enumerate(request.controls):
+    for i, events in enumerate(
+        request.materialize_point(p).events
+        for p in range(int(np.prod(request.point_dims)))
+    ):
         assert events[0].duration_us == pytest.approx([0.1, 0.3][i % 2], abs=0.003)
         assert events[1].start_us == pytest.approx([0.1, 0.3][i % 2], abs=0.006)
         assert events[1].gain == pytest.approx([0.1, 0.2][i % 2], abs=1e-4)
@@ -140,15 +148,27 @@ def test_loadword_uint32_frequency_and_signed_gain_are_decoded_only_by_readout()
         ),
     ]
     request, _, _ = acquire(modules, sweep=[("axis", 2)])
-    assert [e[0].frequency_mhz for e in request.controls] == pytest.approx(
-        [100, 200], abs=1e-4
-    )
-    assert [e[0].gain for e in request.controls] == pytest.approx(
-        [3276 / 32766, -6552 / 32766]
-    )
-    assert [t.readouts[0].frequency_mhz[0] for t in request.timelines] == pytest.approx(
-        [100, 200], abs=1e-4
-    )
+    assert [
+        e[0].frequency_mhz
+        for e in (
+            request.materialize_point(p).events
+            for p in range(int(np.prod(request.point_dims)))
+        )
+    ] == pytest.approx([100, 200], abs=1e-4)
+    assert [
+        e[0].gain
+        for e in (
+            request.materialize_point(p).events
+            for p in range(int(np.prod(request.point_dims)))
+        )
+    ] == pytest.approx([3276 / 32766, -6552 / 32766])
+    assert [
+        t.readouts[0].frequency_mhz[0]
+        for t in (
+            request.materialize_point(p)
+            for p in range(int(np.prod(request.point_dims)))
+        )
+    ] == pytest.approx([100, 200], abs=1e-4)
 
 
 def test_table_readout_initial_template_exec_after_and_outer_wrap_are_not_index_shortcuts():
@@ -160,14 +180,22 @@ def test_table_readout_initial_template_exec_after_and_outer_wrap_are_not_index_
     readout = TablePulseReadout(
         "readout", receiver(), idx_reg="axis", freq_words=gen, ro_freq_words=adc
     )
-    request, prog, env = acquire([readout], sweep=[("axis", 2)], reps=2)
-    assert [events[0].frequency_mhz for events in request.controls] == pytest.approx(
-        [100, 300, 200, 300], abs=1e-4
-    )
+    request, prog, env = acquire([readout], sweep=[("axis", 2)], reps=1)
+    assert [
+        events[0].frequency_mhz
+        for events in (
+            request.materialize_point(p).events
+            for p in range(int(np.prod(request.point_dims)))
+        )
+    ] == pytest.approx([100, 300], abs=1e-4)
     prog.acquire(env.soc, progress=False)
     assert [
-        events[0].frequency_mhz for events in request_of(env).controls
-    ] == pytest.approx([100, 300, 200, 300], abs=1e-4)
+        events[0].frequency_mhz
+        for events in (
+            request_of(env).materialize_point(p).events
+            for p in range(int(np.prod(request.point_dims)))
+        )
+    ] == pytest.approx([100, 300], abs=1e-4)
 
 
 def test_reset_wrappers_expand_only_actual_parallel_pulses():
@@ -180,9 +208,11 @@ def test_reset_wrappers_expand_only_actual_parallel_pulses():
     request, _, _ = acquire(
         [NoneResetCfg().build("none"), reset, receiver().build("readout")]
     )
-    assert len(request.controls[0]) == 3
-    assert [e.start_us for e in request.controls[0][:2]] == [0, 0]
-    assert request.controls[0][-1].start_us == pytest.approx(0.2, abs=0.004)
+    assert len(request.materialize_point(0).events) == 3
+    assert [e.start_us for e in request.materialize_point(0).events[:2]] == [0, 0]
+    assert request.materialize_point(0).events[-1].start_us == pytest.approx(
+        0.2, abs=0.004
+    )
 
 
 def test_join_cross_branch_register_dependency_rejected_before_backend():

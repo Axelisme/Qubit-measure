@@ -1,17 +1,21 @@
-"""FTF environment ownership, live round snapshots and numeric-tool composition."""
+"""FTF round snapshots, persistent engine ownership and compact readout sampling."""
 
 from dataclasses import dataclass, replace
 from hashlib import sha256
+from math import prod
 from pathlib import Path
+from threading import Event
 
 import numpy as np
+from numpy.typing import NDArray
 
 from zcu_tools.core.simulation import (
+    AcquireRequest,
     ChannelSignals,
     EnvironmentSnapshot,
-    PointTimeline,
     RoundRequest,
     RoundSignals,
+    RoundStatistics,
 )
 from zcu_tools.device import DeviceManager
 from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
@@ -20,61 +24,192 @@ from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.simulation import SimulationBinding, SimulationSoc
 from zcu_tools.resources.ftf import FTFSettings, load_ftf, parse_ftf
 from zcu_tools.resources.simulation_replay import ReplayAcquire, save_replay
-from zcu_tools.simulate.adc import ADC, PopulationInput, SamplingIdentity
+from zcu_tools.simulate.adc import (
+    ChannelReadout,
+    ConditionalReadout,
+    ConditionalSums,
+    round_statistics,
+    sample_traces,
+)
 from zcu_tools.simulate.evolution import (
-    EvaluationReceipt,
-    Evolution,
-    EvolutionLibrary,
-    LibrarySnapshot,
-    Populations,
-    SolverSettings,
-    populations,
+    Basis,
+    Engine,
+    PathDiagnostics,
+    batch_populations,
 )
 
-from .point import FTFPointPlan, plan_point
 from .replay import BACKEND_VERSION, replay_versions
+from .template import plan_template
 
 
 @dataclass(frozen=True)
 class FTFNumericUse:
-    """Author-only actual evolution content used by one round execution group.
+    """Author-only latest solve diagnostics, never ordinary acquisition truth.
 
-    acquire_sequence/round_index: detached request sampling scope, not cache key.
-    group_index: zero-based deterministic timeline group in that round. receipt:
-    origin, immutable numeric content identities and full evolve cost. These
-    records contain no density/noise state and are not ordinary GUI/MCP truth.
+    acquire_sequence/round_index identify the solve's sampling scope. paths counts
+    actual engine segment paths; it contains no densities or noise realizations.
+    A reused snapshot does not create a new solve or change this record.
     """
 
     acquire_sequence: int
     round_index: int
-    group_index: int
-    receipt: EvaluationReceipt
+    paths: PathDiagnostics
 
 
 @dataclass(frozen=True)
 class _Prepared:
-    plan: FTFPointPlan
-    populations: Populations
-    adc: ADC
-    receipt: EvaluationReceipt
+    populations: NDArray[np.float64]
+    channels: tuple[ChannelReadout, ...]
+
+
+class FTFAcquire:
+    """One fixed request with at most the immediately preceding round's preparation.
+
+    Construct through FTFSource.open_acquire. sample_round takes a detached live
+    snapshot and a zero-based software round index. Equal consecutive snapshots
+    reuse density and conditional responses, but draw a fresh round stream.
+    Opening the next acquire invalidates this session and releases preparations;
+    using an invalidated session raises RuntimeError. Calls are synchronous and
+    must be serialized by the caller (the binding provides acquire admission).
+    """
+
+    def __init__(self, source: "FTFSource", request: AcquireRequest) -> None:
+        self._source = source
+        self._active = True
+        self.request = request
+        self._snapshot: EnvironmentSnapshot | None = None
+        self._prepared: _Prepared | None = None
+
+    def invalidate(self) -> None:
+        """Release deterministic arrays and reject further rounds; safe to repeat."""
+        self._active = False
+        self._prepared = None
+
+    def sample_round(
+        self, snapshot: EnvironmentSnapshot, index: int
+    ) -> RoundStatistics | RoundSignals:
+        """Return integrated totals or decimated shots for this snapshot/index.
+
+        Numeric/ADC errors propagate without partial results or changing the
+        cached snapshot. Replay writes, when enabled, finish before returning.
+        Decimated shots are rearranged from point-major C6 order to QICK loop
+        order (including the reps axis). Neither mode averages or rounds data.
+        """
+        owner = self._source
+        if not self._active:
+            raise RuntimeError("FTF acquire session is no longer active")
+        if self._prepared is None or snapshot != self._snapshot:
+            prepared = self._prepare(snapshot, index)
+            self._prepared, self._snapshot = prepared, snapshot
+        prepared = self._prepared
+        acquire = self.request
+        arguments = dict(
+            reps=acquire.reps,
+            seed=acquire.root_seed,
+            acquire_sequence=acquire.sequence,
+            round_index=index,
+        )
+        if acquire.mode == "integrated":
+            result = round_statistics(
+                prepared.populations, prepared.channels, **arguments
+            )
+        else:
+            traces = sample_traces(prepared.populations, prepared.channels, **arguments)
+            channels = []
+            for channel in traces.channels:
+                shaped = channel.iq.reshape(
+                    (*acquire.point_dims, acquire.reps, *channel.iq.shape[1:])
+                )
+                ordered = np.moveaxis(
+                    shaped, len(acquire.point_dims), acquire.avg_level
+                )
+                channels.append(
+                    ChannelSignals(channel.channel, ordered.reshape(channel.iq.shape))
+                )
+            result = RoundSignals(tuple(channels))
+        if owner.private_replay is not None:
+            save_replay(
+                owner.private_replay,
+                ReplayAcquire(
+                    settings=owner.settings, request=acquire, versions=replay_versions()
+                ),
+                snapshot,
+                index,
+            )
+        return result
+
+    def _prepare(self, snapshot: EnvironmentSnapshot, index: int) -> _Prepared:
+        acquire = self.request
+        owner = self._source
+        plans = tuple(
+            plan_template(owner.settings, snapshot, template)
+            for template in acquire.templates
+        )
+        evolved = owner.engine.evolve(
+            plans[0].source, tuple(plan.batch for plan in plans), cancel=Event()
+        )
+        state_count = evolved.densities.shape[-1]
+        probabilities = np.empty((prod(acquire.point_dims), state_count))
+        dc_model = plans[0].source.model((0,) * plans[0].batch.flux.level.shape[1])
+        # Evolution returns DC energy coordinates; readout uses that same basis
+        # with the ADC model's explicit state order.
+        readout_basis = Basis(
+            dc_model.identity,
+            plans[0].readout.model.state_labels,
+            dc_model.eigenvectors,
+        )
+        probabilities[evolved.points] = batch_populations(
+            evolved.densities, readout_basis, readout_basis
+        )
+        response = ConditionalReadout(
+            plans[0].readout.model,
+            rtol=owner.settings.solver.rtol,
+            atol=owner.settings.solver.atol,
+        )
+        conditionals = []
+        traces = []
+        content_index = np.empty(prod(acquire.point_dims), dtype=np.int64)
+        offset = 0
+        for plan in plans:
+            conditional = response.responses(
+                replace(plan.readout, include_traces=acquire.mode == "decimated")
+            )
+            conditionals.append(conditional)
+            if conditional.traces is not None:
+                traces.append(conditional.traces)
+            content_index[plan.batch.points] = offset + plan.readout.content_index
+            offset += len(conditional.sums)
+        conditional = ConditionalSums(
+            np.concatenate([item.sums for item in conditionals]),
+            conditionals[0].sample_counts,
+            np.concatenate(traces) if traces else None,
+        )
+        channel = ChannelReadout(
+            owner.settings.receiver.ro_ch,
+            conditional,
+            content_index.reshape(acquire.point_dims),
+            plans[0].readout.model.receiver,
+        )
+        owner.evaluations = (FTFNumericUse(acquire.sequence, index, evolved.paths),)
+        return _Prepared(
+            probabilities.reshape((*acquire.point_dims, state_count)), (channel,)
+        )
 
 
 class FTFSource:
-    """Environment coordinator with immutable settings and one driver manager.
+    """Environment coordinator with one persistent Engine and one current acquire.
 
-    settings: validated FTF parameters retained for private in-memory reproduction;
-    devices: the exact manager shared by the host. snapshot reads live DC once
-    per round; execute uses only RoundRequest numeric inputs, not drivers.
-    library: optional explicitly pathed numeric owner for frozen U tables/exact
-    records. Each round fixes published versions. No point preparation, density,
-    source tail or receiver noise is retained across calls. evaluations holds
-    actual numeric receipts for every group/round of the latest acquire only;
-    a new acquire sequence clears earlier receipts, never published disk data.
-    private_replay: optional absolute author-only archive directory. Successful
-    rounds save detached controls/settings/snapshots/seeds and checked numeric
-    references there. None disables all private input I/O. Archive errors fail the
-    acquire; public provenance remains only simulation_id. This is author-side
-    composition, not an ordinary GUI/MCP truth interface.
+    settings is a validated immutable FTF resource; devices supplies live DC
+    readbacks to snapshot. engine optionally supplies a configured numerical
+    executor; this source takes ownership, including close(). Without it, use
+    workers=1 and a 256 MiB prepare cache. private_replay is an optional absolute
+    author-only input archive directory; None performs no replay I/O.
+
+    open_acquire drops the previous session's density/conditional arrays. execute
+    opens a session only when its request object changes, preserving preparation
+    across equal-snapshot rounds. The engine/cache survives across acquires.
+    close invalidates the current session and closes the engine idempotently.
+    Calls are synchronous, serialized by SimulationBinding, not thread-safe.
     """
 
     def __init__(
@@ -82,24 +217,22 @@ class FTFSource:
         settings: FTFSettings,
         devices: DeviceManager,
         *,
-        library: EvolutionLibrary | None = None,
+        engine: Engine | None = None,
         private_replay: Path | None = None,
     ) -> None:
+        if private_replay is not None and not private_replay.is_absolute():
+            raise ValueError("private replay requires an explicit absolute root")
         self.settings = settings
         self.devices = devices
         self.identity = sha256(settings.model_dump_json().encode()).hexdigest()
-        self.library = library
-        if private_replay is not None and not private_replay.is_absolute():
-            raise ValueError("private replay requires an explicit absolute root")
         self.private_replay = private_replay
+        self.engine = Engine(1, 256 * 1024**2) if engine is None else engine
         self.evaluations: tuple[FTFNumericUse, ...] = ()
+        self._session: FTFAcquire | None = None
+        self._closed = False
 
     def snapshot(self) -> EnvironmentSnapshot:
-        """Capture current fixed-unit live values, without startup writes.
-
-        Missing/disconnected devices, mismatched units, nonfinite values and
-        source-limit violations fail before acquisition; no cached readback.
-        """
+        """Read fixed-unit live DC values once, rejecting missing/invalid devices."""
         values = []
         for source in self.settings.devices:
             info = self.devices.get_info(source.name)
@@ -115,120 +248,46 @@ class FTFSource:
             values.append((source.name, info.value))
         return EnvironmentSnapshot("ftf-v1", self.identity, tuple(values))
 
-    def _prepare(
-        self,
-        snapshot: EnvironmentSnapshot,
-        timeline: PointTimeline,
-        tables: LibrarySnapshot | None,
-    ) -> _Prepared:
-        plan = plan_point(self.settings, snapshot, timeline)
-        solver = self.settings.solver
-        # Explicit three-tool composition: density -> target populations -> ADC.
-        evolution = Evolution(
-            plan.evolution_model,
-            SolverSettings(solver.rtol, solver.atol, solver.max_step_ns),
-            library=self.library,
-            tables=tables,
-        )
-        state = evolution.evolve(
-            plan.joint.initial_state(), plan.controls, end_ns=plan.readout_start_ns
-        )
-        mixture = populations(state, plan.readout_basis)
-        adc = ADC(plan.readout_model, rtol=solver.rtol, atol=solver.atol)
-        return _Prepared(plan, mixture, adc, evolution.last_evaluation)
+    def open_acquire(self, request: AcquireRequest) -> FTFAcquire:
+        """Start a fixed template request, invalidating/releasing the previous session.
 
-    def execute(
-        self, request: RoundRequest, *, tables: LibrarySnapshot | None = None
-    ) -> RoundSignals:
-        """Generate this round's single ADC sums/traces from detached timelines.
-
-        Equal physical executions share evolution and conditional response, but
-        receive independent joint-initial/noise draws. Point grouping does not
-        depend on sweep names. No state/filter tail crosses shots/rounds. Raw and
-        averaged acquisition share this one numeric realization via the adapter.
-        tables optionally supplies the exact frozen numeric publication set for
-        replay; None captures current publications once at this round boundary.
-        private_replay, if enabled, persists the successful round before return;
-        I/O and numeric-reference errors propagate rather than falling back.
+        Requires nonempty C1 templates and the current RNG stream version. Legacy
+        execution timelines are not consumed. ValueError rejects unsupported
+        inputs before the engine runs; a closed source raises RuntimeError.
         """
-        # Publication versions are fixed for this round, not for each group.
-        if tables is None and self.library is not None:
-            tables = self.library.snapshot()
-        acquire = request.acquire
-        if (
-            self.evaluations
-            and self.evaluations[-1].acquire_sequence != acquire.sequence
-        ):
-            self.evaluations = ()
-        if len(acquire.timelines) != acquire.executions:
-            raise ValueError("FTF requires per-execution point timelines")
-        groups: dict[PointTimeline, list[int]] = {}
-        for i, timeline in enumerate(acquire.timelines):
-            key = replace(
-                timeline,
-                coordinates=(),
-                events=tuple(replace(e, iterations=()) for e in timeline.events),
-            )
-            groups.setdefault(key, []).append(i)
-        window = acquire.readouts[0]
-        shape = (
-            (acquire.executions, window.reads, window.samples, 2)
-            if acquire.mode == "decimated"
-            else (acquire.executions, window.reads, 2)
-        )
-        output = np.empty(shape, dtype=float)
-        for group, (timeline, indices) in enumerate(groups.items()):
-            prepared = self._prepare(request.snapshot, timeline, tables)
-            self.evaluations += (
-                FTFNumericUse(acquire.sequence, request.index, group, prepared.receipt),
-            )
-            plan = prepared.plan
-            mixture = PopulationInput(
-                prepared.populations.basis.labels, prepared.populations.values
-            )
-            identity = SamplingIdentity(
-                acquire.root_seed, (acquire.sequence, request.index, group)
-            )
-            windows = prepared.adc.sample_windows(
-                mixture, plan.pulses, plan.grids, identity, shots=len(indices)
-            )
-            for read, samples in enumerate(windows):
-                output[indices, read] = (
-                    samples.traces if acquire.mode == "decimated" else samples.sums
-                )
-        if self.private_replay is not None:
-            identities = tuple(
-                identity
-                for use in self.evaluations
-                if use.round_index == request.index
-                for identity in use.receipt.content_identities
-            )
-            manifest = (
-                self.library.replay_manifest(tables, identities)
-                if self.library is not None and tables is not None
-                else None
-            )
-            save_replay(
-                self.private_replay,
-                ReplayAcquire(
-                    settings=self.settings,
-                    request=acquire,
-                    versions=replay_versions(),
-                    library_path=self.library.path
-                    if self.library is not None
-                    else None,
-                ),
-                request.snapshot,
-                request.index,
-                manifest,
-            )
-        return RoundSignals((ChannelSignals(self.settings.receiver.ro_ch, output),))
+        if self._closed:
+            raise RuntimeError("FTF source is closed")
+        if not request.templates:
+            raise ValueError("FTF requires timeline templates")
+        if request.rng_version != f"PCG64/SeedSequence-v2/numpy-{np.__version__}":
+            raise ValueError("FTF RNG version mismatch")
+        if self._session is not None:
+            self._session.invalidate()
+        self._session = FTFAcquire(self, request)
+        self.evaluations = ()
+        return self._session
+
+    def execute(self, request: RoundRequest) -> RoundStatistics | RoundSignals:
+        """Execute a detached round, reusing only this acquire's last equal snapshot."""
+        if self._session is None or self._session.request is not request.acquire:
+            self.open_acquire(request.acquire)
+        session = self._session
+        if session is None:
+            raise RuntimeError("FTF acquire was not opened")
+        return session.sample_round(request.snapshot, request.index)
+
+    def close(self) -> None:
+        """Release current deterministic preparations and the engine; safe to repeat."""
+        if self._session is not None:
+            self._session.invalidate()
+            self._session = None
+        self._closed = True
+        self.engine.close()
 
 
 def ftf(
     configuration: FTFSettings | str | Path,
     *,
-    library: EvolutionLibrary | None = None,
     private_replay: Path | None = None,
 ) -> SimulationEnvironment:
     """Build a fixed-profile FTF environment from named values or a YAML path.
@@ -237,16 +296,11 @@ def ftf(
     returned manager owns cleanup; builder failures close all devices and preserve
     both original and cleanup errors. Channels use make_mock_soccfg's supported
     profile, never arbitrary firmware overrides. Host receives no model truth.
-    library optionally injects author-selected EvolutionLibrary storage; no path
-    search/default cache. Numeric owner handles table parsing, misses and saving.
     private_replay explicitly enables author-only checked input archives at an
-    absolute directory. None (default) writes no private replay data. Archives
-    contain model truth and must not be published through normal Run metadata.
-    Successful round capture failures propagate. replay_round reloads one round
-    independently; numeric references remain in the injected library and must
-    be retained. The module README documents weak dispersive/Markov/secular
-    approximations and readout-origin flux freezing. No runtime applicability
-    gate is added.
+    absolute directory. Replay recomputes with checked numeric and RNG versions;
+    no U table or exact density record is consulted. One engine persists across
+    acquires. Worker threads live only during evolve; dropping the environment
+    releases its in-memory engine cache. FTFSource.close explicitly clears it.
     """
     settings = (
         parse_ftf(configuration)
@@ -268,9 +322,7 @@ def ftf(
                 ),
                 progress=False,
             )
-        coordinator = FTFSource(
-            settings, devices, library=library, private_replay=private_replay
-        )
+        coordinator = FTFSource(settings, devices, private_replay=private_replay)
         soccfg = make_mock_soccfg(
             settings.channels.generators, settings.channels.readouts
         )

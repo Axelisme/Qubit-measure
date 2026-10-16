@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-16，FTF numeric/acquisition owner、UI 驗證與確定性等待政策
+**Last updated:** 2026-10-17，測試成本規則
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -87,6 +87,12 @@ flock <task-scratch>/heavy-task.lock <repo>/.agent_state/tools/heavy.sh \
 不用來跳過慢測試。slow 門檻依整套實測決定，數據與理由記在 task receipt。
 fixture 過重、重複計算或不必要的 sleep／輪詢要直接修，不用 slow 隱藏成本。
 只為需要保留的昂貴驗證加 slow，不做全域逐 node skip。
+
+### 測試成本
+
+每個測試函數的計算只用單核心。一個測試內部的 worker、thread 或 process 總數最多兩個，用於驗證多 worker 契約。每個測試在 `-n 0` 下少於 30 s。
+測試不跑慢的模擬或擬合。行為改用小型合成模型（少數能階、短 timeline）、解析解、不變性或最小 case 對照 reference 來確定。
+完整精度與效能量測放在 task 的量測腳本，不放進測試套件。新增測試時以 `--durations=0` 確認耗時。
 
 `tests/conftest.py` 在每個 xdist worker 啟動時，把
 `OMP_NUM_THREADS / OPENBLAS_NUM_THREADS / MKL_NUM_THREADS` 預設設為 `"1"`，
@@ -284,10 +290,11 @@ in `tests/gui/app/measure/test_simulation_run.py`. All offline caches remain iso
 errors. `tests/simulate/test_ftf_model.py`, `test_joint_baths.py` and
 `test_source_lines.py` own fixed-coordinate circuits, LC/Boltzmann/Gibbs references,
 CP dephasing and causal source tails. Independent evolution/ADC behavior stays in
-`tests/simulate/test_evolution.py` and `test_adc.py`; model-event and multi-window
+`tests/simulate/evolution/` and `test_adc.py`; model-event and multi-window
 sampling tests live in the corresponding numeric owner directories.
-`tests/experiment/test_ftf.py` covers explicit unit conversion, readout-origin tail
-freezing, active-control rejection and public acquire/decimated composition.
+`tests/experiment/test_ftf.py` covers explicit unit conversion, common carrier phase
+and public acquire/decimated composition. `test_ftf_templates.py` covers DC readout
+and the template engine contract.
 The former TLS engine/frontend and tests serving only that implementation are
 retired. Framework Window/RPC tests continue to use synthetic registered
 experiments, not lab definitions or model-truth calibration oracles.

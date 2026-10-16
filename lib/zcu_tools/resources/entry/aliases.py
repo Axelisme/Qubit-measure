@@ -38,6 +38,16 @@ def load_entry_aliases(source: Path) -> EntryAliases | None:
         return None
     with stream:
         raw = YAML(typ="safe").load(stream)
+    return parse_entry_aliases(raw, source=source)
+
+
+def parse_entry_aliases(raw: object, *, source: Path) -> EntryAliases:
+    """Validate an in-memory zcu.aliases 1.x document without resolving links.
+
+    raw is an external document; source labels diagnostics. No I/O occurs.
+    Preserve authored row order and strict strings, as load_entry_aliases does.
+    Invalid headers, missing rows or non-string bindings raise ValueError.
+    """
     document = TypeAdapter(YamlMap).validate_python(raw, strict=True)
     validate_header(
         document,
