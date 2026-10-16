@@ -75,6 +75,25 @@ class JointModel:
             np.eye(m, dtype=complex),
         )
 
+    def native_embedding(self) -> Matrix:
+        """Return an owned dimensionless map from M to physical native coordinates.
+
+        Shape is (F1 native_cutoff, 2*C charge_cutoff+1, F2 native_cutoff, M).
+        The first/third axes are oscillator number 0..cutoff-1 with the circuit's
+        fixed EC/EL scale. The middle axis is Cooper-pair charge -ncut..+ncut,
+        not oscillator number. Contract the final axis with a state vector in
+        ``basis`` coordinates, or both final axes with a density matrix.
+        Columns are orthonormal; no state populations are clipped/renormalized.
+        This author diagnostic includes local and joint projections and their
+        complex phases. Across native cutoffs, pad oscillator axes at the high
+        end and center the charge axis. Comparing different EC/EL requires an
+        additional oscillator-coordinate transformation, not zero padding.
+        Allocates the returned tensor only; does not change runtime state.
+        """
+        v1, vc, v2 = (c.vectors for c in self._locals)
+        parent = self.parent_vectors.reshape(*self._dimensions, -1)
+        return np.einsum("ai,bj,ck,ijkm->abcm", v1, vc, v2, parent, optimize=True)
+
     @staticmethod
     def _flux(flux: RealArray) -> RealArray:
         result = np.asarray(flux, dtype=float)

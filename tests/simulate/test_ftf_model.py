@@ -7,7 +7,6 @@ from scipy.linalg import expm
 def test_native_embedding_preserves_physical_operators_across_truncations() -> None:
     """Compare physical native coordinates, not matching energy-index labels."""
     import scqubits as scq
-
     from zcu_tools.simulate.ftf import (
         FluxoniumCircuit,
         JointModel,
@@ -18,39 +17,54 @@ def test_native_embedding_preserves_physical_operators_across_truncations() -> N
     f = FluxoniumCircuit(3.0, 0.8, 0.6, 6, 3)
     c = SquidCircuit(10.0, 0.3, 0.2, 2, 3)
     flux = np.array([0.35, 0.22, 0.4])
-    model = JointModel(JointParameters(f, c, f, 0.05, 0.06, -0.04, 8), flux,
-                       temperature_k=0.04)
+    model = JointModel(
+        JointParameters(f, c, f, 0.05, 0.06, -0.04, 8), flux, temperature_k=0.04
+    )
     assert callable(getattr(model, "native_embedding", None)), (
         "authors need a physical native-coordinate map for cross-basis observables"
     )
     embedding = model.native_embedding()
     assert embedding.shape == (6, 5, 6, 8)
     vectors = embedding.reshape(180, 8)
-    np.testing.assert_allclose(vectors.conj().T @ vectors, np.eye(8), rtol=0, atol=1e-12)
+    np.testing.assert_allclose(
+        vectors.conj().T @ vectors, np.eye(8), rtol=0, atol=1e-12
+    )
 
     # Independent circuit package supplies oscillator H/n; the SQUID uses a
     # charge-basis hopping Hamiltonian with its fixed-theta complex phase.
-    circuits = [scq.Fluxonium(EJ=3, EC=.8, EL=.6, flux=value, cutoff=6)
-                for value in (flux[0], flux[2])]
+    circuits = [
+        scq.Fluxonium(EJ=3, EC=0.8, EL=0.6, flux=value, cutoff=6)
+        for value in (flux[0], flux[2])
+    ]
     numbers = np.arange(-2, 3)
-    hopping = -.5 * 10 * (np.cos(np.pi * flux[1]) + .2j * np.sin(np.pi * flux[1]))
-    hc = np.diag(4 * .3 * numbers**2).astype(complex)
+    hopping = -0.5 * 10 * (np.cos(np.pi * flux[1]) + 0.2j * np.sin(np.pi * flux[1]))
+    hc = np.diag(4 * 0.3 * numbers**2).astype(complex)
     hc += hopping * np.eye(5, k=1) + hopping.conjugate() * np.eye(5, k=-1)
-    h = (np.kron(np.kron(circuits[0].hamiltonian(), np.eye(5)), np.eye(6))
-         + np.kron(np.kron(np.eye(6), hc), np.eye(6))
-         + np.kron(np.kron(np.eye(6), np.eye(5)), circuits[1].hamiltonian()))
+    h = (
+        np.kron(np.kron(circuits[0].hamiltonian(), np.eye(5)), np.eye(6))
+        + np.kron(np.kron(np.eye(6), hc), np.eye(6))
+        + np.kron(np.kron(np.eye(6), np.eye(5)), circuits[1].hamiltonian())
+    )
     n1, n2 = (circuit.n_operator() for circuit in circuits)
     nc = np.diag(numbers)
-    h += (.05 * np.kron(np.kron(n1, nc), np.eye(6))
-          + .06 * np.kron(np.kron(np.eye(6), nc), n2)
-          - .04 * np.kron(np.kron(n1, np.eye(5)), n2))
-    np.testing.assert_allclose(vectors.conj().T @ h @ vectors,
-                               np.diag(model.energies_ghz), rtol=0, atol=2e-12)
+    h += (
+        0.05 * np.kron(np.kron(n1, nc), np.eye(6))
+        + 0.06 * np.kron(np.kron(np.eye(6), nc), n2)
+        - 0.04 * np.kron(np.kron(n1, np.eye(5)), n2)
+    )
+    np.testing.assert_allclose(
+        vectors.conj().T @ h @ vectors, np.diag(model.energies_ghz), rtol=0, atol=2e-12
+    )
     charge_square = np.kron(np.kron(np.eye(6), nc @ nc), np.eye(6))
-    np.testing.assert_allclose(vectors.conj().T @ charge_square @ vectors,
-                               model.charge_squared_operator(1), rtol=0, atol=1e-12)
-    larger = JointModel(JointParameters(f, c, f, .05, .06, -.04, 12), flux,
-                        temperature_k=.04)
+    np.testing.assert_allclose(
+        vectors.conj().T @ charge_square @ vectors,
+        model.charge_squared_operator(1),
+        rtol=0,
+        atol=1e-12,
+    )
+    larger = JointModel(
+        JointParameters(f, c, f, 0.05, 0.06, -0.04, 12), flux, temperature_k=0.04
+    )
     overlap = vectors.conj().T @ larger.native_embedding().reshape(180, 12)
     np.testing.assert_allclose(np.abs(overlap), np.eye(8, 12), rtol=0, atol=1e-12)
 

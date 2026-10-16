@@ -8,6 +8,15 @@ product space with all g1c/g2c/g12 terms, then selects the lowest M joint states
 Dynamic Hamiltonians stay in this fixed basis. Native n² is formed before local
 and joint projection; squared truncated n is not a substitute.
 
+`native_embedding()` maps the retained joint coordinates into physical native
+F1-oscillator × coupler-charge × F2-oscillator coordinates, including both local
+and coupled eigenvector phases. Authors can compare projectors, coherences and
+subspace leakage across truncations without equating energy-index labels.
+Oscillator cutoffs pad at the high end; the charge grid pads symmetrically.
+Different EC/EL oscillator scales require a separate coordinate transformation.
+This explicit diagnostic allocates a tensor only when called; it does not change
+runtime propagation or certify basis convergence.
+
 Fluxonium uses fixed oscillator coordinates. The SQUID uses fixed theta and
 charge n=-ncut..ncut with H/h=4EC(n-ng)²-EJmax*cos(pi*f)*cos(theta)
 +d*EJmax*sin(pi*f)*sin(theta). It does not switch to a flux-dependent shifted
