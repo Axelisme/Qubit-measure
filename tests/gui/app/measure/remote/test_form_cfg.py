@@ -710,6 +710,32 @@ def test_inline_noop_takes_busy_reentry_and_lifetime_guards(
             fixture.ctrl.tab_control.close_tab(tab)
 
 
+def test_headless_sampling_commands_project_actual_values_and_reset(form_rpc):
+    fixture, tab, rpc = form_rpc
+    owner = fixture.ctrl.cfg_resources.lookup(tab)
+    owner.write({("sweep", "start"): 0, ("sweep", "stop"): 1, ("sweep", "n"): 5})
+    described = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["sweep", "n"]})
+    commands = described["result"]["description"]["target"].get("commands", [])
+    assert commands, "Expts must expose sampling commands through RPC"
+    assert commands[0]["inputs"] == [["sweep", "start"], ["sweep", "stop"], ["sweep", "n"]]
+    reply = rpc.call("tab.run_cfg_command", {"tab_id": tab, "path": ["sweep", "n"], "name": commands[0]["name"]})
+    assert reply["ok"], reply
+    owner.write({("sweep", "step"): 0.3})
+    before = owner.input.to_json()
+    observed = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["sweep", "stop"]})
+    assert observed["ok"], observed
+    assert observed["result"]["input"]["sweep"]["stop"] == 1
+    assert {tuple(item["path"]): item["value"] for item in observed["result"]["values"]}[("sweep", "stop")] == pytest.approx(0.9)
+    assert owner.input.to_json() == before
+    inactive = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["sweep", "n"]})
+    assert not inactive["ok"]
+    assert inactive["error"]["reason"] == "form_path"
+    reset = rpc.call("tab.reset_cfg", {"tab_id": tab})
+    assert reset["ok"], reset
+    assert "n" in reset["result"]["input"]["sweep"]
+    assert "step" not in reset["result"]["input"]["sweep"]
+
+
 def test_headless_coordinate_command_observation_and_active_paths(form_rpc):
     fixture, tab, rpc = form_rpc
     owner = fixture.ctrl.cfg_resources.lookup(tab)
