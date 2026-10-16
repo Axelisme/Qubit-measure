@@ -59,6 +59,168 @@ def _second(x: complex, y: complex, z: complex) -> complex:
 
 
 @njit(nogil=True, cache=True)
+def _build_paths(
+    params: NDArray[np.float64],
+    eigenvalues: NDArray[np.complex128],
+    modes: NDArray[np.complex128],
+    couplings: NDArray[np.complex128],
+    pruning: NDArray[np.float64],
+    outputs: NDArray[np.int64],
+) -> tuple[NDArray[np.int64], NDArray[np.complex128]]:
+    """Contract one input into paths; retain a superset for all batch parameters."""
+    dimension = len(modes)
+    # Each discarded path gets an equal share of budget/8. The actual modal
+    # input and max gain/duration bound every row; thresholds remain unchanged.
+    allowance = pruning[-1] / (8 * (2 * dimension**2 + 4 * dimension**3))
+    gain = np.max(np.abs(params[:, 1]))
+    duration = np.max(params[:, 2])
+    growth = np.exp(max(0.0, np.max(eigenvalues.real)) * duration)
+    indices = []
+    coefficients = []
+    for a in outputs:
+        for outer in range(2):
+            r = 2 * outer - 1
+            for b in range(dimension):
+                coefficient = couplings[outer, a, b]
+                if coefficient == 0:
+                    continue
+                first = coefficient * modes[b]
+                bound = abs(first * gain) * duration * growth * pruning[a]
+                if abs(first) > 1e-16 or bound > allowance:
+                    # c=-1 marks first order; all other records are second order.
+                    indices.append((a, b, -1, r, 0))
+                    coefficients.append(first)
+                for inner in range(2):
+                    s = 2 * inner - 1
+                    for c in range(dimension):
+                        second = coefficient * couplings[inner, b, c] * modes[c]
+                        bound = (
+                            abs(second * gain**2)
+                            * duration**2
+                            / 2
+                            * growth
+                            * pruning[a]
+                        )
+                        if abs(second) > 1e-12 or bound > allowance:
+                            indices.append((a, b, c, r, s))
+                            coefficients.append(second)
+    return (
+        np.array(indices, dtype=np.int64).reshape((-1, 5)),
+        np.array(coefficients, dtype=np.complex128),
+    )
+
+
+@njit(nogil=True, cache=True)
+def _evaluate_paths(
+    params: NDArray[np.float64],
+    eigenvalues: NDArray[np.complex128],
+    modes: NDArray[np.complex128],
+    pruning: NDArray[np.float64],
+    indices: NDArray[np.int64],
+    coefficients: NDArray[np.complex128],
+) -> NDArray[np.complex128]:
+    """Evaluate contracted paths, retaining the original per-row pruning bound."""
+    dimension = len(modes)
+    allowance = pruning[-1] / (8 * (2 * dimension**2 + 4 * dimension**3))
+    result = np.empty((len(params), dimension), dtype=np.complex128)
+    # With equal |gain| and duration, the table already applied each row's exact
+    # bound. Mixed batches still recheck it below, preserving row splitting.
+    uniform_bound = np.all(np.abs(params[:, 1]) == abs(params[0, 1])) and np.all(
+        params[:, 2] == params[0, 2]
+    )
+    for job in range(len(params)):
+        frequency, gain, duration, phase = params[job]
+        scaled = eigenvalues * duration
+        result[job] = np.exp(scaled) * modes
+        if gain == 0 or duration == 0:
+            continue
+        omega_time = 2 * np.pi * frequency * duration
+        growth = np.exp(max(0.0, np.max(eigenvalues.real)) * duration)
+        first_factors = gain * np.exp(1j * np.array([-1, 1]) * phase)
+        second_factors = gain**2 * np.exp(1j * np.array([-2, 0, 2]) * phase)
+        for path in range(len(indices)):
+            a, b, c, r, s = indices[path]
+            coefficient = coefficients[path]
+            if c == -1:
+                if (
+                    uniform_bound
+                    or abs(coefficient) > 1e-16
+                    or abs(coefficient * gain) * duration * growth * pruning[a]
+                    > allowance
+                ):
+                    result[job, a] += (
+                        first_factors[(r + 1) // 2]
+                        * coefficient
+                        * duration
+                        * _first(scaled[a], scaled[b] + 1j * r * omega_time)
+                    )
+            else:
+                if (
+                    uniform_bound
+                    or abs(coefficient) > 1e-12
+                    or abs(coefficient * gain**2)
+                    * duration**2
+                    / 2
+                    * growth
+                    * pruning[a]
+                    > allowance
+                ):
+                    result[job, a] += (
+                        second_factors[(r + s + 2) // 2]
+                        * coefficient
+                        * duration**2
+                        * _second(
+                            scaled[a],
+                            scaled[b] + 1j * r * omega_time,
+                            scaled[c] + 1j * (r + s) * omega_time,
+                        )
+                    )
+    return result
+
+
+@njit(nogil=True, cache=True)
+def _evaluate_batch(
+    params: NDArray[np.float64],
+    eigenvalues: NDArray[np.complex128],
+    initial_modes: NDArray[np.complex128],
+    couplings: NDArray[np.complex128],
+    pruning: NDArray[np.float64],
+    outputs: NDArray[np.int64],
+) -> NDArray[np.complex128]:
+    """Share contracted paths for equal inputs; handle distinct states rowwise."""
+    if len(params) == 0:
+        return initial_modes.copy()
+    if np.all(params[:, 1] == 0) or np.all(params[:, 2] == 0):
+        return np.exp(params[:, 2:3] * eigenvalues) * initial_modes
+    if np.all(initial_modes == initial_modes[0]):
+        indices, coefficients = _build_paths(
+            params, eigenvalues, initial_modes[0], couplings, pruning, outputs
+        )
+        return _evaluate_paths(
+            params, eigenvalues, initial_modes[0], pruning, indices, coefficients
+        )
+    result = np.empty_like(initial_modes)
+    for job in range(len(params)):
+        indices, coefficients = _build_paths(
+            params[job : job + 1],
+            eigenvalues,
+            initial_modes[job],
+            couplings,
+            pruning,
+            outputs,
+        )
+        result[job] = _evaluate_paths(
+            params[job : job + 1],
+            eigenvalues,
+            initial_modes[job],
+            pruning,
+            indices,
+            coefficients,
+        )[0]
+    return result
+
+
+@njit(nogil=True, cache=True)
 def evaluate_dyson(
     params: NDArray[np.float64],
     eigenvalues: NDArray[np.complex128],
@@ -75,69 +237,17 @@ def evaluate_dyson(
     pruning (D+1,): max(abs(W[:,mode])) followed by positive error budget.
     Inputs are not changed. Output is complex128 (jobs,D). Nonfinite output
     is checked by the Kernel adapter. No model, table or Python object enters
-    this function, allowing a later array backend to replace it.
+    this function. Equal inputs share a batch-local contracted path table;
+    distinct inputs use the same pruning and evaluation row by row.
     """
-    jobs, dimension = initial_modes.shape
-    result = np.empty_like(initial_modes)
-    budget = pruning[-1]
-    # Each discarded path gets an equal share of budget/8. Physical states
-    # have Frobenius norm <=1; here the bound uses the actual modal input.
-    allowance = budget / (8 * (2 * dimension**2 + 4 * dimension**3))
-    for job in range(jobs):
-        frequency, gain, duration, phase = params[job]
-        omega = 2 * np.pi * frequency
-        scaled = eigenvalues * duration
-        growth = np.exp(max(0.0, np.max(eigenvalues.real)) * duration)
-        for a in range(dimension):
-            value = np.exp(scaled[a]) * initial_modes[job, a]
-            for outer in range(2):
-                r = 2 * outer - 1
-                factor = gain * np.exp(1j * r * phase)
-                for b in range(dimension):
-                    coefficient = couplings[outer, a, b]
-                    if coefficient == 0:
-                        continue
-                    first = coefficient * initial_modes[job, b]
-                    bound = abs(first * gain) * duration * growth * pruning[a]
-                    if abs(first) > 1e-16 or bound > allowance:
-                        value += (
-                            factor
-                            * first
-                            * duration
-                            * _first(scaled[a], scaled[b] + 1j * r * omega * duration)
-                        )
-                    for inner in range(2):
-                        s = 2 * inner - 1
-                        factor2 = gain**2 * np.exp(1j * (r + s) * phase)
-                        for c in range(dimension):
-                            second = (
-                                coefficient
-                                * couplings[inner, b, c]
-                                * initial_modes[job, c]
-                            )
-                            if second == 0:
-                                continue
-                            bound = (
-                                abs(second * gain**2)
-                                * duration**2
-                                / 2
-                                * growth
-                                * pruning[a]
-                            )
-                            if abs(second) <= 1e-12 and bound <= allowance:
-                                continue
-                            value += (
-                                factor2
-                                * second
-                                * duration**2
-                                * _second(
-                                    scaled[a],
-                                    scaled[b] + 1j * r * omega * duration,
-                                    scaled[c] + 1j * (r + s) * omega * duration,
-                                )
-                            )
-            result[job, a] = value
-    return result
+    return _evaluate_batch(
+        params,
+        eigenvalues,
+        initial_modes,
+        couplings,
+        pruning,
+        np.arange(len(eigenvalues), dtype=np.int64),
+    )
 
 
 @dataclass(frozen=True)
@@ -211,6 +321,33 @@ def _advance(
     return (evolved @ entry.vectors.T).reshape(states.shape)
 
 
+def _population_transfer(
+    entry: _Entry,
+    port: int,
+    params: NDArray[np.float64],
+    initial: NDArray[np.complex128],
+    budget: float,
+) -> NDArray[np.float64]:
+    """Compute driven-minus-free populations, including coherent linear terms."""
+    size = len(initial)
+    populations = np.arange(size, dtype=np.int64) * (size + 1)
+    modes = initial.ravel() @ entry.inverse.T
+    pruning = np.r_[np.max(abs(entry.vectors), axis=0), budget]
+    evolved = _evaluate_batch(
+        params,
+        entry.values,
+        np.repeat(modes[None], len(params), axis=0),
+        entry.couplings[port],
+        pruning,
+        populations,
+    )
+    free = np.exp(params[:, 2:3] * entry.values) * modes
+    # Secular population eigenvectors have support only on population indices.
+    # No coherence-output paths can contribute to this projection.
+    transfer = (evolved - free) @ entry.vectors[populations].T
+    return np.max(abs(transfer), axis=1)
+
+
 class DysonKernel:
     """C5 weak one-tone constant kernel; engine owns known-state eligibility.
 
@@ -235,23 +372,29 @@ class DysonKernel:
         active = np.flatnonzero(accepted)
         for positions, model in model_groups(table, rows[active], source):
             original = active[positions]
-            entry = _prepare_model(model)
+            entry = None
             for port in np.unique(table.tone_port[rows[original], 0]):
                 selected = original[table.tone_port[rows[original], 0] == port]
                 params = parameters(table, rows[selected])
                 one, two = drive_ratios(model, int(port), params)
+                eligible = (one <= 0.1) & (two <= 0.05)
+                accepted[selected] = False
+                selected, params = selected[eligible], params[eligible]
+                if not len(selected):
+                    continue
+                if entry is None:
+                    entry = _prepare_model(model)
                 dc_model = source.model((0,) * len(model.level))
-                overlap = model.eigenvectors.conj().T @ dc_model.eigenvectors
-                initial = overlap @ source.initial_density @ overlap.conj().T
-                states = np.repeat(initial[None], len(selected), axis=0)
-                driven = _advance(entry, int(port), params, states, budget)
-                zero = params.copy()
-                zero[:, 1] = 0
-                free = _advance(entry, int(port), zero, states, budget)
-                transfer = np.max(
-                    abs(np.diagonal(driven - free, axis1=1, axis2=2)), axis=1
+                initial = source.initial_density
+                # Equal bases are exactly the same coordinates. Multiplying a
+                # near-identity overlap would introduce spurious coherence.
+                if not np.array_equal(model.eigenvectors, dc_model.eigenvectors):
+                    overlap = model.eigenvectors.conj().T @ dc_model.eigenvectors
+                    initial = overlap @ initial @ overlap.conj().T
+                transfer = _population_transfer(
+                    entry, int(port), params, initial, budget
                 )
-                accepted[selected] = (one <= 0.1) & (two <= 0.05) & (transfer <= 0.02)
+                accepted[selected] = transfer <= 0.02
         return accepted
 
     def prepare_keys(
