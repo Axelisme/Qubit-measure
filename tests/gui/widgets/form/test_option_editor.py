@@ -303,6 +303,35 @@ def test_nullable_modules_offer_none_keys_and_inline_kinds_without_enabled(
     assert editor.findChild(QWidget, "form.input.reset.module.pulse1_cfg") is None
 
 
+def test_default_none_module_selection_via_component_events(
+    build: Build, qapp: QApplication, tmp_path
+) -> None:
+    from tests.gui._user_input import ComponentDriver
+
+    class EventCore(ConfigBase):
+        pulse: PulseCfg | None = None
+
+    env = module_env()
+    form = form_adapter.Form(EventCore, {})
+    state = FormState(form.default_input(env))
+    editor = build(state, env, None, None)
+    editor.resize(760, 360)
+    editor.show()
+    qapp.processEvents()
+    driver = ComponentDriver(editor)
+
+    driver.screenshot(tmp_path / "01-default-none.png")
+    assert driver.observe(object_name="form.input.pulse").text == "None"
+
+    driver.choose_option(object_name="form.input.pulse", value="Q1.pulses.pi")
+    driver.screenshot(tmp_path / "02-selected-module.png")
+    assert driver.observe(object_name="form.input.pulse").text == "Q1.pulses.pi"
+
+    driver.choose_option(object_name="form.input.pulse", value="None")
+    driver.screenshot(tmp_path / "03-disabled-again.png")
+    assert driver.observe(object_name="form.input.pulse").text == "None"
+
+
 class Color(StrEnum):
     """An Enum leaf; its options come from the core."""
 

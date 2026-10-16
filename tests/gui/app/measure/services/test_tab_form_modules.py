@@ -67,7 +67,7 @@ def test_module_read_and_conversion_use_capture_until_reset() -> None:
         capture=capture,
         mutation_allowed=lambda: True,
     )
-    resource.write({("pulse", "kind"): "ref", ("pulse", "name"): "Q1.pulses.pi"})
+    resource.write({("pulse",): {"kind": "ref", "name": "Q1.pulses.pi"}})
     assert hasattr(resource, "read_module"), "Missing resource execution module read"
     before = resource.input.data
     latest = 200.0
@@ -77,7 +77,7 @@ def test_module_read_and_conversion_use_capture_until_reset() -> None:
     assert resource.read_module(("pulse",)).value["freq"] == 100.0
     assert captures == [100.0]
     resource.reset()
-    resource.write({("pulse", "kind"): "ref", ("pulse", "name"): "Q1.pulses.pi"})
+    resource.write({("pulse",): {"kind": "ref", "name": "Q1.pulses.pi"}})
     assert resource.read_module(("pulse",)).value["freq"] == 200.0
     assert captures == [100.0, 200.0]
 
@@ -99,7 +99,7 @@ def test_module_read_is_field_local_and_excludes_extras_lowering() -> None:
         capture=lambda _aliases: TabFormSources(module_env(100.0)),
         mutation_allowed=lambda: True,
     )
-    resource.write({("pulse", "kind"): "ref", ("pulse", "name"): "Q1.pulses.pi"})
+    resource.write({("pulse",): {"kind": "ref", "name": "Q1.pulses.pi"}})
     assert hasattr(resource, "read_module"), "Missing field-local module observation"
     assert resource.read_module(("pulse",)).value["freq"] == 100.0
     resource.run_command(("pulse",), "to_inline")
@@ -112,7 +112,7 @@ def test_module_read_allows_other_invalid_input_but_rejects_own_errors() -> None
         capture=lambda _aliases: TabFormSources(module_env(100.0)),
         mutation_allowed=lambda: True,
     )
-    resource.write({("pulse", "kind"): "ref", ("pulse", "name"): "Q1.pulses.pi"})
+    resource.write({("pulse",): {"kind": "ref", "name": "Q1.pulses.pi"}})
     resource.write({("amount",): {"expr": "unfinished +"}})
     assert hasattr(resource, "read_module"), "Missing field-local module read"
     assert resource.read_module(("pulse",)).value["freq"] == 100.0

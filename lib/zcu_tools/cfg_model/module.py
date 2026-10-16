@@ -28,8 +28,8 @@ class AbsModuleCfg(_ModuleFields, ABC):
         """Update a family-specific knob; unsupported names or values raise ValueError."""
 
 
-class _PulseFields(_ModuleFields):
-    """Pulse scalar knobs, shared by persistent and materialized schemas.
+class _PulseFields[WaveformT](_ModuleFields):
+    """Pulse waveform and scalar knobs shared by persistent and materialized schemas.
 
     type is pulse. ch is the explicit generator channel; nqz is Nyquist zone 1
     or 2. freq and mixer_freq are MHz, phase is degrees, gain is normalized,
@@ -39,6 +39,7 @@ class _PulseFields(_ModuleFields):
     """
 
     type: Literal["pulse"] = "pulse"
+    waveform: Annotated[WaveformT, FieldMeta(label="Waveform")]
     ch: Annotated[int, FieldMeta(label="Gen ch")]
     nqz: Annotated[Literal[1, 2], FieldMeta(label="NQZ", group="Advanced")]
     freq: Annotated[float | QickParam, FieldMeta(label="Freq", unit="MHz", decimals=3)]
@@ -61,16 +62,12 @@ class _PulseFields(_ModuleFields):
     ] = None
 
 
-class PulseSpec(_PulseFields):
+class PulseSpec(_PulseFields[str | WaveformSpec]):
     """Persistent pulse; waveform is a concrete library key or inline WaveformSpec."""
 
-    waveform: Annotated[str | WaveformSpec, FieldMeta(label="Waveform")]
 
-
-class PulseCfg(_PulseFields, AbsModuleCfg):
+class PulseCfg(_PulseFields[WaveformCfg], AbsModuleCfg):
     """Materialized pulse; waveform is an expanded, validated WaveformCfg."""
-
-    waveform: WaveformCfg
 
     def set_param(self, name: str, value: float | QickParam) -> None:
         """Set gain/freq/phase or delegate length to the waveform; otherwise raise ValueError."""
@@ -86,7 +83,7 @@ class AbsReadoutCfg(AbsModuleCfg):
     """Materialized readout family with generator-driven acquisition."""
 
 
-class _PulseReadoutFields(_ModuleFields):
+class _PulseReadoutFields[WaveformT](_ModuleFields):
     """Independent generator and ADC settings for type readout/pulse.
 
     gen_ch selects the generator and ro_ch the ADC. nqz is Nyquist zone 1 or 2.
@@ -98,6 +95,7 @@ class _PulseReadoutFields(_ModuleFields):
     """
 
     type: Literal["readout/pulse"] = "readout/pulse"
+    waveform: Annotated[WaveformT, FieldMeta(label="Waveform")]
     gen_ch: Annotated[int, FieldMeta(label="Gen ch")]
     nqz: Annotated[Literal[1, 2], FieldMeta(label="NQZ", group="Advanced")]
     freq: Annotated[float | QickParam, FieldMeta(label="Freq", unit="MHz", decimals=3)]
@@ -127,16 +125,12 @@ class _PulseReadoutFields(_ModuleFields):
     ] = 0.0
 
 
-class PulseReadoutSpec(_PulseReadoutFields):
+class PulseReadoutSpec(_PulseReadoutFields[str | WaveformSpec]):
     """Persistent readout; waveform is a concrete key or inline WaveformSpec."""
 
-    waveform: Annotated[str | WaveformSpec, FieldMeta(label="Waveform")]
 
-
-class PulseReadoutCfg(_PulseReadoutFields, AbsReadoutCfg):
+class PulseReadoutCfg(_PulseReadoutFields[WaveformCfg], AbsReadoutCfg):
     """Materialized readout; waveform is an expanded, validated WaveformCfg."""
-
-    waveform: WaveformCfg
 
     def set_param(self, name: str, value: float | QickParam) -> None:
         """Set freq (MHz), gain, length or ro_length (us); otherwise raise ValueError.

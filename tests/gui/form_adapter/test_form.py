@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Annotated
 
 import pytest
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, JsonValue
 from zcu_tools import cfg_model as nodes
 from zcu_tools.cfg_model import ConfigBase, Expr, FieldMeta
 from zcu_tools.gui import form_adapter
-from zcu_tools.gui.form import FormEnv, FormErrors, FormModel, FormState
+from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormModel, FormState
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
@@ -99,6 +100,67 @@ def test_failed_range_endpoint_requires_input(endpoint: str, expression: str) ->
     assert cfg.sweep.freq.start == (3.0 if endpoint == "start" else 2.0)
     assert cfg.sweep.freq.stop == (8.0 if endpoint == "start" else 9.0)
     assert cfg.sweep.freq.expts == 4
+
+
+@pytest.mark.parametrize(
+    "factory", [nodes.Range, nodes.Range.between], ids=["direct", "between"]
+)
+@pytest.mark.parametrize(
+    "blank", [("start",), ("stop",), ("start", "stop")], ids=["start", "stop", "both"]
+)
+def test_blank_range_endpoints_remain_required_when_input_keys_are_absent(
+    factory: Callable[[float | None, float | None, int], nodes.Range],
+    blank: tuple[str, ...],
+) -> None:
+    env = FormEnv()
+    node = factory(
+        None if "start" in blank else 2.0, None if "stop" in blank else 8.0, 4
+    )
+    form = form_adapter.Form(ScalarCfg, {"sweep": {"freq": node}})
+    state = FormState(form.default_input(env))
+    initial = state.result(env)
+    assert isinstance(initial, FormErrors), (
+        "An authored blank endpoint must block submission"
+    )
+    assert set(initial.messages) == {("sweep", "freq", name) for name in blank}
+
+    # A partial draft must not revive the inherited LinRange 0/1 endpoints.
+    partial: dict[str, JsonValue] = {"kind": "linrange", "n": 4}
+    if "start" not in blank:
+        partial["start"] = 2.0
+    if "stop" not in blank:
+        partial["stop"] = 8.0
+    state = FormState(FormInput(form.model, {"sweep": {"freq": partial}}))
+    missing = state.result(env)
+    assert isinstance(missing, FormErrors), "Absent blank endpoints must not use 0/1"
+    assert missing.messages == {
+        ("sweep", "freq", name): "Field required" for name in blank
+    }
+
+    state.write(
+        {("sweep", "freq", name): 3.0 if name == "start" else 9.0 for name in blank},
+        env,
+    )
+    cfg = form.to_cfg(require_result(state, env), env)
+    if isinstance(cfg, FormErrors):
+        pytest.fail(str(cfg.messages))
+    assert cfg.sweep.freq.start == (3.0 if "start" in blank else 2.0)
+    assert cfg.sweep.freq.stop == (9.0 if "stop" in blank else 8.0)
+    assert cfg.sweep.freq.expts == 4
+    assert cfg.sweep.freq.step == (cfg.sweep.freq.stop - cfg.sweep.freq.start) / 3
+
+    # Requiredness belongs to this authored form, not the shared range class.
+    control = form_adapter.Form(
+        ScalarCfg, {"sweep": {"freq": nodes.Range(2.0, 8.0, 4)}}
+    )
+    control_state = FormState(
+        FormInput(control.model, {"sweep": {"freq": {"kind": "linrange", "n": 4}}})
+    )
+    control_cfg = control.to_cfg(require_result(control_state, env), env)
+    if isinstance(control_cfg, FormErrors):
+        pytest.fail(str(control_cfg.messages))
+    assert control_cfg.sweep.freq.start == 0.0
+    assert control_cfg.sweep.freq.stop == 1.0
 
 
 class PreciseSweepCfg(ConfigBase):
