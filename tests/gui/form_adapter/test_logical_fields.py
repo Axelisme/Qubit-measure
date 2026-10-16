@@ -66,7 +66,7 @@ def test_ref_read_projects_nested_capture_without_authored_input_or_mutation() -
     env = captured()
     input = keyed(form, env)
     before = input.to_json()
-    library = env.library.document.model_dump() if env.library is not None else None
+    library = env.library.document().model_dump() if env.library is not None else None
     observed = form.read_logical_field(input, ("drive", "waveform", "length"), env)
     assert observed.value == 0.08 and observed.value_status == "available"
     assert observed.readonly and not observed.input_present and observed.input is None
@@ -80,7 +80,7 @@ def test_ref_read_projects_nested_capture_without_authored_input_or_mutation() -
         and not observed.description.target.fixed
     )
     assert input.to_json() == before
-    assert env.library is not None and env.library.document.model_dump() == library
+    assert env.library is not None and env.library.document().model_dump() == library
     with pytest.raises(adapter.LogicalEditError) as failure:
         form.prepare_logical_edits(
             input, [adapter.LogicalEdit(("drive", "freq"), 5)], env
