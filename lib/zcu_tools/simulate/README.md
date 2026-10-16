@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-10-16，FTF joint circuits and independent numeric tools
+**Last updated:** 2026-10-17，segment engine and recomputed replay
 
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
@@ -9,12 +9,17 @@ prediction tools remain separate. ADR-0072 defines the package dependency rules.
 ## Evolution and explicit populations
 
 Import records and functions from `zcu_tools.simulate.evolution`.
-`Engine.evolve(source, batches, budget=..., cancel=...)` evolves all template
-points to readout start. `ModelSource` supplies DC initial density and secular
-models. `TimelineBatch` carries drive tracks, flux schedules and per-point end
-times in ns, GHz and radians. Segment kernels propagate densities without
-clipping negative eigenvalues or renormalizing the trace. Model and kernel
-contracts are documented in [evolution](evolution/README.md).
+`SecularModel` supplies energy-basis Hamiltonians, drive quadratures, directional
+rates and pure dephasing. `ModelSource` provides these models at quantized flux
+levels. Energies use H/h in GHz, time is ns and phase is radians.
+
+`Engine.evolve` takes a `ModelSource` with the initial DC density and a sequence
+of `TimelineBatch` records. It returns densities at readout start in the DC
+energy basis, not an internal-step trajectory. FTF uses the segment engine's fast algorithms by
+default. The engine segments controls, selects kernels and shares deterministic
+preparations across points and acquires. It never carries quantum states into a
+new shot. Numeric tolerances do not certify basis convergence or the physical
+validity of a model.
 
 `ControlSequence`, `Envelope` and `NumericModel` remain inputs to independent
 continuous-flux and model tools. They do not define an acquisition backend.
@@ -55,11 +60,10 @@ raw generation share this identity format.
 Environment code owns unit conversion from QICK us/MHz/degrees to ns/GHz/radians
 and composes evolution, explicit populations and ADC. Program adapters still own
 channel order, QICK buffer shapes, nearest-even int64 conversion and acquisition
-normalization. [`evolution`](evolution/README.md) also owns optional offline
-Intel OpenCL U tables, checked numeric files and persistent exact density
-records. GPU construction is offline only. Runtime fixes published versions at
-the environment-selected boundary and directly solves uncovered legal requests.
-There is no backend registry or automatic runtime table construction.
+normalization. [`evolution`](evolution/README.md) uses the segment engine's fast
+algorithms by default and retains prepared data in memory. It does not read or
+write an offline U-table library or persistent density records. Private replay
+recomputes from archived inputs under matching numeric and RNG versions.
 
 ## FTF circuits and noise
 

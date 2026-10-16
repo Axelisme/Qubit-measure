@@ -10,6 +10,7 @@ Builder failures close devices and preserve startup and cleanup errors.
 
 `FTFSource.snapshot` reads live DC values before each round. It checks units and
 limits without restoring startup values. `execute` consumes detached templates.
+The segment engine's fast algorithms are the default numeric path.
 One source owns one `Engine`, whose prepare cache survives across acquires.
 Workers exist only during `evolve`; the engine retains no idle threading pool.
 `FTFSource.close()` clears preparations and the engine cache. Dropping the
@@ -58,3 +59,6 @@ dependency versions must match. The stream policy is `PCG64/SeedSequence-v2`.
 Old exact-record manifests fail explicitly. Archives contain model truth and
 must not appear in ordinary Run/native/RPC metadata. Normal provenance remains
 the opaque simulation identifier.
+
+There is no offline database builder, U-table library or persistent density
+record store. Replay retains inputs and recomputes evolution and readout.

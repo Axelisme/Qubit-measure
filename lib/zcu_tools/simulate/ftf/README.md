@@ -41,8 +41,8 @@ boundaries. It owns integration and never resets the density at a bath update.
 `fixed_numeric_model` supplies the same Hamiltonian and full baths at an explicit
 constant reduced flux, without callbacks or bath-update boundaries. It is not
 valid for a driven flux source or passive tail. `FluxDynamics` keeps the callback's actual event coordinates and optional
-stable dependency identity together for persistent direct records. Numeric matrices,
-basis and actual controls still participate in their separate exact key.
+stable dependency identity together. This callback description does not create
+persistent density records.
 
 `collapse_operators` combines multilevel relaxation with CP flux/residual-photon
 pure dephasing. Slopes/pulls use rad/us in the pure-rate formulas, then rates
