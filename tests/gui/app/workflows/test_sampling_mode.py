@@ -20,21 +20,36 @@ class SamplingPlanCfg(ConfigBase):
 def test_workflow_step_expression_memento_and_prepare(qapp, tmp_path: Path, attachment):
     form = Form(SamplingPlanCfg, {"sweep": Range.between(0, 1, 5)})
     registration = WorkflowAttachment(
-        step=sample_step, plan_model=form.model, knobs_model=TunablesForm,
+        step=sample_step,
+        plan_model=form.model,
+        knobs_model=TunablesForm,
         plan_to_cfg=lambda value, env, snapshot: Plan(snapshot=snapshot),
-        knobs_to_cfg=TunablesForm.to_cfg, seed=lambda plan, value: Context(1),
+        knobs_to_cfg=TunablesForm.to_cfg,
+        seed=lambda plan, value: Context(1),
     )
     _, harness, _ = attachment
-    window = WorkflowWindow(harness.state, harness.services, harness.owner,
-                            templates={}, alias_presets=None, registrations=(registration,))
+    window = WorkflowWindow(
+        harness.state,
+        harness.services,
+        harness.owner,
+        templates={},
+        alias_presets=None,
+        registrations=(registration,),
+    )
     window.resize(1100, 900)
     window.show()
     qapp.processEvents()
     driver = ComponentDriver(window)
     try:
-        driver.invoke_context_action(object_name="form.input.sweep.n", action="Switch to Step")
-        driver.invoke_context_action(object_name="form.input.sweep.start", action="Switch to Center / Span")
-        driver.invoke_context_action(object_name="form.input.sweep.step", action="Expression")
+        driver.invoke_context_action(
+            object_name="form.input.sweep.n", action="Switch to Step"
+        )
+        driver.invoke_context_action(
+            object_name="form.input.sweep.start", action="Switch to Center / Span"
+        )
+        driver.invoke_context_action(
+            object_name="form.input.sweep.step", action="Expression"
+        )
         driver.enter_text(object_name="form.input.sweep.step", value="0.1 * 3")
         driver.screenshot(tmp_path / "01-workflow-center-step.png")
         assert "0.45" in driver.observe(object_name="form.value.sweep.center").text

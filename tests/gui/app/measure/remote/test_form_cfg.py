@@ -717,15 +717,24 @@ def test_headless_sampling_commands_project_actual_values_and_reset(form_rpc):
     described = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["sweep", "n"]})
     commands = described["result"]["description"]["target"].get("commands", [])
     assert commands, "Expts must expose sampling commands through RPC"
-    assert commands[0]["inputs"] == [["sweep", "start"], ["sweep", "stop"], ["sweep", "n"]]
-    reply = rpc.call("tab.run_cfg_command", {"tab_id": tab, "path": ["sweep", "n"], "name": commands[0]["name"]})
+    assert commands[0]["inputs"] == [
+        ["sweep", "start"],
+        ["sweep", "stop"],
+        ["sweep", "n"],
+    ]
+    reply = rpc.call(
+        "tab.run_cfg_command",
+        {"tab_id": tab, "path": ["sweep", "n"], "name": commands[0]["name"]},
+    )
     assert reply["ok"], reply
     owner.write({("sweep", "step"): 0.3})
     before = owner.input.to_json()
     observed = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["sweep", "stop"]})
     assert observed["ok"], observed
     assert observed["result"]["input"]["sweep"]["stop"] == 1
-    assert {tuple(item["path"]): item["value"] for item in observed["result"]["values"]}[("sweep", "stop")] == pytest.approx(0.9)
+    assert {
+        tuple(item["path"]): item["value"] for item in observed["result"]["values"]
+    }[("sweep", "stop")] == pytest.approx(0.9)
     assert owner.input.to_json() == before
     inactive = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["sweep", "n"]})
     assert not inactive["ok"]
