@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QPushButton,
     QStatusBar,
     QTabWidget,
@@ -202,6 +203,35 @@ def test_disabled_or_hidden_input_cannot_commit_and_tab_availability_is_respecte
     qapp.processEvents()
     with pytest.raises(LookupError, match="Data.*2 candidates.*1.*2"):
         driver.select_tab("Data")
+
+
+def test_blocking_menu_selection_uses_visible_nested_captions(surface, qapp) -> None:
+    button = QPushButton("Open menu", surface.centralWidget())
+    button.show()
+    button.move(300, 120)
+    menu = QMenu(surface)
+    group = menu.addMenu("Group")
+    assert group is not None
+    group.addAction("Open")
+    menu.addAction("Open")
+    selected: list[str] = []
+
+    def open_menu() -> None:
+        action = menu.exec(button.mapToGlobal(button.rect().bottomLeft()))
+        if action is not None:
+            selected.append(action.text())
+            surface.statusBar().showMessage("Selected nested Open")
+
+    button.clicked.connect(open_menu)
+    qapp.processEvents()
+    driver = _user_input.ComponentDriver(surface)
+    assert callable(getattr(driver, "select_menu", None)), (
+        "ComponentDriver must deliver a caption path inside a blocking QMenu"
+    )
+    driver.select_menu("Open menu", ("Group", "Open"))
+    assert selected == ["Open"]
+    assert driver.status().text == "Selected nested Open"
+    assert not menu.isVisible()
 
 
 @pytest.fixture
