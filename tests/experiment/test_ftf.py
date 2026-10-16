@@ -74,6 +74,38 @@ def test_point_composition_units_signed_drive_and_tail_freeze() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("phase_deg", "expected_second"),
+    [(0.0, -0.2), (180.0, 0.2)],
+    ids=["same-phase", "opposite-phase"],
+)
+def test_common_carrier_origin_survives_pulse_start_quantization(
+    phase_deg: float, expected_second: float
+) -> None:
+    from zcu_tools.experiment.ftf import plan_point
+
+    settings = parse_ftf(ftf_document())
+    snapshot = EnvironmentSnapshot("ftf-v1", "test", (("bias", 0.2),))
+    window = ReadoutWindow(0, 0, 4, 100.0, (0.1,), (6000.0,), (0.0,), (0,))
+    for second_start_us in (0.032, 0.033):
+        events = (
+            PulseEvent(2, 0.0, 0.016, 250.0, 0.0, 0.2),
+            PulseEvent(2, second_start_us, 0.016, 250.0, phase_deg, -0.2),
+            PulseEvent(0, 0.1, 0.04, 6000.0, 0.0, 0.1),
+        )
+        plan = plan_point(
+            settings, snapshot, PointTimeline((), events, (window,), 0.14)
+        )
+        first, second = plan.controls.pulses
+        # Both observations are whole carrier cycles from their common origin.
+        assert plan.controls.amplitude(first, 8.0) == pytest.approx(
+            0.2, abs=1e-12, rel=0
+        )
+        assert plan.controls.amplitude(second, 40.0) == pytest.approx(
+            expected_second, abs=1e-12, rel=0
+        )
+
+
 def _readout() -> PulseReadoutCfg:
     return PulseReadoutCfg(
         gen_ch=0,
