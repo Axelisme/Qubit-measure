@@ -53,6 +53,7 @@ from ._seeds import (
     scalar_seed,
     selected_model,
     set_path,
+    set_slot_path,
     slot_key,
     spec_annotation,
     supported_input,
@@ -725,7 +726,7 @@ class ModuleField:
         else:
             return None
         for path, value in self.node.set.items():
-            set_path(module, path, scalar_seed(value))
+            set_slot_path(model, module, path, scalar_seed(value), env)
         for path, value in self.locks.items():
             set_path(module, path, scalar_seed(value))
         selected = next(
