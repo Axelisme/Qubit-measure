@@ -141,6 +141,7 @@ def calculate_purcell_t1_vs_flux(
     g: float,
     Temp: float,
     params: tuple[float, float, float],
+    *,
     progress: bool = True,
 ) -> NDArray[np.float64]:
     """Return two-level Purcell equilibrium T1 along normalized flux Phi/Phi0.
@@ -183,7 +184,7 @@ def calculate_purcell_t1_vs_flux(
     def update_hilbertspace(flux: float) -> None:
         fluxonium.flux = flux
 
-    with scq_progress(progress):
+    with scq_progress(progress=progress):
         sweep = ParameterSweep(
             hilbertspace=hilbertspace,
             paramvals_by_name={"flux": fluxs},

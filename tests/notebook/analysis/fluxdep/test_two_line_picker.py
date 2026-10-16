@@ -116,7 +116,7 @@ def test_press_far_from_both_picks_nothing():
 def test_conjugate_drag_moves_both_lines_together():
     picker = _make_picker()
     half0, int0 = picker.positions()
-    picker.set_conjugate(True)
+    picker.set_conjugate(on=True)
     picker.on_press(half0)
     picker.on_move(half0 + 0.5)
     half1, int1 = picker.positions()
@@ -202,7 +202,7 @@ def test_auto_align_keeps_positions_in_range():
 def test_magnitude_only_toggle():
     picker = _make_picker()
     assert picker.magnitude_only is False
-    picker.set_magnitude_only(True)
+    picker.set_magnitude_only(on=True)
     assert picker.magnitude_only is True
 
 

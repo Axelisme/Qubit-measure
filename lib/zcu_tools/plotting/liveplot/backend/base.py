@@ -20,7 +20,7 @@ from matplotlib.figure import Figure
 class LivePlotBackend(ABC):
     @abstractmethod
     def make_plot_frame(
-        self, n_row: int, n_col: int, plot_instant: bool = False, **kwargs: Any
+        self, n_row: int, n_col: int, *, plot_instant: bool = False, **kwargs: Any
     ) -> tuple[Figure, list[list[Axes]]]:
         """Build an (n_row x n_col) grid of axes; optionally show it now."""
 

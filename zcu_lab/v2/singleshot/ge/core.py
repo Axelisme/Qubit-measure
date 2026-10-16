@@ -107,6 +107,7 @@ def optimize_ge_radius(
     e_center: complex,
     init_pops: NDArray[np.float64],
     sigma: float,
+    *,
     consider_other: bool = True,
 ) -> float:
     from scipy.optimize import OptimizeResult, minimize_scalar

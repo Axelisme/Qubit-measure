@@ -77,7 +77,7 @@ def test_session_core_connects_and_cancels_on_owner_thread(
         def register_device(self, name: str, device: Any) -> None:
             self._devices[name] = device
 
-        def drop_device(self, name: str, ignore_error: bool = False) -> None:
+        def drop_device(self, name: str, *, ignore_error: bool = False) -> None:
             if name not in self._devices:
                 if ignore_error:
                     return

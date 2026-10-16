@@ -19,7 +19,7 @@ NUM_BINS = 201
 
 
 def singleshot_visualize(
-    signals: NDArray[np.complex128], plot_center: bool = True
+    signals: NDArray[np.complex128], *, plot_center: bool = True
 ) -> tuple[Figure, Axes]:
     """
     Visualize single-shot measurements in IQ plane.

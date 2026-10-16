@@ -17,8 +17,9 @@ class ScatterSegment(AbsSegment):
         xlabel: str,
         ylabel: str,
         title: str | None = None,
-        show_grid: bool = True,
         scatter_kwargs: Mapping[str, Any] | None = None,
+        *,
+        show_grid: bool = True,
     ) -> None:
         self.xlabel = xlabel
         self.ylabel = ylabel

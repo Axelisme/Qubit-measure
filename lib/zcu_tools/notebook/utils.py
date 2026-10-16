@@ -22,7 +22,7 @@ if TYPE_CHECKING:
         from typing import Any as ResourceManager
 
 
-def gc_collect(verbose: bool = True) -> None:
+def gc_collect(*, verbose: bool = True) -> None:
     """Clear all matplotlib figures and run garbage collection to free memory."""
     plt.close("all")
     gc_num = gc.collect()
@@ -73,7 +73,7 @@ def get_ip_address(iface: str) -> str:
         raise OSError(f"Interface {iface} not found or has no IPv4 address.")
 
 
-def savefig(fig: Figure, filepath: str, close_after: bool = True, **kwargs) -> None:
+def savefig(fig: Figure, filepath: str, *, close_after: bool = True, **kwargs) -> None:
     """Save a matplotlib figure, creating parent directories if necessary. close the figure after saving to free memory."""
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     fig.savefig(filepath, **kwargs)

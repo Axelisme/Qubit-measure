@@ -10,8 +10,9 @@ def fit_rabi(
     xs: NDArray[np.float64],
     real_signals: NDArray[np.float64],
     /,
-    decay: bool = False,
     init_phase: float | None = None,
+    *,
+    decay: bool = False,
 ) -> tuple[
     float,
     float,

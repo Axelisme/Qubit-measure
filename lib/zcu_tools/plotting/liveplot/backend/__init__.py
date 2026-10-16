@@ -77,7 +77,7 @@ def active_backend() -> LivePlotBackend:
 
 
 def make_plot_frame(
-    n_row: int, n_col: int, plot_instant: bool = False, **kwargs
+    n_row: int, n_col: int, *, plot_instant: bool = False, **kwargs
 ) -> tuple[Figure, list[list[Axes]]]:
     return active_backend().make_plot_frame(
         n_row, n_col, plot_instant=plot_instant, **kwargs

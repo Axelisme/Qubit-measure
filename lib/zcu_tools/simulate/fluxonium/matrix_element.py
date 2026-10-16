@@ -87,8 +87,9 @@ def calculate_system_n_oper_vs_flux(
     bare_rf: float,
     g: float,
     return_dim: int = 4,
-    progress: bool = True,
     sweep: ParameterSweep | None = None,
+    *,
+    progress: bool = True,
 ) -> tuple[ParameterSweep, NDArray[np.complex128]]:
     """
     Calculate the matrix elements of the system over a parameter sweep
@@ -115,7 +116,7 @@ def calculate_system_n_oper_vs_flux(
         def update_hilbertspace(flux: float) -> None:
             fluxonium.flux = flux
 
-        with scq_progress(progress):
+        with scq_progress(progress=progress):
             sweep = ParameterSweep(
                 hilbertspace,
                 {"params": fluxs},

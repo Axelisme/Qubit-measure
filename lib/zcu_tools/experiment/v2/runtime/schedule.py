@@ -1012,7 +1012,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
             total=rounds,
             smoothing=0,
             desc=progress_label,
-            leave=self._resolve_progress_leave(progress_leave),
+            leave=self._resolve_progress_leave(progress_leave=progress_leave),
             disable=rounds == 1,
         )
         try:
@@ -1121,7 +1121,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
             raise ValueError("Program cfg.rounds must be positive")
         return rounds
 
-    def _resolve_progress_leave(self, progress_leave: bool | None) -> bool:
+    def _resolve_progress_leave(self, *, progress_leave: bool | None) -> bool:
         if progress_leave is not None:
             return progress_leave
         return not isinstance(self._owner, ScheduleStep)

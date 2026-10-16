@@ -97,7 +97,7 @@ def _value_spin(dialog: PredictorDialog) -> TrimDoubleSpinBox:
 def test_live_mode_locks_model_and_transition_controls(qapp):
     dialog = _make_dialog(device=_make_device_ctrl())
 
-    dialog.set_live_mode(True)
+    dialog.set_live_mode(enabled=True)
 
     for widget_type in (
         QDoubleSpinBox,
@@ -114,7 +114,7 @@ def test_live_mode_locks_model_and_transition_controls(qapp):
     for text in ("Load", "Browse", "Add", "Remove", "Calibrate", "Use"):
         assert not _button(dialog, text).isEnabled()
 
-    dialog.set_live_mode(False)
+    dialog.set_live_mode(enabled=False)
 
     assert _value_spin(dialog).isEnabled()
     assert _button(dialog, "Add").isEnabled()
@@ -123,7 +123,7 @@ def test_live_mode_locks_model_and_transition_controls(qapp):
 
 def test_live_device_value_updates_read_only_control(qapp):
     dialog = _make_dialog()
-    dialog.set_live_mode(True)
+    dialog.set_live_mode(enabled=True)
 
     dialog.set_live_device_value(0.25)
 

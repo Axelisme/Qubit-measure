@@ -519,6 +519,7 @@ def fit_singleshot_p0(
     init_p0_g: float,
     init_p0_e: float,
     ge_params: tuple[float, float, float, float, float, float, float],
+    *,
     fit_length_ratio: bool = False,
 ) -> tuple[tuple[float, float, float], NDArray[np.float64]]:
     sg, se, s, _, _, p_avg, length_ratio = ge_params

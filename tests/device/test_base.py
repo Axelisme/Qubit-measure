@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import logging
-from operator import call
 import threading
+from operator import call
 from typing import Any, Literal, cast
 
 import pytest

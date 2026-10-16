@@ -123,7 +123,7 @@ predictor device-value flow 把非 numeric input 當作有效硬體值。
 | API | 用途 |
 | --- | ---- |
 | `register_device(name, device)` | 註冊 `BaseDevice` 實例；非 `BaseDevice` 入口 `TypeError`，重名會 warn 並覆蓋 |
-| `drop_device(name, ignore_error=False)` | 移除 registry entry（不 close） |
+| `drop_device(name, *, ignore_error=False)` | 移除 registry entry（不 close） |
 | `get_device(name)` | 取得；找不到 `ValueError` |
 | `get_all_devices()` | 回傳整個 dict |
 | `setup_devices(dev_cfg: Mapping[str, DeviceInfo], *, progress=True, cancel_signal=None)` | 批次對已註冊裝置呼叫 `setup(cfg)` |
@@ -190,7 +190,7 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 
 **Smart ramp**：`set_voltage` / `set_current` 不直接跳值，而是以 `_rampstep` 為實際步長在 `np.linspace` 上逐點下發，步間 sleep `_rampinterval = 0.01s`。`DEFAULT_RAMPSTEP = {voltage: 1e-3 V, current: 1e-6 A}`。線性 stepping、progress 與 `stop_event` check 由 module-private shared ramp helper 處理；mode/output/safety guard 保留在 YOKO public setter 與 direct setter。YOKO ramp 保留起始點也下發一次的硬體 I/O/timing 行為。`progress=True` 時跑 make_pbar。若 output 為 off 且目標值非零，setter 會 `RuntimeError`，不自動開輸出。兩者均接受 `stop_event: Optional[threading.Event]`，每步前 check `stop_event.is_set()` 協作中止。
 
-**模式切換**：`set_mode(mode, force=False, rampstep=None)` 若當前 level 非零會擋下來，需 `force=True`。切完自動換 `_rampstep` 為新模式的預設（或呼叫端給的）。
+**模式切換**：`set_mode(mode, rampstep=None, *, force=False)` 若當前 level 非零會擋下來，需 `force=True`。切完自動換 `_rampstep` 為新模式的預設（或呼叫端給的）。
 
 **`_setup`**（base 已完成地址/型別檢查，不需 `typeguard.check_type`）：
 
@@ -224,10 +224,10 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 
 `FakeDevice` 用於本地流程測試，不需要真實儀器連線：
 
-- **`__init__(fast_mode=False, *, value_unit="native")` 不接受 `rm` 參數**；value_unit 可為 native、V 或 A，建立後固定，不做數值換算。它呼叫 `BaseDevice.__init__("none", rm=None)`，並由 `_open_session()` override 回傳 `None`。因此 Fake 不開 pyvisa session、不呼叫 `connect_message()`，但仍取得 base locks/logger/session invariant。`fast_mode=True` 跳過 ramp 的 `time.sleep`（加速測試）。
+- **`__init__(*, fast_mode=False, value_unit="native")` 不接受 `rm` 參數**；value_unit 可為 native、V 或 A，建立後固定，不做數值換算。它呼叫 `BaseDevice.__init__("none", rm=None)`，並由 `_open_session()` override 回傳 `None`。因此 Fake 不開 pyvisa session、不呼叫 `connect_message()`，但仍取得 base locks/logger/session invariant。`fast_mode=True` 跳過 ramp 的 `time.sleep`（加速測試）。
 - `FakeDeviceInfo` 欄位：`type: Literal["FakeDevice"] = "FakeDevice"`、`output: Literal["on","off"] = "off"`、`value: float = 0.0`、`rampstep: float = 0.01`、`value_unit: Literal["native", "V", "A"] = "native"`。Value 與 rampstep 使用相同固定單位。Setup 單位不同時在任何寫入前拒絕；換單位須重建裝置。Dump 與 GUI snapshot 保留實際單位。RF 裝置的 Hz／dBm 量各有固定單位，不新增 `value_unit`。
 - 提供 `get_output/set_output/output_on/output_off` 與 `get_value/set_value` 方法（記憶體狀態操作）。
-- `_set_value_smart(value, progress, stop_event=None)`：以 `_rampstep` 為實際步長，透過同一個 private ramp helper 做 `np.linspace` stepping + make_pbar；Fake 保留跳過起始點的 mock 行為，每步前 check `stop_event.is_set()`，協作中止。
+- `_set_value_smart(value, stop_event=None, *, progress=False)`：以 `_rampstep` 為實際步長，透過同一個 private ramp helper 做 `np.linspace` stepping + make_pbar；Fake 保留跳過起始點的 mock 行為，每步前 check `stop_event.is_set()`，協作中止。
 - `_setup(cfg, *, progress, stop_event)` 先驗證固定單位，再呼叫 `set_output` + 更新 `_rampstep` + `_set_value_smart`（透傳 `stop_event`）。
 - `get_info()` 回傳當前記憶體狀態。
 
