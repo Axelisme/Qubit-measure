@@ -92,7 +92,7 @@ def test_failed_coordinate_command_is_atomic(endpoint: JsonValue):
     commands = getattr(target, "commands", ())
     assert commands, "Coordinate commands must exist on endpoint fields"
     before = state.input.to_json()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Cannot convert coordinates"):
         state.run_command(("sweep", "stop"), commands[0].name, env)
     assert state.input.to_json() == before
 
@@ -124,12 +124,12 @@ def test_center_expression_restore_reset_and_single_point_contract():
 
 def test_failed_authored_endpoint_cannot_convert_using_inherited_default():
     env = FormEnv()
-    form = Form(CoordinateCfg, {"sweep": Range.between(Expr("$missing.value"), 10, 4)})
+    form = Form(CoordinateCfg, {"sweep": Range(Expr("$missing.value"), 10, 4)})
     state = FormState(form.default_input(env))
     target = state.describe(("sweep", "stop"), env).target
     commands = getattr(target, "commands", ())
     assert commands, "Coordinate commands must exist"
     before = state.input.to_json()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Cannot convert coordinates"):
         state.run_command(("sweep", "stop"), commands[0].name, env)
     assert state.input.to_json() == before
