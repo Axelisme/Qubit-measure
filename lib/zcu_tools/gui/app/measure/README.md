@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-16，owner 導覽
+**Last updated:** 2026-10-16，logical recipe owner
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -58,6 +58,8 @@ receives their catalogs by injection and never imports the user package.
 and captures parameters, library and cached device infos on Open and Reset. Preview, result and Run use that capture until the next Reset.
 Source events do not refresh existing forms. Device capture copies cached infos;
 it never queries a live driver.
+
+Recipe 的 logical read/edit/selector 命令也由 `TabFormResource` 擁有。Adapter 解析路徑並產生隔離候選，resource 在同一 mutation guard 內安裝，保留 base。Changed batch 只通知與發布一次，inline no-op 仍先檢查 guards。一般 invalid draft 保留，結構或來源拒絕不提交成功前綴。Logical readonly read 只投影固定 captured Spec，不建立可寫草稿，不更動 input、base 或 publication。通用 Form RPC 與 widget 仍使用 canonical paths。
 
 RunInputs 固定 admission 的 ParameterContext，RunPaneState 隨 result 保存同一引用。
 晚開 FIT、interactive factory、Post 與 WB 讀這份 result source，不讀後來的 tab binding。

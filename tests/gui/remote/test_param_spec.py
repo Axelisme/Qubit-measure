@@ -267,3 +267,37 @@ def test_validation_keeps_first_spec_failure_before_later_enum(
     assert error.value.code is ErrorCode.INVALID_PARAMS
     assert error.value.message == message
     assert error.value.__cause__ is None
+
+
+def test_optional_omission_can_be_distinguished_from_explicit_null() -> None:
+    assert hasattr(ParamSpec, "omit_when_missing"), "Missing optional omission policy"
+    spec = (ParamSpec("key", JsonType.STRING, required=False, omit_when_missing=True),)
+    assert validate_params(spec, {}) == {}
+    assert validate_params(spec, {"key": None}) == {"key": None}
+    assert validate_params(spec, {"key": "pulse_a"}) == {"key": "pulse_a"}
+    schema = build_input_schema(spec)
+    assert "key" not in schema.get("required", [])
+    assert schema["properties"]["key"].get("type") == "string"
+    legacy = (ParamSpec("key", JsonType.STRING, required=False),)
+    assert validate_params(legacy, {}) == {"key": None}
+    assert validate_params(legacy, {"key": None}) == {"key": None}
+    defaulted = (ParamSpec("key", JsonType.STRING, required=False, default="old"),)
+    assert validate_params(defaulted, {}) == {"key": "old"}
+    assert validate_params(defaulted, {"key": None}) == {"key": "old"}
+
+
+@pytest.mark.parametrize(
+    "required, default", [(True, None), (False, "key"), (True, "key")]
+)
+def test_omission_policy_rejects_required_or_defaulted_declarations(
+    required, default
+) -> None:
+    assert hasattr(ParamSpec, "omit_when_missing"), "Missing optional omission policy"
+    with pytest.raises(ValueError, match="omit_when_missing"):
+        ParamSpec(
+            "key",
+            JsonType.STRING,
+            required=required,
+            default=default,
+            omit_when_missing=True,
+        )

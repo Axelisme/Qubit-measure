@@ -14,11 +14,11 @@ from zcu_tools.gui.form import (
     FormModel,
     FormPath,
     FormState,
-    KeyRef,
     LinRange,
     Option,
     OptionCommand,
 )
+from zcu_tools.gui.form_adapter import KeyRef
 
 
 class Speed(StrEnum):

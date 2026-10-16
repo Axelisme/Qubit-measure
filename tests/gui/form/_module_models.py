@@ -8,7 +8,7 @@ from typing import Annotated
 
 from pydantic import Field
 from zcu_tools.cfg_model import PulseSpec
-from zcu_tools.gui.form import ModuleInline, ModuleRef
+from zcu_tools.gui.form_adapter import ModuleInline, ModuleRef
 
 
 class KeyPulseSpec(PulseSpec):

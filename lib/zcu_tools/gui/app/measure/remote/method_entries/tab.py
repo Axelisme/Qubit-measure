@@ -14,6 +14,58 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
+        "tab.read_recipe_field",
+        "tab:h_tab_read_recipe_field",
+        MethodSpec(
+            5.0,
+            "Read one logical field from current input and fixed captured Specs. "
+            "Generated wrappers are hidden; real field names remain. path=[] reads "
+            "root. Returns metadata, authored input, ordinary value/value_status, "
+            "selector/source, readonly and directed logical errors in one turn. "
+            "Ref reads do not materialize input, refresh sources or grant writes.",
+            (required_string("tab_id"), ParamSpec("path", JsonType.ARRAY)),
+            readonly=True,
+        ),
+    ),
+    method_entry(
+        "tab.edit_recipe_fields",
+        "tab:h_tab_edit_recipe_fields",
+        MethodSpec(
+            5.0,
+            "Atomically edit ordered logical path/value leaves. Generated selectors "
+            "require select_recipe_module; no content write crosses ref ancestors. "
+            "Structural/source/guard rejection commits no prefix. Returns changed "
+            "and complete logical Form preview errors; invalid ordinary drafts "
+            "remain installed. Empty batches still require mutation authority.",
+            (required_string("tab_id"), ParamSpec("edits", JsonType.ARRAY)),
+        ),
+    ),
+    method_entry(
+        "tab.select_recipe_module",
+        "tab:h_tab_select_recipe_module",
+        MethodSpec(
+            5.0,
+            "Select/copy/disable a logical generated module selector. use_library "
+            "requires an actual captured key allowed by the owner. Other actions "
+            "must omit key; explicit null is invalid. use_inline explicitly copies "
+            "fixed captured Spec content, preserving child keys; inline is a guarded "
+            "no-op. Ref ancestors require explicit outer copies first. Returns "
+            "changed and a fresh same-turn field observation. No retry or rollback.",
+            (
+                required_string("tab_id"),
+                ParamSpec("path", JsonType.ARRAY),
+                ParamSpec(
+                    "action",
+                    JsonType.STRING,
+                    enum=("use_library", "use_inline", "disable"),
+                ),
+                ParamSpec(
+                    "key", JsonType.STRING, required=False, omit_when_missing=True
+                ),
+            ),
+        ),
+    ),
+    method_entry(
         "tab.new",
         "tab:h_tab_new",
         MethodSpec(
