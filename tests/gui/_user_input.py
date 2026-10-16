@@ -434,13 +434,18 @@ class ComponentDriver:
                 key_click(menu, Qt.Key.Key_Right)
             QApplication.processEvents()
 
-    def choose_file(self, opener: str, path: Path) -> None:
+    def choose_file(
+        self, opener: str, path: Path, *, evidence: Path | None = None
+    ) -> None:
         """Click opener, enter path in its modal Qt file chooser, and click Open.
 
         The opener must synchronously open a non-native QFileDialog with Qt's
         visible fileNameEdit. The caller supplies an existing file path (spaces
-        allowed). Missing/ambiguous widgets raise LookupError; a different modal
-        raises LookupError. Disabled/hidden/modal-blocked openers are no-ops.
+        allowed). If evidence is a PNG path, capture the visible file chooser
+        there before typing or accepting; None skips capture. Capture creates
+        parent directories and raises OSError on save failure. Missing/ambiguous
+        widgets or a different modal raise LookupError. Disabled/hidden/clipped/
+        modal-blocked openers are no-ops, including no evidence capture.
         A queued event supplies real input inside the modal loop; a 30-second
         watchdog guards that delivery. On delivery failure Escape dismisses the
         chooser before the exception returns. No dialog return value is patched.
@@ -459,6 +464,12 @@ class ComponentDriver:
                 if not isinstance(dialog, QFileDialog):
                     raise LookupError("No visible Qt file chooser")
                 chooser = ComponentDriver(dialog)
+                if not self._on_screen(dialog):
+                    raise LookupError("Qt file chooser is not on screen")
+                if evidence is not None:
+                    # Input delivery is executing here, not queued behind the
+                    # screenshot's layout flush, so capture precedes acceptance.
+                    chooser.screenshot(evidence)
                 filename = chooser._find(None, "fileNameEdit", editable=True)
                 mouse_click(filename, filename.rect().center())
                 key_click(filename, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
@@ -467,7 +478,7 @@ class ComponentDriver:
                 if (popup := QApplication.activePopupWidget()) is not None:
                     key_click(popup, Qt.Key.Key_Escape)
                 chooser.click("&Open")
-            except (LookupError, RuntimeError, ValueError) as error:
+            except (LookupError, OSError, RuntimeError, ValueError) as error:
                 errors.append(error)
                 dismiss()
 

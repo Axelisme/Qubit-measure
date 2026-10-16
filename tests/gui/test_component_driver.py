@@ -481,7 +481,9 @@ def test_viewport_clipped_widgets_cannot_be_observed_or_operated(surface, qapp) 
     assert driver.status().text == "Action fired"
 
 
-def test_file_chooser_saves_png_before_real_selection_closes_modal(surface, tmp_path, qapp) -> None:
+def test_file_chooser_saves_png_before_real_selection_closes_modal(
+    surface, tmp_path, qapp
+) -> None:
     native = tmp_path / "native.h5"
     native.write_bytes(b"synthetic native file")
     button = QPushButton("Choose with evidence")
@@ -490,14 +492,19 @@ def test_file_chooser_saves_png_before_real_selection_closes_modal(surface, tmp_
 
     def choose() -> None:
         filename, _ = QFileDialog.getOpenFileName(
-            surface, "Open native data", str(tmp_path), "Data (*.h5)",
+            surface,
+            "Open native data",
+            str(tmp_path),
+            "Data (*.h5)",
             options=QFileDialog.Option.DontUseNativeDialog,
         )
         surface.statusBar().showMessage(f"Selected {filename}")
 
     button.clicked.connect(choose)
     driver = _user_input.ComponentDriver(surface)
-    assert "evidence" in signature(driver.choose_file).parameters, "File chooser must capture its visible modal before selection"
+    assert "evidence" in signature(driver.choose_file).parameters, (
+        "File chooser must capture its visible modal before selection"
+    )
     shot = tmp_path / "evidence" / "chooser.png"
     driver.choose_file("Choose with evidence", native, evidence=shot)
     assert shot.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
