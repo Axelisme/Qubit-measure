@@ -195,6 +195,24 @@ def test_parse_alu_expr_error_paths(raw, message):
         parse_alu_expr(raw)
 
 
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        ("r1 BAD #2", "Unknown ALU operator: 'BAD'"),
+        ("BAD r1", "Unknown ALU unary operator: 'BAD'"),
+    ],
+)
+def test_parse_alu_expr_preserves_operator_cause(raw: str, message: str) -> None:
+    with pytest.raises(ValueError) as caught:
+        parse_alu_expr(raw)
+
+    assert type(caught.value) is ValueError
+    assert str(caught.value) == message
+    cause = caught.value.__cause__
+    assert isinstance(cause, ValueError)
+    assert str(cause) == "'BAD' is not a valid AluOp"
+
+
 def test_parse_side_write_paths():
     invalid: Any = 1
     side = SideWrite(Register("r1"), "imm")
