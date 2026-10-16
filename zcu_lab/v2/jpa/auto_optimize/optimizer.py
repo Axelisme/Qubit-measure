@@ -756,8 +756,7 @@ class JPAOptimizer:
         # Get next point based on current phase
         if self._phase == 1:
             return self._get_next_phase1_point(i)
-        else:
-            return self._get_next_phaseN_point(i)
+        return self._get_next_phaseN_point(i)
 
     def _record_last_result(self, last_snr: float) -> None:
         """Record the result from the last measurement."""
@@ -810,11 +809,10 @@ class JPAOptimizer:
                     return None  # Optimization complete
                 # Don't use recursion with None - directly get next point
                 return self._get_next_phaseN_point(i)
-            else:
-                # Try again with new slice - get point directly without recursion
-                point = self._get_phase1_point()
-                if point is None:
-                    return None  # Should not happen, but handle gracefully
+            # Try again with new slice - get point directly without recursion
+            point = self._get_phase1_point()
+            if point is None:
+                return None  # Should not happen, but handle gracefully
 
         # Record point (will be updated with SNR in next call)
         self.data.history_X.append(list(point))

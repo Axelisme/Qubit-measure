@@ -9,6 +9,8 @@ optimisation in step 2 cannot silently change results.
 
 from __future__ import annotations
 
+import inspect
+
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose
@@ -18,6 +20,7 @@ from zcu_tools.utils.process import (
     minus_mean,
     minus_median,
     peak_n_avg,
+    rescale,
     rotate2real,
     rotate_phase,
     smooth_signal1d,
@@ -29,6 +32,23 @@ from zcu_tools.utils.process import (
 # ---------------------------------------------------------------------------
 
 RNG = np.random.default_rng(0)
+
+
+def test_rescale_complex_warning_identifies_the_caller_and_preserves_data() -> None:
+    signals = np.array([1.0 + 2.0j, 3.0 - 4.0j])
+    original = signals.copy()
+    with pytest.warns(
+        UserWarning, match="^Rescale complex signals is not supported, do nothing$"
+    ) as recorded:
+        call_line = inspect.stack()[0].lineno + 1
+        result = rescale(signals)
+    assert len(recorded) == 1
+    assert recorded[0].filename == __file__
+    assert recorded[0].lineno == call_line
+    assert result is not signals
+    assert result.dtype == signals.dtype
+    assert_allclose(result, original)
+    assert_allclose(signals, original)
 
 
 def _make_complex(rng: np.random.Generator, n: int = 50) -> np.ndarray:

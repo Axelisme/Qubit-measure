@@ -308,7 +308,7 @@ def _synthetic_calibration(samples: pd.DataFrame) -> T1FluxCalibration:
 
 
 def _synthetic_context(samples: pd.DataFrame) -> T1CurveContext:
-    context = T1CurveContext(
+    return T1CurveContext(
         result_dir="/tmp/result",
         image_dir="/tmp/result/t1_curve",
         samples_filename="samples.jsonl",
@@ -321,7 +321,6 @@ def _synthetic_context(samples: pd.DataFrame) -> T1CurveContext:
         samples_preview=samples,
         available_columns=tuple(samples.columns),
     )
-    return context
 
 
 def _synthetic_prepared_data() -> T1PreparedData:

@@ -355,7 +355,10 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         stop_event: threading.Event | None = None,
     ) -> None:
         if self.get_output() != "on" and cfg.output == "on":
-            warnings.warn("YOKOGS200 output is off, did you forget to turn it on?")
+            # _setup -> BaseDevice.setup -> device_operation wrapper -> caller.
+            warnings.warn(
+                "YOKOGS200 output is off, did you forget to turn it on?", stacklevel=4
+            )
         self.set_output(cfg.output)
 
         cur_mode = self.get_mode()

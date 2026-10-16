@@ -112,9 +112,8 @@ def find_folder_id(service, name, parent_id):
         if files:
             print(f"Found remote folder '{name}' (ID: {files[0].get('id')}).")
             return files[0].get("id")
-        else:
-            print(f"Remote folder '{name}' not found.")
-            return None
+        print(f"Remote folder '{name}' not found.")
+        return None
     except HttpError as e:
         print(f"An error occurred while finding folder '{name}': {e}")
         return None
@@ -206,8 +205,7 @@ def collect_download_tasks(service, remote_folder_id, local_folder_path, tasks_l
                         f"  - Skipping '{name}' (local is up-to-date: {local_datetime} vs remote: {remote_datetime})."
                     )
                     continue
-                else:
-                    print(f"  - Queuing update for '{name}' (remote is newer).")
+                print(f"  - Queuing update for '{name}' (remote is newer).")
             else:
                 print(f"  - Queuing new file '{name}' for download...")
 

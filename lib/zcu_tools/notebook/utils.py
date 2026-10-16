@@ -69,8 +69,8 @@ def get_ip_address(iface: str) -> str:
                 struct.pack("256s", bytes(iface[:15], "utf-8")),
             )[20:24]
         )
-    except OSError:
-        raise OSError(f"Interface {iface} not found or has no IPv4 address.")
+    except OSError as exc:
+        raise OSError(f"Interface {iface} not found or has no IPv4 address.") from exc
 
 
 def savefig(fig: Figure, filepath: str, *, close_after: bool = True, **kwargs) -> None:

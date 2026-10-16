@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import functools
 import operator
+import os
 import warnings
 from collections.abc import Callable
 from typing import Protocol, TypeAlias, cast, final
 
 import numpy as np
 from numpy.typing import NDArray
+from qick import qick_asm
 from qick.qick_asm import (
     AcquireMixin,
     logger,
@@ -23,6 +25,14 @@ __all__ = [
     "StoppedPartialAcquireError",
     "TrackerProtocol",
 ]
+
+
+# Skip both program wrappers and QICK's loop: acquire and stepped finish_round
+# enter through different depths, as do accumulated and decimated round hooks.
+_ACQUIRE_WARNING_INTERNAL_PATHS = (
+    os.path.dirname(__file__) + os.sep,
+    os.path.dirname(qick_asm.__file__) + os.sep,
+)
 
 
 class CancelFlagProtocol(Protocol):
@@ -327,13 +337,15 @@ class SingleShotMixin(TypedAcquireMixin):
             d_reps = [np.zeros_like(d) for d in acc_buf]
             if ge_radius is not None:
                 warnings.warn(
-                    "Both threshold and ge_radius are set, threshold will be applied and ge_radius will be ignored"
+                    "Both threshold and ge_radius are set, threshold will be applied and ge_radius will be ignored",
+                    stacklevel=2,
+                    skip_file_prefixes=_ACQUIRE_WARNING_INTERNAL_PATHS,
                 )
             self.shots = self._apply_threshold(acc_buf, threshold, angle, remove_offset)
             for i, ch_shot in enumerate(self.shots):
                 d_reps[i][..., 0] = ch_shot
             return self._average_buf(d_reps, length_norm=False)
-        elif ge_radius is not None:
+        if ge_radius is not None:
             d_reps = [np.zeros_like(d) for d in acc_buf]
             if g_center is None or e_center is None:
                 raise ValueError(
@@ -345,13 +357,12 @@ class SingleShotMixin(TypedAcquireMixin):
             for i, ch_shot in enumerate(self.shots):
                 d_reps[i] = ch_shot
             return self._average_buf(d_reps, length_norm=False)
-        else:
-            d_reps = acc_buf
-            return self._average_buf(
-                d_reps,
-                length_norm=True,
-                remove_offset=self.acquire_params["remove_offset"],
-            )
+        d_reps = acc_buf
+        return self._average_buf(
+            d_reps,
+            length_norm=True,
+            remove_offset=self.acquire_params["remove_offset"],
+        )
 
     def _apply_classification(
         self,
@@ -456,7 +467,9 @@ class RoundHookMixin(TypedAcquireMixin):
         if len(rounds_buf) != self._inc_sum_count:
             warnings.warn(
                 f"Detected non-matching number of rounds ({len(rounds_buf)}) and _inc_sum_count ({self._inc_sum_count})"
-                "The callback data may be corrupted, fallback to normal summarize"
+                "The callback data may be corrupted, fallback to normal summarize",
+                stacklevel=2,
+                skip_file_prefixes=_ACQUIRE_WARNING_INTERNAL_PATHS,
             )
             return self._summarize_accumulated(rounds_buf)
 
@@ -476,12 +489,10 @@ class RoundHookMixin(TypedAcquireMixin):
         for i in range(n_ro_chs):
             self._inc_sum_state[i] += rounds_buf[-1][i]
 
-        mean_data = cast(
+        return cast(
             list[NDArray[np.float64]],
             [d / self._inc_sum_count for d in self._inc_sum_state],
         )
-
-        return mean_data
 
     def _inc_summarize_decimated(
         self, rounds_buf: list[NDArray[np.float64]]
