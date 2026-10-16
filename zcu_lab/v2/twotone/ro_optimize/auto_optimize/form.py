@@ -1,8 +1,9 @@
 """Core-derived starting values for ro_optimize/auto_optimize."""
 
-from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
+from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
+from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
 from zcu_lab.v2.twotone.ro_optimize.auto_optimize.core import AutoOptCfg
 
 
@@ -27,7 +28,7 @@ def make_form(ctx: FormContext) -> Form[AutoOptCfg]:
                 "gain": Range.between(0.1, 0.25, expts=51),
                 "length": Range.between(5.0, 10.0, expts=51),
             },
-            "relax_delay": Expr("3.0 * $qubit.t1"),
+            "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,
             "num_points": 1001,

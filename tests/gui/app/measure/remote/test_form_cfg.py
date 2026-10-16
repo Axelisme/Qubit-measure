@@ -484,7 +484,7 @@ def test_existing_inline_draft_is_a_guarded_noop(
     tab = fixture.ctrl.new_tab("module-rpc")
     try:
         owner = fixture.ctrl.cfg_resources.lookup(tab)
-        owner.write({("pulse", "kind"): "inline"})
+        owner.write({("pulse",): {"kind": "inline"}})
         if draft == "invalid-expression":
             owner.write(
                 {
@@ -569,7 +569,7 @@ def test_module_rpc_conversion_values_errors_and_readonly_admission(form_rpc) ->
         notifications: list[str] = []
         owner.subscribe(lambda: notifications.append("changed"))
         # Selecting Inline uses ordinary type defaults, not hidden fallback.
-        owner.write({("pulse", "kind"): "inline"})
+        owner.write({("pulse",): {"kind": "inline"}})
         assert owner.input.data["pulse"]["kind"] == "inline"
         assert notifications == ["changed"]
         owner.write(

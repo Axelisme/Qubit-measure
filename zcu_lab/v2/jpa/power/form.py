@@ -3,6 +3,7 @@
 from zcu_tools.cfg_model import AliasName, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
+from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
 from zcu_lab.v2.jpa.power.core import PowerCfg
 
 
@@ -23,7 +24,7 @@ def make_form(ctx: FormContext) -> Form[PowerCfg]:
             "jpa_rf_dev": AliasName("jpa_rf_dev"),
             "sweep": {"jpa_power": Range.around("$jpa.pump_power", 5.0, expts=101)},
             "skew_penalty": 0.0,
-            "relax_delay": 0.5,
+            "relax_delay": t1_initial_time(ctx.parameters, multiplier=1),
             "reps": 10000,
             "rounds": 1,
             "initial_delay": Hidden(),

@@ -69,8 +69,10 @@ def _sweep_branch(
     for name, info in base.model_fields.items():
         if info.annotation is not float:
             continue
-        required = isinstance(node, Range) and isinstance(
-            getattr(node, name, None), Expr
+        required = (
+            isinstance(node, Range)
+            and name in ("start", "stop")
+            and (getattr(node, name) is None or isinstance(getattr(node, name), Expr))
         )
         if not required and decimals is None:
             continue
@@ -98,7 +100,7 @@ def _sweep_branch(
 
 
 def _sweep_model(node: FormNode, info: FieldInfo) -> object:
-    """Build four active branches; only Expr endpoints lose inherited defaults.
+    """Build four active branches; Expr and None endpoints lose inherited defaults.
 
     node is the authored sweep; info is its core field declaration. Float
     precision applies to all coordinates and step, never n or the outer model.
@@ -376,6 +378,13 @@ class _Section:
                 data[name] = node.value
             else:
                 data[name] = _seed_json(node)
+        # Only core-disabled modules get an explicit selection. Existing initial
+        # values win, while nullable fields without a None default stay missing.
+        data = {
+            name: None
+            for name in self.modules
+            if self.core.model_fields[name].default is None
+        } | data
         for name, child in self.children.items():
             if name not in data and self.core.model_fields[name].is_required():
                 data[name] = child.default_data(env)
@@ -449,7 +458,8 @@ class Form[C: ConfigBase]:
     structural defaults. Only Expr nodes become expression envelopes. Ordinary
     strings, including $-prefixed strings, remain literal. Expr initial values
     remove static defaults in this form only; failed evaluation requires input
-    instead of falling back to core defaults. Module locks remove
+    instead of falling back to core defaults. Range endpoints authored as None
+    are also blank required input, never inherited 0/1 defaults. Module locks remove
     the ref branch and use single-value Literal fields in inline content. Optional extras adds an 'extras' section and requires
     a named lower(extras, cfg) callable returning the concrete core cfg type.
     Generated module input omits optional desc; conversion restores its

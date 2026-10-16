@@ -96,7 +96,7 @@ def test_recipe_rpc_read_and_noop_preserve_observer_busy_and_notification_policy
     tab = fixture.ctrl.new_tab("logical-module")
     try:
         owner = fixture.ctrl.cfg_resources.lookup(tab)
-        owner.write({("pulse", "kind"): "inline"})
+        owner.write({("pulse",): {"kind": "inline"}})
         version_key = f"tab:{tab}:cfg"
         version = fixture.state.version.get(version_key)
         selection = {"tab_id": tab, "path": ["pulse"], "action": "use_inline"}
