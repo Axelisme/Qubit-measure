@@ -1,6 +1,6 @@
 """Public acquisition classifies normalized IQ without depending on lab cores."""
 
-import sys
+import inspect
 
 import numpy as np
 import pytest
@@ -32,6 +32,7 @@ def test_acquire_threshold_warning_identifies_the_public_caller(stepped: bool) -
         ],
     )
     options = dict(threshold=1.0, ge_radius=0.5, progress=False)
+    call_lines: list[int] = []
     if stepped:
         program.acquire(soc, step_rounds=True, **options)
         with pytest.warns(
@@ -39,7 +40,7 @@ def test_acquire_threshold_warning_identifies_the_public_caller(stepped: bool) -
             match="^Both threshold and ge_radius are set, threshold will be applied and ge_radius will be ignored$",
         ) as recorded:
             for _ in range(2):
-                call_line = sys._getframe().f_lineno + 1
+                call_lines.append(inspect.stack()[0].lineno + 1)
                 program.finish_round()
         result = program.finish_acquire()
     else:
@@ -47,11 +48,12 @@ def test_acquire_threshold_warning_identifies_the_public_caller(stepped: bool) -
             UserWarning,
             match="^Both threshold and ge_radius are set, threshold will be applied and ge_radius will be ignored$",
         ) as recorded:
-            call_line = sys._getframe().f_lineno + 1
+            call_lines.extend([inspect.stack()[0].lineno + 1] * 2)
             result = program.acquire(soc, **options)
     assert len(recorded) == 2
     assert all(warning.filename == __file__ for warning in recorded)
-    assert all(warning.lineno == call_line for warning in recorded)
+    assert [warning.lineno for warning in recorded] == call_lines
+    assert result is not None
     np.testing.assert_array_equal(result[0], np.zeros((1, 2)))
 
 

@@ -1,6 +1,6 @@
 """Notebook backend diagnostics through its public presentation entries."""
 
-import sys
+import inspect
 from collections.abc import Callable
 
 import pytest
@@ -19,14 +19,16 @@ def test_non_widget_warning_identifies_the_presentation_caller(
     # A real non-widget canvas still fails at layout after the diagnostic.
     # Do not replace the canvas or accidentally add a new fallback policy.
     figure = Figure()
-    with set_liveplot_backend(JupyterBackend()):
-        with pytest.warns(
+    with (
+        set_liveplot_backend(JupyterBackend()),
+        pytest.warns(
             UserWarning,
             match="^Warning: The matplotlib backend should be set to 'widget' for live plotting\\.$",
-        ) as recorded:
-            with pytest.raises(AttributeError, match="layout"):
-                call_line = sys._getframe().f_lineno + 1
-                present(figure)
+        ) as recorded,
+    ):
+        call_line = inspect.stack()[0].lineno + 2
+        with pytest.raises(AttributeError, match="layout"):
+            present(figure)
     assert len(recorded) == 1
     assert recorded[0].filename == __file__
     assert recorded[0].lineno == call_line

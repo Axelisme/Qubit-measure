@@ -9,7 +9,7 @@ optimisation in step 2 cannot silently change results.
 
 from __future__ import annotations
 
-import sys
+import inspect
 
 import numpy as np
 import pytest
@@ -40,7 +40,7 @@ def test_rescale_complex_warning_identifies_the_caller_and_preserves_data() -> N
     with pytest.warns(
         UserWarning, match="^Rescale complex signals is not supported, do nothing$"
     ) as recorded:
-        call_line = sys._getframe().f_lineno + 1
+        call_line = inspect.stack()[0].lineno + 1
         result = rescale(signals)
     assert len(recorded) == 1
     assert recorded[0].filename == __file__

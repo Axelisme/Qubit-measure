@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import sys
+import inspect
 import threading
 from typing import Any, Literal, cast
 
@@ -90,7 +90,7 @@ def test_yoko_setup_warning_identifies_the_setup_caller() -> None:
             UserWarning,
             match=r"^YOKOGS200 output is off, did you forget to turn it on\?$",
         ) as recorded:
-            call_line = sys._getframe().f_lineno + 1
+            call_line = inspect.stack()[0].lineno + 1
             result = dev.setup(cfg, progress=False)
         assert len(recorded) == 1
         assert recorded[0].filename == __file__
