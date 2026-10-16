@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QFileDialog,
     QFormLayout,
     QLabel,
     QLineEdit,
@@ -425,6 +426,63 @@ class ComponentDriver:
             if index < len(path) - 1:
                 key_click(menu, Qt.Key.Key_Right)
             QApplication.processEvents()
+
+    def choose_file(self, opener: str, path: Path) -> None:
+        """Click opener, enter path in its modal Qt file chooser, and click Open.
+
+        The opener must synchronously open a non-native QFileDialog with Qt's
+        visible fileNameEdit. The caller supplies an existing file path (spaces
+        allowed). Missing/ambiguous widgets raise LookupError; a different modal
+        raises LookupError. Disabled/hidden/modal-blocked openers are no-ops.
+        A queued event supplies real input inside the modal loop; a 30-second
+        watchdog guards that delivery. On delivery failure Escape dismisses the
+        chooser before the exception returns. No dialog return value is patched.
+        """
+        button = self._find(opener, None)
+        if not self._can_interact(button):
+            return
+        errors: list[Exception] = []
+
+        def choose() -> None:
+            try:
+                # Deliver the chooser's already-posted activation/focus events
+                # before Ctrl+A can be interpreted by an unfocused file view.
+                QApplication.processEvents()
+                dialog = QApplication.activeModalWidget()
+                if not isinstance(dialog, QFileDialog):
+                    raise LookupError("No visible Qt file chooser")
+                chooser = ComponentDriver(dialog)
+                filename = chooser._find(None, "fileNameEdit", editable=True)
+                mouse_click(filename, filename.rect().center())
+                key_click(filename, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+                type_text(filename, str(path))
+                # Completion popups consume Enter and may replace the typed path.
+                if (popup := QApplication.activePopupWidget()) is not None:
+                    key_click(popup, Qt.Key.Key_Escape)
+                chooser.click("&Open")
+            except (LookupError, RuntimeError, ValueError) as error:
+                errors.append(error)
+                dismiss()
+
+        def dismiss() -> None:
+            if isinstance(dialog := QApplication.activeModalWidget(), QFileDialog):
+                key_click(dialog, Qt.Key.Key_Escape)
+
+        def timed_out() -> None:
+            errors.append(TimeoutError("File chooser input delivery did not finish"))
+            dismiss()
+
+        watchdog = QTimer()
+        watchdog.setSingleShot(True)
+        watchdog.timeout.connect(timed_out)
+        watchdog.start(30_000)
+        QTimer.singleShot(0, choose)
+        try:
+            self.click(opener)
+        finally:
+            watchdog.stop()
+        if errors:
+            raise errors[0]
 
     def enter_text(
         self,
