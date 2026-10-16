@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-17，T1 初值選源
+**Last updated:** 2026-10-17，T1 與 Rabi 初值選源
 
 # Measure domain support
 
@@ -17,6 +17,8 @@ helper 留在群組內 `_shared.py`。
 組合根注入 Registry 與 Library 新建選單。不再維護 builder、Seed wrapper 或角色 default 表。
 
 `ctx_helpers.t1_initial_time` 集中 T1 衍生初值的選源。它從固定 capture 讀普通 T1，tone 掃描先讀歷史 tone T1，只有缺值才下探普通 T1。無 capture 或所有候選 leaf 缺失／null 時使用 30 µs 時間尺度；已存無效值回 None，讓衍生必填欄位留空。來源與 alias／path 錯誤仍傳遞，不寫回校準。各 Form 明確指定等待或掃描所需倍率，自然等待不使用 tone T1。
+
+`rabi_initial_values.len_rabi_initial_values` 為兩種 Length Rabi 選擇相同的 pulse 來源與掃描上限。已有 x180 時保留 Slot 與 gain，以有效 pi_len 的四倍作上限；沒有 x180 時使用 gain=1 的 qub_probe Template 與 1 µs 上限。它只讀固定 capture 中的 validated Spec，跟隨 waveform key，但不 materialize、不讀 asset、不寫回校準。原始來源在 owner 驗證前被拒絕或轉型的值，不屬於此 typed capture 的可觀察輸入。
 
 `singleshot_shared.py` 從 AnalyzeRequest 的固定 Run ParameterContext 讀取分類、chi/kappa
 與可選分析校準。缺 capture 明示失敗；可選 leaf 缺少或 null 時交給 core 的既有預設。
