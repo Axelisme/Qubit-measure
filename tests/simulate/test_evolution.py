@@ -1,9 +1,8 @@
-"""State validation, basis conversion and integer propagator composition."""
+"""State validation and basis conversion."""
 
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose
-from scipy.linalg import expm
 
 GROUND = np.diag([1, 0]).astype(complex)
 PLUS = np.full((2, 2), 0.5, dtype=complex)
@@ -31,16 +30,3 @@ def test_invalid_density_fails_without_repair():
         DensityState(basis, np.diag([1.1, -0.1]).astype(complex))
     with pytest.raises(ValueError, match="trace"):
         DensityState(basis, 2 * GROUND)
-
-
-def test_binary_integer_power():
-    from zcu_tools.simulate.evolution import propagator_power
-
-    x = np.array([[0, 1], [1, 0]], dtype=complex)
-    u = np.asarray(expm(-0.012j * x), dtype=np.complex128)
-    assert_allclose(propagator_power(u, 0), np.eye(2))
-    assert_allclose(
-        propagator_power(u, 1000003), expm(-0.012j * x * 1000003), atol=2e-9
-    )
-    with pytest.raises(ValueError, match="nonnegative integer"):
-        propagator_power(u, -1)

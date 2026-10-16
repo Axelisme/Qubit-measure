@@ -26,5 +26,4 @@ from .secular import (
     SecularDrive,
     SecularModel,
 )
-from .solver import propagator_power
 from .state import Basis, DensityState, Populations, populations
