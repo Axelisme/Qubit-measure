@@ -547,3 +547,64 @@ def test_ref_selector_observation_keeps_affecting_ancestor_failure() -> None:
     )
     observed = form.read_logical_field(input, ("extras", "reference"), captured())
     assert observed.errors is not None and ("extras",) in observed.errors.messages
+
+
+def test_logical_metadata_keeps_structural_tags_distinct_from_real_names() -> None:
+    from typing import Annotated, Literal
+
+    from zcu_tools.cfg_model import Range
+    from zcu_tools.program.v2 import SweepCfg
+
+    class Ordinary(FormModel):
+        kind: str = "authored"
+        module: int = 7
+
+    class Flat(FormModel):
+        kind: Literal["flat"] = "flat"
+        amount: float = 1.0
+
+    class Ramp(FormModel):
+        kind: Literal["ramp"] = "ramp"
+        amount: float = 2.0
+
+    class Extras(FormModel):
+        ordinary: Ordinary = Ordinary()
+        shape: Annotated[Flat | Ramp, Field(discriminator="kind")] = Flat()
+
+    class WithSweep(ConfigBase):
+        sweep: SweepCfg
+
+    env = FormEnv()
+    form = adapter.Form(
+        WithSweep,
+        {"sweep": Range.between(1.0, 2.0, expts=3)},
+        extras=Extras,
+        lower=lambda _extras, cfg: cfg,
+    )
+    input = form.default_input(env)
+    sweep = form.read_logical_field(input, ("sweep",), env)
+    assert tuple(child.name for child in sweep.description.children) == (
+        "start",
+        "stop",
+        "n",
+    )
+    tag = form.read_logical_field(input, ("sweep", "kind"), env)
+    assert tag.description.target is not None and tag.description.target.hidden
+    ordinary = form.read_logical_field(input, ("extras", "ordinary"), env)
+    assert tuple(child.name for child in ordinary.description.children) == (
+        "kind",
+        "module",
+    )
+    kind = form.read_logical_field(input, ("extras", "ordinary", "kind"), env)
+    assert kind.value == "authored"
+    assert kind.description.target is not None and not kind.description.target.hidden
+    shape = form.read_logical_field(input, ("extras", "shape"), env)
+    assert shape.description.target is not None
+    assert shape.description.target.kind == "union"
+    assert not shape.description.target.selection_fixed
+    assert tuple(child.name for child in shape.description.children) == ("amount",)
+    branch_tag = form.read_logical_field(input, ("extras", "shape", "kind"), env)
+    assert (
+        branch_tag.description.target is not None
+        and branch_tag.description.target.hidden
+    )
