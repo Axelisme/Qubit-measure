@@ -28,9 +28,9 @@ description: 透過 measure-gui MCP 與使用者協作量測及校準。接收�
 
 選擇新建或重用 tab、再次呼叫同 adapter 的 recipe、保存不完整或清理工作頁時，讀 [Tab 生命週期](references/tab-strategy.md)。
 
-讀 recipe 的 adapter guide 使用 `recipe_guide(recipe)`。初始化模擬環境使用 `simulation_initialize`，切換可能斷開真實裝置，先核對授權。設定已連線裝置的工作值使用 `device_set_value(name, value, unit)`，unit 必須與 snapshot 相同。只有 FakeDevice unit=none 接受明確的 native。它只改 value，output、mode 與 rampstep 另用 RPC 明確設定。
+讀 recipe 的 adapter guide 使用 `recipe_guide(recipe)`。初始化模擬環境使用 `simulation_initialize`，切換可能斷開真實裝置，先核對授權。設定已連線裝置使用 `device_setup(name, cfg)`，cfg 是 partial Info patch，可同時改 value、output 與 rampstep。單位與欄位規則以 server instructions 為準。
 
-Setup 回覆先看 steps、native operation、before/after 與 verification。等待逾時不代表未執行，post-read 核對失敗也不抹掉已確認的 operation outcome。保留 op，用 wait 和完整 snapshot 接手。
+Setup 回覆先看 steps、native operation、requested 與 before/after。requested 是合併後的完整候選，不是驗證收據；simulation 回覆另有 verification。等待逾時不代表未執行，post-read 核對失敗也不抹掉已確認的 operation outcome。保留 op，用 wait 和完整 snapshot 接手。
 
 其他細部設定、保存、writeback 或排查使用 `rpc_list` → `rpc_describe` → `rpc_call`。直接查 adapter 時讀 `adapter.guide` 的 live schema。所有公開 RPC 都可用，不因已有 recipe 或共用工具而禁止直接呼叫。Raw RPC 不代為聚合結果、解碼 PNG 或完成共用分析的保存流程。
 
@@ -38,7 +38,7 @@ Recipe 首次呼叫最多等待 300 秒。Client deadline 必須超過 300 秒�
 
 Recipe、`tab_analyze` 與 `wait(execution)` 回傳同一摘要。先核對 `actual` 的量測條件、`analysis.primary/post` 的 estimates、details、warnings，以及全部 writeback candidates 與 destination。需要原始 expressions、完整 cfg publication、proposal 或分析診斷時，用 `status(execution, detail="full")` 讀當次已捕捉的內容。這個查詢不補讀目前 GUI，也不刷新 guard。全域 `status` 只列非終態 executions 與終態數量，保存已知 execution ID 以便後續查詢。
 
-保存結果看 `artifacts` 的 section、artifact name、完整 members 與各路徑 status/error。`reserved` 是預留目的地，只有 `saved` 證明該次已保存。`run_id` 取 Save report 的 confirmed 身分，未確認持久輸出時為 null。後續分析失敗不抹掉已確認的 raw 保存結果。當次回覆可附記憶體中的 image content，之後用 `tab.get_figure` 取 GUI 當下圖像，不保證是原圖。`status` 只讀 capture，不附 image content。Run 或分析 step 為 `unknown` 時，沒有 handle 也不能推斷未啟動，先核對現況，不自動重送。
+保存結果看 `artifacts` 的 section、artifact name、完整 members 與各路徑 status/error。`reserved` 是預留目的地，只有 `saved` 證明該次已保存。`run_id` 是已捕捉 Save report 的原 Run 身分，全部輸出失敗也保留；沒有捕捉到 report 時才為 null。保存是否成功看各路徑 status/error。Readonly tab snapshot 的 confirmed run_id 在持久輸出成功前仍為 null。後續分析失敗不抹掉已確認的 raw 保存結果。當次回覆可附記憶體中的 image content，之後用 `tab.get_figure` 取 GUI 當下圖像，不保證是原圖。`status` 只讀 capture，不附 image content。Run 或分析 step 為 `unknown` 時，沒有 handle 也不能推斷未啟動，先核對現況，不自動重送。
 
 `finish_early` 對 recipe 停止採集，有可用結果就保存 raw 並繼續分析。`cancel` 放棄後續分析與保存，優先於 finish_early；已啟動且不可取消的保存仍回報真實結果。控制回覆只確認請求及 GUI 回應，用 `wait` 或 `status` 核對終態、錯誤與實際保存路徑，不只看 GUI 是否停止。
 
