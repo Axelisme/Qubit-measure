@@ -74,7 +74,7 @@ def test_round_draws_reproduce_without_mutating_inputs_or_global_rng(sampler):
     populations = np.array([[[0.25, 0.75], [1.0, 0.0]]])
     original = populations.copy()
     inputs = channels()
-    global_state = np.random.get_state()
+    global_state = np.random.get_state(legacy=True)
     kwargs = dict(reps=17, seed=73, acquire_sequence=2, round_index=3)
     first = sampler(populations, inputs, **kwargs)
     second = sampler(populations, inputs, **kwargs)
@@ -87,7 +87,7 @@ def test_round_draws_reproduce_without_mutating_inputs_or_global_rng(sampler):
     else:
         pytest.fail("sampler returned inconsistent result types")
     np.testing.assert_array_equal(populations, original)
-    after = np.random.get_state()
+    after = np.random.get_state(legacy=True)
     assert global_state[0] == after[0]
     np.testing.assert_array_equal(global_state[1], after[1])
     assert global_state[2:] == after[2:]
