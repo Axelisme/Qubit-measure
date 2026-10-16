@@ -39,7 +39,7 @@ def dump_spectrums(
 def load_spectrums(path: str) -> dict[str, SpectrumResult]:
     spectrums = dict[str, SpectrumResult]()
     with h5.File(path, "r") as f:
-        for name in f:
+        for name in f.keys():
             grp = f[name]
             assert isinstance(grp, h5.Group)
             spect_grp = grp["spectrum"]

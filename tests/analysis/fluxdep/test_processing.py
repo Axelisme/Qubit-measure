@@ -14,8 +14,12 @@ from zcu_tools.analysis.fluxdep import (
 )
 
 
-@pytest.mark.parametrize("invalid_call", [cast2real_and_norm], ids=["cast2real_and_norm"])
-def test_cast2real_and_norm_rejects_positional_phase_option(invalid_call: Callable[..., object]) -> None:
+@pytest.mark.parametrize(
+    "invalid_call", [cast2real_and_norm], ids=["cast2real_and_norm"]
+)
+def test_cast2real_and_norm_rejects_positional_phase_option(
+    invalid_call: Callable[..., object],
+) -> None:
     signals = np.ones((3, 5), dtype=np.complex128)
     with pytest.raises(TypeError, match="positional"):
         invalid_call(signals, False, 1, "gaussian")

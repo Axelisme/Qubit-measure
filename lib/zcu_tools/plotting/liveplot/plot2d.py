@@ -104,9 +104,10 @@ class LivePlot2DwithLine(BaseSegmentLivePlot, Generic[Seg2D_T]):
         line_axis: Literal[0, 1],
         num_lines: int = ...,
         title: str | None = ...,
-        uniform: Literal[True] = ...,
         segment2d_kwargs: dict[str, Any] | None = ...,
         segment1d_line_kwargs: list[dict[str, Any]] | None = ...,
+        *,
+        uniform: Literal[True] = ...,
         **kwargs,
     ) -> None: ...
 
@@ -118,9 +119,10 @@ class LivePlot2DwithLine(BaseSegmentLivePlot, Generic[Seg2D_T]):
         line_axis: Literal[0, 1],
         num_lines: int = ...,
         title: str | None = ...,
-        uniform: Literal[False] = ...,
         segment2d_kwargs: dict[str, Any] | None = ...,
         segment1d_line_kwargs: list[dict[str, Any]] | None = ...,
+        *,
+        uniform: Literal[False] = ...,
         **kwargs,
     ) -> None: ...
 

@@ -12,7 +12,9 @@ from zcu_tools.device import BaseDevice, BaseDeviceInfo, FakeDevice, FakeDeviceI
 
 
 @pytest.mark.parametrize("invalid_call", [FakeDevice], ids=["FakeDevice"])
-def test_fake_device_rejects_positional_fast_mode(invalid_call: Callable[..., object]) -> None:
+def test_fake_device_rejects_positional_fast_mode(
+    invalid_call: Callable[..., object],
+) -> None:
     with pytest.raises(TypeError, match="positional"):
         invalid_call(True)
 

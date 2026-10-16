@@ -1071,7 +1071,9 @@ def _all_log_refs(f: h5py.File) -> list[Any]:
     refs: list[Any] = []
     if "Data" in f:
         refs.append(f)
-    log_ns = sorted(int(k[4:]) for k in f if k.startswith("Log_") and k[4:].isdigit())
+    log_ns = sorted(
+        int(k[4:]) for k in f.keys() if k.startswith("Log_") and k[4:].isdigit()
+    )
     for n in log_ns:
         g = f["Log_%d" % n]
         if isinstance(g, h5py.Group) and "Data" in g:
