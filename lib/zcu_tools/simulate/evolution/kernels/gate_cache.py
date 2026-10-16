@@ -180,6 +180,9 @@ class GateCacheKernel:
             ]
         )
         keys = np.empty(len(rows), dtype=dtype)
+        if not len(rows):
+            # A table without tones has no tone columns to index.
+            return keys
         keys["level"] = table.level[rows]
         keys["port"] = table.tone_port[rows, 0]
         identities = np.array(
