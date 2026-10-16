@@ -383,6 +383,7 @@ def test_recipe_nested_and_extra_selectors_require_explicit_ancestor_copies() ->
             )}, waveforms={"const": ConstWaveformCfg(length=0.1)}),
         },
     ))
+    library_before = library.module_spec("Q1.pulses.pi").model_dump()
     resource = TabFormResource(
         lambda _ctx: Form(ModuleCore, {}, extras=extras, lower=lower),
         capture=lambda _aliases: TabFormSources(FormEnv(library=library)),
@@ -403,7 +404,9 @@ def test_recipe_nested_and_extra_selectors_require_explicit_ancestor_copies() ->
     assert ancestor.value.selector_path == ("pulse",)
     assert resource.input.data == before
     resource.select_recipe_module(("pulse",), "use_inline")
-    assert resource.read_recipe_field(("pulse", "waveform")).selector.key == "Q1.waveforms.const"
+    child = resource.read_recipe_field(("pulse", "waveform"))
+    assert child.selector is not None
+    assert child.selector.key == "Q1.waveforms.const"
     resource.select_recipe_module(("pulse", "waveform"), "use_inline")
     resource.edit_recipe_fields([LogicalEdit(("pulse", "waveform", "length"), 0.08)])
     assert resource.read_recipe_field(("pulse", "waveform", "length")).value == 0.08
@@ -412,4 +415,4 @@ def test_recipe_nested_and_extra_selectors_require_explicit_ancestor_copies() ->
     resource.select_recipe_module(("extras", "reference"), "use_inline")
     resource.edit_recipe_fields([LogicalEdit(("extras", "reference", "freq"), 125.0)])
     assert resource.read_recipe_field(("extras", "reference", "freq")).value == 125.0
-    assert library.module_spec("Q1.pulses.pi").freq == 100.0
+    assert library.module_spec("Q1.pulses.pi").model_dump() == library_before
