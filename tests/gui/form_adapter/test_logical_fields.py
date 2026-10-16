@@ -436,3 +436,43 @@ def test_missing_null_and_failed_scalar_values_have_distinct_statuses() -> None:
     assert explicit.value_status == "available" and explicit.input_present and explicit.value is None
     failed = form.read_logical_field(input, ("extras", "invalid"), FormEnv())
     assert failed.value_status == "unavailable" and failed.input_present and failed.value is None
+
+
+def test_locked_selector_rejects_library_and_disable_without_changing_input() -> None:
+    form = adapter.Form(LogicalCfg, {"drive": Template("pulse", lock={"freq": 7.0})})
+    form.bind_templates({"pulse": TemplateDef(PulseSpec, "Locked pulse", {"ch": 1, "nqz": 1, "freq": 1.0, "gain": 0.2, "waveform.style": "const", "waveform.length": 0.1})}, adapter="synthetic")
+    env = captured()
+    input = form.default_input(env)
+    before = input.to_json()
+    observed = form.read_logical_field(input, ("drive",), env)
+    assert observed.description.target is not None and observed.description.target.selection_fixed
+    with pytest.raises(adapter.LogicalEditError) as failure:
+        form.prepare_library_selection(input, ("drive",), "Q.pulses.drive", env)
+    assert failure.value.reason_code == "module_selector"
+    assert not form.prepare_inline_copy(input, ("drive",), env).changed
+    assert input.to_json() == before
+
+
+def test_ordinary_union_partial_write_keeps_core_defaults_and_initial_active_structure() -> None:
+    from typing import Annotated, Literal
+
+    class Flat(FormModel):
+        kind: Literal["flat"] = "flat"
+        length: float = 1.0
+
+    class Ramp(FormModel):
+        kind: Literal["ramp"] = "ramp"
+        start: float = 0.0
+        stop: float = 1.0
+
+    class Extras(FormModel):
+        shape: Annotated[Flat | Ramp, Field(discriminator="kind")]
+
+    form = adapter.Form(LogicalCfg, {}, extras=Extras, lower=lambda extras, cfg: cfg)
+    input = FormInput(form.model, {"extras": {"shape": {"kind": "flat", "length": 9.0}}})
+    env = FormEnv()
+    candidate = form.prepare_logical_edits(input, [adapter.LogicalEdit(("extras", "shape"), {"kind": "ramp", "start": 3.0})], env)
+    assert object_at(candidate.input.data, ("extras", "shape")) == {"kind": "ramp", "start": 3.0, "stop": 1.0}
+    with pytest.raises(adapter.LogicalEditError) as failure:
+        form.prepare_logical_edits(input, [adapter.LogicalEdit(("reps",), 8), adapter.LogicalEdit(("extras", "shape", "start"), 3)], env)
+    assert failure.value.reason_code == "form_path" and failure.value.edit_index == 1
