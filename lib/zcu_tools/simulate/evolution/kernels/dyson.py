@@ -351,10 +351,17 @@ def _population_transfer(
 class DysonKernel:
     """C5 weak one-tone constant kernel; engine owns known-state eligibility.
 
-    Guards use r<=0.1, r2<=0.05 and the initial-density second-order population
-    change <=0.02. Prepared modes are shared across frequency, gain, duration,
-    phase and port. Preparation never reads a density. apply accepts arbitrary
-    densities, not only diagonal or stationary states.
+    Guards use r<=min(0.1, 0.25*budget**(1/3)), r2<=0.05 and the initial-density
+    second-order population change <=min(0.02, (1.5*budget)**(2/3)). The r limit
+    follows far-detuned third-order coherence error proportional to r**3; its
+    coefficient is calibrated on a synthetic scan with margin (r<=0.025 at
+    budget=1e-3). The population limit follows the two-level resonant third-order
+    coherence error approximately (2/3)*abs(delta_p)**(3/2) <= budget (0.0131 at
+    budget=1e-3). Neither threshold is a rigorous multilevel or coherent-input
+    remainder bound. Guard failures follow the engine's reduced RWA/T6 path.
+    Prepared modes are shared across frequency, gain, duration, phase and port.
+    Preparation never reads a density. apply accepts arbitrary densities, not
+    only diagonal or stationary states.
     """
 
     name = "dyson"
@@ -377,7 +384,7 @@ class DysonKernel:
                 selected = original[table.tone_port[rows[original], 0] == port]
                 params = parameters(table, rows[selected])
                 one, two = drive_ratios(model, int(port), params)
-                eligible = (one <= 0.1) & (two <= 0.05)
+                eligible = (one <= min(0.1, 0.25 * budget ** (1 / 3))) & (two <= 0.05)
                 accepted[selected] = False
                 selected, params = selected[eligible], params[eligible]
                 if not len(selected):
@@ -394,7 +401,7 @@ class DysonKernel:
                 transfer = _population_transfer(
                     entry, int(port), params, initial, budget
                 )
-                accepted[selected] = transfer <= 0.02
+                accepted[selected] = transfer <= min(0.02, (1.5 * budget) ** (2 / 3))
         return accepted
 
     def prepare_keys(
