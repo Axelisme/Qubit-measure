@@ -1,11 +1,11 @@
 """The component driver's public seam uses only rendered widgets and input events."""
 
 from collections.abc import Generator
-from inspect import signature
 from pathlib import Path
 
 import pytest
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QImage
 from PyQt6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -176,6 +176,10 @@ def test_only_visible_legend_text_is_observed(surface, qapp) -> None:
     qapp.processEvents()
     driver = _user_input.ComponentDriver(surface)
     assert driver.legends().texts == ("Measured signal",)
+    axes.set_visible(False)
+    canvas.draw()
+    assert driver.legends().texts == ()
+    axes.set_visible(True)
     canvas.hide()
     assert driver.legends().texts == ()
 
@@ -232,9 +236,6 @@ def test_blocking_menu_selection_uses_visible_nested_captions(surface, qapp) -> 
     button.clicked.connect(open_menu)
     qapp.processEvents()
     driver = _user_input.ComponentDriver(surface)
-    assert callable(getattr(driver, "select_menu", None)), (
-        "ComponentDriver must deliver a caption path inside a blocking QMenu"
-    )
     driver.select_menu("Open menu", ("Group", "Open"))
     assert selected == ["Open"]
     assert driver.status().text == "Selected nested Open"
@@ -383,9 +384,6 @@ def test_plot_axes_and_curves_observe_rendered_artists_only(surface, qapp) -> No
     canvas.draw()
     qapp.processEvents()
     driver = _user_input.ComponentDriver(surface)
-    assert callable(getattr(driver, "plots", None)), (
-        "Driver must observe raw plot axes and visible curves"
-    )
     observed = driver.plots().axes
     assert len(observed) == 1
     assert observed[0].xlabel == "Frequency (MHz)"
@@ -422,9 +420,8 @@ def test_file_chooser_enters_existing_path_through_real_modal_events(
 
     button.clicked.connect(choose)
     driver = _user_input.ComponentDriver(surface)
-    assert callable(getattr(driver, "choose_file", None)), (
-        "Driver must select files using real modal input"
-    )
+    hidden_copy = QPushButton("Choose file", surface)
+    hidden_copy.hide()
     driver.choose_file("Choose file", native)
     assert driver.dialogs() == ()
     assert driver.status().text == f"Selected {native}"
@@ -488,25 +485,121 @@ def test_file_chooser_saves_png_before_real_selection_closes_modal(
     native.write_bytes(b"synthetic native file")
     button = QPushButton("Choose with evidence")
     surface.setCentralWidget(button)
+    # This external chooser is deliberately larger than the owner. A grab of the
+    # owner after acceptance cannot satisfy the image-size assertions below.
+    dialog = QFileDialog(surface, "Open native data", str(tmp_path), "Data (*.h5)")
+    dialog.setOption(QFileDialog.Option.DontUseNativeDialog)
+    dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+    dialog.setFixedSize(900, 600)
     qapp.processEvents()
 
     def choose() -> None:
-        filename, _ = QFileDialog.getOpenFileName(
-            surface,
-            "Open native data",
-            str(tmp_path),
-            "Data (*.h5)",
-            options=QFileDialog.Option.DontUseNativeDialog,
-        )
-        surface.statusBar().showMessage(f"Selected {filename}")
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            surface.statusBar().showMessage(f"Selected {dialog.selectedFiles()[0]}")
 
     button.clicked.connect(choose)
     driver = _user_input.ComponentDriver(surface)
-    assert "evidence" in signature(driver.choose_file).parameters, (
-        "File chooser must capture its visible modal before selection"
-    )
+    owner_shot = driver.screenshot(tmp_path / "owner.png")
     shot = tmp_path / "evidence" / "chooser.png"
     driver.choose_file("Choose with evidence", native, evidence=shot)
     assert shot.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    image = QImage(str(shot))
+    assert image.size() == dialog.size() * dialog.devicePixelRatioF()
+    assert image.size() != QImage(str(owner_shot)).size()
     assert driver.dialogs() == ()
     assert driver.status().text == f"Selected {native}"
+
+
+@pytest.mark.parametrize("field_visible", [True, False], ids=["field-visible", "value-visible"])
+def test_tree_snapshot_redacts_cells_outside_horizontal_viewport(
+    tree_surface, qapp, field_visible: bool
+) -> None:
+    from PyQt6.QtWidgets import QAbstractItemView
+
+    window, tree = tree_surface
+    tree.header().setStretchLastSection(False)
+    tree.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+    for column in range(3):
+        tree.setColumnWidth(column, 900)
+    root = tree.topLevelItem(0)
+    root.setExpanded(True)
+    tree.horizontalScrollBar().setValue(0 if field_visible else 900)
+    qapp.processEvents()
+    driver = _user_input.ComponentDriver(window)
+    rows = driver.visible().tree_rows
+    if field_visible:
+        assert [(r.path, r.columns) for r in rows] == [
+            (("general",), ("general", "", "")),
+            (("general", "peak"), ("peak", "", "")),
+        ]
+    else:
+        assert [(r.path, r.columns) for r in rows] == [
+            (("",), ("", "general", "")),
+            (("", ""), ("", "1.25", "")),
+        ]
+        with pytest.raises(LookupError, match="general.*0 candidates"):
+            driver.expand_tree(("general",), object_name="parameters")
+        # Even an exact redacted path cannot reach an offscreen expansion control.
+        root.setExpanded(False)
+        driver.expand_tree(("",), object_name="parameters")
+        assert not driver.visible().tree_rows[0].expanded
+
+
+@pytest.mark.parametrize("bad_path_kind", ["missing", "directory"])
+@pytest.mark.parametrize("opener_state", ["enabled", "disabled", "hidden"])
+def test_file_chooser_rejects_bad_path_before_opener_side_effects(
+    surface, tmp_path: Path, qapp, bad_path_kind: str, opener_state: str
+) -> None:
+    path = tmp_path / bad_path_kind
+    expected: type[Exception] = FileNotFoundError
+    if bad_path_kind == "directory":
+        path.mkdir()
+        expected = ValueError
+    button = QPushButton("Safe synthetic opener")
+    surface.setCentralWidget(button)
+    clicked: list[bool] = []
+    # A click has no modal side effect, so the old implementation cannot hang.
+    button.clicked.connect(lambda: clicked.append(True))
+    button.setEnabled(opener_state != "disabled")
+    button.setVisible(opener_state != "hidden")
+    qapp.processEvents()
+    driver = _user_input.ComponentDriver(surface)
+    errors: list[Exception] = []
+    try:
+        driver.choose_file("Safe synthetic opener", path)
+    except Exception as error:
+        errors.append(error)
+    assert len(errors) == 1 and type(errors[0]) is expected
+    assert clicked == []
+    assert driver.dialogs() == ()
+
+
+@pytest.mark.parametrize("opener_state", ["disabled", "hidden", "clipped"])
+def test_file_chooser_valid_path_unavailable_opener_is_noop(
+    surface, tmp_path: Path, qapp, opener_state: str
+) -> None:
+    native = tmp_path / "native.h5"
+    native.write_bytes(b"synthetic")
+    scroll = QScrollArea()
+    content = QWidget()
+    content.setFixedSize(500, 1200)
+    button = QPushButton("Unavailable chooser", content)
+    button.move(10, 1000 if opener_state == "clipped" else 10)
+    button.setEnabled(opener_state != "disabled")
+    button.setVisible(opener_state != "hidden")
+    clicked: list[bool] = []
+    button.clicked.connect(lambda: clicked.append(True))
+    scroll.setWidget(content)
+    surface.setCentralWidget(scroll)
+    qapp.processEvents()
+    driver = _user_input.ComponentDriver(surface)
+    shot = tmp_path / "must-not-exist.png"
+    errors: list[Exception] = []
+    try:
+        driver.choose_file("Unavailable chooser", native, evidence=shot)
+    except Exception as error:
+        errors.append(error)
+    assert errors == []
+    assert clicked == []
+    assert driver.dialogs() == ()
+    assert not shot.exists()
