@@ -3,6 +3,7 @@
 from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
+from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
 from zcu_lab.v2.singleshot.ac_stark.core import AcStarkCfg
 
 
@@ -45,7 +46,7 @@ def make_form(ctx: FormContext) -> Form[AcStarkCfg]:
             "g_center": Expr("$qubit.ext.readout_cal.g_center"),
             "e_center": Expr("$qubit.ext.readout_cal.e_center"),
             "radius": Expr("$qubit.ext.readout_cal.radius"),
-            "relax_delay": 5.5,
+            "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 2,
             "initial_delay": Hidden(),

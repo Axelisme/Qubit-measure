@@ -1,7 +1,9 @@
 """Experiment starting values from fixed captures and injected templates."""
 
-from zcu_tools.cfg_model import Expr, Hidden, Slot, Template
+from zcu_tools.cfg_model import Hidden, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
+
+from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
 
 from .core import AllXYCfg
 
@@ -24,7 +26,7 @@ def make_form(ctx: FormContext) -> Form[AllXYCfg]:
                 else Template("readout"),
                 "I_pulse": Hidden(),
             },
-            "relax_delay": Expr("5 * $qubit.t1"),
+            "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "initial_delay": Hidden(),
             "reps": 1000,
             "rounds": 100,
