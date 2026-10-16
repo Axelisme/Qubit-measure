@@ -45,7 +45,7 @@ def kernel_case(request: pytest.FixtureRequest) -> KernelCase:
     count = len(gains)
     table = SegmentTable(
         np.arange(count),
-        np.arange(count) * 1.3,
+        np.arange(count, dtype=np.float64) * 1.3,
         np.array([48, 48, 35.7, 48, 19.3, 8.3, 9.1, 24.1]),
         np.array([[0], [0], [1], [0], [0], [1], [0], [0]]),
         np.ones(count, dtype=np.int64),
@@ -78,9 +78,13 @@ def test_shaped_accuracy(kernel_case: KernelCase) -> None:
     rows = np.arange(len(case.states), dtype=np.int64)
     assert case.kernel.guard(case.table, rows, case.source, 1e-3).all()
     keys, representatives, inverse = np.unique(
-        case.kernel.prepare_keys(case.table, rows), return_index=True, return_inverse=True
+        case.kernel.prepare_keys(case.table, rows),
+        return_index=True,
+        return_inverse=True,
     )
-    prepared = case.kernel.prepare(keys, case.table, rows[representatives], case.source, 1e-3)
+    prepared = case.kernel.prepare(
+        keys, case.table, rows[representatives], case.source, 1e-3
+    )
     assert prepared.nbytes > 0
     actual = case.states.copy()
     case.kernel.apply(prepared, inverse, case.table, rows, actual, 1e-3)
@@ -88,7 +92,9 @@ def test_shaped_accuracy(kernel_case: KernelCase) -> None:
     assert_budget(actual, expected, 1e-2)
 
 
-def test_keys_share_shapes_phases_and_ports_but_separate_bands(kernel_case: KernelCase) -> None:
+def test_keys_share_shapes_phases_and_ports_but_separate_bands(
+    kernel_case: KernelCase,
+) -> None:
     case = kernel_case
     rows = np.arange(len(case.states), dtype=np.int64)
     table = replace(
