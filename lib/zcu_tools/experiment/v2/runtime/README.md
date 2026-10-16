@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-10-08，移除舊 Autofluxdep 與 overnight 入口
+**Last updated:** 2026-10-17，runtime 測試按公開契約分組
 
 `runtime/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
@@ -162,11 +162,16 @@ with Schedule(cfg, signals_buffer) as sched:
 
 ## 測試
 
-`tests/experiment/v2/runtime/test_flow.py` 覆蓋 typed env、SignalBuffer、ProgramBuilder、
-host scan/repeat/batch、ProgramBuilder retry、`ScheduleOutcome` 與 decimated acquire。
+`tests/experiment/v2/runtime/test_program_builder.py` 覆蓋 ProgramBuilder 建構、cfg 投影與 sweep。
+`test_program_acquire.py` 覆蓋 integrated／decimated acquire、program cache、progress 與 raw conversion；
+`test_program_retry.py` 覆蓋 retry、stop checker、failed attempt 後 stop 不再 retry 與 `ScheduleOutcome`。
+`test_schedule.py` 覆蓋 typed env 與 host scan/repeat/batch；`test_schedule_buffers.py` 覆蓋
+root buffer 註冊、child buffer 同步與 shape validation。`test_signal_buffer_flush.py` 覆蓋
+SignalBuffer 寫入通知、manual update 與 flush。
 `test_schedule_lifecycle.py` 覆蓋 context 使用邊界、shared stop token、host body 中斷的
-partial/NaN 保存、其他 exception 傳播與 repeat stop。兩個檔案重用同一個 test cfg builder，
-案例仍經公開 Schedule／buffer／StopSignal 接縫驗證，不直接測 outcome 的內部 helper。
+partial/NaN 保存、其他 exception 傳播與 repeat stop。Runtime 案例重用 `_flow_cfg.py` 的
+cfg builder，共用 recording fake 放在 `_flow_fakes.py`，由最近的 conftest 還原每個案例的
+mutable fake state。案例仍經公開 Schedule／buffer／StopSignal 接縫驗證，不直接測 outcome 的內部 helper。
 `test_result_tree.py` 覆蓋 ResultTree node set、child buffer、subscription、flush 與
 ordinary SignalBuffer regression。單一實驗模組只保留 runtime
 整合型檢查，不再為每個資料型 experiment 建獨立 runner 測試。
