@@ -24,27 +24,11 @@ description: 透過 measure-gui MCP 與使用者協作量測及校準。接收�
 
 ## 選擇 MCP 入口
 
-日常量測先選對應 recipe，讀其現行 schema。分析既有資料先用 `tab_analyze`，互動判讀用 `tab_interact` 取得狀態、圖與可用命令。Client 延後顯示工具時，先搜尋對應 recipe 或共用入口。這是操作指引，不是日常／排查權限模式。
+工具的選擇、參數、回覆欄位、等待、控制與保存語意以 measure-gui server instructions 和各工具描述為準，本 skill 不重述。
 
 選擇新建或重用 tab、再次呼叫同 adapter 的 recipe、保存不完整或清理工作頁時，讀 [Tab 生命週期](references/tab-strategy.md)。
 
-讀 recipe 的 adapter guide 使用 `recipe_guide(recipe)`。初始化模擬環境使用 `simulation_initialize`，切換可能斷開真實裝置，先核對授權。設定已連線裝置使用 `device_setup(name, cfg)`，cfg 是 partial Info patch，可同時改 value、output 與 rampstep。單位與欄位規則以 server instructions 為準。
-
-Setup 回覆先看 steps、native operation、requested 與 before/after。requested 是合併後的完整候選，不是驗證收據；simulation 回覆另有 verification。等待逾時不代表未執行，post-read 核對失敗也不抹掉已確認的 operation outcome。保留 op，用 wait 和完整 snapshot 接手。
-
-其他細部設定、保存、writeback 或排查使用 `rpc_list` → `rpc_describe` → `rpc_call`。直接查 adapter 時讀 `adapter.guide` 的 live schema。所有公開 RPC 都可用，不因已有 recipe 或共用工具而禁止直接呼叫。Raw RPC 不代為聚合結果、解碼 PNG 或完成共用分析的保存流程。
-
-Recipe 首次呼叫最多等待 300 秒。Client deadline 必須超過 300 秒並留傳輸餘裕。首次等待期間，同一 stdio 連線的另一請求不保證立即處理。回傳仍執行中的 execution 後，用 `status(execution)` 或 `wait(execution)` 追蹤整個流程。`wait(op)` 只等待單個 GUI operation。逾時只停止等待，不取消量測，也不是重跑依據。
-
-Recipe、`tab_analyze` 與 `wait(execution)` 回傳同一摘要。先核對 `actual` 的量測條件、`analysis.primary/post` 的 estimates、details、warnings，以及全部 writeback candidates 與 destination。需要原始 expressions、完整 cfg publication、proposal 或分析診斷時，用 `status(execution, detail="full")` 讀當次已捕捉的內容。這個查詢不補讀目前 GUI，也不刷新 guard。全域 `status` 只列非終態 executions 與終態數量，保存已知 execution ID 以便後續查詢。
-
-保存結果看 `artifacts` 的 section、artifact name、完整 members 與各路徑 status/error。`reserved` 是預留目的地，只有 `saved` 證明該次已保存。`run_id` 是已捕捉 Save report 的原 Run 身分，全部輸出失敗也保留；沒有捕捉到 report 時才為 null。保存是否成功看各路徑 status/error。Readonly tab snapshot 的 confirmed run_id 在持久輸出成功前仍為 null。後續分析失敗不抹掉已確認的 raw 保存結果。當次回覆可附記憶體中的 image content，之後用 `tab.get_figure` 取 GUI 當下圖像，不保證是原圖。`status` 只讀 capture，不附 image content。Run 或分析 step 為 `unknown` 時，沒有 handle 也不能推斷未啟動，先核對現況，不自動重送。
-
-`finish_early` 對 recipe 停止採集，有可用結果就保存 raw 並繼續分析。`cancel` 放棄後續分析與保存，優先於 finish_early；已啟動且不可取消的保存仍回報真實結果。控制回覆只確認請求及 GUI 回應，用 `wait` 或 `status` 核對終態、錯誤與實際保存路徑，不只看 GUI 是否停止。
-
-寫入前明確讀取相關完整 snapshot。Tab 用 `tab.snapshot`，context 用 `context.snapshot`，SoC 用 `soc.info(include_cfg=true)`，裝置用 `device.snapshot`。Cfg 寫入與 Run 前另讀 `tab.get_cfg` 的目前 input、values 與 errors；這些入口不使用 cfg_ref。摘要與 `status` 不替代這些 guard 觀察。寫回用 `apply_writeback(tab, items=None)`。items 是 preview 的穩定 target_name，省略寫全部，空陣列寫零項，不看 GUI 勾選。先核對提案與當前目的地。未知、重複或跨 stage 同名會在任何寫入前被拒絕；寫入後核對 confirmed completed 與 failed stage 的不確定性。這個工具不回答 recipe。候選內容的修改走 RPC。
-
-查 cfg 值用 `tab.get_cfg`，回覆只有 input、values 與 errors，不下載 schema。查欄位能力用 `tab.describe_cfg(path=[])` 讀 root，再用回覆中的完整 model-field path 逐層查詢。每次只回目標與直接 children，options 列 label、value 與 commands，不帶 fields。寫入選項的整個 value，不從 union 猜分支。攤平顯示不省略 path 裡的 module。RecipeTab.read_field 每次送一次 fresh describe RPC，沒有上次 observation 快照；局部 errors 只有 Form preview，lowered cfg 錯誤另看 get_cfg 或 Run admission。固定 capture 到明確 Reset 才更新。
+寫入前明確讀取相關完整 snapshot。Tab 用 `tab.snapshot`，context 用 `context.snapshot`，SoC 用 `soc.info(include_cfg=true)`，裝置用 `device.snapshot`。Cfg 寫入與 Run 前另讀 `tab.get_cfg` 的目前 input、values 與 errors。摘要與 `status` 不替代這些 guard 觀察。
 
 來源記錄帶有 `cloned_from` 的沿用值，在用於量測或校準前至少快速驗證一次。按該值的用途選驗證，例如用短掃描核對頻率，或用 Rabi 核對 pulse 候選。讀 [Tab 生命週期的沿用值驗證](references/tab-strategy.md#沿用值驗證) 決定證據與下一步。驗證仍受當次硬體、資料及資源授權限制。
 
@@ -78,7 +62,7 @@ Python 分析使用 `uv run --directory <repo> --no-sync -- <command>`，沿用 
 
 按目前工具契約執行明確的讀取與變更。步驟已確定、無需中途判讀時批次操作；下一步取決於新證據時停在判斷點。未確認並行安排前，不讓多個執行者同時修改同一 live resource。
 
-操作逾時、斷線或 stale 時，先讀現況再決定。Operation handle 綁定 GUI 連線世代，重連後用 status 重新取得；execution ID 只屬於目前 MCP server session，不是持久恢復 token。沒有完成回覆時不自動重送。無法判斷是否已執行時記錄不確定性並求助。
+操作逾時、斷線或 stale 時，先讀現況再決定。沒有完成回覆時不自動重送。無法判斷是否已執行時記錄不確定性並求助。
 
 結果回來後檢查原疑問是否減少、物理圖像如何改變，以及下一階段是否已具備條件。需要保存或 writeback 時，核對目標及實際結果，不把一次成功回覆當成所有產物已保存。
 
