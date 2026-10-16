@@ -15,6 +15,48 @@ from zcu_tools.simulate.evolution import EvolutionLibrary
 from tests.resources._ftf_data import ftf_document
 
 
+def test_replay_rejects_archive_from_pre_quantized_phase_backend(
+    tmp_path: Path,
+) -> None:
+    from zcu_tools.experiment.ftf import replay_round
+    from zcu_tools.resources.simulation_replay import (
+        read_replay,
+        replay_paths,
+        save_replay,
+    )
+
+    archive = tmp_path / "current"
+    env = ftf(parse_ftf(ftf_document()), private_replay=archive)
+    try:
+        program = ModularProgramV2(
+            env.soccfg,
+            ProgramV2Cfg(reps=1, rounds=1),
+            modules=[
+                PulseReadoutCfg(
+                    gen_ch=0,
+                    ro_ch=0,
+                    nqz=1,
+                    freq=6000.0,
+                    gain=0.1,
+                    waveform=ConstWaveformCfg(length=0.016),
+                    ro_length=0.016,
+                ).build("ro")
+            ],
+        )
+        program.acquire(env.soc, progress=False)
+    finally:
+        env.devices.close_all_devices()
+    saved = read_replay(replay_paths(archive)[0])
+    old_versions = tuple(
+        (name, "ftf-direct-v1" if name == "backend" else value)
+        for name, value in saved.acquire.versions
+    )
+    legacy = saved.acquire.model_copy(update={"versions": old_versions})
+    path = save_replay(tmp_path / "legacy", legacy, saved.round.snapshot, 0)
+    with pytest.raises(ValueError, match="version mismatch"):
+        replay_round(path)
+
+
 def test_reload_selected_round_without_prior_acquires_or_live_devices(
     tmp_path: Path,
 ) -> None:
