@@ -241,3 +241,111 @@ def test_option_command_rejection_is_atomic(path: tuple[str, ...], name: str) ->
         resource.run_command(("pulse",), "to_inline")
     assert resource.input.data == before
     assert notifications == ["changed"]
+
+
+def test_recipe_ref_read_is_detached_and_does_not_authorize_descendant_write() -> None:
+    resource = TabFormResource(
+        lambda _ctx: Form(ModuleCore, {}),
+        capture=lambda _aliases: TabFormSources(module_env(100.0)),
+        mutation_allowed=lambda: True,
+    )
+    assert hasattr(resource, "select_recipe_module"), "Missing logical selector command"
+    resource.select_recipe_module(("pulse",), "use_library", key="Q1.pulses.pi")
+    before = resource.input.data
+    base = resource.editor_state.base
+    notifications: list[str] = []
+    resource.subscribe(lambda: notifications.append("changed"))
+    observed = resource.read_recipe_field(("pulse", "waveform", "length"))
+    assert observed.value_status == "available"
+    assert observed.value == 0.1
+    assert observed.input_present is False
+    assert observed.input is None
+    assert observed.readonly is True
+    assert observed.selector is None
+    assert observed.source is not None
+    assert observed.source.selector_path == ("pulse",)
+    assert observed.source.key == "Q1.pulses.pi"
+    assert observed.source.spec_path == ("waveform", "length")
+    assert resource.input.data == before
+    assert resource.editor_state.base == base
+    assert notifications == []
+    from zcu_tools.gui.form_adapter import LogicalEdit, LogicalEditError
+
+    with pytest.raises(LogicalEditError) as rejected:
+        resource.edit_recipe_fields([
+            LogicalEdit(("amount",), 2.0),
+            LogicalEdit(("pulse", "freq"), 125.0),
+        ])
+    assert rejected.value.reason_code == "ref_ancestor"
+    assert rejected.value.edit_index == 1
+    assert resource.input.data == before
+    assert notifications == []
+
+
+def test_recipe_copy_and_batch_install_once_without_replacing_base() -> None:
+    resource = TabFormResource(
+        lambda _ctx: Form(ModuleCore, {}),
+        capture=lambda _aliases: TabFormSources(module_env(100.0)),
+        mutation_allowed=lambda: True,
+    )
+    assert hasattr(resource, "edit_recipe_fields"), "Missing logical batch command"
+    from zcu_tools.gui.form_adapter import LogicalEdit
+
+    base = resource.editor_state.base
+    resource.select_recipe_module(("pulse",), "use_library", key="Q1.pulses.pi")
+    assert resource.select_recipe_module(("pulse",), "use_inline") is True
+    notifications: list[str] = []
+    state_notifications: list[str] = []
+    resource.subscribe(lambda: notifications.append("changed"))
+    resource.editor_state.subscribe(lambda: state_notifications.append("changed"))
+    assert resource.select_recipe_module(("pulse",), "use_inline") is False
+    assert resource.edit_recipe_fields([
+        LogicalEdit(("amount",), 2.0),
+        LogicalEdit(("pulse", "freq"), {"expr": "125 + 5"}),
+    ]) is True
+    assert resource.read_recipe_field(("pulse", "freq")).value == 130.0
+    assert resource.read_recipe_field(("pulse", "freq")).input == {"expr": "125 + 5"}
+    assert resource.editor_state.base == base
+    assert notifications == ["changed"]
+    assert state_notifications == ["changed"]
+    resource.edit_recipe_fields([LogicalEdit(("amount",), {"expr": "1 / 0"})])
+    invalid = resource.read_recipe_field(("amount",))
+    assert invalid.value_status == "unavailable"
+    assert invalid.errors is not None
+    assert invalid.input == {"expr": "1 / 0"}
+
+
+def test_recipe_inline_noop_still_takes_busy_notification_and_lifetime_guards() -> None:
+    allowed = True
+    resource = TabFormResource(
+        lambda _ctx: Form(ModuleCore, {}),
+        capture=lambda _aliases: TabFormSources(module_env(100.0)),
+        mutation_allowed=lambda: allowed,
+    )
+    assert hasattr(resource, "select_recipe_module"), "Missing guarded selector command"
+    resource.select_recipe_module(("pulse",), "use_library", key="Q1.pulses.pi")
+    resource.select_recipe_module(("pulse",), "use_inline")
+    before = resource.input.data
+    allowed = False
+    with pytest.raises(CfgPreconditionError) as busy:
+        resource.select_recipe_module(("pulse",), "use_inline")
+    assert busy.value.reason is CfgPreconditionReason.MUTATION_BLOCKED
+    assert resource.read_recipe_field(("pulse", "freq")).value == 100.0
+    allowed = True
+    failures: list[CfgPreconditionReason] = []
+
+    def during_notification() -> None:
+        assert resource.read_recipe_field(("pulse", "freq")).value == 100.0
+        try:
+            resource.select_recipe_module(("pulse",), "use_inline")
+        except CfgPreconditionError as error:
+            failures.append(error.reason)
+
+    resource.editor_state.subscribe(during_notification)
+    resource.write({("amount",): 2.0})
+    assert failures == [CfgPreconditionReason.REENTRANT_MUTATION]
+    assert resource.input.data["pulse"] == before["pulse"]
+    resource.revoke()
+    with pytest.raises(CfgPreconditionError) as gone:
+        resource.select_recipe_module(("pulse",), "use_inline")
+    assert gone.value.reason is CfgPreconditionReason.RESOURCE_GONE
