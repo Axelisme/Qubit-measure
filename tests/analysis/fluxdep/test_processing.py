@@ -25,6 +25,33 @@ def test_cast2real_and_norm_rejects_positional_phase_option(
         invalid_call(signals, False, 1, "gaussian")
 
 
+@pytest.mark.parametrize(
+    "invalid_call", [cast2real_and_norm], ids=["cast2real_and_norm"]
+)
+@pytest.mark.parametrize("use_phase", [True, False], ids=["true", "false"])
+def test_cast2real_and_norm_rejects_short_positional_boolean(
+    invalid_call: Callable[..., object], use_phase: bool
+) -> None:
+    signals = np.tile(np.linspace(1.0, 3.0, 64), (3, 1)).astype(np.complex128)
+    with pytest.raises(TypeError, match="positional"):
+        invalid_call(signals, use_phase)
+
+
+def test_cast2real_and_norm_named_options_preserve_numeric_results() -> None:
+    signals = np.full((3, 64), 3.0 + 4.0j, dtype=np.complex128)
+    default = cast2real_and_norm(signals)
+    explicit = cast2real_and_norm(
+        signals, use_phase=True, sigma=1, smooth_method="wavelet"
+    )
+    np.testing.assert_allclose(default, 0.0, atol=1e-12)
+    np.testing.assert_allclose(default, explicit)
+    magnitude = cast2real_and_norm(
+        signals, use_phase=False, sigma=1, smooth_method="gaussian"
+    )
+    np.testing.assert_allclose(magnitude, 5.0, atol=1e-12)
+    np.testing.assert_array_equal(signals, 3.0 + 4.0j)
+
+
 def test_cast2real_and_norm_keeps_constant_rows_finite() -> None:
     signals = np.ones((3, 5), dtype=np.complex128)
     real = cast2real_and_norm(signals)

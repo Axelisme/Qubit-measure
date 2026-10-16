@@ -1,6 +1,30 @@
+from collections.abc import Callable
+
 import numpy as np
+import pytest
 from zcu_tools.analysis.fitting.base import cosfunc, decaycos
 from zcu_tools.analysis.fitting.rabi import fit_rabi
+
+
+@pytest.mark.parametrize("invalid_call", [fit_rabi], ids=["fit_rabi"])
+@pytest.mark.parametrize("decay", [True, False], ids=["true", "false"])
+def test_fit_rabi_rejects_short_positional_boolean(
+    invalid_call: Callable[..., object], decay: bool
+) -> None:
+    xs = np.linspace(0, 4, 400)
+    signals = cosfunc(xs, 0.0, 1.0, 0.5, 0.0)
+    with pytest.raises(TypeError, match="positional"):
+        invalid_call(xs, signals, decay)
+
+
+def test_fit_rabi_default_matches_explicit_no_decay() -> None:
+    xs = np.linspace(0, 4, 400)
+    signals = cosfunc(xs, 0.0, 1.0, 0.5, 0.0)
+    default = fit_rabi(xs, signals)
+    explicit = fit_rabi(xs, signals, decay=False, init_phase=None)
+    np.testing.assert_allclose(default[:6], explicit[:6])
+    np.testing.assert_allclose(default[6], signals, atol=1e-7)
+    np.testing.assert_allclose(default[6], explicit[6])
 
 
 def test_fit_rabi_no_decay():
