@@ -11,6 +11,7 @@ from zcu_tools.core.simulation import (
     RoundStatistics,
 )
 from zcu_tools.device import DeviceManager
+from zcu_tools.experiment.ftf import FTFTemplatePlan
 from zcu_tools.simulate.evolution import Engine
 
 from tests.experiment._ftf_templates import (
@@ -100,6 +101,141 @@ def test_template_engine_paths_match_strict_secular_reference(
         np.testing.assert_allclose(
             actual.densities[p], state.reshape(2, 2), atol=1e-5, rtol=0
         )
+
+
+def continuous_flux_reference(plan: FTFTemplatePlan, point: int):
+    """Strict fixed-coordinate integration with independently rotated grid baths."""
+    waveform = plan.batch.flux_waveform
+    assert waveform is not None, "FTF planning must supply continuous flux samples"
+    first, last = waveform.offsets[point : point + 2]
+    times = waveform.time_ns[first:last]
+    flux = waveform.flux[first:last]
+    schedule = plan.batch.flux
+    first, last = schedule.offsets[point : point + 2]
+    bath_times = schedule.start_ns[first:last]
+    levels = schedule.level[first:last]
+    expansion = plan.source.flux_expansion()
+    dc = plan.source.model((0, 0, 0))
+    vectors = dc.eigenvectors
+    state = vectors @ plan.source.initial_density @ vectors.conj().T
+    end = plan.batch.end_ns[point]
+    boundaries = np.unique(
+        np.r_[
+            0.0,
+            end,
+            times,
+            bath_times,
+            [t.start_ns[point] for t in plan.batch.tracks],
+            [t.start_ns[point] + t.duration_ns[point] for t in plan.batch.tracks],
+        ]
+    )
+    boundaries = boundaries[(boundaries >= 0) & (boundaries <= end)]
+
+    def rhs(time, flat):
+        rho = flat.reshape(state.shape)
+        value = [np.interp(time, times, flux[:, loop]) for loop in range(3)]
+        h = expansion.static.copy()
+        for term in expansion.terms:
+            angle = np.pi * value[term.loop] * (2 if "2pi" in term.kind else 1)
+            h += (
+                np.cos(angle) if term.kind.startswith("cos") else np.sin(angle)
+            ) * term.matrix
+        for track in plan.batch.tracks:
+            if (
+                track.start_ns[point]
+                <= time
+                < track.start_ns[point] + track.duration_ns[point]
+            ):
+                drive = next(d for d in dc.drives if d.name == track.port)
+                z = track.amplitude[point] * np.exp(
+                    1j
+                    * (
+                        2 * np.pi * track.frequency_ghz[point] * time
+                        + track.phase_rad[point]
+                    )
+                )
+                h += (
+                    vectors
+                    @ (z.real * drive.in_phase_ghz + z.imag * drive.quadrature_ghz)
+                    @ vectors.conj().T
+                )
+        bath_rho = bath.eigenvectors.conj().T @ rho @ bath.eigenvectors
+        loss = bath.rates_per_ns.sum(axis=0)
+        decay = (loss[:, None] + loss[None, :]) / 2 + bath.dephasing_per_ns
+        dissipation = -decay * bath_rho
+        dissipation[np.diag_indices(len(rho))] += (
+            bath.rates_per_ns @ bath_rho.diagonal()
+        )
+        return (
+            -2j * np.pi * (h @ rho - rho @ h)
+            + bath.eigenvectors @ dissipation @ bath.eigenvectors.conj().T
+        ).ravel()
+
+    for left, right in zip(boundaries[:-1], boundaries[1:], strict=True):
+        index = np.searchsorted(bath_times, (left + right) / 2, side="right") - 1
+        bath = plan.source.model(tuple(int(v) for v in levels[index]))
+        solution = solve_ivp(
+            rhs,
+            (left, right),
+            state.ravel(),
+            method="DOP853",
+            rtol=2e-12,
+            atol=2e-14,
+            max_step=0.05,
+        )
+        assert solution.success, solution.message
+        state = solution.y[:, -1].reshape(state.shape)
+    return vectors.conj().T @ state @ vectors
+
+
+def test_template_overlapping_flux_drive_and_idle_match_continuous_reference() -> None:
+    import zcu_tools.experiment.ftf as ftf
+
+    resource = settings()
+    resource = resource.model_copy(
+        update={
+            "flux_sources": (
+                resource.flux_sources[0].model_copy(update={"tau_ns": 4.0}),
+            )
+        }
+    )
+    driven = template(tones=1)
+    drive = replace(
+        driven.events[0], start_us=np.zeros(2), duration_us=np.full(2, 0.006)
+    )
+    flux = replace(
+        drive,
+        gen_ch=1,
+        duration_us=np.full(2, 0.004),
+        frequency_mhz=np.zeros(2),
+        phase_deg=np.zeros(2),
+        gain=np.full(2, 0.2),
+    )
+    engine = Engine(1, 1_000_000)
+    try:
+        for controls, path in (((drive, flux), "flux_dop853"), ((flux,), "t4")):
+            plan = ftf.plan_template(
+                resource,
+                snapshot(),
+                replace(driven, events=(*controls, driven.events[-1])),
+            )
+            assert plan.batch.flux_waveform is not None, (
+                "FTF planning must supply continuous flux samples"
+            )
+            actual = engine.evolve(
+                plan.source, (plan.batch,), budget=1e-3, cancel=Event()
+            )
+            assert actual.paths.segments_by_kernel[path] > 1
+            if path == "t4":
+                assert actual.paths.segments_by_kernel.get("flux_dop853", 0) == 0
+            expected = np.stack([continuous_flux_reference(plan, p) for p in range(2)])
+            error = np.abs(actual.densities - expected)
+            print(
+                f"{path}: population error={np.max(np.abs(np.diagonal(actual.densities - expected, axis1=1, axis2=2))):.6g}, low-four error={np.max(error):.6g}"
+            )
+            np.testing.assert_allclose(actual.densities, expected, atol=1e-3, rtol=0)
+    finally:
+        engine.close()
 
 
 def test_readout_ignores_controls_after_start_and_rejects_multiple_pulses() -> None:
