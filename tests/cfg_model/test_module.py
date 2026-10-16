@@ -12,6 +12,8 @@ from zcu_tools.cfg_model import (
     ConstWaveformCfg,
     GaussWaveformCfg,
     ModuleCfgFactory,
+    MuxReadoutCfg,
+    MuxReadoutSpec,
     NoneResetCfg,
     PulseCfg,
     PulseReadoutCfg,
@@ -21,7 +23,7 @@ from zcu_tools.cfg_model import (
     TwoPulseResetCfg,
 )
 
-from ._support import Resolver
+from ._support import Resolver, mux_raw
 
 
 def _make_cfg(length=0.2, pre=0.0, post=0.0):
@@ -520,3 +522,29 @@ def test_mux_numeric_cfg_preserves_order_and_list_serialization(count: int):
     assert (cfg.pre_delay, cfg.post_delay, cfg.trig_offset) == (0.0, 0.0, 0.0)
     cfg.tones[0].freq = -100.0
     assert cfg_model.ModuleCfgFactory.from_raw(raw).to_dict()["tones"] == raw["tones"]
+
+
+def test_mux_labels_default_and_round_trip_through_spec_and_materialization() -> None:
+    spec = MuxReadoutSpec.model_validate(mux_raw(3))
+    assert [tone.get("label") for tone in spec.model_dump()["tones"]] == ["", "", ""]
+
+    authored = spec.model_dump()
+    for tone, label in zip(authored["tones"], ["共振腔", "", "共振腔"], strict=True):
+        tone["label"] = label
+    spec = MuxReadoutSpec.model_validate(authored)
+    restored = MuxReadoutSpec.model_validate_json(spec.to_json())
+    resolver = Resolver()
+    resolver.modules["MG.readout.rf"] = restored
+    cfg = ModuleCfgFactory.from_raw(
+        "MG.readout.rf", context=CfgValidationContext(modules=resolver)
+    )
+    assert isinstance(cfg, MuxReadoutCfg)
+    assert cfg.to_dict() == restored.to_dict()
+    assert [tone.label for tone in cfg.tones] == ["共振腔", "", "共振腔"]
+    assert [tone.freq for tone in cfg.tones] == [6020.0, 5980.0, 5940.0]
+    assert MuxReadoutCfg.model_validate_json(cfg.to_json()).to_dict() == cfg.to_dict()
+
+    for invalid in (None, 1, True):
+        authored["tones"][0]["label"] = invalid
+        with pytest.raises(ValidationError, match="label"):
+            MuxReadoutSpec.model_validate(authored)
