@@ -68,16 +68,19 @@ def _sweep_model(node: FormNode, info: FieldInfo) -> type[SweepRange]:
     """Generate endpoint requirements and float precision for one core sweep.
 
     node is the authored sweep value; info is its core field declaration.
-    Only Expr endpoints lose the inherited LinRange default. FieldMeta decimals
-    decorates start/stop, never n or the outer model. Literal or unauthored
-    endpoints keep ordinary defaults. No expression is evaluated, and neither
+    Expr and None endpoints lose the inherited LinRange default. None means
+    blank required input. FieldMeta decimals decorates start/stop, never n or
+    the outer model. Literal or unauthored endpoints keep ordinary defaults.
+    No expression is evaluated, and neither
     the core declaration nor the shared SweepRange class is modified.
     """
     meta = get_field_meta(info)
     decimals = meta.decimals if meta is not None else None
     fields: dict[str, FieldInfo] = {}
     for name in ("start", "stop"):
-        required = isinstance(node, Range) and isinstance(getattr(node, name), Expr)
+        required = isinstance(node, Range) and (
+            getattr(node, name) is None or isinstance(getattr(node, name), Expr)
+        )
         if not required and decimals is None:
             continue
         endpoint = deepcopy(SweepRange.model_fields[name])
@@ -432,7 +435,8 @@ class Form[C: ConfigBase]:
     structural defaults. Only Expr nodes become expression envelopes. Ordinary
     strings, including $-prefixed strings, remain literal. Expr initial values
     remove static defaults in this form only; failed evaluation requires input
-    instead of falling back to core defaults. Module locks remove
+    instead of falling back to core defaults. Range endpoints authored as None
+    are also blank required input, never inherited 0/1 defaults. Module locks remove
     the ref branch and use single-value Literal fields in inline content. Optional extras adds an 'extras' section and requires
     a named lower(extras, cfg) callable returning the concrete core cfg type.
     Generated module input omits optional desc; conversion restores its
