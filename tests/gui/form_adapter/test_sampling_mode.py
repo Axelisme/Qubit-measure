@@ -87,6 +87,43 @@ def test_step_projection_preserves_authored_input(
     }
 
 
+@pytest.mark.parametrize("center", [False, True], ids=["range", "center"])
+@pytest.mark.parametrize("descending", [False, True], ids=["ascending", "descending"])
+def test_large_offset_step_count_survives_effective_projection(center, descending):
+    start, stop, step, actual_stop = (
+        (1000000000.5, 1000000000.0, -0.3, 1000000000.2)
+        if descending
+        else (1000000000.0, 1000000000.5, 0.3, 1000000000.3)
+    )
+    env = FormEnv()
+    form, state = step_state(start, stop)
+    if center:
+        convert(state, "start", "Switch to Center / Span")
+    state.write({("sweep", "step"): step}, env)
+    authored = state.input.to_json()
+    preview = state.preview(env)
+    assert preview.errors is None, "A two-point Step sweep must remain valid"
+    coordinate = "center" if center else "stop"
+    assert preview.values[("sweep", coordinate)] == pytest.approx(
+        (start + actual_stop) / 2 if center else actual_stop, rel=0, abs=2e-7
+    )
+    result = state.result(env)
+    assert not isinstance(result, FormErrors)
+    sweep = getattr(result, "sweep")
+    try:
+        count = sweep.n
+        cfg = form.to_cfg(result, env)
+    except ValueError as error:
+        pytest.fail(f"Validated two-point Step sweep must lower successfully: {error}")
+    assert count == 2
+    assert not isinstance(cfg, FormErrors)
+    assert cfg.sweep.expts == count
+    assert cfg.sweep.start == pytest.approx(start, rel=0, abs=2e-7)
+    assert cfg.sweep.stop == pytest.approx(actual_stop, rel=0, abs=2e-7)
+    assert cfg.sweep.step == step
+    assert state.input.to_json() == authored
+
+
 @pytest.mark.parametrize("step", [0, -0.1, 2, {"expr": "1 / 0"}])
 def test_invalid_step_draft_rejects_result_and_atomic_conversion(step: JsonValue):
     _, state = step_state()
