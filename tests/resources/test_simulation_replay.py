@@ -70,3 +70,35 @@ def test_replay_rejects_changed_saved_content(tmp_path: Path) -> None:
     damaged.write_bytes(b"{}")
     with pytest.raises(ValueError, match="integrity"):
         read_replay(damaged)
+
+
+def test_replay_round_trips_legacy_acquire_without_templates(tmp_path: Path) -> None:
+    from zcu_tools.resources.simulation_replay import (
+        ReplayAcquire,
+        read_replay,
+        save_replay,
+    )
+
+    request = AcquireRequest(
+        mode="integrated",
+        loop_dims=(3,),
+        avg_level=0,
+        readouts=(ReadoutWindow(0, 0, 4, 100.0, (0.02,)),),
+        controls=((), (), ()),
+        root_seed=5,
+        sequence=8,
+        rng_version="test-rng",
+    )
+    acquire = ReplayAcquire(
+        settings=parse_ftf(ftf_document()),
+        request=request,
+        versions=(("backend", "test-v1"),),
+    )
+    snapshot = EnvironmentSnapshot("test-v1", "detached")
+    path = save_replay(tmp_path, acquire, snapshot, 2)
+    restored = read_replay(path)
+    assert restored.acquire == acquire
+    assert restored.acquire.request == request
+    assert restored.acquire.request.templates == ()
+    assert restored.round.snapshot == snapshot
+    assert restored.round.index == 2

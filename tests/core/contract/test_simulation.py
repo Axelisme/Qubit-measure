@@ -58,6 +58,7 @@ def template_request():
         point_names=("flux", "frequency"),
         reps=5,
         templates=(template, other),
+        controls=(),
         readouts=(
             simulation.ReadoutWindow(
                 channel=4,
