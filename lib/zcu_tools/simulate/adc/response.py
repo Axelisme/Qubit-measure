@@ -5,6 +5,7 @@ from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 
 from .model import ReadoutModel, RealArray
+from .readout_batch import ConditionalSums, ReadoutBatch
 from .request import ConditionalResponse, ReadoutPulse, SampleGrid
 
 
@@ -36,6 +37,26 @@ class ConditionalReadout:
                 for f in detuning
             ]
         )
+
+    def responses(self, batch: ReadoutBatch) -> ConditionalSums:
+        """Return noiseless per-shot sums for each content/read/initial state.
+
+        batch supplies the DC model, finite pulses and grids in ns/GHz/radians.
+        Its model defines the state order; no flux tail or overlapping controls
+        enter this calculation. Cache each distinct (model identity, pulses,
+        grids) response once. Constant pulses use the closed-form matrix
+        exponential; other envelopes use the existing DOP853 moment ODE.
+        ConditionalSums.sums has shape (contents, reads, states, 2), after
+        demodulation/gain/phase/offset. Traces have shape
+        (contents, reads, states, samples, 2) only if batch.include_traces;
+        otherwise traces is None. No initial-state or noise draw occurs.
+        Inputs are not mutated; populations are never clipped or normalized.
+        Raise ValueError for incompatible grids/sample counts or invalid
+        callbacks; RuntimeError for solver failure or invalid final populations.
+        The batched solver is not implemented yet and currently raises
+        NotImplementedError. The existing single-grid response is unchanged.
+        """
+        raise NotImplementedError("batched conditional readout is not implemented")
 
     def response(
         self, pulses: tuple[ReadoutPulse, ...], grid: SampleGrid
