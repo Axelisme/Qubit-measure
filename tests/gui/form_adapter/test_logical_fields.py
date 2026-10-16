@@ -600,7 +600,7 @@ def test_logical_metadata_keeps_structural_tags_distinct_from_real_names() -> No
     assert kind.description.target is not None and not kind.description.target.hidden
     shape = form.read_logical_field(input, ("extras", "shape"), env)
     assert shape.description.target is not None
-    assert shape.description.target.kind == "union"
+    assert shape.description.target.kind == "model"
     assert not shape.description.target.selection_fixed
     assert tuple(child.name for child in shape.description.children) == ("amount",)
     branch_tag = form.read_logical_field(input, ("extras", "shape", "kind"), env)
