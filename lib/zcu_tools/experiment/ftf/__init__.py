@@ -7,4 +7,5 @@ inputs for independent author diagnostics, not normal GUI/MCP calibration truth.
 from .database import FTFBuildPlan, build_database
 from .point import FTFPointPlan, plan_point
 from .replay import replay_round
-from .runtime import FTFNumericUse, FTFSource, ftf
+from .runtime import FTFAcquire, FTFNumericUse, FTFSource, ftf
+from .template import FTFTemplatePlan, plan_template

@@ -21,6 +21,9 @@ from ._envelope import sample_values
 from ._validation import integers, owned, shape
 from .secular import FluxSchedule, ModelSource
 
+# Replay identity of the segment engine numerical algorithms, independent of records.
+SEGMENT_NUMERIC_VERSION = "segment-engine-v1"
+
 
 @dataclass(frozen=True)
 class EnvelopeSpec:
@@ -249,7 +252,7 @@ class Cancelled(Exception):
 
 
 class Engine:
-    """Segment engine with one persistent threading pool and prepare-payload LRU.
+    """Segment engine with a per-call threading pool and persistent prepare LRU.
 
     workers: positive sole parallel width; kernels remain single-threaded.
     cache_bytes: nonnegative resident-array byte limit, not a process RAM cap.
@@ -262,7 +265,8 @@ class Engine:
     parameters and absolute DC flux. Kernel keys include row flux levels.
     Cache namespaces also include the error budget, so stricter requests cannot
     reuse looser preparations. Calls on one instance serialize; close is
-    idempotent and waits for any active acquire before releasing the pool.
+    idempotent and waits for active work before clearing the cache. No worker
+    resource survives an evolve call.
     """
 
     def __init__(
@@ -273,7 +277,7 @@ class Engine:
         kernels: Sequence[Kernel] | None = None,
         chunks_per_worker: int = 6,
     ) -> None:
-        """Create the pool and cache; reject invalid sizes or duplicate names."""
+        """Create the prepare cache; reject invalid sizes or duplicate kernel names."""
         from ._schedule import PrepareCache
         from .kernels import REGISTRY
 
@@ -289,8 +293,7 @@ class Engine:
         self._chunks = workers * chunks_per_worker
         self._lock = Lock()
         self._closed = False
-        self._pool = Parallel(n_jobs=workers, backend="threading")
-        self._pool.__enter__()
+        self._workers = workers
 
     def evolve(
         self,
@@ -331,15 +334,15 @@ class Engine:
             geometry = plan(source, batches)
             dispatch = classify(geometry, self._kernels, source, budget)
             schedule = Schedule(geometry, dispatch, source, budget, cancel)
-            states = schedule.run(self._kernels, self._cache, self._pool, self._chunks)
+            with Parallel(n_jobs=self._workers, backend="threading") as pool:
+                states = schedule.run(self._kernels, self._cache, pool, self._chunks)
             if cancel.is_set():
                 raise Cancelled()
             return EvolutionResult(geometry.points, states, dispatch.diagnostics)
 
     def close(self) -> None:
-        """Wait for active work, release the worker pool/cache; safe to repeat."""
+        """Wait for active work, clear the cache and reject later evolve calls; idempotent."""
         with self._lock:
             if not self._closed:
                 self._closed = True
-                self._pool.__exit__(None, None, None)
                 self._cache.clear()

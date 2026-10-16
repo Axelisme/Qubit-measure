@@ -28,7 +28,7 @@ class SimulationProvenance:
             version string, retained as private replay metadata. The binding
             imposes no format or version compatibility check.
         rng_version: Binding-generated private RNG/seed-derivation version,
-            currently "PCG64/SeedSequence-v1/numpy-<version>". Replay requires
+            currently "PCG64/SeedSequence-v2/numpy-<version>". Replay requires
             compatible RNG/library versions as well as the private inputs.
 
     backend_version and rng_version are not normal GUI/MCP metadata. Publishing
@@ -58,7 +58,7 @@ class SimulationBinding:
         root_seed: Nonnegative integer supplied through seed or generated once
             by NumPy SeedSequence when seed is None. Private replay entropy.
         rng_version: Private RNG/derivation version string, currently
-            "PCG64/SeedSequence-v1/numpy-<version>".
+            "PCG64/SeedSequence-v2/numpy-<version>".
         provenance: SimulationProvenance for this binding. Only its identifier
             is intended for public Run metadata.
         last_request: Most recently installed AcquireRequest, or None before any
@@ -105,7 +105,7 @@ class SimulationBinding:
         if not isinstance(entropy, int):
             raise TypeError("root seed entropy must be an integer")
         self.root_seed = entropy
-        self.rng_version = f"PCG64/SeedSequence-v1/numpy-{np.__version__}"
+        self.rng_version = f"PCG64/SeedSequence-v2/numpy-{np.__version__}"
         self.provenance = SimulationProvenance(
             uuid4().hex, backend_version, self.rng_version
         )

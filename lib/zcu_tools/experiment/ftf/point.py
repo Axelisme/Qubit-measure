@@ -14,7 +14,6 @@ from zcu_tools.simulate.evolution import (
     Basis,
     ControlPulse,
     ControlSequence,
-    DriveSource,
     Envelope,
     NumericModel,
     quantize_ns,
@@ -22,6 +21,8 @@ from zcu_tools.simulate.evolution import (
 from zcu_tools.simulate.ftf import FluxDynamics, JointModel, Resonator
 from zcu_tools.simulate.lines import FilteredFlux, FluxLine
 
+from .numeric import dc_flux as _dc_flux
+from .numeric import drive_sources as _sources
 from .numeric import joint_parameters
 from .numeric import resonators as numeric_resonators
 
@@ -66,25 +67,6 @@ def _control(event: PulseEvent, name: str) -> ControlPulse:
     )
 
 
-def _dc_flux(
-    settings: FTFSettings, snapshot: EnvironmentSnapshot
-) -> NDArray[np.float64]:
-    values = dict(snapshot.values)
-    result = np.array(settings.dc_mapping.offset)
-    for source in settings.devices:
-        if (
-            source.name not in values
-            or not np.isfinite(values[source.name])
-            or not source.limits[0] <= values[source.name] <= source.limits[1]
-        ):
-            raise ValueError(
-                f"devices.{source.name}: missing/nonfinite/out-of-limits round value"
-            )
-    for column in settings.dc_mapping.columns:
-        result += np.array(column.coefficients) * values[column.source]
-    return result
-
-
 def _controls(settings: FTFSettings, timeline: PointTimeline) -> ControlSequence:
     wiring = {
         source.gen_ch: source.name
@@ -98,26 +80,6 @@ def _controls(settings: FTFSettings, timeline: PointTimeline) -> ControlSequence
             raise ValueError(f"unbound FTF control generator {event.gen_ch}")
         pulses.append(_control(event, wiring[event.gen_ch]))
     return ControlSequence(tuple(pulses))
-
-
-def _sources(settings: FTFSettings, joint: JointModel) -> tuple[DriveSource, ...]:
-    zero = np.zeros_like(joint.hamiltonian(joint.dc_flux))
-    sources = [DriveSource(source.name, zero) for source in settings.flux_sources]
-    for source in settings.microwave_sources:
-        coefficients = tuple(
-            complex(real, imag) for real, imag in source.coefficients_ghz_per_gain
-        )
-        # Re[c*z] = Re(c)*Re(z)-Im(c)*Im(z); n itself is Hermitian.
-        x = sum(
-            (c.real * joint.charge_operator(i) for i, c in enumerate(coefficients)),
-            zero.copy(),
-        )
-        y = sum(
-            (-c.imag * joint.charge_operator(i) for i, c in enumerate(coefficients)),
-            zero.copy(),
-        )
-        sources.append(DriveSource(source.name, x, y))
-    return tuple(sources)
 
 
 def _readout_event(settings: FTFSettings, timeline: PointTimeline) -> PulseEvent:

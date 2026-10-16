@@ -7,6 +7,7 @@ records and tools here; submodule layout is not a second integration interface.
 from .batch import CPUReference, PlateauFamily
 from .controls import ControlPulse, ControlSequence, Envelope, PhaseEvent, quantize_ns
 from .engine import (
+    SEGMENT_NUMERIC_VERSION,
     Cancelled,
     DriveTrack,
     Engine,
