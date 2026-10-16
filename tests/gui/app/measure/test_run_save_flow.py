@@ -37,9 +37,10 @@ class PlottedSavingAdapter(SavingAdapter):
         self, req: RunRequest, cfg: SavingCfg, *, context: RunContext
     ) -> RunRecord[SavingCfg, SavingResult]:
         record = super().run(req, cfg, context=context)
+        context.plots.subplots("signal")
 
         def draw(figure: Figure) -> None:
-            axes = figure.subplots()
+            axes = figure.axes[0]
             axes.plot(record.result.frequency, record.result.signal.real, label="Signal")
             axes.legend()
 
