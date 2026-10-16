@@ -418,7 +418,7 @@ def smooth_signal_nd(
         return cast(
             NDArray[Any], gaussian_filter(signals, sigma=sigma, axes=tuple(axes))
         )
-    elif method == "wavelet":
+    if method == "wavelet":
         out = np.asarray(signals)
         for axis in _normalize_axes(axes, out.ndim):
             out = wavelet_denoise1d(
@@ -432,8 +432,7 @@ def smooth_signal_nd(
                 threshold_mode=threshold_mode,
             )
         return out
-    else:
-        raise ValueError(f"Invalid smoothing method: {method}")
+    raise ValueError(f"Invalid smoothing method: {method}")
 
 
 def calculate_noise(signals: NDArray[T_dtype]) -> tuple[float, NDArray[T_dtype]]:

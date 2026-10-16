@@ -333,7 +333,7 @@ class SingleShotMixin(TypedAcquireMixin):
             for i, ch_shot in enumerate(self.shots):
                 d_reps[i][..., 0] = ch_shot
             return self._average_buf(d_reps, length_norm=False)
-        elif ge_radius is not None:
+        if ge_radius is not None:
             d_reps = [np.zeros_like(d) for d in acc_buf]
             if g_center is None or e_center is None:
                 raise ValueError(
@@ -345,13 +345,12 @@ class SingleShotMixin(TypedAcquireMixin):
             for i, ch_shot in enumerate(self.shots):
                 d_reps[i] = ch_shot
             return self._average_buf(d_reps, length_norm=False)
-        else:
-            d_reps = acc_buf
-            return self._average_buf(
-                d_reps,
-                length_norm=True,
-                remove_offset=self.acquire_params["remove_offset"],
-            )
+        d_reps = acc_buf
+        return self._average_buf(
+            d_reps,
+            length_norm=True,
+            remove_offset=self.acquire_params["remove_offset"],
+        )
 
     def _apply_classification(
         self,
@@ -476,12 +475,10 @@ class RoundHookMixin(TypedAcquireMixin):
         for i in range(n_ro_chs):
             self._inc_sum_state[i] += rounds_buf[-1][i]
 
-        mean_data = cast(
+        return cast(
             list[NDArray[np.float64]],
             [d / self._inc_sum_count for d in self._inc_sum_state],
         )
-
-        return mean_data
 
     def _inc_summarize_decimated(
         self, rounds_buf: list[NDArray[np.float64]]
