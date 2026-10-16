@@ -449,7 +449,7 @@ def test_collision_update_delete_and_rename_policy(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# D10. prepare_preview_series unit tests
+# prepare_preview_series unit tests
 # ---------------------------------------------------------------------------
 
 
