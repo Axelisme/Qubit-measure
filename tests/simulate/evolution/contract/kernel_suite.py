@@ -116,7 +116,8 @@ def _reference_dissipation(
     result = -model.dephasing_per_ns * rho
     for target in range(size):
         for source in range(size):
-            if target != source:
+            if target != source and model.rates_per_ns[target, source] != 0:
+                # Lossless larger-parent references need no zero jump matrices.
                 jump = np.zeros((size, size), complex)
                 jump[target, source] = np.sqrt(model.rates_per_ns[target, source])
                 loss = jump.conj().T @ jump
