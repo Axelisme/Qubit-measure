@@ -7,15 +7,21 @@ import pytest
 from zcu_tools.cfg_model import (
     ArbWaveformCfg,
     ConstWaveformCfg,
+    MuxReadoutSpec,
     PulseSpec,
+    Template,
+    TemplateDef,
 )
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.form import FormErrors
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.events import MlChangedPayload
 from zcu_tools.gui.session.library_entry import (
     LibraryEntryInvalid,
+    library_entry_kind,
+    new_library_entry,
     open_library_entry,
 )
 from zcu_tools.gui.session.services.context import ContextService
@@ -269,3 +275,50 @@ def test_opening_an_unknown_entry_is_rejected(session: LibrarySession) -> None:
     capture = _seed(session)
     with pytest.raises(InvalidInputError, match="Q1.pulses.missing"):
         open_library_entry(capture, "module", "Q1.pulses.missing", arb_names=())
+
+
+def test_new_mux_kind_requires_tones_and_saves_labels(session: LibrarySession) -> None:
+    try:
+        kind = library_entry_kind(MuxReadoutSpec)
+    except TypeError as exc:
+        pytest.fail(f"MuxReadoutSpec must be a creatable module library kind: {exc}")
+    assert kind == "module"
+    _select(session, "mux")
+    capture = session.control.read_context()
+    catalog = {
+        "synthetic_mux": TemplateDef(
+            MuxReadoutSpec,
+            "Synthetic mux",
+            {
+                "gen_ch": 9,
+                "nqz": 2,
+                "mixer_freq": 6000.0,
+                "length": 2.0,
+                "ro_length": 1.5,
+            },
+        )
+    }
+    entry = new_library_entry(capture, Template("synthetic_mux"), catalog, arb_names=())
+    assert entry.kind == "module"
+    assert isinstance(entry.result(), FormErrors)
+    with pytest.raises(LibraryEntryInvalid):
+        entry.put("MG.readout.rf")
+    entry.state.write(
+        {
+            ("tones",): [
+                {"freq": 6020.0, "gain": 0.1, "ro_ch": 7, "label": "R upper"},
+                {"freq": 5980.0, "gain": 0.2, "ro_ch": 4},
+            ]
+        },
+        entry.env,
+    )
+    session.control.apply_library_change(entry.parameters, entry.put("MG.readout.rf"))
+    reopened = open_library_entry(
+        session.control.read_context(), "module", "MG.readout.rf", arb_names=()
+    )
+    spec = reopened.spec()
+    assert isinstance(spec, MuxReadoutSpec)
+    assert [(tone.freq, tone.label) for tone in spec.tones] == [
+        (6020.0, "R upper"),
+        (5980.0, ""),
+    ]

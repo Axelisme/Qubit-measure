@@ -7,7 +7,6 @@ from typing import Annotated, Any, ClassVar, Literal
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import model_validator
-from zcu_tools.analysis.fitting import HangerModel, TransmissionModel, get_proper_model
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
@@ -33,6 +32,13 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.utils import readout_freq_words
 
+from zcu_lab.v2._support.resonator import (
+    ResonanceOptions as FreqAnalyzeOptions,
+)
+from zcu_lab.v2._support.resonator import (
+    fit_resonance,
+)
+
 SamplingMode = Literal["linear", "homophasal"]
 
 
@@ -40,16 +46,6 @@ SamplingMode = Literal["linear", "homophasal"]
 class FreqResult:
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-
-
-@dataclass(frozen=True)
-class FreqAnalyzeOptions:
-    model_type: Literal["hm", "t", "auto"] = "auto"
-    edelay: float | None = None
-    fit_bg_amp_slope: bool = False
-    fit_bg_phase_curvature: bool = False
-    edelay_branch_seed: float | None = None
-    edelay_max_search_radius: float | None = None
 
 
 @dataclass(frozen=True)
@@ -280,40 +276,8 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         *,
         plots: Plots,
     ) -> FreqAnalysis:
-        # Remove first and last point, sometimes they have problems.
-        freqs = source.result.freqs[1:-1]
-        signals = source.result.signals[1:-1]
-
-        if options.model_type == "hm":
-            model = HangerModel()
-        elif options.model_type == "t":
-            model = TransmissionModel()
-        elif options.model_type == "auto":
-            model = get_proper_model(freqs, signals)
-        else:
-            raise ValueError(f"Invalid model type: {options.model_type}")
-
-        param_dict = model.fit(
-            freqs,
-            signals,
-            options.edelay,
-            fit_bg_amp_slope=options.fit_bg_amp_slope,
-            fit_bg_phase_curvature=options.fit_bg_phase_curvature,
-            edelay_branch_seed=options.edelay_branch_seed,
-            edelay_max_search_radius=options.edelay_max_search_radius,
-        )
         fig, _ = plots.subplots("fit", figsize=(9, 8))
-        fig.clear()
-        model.visualize_fit(
-            freqs,
-            signals,
-            param_dict,  # type: ignore[arg-type]
-            figure=fig,
-            fit_bg_amp_slope=options.fit_bg_amp_slope,
-            fit_bg_phase_curvature=options.fit_bg_phase_curvature,
-        )
+        answer = fit_resonance(source.result.freqs, source.result.signals, options, fig)
         return FreqAnalysis(
-            freq=float(param_dict["freq"]),
-            fwhm=float(param_dict["fwhm"]),
-            params=dict(param_dict),
+            freq=answer.freq, fwhm=answer.fwhm, params=dict(answer.params)
         )

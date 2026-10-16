@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.entry.registry import ComponentRegistry, RoleSpec
-from zcu_tools.resources.entry.schema import ComponentSchema
+from zcu_tools.resources.entry.schema import ComponentSchema, validate_component_name
 from zcu_tools.resources.entry.views import ComponentView, FieldView
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.predictor import PredictorInputError
@@ -86,6 +86,29 @@ class BuiltinComponent(ComponentSchema):
         default_factory=dict,
         description="Module slots: slot name to a module library key.",
     )
+
+
+class MuxGroupSchema(BuiltinComponent):
+    """A mux module owner with 1..8 ordered component names.
+
+    members binds full readout tones by index, not a kind constraint or a set.
+    Reordering members never changes this group's module ownership. Inherited
+    module and ext retain the ordinary component slot and extension semantics.
+    """
+
+    members: list[str] = Field(
+        min_length=1,
+        max_length=8,
+        description="Ordered component names, one per mux tone; duplicates are allowed.",
+    )
+
+    @field_validator("members")
+    @classmethod
+    def validate_members(cls, value: list[str]) -> list[str]:
+        """Require addressable component names without resolving their kinds."""
+        for name in value:
+            validate_component_name(name)
+        return value
 
 
 class ResonatorSchema(BuiltinComponent):
@@ -210,6 +233,7 @@ def _optional_number(value: object, name: str) -> float | None:
 def register_all(registry: ComponentRegistry) -> None:
     """Register definitions into the caller's registry; duplicates fail normally."""
     registry.register("resonator", ResonatorSchema)
+    registry.register("group/mux", MuxGroupSchema)
     registry.register("device/current_source", BuiltinComponent)
     registry.register("amplifier/jpa", JpaSchema)
     registry.register("qubit/fluxonium", QubitSchema)
