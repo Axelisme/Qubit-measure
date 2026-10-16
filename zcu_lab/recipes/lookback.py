@@ -10,7 +10,7 @@ from zcu_tools.mcp.measure.recipe import (
     ask,
 )
 
-from .helpers import set_frequency
+from .helpers import apply_frequency, choose_frequency, retain_scalar
 
 
 def _set_readout_timing(
@@ -19,26 +19,15 @@ def _set_readout_timing(
     trigger_offset_us: float | None,
 ) -> None:
     """Keep omitted key values and provenance; convert only for explicit edits."""
-    for field, value, value_path in (
-        (
-            "modules.readout.module.ro_length",
-            readout_length_us,
-            ("ro_length",),
-        ),
-        (
-            "modules.readout.module.trig_offset",
-            trigger_offset_us,
-            ("trig_offset",),
-        ),
+    for field, value in (
+        ("modules.readout.ro_length", readout_length_us),
+        ("modules.readout.trig_offset", trigger_offset_us),
     ):
         if value is not None:
             tab.use_inline("modules.readout")
-        if value is None and tab.read_field("modules.readout").mode == "key":
-            tab.retain_module_source(
-                "modules.readout", summary_field=field, value_path=value_path
-            )
-        else:
             tab.set(field, value, source="explicit")
+        else:
+            retain_scalar(tab, field)
 
 
 def lookback(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
@@ -80,16 +69,19 @@ def lookback(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
         tab.disable_library("modules.init_pulse")
     else:
         tab.use_library("modules.init_pulse", init_pulse_ref)
-    missing = set_frequency(
+    frequency = choose_frequency(
         tab,
-        "modules.readout",
+        "modules.readout.freq",
         frequency_mhz,
         calibration="$resonator.freq",
         prefer_library=readout_ref is not None,
         required="frequency_mhz",
     )
-    if missing is not None:
-        raise RecipeNeedsParameters((missing,))
+    if frequency.missing:
+        raise RecipeNeedsParameters(frequency.missing)
+    if frequency.edit is not None:
+        tab.use_inline("modules.readout")
+        apply_frequency(tab, frequency.edit)
     _set_readout_timing(tab, readout_length_us, trigger_offset_us)
     tab.set("rounds", rounds, source="explicit")
     result = yield from tab.run_step()
@@ -137,11 +129,9 @@ DEFINITION = RecipeDefinition(
     run=lookback,
     adapter_name="lookback",
     summary_parameters=(
-        SummaryParameter("frequency_mhz", "modules.readout.module.freq", "MHz"),
-        SummaryParameter("readout_length_us", "modules.readout.module.ro_length", "us"),
-        SummaryParameter(
-            "trigger_offset_us", "modules.readout.module.trig_offset", "us"
-        ),
+        SummaryParameter("frequency_mhz", "modules.readout.freq", "MHz"),
+        SummaryParameter("readout_length_us", "modules.readout.ro_length", "us"),
+        SummaryParameter("trigger_offset_us", "modules.readout.trig_offset", "us"),
         SummaryParameter("rounds", "rounds"),
         SummaryParameter("readout_ref", "modules.readout"),
         SummaryParameter("use_reset", "modules.reset"),

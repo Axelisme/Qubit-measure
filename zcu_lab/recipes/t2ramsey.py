@@ -12,7 +12,7 @@ from zcu_tools.mcp.measure.recipe import (
     ask,
 )
 
-from .helpers import set_frequency
+from .helpers import apply_frequency, choose_frequency
 
 
 def _validate_inputs(
@@ -89,15 +89,16 @@ def t2ramsey(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
 
     # Report every absent calibration before Run, as the existing tool does.
     missing: list[MissingParameter] = []
-    if (
-        parameter := set_frequency(
-            tab,
-            "modules.readout",
-            calibration="$resonator.freq",
-            required="readout_ref",
-        )
-    ) is not None:
-        missing.append(parameter)
+    frequency = choose_frequency(
+        tab,
+        "modules.readout.freq",
+        calibration="$resonator.freq",
+        required="readout_ref",
+    )
+    missing.extend(frequency.missing)
+    if frequency.edit is not None:
+        tab.use_inline("modules.readout")
+        apply_frequency(tab, frequency.edit)
     if (
         parameter := tab.use_library("modules.pi2_pulse", pi2_ref, required="pi2_ref")
     ) is not None:
@@ -157,7 +158,7 @@ DEFINITION = RecipeDefinition(
     summary_parameters=(
         SummaryParameter(
             "readout_frequency_mhz",
-            "modules.readout.module.freq",
+            "modules.readout.freq",
             "MHz",
         ),
         SummaryParameter("readout_ref", "modules.readout"),
