@@ -15,8 +15,13 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned 
 - `lookback/`、`onetone/`、`mux/`、`twotone/`、`singleshot/`、`jpa/` 擁有 concrete experiment definitions。Leaf 的 `gui.py` 對應 `core.py`。專用 helper 留在 leaf；同群組共用的 helper 留在 family。
   `jpa/` 的六個 adapter（`freq` / `flux` / `power` / `auto_optimize` /
   `flux_onetone` / `check`）是單一可發現的 JPA 校準 family，依 bring-up 順序
-  註冊於 `../definitions.py`。六個 concrete adapters 各自擁有 notebook-derived
-  acquisition defaults，並共同暴露 `reps` / `rounds` / `relax_delay`；
+  註冊於 `../definitions.py`。Concrete adapters 各自擁有 acquisition 初值政策，
+  並共同暴露 `reps` / `rounds` / `relax_delay`。四個 qubit SNR adapter 的
+  `relax_delay` 採 `1*T1`，透過 `_support/measure/ctx_helpers.py` 的
+  `t1_initial_time` 共用固定 capture 的來源分類 mechanics。有效 T1 用捕捉校準，
+  缺值用 `30 us` 公允時間尺度，無效值留空，來源故障傳遞 owner 的原錯誤。
+  初值可覆寫，不寫回校準。純反射的 `flux_onetone` / `check` 等待維持
+  `0.1 us` / `0.5 us`，六個 adapter 的 `reps` / `rounds` 不變；
   `initial_delay` 維持 core-owned hidden default。auto optimizer 的 sweep `expts`
   是 allocation resolution hint，flux 則使用中性 device-value contract。完整家族
   契約見 `measure-authoring.md`。

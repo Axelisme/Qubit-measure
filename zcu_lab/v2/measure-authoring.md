@@ -229,11 +229,21 @@ tab creation 與 remote adapter listing（`view.adapter_list`）因此直接列�
 （`set_freq` / `set_power` / `set_output` knob 能力檢查），flux 選擇使用
 `jpa_flux_dev` role（`set_flux` knob）；lowering 與 preflight 只作用於 cached
 device snapshot，任何硬體工作前 fast-fail。六個 adapter 都顯式暴露 `reps`、
-`rounds`、`relax_delay`，fresh defaults 沿用 notebook bring-up workflow：
-`freq` / `flux` / `power` 是 `10000 / 1 / 0.5 us`，`auto_optimize` 是
-`1000 / 1 / 30.5 us`，`flux_onetone` 是 `100 / 10 / 0.1 us`，`check` 是
-`1000 / 5 / 0.5 us`；`initial_delay` 維持 GUI 隱藏並使用 core 的 `1.0 us`
-default。這些是可修改的操作 seed，不是跨 setup 的最佳 SNR 或安全保證。
+`rounds`、`relax_delay`。`reps / rounds` 維持原值，`freq` / `flux` /
+`power` 是 `10000 / 1`，`auto_optimize` 是 `1000 / 1`，`flux_onetone` 是
+`100 / 10`，`check` 是 `1000 / 5`。`initial_delay` 維持 GUI 隱藏並使用 core
+的 `1.0 us` default。
+
+四個 qubit SNR adapter（`freq` / `flux` / `power` / `auto_optimize`）的
+`relax_delay` 初值為 `1*T1`，不是 Notebook 固定常數。Form 透過
+`_support/measure/ctx_helpers.py` 的 `t1_initial_time`，從 Open／Reset 的固定
+capture 取得 `$qubit.t1`。有效 T1 是非 bool 的有限正實數。T1 leaf 缺失／null
+或沒有 capture 時，使用 `30 us` 公允時間尺度，等待初值為 `30 us`。
+已存但無效的 T1 讓等待欄位留空，不回落公允值。Alias、path、namespace 或來源
+讀取故障維持 owner 的原錯誤，不當成缺值或以留空掩蓋。初值可覆寫，不寫回校準。
+兩個純反射 adapter 不套 T1 政策，`flux_onetone` 的 `relax_delay` 維持
+`0.1 us`，`check` 維持 `0.5 us`。這些是可修改的操作 seed，不是跨 setup 的
+最佳 SNR 或安全保證。
 
 `auto_optimize` 的三軸 `start` / `stop` 是 search bounds；各 sweep 的 `expts`
 是會影響 phase-1 flux-grid 與 per-slice budget allocation 的 relative resolution
