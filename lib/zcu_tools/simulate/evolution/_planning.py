@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 
 from .engine import EnvelopeSpec, TimelineBatch
 from .kernel import SegmentTable
-from .secular import ModelSource
+from .secular import FluxWaveform, ModelSource
 
 
 @dataclass(frozen=True)
@@ -184,6 +184,7 @@ def _batch_geometry(batch: TimelineBatch, source: ModelSource) -> Geometry:
         envelope_index,
         offset,
         envelopes,
+        batch.flux_waveform,
     )
     first_drive = np.full(len(batch.points), np.inf)
     np.minimum.at(first_drive, point[tones > 0], start[tones > 0])
@@ -199,7 +200,9 @@ def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
     tables = [g.table for g in geometries]
     width = max(table.tone_port.shape[1] for table in tables)
     columns = {
-        name: [] for name in SegmentTable.__dataclass_fields__ if name != "envelopes"
+        name: []
+        for name in SegmentTable.__dataclass_fields__
+        if name not in ("envelopes", "flux_waveform", "flux_waveform_available")
     }
     envelopes: list[EnvelopeSpec] = []
     timeline_base = 0
@@ -219,13 +222,53 @@ def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
             columns[name].append(column)
         timeline_base += len(geometry.points)
         envelopes.extend(table.envelopes)
+    waveform = _combine_waveforms(batches)
     combined = SegmentTable(
         **{name: np.concatenate(values) for name, values in columns.items()},
         envelopes=tuple(envelopes),
+        flux_waveform=waveform,
+        flux_waveform_available=(
+            np.concatenate(
+                [
+                    np.full(
+                        len(batch.points), batch.flux_waveform is not None, dtype=bool
+                    )
+                    for batch in batches
+                ]
+            )
+            if waveform is not None
+            else None
+        ),
     )
     return Geometry(
         combined,
         points,
         np.concatenate([g.flux_drive for g in geometries]),
         np.concatenate([g.known_input for g in geometries]),
+    )
+
+
+def _combine_waveforms(batches: Sequence[TimelineBatch]) -> FluxWaveform | None:
+    """Concatenate ragged samples; absent batches get inert per-point samples.
+
+    The availability mask keeps absent timelines distinguishable from physical
+    zero flux so a continuous kernel can reject them explicitly.
+    """
+    if all(batch.flux_waveform is None for batch in batches):
+        return None
+    counts, times, values = [], [], []
+    for batch in batches:
+        waveform = batch.flux_waveform
+        if waveform is None:
+            counts.append(np.ones(len(batch.points), dtype=np.int64))
+            times.append(np.zeros(len(batch.points)))
+            values.append(np.zeros((len(batch.points), batch.flux.level.shape[1])))
+        else:
+            counts.append(np.diff(waveform.offsets))
+            times.append(waveform.time_ns)
+            values.append(waveform.flux)
+    return FluxWaveform(
+        np.r_[0, np.cumsum(np.concatenate(counts))],
+        np.concatenate(times),
+        np.concatenate(values),
     )

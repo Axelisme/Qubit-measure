@@ -4,6 +4,7 @@ from ..kernel import Kernel
 from .dop853 import DOP853Kernel
 from .dyson import DysonKernel
 from .floquet import FloquetKernel
+from .flux_dop853 import FluxDOP853Kernel
 from .gate_cache import GateCacheKernel
 from .period_table import PeriodTableKernel
 from .rwa import RWAKernel
@@ -16,6 +17,7 @@ REGISTRY: tuple[Kernel, ...] = (
     DysonKernel(),
     RWAKernel(),
     DOP853Kernel(),
+    FluxDOP853Kernel(),
     GateCacheKernel(),
     PeriodTableKernel(),
     FloquetKernel(),

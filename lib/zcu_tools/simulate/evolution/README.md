@@ -17,7 +17,12 @@ represents densities at readout start in the DC eigenbasis. `Engine` segments
 all templates with array event sorting, selects kernels by name, and runs
 independent joblib-threading chunks. Missing required registry entries raise
 with the segment and kernel name. T4 implements exact zero-drive secular
-propagation. Other algorithm families plug into the internal registry.
+propagation, including quantized flux subsegments with basis changes. When a
+flux grid level changes during a drive, `flux_dop853` interpolates the optional
+`TimelineBatch.flux_waveform` and evaluates the exact `FluxExpansion` in its
+RHS. The bath stays at the row's grid level and switches at segment boundaries.
+Waveform variation that stays within one grid level keeps the quantized path.
+Other algorithm families plug into the internal registry.
 
 The engine counts prepare keys with `np.unique`. Repeated keys are prepared
 in the shared A stage. Single-use keys are prepared inside their timeline

@@ -19,7 +19,7 @@ from numpy.typing import NDArray
 
 from ._envelope import sample_values
 from ._validation import integers, owned, shape
-from .secular import FluxSchedule, ModelSource
+from .secular import FluxSchedule, FluxWaveform, ModelSource
 
 # Replay identity of the segment engine numerical algorithms, independent of records.
 SEGMENT_NUMERIC_VERSION = "segment-engine-v1"
@@ -156,6 +156,9 @@ class TimelineBatch:
     flux: FluxSchedule containing n ragged point spans.
     end_ns: nonnegative float64 (n,) readout start times. Engine ignores tracks
         and flux segments beyond these times, returning DC-basis densities.
+    flux_waveform: optional continuous absolute flux samples in batch point
+        order, with the same loop count as flux. Required by flux_dop853.
+        None means no continuous samples were supplied.
     Arrays own read-only copies.
 
     Raises:
@@ -167,6 +170,7 @@ class TimelineBatch:
     tracks: tuple[DriveTrack, ...]
     flux: FluxSchedule
     end_ns: NDArray[np.float64]
+    flux_waveform: FluxWaveform | None = None
 
     def __post_init__(self) -> None:
         points = integers(self.points, "point indices")
@@ -180,6 +184,12 @@ class TimelineBatch:
         shape(end, points.shape, "readout times")
         if np.any(end < 0) or len(self.flux.offsets) != len(points) + 1:
             raise ValueError("readout times/flux must match points")
+        if self.flux_waveform is not None:
+            shape(
+                self.flux_waveform.offsets, (len(points) + 1,), "flux waveform offsets"
+            )
+            if self.flux_waveform.flux.shape[1] != self.flux.level.shape[1]:
+                raise ValueError("flux waveform loop shape must match schedule")
         for track in self.tracks:
             shape(track.start_ns, points.shape, "drive track")
         object.__setattr__(self, "points", points)
