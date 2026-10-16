@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from qtpy.QtCore import Qt
+from qtpy.QtCore import QPoint, Qt
 from qtpy.QtGui import QShowEvent
 from qtpy.QtWidgets import (
     QComboBox,
@@ -48,7 +48,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _SCREEN_HEIGHT_SHARE = 0.9
-_INDENT_PX = 18
 _MIN_WIDTH_PX = 480
 
 
@@ -75,22 +74,26 @@ class AddComponentDialog(QDialog):
     """Collect a new component's name, kind and fields, then add it via the owner.
 
     The dialog states its destination ("Adds to: current point P1" or "Adds
-    to: setup template"). Below Name and Kind, a scroll area lists every field
-    of component_field_specs(kind): group fields are indented header rows
-    with their fields below; each field shows its unit and its description as
-    a tooltip. Choice and boolean fields use a drop-down whose blank first
-    entry means unset. A role reference field (FieldSpec.reference_role)
-    drops down the destination document's components that match the role;
-    other text fields complete component names. Changing Kind rebuilds the
+    to: setup template"). Below Name and Kind, a scroll area lists only required
+    leaf fields whose enclosing groups are all required, using full dotted-path
+    labels without group headers or indentation. Kinds without these fields show
+    "No required fields. Edit the others in Inspect after adding." Each field
+    shows its unit and its description as a tooltip. Choice and boolean fields
+    use a drop-down whose blank first entry means unset. A role reference field
+    (FieldSpec.reference_role) drops down the destination document's components
+    that match the role. Other text fields complete component names.
+    Changing Kind rebuilds the
     fields. Required fields that are still empty have red labels.
 
     Add sends only filled fields, nested by their segments, to
-    control.add_component. Empty required fields block Add locally; every
-    other check belongs to the owner. On success the dialog calls
+    control.add_component. Empty Name or required fields disable Add; its tooltip
+    lists missing paths. Parse errors stay in red inside the dialog; every other
+    check belongs to the owner. On success the dialog calls
     on_added(name) and accepts; on failure the error stays in red inside
     the dialog and every input is kept. The dialog height never exceeds 90%
     of its screen's available height; the fields scroll instead, and Add and
-    Cancel stay outside the scroll area.
+    Cancel stay outside the scroll area. First show and Kind changes fit and
+    reposition the entire window frame inside that screen's available geometry.
     """
 
     def __init__(
@@ -117,7 +120,6 @@ class AddComponentDialog(QDialog):
         self._setup = setup
         self._on_added = on_added
         self._rows: list[_FieldRow] = []
-        self._groups: dict[tuple[str, ...], FieldSpec] = {}
         self.setWindowTitle("Add component")
         layout = QVBoxLayout(self)
 
@@ -170,11 +172,11 @@ class AddComponentDialog(QDialog):
 
     def _build_buttons(self) -> QDialogButtonBox:
         buttons = QDialogButtonBox()
-        add = QPushButton("Add")
-        add.setObjectName("add_submit")
-        add.setDefault(True)
-        add.clicked.connect(self._on_add)
-        buttons.addButton(add, QDialogButtonBox.ButtonRole.AcceptRole)
+        self._add = QPushButton("Add")
+        self._add.setObjectName("add_submit")
+        self._add.setDefault(True)
+        self._add.clicked.connect(self._on_add)
+        buttons.addButton(self._add, QDialogButtonBox.ButtonRole.AcceptRole)
         cancel = QPushButton("Cancel")
         cancel.setObjectName("add_cancel")
         cancel.clicked.connect(self.reject)
@@ -201,26 +203,29 @@ class AddComponentDialog(QDialog):
     def _rebuild_fields(self) -> None:
         """Replace the scroll area's form with one built for the selected kind."""
         self._rows.clear()
-        self._groups.clear()
         form = QWidget()
         grid = QGridLayout(form)
         grid.setColumnStretch(1, 1)
         kind = self._kind.currentText()
         specs = component_field_specs(kind) if kind else ()
+        groups = {spec.segments: spec for spec in specs if spec.value_kind == "group"}
+        required = [
+            spec
+            for spec in specs
+            if spec.value_kind != "group"
+            and spec.required
+            and all(
+                groups[spec.segments[:depth]].required
+                for depth in range(1, len(spec.segments))
+            )
+        ]
         # Reference choices and name completion come from the destination document.
         document = self._control.inspect_document(setup=self._setup)
-        for row, spec in enumerate(specs):
-            label = QLabel(spec.segments[-1])
+        for row, spec in enumerate(required):
+            label = QLabel(f"{spec.path} *")
             label.setObjectName(f"label:{spec.path}")
-            label.setIndent(_INDENT_PX * (len(spec.segments) - 1))
+            label.setIndent(0)
             label.setToolTip(field_tooltip(spec, spec.path))
-            if spec.value_kind == "group":
-                font = label.font()
-                font.setBold(True)
-                label.setFont(font)
-                self._groups[spec.segments] = spec
-                grid.addWidget(label, row, 0, 1, 3)
-                continue
             editor = self._editor(spec, document)
             unit = QLabel(spec.unit or "")
             unit.setObjectName(f"unit:{spec.path}")
@@ -228,9 +233,16 @@ class AddComponentDialog(QDialog):
             grid.addWidget(editor, row, 1)
             grid.addWidget(unit, row, 2)
             self._rows.append(_FieldRow(spec, label, editor))
-        grid.setRowStretch(len(specs), 1)
+        if not required:
+            hint = QLabel(
+                "No required fields. Edit the others in Inspect after adding."
+            )
+            hint.setObjectName("add_fields_hint")
+            grid.addWidget(hint, 0, 0, 1, 3)
+        grid.setRowStretch(max(1, len(required)), 1)
         # setWidget deletes the previous form together with its inputs.
         self._scroll.setWidget(form)
+        self._scroll.updateGeometry()
         self._update_required()
         if self.isVisible():
             self._fit_to_screen()
@@ -255,42 +267,26 @@ class AddComponentDialog(QDialog):
         editor.setToolTip(field_tooltip(spec, spec.path))
         return editor
 
-    def _required_now(self, spec: FieldSpec) -> bool:
-        """A required field counts once every enclosing group is supplied.
-
-        A group is supplied when it is itself required or any field inside it
-        is filled; an untouched optional group is not sent at all.
-        """
-        if not spec.required:
-            return False
-        for depth in range(1, len(spec.segments)):
-            prefix = spec.segments[:depth]
-            group = self._groups[prefix]
-            if not group.required and not self._group_filled(prefix):
-                return False
-        return True
-
-    def _group_filled(self, prefix: tuple[str, ...]) -> bool:
-        return any(
-            row.text() and row.spec.segments[: len(prefix)] == prefix
-            for row in self._rows
-        )
-
     def _update_required(self) -> None:
+        missing = [] if self._name.text() else ["name"]
         set_error_foreground(self._name_label, error=not self._name.text())
         for row in self._rows:
-            required = self._required_now(row.spec)
-            row.label.setText(f"{row.spec.segments[-1]}{' *' if required else ''}")
-            set_error_foreground(row.label, error=required and not row.text())
+            empty = not row.text()
+            set_error_foreground(row.label, error=empty)
+            if empty:
+                missing.append(row.path)
             if isinstance(row.editor, QLineEdit):
-                row.editor.setPlaceholderText("Required" if required else "(unset)")
+                row.editor.setPlaceholderText("Required")
+        self._add.setEnabled(not missing)
+        self._add.setToolTip(f"Missing: {', '.join(missing)}" if missing else "")
 
     def _fit_to_screen(self) -> None:
-        """Size to the form, capped at 90% of the screen's available height."""
+        """Fit the form and keep the whole frame inside the available screen."""
         screen = self.screen()
         if screen is None:
             raise RuntimeError("Add component dialog has no screen")
-        limit = int(screen.availableGeometry().height() * _SCREEN_HEIGHT_SHARE)
+        available = screen.availableGeometry()
+        limit = int(available.height() * _SCREEN_HEIGHT_SHARE)
         self.setMaximumHeight(limit)
         form = self._scroll.widget()
         if form is None:
@@ -298,11 +294,38 @@ class AddComponentDialog(QDialog):
         frame = 2 * self._scroll.frameWidth()
         scrollbar = self._scroll.verticalScrollBar()
         bar_width = scrollbar.sizeHint().width() if scrollbar is not None else 0
-        self._scroll.setMinimumWidth(form.sizeHint().width() + frame + bar_width)
-        chrome = self.sizeHint().height() - self._scroll.sizeHint().height()
+        layout = self.layout()
+        if layout is None:
+            raise RuntimeError("Add component dialog has no layout")
+        border_width = self.frameGeometry().width() - self.width()
+        margins = layout.contentsMargins()
+        field_width_limit = (
+            available.width() - border_width - margins.left() - margins.right()
+        )
+        self._scroll.setMinimumWidth(
+            min(form.sizeHint().width() + frame + bar_width, field_width_limit)
+        )
+        layout.activate()
+        chrome = (
+            self.minimumSizeHint().height() - self._scroll.minimumSizeHint().height()
+        )
         wanted = chrome + form.sizeHint().height() + frame
-        width = max(self.width(), self.sizeHint().width(), _MIN_WIDTH_PX)
-        self.resize(width, min(limit, wanted))
+        border_height = self.frameGeometry().height() - self.height()
+        width = min(
+            max(self.width(), self.sizeHint().width(), _MIN_WIDTH_PX),
+            available.width() - border_width,
+        )
+        self.resize(width, min(limit, wanted, available.height() - border_height))
+        frame_geometry = self.frameGeometry()
+        left = max(
+            available.left(),
+            min(frame_geometry.left(), available.right() - frame_geometry.width() + 1),
+        )
+        top = max(
+            available.top(),
+            min(frame_geometry.top(), available.bottom() - frame_geometry.height() + 1),
+        )
+        self.move(self.pos() + QPoint(left, top) - frame_geometry.topLeft())
 
     # ------------------------------------------------------------------
     # Submission
@@ -313,17 +336,7 @@ class AddComponentDialog(QDialog):
         if self._retired:
             return
         self._update_required()
-        missing = [
-            row.path
-            for row in self._rows
-            if self._required_now(row.spec) and not row.text()
-        ]
-        if not self._name.text():
-            missing.insert(0, "name")
-        if missing:
-            self._error.setText("\n".join(f"{path}: Required" for path in missing))
-            self._error.setToolTip("")
-            self._error.setVisible(True)
+        if not self._add.isEnabled():
             return
         fields: YamlMap = {}
         for row in self._rows:
