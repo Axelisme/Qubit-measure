@@ -5,7 +5,6 @@ from numba import njit
 from numpy.typing import NDArray
 
 from ._dop853 import Tolerances, integrate
-from ._dop853_data import Models, Segments
 
 
 # Compiled callables specialize this runner for each kernel's context and RHS.
@@ -14,23 +13,22 @@ def run_chain(
     rhs,
     make_context,
     data,
-    models: Models,
-    segments: Segments,
-    rows: NDArray[np.int64],
-    model_index: NDArray[np.int64],
+    row_models: tuple[NDArray[np.int64], NDArray[np.int64]],
     states: NDArray[np.complex128],
     controls: Tolerances,
 ):
     """Advance touching same-timeline rows and store every interval endpoint.
 
     rhs(time, flat_state, context) and make_context(data, row, model) are
-    compiled kernel-owned callables. Models and segments share their packed
-    layout with data. rows/model_index align with states (rows, M, M).
+    compiled kernel-owned callables. data supplies packed models and segments.
+    row_models is (rows, model_index), aligned with states (rows, M, M).
     Each chain reads only its first input slot; subsequent rows use the previous
     endpoint, changing basis on model changes. Disjoint rows reset the adaptive
     step to controls.max_step and read their own input. Contiguity uses 1e-9 ns.
     Integration failures propagate; earlier endpoints may already be stored.
     """
+    models, segments = data.models, data.segments
+    rows, model_index = row_models
     last_step = controls.max_step
     for index in range(len(rows)):
         row, model = rows[index], model_index[index]

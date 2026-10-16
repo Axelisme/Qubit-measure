@@ -230,6 +230,4 @@ class FluxDOP853Kernel:
             prepared.expansion,
             _Waveform(waveform.offsets, waveform.time_ns, waveform.flux),
         )
-        run_chain(
-            _rhs, _context, data, models, segments, rows, inverse, states, controls
-        )
+        run_chain(_rhs, _context, data, (rows, inverse), states, controls)

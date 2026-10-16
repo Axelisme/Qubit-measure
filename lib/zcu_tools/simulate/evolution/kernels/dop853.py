@@ -1,6 +1,7 @@
 """Batched arbitrary-envelope Lindblad fallback in each secular eigenbasis."""
 
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import numpy as np
 from numba import njit
@@ -13,10 +14,16 @@ from ._dop853_chain import run_chain
 from ._dop853_data import (
     Context,
     Models,
+    Segments,
     hamiltonian,
     pack_models,
     pack_segments,
 )
+
+
+class _Data(NamedTuple):
+    models: Models
+    segments: Segments
 
 
 @dataclass(frozen=True)
@@ -149,11 +156,8 @@ class DOP853Kernel:
         run_chain(
             _rhs,
             _context,
-            (models, segments),
-            models,
-            segments,
-            rows,
-            key_index,
+            _Data(models, segments),
+            (rows, key_index),
             states,
             controls,
         )
