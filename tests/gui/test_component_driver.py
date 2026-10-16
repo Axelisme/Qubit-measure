@@ -4,11 +4,11 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QAction, QImage
 from PyQt6.QtWidgets import (
-    QDialog,
     QComboBox,
+    QDialog,
     QFileDialog,
     QFormLayout,
     QLabel,
@@ -647,11 +647,13 @@ def test_choose_option_and_context_action_use_visible_captions(choice_surface) -
     assert driver.observe(object_name="choice_status").text == "Two"
 
 
-def test_choice_operations_reject_wrong_selector_and_ignore_unavailable_widgets(choice_surface, qapp) -> None:
+def test_choice_operations_reject_wrong_selector_and_ignore_unavailable_widgets(
+    choice_surface, qapp
+) -> None:
     driver = _user_input.ComponentDriver(choice_surface)
     with pytest.raises(TypeError):
         driver.choose_option(object_name="choice_status", value="Two")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="exactly one"):
         driver.choose_option(value="Two")
     with pytest.raises(LookupError):
         driver.invoke_context_action(object_name="missing", action="Copy choice")

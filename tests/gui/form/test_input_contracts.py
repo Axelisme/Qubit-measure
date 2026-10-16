@@ -16,6 +16,7 @@ class CapturedName(form.FormModel):
 
     @classmethod
     def check_sources(cls, data: Mapping[str, JsonValue], env: form.FormEnv) -> None:
+        del env
         if data.get("name") == "missing":
             raise form.field_error(("name",), "Unavailable captured name")
 
@@ -29,11 +30,16 @@ def test_source_hook_directs_nested_failures_and_restore_reverts_only_consumer()
     None
 ):
     env = form.FormEnv()
-    state = form.FormState(form.FormInput(SourceTree, {"child": {"name": "ok"}}))
+    state = form.FormState[form.FormModel](
+        form.FormInput(SourceTree, {"child": {"name": "ok"}})
+    )
     before = state.input.data
     with pytest.raises(PydanticCustomError) as failure:
         state.write({("child", "name"): "missing", ("count",): 2}, env)
-    assert failure.value.context["path"] == ("child", "name")
+    assert failure.value.context is not None and failure.value.context["path"] == (
+        "child",
+        "name",
+    )
     assert state.input.data == before
     invalid = form.FormState(form.FormInput(SourceTree, {"child": {"name": "missing"}}))
     errors = invalid.result(env)
@@ -47,7 +53,9 @@ def test_source_hook_directs_nested_failures_and_restore_reverts_only_consumer()
 
 def test_prepare_install_is_detached_preserves_base_and_notifies_once() -> None:
     env = form.FormEnv()
-    state = form.FormState(form.FormInput(SourceTree, {"child": {"name": "ok"}}))
+    state = form.FormState[form.FormModel](
+        form.FormInput(SourceTree, {"child": {"name": "ok"}})
+    )
     before = state.base.data
     notices: list[str] = []
     state.subscribe(lambda: notices.append("changed"))
