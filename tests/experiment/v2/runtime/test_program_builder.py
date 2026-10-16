@@ -29,9 +29,9 @@ def test_program_builder_build_returns_program_with_isolated_cfg():
         assert isinstance(program, FakeProgram)
         assert type(program.cfg_model) is FlowCfg
         program.cfg_model.reps = 99
-        assert getattr(sched.cfg, "reps") == 5
+        assert sched.cfg.reps == 5
 
-    assert getattr(init_cfg, "reps") == 5
+    assert init_cfg.reps == 5
     assert program is not None
     assert program.soccfg == "soccfg"
     assert program.modules[0] is not module

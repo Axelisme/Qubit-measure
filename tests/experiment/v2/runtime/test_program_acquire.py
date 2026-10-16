@@ -39,8 +39,8 @@ def test_build_and_acquire_builds_program_and_updates_buffer():
                 stop_condition=lambda: False,
             )
         )
-        assert getattr(sched.cfg, "reps") == 4
-        assert getattr(sched.cfg, "rounds") == 2
+        assert sched.cfg.reps == 4
+        assert sched.cfg.rounds == 2
 
     assert result is not None
     assert np.allclose(result, [2.0])
