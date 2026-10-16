@@ -157,8 +157,10 @@ class MuxReadoutTone(ConfigBase):
     freq is finite absolute MHz (negative values are permitted), gain is finite
     normalized amplitude in [-1, 1], phase is any finite degree value, and ro_ch
     is a nonnegative integer, never bool. Equal frequencies are permitted. Tone
-    order, not frequency or channel order, defines identity. No rescaling occurs;
-    the author owns summed-signal headroom.
+    order, not frequency or channel order, defines identity. label is optional
+    display text, defaults to the empty string, and may repeat; it is not a
+    component identity and program execution does not interpret it. No rescaling
+    occurs; the author owns summed-signal headroom.
     """
 
     model_config = ConfigDict(strict=True, allow_inf_nan=False)
@@ -167,6 +169,7 @@ class MuxReadoutTone(ConfigBase):
     gain: Annotated[float, Field(ge=-1.0, le=1.0)]
     phase: float = 0.0
     ro_ch: Annotated[int, Field(ge=0)]
+    label: str = ""
 
 
 class _MuxReadoutFields(_ModuleFields):
@@ -178,8 +181,9 @@ class _MuxReadoutFields(_ModuleFields):
     length is the common positive const-playback duration in us; ro_length is
     the common positive ADC window in us. pre_delay/post_delay bracket playback,
     and trig_offset delays the common ADC trigger, all finite nonnegative us.
-    desc is optional prose. Only numeric scalars are accepted, not references,
-    expressions, waveforms, QICK sweeps or register words.
+    desc is optional prose; tone labels are display-only strings. Execution
+    fields accept only numeric scalars, not references, expressions, waveforms,
+    QICK sweeps or register words.
     """
 
     model_config = ConfigDict(strict=True, allow_inf_nan=False)

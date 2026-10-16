@@ -4,7 +4,14 @@ from typing import Annotated
 
 import pytest
 from pydantic import JsonValue, PydanticSchemaGenerationError
-from zcu_tools.cfg_model import ConfigBase, FieldMeta, PulseSpec, ResetCfg
+from zcu_tools.cfg_model import (
+    ConfigBase,
+    FieldMeta,
+    MuxReadoutCfg,
+    MuxReadoutSpec,
+    PulseSpec,
+    ResetCfg,
+)
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormModel, FormState
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.program.v2.modules import PulseCfg
@@ -529,3 +536,62 @@ def test_required_module_branch_switch_uses_blank_defaults(missing: str) -> None
     assert expect_object(module["module"])["type"] == "pulse"
     state.write({("modules", "probe", "module", "freq"): 125.0}, env)
     assert state.preview(env).values[("modules", "probe", "module", "freq")] == 125.0
+
+
+class MuxCore(ConfigBase):
+    """A synthetic core with one mux readout, independent of lab definitions."""
+
+    readout: MuxReadoutCfg
+
+
+def test_mux_ref_to_inline_keeps_labels_and_detaches_json_edits() -> None:
+    source = MuxReadoutSpec.model_validate(
+        {
+            "gen_ch": 9,
+            "nqz": 2,
+            "mixer_freq": 6000.0,
+            "length": 2.0,
+            "ro_length": 1.5,
+            "tones": [{"freq": 6020.0, "gain": 0.1, "ro_ch": 7}],
+        }
+    )
+    env = FormEnv(
+        library=LibrarySnapshot(
+            ModuleLibraryDocument(
+                format="zcu.module-library",
+                format_version="2.0",
+                components={"MG": ComponentLibrary(readout={"rf": source})},
+            )
+        )
+    )
+    form = Form(MuxCore, {})
+    state = FormState(
+        FormInput(form.model, {"readout": {"kind": "ref", "name": "MG.readout.rf"}})
+    )
+    ref = form.read_module(state.input, ("readout",), env)
+    assert not isinstance(ref, FormErrors), ref
+    assert ref.value["tones"] == [
+        {"freq": 6020.0, "gain": 0.1, "phase": 0.0, "ro_ch": 7, "label": ""}
+    ]
+    state.run_command(("readout",), "to_inline", env)
+    inline = form.read_module(state.input, ("readout",), FormEnv())
+    assert not isinstance(inline, FormErrors), inline
+    assert inline.mode == "inline"
+    assert inline.value["tones"] == ref.value["tones"]
+    state.write(
+        {
+            ("readout", "module", "tones"): [
+                {"freq": 6030.0, "gain": 0.1, "ro_ch": 7, "label": "Edited"}
+            ]
+        },
+        FormEnv(),
+    )
+    value = state.result(FormEnv())
+    assert not isinstance(value, FormErrors), value
+    cfg = form.to_cfg(value, FormEnv())
+    assert isinstance(cfg, MuxCore), cfg
+    assert [(tone.freq, tone.label) for tone in cfg.readout.tones] == [
+        (6030.0, "Edited")
+    ]
+    assert env.library is not None
+    assert env.library.module_spec("MG.readout.rf") == source

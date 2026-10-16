@@ -10,8 +10,9 @@ from functools import partial
 from typing import Annotated
 
 import numpy as np
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
-from pydantic import field_validator
+from pydantic import StrictInt, ValidationInfo, field_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     IDENTITY,
@@ -31,12 +32,13 @@ from zcu_tools.program.v2.modules import MuxReadout, MuxReadoutCfg
 
 @dataclass(frozen=True)
 class MuxOnetoneResult:
-    """Averaged spectra in the original cfg tone order, including partial runs.
+    """Averaged active spectra in selection order, including partial runs.
 
     dfs is float64 (Ndf,) of nominal common offsets in MHz, not actual DDS
-    frequencies. tone_indices is int64 (N,) containing 0..N-1; index i refers
-    to the saved cfg.modules.readout.tones[i], not its logical ADC channel.
-    signals is complex128 (Ndf, N) of averaged I+jQ in a.u., retaining the
+    frequencies. tone_indices is int64 (K,) of original indices in 0..N-1;
+    each index i refers to saved cfg.modules.readout.tones[i], not its ADC
+    channel. K is the active count and N the full cfg tone count.
+    signals is complex128 (Ndf, K) of averaged I+jQ in a.u., retaining the
     program's ADC-length normalization. Unwritten entries remain NaN; acquired
     rows survive cancellation or failure. Data alone does not indicate success:
     the run's caller must check context.cancel_signal.raise_if_error().
@@ -91,12 +93,45 @@ class MuxOnetoneCfg(ProgramV2Cfg, ExpCfgModel):
     Inherited reps (default 1) is repetitions per round; rounds (default 1) is
     software acquisition rounds per offset. initial_delay and relax_delay are
     program delays in us (both default 1). No external devices are required.
+    active_tones selects original readout indices in execution/column order.
+    None selects all tones. Lists must be nonempty, unique integers in 0..N-1;
+    bool, floating point and string indices are rejected without coercion.
     Keep this original cfg with the Result when constructing a RunRecord so
     persistence records base frequencies and the sweep, not the final point.
     """
 
     modules: MuxOnetoneModuleCfg
     sweep: MuxOnetoneSweepCfg
+    active_tones: Annotated[
+        list[StrictInt] | None,
+        FieldMeta(
+            label="Active tones",
+            description="Original tone indices in column order; None measures all tones.",
+        ),
+    ] = None
+
+    @field_validator("active_tones")
+    @classmethod
+    def validate_active_tones(
+        cls, value: list[int] | None, info: ValidationInfo
+    ) -> list[int] | None:
+        """Reject empty, duplicate or out-of-range selections; preserve order.
+
+        Pydantic validates strict integer elements before this check. Range is
+        checked against the full readout when its own validation succeeded.
+        """
+        if value is None:
+            return None
+        if not value or len(set(value)) != len(value):
+            raise ValueError("active_tones must be nonempty and contain unique indices")
+        modules = info.data.get("modules")
+        if isinstance(modules, MuxOnetoneModuleCfg) and any(
+            index < 0 or index >= len(modules.readout.tones) for index in value
+        ):
+            raise ValueError(
+                "active_tones indices must be in 0..N-1 of the full readout"
+            )
+        return value
 
 
 def _mux_signal(
@@ -114,7 +149,7 @@ class MuxOnetoneExp(PersistableExperiment[MuxOnetoneResult, MuxOnetoneCfg]):
     """Stateless core-only spectroscopy, with one complex Signal and numeric axes.
 
     AXES_SPEC maps inner-first Tone (unitless int64) then Frequency offset
-    (MHz in memory, Hz on disk), preserving signals.shape == (Ndf, N).
+    (MHz in memory, Hz on disk), preserving signals.shape == (Ndf, K) for K active tones.
     Inherited save_run/load_run use native data; save exports one Labber complex
     log. Labber reads use zcu_tools.datafile.load_labber_data, not core.load.
     This class neither connects instruments nor registers frontend recipes.
@@ -137,7 +172,7 @@ class MuxOnetoneExp(PersistableExperiment[MuxOnetoneResult, MuxOnetoneCfg]):
 
         config is a validated base-tone cfg and is never mutated. context must
         provide compatible soc/soccfg, active Plots and a fresh cancel_signal;
-        devices may be empty. Publish N magnitude-vs-nominal-offset lines as
+        devices may be empty. Publish K active magnitude-vs-nominal-offset lines as
         measurement, and return all coordinates plus the complex signal buffer.
         No result is cached, saved or wrapped in a RunRecord here.
 
@@ -151,12 +186,30 @@ class MuxOnetoneExp(PersistableExperiment[MuxOnetoneResult, MuxOnetoneCfg]):
         cfg = deepcopy(config)
         base_readout = cfg.modules.readout
         dfs = sweep2array(cfg.sweep.df, "none")
-        tone_indices = np.arange(len(base_readout.tones), dtype=np.int64)
+        indices = (
+            list(range(len(base_readout.tones)))
+            if cfg.active_tones is None
+            else cfg.active_tones
+        )
+        tone_indices = np.asarray(indices, dtype=np.int64)
+        active_readout = base_readout.with_updates(
+            tones=[base_readout.tones[index] for index in indices]
+        )
+        labels = [
+            base_readout.tones[index].label or f"tone {index}" for index in indices
+        ]
+
+        def configure_axes(axes: Axes) -> None:
+            for line, label in zip(axes.lines, labels, strict=True):
+                line.set_label(label)
+            axes.legend()
+
         viewer = context.plots.liveplot_1d(
             "measurement",
             "Nominal frequency offset (MHz)",
             "Magnitude (a.u.)",
             num_lines=len(tone_indices),
+            configure_axes=configure_axes,
         )
         signals_buffer = SignalBuffer(
             (len(dfs), len(tone_indices)),
@@ -164,20 +217,21 @@ class MuxOnetoneExp(PersistableExperiment[MuxOnetoneResult, MuxOnetoneCfg]):
         )
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for df, step in sched.scan("df", dfs.tolist()):
-                step.cfg.modules.readout = base_readout.with_updates(
+                readout = active_readout.with_updates(
                     tones=[
                         tone.with_updates(freq=tone.freq + df)
-                        for tone in base_readout.tones
+                        for tone in active_readout.tones
                     ]
                 )
                 builder = (
                     step.prog_builder(context.soc, context.soccfg)
                     .add_reset("reset", step.cfg.modules.reset)
-                    .add(MuxReadout("readout", step.cfg.modules.readout))
+                    .add(MuxReadout("readout", readout))
                 )
                 prog = builder.build()
                 _ = builder.run_program(prog, raw2signal_fn=partial(_mux_signal, prog))
 
+        signals_buffer.trigger_update(flush=True)
         return MuxOnetoneResult(
             dfs=dfs,
             tone_indices=tone_indices,

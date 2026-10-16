@@ -12,6 +12,7 @@ from zcu_tools.cfg_model import (
     Expr,
     FlatTopWaveformSpec,
     ModuleSpec,
+    MuxReadoutSpec,
     PulseReadoutSpec,
     PulseResetSpec,
     PulseSpec,
@@ -866,3 +867,33 @@ def test_template_input_propagates_unavailable_captured_source(
     form = form_adapter.module_form(PulseSpec)
     with pytest.raises(ContextSourceUnavailableError):
         form.template_input(Template("pulse"), creation_templates, env)
+
+
+def test_mux_module_form_edits_tone_labels_as_a_whole_json_leaf() -> None:
+    form = form_adapter.module_form(MuxReadoutSpec)
+    env = FormEnv()
+    source = MuxReadoutSpec.model_validate(
+        {
+            "gen_ch": 9,
+            "nqz": 2,
+            "mixer_freq": 6000.0,
+            "length": 2.0,
+            "ro_length": 1.5,
+            "tones": [
+                {"freq": 6020.0, "gain": 0.1, "ro_ch": 7},
+                {"freq": 5980.0, "gain": 0.2, "ro_ch": 4},
+            ],
+        }
+    )
+    state = FormState(form.input_from_spec(source, env))
+    tones: list[JsonValue] = [
+        {"freq": 6020.0, "gain": 0.1, "ro_ch": 7, "label": "Upper"},
+        {"freq": 5980.0, "gain": 0.2, "ro_ch": 4, "label": "Lower"},
+    ]
+    state.write({("tones",): tones}, env)
+    spec = result_spec(form, state, env)
+    assert [tone.label for tone in spec.tones] == ["Upper", "Lower"]
+    assert [tone.ro_ch for tone in spec.tones] == [7, 4]
+    restored = FormState(form.input_from_spec(spec, env))
+    assert result_spec(form, restored, env) == spec
+    assert [tone.label for tone in source.tones] == ["", ""]
