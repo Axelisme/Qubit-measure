@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from operator import call
 import threading
 from typing import Any, Literal, cast
 
@@ -8,6 +9,11 @@ import pytest
 from _pytest.capture import CaptureFixture
 from _pytest.logging import LogCaptureFixture
 from zcu_tools.device import BaseDevice, BaseDeviceInfo, FakeDevice, FakeDeviceInfo
+
+
+def test_fake_device_rejects_positional_fast_mode() -> None:
+    with pytest.raises(TypeError, match="positional"):
+        call(FakeDevice, True)
 
 
 class DummyDeviceInfo(BaseDeviceInfo):
