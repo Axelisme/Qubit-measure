@@ -48,6 +48,33 @@
 
 框架測試使用最小合成 workflow／adapter，不綁定實驗流程或預設值。實驗定義錯誤由 GUI 啟動或載入時回報，不另維護個別實驗測試。使用者於 2026-10-12 裁定：「我給你一個判斷方法，如果我刪除zcu_lab測試會報錯，那測試就是寫錯了。」
 
+### Mux group 是實驗室的 component 定義
+
+`zcu_lab.components.MuxGroupSchema` 宣告 `group/mux`，沿既有 ComponentRegistry 註冊。
+它保存有序的 1 至 8 個 component 名稱及一般 module／ext。Members 不作去重或 resonator kind gate。
+Group 自己擁有 readout module，重排成員不改 owner。
+使用者於 2026-10-16 對專屬 group component 方案裁定：「我選B」。
+
+Scalar alias `mux=MG12` 已足以讓 adapter 經固定 ParameterContext 讀取 `$mux.members`，
+Readout 初值使用 `$mux.module.readout`。Framework 不認得 group/mux 或 members，
+也不新增 list alias、group registry、RPC 或保存格式。
+使用者於 2026-10-16 對只用 scalar mux alias 的方案裁定：「B」。
+
+完整 readout 的 tones[i] 綁定 members[i]，cfg 不保存 writeback 目標或 group snapshot。
+active_tones=None 量全部；指定非空、唯一且有效的原始 index list，則依輸入順序投影 subset
+給 program。Program 不知道 MG 或 members。RunRecord 保存完整 readout 與 selection，
+資料軸保留原始序號，不重新編號。使用者於 2026-10-16 提議：「一個MG component類，內部屬性綁定到R1, R2，gui中預設指定MG，寫回目標也是從MG的綁定取」，並補充「為了能只讀特定幾個R，可以考慮MG外cfg另外提供mask之類的」。對 active_tones 方案裁定：「可以」。
+
+Core cfg 驗證錯誤沿既有宿主 result／Run 診斷定位 `active_tones` 並拒絕 Run，不保證欄位變紅。
+FormState 的 preview／describe 不執行 lowering，也不新增 FormEditor 外部錯誤投影。
+此分界沿用 [[0065]]。使用者於 2026-10-16 裁定：「報錯我選B」。
+
+Writeback 由 adapter 經 Run／Load 既有 capture 讀取 `$mux.members`，以完整原始序號對應成功 active tones。
+Members 數不等於完整 N 時只提 module，並顯示原因。
+固定 module target 是 `$mux.readout.readout_rf`，與 group 當前 slot 所指的 key 無關。
+使用者於 2026-10-16 裁定：「應該參考其他使用alias是怎麼寫回的」。
+這些 lab 定義沿第 4 層依賴下層的方向，C15、C16 保護 core 與 framework 邊界。
+
 ### 能力模組的兩類
 
 | 類別 | 模組 | 規則 |

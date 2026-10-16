@@ -15,6 +15,7 @@ from zcu_tools.cfg_model import (
     Expr,
     FlatTopWaveformSpec,
     GaussWaveformCfg,
+    MuxReadoutSpec,
     NoneResetCfg,
     PulseReadoutSpec,
     PulseResetSpec,
@@ -217,6 +218,22 @@ TEMPLATES: dict[str, TemplateDef] = {
             "ro_length": 0.0,
             "trig_offset": 0.0,
         },
+    ),
+    # Editing seeds only: authors must supply tones and verify hardware wiring.
+    "readout/mux:blank": TemplateDef(
+        MuxReadoutSpec,
+        "Blank: readout/mux",
+        {
+            "gen_ch": 0,
+            "nqz": 1,
+            "mixer_freq": 0.0,
+            "length": 1.0,
+            "ro_length": 1.0,
+            "pre_delay": 0.0,
+            "post_delay": 0.0,
+            "trig_offset": 0.0,
+        },
+        default_name="readout_rf",
     ),
     "reset/none:blank": TemplateDef(
         NoneResetCfg, "Blank: reset/none", {"type": "reset/none"}

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from numbers import Integral, Real
 from pathlib import Path
@@ -26,6 +26,7 @@ from zcu_tools.plotting.plots import Plots
 from zcu_lab.v2._support.measure.writeback_helpers import (
     pulse_readout_module_writeback_items,
 )
+from zcu_lab.v2._support.resonator import finite_real, route_matched_delay
 from zcu_lab.v2.onetone.freq.core import (
     FreqAnalyzeOptions,
     FreqCfg,
@@ -40,7 +41,6 @@ EDelayMode: TypeAlias = Literal["auto", "calibrated", "manual"]
 EDelaySource: TypeAlias = Literal["global", "calibrated", "manual"]
 
 _EDELAY_PARAMETER_PATH = "resonator.ext.edelay"
-_EDELAY_CALIBRATION_FIELDS = frozenset({"edelay", "res_ch", "ro_ch"})
 _DEFAULT_MAX_EDELAY_SEARCH_RADIUS = 100.0
 
 
@@ -110,19 +110,6 @@ class OneToneFreqAdapter(
             return None
         return int(res_ch), int(ro_ch)
 
-    @staticmethod
-    def _finite_real(value: object) -> float | None:
-        if isinstance(value, bool) or not isinstance(value, Real):
-            return None
-        converted = float(value)
-        return converted if np.isfinite(converted) else None
-
-    @staticmethod
-    def _channel(value: object) -> int | None:
-        if isinstance(value, bool) or not isinstance(value, Integral):
-            return None
-        return int(value)
-
     @classmethod
     def _route_matched_prior(
         cls, parameters: ParameterContext | None, route: tuple[int, int] | None
@@ -130,20 +117,7 @@ class OneToneFreqAdapter(
         if parameters is None or route is None:
             return None
         lookup = parameters.lookup(f"${_EDELAY_PARAMETER_PATH}")
-        raw = lookup.value
-        if not lookup.present or raw is None or not isinstance(raw, Mapping):
-            return None
-        fields: frozenset[str] = frozenset(raw)
-        if fields != _EDELAY_CALIBRATION_FIELDS:
-            return None
-        prior = cls._finite_real(raw["edelay"])
-        prior_res_ch = cls._channel(raw["res_ch"])
-        prior_ro_ch = cls._channel(raw["ro_ch"])
-        if prior is None or prior_res_ch is None or prior_ro_ch is None:
-            return None
-        if (prior_res_ch, prior_ro_ch) != route:
-            return None
-        return prior
+        return route_matched_delay(lookup.value, route) if lookup.present else None
 
     @classmethod
     def _resolve_edelay_seed(
@@ -155,7 +129,7 @@ class OneToneFreqAdapter(
         if params.edelay_mode == "manual":
             if params.manual_edelay is None:
                 raise ValueError("manual edelay mode requires manual_edelay")
-            seed = cls._finite_real(params.manual_edelay)
+            seed = finite_real(params.manual_edelay)
             if seed is None:
                 raise ValueError("manual_edelay must be finite")
             return seed, "manual"
@@ -206,7 +180,7 @@ class OneToneFreqAdapter(
         )
         max_search_radius: float | None = None
         if edelay_seed is None:
-            max_search_radius = self._finite_real(params.max_edelay_search_radius)
+            max_search_radius = finite_real(params.max_edelay_search_radius)
             if max_search_radius is None or max_search_radius <= 0.0:
                 raise ValueError(
                     "max_edelay_search_radius must be positive and finite, got "
@@ -223,7 +197,7 @@ class OneToneFreqAdapter(
             ),
             plots=plots,
         )
-        edelay = self._finite_real(answer.params.get("edelay"))
+        edelay = finite_real(answer.params.get("edelay"))
         if edelay is None:
             raise ValueError("one-tone fit result must contain a finite edelay")
         return OneToneFreqAnalyzeResult(
@@ -270,7 +244,7 @@ class OneToneFreqAdapter(
         ]
         if result.edelay_persistable:
             route = self._readout_route(req.run_result)
-            edelay = self._finite_real(result.edelay)
+            edelay = finite_real(result.edelay)
             if route is None or edelay is None:
                 raise ValueError(
                     "persistable electrical delay requires a finite fitted edelay "

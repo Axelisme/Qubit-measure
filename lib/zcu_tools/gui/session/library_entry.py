@@ -36,6 +36,7 @@ from zcu_tools.cfg_model import (
     FlatTopWaveformSpec,
     GaussWaveformCfg,
     ModuleSpec,
+    MuxReadoutSpec,
     NoneResetCfg,
     PulseReadoutSpec,
     PulseResetSpec,
@@ -69,6 +70,7 @@ LIBRARY_WRITE_ERRORS = (ExpectedError, KeyError, ValueError, OSError)
 _MODULE_SPECS = (
     PulseSpec,
     PulseReadoutSpec,
+    MuxReadoutSpec,
     NoneResetCfg,
     PulseResetSpec,
     TwoPulseResetSpec,
