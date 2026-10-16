@@ -198,14 +198,14 @@ class BaseEventBus:
         for cb in list(self._meta_subs.get(type(payload), ())):
             try:
                 cb(payload, meta)
-            except Exception:  # noqa: BLE001 — one bad subscriber must not break the rest
+            except Exception:  # one bad subscriber must not break the rest
                 logger.exception(
                     "EventBus subscriber for %s raised", type(payload).__name__
                 )
         for cb in list(self._subs.get(type(payload), ())):
             try:
                 cb(payload)
-            except Exception:  # noqa: BLE001 — one bad subscriber must not break the rest
+            except Exception:  # one bad subscriber must not break the rest
                 logger.exception(
                     "EventBus subscriber for %s raised", type(payload).__name__
                 )
