@@ -354,6 +354,13 @@ class _Section:
                 data[name] = node.value
             else:
                 data[name] = _seed_json(node)
+        # Only core-disabled modules get an explicit selection. Existing initial
+        # values win, while nullable fields without a None default stay missing.
+        data = {
+            name: None
+            for name in self.modules
+            if self.core.model_fields[name].default is None
+        } | data
         for name, child in self.children.items():
             if name not in data and self.core.model_fields[name].is_required():
                 data[name] = child.default_data(env)
