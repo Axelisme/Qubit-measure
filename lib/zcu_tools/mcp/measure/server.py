@@ -70,7 +70,7 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v115: read-only predictor inputs and readiness without an installed predictor.
 # v116: explicit working-point selection and saved writeback destinations.
 # v117: holder/ref-free cfg integrated above the working-point and UI releases.
-MCP_VERSION = 119
+MCP_VERSION = 120
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect. This does not connect hardware.
@@ -91,8 +91,9 @@ when a recipe or shared tool covers it. Raw RPC does not aggregate tool
 results, decode PNG replies, or run the analysis artifact save pipeline.
 
 
-For authorized setup, simulation_initialize uses the GUI coordinator and may
-switch away from real devices. It does not launch a GUI or connect real hardware.
+For an authorized offline launch, connect with launch='new' and simulate set to
+an environment Python path. Explicit simulate paths are refused when attaching;
+the existing GUI stays unchanged. Close it before selecting another environment.
 device_setup(name, cfg) accepts a partial Info patch, reads before, merges full
 cfg, submits once and waits at most 300 seconds. It has no timeout argument.
 YOKO value patches require caller-supplied value_unit; output/rampstep-only

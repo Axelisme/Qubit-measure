@@ -18,7 +18,7 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.gui.session.device_control import DeviceControlFacet
 from zcu_tools.gui.session.services.connection import (
-    ConnectMockRequest,
+    ConnectRemoteRequest,
     ConnectRequest,
     SoCConnectionService,
 )
@@ -28,13 +28,9 @@ from zcu_tools.gui.session.services.project_settings import (
     ProjectSettingsService,
     SetupPreferences,
 )
-from zcu_tools.gui.session.services.simulated_environment import (
-    SimulatedEnvironmentCoordinator,
-)
 from zcu_tools.gui.session.setup_control import SetupControlFacet
 from zcu_tools.gui.session.types import SocCfgHandle
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.sim import SimParams
 
 from tests.gui._control_fakes import CallLog, RecordedCall, RecordingSignal, call
 from tests.gui.app.measure.remote._helpers import Fixture
@@ -121,15 +117,6 @@ class RecordingDevice(DeviceControlFacet):
         return "V"
 
 
-class RecordingSimulatedEnvironment(SimulatedEnvironmentCoordinator):
-    def __init__(self, log: CallLog) -> None:
-        self._log = log
-
-    def start(self, *, sim_params: SimParams | None = None) -> int:
-        self._log.add("simulated_environment", "start", sim_params=sim_params)
-        return 7
-
-
 def _facet() -> tuple[SetupControlFacet, CallLog, BaseEventBus, RecordingConnection]:
     log, bus = CallLog(), BaseEventBus()
     connection = RecordingConnection(log)
@@ -139,7 +126,6 @@ def _facet() -> tuple[SetupControlFacet, CallLog, BaseEventBus, RecordingConnect
             settings=RecordingSettings(log),
             context=RecordingContext(log),
             connection=connection,
-            simulated_environment=RecordingSimulatedEnvironment(log),
             device=RecordingDevice(log),
         ),
         log,
@@ -157,7 +143,7 @@ def test_setup_control_facet_forwards_deliberate_setup_dialog_contract() -> None
         "entry", "chip", Path("/tmp/result/chip"), Path("/tmp/Database/chip")
     )
     conn_req = ConnectionPreferences(ip="127.0.0.1", port=8887)
-    connect_req = ConnectMockRequest()
+    connect_req = ConnectRemoteRequest(ip="192.0.2.1", port=8888)
     cases: tuple[tuple[str, Callable[[], object], object, RecordedCall], ...] = (
         (
             "get_setup_preferences",

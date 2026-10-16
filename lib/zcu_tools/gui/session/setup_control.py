@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Protocol
 from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.session.events import (
     ConnectionFinishedPayload,
-    SimulatedEnvironmentFinishedPayload,
 )
 
 if TYPE_CHECKING:
@@ -32,11 +31,7 @@ if TYPE_CHECKING:
         ProjectSettingsService,
         SetupPreferences,
     )
-    from zcu_tools.gui.session.services.simulated_environment import (
-        SimulatedEnvironmentCoordinator,
-    )
     from zcu_tools.gui.session.types import SocCfgHandle
-    from zcu_tools.program.v2.sim import SimParams
 
 
 class SetupControlPort(Protocol):
@@ -84,9 +79,6 @@ class SetupControlPort(Protocol):
         ...
 
     def start_connect(self, req: ConnectRequest) -> int: ...
-    def start_simulated_environment(
-        self, *, sim_params: SimParams | None = None
-    ) -> int: ...
     def bind_connection_outcome(
         self,
         on_finished: Callable[[], None],
@@ -106,14 +98,12 @@ class SetupControlFacet(SetupControlPort):
         settings: ProjectSettingsService,
         context: ContextControlPort,
         connection: SoCConnectionService,
-        simulated_environment: SimulatedEnvironmentCoordinator,
         device: DeviceControlPort,
     ) -> None:
         self._bus = bus
         self._settings = settings
         self._context = context
         self._connection = connection
-        self._simulated_environment = simulated_environment
         self.devices = device
         self._connection_outcome_subscriptions = EventSubscriptions()
 
@@ -150,11 +140,6 @@ class SetupControlFacet(SetupControlPort):
     def start_connect(self, req: ConnectRequest) -> int:
         return self._connection.start_connect(req)
 
-    def start_simulated_environment(
-        self, *, sim_params: SimParams | None = None
-    ) -> int:
-        return self._simulated_environment.start(sim_params=sim_params)
-
     def bind_connection_outcome(
         self,
         on_finished: Callable[[], None],
@@ -164,7 +149,7 @@ class SetupControlFacet(SetupControlPort):
         self._connection_outcome_subscriptions = EventSubscriptions()
 
         def dispatch(
-            payload: ConnectionFinishedPayload | SimulatedEnvironmentFinishedPayload,
+            payload: ConnectionFinishedPayload,
         ) -> None:
             if payload.success:
                 on_finished()
@@ -173,9 +158,6 @@ class SetupControlFacet(SetupControlPort):
 
         self._connection_outcome_subscriptions.subscribe(
             self._bus, ConnectionFinishedPayload, dispatch
-        )
-        self._connection_outcome_subscriptions.subscribe(
-            self._bus, SimulatedEnvironmentFinishedPayload, dispatch
         )
 
     def remember_connection(self, prefs: ConnectionPreferences) -> None:

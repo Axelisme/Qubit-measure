@@ -1,6 +1,6 @@
 # `simulate/fluxonium` 模塊重點文檔
 
-**Last updated:** 2026-10-14，coherence units 與 Purcell equilibrium T1
+**Last updated:** 2026-10-16，shared loss spectra 與 coherence units
 
 基於 [scqubits](https://scqubits.readthedocs.io) 的 Fluxonium 量子比特數值模擬工具集,提供能譜、色散位移、矩陣元、相干時間與實驗參數預測等計算。
 
@@ -51,6 +51,7 @@
 
 - `calculate_eff_t1(_with)` / `calculate_eff_t1_vs_flux(_with)` 包裝 scqubits，回傳 physical ns，不再外乘 2π。`_with` 接受既有 Fluxonium 與 eigenpairs／spectrum data，供重用本徵分解。
 - `calculate_eff_t1_fast` / `calculate_eff_t1_vs_flux_fast` 使用快取算子與批次 numpy 計算，和 slow 路徑使用相同的物理 rates，`T1 = 1/Σrate`。支援 capacitive、inductive、charge impedance、flux bias line 與 quasiparticle channels。Fast 固定 `total=True`；不支援的 channel／options 直接報錯，需要單向 rate 時使用 slow 路徑。
+- Loss spectra 由 `simulate.spectra` 提供，與 joint directional baths 共用。Coherence 仍合併兩方向，不把 equilibrium rate 當單向 jump；預設 Q 與 scalar／array、callable options 不變。
 - 絕對單位由 SI LC energy lifetime 與 raw scqubits regressions 驗證，fast／slow 相等不是唯一 oracle。半通量附近 matrix element 可能因 parity 消失，應比較接近零的 rate，不能只比較巨大 T1 的相對差。
 - `calculate_purcell_t1_vs_flux(..., progress=True)` 分別對 qubit e→g 與 g→e rates 做 resonator thermal average，回傳 equilibrium `T1=1/(Γeg+Γge)`，單位 ns。只納入 0↔1，不包含高能態 leakage，也不代表來源論文的完整 loss 模型。
   - 底層 module-public `purcell` 仍回傳指定 initial→final groups 的 directional escape lifetime。高階 sweep 重用同一本徵分解求兩個方向，再合併 rates。

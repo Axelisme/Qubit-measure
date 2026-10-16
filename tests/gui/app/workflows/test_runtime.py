@@ -117,7 +117,7 @@ def test_live_getter_returns_detached_actual_subclass_without_updating_cache(
 
 
 @pytest.mark.parametrize(
-    "update", [{"value": "invalid"}, {"value_unit": "V"}, {"output": "invalid"}]
+    "update", [{"value": "invalid"}, {"value_unit": "invalid"}, {"output": "invalid"}]
 )
 def test_complete_setup_revalidates_unchecked_model_copy_before_driver_io(
     connected, update: dict[str, object]

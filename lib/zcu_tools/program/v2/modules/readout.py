@@ -301,6 +301,17 @@ class TablePulseReadout(AbsReadout):
             val_reg=f"{name}_next_ro_freq_word",
         )
 
+    @property
+    def initial_template(self) -> PulseReadout:
+        """Borrow the initial scalar/swept template used before exec-after updates.
+
+        The returned Module is owned by this table readout and must not be
+        mutated by consumers. init(prog) initializes it and its dedicated pulse
+        identity. It is not the current mutable hardware wmem contents; semantic
+        interpreters own their own per-execution template-word update state.
+        """
+        return self._readout
+
     def init(self, prog: ModularProgramV2) -> None:
         self._validate_loop_count(prog)
         self._readout.init(prog)

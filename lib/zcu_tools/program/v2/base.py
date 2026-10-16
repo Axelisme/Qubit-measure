@@ -1,19 +1,18 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
-from typing import Annotated, cast
+from typing import Annotated
 
 import numpy as np
 from qick import QickConfig
 from qick.asm_v2 import AveragerProgramV2
 
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.program.acquisition import ImproveAcquireMixin
 
 from .ir import IRCompileMixin
 from .macro import ImproveAsmV2
 from .modules.registry import PulseRegistry
+from .simulation import SimulationAcquireMixin
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +44,9 @@ class ProgramV2Cfg(ConfigBase):
     ] = 1.0
 
 
+# QICK annotates single ndarrays; our existing mixin returns one array per ADC.
 class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
-    ImproveAcquireMixin, ImproveAsmV2, AveragerProgramV2, IRCompileMixin
+    SimulationAcquireMixin, ImproveAsmV2, AveragerProgramV2, IRCompileMixin
 ):
     def __init__(self, soccfg: QickConfig, cfg: ProgramV2Cfg, **kwargs) -> None:
 
@@ -103,86 +103,9 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
         )
 
     def acquire(self, soc, *args, **kwargs):
-        logger.debug(
-            "MyProgramV2.acquire: reps=%s, rounds=%s",
-            self.cfg_model.reps,
-            self.cfg_model.rounds,
-        )
-
-        # Sim dispatch (mocksim P1-5): a MockQickSoc carrying SimParams routes
-        # through the SimEngine.  We *inject* the engine onto the soc (no eager
-        # compute); the real round loop then runs unchanged and the soc's
-        # poll_data computes each round lazily off the engine, so round_hook /
-        # _process_accumulated / _summarize_accumulated / get_raw are all reused.
-        # ``cancel_flag`` stays owned by the real round loop's finish_round(),
-        # matching hardware's round-boundary stop semantics. With no SimParams this
-        # branch is skipped entirely and behaviour is identical to the prior real
-        # path (D1).
-        sim = getattr(soc, "_sim_params", None)
-        if sim is not None:
-            self._attach_sim_engine(
-                soc,
-                sim,
-            )
-
         return super().acquire(soc, *args, rounds=self.cfg_model.rounds, **kwargs)
 
     def acquire_decimated(self, soc, *args, **kwargs):
-        logger.debug(
-            "MyProgramV2.acquire_decimated: reps=%s, rounds=%s",
-            self.cfg_model.reps,
-            self.cfg_model.rounds,
-        )
-
-        # Sim dispatch (mocksim D2): a MockQickSoc carrying SimParams routes the
-        # decimated (time-domain / lookback) path through the SimEngine too.  We
-        # inject the engine onto the soc (no eager compute); the real decimated
-        # round loop then runs unchanged and the soc's get_decimated renders each
-        # round's trace lazily off the engine (model A, timeFly-shifted readout
-        # envelope × steady mixed S21).  With no SimParams this branch is skipped
-        # and behaviour is identical to the prior real path (D1).
-        sim = getattr(soc, "_sim_params", None)
-        if sim is not None:
-            self._attach_sim_engine(
-                soc,
-                sim,
-            )
-
         return super().acquire_decimated(
             soc, *args, rounds=self.cfg_model.rounds, **kwargs
-        )
-
-    def _attach_sim_engine(
-        self,
-        soc,
-        sim,
-    ) -> None:
-        """Build the SimEngine and inject it onto the mock soc for poll-time compute.
-
-        Ensures the program is compiled (the engine reads loop_dims / ro_chs /
-        the module tree), derives this acquire's child RNG seed from the mock soc,
-        constructs the engine, and hands it to the mock soc; no rounds are
-        computed here — poll_data drives compute lazily.  Lives here (not in
-        acquire) to keep the dispatch branch readable; engine construction raises
-        (does not swallow) so unsupported experiment structures fail fast instead
-        of degrading to noise.
-        """
-
-        from .sim.engine import SimEngine
-
-        if self.loop_dims is None or self.avg_level is None:
-            self.compile()
-
-        next_seed = getattr(soc, "next_sim_acquire_seed", None)
-        if not callable(next_seed):
-            raise TypeError(
-                "SimParams-backed soc must provide next_sim_acquire_seed() for "
-                "per-acquire RNG seed derivation"
-            )
-
-        rng_seed = cast(
-            "Callable[[], int | np.random.SeedSequence | None]", next_seed
-        )()
-        soc.set_sim_engine(
-            SimEngine(self, sim, rng_seed=rng_seed, flux_source=soc.flux_source)
         )

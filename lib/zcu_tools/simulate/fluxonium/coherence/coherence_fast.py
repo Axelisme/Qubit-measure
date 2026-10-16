@@ -16,9 +16,8 @@ module removes:
    ``sin(alpha*phi + beta) = sin(alpha*phi)*cos(beta) + cos(alpha*phi)*sin(beta)`` — no
    ``sinm`` per flux.
 
-The T1 noise formulas (the spectral densities + Fermi rate) are transcribed verbatim
-from ``scqubits/core/noise.py`` and validated pointwise against scqubits to machine
-precision (see ``tests/simulate/fluxonium/test_coherence_fast.py``). The
+The T1 noise spectra are provided by the shared numeric ``simulate.spectra``
+owner and validated pointwise against scqubits to machine precision (see ``tests/simulate/fluxonium/test_coherence_fast.py``). The
 result matches ``calculate_eff_t1_vs_flux`` to ~1e-13 relative. The supported channels
 are the five Fluxonium T1 channels; an unsupported channel name fast-fails.
 """
@@ -30,23 +29,35 @@ from functools import lru_cache
 from typing import Any
 
 import numpy as np
-import scipy.constants as const
-import scipy.special as special
 from numpy.typing import NDArray
 
-# Physical constants (mirrors scqubits NOISE_PARAMS / CONSTANTS / units).
-_HBAR = const.hbar
-_KB = const.k
-_E = const.e
-_H = const.h
-_R_K = _H / _E**2  # Klitzing constant R_k = h / e^2
-_TO_STD = 1e9  # units.to_standard_units: GHz system units -> Hz
-
-# scqubits NOISE_PARAMS defaults used by the channels.
-_DEF_Z = 50.0  # R_0, characteristic impedance (Ohm)
-_DEF_M = 400.0  # mutual inductance (Phi_0 / A)
-_DEF_X_QP = 3e-6  # quasiparticle density
-_DEF_DELTA = 3.4e-4  # superconducting gap (eV)
+from zcu_tools.simulate.spectra import (
+    DEFAULT_GAP_EV as _DEF_DELTA,
+)
+from zcu_tools.simulate.spectra import (
+    DEFAULT_IMPEDANCE_OHM as _DEF_Z,
+)
+from zcu_tools.simulate.spectra import (
+    DEFAULT_MUTUAL_PHI0_PER_A as _DEF_M,
+)
+from zcu_tools.simulate.spectra import (
+    DEFAULT_QP_DENSITY as _DEF_X_QP,
+)
+from zcu_tools.simulate.spectra import (
+    capacitive_spectrum as _s_capacitive,
+)
+from zcu_tools.simulate.spectra import (
+    charge_impedance_spectrum as _s_charge_impedance,
+)
+from zcu_tools.simulate.spectra import (
+    flux_line_spectrum as _s_flux_bias_line,
+)
+from zcu_tools.simulate.spectra import (
+    inductive_spectrum as _s_inductive,
+)
+from zcu_tools.simulate.spectra import (
+    quasiparticle_spectrum as _s_quasiparticle,
+)
 
 
 class UnsupportedNoiseChannelError(ValueError):
@@ -60,116 +71,6 @@ class UnsupportedNoiseOptionError(ValueError):
     options, so an unknown option (e.g. ``total``) raises rather than being silently
     ignored — silently dropping it would return a wrong-but-plausible T1.
     """
-
-
-def _therm_ratio(omega: float, T: float, *, omega_in_std: bool = False) -> float:
-    """``hbar * omega / (k_B * T)`` — scqubits ``calc_therm_ratio`` (omega in system
-    rad units = 2*pi*GHz unless already standard)."""
-    o = omega if omega_in_std else omega * _TO_STD
-    return _HBAR * o / (_KB * T)
-
-
-def _ev_to_hz(val: float) -> float:
-    return val * _E / _H
-
-
-# --- spectral densities S(omega, T), omega in system rad units (2*pi*GHz) ----------
-# Each is a verbatim port of the corresponding scqubits ``spectral_density`` closure.
-
-
-def _s_capacitive(omega, T, EC, Q_cap=None):
-    therm = _therm_ratio(omega, T)
-    if Q_cap is None:
-        q = 1e6 * (2 * np.pi * 6e9 / np.abs(omega * _TO_STD)) ** 0.7
-    elif callable(Q_cap):
-        q = Q_cap(omega, T)
-    else:
-        q = Q_cap
-    s = 2 * 8 * EC / q * (1 / np.tanh(0.5 * np.abs(therm))) / (1 + np.exp(-therm))
-    return s * 2 * np.pi
-
-
-def _real(value: Any) -> Any:
-    """The real part of a (possibly complex) impedance/admittance value.
-
-    Uses ``np.real`` so it works for both a scalar impedance ``Z`` and an array-valued
-    admittance ``Y_qp`` (the vectorised-over-flux quasiparticle path passes a length-N
-    omega, making ``y`` a length-N array)."""
-    return np.real(value)
-
-
-def _s_charge_impedance(omega, T, Z=_DEF_Z):
-    z = Z(omega) if callable(Z) else Z
-    Q_c = _R_K / (8 * np.pi * _real(z))
-    therm = _therm_ratio(omega, T)
-    return 2 * omega / Q_c * (1 / np.tanh(0.5 * therm)) / (1 + np.exp(-therm))
-
-
-def _s_flux_bias_line(omega, T, M=_DEF_M, Z=_DEF_Z):
-    z = Z(omega) if callable(Z) else Z
-    therm = _therm_ratio(omega, T)
-    s = (
-        2
-        * (2 * np.pi) ** 2
-        * M**2
-        * omega
-        * _HBAR
-        / _real(z)
-        * (1 / np.tanh(0.5 * therm))
-        / (1 + np.exp(-therm))
-    )
-    return s * _TO_STD**2  # 2 powers of frequency -> standard units
-
-
-def _s_inductive(omega, T, EL, Q_ind=None):
-    therm = _therm_ratio(omega, T)
-    if Q_ind is None:
-        tr = abs(therm)
-        tr500 = _therm_ratio(2 * np.pi * 500e6, T, omega_in_std=True)
-        q = (
-            500e6
-            * (special.kv(0, 0.5 * tr500) * np.sinh(0.5 * tr500))
-            / (special.kv(0, 0.5 * tr) * np.sinh(0.5 * tr))
-        )
-    elif callable(Q_ind):
-        q = Q_ind(omega, T)
-    else:
-        q = Q_ind
-    s = 2 * EL / q * (1 / np.tanh(0.5 * np.abs(therm))) / (1 + np.exp(-therm))
-    return s * 2 * np.pi
-
-
-def _s_quasiparticle(omega, T, EJ, x_qp=_DEF_X_QP, Delta=_DEF_DELTA, Y_qp=None):
-    therm = _therm_ratio(omega, T)
-    if Y_qp is None:
-        ao = abs(omega)
-        delta_hz = _ev_to_hz(Delta)
-        omega_hz = (ao * _TO_STD) / (2 * np.pi)
-        ej_hz = EJ * _TO_STD
-        tr = _therm_ratio(ao, T)
-        y = (
-            np.sqrt(2 / np.pi)
-            * (8 / _R_K)
-            * (ej_hz / delta_hz)
-            * (2 * delta_hz / omega_hz) ** 1.5
-            * x_qp
-            * np.sqrt(0.5 * tr)
-            * special.kv(0, 0.5 * abs(tr))
-            * np.sinh(0.5 * tr)
-        )
-    elif callable(Y_qp):
-        y = Y_qp(omega, T)
-    else:
-        y = Y_qp
-    return (
-        2
-        * _HBAR
-        * omega
-        / _E**2
-        * _real(y)
-        * (1 / np.tanh(0.5 * therm))
-        / (1 + np.exp(-therm))
-    )
 
 
 # A spectral density S(omega, T): omega may be a scalar or a length-N flux array (the

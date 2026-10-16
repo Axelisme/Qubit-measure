@@ -72,7 +72,6 @@ session/
 │   ├── project_settings.py — ProjectSettingsService：以明確 result/Database roots 呼叫 ResultEntry.open/create，再交 ContextService.install_entry；記住的 entry/connection/device preferences 不證明來源已開啟
 │   ├── progress.py     — ProgressService（per-operation pbar 容器 + bound factory，吃 ProgressTransport；**共用**，非 app-held；owner listener 例外逐一 log 並隔離，壞 listener 會 detach，不阻斷其他 listener 或 terminal cleanup）
 │   ├── shutdown.py     — ShutdownCoordinator（Qt-free cancel-all + poll state machine，吃 OperationHandles，ADR-0066；QTimer driver 在 adapters/）
-│   ├── simulated_environment.py — Use Simulate Env coordinator：經 DeviceService 斷開真實裝置，註冊／初始化 FakeDevice，再綁定 MockSoc 並由 SoC owner 發布；不安裝 predictor
 │   ├── arb_waveform.py — ArbWaveformService：只依賴 SessionState，資產根目錄依 session_env 的 database path 與 chip／qubit 名稱；每次成功寫入 bump 共用 `arb_waveforms` version 一次；未設 project 時 list 回空，其他操作拒絕 no_project
 │   ├── value_sources.py — ValueSourceBinder：訂閱 Context/Device event，把 live SessionState 投影註冊進 `ValueRegistry`；provider 只讀 cached state（device value 只看 `DeviceState.info`，不 poll hardware），並用 owner-level replace/unregister 維護 lifecycle
 │   └── build.py        — SessionServices bundle 與 build_session_services：組裝 owning services/facets（含 arb_waveform），從 project_root 注入 result/Database roots，明確注入 entry-scoped asset binder
@@ -92,7 +91,13 @@ session/
 
 共用 Inspect、Devices 與 ARB 對話框由宿主呼叫 `set_read_only` 決定是否可編輯，不讀控制權或 run 狀態。ARB 唯讀時停用編輯與 Save，保留鎖前草稿；asset 選取、Refresh、預覽與 Close 照常可用。解鎖後 Save 仍受驗證結果限制。Inspect 唯讀時「Arb Waveforms…」入口仍可按，ARB 依宿主規則以唯讀開啟。
 
-`Use Simulate Env` 是明確的環境組裝入口，不是 `SOC_CHANGED` 的副作用。它只在啟用時斷開真實 devices，允許之後混用。任一斷線失敗就停止並回報部分成果，不自動重連、歸零或 RF off。低層 SoC connect 不建立 FakeDevice；重複啟用保留有效 mock 的資源與數值。
+Simulation is selected at measure startup with `--simulate <environment.py>`.
+Composition injects the returned manager and calls `DeviceService.publish_initial_devices`
+before preference restore. Live rows win over same-name remembered rows; other
+remembered rows stay MEMORY_ONLY without connecting. `install_startup_soc` publishes
+the bound SoC/config through the connection owner and fixes that pair for this process.
+Session has no environment builder or dynamic simulation coordinator. The host drains
+work and closes the same manager; Controller close alone does not close drivers.
 
 Device panel 保留原 mode 顯示與 output／value／rampstep 控制，不提供獨立 `value_unit` 編輯。完整 cfg 的單位由 Info 驗證，snapshot 與 recipe 沿同一儲存事實。
 

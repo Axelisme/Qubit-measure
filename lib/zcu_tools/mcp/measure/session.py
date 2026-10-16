@@ -43,6 +43,17 @@ class GuiRpcError(GuiInvocationError):
         self.request_rejected = request_rejected
 
 
+def _reject_environment_attach(
+    simulate: str | None, launch: str, *, existing: bool
+) -> None:
+    """An explicit environment path may only select a newly born GUI process."""
+    if simulate is not None and launch != "new" and (launch == "never" or existing):
+        raise GuiRpcError(
+            'Existing GUI unchanged; close it first, then use launch="new" with simulate.',
+            reason="environment_requires_new_gui",
+        )
+
+
 def _transport_timeout(exc: GuiTransportTimeoutError) -> GuiRpcError:
     """Use the same uncertain transport error for public and internal reads."""
     return GuiRpcError(
@@ -124,6 +135,23 @@ def _parse_catalog(raw: object) -> dict[str, CatalogEntry]:
             operation_key=operation_key,
         )
     return methods
+
+
+@dataclass(frozen=True)
+class ConnectIdentity:
+    """Optional socket-identity changes; None retains that previous field."""
+
+    label: str | None = None
+    mode: Literal["owner", "readonly"] | None = None
+
+    def resolve(self, previous: ControlConnection) -> ControlConnection:
+        return ControlConnection(
+            previous.label if self.label is None else self.label,
+            previous.mode if self.mode is None else self.mode,
+        )
+
+
+_DEFAULT_CONNECT_IDENTITY = ConnectIdentity()
 
 
 class MeasureMcpSession:
@@ -389,8 +417,8 @@ class MeasureMcpSession:
         launch: str,
         clean: bool,
         token: str | None = None,
-        label: str | None = None,
-        mode: Literal["owner", "readonly"] | None = None,
+        identity: ConnectIdentity = _DEFAULT_CONNECT_IDENTITY,
+        simulate: str | None = None,
     ) -> dict[str, Any]:
         """Attach and initialize identity before catalog; report native control.
 
@@ -400,12 +428,14 @@ class MeasureMcpSession:
         """
         with self._rpc_lock:
             self._require_open()
-            identity = ControlConnection(
-                self._control_connection.label if label is None else label,
-                self._control_connection.mode if mode is None else mode,
-            )
+            connection_identity = identity.resolve(self._control_connection)
             return self._connect_to_gui(
-                port=port, launch=launch, clean=clean, token=token, identity=identity
+                port=port,
+                launch=launch,
+                clean=clean,
+                token=token,
+                identity=connection_identity,
+                simulate=simulate,
             )
 
     def _attach_existing_gui(self, selected: int, token: str | None) -> None:
@@ -434,12 +464,14 @@ class MeasureMcpSession:
         clean: bool,
         token: str | None = None,
         identity: ControlConnection,
+        simulate: str | None = None,
     ) -> dict[str, Any]:
         """Attach or launch once; incompatible GUI contracts fail before mutations.
 
         A repeated attach returns the connected GUI. GUI code revision is shown
         but never compared. No failed or stale mutation is resent automatically.
         """
+        _reject_environment_attach(simulate, launch, existing=self.bridge.is_connected)
         if (
             launch != "new"
             and self.bridge.is_connected
@@ -456,6 +488,7 @@ class MeasureMcpSession:
             }
         selected = self._resolve_connect_port(self._config, port)
         existing = self._port_is_open(selected)
+        _reject_environment_attach(simulate, launch, existing=existing)
         if launch == "new" and existing:
             raise GuiRpcError(f"GUI port {selected} is in use", reason="port_in_use")
         if launch == "never" and not existing:
@@ -475,7 +508,8 @@ class MeasureMcpSession:
                 selected,
                 token=token,
                 auto_connect=True,
-                extra_args=["--clean"] if clean else None,
+                extra_args=(["--clean"] if clean else [])
+                + (["--simulate", simulate] if simulate is not None else []),
             )
             if not self.bridge.is_connected:
                 raise GuiRpcError(

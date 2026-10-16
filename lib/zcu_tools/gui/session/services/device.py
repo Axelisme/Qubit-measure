@@ -258,17 +258,34 @@ class DeviceService:
         self._registry: DeviceRegistryPort = (
             device_registry if device_registry is not None else DeviceManager()
         )
-        # Device state lives in State (the SSOT). This service holds only the
-        # live driver (in the registry), the worker threads, and the in-flight
-        # operation transients below. Setup progress lives in the shared
-        # ProgressService, keyed by each operation's token (owner = name).
-        #
-        # Phase C: per-device concurrency. Connect / disconnect / setup of
-        # different devices run in parallel, so the in-flight bookkeeping is a
-        # dict keyed by device name (each op's resource_id) rather than a single
-        # scalar set. The gate enforces that the SAME device has at most one
-        # in-flight mutation, so each name maps to exactly one _InflightOp.
+        # State owns serializable snapshots; this service owns live drivers and
+        # per-name operation transients. The gate prevents concurrent mutations
+        # of the same device. ProgressService owns per-operation setup progress.
         self._inflight: dict[str, _InflightOp] = {}
+
+    def publish_initial_devices(self) -> None:
+        """Publish injected live drivers before preference restore, on owner loop.
+
+        No drivers are reconstructed or connected. Read failure aborts startup;
+        the composition host retains cleanup responsibility for the same manager.
+        Existing published rows are rejected rather than overwritten.
+        """
+        entries = self._registry.get_all_devices()
+        infos = {name: driver.get_info() for name, driver in entries.items()}
+        for name, info in infos.items():
+            if self._state.get_device(name) is not None:
+                raise ValueError(f"device already published: {name}")
+            self._state.put_device(
+                DeviceState(
+                    name=name,
+                    type_name=info.type,
+                    address=info.address,
+                    status=DeviceStatus.CONNECTED,
+                    remember=False,
+                    info=info,
+                )
+            )
+            self._emit_device_changed(name)
 
     def start_connect_device(self, req: ConnectDeviceRequest) -> int:
         current = self._state.get_device(req.name)

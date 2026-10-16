@@ -22,7 +22,10 @@ from zcu_tools.gui.remote.errors import RemoteError
 
 
 def test_coerce_connect_mock_rejected():
-    with pytest.raises(RemoteError, match="simulation.initialize"):
+    with pytest.raises(
+        RemoteError,
+        match="requires kind='remote'; select --simulate at startup for simulation",
+    ):
         coerce_connect_request({"kind": "mock"})
 
 

@@ -40,6 +40,15 @@ router scaffolding. Typed envelopes live in [`gui.remote.wire`](../../../remote/
 - One connection has at most one in-flight RPC.
 - Request and response roots are JSON objects.
 
+## Simulation startup
+
+Simulation environments are installed before remote readiness with
+`--simulate <environment.py>`. GUI runtime environment switching and
+`simulation.initialize` are retired. RPC cannot replace the environment;
+changing it requires a restart. See the
+[simulation contract](../../../../program/v2/simulation/README.md#build-and-own-an-environment)
+for the startup entry point and ownership.
+
 ## Authority and dispatch
 
 After `wire.version` and optional `auth`, send `control.connect` with

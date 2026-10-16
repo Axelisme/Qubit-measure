@@ -1,0 +1,93 @@
+# Illustrative F1-C-F2 sample, not a calibrated chip or converged truncation.
+format: zcu.ftf
+version: 1
+channels:
+  generators: 3
+  readouts: 1
+model:
+  f1:
+    ej_ghz: 8.0
+    ec_ghz: 1.0
+    el_ghz: 0.5
+    native_cutoff: 24
+    levels: 4
+    q_cap: 1000000.0
+    q_ind: 100000000.0
+    xqp: 0.0000002
+    aphi: 0.000002
+  coupler:
+    ejmax_ghz: 12.0
+    ec_ghz: 0.3
+    asymmetry: 0.15
+    ng: 0.0
+    charge_cutoff: 8
+    levels: 4
+    q_cap: 1000000.0
+    aphi: 0.000002
+    # Charge/flux line losses are disabled when their parameters are omitted.
+  f2:
+    ej_ghz: 8.6
+    ec_ghz: 0.9
+    el_ghz: 0.55
+    native_cutoff: 24
+    levels: 4
+    q_cap: 1000000.0
+    q_ind: 100000000.0
+    xqp: 0.0000002
+    aphi: 0.000002
+  g1c_ghz: 0.06
+  g2c_ghz: 0.07
+  g12_ghz: -0.01
+  temperature_k: 0.02
+  # Increase native/local/global dimensions independently to check your sample.
+  retained_levels: 16
+devices:
+  - name: coupler_bias
+    unit: V
+    limits: [-1.0, 1.0]
+    initial: 0.1
+    rampstep: 0.01
+dc_mapping:
+  offset: [0.48, 0.2, 0.49]
+  columns:
+    - source: coupler_bias
+      unit: Phi0/V
+      coefficients: [0.001, 0.2, -0.001]
+flux_sources:
+  - name: coupler_flux
+    gen_ch: 1
+    coefficients_phi0_per_gain: [0.002, 0.1, -0.002]
+    delay_ns: 2.0
+    tau_ns: 8.0
+microwave_sources:
+  - name: microwave
+    gen_ch: 2
+    # Each pair is [real,imag] GHz/gain multiplying full n, not normalized n01.
+    coefficients_ghz_per_gain: [[0.1, 0.0], [0.0, 0.0], [0.002, -0.001]]
+readout_source:
+  gen_ch: 0
+  input_per_gain: 1.0 # sqrt(photons/ns)/gain
+receiver:
+  ro_ch: 0
+  gain: 10000.0 # ADC sample units / sqrt(photons/ns)
+  phase_deg: 0.0
+  offset_adc: [0.0, 0.0]
+  # Two-sided white PSD in ADC^2*ns. Sample covariance is this matrix / dt_ns.
+  noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]]
+resonators:
+  - frequency_ghz: 6.0
+    charge_coefficients_ghz: [0.03, 0.005, 0.0]
+    kappa_external_mhz: 1.0 # kappa_external/(2*pi), MHz
+    kappa_internal_mhz: 0.1
+    thermal_occupation: 0.0 # Omit for Bose(common temperature, bare frequency).
+  - frequency_ghz: 6.2
+    charge_coefficients_ghz: [0.0, 0.005, 0.03]
+    kappa_external_mhz: 1.0
+    kappa_internal_mhz: 0.1
+    thermal_occupation: 0.0
+solver:
+  rtol: 0.00000001
+  atol: 0.0000000001
+  max_step_ns: 0.1
+  bath_segment_ns: 2.0 # nearest 2 ns, at least one tick
+seed: 123

@@ -1,10 +1,16 @@
 # `zcu_tools.resources` experiment work resources
 
-**Last updated:** 2026-10-15，library 讀取清理例外
+**Last updated:** 2026-10-16，具名 FTF YAML 輸入
 
 `resources/` 組織實驗工作資源的命名、讀寫與交換。它不是通用 storage framework，也不包含 datafile。
 
 - [`context/`](context/README.md) 管理 point-local typed ModuleLibrary。
+- `simulation_replay.py` owns opt-in private FTF input JSON, content integrity,
+  atomic file I/O and acquire/round reference resolution. It retains detached
+  waveform samples and settings, not measured I/Q. Numeric manifests stay opaque
+  and are verified by their numeric owner. Normal waveform assets and data.h5
+  policies do not change. This module does not import program or simulate.
+- [`ftf/`](ftf/README.md) 讀取 immutable FTF YAML，擁有具名欄位、units、limits、接線與 noise PSD 的 field-path 診斷，不依賴 simulate、device 或 program。
 - [`qubit_params.py`](qubit_params.py) 直接管理 result scope 的 typed `params.json` handoff。公開讀寫先重新讀取 JSON，寫入採原子替換；方法與 section 規則見 [qubit_params.md](qubit_params.md)。
 - [`sample_table/`](sample_table/README.md) 管理條目的只追加 JSONL 樣本歷史、CSV 匯出與 opt-in v2 欄位協定。
 - [`waveform_assets.py`](waveform_assets.py) 是 qubit-scoped arbitrary waveform asset 的公開入口。每個 Database instance 持有固定 root，capture capability 固定原目錄但每次讀現在 bytes；沒有全域 repository 選擇器。core.waveform_format 負責 NPZ samples codec；內部 data、formula 與 NPZ 模組分別負責 payload／preview、formula 語意／rendering 與實體 I/O；格式、方法與約束見 [waveform_assets.md](waveform_assets.md)。

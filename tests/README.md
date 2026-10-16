@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-16，UI 驗證與確定性等待政策
+**Last updated:** 2026-10-16，FTF numeric/acquisition owner、UI 驗證與確定性等待政策
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -269,24 +269,28 @@ GUI Guard tests 驗證 cached settings 缺失或無效時仍可 admission；Guar
 registry dict、`get_info` 不被其它 device 的 setup ramp 阻塞、整批 name validation
 fast-fail、以及 `setup_devices(..., cancel_signal=...)` 的顯式協作取消語意。取消測試使用真 `FakeDevice`，不註冊 MagicMock driver。
 
-### 補充 — `make_mock_soc()`（`lib/zcu_tools/program/v2/mocksoc.py`）
+### Offline acquisition transports
 
-若要測 `acquire()` / `poll_data()` 路徑（不只 compile），可用 `make_mock_soc()` 建立 `MockQickSoc`。  
-它繼承 `QickConfig` 並提供 no-op 硬體控制方法，回傳 shape 正確的隨機資料，讓整段 acquire 流程可在無硬體下跑通。
+Compile-only cases use `make_mock_soccfg(n_gens, n_readouts)`. Simulation acquisition
+cases explicitly build `white_noise(...)` or a numeric `SimulationBinding` and use
+public program acquire/get_raw. Normal unbound pipeline tests use the deterministic
+transport in `tests/program/_acquisition_soc.py`. No fixture silently installs noise.
+Synthetic registered experiments exercise Window/RPC Run, Stop, failure and native Save
+in `tests/gui/app/measure/test_simulation_run.py`. All offline caches remain isolated.
 
-### Program v2 simulator tests
+### FTF numeric and acquisition tests
 
-`tests/program/v2/sim/test_params.py` 擁有 `SimParams` validation、coherence helper、
-readout decay knobs 與 `Temp` + operating qubit frequency 到 Boltzmann equilibrium
-population 的純 helper 測試。`tests/program/v2/sim/test_readout.py` 覆蓋
-step-photon readout backaction closed form（pulse length vs readout length 分離）與
-decimated excited-initial center；`test_bloch.py` 覆蓋 readout 後 amplitude damping map。
-`tests/program/v2/sim/test_engine.py` 放 public simulator behavior：physics shape、
-spectroscopy/Rabi/T1/T2、single-shot blob、readout scaling、readout-induced backaction、
-decimated trace 與 branch smoke。效能相關 regression 先找 public simulator 的輸出與
-可觀察的資源行為；private cache key、helper call count 或 routing threshold
-不是新增測試的獨立驗收條件。既有 `test_engine_optimization_contract.py`
-仍含白箱案例，本次文件整理不代表該檔已遷移。
+`tests/resources/test_ftf.py` verifies named YAML validation and dotted field
+errors. `tests/simulate/test_ftf_model.py`, `test_joint_baths.py` and
+`test_source_lines.py` own fixed-coordinate circuits, LC/Boltzmann/Gibbs references,
+CP dephasing and causal source tails. Independent evolution/ADC behavior stays in
+`tests/simulate/test_evolution.py` and `test_adc.py`; model-event and multi-window
+sampling tests live in the corresponding numeric owner directories.
+`tests/experiment/test_ftf.py` covers explicit unit conversion, readout-origin tail
+freezing, active-control rejection and public acquire/decimated composition.
+The former TLS engine/frontend and tests serving only that implementation are
+retired. Framework Window/RPC tests continue to use synthetic registered
+experiments, not lab definitions or model-truth calibration oracles.
 
 ### Form 與持久 Spec 的測試 owner
 

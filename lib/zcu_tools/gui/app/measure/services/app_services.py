@@ -46,7 +46,11 @@ if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
-    from zcu_tools.gui.session.ports import OwnerScheduler, ProgressTransport
+    from zcu_tools.gui.session.ports import (
+        DeviceRegistryPort,
+        OwnerScheduler,
+        ProgressTransport,
+    )
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.setup_control import SetupControlPort
@@ -119,6 +123,7 @@ def build_app_services(
     catalog_loader: ExperimentCatalogLoader | None = None,
     params_for: ParamsFor | None = None,
     alias_presets: AliasPresets | None = None,
+    device_registry: DeviceRegistryPort | None = None,
 ) -> AppServices:
     """Construct and wire every domain service into a frozen bundle.
 
@@ -146,6 +151,7 @@ def build_app_services(
     session = build_session_services(
         state=state,
         bus=bus,
+        device_registry=device_registry,
         gate=operation_gate,
         handles=handles,
         background=background,
@@ -156,6 +162,7 @@ def build_app_services(
         alias_rows=() if alias_presets is None else alias_presets["default"],
         params_for=params_for,
     )
+    session.device.publish_initial_devices()
     context = session.context
     device = session.device
     arb_waveform = session.arb_waveform

@@ -71,7 +71,7 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 
 ## Draft
 
-- [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：保留 draft，尚未轉正；由模擬 owner 在成果 land 後核對狀態。啟動固定 Python environment，FTF 用 YAML 調參；同步 acquire 固定量測要求、逐 round 捕捉環境，backend 固定輸入輸出。物理與依賴邊界已定；離線GPU建庫、存檔與模擬時插值的方向已確認，GPU建表及載入尚待驗證。具體型別、schema、遷移與驗收待完成。
+- [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：已交付明確環境、white_noise、Module 控制、FTF、Intel OpenCL 離線建庫、bounded RAM、持久 exact records 與單 round 重播。RAM 預算限每 instance 的 resident arrays，不是 process 上限。Python environment 固定啟動，FTF 用具名 YAML 調參。F1／F2 跑通與 conditional Ramsey 一點的證據只屬舊版本。歷史成本不代表平均 1 秒達標。現行 `ftf-direct-v3` 未重新驗證科學精度或效能。
 
 - [GUI 事件收合](draft/remote-event-coalescing.md)：GUI 訂閱端依 payload type 與 tab 的 per-tick 收合尚未落實；cfg 表單 snapshot 收合已實作。
 - [GUI adapter capability 入口檢查](draft/gui-adapter-capability-guards.md)：analysis／post-analysis application 入口的完整拒絕尚待實作。

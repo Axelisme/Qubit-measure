@@ -55,6 +55,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             "still flushes over it)."
         ),
     )
+    parser.add_argument(
+        "--simulate",
+        type=Path,
+        help="Trusted Python environment defining build_environment(); fixed for this process",
+    )
     return parser.parse_args(argv)
 
 
@@ -114,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
         params_for=params_for,
         alias_presets=load_alias_presets(),
         clean=args.clean,
+        simulate=args.simulate,
         project_root=project_root,
     )
 

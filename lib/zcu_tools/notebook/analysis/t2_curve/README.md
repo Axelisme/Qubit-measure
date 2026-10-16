@@ -1,6 +1,6 @@
 # `t2_curve` 模塊重點文檔
 
-**Last updated:** 2026-10-11 — JSONL sample consumers
+**Last updated:** 2026-10-16，純 dephasing 公式由數值 owner 共用
 
 Sample loading 使用 `JsonlSampleTable.read()`，預設讀取 `samples.jsonl`，每個 run_id 取最後一行。分析欄位使用 `freq_mhz`、`t1_us`、`t1_err_us`、`t2e_us`、`t2e_err_us` 與 `t2r_us`。資料缺 flux 或 row frame 時，由呼叫端提供同單位的 fallback frame。
 
@@ -42,8 +42,8 @@ Fluxonium echo T2 vs. flux 的分析工具：把實測 `T2e` 先扣除 relaxatio
 - `T2FitParams(A_phi=None, n_th=None)`：fit 初值與結果容器；只有非 `None` 的參數會納入模型，語義與 `t1_curve.T1FitParams` 的 white-list 一致。
 - `fit_t2_noise_params(T1s, T2s, domega_dflux, chi_over_2pi_mhz, *, kappa_over_2pi_mhz, init, bounds=None, fixed=(), T1errs=None, T2errs=None, residual_mode="gamma", progress=False, ...)`：用 log-parameter least-squares 擬合 active `A_phi` 與/或 `n_th`。預設 residual 是純退相干率 `Gamma_phi`，其中 `Gamma_phi_obs = 1/T2 - 1/(2*T1)`，若提供 error 會傳播成 rate 權重。
 - `fixed=("n_th",)` 表示 photon channel 仍在模型中、但固定 `n_th`；若不想納入 photon shot noise，建立 `T2FitParams` 時不要提供 `n_th`。
-- `flux_noise_gamma_phi_per_us(A_phi, domega_dflux)`：回傳 first-order 1/f flux-noise echo rate。
-- `thermal_photon_gamma_phi_per_us(n_th, kappa_over_2pi_mhz, chi_over_2pi_mhz)`：回傳 PRX Appendix A15 readout photon shot-noise rate。
+- `flux_noise_gamma_phi_per_us(A_phi, domega_dflux)`：從 `simulate.dephasing` 重新匯出同一純公式，回傳 first-order 1/f flux-noise echo rate。數值 owner 同時支援 FTF joint dephasing，不反向 import Notebook。
+- `thermal_photon_gamma_phi_per_us(n_th, kappa_over_2pi_mhz, chi_over_2pi_mhz)`：從 `simulate.dephasing` 重新匯出同一純公式，回傳 PRX Appendix A15 readout photon shot-noise rate。Chi 使用完整兩態 pull 差，不在新 owner 改變倍率。
 - `thermal_photon_t2_limit_us(...)` 與 `equivalent_n_th_from_t2(...)` 供 notebook 畫 thermal-photon ceiling 與 half-flux 初值估算使用。
 
 ## 典型使用流程

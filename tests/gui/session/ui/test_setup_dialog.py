@@ -9,7 +9,6 @@ from unittest.mock import MagicMock
 import pytest
 from qtpy.QtWidgets import (
     QApplication,
-    QCheckBox,
     QComboBox,
     QGroupBox,
     QInputDialog,
@@ -77,20 +76,6 @@ def _make_ctrl(**overrides: object) -> MagicMock:
     return ctrl
 
 
-def test_setup_dialog_connect_mock_dispatches_request(qapp):
-    ctrl = _make_ctrl()
-    dialog = SetupDialog(ctrl)
-
-    next(
-        check
-        for check in dialog.findChildren(QCheckBox)
-        if check.text() == "Use Simulate Env"
-    ).setChecked(True)
-    entry_button(dialog, "Connect").click()
-
-    ctrl.start_simulated_environment.assert_called_once_with()
-
-
 def test_setup_dialog_connect_remote_dispatches_request(qapp):
     ctrl = _make_ctrl()
     dialog = SetupDialog(ctrl)
@@ -121,11 +106,6 @@ def test_setup_dialog_connect_failure_signal_updates_status(qapp):
     ctrl = _make_ctrl()
     dialog = SetupDialog(ctrl)
 
-    next(
-        check
-        for check in dialog.findChildren(QCheckBox)
-        if check.text() == "Use Simulate Env"
-    ).setChecked(True)
     connect = entry_button(dialog, "Connect")
     connect.click()
     assert not connect.isEnabled()

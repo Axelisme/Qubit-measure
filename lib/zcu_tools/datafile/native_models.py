@@ -106,7 +106,9 @@ class SoftwareProvenance:
     qick_version, soc_fingerprint and hostname are nonempty strings or None.
     None represents genuinely unavailable evidence, including legacy files,
     non-Git installations or opaque cached-config handles, not capture failures.
-    All six disk attrs are required. Optional strings use empty UTF-8 attrs for
+    simulation_id is an optional public environment identifier, never replay
+    inputs or model truth. Older files omit it and read as None. The original
+    six disk attrs remain required. Optional strings use empty UTF-8 attrs for
     None, and git_dirty uses true/false/unknown, never bool(string).
     """
 
@@ -119,6 +121,7 @@ class SoftwareProvenance:
     qick_version: str | None
     soc_fingerprint: str | None
     hostname: str | None
+    simulation_id: str | None = None
 
 
 @dataclass(frozen=True, kw_only=True)

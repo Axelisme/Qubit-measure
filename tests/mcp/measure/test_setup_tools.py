@@ -6,14 +6,9 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from zcu_tools.gui.app.measure.services import app_services
-from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
-from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure import tools_operation
 from zcu_tools.mcp.measure.session import GuiRpcError
-
-from tests.gui.app.measure.remote._helpers import Fixture, mcp_client
 
 from ._support import MeasureClient, WireTransport, make_client
 
@@ -65,9 +60,6 @@ class SetupGui:
             response = {"snapshot": deepcopy(self.device)}
         elif method == "predictor.info":
             response = {"loaded": self.loaded}
-        elif method == "simulation.initialize":
-            self.has_soc = self.is_mock = self.loaded = True
-            response = {"operation_id": 40}
         elif method == "device.setup":
             self.device["info"] = deepcopy(params["cfg"])
             response = {"operation_id": 41}
@@ -96,7 +88,6 @@ def setup_client(
 @pytest.mark.parametrize(
     ("tool", "arguments"),
     [
-        ("simulation_initialize", {}),
         (
             "device_setup",
             {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}},
@@ -141,38 +132,9 @@ def test_setup_requires_existing_connection_without_attaching_replacement_gui(
     assert client.transport.sent == previous_calls
 
 
-def test_simulation_internal_post_read_timeout_retains_finished_operation(setup_client):
-    client, gui = setup_client
-    reads = 0
-
-    def has_soc(params):
-        nonlocal reads
-        reads += 1
-        if reads == 2:
-            raise GuiTransportTimeoutError("state.has_soc", 0.01)
-        return {"ok": True, "result": gui("state.has_soc", params)}
-
-    client.transport.replies["state.has_soc"] = has_soc
-    result = client.call("simulation_initialize", {})
-    assert result.is_error
-    assert result.data["op"] is not None
-    assert result.data["operation"]["status"] == "finished"
-    assert result.data["before"]["soc"] is None
-    assert result.data["before"]["soc"] is None
-    assert result.data["steps"]["start"]["status"] == "completed"
-    assert result.data["steps"]["wait"]["status"] == "completed"
-    assert result.data["steps"]["post_read"]["status"] == "failed"
-    assert result.data["error"]["code"] == "timeout"
-    assert result.data["error"]["reason"] == "gui_transport_timeout"
-    assert [method for method, _ in client.transport.sent].count(
-        "simulation.initialize"
-    ) == 1
-
-
 @pytest.mark.parametrize(
     ("tool", "arguments", "mutation"),
     [
-        ("simulation_initialize", {}, "simulation.initialize"),
         (
             "device_setup",
             {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}},
@@ -192,7 +154,7 @@ def test_internal_progress_timeout_retains_setup_handle_and_before_facts(
     client.transport.replies["operation.progress"] = progress
     result = client.call(
         tool,
-        {**arguments, "timeout": 0} if tool == "simulation_initialize" else arguments,
+        arguments,
     )
     assert result.is_error
     assert result.data["op"] is not None
@@ -213,7 +175,6 @@ def test_internal_progress_timeout_retains_setup_handle_and_before_facts(
 @pytest.mark.parametrize(
     ("tool", "arguments", "mutation", "post_read"),
     [
-        ("simulation_initialize", {}, "simulation.initialize", "device.snapshot"),
         (
             "device_setup",
             {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}},
@@ -246,7 +207,7 @@ def test_running_operation_with_post_read_failure_is_an_error_reply(
     client.transport.replies[post_read] = read
     result = client.call(
         tool,
-        {**arguments, "timeout": 0} if tool == "simulation_initialize" else arguments,
+        arguments,
     )
     assert result.is_error
     assert result.data["op"] is not None
@@ -255,28 +216,6 @@ def test_running_operation_with_post_read_failure_is_an_error_reply(
     assert result.data["steps"]["post_read"]["status"] == "failed"
     assert result.data["error"]["reason"] == "query_failed"
     assert [method for method, _ in client.transport.sent].count(mutation) == 1
-
-
-def test_simulation_verifies_native_readiness_and_repeats_explicit_initialization(
-    setup_client,
-):
-    client, gui = setup_client
-    for _ in range(2):
-        result = client.call("simulation_initialize", {"timeout": 0})
-        assert isinstance(result, ToolReply)
-        assert not result.is_error
-        assert result.data["status"] == "finished"
-        assert result.data["operation"]["status"] == "finished"
-        assert result.data["verification"]["ready"] is True
-        assert result.data["after"]["soc"]["cfg"] == {"board": "mock"}
-        assert all(
-            step["status"] == "completed" for step in result.data["steps"].values()
-        )
-    assert gui.device["info"]["value"] == 0.25
-    assert [method for method, _ in client.transport.sent].count(
-        "simulation.initialize"
-    ) == 2
-    assert ("soc.info", {"include_cfg": True}) in client.transport.sent
 
 
 def test_set_value_preserves_native_value_and_unrelated_controls(setup_client):
@@ -321,20 +260,6 @@ def test_physical_device_uses_exact_native_unit_without_conversion(setup_client)
     assert result.data["after"]["device"]["unit"] == "V"
 
 
-@pytest.mark.parametrize("tool", ["simulation_initialize"])
-@pytest.mark.parametrize("invalid", [True, "0", -1, 301, float("inf"), float("nan")])
-def test_bad_timeout_is_rejected_before_gui_access(setup_client, tool, invalid):
-    client, _ = setup_client
-    arguments = (
-        {}
-        if tool == "simulation_initialize"
-        else {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}}
-    )
-    with pytest.raises(ValueError, match="timeout must be between 0 and 300 seconds"):
-        client.call(tool, {**arguments, "timeout": invalid})
-    assert client.transport.sent == []
-
-
 @pytest.mark.parametrize("defect", ["disconnected", "info-null"])
 def test_device_precondition_failure_retains_before_without_mutation(
     setup_client, defect
@@ -377,7 +302,6 @@ def test_device_precondition_failure_retains_before_without_mutation(
 @pytest.mark.parametrize(
     "tool,method,arguments",
     [
-        ("simulation_initialize", "simulation.initialize", {}),
         (
             "device_setup",
             "device.setup",
@@ -425,7 +349,6 @@ def test_start_failure_distinguishes_rejection_from_unknown_without_retry(
 @pytest.mark.parametrize(
     "tool,arguments",
     [
-        ("simulation_initialize", {}),
         (
             "device_setup",
             {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}},
@@ -439,15 +362,13 @@ def test_wait_timeout_keeps_operation_running_and_reads_partial_facts(
     gui.wait_reason = "timeout"
     result = client.call(
         tool,
-        {**arguments, "timeout": 0} if tool == "simulation_initialize" else arguments,
+        arguments,
     )
     assert result.data["status"] == "running"
     assert result.data["operation"]["status"] == "running"
     assert result.data["steps"]["wait"]["status"] == "running"
     assert result.data["steps"]["post_read"]["status"] == "completed"
     assert result.data["op"] is not None
-    if tool == "simulation_initialize":
-        assert result.data["verification"]["ready"] is False
     gui.wait_reason = "completed"
     assert (
         client.call("wait", {"op": result.data["op"], "timeout": 0})["status"]
@@ -458,7 +379,6 @@ def test_wait_timeout_keeps_operation_running_and_reads_partial_facts(
 @pytest.mark.parametrize(
     "tool,arguments",
     [
-        ("simulation_initialize", {}),
         (
             "device_setup",
             {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}},
@@ -490,7 +410,6 @@ def test_native_failed_operation_is_not_hidden_by_completed_reads(
 @pytest.mark.parametrize(
     "tool,pre_read,arguments",
     [
-        ("simulation_initialize", "state.has_soc", {}),
         (
             "device_setup",
             "device.snapshot",
@@ -521,7 +440,6 @@ def test_missing_precondition_stops_before_start_and_retains_null_facts(
 @pytest.mark.parametrize(
     "tool,arguments",
     [
-        ("simulation_initialize", {}),
         (
             "device_setup",
             {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}},
@@ -550,34 +468,6 @@ def test_wait_query_failure_keeps_handle_and_does_not_infer_completion(
     assert [method for method, _ in client.transport.sent].count("operation.await") == 1
 
 
-def test_post_read_failure_keeps_native_success_and_already_read_prefix(setup_client):
-    client, _gui = setup_client
-    reads = 0
-
-    def device_snapshot(params):
-        nonlocal reads
-        reads += 1
-        if reads == 1:
-            return {"ok": True, "result": {"snapshot": deepcopy(_gui.device)}}
-        return {
-            "ok": False,
-            "error": {
-                "code": "internal_error",
-                "reason": "query_failed",
-                "message": "snapshot failed",
-            },
-        }
-
-    client.transport.replies["device.snapshot"] = device_snapshot
-    result = client.call("simulation_initialize", {})
-    assert result.is_error
-    assert result.data["status"] == "failed"
-    assert result.data["operation"]["status"] == "finished"
-    assert result.data["after"]["soc"]["is_mock"] is True
-    assert result.data["after"]["devices"] == []
-    assert result.data["steps"]["post_read"]["status"] == "failed"
-
-
 def test_connection_loss_after_receipt_retains_handle_without_reconnecting(
     setup_client,
 ):
@@ -600,73 +490,6 @@ def test_connection_loss_after_receipt_retains_handle_without_reconnecting(
     assert result.data["steps"]["wait"]["status"] == "unknown"
     assert [method for method, _ in client.transport.sent].count("device.setup") == 1
     assert "operation.await" not in [method for method, _ in client.transport.sent]
-
-
-def test_setup_workflows_use_real_gui_coordinator_and_device_owner(
-    qapp, tmp_path, request, monkeypatch
-):
-    owned_runners: list[BackgroundRunner] = []
-
-    def make_background_runner() -> BackgroundRunner:
-        runner = BackgroundRunner()
-        owned_runners.append(runner)
-        return runner
-
-    # Retain the real lifetime owner, without replacing its behavior or services.
-    monkeypatch.setattr(app_services, "BackgroundRunner", make_background_runner)
-    fixture = Fixture(empty_project=True, headless=True)
-    port = fixture.start()
-    _, call = mcp_client(port, tmp_path, request=request)
-    try:
-        call("connect", {"port": port})
-        initial = call("simulation_initialize", {})
-        assert initial["status"] == "finished", initial
-        assert initial["verification"]["ready"] is True
-        assert initial["before"]["soc"] is None
-        before = initial["after"]["devices"][0]
-        value = call(
-            "device_setup",
-            {"name": "fake_flux", "cfg": {"value": 0.5, "value_unit": "native"}},
-        )
-        assert value["status"] == "finished", value
-        assert value["after"]["device"]["info"]["value"] == 0.5
-        assert (
-            value["after"]["device"]["info"]["rampstep"] == before["info"]["rampstep"]
-        )
-        repeated = call("simulation_initialize", {})
-        assert repeated["verification"]["ready"] is True
-        assert repeated["after"]["devices"][0]["info"]["value"] == 0.5
-    finally:
-        for runner in owned_runners:
-            runner.quiesce()
-        fixture.stop()
-        qapp.processEvents()
-
-
-def test_simulation_ready_uses_soc_and_device_even_without_predictor(setup_client):
-    client, _gui = setup_client
-    client.transport.replies["predictor.info"] = {
-        "ok": True,
-        "result": {"loaded": False},
-    }
-    result = client.call("simulation_initialize", {})
-    assert not result.is_error
-    assert result.data["status"] == "finished"
-    assert result.data["verification"]["ready"] is True
-
-
-def test_native_finished_is_retained_when_mock_verification_fails(setup_client):
-    client, _ = setup_client
-    client.transport.replies["soc.info"] = {
-        "ok": True,
-        "result": {"is_mock": False, "cfg": {}},
-    }
-    result = client.call("simulation_initialize", {})
-    assert result.is_error
-    assert result.data["status"] == "failed"
-    assert result.data["operation"]["status"] == "finished"
-    assert result.data["verification"]["ready"] is False
-    assert result.data["after"]["soc"]["is_mock"] is False
 
 
 def test_value_quantization_is_observed_not_invented_as_a_failure(setup_client):

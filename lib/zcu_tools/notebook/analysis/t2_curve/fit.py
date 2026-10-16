@@ -20,6 +20,12 @@ from zcu_tools.notebook.analysis.fit_tools import (
 )
 from zcu_tools.progress_bar import make_pbar
 from zcu_tools.progress_bar.base import BaseProgressBar
+from zcu_tools.simulate.dephasing import (
+    flux_noise_gamma_phi_per_us as flux_noise_gamma_phi_per_us,
+)
+from zcu_tools.simulate.dephasing import (
+    thermal_photon_gamma_phi_per_us as thermal_photon_gamma_phi_per_us,
+)
 
 ParameterName = Literal["A_phi", "n_th"]
 ResidualMode = Literal["gamma", "log_t2"]
@@ -59,38 +65,6 @@ class T2FitResult:
     success: bool
     message: str
     optimizer_result: OptimizeResult | None
-
-
-def flux_noise_gamma_phi_per_us(
-    A_phi: float,
-    domega_dflux: NDArray[np.float64],
-) -> NDArray[np.float64]:
-    """First-order 1/f echo dephasing rate in 1/us."""
-    return (
-        np.sqrt(np.log(2.0))
-        * float(A_phi)
-        * np.abs(np.asarray(domega_dflux, dtype=np.float64))
-    )
-
-
-def thermal_photon_gamma_phi_per_us(
-    n_th: float | NDArray[np.float64],
-    *,
-    kappa_over_2pi_mhz: float,
-    chi_over_2pi_mhz: float | NDArray[np.float64],
-) -> float | NDArray[np.float64]:
-    """Readout thermal-photon shot-noise dephasing rate in 1/us.
-
-    Inputs use the common ``kappa/2pi`` and ``chi/2pi`` MHz convention. Since
-    1 MHz = 1 cycle/us, the angular rates are obtained by multiplying by 2*pi.
-    """
-    kappa = 2.0 * np.pi * float(kappa_over_2pi_mhz)
-    chi = 2.0 * np.pi * np.asarray(chi_over_2pi_mhz, dtype=np.float64)
-    gamma_per_photon = kappa * chi**2 / (kappa**2 + chi**2)
-    gamma = np.asarray(n_th, dtype=np.float64) * gamma_per_photon
-    if np.ndim(gamma) == 0:
-        return float(gamma)
-    return np.asarray(gamma, dtype=np.float64)
 
 
 def thermal_photon_t2_limit_us(

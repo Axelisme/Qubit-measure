@@ -18,7 +18,7 @@ from zcu_tools.experiment.stop_signal import StopSignal
 def check_flux_unit(cfg: BaseDeviceInfo, unit: str) -> None:
     """Check a flux coordinate against stored Info.value_unit; return None.
 
-    YOKOGS200Info validates current/A and voltage/V; FakeDeviceInfo uses native.
+    YOKOGS200Info validates current/A and voltage/V; FakeDeviceInfo stores its fixed unit.
     unit is required and must equal that stored unit. Mismatch or any other unit
     raises ValueError. Other Info models raise TypeError naming the unsupported
     device class. No conversion, I/O, cache, cancellation or cfg mutation occurs.
@@ -43,8 +43,8 @@ def set_flux(
     """Set a selected flux source without changing mode, rampstep or output.
 
     YOKO accepts A in current mode or V in voltage mode, ramps with the Run's
-    stop event and retains driver safety limits. Fake accepts only native and
-    writes its single value. Unit/mode mismatch raises ValueError before writes;
+    stop event and retains driver safety limits. Fake accepts its fixed unit and
+    writes its single value without conversion. Unit/mode mismatch raises ValueError before writes;
     unsupported drivers raise TypeError. Driver failures propagate unchanged.
     """
     if isinstance(device, YOKOGS200):
@@ -59,7 +59,7 @@ def set_flux(
         else:
             device.set_voltage(value, progress=progress, stop_event=stop.event)
     elif isinstance(device, FakeDevice):
-        check_flux_unit(FakeDeviceInfo(address=device.address), unit)
+        check_flux_unit(device.get_info(), unit)
         if not stop.is_set():
             device.set_value(value)
     else:

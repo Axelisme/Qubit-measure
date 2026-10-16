@@ -20,6 +20,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Offline Intel OpenCL propagator construction; runtime lookup is CPU-only.
+gpu = ["pyopencl>=2026.1.4,<2027"]
 client = [
   "h5py",
   "ipykernel",

@@ -330,6 +330,26 @@ forbidden_modules =
     zcu_tools.mcp
     zcu_tools.notebook
 
+[importlinter:contract:program-simulation-entry]
+name = Program classes use the simulation entry, not frontend or adapter internals
+type = forbidden
+source_modules =
+    zcu_tools.program.v2.base
+    zcu_tools.program.v2.modular
+    zcu_tools.program.v2.modules
+    zcu_tools.program.v2.ir
+    zcu_tools.program.v2.macro
+    zcu_tools.program.v2.mocksoc
+    zcu_tools.program.v2.utils
+forbidden_modules =
+    zcu_tools.program.v2.simulation.frontend
+    zcu_tools.program.v2.simulation.timeline
+    zcu_tools.program.v2.simulation.dependencies
+    zcu_tools.program.v2.simulation.binding
+    zcu_tools.program.v2.simulation.signals
+    zcu_tools.program.v2.simulation.soc
+allow_indirect_imports = True
+
 # Shared artifact persistence owns formats and failures without any GUI dependency.
 [importlinter:contract:artifacts-core-no-ui]
 name = Artifact persistence is independent of GUI and Qt

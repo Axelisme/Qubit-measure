@@ -123,11 +123,11 @@ Notebook 使用 `CfgEnv(ml, device_manager)` 借用固定 library snapshot 與 c
 
 CfgEnv 與 RunContext 分工不同。前者可跨次組裝重用；後者只有單次執行能力，不讓核心取得 point、library 或 registry 管理權。底層 `assemble_experiment_cfg` 接顯式 validation context，不讀硬體。Run 不重新組裝 cfg、不重連、不補裝置。需要新的參數或 library 資訊時，caller 明確讀取來源、重建 CfgEnv，再次呼叫 make_cfg。Driver mapping 不是資源 lease，也不凍結 driver 狀態。Notebook 初始化 cell 重跑就重建，不探查 namespace 或自動重用，舊連線仍由使用者明確關閉。GUI 的固定來源、CfgRef／revision 與 acceptance 不因 Notebook 入口而重新查詢硬體。
 
-GUI 的 Use Simulate Env 入口由獨立 coordinator 編排，不由一般 soc_changed 通知偷偷註冊 FakeDevice。通過既有互斥檢查後，先經 owner disconnect 已連線的真實 devices，FakeDevice 保留。全部成功才確認或建立 FakeDevice、註冊、將其即時數值 reader 綁定 MockSoc，再交給 SoC owner。既有有效 mock source 不重設；matching predictor 的配套亦由 coordinator 組裝。
+模擬環境由啟動時明確選用的 Python `build_environment()` 組裝，回傳已綁定 soc、匹配 soccfg、同一 DeviceManager 與公開描述。GUI 與 Notebook 共用此 bundle；一般 soc_changed 不建立 device，不保留動態切換入口。成功回傳時清理責任交給宿主，部分清理失敗保留資源與原錯誤，不假裝 ready。
 
-任一 disconnect 或組裝失敗就回報未完成，不自動重連，不假裝 ready。清理只處理本次建立的資源。綁定時確認 source 存在且可用，不接受先綁名稱、acquire 才查 registry。MockSoc 與 SimEngine 不持有 manager；每次 acquire 讀取 reader 一次，同次 acquire 保持固定 operating point。Reader 失敗不降級固定 flux。低層未綁 source 的固定 flux 與白雜訊模式仍可明確使用。
+FTF 的 YAML 由 resources 驗證；experiment.ftf 擁有接線、裝置與逐 round snapshot，simulate 只收數值並提供 joint model、evolution、population conversion 與 ADC。初值只在 startup 套用，每 round 讀當下 device 值；讀取失敗不降級。正常 metadata 只保留 I/Q 與公開 provenance，不含模型真值。舊 TLS 執行機制不留相容層。依賴由 .importlinter C8、C9、C10、C12 約束；完整物理限制與 readout 起點凍結近似見 [模擬環境契約](draft/simulation-environments.md)。
 
-此入口允許之後再連線真實 device，不保證持續隔離，也不在每次 run 前自動斷線。自動建立 context 是後續方向，不納入本次 coordinator，也不預建 plugin registry 或空 hook。
+可信 Python 不是硬體 sandbox。使用者自行隔離主機資源，不新增模擬專用裝置黑名單或自動斷線政策，也不預建 plugin registry 或空 backend。
 
 ## 取捨
 

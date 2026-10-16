@@ -4,10 +4,11 @@ import numpy as np
 import pytest
 from zcu_tools.analysis.singleshot import classify_result
 from zcu_tools.program.v2.base import ProgramV2Cfg
-from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+
+from tests.program._acquisition_soc import make_acquisition_soc
 
 
 @pytest.mark.parametrize("radius", [0.5, 1.0, 1.5, 2.0, 3.0])
@@ -19,7 +20,7 @@ def test_acquire_population_matches_offline_classification(
     expected = classify_result(signals, -1, 1, radius)
     assert np.all(sum(mask.astype(int) for mask in expected) == 1)
     assert expected[2][2]  # An exact tie belongs to neither population.
-    soc, soccfg = make_mock_soc()
+    soc, soccfg = make_acquisition_soc()
     offset = 0.25 if remove_offset else 0.0
     soccfg["readouts"][0]["iq_offset"] = offset
     program = ModularProgramV2(
