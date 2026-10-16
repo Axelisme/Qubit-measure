@@ -12,9 +12,9 @@ from zcu_tools.gui.form import (
     FormModel,
     FormPath,
     FormState,
-    KeyRef,
     Option,
 )
+from zcu_tools.gui.form_adapter import KeyRef
 
 
 class Child(BaseModel):

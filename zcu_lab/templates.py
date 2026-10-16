@@ -27,7 +27,7 @@ from zcu_tools.cfg_model import (
 )
 
 _QUBIT_FREQ = Expr("{qubit}.freq")
-_QUBIT_CH = Expr("{qubit}.wiring.L01.ch")
+_QUBIT_CH = Expr("{qubit}.wiring.ch")
 _RESONATOR_FREQ = Expr("{resonator}.freq")
 _RESONATOR_CH = Expr("{resonator}.wiring.ch")
 _RESONATOR_RO_CH = Expr("{resonator}.wiring.ro_ch")

@@ -1,8 +1,11 @@
 """Key-only refs share input semantics without ModuleRef's source requirement."""
 
+from typing import Annotated
+
 import pytest
 from pydantic import JsonValue, create_model
 from zcu_tools.gui import form
+from zcu_tools.gui import form_adapter as adapter
 
 
 @pytest.mark.parametrize(
@@ -11,8 +14,12 @@ from zcu_tools.gui import form
 def test_key_ref_defaults_description_result_and_restore_do_not_evaluate_names(
     name: JsonValue,
 ) -> None:
-    assert hasattr(form, "KeyRef"), "Missing key-only reference input type"
-    model = create_model("SeededKeyRef", __base__=form.KeyRef, name=(str, name))
+    assert hasattr(adapter, "KeyRef"), "Missing key-only reference input type"
+    model = create_model(
+        "SeededKeyRef",
+        __base__=adapter.KeyRef,
+        name=(Annotated[str, form.InputPolicy(expression=False)], name),
+    )
     env = form.FormEnv()
     state = form.FormState(model.default_input(env))
     assert state.input.data == {"kind": "ref", "name": name}
@@ -20,7 +27,7 @@ def test_key_ref_defaults_description_result_and_restore_do_not_evaluate_names(
     assert field is not None and field.kind == "string" and not field.expression
     result = state.result(env)
     if isinstance(name, str):
-        assert isinstance(result, form.KeyRef) and result.name == name
+        assert isinstance(result, adapter.KeyRef) and result.name == name
         restored = form.FormState(
             form.FormInput(model, {"kind": "ref", "name": "other"})
         )

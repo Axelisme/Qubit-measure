@@ -55,7 +55,9 @@ def test_retain_source_records_scalar_and_sweep_without_cfg_edits(
             },
         }
 
-        assert not any(method == "tab.edit_cfg" for method, _ in client.transport.sent)
+        assert not any(
+            method == "tab.edit_recipe_fields" for method, _ in client.transport.sent
+        )
 
 
 @pytest.mark.parametrize(
@@ -79,8 +81,8 @@ def test_retain_source_rejects_invalid_fields_and_labels_without_rpc(
             assert isinstance(caught.value, ValueError)
             assert "source must be" in str(caught.value)
         assert [
-            call for call in client.transport.sent if call[0] != "tab.describe_cfg"
-        ] == [call for call in before if call[0] != "tab.describe_cfg"]
+            call for call in client.transport.sent if call[0] != "tab.read_recipe_field"
+        ] == [call for call in before if call[0] != "tab.read_recipe_field"]
 
 
 def test_retain_source_rejects_ordinary_model_sections_without_rpc(
@@ -92,8 +94,8 @@ def test_retain_source_rejects_ordinary_model_sections_without_rpc(
         with pytest.raises(ValueError, match="scalar or sweep"):
             tab.retain_source("modules", "caller")
         assert [
-            call for call in client.transport.sent if call[0] != "tab.describe_cfg"
-        ] == [call for call in before if call[0] != "tab.describe_cfg"]
+            call for call in client.transport.sent if call[0] != "tab.read_recipe_field"
+        ] == [call for call in before if call[0] != "tab.read_recipe_field"]
 
 
 def test_set_fields_writes_one_batch_and_keeps_none_default(
@@ -104,7 +106,7 @@ def test_set_fields_writes_one_batch_and_keeps_none_default(
         tab = RecipeSession(
             client.context,
             summary_parameters=(
-                SummaryParameter("frequency", "modules.readout.module.freq"),
+                SummaryParameter("frequency", "modules.readout.freq"),
                 SummaryParameter("rounds", "rounds"),
             ),
         ).open_tab("lookback")
@@ -113,22 +115,20 @@ def test_set_fields_writes_one_batch_and_keeps_none_default(
             [
                 recipe.RecipeFieldEdit("rounds", None, "ignored"),
                 recipe.RecipeFieldEdit(
-                    "modules.readout.module.freq",
+                    "modules.readout.freq",
                     recipe.RecipeExpression(expr="$custom.low"),
                     "caller_low",
                 ),
-                recipe.RecipeFieldEdit(
-                    "modules.readout.module.gain", 22.0, "caller_high"
-                ),
+                recipe.RecipeFieldEdit("modules.readout.gain", 22.0, "caller_high"),
             ]
         )
         assert [
             call
             for call in client.transport.sent[before:]
-            if call[0] != "tab.describe_cfg"
+            if call[0] != "tab.read_recipe_field"
         ] == [
             (
-                "tab.edit_cfg",
+                "tab.edit_recipe_fields",
                 {
                     "tab_id": "t",
                     "edits": [
@@ -136,7 +136,6 @@ def test_set_fields_writes_one_batch_and_keeps_none_default(
                             "path": [
                                 "modules",
                                 "readout",
-                                "module",
                                 "freq",
                             ],
                             "value": {"expr": "$custom.low"},
@@ -145,7 +144,6 @@ def test_set_fields_writes_one_batch_and_keeps_none_default(
                             "path": [
                                 "modules",
                                 "readout",
-                                "module",
                                 "gain",
                             ],
                             "value": 22.0,
@@ -163,7 +161,7 @@ def test_set_fields_writes_one_batch_and_keeps_none_default(
         snapshot = tab.run().snapshot()
         assert snapshot is not None
         assert (
-            snapshot.actual["fields"]["modules.readout.module.freq"].get("source")
+            snapshot.actual["fields"]["modules.readout.freq"].get("source")
             == "caller_low"
         )
         assert snapshot.actual["fields"]["rounds"].get("source") == "gui_default"
@@ -191,14 +189,20 @@ def test_batch_preflight_rejects_all_before_first_edit(
             assert isinstance(caught.value, GuiRpcError)
             assert caught.value.reason == "form_path"
             assert caught.value.code == "invalid_params"
-            assert caught.value.data == {"form_path": [bad_field]}
+            assert caught.value.data == {
+                "path": [bad_field],
+                "form_path": [bad_field],
+                "edit_index": 1,
+            }
+        elif bad_field == "modules.readout":
+            assert isinstance(caught.value, GuiRpcError)
+            assert caught.value.reason == "module_selector"
         else:
             assert isinstance(caught.value, ValueError)
-        assert not [
-            call
-            for call in client.transport.sent[before:]
-            if call[0] != "tab.describe_cfg"
-        ]
+        assert cfg_value(gui.publication, "rounds") == 3
+        assert [call[0] for call in client.transport.sent[before:]] == (
+            [] if bad_source == " " else ["tab.edit_recipe_fields"]
+        )
 
 
 def test_empty_batch_and_default_only_batch_do_not_edit(tmp_path: Path) -> None:
@@ -210,7 +214,7 @@ def test_empty_batch_and_default_only_batch_do_not_edit(tmp_path: Path) -> None:
         assert not [
             call
             for call in client.transport.sent[before:]
-            if call[0] != "tab.describe_cfg"
+            if call[0] != "tab.read_recipe_field"
         ]
 
 
@@ -229,7 +233,7 @@ def test_expression_set_and_sweep_are_forwarded_without_client_evaluation(
         edits = [
             params
             for method, params in client.transport.sent
-            if method == "tab.edit_cfg"
+            if method == "tab.edit_recipe_fields"
         ]
         assert len(edits) == 2
         assert edits[1]["edits"] == [
@@ -246,7 +250,7 @@ def test_batch_invalid_reply_retains_edit_without_rollback(tmp_path: Path) -> No
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         gui.publication["errors"] = [{"path": ["rounds"], "message": "outside range"}]
-        client.transport.replies["tab.edit_cfg"] = {
+        client.transport.replies["tab.edit_recipe_fields"] = {
             "ok": True,
             "result": gui.publication,
         }
@@ -257,8 +261,8 @@ def test_batch_invalid_reply_retains_edit_without_rollback(tmp_path: Path) -> No
         assert [
             method
             for method, _ in client.transport.sent[before:]
-            if method != "tab.describe_cfg"
-        ] == ["tab.edit_cfg"]
+            if method != "tab.read_recipe_field"
+        ] == ["tab.edit_recipe_fields"]
 
 
 def test_actual_mixed_sweep_keeps_the_complete_parameter(tmp_path: Path) -> None:
@@ -294,5 +298,5 @@ def test_actual_mixed_sweep_keeps_the_complete_parameter(tmp_path: Path) -> None
                 == expected
             )
         assert [
-            call for call in client.transport.sent if call[0] != "tab.describe_cfg"
-        ] == [call for call in before if call[0] != "tab.describe_cfg"]
+            call for call in client.transport.sent if call[0] != "tab.read_recipe_field"
+        ] == [call for call in before if call[0] != "tab.read_recipe_field"]

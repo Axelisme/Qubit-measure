@@ -17,7 +17,7 @@ This notebook replaces the former two-level single-qubit simulation. It uses the
 
 ## Load the environment
 
-Run from the repository root, or supply an absolute environment path. The GUI uses the same Python builder when launched with `--simulate zcu_lab/simulation_envs/environment.py`. Changing YAML requires restarting the GUI or rebuilding the Notebook environment. A bias change through the existing device controls does not reload YAML.
+Run from the repository root, or supply an absolute environment path. The GUI uses the same Python builder when launched with `--simulate zcu_lab/simulation_envs/FTF/environment.py`. Changing YAML requires restarting the GUI or rebuilding the Notebook environment. A bias change through the existing device controls does not reload YAML.
 
 ```python
 from pathlib import Path
@@ -32,7 +32,7 @@ from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
-environment_path = Path("zcu_lab/simulation_envs/environment.py").resolve()
+environment_path = Path("zcu_lab/simulation_envs/FTF/environment.py").resolve()
 env = load_environment(environment_path)
 nb_adapter = NotebookAdapter(
     soc=env.soc, soccfg=env.soccfg, device_manager=env.devices,

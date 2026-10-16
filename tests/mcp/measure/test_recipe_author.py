@@ -87,9 +87,18 @@ def test_author_reuse_resets_the_observed_cfg_before_editing(tmp_path):
         cfg_calls = [
             (method, params)
             for method, params in client.transport.sent
-            if method in {"tab.get_cfg", "tab.reset_cfg", "tab.edit_cfg", "tab.new"}
+            if method
+            in {
+                "tab.get_cfg",
+                "tab.reset_cfg",
+                "tab.edit_recipe_fields",
+                "tab.new",
+            }
         ]
-    assert [method for method, _ in cfg_calls] == ["tab.reset_cfg", "tab.edit_cfg"]
+    assert [method for method, _ in cfg_calls] == [
+        "tab.reset_cfg",
+        "tab.edit_recipe_fields",
+    ]
     assert cfg_calls[0][1] == {"tab_id": "t"}
     assert cfg_calls[1][1] == {
         "tab_id": "t",
@@ -104,22 +113,33 @@ def test_author_rejects_unknown_fields_without_editing(tmp_path, field):
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         before = gui.owner.input.data
-        edits_before = sum(
-            method == "tab.edit_cfg" for method, _ in client.transport.sent
-        )
+        sent_before = len(client.transport.sent)
         if field in ("missing", "rounds.child"):
             with pytest.raises(GuiRpcError) as error:
                 tab.set(field, 5)
             assert error.value.code == "invalid_params"
             assert error.value.reason == "form_path"
-            assert error.value.data == {"form_path": field.split(".")}
+            assert error.value.data == {
+                "form_path": field.split("."),
+                "path": field.split("."),
+                "edit_index": 0,
+            }
         else:
             with pytest.raises(ValueError, match="field"):
                 tab.set(field, 5)
         assert gui.owner.input.data == before
-        assert (
-            sum(method == "tab.edit_cfg" for method, _ in client.transport.sent)
-            == edits_before
+        assert client.transport.sent[sent_before:] == (
+            [
+                (
+                    "tab.edit_recipe_fields",
+                    {
+                        "tab_id": "t",
+                        "edits": [{"path": field.split("."), "value": 5}],
+                    },
+                )
+            ]
+            if field in ("missing", "rounds.child")
+            else []
         )
 
 
@@ -149,9 +169,26 @@ def test_author_required_library_returns_parameter_gap_or_none(
         assert (
             tab.use_library("modules.readout", name, required="readout_ref") == expected
         )
-        assert sum(
-            method == "tab.edit_cfg" for method, _ in client.transport.sent[before:]
-        ) == (0 if name is None else 1)
+        assert client.transport.sent[before:] == (
+            [
+                (
+                    "tab.read_recipe_field",
+                    {"tab_id": "t", "path": ["modules", "readout"]},
+                )
+            ]
+            if name is None
+            else [
+                (
+                    "tab.select_recipe_module",
+                    {
+                        "tab_id": "t",
+                        "path": ["modules", "readout"],
+                        "action": "use_library",
+                        "key": name,
+                    },
+                )
+            ]
+        )
 
 
 def test_author_explicit_invalid_library_does_not_fall_back(tmp_path):
@@ -164,13 +201,28 @@ def test_author_explicit_invalid_library_does_not_fall_back(tmp_path):
             tab.use_library(
                 "modules.readout", "unknown.readout.main", required="readout_ref"
             )
-        assert error.value.reason == "invalid_cfg"
-        assert "modules.readout" in str(error.value)
-        assert "Available keys" in str(error.value)
+        assert error.value.code == "invalid_params"
+        assert error.value.reason == "library_key"
+        assert error.value.data == {
+            "path": ["modules", "readout"],
+            "selector_path": ["modules", "readout"],
+            "available_keys": ["R1.readout.main", "R2.readout.main"],
+        }
         assert tab.read_field("modules.readout") == initial
         assert client.transport.sent[len(before) :] == [
-            ("tab.describe_cfg", {"tab_id": "t", "path": ["modules", "readout"]}),
-            ("tab.describe_cfg", {"tab_id": "t", "path": ["modules", "readout"]}),
+            (
+                "tab.select_recipe_module",
+                {
+                    "tab_id": "t",
+                    "path": ["modules", "readout"],
+                    "action": "use_library",
+                    "key": "unknown.readout.main",
+                },
+            ),
+            (
+                "tab.read_recipe_field",
+                {"tab_id": "t", "path": ["modules", "readout"]},
+            ),
         ]
 
 
@@ -249,9 +301,10 @@ def test_author_sweep_rejects_empty_sources_before_any_edit(tmp_path, key, label
     sources[key] = label
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
+        before = len(client.transport.sent)
         with pytest.raises(ValueError, match="sources"):
             tab.set_sweep("sweep.freq", start=6000.0, sources=sources)
-        assert not any(method == "tab.edit_cfg" for method, _ in client.transport.sent)
+        assert client.transport.sent[before:] == []
 
 
 def test_author_disconnected_binding_does_not_reconnect_or_replay_an_edit(tmp_path):

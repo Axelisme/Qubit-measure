@@ -1,6 +1,6 @@
 """Translate core cfg declarations into Qt-free input models and typed cfgs."""
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import replace
 from types import MappingProxyType, new_class
@@ -33,6 +33,7 @@ from zcu_tools.gui.form import (
     FormInput,
     FormModel,
     FormState,
+    FormWritePath,
     LinRange,
     Option,
     static_defaults,
@@ -41,6 +42,7 @@ from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.resources.entry.roles import RoleResolutionError
 
+from . import _logical
 from ._display import field_display
 from ._modules import (
     ModuleField,
@@ -53,6 +55,7 @@ from ._seeds import persistent_input, supported_input, template_seed_tree
 from ._seeds import template_input as _template_input
 from ._types import literal_type, union_type
 from ._types import members as _members
+from .logical import LogicalEdit, LogicalEditCandidate, LogicalFieldObservation
 
 
 class SweepRange(LinRange):
@@ -517,6 +520,104 @@ class Form[C: ConfigBase]:
         input against this env. Unresolved or invalid defaults stay absent.
         """
         return self.model.default_input(env)
+
+    def _check_logical_input(self, input: FormInput[FormModel]) -> None:
+        if not issubclass(input.model, self.model):
+            raise TypeError(
+                "Logical operations require this Form's input or template specialization"
+            )
+
+    def read_logical_field(
+        self, input: FormInput[FormModel], path: FormWritePath, env: FormEnv
+    ) -> LogicalFieldObservation:
+        """Read one detached logical field from input and its fixed capture.
+
+        path omits only generator-owned wrappers; () reads the logical root.
+        Traverse active structure only. Unknown/inactive/whole-leaf descendants
+        raise FormPathError. Ref descendants project captured Specs, never native
+        cfg or assets; unresolved sources raise LogicalSourceError. An unresolved
+        target ref itself remains observable with unavailable value and errors.
+        Authored input remains separate from source values. No defaults, capture,
+        state mutation, publication or materialization occurs. Wrong input model
+        raises TypeError; template subclasses preserve locks and requiredness.
+        """
+        self._check_logical_input(input)
+        return _logical.read(input, path, env)
+
+    def prepare_logical_edits(
+        self, input: FormInput[FormModel], edits: Sequence[LogicalEdit], env: FormEnv
+    ) -> LogicalEditCandidate:
+        """Prepare one detached canonical candidate for a sequence of logical edits.
+
+        Resolve every path against the initial active structure. Duplicate and
+        overlapping paths, ref ancestors, selector replacements and structural/
+        source admission reject the entire batch with LogicalEditError and the
+        original edit index. Whole replacement is also rejected when any declared
+        branch, nested model or container item contains a generated selector. Use
+        reachable logical children and dedicated selector operations instead;
+        sequence/mapping items do not gain writable paths. Ordinary nullable,
+        union and container fields without selectors keep core write semantics.
+        Ordinary invalid values and Expr remain drafts.
+        No live state is installed, captured or published. Use the candidate only
+        within the same guarded owner turn/input/env, without await/reset. Wrong
+        model raises TypeError; declaration/provider failures retain their types.
+        """
+        self._check_logical_input(input)
+        return _logical.edits(input, edits, env)
+
+    def prepare_library_selection(
+        self, input: FormInput[FormModel], path: FormWritePath, key: str, env: FormEnv
+    ) -> LogicalEditCandidate:
+        """Prepare a generated selector's actual captured key, never an alias.
+
+        Validate active ancestry, declaration policy, captured family and allowed
+        keys. Ref ancestors and illegal selections raise LogicalEditError without
+        modifying input. Source/provider failures propagate. Wrong model raises
+        TypeError. The result is a same-turn detached candidate, not publication.
+        """
+        self._check_logical_input(input)
+        return _logical.select(input, path, env, action="library", key=key)
+
+    def prepare_inline_copy(
+        self, input: FormInput[FormModel], path: FormWritePath, env: FormEnv
+    ) -> LogicalEditCandidate:
+        """Copy this selector's captured Spec into detached inline input explicitly.
+
+        Preserve child keys and locks, omit unsupported fields, never materialize
+        cfg/assets. An inline target returns changed=False. Missing/disabled/
+        unresolved targets raise LogicalEditError; missing/incompatible captured
+        sources raise LogicalSourceError. Ref ancestors must be copied first.
+        No fresh-default fallback, capture, installation or publication occurs.
+        Wrong model raises TypeError. Candidate lifetime is one guarded turn.
+        """
+        self._check_logical_input(input)
+        return _logical.select(input, path, env, action="copy")
+
+    def prepare_module_disable(
+        self, input: FormInput[FormModel], path: FormWritePath, env: FormEnv
+    ) -> LogicalEditCandidate:
+        """Prepare null only for a nullable generated selector with writable ancestry.
+
+        Ref ancestors, nonselectors and declaration-fixed/nonnullable selections
+        raise LogicalEditError without modifying input. Wrong model raises
+        TypeError. Source/declaration faults propagate. No capture, installation
+        or publication occurs; use this candidate only in the same guarded turn.
+        """
+        self._check_logical_input(input)
+        return _logical.select(input, path, env, action="disable")
+
+    def logical_errors(
+        self, input: FormInput[FormModel], errors: FormErrors | None, env: FormEnv
+    ) -> FormErrors | None:
+        """Translate existing canonical directed errors, without evaluating input.
+
+        Only generated wrappers/tags disappear. Real names, container indexes
+        and unknown author error suffixes remain intact; cfg paths already in
+        logical space are not stripped twice. None remains None. Wrong input
+        model raises TypeError. No state, sources or errors are changed.
+        """
+        self._check_logical_input(input)
+        return _logical.logical_errors(input, errors, env)
 
     def _module_field(self, path: tuple[str, ...]) -> ModuleField:
         section = self._section

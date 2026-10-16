@@ -10,7 +10,7 @@ from collections.abc import Callable, Generator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from copy import deepcopy
 
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from zcu_tools.core.complex_codec import decode_complex, encode_complex
 from zcu_tools.format_version import YamlValue
@@ -63,7 +63,23 @@ def field_container(value: object, path: str) -> FieldNode:
     raise AttributeError(f"{path}: not a field container")
 
 
-def _write_field(node: FieldNode, name: str, value: object) -> None:
+def _write_field(node: FieldNode, name: str, value: object, path: str) -> None:
+    if (
+        isinstance(node, BaseModel)
+        and name not in type(node).model_fields
+        and type(node).model_config.get("extra") != "allow"
+    ):
+        # Preserve the forbid error contract without invoking migration validators.
+        raise ValidationError.from_exception_data(
+            type(node).__name__,
+            [
+                {
+                    "type": "extra_forbidden",
+                    "loc": tuple(path.split(".")),
+                    "input": value,
+                }
+            ],
+        )
     if isinstance(value, complex):
         value = encode_complex(value)
     copied = deepcopy(value)
@@ -76,14 +92,6 @@ def _write_field(node: FieldNode, name: str, value: object) -> None:
                 raise ValueError(f"{name!r}: model has no extra field storage")
             extras[name] = copied
             node.model_fields_set.add(name)
-        else:
-            # The original model applies forbid/ignore, not a registry precheck.
-            type(node).model_validate(
-                {
-                    **node.model_dump(exclude_unset=True, serialize_as_any=True),
-                    name: copied,
-                }
-            )
     else:
         node[name] = copied
 
@@ -95,6 +103,8 @@ class FieldView:
     child views following the same memory reader and edit callback. Complex
     tags decode to native complex scalars. Missing/unset fields and malformed
     tags raise rather than substituting defaults. Reads never perform I/O.
+    Writes to undeclared model fields raise ValidationError with the full path
+    unless the model allows extras; this rejection does not run model validators.
     """
 
     _model: Callable[[], FieldNode]
@@ -174,10 +184,12 @@ class FieldView:
 
         The core codec supplies the persisted tag. The owning edit callback
         validates the complete model; failures reject values and metadata.
-        Container assignments retain the existing YAML/model contract.
+        Container assignments retain the existing YAML/model contract. Undeclared
+        model fields are rejected with a full-path ValidationError before model
+        validation unless the model allows extras.
         """
         with self._edit(name) as draft:
-            _write_field(draft, name, value)
+            _write_field(draft, name, value, ".".join(filter(None, (self._path, name))))
 
 
 @contextmanager
@@ -205,8 +217,10 @@ def set_model_value(model: BaseModel, path: str, value: object) -> None:
     draft. path uses nonempty mapping/model segments, with no list indexing.
     Native complex scalars use the shared persisted tag. Values are copied;
     model types and field presence are retained. Missing/non-container parents
-    raise KeyError/AttributeError. The owner must validate the full model before
-    publication. No metadata or files are changed.
+    raise KeyError/AttributeError. An undeclared field on a model that does not
+    allow extras raises ValidationError naming the full path, without invoking
+    model validators. The owner must validate the full model before publication.
+    No metadata or files are changed.
     """
     parts = parameter_path(path)
     node: FieldNode = model
@@ -216,4 +230,4 @@ def set_model_value(model: BaseModel, path: str, value: object) -> None:
         if isinstance(node, BaseModel):
             node.model_fields_set.add(name)
         node = field_container(child, ".".join(parts[: index + 1]))
-    _write_field(node, parts[-1], value)
+    _write_field(node, parts[-1], value, path)

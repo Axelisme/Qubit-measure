@@ -13,8 +13,12 @@ from zcu_tools.cfg_model import (
     TemplateDef,
 )
 from zcu_tools.device import BaseDeviceInfo
-from zcu_tools.gui.form import FormEnv, FormErrors, FormState, ModuleInline
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form import (
+    FormEnv,
+    FormErrors,
+    FormState,
+)
+from zcu_tools.gui.form_adapter import Form, ModuleInline
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext

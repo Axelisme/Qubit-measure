@@ -4,7 +4,7 @@ Single-tone sideband-reset length sweep: holds the tested pulse-reset at its cal
 
 ## Expects (parameter context)
 
-The tested pulse frequency reads `$qubit.ext.reset_f.` Seeds 50 length points from 0.1 to 20.0 us, with relax delay 30.5 us. Open and Reset evaluate starting expressions once into direct input using captured sources. Inline qubit pulses read `$qubit.freq` and `$qubit.wiring.L01.ch.` Inline readout reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.ext.time_of_fly` + 0.05 us for trigger timing. Missing or invalid required sources leave the affected fields empty and Invalid; supply calibration or direct values before Run. No numeric calibration fallback is supplied.
+The tested pulse frequency reads `$qubit.ext.reset_f.` Seeds 50 length points from 0.1 to 20.0 us, with relax delay 30.5 us. Open and Reset evaluate starting expressions once into direct input using captured sources. Inline qubit pulses read `$qubit.freq` and `$qubit.wiring.ch.` Inline readout reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.ext.time_of_fly` + 0.05 us for trigger timing. Missing or invalid required sources leave the affected fields empty and Invalid; supply calibration or direct values before Run. No numeric calibration fallback is supplied.
 
 ## Expects (ModuleLibrary)
 

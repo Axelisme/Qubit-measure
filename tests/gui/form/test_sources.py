@@ -14,9 +14,9 @@ from zcu_tools.gui.form import (
     FormModel,
     FormPath,
     FormState,
-    ModuleRef,
     field_error,
 )
+from zcu_tools.gui.form_adapter import ModuleRef
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
     LibrarySnapshot,

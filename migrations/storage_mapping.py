@@ -16,13 +16,15 @@ from migrations.storage_migration import KeyRule, MigrationMapping, ModuleRule
 # Explicit legacy mappings preserve working units and fixed roots. Changes to rules, seeds,
 # roles or native declarations require new revisions for both kind profiles.
 # Never reuse a revision across profiles: resume compares this exact identity.
-_KIND_REVISIONS = {"qubit/fluxonium": "1.8", "qubit/transmon": "1.9"}
+_KIND_REVISIONS = {"qubit/fluxonium": "1.10", "qubit/transmon": "1.11"}
 
 _VALUE_PATHS = (
     ("r_f", "R1.freq"),
     ("rf_w", "R1.kappa"),
     ("res_ch", "R1.wiring.ch"),
     ("ro_ch", "R1.wiring.ro_ch"),
+    ("qub_0_1_ch", "Q1.wiring.ch"),
+    ("lo_flux_ch", "Q1.wiring.lo_flux_ch"),
     ("timeFly", "R1.ext.time_of_fly"),
     ("res_edelay_calibration", "R1.ext.edelay"),
     ("theta0", "R1.ext.theta0"),
@@ -72,14 +74,6 @@ _FLUX_PATHS = (
     ("best_jpa_flux", "J1.flux", "jpa_flux_unit"),
 )
 
-_CHANNEL_PATHS = (
-    ("qub_0_1_ch", "Q1.wiring.L01"),
-    ("qub_1_4_ch", "Q1.wiring.L14"),
-    ("qub_4_5_ch", "Q1.wiring.L45"),
-    ("qub_5_6_ch", "Q1.wiring.L56"),
-    ("lo_flux_ch", "Q1.wiring.flux"),
-)
-
 _MODULE_KEY_PATHS = (
     ("pi_gain", "qubit.module.x180.gain", "Pulse gain belongs to the x180 module"),
     (
@@ -97,7 +91,7 @@ _MODULE_KEY_PATHS = (
 
 _REMOVED = (
     ("readout_f", "Use resonator.freq instead of the removed readout frequency alias"),
-    ("qub_ch", "Explicit band wiring replaces the ambiguous channel"),
+    ("qub_ch", "Explicit drive wiring replaces the ambiguous channel"),
     ("flx_bias", "Obsolete alias; flux_bias holds the predictor's flux offset"),
     ("mA_c", "Obsolete flux value"),
     ("mA_e", "Obsolete flux value"),
@@ -168,16 +162,6 @@ def build_mapping(
                 reason="Flux current or voltage requires an explicit unit key",
             )
             for key, path, unit_key in _FLUX_PATHS
-        )
-        + tuple(
-            KeyRule(
-                old_key=key,
-                target_path=path,
-                action="value",
-                wrap_key="ch",
-                reason="Explicit band or flux wiring channel",
-            )
-            for key, path in _CHANNEL_PATHS
         )
         + tuple(
             KeyRule(

@@ -4,7 +4,7 @@
 
 `zcu_lab` 只放實驗定義、實驗室宣告與各 workflow 自己的小工具。`zcu_tools` 提供實驗與前端框架，不反向 import 這個套件。使用者 GUI 入口在 `scripts/`，agent MCP 組合根在 `mcp_servers/`，取得定義後顯式注入框架。
 
-`v2/` 放各實驗的 core 與前端附件，`recipes/` 放量測流程定義。`workflows/` 的 `coherence_fluxdep/`、`mist_fluxdep/`、`overnight/` 各自擁有流程、表單與科學工具，`common/` 只放真正共用的實驗步驟。`workflows/registry.py` 提供有序註冊清單。Window、App、RPC、MCP、表單協調、layout 與 input 保存都由 lib 宿主負責。實驗室宣告位於 `components/`、`definitions.py` 與 `templates.py`。[`simulation_envs/`](simulation_envs/README.md) 放 GUI／Notebook 共用的模擬環境、參數檔與離線建庫入口。
+`v2/` 放各實驗的 core 與前端附件，`recipes/` 放量測流程定義。`workflows/` 的 `coherence_fluxdep/`、`mist_fluxdep/`、`overnight/` 各自擁有流程、表單與科學工具，`common/` 只放真正共用的實驗步驟。`workflows/registry.py` 提供有序註冊清單。Window、App、RPC、MCP、表單協調、layout 與 input 保存都由 lib 宿主負責。實驗室宣告位於 `components/`、`definitions.py` 與 `templates.py`。[`simulation_envs/`](simulation_envs/FTF/README.md) 放 GUI／Notebook 共用的模擬環境、參數檔與離線建庫入口。
 
 `alias_presets/*.yaml` 定義具名 GUI alias preset，檔名就是名稱，格式使用 `zcu.aliases`。`default.yaml` 保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列。`load_alias_presets()` 重用 resources reader，讀出名稱到有序 rows 的完整資料，不提前載入實驗 catalog。兩個 launcher 以 `alias_presets` 注入 app，格式錯誤或缺 default 直接中止啟動，改檔後需重開 GUI。Behavior 保留完整資料供 dialog 組裝；底層 session 只收 default rows。框架不選裝置，也不從 cache 綁定 flux_dev。
 

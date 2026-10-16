@@ -4,7 +4,6 @@ from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import (
     MissingParameter,
     RecipeDefinition,
-    RecipeFieldEdit,
     RecipeGenerator,
     RecipeNeedsParameters,
     RecipeSession,
@@ -13,9 +12,9 @@ from zcu_tools.mcp.measure.recipe import (
 
 from .helpers import (
     FrequencySweepCalibration,
+    retain_scalar,
     set_flux_sweep,
     set_frequency_sweep,
-    set_module_scalar,
     use_flux_device,
 )
 
@@ -100,11 +99,11 @@ def onetone_spectrum_over_flux(  # noqa: PLR0913 - Preserve typed tool keywords.
     )
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
-    set_module_scalar(
-        tab,
-        "modules.readout",
-        RecipeFieldEdit("modules.readout.module.gain", gain),
-    )
+    if gain is not None:
+        tab.use_inline("modules.readout")
+        tab.set("modules.readout.gain", gain)
+    else:
+        retain_scalar(tab, "modules.readout.gain")
     tab.set("reps", reps)
     tab.set("rounds", rounds)
     result = yield from tab.run_step()
@@ -161,7 +160,7 @@ DEFINITION = RecipeDefinition(
     adapter_name="onetone/flux_dep",
     summary_parameters=(
         SummaryParameter("frequency_sweep", "sweep.freq", "MHz"),
-        SummaryParameter("gain", "modules.readout.module.gain"),
+        SummaryParameter("gain", "modules.readout.gain"),
         SummaryParameter("readout_ref", "modules.readout"),
         SummaryParameter("reps", "reps"),
         SummaryParameter("rounds", "rounds"),

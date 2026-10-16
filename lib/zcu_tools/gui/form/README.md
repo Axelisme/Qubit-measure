@@ -1,6 +1,6 @@
 # gui/form — Qt-free Pydantic input editing
 
-**Last updated:** 2026-10-16，單層 describe、nullable 分支固定語意與獨立宿主提交；accepted ADR 導覽
+**Last updated:** 2026-10-16，通用來源 hook、輸入政策與 prepare/install
 
 `FormState.describe(path, env)` 直接從 model 宣告與目前 input 回傳 `FormDescription`，不產生 JSON Schema。Root path 是 `()`，其他位置用 model-field tuple。`target` 是指定欄位的 metadata，root 則為 None；`children` 只列下一層 metadata。每個 child 保留完整 path，不攜帶 descendants。選中選項只有一個非 nullable、沒有 options 的普通 model wrapper 時，children 攤平一層，但 wrapper 的完整 path 仍可查詢。
 
@@ -26,7 +26,7 @@ Union 位置的 partial object 是選分支加寫入內容，與 tag 葉切換�
 
 `FormModel.default_input` 與 `FormInput` 在入口拒絕未標 tag 的 `str | Model` 欄位。ValueError 指出欄位路徑與不支援的形狀。檢查走過 nullable、alias 與所有 model branches，包含未啟用的分支；它不讀 captured sources。Key-or-inline input 必須使用明確的 tagged ref／inline union，不能靠 JSON 字串或物件型別選分支。持久 Spec 的 `str | Spec` 不改，生成器在 input 邊界投影成 tagged wrappers。
 
-Module 欄位使用 `ModuleRef` 與 `ModuleInline` 衍生 class 的 tagged union，由 `kind` 選分支。Ref 的 `name` 是 literal key，inline 的 `module` 是支援的 input model。原生 `ModuleInput.module` 是持久 `ModuleSpec`，內含未標 tag unions，不能直接放進手寫 FormModel。Caller 使用 `gui.form_adapter` 的生成欄位與選項。生成器宣告 None、library keys、Inline kinds 與 `to_inline` 指令，core 不替 consumer 列 library 清單。選項的 fields 不含 value 已固定的 tag，ref 選項不帶 fields。
+Module／library 的 tagged input、literal key 與 family 政策由 `gui.form_adapter` 擁有。Core 只讀普通 annotation、`Option` 與 `InputPolicy`，不以領域 subclass 判定行為。`InputPolicy(expression=False)` 放在 field 的 Annotated metadata，關閉 describe、decode/result、defaults evaluation 與 compatible restore 的 expression 能力。True 不會替 Literal、enum、bool、choices 或混合 union 開啟原本不支援的能力。Write 仍保存普通 invalid draft，由 result 回報。
 
 Editor 與 MCP 讀同一份 description options，照 label 列選項，一次寫入 value，首次展開才 describe 選中項目的 children。它們不推論 union、ref 或 library 的呈現。普通 nullable model 仍用 Enabled，bool 仍用 checkbox。明確複製只經 `to_inline` 指令，使用 host 的 guarded command callback；一般選 Inline 只建立 fresh defaults。
 
@@ -34,9 +34,11 @@ Scalar、整個 sequence 與整個 typed mapping 都是 leaf。普通 nested mod
 
 Compatible restore 以原文欄位集合與型別選擇未標 tag 的 model-only union。恰好一個 member 相容才保留 subtree，合法 expression envelope 依欄位能力參與比對，不求值。零個或多個 member 相容就丟棄，不猜第一個 branch。Tagged branch 的 selector 與 defaults 契約不變。還原後 captured source 檢查失敗的 leaf（例如 library 沒有的 ref 名稱，或沒有 captured library 時的任何 ref）保留目前 input，目前沒有就留空，路徑和其他 dropped paths 一起回傳。不是由還原 leaf 造成的 source 失敗仍然 raise；一般 write、default_input 與 result 的 source 語意不變。
 
-`KeyRef` 是 key-only 的 tagged ref 基底，欄位為 `kind="ref"` 與 literal `name: str`。Description 不提供 expression 能力，result 不求值 Expr envelope，compatible restore 丟棄 envelope。它不讀 library，也不限制 key 清單。`ModuleRef` 繼承它，保留 module-only captured library source 檢查。生成器的 nested waveform／module ref 使用 `KeyRef`；來源政策不依 input 的位置決定。
+`FormModel.check_sources(data, env)` 檢查本層 raw input 真正消費的來源。Hook 不遞迴、不補 defaults、不驗證普通值，也不改 capture。Core 沿 active children 與被消費的靜態 defaults 呼叫同一 hook，供 defaults、write、preview/result 與 compatible restore 共用。`field_error` 的相對路徑由 core 加上 consuming ancestry。Compatible restore 只回退造成來源失敗的 restored leaf；其他來源故障保留原例外。
 
-FormEnv 借用 host 捕捉的 ParameterContext、library 與 detached `BaseDeviceInfo` snapshots（含 custom driver info）。共用工具只讀裝置名稱；需要特定 driver 欄位的表單自己用 `isinstance` 收窄。沒有 parameter capture 時仍可編輯 ordinary input 與純數學 expression；參數引用失敗會落在消費欄位的 error path。工具不寫來源、不 refresh 或 poll。ModuleRef/ModuleInline 使用公開 library Spec 讀取；to_cfg 的 materialization 與 range 展開歸具體表單。
+`FormState.prepare_write(batch, env)` 回 detached `FormInput`，完成與 write 相同的結構及來源 admission，不安裝、不通知。`install_input(candidate)` 只接受同 model，保留 base，內容改變才通知一次。Host 先 guard，再 prepare，再 install。候選只限同一 owner turn、current input 與 env 使用，不能跨 await、Reset 或 guard 邊界保存，也不是授權或 revision token。普通 `write` 使用同一流程。
+
+FormEnv 借用 host 捕捉的 ParameterContext、library 與 detached `BaseDeviceInfo` snapshots（含 custom driver info）。共用工具只讀裝置名稱；需要特定 driver 欄位的表單自己用 `isinstance` 收窄。沒有 parameter capture 時仍可編輯 ordinary input 與純數學 expression；參數引用失敗會落在消費欄位的 error path。工具不寫來源、不 refresh 或 poll。領域來源 hook 可以讀固定 Spec；to_cfg 的 materialization 與 range 展開歸具體表單。
 
 FormState 的 subscriber 在 input 安裝後同步執行。個別 subscriber 故障記錄 traceback，不回滾 input，也不阻止後續 subscriber 或 host publication。Host 的 mutation guard 涵蓋安裝、editor subscriber 與 resource publication，同一通知期間可讀不可重入 mutation。
 

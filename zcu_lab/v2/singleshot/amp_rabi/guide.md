@@ -4,7 +4,7 @@ Hardware gain sweep preserving every raw IQ shot. Live view classifies Ground / 
 
 ## Expects (parameter context)
 
-Open and Reset capture the current aliases, parameters and library. Relax delay starts at 50.5 us. Gain sweep starts at -0.3 and ends at 4 * `$qubit.module.x180.gain.` Inline qubit gain starts at 1.0. Classification seeds `$qubit.ext.readout_cal.g_center`/e_center/radius; missing calibration stays Invalid. Inline templates read `$qubit.freq`, `$qubit.wiring.L01.ch` and `$resonator.freq`/wiring.ch/wiring.ro_ch; readout trigger uses `$resonator.ext.time_of_fly` + 0.05 us. Missing required sources remain Invalid; no numeric fallback is supplied.
+Open and Reset capture the current aliases, parameters and library. Relax delay starts at 50.5 us. Gain sweep starts at -0.3 and ends at 4 * `$qubit.module.x180.gain.` Inline qubit gain starts at 1.0. Classification seeds `$qubit.ext.readout_cal.g_center`/e_center/radius; missing calibration stays Invalid. Inline templates read `$qubit.freq`, `$qubit.wiring.ch` and `$resonator.freq`/wiring.ch/wiring.ro_ch; readout trigger uses `$resonator.ext.time_of_fly` + 0.05 us. Missing required sources remain Invalid; no numeric fallback is supplied.
 
 ## Expects (ModuleLibrary)
 

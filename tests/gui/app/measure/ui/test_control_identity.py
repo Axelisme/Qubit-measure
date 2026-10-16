@@ -933,7 +933,6 @@ def open_resonator_add(tree: ComponentTreeWidget, name: str) -> AddComponentDial
     dialog = tree.open_add_dialog()
     add_control(dialog, QComboBox, "add_kind").setCurrentText("resonator")
     add_control(dialog, QLineEdit, "add_name").setText(name)
-    add_control(dialog, QLineEdit, "field:freq").setText("6500")
     return dialog
 
 

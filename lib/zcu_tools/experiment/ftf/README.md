@@ -5,8 +5,10 @@
 `ftf(path_or_settings)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
 `DeviceManager`, applies their initial values once and binds the selected channel
-counts to the fixed mock QICK profile. The returned manager owns device cleanup.
-Builder failures close devices and preserve startup and cleanup errors.
+counts to the fixed mock QICK profile. The returned manager owns cleanup. A
+builder failure closes its resources and preserves both startup and close errors.
+The executable example is `zcu_lab/simulation_envs/FTF/environment.py` with adjacent
+`ftf.yaml`, a working copy of the tracked `default.yaml`. The Notebook walkthrough is `notebook_md/single_qubit.md`.
 
 `FTFSource.snapshot` reads live DC values before each round. It checks units and
 limits without restoring startup values. `execute` consumes detached templates.

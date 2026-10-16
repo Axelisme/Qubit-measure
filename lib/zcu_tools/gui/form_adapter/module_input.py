@@ -5,11 +5,15 @@ from typing import overload
 from pydantic import TypeAdapter
 
 from zcu_tools.cfg_model import ConfigBase, ModuleSpec
-from zcu_tools.gui.form import FormEnv, ModuleInline, ModuleRef, Option
+from zcu_tools.gui.form import (
+    FormEnv,
+    Option,
+)
 
 from ._modules import ModuleField
 from ._seeds import persistent_input
 from ._types import members, union_type
+from .input_types import ModuleInline, ModuleRef
 
 _MODULE_SPEC = TypeAdapter[ModuleSpec](ModuleSpec)
 

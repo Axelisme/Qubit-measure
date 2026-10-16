@@ -20,6 +20,7 @@ from zcu_tools.resources.entry import (
     ComponentSchema,
     ResultEntry,
     component_registry,
+    snapshot,
 )
 
 from .view_support import create_entry, field_view, registered_model
@@ -292,6 +293,81 @@ def test_path_write_runs_nested_owning_field_normalization(tmp_path: Path) -> No
             field_view(reopened.setup.N1.timing).label == "changed"
             and field_view(reopened.setup.N1.timing).width == 1.0
         )
+
+
+@pytest.mark.parametrize("policy", ["forbid", "ignore"])
+@pytest.mark.parametrize(
+    ("write", "path"),
+    [
+        ("attribute", "Q1.typo"),
+        ("attribute", "Q1.wiring.typo"),
+        ("set", "Q1.typo"),
+        ("set", "Q1.wiring.typo"),
+        ("item", "Q1.wiring.typo"),
+    ],
+)
+def test_path_writes_reject_undeclared_fields_before_model_migration(
+    tmp_path: Path,
+    policy: Literal["forbid", "ignore"],
+    path: str,
+    write: str,
+) -> None:
+    class MigratingFields(BaseModel):
+        model_config = ConfigDict(extra=policy)
+        ext: YamlMap = Field(default_factory=dict)
+
+        @model_validator(mode="before")
+        @classmethod
+        def move_unknown(cls, value: YamlMap) -> YamlMap:
+            known = {
+                key: item for key, item in value.items() if key in cls.model_fields
+            }
+            unknown = {
+                key: item for key, item in value.items() if key not in cls.model_fields
+            }
+            if unknown:
+                known["ext"] = {"migrated": unknown}
+            return known
+
+    class MigratingComponent(ComponentSchema, MigratingFields):
+        wiring: MigratingFields = Field(default_factory=MigratingFields)
+        rate: float = 10.0
+
+    with registered_model("test/migrating-fields", MigratingComponent) as kind:
+        entry, results, _database = create_entry(tmp_path)
+        entry.setup.add_component("Q1", kind=kind)
+        with entry.setup.edit() as draft:
+            draft.set_meta("Q1.rate", {"comment": "unchanged"})
+        before = snapshot(entry.setup)
+        metadata = entry.setup.meta("Q1.rate")
+        source = results / "entry" / "setup.yaml"
+        disk = source.read_bytes()
+
+        with entry.setup.edit() as draft:
+
+            def assign() -> None:
+                if write == "set":
+                    draft.set(path, 3)
+                elif write == "item":
+                    field_view(draft.Q1.wiring)["typo"] = 3
+                else:
+                    parent = (
+                        draft.Q1 if path == "Q1.typo" else field_view(draft.Q1.wiring)
+                    )
+                    parent.typo = 3
+
+            with pytest.raises(
+                ValidationError, match=path.replace(".", r"\.")
+            ) as error:
+                assign()
+            assert error.value.errors()[0]["type"] == "extra_forbidden"
+            assert error.value.errors()[0]["loc"] == tuple(path.split("."))
+            assert snapshot(draft) == before
+            assert draft.meta("Q1.rate") == metadata
+
+        assert snapshot(entry.setup) == before
+        assert entry.setup.meta("Q1.rate") == metadata
+        assert source.read_bytes() == disk
 
 
 @pytest.mark.parametrize("nullable", [False, True])

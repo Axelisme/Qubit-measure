@@ -4,7 +4,7 @@ Two-tone qubit power dependence: a 2D scan sweeping the qubit-drive gain (outer)
 
 ## Expects (parameter context)
 
-Inline templates read qubit.freq, qubit.wiring.L01.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.ext.time_of_fly + 0.05 us from the fixed capture. Missing required calibration remains Invalid; no numeric fallback. Frequency sweep is qubit.freq ± 1.5 * qubit.kappa; gain runs 0.001 to 1.0.
+Inline templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.ext.time_of_fly + 0.05 us from the fixed capture. Missing required calibration remains Invalid; no numeric fallback. Frequency sweep is qubit.freq ± 1.5 * qubit.kappa; gain runs 0.001 to 1.0.
 
 ## Expects (ModuleLibrary)
 

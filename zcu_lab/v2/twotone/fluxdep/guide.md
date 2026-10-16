@@ -4,7 +4,7 @@ Two-tone qubit flux dependence: a 2D scan stepping an external flux device (oute
 
 ## Expects (parameter context)
 
-Inline templates read qubit.freq, qubit.wiring.L01.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.ext.time_of_fly + 0.05 us from the fixed capture. Missing required calibration remains Invalid; no numeric fallback. Frequency sweep is qubit.freq ± qubit.kappa over 1001 points. Flux spans 10% beyond qubit.flux_int and qubit.flux_half; missing endpoints remain Invalid.
+Inline templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.ext.time_of_fly + 0.05 us from the fixed capture. Missing required calibration remains Invalid; no numeric fallback. Frequency sweep is qubit.freq ± qubit.kappa over 1001 points. Flux spans 10% beyond qubit.flux_int and qubit.flux_half; missing endpoints remain Invalid.
 
 ## Expects (ModuleLibrary)
 
