@@ -318,7 +318,9 @@ class AcquireRequest:
                 coordinates = tuple(
                     (name, int(index))
                     for name, index in zip(
-                        self.point_names, np.unravel_index(point, self.point_dims)
+                        self.point_names,
+                        np.unravel_index(point, self.point_dims),
+                        strict=True,
                     )
                 )
                 events = tuple(
@@ -542,9 +544,13 @@ class RoundStatistics:
             )
         )
         points, state_count = prod(point_dims), counts.shape[-1]
-        states = np.empty((points, reps), dtype=np.int64)
-        for point, row in enumerate(counts.reshape(points, state_count)):
-            states[point] = rng.permutation(np.repeat(np.arange(state_count), row))
+        # Flattened counts repeat state labels in point order. Shuffle rows
+        # together so Python work does not grow with points or repetitions.
+        states = np.repeat(
+            np.tile(np.arange(state_count, dtype=np.int64), points), counts.ravel()
+        ).reshape(points, reps)
+        order = rng.random((points, reps)).argsort(axis=1)
+        states = np.take_along_axis(states, order, axis=1)
         raw: dict[int, NDArray[np.int64]] = {}
         for channel in self.channels:
             if channel.channel in raw:
