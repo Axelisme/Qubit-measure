@@ -13,6 +13,7 @@ from zcu_tools.mcp.measure.recipe import (
     RecipeNeedsParameters,
     RecipeRun,
     RecipeSession,
+    ask,
 )
 
 
@@ -52,20 +53,21 @@ def pipeline(
             RecipeFieldEdit("rounds", rounds),
         )
     )
-    run, status = yield tab.run()
-    if status == "cancelled":
+    result = yield from tab.run_step()
+    run = result.run
+    if result.status == "cancelled":
         return
     assert isinstance(run, RecipeRun)
     run.save_raw()
-    _, status = yield run.analyze("primary")
-    if status == "cancelled":
+    analysis = yield from run.analyze_step("primary")
+    if analysis.status == "cancelled":
         return
     if post:
-        _, status = yield run.analyze("post")
-        if status == "cancelled":
+        analysis = yield from run.analyze_step("post")
+        if analysis.status == "cancelled":
             return
-    decision, status = yield run.propose_writeback()
-    if status != "cancelled" and decision == "accepted":
+    decision = yield from ask(run.propose_writeback())
+    if decision.status != "cancelled" and decision.decision == "accepted":
         tab.accept()
 
 

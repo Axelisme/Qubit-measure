@@ -8,8 +8,8 @@ from zcu_tools.mcp.measure.recipe import (
     RecipeDefinition,
     RecipeGenerator,
     RecipeNeedsParameters,
-    RecipeRun,
     RecipeSession,
+    ask,
 )
 
 from .helpers import set_frequency
@@ -135,18 +135,18 @@ def time_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs
     tab.set("reps", reps, source="explicit")
     tab.set("rounds", rounds, source="explicit")
 
-    run, status = yield tab.run()
-    if status == "cancelled":
+    result = yield from tab.run_step()
+    run = result.run
+    if result.status == "cancelled" or run is None:
         return
-    assert isinstance(run, RecipeRun)
     run.save_raw()
-    _, status = yield run.analyze("primary")
-    if status == "cancelled":
+    analysis = yield from run.analyze_step("primary")
+    if analysis.status == "cancelled":
         return
-    decision, status = yield run.propose_writeback()
-    if status == "cancelled":
+    decision = yield from ask(run.propose_writeback())
+    if decision.status == "cancelled":
         return
-    if decision == "accepted":
+    if decision.decision == "accepted":
         tab.accept()
 
 

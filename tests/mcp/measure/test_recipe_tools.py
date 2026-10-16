@@ -7,7 +7,7 @@ from dataclasses import replace
 import pytest
 from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.execution_reply import SummaryEstimate
-from zcu_tools.mcp.measure.recipe import RecipeGenerator, RecipeRun, RecipeSession
+from zcu_tools.mcp.measure.recipe import RecipeGenerator, RecipeRun, RecipeSession, ask
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._analyze_support import call_stdio, stdio_data
@@ -21,20 +21,21 @@ def _sample(
     session: RecipeSession, *, post: bool = False, write: bool = False
 ) -> RecipeGenerator:
     tab = session.open_tab("lookback")
-    run, status = yield tab.run()
-    if status == "cancelled":
+    result = yield from tab.run_step()
+    run = result.run
+    if result.status == "cancelled":
         return
     assert isinstance(run, RecipeRun)
     run.save_raw()
-    _, status = yield run.analyze("primary")
-    if status == "cancelled":
+    analysis = yield from run.analyze_step("primary")
+    if analysis.status == "cancelled":
         return
     if post:
-        _, status = yield run.analyze("post")
-        if status == "cancelled":
+        analysis = yield from run.analyze_step("post")
+        if analysis.status == "cancelled":
             return
-    decision, status = yield run.propose_writeback()
-    if status != "cancelled" and decision == "accepted" and write:
+    decision = yield from ask(run.propose_writeback())
+    if decision.status != "cancelled" and decision.decision == "accepted" and write:
         tab.accept()
 
 
