@@ -221,6 +221,25 @@ def _children(
     )
 
 
+def _description_tags(roots: tuple[object, ...]) -> dict[type[BaseModel], str]:
+    tags = branch_tags(roots)
+    tags[LinRange] = "kind"
+    return tags
+
+
+def describe_field(target: Field, *, roots: tuple[object, ...]) -> FormFieldDescription:
+    """Describe an already resolved field in its original parent context.
+
+    target retains its Level, effective choices/options and enclosing selection.
+    roots are the annotations from which that occurrence was reached, including
+    a projected model when it is outside the original root graph. They identify
+    structural branch tags; ordinary same-named fields remain ordinary fields.
+    This reads metadata only, without evaluation, source lookup or mutation.
+    Invalid display declarations raise ValueError, as canonical describe does.
+    """
+    return _metadata(target, _description_tags(roots))
+
+
 def describe(
     model: type[FormModel],
     data: Mapping[str, JsonValue],
@@ -234,8 +253,7 @@ def describe(
     Structural tag identity is annotation-owned, independent of dynamic choices.
     """
     validate_path(path)
-    tags = branch_tags((model,))
-    tags[LinRange] = "kind"
+    tags = _description_tags((model,))
     if not path:
         return FormDescription(
             path, None, _children(root_level(model, data, env), tags)

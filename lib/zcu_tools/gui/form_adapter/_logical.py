@@ -24,6 +24,7 @@ from zcu_tools.gui.form import (
     FormWritePath,
     Option,
 )
+from zcu_tools.gui.form._describe import describe_field
 from zcu_tools.gui.form._selection import Field, Level, root_level, validate_path
 from zcu_tools.gui.form._sources import error_path
 from zcu_tools.gui.form._structure import StructureError
@@ -247,16 +248,15 @@ def _shell(target: Field) -> tuple[type[FormModel], dict[str, JsonValue]]:
     return model, data
 
 
-def _metadata(position: _Position, env: FormEnv) -> FormFieldDescription:
-    model, data = _shell(position.target)
-    description = FormState(FormInput(model, data)).describe(("value",), env)
-    if description.target is None:
-        raise RuntimeError("Field description has no target")
-    return replace(description.target, path=position.path, name=position.path[-1])
+def _metadata(position: _Position, root: type[FormModel]) -> FormFieldDescription:
+    description = describe_field(
+        position.target, roots=(root, position.target.level.model)
+    )
+    return replace(description, path=position.path, name=position.path[-1])
 
 
 def _children(
-    level: Level | None, prefix: FormWritePath, env: FormEnv
+    level: Level | None, prefix: FormWritePath, root: type[FormModel]
 ) -> tuple[FormFieldDescription, ...]:
     if level is None:
         return ()
@@ -265,7 +265,7 @@ def _children(
         target = level.field(name)
         if target.pinned:
             continue
-        metadata = _metadata(_Position(target, (*prefix, name)), env)
+        metadata = _metadata(_Position(target, (*prefix, name)), root)
         if not metadata.hidden:
             result.append(metadata)
     return tuple(result)
@@ -353,6 +353,7 @@ def _read_reference(
     selector: LogicalSelector,
     metadata: FormFieldDescription,
     env: FormEnv,
+    root: type[FormModel],
     *,
     input_present: bool,
     raw: JsonValue,
@@ -383,7 +384,7 @@ def _read_reference(
     )
     return LogicalFieldObservation(
         FormDescription(
-            path, replace(metadata, can_expand=True), _children(level, path, env)
+            path, replace(metadata, can_expand=True), _children(level, path, root)
         ),
         input_present,
         raw,
@@ -400,11 +401,12 @@ def read(
     input: FormInput[FormModel], path: FormWritePath, env: FormEnv
 ) -> LogicalFieldObservation:
     validate_path(path)
+    root = input.model
     if not path:
         level = root_level(input.model, input.data, env)
         value, errors = _ordinary_level(level, env)
         observed = LogicalFieldObservation(
-            FormDescription((), None, _children(level, (), env)),
+            FormDescription((), None, _children(level, (), root)),
             True,
             input.data,
             "available",
@@ -417,7 +419,7 @@ def read(
         return _with_input_errors(input, observed, env)
     position = _resolve(input, path, env)
     target, marker = position.target, position.marker
-    metadata = _metadata(position, env)
+    metadata = _metadata(position, input.model)
     selector = _selector(target, marker, env) if marker is not None else None
     authored = position.source is None
     input_present = authored and target.name in target.level.data
@@ -425,7 +427,13 @@ def read(
     source = position.source
     if selector is not None and selector.mode == "key":
         observed = _read_reference(
-            position, selector, metadata, env, input_present=input_present, raw=raw
+            position,
+            selector,
+            metadata,
+            env,
+            root,
+            input_present=input_present,
+            raw=raw,
         )
         return _with_input_errors(input, observed, env)
     level, _ = _content(position, env, path, writing=False)
@@ -449,7 +457,7 @@ def read(
         else "missing"
     )
     observed = LogicalFieldObservation(
-        FormDescription(path, metadata, _children(level, path, env)),
+        FormDescription(path, metadata, _children(level, path, root)),
         input_present,
         raw,
         status,
@@ -578,7 +586,7 @@ def select(
         raise LogicalEditError(
             "Not a generated module selector", reason_code="module_selector", path=path
         )
-    description = _metadata(position, env)
+    description = _metadata(position, input.model)
     selector = _selector(position.target, marker, env)
     if action == "copy" and selector.mode == "inline":
         return LogicalEditCandidate(FormInput(input.model, input.data), False)
