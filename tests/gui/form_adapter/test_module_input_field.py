@@ -26,10 +26,9 @@ from zcu_tools.gui.form import (
     FormModel,
     FormPath,
     FormState,
-    ModuleInline,
-    ModuleInput,
     Option,
 )
+from zcu_tools.gui.form_adapter import ModuleInline, ModuleInput
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
     LibrarySnapshot,

@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from types import UnionType, new_class
 from typing import (
@@ -32,14 +32,12 @@ from zcu_tools.cfg_model import (
     WaveformSpec,
 )
 from zcu_tools.gui.form import (
+    Display,
     FormEnv,
     FormErrors,
     FormInput,
     FormModel,
     FormState,
-    KeyRef,
-    ModuleInline,
-    ModuleRef,
     Option,
     OptionCommand,
     static_defaults,
@@ -62,6 +60,8 @@ from ._seeds import (
     template_seed_tree,
 )
 from ._types import annotated_type, literal_type, members, type_tag, union_type
+from .input_types import KeyRef, ModuleInline, ModuleRef
+from .logical import ModuleSelector
 
 _SPEC_BY_TAG = {
     type_tag(model): model
@@ -268,7 +268,8 @@ def _editable(
     if origin is Annotated:
         result = _editable(args[0], locks, seeds)
         for metadata in args[1:]:
-            result = annotated_type(result, metadata)
+            if not isinstance(metadata, ModuleSelector):
+                result = annotated_type(result, metadata)
         return result
     if origin in (Union, UnionType):
         items = tuple(
@@ -321,11 +322,39 @@ def _tagged_annotation(
         if locks
         else annotated_type(union_type((KeyRef, inline)), Field(discriminator="kind"))
     )
-    return (
+    specs = tuple(
+        spec
+        for spec in _PERSISTENT_SPECS
+        if any(issubclass(model, spec) for model in models)
+    )
+    result = (
         union_type((tagged, type(None)))
         if type(None) in members(annotation)
         else tagged
     )
+    return annotated_type(
+        result,
+        ModuleSelector(
+            "module",
+            specs,
+            specs,
+            "waveform"
+            if all(spec in members(WaveformSpec) for spec in specs)
+            else "module",
+        ),
+    )
+
+
+def _spec_display(name: str, info: FieldInfo, *, locked: bool) -> Display | None:
+    """Adapter-owned structural tags remain hidden even at a standalone Spec root."""
+    display = field_display(info, locked=locked)
+    if (
+        name in ("type", "style")
+        and get_origin(info.annotation) is Literal
+        and len(get_args(info.annotation)) == 1
+    ):
+        return replace(display or Display(), hidden=True)
+    return display
 
 
 def editable_spec(
@@ -382,7 +411,8 @@ def editable_spec(
             derived.default_factory = None
         if name in locks:
             derived.default = locks[name]
-        if (display := field_display(info, locked=name in locks)) is not None:
+        display = _spec_display(name, info, locked=name in locks)
+        if display is not None:
             derived.metadata.append(display)
         namespace[name] = derived
 
@@ -579,6 +609,10 @@ class ModuleField:
             inline
             if self.locks
             else annotated_type(union_type((ref, inline)), Field(discriminator="kind"))
+        )
+        self.annotation = annotated_type(
+            self.annotation,
+            ModuleSelector("module", self.specs, self.ref_specs, "module"),
         )
         # A single-field form evaluates this module without unrelated draft errors.
         value_model = new_class(

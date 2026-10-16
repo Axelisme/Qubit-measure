@@ -12,11 +12,10 @@ from pydantic.fields import FieldInfo
 from ._json import copy_json
 from ._selection import Field, Level, literal_values, resolve, root_level, validate_path
 from ._structure import (
-    accepts_expression,
     alternatives,
     branch_tags,
+    expression_allowed,
     fixed_tag,
-    library_key,
     model_types,
 )
 from .description import (
@@ -27,7 +26,7 @@ from .description import (
     FormFieldKind,
     FormOptionDescription,
 )
-from .model import Display, FormEnv, FormModel, FormWritePath, LinRange, ModuleInput
+from .model import Display, FormEnv, FormModel, FormWritePath, LinRange
 from .options import Option
 
 
@@ -199,9 +198,7 @@ def _metadata(
         collapsed=display.collapsed,
         can_expand=target.active_model is not None,
         nullable=type(None) in alternatives(info.annotation),
-        expression=accepts_expression(info.annotation, target.path)
-        and target.choices is None
-        and not library_key(target.level.model, target.name),
+        expression=expression_allowed(info, target.path) and target.choices is None,
         choices=None
         if target.choices is None
         else tuple(copy_json(value) for value in target.choices),
@@ -237,7 +234,7 @@ def describe(
     Structural tag identity is annotation-owned, independent of dynamic choices.
     """
     validate_path(path)
-    tags = branch_tags((model, ModuleInput))
+    tags = branch_tags((model,))
     tags[LinRange] = "kind"
     if not path:
         return FormDescription(
