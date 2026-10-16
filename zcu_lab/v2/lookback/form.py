@@ -13,8 +13,8 @@ def make_form(ctx: FormContext) -> Form[LookbackCfg]:
         LookbackCfg,
         tree={
             "modules": {
-                "reset": None,
-                "init_pulse": None,
+                "reset": Hidden(),
+                "init_pulse": Hidden(),
                 "readout": Template(
                     "readout",
                     set={
