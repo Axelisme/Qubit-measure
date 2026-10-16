@@ -4,7 +4,7 @@ Single-shot ground/excited readout: measures without and with the probe pi-pulse
 
 ## Expects (parameter context)
 
-Open and Reset capture the current aliases, parameters and library. Relax delay is 5 * `$qubit.t1.` Inline probe uses `$qubit.freq` and `$qubit.wiring.L01.ch.` Inline templates read `$qubit.freq`, `$qubit.wiring.L01.ch` and `$resonator.freq`/wiring.ch/wiring.ro_ch; readout trigger uses `$resonator.ext.time_of_fly` + 0.05 us. Missing required sources remain Invalid; no numeric fallback is supplied.
+Open and Reset capture the current aliases, parameters and library. Relax delay is 5 * `$qubit.t1.` Inline probe uses `$qubit.freq` and `$qubit.wiring.ch.` Inline templates read `$qubit.freq`, `$qubit.wiring.ch` and `$resonator.freq`/wiring.ch/wiring.ro_ch; readout trigger uses `$resonator.ext.time_of_fly` + 0.05 us. Missing required sources remain Invalid; no numeric fallback is supplied.
 
 ## Expects (ModuleLibrary)
 

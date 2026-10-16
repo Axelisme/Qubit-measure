@@ -1,7 +1,6 @@
 """Recipe promises through the shipped tool table and GUI transport seam."""
 
 import base64
-from copy import deepcopy
 from dataclasses import asdict
 from threading import Event, Thread, current_thread
 from typing import Any
@@ -791,7 +790,11 @@ def test_recipe_cancel_during_preparation_keeps_the_missing_parameter_handoff(
     release = Event()
 
     def respond(method, params):
-        if method == "tab.edit_cfg":
+        if method == "tab.select_recipe_module" and params["path"] == [
+            "modules",
+            "reset",
+        ]:
+            assert params["action"] == "disable"
             pending.set()
             wait_for_event(release, "Test must release the admitted RPC")
         return gui(method, params)
@@ -1013,15 +1016,24 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
         edits = [
             edit
             for method, params in client.transport.sent
-            if method == "tab.edit_cfg"
+            if method == "tab.edit_recipe_fields"
             for edit in params["edits"]
         ]
         by_path = {tuple(edit["path"]): edit["value"] for edit in edits}
-        assert by_path["modules", "reset"] is None
-        assert by_path["modules", "init_pulse"] is None
+        selections = [
+            params
+            for method, params in client.transport.sent
+            if method == "tab.select_recipe_module"
+        ]
+        assert selections == [
+            {"tab_id": "t", "path": ["modules", name], "action": "disable"}
+            for name in ("reset", "init_pulse")
+        ]
+        for name in ("reset", "init_pulse"):
+            assert cfg_value(gui.publication, f"modules.{name}") is None
         for key, value in zip(("ro_length", "trig_offset"), expected, strict=True):
-            assert by_path["modules", "readout", "module", key] == value
-            assert type(by_path["modules", "readout", "module", key]) is float
+            assert by_path["modules", "readout", key] == value
+            assert type(by_path["modules", "readout", key]) is float
 
 
 @pytest.mark.parametrize("reuse_tab_id", [None, "kept"])
@@ -1030,8 +1042,6 @@ def test_lookback_missing_frequency_does_not_run_a_blind_default(
 ):
     tab = reuse_tab_id or "new"
     gui = ExecutionGui()
-    gui.reset_form()
-    publication = gui.publication
 
     def respond(method: str, params: dict[str, Any]) -> dict[str, Any]:
         if method == "tab.parameter_read":
@@ -1055,9 +1065,12 @@ def test_lookback_missing_frequency_does_not_run_a_blind_default(
                     }
                 ]
             }
-        if method in ("tab.get_cfg", "tab.reset_cfg", "tab.edit_cfg"):
-            return deepcopy(publication)
-        if method == "tab.describe_cfg":
+        if method in (
+            "tab.get_cfg",
+            "tab.reset_cfg",
+            "tab.read_recipe_field",
+            "tab.select_recipe_module",
+        ):
             return gui(method, params)
         raise AssertionError(f"Missing frequency must not start work: {method}")
 

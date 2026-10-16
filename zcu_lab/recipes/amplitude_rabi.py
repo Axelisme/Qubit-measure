@@ -6,14 +6,13 @@ from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParame
 from zcu_tools.mcp.measure.recipe import (
     MissingParameter,
     RecipeDefinition,
-    RecipeFieldEdit,
     RecipeGenerator,
     RecipeNeedsParameters,
     RecipeSession,
     ask,
 )
 
-from .helpers import set_frequency, set_nested_module_scalar
+from .helpers import apply_frequency, choose_frequency, retain_scalar
 
 
 def _validate_inputs(
@@ -96,25 +95,27 @@ def amplitude_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool i
 
     # Preserve the complete missing-source list rather than failing on its first item.
     missing: list[MissingParameter] = []
-    if (
-        parameter := set_frequency(
-            tab,
-            "modules.qub_pulse.module.freq",
-            frequency_mhz,
-            calibration="$qubit.freq",
-            required="frequency_mhz",
-        )
-    ) is not None:
-        missing.append(parameter)
-    if (
-        parameter := set_frequency(
-            tab,
-            "modules.readout",
-            calibration="$resonator.freq",
-            required="readout_ref",
-        )
-    ) is not None:
-        missing.append(parameter)
+    frequency = choose_frequency(
+        tab,
+        "modules.qub_pulse.freq",
+        frequency_mhz,
+        calibration="$qubit.freq",
+        required="frequency_mhz",
+    )
+    missing.extend(frequency.missing)
+    if frequency.edit is not None:
+        tab.use_inline("modules.qub_pulse")
+        apply_frequency(tab, frequency.edit)
+    frequency = choose_frequency(
+        tab,
+        "modules.readout.freq",
+        calibration="$resonator.freq",
+        required="readout_ref",
+    )
+    missing.extend(frequency.missing)
+    if frequency.edit is not None:
+        tab.use_inline("modules.readout")
+        apply_frequency(tab, frequency.edit)
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
 
@@ -125,15 +126,12 @@ def amplitude_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool i
         expts=points,
         sources={"start": "explicit", "stop": "explicit", "expts": "explicit"},
     )
-    set_nested_module_scalar(
-        tab,
-        "modules.qub_pulse",
-        "modules.qub_pulse.module.waveform",
-        RecipeFieldEdit(
-            "modules.qub_pulse.module.waveform.module.length", pulse_length_us
-        ),
-        ("waveform", "length"),
-    )
+    if pulse_length_us is not None:
+        tab.use_inline("modules.qub_pulse")
+        tab.use_inline("modules.qub_pulse.waveform")
+        tab.set("modules.qub_pulse.waveform.length", pulse_length_us)
+    else:
+        retain_scalar(tab, "modules.qub_pulse.waveform.length")
     tab.set("reps", reps, source="explicit")
     tab.set("rounds", rounds, source="explicit")
 
@@ -185,18 +183,16 @@ DEFINITION = RecipeDefinition(
     summary_parameters=(
         SummaryParameter(
             "readout_frequency_mhz",
-            "modules.readout.module.freq",
+            "modules.readout.freq",
             "MHz",
         ),
         SummaryParameter("readout_ref", "modules.readout"),
         SummaryParameter("use_reset", "modules.reset"),
         SummaryParameter("reps", "reps"),
         SummaryParameter("rounds", "rounds"),
-        SummaryParameter("frequency_mhz", "modules.qub_pulse.module.freq", "MHz"),
+        SummaryParameter("frequency_mhz", "modules.qub_pulse.freq", "MHz"),
         SummaryParameter("drive_ref", "modules.qub_pulse"),
-        SummaryParameter(
-            "pulse_length_us", "modules.qub_pulse.module.waveform.module.length", "us"
-        ),
+        SummaryParameter("pulse_length_us", "modules.qub_pulse.waveform.length", "us"),
         SummaryParameter("gain_sweep", "sweep.gain"),
     ),
     summary_estimates=(

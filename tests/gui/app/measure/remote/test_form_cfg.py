@@ -1,25 +1,21 @@
 """Form RPC observations and atomic writes on an in-process app connection."""
 
-import json
 import typing
-from collections.abc import Callable, Iterator
-from typing import Any, ClassVar
+from typing import ClassVar
 
 import pytest
 from pydantic import BaseModel, Field
-from zcu_tools.cfg_model import PulseCfg, Range
-from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
+from zcu_tools.cfg_model import Range
 from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
 )
 from zcu_tools.gui.form import FormModel
 from zcu_tools.gui.form_adapter import Form, FormContext
-from zcu_tools.gui.remote.rpc_endpoint import ClientLink
-from zcu_tools.gui.remote.wire import Request
 
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg, SampleResult
 
+from ._form_rpc import FormRpc, ModuleRpcAdapter, ModuleRpcCfg
 from ._helpers import Fixture
 
 
@@ -52,52 +48,6 @@ class ExtrasAdapter(SampleAdapter):
             extras=ExtraInputs,
             lower=retain_cfg,
         )
-
-
-class ImmediateScheduler:
-    """Dispatch on the test's current owner thread."""
-
-    def is_owner_thread(self) -> bool:
-        return True
-
-    def post(self, callback: Callable[[], None]) -> None:
-        callback()
-
-    def call[T](self, callback: Callable[[], T]) -> T:
-        return callback()
-
-
-class FormRpc:
-    """Record real dispatch replies without a socket or a rendered window."""
-
-    def __init__(self, remote: RemoteControlAdapter) -> None:
-        self.remote = remote
-        self.link = ClientLink("form-test", token_required=False)
-        remote.on_client_open(self.link)
-        self.call("control.connect", {})
-
-    def call(self, method: str, params: dict[str, object]) -> dict[str, Any]:
-        self.remote.route(self.link, Request("form-request", method, params))
-        return json.loads(self.link.outbound.get(timeout=2.0))
-
-
-@pytest.fixture
-def form_rpc(qapp) -> Iterator[tuple[Fixture, str, FormRpc]]:
-    fixture = Fixture()
-    tab_id = fixture.ctrl.new_tab("fake")
-    remote = RemoteControlAdapter(
-        fixture.ctrl,
-        ControlOptions(port=0),
-        ImmediateScheduler(),
-        render_view=fixture.view,
-    )
-    rpc = FormRpc(remote)
-    try:
-        yield fixture, tab_id, rpc
-    finally:
-        fixture.ctrl.close()
-        fixture.ctrl.tab_control.close_tab(tab_id)
-        remote.on_client_close(rpc.link, on_owner_thread=True)
 
 
 def test_get_cfg_returns_authored_input_and_ordinary_leaf_values(form_rpc) -> None:
@@ -502,12 +452,12 @@ def test_recipe_with_real_form_and_adapter_preserves_acquisition_result(
         effects = [
             (method, params)
             for method, params in client.transport.sent
-            if method in ("tab.reset_cfg", "tab.edit_cfg", "tab.run_start")
+            if method in ("tab.reset_cfg", "tab.edit_recipe_fields", "tab.run_start")
         ]
         assert effects == [
             ("tab.reset_cfg", {"tab_id": tab}),
             (
-                "tab.edit_cfg",
+                "tab.edit_recipe_fields",
                 {"tab_id": tab, "edits": [{"path": ["gain"], "value": 0.75}]},
             ),
             ("tab.run_start", {"tab_id": tab}),
@@ -523,17 +473,6 @@ def test_run_aliases_rejected_before_view_or_operation_effects(form_rpc) -> None
     assert reply["error"]["reason"] == "run_aliases_not_supported", reply
     assert selected == []
     assert fixture.ctrl.tab_control.get_running_tab_id() is None
-
-
-class ModuleRpcCfg(SampleCfg):
-    pulse: PulseCfg | None = None
-
-
-class ModuleRpcAdapter(SampleAdapter):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[ModuleRpcCfg]:
-        del ctx
-        return Form(ModuleRpcCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
 
 
 @pytest.mark.parametrize("draft", ["partial", "invalid-expression"])

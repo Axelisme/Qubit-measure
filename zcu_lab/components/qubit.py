@@ -1,34 +1,33 @@
-"""Shared qubit fields, transition wiring and predictor input conversion."""
+"""Shared qubit fields, channel wiring and predictor input conversion."""
 
 from math import isfinite
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from zcu_tools.resources.entry.schema import ComponentSchema
 from zcu_tools.resources.entry.views import ComponentView, FieldView
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.predictor import PredictorInputError
 from zcu_tools.simulate.transmon import TransmonParams
 
-from .base import BuiltinComponent, ChannelSchema, Duration, Flux, Frequency
+from .base import BuiltinComponent, Duration, Flux, Frequency, reject_null_channel
 
 
 class QubitWiringSchema(BaseModel):
+    """Optional drive and local flux channel indices; supplied values cannot be null."""
+
     model_config = ConfigDict(extra="forbid")
 
-    L01: ChannelSchema | None = Field(
-        default=None, description="Drive line for the 0-1 transition."
+    ch: int | None = Field(
+        default=None, ge=0, strict=True, description="Drive generator channel index."
     )
-    L14: ChannelSchema | None = Field(
-        default=None, description="Drive line for the 1-4 transition."
+    lo_flux_ch: int | None = Field(
+        default=None, ge=0, strict=True, description="Local flux channel index."
     )
-    L45: ChannelSchema | None = Field(
-        default=None, description="Drive line for the 4-5 transition."
+
+    reject_null_channels = field_validator("ch", "lo_flux_ch", mode="before")(
+        reject_null_channel
     )
-    L56: ChannelSchema | None = Field(
-        default=None, description="Drive line for the 5-6 transition."
-    )
-    flux: ChannelSchema | None = Field(default=None, description="Local flux line.")
 
 
 class QubitBaseSchema(BuiltinComponent):
@@ -36,7 +35,7 @@ class QubitBaseSchema(BuiltinComponent):
 
     wiring: QubitWiringSchema = Field(
         default_factory=QubitWiringSchema,
-        description="Drive and flux lines per transition.",
+        description="Drive and local flux channel wiring.",
     )
     freq: Frequency = Field(default=None, description="Qubit 0-1 transition frequency.")
     kappa: Frequency = Field(default=None, description="Qubit transition linewidth.")

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, Qt, QTimer
-from PyQt6.QtGui import QKeyEvent, QMouseEvent
+from PyQt6.QtGui import QContextMenuEvent, QKeyEvent, QMouseEvent
 from PyQt6.QtWidgets import (
     QAbstractButton,
     QApplication,
@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMenu,
     QPlainTextEdit,
+    QScrollArea,
     QStatusBar,
     QStyle,
     QStyleOptionButton,
@@ -75,6 +76,7 @@ class WidgetObservation:
     text: str  # Rendered widget value/caption; empty when hidden or without text.
     enabled: bool  # Effective Qt enabled flag, including disabled ancestors.
     visible: bool  # On-screen Qt region exists, including ancestor/viewport clipping.
+    fully_visible: bool  # Entire widget rectangle survives ancestor/viewport clipping.
     object_name: str  # Stable objectName if provided by the UI, otherwise empty.
     tooltip: str  # Hover help; empty when hidden or without a tooltip.
     checked: (
@@ -117,10 +119,19 @@ class StatusObservation:
 
 @dataclass(frozen=True)
 class DialogObservation:
-    """A visible dialog's title and visible widget texts, in widget-tree order."""
+    """A visible dialog's captions and placement on its current screen."""
 
     title: str
-    texts: tuple[str, ...]
+    texts: tuple[str, ...]  # Visible widget texts, in widget-tree order.
+    frame_within_screen: bool  # Entire frame lies within available screen bounds.
+    height_fraction: float  # Client height divided by available screen height.
+
+
+@dataclass(frozen=True)
+class ScrollObservation:
+    """Visible scroll affordances of one scroll area."""
+
+    vertical_scrollable: bool  # Visible vertical scrollbar has a nonempty range.
 
 
 @dataclass(frozen=True)
@@ -255,6 +266,7 @@ class ComponentDriver:
             text=_display_text(widget) if on_screen else "",
             enabled=widget.isEnabled(),
             visible=on_screen,
+            fully_visible=on_screen and widget.visibleRegion().contains(widget.rect()),
             object_name=widget.objectName(),
             tooltip=widget.toolTip() if on_screen else "",
             checked=(
@@ -391,6 +403,121 @@ class ComponentDriver:
             mouse_click(widget, point)
         QApplication.processEvents()
 
+    def _field_control(self, text: str | None, object_name: str | None) -> QWidget:
+        if (text is None) == (object_name is None):
+            raise ValueError("Supply exactly one of text or object_name")
+        if text is not None:
+            fields = [
+                widget
+                for widget in self._widgets()
+                if self._on_screen(widget) and self._field_label(widget) == text
+            ]
+            if fields:
+                return _unique(text, fields, [widget.objectName() for widget in fields])
+        return self._find(text, object_name)
+
+    def choose_option(
+        self,
+        text: str | None = None,
+        value: str = "",
+        *,
+        object_name: str | None = None,
+    ) -> None:
+        """Choose an exact visible option caption using real combo keyboard events.
+
+        Supply exactly one exact text/form-label or object_name selector. Missing
+        or ambiguous widget/option captions raise LookupError; a non-combo target
+        raises TypeError. Disabled, hidden, clipped or modal-blocked targets and
+        disabled options are no-ops. value is a caption, never userData or index.
+        No target is shown or scrolled into view. Popups close on failure.
+        """
+        widget = self._field_control(text, object_name)
+        if not isinstance(widget, QComboBox):
+            raise TypeError("choose_option requires QComboBox")
+        if not self._can_interact(widget):
+            return
+        index = _unique(
+            value,
+            [i for i in range(widget.count()) if widget.itemText(i) == value],
+            [widget.itemText(i) for i in range(widget.count())],
+        )
+        model = widget.model()
+        if (
+            model is None
+            or not model.flags(model.index(index, widget.modelColumn()))
+            & Qt.ItemFlag.ItemIsEnabled
+        ):
+            return
+        mouse_click(widget, widget.rect().center())
+        try:
+            view = widget.view()
+            if view is None:
+                raise RuntimeError("Combo has no option view")
+            key_click(view, Qt.Key.Key_Home)
+            for _ in range(index):
+                key_click(view, Qt.Key.Key_Down)
+            key_click(view, Qt.Key.Key_Return)
+        finally:
+            popup = QApplication.activePopupWidget()
+            if popup is not None:
+                key_click(popup, Qt.Key.Key_Escape)
+        QApplication.processEvents()
+
+    def invoke_context_action(
+        self,
+        text: str | None = None,
+        action: str = "",
+        *,
+        object_name: str | None = None,
+    ) -> None:
+        """Open a control's context menu and click an exact visible action caption.
+
+        Supply exactly one exact text/form-label or object_name selector. Missing/
+        ambiguous captions raise LookupError; non-combo/non-line-edit targets raise
+        TypeError. Unavailable widgets and disabled actions are no-ops. Hidden
+        actions are not selected. Real context-menu/mouse events are delivered;
+        actions and product handlers are never called directly. A scheduled menu
+        delivery has a 30-second watchdog; all popup/callback failures are returned
+        to the caller after closing the menu, never left in Qt's event loop.
+        """
+        widget = self._field_control(text, object_name)
+        if not isinstance(widget, (QComboBox, QLineEdit)):
+            raise TypeError("Context action requires QComboBox or QLineEdit")
+        if not self._can_interact(widget):
+            return
+        errors: list[Exception] = []
+
+        def choose() -> None:
+            try:
+                self._select_menu_path((action,))
+            except (LookupError, RuntimeError, ValueError, TypeError) as error:
+                errors.append(error)
+                self._dismiss_menus()
+
+        def timed_out() -> None:
+            errors.append(TimeoutError("Context menu delivery did not finish"))
+            self._dismiss_menus()
+
+        watchdog = QTimer()
+        watchdog.setSingleShot(True)
+        watchdog.timeout.connect(timed_out)
+        watchdog.start(30_000)
+        QTimer.singleShot(0, choose)
+        try:
+            point = widget.rect().center()
+            QApplication.sendEvent(
+                widget,
+                QContextMenuEvent(
+                    QContextMenuEvent.Reason.Mouse, point, widget.mapToGlobal(point)
+                ),
+            )
+            QApplication.processEvents()
+        finally:
+            watchdog.stop()
+            self._dismiss_menus()
+        if errors:
+            raise errors[0]
+
     def select_menu(self, opener: str, path: tuple[str, ...]) -> None:
         """Click opener and select exact captions in its blocking QMenu.
 
@@ -457,7 +584,9 @@ class ComponentDriver:
             mouse_click(menu, menu.actionGeometry(action).center())
             if index < len(path) - 1:
                 key_click(menu, Qt.Key.Key_Right)
-            QApplication.processEvents()
+                QApplication.processEvents()
+            # Let the final click unwind QMenu.exec before deferred deletions.
+            # Commands may retire their action and control synchronously.
 
     def choose_file(
         self, opener: str, path: Path, *, evidence: Path | None = None
@@ -569,6 +698,24 @@ class ComponentDriver:
             key_click(widget, Qt.Key.Key_Return)
         QApplication.processEvents()
 
+    def select_combo(self, value: str, *, object_name: str) -> None:
+        """Select an exact combo-box option using keyboard events, if usable."""
+        widget = self._find(None, object_name)
+        if not isinstance(widget, QComboBox):
+            raise TypeError(f"{object_name!r} is not a QComboBox")
+        index = widget.findText(value)
+        if index < 0:
+            raise LookupError(f"{object_name!r} has no option {value!r}")
+        if self._can_interact(widget):
+            mouse_click(widget, widget.rect().center())
+            popup = widget.view()
+            assert popup is not None
+            key_click(popup, Qt.Key.Key_Home)
+            for _ in range(index):
+                key_click(popup, Qt.Key.Key_Down)
+            key_click(popup, Qt.Key.Key_Return)
+        QApplication.processEvents()
+
     def _tab_bar(self, caption: str) -> QTabBar:
         bars = [
             bar
@@ -625,9 +772,35 @@ class ComponentDriver:
                     for widget in dialog.findChildren(QWidget)
                     if self._on_screen(widget) and (text := _display_text(widget))
                 ),
+                self._dialog_frame_within_screen(dialog),
+                self._dialog_height_fraction(dialog),
             )
             for dialog in self._window.findChildren(QDialog)
             if self._on_screen(dialog)
+        )
+
+    @staticmethod
+    def _dialog_frame_within_screen(dialog: QDialog) -> bool:
+        screen = dialog.screen()
+        if screen is None:
+            raise RuntimeError("Visible dialog has no screen")
+        return screen.availableGeometry().contains(dialog.frameGeometry())
+
+    @staticmethod
+    def _dialog_height_fraction(dialog: QDialog) -> float:
+        screen = dialog.screen()
+        if screen is None:
+            raise RuntimeError("Visible dialog has no screen")
+        return dialog.height() / screen.availableGeometry().height()
+
+    def scroll_area(self, *, object_name: str) -> ScrollObservation:
+        """Read a scroll area's visible scrollbar; wrong widget types fail fast."""
+        widget = self._find(None, object_name)
+        if not isinstance(widget, QScrollArea):
+            raise TypeError(f"{object_name!r} is not a QScrollArea")
+        bar = widget.verticalScrollBar()
+        return ScrollObservation(
+            bar is not None and self._on_screen(bar) and bar.maximum() > bar.minimum()
         )
 
     def legends(self) -> LegendObservation:

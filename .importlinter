@@ -40,6 +40,7 @@ type = forbidden
 source_modules =
     zcu_tools.gui.form
 forbidden_modules =
+    zcu_tools.gui.form_adapter
     zcu_tools.gui.app
     zcu_tools.gui.widgets
     zcu_tools.gui.remote

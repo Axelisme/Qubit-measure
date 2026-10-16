@@ -1,6 +1,6 @@
 """Fixtures shared only by real point and context-snapshot socket contracts."""
 
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
 from pathlib import Path
 
 import pytest
@@ -13,7 +13,8 @@ from zcu_tools.gui.event_bus import BaseEventBus
 
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
-from ._helpers import open_client
+from ._form_rpc import FormRpc, ImmediateScheduler
+from ._helpers import Fixture, open_client
 from ._interactive_support import InteractiveFixture
 from ._point_application import PointAdapter, PointApplication
 
@@ -73,3 +74,22 @@ def fx(qapp, tmp_path):
         widget.deleteLater()
     fixture.stop()
     qapp.processEvents()
+
+
+@pytest.fixture
+def form_rpc(qapp) -> Iterator[tuple[Fixture, str, FormRpc]]:
+    fixture = Fixture()
+    tab_id = fixture.ctrl.new_tab("fake")
+    remote = RemoteControlAdapter(
+        fixture.ctrl,
+        ControlOptions(port=0),
+        ImmediateScheduler(),
+        render_view=fixture.view,
+    )
+    rpc = FormRpc(remote)
+    try:
+        yield fixture, tab_id, rpc
+    finally:
+        fixture.ctrl.close()
+        fixture.ctrl.tab_control.close_tab(tab_id)
+        remote.on_client_close(rpc.link, on_owner_thread=True)

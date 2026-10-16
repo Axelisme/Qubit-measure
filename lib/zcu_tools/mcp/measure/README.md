@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-16，typed recipe helpers、Load cfg_issue 與 Library／writeback Form
+**Last updated:** 2026-10-16，logical recipe fields 與固定來源讀取
 
 # `zcu_tools/mcp/measure/`
 
@@ -48,15 +48,21 @@ Recipe helper 分成「工作步驟」與「交還控制權」。工作步驟以
 
 需要交還控制權做寫回判斷時，作者用 `decision = yield from ask(run.propose_writeback())`，回傳 `WritebackResult`。`decision.status` 為 completed 時，`decision.decision` 是 accepted 或 skipped；cancelled 時為 None。`ask` 只接受已捕捉的 WritebackQuestion，不寫入資料。Opaque operation 不可迭代，也不能直接 yield；driver 會拒絕並提示 helper 寫法。Driver 將具名結果放在 operation.delivery，以 None 推進 generator，原有 completion failure 仍 throw 到作者的 helper 呼叫處。
 
-`RecipeTab.use_library` 選實際 library key，不建立舊 ref tree，也不複製內容。Slot 與 nested key 保存 tagged ref 的 kind/name，inline 保存 kind/module。持久 Spec 的 child key 仍是字串。`use_library` 只寫清單中 value 恰為該 ref 的 Option，以一次整個欄位 write 選 key。未列出的 key 在 RPC 前拒絕，訊息指名欄位並列可用 keys。Locked Slot 的固定 inline tag 也在 RPC 前拒絕 key selection；沒有 captured library 的普通欄位不因此變成 locked。
+`RecipeTab` 的欄位、origins 與 summary 宣告使用 logical paths。例如 `modules.readout.freq`、`modules.qub_pulse.waveform.length`。Adapter 只隱藏生成器加入的 wrapper，真實名為 module 的欄位仍保留。Range count 是 n，`set_sweep` 的公開 expts 參數送出時轉為 n。
 
-`read_field` 每次只送一次 `tab.describe_cfg`，從同一 owner turn 取得目前的單層描述與局部觀察，再回傳具名 RecipeFormField。不保留上次 observation，也不把兩次 RPC 拼成一份讀取。input 保留 Form JSON，input_present 區分未填與 null。value 是 ordinary leaf 或 subtree，不能作為有效性的證明。mode 是 key、inline 或 None，key 是實際 library key 或 None。fields 只列選中 Option 的可編輯子欄位，不含 tag；ref 沒有 fields。Core 決定目前選項，MCP 不匹配選項或推導 union。mode 只讀公開 S2 input kind。locked 使用公開 selection_fixed 或 fixed metadata，不因缺 key 選項而鎖定。單一普通 model wrapper 攤平後，fields 直接列其中子欄位，實際寫入路徑仍保留 module。errors 包含絕對 path/message。DTO 不含 CfgSchema kind 或 ref 子欄位 readonly 投影。Tag 葉不是 read_field 路徑。Inline 路徑包含 module，例如 `modules.readout.module.freq`。Range 使用 start、stop、n，set_sweep 的公開 expts 寫入 n。局部 errors 只含 Form preview 的 root 與該欄位／後代錯誤。Lowered cfg 錯誤請讀 get_cfg 或交給 Run admission 檢查。未知、inactive 或 whole-leaf 子路徑由 owner 回 invalid_params／form_path，data.form_path 保留請求路徑。
+`read_field` 每次送一次 `tab.read_recipe_field`。同一 owner turn 回傳 metadata、authored input、ordinary value、value_status、selector/source、readonly 與局部 logical errors。Input_present 區分未填與 null。Value_status 區分 available、missing 與 unavailable；available 的 null 是有效觀察。Value 與局部 errors 不證明整份 cfg 有效，get_cfg 與 Run admission 仍檢查 cfg。
 
-`RecipeTab.read_module(field)` 回傳具名 RecipeModuleValues，含 detached value、key／inline mode 與 source。Key mode 讀 Reset 的固定 library capture，source 是 library:<key>。Inline mode 只求該欄位的值，source 是 dotted core module path。其他欄位 invalid 不擋讀取，該 module 自身 invalid 才拒絕。值不含 extras lowering、整份 cfg 驗證或 native to_cfg。
+Mode/key 只來自 owner 的 selector。普通 scalar 不繼承祖先 mode，library key 也不是 scalar 值。Locked 使用 fixed 或 selection_fixed，不從 readonly 或選單數量推導。Fields 是 logical direct children，ref selector 可列 captured Spec 的可讀欄位。穿過 ref 的值沒有 authored input，source 指明最近 supplying selector、actual key、namespace 與 Spec path。讀取不 materialize input、不 refresh capture，也不授權後續寫入。
 
-`use_inline(field)` 走既有 tab.use_inline RPC。Server 先檢查 holder、busy、lifetime 與通知重入 guard，再以公開 read_module_kind 讀取 core-module 欄位的 input tag，不依賴 draft 驗證。Ref 模式執行同一個 to_inline 選項指令，從開表單／Reset 的固定 library 複製快照，以一次原子 write 發布。Inline 模式即使必填值未填或 expression 無效，也不求值來判斷模式、不改 input、不發布，但仍檢查 guards。回覆沿用lean Form observation，保留 draft 的 errors。停用或來源無效的欄位拒絕轉換，不補 fallback；要從範本／型別預設開始，明確選 Inline 選項。Caller 之後用 set 寫入 module 葉，例如 tab.use_inline("modules.qub_pulse") 後呼叫 tab.set("modules.qub_pulse.module.freq", 125.0)，不自己組 envelope。
+`use_library(field, name)` 直接送一次 `tab.select_recipe_module`。Owner 檢查 actual key、family、選單與宣告限制，MCP 不遍歷 Option 或組 ref JSON。Name=None 保留 input，fresh read 檢查現況；required 缺有效 key 回 MissingParameter，不記成功來源。明填成功記 explicit，保留成功記 gui_default。`disable_library` 送 disable，nullable 與 lock 由 owner 檢查，成功記 disabled。
 
-`retain_module_source(field, summary_field=..., value_path=...)` 記錄通用 scalar projection 及 module source。summary_field 使用 dotted inline 葉路徑；key mode 也用相同身分，即使 input 沒有該葉。value_path 是 module-relative path，不含 inline envelope。Run 讀目前 scalar 值，保留數字而非 library key 或整個 module。無效 projection 不記成功前綴。後續 set 的來源可取代 label，既有 Run capture 不變。Frequency／linewidth policy 仍由 caller 決定。
+`use_inline` 送同一 selector RPC 的 use_inline action，從固定 capture 明確複製。先逐層複製 ref 祖先，再改內容。外層 copy 保留 child key，child selector 仍需另行 copy。既有 inline 是 guarded no-op，holder、busy、lifetime 與通知重入仍可拒絕。Missing、disabled 與 unresolved 不建立預設內容。Copy 已成功而下一次 set 失敗時，不回滾 copy。
+
+`set`、`set_fields` 與 `set_sweep` 把 supplied logical edits 一次送 `tab.edit_recipe_fields`，不預讀 canonical mapping。None 保留 input 並記 gui_default，全 None 或空批次不送 mutation。Expression 原文保持不變。Owner 在同一 turn 解析全部 paths、檢查 admission 並提交，結構、來源或 ref 祖先拒絕不留成功前綴。一般 invalid draft 仍會安裝；MCP 回 invalid_cfg 時保留 owner draft，且不記成功 provenance。
+
+`RecipeTab.read_module(field)` 保留明確 materialization 的用途，回 detached module values、mode 與 source。它不實作 read_field 或 summary scalar。`retain_module_source(field, summary_field=..., value_path=...)` 要求 summary_field 與 field 加 value_path 指向同一 logical scalar，透過 logical read 記來源，不拆 wrapper 或 materialize。Caller 也可讀 source.key，再用 `retain_source` 記 `library:<key>`。這些 labels 只影響呈現，不改值或寫入權限。
+
+Run 前仍走 get_cfg 與原有 admission，再 fresh capture summary_parameters 指名的 logical fields。Scalar 使用 ordinary value，selector 摘要才使用 actual key。Missing、unavailable 或有相關 errors 的值不當成成功 null。當次 facts 已 detached，後來 Edit、Reset 或 library 更新不改舊 Run 摘要。
 
 Recipe 將既有 GUI 操作串成有界實驗流程，不在 MCP 複製實驗核心或 cfg defaults。參數來源、缺參數與分析分支由個別 recipe 宣告。首次呼叫等待最多 300 秒；缺參數、失敗或互動需求會提早交付。仍執行時回傳 execution，背景接續不因等待逾時而停止。
 
@@ -64,7 +70,7 @@ Recipe 將既有 GUI 操作串成有界實驗流程，不在 MCP 複製實驗核
 
 `twotone_spectrum` 的 center_mhz／span_mhz／points 必填。三個 resonator spectrum 可省略 frequency range，domain helper 讀目前 frequency／linewidth 後寫數字 endpoints。正式 freq／power／flux 的 full-span 倍率為 3／3／2，省略 count 保留 GUI 值。四個 spectrum 摘要只保 sweep，不另計 center／span。Frequency／flux／unit policy 由 zcu_lab.recipes.helpers 擁有。
 
-`RecipeTab` 提供通用 read_value、read_library_root、read_field、read_device、set、set_fields 與 set_sweep。Read_device 只讀 cached snapshot，不連線或換算。Set_fields 先驗證，再以一次 edit_cfg 寫入；None 保留值並標 gui_default。Retain_source 只記 caller 選好的 scalar/sweep label，不發 RPC，也不改 Form input。Framework 不解讀 calibration、角色或 linewidth。
+`RecipeTab` 提供通用 read_value、read_library_root、read_field、read_device、set、set_fields 與 set_sweep。Read_device 只讀 cached snapshot，不連線或換算。Set_fields 先驗 carrier 與 label，再以一次 edit_recipe_fields 交 owner 驗證與寫入；None 保留值並標 gui_default。Retain_source 以 fresh logical read 檢查欄位，再記 caller 選好的 scalar/sweep label，不改 Form input。Framework 不解讀 calibration、角色或 linewidth。
 
 Client deadline 必須超過 300 秒並留傳輸與回覆開銷。Stdio server 同步處理請求，首次等待期間不保證同連線的另一控制請求立即處理。Client timeout 不等於取消，不可因此自動重跑。
 

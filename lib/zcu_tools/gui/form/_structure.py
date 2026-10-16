@@ -15,7 +15,21 @@ from pydantic_core import PydanticCustomError
 
 from ._json import copy_json, copy_object, default_json, expr_text
 from .defaults import static_defaults
-from .model import FormEnv, FormModel, FormPath, FormWritePath, KeyRef
+from .model import FormEnv, FormModel, FormPath, FormWritePath, InputPolicy
+
+
+class StructureError(ValueError):
+    """Invalid write structure, distinct from author/provider ValueErrors.
+
+    path identifies the canonical batch write that failed, not a position inside
+    its value. build_candidate preserves that full path through nested traversal
+    and partial-object expansion. No candidate is installed on failure.
+    """
+
+    def __init__(self, message: str, *, path: FormWritePath) -> None:
+        """Store the diagnostic message and the failing canonical write path."""
+        super().__init__(message)
+        self.path = path
 
 
 def unwrap(annotation: object) -> object:
@@ -49,7 +63,7 @@ def accepts_expression(annotation: object, path: FormPath) -> bool:
     picked values (Literal, Enum, bool), chosen from a dropdown or checkbox.
     A text field has a text member and no picked member, possibly nullable.
     Two leaves this annotation check cannot see are not text fields: a
-    leaf with declared choices (by path) and a KeyRef name (see library_key).
+    leaf with declared choices (by path) and a field restricted by InputPolicy.
 
     path is the leaf's field path, used only in the error. A union with both
     text and picked members raises ValueError naming path: the editor has no
@@ -74,12 +88,12 @@ def accepts_expression(annotation: object, path: FormPath) -> bool:
     return text
 
 
-def library_key(model: type[BaseModel], name: str) -> bool:
-    """Whether field name of model holds a literal key: a KeyRef's name.
-
-    A library key is a plain string, never an Expr envelope.
-    """
-    return issubclass(model, KeyRef) and name == "name"
+def expression_allowed(info: FieldInfo, path: FormPath) -> bool:
+    """Return the annotation capability restricted by explicit InputPolicy."""
+    capable = accepts_expression(info.annotation, path)
+    return capable and not any(
+        isinstance(item, InputPolicy) and not item.expression for item in info.metadata
+    )
 
 
 def model_types(annotation: object) -> tuple[type[BaseModel], ...]:
@@ -295,11 +309,11 @@ def _field_at(
     model: type[BaseModel], data: dict[str, JsonValue], path: FormWritePath
 ) -> tuple[dict[str, JsonValue], str, FieldInfo]:
     if not path:
-        raise ValueError(f"Invalid write path: {path!r}")
+        raise StructureError(f"Invalid write path: {path!r}", path=path)
     name, *tail = path
     info = model.model_fields.get(name)
     if info is None:
-        raise ValueError(f"Unknown field path: {path!r}")
+        raise StructureError(f"Unknown field path: {path!r}", path=path)
     if not tail:
         return data, name, info
     value = data.get(name)
@@ -309,10 +323,12 @@ def _field_at(
             value = static_defaults(child)
             data[name] = value
         if not isinstance(value, dict):
-            raise ValueError(f"Inactive, missing or invalid model path: {path!r}")
+            raise StructureError(
+                f"Inactive, missing or invalid model path: {path!r}", path=path
+            )
         return _field_at(child, value, tuple(tail))
-    raise ValueError(
-        f"Not a writable child path (mapping, sequence or scalar): {path!r}"
+    raise StructureError(
+        f"Not a writable child path (mapping, sequence or scalar): {path!r}", path=path
     )
 
 
@@ -331,7 +347,9 @@ def _switch(
         return False
     old = parent.get(key)
     if key in parent and old is None:
-        raise ValueError(f"Activate null section before child write: {path!r}")
+        raise StructureError(
+            f"Activate null section before child write: {path!r}", path=path
+        )
     if isinstance(old, dict) and old.get(tag_key) == value:
         return True
     branch = next(
@@ -339,7 +357,9 @@ def _switch(
         None,
     )
     if branch is None:
-        raise ValueError(f"Unknown discriminator at path {path!r}: {value!r}")
+        raise StructureError(
+            f"Unknown discriminator at path {path!r}: {value!r}", path=path
+        )
     try:
         new = _branch_defaults(branch, env)
     except PydanticCustomError as exc:
@@ -368,7 +388,7 @@ def _select_object(
     old = parent.get(key)
     branch = selected(info, value if tag in value else old)
     if branch is None:
-        raise ValueError(f"Missing or unknown discriminator at {path!r}")
+        raise StructureError(f"Missing or unknown discriminator at {path!r}", path=path)
     try:
         if not isinstance(old, dict) or selected(info, old) is not branch:
             seed = _branch_defaults(branch, env)
@@ -393,7 +413,9 @@ def _partial_model(
     for name, item in value.items():
         info = model.model_fields.get(name)
         if info is None:
-            raise ValueError(f"Unknown field in partial branch object: {name!r}")
+            raise StructureError(
+                f"Unknown field in partial branch object: {name!r}", path=(name,)
+            )
         if (
             isinstance(item, dict)
             and model_types(info.annotation)
@@ -401,7 +423,9 @@ def _partial_model(
         ):
             child = selected(info, item)
             if child is None:
-                raise ValueError(f"Ambiguous partial model field: {name!r}")
+                raise StructureError(
+                    f"Ambiguous partial model field: {name!r}", path=(name,)
+                )
             prior = seed.get(name)
             try:
                 seed[name] = _partial_model(
@@ -431,23 +455,33 @@ def build_candidate(
     paths = tuple(batch)
     for path in paths:
         if not path:
-            raise ValueError(f"Invalid write path: {path!r}")
+            raise StructureError(f"Invalid write path: {path!r}", path=path)
         if any(path != other and other[: len(path)] == path for other in paths):
-            raise ValueError(f"Overlapping paths: {path!r}")
+            raise StructureError(f"Overlapping paths: {path!r}", path=path)
     copied = {path: copy_json(value) for path, value in batch.items()}
     result = copy_object(data)
     pending: dict[FormWritePath, JsonValue] = {}
     for path in sorted(copied, key=len):
         value = copied[path]
-        if not (
-            _switch(model, result, path, value, env)
-            or _select_object(model, result, path, value, env)
-        ):
-            pending[path] = value
+        try:
+            if not (
+                _switch(model, result, path, value, env)
+                or _select_object(model, result, path, value, env)
+            ):
+                pending[path] = value
+        except StructureError as exc:
+            # Nested traversal/partial objects report local paths; retain the
+            # original batch key so callers can identify the consuming write.
+            exc.path = path
+            raise
     for path, value in pending.items():
-        parent, key, info = _field_at(model, result, path)
-        _require_leaf(info, value, path)
-        parent[key] = value
+        try:
+            parent, key, info = _field_at(model, result, path)
+            _require_leaf(info, value, path)
+            parent[key] = value
+        except StructureError as exc:
+            exc.path = path
+            raise
     return result
 
 
@@ -462,7 +496,9 @@ def _require_leaf(info: FieldInfo, value: JsonValue, path: FormWritePath) -> Non
             for t in types
         ):
             return
-        raise ValueError(f"Whole model replacement is not a leaf path: {path!r}")
+        raise StructureError(
+            f"Whole model replacement is not a leaf path: {path!r}", path=path
+        )
 
 
 def _field_leaves(
@@ -492,7 +528,7 @@ def _compatible(info: FieldInfo, value: JsonValue, path: FormPath) -> bool:
     A union of text and picked values raises ValueError (see
     accepts_expression).
     """
-    text_field = accepts_expression(info.annotation, path)
+    text_field = expression_allowed(info, path)
     # Containers are whole leaves, but nested selectors still require ordinary tags.
     tag = discriminator(info)
     if tag is not None and isinstance(value, dict) and isinstance(value.get(tag), dict):
@@ -500,8 +536,8 @@ def _compatible(info: FieldInfo, value: JsonValue, path: FormPath) -> bool:
     types = alternatives(info.annotation)
     if value is None:
         return type(None) in types
-    if isinstance(value, dict) and text_field:
-        if expr_text(value) is not None:
+    if isinstance(value, dict):
+        if text_field and expr_text(value) is not None:
             return True
         if set(value) == {"__complex__"} and complex in types:
             from zcu_tools.core.complex_codec import decode_complex
@@ -656,7 +692,7 @@ def _restore_model(
     for name, value in saved.items():
         path = (*prefix, name)
         info = model.model_fields.get(name)
-        if info is None or (library_key(model, name) and isinstance(value, dict)):
+        if info is None:
             # A library key is a plain string, so an envelope cannot restore.
             dropped.append(path)
         else:
