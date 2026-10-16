@@ -234,3 +234,55 @@ def test_recipe_tab_uses_real_rpc_for_nested_captured_refs_and_copy(
     assert captured is not None
     assert captured.actual["fields"]["pulse.waveform.length"]["value"] == 0.08
     assert field.value == 0.1
+
+
+@pytest.mark.parametrize("operation", ["read", "copy"])
+def test_recipe_source_failure_preserves_identity_and_draft(
+    nested_recipe_rpc, operation
+) -> None:
+    from zcu_tools.cfg_model import PulseSpec
+    from zcu_tools.mcp.measure.session import GuiRpcError
+
+    fixture, tab, client, context, target = nested_recipe_rpc
+    context.set_module(
+        target,
+        "Q1.pulses.pi",
+        PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.2, waveform="Q1.waveforms.missing"),
+    )
+    owner = fixture.ctrl.cfg_resources.lookup(tab)
+    owner.reset()
+    # The source exists at the selected module, but its captured child key does not.
+    owner.select_recipe_module(("pulse",), "use_library", key="Q1.pulses.pi")
+    if operation == "copy":
+        owner.select_recipe_module(("pulse",), "use_inline")
+    before = owner.input.data
+    base = owner.editor_state.base.data
+    version = fixture.state.version.get(f"tab:{tab}:cfg")
+    notices: list[str] = []
+    owner.subscribe(lambda: notices.append("changed"))
+    path = (
+        ["pulse", "waveform", "length"]
+        if operation == "read"
+        else ["pulse", "waveform"]
+    )
+    method = (
+        "tab.read_recipe_field" if operation == "read" else "tab.select_recipe_module"
+    )
+    params = {"tab_id": tab, "path": path}
+    if operation == "copy":
+        params["action"] = "use_inline"
+    # Use the same in-process RPC transport as RecipeTab, retaining its native error.
+    with pytest.raises(GuiRpcError) as rejected:
+        client.context.session.send_gui_rpc(method, params)
+    assert rejected.value.code == "precondition_failed"
+    assert rejected.value.reason == "library_source"
+    assert rejected.value.data == {
+        "path": path,
+        "selector_path": ["pulse", "waveform"],
+        "key": "Q1.waveforms.missing",
+        "source_kind": "waveform",
+    }
+    assert owner.input.data == before
+    assert owner.editor_state.base.data == base
+    assert fixture.state.version.get(f"tab:{tab}:cfg") == version
+    assert notices == []
