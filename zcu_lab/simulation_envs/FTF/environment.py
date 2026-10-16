@@ -13,7 +13,11 @@ def build_environment() -> SimulationEnvironment:
     The host closes the returned device manager after acquisition has drained.
     YAML/binding errors abort startup without selecting another environment.
     """
+    path = Path(__file__).with_name("ftf.yaml")
+    # ftf.yaml is the user's ignored working copy of the tracked default.yaml.
+    if not path.is_file():
+        raise FileNotFoundError(f"{path} is missing; copy default.yaml to ftf.yaml")
     return ftf(
-        Path(__file__).with_name("ftf.yaml"),
+        path,
         library=EvolutionLibrary(Path(__file__).resolve().with_name("evolution_data")),
     )

@@ -12,7 +12,7 @@ There is no dependency on `simulate`, `device` or `program`.
 The document is `format: zcu.ftf`, `version: 1`. It explicitly supplies physical
 model values, native/local/global truncations, channel counts, DC devices/mapping,
 pulse calibrations, the common readout source, receiver, two resonators and solver
-settings. `notebook_md/simulation/ftf.yaml` is an executable illustrative sample.
+settings. `zcu_lab/simulation_envs/FTF/default.yaml` is an executable illustrative sample.
 It is not a calibrated chip or a convergence guarantee.
 
 Defaults are deliberately limited. Coupler ng, source delay/tau, receiver phase

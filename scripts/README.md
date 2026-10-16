@@ -22,10 +22,10 @@
 
 ```bash
 uv run --directory . --no-sync -- python scripts/run_measure_gui.py \
-  --simulate zcu_lab/simulation_envs/environment.py
+  --simulate zcu_lab/simulation_envs/FTF/environment.py
 ```
 
-[FTF 範例環境](../zcu_lab/simulation_envs/README.md) 與 Notebook 共用 `build_environment()`，相鄰的 `ftf.yaml` 提供模型與接線參數。環境檔會執行 Python，只載入可信檔案。修改環境或 YAML 後須重啟；載入失敗會中止，不會回退正常模式。
+[FTF 範例環境](../zcu_lab/simulation_envs/FTF/README.md) 與 Notebook 共用 `build_environment()`，相鄰的 `ftf.yaml`（由 `default.yaml` 複製）提供模型與接線參數。環境檔會執行 Python，只載入可信檔案。修改環境或 YAML 後須重啟；載入失敗會中止，不會回退正常模式。
 
 ## 資料作業
 

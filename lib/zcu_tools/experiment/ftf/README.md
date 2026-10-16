@@ -7,8 +7,8 @@ and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
 `DeviceManager`, applies their initial values once and binds the selected channel
 counts to the fixed mock QICK profile. The returned manager owns cleanup. A
 builder failure closes its resources and preserves both startup and close errors.
-The executable example is `zcu_lab/simulation_envs/environment.py` with adjacent
-`ftf.yaml`. The Notebook walkthrough is `notebook_md/single_qubit.md`.
+The executable example is `zcu_lab/simulation_envs/FTF/environment.py` with adjacent
+`ftf.yaml`, a working copy of the tracked `default.yaml`. The Notebook walkthrough is `notebook_md/single_qubit.md`.
 
 `FTFSource.snapshot` captures current device values immediately before each round.
 It checks the configured source units and limits without restoring startup values.
@@ -89,7 +89,7 @@ drivers, GUI or QICK program is created. The optional prebuild plan supplies a
 plateau duration, fixed complex microwave ratios and common-scale interval.
 Actual runtime waveforms still come from timelines; unmatched inputs go direct.
 `database.main(argv)` is the thin CLI. The example adjacent
-`zcu_lab/simulation_envs/build_database.py` selects its YAML and data paths.
+`zcu_lab/simulation_envs/FTF/build_database.py` selects its YAML and data paths.
 
 Only static closed constant-envelope/frequency-zero intervals use U tables.
 Nonzero baths, dynamic flux and other controls retain full direct evolution and
