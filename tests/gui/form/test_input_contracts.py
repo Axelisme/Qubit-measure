@@ -90,7 +90,8 @@ def test_input_policy_disables_expression_across_description_defaults_and_restor
 
 def test_expression_restriction_does_not_disable_complex_literal_restore() -> None:
     model = create_model(
-        "LiteralComplex", __base__=form.FormModel,
+        "LiteralComplex",
+        __base__=form.FormModel,
         value=(Annotated[complex, form.InputPolicy(expression=False)], ...),
     )
     env = form.FormEnv()

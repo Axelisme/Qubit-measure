@@ -387,7 +387,8 @@ def test_root_nested_sections_and_captured_inline_subtrees_never_expose_wrappers
     copied = form.prepare_inline_copy(input, ("modules", "drive"), env).input
     root = ordinary_object(form.read_logical_field(copied, (), env).value)
     drive = ordinary_object(ordinary_object(root["modules"])["drive"])
-    assert drive["freq"] == 12 and "module" not in drive
+    assert drive.get("freq") == 12
+    assert "module" not in drive
     source = form.read_logical_field(input, ("modules", "drive"), env)
     waveform = ordinary_object(ordinary_object(source.value)["waveform"])
     assert waveform["raise_waveform"] == "Q.waveforms.edge"
@@ -528,6 +529,7 @@ def test_ordinary_union_partial_write_keeps_core_defaults_and_initial_active_str
 
 def test_ref_selector_observation_keeps_affecting_ancestor_failure() -> None:
     from typing import Self
+
     from pydantic import create_model, model_validator
 
     class Parent(FormModel):
@@ -536,8 +538,12 @@ def test_ref_selector_observation_keeps_affecting_ancestor_failure() -> None:
             raise ValueError("Ancestor failure")
 
     field = adapter.ModuleInputField(PulseSpec)
-    extras = create_model("InvalidParent", __base__=Parent, reference=(field.annotation, ...))
+    extras = create_model(
+        "InvalidParent", __base__=Parent, reference=(field.annotation, ...)
+    )
     form = adapter.Form(LogicalCfg, {}, extras=extras, lower=lambda extras, cfg: cfg)
-    input = FormInput(form.model, {"extras": {"reference": {"kind": "ref", "name": "Q.pulses.drive"}}})
+    input = FormInput(
+        form.model, {"extras": {"reference": {"kind": "ref", "name": "Q.pulses.drive"}}}
+    )
     observed = form.read_logical_field(input, ("extras", "reference"), captured())
     assert observed.errors is not None and ("extras",) in observed.errors.messages
