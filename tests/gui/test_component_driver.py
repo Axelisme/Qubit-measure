@@ -202,3 +202,120 @@ def test_disabled_or_hidden_input_cannot_commit_and_tab_availability_is_respecte
     qapp.processEvents()
     with pytest.raises(LookupError, match="Data.*2 candidates.*1.*2"):
         driver.select_tab("Data")
+
+
+@pytest.fixture
+def tree_surface(surface, qapp):
+    from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem
+
+    tree = QTreeWidget()
+    tree.setObjectName("parameters")
+    tree.setHeaderLabels(["Field", "Value", "Unit"])
+    root = QTreeWidgetItem(tree, ["general", "general", ""])
+    QTreeWidgetItem(root, ["peak", "1.25", "MHz"])
+    hidden = QTreeWidgetItem(tree, ["hidden", "secret", ""])
+    hidden.setHidden(True)
+    surface.setCentralWidget(tree)
+    qapp.processEvents()
+    return surface, tree
+
+
+def test_visible_tree_rows_and_real_expand_reveal_displayed_values(
+    tree_surface,
+) -> None:
+    window, _ = tree_surface
+    driver = _user_input.ComponentDriver(window)
+    before = driver.visible().tree_rows
+    assert [(r.tree_name, r.path, r.columns, r.expanded) for r in before] == [
+        ("parameters", ("general",), ("general", "general", ""), False)
+    ]
+    driver.expand_tree(("general",), object_name="parameters")
+    rows = driver.visible().tree_rows
+    assert [(r.path, r.columns, r.expanded) for r in rows] == [
+        (("general",), ("general", "general", ""), True),
+        (("general", "peak"), ("peak", "1.25", "MHz"), False),
+    ]
+
+
+def test_tree_expand_refuses_disabled_hidden_and_collapsed_descendants(
+    tree_surface,
+) -> None:
+    window, tree = tree_surface
+    driver = _user_input.ComponentDriver(window)
+    with pytest.raises(LookupError, match="peak.*0 candidates"):
+        driver.expand_tree(("general", "peak"), object_name="parameters")
+    tree.setEnabled(False)
+    driver.expand_tree(("general",), object_name="parameters")
+    assert not driver.visible().tree_rows[0].expanded
+    tree.setEnabled(True)
+    tree.hide()
+    driver.expand_tree(("general",), object_name="parameters")
+    assert driver.visible().tree_rows == ()
+    tree.show()
+    assert not driver.visible().tree_rows[0].expanded
+
+
+def test_tree_expand_reports_missing_and_ambiguous_visible_paths(
+    tree_surface, qapp
+) -> None:
+    from PyQt6.QtWidgets import QTreeWidgetItem
+
+    window, tree = tree_surface
+    QTreeWidgetItem(tree, ["general", "duplicate", ""])
+    qapp.processEvents()
+    driver = _user_input.ComponentDriver(window)
+    with pytest.raises(LookupError, match="general.*2 candidates.*duplicate"):
+        driver.expand_tree(("general",), object_name="parameters")
+    with pytest.raises(LookupError, match="missing.*0 candidates"):
+        driver.expand_tree(("missing",), object_name="parameters")
+
+
+def test_wide_checkbox_click_reaches_indicator_and_reports_visible_status(
+    surface, qapp
+) -> None:
+    from PyQt6.QtWidgets import QCheckBox
+
+    checkbox = QCheckBox("Use Simulate Env")
+    checkbox.setObjectName("simulate")
+    surface.centralWidget().currentWidget().layout().addRow(checkbox)
+    checkbox.toggled.connect(
+        lambda checked: surface.statusBar().showMessage("on" if checked else "off")
+    )
+    qapp.processEvents()
+    driver = _user_input.ComponentDriver(surface)
+    assert driver.observe("Use Simulate Env").visible
+    assert driver.observe("Use Simulate Env").enabled
+    assert driver.dialogs() == ()
+    driver.click("Use Simulate Env")
+    assert driver.status().text == "on"
+
+
+def test_checkbox_snapshot_tracks_binary_clicks_and_disabled_hidden_noops(
+    surface, qapp
+) -> None:
+    from PyQt6.QtWidgets import QCheckBox
+
+    checkbox = QCheckBox("Use Simulate Env")
+    surface.centralWidget().currentWidget().layout().addRow(checkbox)
+    checkbox.toggled.connect(
+        lambda checked: surface.statusBar().showMessage("on" if checked else "off")
+    )
+    qapp.processEvents()
+    driver = _user_input.ComponentDriver(surface)
+    assert driver.observe("Use Simulate Env").checked is False
+    driver.click("Use Simulate Env")
+    assert driver.status().text == "on"
+    assert driver.observe("Use Simulate Env").checked is True
+    driver.click("Use Simulate Env")
+    assert driver.status().text == "off"
+    assert driver.observe("Use Simulate Env").checked is False
+    checkbox.setEnabled(False)
+    driver.click("Use Simulate Env")
+    assert driver.status().text == "off"
+    assert driver.observe("Use Simulate Env").checked is False
+    checkbox.setObjectName("simulate")
+    checkbox.hide()
+    driver.click(object_name="simulate")
+    assert driver.status().text == "off"
+    assert driver.observe(object_name="simulate").checked is None
+    assert driver.observe("Unavailable").checked is None
