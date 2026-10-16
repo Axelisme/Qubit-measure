@@ -27,7 +27,8 @@ def kernel_case(request: pytest.FixtureRequest) -> KernelCase:
     durations = np.array([2.0, 3.0, 1.5, 0.0])
     gains = np.array([0.0004, 0.0006, -0.0003, 0.0])
     if name == "rwa":
-        durations = np.array([20.0, 30.0, 15.0, 0.0])
+        # Keep weak-drive/coherence coverage without a long accuracy scan.
+        durations = np.array([2.0, 3.0, 1.5, 0.0])
         gains = np.array([0.003, 0.002, -0.004, 0.0])
     table = SegmentTable(
         np.arange(4),

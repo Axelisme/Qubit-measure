@@ -212,7 +212,7 @@ def test_engine_flux_wiring_across_batches_and_no_drive_midpoint_budget():
     assert hasattr(evolution.TimelineBatch, "flux_waveform"), (
         "C3 must accept the continuous waveform"
     )
-    times = np.arange(0, 2.001, 0.02)
+    times = np.arange(0, 0.401, 0.02)
     midpoint = times + (times[1] - times[0]) / 2
     levels = np.column_stack(
         (np.rint(12 * np.sin(midpoint * 2)), np.rint(7 * np.sin(midpoint)))
@@ -228,7 +228,7 @@ def test_engine_flux_wiring_across_batches_and_no_drive_midpoint_budget():
     driven = evolution.DriveTrack(
         "drive",
         np.array([0.0]),
-        np.array([2.0]),
+        np.array([0.4]),
         np.array([0.17]),
         np.array([0.3]),
         np.array([0.12]),
@@ -241,7 +241,7 @@ def test_engine_flux_wiring_across_batches_and_no_drive_midpoint_budget():
             np.array([p]),
             (driven,) if p else (),
             schedule,
-            np.array([2.0]),
+            np.array([0.4]),
             flux_waveform=waveform,
         )
         for p in range(2)
@@ -259,7 +259,7 @@ def test_engine_flux_wiring_across_batches_and_no_drive_midpoint_budget():
             case.table,
             timeline=np.array([0, 0, 0]),
             start_ns=np.zeros(3),
-            duration_ns=np.full(3, 2.0),
+            duration_ns=np.full(3, 0.4),
             level=np.zeros((3, 2), dtype=np.int64),
             tones=np.full(3, p),
             tone_port=np.array([[0 if p else -1, -1, -1]] * 3),

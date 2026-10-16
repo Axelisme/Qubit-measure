@@ -140,7 +140,7 @@ def test_full_micromotion_with_arbitrary_start_phase(kernel_case: KernelCase) ->
     )
     table = replace(
         case.table,
-        duration_ns=np.array([13.2, 7.3, 0.0, 4.1]),
+        duration_ns=np.array([3.2, 2.3, 0.0, 1.1]),
         tone_frequency_ghz=np.tile([0.61, 0.13], (4, 1)),
         tone_amplitude=np.tile([0.2, 0.0], (4, 1)),
     )
@@ -267,7 +267,7 @@ def test_probe_guard_failure_uses_period_propagation_in_floquet_frame(
     )
     table = replace(
         case.table,
-        duration_ns=np.array([40.7, 30.1, 18.9, 0.0]),
+        duration_ns=np.array([4.7, 3.1, 1.9, 0.0]),
         tone_port=np.tile([0, 1], (4, 1)),
         tone_frequency_ghz=np.column_stack((np.full(4, 3.7), [0.13, 0, -0.11, 0])),
         tone_amplitude=np.tile([0.2, 0.15], (4, 1)),

@@ -107,24 +107,6 @@ def _reference_hamiltonian(
     return h
 
 
-def _reference_dissipation(
-    rho: NDArray[np.complex128],
-    model: evolution.SecularModel,
-) -> NDArray[np.complex128]:
-    """Construct individual Lindblad jumps in the bath's eigenbasis."""
-    size = len(rho)
-    result = -model.dephasing_per_ns * rho
-    for target in range(size):
-        for source in range(size):
-            if target != source and model.rates_per_ns[target, source] != 0:
-                # Lossless larger-parent references need no zero jump matrices.
-                jump = np.zeros((size, size), complex)
-                jump[target, source] = np.sqrt(model.rates_per_ns[target, source])
-                loss = jump.conj().T @ jump
-                result += jump @ rho @ jump.conj().T - (loss @ rho + rho @ loss) / 2
-    return result
-
-
 def reference(
     case: KernelCase,
     row: int,
@@ -161,11 +143,14 @@ def reference(
         rho = flat.reshape(size, size)
         h = _reference_hamiltonian(case, row, time, model)
         derivative = -2j * np.pi * (h @ rho - rho @ h)
-        overlap = model.eigenvectors.conj().T @ bath_model.eigenvectors
         bath_rho = overlap.conj().T @ rho @ overlap
-        derivative += (
-            overlap @ _reference_dissipation(bath_rho, bath_model) @ overlap.conj().T
-        )
+        dissipation = -bath_model.dephasing_per_ns * bath_rho
+        for jump, loss in jumps:
+            dissipation += (
+                jump @ bath_rho @ jump.conj().T
+                - (loss @ bath_rho + bath_rho @ loss) / 2
+            )
+        derivative += overlap @ dissipation @ overlap.conj().T
         return derivative.ravel()
 
     start = float(table.start_ns[row])
@@ -180,6 +165,15 @@ def reference(
         if bath is not None:
             index = np.searchsorted(bath_time, (left + right) / 2, side="right") - 1
             bath_model = case.source.model(tuple(int(v) for v in bath_levels[index]))
+        overlap = model.eigenvectors.conj().T @ bath_model.eigenvectors
+        # Jumps and basis changes are constant between bath boundaries. Build
+        # only nonzero jumps once, retaining an oracle independent of product RHS.
+        jumps = []
+        for target, origin in np.argwhere(bath_model.rates_per_ns > 0):
+            if target != origin:
+                jump = np.zeros((size, size), complex)
+                jump[target, origin] = np.sqrt(bath_model.rates_per_ns[target, origin])
+                jumps.append((jump, jump.conj().T @ jump))
         solution = solve_ivp(
             rhs,
             (left, right),

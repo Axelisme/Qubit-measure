@@ -50,7 +50,20 @@ def test_template_engine_paths_match_strict_secular_reference(
 ) -> None:
     import zcu_tools.experiment.ftf as ftf
 
-    plan = ftf.plan_template(settings(), snapshot(), template(tones=tones))
+    base = template(tones=tones)
+    # Keep the 2 ns drive support required by FTF's quantization, but shorten
+    # the idle before readout. Unit conversion has its own unscaled test above.
+    tiny = replace(
+        base,
+        events=(
+            *base.events[:-1],
+            replace(base.events[-1], start_us=base.events[-1].start_us - 0.004),
+        ),
+        readouts=tuple(
+            replace(r, trigger_us=r.trigger_us - 0.004) for r in base.readouts
+        ),
+    )
+    plan = ftf.plan_template(settings(), snapshot(), tiny)
     engine = Engine(1, 1_000_000)
     try:
         actual = engine.evolve(plan.source, (plan.batch,), cancel=Event())

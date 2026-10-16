@@ -24,17 +24,21 @@ def kernel_case(request: pytest.FixtureRequest) -> KernelCase:
     model = synthetic_model(size)
     model = replace(
         model,
-        rates_per_ns=model.rates_per_ns * 0.05,
+        # Rescale time by 1/8 and every frequency/rate by 8 to retain
+        # dimensionless dynamics and period counts with fewer envelope knots.
+        energies_ghz=model.energies_ghz * 8,
+        rates_per_ns=model.rates_per_ns * 0.05 * 8,
+        dephasing_per_ns=model.dephasing_per_ns * 8,
         drives=tuple(
             SecularDrive(f"port-{p}", d.in_phase_ghz * scale, d.quadrature_ghz * scale)
-            for p, scale in enumerate((0.012, 0.009))
+            for p, scale in enumerate((0.096, 0.072))
             for d in model.drives
         ),
     )
-    times = np.linspace(0, 48, 97)
-    gaussian = np.exp(-0.5 * ((times - 24) / 12) ** 2)
-    drag = gaussian * (1 - 0.4j * (times - 24) / 144)
-    ramp = np.minimum(times / 24, 1)
+    times = np.linspace(0, 6, 13)
+    gaussian = np.exp(-0.5 * ((times - 3) / 1.5) ** 2)
+    drag = gaussian * (1 - 0.4j * (times - 3) / 18)
+    ramp = np.minimum(times / 3, 1)
     envelopes = tuple(
         EnvelopeSpec("sampled", values.astype(complex), times)
         for values in (gaussian, drag, ramp)
@@ -46,15 +50,16 @@ def kernel_case(request: pytest.FixtureRequest) -> KernelCase:
     table = SegmentTable(
         np.arange(count),
         np.arange(count, dtype=np.float64) * 1.3,
-        np.array([48, 48, 35.7, 48, 19.3, 8.3, 9.1, 24.1]),
+        # Preserve full periods, fractional tails, DC, zero drive and band > 1.
+        np.array([48, 48, 35.7, 48, 19.3, 8.3, 9.1, 24.1]) / 8,
         np.array([[0], [0], [1], [0], [0], [1], [0], [0]]),
         np.ones(count, dtype=np.int64),
         np.array([[0], [0], [0], [1], [0], [1], [0], [0]]),
-        np.array([[0.5], [0.5], [0.5], [0.5], [-0.5], [0], [0.5], [0.5]]),
+        np.array([[4.0], [4.0], [4.0], [4.0], [-4.0], [0], [4.0], [4.0]]),
         gains[:, None],
         np.array([[0.17], [1.3], [-0.7], [2.1], [0.5], [-1.1], [0], [0.9]]),
         np.array([[0], [0], [0], [1], [2], [1], [0], [2]]),
-        np.array([[0], [0], [3.2], [0], [4.7], [0], [0], [0]]),
+        np.array([[0], [0], [3.2], [0], [4.7], [0], [0], [0]]) / 8,
         envelopes,
     )
     vector = np.exp(0.7j * np.arange(size)) / np.sqrt(size)

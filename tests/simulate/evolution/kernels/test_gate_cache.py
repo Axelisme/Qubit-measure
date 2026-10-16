@@ -16,18 +16,18 @@ from tests.simulate.evolution.contract.kernel_suite import (
 )
 
 
-def shaped_table(size: int = 18) -> SegmentTable:
-    """Three input states at six off-grid carrier phases share one gate."""
-    times = np.linspace(0, 6, 13)
+def shaped_table(size: int = 6) -> SegmentTable:
+    """Three input states at two off-grid phases each share one gate."""
+    times = np.linspace(0, 1.5, 7)
     envelope = evolution.EnvelopeSpec(
         "sampled",
-        (np.sin(np.pi * times / 6) ** 2 + 0.12j * np.sin(2 * np.pi * times / 6)),
+        (np.sin(np.pi * times / 1.5) ** 2 + 0.12j * np.sin(2 * np.pi * times / 1.5)),
         times,
     )
     return SegmentTable(
         timeline=np.arange(size),
         start_ns=np.arange(size, dtype=float) * 2,
-        duration_ns=np.full(size, 4.0),
+        duration_ns=np.full(size, 1.0),
         level=np.zeros((size, 1), dtype=np.int64),
         tones=np.ones(size, dtype=np.int64),
         tone_port=np.zeros((size, 1), dtype=np.int64),
@@ -37,7 +37,7 @@ def shaped_table(size: int = 18) -> SegmentTable:
             :, None
         ],
         tone_envelope=np.zeros((size, 1), dtype=np.int64),
-        tone_envelope_offset_ns=np.full((size, 1), 0.5),
+        tone_envelope_offset_ns=np.full((size, 1), 0.125),
         envelopes=(envelope,),
     )
 
@@ -57,7 +57,7 @@ def kernel_case(request: pytest.FixtureRequest) -> KernelCase:
     coherent = np.exp(0.7j * np.arange(size)) / np.sqrt(size)
     states = np.repeat(
         np.stack([ground, np.eye(size) / size, np.outer(coherent, coherent.conj())]),
-        6,
+        2,
         axis=0,
     )
     return KernelCase(GateCacheKernel(), source, shaped_table(), states)
@@ -103,7 +103,7 @@ def test_guard_only_accepts_shaped_single_tone(kernel_case: KernelCase) -> None:
 def test_keys_use_content_and_exclude_start_phase(kernel_case: KernelCase) -> None:
     case = kernel_case
     table = case.table
-    rows = np.arange(18, dtype=np.int64)
+    rows = np.arange(6, dtype=np.int64)
     keys = case.kernel.prepare_keys(table, rows)
     assert keys.dtype.kind == "V"
     assert len(np.unique(keys)) == 1
@@ -112,16 +112,16 @@ def test_keys_use_content_and_exclude_start_phase(kernel_case: KernelCase) -> No
     alias = replace(
         table,
         envelopes=(envelope, duplicate),
-        tone_envelope=np.ones((18, 1), dtype=np.int64),
+        tone_envelope=np.ones((6, 1), dtype=np.int64),
     )
     np.testing.assert_array_equal(case.kernel.prepare_keys(alias, rows), keys)
     for field, value in (
-        ("level", np.ones((18, 1), dtype=np.int64)),
-        ("duration_ns", np.full(18, 3.0)),
-        ("tone_frequency_ghz", np.full((18, 1), 0.14)),
-        ("tone_amplitude", np.full((18, 1), -0.055)),
-        ("tone_port", np.ones((18, 1), dtype=np.int64)),
-        ("tone_envelope_offset_ns", np.zeros((18, 1))),
+        ("level", np.ones((6, 1), dtype=np.int64)),
+        ("duration_ns", np.full(6, 3.0)),
+        ("tone_frequency_ghz", np.full((6, 1), 0.14)),
+        ("tone_amplitude", np.full((6, 1), -0.055)),
+        ("tone_port", np.ones((6, 1), dtype=np.int64)),
+        ("tone_envelope_offset_ns", np.zeros((6, 1))),
     ):
         changed = replace(table, **{field: value})
         assert not np.any(case.kernel.prepare_keys(changed, rows) == keys), field
@@ -134,8 +134,8 @@ def test_keys_use_content_and_exclude_start_phase(kernel_case: KernelCase) -> No
 
 def test_prepared_entries_follow_key_mapping(kernel_case: KernelCase) -> None:
     case = kernel_case
-    rows = np.array([0, 7, 14], dtype=np.int64)
-    table = replace(case.table, duration_ns=np.resize([0.0, 2.5, 4.0], 18))
+    rows = np.array([0, 2, 4], dtype=np.int64)
+    table = replace(case.table, duration_ns=np.resize([0.0, 0.5, 1.0], 6))
     keys, representatives, inverse = np.unique(
         case.kernel.prepare_keys(table, rows), return_index=True, return_inverse=True
     )

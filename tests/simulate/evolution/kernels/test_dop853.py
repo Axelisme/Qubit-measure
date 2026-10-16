@@ -32,17 +32,22 @@ def envelope(shape: str) -> EnvelopeSpec:
     return EnvelopeSpec("sampled", shapes[shape].astype(complex), time)
 
 
-@pytest.fixture(params=[3, 4])
-def size(request: pytest.FixtureRequest) -> int:
-    return request.param
-
-
 @pytest.fixture(
-    params=["constant", "gaussian", "drag", "cosine", "flat_top", "sampled"]
+    params=[
+        (3, "constant"),
+        (3, "gaussian"),
+        (4, "drag"),
+        (3, "cosine"),
+        (3, "flat_top"),
+        (3, "sampled"),
+    ],
+    ids=["constant-3", "gaussian-3", "drag-4", "cosine-3", "flat_top-3", "sampled-3"],
 )
-def kernel_case(request: pytest.FixtureRequest, size: int) -> KernelCase:
+def kernel_case(request: pytest.FixtureRequest) -> KernelCase:
     from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Kernel
 
+    # Cover every envelope and both dimensions, not their Cartesian product.
+    size, shape = request.param
     model = synthetic_model(size)
 
     def build(level: tuple[int, ...]):
@@ -77,7 +82,7 @@ def kernel_case(request: pytest.FixtureRequest, size: int) -> KernelCase:
         tone_theta_rad=np.broadcast_to([0.5, -0.3, 1.2, 2.1], (4, 4)),
         tone_envelope=np.where(playing, 0, -1),
         tone_envelope_offset_ns=np.broadcast_to([0.4, 0.1, 0.7, 0.0], (4, 4)),
-        envelopes=(envelope(request.param),),
+        envelopes=(envelope(shape),),
     )
     return KernelCase(DOP853Kernel(), source, table, np.repeat(state[None], 4, axis=0))
 

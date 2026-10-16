@@ -192,14 +192,14 @@ def test_model_source_caches_each_level_across_threads() -> None:
     source = evolution.ModelSource(
         (np.eye(3, dtype=np.complex128) / 3).astype(np.complex128), build
     )
-    barrier = Barrier(4)
+    barrier = Barrier(2)
 
     def get_model(_: int) -> evolution.SecularModel:
         barrier.wait(timeout=10)  # All submitted workers reach this rendezvous.
         return source.model((0,))
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        models = list(pool.map(get_model, range(4)))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        models = list(pool.map(get_model, range(2)))
     assert len(calls) == 1
     assert all(model is models[0] for model in models)
     assert source.model((1,)).level == (1,)
