@@ -8,7 +8,13 @@ from typing import Literal
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from zcu_tools.analysis.fitting import HangerModel, TransmissionModel, get_proper_model
+from zcu_tools.analysis.fitting import (
+    FitQuality,
+    HangerModel,
+    TransmissionModel,
+    compute_fit_quality,
+    get_proper_model,
+)
 from zcu_tools.analysis.fitting.resonance.hanger import HangerParams
 from zcu_tools.analysis.fitting.resonance.transmission import TransmissionParams
 
@@ -38,6 +44,14 @@ class ResonanceFit:
 
     params retains the selected model's complete named fit output, including
     complex scale/coupling and circle geometry, for single-tone consumers.
+    fit_quality compares raw IQ and the public model on the trimmed fit grid,
+    represented as concatenated real then imaginary float64 observations. Its
+    named parameters are the evaluator's real coordinates: freq, Ql, a0.real,
+    a0.imag, fitted edelay, enabled background terms, and hanger-only abs(Qc)
+    and phi. Derived fwhm/theta0/Qi and circle geometry are not independent
+    model coordinates. Public model fits provide no covariance, so every
+    relative parameter error is None with a covariance_unavailable issue.
+    Quality is diagnostic only, including for the sequential fit path.
     """
 
     freq: float
@@ -45,6 +59,7 @@ class ResonanceFit:
     theta0: float
     edelay: float
     params: HangerParams | TransmissionParams
+    fit_quality: FitQuality
 
 
 def fit_resonance(
@@ -58,7 +73,9 @@ def fit_resonance(
     The remaining grid must be finite, strictly monotonic, and contain at least
     four observations. Model validation and numerical failures propagate; callers
     own isolation and diagnostic plots. This function does not select a delay
-    prior, decide persistence, or interpret experimental coordinates.
+    prior, decide persistence, or interpret experimental coordinates. The result
+    includes reconstruction quality in the raw-IQ representation documented on
+    ResonanceFit, with unavailable covariance left explicit.
     """
     freqs, signals = freqs[1:-1], signals[1:-1]
     if options.model_type == "hm":
@@ -96,6 +113,8 @@ def fit_resonance(
             params["edelay"],
         )
         values: HangerParams | TransmissionParams = params
+        model_signals = model.calc_signals(freqs, **params)
+        model_parameters = {"Qc.abs": float(abs(params["Qc"])), "phi": params["phi"]}
     else:
         transmission = model.fit(
             freqs,
@@ -122,12 +141,35 @@ def fit_resonance(
             transmission["edelay"],
         )
         values = transmission
+        model_signals = model.calc_signals(freqs, **transmission)
+        model_parameters = {}
+    model_parameters.update(
+        {
+            "freq": values["freq"],
+            "Ql": values["Ql"],
+            "a0.real": float(values["a0"].real),
+            "a0.imag": float(values["a0"].imag),
+        }
+    )
+    if options.edelay is None:
+        model_parameters["edelay"] = values["edelay"]
+    if options.fit_bg_amp_slope:
+        model_parameters["bg_amp_slope"] = values["bg_amp_slope"]
+    if options.fit_bg_phase_curvature:
+        model_parameters["bg_phase_curvature"] = values["bg_phase_curvature"]
+    quality = compute_fit_quality(
+        np.concatenate((signals.real, signals.imag)),
+        np.concatenate((model_signals.real, model_signals.imag)),
+        model_parameters,
+        covariance=None,
+    )
     return ResonanceFit(
         freq=float(freq),
         fwhm=float(fwhm),
         theta0=float(theta0),
         edelay=float(edelay),
         params=values,
+        fit_quality=quality,
     )
 
 

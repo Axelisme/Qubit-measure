@@ -48,7 +48,8 @@ class ToneFitSuccess:
     """One active original tone's fit, never an active-column ordinal.
 
     index is the original tones[index]; label is display-only and may repeat.
-    fit contains MHz frequency/linewidth, rad theta0 and inverse-MHz delay.
+    fit contains MHz frequency/linewidth, rad theta0, inverse-MHz delay and
+    typed diagnostic fit_quality on this tone's trimmed absolute-frequency IQ.
     edelay_source records global search, captured route prior, or manual seed.
     edelay_persistable follows seeded-or-nonuniform single-tone policy.
     """
@@ -83,7 +84,7 @@ class MuxOnetoneAnalyzeResult(AnalyzeResultBase):
     members_diagnostic: str | None
 
     def to_summary_dict(self) -> dict[str, object]:
-        """Expose each original tone's scalars or failure and binding diagnostic."""
+        """Expose each original tone's scalars/quality or failure, plus bindings."""
         tones: list[dict[str, object]] = []
         for outcome in self.outcomes:
             row: dict[str, object] = {"index": outcome.index, "label": outcome.label}
@@ -94,6 +95,7 @@ class MuxOnetoneAnalyzeResult(AnalyzeResultBase):
                     status="success",
                     freq=outcome.fit.freq,
                     kappa=outcome.fit.fwhm,
+                    fit_quality=outcome.fit.fit_quality.to_summary_dict(),
                     theta0=outcome.fit.theta0,
                     edelay=outcome.fit.edelay,
                     edelay_source=outcome.edelay_source,

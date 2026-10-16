@@ -35,7 +35,7 @@ Live 圖以共同 offset 為橫軸，顯示 K 條 active magnitude 曲線。Lege
 
 FIT 只處理 active columns。每條曲線以保存的原始 base frequency 加共同 nominal dfs 作 MHz 座標，去掉首尾點。這不是 DDS 實際頻率。Cfg、selection、tone_indices 或 shape 不符時整次拒絕。單一 tone 的數值擬合失敗會留下原因與診斷圖，其餘 tone 繼續。
 
-K 張圖使用 `fit_i` 命名，i 是原始 tone 序號。例如 `[2,0]` 產生 `fit_2`、`fit_0`。Title 顯示 label，label 重複也不會覆蓋圖。Summary 列出每個 active tone 的成功 scalars 或失敗原因。
+K 張圖使用 `fit_i` 命名，i 是原始 tone 序號。例如 `[2,0]` 產生 `fit_2`、`fit_0`。Title 顯示 label，label 重複也不會覆蓋圖。Summary 列出每個 active tone 的成功 scalars 或失敗原因。成功列的 `fit_quality` 比較去端點後的原始 IQ 與模型，以串接 I、Q 的實數向量計算殘差指標；公開 fit 不提供 covariance，各具名模型參數的相對誤差為 null 並附 `covariance_unavailable`，品質不決定 proposal 是否提出。
 
 ## Writeback
 
