@@ -1,21 +1,26 @@
 """Templates and slots resolve captured sources into editable persistent inputs."""
 
 import pytest
+from pydantic import JsonValue
 from zcu_tools.cfg_model import (
     AliasName,
     BathResetSpec,
     ConfigBase,
+    ConstWaveformCfg,
     Expr,
+    FlatTopWaveformSpec,
     PulseReadoutSpec,
     PulseSpec,
     Slot,
     Template,
     TemplateDef,
+    WaveformSpec,
 )
 from zcu_tools.device import BaseDeviceInfo
 from zcu_tools.gui.form import (
     FormEnv,
     FormErrors,
+    FormModel,
     FormState,
 )
 from zcu_tools.gui.form_adapter import Form, ModuleInline
@@ -700,3 +705,199 @@ def test_optional_partially_locked_module_describes_fixed_branch_not_value(
     assert disabled.target.fixed is False
     assert disabled.target.nullable is True
     assert disabled.children == ()
+
+
+def nested_copy_env(*, inline: bool = False) -> FormEnv:
+    """Capture a reset with reusable pulse and waveform children, without I/O."""
+    pulse = PulseSpec.model_validate(
+        {
+            "ch": 1,
+            "nqz": 1,
+            "freq": 100,
+            "gain": 0.5,
+            "waveform": (
+                {"style": "const", "length": 0.04} if inline else "Q.waveforms.envelope"
+            ),
+        }
+    )
+    return FormEnv(
+        library=LibrarySnapshot(
+            ModuleLibraryDocument(
+                format="zcu.module-library",
+                format_version="2.0",
+                components={
+                    "Q": ComponentLibrary(
+                        pulses={"probe": pulse},
+                        waveforms={"envelope": ConstWaveformCfg(length=0.04)},
+                        reset={
+                            "bath": BathResetSpec(
+                                cavity_tone_cfg="Q.pulses.probe",
+                                qubit_tone_cfg="Q.pulses.probe",
+                                pi2_cfg="Q.pulses.probe",
+                            )
+                        },
+                    )
+                },
+            )
+        )
+    )
+
+
+def input_object(value: JsonValue) -> dict[str, JsonValue]:
+    """Require an object at the public Form input boundary."""
+    assert isinstance(value, dict), value
+    return value
+
+
+def configured[C: ConfigBase](
+    form: Form[C], state: FormState[FormModel], env: FormEnv
+) -> C:
+    """Require a valid result and convert it through the public cfg boundary."""
+    result = state.result(env)
+    if isinstance(result, FormErrors):
+        pytest.fail(str(result.messages))
+    cfg = form.to_cfg(result, env)
+    if isinstance(cfg, FormErrors):
+        pytest.fail(str(cfg.messages))
+    return cfg
+
+
+@pytest.mark.parametrize("inline", [False, True], ids=["captured-key", "inline-child"])
+def test_slot_copy_overrides_child_without_changing_captured_source(
+    inline: bool,
+) -> None:
+    env = nested_copy_env(inline=inline)
+    assert env.library is not None
+    original = env.library.document()
+    form = bound_form(
+        Slot("Q.pulses.probe", copy=True, set={"waveform.length": 0.03, "gain": 0.7})
+    )
+    state = FormState(form.default_input(env))
+    cfg = configured(form, state, env)
+    assert cfg.probe.waveform.length == 0.03
+    assert cfg.probe.gain == 0.7
+    assert env.library.document() == original
+    assert env.library.waveform_spec("Q.waveforms.envelope").length == 0.04
+
+    # An installed copy remains detached even when a host supplies a later capture.
+    later = FormEnv(
+        library=env.library.replaced_waveform(
+            "Q.waveforms.envelope", ConstWaveformCfg(length=0.9)
+        )
+    )
+    assert configured(form, state, later).probe.waveform.length == 0.03
+    state.write({("probe", "module", "waveform", "module", "length"): 0.06}, later)
+    assert configured(form, state, later).probe.waveform.length == 0.06
+    assert env.library.document() == original
+
+
+@pytest.mark.parametrize("placement", ["root-slot", "template-slot"])
+def test_slot_copy_expands_only_the_overridden_reference_path(placement: str) -> None:
+    env = nested_copy_env()
+    assert env.library is not None
+    original = env.library.document()
+    if placement == "root-slot":
+        form = Form(
+            ResetCore,
+            {
+                "reset": Slot(
+                    "Q.reset.bath", copy=True, set={"pi2_cfg.waveform.length": 0.03}
+                )
+            },
+        )
+        catalog: dict[str, TemplateDef] = {}
+    else:
+        form = Form(ResetCore, {"reset": Template("reset")})
+        catalog = {
+            "reset": TemplateDef(
+                BathResetSpec,
+                "Reset",
+                {
+                    "cavity_tone_cfg": Slot("Q.pulses.probe"),
+                    "qubit_tone_cfg": Slot("Q.pulses.probe"),
+                    "pi2_cfg": Slot(
+                        "Q.pulses.probe", copy=True, set={"waveform.length": 0.03}
+                    ),
+                },
+            )
+        }
+    form.bind_templates(catalog, adapter="synthetic-copy")
+    state = FormState(form.default_input(env))
+    reset = input_object(input_object(state.input.data["reset"])["module"])
+    assert reset["cavity_tone_cfg"] == {"kind": "ref", "name": "Q.pulses.probe"}
+    assert reset["qubit_tone_cfg"] == {"kind": "ref", "name": "Q.pulses.probe"}
+    pi2 = input_object(input_object(reset["pi2_cfg"])["module"])
+    assert pi2["waveform"] == {
+        "kind": "inline",
+        "module": {"style": "const", "length": 0.03},
+    }
+    cfg = configured(form, state, env)
+    assert cfg.reset.pi2_cfg.waveform.length == 0.03
+    assert cfg.reset.cavity_tone_cfg.waveform.length == 0.04
+    assert cfg.reset.qubit_tone_cfg.waveform.length == 0.04
+    assert env.library.document() == original
+
+
+@pytest.mark.parametrize("inline", [False, True], ids=["captured-key", "inline-child"])
+def test_slot_copy_none_child_override_requires_manual_value(inline: bool) -> None:
+    env = nested_copy_env(inline=inline)
+    form = bound_form(Slot("Q.pulses.probe", copy=True, set={"waveform.length": None}))
+    state = FormState(form.default_input(env))
+    path = ("probe", "module", "waveform", "module", "length")
+    result = state.result(env)
+    assert isinstance(result, FormErrors)
+    assert path in result.messages
+    assert state.describe(path, env).target is not None
+    state.write({path: 0.08}, env)
+    assert configured(form, state, env).probe.waveform.length == 0.08
+
+
+class FailedChildLibrary(LibrarySnapshot):
+    """A captured source whose public waveform query fails at the boundary."""
+
+    def waveform_spec(self, path: str) -> WaveformSpec:
+        """Report the source failure instead of providing the requested Spec."""
+        raise OSError(f"Captured waveform unavailable: {path}")
+
+
+@pytest.mark.parametrize(
+    ("fault", "error", "message"),
+    [
+        ("missing", KeyError, "absent"),
+        (
+            "wrong-namespace",
+            ValueError,
+            "Library kind 'waveform' does not match partition",
+        ),
+        ("malformed-self-reference", ValueError, "[Ii]ncompatible.*family"),
+        ("source-failure", OSError, "Captured waveform unavailable"),
+    ],
+)
+def test_slot_copy_child_source_errors_propagate(
+    fault: str, error: type[Exception], message: str
+) -> None:
+    env = nested_copy_env()
+    assert env.library is not None
+    document = env.library.document()
+    pulse = document.components["Q"].pulses["probe"]
+    path = "waveform.length"
+    if fault == "missing":
+        pulse.waveform = "Q.waveforms.absent"
+    elif fault == "wrong-namespace":
+        pulse.waveform = "Q.pulses.probe"
+    elif fault == "malformed-self-reference":
+        # Valid persistent syntax, but flat_top is not an admissible ramp family.
+        document.components["Q"].waveforms["envelope"] = FlatTopWaveformSpec(
+            length=0.4, raise_waveform="Q.waveforms.envelope"
+        )
+        path = "waveform.raise_waveform.length"
+    library = (
+        FailedChildLibrary(document)
+        if fault == "source-failure"
+        else LibrarySnapshot(document)
+    )
+    original = library.document()
+    form = bound_form(Slot("Q.pulses.probe", copy=True, set={path: 0.03}))
+    with pytest.raises(error, match=message):
+        form.default_input(FormEnv(library=library))
+    assert library.document() == original

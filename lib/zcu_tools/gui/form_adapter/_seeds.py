@@ -236,6 +236,69 @@ def complete_input(
     return data
 
 
+def _captured_child(annotation: object, key: str, env: FormEnv) -> dict[str, JsonValue]:
+    """Copy a child key into supported persistent JSON of its declared family.
+
+    annotation is the generated child selector. Only its captured Spec is read;
+    descendants remain keys and assets are not accessed. Missing capture/key,
+    incompatible families and source failures propagate to the Form caller.
+    """
+    if env.library is None:
+        raise ValueError("Missing captured library for Slot child copy")
+    models = tuple(
+        model
+        for model in members(spec_annotation(annotation))
+        if isinstance(model, type) and issubclass(model, BaseModel)
+    )
+    spec = (
+        env.library.waveform_spec(key)
+        if all("style" in model.model_fields for model in models)
+        else env.library.module_spec(key)
+    )
+    model = next((model for model in models if issubclass(model, type(spec))), None)
+    if model is None:
+        raise ValueError(f"Incompatible library family for {key!r}")
+    return persistent_input(
+        model, supported_input(model, spec.model_dump(mode="json", exclude_none=True))
+    )
+
+
+def set_slot_path(
+    model: type[BaseModel],
+    data: dict[str, JsonValue],
+    path: str,
+    value: JsonValue,
+    env: FormEnv,
+) -> None:
+    """Set a persistent Slot override, copying only traversed child keys inline.
+
+    model describes data's generated editable family. path uses dotted Spec
+    fields, never generated wrappers. Inline children keep their existing data;
+    a captured child key is replaced by a detached supported Spec copy before
+    descending. Other keys and the captured library remain unchanged. Invalid
+    paths, missing keys, family mismatches and source failures propagate.
+    """
+    parts = path.split(".")
+    if not all(parts):
+        raise ValueError(f"Invalid seed path {path!r}")
+    parent = data
+    for part in parts[:-1]:
+        if part not in model.model_fields:
+            raise ValueError(f"Unknown seed path {path!r}")
+        annotation = model.model_fields[part].annotation
+        child = parent.get(part, {})
+        if isinstance(child, str) and inline_wrapper(annotation) is not None:
+            child = _captured_child(annotation, child, env)
+        if not isinstance(child, dict):
+            raise ValueError(f"Seed path traverses a non-inline field: {path!r}")
+        parent[part] = child
+        model = selected_model(spec_annotation(annotation), child)
+        parent = child
+    if parts[-1] not in model.model_fields:
+        raise ValueError(f"Unknown seed path {path!r}")
+    parent[parts[-1]] = value
+
+
 def _path_annotation(
     model: type[BaseModel], data: Mapping[str, JsonValue], path: str
 ) -> object:
@@ -357,7 +420,7 @@ def nested_slot(
             supported_input(selected, spec.model_dump(mode="json", exclude_none=True)),
         )
         for path, seed in slot.set.items():
-            set_path(data, path, scalar_seed(seed))
+            set_slot_path(selected, data, path, scalar_seed(seed), env)
         for path, value in slot.lock.items():
             set_path(data, path, scalar_seed(value))
         return data
