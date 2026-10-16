@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import pytest
 from zcu_tools.cfg_model import ConfigBase, Range
 from zcu_tools.gui.app.workflows.attachment import WorkflowAttachment
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
@@ -52,7 +53,9 @@ def test_workflow_step_expression_memento_and_prepare(qapp, tmp_path: Path, atta
         )
         driver.enter_text(object_name="form.input.sweep.step", value="0.1 * 3")
         driver.screenshot(tmp_path / "01-workflow-center-step.png")
-        assert "0.45" in driver.observe(object_name="form.value.sweep.center").text
+        assert float(
+            driver.observe(object_name="form.value.sweep.center").text.split(": ")[-1]
+        ) == pytest.approx(0.45)
         saved = window.capture_persisted_state()
         driver.click("Prepare forms")
         driver = ComponentDriver(window.plan_panel)
@@ -62,7 +65,9 @@ def test_workflow_step_expression_memento_and_prepare(qapp, tmp_path: Path, atta
         driver = ComponentDriver(window.plan_panel)
         driver.screenshot(tmp_path / "03-workflow-restored-step.png")
         assert driver.observe(object_name="form.input.sweep.step").text == "0.1 * 3"
-        assert "0.45" in driver.observe(object_name="form.value.sweep.center").text
+        assert float(
+            driver.observe(object_name="form.value.sweep.center").text.split(": ")[-1]
+        ) == pytest.approx(0.45)
         assert window.capture_persisted_state() == saved
     finally:
         window.close()

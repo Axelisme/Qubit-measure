@@ -46,13 +46,19 @@ def test_sampling_context_menu_and_visible_effective_coordinates(
     driver.enter_text(object_name="form.input.sweep.step", value="0.3")
     driver.screenshot(tmp_path / "03-effective-stop.png")
     assert float(driver.observe(object_name="form.input.sweep.stop").text) == 1
-    assert "0.9" in driver.observe(object_name="form.value.sweep.stop").text
+    assert float(
+        driver.observe(object_name="form.value.sweep.stop").text.split(": ")[-1]
+    ) == pytest.approx(0.9)
     driver.invoke_context_action(
         object_name="form.input.sweep.start", action="Switch to Center / Span"
     )
     driver.screenshot(tmp_path / "04-center-step.png")
-    assert "0.45" in driver.observe(object_name="form.value.sweep.center").text
-    assert "0.9" in driver.observe(object_name="form.value.sweep.span").text
+    assert float(
+        driver.observe(object_name="form.value.sweep.center").text.split(": ")[-1]
+    ) == pytest.approx(0.45)
+    assert float(
+        driver.observe(object_name="form.value.sweep.span").text.split(": ")[-1]
+    ) == pytest.approx(0.9)
     driver.invoke_context_action(
         object_name="form.input.sweep.step", action="Expression"
     )
@@ -63,7 +69,9 @@ def test_sampling_context_menu_and_visible_effective_coordinates(
         object_name="form.input.sweep.step", action="Switch to Expts"
     )
     driver.screenshot(tmp_path / "06-center-expts.png")
-    assert float(driver.observe(object_name="form.input.sweep.center").text) == 0.45
+    assert float(
+        driver.observe(object_name="form.input.sweep.center").text
+    ) == pytest.approx(0.45)
     assert driver.observe(object_name="form.input.sweep.n").text == "4"
     assert driver.observe(object_name="form.input.other").text == "unfinished"
     driver.invoke_context_action(
@@ -76,7 +84,9 @@ def test_sampling_context_menu_and_visible_effective_coordinates(
     )
     driver.enter_text(object_name="form.input.sweep.step", value="-0.3")
     driver.screenshot(tmp_path / "07-descending.png")
-    assert "0.1" in driver.observe(object_name="form.value.sweep.stop").text
+    assert float(
+        driver.observe(object_name="form.value.sweep.stop").text.split(": ")[-1]
+    ) == pytest.approx(0.1)
     driver.invoke_context_action(
         object_name="form.input.sweep.step", action="Expression"
     )

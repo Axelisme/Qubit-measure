@@ -731,10 +731,8 @@ def test_headless_sampling_commands_project_actual_values_and_reset(form_rpc):
     before = owner.input.to_json()
     observed = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["sweep", "stop"]})
     assert observed["ok"], observed
-    assert observed["result"]["input"]["sweep"]["stop"] == 1
-    assert {
-        tuple(item["path"]): item["value"] for item in observed["result"]["values"]
-    }[("sweep", "stop")] == pytest.approx(0.9)
+    assert observed["result"]["input"] == 1
+    assert observed["result"]["value"] == pytest.approx(0.9)
     assert owner.input.to_json() == before
     inactive = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["sweep", "n"]})
     assert not inactive["ok"]
