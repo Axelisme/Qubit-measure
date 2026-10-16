@@ -2,7 +2,7 @@
 
 import pytest
 from pydantic import Field, JsonValue
-from zcu_tools.cfg_model import ConfigBase, PulseSpec, Template, TemplateDef
+from zcu_tools.cfg_model import ArbWaveformCfg, ConfigBase, PulseSpec, Template, TemplateDef
 from zcu_tools.gui import form_adapter as adapter
 from zcu_tools.gui.form import (
     FormEnv,
@@ -262,3 +262,53 @@ def test_logical_errors_hide_only_generated_wrappers_and_preserve_indexes() -> N
         ("real", "module", "value"): "real",
         ("samples", 2): "item",
     }
+
+
+def test_root_observation_contains_logical_subtrees_and_scalar_failure_is_unavailable() -> None:
+    form = adapter.Form(LogicalCfg, {})
+    env = captured()
+    input = form.prepare_inline_copy(keyed(form, env), ("drive",), env).input
+    root = form.read_logical_field(input, (), env)
+    assert isinstance(root.value, dict)
+    drive = root.value["drive"]
+    assert isinstance(drive, dict) and drive["freq"] == 4100
+    assert drive["waveform"] == "Q.waveforms.wave"
+    invalid = FormState(input)
+    invalid.write({("reps",): -1}, env)
+    unrelated = form.read_logical_field(invalid.input, ("drive", "freq"), env)
+    assert unrelated.value == 4100 and unrelated.errors is None
+    leaf = form.read_logical_field(invalid.input, ("reps",), env)
+    assert leaf.value_status == "unavailable" and leaf.value is None and leaf.errors is not None
+
+
+def test_parent_model_errors_are_relevant_but_unrelated_sibling_errors_are_not() -> None:
+    from pydantic import model_validator
+    class RootError(FormModel):
+        first: int = 1
+        second: int = 2
+
+        @model_validator(mode="after")
+        def reject_pair(self):
+            if self.first == self.second:
+                raise ValueError("Pair must differ")
+            return self
+    form = adapter.Form(LogicalCfg, {}, extras=RootError, lower=lambda extras, cfg: cfg)
+    input = FormInput(form.model, {"extras": {"first": 2, "second": 2}})
+    observation = form.read_logical_field(input, ("extras", "first"), FormEnv())
+    assert observation.errors is not None and ("extras",) in observation.errors.messages
+
+
+def test_ref_source_with_missing_child_key_does_not_block_scalar_or_fallback() -> None:
+    form = adapter.Form(LogicalCfg, {})
+    env = captured()
+    assert env.library is not None
+    missing = env.library.replaced_waveform("Q.waveforms.wave", ArbWaveformCfg(data="not-an-asset"))
+    env = FormEnv(library=missing)
+    input = keyed(form, env)
+    scalar = form.read_logical_field(input, ("drive", "freq"), env)
+    assert scalar.value == 4100 and scalar.errors is None
+    empty = FormEnv(library=missing.deleted("Q.waveforms.wave", kind="waveform"))
+    assert form.read_logical_field(input, ("drive", "freq"), empty).value == 4100
+    with pytest.raises(adapter.LogicalSourceError) as failure:
+        form.read_logical_field(input, ("drive", "waveform", "length"), empty)
+    assert failure.value.selector_path == ("drive", "waveform")
