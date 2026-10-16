@@ -1,7 +1,9 @@
 """Experiment starting values from fixed captures and injected templates."""
 
-from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
+from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
+
+from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
 
 from .core import ZigZagScanCfg
 
@@ -23,7 +25,7 @@ def make_gain_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
                 if ctx.has("$qubit.module.readout")
                 else Template("readout"),
             },
-            "relax_delay": Expr("5 * $qubit.t1"),
+            "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "initial_delay": Hidden(),
             "n_times": 6,
             "repeat_on": "X180_pulse",
@@ -58,7 +60,7 @@ def make_freq_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
                 if ctx.has("$qubit.module.readout")
                 else Template("readout"),
             },
-            "relax_delay": Expr("5 * $qubit.t1"),
+            "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "initial_delay": Hidden(),
             "n_times": 6,
             "repeat_on": "X180_pulse",
