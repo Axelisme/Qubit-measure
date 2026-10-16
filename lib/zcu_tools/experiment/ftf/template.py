@@ -18,6 +18,7 @@ from zcu_tools.simulate.evolution import (
 from zcu_tools.simulate.ftf import (
     FluxTrack,
     JointModel,
+    flux_waveform,
     model_source,
     readout_model,
     schedule,
@@ -81,7 +82,7 @@ def _timeline_batch(
     template: TimelineTemplate,
     end_ns: NDArray[np.float64],
 ) -> TimelineBatch:
-    """Keep the single flux-track entry point here for continuous-waveform wiring."""
+    """Supply both quantized idle flux and continuous driven flux to the engine."""
     microwave = {s.gen_ch: s.name for s in settings.microwave_sources}
     flux_ports = {s.gen_ch: s.name for s in settings.flux_sources}
     drives = []
@@ -119,7 +120,16 @@ def _timeline_batch(
         sample_period_ns=2.0,
         points=len(template.points),
     )
-    return TimelineBatch(template.points, tuple(drives), filtered, end_ns)
+    waveform = flux_waveform(
+        tuple(flux),
+        dc_flux=joint.dc_flux,
+        lines=lines,
+        sample_period_ns=2.0,
+        points=len(template.points),
+    )
+    return TimelineBatch(
+        template.points, tuple(drives), filtered, end_ns, flux_waveform=waveform
+    )
 
 
 def _readout_contents(

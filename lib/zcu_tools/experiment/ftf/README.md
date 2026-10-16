@@ -25,9 +25,10 @@ The binding serializes calls; direct author callers must do the same.
 arrays. It preserves signed gains, complex sampled envelopes and the common
 carrier origin. Pulse supports use absolute nearest-2-ns rounding, ties even.
 The model owner supplies a DC `ModelSource` and filters flux tracks into a ragged
-lattice schedule. The engine evolves every template together to readout start.
-The current batch conversion keeps flux-track wiring in one function. Continuous
-flux waveform transport is added separately with the continuous-flux kernel.
+lattice schedule and a continuous waveform sampled on the same DAC grid. The
+engine uses the quantized T4 subsegments without a drive and continuous-flux
+DOP853 when flux changes during a drive. It evolves every template together to
+readout start.
 
 Readout uses the DC model and populations in its energy basis. It ignores flux
 tails and controls during or after readout. Earlier control portions still evolve
