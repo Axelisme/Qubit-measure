@@ -12,6 +12,7 @@ from zcu_tools.core.simulation import (
     EnvironmentSnapshot,
     RoundRequest,
     RoundSignals,
+    RoundStatistics,
 )
 
 
@@ -53,7 +54,7 @@ class SimulationBinding:
         capture_snapshot: Environment-owned, no-argument callable returning the
             current EnvironmentSnapshot. It runs in the acquiring thread.
         execute: Environment-owned callable taking a RoundRequest and returning
-            one RoundSignals for all ADCs. It runs in the same acquiring thread.
+            RoundStatistics (integrated) or RoundSignals (decimated) for all ADCs. It runs in the same acquiring thread.
         root_seed: Nonnegative integer supplied through seed or generated once
             by NumPy SeedSequence when seed is None. Private replay entropy.
         rng_version: Private RNG/derivation version string, currently
@@ -75,7 +76,7 @@ class SimulationBinding:
     def __init__(
         self,
         capture_snapshot: Callable[[], EnvironmentSnapshot],
-        execute: Callable[[RoundRequest], RoundSignals],
+        execute: Callable[[RoundRequest], RoundStatistics | RoundSignals],
         *,
         backend_version: str,
         seed: int | None = None,
@@ -84,8 +85,8 @@ class SimulationBinding:
 
         capture_snapshot takes no arguments and returns current numeric device
         inputs and model identity. execute takes those inputs in a RoundRequest
-        and returns all ADC signals under the core.simulation layout/borrow
-        contract. The environment retains ownership of both callbacks and their
+        and returns all ADC statistics/signals under the core.simulation
+        layout/borrow contract. The environment retains ownership of both callbacks and their
         resources; neither callback should perform QICK averaging or rounding.
         backend_version is an author-defined private implementation version
         string. seed is a nonnegative built-in int, or None for fresh entropy.
@@ -139,7 +140,9 @@ class SimulationBinding:
         """
         self._admission.release()
 
-    def sample_round(self, request: AcquireRequest, index: int) -> RoundSignals:
+    def sample_round(
+        self, request: AcquireRequest, index: int
+    ) -> RoundStatistics | RoundSignals:
         """Capture inputs and synchronously return one joint ADC realization.
 
         request is the installed, fixed AcquireRequest for the admitted call.
@@ -148,12 +151,20 @@ class SimulationBinding:
         request identity or index range and does not increment the index itself.
 
         Calls capture_snapshot once, appends the resulting RoundRequest to rounds,
-        then calls execute once. Returns its RoundSignals without validation or
-        copying; backend arrays remain borrowed until the adapter copies them.
+        then calls execute once. Validates the mode/result type and returns the
+        borrowed result; the adapter validates channel layouts and copies arrays.
+        Integrated RoundSignals remain accepted during backend migration.
         Callback exceptions propagate. Snapshot failure appends nothing; execute
-        failure leaves the captured input in rounds. It does not normalize,
-        average, round signals or update last_request.
+        failure leaves the captured input in rounds. A mode/result mismatch
+        raises ValueError. It does not normalize, average, round signals or
+        update last_request.
         """
         round_request = RoundRequest(request, self.capture_snapshot(), index)
         self.rounds += (round_request,)
-        return self.execute(round_request)
+        result = self.execute(round_request)
+        if request.mode == "integrated" and isinstance(result, RoundStatistics):
+            return result
+        # Legacy backend path; contract cleanup removes integrated RoundSignals.
+        if isinstance(result, RoundSignals):
+            return result
+        raise ValueError(f"backend result does not match {request.mode} mode")

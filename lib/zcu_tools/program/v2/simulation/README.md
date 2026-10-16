@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-16 — Module timelines and explicit acquisition environments
+**Last updated:** 2026-10-17 — Compact integrated rounds and deferred raw
 
 `SimulationAcquireMixin` enters once through `MyProgramV2`. With a
 `SimulationSoc`, it admits a synchronous call, builds one `AcquireRequest`,
@@ -130,8 +130,17 @@ Normal hardware compilation and the existing block_mode timing policy are unchan
   the next snapshot. It cannot change this acquire's controls or layout.
 - `SimulationBinding(capture_snapshot, execute, backend_version=..., seed=...)`
   coordinates admission and retains `last_request` and `rounds` privately in
-  memory. `execute(RoundRequest)` returns all ADCs in one `RoundSignals`.
-- Integrated IQ has shape `(execution, read, 2)` and contains float64 ADC sums.
+  memory. `execute(RoundRequest)` returns `RoundStatistics` for integrated mode
+  or `RoundSignals` for decimated mode. Integrated `RoundSignals` remain accepted
+  while legacy numeric backends migrate. Other mode/result mismatches raise.
+- Integrated statistics contain per-point totals over reps, shared state counts,
+  conditional per-shot sums and receiver covariance. The adapter validates and
+  detaches these arrays. Without threshold, classification or trackers, it divides
+  totals by reps and readout length, removes QICK offsets and moves reads first,
+  without allocating `acc_buf`. Hooks receive the running mean of completed rounds.
+  Threshold, classification, trackers and `get_raw()` materialize deterministic
+  int64 shots from the retained last-round identity. Getters never rerun a backend.
+- Legacy integrated IQ has shape `(execution, read, 2)` and contains float64 ADC sums.
   Decimated IQ has shape `(execution, read, sample, 2)` and contains float64 ADC
   samples. Last axis is I/Q. Backend arrays are borrowed until the adapter copies
   them. Missing, duplicate or extra ADCs, wrong shapes and nonfinite values fail.
@@ -143,10 +152,13 @@ Normal hardware compilation and the existing block_mode timing policy are unchan
 `white_noise(std_adc=1.0, seed=None, ...)` explicitly selects independent,
 zero-mean Gaussian I/Q per channel/sample. `std_adc` is finite, nonnegative and
 measured per ADC sample. Integrated sums use standard deviation
-`std_adc * sqrt(samples)`. Zero produces exact zero. It models no pulse response.
-The root seed is supplied or generated once. PCG64 streams derive from
-`SeedSequence([root_seed, acquire_sequence, round_index])`; NumPy and derivation
-versions are retained. Calls, including failed or stopped calls, consume distinct
+`std_adc * sqrt(samples)`. Compact totals include receiver variance and reps/12
+rounding variance per component. Zero produces exact zero, without rounding noise.
+It models no pulse response. The root seed is supplied or generated once.
+Integrated totals use PCG64 with
+`SeedSequence([root_seed, acquire_sequence, round_index, 0])`; deferred raw uses
+stream suffix 1. Decimated draws retain the three-component seed sequence.
+NumPy, backend and derivation versions are retained. Calls, including failed or stopped calls, consume distinct
 sequences. Getters do not sample. Recreating an environment with the same seed
 and call sequence reproduces results within the recorded library versions.
 

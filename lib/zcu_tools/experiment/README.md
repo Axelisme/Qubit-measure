@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-16，FTF 環境、固定單位 flux helper 與 Artifact 保存邊界
+**Last updated:** 2026-10-17，WhiteNoise compact rounds 與既有實驗框架邊界
 
 `experiment/` 定義實驗介面、Result 與保存資料之間的映射，以及實驗 cfg 的支援機制。這個位置不表示其現有程式碼均與 QICK 無關。`cfg_assembler.py` 只提供 Run mapping 的共用值型別，`utils/sweep.py` 使用 `program.v2` 的 `SweepCfg`。程式指令的建構與 acquire 由 [program/v2](../program/v2/README.md) 及 [experiment/v2/runtime](v2/runtime/README.md) 接合。
 
@@ -15,6 +15,9 @@ Successful builder return transfers cleanup to the host. Read the
 [acquisition environment contract](../program/v2/simulation/README.md) before
 writing a builder or numeric source. Public Run metadata contains only the
 optional opaque `simulation_id`; private replay inputs remain on the binding.
+WhiteNoise returns compact `RoundStatistics` for integrated acquisition and keeps
+per-execution `RoundSignals` for decimated traces. Raw integrated shots are drawn
+only when processing or a getter needs them, using a separate retained identity.
 
 [`ftf`](ftf/README.md) composes a named YAML sample, fixed V/A memory devices,
 fixed-coordinate joint circuits, explicit evolution/population conversion and the
