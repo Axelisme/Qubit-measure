@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 import numpy as np
 from numpy.typing import NDArray
 
+from ._envelope import sample_values
 from ._validation import integers, owned, shape
 from .secular import FluxSchedule, ModelSource
 
@@ -82,11 +83,7 @@ class EnvelopeSpec:
         times = np.asarray(local_ns, dtype=np.float64)
         if not np.isfinite(times).all() or np.any(times < 0):
             raise ValueError("envelope evaluation times must be finite and nonnegative")
-        if self.kind == "constant":
-            return np.ones(times.shape, dtype=np.complex128)
-        real = np.interp(times.ravel(), self.sample_ns, self.samples.real)
-        imag = np.interp(times.ravel(), self.sample_ns, self.samples.imag)
-        return (real + 1j * imag).astype(np.complex128).reshape(times.shape)
+        return sample_values(times, self.sample_ns, self.samples)
 
 
 @dataclass(frozen=True)

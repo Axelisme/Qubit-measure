@@ -1,6 +1,7 @@
 """Internal algorithm registry, resolved by stable Kernel.name."""
 
 from ..kernel import Kernel
+from .dop853 import DOP853Kernel
 from .dyson import DysonKernel
 from .gate_cache import GateCacheKernel
 from .period_table import PeriodTableKernel
@@ -13,6 +14,7 @@ REGISTRY: tuple[Kernel, ...] = (
     T6Kernel(),
     DysonKernel(),
     RWAKernel(),
+    DOP853Kernel(),
     GateCacheKernel(),
     PeriodTableKernel(),
 )
