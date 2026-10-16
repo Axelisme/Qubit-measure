@@ -54,8 +54,9 @@ Child key 保持 key，expression 在固定 env 求成數字後才存 Library。
 
 Adapter 如需不同於 core 的欄位，Form 明列 extras 與具名 lower，或直接回傳 adapter 自己的
 型別。Runtime 與 extras 的解讀屬 adapter，框架不知道它是不是實驗 cfg。
-`onetone/freq` 的 sampling_mode 與 homophasal 是正式 cfg 欄位。Linear 模式忽略合法校正值，
-但不忽略 expression 錯誤；homophasal 在 device I/O 前驗必要欄位與正值，不從 live point 補值。
+`onetone/freq` 的 Form 以單一 tagged sampling 選擇經 extras／lower 轉回 core 的
+sampling_mode 與 homophasal。Linear 輸出 homophasal=None。Homophasal 的必要參數
+以固定 capture 提供 fresh 初值，可覆寫；缺值或無效值阻止提交，不從 live point 補值。
 `twotone/time_domain/t1` 的 uniform 隨 RunRecord 保存。False 保原 start／stop／expts 視窗，
 由 runtime 在硬體量化前配置 delay；格點 collision 提示擴大 span 或減少 points，不靜默減點。
 
