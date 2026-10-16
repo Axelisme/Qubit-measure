@@ -272,10 +272,12 @@ def test_recipe_ref_read_is_detached_and_does_not_authorize_descendant_write() -
     from zcu_tools.gui.form_adapter import LogicalEdit, LogicalEditError
 
     with pytest.raises(LogicalEditError) as rejected:
-        resource.edit_recipe_fields([
-            LogicalEdit(("amount",), 2.0),
-            LogicalEdit(("pulse", "freq"), 125.0),
-        ])
+        resource.edit_recipe_fields(
+            [
+                LogicalEdit(("amount",), 2.0),
+                LogicalEdit(("pulse", "freq"), 125.0),
+            ]
+        )
     assert rejected.value.reason_code == "ref_ancestor"
     assert rejected.value.edit_index == 1
     assert resource.input.data == before
@@ -299,10 +301,15 @@ def test_recipe_copy_and_batch_install_once_without_replacing_base() -> None:
     resource.subscribe(lambda: notifications.append("changed"))
     resource.editor_state.subscribe(lambda: state_notifications.append("changed"))
     assert resource.select_recipe_module(("pulse",), "use_inline") is False
-    assert resource.edit_recipe_fields([
-        LogicalEdit(("amount",), 2.0),
-        LogicalEdit(("pulse", "freq"), {"expr": "125 + 5"}),
-    ]) is True
+    assert (
+        resource.edit_recipe_fields(
+            [
+                LogicalEdit(("amount",), 2.0),
+                LogicalEdit(("pulse", "freq"), {"expr": "125 + 5"}),
+            ]
+        )
+        is True
+    )
     assert resource.read_recipe_field(("pulse", "freq")).value == 130.0
     assert resource.read_recipe_field(("pulse", "freq")).input == {"expr": "125 + 5"}
     assert resource.editor_state.base.data == base
@@ -349,3 +356,60 @@ def test_recipe_inline_noop_still_takes_busy_notification_and_lifetime_guards() 
     with pytest.raises(CfgPreconditionError) as gone:
         resource.select_recipe_module(("pulse",), "use_inline")
     assert gone.value.reason is CfgPreconditionReason.RESOURCE_GONE
+
+
+def test_recipe_nested_and_extra_selectors_require_explicit_ancestor_copies() -> None:
+    from pydantic import create_model
+    from zcu_tools.gui.form import FormModel
+    from zcu_tools.gui.form_adapter import LogicalEdit, LogicalEditError, ModuleInputField
+
+    field = ModuleInputField(PulseSpec, nullable=True)
+
+    class ExtraSelectors(FormModel):
+        @classmethod
+        def options(cls, env: FormEnv):
+            return {("reference",): field.options(env)}
+
+    extras = create_model("ExtraSelectorFields", __base__=ExtraSelectors,
+                          reference=(field.annotation, None))
+
+    def lower(_extras: BaseModel, cfg: ModuleCore) -> ModuleCore:
+        return cfg
+
+    library = LibrarySnapshot(ModuleLibraryDocument(
+        format="zcu.module-library", format_version="2.0", components={
+            "Q1": ComponentLibrary(pulses={"pi": PulseSpec(
+                ch=0, nqz=1, freq=100.0, gain=0.2, waveform="Q1.waveforms.const",
+            )}, waveforms={"const": ConstWaveformCfg(length=0.1)}),
+        },
+    ))
+    resource = TabFormResource(
+        lambda _ctx: Form(ModuleCore, {}, extras=extras, lower=lower),
+        capture=lambda _aliases: TabFormSources(FormEnv(library=library)),
+        mutation_allowed=lambda: True,
+    )
+    resource.select_recipe_module(("pulse",), "use_library", key="Q1.pulses.pi")
+    before = resource.input.data
+    observed = resource.read_recipe_field(("pulse", "waveform", "length"))
+    assert observed.value == 0.1 and observed.readonly
+    assert observed.source is not None
+    assert observed.source.key == "Q1.waveforms.const"
+    assert observed.source.selector_path == ("pulse", "waveform")
+    assert observed.source.source_kind == "waveform"
+    assert observed.source.spec_path == ("length",)
+    with pytest.raises(LogicalEditError) as ancestor:
+        resource.select_recipe_module(("pulse", "waveform"), "use_inline")
+    assert ancestor.value.reason_code == "ref_ancestor"
+    assert ancestor.value.selector_path == ("pulse",)
+    assert resource.input.data == before
+    resource.select_recipe_module(("pulse",), "use_inline")
+    assert resource.read_recipe_field(("pulse", "waveform")).selector.key == "Q1.waveforms.const"
+    resource.select_recipe_module(("pulse", "waveform"), "use_inline")
+    resource.edit_recipe_fields([LogicalEdit(("pulse", "waveform", "length"), 0.08)])
+    assert resource.read_recipe_field(("pulse", "waveform", "length")).value == 0.08
+    resource.select_recipe_module(("extras", "reference"), "use_library", key="Q1.pulses.pi")
+    assert resource.read_recipe_field(("extras", "reference", "freq")).value == 100.0
+    resource.select_recipe_module(("extras", "reference"), "use_inline")
+    resource.edit_recipe_fields([LogicalEdit(("extras", "reference", "freq"), 125.0)])
+    assert resource.read_recipe_field(("extras", "reference", "freq")).value == 125.0
+    assert library.module_spec("Q1.pulses.pi").freq == 100.0
