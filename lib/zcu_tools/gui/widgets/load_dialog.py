@@ -106,9 +106,7 @@ class LoadDataDialog(QDialog):
         # subclass, which owns the row's layout.
         self._transpose_btn = QPushButton("Transpose axes")
         self._transpose_btn.setCheckable(True)
-        self._transpose_btn.toggled.connect(
-            lambda checked: self._on_transpose_toggled(checked=checked)
-        )
+        self._transpose_btn.toggled.connect(self._on_transpose_toggled)
         opt_row = QHBoxLayout()
         self._build_options(opt_row)
         content.addLayout(opt_row)
@@ -166,7 +164,7 @@ class LoadDataDialog(QDialog):
         self._raw = self._read_best_effort(filepath)
         self._render_preview()
 
-    def _on_transpose_toggled(self, *, checked: bool) -> None:
+    def _on_transpose_toggled(self, checked: bool) -> None:
         self._transpose = checked
         self._render_preview()
 

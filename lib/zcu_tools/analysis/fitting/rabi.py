@@ -10,9 +10,9 @@ def fit_rabi(
     xs: NDArray[np.float64],
     real_signals: NDArray[np.float64],
     /,
-    init_phase: float | None = None,
     *,
     decay: bool = False,
+    init_phase: float | None = None,
 ) -> tuple[
     float,
     float,
@@ -23,7 +23,28 @@ def fit_rabi(
     NDArray[np.float64],
     tuple[tuple[float, ...], NDArray[np.float64]],
 ]:
-    """Return (pi_x, pi_x_err, pi2_x, pi2_x_err, freq, freq_err, fit_signals, (pOpt, pCov))"""
+    """Fit a real Rabi trace and derive pi and pi/2 pulse coordinates.
+
+    ``xs`` and ``real_signals`` are matching 1D float64 arrays of sweep
+    coordinates and measured values. Coordinates must be regularly spaced in
+    ascending or descending order with a nonzero span. Supply enough finite
+    samples to fit a cosine (four parameters, or five with decay). Inputs are
+    not modified.
+    ``decay`` selects an exponentially damped cosine instead of a cosine.
+    ``init_phase`` fixes the phase in degrees when supplied; None fits it freely.
+    Both options must be passed by keyword.
+
+    Return (pi_x, pi_x_err, pi2_x, pi2_x_err, freq, freq_err, fit_signals,
+    (pOpt, pCov)). Coordinates and their standard errors use the units of xs;
+    frequency uses inverse xs units. Parameters are (offset, amplitude, frequency,
+    phase_degrees[, decay_time]); covariance follows that order. Fitted samples
+    follow the input order.
+
+    Invalid data can raise ValueError from initialization or fitting. Optimizer
+    non-convergence emits RuntimeWarning and returns the initial-parameter
+    fallback with infinite covariance. A zero fitted frequency cannot yield
+    finite pulse coordinates and can raise ZeroDivisionError.
+    """
 
     # choose fitting function
     fixedparams: list[float | None]
