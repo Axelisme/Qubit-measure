@@ -300,3 +300,22 @@ def test_actual_mixed_sweep_keeps_the_complete_parameter(tmp_path: Path) -> None
         assert [
             call for call in client.transport.sent if call[0] != "tab.read_recipe_field"
         ] == [call for call in before if call[0] != "tab.read_recipe_field"]
+
+
+def test_complete_set_sweep_replaces_invalid_center_draft(tmp_path: Path) -> None:
+    gui = FieldGui()
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        target = gui.owner.describe(("range", "start")).target
+        commands = getattr(target, "commands", ())
+        assert commands, "Owner must expose coordinate conversion"
+        gui.owner.run_command(("range", "start"), commands[0].name)
+        gui.owner.write({("range", "center"): {"expr": "1 / 0"}})
+        tab.set_sweep("range", start=10.0, stop=4.0, expts=4)
+        assert gui.owner.input.data["range"] == {
+            "kind": "linrange",
+            "start": 10.0,
+            "stop": 4.0,
+            "n": 4,
+        }
+        assert cfg_value(gui.publication, "range.stop") == 4.0
