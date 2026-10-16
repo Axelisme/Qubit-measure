@@ -274,6 +274,7 @@ def test_reps_dependent_timeline_rejected_before_backend(dependency):
     modules = [cfg.build("drive"), receiver().build("readout")]
     if dependency == "sweep":
         cfg.gain = QickParam(0.1, {"reps": 0.2})
+        modules[0] = cfg.build("drive")
     elif dependency == "register":
         modules.insert(0, LoadValue("count", [1, 2], "reps", "n"))
         modules[1] = Repeat("inner", "n", range_hint=(1, 2)).add_content(
