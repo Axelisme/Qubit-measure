@@ -85,7 +85,11 @@ def test_run_curve_then_save_all_reports_native_save_in_bottom_status(
     # The offline adapter returns after its host draw; terminal owner delivery restores Run.
     # qt_until's 30-second watchdog only guards a stuck worker/Qt delivery.
     qt_until(
-        lambda: flow.legends().texts == ("Signal",) and flow.observe("Run").enabled,
+        lambda: flow.legends().texts == ("Signal",)
+        and any(
+            w.kind == "QPushButton" and w.text == "Run" and w.enabled and w.visible
+            for w in flow.visible().widgets
+        ),
         label="synthetic Run result and idle button",
     )
     flow.screenshot(shots / "04-run-complete.png")

@@ -4,6 +4,7 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
+from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import (
     QDialog,
     QFormLayout,
@@ -17,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from tests.gui import _user_input
+from tests.gui._qt_waits import qt_until
 
 
 @pytest.fixture
@@ -122,6 +124,30 @@ def test_visible_dialog_text_and_caller_chosen_png_path(surface, qapp, tmp_path)
         assert driver.dialogs() == ()
     finally:
         dialog.deleteLater()
+
+
+def test_visible_snapshot_distinguishes_running_button_from_caption(surface, qapp) -> None:
+    page = surface.centralWidget().currentWidget()
+    button = QPushButton("Run")
+    page.layout().addRow(button)
+    button.clicked.connect(lambda: button.setText("Stop"))
+    qapp.processEvents()
+    driver = _user_input.ComponentDriver(surface)
+    driver.click("Run")
+    running = driver.visible()
+    assert not any(w.kind == "QPushButton" and w.text == "Run" for w in running.widgets)
+    assert any(w.kind == "QPushButton" and w.text == "Stop" for w in running.widgets)
+    assert not any(w.object_name == "hidden_action" for w in running.widgets)
+    QTimer.singleShot(0, lambda: button.setText("Run"))
+    # The queued synthetic terminal callback restores Run on the next owner turn.
+    qt_until(
+        lambda: any(
+            w.kind == "QPushButton" and w.text == "Run" and w.enabled and w.visible
+            for w in driver.visible().widgets
+        ),
+        label="synthetic button terminal caption",
+    )
+    assert driver.observe("Run").enabled
 
 
 def test_only_visible_legend_text_is_observed(surface, qapp) -> None:
