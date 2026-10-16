@@ -6,7 +6,6 @@ from zcu_tools.mcp.measure.recipe import (
     RecipeFieldEdit,
     RecipeGenerator,
     RecipeNeedsParameters,
-    RecipeRun,
     RecipeSession,
 )
 
@@ -80,10 +79,10 @@ def onetone_spectrum_over_power(  # noqa: PLR0913 - Preserve typed tool keywords
     )
     tab.set("reps", reps)
     tab.set("rounds", rounds)
-    run, status = yield tab.run()
-    if status == "cancelled":
+    result = yield from tab.run_step()
+    run = result.run
+    if result.status == "cancelled" or run is None:
         return
-    assert isinstance(run, RecipeRun)
     run.save_raw()
     run.preview()
 

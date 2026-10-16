@@ -33,7 +33,7 @@ def test_retain_source_records_scalar_and_sweep_without_cfg_edits(
         tab = session.open_tab("lookback")
         tab.retain_source("rounds", "caller_rounds")
         tab.retain_source("range", "caller_range")
-        yield tab.run()
+        yield from tab.run_step()
 
     sample = replace(
         definition(run),
@@ -267,7 +267,7 @@ def test_actual_mixed_sweep_keeps_the_complete_parameter(tmp_path: Path) -> None
     def run(session: RecipeSession) -> RecipeGenerator:
         tab = session.open_tab("lookback")
         tab.set_sweep("range", start=10.0, stop=20.0)
-        yield tab.run()
+        yield from tab.run_step()
 
     sample = replace(
         definition(run),

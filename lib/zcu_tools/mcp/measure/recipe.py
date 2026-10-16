@@ -1,9 +1,10 @@
 """Author-facing generator recipe contracts; GUI policy stays in the GUI owner.
 
 Recipes receive a RecipeSession from the driver, not a transport or cfg publication.
-Run, analysis and writeback questions are yielded once. The driver delivers their
-status or throws a failure back into that yield expression. Session close closes
-the generator, so ordinary Python finally blocks still run.
+Run and analysis use typed yield-from helpers; ask marks a writeback handoff.
+The driver stores each named result on its operation, or throws a failure back
+into the helper call. Session close closes the generator, so ordinary Python
+finally blocks still run.
 
 Cfg preparation uses one fixed connection and the GUI's returned publications.
 The injected definitions drive these handles through the shared execution worker.
@@ -286,11 +287,46 @@ class RecipeRunSnapshot:
     images: tuple[PngImage, ...] = ()
 
 
+@dataclass(frozen=True)
+class RunStepResult:
+    """Run delivery: run retains partial data, or is None for a suppressed start.
+
+    status is completed, finished_early, or cancelled. Cancellation is returned to
+    the author, who decides how to clean up and whether to return.
+    """
+
+    run: RecipeRun | None
+    status: StepStatus
+
+
+@dataclass(frozen=True)
+class AnalysisStepResult:
+    """Analysis delivery with completed/cancelled status and captured analysis.
+
+    analysis is None when cancelled; otherwise it holds the completed capture.
+    """
+
+    analysis: RecipeAnalysis | None
+    status: StepStatus
+
+
+@dataclass(frozen=True)
+class WritebackResult:
+    """Answer delivery, without writing or authorizing any data.
+
+    decision is accepted/skipped on completed status, or None on cancelled status.
+    """
+
+    decision: WritebackDecision | None
+    status: StepStatus
+
+
 class RunOperation:
     """Opaque, non-iterable Run handle created by RecipeTab.run.
 
-    Yield once to receive (RecipeRun, completed/finished_early/cancelled). A
-    between-yield cancel instead delivers (None, cancelled) without sending Run.
+    Use RecipeTab.run_step with yield from, not a direct yield of this handle.
+    delivery is None until the driver stores the named RunStepResult. A
+    between-step cancel delivers a result with no run, without sending Run.
     Failure or superseded source is thrown back at the yield expression.
     Construction is framework-only: binding is the owner-created Run state, or
     None for one suppressed start. Authors obtain handles from RecipeTab.run.
@@ -298,6 +334,7 @@ class RunOperation:
 
     def __init__(self, binding: _RunBinding | None) -> None:
         self._binding = binding
+        self.delivery: RunStepResult | None = None
 
     def snapshot(self) -> RecipeRunSnapshot | None:
         """Read this fixed Run capture without RPCs; None means suppressed start."""
@@ -369,7 +406,8 @@ class RunOperation:
 class AnalyzeOperation:
     """Opaque, non-iterable analysis handle created by RecipeRun.analyze.
 
-    Yield once to receive (RecipeAnalysis, completed) or (None, cancelled).
+    Use RecipeRun.analyze_step with yield from, not a direct yield of this handle.
+    delivery is None until the driver stores the named AnalysisStepResult.
     Interactive handoff does not finish the yield; GUI done resumes observation.
     Completed delivery captures the native result, synchronously saves the whole
     stage artifact and reads writeback candidates once without writing them.
@@ -385,6 +423,7 @@ class AnalyzeOperation:
 
     def __init__(self, execution: AnalysisExecution | None) -> None:
         self._execution = execution
+        self.delivery: AnalysisStepResult | None = None
 
     def snapshot(self) -> ExecutionSnapshot | None:
         """Read detached local progress; None means a suppressed start, not unknown."""
@@ -437,14 +476,16 @@ class AnalyzeOperation:
 class WritebackQuestion:
     """Opaque, non-iterable captured question created by propose_writeback.
 
-    Yield once to pause until answer delivers (accepted/skipped, completed), or
-    cancellation delivers (None, cancelled). Answer itself never writes data.
+    Use yield from ask(question) to pause for an answer or cancellation.
+    delivery is None until the driver stores the named WritebackResult.
+    Answer itself never writes data.
     Construction is framework-only: selection is the validated captured proposal.
     Authors obtain handles from RecipeRun.propose_writeback.
     """
 
     def __init__(self, selection: WritebackSelection) -> None:
         self._selection = deepcopy(selection)
+        self.delivery: WritebackResult | None = None
 
     def snapshot(self) -> WritebackSelection:
         """Read detached stable names and proposals without a GUI request or write."""
@@ -1210,8 +1251,23 @@ class RecipeTab:
             self._binding.origins[f"{field}.{model_field}"] = captured_sources[key]
         self._binding.origins[field] = captured_sources
 
+    def run_step(self) -> Generator[RecipeStep, None, RunStepResult]:
+        """Send Run and await its named result using ``yield from tab.run_step()``.
+
+        Uses the same cfg, source and cancellation contract as run(). Completion
+        failures are thrown here. Cancelled results let the author clean up and
+        return; finish_early retains the partial Run for saving and analysis.
+        """
+        operation = self.run()
+        yield RecipeStep(operation)
+        if operation.delivery is None:
+            raise ValueError("Run helper resumed without driver delivery")
+        return operation.delivery
+
     def run(self) -> RunOperation:
-        """Immediately send Run for this tab and return its yield handle.
+        """Immediately send Run and return an opaque handle for framework use.
+
+        Recipe authors use yield from run_step(), not yield run().
 
         The recipe cfg publication must be valid. Reset captured aliases and
         parameter sources before edits; Run sends no source overrides.
@@ -1391,6 +1447,24 @@ class RecipeRun:
         image = validated_png(base64.b64decode(encoded, validate=True))
         binding.publish(replace(binding.capture, images=(image,)))
 
+    def analyze_step(
+        self,
+        stage: AnalysisStage,
+        *,
+        params: Mapping[str, RecipeParameter] | None = None,
+    ) -> Generator[RecipeStep, None, AnalysisStepResult]:
+        """Start analysis and await its capture with ``yield from``.
+
+        stage and params follow analyze(). Interactive analysis hands control to
+        the agent until done; failures are thrown here. Cancellation returns a
+        named result with no analysis, leaving author cleanup in control.
+        """
+        operation = self.analyze(stage, params=params)
+        yield RecipeStep(operation)
+        if operation.delivery is None:
+            raise ValueError("Analysis helper resumed without driver delivery")
+        return operation.delivery
+
     def analyze(
         self,
         stage: AnalysisStage,
@@ -1398,6 +1472,8 @@ class RecipeRun:
         params: Mapping[str, RecipeParameter] | None = None,
     ) -> AnalyzeOperation:
         """Immediately start primary/post analysis bound to this Run's source.
+
+        Recipe authors use yield from analyze_step(), not yield analyze().
 
         params supplies named scalar/one-level-array GUI updates; None keeps defaults.
         Invalid stage or unsupported/non-finite parameters raise ValueError before
@@ -1488,8 +1564,9 @@ class RecipeRun:
 
         items uses stable target_name, None selects all, empty selects none. Reject
         unknown, repeated or cross-stage ambiguous names before publishing the
-        question. Yield the handle to await accepted/skipped; no timeout or write
-        is implied. The recipe must call tab.accept explicitly to write anything.
+        question. Use yield from ask(question) to await accepted/skipped or
+        cancellation; no timeout or write is implied. The recipe must call
+        tab.accept explicitly to write anything.
         """
         from zcu_tools.mcp.measure.writeback import select_writeback_items
 
@@ -1506,10 +1583,34 @@ class RecipeRun:
 
 
 RecipeOperation = RunOperation | AnalyzeOperation | WritebackQuestion
-RecipeDelivery = tuple[
-    RecipeRun | RecipeAnalysis | WritebackDecision | None, StepStatus
-]
-RecipeGenerator = Generator[RecipeOperation, RecipeDelivery, None]
+
+
+@dataclass(frozen=True)
+class RecipeStep:
+    """Framework envelope yielded by helpers, not constructed by recipe authors.
+
+    operation is the opaque Run, analysis, or captured question to complete.
+    Keeping this envelope separate lets the driver reject direct operation yields.
+    """
+
+    operation: RecipeOperation
+
+
+# Include operations so the driver can diagnose direct-yield author mistakes.
+RecipeGenerator = Generator[RecipeStep | RecipeOperation, None, None]
+
+
+def ask(question: WritebackQuestion) -> Generator[RecipeStep, None, WritebackResult]:
+    """Wait for accepted/skipped or cancellation via ``yield from ask(question)``.
+
+    question must be a captured WritebackQuestion from propose_writeback(). This
+    handoff never writes data. Cancellation returns status cancelled with no
+    decision, allowing author cleanup; session close instead closes the generator.
+    """
+    yield RecipeStep(question)
+    if question.delivery is None:
+        raise ValueError("Question helper resumed without driver delivery")
+    return question.delivery
 
 
 @dataclass(frozen=True)

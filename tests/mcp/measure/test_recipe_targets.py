@@ -28,7 +28,7 @@ def targeted(
     tab.read_value("$resonator.freq")
     for path in ("modules.readout.module.freq",):
         tab.set(path, {"expr": "$resonator.freq"}, source="$resonator.freq")
-    yield tab.run()
+    yield from tab.run_step()
 
 
 _TARGETED_DEFINITION = definition(
@@ -79,7 +79,7 @@ def test_open_tab_preserves_named_aliases_for_new_and_reused_recipe_runs(
         aliases["resonator"] = "missing"
         tab.use_library("modules.readout", None, required="readout_ref")
         tab.read_value("$resonator.freq")
-        yield tab.run()
+        yield from tab.run_step()
 
     registered = definition(
         recipe, {"type": "object", "properties": {}, "additionalProperties": False}
@@ -126,7 +126,7 @@ def required_library(
     tab = session.open_tab("lookback")
     tab.use_library("modules.readout", "R2.readout.main")
     tab.use_library("modules.readout", reference, required="readout_ref")
-    yield tab.run()
+    yield from tab.run_step()
 
 
 @pytest.mark.parametrize("reference", [None, "R2.readout.main", "missing.readout.main"])

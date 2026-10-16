@@ -5,9 +5,9 @@ from zcu_tools.mcp.measure.recipe import (
     RecipeDefinition,
     RecipeGenerator,
     RecipeNeedsParameters,
-    RecipeRun,
     RecipeSession,
     RecipeTab,
+    ask,
 )
 
 from .helpers import set_frequency
@@ -92,18 +92,18 @@ def lookback(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
         raise RecipeNeedsParameters((missing,))
     _set_readout_timing(tab, readout_length_us, trigger_offset_us)
     tab.set("rounds", rounds, source="explicit")
-    run, status = yield tab.run()
-    if status == "cancelled":
+    result = yield from tab.run_step()
+    run = result.run
+    if result.status == "cancelled" or run is None:
         return
-    assert isinstance(run, RecipeRun)
     run.save_raw()
-    _, status = yield run.analyze("primary")
-    if status == "cancelled":
+    analysis = yield from run.analyze_step("primary")
+    if analysis.status == "cancelled":
         return
-    decision, status = yield run.propose_writeback()
-    if status == "cancelled":
+    decision = yield from ask(run.propose_writeback())
+    if decision.status == "cancelled":
         return
-    if decision == "accepted":
+    if decision.decision == "accepted":
         tab.accept()
 
 
