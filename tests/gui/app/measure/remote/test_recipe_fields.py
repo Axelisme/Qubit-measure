@@ -179,6 +179,31 @@ def nested_recipe_rpc(form_rpc, tmp_path):
         restore_registry(registry_before)
 
 
+def assert_run_keeps_nested_length_after_updates(prepared, nested_recipe_rpc) -> None:
+    """Observe the original Run after successful library and draft mutations."""
+    from zcu_tools.cfg_model import ConstWaveformCfg
+
+    from tests.gui._qt_waits import qt_until
+
+    fixture, tab, client, context, target = nested_recipe_rpc
+    operation = prepared.run()
+    # The accepted synthetic Run returns immediately and queues its owner delivery.
+    qt_until(
+        lambda: not fixture.state.is_tab_running(tab), label="synthetic recipe Run"
+    )
+    result = client.context.session.send_gui_rpc("tab.snapshot", {"tab_id": tab})
+    assert result["tabs"][0]["result_state"]["available"] is True
+    captured = operation.snapshot()
+    assert captured is not None
+    assert captured.actual["fields"]["pulse.waveform.length"]["value"] == 0.08
+    context.set_waveform(target, "Q1.waveforms.seed", ConstWaveformCfg(length=0.7))
+    prepared.set("pulse.waveform.length", 0.16)
+    assert prepared.read_field("pulse.waveform.length").value == 0.16
+    after_updates = operation.snapshot()
+    assert after_updates is not None
+    assert after_updates.actual["fields"]["pulse.waveform.length"]["value"] == 0.08
+
+
 def test_recipe_tab_uses_real_rpc_for_nested_captured_refs_and_copy(
     nested_recipe_rpc,
 ) -> None:
@@ -228,12 +253,9 @@ def test_recipe_tab_uses_real_rpc_for_nested_captured_refs_and_copy(
     prepared.set("pulse.waveform.length", 0.08)
     prepared.retain_source("pulse.waveform.length", "explicit")
     assert prepared.read_field("pulse.waveform.length").value == 0.08
-    operation = prepared.run()
-    fixture.ctrl.close()
-    captured = operation.snapshot()
-    assert captured is not None
-    assert captured.actual["fields"]["pulse.waveform.length"]["value"] == 0.08
+    assert_run_keeps_nested_length_after_updates(prepared, nested_recipe_rpc)
     assert field.value == 0.1
+    fixture.ctrl.close()
 
 
 @pytest.mark.parametrize("operation", ["read", "copy"])
