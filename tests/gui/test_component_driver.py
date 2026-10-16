@@ -319,3 +319,11 @@ def test_checkbox_snapshot_tracks_binary_clicks_and_disabled_hidden_noops(
     assert driver.status().text == "off"
     assert driver.observe(object_name="simulate").checked is None
     assert driver.observe("Unavailable").checked is None
+
+
+def test_tree_snapshot_does_not_expose_hidden_column_text(tree_surface, qapp) -> None:
+    window, tree = tree_surface
+    tree.setColumnHidden(1, True)
+    qapp.processEvents()
+    driver = _user_input.ComponentDriver(window)
+    assert driver.visible().tree_rows[0].columns == ("general", "", "")
