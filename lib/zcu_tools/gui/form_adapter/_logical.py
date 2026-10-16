@@ -27,7 +27,7 @@ from zcu_tools.gui.form import (
 from zcu_tools.gui.form._describe import describe_field
 from zcu_tools.gui.form._selection import Field, Level, root_level, validate_path
 from zcu_tools.gui.form._sources import error_path
-from zcu_tools.gui.form._structure import StructureError
+from zcu_tools.gui.form._structure import StructureError, alternatives
 
 from ._seeds import (
     selected_model,
@@ -59,6 +59,31 @@ def _marker(info: FieldInfo) -> ModuleSelector | None:
             if found is not None:
                 return found
     return None
+
+
+def _contains_selector(info: FieldInfo) -> bool:
+    """Whether replacing this declaration could replace a generated selector.
+
+    Inspect metadata across all declared branches, including inactive/nullable
+    models and container items. Do not parse payloads or select/evaluate branches;
+    selector-bearing containers must be edited through their logical children.
+    """
+    pending = [info]
+    seen: set[type[BaseModel]] = set()
+    while pending:
+        field = pending.pop()
+        if _marker(field) is not None:
+            return True
+        for member in alternatives(field.annotation):
+            if isinstance(member, type) and issubclass(member, BaseModel):
+                if member not in seen:
+                    seen.add(member)
+                    pending.extend(member.model_fields.values())
+            else:
+                pending.extend(
+                    FieldInfo.from_annotation(item) for item in get_args(member)
+                )
+    return False
 
 
 def _selector(target: Field, marker: ModuleSelector, env: FormEnv) -> LogicalSelector:
@@ -533,13 +558,14 @@ def edits(
         except LogicalEditError as exc:
             exc.edit_index = index
             raise
-        if position.marker is not None:
+        if _contains_selector(position.target.info):
             raise LogicalEditError(
-                "Use a dedicated module selection operation",
+                "Edit selector-bearing containers through logical children; "
+                "use dedicated operations for module selection",
                 reason_code="module_selector",
                 path=change.path,
                 edit_index=index,
-                selector_path=change.path,
+                selector_path=change.path if position.marker is not None else None,
             )
         batch[position.target.path] = change.value
         origins[position.target.path] = (change.path, index)
@@ -553,11 +579,12 @@ def edits(
             origins,
         )
     except StructureError as exc:
+        path, index = origins[exc.path]
         raise LogicalEditError(
             str(exc),
             reason_code="form_structure",
-            path=changes[-1].path if changes else (),
-            edit_index=len(changes) - 1 if changes else None,
+            path=path,
+            edit_index=index,
         ) from exc
 
 
