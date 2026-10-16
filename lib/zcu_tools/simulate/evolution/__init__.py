@@ -5,7 +5,7 @@ records and tools here; submodule layout is not a second integration interface.
 """
 
 from .batch import CPUReference, PlateauFamily
-from .controls import ControlPulse, ControlSequence, Envelope, PhaseEvent
+from .controls import ControlPulse, ControlSequence, Envelope, PhaseEvent, quantize_ns
 from .intel import IntelOpenCL
 from .library import BuildPlan, EvolutionLibrary, LibrarySnapshot
 from .model import DriveSource, NumericModel, SolverSettings

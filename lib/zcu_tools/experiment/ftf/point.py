@@ -17,6 +17,7 @@ from zcu_tools.simulate.evolution import (
     DriveSource,
     Envelope,
     NumericModel,
+    quantize_ns,
 )
 from zcu_tools.simulate.ftf import JointModel, Resonator
 from zcu_tools.simulate.lines import FilteredFlux, FluxLine
@@ -41,8 +42,9 @@ def _envelope(event: PulseEvent) -> Envelope:
 def _control(event: PulseEvent, name: str) -> ControlPulse:
     start = event.start_us * 1000
     frequency = event.frequency_mhz / 1000
+    # Local carrier time starts at the numeric owner's quantized support.
     phase = np.deg2rad(event.phase_deg) + 2 * np.pi * frequency * (
-        start - event.phase_reference_us * 1000
+        quantize_ns(start) - event.phase_reference_us * 1000
     )
     breakpoints = (
         ()

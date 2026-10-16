@@ -5,6 +5,9 @@
 `Evolution` owns event geometry, solver selection, U lookup and exact density
 records. The caller supplies a model, continuous controls and an explicit initial
 density. No shot, filter tail or noise realization survives a call implicitly.
+`quantize_ns` exposes the same absolute nearest-2-ns, ties-even event geometry
+used by controls. Composition callers use it when anchoring a local carrier to
+an external common phase reference; local reset/continuous semantics do not change.
 The solver contracts exact Lindblad jump algebra before repeated RHS evaluations.
 Dynamic callbacks still run and validate their full contents at every evaluation.
 Only identical contents reuse algebra. Hamiltonian and baths stay in one full
