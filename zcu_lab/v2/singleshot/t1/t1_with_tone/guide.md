@@ -4,7 +4,7 @@ Single-shot T1-with-tone: applies a π pulse and a simultaneous probe tone durin
 
 ## Expects (parameter context)
 
-Open and Reset capture the current aliases, parameters and library. Relax delay is 5 * `$qubit.t1.` Length stop is 5 * `$qubit.ext.t1_with_tone`; there is no fallback to t1. Classification seeds `$qubit.ext.readout_cal.g_center`/e_center/radius; missing calibration stays Invalid. Inline templates read `$qubit.freq`, `$qubit.wiring.L01.ch` and `$resonator.freq`/wiring.ch/wiring.ro_ch; readout trigger uses `$resonator.ext.time_of_fly` + 0.05 us. Missing required sources remain Invalid; no numeric fallback is supplied.
+Open and Reset capture the current aliases, parameters and library. Relax delay is 5 * `$qubit.t1.` Length stop is 5 * `$qubit.ext.t1_with_tone`; there is no fallback to t1. Classification seeds `$qubit.ext.readout_cal.g_center`/e_center/radius; missing calibration stays Invalid. Inline templates read `$qubit.freq`, `$qubit.wiring.ch` and `$resonator.freq`/wiring.ch/wiring.ro_ch; readout trigger uses `$resonator.ext.time_of_fly` + 0.05 us. Missing required sources remain Invalid; no numeric fallback is supplied.
 
 ## Expects (ModuleLibrary)
 

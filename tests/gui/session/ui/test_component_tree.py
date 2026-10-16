@@ -2,12 +2,12 @@
 
 from collections.abc import Generator
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 import yaml
-from pydantic import ConfigDict, ValidationError, create_model
-from qtpy.QtCore import QEvent, QPoint, QPointF, QRect, Qt
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
+from qtpy.QtCore import QEvent, QPoint, QPointF, Qt
 from qtpy.QtGui import QKeyEvent, QMouseEvent
 from qtpy.QtWidgets import (
     QApplication,
@@ -16,7 +16,6 @@ from qtpy.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QScrollArea,
     QTreeWidget,
     QTreeWidgetItem,
     QWidget,
@@ -42,8 +41,10 @@ from zcu_tools.resources.entry import (
 )
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._user_input import ComponentDriver
 from tests.resources.entry.fakes import (
     Profiled,
+    ProfiledChannel,
     register_fakes,
     registry_state,
     restore_registry,
@@ -61,10 +62,31 @@ class OpenComponent(ComponentSchema):
     rate: float | None = None
 
 
-# Forty optional fields: more rows than any test screen fits without scrolling.
+class RequiredRouting(BaseModel):
+    main: ProfiledChannel
+    bias: ProfiledChannel | None = None
+
+
+class RequiredForm(ComponentSchema):
+    label: str = Field(description="Required label.")
+    routing: RequiredRouting
+    optional_routing: RequiredRouting | None = None
+    rate: float = Field(json_schema_extra={"unit": "MHz"}, description="Sample rate.")
+    mode: Literal["A", "V"]
+    enabled: bool
+    count: int = Field(strict=True)
+    notes: str | None = None
+
+
+class RequiredDrive(ComponentSchema):
+    sense: str
+    source: str
+
+
+# Forty required fields: more rows than any test screen fits without scrolling.
 # create_model takes field definitions as untyped keyword arguments.
 _TALL_FIELDS: dict[str, Any] = {
-    f"value_{index:02d}": (float | None, None) for index in range(40)
+    f"value_{index:02d}": (float, ...) for index in range(40)
 }
 TallComponent = create_model("TallComponent", __base__=ComponentSchema, **_TALL_FIELDS)
 
@@ -87,6 +109,8 @@ def owner(qapp) -> Generator[ContextService]:
         component_registry.register("test/profiled", Profiled)
         component_registry.register("test/open", OpenComponent)
         component_registry.register("test/tall", TallComponent)
+        component_registry.register("test/form", RequiredForm)
+        component_registry.register("test/drive", RequiredDrive)
         installed = registry_state()
         yield _service()
         assert registry_state() == installed
@@ -611,65 +635,129 @@ def test_add_button_opens_a_modal_dialog_naming_the_destination(qapp, component_
 
 
 def test_dialog_fields_follow_the_kind_schema_and_rebuild_on_kind_change(
-    qapp, component_widget
+    qapp, component_widget, tmp_path
 ):
     widget, _control = component_widget
-    dialog = _open_add_dialog(qapp, widget, "test/profiled")
-
-    # Groups are header rows without an input; their leaves get inputs.
-    for group in ("routing", "routing.main", "routing.bias"):
-        _child(dialog, QLabel, f"label:{group}")
-        assert dialog.findChild(QWidget, f"field:{group}") is None
-    for leaf in ("label", "routing.main.ch", "routing.bias.ch", "rate", "tags"):
-        _child(dialog, QWidget, f"field:{leaf}")
-    assert dialog.findChild(QWidget, "field:kind") is None
-
-    mode = _child(dialog, QComboBox, "field:mode")
-    assert [mode.itemText(i) for i in range(mode.count())] == ["", "A", "V"]
-    enabled = _child(dialog, QComboBox, "field:enabled")
-    assert enabled.currentText() == ""
-    assert {enabled.itemText(i) for i in range(enabled.count())} == {
-        "",
-        "true",
-        "false",
+    driver = ComponentDriver(widget)
+    driver.click("Add component…")
+    driver.screenshot(tmp_path / "opened.png")
+    driver.select_combo("test/form", object_name="add_kind")
+    driver.screenshot(tmp_path / "required-form.png")
+    fields = {
+        field.object_name
+        for field in driver.visible().widgets
+        if field.object_name.startswith("field:")
     }
-    assert _child(dialog, QLabel, "unit:rate").text() == "MHz"
-    label_input = _child(dialog, QLineEdit, "field:label")
-    rate_input = _child(dialog, QLineEdit, "field:rate")
-    assert label_input.placeholderText() != rate_input.placeholderText()
+    assert fields == {
+        "field:label",
+        "field:routing.main.ch",
+        "field:rate",
+        "field:mode",
+        "field:enabled",
+        "field:count",
+    }
+    submit = driver.observe(object_name="add_submit")
+    assert not submit.enabled
+    assert (
+        submit.tooltip
+        == "Missing: name, label, routing.main.ch, rate, mode, enabled, count"
+    )
+    assert (
+        driver.observe(object_name="label:routing.main.ch").text == "routing.main.ch *"
+    )
+    assert driver.observe(object_name="field:routing.main.ch").visible
+    assert (
+        "Channel index." in driver.observe(object_name="field:routing.main.ch").tooltip
+    )
+    labels = {item.text for item in driver.visible().widgets if item.kind == "QLabel"}
+    assert "routing" not in labels and "main" not in labels
+    assert driver.observe(object_name="unit:rate").text == "MHz"
 
-    _child(dialog, QComboBox, "add_kind").setCurrentText("test/required")
-    qapp.processEvents()
-    _child(dialog, QLineEdit, "field:reference")
-    assert dialog.findChild(QWidget, "field:label") is None
-    assert dialog.findChild(QWidget, "field:routing.main.ch") is None
+    driver.select_combo("test/required", object_name="add_kind")
+    driver.screenshot(tmp_path / "changed-kind.png")
+    assert driver.observe(object_name="field:reference").visible
+    assert (
+        driver.observe(object_name="add_submit").tooltip == "Missing: name, reference"
+    )
+    assert {
+        item.object_name
+        for item in driver.visible().widgets
+        if item.object_name.startswith("field:")
+    } == {"field:reference"}
+
+
+def test_dialog_without_required_fields_shows_hint_and_adds_name_and_kind(
+    qapp, component_widget, tmp_path
+):
+    widget, _control = component_widget
+    driver = ComponentDriver(widget)
+    driver.click("Add component…")
+    driver.screenshot(tmp_path / "opened.png")
+    driver.select_combo("test/open", object_name="add_kind")
+    driver.screenshot(tmp_path / "no-required-fields.png")
+    assert "No required fields. Edit the others in Inspect after adding." in {
+        item.text for item in driver.visible().widgets
+    }
+    submit = driver.observe(object_name="add_submit")
+    assert not submit.enabled
+    assert submit.tooltip == "Missing: name"
+    driver.enter_text(object_name="add_name", value="O1")
+    driver.screenshot(tmp_path / "added.png")
+    assert driver.dialogs() == ()
+    assert any(row.path == ("O1",) for row in driver.visible().tree_rows)
+
+
+def test_dialog_without_required_fields_submits_only_name_and_kind(
+    qapp, component_widget
+):
+    """Submission contract, separate from the driver-only UI scenario."""
+    widget, control = component_widget
+    dialog = _open_add_dialog(qapp, widget, "test/open")
+    _child(dialog, QLineEdit, "add_name").setText("O1")
+    _submit(qapp, dialog)
+    assert document_value(control.inspect_document(), "O1") == {"kind": "test/open"}
+
+
+def _fill_required_form(dialog: QDialog, *, count: str = "3") -> None:
+    _fill(dialog, "label", "probe")
+    _fill(dialog, "routing.main.ch", "2")
+    _fill(dialog, "rate", "4300.5")
+    _fill(dialog, "mode", "V")
+    _fill(dialog, "enabled", "true")
+    _fill(dialog, "count", count)
 
 
 def test_dialog_submits_filled_fields_as_nested_mapping_and_selects_the_component(
     qapp, component_widget
 ):
+    """Submission/field contract; the driver scenarios cover visible interaction."""
     widget, control = component_widget
-    dialog = _open_add_dialog(qapp, widget, "test/profiled")
+    dialog = _open_add_dialog(qapp, widget, "test/form")
+    assert _combo_items(_child(dialog, QComboBox, "field:mode")) == ["", "A", "V"]
+    assert set(_combo_items(_child(dialog, QComboBox, "field:enabled"))) == {
+        "",
+        "true",
+        "false",
+    }
+    assert _child(dialog, QLabel, "label:routing.main.ch").indent() == 0
     _child(dialog, QLineEdit, "add_name").setText("P1")
-    _fill(dialog, "label", "probe")
-    _fill(dialog, "routing.bias.ch", "2")
-    _fill(dialog, "rate", "4300.5")
-    _fill(dialog, "mode", "V")
-    _fill(dialog, "enabled", "true")
-
+    _fill_required_form(dialog)
+    assert _child(dialog, QLabel, "label:routing.main.ch").text() == "routing.main.ch *"
     _submit(qapp, dialog)
 
     assert _visible_dialogs(widget) == []
     component = document_value(control.inspect_document(), "P1")
-    assert isinstance(component, dict)
-    # Only filled fields are sent; the untouched routing.main group is absent.
-    assert component["routing"] == {"bias": {"ch": 2}}
-    assert component["rate"] == 4300.5
-    assert component["mode"] == "V"
-    assert component["enabled"] is True
-    assert "count" not in component
+    assert component == {
+        "kind": "test/form",
+        "label": "probe",
+        "routing": {"main": {"ch": 2}},
+        "rate": 4300.5,
+        "mode": "V",
+        "enabled": True,
+        "count": 3,
+    }
     assert _current_path(widget) == ["P1"]
-    assert _row(widget, "P1", "routing", "bias", "ch").text(VALUE) == "2"
+    assert _row(widget, "P1", "routing", "main", "ch").text(VALUE) == "2"
 
 
 def test_dialog_marks_missing_required_fields_and_does_not_submit(
@@ -679,29 +767,39 @@ def test_dialog_marks_missing_required_fields_and_does_not_submit(
     dialog = _open_add_dialog(qapp, widget, "test/profiled")
     name_label = _child(dialog, QLabel, "label:add_name")
     required_label = _child(dialog, QLabel, "label:label")
+    submit = _child(dialog, QPushButton, "add_submit")
     assert _is_red(name_label) and _is_red(required_label)
-    assert not _is_red(_child(dialog, QLabel, "label:rate"))
-    _fill(dialog, "rate", "4300.5")
+    assert not submit.isEnabled()
+    assert submit.toolTip() == "Missing: name, label"
 
     _submit(qapp, dialog)
 
     assert _visible_dialogs(widget) == [dialog]
     assert control.inspect_document().components == {}
-    assert "label" in _child(dialog, QLabel, "add_error").text()
-
     _child(dialog, QLineEdit, "add_name").setText("P1")
+    assert not submit.isEnabled()
+    assert submit.toolTip() == "Missing: label"
     _fill(dialog, "label", "probe")
     assert not _is_red(name_label) and not _is_red(required_label)
+    assert submit.isEnabled() and submit.toolTip() == ""
+    _fill(dialog, "label", "")
+    assert _is_red(required_label) and not submit.isEnabled()
+    assert submit.toolTip() == "Missing: label"
+    _fill(dialog, "label", "probe")
+    _child(dialog, QLineEdit, "add_name").setText("")
+    assert _is_red(name_label) and not submit.isEnabled()
+    assert submit.toolTip() == "Missing: name"
+    _child(dialog, QLineEdit, "add_name").setText("P1")
+    assert submit.isEnabled() and submit.toolTip() == ""
     _submit(qapp, dialog)
     assert "P1" in control.inspect_document().components
 
 
 def test_owner_rejection_stays_in_the_dialog_with_input_kept(qapp, component_widget):
     widget, control = component_widget
-    dialog = _open_add_dialog(qapp, widget, "test/profiled")
+    dialog = _open_add_dialog(qapp, widget, "test/form")
     _child(dialog, QLineEdit, "add_name").setText("P1")
-    _fill(dialog, "label", "probe")
-    _fill(dialog, "count", "2.5")
+    _fill_required_form(dialog, count="2.5")
 
     _submit(qapp, dialog)
 
@@ -720,24 +818,38 @@ def test_owner_rejection_stays_in_the_dialog_with_input_kept(qapp, component_wid
     assert _error(widget).text() == ""
 
 
-def test_dialog_height_stays_within_the_screen_and_fields_scroll(
-    qapp, component_widget
-):
+@pytest.fixture
+def near_bottom_dialog(qapp, component_widget) -> ComponentDriver:
+    """Set up a short dialog where a user could have left it near screen bottom."""
     widget, _control = component_widget
-    dialog = _open_add_dialog(qapp, widget, "test/tall")
+    dialog = _open_add_dialog(qapp, widget, "test/required")
     screen = dialog.screen()
     assert screen is not None
-    limit = 0.9 * screen.availableGeometry().height()
+    available = screen.availableGeometry()
+    dialog.move(
+        available.left() + 10, available.bottom() - dialog.frameGeometry().height() - 10
+    )
+    qapp.processEvents()
+    return ComponentDriver(widget)
 
-    assert dialog.height() <= limit
-    scroll = _child(dialog, QScrollArea, "add_fields")
-    scrollbar = scroll.verticalScrollBar()
-    assert scrollbar is not None and scrollbar.maximum() > 0
+
+def test_dialog_height_stays_within_the_screen_and_fields_scroll(
+    near_bottom_dialog: ComponentDriver, tmp_path
+):
+    driver = near_bottom_dialog
+    driver.screenshot(tmp_path / "short-kind.png")
+    assert driver.dialogs()[0].frame_within_screen
+    driver.select_combo("test/tall", object_name="add_kind")
+    driver.screenshot(tmp_path / "tall-kind.png")
+    placement = driver.dialogs()[0]
+    assert placement.frame_within_screen
+    assert placement.height_fraction <= 0.9
+    assert driver.scroll_area(object_name="add_fields").vertical_scrollable
     for name in ("add_submit", "add_cancel"):
-        button = _child(dialog, QPushButton, name)
-        assert button.isVisible()
-        placed = QRect(button.mapTo(dialog, QPoint(0, 0)), button.size())
-        assert dialog.rect().contains(placed)
+        assert driver.observe(object_name=name).fully_visible
+    driver.click("Cancel")
+    driver.screenshot(tmp_path / "cancelled.png")
+    assert driver.dialogs() == ()
 
 
 def _combo_items(combo: QComboBox) -> list[str]:
@@ -786,12 +898,13 @@ def test_dialog_role_reference_field_is_a_drop_down_of_matching_components(
     widget.refresh()
     assert widget.add_component("S1", "fake/sensor", {})
 
-    dialog = _open_add_dialog(qapp, widget, "fake/drive/a")
+    dialog = _open_add_dialog(qapp, widget, "test/drive")
     sense = _child(dialog, QComboBox, "field:sense")
     assert _combo_items(sense) == ["", "S1"]
     assert _completions(_child(dialog, QLineEdit, "field:source")) == {"S1"}
     _child(dialog, QLineEdit, "add_name").setText("D1")
     _fill(dialog, "sense", "S1")
+    _fill(dialog, "source", "S1")
     _submit(qapp, dialog)
 
     assert control.read_context().value("D1.sense") == "S1"
