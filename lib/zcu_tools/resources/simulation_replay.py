@@ -9,13 +9,218 @@ from hashlib import sha256
 from os import fsync, replace
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+import numpy as np
+from numpy.typing import NDArray
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    ValidateAs,
+)
 
-from zcu_tools.core.simulation import AcquireRequest, EnvironmentSnapshot
+from zcu_tools.core.simulation import (
+    AcquireRequest,
+    AcquisitionMode,
+    EnvironmentSnapshot,
+    EventSlot,
+    PointTimeline,
+    PulseEnvelope,
+    PulseEvent,
+    ReadoutSlot,
+    ReadoutWindow,
+    TimelineTemplate,
+)
 
 from .ftf import FTFSettings
+
+
+class _NumericJSON(BaseModel):
+    """Strict wire records; from_attributes adapts core numeric dataclasses."""
+
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, allow_inf_nan=False, from_attributes=True
+    )
+
+
+class _ArrayJSON(_NumericJSON):
+    """Flat JSON values with explicit dtype and shape, never object arrays."""
+
+    dtype: Literal["float64", "int64", "bool"]
+    shape: tuple[int, ...]
+    values: tuple[float | int | bool, ...]
+
+    def array(self, dtype: np.dtype):
+        if self.dtype != dtype.name:
+            raise ValueError(
+                f"expected replay array dtype {dtype.name}, got {self.dtype}"
+            )
+        if any(size < 0 for size in self.shape):
+            raise ValueError("replay array shape must be nonnegative")
+        return np.asarray(self.values, dtype=dtype).reshape(self.shape)
+
+
+def _array_json(value: object) -> object:
+    """Convert only ndarrays; JSON dictionaries go to the typed wire validator."""
+    if isinstance(value, np.ndarray):
+        return _ArrayJSON(
+            dtype=value.dtype.name, shape=value.shape, values=tuple(value.flat)
+        )
+    return value
+
+
+def _float_array(value: _ArrayJSON) -> NDArray[np.float64]:
+    return value.array(np.dtype(np.float64))
+
+
+def _int_array(value: _ArrayJSON) -> NDArray[np.int64]:
+    return value.array(np.dtype(np.int64))
+
+
+def _bool_array(value: _ArrayJSON) -> NDArray[np.bool_]:
+    return value.array(np.dtype(np.bool_))
+
+
+_Floats = Annotated[
+    NDArray[np.float64],
+    ValidateAs(_ArrayJSON, _float_array),
+    BeforeValidator(_array_json),
+    PlainSerializer(_array_json, return_type=_ArrayJSON),
+]
+_Ints = Annotated[
+    NDArray[np.int64],
+    ValidateAs(_ArrayJSON, _int_array),
+    BeforeValidator(_array_json),
+    PlainSerializer(_array_json, return_type=_ArrayJSON),
+]
+_Bools = Annotated[
+    NDArray[np.bool_],
+    ValidateAs(_ArrayJSON, _bool_array),
+    BeforeValidator(_array_json),
+    PlainSerializer(_array_json, return_type=_ArrayJSON),
+]
+
+
+class _EventJSON(_NumericJSON):
+    """EventSlot wire layout with typed array codecs and detached envelopes."""
+
+    gen_ch: int
+    source: str
+    iterations: tuple[tuple[str, int], ...]
+    start_us: _Floats
+    duration_us: _Floats
+    frequency_mhz: _Floats
+    phase_deg: _Floats
+    gain: _Floats
+    envelopes: tuple[PulseEnvelope | None, ...]
+    envelope_index: _Ints
+    active: _Bools
+    phase_reference_us: float
+
+    def record(self) -> EventSlot:
+        return EventSlot(
+            gen_ch=self.gen_ch,
+            source=self.source,
+            iterations=self.iterations,
+            start_us=self.start_us,
+            duration_us=self.duration_us,
+            frequency_mhz=self.frequency_mhz,
+            phase_deg=self.phase_deg,
+            gain=self.gain,
+            envelopes=self.envelopes,
+            envelope_index=self.envelope_index,
+            active=self.active,
+            phase_reference_us=self.phase_reference_us,
+        )
+
+
+class _ReadoutJSON(_NumericJSON):
+    """ReadoutSlot wire layout; array shape retains point and read axes."""
+
+    channel: int
+    samples: int
+    sample_rate_mhz: float
+    trigger_us: _Floats
+    frequency_mhz: _Floats
+    phase_deg: _Floats
+    generator_channels: _Ints
+
+    def record(self) -> ReadoutSlot:
+        return ReadoutSlot(
+            channel=self.channel,
+            samples=self.samples,
+            sample_rate_mhz=self.sample_rate_mhz,
+            trigger_us=self.trigger_us,
+            frequency_mhz=self.frequency_mhz,
+            phase_deg=self.phase_deg,
+            generator_channels=self.generator_channels,
+        )
+
+
+class _TemplateJSON(_NumericJSON):
+    """TimelineTemplate wire layout; arrays keep their original dtype and shape."""
+
+    points: _Ints
+    events: tuple[_EventJSON, ...]
+    readouts: tuple[_ReadoutJSON, ...]
+    duration_us: _Floats
+
+    def record(self) -> TimelineTemplate:
+        return TimelineTemplate(
+            self.points,
+            tuple(event.record() for event in self.events),
+            tuple(readout.record() for readout in self.readouts),
+            self.duration_us,
+        )
+
+
+class _RequestJSON(_NumericJSON):
+    """Acquire wire layout, including the temporary legacy execution records."""
+
+    mode: AcquisitionMode
+    loop_dims: tuple[int, ...]
+    avg_level: int
+    readouts: tuple[ReadoutWindow, ...]
+    controls: tuple[tuple[PulseEvent, ...], ...]
+    root_seed: int
+    sequence: int
+    rng_version: str
+    timelines: tuple[PointTimeline, ...] = ()
+    point_dims: tuple[int, ...] = ()
+    point_names: tuple[str, ...] = ()
+    reps: int = 1
+    templates: tuple[_TemplateJSON, ...] = ()
+
+    def record(self) -> AcquireRequest:
+        return AcquireRequest(
+            mode=self.mode,
+            loop_dims=self.loop_dims,
+            avg_level=self.avg_level,
+            readouts=self.readouts,
+            controls=self.controls,
+            root_seed=self.root_seed,
+            sequence=self.sequence,
+            rng_version=self.rng_version,
+            timelines=self.timelines,
+            point_dims=self.point_dims,
+            point_names=self.point_names,
+            reps=self.reps,
+            templates=tuple(template.record() for template in self.templates),
+        )
+
+
+def _request_json(value: AcquireRequest) -> _RequestJSON:
+    return _RequestJSON.model_validate(value)
+
+
+_ReplayRequest = Annotated[
+    AcquireRequest,
+    ValidateAs(_RequestJSON, _RequestJSON.record),
+    PlainSerializer(_request_json, return_type=_RequestJSON),
+]
 
 
 class ReplayAcquire(BaseModel):
@@ -29,13 +234,10 @@ class ReplayAcquire(BaseModel):
     numeric-library root, or None when no numeric persistence was used.
     """
 
-    # Template arrays have no JSON codec yet; the legacy path keeps templates=().
-    model_config = ConfigDict(
-        extra="forbid", frozen=True, allow_inf_nan=False, arbitrary_types_allowed=True
-    )
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
     version: Literal[1] = 1
     settings: FTFSettings
-    request: AcquireRequest
+    request: _ReplayRequest
     versions: tuple[tuple[str, str], ...]
     library_path: Path | None = None
 

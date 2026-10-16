@@ -1,5 +1,6 @@
 """QICK transport adapter requiring an explicitly assembled simulation binding."""
 
+import numpy as np
 from qick import QickConfig
 
 from zcu_tools.core.simulation import AcquireRequest
@@ -44,23 +45,18 @@ class SimulationSoc(QickConfig):
         an unbound generator/ADC route. This method does not generate signals.
         """
         bound_gens = {gen for gen, _ in self.routes}
-        for events in request.controls:
-            for event in events:
-                if event.gen_ch not in bound_gens:
+        for template in request.templates:
+            for event in template.events:
+                if np.any(event.active) and event.gen_ch not in bound_gens:
                     raise ValueError(
                         f"{event.source!r} generator {event.gen_ch} is not bound"
                     )
-        windows = (
-            (window for point in request.timelines for window in point.readouts)
-            if request.timelines
-            else iter(request.readouts)
-        )
-        if any(
-            (gen_ch, window.channel) not in self.routes
-            for window in windows
-            for gen_ch in (window.generator_channels or (window.gen_ch,))
-        ):
-            raise ValueError("program uses an unbound generator/ADC route")
+            for window in template.readouts:
+                if any(
+                    (int(gen), window.channel) not in self.routes
+                    for gen in np.unique(window.generator_channels)
+                ):
+                    raise ValueError("program uses an unbound generator/ADC route")
         self._request = request
         self.binding.last_request = request
         self._round_index = 0

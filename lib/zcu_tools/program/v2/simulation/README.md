@@ -82,21 +82,35 @@ they do not reset a quantum state. LoadValue compression does not affect semanti
 values. LoadWord keeps uint32 patterns until a named readout frequency/gain
 consumer decodes them; scalar delay/count consumers cannot reinterpret words.
 
-Each execution has a detached `PointTimeline` with quantized controls and hardware
-loop indices. `PulseEvent` retains signed gain, carrier MHz, phase degrees, source,
+The frontend interprets the Module tree once over a NumPy grid of non-reps
+points. `AcquireRequest.templates` partitions that grid into structural classes.
+Each event slot has point arrays for quantized timing, carrier, phase, signed gain,
+envelope selection and activity. Repeat expands to its fixed count or register
+range bound, with inactive slots beyond each point's count. Branch selections
+partition templates. Generator and per-read ADC routing checks use these templates.
+Any consumed parameter that depends on reps raises before backend execution.
+
+`materialize_point(point)` expands one point into a detached `PointTimeline` for
+diagnostics. `PulseEvent` retains signed gain, carrier MHz, phase degrees, source,
 nested iteration coordinates and a common phase origin of zero. A nonconstant
 `PulseEnvelope` owns immutable complex samples on the actual DAC sample clock.
 Consumers interpolate linearly, hold the final sample through pulse end and use
 zero outside the event. No per-pulse peak normalization or solver grid is imposed.
-Const uses a unity envelope (`None`). Flat-top retains the two hardware ramps and
-half-gain plateau without expanding long plateaus onto a fixed fine grid.
+Const uses a unity envelope (`None`). A flat-top with at least 10 ns of plateau
+becomes adjacent up-ramp, half-gain constant and down-ramp slots. Short flat-tops
+keep whole sampled-envelope candidates. Long plateaus never expand onto a fine
+grid. Ramp boundary samples preserve the scalar envelope's linear interpolation.
 
 `ReadoutWindow` keeps ADC samples/rate independent of generator duration. Per-point
 windows retain trigger emission order, demodulation MHz/degrees and the generator
 association for each read. The acquire-level windows specify fixed ADC shapes;
-backends use `timelines` for execution-dependent timing/demodulation. `controls`
-remains the corresponding per-execution event tuples. Environments, not this
-frontend, explicitly convert us/MHz into the independent numeric APIs' ns/GHz.
+new consumers use template arrays for point-dependent timing/demodulation.
+Temporary `timelines` and `controls` fields remain for old backends. A separate
+legacy expansion materializes the templates in hardware execution order and
+restores whole flat-top events. That compatibility step scales with executions;
+Module interpretation does not. Remove it when those fields are removed.
+Environments, not this frontend, explicitly convert us/MHz into the independent
+numeric APIs' ns/GHz.
 
 ComputedPulse reserves the maximum candidate blocking length. TableLengthPulse
 uses the selected quantized duration and the existing runtime timestamp policy,
@@ -106,9 +120,10 @@ The last update restores table entry zero for the next outer repetition. Registe
 and template state belongs to one frontend preparation, never to another acquire.
 Normal hardware compilation and the existing block_mode timing policy are unchanged.
 
-- `AcquireRequest` fixes C-order `loop_dims`, `avg_level`, per-execution controls,
-  declared ADC order, trigger-order windows, detached timelines and private sampling
-  identity. Every used generator and every per-read ADC route must be bound.
+- `AcquireRequest` fixes C-order `loop_dims`, `avg_level`, non-reps `point_dims`
+  and `point_names`, `reps`, point templates, declared ADC order, trigger-order
+  windows and private sampling identity. Every active generator and every per-read
+  ADC route must be bound.
 - `EnvironmentSnapshot` contains numeric native-unit device values and retained
   model/calibration identity. The environment captures it immediately before
   each round, not in getters or preparation. A successful round hook may change
