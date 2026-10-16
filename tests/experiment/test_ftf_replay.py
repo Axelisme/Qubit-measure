@@ -1,5 +1,6 @@
 """Author-opted persistent round replay through acquisition and detached inputs."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -67,11 +68,22 @@ def test_replay_recomputes_statistics_without_numeric_records(tmp_path: Path) ->
         save_replay,
     )
 
-    from tests.experiment.test_ftf_templates import request, settings, snapshot
+    from tests.experiment.test_ftf_templates import (
+        expect_statistics,
+        request,
+        settings,
+        snapshot,
+    )
 
     source = FTFSource(settings(), DeviceManager(), private_replay=tmp_path / "archive")
     try:
-        expected = source.execute(RoundRequest(request(), snapshot(), 2))
+        expected = expect_statistics(
+            source.execute(
+                RoundRequest(
+                    request(), replace(snapshot(), model_identity=source.identity), 2
+                )
+            )
+        )
     finally:
         source.close()
     paths = replay_paths(tmp_path / "archive")

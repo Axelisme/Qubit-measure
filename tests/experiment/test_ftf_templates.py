@@ -8,6 +8,7 @@ import pytest
 from scipy.integrate import solve_ivp
 from zcu_tools.core.simulation import (
     AcquireRequest,
+    AcquisitionMode,
     EnvironmentSnapshot,
     EventSlot,
     PulseEnvelope,
@@ -73,7 +74,7 @@ def snapshot(value: float = 0.2) -> EnvironmentSnapshot:
     return EnvironmentSnapshot("ftf-v1", "synthetic", (("bias", value),))
 
 
-def request(mode="integrated", *, templates=None) -> AcquireRequest:
+def request(mode: AcquisitionMode = "integrated", *, templates=None) -> AcquireRequest:
     return AcquireRequest(
         mode,
         (3, 2),
@@ -130,7 +131,7 @@ def test_template_engine_paths_match_strict_secular_reference(
     decay = (loss[:, None] + loss[None, :]) / 2 + model.dephasing_per_ns
     for p in range(2):
 
-        def rhs(t, flat):
+        def rhs(t, flat, p=p):
             rho = flat.reshape(2, 2)
             h = np.diag(model.energies_ghz).astype(complex)
             for track in plan.batch.tracks:
@@ -213,8 +214,8 @@ def test_round_statistics_reuse_snapshot_and_engine_across_acquires() -> None:
     source = FTFSource(settings(), DeviceManager(), engine=engine)
     try:
         session = source.open_acquire(request())
-        first = session.sample_round(snapshot(), 0)
-        second = session.sample_round(snapshot(), 1)
+        first = expect_statistics(session.sample_round(snapshot(), 0))
+        second = expect_statistics(session.sample_round(snapshot(), 1))
         assert isinstance(first, RoundStatistics)
         assert first.channels[0].sums.shape == (2, 1, 2)
         assert engine.calls == 1
@@ -228,3 +229,10 @@ def test_round_statistics_reuse_snapshot_and_engine_across_acquires() -> None:
         assert traces.channels[0].iq.shape == (6, 1, 4, 2)
     finally:
         source.close()
+
+
+def expect_statistics(result: RoundStatistics | RoundSignals) -> RoundStatistics:
+    """Narrow the integrated result once for typed numerical assertions."""
+    if not isinstance(result, RoundStatistics):
+        raise AssertionError("integrated FTF round must return RoundStatistics")
+    return result
