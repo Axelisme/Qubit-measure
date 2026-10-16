@@ -18,10 +18,11 @@ all templates with array event sorting, selects kernels by name, and runs
 independent joblib-threading chunks. Missing required registry entries raise
 with the segment and kernel name. T4 implements exact zero-drive secular
 propagation, including quantized flux subsegments with basis changes. When a
-flux grid level changes during a drive, `flux_dop853` interpolates the optional
+flux waveform varies during a driven segment, `flux_dop853` interpolates
 `TimelineBatch.flux_waveform` and evaluates the exact `FluxExpansion` in its
-RHS. The bath stays at the row's grid level and switches at segment boundaries.
-Waveform variation that stays within one grid level keeps the quantized path.
+RHS, including tails that stay inside one grid level. The model owner truncates
+tails at its absolute threshold and holds the terminal DC sample. The bath stays
+at the row's grid level and switches at segment boundaries.
 Other algorithm families plug into the internal registry.
 
 The engine counts prepare keys with `np.unique`. Repeated keys are prepared

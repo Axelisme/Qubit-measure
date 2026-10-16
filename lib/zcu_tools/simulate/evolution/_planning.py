@@ -92,7 +92,7 @@ def _tone_columns(batch, table, source, flux_point):
     env_index = np.full((rows, width), -1, dtype=np.int64)
     envelopes: list[EnvelopeSpec] = [EnvelopeSpec("constant")]
     flux_drive = np.zeros(rows, dtype=bool)
-    # Only actual level changes inside pulse support trigger the continuous path.
+    # Lattice events also route varying drives when continuous samples are absent.
     change = np.ones(len(flux_point), dtype=bool)
     change[1:] = (flux_point[1:] == flux_point[:-1]) & np.any(
         batch.flux.level[1:] != batch.flux.level[:-1], axis=1
@@ -161,6 +161,34 @@ def _tone_columns(batch, table, source, flux_point):
     return playing.sum(axis=1).astype(np.int64), packed, tuple(envelopes), flux_drive
 
 
+def _waveform_varies(batch: TimelineBatch, point, start, duration):
+    """Detect nonconstant interpolated sample intervals overlapping each row.
+
+    Terminal samples hold DC after the model owner's tail truncation. Looking
+    at sample slopes, not lattice switches, retains tails inside one level.
+    """
+    waveform = batch.flux_waveform
+    if waveform is None:
+        return np.zeros(len(point), dtype=bool)
+    sample_point = np.repeat(np.arange(len(batch.points)), np.diff(waveform.offsets))
+    sample_events = _events(sample_point, waveform.time_ns)
+    varying = np.r_[
+        (sample_point[1:] == sample_point[:-1])
+        & np.any(waveform.flux[1:] != waveform.flux[:-1], axis=1),
+        False,
+    ]
+    # Count varying intervals touching the open row support. Clamp at ragged
+    # point edges so samples outside their span use the held endpoint value.
+    first = np.maximum(
+        np.searchsorted(sample_events, _events(point, start), side="right") - 1,
+        waveform.offsets[point],
+    )
+    last = np.searchsorted(sample_events, _events(point, start + duration), side="left")
+    last = np.maximum(last, first)
+    count = np.r_[0, np.cumsum(varying)]
+    return count[last] > count[first]
+
+
 def _batch_geometry(batch: TimelineBatch, source: ModelSource) -> Geometry:
     events, duration, flux_point = _boundaries(batch)
     point, start = events["timeline"], events["time"]
@@ -170,6 +198,7 @@ def _batch_geometry(batch: TimelineBatch, source: ModelSource) -> Geometry:
     tones, columns, envelopes, flux_drive = _tone_columns(
         batch, (point, start, duration, level), source, flux_point
     )
+    flux_drive |= (tones > 0) & _waveform_varies(batch, point, start, duration)
     port, frequency, amplitude, theta, envelope_index, offset = columns
     table = SegmentTable(
         point,
