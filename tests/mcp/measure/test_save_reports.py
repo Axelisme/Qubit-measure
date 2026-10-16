@@ -238,7 +238,9 @@ def test_recipe_reply_projects_raw_report_and_delivers_run_bytes(tmp_path):
     }
 
     def sample(session: RecipeSession) -> RecipeGenerator:
-        run, status = yield session.open_tab("lookback").run()
+        result = yield from session.open_tab("lookback").run_step()
+        run = result.run
+        status = result.status
         assert isinstance(run, RecipeRun) and status == "completed"
         run.save_raw()
         run.preview()
@@ -328,7 +330,9 @@ def test_recipe_raw_step_is_null_without_report(tmp_path, scenario):
     def sample(session: RecipeSession) -> RecipeGenerator:
         if scenario == "before_run":
             return
-        run, status = yield session.open_tab("lookback").run()
+        result = yield from session.open_tab("lookback").run_step()
+        run = result.run
+        status = result.status
         assert isinstance(run, RecipeRun) and status == "completed"
         if scenario == "uncertain_save":
             run.save_raw()
@@ -360,7 +364,9 @@ def test_recipe_raw_step_is_null_without_report(tmp_path, scenario):
 
 
 def _preview_recipe(session: RecipeSession) -> RecipeGenerator:
-    run, status = yield session.open_tab("lookback").run()
+    result = yield from session.open_tab("lookback").run_step()
+    run = result.run
+    status = result.status
     assert isinstance(run, RecipeRun) and status == "completed"
     run.save_raw()
     run.preview()

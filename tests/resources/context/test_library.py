@@ -780,8 +780,14 @@ def test_mux_and_pulse_readouts_roundtrip_and_materialize_fixed_snapshot(
         "length": 2.0,
         "ro_length": 1.5,
         "tones": [
-            {"freq": 6020.0, "gain": 0.05, "phase": 90.0, "ro_ch": 4},
-            {"freq": 5980.0, "gain": -0.04, "phase": 0.0, "ro_ch": 1},
+            {
+                "freq": 6020.0,
+                "gain": 0.05,
+                "phase": 90.0,
+                "ro_ch": 4,
+                "label": "upper",
+            },
+            {"freq": 5980.0, "gain": -0.04, "phase": 0.0, "ro_ch": 1, "label": ""},
         ],
     }
     library = open_library(files)

@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-16，Load cfg_issue、單層欄位查詢、lean cfg 與 Library／writeback Form
+**Last updated:** 2026-10-16，typed recipe helpers、Load cfg_issue 與 Library／writeback Form
 
 # `zcu_tools/mcp/measure/`
 
@@ -44,6 +44,10 @@ Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.conn
 
 ## Recipe 與 execution
 
+Recipe helper 分成「工作步驟」與「交還控制權」。工作步驟以 `result = yield from tab.run_step()` 等待 Run。作者取出 `run = result.run`，檢查取消與空 handle 後，以 `analysis = yield from run.analyze_step("primary")` 等待分析。兩者分別回傳 `RunStepResult` 與 `AnalysisStepResult`，欄位為 run／analysis 與 status。Run status 為 completed、finished_early 或 cancelled；分析為 completed 或 cancelled。Cancelled Run 可保留 partial handle，未送出 Run 時 run 為 None；cancelled analysis 的 analysis 為 None。作者檢查 status，自行收尾並 return，不以例外代表取消。
+
+需要交還控制權做寫回判斷時，作者用 `decision = yield from ask(run.propose_writeback())`，回傳 `WritebackResult`。`decision.status` 為 completed 時，`decision.decision` 是 accepted 或 skipped；cancelled 時為 None。`ask` 只接受已捕捉的 WritebackQuestion，不寫入資料。Opaque operation 不可迭代，也不能直接 yield；driver 會拒絕並提示 helper 寫法。Driver 將具名結果放在 operation.delivery，以 None 推進 generator，原有 completion failure 仍 throw 到作者的 helper 呼叫處。
+
 `RecipeTab.use_library` 選實際 library key，不建立舊 ref tree，也不複製內容。Slot 與 nested key 保存 tagged ref 的 kind/name，inline 保存 kind/module。持久 Spec 的 child key 仍是字串。`use_library` 只寫清單中 value 恰為該 ref 的 Option，以一次整個欄位 write 選 key。未列出的 key 在 RPC 前拒絕，訊息指名欄位並列可用 keys。Locked Slot 的固定 inline tag 也在 RPC 前拒絕 key selection；沒有 captured library 的普通欄位不因此變成 locked。
 
 `read_field` 每次只送一次 `tab.describe_cfg`，從同一 owner turn 取得目前的單層描述與局部觀察，再回傳具名 RecipeFormField。不保留上次 observation，也不把兩次 RPC 拼成一份讀取。input 保留 Form JSON，input_present 區分未填與 null。value 是 ordinary leaf 或 subtree，不能作為有效性的證明。mode 是 key、inline 或 None，key 是實際 library key 或 None。fields 只列選中 Option 的可編輯子欄位，不含 tag；ref 沒有 fields。Core 決定目前選項，MCP 不匹配選項或推導 union。mode 只讀公開 S2 input kind。locked 使用公開 selection_fixed 或 fixed metadata，不因缺 key 選項而鎖定。單一普通 model wrapper 攤平後，fields 直接列其中子欄位，實際寫入路徑仍保留 module。errors 包含絕對 path/message。DTO 不含 CfgSchema kind 或 ref 子欄位 readonly 投影。Tag 葉不是 read_field 路徑。Inline 路徑包含 module，例如 `modules.readout.module.freq`。Range 使用 start、stop、n，set_sweep 的公開 expts 寫入 n。局部 errors 只含 Form preview 的 root 與該欄位／後代錯誤。Lowered cfg 錯誤請讀 get_cfg 或交給 Run admission 檢查。未知、inactive 或 whole-leaf 子路徑由 owner 回 invalid_params／form_path，data.form_path 保留請求路徑。
@@ -82,7 +86,7 @@ Author analysis 綁定原 Run 與同一 Run 的 Primary。它重用 `AnalysisExe
 
 ## 分析、互動與寫回
 
-Recipe 以 yield 提出 completed capture 的寫回候選。`answer(recipe, decision)` 的 recipe 是 execution ID，decision 為 accepted 或 skipped；它只回答，不寫入也不授權。普通 `tab.accept(items)` 寫 GUI 當前 draft。摘要的 `question_items`／`question_preview` 是 active question，`writeback.receipts` 則列出實際寫入與失敗前綴；兩者不能互相冒充。Query 只讀 local capture。Session close 喚醒並收束 generator finally。
+Recipe 以 `yield from ask(run.propose_writeback())` 提出 completed capture 的寫回候選，交還控制權並等待回答。`answer(recipe, decision)` 的 recipe 是 execution ID，decision 為 accepted 或 skipped；它只回答，不寫入也不授權。普通 `tab.accept(items)` 寫 GUI 當前 draft。摘要的 `question_items`／`question_preview` 是 active question，`writeback.receipts` 則列出實際寫入與失敗前綴；兩者不能互相冒充。Query 只讀 local capture。Session close 喚醒並收束 generator finally。
 
 `tab_analyze` 在既有資料上啟動 Primary 或 Post 分析。Execution 捕捉結果、實際參數、失效內容、完整 analysis artifact 的 Save report、當次 image content 及 writeback 候選。互動分析立即交接 tab、op、狀態、可用命令與圖像。
 

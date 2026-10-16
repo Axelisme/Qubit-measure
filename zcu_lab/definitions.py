@@ -12,6 +12,7 @@ from zcu_lab.v2.jpa.flux_onetone.gui import JpaFluxOneToneAdapter
 from zcu_lab.v2.jpa.freq.gui import JpaFreqAdapter
 from zcu_lab.v2.jpa.power.gui import JpaPowerAdapter
 from zcu_lab.v2.lookback.gui import LookbackAdapter
+from zcu_lab.v2.mux.onetone.gui import MuxOnetoneAdapter
 from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
 from zcu_lab.v2.onetone.freq.gui import OneToneFreqAdapter
 from zcu_lab.v2.onetone.power_dep.gui import OneTonePowerDepAdapter
@@ -67,6 +68,7 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "onetone/freq": OneToneFreqAdapter,
     "onetone/power_dep": OneTonePowerDepAdapter,
     "onetone/flux_dep": OneToneFluxDepAdapter,
+    "mux/onetone": MuxOnetoneAdapter,
     "twotone/freq": FreqAdapter,
     "twotone/ckp": CKPAdapter,
     "twotone/power_dep": PowerDepAdapter,

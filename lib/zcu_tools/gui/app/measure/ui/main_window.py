@@ -132,6 +132,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._ctrl = controller
         self._tab_widgets: dict[str, ExpTabWidget] = {}
+        self._cfg_status_message: str | None = None
         self._tab_actions: TabActions = _MainWindowTabActions(self)
         self._dialog_refs = DialogRefStore()
         self._dialog_presenter = dialog_presenter or QtDialogPresenter(
@@ -299,17 +300,17 @@ class MainWindow(QMainWindow):
         tab_w = ExpTabWidget(
             tab_id, self._ctrl, caps, dialog_presenter=self._dialog_presenter
         )
+        # Attach before currentChanged projects the displayed cfg diagnostic.
+        tab_w.set_writable(
+            writable=self._ctrl.control_identity.status().holder == "gui"
+        )
+        tab_w.attach(snapshot, self._tab_actions)
         self._tab_widgets[tab_id] = tab_w
         self._tabs.addTab(tab_w, tab_label)
         self._tabs.setCurrentWidget(tab_w)
         self._refresh_empty_hint()
 
-        # Reuse the snapshot already fetched for capabilities (avoid second fetch).
         self._toolbar.set_new_tab_enabled(True)
-        tab_w.set_writable(
-            writable=self._ctrl.control_identity.status().holder == "gui"
-        )
-        tab_w.attach(snapshot, self._tab_actions)
         # A tab can be added while another tab is running. Project the current
         # State-owned running identity immediately instead of waiting for a new
         # lifecycle event.
@@ -485,6 +486,17 @@ class MainWindow(QMainWindow):
         if tab_w is None or not self._ctrl.has_tab(tab_id):
             return
         tab_w.update_interaction_state(snapshot or self._ctrl.get_tab_snapshot(tab_id))
+        if self._tabs.currentWidget() is tab_w:
+            self._refresh_cfg_status(tab_w)
+
+    def _refresh_cfg_status(self, tab_w: ExpTabWidget | None) -> None:
+        reason = tab_w.cfg_invalid_reason() if tab_w is not None else None
+        if reason is not None:
+            message = f"Config invalid: {reason}"
+            self.show_status_message(message)
+            self._cfg_status_message = message
+        elif self._cfg_status_message is not None:
+            self.show_status_message("")
 
     def refresh_context_panel(self) -> None:
         """Project current entry and point without submitting source commands.
@@ -637,6 +649,7 @@ class MainWindow(QMainWindow):
 
     def show_status_message(self, message: str) -> None:
         logger.info("status: %s", message)
+        self._cfg_status_message = None
         self._status_label.setText(message)
 
     def show_error_dialog(self, title: str, message: str) -> None:
@@ -803,9 +816,11 @@ class MainWindow(QMainWindow):
     def _on_current_tab_changed(self, index: int) -> None:
         widget = self._tabs.widget(index)
         if not isinstance(widget, ExpTabWidget):
+            self._refresh_cfg_status(None)
             return
         if not self._ctrl.has_tab(widget.tab_id):
             return
+        self._refresh_cfg_status(widget)
         if self._ctrl.control_identity.status().holder == "gui":
             self._ctrl.set_active_tab(widget.tab_id)
 
@@ -840,6 +855,7 @@ class MainWindow(QMainWindow):
             msg = f"Config invalid: {reason}"
             logger.warning("run_or_stop_tab: blocked — %s", msg)
             self.show_status_message(msg)
+            self._cfg_status_message = msg
             return
         self._ctrl.start_run(tab_id)
 

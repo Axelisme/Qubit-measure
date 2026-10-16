@@ -1,6 +1,6 @@
 # gui/form_adapter — 從 core cfg 生成 Form
 
-**Last updated:** 2026-10-15，單層描述、平鋪 Readout 與必填通道
+**Last updated:** 2026-10-16，Pulse／mux Readout 表單
 
 本 package 是 GUI 的 Qt-free 前端框架。它把 core cfg 宣告與作者寫的起始樹翻譯成 `gui.form` 的 `FormModel`，再把表單結果轉回驗證過的 core cfg。它供 measure、workflows、library 與 writeback 的表單定義共用。Measure 的註冊、protocol 與分頁 Form resource 使用 `Form`，workflows 的手寫 plan 表單使用 `ModuleInputField`。
 
@@ -27,7 +27,9 @@
 
 持久 Spec、範本 seed 與 lock 路徑仍使用原欄位名稱，不含 wrapper。生成器在 input 邊界加入 wrapper，`to_cfg` 去掉 wrapper，保留 child key 字串。Nested ref 使用 core 的 `KeyRef`，不限制 choices，也不新增 captured source 檢查。Core module ref 仍使用 `ModuleRef` 並檢查固定 library。兩種 ref 的 name 都只接受 literal key，不求 Expr。
 
-Readout 直接編輯平鋪的 generator 與 ADC 欄位。`gen_ch` 與 `ro_ch` 必填且可編輯；一般 Pulse 沒有 `ro_ch`。單一 `freq` 同時供兩者使用，不從其他欄位推導通道或補值。Waveform 仍可保留 child library key。
+`readout/pulse` 直接編輯平鋪的 generator 與 ADC 欄位。`gen_ch` 與 `ro_ch` 必填且可編輯；一般 Pulse 沒有 `ro_ch`。單一 `freq` 同時供兩者使用，不從其他欄位推導通道或補值。Waveform 仍可保留 child library key。
+
+`readout/mux` 沿用 module 的 ref／inline 與 Convert to inline。Scalar 欄位分別編輯，tones 是整個 list 的 JSON leaf，包含每筆 tone 的 label。它沒有 waveform 或逐 tone 引用。
 
 Template／Slot 節點在 host 呼叫 `Form.bind_templates(catalog, adapter=...)` 後才解析。Measure 在 Open／Reset 捕捉來源，呼叫 adapter 的 `make_form(ctx)`，再綁定 Registry 的範本目錄。註冊與 reload 不呼叫 factory，也不預檢範本。範本目錄的格式在 `cfg_model`，真實範本表在 `zcu_lab`。
 

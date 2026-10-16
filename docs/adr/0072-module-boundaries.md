@@ -44,9 +44,38 @@
 5. 組合根：使用者入口在 `scripts/`，agent MCP 入口在 `mcp_servers/`
 
 - `zcu_tools` 不 import `zcu_lab`。定義由組合根注入，框架不反向載入使用者實驗。
-- tests 不依賴 zcu_lab；刪掉 `zcu_lab/` 後整套 pytest 仍通過。
+- tests 不依賴 `zcu_lab`，不 import、不使用其 fake 實驗、不綁定實驗流程或預設值。
 
 框架測試使用最小合成 workflow／adapter，不綁定實驗流程或預設值。實驗定義錯誤由 GUI 啟動或載入時回報，不另維護個別實驗測試。使用者於 2026-10-12 裁定：「我給你一個判斷方法，如果我刪除zcu_lab測試會報錯，那測試就是寫錯了。」
+
+使用者於 2026-10-16 改定驗收方式：「算了，我認為不用真的測試ZCU_LAB移開後會不會出現錯誤。這中東西直接看有沒有import就好，偷偷做的在review也會被抓到，感覺是浪費時間測試」。Tests 不依賴 `zcu_lab` 的原則不變，由 review 檢查 import，必要時以 grep 輔助。不再暫移 `zcu_lab/` 跑 pytest，也不新增 `ZCU_LAB` 環境變數或 import hook。
+
+### Mux group 是實驗室的 component 定義
+
+`zcu_lab.components.MuxGroupSchema` 宣告 `group/mux`，沿既有 ComponentRegistry 註冊。
+它保存有序的 1 至 8 個 component 名稱及一般 module／ext。Members 不作去重或 resonator kind gate。
+Group 自己擁有 readout module，重排成員不改 owner。
+使用者於 2026-10-16 對專屬 group component 方案裁定：「我選B」。
+
+Scalar alias `mux=MG12` 已足以讓 adapter 經固定 ParameterContext 讀取 `$mux.members`，
+Readout 初值使用 `$mux.module.readout`。Framework 不認得 group/mux 或 members，
+也不新增 list alias、group registry、RPC 或保存格式。
+使用者於 2026-10-16 對只用 scalar mux alias 的方案裁定：「B」。
+
+完整 readout 的 tones[i] 綁定 members[i]，cfg 不保存 writeback 目標或 group snapshot。
+active_tones=None 量全部；指定非空、唯一且有效的原始 index list，則依輸入順序投影 subset
+給 program。Program 不知道 MG 或 members。RunRecord 保存完整 readout 與 selection，
+資料軸保留原始序號，不重新編號。使用者於 2026-10-16 提議：「一個MG component類，內部屬性綁定到R1, R2，gui中預設指定MG，寫回目標也是從MG的綁定取」，並補充「為了能只讀特定幾個R，可以考慮MG外cfg另外提供mask之類的」。對 active_tones 方案裁定：「可以」。
+
+Core cfg 驗證錯誤沿既有宿主 result／Run 診斷定位 `active_tones` 並拒絕 Run，不保證欄位變紅。
+FormState 的 preview／describe 不執行 lowering，也不新增 FormEditor 外部錯誤投影。
+此分界沿用 [[0065]]。使用者於 2026-10-16 裁定：「報錯我選B」。
+
+Writeback 由 adapter 經 Run／Load 既有 capture 讀取 `$mux.members`，以完整原始序號對應成功 active tones。
+Members 數不等於完整 N 時只提 module，並顯示原因。
+固定 module target 是 `$mux.readout.readout_rf`，與 group 當前 slot 所指的 key 無關。
+使用者於 2026-10-16 裁定：「應該參考其他使用alias是怎麼寫回的」。
+這些 lab 定義沿第 4 層依賴下層的方向，C15、C16 保護 core 與 framework 邊界。
 
 ### 能力模組的兩類
 
@@ -104,7 +133,7 @@ Datafile／resources → core 的方向由 C8、C9、C12 約束。此函式只�
 | C16 | `forbidden` | `zcu_tools` 不 import `zcu_lab` |
 | C19 | `forbidden` | `core` 在 repo 內只依賴 `utils` |
 
-`zcu_tools`、`zcu_lab`、離線 `migrations` 與 repo 的 `mcp_servers` 都是 import-linter 的 root packages。只為離線遷移存在的程式與對照表放在 `migrations/`，`zcu_lab` 與 `zcu_tools` 不 import 它，遷移完成後可整個刪除。使用者於 2026-10-14 裁定：「我自己會預期，我遷移完後刪除migrations就可以了」。組合根顯式注入 measure registry、workflow 註冊清單與 MCP recipes，framework 不反向載入使用者定義。Tests 的 lab 獨立性由刪除 `zcu_lab/` 後的整套 pytest 驗收，不新增 tests import contract。
+`zcu_tools`、`zcu_lab`、離線 `migrations` 與 repo 的 `mcp_servers` 都是 import-linter 的 root packages。只為離線遷移存在的程式與對照表放在 `migrations/`，`zcu_lab` 與 `zcu_tools` 不 import 它，遷移完成後可整個刪除。使用者於 2026-10-14 裁定：「我自己會預期，我遷移完後刪除migrations就可以了」。組合根顯式注入 measure registry、workflow 註冊清單與 MCP recipes，framework 不反向載入使用者定義。Tests 的 lab 獨立性由 review 檢查 import，必要時以 grep `zcu_lab` 輔助，不新增 tests import contract。
 
 債務以確切的 module 對逐條列在 `ignore_imports`，不用萬用字元，每組註解寫明「債務，由誰移除」。舊 cfg_editing → gui.cfg 例外隨兩個模組退休而移除，不是可仿照的依賴。`ignore_imports` 只減不增。
 
