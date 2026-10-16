@@ -49,7 +49,7 @@ def kernel_case(request: pytest.FixtureRequest) -> KernelCase:
     size: int = request.param
     model = synthetic_model(size)
     source = evolution.ModelSource(
-        np.eye(size, dtype=complex) / size,
+        np.eye(size, dtype=np.complex128) / size,
         lambda level: replace(model, level=level),
     )
     ground = np.zeros((size, size), complex)
