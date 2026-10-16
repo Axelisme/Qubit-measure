@@ -153,7 +153,6 @@ class SimulationBinding:
         Calls capture_snapshot once, appends the resulting RoundRequest to rounds,
         then calls execute once. Validates the mode/result type and returns the
         borrowed result; the adapter validates channel layouts and copies arrays.
-        Integrated RoundSignals remain accepted during backend migration.
         Callback exceptions propagate. Snapshot failure appends nothing; execute
         failure leaves the captured input in rounds. A mode/result mismatch
         raises ValueError. It does not normalize, average, round signals or
@@ -164,7 +163,6 @@ class SimulationBinding:
         result = self.execute(round_request)
         if request.mode == "integrated" and isinstance(result, RoundStatistics):
             return result
-        # Legacy backend path; contract cleanup removes integrated RoundSignals.
-        if isinstance(result, RoundSignals):
+        if request.mode == "decimated" and isinstance(result, RoundSignals):
             return result
         raise ValueError(f"backend result does not match {request.mode} mode")

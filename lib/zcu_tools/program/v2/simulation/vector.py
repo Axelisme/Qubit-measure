@@ -60,9 +60,7 @@ class VectorInterpreter:
     any backend call. The scalar interpreter supplies shared envelope extraction
     and validation only; it never evaluates hardware points here.
 
-    flat_tops owns envelope lowering and whole-envelope legacy restoration.
-    legacy_templates holds the unlowered structural classes after run_templates;
-    only temporary controls/timelines expansion consumes those classes.
+    flat_tops owns flat-top envelope lowering.
     """
 
     def __init__(self, prog: ModularProgramV2) -> None:
@@ -100,7 +98,6 @@ class VectorInterpreter:
         self._iterations: list[tuple[str, int]] = []
         self._structures: list[IntArray] = []
         self.flat_tops = FlatTopEnvelopes()
-        self.legacy_templates: tuple[TimelineTemplate, ...] = ()
 
     def _zeros(self) -> FloatArray:
         return np.zeros(self._size, dtype=np.float64)
@@ -621,5 +618,4 @@ class VectorInterpreter:
                     points, events, tuple(readouts), duration[points].copy()
                 )
             )
-        self.legacy_templates = tuple(templates)
         return tuple(self.flat_tops.lower(t) for t in templates)

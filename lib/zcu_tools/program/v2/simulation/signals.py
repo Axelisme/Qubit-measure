@@ -1,5 +1,7 @@
 """Validate numeric signals and pack the QICK buffers without averaging."""
 
+from math import prod
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -35,16 +37,14 @@ def pack_signals(
     decimated = {}
     for window in request.readouts:
         iq = np.asarray(by_channel[window.channel], dtype=np.float64)
-        shape = (request.executions, window.reads)
-        shape += (window.samples, 2) if request.mode == "decimated" else (2,)
+        shape = (prod(request.loop_dims), window.reads, window.samples, 2)
         if iq.shape != shape or not np.all(np.isfinite(iq)):
             raise ValueError(
                 f"invalid ADC {window.channel} signals: expected finite {shape}, got {iq.shape}"
             )
-        sums = iq.sum(axis=-2) if request.mode == "decimated" else iq
+        sums = iq.sum(axis=-2)
         accumulated[window.channel] = rounded_sums(sums).reshape(-1, 2)
-        if request.mode == "decimated":
-            decimated[window.channel] = iq.reshape(-1, 2).copy()
+        decimated[window.channel] = iq.reshape(-1, 2).copy()
     return accumulated, decimated
 
 

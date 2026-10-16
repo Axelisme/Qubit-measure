@@ -58,8 +58,3 @@ dependency versions must match. The stream policy is `PCG64/SeedSequence-v2`.
 Old exact-record manifests fail explicitly. Archives contain model truth and
 must not appear in ordinary Run/native/RPC metadata. Normal provenance remains
 the opaque simulation identifier.
-
-`plan_point` and `build_database` remain transitional author tools for the old
-continuous solver and offline library. Normal acquisition does not call them.
-Their tail-frozen readout and exact-record semantics do not describe the template
-runtime. They are removed with that older numeric stack.

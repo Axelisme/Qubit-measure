@@ -284,10 +284,11 @@ in `tests/gui/app/measure/test_simulation_run.py`. All offline caches remain iso
 errors. `tests/simulate/test_ftf_model.py`, `test_joint_baths.py` and
 `test_source_lines.py` own fixed-coordinate circuits, LC/Boltzmann/Gibbs references,
 CP dephasing and causal source tails. Independent evolution/ADC behavior stays in
-`tests/simulate/test_evolution.py` and `test_adc.py`; model-event and multi-window
+`tests/simulate/evolution/` and `test_adc.py`; model-event and multi-window
 sampling tests live in the corresponding numeric owner directories.
-`tests/experiment/test_ftf.py` covers explicit unit conversion, readout-origin tail
-freezing, active-control rejection and public acquire/decimated composition.
+`tests/experiment/test_ftf.py` covers explicit unit conversion, common carrier phase
+and public acquire/decimated composition. `test_ftf_templates.py` covers DC readout
+and the template engine contract.
 The former TLS engine/frontend and tests serving only that implementation are
 retired. Framework Window/RPC tests continue to use synthetic registered
 experiments, not lab definitions or model-truth calibration oracles.

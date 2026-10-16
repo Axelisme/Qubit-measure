@@ -3,6 +3,7 @@
 import importlib.util
 import sys
 from dataclasses import dataclass
+from math import prod
 from pathlib import Path
 from uuid import uuid4
 
@@ -74,7 +75,7 @@ class WhiteNoise:
         )
         channels = []
         for window in acquire.readouts:
-            shape = (acquire.executions, window.reads, window.samples, 2)
+            shape = (prod(acquire.loop_dims), window.reads, window.samples, 2)
             channels.append(
                 ChannelSignals(window.channel, rng.normal(0, self.std_adc, shape))
             )

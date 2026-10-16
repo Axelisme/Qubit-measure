@@ -27,9 +27,7 @@ from zcu_tools.core.simulation import (
     AcquisitionMode,
     EnvironmentSnapshot,
     EventSlot,
-    PointTimeline,
     PulseEnvelope,
-    PulseEvent,
     ReadoutSlot,
     ReadoutWindow,
     TimelineTemplate,
@@ -178,17 +176,15 @@ class _TemplateJSON(_NumericJSON):
 
 
 class _RequestJSON(_NumericJSON):
-    """Acquire wire layout, including the temporary legacy execution records."""
+    """Template acquire wire layout with typed per-point arrays."""
 
     mode: AcquisitionMode
     loop_dims: tuple[int, ...]
     avg_level: int
     readouts: tuple[ReadoutWindow, ...]
-    controls: tuple[tuple[PulseEvent, ...], ...]
     root_seed: int
     sequence: int
     rng_version: str
-    timelines: tuple[PointTimeline, ...] = ()
     point_dims: tuple[int, ...] = ()
     point_names: tuple[str, ...] = ()
     reps: int = 1
@@ -200,11 +196,9 @@ class _RequestJSON(_NumericJSON):
             loop_dims=self.loop_dims,
             avg_level=self.avg_level,
             readouts=self.readouts,
-            controls=self.controls,
             root_seed=self.root_seed,
             sequence=self.sequence,
             rng_version=self.rng_version,
-            timelines=self.timelines,
             point_dims=self.point_dims,
             point_names=self.point_names,
             reps=self.reps,

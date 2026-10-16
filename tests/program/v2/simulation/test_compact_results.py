@@ -7,6 +7,7 @@ import pytest
 from zcu_tools.core.simulation import (
     ChannelStatistics,
     RoundRequest,
+    RoundSignals,
     RoundStatistics,
     SamplingIdentity,
 )
@@ -229,7 +230,7 @@ def test_binding_rejects_result_type_mismatch(mode, monkeypatch):
     monkeypatch.setattr(
         env.soc.binding,
         "execute",
-        statistics if mode == "decimated" else lambda request: None,
+        statistics if mode == "decimated" else lambda request: RoundSignals(()),
     )
     with pytest.raises(ValueError, match="mode|result|Round"):
         env.soc.binding.sample_round(request, 0)

@@ -53,7 +53,6 @@ def test_white_noise_integrated_round_is_compact_and_decimated_remains_signals()
             avg_level=0,
             reps=100,
             readouts=(ReadoutWindow(0, 0, 8, 307.2, (0.0,)),),
-            controls=((),) * 100,
             root_seed=17,
             sequence=0,
             rng_version=env.soc.binding.rng_version,

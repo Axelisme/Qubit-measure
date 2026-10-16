@@ -75,7 +75,6 @@ def request(mode: AcquisitionMode = "integrated", *, templates=None) -> AcquireR
         (3, 2),
         0,
         (ReadoutWindow(0, 0, 4, 1000.0, (0.008,)),),
-        (),
         123,
         7,
         f"PCG64/SeedSequence-v2/numpy-{np.__version__}",

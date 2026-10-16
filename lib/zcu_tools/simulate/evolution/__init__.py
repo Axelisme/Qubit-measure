@@ -30,6 +30,6 @@ from .secular import (
     SecularDrive,
     SecularModel,
 )
-from .solver import Evolution, propagator_power
+from .solver import propagator_power
 from .state import Basis, DensityState, Populations, populations
 from .validation import ValidationEvidence, ValidationLimits

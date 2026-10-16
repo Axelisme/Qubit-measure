@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-from itertools import product
 from typing import TYPE_CHECKING
-
-import numpy as np
 
 from zcu_tools.core.simulation import (
     AcquireRequest,
@@ -64,12 +60,11 @@ def build_request(
     )
     if not windows:
         raise ValueError("simulation readout layout does not match compiled triggers")
-    request = AcquireRequest(
+    return AcquireRequest(
         mode=mode,
         loop_dims=tuple(int(n) for n in prog.loop_dims),
         avg_level=int(prog.avg_level),
         readouts=windows,
-        controls=(),
         root_seed=binding.root_seed,
         sequence=sequence,
         rng_version=binding.rng_version,
@@ -77,19 +72,4 @@ def build_request(
         point_names=names,
         reps=loops["reps"],
         templates=templates,
-    )
-    legacy = replace(request, templates=interpreter.legacy_templates)
-    timelines = []
-    # Legacy controls/timelines expansion for old backends disappears with those fields.
-    for execution in product(*(range(n) for n in loops.values())):
-        coordinates = dict(zip(loops, execution, strict=True))
-        point = int(
-            np.ravel_multi_index(tuple(coordinates[n] for n in names), point_dims)
-        )
-        timeline = interpreter.flat_tops.restore(legacy.materialize_point(point))
-        timelines.append(replace(timeline, coordinates=tuple(coordinates.items())))
-    return replace(
-        request,
-        controls=tuple(t.events for t in timelines),
-        timelines=tuple(timelines),
     )

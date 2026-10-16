@@ -252,7 +252,7 @@ def test_templates_materialize_like_scalar_interpretation(case):
         np.arange(np.prod(request.point_dims)),
     )
     oracle = TimelineInterpreter(prog)
-    for i, indices in enumerate(product(*(range(n) for n in prog.loop_dict.values()))):
+    for indices in product(*(range(n) for n in prog.loop_dict.values())):
         point = dict(zip(prog.loop_dict, indices, strict=True))
         scalar = oracle.run_point(point)
         oracle.after_point()
@@ -277,8 +277,6 @@ def test_templates_materialize_like_scalar_interpretation(case):
             )
         else:
             assert materialized == expected
-        assert request.timelines[i] == scalar
-        assert request.controls[i] == scalar.events
     if case == "variable_repeat":
         assert len(request.templates) == 1
         assert [e.active.tolist() for e in request.templates[0].events[:2]] == [
@@ -376,7 +374,7 @@ def test_table_hook_initial_state_that_changes_across_reps_is_rejected():
 
 
 @pytest.mark.parametrize("missing", ["generator", "route"])
-def test_soc_routes_are_checked_from_templates_without_legacy_timelines(missing):
+def test_soc_routes_are_checked_from_templates(missing):
     env = white_noise(
         std_adc=0,
         n_gens=2,
@@ -393,8 +391,6 @@ def test_soc_routes_are_checked_from_templates_without_legacy_timelines(missing)
     request = build_request(prog, "integrated", env.soc.binding, 0)
     request = replace(
         request,
-        controls=(),
-        timelines=(),
         readouts=tuple(
             replace(w, gen_ch=0, generator_channels=()) for w in request.readouts
         ),

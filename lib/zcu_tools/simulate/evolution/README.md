@@ -50,25 +50,6 @@ accepted rows, a synthetic model and input densities. The suite compares against
 an independent strict DOP853 reference and checks row splitting and preparation
 without density access. The demo kernel stays in tests.
 
-## Existing Evolution API
-
-`Evolution` owns event geometry, solver selection, U lookup and exact density
-records. The caller supplies a model, continuous controls and an explicit initial
-density. No shot, filter tail or noise realization survives a call implicitly.
-`quantize_ns` exposes the same absolute nearest-2-ns, ties-even event geometry
-used by controls. Composition callers use it when anchoring a local carrier to
-an external common phase reference; local reset/continuous semantics do not change.
-The solver contracts exact Lindblad jump algebra before repeated RHS evaluations.
-Dynamic callbacks still run and validate their full contents at every evaluation.
-Only identical contents reuse algebra. Hamiltonian and baths stay in one full
-Lindblad ODE, without operator splitting or fewer bath updates. Each action uses
-at most 16 MiB for an optional dense gain matrix; dimensions above 32 use exact
-batched matrix products instead. Solver workspaces remain outside the library
-LRU budget. `NUMERIC_VERSION` is `density-direct-v2`; older exact-record keys and
-private replay versions do not silently alias the changed arithmetic.
-`last_evaluation` reports the actual direct, direct-record or table path and
-content identities. It is author diagnostic data, not public acquisition truth.
-
 ## Offline construction
 
 `PlateauFamily` describes fixed DC, constant-envelope, zero-frequency joint

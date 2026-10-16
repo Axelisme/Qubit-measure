@@ -7,7 +7,6 @@ from numpy.typing import NDArray
 
 from zcu_tools.core.simulation import (
     EventSlot,
-    PointTimeline,
     PulseEnvelope,
     TimelineTemplate,
 )
@@ -88,7 +87,7 @@ class FlatTopEnvelopes:
 
     Long plateaus become ramp/constant/ramp slots. Whole short envelopes have
     fewer than 10 ns of plateau, bounding their duration candidates by the DAC
-    clock, not the sweep size. The same registry restores whole legacy events.
+    clock, not the sweep size. Candidate shapes also supply short-plateau envelopes.
     """
 
     def __init__(self) -> None:
@@ -158,15 +157,3 @@ class FlatTopEnvelopes:
                 indices[chosen & (slot.duration_us == duration)] = len(envelopes)
                 envelopes.append(shape.whole(float(duration)))
         return replace(slot, envelopes=tuple(envelopes), envelope_index=indices)
-
-    def restore(self, timeline: PointTimeline) -> PointTimeline:
-        """Resize whole flat-top envelopes during temporary legacy expansion."""
-        events = []
-        for event in timeline.events:
-            shape = self._candidates.get(id(event.envelope))
-            events.append(
-                replace(event, envelope=shape.whole(event.duration_us))
-                if shape is not None
-                else event
-            )
-        return replace(timeline, events=tuple(events))

@@ -105,10 +105,7 @@ grid. Ramp boundary samples preserve the scalar envelope's linear interpolation.
 windows retain trigger emission order, demodulation MHz/degrees and the generator
 association for each read. The acquire-level windows specify fixed ADC shapes;
 new consumers use template arrays for point-dependent timing/demodulation.
-Temporary `timelines` and `controls` fields remain for old backends. A separate
-legacy expansion materializes the templates in hardware execution order and
-restores whole flat-top events. That compatibility step scales with executions;
-Module interpretation does not. Remove it when those fields are removed.
+`materialize_point` expands one detached point for diagnostics, excluding reps.
 Environments, not this frontend, explicitly convert us/MHz into the independent
 numeric APIs' ns/GHz.
 
@@ -131,8 +128,7 @@ Normal hardware compilation and the existing block_mode timing policy are unchan
 - `SimulationBinding(capture_snapshot, execute, backend_version=..., seed=...)`
   coordinates admission and retains `last_request` and `rounds` privately in
   memory. `execute(RoundRequest)` returns `RoundStatistics` for integrated mode
-  or `RoundSignals` for decimated mode. Integrated `RoundSignals` remain accepted
-  while legacy numeric backends migrate. Other mode/result mismatches raise.
+  or `RoundSignals` for decimated mode. Mode/result mismatches raise.
 - Integrated statistics contain per-point totals over reps, shared state counts,
   conditional per-shot sums and receiver covariance. The adapter validates and
   detaches these arrays. Without threshold, classification or trackers, it divides
@@ -140,8 +136,7 @@ Normal hardware compilation and the existing block_mode timing policy are unchan
   without allocating `acc_buf`. Hooks receive the running mean of completed rounds.
   Threshold, classification, trackers and `get_raw()` materialize deterministic
   int64 shots from the retained last-round identity. Getters never rerun a backend.
-- Legacy integrated IQ has shape `(execution, read, 2)` and contains float64 ADC sums.
-  Decimated IQ has shape `(execution, read, sample, 2)` and contains float64 ADC
+- Decimated IQ has shape `(execution, read, sample, 2)` and contains float64 ADC
   samples. Last axis is I/Q. Backend arrays are borrowed until the adapter copies
   them. Missing, duplicate or extra ADCs, wrong shapes and nonfinite values fail.
 - The adapter orders channels, sums companion raw from the same decimated trace,

@@ -9,32 +9,15 @@ prediction tools remain separate. ADR-0072 defines the package dependency rules.
 ## Evolution and explicit populations
 
 Import records and functions from `zcu_tools.simulate.evolution`.
-`NumericModel` owns a fixed `Basis`, static Hamiltonian and source quadratures.
-Optional numeric callbacks provide additive time-dependent Hamiltonians and baths
-in that same basis. Hamiltonian coefficients are H/h in GHz, time is ns, phase
-is radians, and Lindblad operators include their rates in ns**(-1/2).
-The solver applies the Hamiltonian factor `-2*pi*1j`; source amplitudes have no
-hidden factor of one half or per-waveform normalization.
+`Engine.evolve(source, batches, budget=..., cancel=...)` evolves all template
+points to readout start. `ModelSource` supplies DC initial density and secular
+models. `TimelineBatch` carries drive tracks, flux schedules and per-point end
+times in ns, GHz and radians. Segment kernels propagate densities without
+clipping negative eigenvalues or renormalizing the trace. Model and kernel
+contracts are documented in [evolution](evolution/README.md).
 
-`Evolution.evolve` requires an explicit `DensityState` on every call. It returns
-only the final density, not an internal-step trajectory. Pass the previous result
-and the same full absolute `ControlSequence` when continuing a shot. A new shot
-must receive its own initial state. Instances do not remember quantum states.
-
-Model event times partition bath discontinuities alongside source events.
-The solver rounds all event coordinates to the nearest 2 ns from origin zero,
-with ties to even. It unions the coordinates before forming intervals. It never
-rounds interval lengths independently. Envelopes stay continuous in pulse-local
-coordinates across other sources' events. `Envelope.sampled` preserves the
-original arbitrary-waveform axis and signed complex values.
-
-Within each joint interval the solver uses a static matrix exponential, adaptive
-DOP853, or an exact-frequency period plus tail. Integer propagator powers use
-binary multiplication. Only flat, exactly commensurate closed controls qualify
-for period reuse. Dissipative evolution solves the full Lindblad equation.
-Solver tolerances control numerical integration, not basis convergence or the
-physical validity of a model. Solver output is never repaired by clipping
-negative density eigenvalues or renormalizing the trace.
+`ControlSequence`, `Envelope` and `NumericModel` remain inputs to independent
+continuous-flux and model tools. They do not define an acquisition backend.
 
 Call `populations(state, target_basis)` explicitly before readout. Basis vectors
 are ordered columns in common ambient coordinates. The result preserves target

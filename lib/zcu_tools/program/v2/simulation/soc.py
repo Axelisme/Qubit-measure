@@ -1,5 +1,7 @@
 """QICK transport adapter requiring an explicitly assembled simulation binding."""
 
+from math import prod
+
 import numpy as np
 from qick import QickConfig
 
@@ -95,7 +97,7 @@ class SimulationSoc(QickConfig):
             raise RuntimeError("simulation has no active acquisition request")
         expected = [(w.channel, w.reads) for w in self._request.readouts]
         if (
-            total_shots != self._request.executions
+            total_shots != prod(self._request.loop_dims)
             or list(zip(ch_list, reads_per_shot, strict=True)) != expected
         ):
             raise ValueError("QICK readout layout differs from simulation request")
@@ -111,7 +113,7 @@ class SimulationSoc(QickConfig):
         self._materialize_accumulated()
         return [
             (
-                self._request.executions,
+                prod(self._request.loop_dims),
                 ([self._accumulated[w.channel] for w in self._request.readouts], {}),
             )
         ]

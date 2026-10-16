@@ -144,8 +144,7 @@ class PointTimeline:
 
     Attributes:
         coordinates: Quantized hardware-loop (name, zero-based index) pairs in
-            outermost-first order. Template diagnostics exclude reps; legacy
-            per-execution timelines include reps. Control values in events are
+            outermost-first order, excluding reps. Control values in events are
             already rounded by the board's clocks/DDS; indices are not voltages.
         events: Generator events in semantic emission order, not time-sorted.
         readouts: ADC declaration order; each window retains trigger emission
@@ -248,27 +247,19 @@ class AcquireRequest:
             requests individual ADC samples. Neither mode asks for averaging.
         loop_dims: Compiled loop lengths, including reps, ordered outermost to
             innermost. Executions flatten these axes in C order, with the last
-            loop varying fastest. Their product is the control timeline count.
+            loop varying fastest. Their product is the decimated execution count.
         avg_level: Zero-based axis of loop_dims that QICK averages for integrated
             acquisition, normally the reps axis. It does not request backend
             averaging. Decimated acquisition retains executions and averages
             only software rounds in the existing acquisition pipeline.
         readouts: One window per declared ADC, in QICK ADC declaration order,
             not sorted by channel number. Each window defines its read order.
-        controls: One tuple of PulseEvent objects per flattened execution in
-            loop_dims C order. Events retain frontend emission order and share
-            that execution's time origin; identical to timelines[i].events.
-        timelines: Detached per-execution controls, coordinates and ADC timing.
-            Empty only for callers constructing legacy shape-only records.
-            readouts above supplies fixed shapes; timelines carries dynamic
-            triggers and demodulation values without changing those shapes.
         point_dims: Loop lengths without the reps axis, flattened in C order
             for template point indices. Empty means a single unswept point.
         point_names: Hardware loop names aligned with point_dims, excluding reps.
             Required when templates are supplied; length mismatch raises ValueError.
         reps: Length of the reps axis; repetitions do not create new points.
         templates: Structural point classes partitioning range(prod(point_dims)).
-            Empty for callers still supplying legacy controls/timelines.
         root_seed: Nonnegative integer entropy supplied by the environment
             author or generated once by the binding when seed is omitted.
         sequence: Zero-based, monotonically increasing acquire identity from
@@ -287,11 +278,9 @@ class AcquireRequest:
     loop_dims: tuple[int, ...]
     avg_level: int
     readouts: tuple[ReadoutWindow, ...]
-    controls: tuple[tuple[PulseEvent, ...], ...]
     root_seed: int
     sequence: int
     rng_version: str
-    timelines: tuple[PointTimeline, ...] = ()
     point_dims: tuple[int, ...] = ()
     point_names: tuple[str, ...] = ()
     reps: int = 1
@@ -362,15 +351,6 @@ class AcquireRequest:
                 )
         raise ValueError("no template covers point")
 
-    @property
-    def executions(self) -> int:
-        """Return len(controls), the number of flattened sequence executions.
-
-        The frontend makes this equal to the product of loop_dims; this property
-        counts timelines without checking that relationship.
-        """
-        return len(self.controls)
-
 
 @dataclass(frozen=True)
 class EnvironmentSnapshot:
@@ -426,9 +406,8 @@ class ChannelSignals:
     Attributes:
         channel: Zero-based ADC/readout index matching a ReadoutWindow.channel
             in the request. It is not the position in the returned channel tuple.
-        iq: Finite float64 array with last axis [I, Q]. Integrated mode uses
-            shape (execution, read, 2) and unnormalized discrete ADC sample sums.
-            Decimated mode uses (execution, read, sample, 2) and individual ADC
+        iq: Finite float64 array with last axis [I, Q]. Decimated mode uses
+            (execution, read, sample, 2) and individual ADC
             sample units, with sample length equal to the window's samples.
             Executions follow loop_dims C order; reads follow trigger_us order;
             samples follow increasing time at 1 / sample_rate_mhz us intervals.
@@ -445,7 +424,7 @@ class ChannelSignals:
 
 @dataclass(frozen=True)
 class RoundSignals:
-    """One joint realization for every requested ADC in a software round.
+    """One joint decimated realization for every ADC in a software round.
 
     Attributes:
         channels: One ChannelSignals per requested ADC. Tuple order is arbitrary;
@@ -453,13 +432,13 @@ class RoundSignals:
             All entries belong to the same round realization. ADCs may have
             different sample counts and are not padded to a common length.
 
-    ChannelSignals defines the per-mode array layout, units and borrow lifetime.
+    ChannelSignals defines the decimated array layout, units and borrow lifetime.
     The backend lends arrays until the adapter copies them; repeated getters use
     the stored round buffers and do not execute the backend again. The adapter
     rejects missing, duplicate or extra ADCs, wrong shapes and nonfinite values.
-    It rounds integrated sums to int64 with nearest-even rounding and rejects
-    overflow. In decimated mode it copies the traces and sums those same samples
-    for companion raw data. QICK owns normalization and averaging afterward.
+    It copies decimated traces and sums those same samples for companion raw
+    data, using nearest-even int64 rounding and rejecting overflow. QICK owns
+    normalization and averaging afterward.
     """
 
     channels: tuple[ChannelSignals, ...]
