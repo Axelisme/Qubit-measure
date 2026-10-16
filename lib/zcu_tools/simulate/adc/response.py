@@ -56,9 +56,9 @@ class ConditionalReadout:
         callbacks are held alive and keyed by callable identity; callers must
         keep them deterministic. Equivalent separately constructed numeric inputs
         reuse the cache. Traces are retained internally, so switching include_traces
-        does not solve again. Constant pulses (envelope=None, carrier exactly
-        equal to model reference) use the closed-form matrix exponential; other
-        envelopes/carriers use the existing DOP853 moment ODE.
+        does not solve again. Constant pulses (envelope=None) use the closed-form
+        matrix exponential in the pulse carrier frame, including detuned carriers;
+        other envelopes use the existing DOP853 moment ODE.
         ConditionalSums.sums has shape (contents, reads, states, 2), after
         demodulation/gain/phase/offset. Traces have shape
         (contents, reads, states, samples, 2) only if batch.include_traces;
@@ -88,11 +88,7 @@ class ConditionalReadout:
             key = (model_key, _pulse_key(pulses), _grid_key(grids))
             if key not in self._responses:
                 times = np.unique(np.concatenate([g.times_ns for g in grids]))
-                constant = all(
-                    p.envelope is None
-                    and p.frequency_ghz == batch.model.reference_frequency_ghz
-                    for p in pulses
-                )
+                constant = all(p.envelope is None for p in pulses)
                 outgoing, _ = solver._fields(pulses, times, constant=constant)
                 traces = tuple(
                     readonly_array(
@@ -157,6 +153,19 @@ class ConditionalReadout:
         interval = self._constant_interval if constant else self._interval
         for left, right in zip(points[:-1], points[1:], strict=True):
             state = interval(state, pulses, times, outputs, left, right)
+        if constant:
+            # A batch content has one carrier. Its moments stay in that frame
+            # through pulse corners and ringdown; restore the model frame once
+            # before combining with the incident field and demodulating.
+            omega = (
+                2
+                * np.pi
+                * (pulses[0].frequency_ghz - self.model.reference_frequency_ghz)
+            )
+            outputs[:, :, 1:, :] *= np.exp(-1j * omega * (times - start))[
+                :, None, None, None
+            ]
+            state[:, 1:, :] *= np.exp(-1j * omega * (end - start))
         self._validate_solution(state)
         moments = outputs[:, :, 1:, :].sum(axis=1)
         outgoing = np.array([self._incident(pulses, t) for t in times])[
@@ -229,15 +238,24 @@ class ConditionalReadout:
     def _constant_interval(
         self, state, pulses, times, outputs, left, right
     ) -> NDArray[np.complex128]:
-        """Exact homogeneous moment propagation for a constant incident field."""
+        """Propagate one flat pulse exactly, retaining moments in its carrier frame.
+
+        Population components do not rotate. Moment components rotate relative to
+        the model reference by exp(+i*omega*(t-pulse.start_ns)), even in ringdown.
+        The batch contract guarantees one pulse, so each interval has a constant
+        generator in this frame regardless of carrier detuning.
+        """
         n = len(self.model.state_labels)
         generator = np.zeros((3 * n, 3 * n), dtype=np.complex128)
         population = np.arange(0, 3 * n, 3)
         generator[np.ix_(population, population)] = self._q
-        incident = self._incident(pulses, left)
+        pulse = pulses[0]
+        omega = 2 * np.pi * (pulse.frequency_ghz - self.model.reference_frequency_ghz)
+        incident = pulse.incident(left, pulse.frequency_ghz)
         for r in range(2):
             moments = population + r + 1
             generator[np.ix_(moments, moments)] = self._q
+            generator[moments, moments] += 1j * omega
             generator[moments, population] = self._v[r] * incident
         for s in range(n):
             generator[3 * s + 1 : 3 * s + 3, 3 * s + 1 : 3 * s + 3] -= self._a[s]
