@@ -1,3 +1,4 @@
+import re
 from typing import Any
 
 import pytest
@@ -193,6 +194,24 @@ def test_parse_alu_expr_success_paths():
 def test_parse_alu_expr_error_paths(raw, message):
     with pytest.raises(ValueError, match=message):
         parse_alu_expr(raw)
+
+
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        ("r1 BAD #2", "Unknown ALU operator: 'BAD'"),
+        ("BAD r1", "Unknown ALU unary operator: 'BAD'"),
+    ],
+)
+def test_parse_alu_expr_preserves_operator_cause(raw: str, message: str) -> None:
+    with pytest.raises(ValueError, match=re.escape(message)) as caught:
+        parse_alu_expr(raw)
+
+    assert type(caught.value) is ValueError
+    assert str(caught.value) == message
+    cause = caught.value.__cause__
+    assert isinstance(cause, ValueError)
+    assert str(cause) == "'BAD' is not a valid AluOp"
 
 
 def test_parse_side_write_paths():

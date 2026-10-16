@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import warnings
 from typing import TYPE_CHECKING, Any
 
@@ -21,7 +22,10 @@ def instant_plot(fig: Figure) -> None:
 
     if not hasattr(canvas, "toolbar_visible"):
         warnings.warn(
-            "Warning: The matplotlib backend should be set to 'widget' for live plotting."
+            "Warning: The matplotlib backend should be set to 'widget' for live plotting.",
+            stacklevel=2,
+            # Direct calls and backend dispatch have different frame depths.
+            skip_file_prefixes=(os.path.dirname(os.path.dirname(__file__)) + os.sep,),
         )
 
     figsize = fig.get_size_inches()
