@@ -7,7 +7,6 @@ from typing import Literal
 
 import pytest
 from pydantic import Field
-from pydantic_core import PydanticCustomError
 from zcu_tools.cfg_model import (
     ConfigBase,
     ConstWaveformCfg,
@@ -79,7 +78,7 @@ class FormGui(LookbackGui):
     def __call__(self, method: str, params: dict[str, object]) -> dict[str, object]:
         if method in ("tab.reset_cfg", "tab.get_cfg"):
             return dict(observe_form(self.owner))
-        if method == "tab.edit_cfg":
+        if method == "tab.edit_recipe_fields":
             self.owner.write(form_writes(params["edits"]))
             return dict(observe_form(self.owner))
         if method == "tab.run_start":
@@ -135,7 +134,7 @@ def test_read_field_queries_current_owner_once_and_detaches_reply(
         assert field.input == 19
         assert field.value == 19
         assert client.transport.sent[before:] == [
-            ("tab.describe_cfg", {"tab_id": "t", "path": ["rounds"]})
+            ("tab.read_recipe_field", {"tab_id": "t", "path": ["rounds"]})
         ]
         gui.owner.write({("rounds",): 23})
         assert field.input == 19
@@ -155,7 +154,7 @@ def test_use_library_sets_actual_key_and_exposes_key_mode(tmp_path: Path) -> Non
         assert selected.key == "Q1.pulses.pi"
         assert selected.input == {"kind": "ref", "name": "Q1.pulses.pi"}
         assert not selected.locked
-        assert selected.fields == ()
+        assert "freq" in selected.fields
         assert selected.errors == ()
         values = gui.owner.accept().values["pulse"]
         if not isinstance(values, dict):
@@ -163,28 +162,21 @@ def test_use_library_sets_actual_key_and_exposes_key_mode(tmp_path: Path) -> Non
         assert values["freq"] == 100.0
 
 
-def test_use_library_writes_one_declared_option_value(tmp_path: Path) -> None:
+def test_use_library_sends_one_selector_command(tmp_path: Path) -> None:
     with recipe_client(tmp_path, FormGui()) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         before = len(client.transport.sent)
         tab.use_library("pulse", "Q1.pulses.pi")
-        assert [
-            call
-            for call in client.transport.sent[before:]
-            if call[0] != "tab.describe_cfg"
-        ] == [
+        assert client.transport.sent[before:] == [
             (
-                "tab.edit_cfg",
+                "tab.select_recipe_module",
                 {
                     "tab_id": "t",
-                    "edits": [
-                        {
-                            "path": ["pulse"],
-                            "value": {"kind": "ref", "name": "Q1.pulses.pi"},
-                        }
-                    ],
+                    "path": ["pulse"],
+                    "action": "use_library",
+                    "key": "Q1.pulses.pi",
                 },
-            )
+            ),
         ]
 
 
@@ -204,18 +196,25 @@ def test_unoffered_library_key_reports_available_options_without_writing(
         assert not tab.read_field("pulse").locked
         before = gui.owner.input.data
         sent = list(client.transport.sent)
-        with pytest.raises((GuiRpcError, PydanticCustomError)) as failure:
+        with pytest.raises(GuiRpcError) as failure:
             tab.use_library("pulse", "Q1.pulses.absent")
         error = failure.value
-        assert isinstance(error, GuiRpcError), error
-        assert error.reason == "invalid_cfg"
-        assert "pulse" in str(error)
-        assert "Available keys" in str(error)
-        if captured:
-            assert "Q1.pulses.pi" in str(error)
-        assert [
-            call for call in client.transport.sent if call[0] != "tab.describe_cfg"
-        ] == [call for call in sent if call[0] != "tab.describe_cfg"]
+        assert error.reason == "library_key"
+        assert error.code == "invalid_params"
+        assert error.data is not None
+        assert error.data["path"] == ["pulse"]
+        assert error.data["available_keys"] == (["Q1.pulses.pi"] if captured else [])
+        assert client.transport.sent[len(sent) :] == [
+            (
+                "tab.select_recipe_module",
+                {
+                    "tab_id": "t",
+                    "path": ["pulse"],
+                    "action": "use_library",
+                    "key": "Q1.pulses.absent",
+                },
+            ),
+        ]
         assert gui.owner.input.data == before
 
 
@@ -270,6 +269,10 @@ def test_read_field_projects_selected_typed_option_fields(
             "input_present": True,
             "value": None,
             "errors": [],
+            "value_status": "missing",
+            "selector": None,
+            "source": None,
+            "readonly": False,
         }
     )
     observed = read_form_field(observation, ("choice",))
@@ -326,8 +329,9 @@ def test_locked_outer_branch_keeps_inner_kind_editable(tmp_path: Path) -> None:
         assert outer.locked
         assert outer.fields == ("module",)
         assert not tab.read_field("extras.choice.module").locked
-        with pytest.raises(ValueError, match="locked"):
+        with pytest.raises(GuiRpcError) as rejected:
             tab.use_library("extras.choice", "unoffered")
+        assert rejected.value.reason == "module_selector"
         gui.owner.write(
             {("extras", "choice", "module"): {"kind": "1", "text": "changed"}}
         )
@@ -381,7 +385,7 @@ def test_use_library_switches_required_inline_slot_to_actual_key(
         assert RequiredCfg.model_validate(gui.owner.accept().cfg).pulse.freq == 100.0
 
 
-def test_locked_inline_slot_rejects_library_selection_before_rpc(
+def test_locked_inline_slot_rejects_library_selection_at_owner(
     tmp_path: Path,
 ) -> None:
     with recipe_client(tmp_path, FormGui()) as client:
@@ -398,11 +402,20 @@ def test_locked_inline_slot_rejects_library_selection_before_rpc(
         assert "freq" in locked.fields
         assert "gain" in locked.fields
         before = list(client.transport.sent)
-        with pytest.raises(ValueError, match="locked"):
+        with pytest.raises(GuiRpcError) as rejected:
             tab.use_library("locked_pulse", "Q1.pulses.pi")
-        assert [
-            call for call in client.transport.sent if call[0] != "tab.describe_cfg"
-        ] == [call for call in before if call[0] != "tab.describe_cfg"]
+        assert rejected.value.reason == "module_selector"
+        assert client.transport.sent[len(before) :] == [
+            (
+                "tab.select_recipe_module",
+                {
+                    "tab_id": "t",
+                    "path": ["locked_pulse"],
+                    "action": "use_library",
+                    "key": "Q1.pulses.pi",
+                },
+            ),
+        ]
 
 
 @pytest.mark.parametrize("field", ["pulse.kind", "locked_pulse.kind"])
@@ -414,17 +427,13 @@ def test_read_field_does_not_expose_option_selected_tag_leaves(
         tab = RecipeSession(client.context).open_tab("lookback")
         tab.use_library("pulse", "Q1.pulses.pi")
         before = gui.owner.input.data
-        if field == "pulse.kind":
-            with pytest.raises(GuiRpcError) as caught:
-                tab.read_field(field)
-            assert caught.value.code == "invalid_params"
-            assert caught.value.reason == "form_path"
-            assert caught.value.data == {"form_path": field.split(".")}
-        else:
-            with pytest.raises(ValueError, match="field"):
-                tab.read_field(field)
+        with pytest.raises(GuiRpcError) as caught:
+            tab.read_field(field)
+        assert caught.value.code == "invalid_params"
+        assert caught.value.reason == "form_path"
+        assert caught.value.data == {"form_path": field.split(".")}
         assert gui.owner.input.data == before
-        assert tab.read_field("locked_pulse.module.freq").value == 100.0
+        assert tab.read_field("locked_pulse.freq").value == 100.0
 
 
 def test_read_module_returns_lowered_values_without_editing_key(tmp_path: Path) -> None:
@@ -454,8 +463,8 @@ def test_use_inline_copies_library_then_accepts_public_frequency_write(
         assert hasattr(tab, "use_inline"), "Missing public inline conversion"
         tab.use_inline("pulse")
         assert tab.read_field("pulse").mode == "inline"
-        assert tab.read_field("pulse.module.gain").value == 0.2
-        tab.set("pulse.module.freq", 125.0, source=source)
+        assert tab.read_field("pulse.gain").value == 0.2
+        tab.set("pulse.freq", 125.0, source=source)
         module = tab.read_module("pulse")
         assert module.mode == "inline"
         assert module.source == "pulse"
@@ -470,32 +479,30 @@ def test_retained_module_source_keeps_key_and_numeric_summary(tmp_path: Path) ->
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(
             client.context,
-            summary_parameters=(
-                SummaryParameter("frequency", "pulse.module.freq", "MHz"),
-            ),
+            summary_parameters=(SummaryParameter("frequency", "pulse.freq", "MHz"),),
         ).open_tab("lookback")
         tab.use_library("pulse", "Q1.pulses.pi")
         before = gui.owner.input.data
         assert hasattr(tab, "retain_module_source"), "Missing module summary projection"
         tab.retain_module_source(
-            "pulse", summary_field="pulse.module.freq", value_path=("freq",)
+            "pulse", summary_field="pulse.freq", value_path=("freq",)
         )
         assert gui.owner.input.data == before
         assert tab.read_field("pulse").mode == "key"
         operation = tab.run()
         captured = operation.snapshot()
         assert captured is not None
-        assert captured.actual["fields"]["pulse.module.freq"] == {
+        assert captured.actual["fields"]["pulse.freq"] == {
             "value": 100.0,
             "source": "library:Q1.pulses.pi",
             "unit": "MHz",
         }
         tab.use_inline("pulse")
-        tab.set("pulse.module.freq", 125.0, source="calibration")
-        assert captured.actual["fields"]["pulse.module.freq"]["value"] == 100.0
+        tab.set("pulse.freq", 125.0, source="calibration")
+        assert captured.actual["fields"]["pulse.freq"]["value"] == 100.0
         next_capture = tab.run().snapshot()
         assert next_capture is not None
-        assert next_capture.actual["fields"]["pulse.module.freq"] == {
+        assert next_capture.actual["fields"]["pulse.freq"] == {
             "value": 125.0,
             "source": "calibration",
             "unit": "MHz",
@@ -507,7 +514,7 @@ def test_invalid_module_projection_records_no_success_prefix(tmp_path: Path) -> 
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(
             client.context,
-            summary_parameters=(SummaryParameter("frequency", "pulse.module.freq"),),
+            summary_parameters=(SummaryParameter("frequency", "pulse.freq"),),
         ).open_tab("lookback")
         tab.use_library("pulse", "Q1.pulses.pi")
         assert hasattr(tab, "retain_module_source"), (
@@ -515,19 +522,22 @@ def test_invalid_module_projection_records_no_success_prefix(tmp_path: Path) -> 
         )
         with pytest.raises(ValueError, match="module value path"):
             tab.retain_module_source(
-                "pulse", summary_field="pulse.module.freq", value_path=("missing",)
+                "pulse", summary_field="pulse.freq", value_path=("missing",)
             )
         captured = tab.run().snapshot()
         assert captured is not None
-        assert "pulse.module.freq" not in captured.actual["fields"]
+        assert "pulse.freq" not in captured.actual["fields"]
 
 
-def test_logical_ref_scalar_and_copy_keep_summary_facts_detached(tmp_path: Path) -> None:
+def test_logical_ref_scalar_and_copy_keep_summary_facts_detached(
+    tmp_path: Path,
+) -> None:
     gui = FormGui()
     with recipe_client(tmp_path, gui) as client:
-        tab = RecipeSession(client.context, summary_parameters=(
-            SummaryParameter("frequency", "pulse.freq", "MHz"),
-        )).open_tab("lookback")
+        tab = RecipeSession(
+            client.context,
+            summary_parameters=(SummaryParameter("frequency", "pulse.freq", "MHz"),),
+        ).open_tab("lookback")
         tab.use_library("pulse", "Q1.pulses.pi")
         before = gui.owner.input.data
         sent = len(client.transport.sent)
@@ -556,7 +566,9 @@ def test_logical_ref_scalar_and_copy_keep_summary_facts_detached(tmp_path: Path)
         assert observed.value == 100.0
 
 
-def test_logical_scalar_batch_sends_one_owner_command_without_preflight_reads(tmp_path: Path) -> None:
+def test_logical_scalar_batch_sends_one_owner_command_without_preflight_reads(
+    tmp_path: Path,
+) -> None:
     from zcu_tools.mcp.measure.recipe import RecipeFieldEdit
 
     gui = FormGui()
@@ -565,11 +577,19 @@ def test_logical_scalar_batch_sends_one_owner_command_without_preflight_reads(tm
         tab.use_library("pulse", "Q1.pulses.pi")
         tab.use_inline("pulse")
         sent = len(client.transport.sent)
-        tab.set_fields([RecipeFieldEdit("rounds", 9), RecipeFieldEdit("pulse.freq", 125.0)])
+        tab.set_fields(
+            [RecipeFieldEdit("rounds", 9), RecipeFieldEdit("pulse.freq", 125.0)]
+        )
         assert client.transport.sent[sent:] == [
-            ("tab.edit_recipe_fields", {"tab_id": "t", "edits": [
-                {"path": ["rounds"], "value": 9},
-                {"path": ["pulse", "freq"], "value": 125.0},
-            ]}),
+            (
+                "tab.edit_recipe_fields",
+                {
+                    "tab_id": "t",
+                    "edits": [
+                        {"path": ["rounds"], "value": 9},
+                        {"path": ["pulse", "freq"], "value": 125.0},
+                    ],
+                },
+            ),
         ]
         assert tab.read_field("pulse.freq").value == 125.0

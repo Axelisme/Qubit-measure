@@ -361,7 +361,11 @@ def test_recipe_inline_noop_still_takes_busy_notification_and_lifetime_guards() 
 def test_recipe_nested_and_extra_selectors_require_explicit_ancestor_copies() -> None:
     from pydantic import create_model
     from zcu_tools.gui.form import FormModel
-    from zcu_tools.gui.form_adapter import LogicalEdit, LogicalEditError, ModuleInputField
+    from zcu_tools.gui.form_adapter import (
+        LogicalEdit,
+        LogicalEditError,
+        ModuleInputField,
+    )
 
     field = ModuleInputField(PulseSpec, nullable=True)
 
@@ -370,19 +374,35 @@ def test_recipe_nested_and_extra_selectors_require_explicit_ancestor_copies() ->
         def options(cls, env: FormEnv):
             return {("reference",): field.options(env)}
 
-    extras = create_model("ExtraSelectorFields", __base__=ExtraSelectors,
-                          reference=(field.annotation, None))
+    extras = create_model(
+        "ExtraSelectorFields",
+        __base__=ExtraSelectors,
+        reference=(field.annotation, None),
+    )
 
     def lower(_extras: BaseModel, cfg: ModuleCore) -> ModuleCore:
         return cfg
 
-    library = LibrarySnapshot(ModuleLibraryDocument(
-        format="zcu.module-library", format_version="2.0", components={
-            "Q1": ComponentLibrary(pulses={"pi": PulseSpec(
-                ch=0, nqz=1, freq=100.0, gain=0.2, waveform="Q1.waveforms.const",
-            )}, waveforms={"const": ConstWaveformCfg(length=0.1)}),
-        },
-    ))
+    library = LibrarySnapshot(
+        ModuleLibraryDocument(
+            format="zcu.module-library",
+            format_version="2.0",
+            components={
+                "Q1": ComponentLibrary(
+                    pulses={
+                        "pi": PulseSpec(
+                            ch=0,
+                            nqz=1,
+                            freq=100.0,
+                            gain=0.2,
+                            waveform="Q1.waveforms.const",
+                        )
+                    },
+                    waveforms={"const": ConstWaveformCfg(length=0.1)},
+                ),
+            },
+        )
+    )
     library_before = library.module_spec("Q1.pulses.pi").model_dump()
     resource = TabFormResource(
         lambda _ctx: Form(ModuleCore, {}, extras=extras, lower=lower),
@@ -410,7 +430,9 @@ def test_recipe_nested_and_extra_selectors_require_explicit_ancestor_copies() ->
     resource.select_recipe_module(("pulse", "waveform"), "use_inline")
     resource.edit_recipe_fields([LogicalEdit(("pulse", "waveform", "length"), 0.08)])
     assert resource.read_recipe_field(("pulse", "waveform", "length")).value == 0.08
-    resource.select_recipe_module(("extras", "reference"), "use_library", key="Q1.pulses.pi")
+    resource.select_recipe_module(
+        ("extras", "reference"), "use_library", key="Q1.pulses.pi"
+    )
     assert resource.read_recipe_field(("extras", "reference", "freq")).value == 100.0
     resource.select_recipe_module(("extras", "reference"), "use_inline")
     resource.edit_recipe_fields([LogicalEdit(("extras", "reference", "freq"), 125.0)])

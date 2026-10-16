@@ -11,7 +11,11 @@ from typing import Literal
 from pydantic import TypeAdapter
 
 from zcu_tools.format_version import YamlValue
-from zcu_tools.gui.app.measure.remote.form_description import FormFieldObservation
+from zcu_tools.gui.app.measure.remote.form_description import (
+    RecipeFieldObservation,
+    RecipeSelectorWire,
+    RecipeSourceWire,
+)
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 
@@ -42,11 +46,13 @@ class RecipeFormField:
     locked is the owner's selection_fixed or fixed flag: this level has a
     declaration-fixed branch or complete value. It does not freeze inner
     choices, hide children or imply readonly descendants.
-    fields lists the selected Option fields, or direct section properties, in
-    declaration order. Option-selected tags are omitted; ref and other options without
-    fields have no children. Tag leaves are not read_field paths. Inline leaves
-    remain accessible as <field>.module.<leaf>.
-    errors contains directed errors at or below this field, and root errors.
+    fields lists logical direct children, including readable captured Spec
+    children. Only generated wrappers are hidden; real module fields remain.
+    value_status is available (including null), missing or unavailable. selector
+    is owner-supplied generated identity or None for ordinary fields. source is
+    the nearest captured ref identity or None. readonly means a ref ancestor was
+    crossed, not declaration-fixed. errors contains relevant logical directed
+    failures, including root and affecting ancestors. Reading grants no writes.
     All containers are detached from the current reply.
     """
 
@@ -58,6 +64,10 @@ class RecipeFormField:
     locked: bool
     fields: tuple[str, ...]
     errors: tuple[RecipeFormError, ...]
+    value_status: Literal["available", "missing", "unavailable"]
+    selector: RecipeSelectorWire | None
+    source: RecipeSourceWire | None
+    readonly: bool
 
 
 @dataclass(frozen=True)
@@ -95,25 +105,6 @@ def read_module_values(reply: Mapping[str, object]) -> RecipeModuleValues:
     )
 
 
-def module_scalar(value: Mapping[str, YamlValue], path: tuple[str, ...]) -> YamlValue:
-    """Project one scalar module value for summary capture, not Form editing.
-
-    path is a nonempty tuple of module-relative field names, without the Slot's
-    module envelope. Unknown paths, blank segments and non-scalar targets raise
-    ValueError. The returned scalar uses the module's units; no policy runs.
-    """
-    if not path or any(not part or part != part.strip() for part in path):
-        raise ValueError("value_path must contain nonempty module field names")
-    selected: YamlValue = dict(value)
-    for part in path:
-        if not isinstance(selected, dict) or part not in selected:
-            raise ValueError(f"Unknown module value path: {'.'.join(path)}")
-        selected = selected[part]
-    if isinstance(selected, (dict, list)):
-        raise ValueError("Module summary projection must select a scalar")
-    return selected
-
-
 def wire_object(value: object) -> dict[str, object]:
     """Validate an object received from the GUI without accepting bad keys."""
     if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
@@ -129,71 +120,28 @@ def wire_value(value: object) -> YamlValue:
         raise GuiRpcError("Invalid GUI value", reason="incompatible_wire") from error
 
 
-def field_observation(reply: Mapping[str, object]) -> FormFieldObservation:
-    """Decode a tab.describe_cfg reply; malformed wire raises incompatible_wire.
+def field_observation(reply: Mapping[str, object]) -> RecipeFieldObservation:
+    """Decode a tab.read_recipe_field reply; malformed wire raises incompatible_wire.
 
     reply must follow the app's typed single-layer wire, including local input
     and value. This validates transport shape, never core annotation semantics.
     """
     try:
-        return TypeAdapter(FormFieldObservation).validate_python(reply, strict=True)
+        return TypeAdapter(RecipeFieldObservation).validate_python(reply, strict=True)
     except ValueError as error:
         raise GuiRpcError(
             "Invalid Form description", reason="incompatible_wire"
         ) from error
 
 
-def slot_description(
-    observation: FormFieldObservation,
-) -> Literal["selectable", "locked"] | None:
-    """Classify S2 module metadata, without option matching or union inference.
-
-    observation is a decoded current field. Declared ref/inline option values
-    identify module selectors; the owner's selection_fixed or fixed flag
-    decides locking. Missing library options alone never imply a lock.
-    Nonmodule fields return None.
-    """
-    target = observation["description"]["target"]
-    if target is not None:
-        for option in target["options"] or []:
-            value = option["value"]
-            if isinstance(value, dict) and value.get("kind") in ("ref", "inline"):
-                return (
-                    "locked"
-                    if target["selection_fixed"] or target["fixed"]
-                    else "selectable"
-                )
-    return None
-
-
-def library_option_value(
-    observation: FormFieldObservation, name: str, field: str
-) -> YamlValue:
-    """Return the offered ref value for literal key name at diagnostic field.
-
-    observation is a decoded current description. No input is synthesized or
-    source resolved. Unoffered keys raise invalid_cfg with available keys.
-    """
-    target = observation["description"]["target"]
-    keys: list[str] = []
-    for option in target["options"] or [] if target is not None else []:
-        value = option["value"]
-        if value == {"kind": "ref", "name": name}:
-            return wire_value(value)
-        if isinstance(value, dict) and value.get("kind") == "ref":
-            key = value.get("name")
-            if isinstance(key, str):
-                keys.append(key)
-    raise GuiRpcError(
-        f"Invalid {field} reference {name!r}. Available keys: {keys}",
-        reason="invalid_cfg",
-    )
-
-
 def directed_errors(
     publication: Mapping[str, object], path: tuple[str, ...]
 ) -> tuple[RecipeFormError, ...]:
-    """Decode root and descendant errors from the Form observation."""
+    """Decode errors at root, consuming ancestors, target or descendants.
+
+    publication is an owner edit reply with complete logical preview errors;
+    path is the edited logical field. Sibling failures do not affect this edit.
+    """
     raw = publication.get("errors")
     if not isinstance(raw, list):
         raise GuiRpcError("Invalid Form errors", reason="incompatible_wire")
@@ -212,19 +160,23 @@ def directed_errors(
         ):
             raise GuiRpcError("Invalid Form error", reason="incompatible_wire")
         error_path = tuple(segments)
-        if not error_path or error_path[: len(path)] == path:
+        if (
+            not error_path
+            or error_path[: len(path)] == path
+            or path[: len(error_path)] == error_path
+        ):
             errors.append(RecipeFormError(error_path, message))
     return tuple(errors)
 
 
 def read_form_field(
-    observation: FormFieldObservation, path: tuple[str, ...]
+    observation: RecipeFieldObservation, path: tuple[str, ...]
 ) -> RecipeFormField:
     """Project one decoded atomic field read into the author's detached view.
 
-    observation comes from tab.describe_cfg, and path is its requested canonical
-    model-field path. Fixed hidden structural tags are not author field paths.
-    No option matching, schema traversal or source reads occur here.
+    observation comes from tab.read_recipe_field; path is its logical request.
+    Fixed hidden structural tags are not author field paths. Mode/key use only
+    owner-supplied selector identity, never authored input or Option inspection.
     """
     description = observation["description"]
     target = description["target"]
@@ -232,14 +184,13 @@ def read_form_field(
         raise ValueError(f"Unknown cfg field: {'.'.join(path)}")
     raw = observation["input"]
     mode: Literal["key", "inline"] | None = None
+    selector = observation["selector"]
     key = None
-    if isinstance(raw, dict):
-        if raw.get("kind") == "ref":
+    if selector is not None:
+        if selector["mode"] == "key":
             mode = "key"
-            name = raw.get("name")
-            if isinstance(name, str):
-                key = name
-        elif raw.get("kind") == "inline":
+            key = selector["key"]
+        elif selector["mode"] == "inline":
             mode = "inline"
     return RecipeFormField(
         input=wire_value(raw),
@@ -253,5 +204,12 @@ def read_form_field(
             for child in description["children"]
             if not (child["hidden"] and child["fixed"])
         ),
-        errors=directed_errors(dict(observation), path),
+        errors=tuple(
+            RecipeFormError(tuple(error["path"]), error["message"])
+            for error in observation["errors"]
+        ),
+        value_status=observation["value_status"],
+        selector=selector,
+        source=observation["source"],
+        readonly=observation["readonly"],
     )

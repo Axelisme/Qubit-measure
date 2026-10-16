@@ -16,11 +16,15 @@ from zcu_tools.cfg_model import (
     Template,
     TemplateDef,
 )
-from zcu_tools.gui.app.measure.remote.form_description import describe_form
+from zcu_tools.gui.app.measure.remote.form_description import (
+    describe_form,
+    recipe_field_wire,
+)
+from zcu_tools.gui.app.measure.remote.form_errors import recipe_form_errors
 from zcu_tools.gui.app.measure.remote.form_observation import form_writes, observe_form
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
 from zcu_tools.gui.form import FormEnv, FormPathError
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, LogicalEdit
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.aliases import AliasRow, AliasTable
 from zcu_tools.gui.session.context_types import SavedPoint
@@ -312,10 +316,55 @@ class LookbackGui:
                 data={"form_path": list(error.path)},
             ) from error
 
+    def _recipe_rpc(self, method, params):
+        if method == "tab.describe_cfg":
+            return self._describe(tuple(params["path"]))
+        if method == "tab.read_recipe_field":
+            with recipe_form_errors():
+                return dict(
+                    recipe_field_wire(
+                        self.owner.read_recipe_field(tuple(params["path"]))
+                    )
+                )
+        if method == "tab.edit_recipe_fields":
+            with recipe_form_errors():
+                changed = self.owner.edit_recipe_fields(
+                    [
+                        LogicalEdit(tuple(edit["path"]), edit["value"])
+                        for edit in params["edits"]
+                    ]
+                )
+                errors = self.owner.recipe_errors()
+                self.publication = dict(observe_form(self.owner))
+                return {
+                    "changed": changed,
+                    "errors": [
+                        {"path": list(path), "message": message}
+                        for path, message in (errors.messages.items() if errors else ())
+                    ],
+                }
+        if method == "tab.select_recipe_module":
+            with recipe_form_errors():
+                path = tuple(params["path"])
+                changed = self.owner.select_recipe_module(
+                    path, params["action"], key=params.get("key")
+                )
+                self.publication = dict(observe_form(self.owner))
+                return {
+                    "changed": changed,
+                    "field": recipe_field_wire(self.owner.read_recipe_field(path)),
+                }
+        raise ValueError(f"Unknown recipe method: {method}")
+
     def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         observations = self._observations()
-        if method == "tab.describe_cfg":
-            observations[method] = self._describe(tuple(params["path"]))
+        if method in (
+            "tab.describe_cfg",
+            "tab.read_recipe_field",
+            "tab.edit_recipe_fields",
+            "tab.select_recipe_module",
+        ):
+            observations[method] = self._recipe_rpc(method, params)
         if method == "tab.parameter_read":
             observations[method] = {
                 "values": {
