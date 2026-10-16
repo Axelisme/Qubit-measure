@@ -117,14 +117,14 @@ def test_two_interactive_stages_resume_in_background_without_tool_wait(tmp_path)
 
     def sample(session: RecipeSession) -> RecipeGenerator:
         result = yield from session.open_tab("lookback").run_step()
-        run, _ = result.run, result.status
+        run = result.run
         assert isinstance(run, RecipeRun)
         result = yield from run.analyze_step("primary")
-        primary, _ = result.analysis, result.status
+        primary = result.analysis
         assert isinstance(primary, RecipeAnalysis)
         reached_post.set()
         result = yield from run.analyze_step("post")
-        post, _ = result.analysis, result.status
+        post = result.analysis
         assert isinstance(post, RecipeAnalysis)
         resumed.set()
 
@@ -166,10 +166,9 @@ def test_question_captures_items_and_answer_only_delivers_decision(tmp_path, ans
 
     def sample(session: RecipeSession) -> RecipeGenerator:
         result = yield from session.open_tab("lookback").run_step()
-        run, _ = result.run, result.status
+        run = result.run
         assert isinstance(run, RecipeRun)
-        result = yield from run.analyze_step("primary")
-        _, _ = result.analysis, result.status
+        yield from run.analyze_step("primary")
         result = yield from ask(run.propose_writeback(["frequency"]))
         decision, status = result.decision, result.status
         delivered.extend((decision, status))
@@ -205,10 +204,9 @@ def test_question_captures_items_and_answer_only_delivers_decision(tmp_path, ans
 def test_completed_rejects_unexpected_question_handoff(tmp_path):
     def sample(session: RecipeSession) -> RecipeGenerator:
         result = yield from session.open_tab("lookback").run_step()
-        run, _ = result.run, result.status
+        run = result.run
         assert isinstance(run, RecipeRun)
-        result = yield from run.analyze_step("primary")
-        _, _ = result.analysis, result.status
+        yield from run.analyze_step("primary")
         yield from ask(run.propose_writeback(["frequency"]))
 
     with (
@@ -236,10 +234,9 @@ def test_question_cancel_delivers_none_and_clears_one_intent(tmp_path):
 
     def sample(session: RecipeSession) -> RecipeGenerator:
         result = yield from session.open_tab("lookback").run_step()
-        run, _ = result.run, result.status
+        run = result.run
         assert isinstance(run, RecipeRun)
-        result = yield from run.analyze_step("primary")
-        _, _ = result.analysis, result.status
+        yield from run.analyze_step("primary")
         result = yield from ask(run.propose_writeback())
         decision, status = result.decision, result.status
         delivered.extend((decision, status))
@@ -302,7 +299,7 @@ def test_interactive_cancel_delivers_none_without_another_analysis_worker(tmp_pa
 
     def sample(session: RecipeSession) -> RecipeGenerator:
         result = yield from session.open_tab("lookback").run_step()
-        run, _ = result.run, result.status
+        run = result.run
         assert isinstance(run, RecipeRun)
         result = yield from run.analyze_step("primary")
         analysis, status = result.analysis, result.status
@@ -331,7 +328,7 @@ def test_between_yield_cancel_suppresses_once_but_keeps_fast_steps(tmp_path):
     def sample(session: RecipeSession) -> RecipeGenerator:
         tab = session.open_tab("lookback")
         result = yield from tab.run_step()
-        run, _ = result.run, result.status
+        run = result.run
         assert isinstance(run, RecipeRun)
         between.set()
         wait_for_event(continue_recipe)
@@ -380,8 +377,7 @@ def test_native_failure_is_thrown_at_yield_and_finally_runs(tmp_path, caught):
     def sample(session: RecipeSession) -> RecipeGenerator:
         try:
             try:
-                result = yield from session.open_tab("lookback").run_step()
-                _, _ = result.run, result.status
+                yield from session.open_tab("lookback").run_step()
             except GuiRpcError as error:
                 failures.append(error.reason)
                 if not caught:
@@ -415,10 +411,9 @@ def test_close_serializes_finally_and_never_resumes_a_closed_generator(
     def sample(session: RecipeSession) -> RecipeGenerator:
         try:
             result = yield from session.open_tab("lookback").run_step()
-            run, _ = result.run, result.status
+            run = result.run
             assert isinstance(run, RecipeRun)
-            result = yield from run.analyze_step("primary")
-            _, _ = result.analysis, result.status
+            yield from run.analyze_step("primary")
             resumed.set()
         finally:
             finally_ran.set()
