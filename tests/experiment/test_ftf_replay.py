@@ -15,8 +15,10 @@ from zcu_tools.simulate.evolution import EvolutionLibrary
 from tests.resources._ftf_data import ftf_document
 
 
-def test_replay_rejects_archive_from_pre_quantized_phase_backend(
+@pytest.mark.parametrize("backend", ["ftf-direct-v1", "ftf-direct-v2"])
+def test_replay_rejects_archive_from_obsolete_numeric_backend(
     tmp_path: Path,
+    backend: str,
 ) -> None:
     from zcu_tools.experiment.ftf import replay_round
     from zcu_tools.resources.simulation_replay import (
@@ -48,7 +50,7 @@ def test_replay_rejects_archive_from_pre_quantized_phase_backend(
         env.devices.close_all_devices()
     saved = read_replay(replay_paths(archive)[0])
     old_versions = tuple(
-        (name, "ftf-direct-v1" if name == "backend" else value)
+        (name, backend if name == "backend" else value)
         for name, value in saved.acquire.versions
     )
     legacy = saved.acquire.model_copy(update={"versions": old_versions})
