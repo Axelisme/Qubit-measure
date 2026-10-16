@@ -54,6 +54,69 @@ class TestT6Kernel(KernelContract):
     pass
 
 
+@pytest.mark.parametrize(
+    ("frequency", "duration", "rate_scale"),
+    [
+        pytest.param(0.7, 4.37, 1.0, id="coherent-periods-tail"),
+        pytest.param(-0.7, 4.37, 1.0, id="negative-frequency"),
+        pytest.param(0.0, 0.4, 1.0, id="zero-frequency"),
+        # At late phase origins, relaxation over a period loses many digits.
+        # The short physical segment itself remains accurately integrable.
+        pytest.param(0.7, 0.23, 10000.0, id="ill-conditioned-phase-origin"),
+    ],
+)
+def test_channels_for_arbitrary_coherent_inputs(
+    frequency: float, duration: float, rate_scale: float
+) -> None:
+    from zcu_tools.simulate.evolution.kernels.t6 import T6Kernel
+
+    model = synthetic_model(3)
+    model = replace(model, rates_per_ns=model.rates_per_ns * rate_scale)
+    source = ModelSource(np.eye(3, dtype=complex) / 3, lambda level: model)
+    # Basis projectors and real/imaginary pair superpositions span Hermitian
+    # inputs. One prepared key must work for all of them, not just a thermal state.
+    vectors = list(np.eye(3, dtype=complex))
+    for left in range(3):
+        for right in range(left + 1, 3):
+            for phase in (1.0, 1j):
+                vector = np.zeros(3, dtype=complex)
+                vector[left], vector[right] = 1 / np.sqrt(2), phase / np.sqrt(2)
+                vectors.append(vector)
+    states = np.stack([np.outer(vector, vector.conj()) for vector in vectors])
+    count = len(states)
+    table = SegmentTable(
+        timeline=np.arange(count),
+        start_ns=np.arange(count, dtype=float) * 0.37,
+        duration_ns=np.full(count, duration),
+        level=np.zeros((count, 1), dtype=np.int64),
+        tones=np.ones(count, dtype=np.int64),
+        tone_port=np.zeros((count, 1), dtype=np.int64),
+        tone_frequency_ghz=np.full((count, 1), frequency),
+        tone_amplitude=np.full((count, 1), 0.15),
+        tone_theta_rad=np.linspace(-2.1, 8.2, count)[:, None],
+        tone_envelope=np.zeros((count, 1), dtype=np.int64),
+        tone_envelope_offset_ns=np.zeros((count, 1)),
+        envelopes=(EnvelopeSpec("constant"),),
+    )
+    case = KernelCase(T6Kernel(), source, table, states, budget=1e-6)
+    rows = np.arange(count, dtype=np.int64)
+    prepared = case.kernel.prepare(
+        case.kernel.prepare_keys(table, rows[:1]),
+        table,
+        rows[:1],
+        source,
+        case.budget,
+    )
+    actual = states.copy()
+    case.kernel.apply(
+        prepared, np.zeros(count, dtype=np.int64), table, rows, actual, case.budget
+    )
+    expected = np.stack(
+        [reference(case, row, state) for row, state in enumerate(states)]
+    )
+    assert_budget(actual, expected, case.budget)
+
+
 def test_guard_only_accepts_one_constant_tone(kernel_case: KernelCase) -> None:
     case = kernel_case
     rows = np.arange(len(case.states), dtype=np.int64)
