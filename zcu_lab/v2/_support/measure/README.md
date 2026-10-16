@@ -20,6 +20,13 @@ helper 留在群組內 `_shared.py`。
 
 `rabi_initial_values.len_rabi_initial_values` 為兩種 Length Rabi 選擇相同的 pulse 來源與掃描上限。已有 x180 時保留 Slot 與 gain，以有效 pi_len 的四倍作上限；沒有 x180 時使用 gain=1 的 qub_probe Template 與 1 µs 上限。它只讀固定 capture 中的 validated Spec，跟隨 waveform key，但不 materialize、不讀 asset、不寫回校準。原始來源在 owner 驗證前被拒絕或轉型的值，不屬於此 typed capture 的可觀察輸入。
 
+`rabi_initial_values.amp_rabi_initial_pulse` 為兩種 Amplitude Rabi 選擇相同的 pulse 來源與長度。
+有 x180 時透過 Slot(copy=True).set 複製捕捉來源，覆寫 waveform.length=1.5*pi_len*pi_gain（µs）。
+pi_len 須為有限正數，pi_gain 須為有限數且在 (0, 1]。無效來源讓必填長度留空。
+來源 gain 若為 NaN 或 ±Inf，額外設 gain=None，避免非有限數留在 JSON input。兩個必填欄位都補齊才可提交。
+有限的無效 gain 保留原值。沒有 x180 時使用 qub_probe Template，明確設定 gain=1 與 length=1 µs。
+Nested waveform key 的複製由 Form adapter 負責。來源與其他欄位不變，不寫回校準。
+
 `singleshot_shared.py` 從 AnalyzeRequest 的固定 Run ParameterContext 讀取分類、chi/kappa
 與可選分析校準。缺 capture 明示失敗；可選 leaf 缺少或 null 時交給 core 的既有預設。
 

@@ -33,6 +33,52 @@ def len_rabi_initial_values(
     pulse = _x180_spec(parameters)
     if pulse is None:
         return Template("qub_probe", set={"gain": 1.0}), 1.0
+    pi_len = _valid_pi_len(parameters, pulse)
+    stop = None if pi_len is None else 4 * pi_len
+    return Slot("$qubit.module.x180"), stop
+
+
+def amp_rabi_initial_pulse(parameters: ParameterContext | None) -> Slot | Template:
+    """Return an editable Amplitude Rabi pulse from the fixed Open/Reset capture.
+
+    Missing capture or missing/null x180 selects qub_probe with gain 1.0 and
+    explicit waveform length 1.0 us. Otherwise copy captured x180 and override
+    only waveform.length with 1.5*pi_len*pi_gain in us. pi_len must be finite
+    and positive; pi_gain must be finite and in (0, 1]. Neither accepts bool.
+    Invalid stored values leave the required length blank, not a fallback.
+    Only nonfinite gain also leaves gain blank so the copied pulse is editable
+    as JSON input; both required fields must then be filled before submission.
+    Finite invalid gain is preserved unchanged.
+
+    Only validated Specs are read, following waveform keys without reading
+    assets. Pre-validation rejected/coerced raw values are outside this
+    boundary. Alias, source and library errors propagate; non-pulse x180
+    raises TypeError. No source is refreshed, mutated or written back.
+    """
+    if parameters is None:
+        return Template("qub_probe", set={"gain": 1.0, "waveform.length": 1.0})
+    pulse = _x180_spec(parameters)
+    if pulse is None:
+        return Template("qub_probe", set={"gain": 1.0, "waveform.length": 1.0})
+    pi_len = _valid_pi_len(parameters, pulse)
+    pi_gain = pulse.gain
+    if not isfinite(pi_gain):
+        return Slot(
+            "$qubit.module.x180", copy=True, set={"gain": None, "waveform.length": None}
+        )
+    if (
+        pi_len is None
+        or isinstance(pi_gain, bool)
+        or not isinstance(pi_gain, (int, float))
+        or not 0 < pi_gain <= 1
+    ):
+        length = None
+    else:
+        length = 1.5 * pi_len * pi_gain
+    return Slot("$qubit.module.x180", copy=True, set={"waveform.length": length})
+
+
+def _valid_pi_len(parameters: ParameterContext, pulse: PulseSpec) -> float | None:
     waveform = (
         parameters.library.waveform_spec(pulse.waveform)
         if isinstance(pulse.waveform, str)
@@ -45,10 +91,8 @@ def len_rabi_initial_values(
         or not isfinite(pi_len)
         or pi_len <= 0
     ):
-        stop = None
-    else:
-        stop = 4 * pi_len
-    return Slot("$qubit.module.x180"), stop
+        return None
+    return pi_len
 
 
 def _x180_spec(parameters: ParameterContext) -> PulseSpec | None:
