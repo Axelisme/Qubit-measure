@@ -246,3 +246,49 @@ def test_distinct_probe_port_is_not_aliased_to_stark_port(
     table = replace(case.table, tone_port=np.tile([0, 1], (4, 1)))
     case = replace(case, source=source, table=table)
     KernelContract().test_error_within_budget(case)
+
+
+def test_probe_guard_failure_uses_period_propagation_in_floquet_frame(
+    kernel_case: KernelCase,
+) -> None:
+    """Strong probes remain accepted when the Floquet approximation is valid."""
+    case = kernel_case
+    original = case.source.model((0,))
+    probe = original.drives[0]
+    stark = replace(
+        probe,
+        name="stark",
+        in_phase_ghz=np.zeros_like(probe.in_phase_ghz),
+        quadrature_ghz=np.zeros_like(probe.quadrature_ghz),
+    )
+    source = ModelSource(
+        case.states[0],
+        lambda level: replace(original, level=level, drives=(stark, probe)),
+    )
+    table = replace(
+        case.table,
+        duration_ns=np.array([40.7, 30.1, 18.9, 0.0]),
+        tone_port=np.tile([0, 1], (4, 1)),
+        tone_frequency_ghz=np.column_stack((np.full(4, 3.7), [0.13, 0, -0.11, 0])),
+        tone_amplitude=np.tile([0.2, 0.15], (4, 1)),
+    )
+    case = replace(case, source=source, table=table)
+    rows = np.arange(4, dtype=np.int64)
+    assert case.kernel.guard(table, rows, source, case.budget).all()
+    keys, representatives, inverse = np.unique(
+        case.kernel.prepare_keys(table, rows), return_index=True, return_inverse=True
+    )
+    prepared = case.kernel.prepare(
+        keys, table, rows[representatives], source, case.budget
+    )
+    actual = case.states.copy()
+    case.kernel.apply(prepared, inverse, table, rows, actual, case.budget)
+    expected = np.stack(
+        [reference(case, r, state) for r, state in enumerate(case.states)]
+    )
+    without = replace(
+        case, table=replace(table, tone_amplitude=table.tone_amplitude * [1, 0])
+    )
+    free = reference(without, 0, case.states[0])
+    assert np.max(abs(np.diag(expected[0] - free))) > 0.02
+    assert_budget(actual, expected, 2e-8)
