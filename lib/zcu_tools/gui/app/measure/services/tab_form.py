@@ -29,7 +29,14 @@ from zcu_tools.gui.form import (
     FormState,
     FormWritePath,
 )
-from zcu_tools.gui.form_adapter import Form, FormContext, ModuleValues
+from zcu_tools.gui.form_adapter import (
+    Form,
+    FormContext,
+    LogicalEdit,
+    LogicalEditCandidate,
+    LogicalFieldObservation,
+    ModuleValues,
+)
 
 _logger = getLogger(__name__)
 
@@ -203,6 +210,91 @@ class TabFormResource:
         with self._mutation():
             self._state.write(batch, self._sources.env)
             self._notify()
+
+    def read_recipe_field(self, path: FormWritePath) -> LogicalFieldObservation:
+        """Read one logical field using current input and the fixed capture.
+
+        path contains field names without generated wrappers; () reads root.
+        Ref descendants project captured Spec values, never writable drafts.
+        Busy, observer and notification reads are allowed. Revocation raises
+        RESOURCE_GONE. Adapter path/source failures propagate without changing
+        input, base, library, notifications or publication. No capture occurs.
+        """
+        self._require_open()
+        return self._form.read_logical_field(self._state.input, path, self._sources.env)
+
+    def edit_recipe_fields(self, edits: Sequence[LogicalEdit]) -> bool:
+        """Admit and install one ordered logical batch under all mutation guards.
+
+        edits retains duplicate paths and request indexes for adapter admission.
+        Structural/source/ref-ancestor failures leave the entire resource intact.
+        Ordinary invalid drafts are installed, not rolled back. Return whether
+        input changed, not whether it is valid. Changed input notifies state and
+        resource subscribers once, preserving base and the fixed source capture.
+        Busy, revoked and notification-reentrant commands reject even empty edits.
+        """
+        with self._mutation():
+            candidate = self._form.prepare_logical_edits(
+                self._state.input, edits, self._sources.env
+            )
+            return self._install_recipe_candidate(candidate)
+
+    def select_recipe_module(
+        self,
+        path: FormWritePath,
+        action: Literal["use_library", "use_inline", "disable"],
+        *,
+        key: str | None = None,
+    ) -> bool:
+        """Select/copy/disable a logical generated selector in one guarded turn.
+
+        path is nonempty. use_library requires a nonblank actual key; other
+        actions require key=None. Adapter owns choices, family, declaration
+        locks, nullable state, ref ancestors and captured source admission.
+        use_inline copies that capture; existing inline is a guarded no-op.
+        Missing/disabled/unresolved selections never create defaults. Return
+        changed, not validity. Failures preserve input/base/publication; changed
+        candidates notify once. Subsequent commands are not a transaction.
+        """
+        with self._mutation():
+            if action == "use_library":
+                if key is None or not key.strip():
+                    raise ValueError("use_library requires a nonempty key")
+                candidate = self._form.prepare_library_selection(
+                    self._state.input, path, key, self._sources.env
+                )
+            elif key is not None:
+                raise ValueError("key is only accepted for use_library")
+            elif action == "use_inline":
+                candidate = self._form.prepare_inline_copy(
+                    self._state.input, path, self._sources.env
+                )
+            elif action == "disable":
+                candidate = self._form.prepare_module_disable(
+                    self._state.input, path, self._sources.env
+                )
+            else:
+                raise ValueError(f"Unknown selector action: {action}")
+            return self._install_recipe_candidate(candidate)
+
+    def recipe_errors(self) -> FormErrors | None:
+        """Return complete logical Form preview errors, without cfg lowering.
+
+        Uses current input and fixed sources in this owner turn. This does not
+        mutate, capture or certify cfg validity. Revocation raises RESOURCE_GONE.
+        """
+        self._require_open()
+        return self._form.logical_errors(
+            self._state.input,
+            self._state.preview(self._sources.env).errors,
+            self._sources.env,
+        )
+
+    def _install_recipe_candidate(self, candidate: LogicalEditCandidate) -> bool:
+        if candidate.changed:
+            self._state.install_input(candidate.input)
+            self._notify()
+        return candidate.changed
 
     def read_module_kind(self, path: tuple[str, ...]) -> Literal["ref", "inline"]:
         """Read one authored core module's tag without evaluating its draft.

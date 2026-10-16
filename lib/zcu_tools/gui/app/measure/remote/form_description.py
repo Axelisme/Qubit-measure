@@ -5,6 +5,7 @@ from typing import Literal, TypedDict
 from pydantic import JsonValue
 
 from zcu_tools.gui.form import FormDescription, FormFieldDescription
+from zcu_tools.gui.form_adapter import LogicalFieldObservation
 
 from ..services.tab_form import TabFormResource
 from .form_observation import FormError
@@ -245,4 +246,109 @@ def describe_form(
             )
             if not error_path or error_path[: len(path)] == path
         ],
+    }
+
+
+class RecipeSelectorWire(TypedDict):
+    """Generated selector identity, not inferred from its authored envelope.
+
+    mode distinguishes explicit key/inline, null disabled, absent missing and
+    unresolved draft. key is the actual key only in key mode, otherwise None.
+    available_keys is the captured ordered menu; its size does not imply locks.
+    """
+
+    mode: Literal["key", "inline", "disabled", "missing", "unresolved"]
+    key: str | None
+    available_keys: list[str]
+
+
+class RecipeSourceWire(TypedDict):
+    """Nearest captured ref providing a logical value.
+
+    selector_path identifies that logical selector, key its actual library key,
+    source_kind its module/waveform namespace, and spec_path the true persistent
+    field path from that Spec root (empty for the selector itself).
+    """
+
+    selector_path: list[str]
+    key: str
+    source_kind: Literal["module", "waveform"]
+    spec_path: list[str]
+
+
+class RecipeFieldObservation(FormFieldObservation):
+    """Detached logical read; inherited metadata/errors use logical paths.
+
+    input_present/input describe authored input only, not projected source data.
+    value_status distinguishes available (including null), missing and unavailable
+    due to evaluation/validation failure. selector is set only for generated
+    selectors, source identifies the nearest supplying ref or None. readonly
+    means a ref ancestor was traversed, not declaration-fixed or write authority.
+    Root has target/selector/source=None and an ordinary logical subtree value.
+    """
+
+    value_status: Literal["available", "missing", "unavailable"]
+    selector: RecipeSelectorWire | None
+    source: RecipeSourceWire | None
+    readonly: bool
+
+
+class RecipeEditResult(TypedDict):
+    """changed reports installed input, errors the complete logical Form preview.
+
+    Ordinary invalid drafts may be changed=True; this does not certify cfg.
+    Admission/guard failure raises instead of returning changed=False.
+    """
+
+    changed: bool
+    errors: list[FormError]
+
+
+class RecipeSelectionResult(TypedDict):
+    """changed reports installation; field is a fresh same-turn target read.
+
+    A guarded inline no-op returns changed=False. No cross-command transaction
+    or validity guarantee is implied by either field.
+    """
+
+    changed: bool
+    field: RecipeFieldObservation
+
+
+def recipe_field_wire(observation: LogicalFieldObservation) -> RecipeFieldObservation:
+    """Encode one adapter observation, preserving logical paths and source facts.
+
+    Does not resolve sources or inspect authored selector envelopes. Ordinary
+    values use the existing JSON/complex codec; containers are detached.
+    """
+    selector = observation.selector
+    source = observation.source
+    return {
+        "description": description_wire(observation.description),
+        "input_present": observation.input_present,
+        "input": observation.input,
+        "value": context_wire_value(observation.value),
+        "errors": [
+            {"path": list(path), "message": message}
+            for path, message in (
+                observation.errors.messages.items() if observation.errors else ()
+            )
+        ],
+        "value_status": observation.value_status,
+        "selector": {
+            "mode": selector.mode,
+            "key": selector.key,
+            "available_keys": list(selector.available_keys),
+        }
+        if selector is not None
+        else None,
+        "source": {
+            "selector_path": list(source.selector_path),
+            "key": source.key,
+            "source_kind": source.source_kind,
+            "spec_path": list(source.spec_path),
+        }
+        if source is not None
+        else None,
+        "readonly": observation.readonly,
     }

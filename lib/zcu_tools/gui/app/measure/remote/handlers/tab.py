@@ -5,12 +5,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, TypedDict
 
+from pydantic import JsonValue, TypeAdapter
+
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
 )
 from zcu_tools.gui.form import FormPathError
+from zcu_tools.gui.form_adapter import LogicalEdit
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 if TYPE_CHECKING:
@@ -430,3 +433,138 @@ def h_tab_use_inline(
             reason="form_errors",
         ) from exc
     return dict(observe_form(resource))
+
+
+def _recipe_path(raw: object, *, root: bool = False) -> tuple[str, ...]:
+    if not isinstance(raw, list) or (not raw and not root):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "path must be a field array", reason="form_errors"
+        )
+    parts: list[str] = []
+    for part in raw:
+        if not isinstance(part, str) or not part:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                "path requires nonempty strings",
+                reason="form_errors",
+            )
+        parts.append(part)
+    return tuple(parts)
+
+
+def h_tab_read_recipe_field(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Read logical metadata/authored input/value/errors in one fixed-source turn.
+
+    path is a string array, [] for root. Readonly refs do not materialize drafts
+    or grant write authority. Expected failures keep directed logical details.
+    """
+    from ..form_description import recipe_field_wire
+    from ..form_errors import recipe_form_errors
+
+    path = _recipe_path(params["path"], root=True)
+    with recipe_form_errors():
+        resource = adapter.cfg_lookup(str(params["tab_id"]))
+        return dict(recipe_field_wire(resource.read_recipe_field(path)))
+
+
+def _recipe_edits(raw: object) -> list[LogicalEdit]:
+    if not isinstance(raw, list):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "edits must be an array", reason="form_errors"
+        )
+    edits: list[LogicalEdit] = []
+    for edit in raw:
+        if not isinstance(edit, dict) or set(edit) != {"path", "value"}:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                "edits require path/value",
+                reason="form_errors",
+            )
+        path = _recipe_path(edit["path"])
+        try:
+            value = TypeAdapter(JsonValue).validate_python(edit["value"], strict=True)
+        except ValueError as exc:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, str(exc), reason="form_errors"
+            ) from exc
+        edits.append(LogicalEdit(path, value))
+    return edits
+
+
+def h_tab_edit_recipe_fields(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Commit one ordered logical batch; invalid ordinary drafts remain installed.
+
+    Structural/source/ref/guard failures reject without a successful prefix.
+    Returns changed and complete logical Form preview errors, not cfg validity.
+    """
+    from ..form_description import RecipeEditResult
+    from ..form_errors import recipe_form_errors
+
+    edits = _recipe_edits(params["edits"])
+    tab_id = str(params["tab_id"])
+    with recipe_form_errors():
+        resource = adapter.cfg_lookup(tab_id)
+        changed = resource.edit_recipe_fields(edits)
+        errors = resource.recipe_errors()
+        result: RecipeEditResult = {
+            "changed": changed,
+            "errors": [
+                {"path": list(path), "message": message}
+                for path, message in (errors.messages.items() if errors else ())
+            ],
+        }
+    if changed:
+        follow_tab(adapter, tab_id, "run")
+    return dict(result)
+
+
+def h_tab_select_recipe_module(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Select an actual key, explicitly copy, or disable a logical selector.
+
+    use_library requires a nonblank key; other actions must omit it. Explicit
+    null is not omission. Owner admission precedes no-op detection; the reply
+    includes a fresh same-turn observation, never a second RPC or cached read.
+    """
+    from ..form_description import RecipeSelectionResult, recipe_field_wire
+    from ..form_errors import recipe_form_errors
+
+    path = _recipe_path(params["path"])
+    action = params["action"]
+    if action not in ("use_library", "use_inline", "disable"):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "Unknown selector action", reason="form_errors"
+        )
+    key = params.get("key")
+    if action == "use_library":
+        if not isinstance(key, str) or not key.strip():
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                "use_library requires a key",
+                reason="form_errors",
+            )
+    elif "key" in params:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "key must be omitted", reason="form_errors"
+        )
+    tab_id = str(params["tab_id"])
+    with recipe_form_errors():
+        resource = adapter.cfg_lookup(tab_id)
+        if action == "use_library" and isinstance(key, str):
+            changed = resource.select_recipe_module(path, "use_library", key=key)
+        elif action == "use_inline":
+            changed = resource.select_recipe_module(path, "use_inline")
+        else:
+            changed = resource.select_recipe_module(path, "disable")
+        result: RecipeSelectionResult = {
+            "changed": changed,
+            "field": recipe_field_wire(resource.read_recipe_field(path)),
+        }
+    if changed:
+        follow_tab(adapter, tab_id, "run")
+    return dict(result)

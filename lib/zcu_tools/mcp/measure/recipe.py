@@ -21,7 +21,7 @@ from threading import Condition, Event
 from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict, TypeGuard
 
 from zcu_tools.format_version import YamlValue
-from zcu_tools.gui.app.measure.remote.form_description import FormFieldObservation
+from zcu_tools.gui.app.measure.remote.form_description import RecipeFieldObservation
 from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
 from zcu_tools.mcp.measure.analysis_execution import (
@@ -44,11 +44,8 @@ from zcu_tools.mcp.measure.recipe_form import (
     RecipeModuleValues,
     directed_errors,
     field_observation,
-    library_option_value,
-    module_scalar,
     read_form_field,
     read_module_values,
-    slot_description,
 )
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
@@ -515,9 +512,6 @@ class _TabBinding:
     observe_analysis: Callable[[AnalyzeOperation], None]
     observe_writeback: Callable[[WritebackReceipt], None]
     origins: dict[str, str | SweepSources] = field(default_factory=dict)
-    module_projections: dict[str, tuple[str, tuple[str, ...]]] = field(
-        default_factory=dict
-    )
     summary_parameters: tuple[SummaryParameter, ...] = ()
     closed: Event = field(default_factory=Event)
     condition: Condition = field(default_factory=Condition)
@@ -903,16 +897,16 @@ class RecipeTab:
         return self._library_reference(reference)
 
     def read_field(self, field: str) -> RecipeFormField:
-        """Read one current detached field with exactly one describe_cfg RPC.
+        """Read a logical field with one fresh tab.read_recipe_field RPC.
 
-        field is a nonempty dotted canonical model-field path. Inline paths
-        include module; Range count is n, not set_sweep's expts. Description,
-        input_present/input, ordinary value and directed errors are captured in
-        the same owner turn, even when other fields are invalid. Errors are local
-        Form preview errors; get_cfg or Run checks lowered cfg errors. No cached
-        observation, source refresh or mutation is used. Unknown/inactive paths
-        fail at the owner; malformed paths raise ValueError and malformed wire
-        raises GuiRpcError(incompatible_wire). Earlier returned views stay detached.
+        field is a nonempty dotted logical path; only generated wrappers are
+        hidden. Range count is n. Metadata, authored input, ordinary value,
+        value_status, selector/source identity, readonly and local errors come
+        from one owner turn. Ref reads project fixed captured Specs without
+        materialization, source refresh or write authority. Unknown/inactive
+        paths and source failures retain owner errors; malformed local paths
+        raise ValueError, malformed replies raise incompatible_wire. Returned
+        views are detached. Cfg validity still belongs to get_cfg/Run admission.
         """
         return self._node(field)
 
@@ -969,17 +963,18 @@ class RecipeTab:
         path = tuple(_field_path(name))
         return read_form_field(self._describe(path), path)
 
-    def _describe(self, path: tuple[str, ...]) -> FormFieldObservation:
+    def _describe(self, path: tuple[str, ...]) -> RecipeFieldObservation:
         return field_observation(
             self._binding.tools.send_gui_rpc(
-                "tab.describe_cfg", {"tab_id": self._binding.tab, "path": list(path)}
+                "tab.read_recipe_field",
+                {"tab_id": self._binding.tab, "path": list(path)},
             )
         )
 
     def _edit(self, edits: list[_CfgEdit]) -> Mapping[str, object] | None:
         if edits:
             return self._binding.tools.send_gui_rpc(
-                "tab.edit_cfg",
+                "tab.edit_recipe_fields",
                 {
                     "tab_id": self._binding.tab,
                     "edits": edits,
@@ -991,49 +986,70 @@ class RecipeTab:
     def use_library(
         self, field: str, name: str | None, *, required: str | None = None
     ) -> MissingParameter | None:
-        """Write a declared ref Option value at a tagged Form module field.
+        """Select an actual library key using one logical owner command.
 
-        name is a nonblank concrete library key, not a role/alias or __ref tag.
-        None retains the current input. required names the tool parameter whose
-        absent selection returns MissingParameter without editing. Explicit
-        unoffered keys raise GuiRpcError(invalid_cfg) before any write, naming
-        the field and current available keys. Owner validation errors propagate.
-        An inline-only locked Slot rejects explicit selection before mutation.
-        This method does not copy or materialize library content. GUI and source
-        failures propagate without retry, refresh or fallback.
+        field is a logical generated selector. name is a nonblank actual key;
+        owner checks captured family/choices/locks/ref ancestors. None retains
+        input and performs one fresh read. required names a nonblank caller
+        parameter; absent/invalid retained keys return MissingParameter without
+        mutation or success provenance. Explicit success records explicit,
+        retained success gui_default. No Option/input inspection, materialization,
+        refresh or retry occurs; owner and connection failures propagate.
         """
-        path = tuple(_field_path(field))
-        observation = self._describe(path)
-        slot = slot_description(observation)
-        if slot is None:
-            raise ValueError(f"Not a module reference field: {field}")
+        _field_path(field)
+        if required is not None and not required.strip():
+            raise ValueError("required must be a nonempty parameter name")
         if name is not None:
-            if not name or not name.strip():
+            if not name.strip():
                 raise ValueError("library name must be non-empty")
-            if slot == "locked":
-                raise ValueError(f"Cannot select a library key at locked Slot: {field}")
-            selection = library_option_value(observation, name, field)
-            self._edit([{"path": list(path), "value": selection}])
-        selected = self.read_field(field)
-        if name is not None and (selected.errors or selected.key != name):
+            selected = self._select_module(field, "use_library", key=name)
+        else:
+            selected = self.read_field(field)
+        if selected.selector is None:
+            raise ValueError(f"Not a module reference field: {field}")
+        valid = (
+            selected.mode == "key"
+            and selected.key is not None
+            and selected.value_status == "available"
+            and not selected.errors
+        )
+        if name is not None and (not valid or selected.key != name):
             raise GuiRpcError(f"Invalid {field} reference", reason="invalid_cfg")
-        if (
-            name is None
-            and required is not None
-            and (selected.key is None or selected.errors)
-        ):
+        if name is None and required is not None and not valid:
             return MissingParameter(required, f"Provide a valid {field} library key")
         self._binding.origins[field] = "explicit" if name is not None else "gui_default"
         return None
 
-    def disable_library(self, field: str) -> None:
-        """Write null to an optional Slot; the Form owner validates nullability."""
+    def _select_module(
+        self,
+        field: str,
+        action: Literal["use_library", "use_inline", "disable"],
+        *,
+        key: str | None = None,
+    ) -> RecipeFormField:
         path = tuple(_field_path(field))
-        if slot_description(self._describe(path)) is None:
-            raise ValueError(f"Not a module reference field: {field}")
-        self._edit([{"path": list(path), "value": None}])
-        selected = self.read_field(field)
-        if selected.input is not None or selected.errors:
+        params: dict[str, object] = {
+            "tab_id": self._binding.tab,
+            "path": list(path),
+            "action": action,
+        }
+        if key is not None:
+            params["key"] = key
+        reply = self._binding.tools.send_gui_rpc("tab.select_recipe_module", params)
+        return read_form_field(field_observation(_cfg_object(reply.get("field"))), path)
+
+    def disable_library(self, field: str) -> None:
+        """Disable a nullable logical selector; owner checks locks and ancestry.
+
+        Sends one selector command, never set(null). On success records disabled
+        provenance. Admission/source/control failures propagate without retry.
+        """
+        selected = self._select_module(field, "disable")
+        if (
+            selected.selector is None
+            or selected.selector["mode"] != "disabled"
+            or selected.errors
+        ):
             raise GuiRpcError(f"Cannot disable {field}", reason="invalid_cfg")
         self._binding.origins[field] = "disabled"
 
@@ -1056,47 +1072,46 @@ class RecipeTab:
         )
 
     def use_inline(self, field: str) -> None:
-        """Ask the owner to convert a whole core module to editable inline input.
+        """Explicitly copy a logical selector from its fixed captured Spec.
 
-        field follows read_module. The existing tab.use_inline RPC checks
-        holder, busy, lifetime and notification-reentrant admission before
-        reading the owner's module mode. Key mode runs the generated to_inline
-        option command on the fixed captured library. Inline mode is unchanged
-        with no publication, but still takes those guards. Locks remain applied.
-        Disabled or unresolved modules fail with a directed error; select an
-        Inline option explicitly to start from template/type defaults.
-        No caller layout construction or full-cfg/extras lowering occurs here.
-        A changed input uses one atomic write/publication; subsequent reads see
-        the current Form view. Source, structural and connection failures
-        propagate without refresh, retry, fallback or rollback.
+        Sends tab.select_recipe_module/use_inline even for existing inline, so
+        holder/busy/lifetime/notification guards still apply to no-ops. Outer ref
+        ancestors must be copied explicitly first. Missing/disabled/unresolved
+        input never creates defaults. A successful copy preserves child keys;
+        later failed writes do not roll it back. Owner/source/connection failures
+        propagate without refresh, fallback or retry.
         """
-        _field_path(field)
-        self._binding.tools.send_gui_rpc(
-            "tab.use_inline", {"tab_id": self._binding.tab, "field": field}
-        )
+        self._select_module(field, "use_inline")
 
     def retain_module_source(
         self, field: str, *, summary_field: str, value_path: tuple[str, ...]
     ) -> None:
-        """Record a generic scalar projection and module provenance for next Run.
+        """Retain provenance for one logical scalar without materializing a module.
 
-        field follows read_module. summary_field is the dotted inline leaf path
-        used as the summary identity. Use that same inline path in key mode,
-        even though the current key-mode input has no such leaf.
-        value_path contains module-relative field names, without the inline
-        envelope. Missing/non-scalar projections raise ValueError before metadata
-        changes. Module errors propagate. No frequency/calibration policy runs.
-        Validate now, then read the current module value at Run capture. Keep
-        numeric values and the library:<key> or dotted module source, not a key
-        string or whole module. Later set/set_sweep calls replace provenance;
-        already captured Runs remain detached. No Form mutation/publication or
-        source refresh occurs, and no success prefix is recorded on failure.
+        field is a logical selector; value_path is its nonempty relative logical
+        scalar path. summary_field must identify that same leaf. Validates its
+        current ordinary value/status/errors, then records library:<actual-key>
+        from owner source or field for authored inline values. No input changes
+        or write authority result. Fresh Run reads capture detached facts.
         """
-        _field_path(summary_field)
-        module = self.read_module(field)
-        module_scalar(module.value, value_path)
-        self._binding.module_projections[summary_field] = (field, value_path)
-        self._binding.origins[summary_field] = module.source
+        path = tuple(_field_path(field))
+        if not value_path or any(
+            not part or part != part.strip() for part in value_path
+        ):
+            raise ValueError("value_path must contain nonempty module field names")
+        if tuple(_field_path(summary_field)) != (*path, *value_path):
+            raise ValueError("summary_field must match the logical module value path")
+        node = self.read_field(summary_field)
+        if (
+            node.selector is not None
+            or node.fields
+            or node.value_status != "available"
+            or node.errors
+        ):
+            raise ValueError("Module value path must select an available scalar")
+        self._binding.origins[summary_field] = (
+            f"library:{node.source['key']}" if node.source is not None else field
+        )
 
     def retain_source(self, field: str, source: str) -> None:
         """Record a caller-chosen provenance label for an unchanged cfg field.
@@ -1105,26 +1120,27 @@ class RecipeTab:
         string, such as a library label; this method interprets no domain policy.
         It changes only this tab's source metadata for the next Run. Subsequent
         set/set_sweep calls can replace the label, and captured Runs remain fixed.
-        No RPC, Form input change or validation of the resolved value occurs.
+        One fresh logical read validates the field category. No Form input
+        change or validation of the resolved value occurs.
         Unknown/non-scalar/non-sweep fields and empty labels raise ValueError before metadata changes. set(None) still records gui_default.
         """
         label = _source_label(source)
         node = self._node(field)
-        if node.mode is not None or (
+        if node.selector is not None or (
             node.fields and not {"start", "stop", "n"} <= set(node.fields)
         ):
             raise ValueError(f"Not a scalar or sweep cfg field: {field}")
         self._binding.origins[field] = label
 
     def set_fields(self, edits: Sequence[RecipeFieldEdit]) -> None:
-        """Prepare scalar edits together and dispatch at most one tab.edit_cfg.
+        """Send supplied logical scalar edits in one tab.edit_recipe_fields RPC.
 
         edits is an ordered sequence of dotted scalar paths, direct/expression
         inputs and non-blank provenance labels. None values retain current inputs
         and record gui_default. Empty/default-only batches send no edit. Validate
-        every path, scalar kind, carrier and label before any mutation; local
+        local path syntax, carrier and label before any mutation; local
         errors raise ValueError. Expressions go unchanged to the GUI owner.
-        The resource returns one complete Form observation. Check directed
+        The resource returns changed and complete logical Form errors. Check directed
         errors before recording sources; invalid replies raise invalid_cfg
         but leave the owner's committed draft intact.
         GUI/connection failures propagate without refresh, retry or rollback;
@@ -1135,9 +1151,7 @@ class RecipeTab:
         for edit in planned:
             if not edit.source or not edit.source.strip():
                 raise ValueError("source must be a non-empty provenance label")
-            node = self._node(edit.field)
-            if node.fields or node.mode is not None:
-                raise ValueError(f"Not a scalar cfg field: {edit.field}")
+            _field_path(edit.field)
             _check_edit_value(edit.value)
             if edit.value is not None:
                 wire.append(
@@ -1150,7 +1164,10 @@ class RecipeTab:
                 and edit.value is not None
                 and directed_errors(reply, tuple(_field_path(edit.field)))
             ):
-                raise GuiRpcError(f"Invalid {edit.field} value", reason="invalid_cfg")
+                raise GuiRpcError(
+                    f"Invalid {edit.field} value; owner retained the draft",
+                    reason="invalid_cfg",
+                )
         for edit in planned:
             self._binding.origins[edit.field] = (
                 edit.source if edit.value is not None else "gui_default"
@@ -1167,23 +1184,18 @@ class RecipeTab:
 
         None keeps its current input and records gui_default. source is a non-blank
         provenance label for supplied values. Unknown/non-scalar fields and invalid
-        carriers/labels raise ValueError before dispatch. The GUI parses expressions
+        carriers/labels are checked locally. The GUI owns path/admission errors,
+        parses expressions
         and validates values; returned errors raise GuiRpcError(invalid_cfg) without
         retry or rollback. Earlier returned field views remain detached.
         """
         self.set_fields((RecipeFieldEdit(field, value, source),))
 
-    def _sweep_inputs(self, field: str) -> RecipeFormField:
-        node = self._node(field)
-        if not {"start", "stop", "n"} <= set(node.fields):
-            raise ValueError(f"Not a sweep cfg field: {field}")
-        return node
-
     def _write_sweep(self, field: str, values: dict[str, object]) -> None:
-        self._sweep_inputs(field)
+        _field_path(field)
         if not values:
             return
-        self._edit(
+        reply = self._edit(
             [
                 {
                     "path": [*_field_path(field), "n" if key == "expts" else key],
@@ -1192,8 +1204,10 @@ class RecipeTab:
                 for key, value in values.items()
             ]
         )
-        if self._node(field).errors:
-            raise GuiRpcError(f"Invalid {field} sweep", reason="invalid_cfg")
+        if reply is not None and directed_errors(reply, tuple(_field_path(field))):
+            raise GuiRpcError(
+                f"Invalid {field} sweep; draft retained", reason="invalid_cfg"
+            )
 
     def set_sweep(
         self,
@@ -1332,12 +1346,9 @@ class RecipeTab:
         return operation
 
     def _capture_cfg_field(self, name: str, source: str | SweepSources) -> ActualField:
-        projection = self._binding.module_projections.get(name)
-        if projection is not None:
-            module_field, value_path = projection
-            module = self.read_module(module_field)
-            return {"value": module_scalar(module.value, value_path), "source": source}
         node = self._node(name)
+        if node.value_status != "available" or node.errors:
+            raise GuiRpcError(f"Unavailable {name} summary value", reason="invalid_cfg")
         value = node.value
         if node.mode == "key":
             value = node.key

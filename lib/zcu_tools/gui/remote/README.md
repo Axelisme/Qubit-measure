@@ -1,6 +1,6 @@
 # `zcu_tools.gui.remote` — shared remote adapter
 
-**Last updated:** 2026-10-13，RPC／MCP 分工與 domain numeric range projection
+**Last updated:** 2026-10-16，optional parameter omission
 
 This package owns NDJSON framing, typed envelopes, authentication, socket queues,
 owner-scheduler dispatch and lazy event delivery. Apps supply methods, serializers
@@ -31,7 +31,9 @@ connection-local lifecycle and lazy serialization/backpressure behavior.
 `ParamSpec.minimum` / `maximum` project inclusive numeric JSON-schema limits.
 These declarations do not add generic range admission: domain owners validate
 ranges and provide the same constants to schemas, including dependent limits
-in descriptions. Optional omission/null and undeclared-field behavior stay unchanged.
+in descriptions. Undeclared-field behavior stays unchanged.
+
+`ParamSpec.omit_when_missing=True` 讓 optional、default=None 的欄位在 absent 時不進 handler params，explicit null 仍以 None 傳入。Handler 可用 membership 判斷有沒有提供該欄位。Required 或帶非 None default 的宣告在建構時拒絕此設定。預設 False 保持原有 absent/null/default 行為，schema requiredness 仍由 required 決定。
 
 Wire details live in the [measure remote README](../app/measure/remote/README.md).
 App composition and error boundaries are in

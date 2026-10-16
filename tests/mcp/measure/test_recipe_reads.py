@@ -128,7 +128,7 @@ def test_read_field_retains_range_input_and_directed_errors(tmp_path: Path) -> N
         assert state.errors[0].message
         assert state.fields == ("start", "stop", "n")
         assert client.transport.sent[before:] == [
-            ("tab.describe_cfg", {"tab_id": "t", "path": ["range"]})
+            ("tab.read_recipe_field", {"tab_id": "t", "path": ["range"]})
         ]
 
 
@@ -152,7 +152,7 @@ def test_read_field_observes_current_input_and_propagates_failed_edits(
         current = tab.read_field("rounds")
         assert current.input == current.value == 7
         assert old.input == old.value == 3
-        client.transport.replies["tab.edit_cfg"] = {
+        client.transport.replies["tab.edit_recipe_fields"] = {
             "ok": False,
             "error": {
                 "code": "failed_precondition",
@@ -167,8 +167,8 @@ def test_read_field_observes_current_input_and_propagates_failed_edits(
         assert [
             method
             for method, _ in client.transport.sent[before:]
-            if method != "tab.describe_cfg"
-        ] == ["tab.edit_cfg"]
+            if method != "tab.read_recipe_field"
+        ] == ["tab.edit_recipe_fields"]
 
 
 @pytest.mark.parametrize("field", ["", "missing", "modules..readout", "rounds.child"])
@@ -196,16 +196,19 @@ def test_read_field_rejects_malformed_wire_without_retry(tmp_path: Path) -> None
     with recipe_client(tmp_path, LookbackGui()) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         reply = client.context.gui.send_gui_rpc(
-            "tab.describe_cfg", {"tab_id": "t", "path": ["rounds"]}
+            "tab.read_recipe_field", {"tab_id": "t", "path": ["rounds"]}
         )
         reply["input_present"] = "yes"
-        client.transport.replies["tab.describe_cfg"] = {"ok": True, "result": reply}
+        client.transport.replies["tab.read_recipe_field"] = {
+            "ok": True,
+            "result": reply,
+        }
         before = len(client.transport.sent)
         with pytest.raises(GuiRpcError) as failure:
             tab.read_field("rounds")
         assert failure.value.reason == "incompatible_wire"
         assert client.transport.sent[before:] == [
-            ("tab.describe_cfg", {"tab_id": "t", "path": ["rounds"]})
+            ("tab.read_recipe_field", {"tab_id": "t", "path": ["rounds"]})
         ]
 
 

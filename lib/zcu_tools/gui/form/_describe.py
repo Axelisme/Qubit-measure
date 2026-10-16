@@ -12,11 +12,10 @@ from pydantic.fields import FieldInfo
 from ._json import copy_json
 from ._selection import Field, Level, literal_values, resolve, root_level, validate_path
 from ._structure import (
-    accepts_expression,
     alternatives,
     branch_tags,
+    expression_allowed,
     fixed_tag,
-    library_key,
     model_types,
 )
 from .description import (
@@ -27,7 +26,7 @@ from .description import (
     FormFieldKind,
     FormOptionDescription,
 )
-from .model import Display, FormEnv, FormModel, FormWritePath, LinRange, ModuleInput
+from .model import Display, FormEnv, FormModel, FormWritePath, LinRange
 from .options import Option
 
 
@@ -199,9 +198,7 @@ def _metadata(
         collapsed=display.collapsed,
         can_expand=target.active_model is not None,
         nullable=type(None) in alternatives(info.annotation),
-        expression=accepts_expression(info.annotation, target.path)
-        and target.choices is None
-        and not library_key(target.level.model, target.name),
+        expression=expression_allowed(info, target.path) and target.choices is None,
         choices=None
         if target.choices is None
         else tuple(copy_json(value) for value in target.choices),
@@ -224,6 +221,25 @@ def _children(
     )
 
 
+def _description_tags(roots: tuple[object, ...]) -> dict[type[BaseModel], str]:
+    tags = branch_tags(roots)
+    tags[LinRange] = "kind"
+    return tags
+
+
+def describe_field(target: Field, *, roots: tuple[object, ...]) -> FormFieldDescription:
+    """Describe an already resolved field in its original parent context.
+
+    target retains its Level, effective choices/options and enclosing selection.
+    roots are the annotations from which that occurrence was reached, including
+    a projected model when it is outside the original root graph. They identify
+    structural branch tags; ordinary same-named fields remain ordinary fields.
+    This reads metadata only, without evaluation, source lookup or mutation.
+    Invalid display declarations raise ValueError, as canonical describe does.
+    """
+    return _metadata(target, _description_tags(roots))
+
+
 def describe(
     model: type[FormModel],
     data: Mapping[str, JsonValue],
@@ -237,14 +253,13 @@ def describe(
     Structural tag identity is annotation-owned, independent of dynamic choices.
     """
     validate_path(path)
-    tags = branch_tags((model, ModuleInput))
-    tags[LinRange] = "kind"
+    tags = _description_tags((model,))
     if not path:
         return FormDescription(
             path, None, _children(root_level(model, data, env), tags)
         )
     target = resolve(model, data, path, env)
-    metadata = _metadata(target, tags)
+    metadata = describe_field(target, roots=(model,))
     level = target.children(env)
     if level is None:
         return FormDescription(path, metadata, ())

@@ -688,3 +688,105 @@ def test_a_host_write_without_a_host_command_route_is_refused(
     state.write({("gain",): 0.5}, env)
     assert notices == [1]
     assert state.input.data == {**before, "gain": 0.5}
+
+
+def test_generated_nested_copy_and_fresh_selection_via_component_events(
+    build: Build, qapp: QApplication, tmp_path
+) -> None:
+    from tests.gui._user_input import ComponentDriver
+
+    class EventCore(ConfigBase):
+        pulse: PulseCfg | None = None
+        note: str = "$literal-name"
+
+    env = FormEnv(
+        library=LibrarySnapshot(
+            ModuleLibraryDocument(
+                format="zcu.module-library",
+                format_version="2.0",
+                components={
+                    "Q1": ComponentLibrary(
+                        pulses={
+                            "pi": PulseSpec(
+                                ch=0,
+                                nqz=1,
+                                freq=100,
+                                gain=0.2,
+                                waveform="Q1.waveforms.wave",
+                            )
+                        },
+                        waveforms={"wave": ConstWaveformCfg(length=0.1)},
+                    )
+                },
+            )
+        )
+    )
+    form = form_adapter.Form(EventCore, {})
+    state = FormState(
+        FormInput(
+            form.model,
+            {
+                "pulse": {"kind": "ref", "name": "Q1.pulses.pi"},
+                "note": "$literal-name",
+            },
+        )
+    )
+    editor = build(state, env, None, None)
+    editor.resize(760, 1000)
+    editor.show()
+    qapp.processEvents()
+    driver = ComponentDriver(editor)
+    driver.screenshot(tmp_path / "01-ref.png")
+    assert driver.observe(object_name="form.input.pulse").text == "Q1.pulses.pi"
+    assert driver.observe(object_name="form.input.note").text == "$literal-name"
+    driver.invoke_context_action(
+        object_name="form.input.pulse", action="Convert to inline"
+    )
+    driver.screenshot(tmp_path / "02-outer-inline.png")
+    assert driver.observe(object_name="form.input.pulse").text == "Inline"
+    assert driver.observe(object_name="form.input.pulse.module.freq").text == "100.0"
+    assert (
+        driver.observe(object_name="form.input.pulse.module.waveform").text
+        == "Q1.waveforms.wave"
+    )
+    driver.invoke_context_action(
+        object_name="form.input.pulse.module.waveform", action="Convert to inline"
+    )
+    driver.screenshot(tmp_path / "03-child-inline.png")
+    assert (
+        driver.observe(object_name="form.input.pulse.module.waveform").text
+        == "Inline: const"
+    )
+    assert (
+        driver.observe(
+            object_name="form.input.pulse.module.waveform.module.length"
+        ).text
+        == "0.1"
+    )
+    driver.enter_text(
+        object_name="form.input.pulse.module.waveform.module.length", value="0.25"
+    )
+    driver.screenshot(tmp_path / "04-edited-length.png")
+    assert (
+        driver.observe(
+            object_name="form.input.pulse.module.waveform.module.length"
+        ).text
+        == "0.25"
+    )
+    driver.choose_option(
+        object_name="form.input.pulse.module.waveform", value="Inline: cosine"
+    )
+    driver.screenshot(tmp_path / "05-fresh-kind.png")
+    assert (
+        driver.observe(object_name="form.input.pulse.module.waveform").text
+        == "Inline: cosine"
+    )
+    assert (
+        driver.observe(
+            object_name="form.input.pulse.module.waveform.module.length"
+        ).text
+        == ""
+    )
+    driver.enter_text(object_name="form.input.note", value="$still-literal")
+    driver.screenshot(tmp_path / "06-literal-text.png")
+    assert driver.observe(object_name="form.input.note").text == "$still-literal"

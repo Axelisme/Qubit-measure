@@ -29,137 +29,40 @@ def _points(expts: object) -> None:
         raise ValueError("expts must be an integer of at least two")
 
 
-# A frequency leaf carries its dotted Form path, source module, and value projection.
-# The Form path includes S2 inline envelopes (module); read_module values do not.
-type _FrequencyLeaf = tuple[str, str | None, tuple[str, ...]]
+def retain_scalar(tab: RecipeTab, field: str) -> None:
+    """Retain one available logical scalar and its captured source label.
 
-
-def _frequency_fields(
-    tab: RecipeTab, field: str
-) -> tuple[list[_FrequencyLeaf], str | None]:
-    """Return scalar paths with their source module/projection and outer edit root."""
-    parts = field.split(".")
-    # Find the module before reading a leaf that does not exist in key input.
-    for length in range(1, len(parts)):
-        parent_path = ".".join(parts[:length])
-        parent = tab.read_field(parent_path)
-        if parent.mode in {"key", "inline"}:
-            return [
-                (field, parent_path, _module_value_path(parent_path, field))
-            ], parent_path
-    node = tab.read_field(field)
-    if node.mode in {"key", "inline"}:
-        fields = (
-            tab.read_module(field).value
-            if node.mode == "key"
-            else tab.read_field(f"{field}.module").fields
-        )
-        if "freq" in fields:
-            leaves: list[_FrequencyLeaf] = [(f"{field}.module.freq", field, ("freq",))]
-        else:
-            raise GuiRpcError("Unsupported readout shape", reason="invalid_cfg")
-        return leaves, field
-    if node.fields:
-        raise ValueError(f"Not a frequency field: {field}")
-    return [(field, None, ())], None
-
-
-def _module_value_path(module_field: str, field: str) -> tuple[str, ...]:
-    prefix = f"{module_field}.module."
-    if not field.startswith(prefix):
-        raise ValueError(f"Not an inline module frequency field: {field}")
-    return tuple(field.removeprefix(prefix).split("."))
-
-
-def set_module_scalar(tab: RecipeTab, module_field: str, edit: RecipeFieldEdit) -> None:
-    """Edit a flat module scalar, retaining key input/source when value is None.
-
-    module_field is a complete public S2 module path; edit.field is a scalar
-    directly under its inline module envelope. Explicit values convert the
-    module with use_inline before writing. None retains a key's scalar value
-    and provenance; inline input follows RecipeTab.set's default retention.
-    Path, validation, lock and source errors propagate without fallback.
+    tab is an opened recipe tab; field is a complete logical scalar path.
+    A captured source records library:<actual-key> from the owner observation.
+    Otherwise set(None) retains authored input and records gui_default.
+    Missing/unavailable values or directed errors raise GuiRpcError(invalid_cfg).
+    Path/source/connection errors propagate. No selector is copied or changed.
     """
-    value_path = _module_value_path(module_field, edit.field)
-    if edit.value is not None:
-        tab.use_inline(module_field)
-    elif tab.read_field(module_field).mode == "key":
-        tab.retain_module_source(
-            module_field, summary_field=edit.field, value_path=value_path
-        )
-        return
-    tab.set(edit.field, edit.value, source=edit.source)
-
-
-def set_nested_module_scalar(
-    tab: RecipeTab,
-    outer_field: str,
-    child_field: str,
-    edit: RecipeFieldEdit,
-    outer_value_path: tuple[str, ...],
-) -> None:
-    """Set or retain a scalar whose nested module may still be a library key.
-
-    tab is opened with fixed Reset sources. outer_field and child_field are
-    complete public S2 module paths. edit carries the complete scalar path
-    directly under child_field, its value, and its unchanged provenance label.
-    outer_value_path is the core-relative projection from outer_field to that
-    scalar, without inline wrappers. A supplied value converts a key outer
-    module and then the child through use_inline before set. None retains an
-    outer key first, otherwise a child key, with the same absolute summary
-    field. If both modules are inline, set(None) preserves input and records
-    gui_default. Child-relative projection follows the public scalar path.
-    Path, validation, lock-admission, and source/connection errors propagate
-    from RecipeTab without refresh, fallback, or rollback.
-    No caller layout construction or returned-data patching occurs.
-    """
-    child_value_path = _module_value_path(child_field, edit.field)
-    if edit.value is not None:
-        if tab.read_field(outer_field).mode == "key":
-            tab.use_inline(outer_field)
-        tab.use_inline(child_field)
-    elif tab.read_field(outer_field).mode == "key":
-        tab.retain_module_source(
-            outer_field, summary_field=edit.field, value_path=outer_value_path
-        )
-        return
-    elif tab.read_field(child_field).mode == "key":
-        tab.retain_module_source(
-            child_field, summary_field=edit.field, value_path=child_value_path
-        )
-        return
-    tab.set(edit.field, edit.value, source=edit.source)
-
-
-def _usable_frequency(tab: RecipeTab, leaf: _FrequencyLeaf) -> bool:
-    field, module_field, value_path = leaf
-    if module_field is not None and tab.read_field(module_field).mode == "key":
-        value: object = tab.read_module(module_field).value
-        for part in value_path:
-            if not isinstance(value, dict):
-                return False
-            value = value.get(part)
-        return _finite(value)
     state = tab.read_field(field)
-    return not state.errors and _finite(state.value)
+    if state.value_status != "available" or state.errors:
+        raise GuiRpcError(f"Invalid retained {field}", reason="invalid_cfg")
+    if state.source is not None:
+        tab.retain_source(field, f"library:{state.source['key']}")
+    else:
+        tab.set(field, None)
 
 
-def _write_frequency_fields(
-    tab: RecipeTab,
-    module_field: str | None,
-    leaves: list[_FrequencyLeaf],
-    edits: list[RecipeFieldEdit],
-) -> None:
-    """Convert only for edits, apply one scalar batch, then verify all frequencies."""
-    if edits and module_field is not None:
-        tab.use_inline(module_field)
-    tab.set_fields(edits)
-    for leaf in leaves:
-        if not _usable_frequency(tab, leaf):
-            raise GuiRpcError(f"Invalid {leaf[0]} frequency", reason="invalid_cfg")
+@dataclass(frozen=True)
+class FrequencyChoice:
+    """A frequency policy decision, before the recipe copies or edits selectors.
+
+    edit is the logical scalar edit for an explicit or calibrated MHz value,
+    or None when retaining a captured library value or reporting a missing input.
+    missing is empty for a usable source, otherwise contains the required tool
+    parameter and its reason. A retained library value already has its provenance
+    recorded by choose_frequency, but no Form input or selector changes.
+    """
+
+    edit: RecipeFieldEdit | None
+    missing: tuple[MissingParameter, ...] = ()
 
 
-def set_frequency(
+def choose_frequency(
     tab: RecipeTab,
     field: str,
     frequency_mhz: float | None = None,
@@ -167,67 +70,66 @@ def set_frequency(
     calibration: str,
     prefer_library: bool = True,
     required: str,
-) -> MissingParameter | None:
-    """Select explicit, usable library, or calibrated frequency in MHz.
+) -> FrequencyChoice:
+    """Choose an explicit, captured-library, or calibrated scalar frequency in MHz.
 
-    tab is opened; field is a dotted scalar frequency or core readout module root.
-    Inline leaf paths include module, for example modules.qub_pulse.module.freq.
-    Key input stays unchanged when retaining library values; explicit/calibrated
-    writes first ask the owner to convert the whole module to inline. Retained
-    library values and sources use the public module read. A readout root
-    writes its single frequency at <root>.module.freq for generator and ADC.
-    Other readout shapes raise GuiRpcError(invalid_cfg).
-    calibration is a caller-owned logical scalar path (not a formula). required
-    names the missing tool parameter when no source is usable. Explicit finite
-    nonboolean frequency_mhz wins; otherwise prefer_library enables current
-    valid library leaf selection, followed by finite calibration. Supplied values
-    carry explicit provenance; library:<root> and calibration labels persist.
-    Validate all leaves before one batch edit; retained library leaves cause no
-    edit. Return None on success; absent sources return MissingParameter(required,
-    reason) with no edit. Invalid explicit values raise ValueError. Invalid cfg
-    and source/connection errors propagate without fallback or retry. Calibration
-    uses a GUI expression.
+    tab is opened; field is a complete logical scalar path, for example
+    modules.readout.freq. calibration is a caller-owned logical scalar path
+    such as $resonator.freq, not a formula. required names the missing tool input.
+    Explicit finite nonboolean frequency_mhz wins and produces an explicit edit.
+    Otherwise prefer_library retains an available finite error-free captured
+    scalar, records library:<actual-key>, and returns a choice without an edit.
+    Otherwise a finite calibration produces an expression edit labeled with
+    calibration. No usable source returns a choice with the missing required
+    parameter and no edit. Missing decisions do not change input or provenance.
+    Invalid explicit values raise ValueError; source/connection errors propagate
+    without refresh or retry. No selector is copied or edited here. The recipe
+    must explicitly use_inline on each selector ancestor before apply_frequency.
     """
-    if frequency_mhz is not None and not _finite(frequency_mhz):
-        raise ValueError("frequency_mhz must be finite and not boolean")
-    leaves, module_field = _frequency_fields(tab, field)
-    library_roots = {
-        path: tab.read_library_root(tab.read_field(source_field).key)
-        if frequency_mhz is None and prefer_library and source_field is not None
-        else None
-        for path, source_field, _ in leaves
-    }
-    needs_calibration = frequency_mhz is None and any(
-        library_roots[leaf[0]] is None or not _usable_frequency(tab, leaf)
-        for leaf in leaves
-    )
-    calibrated = tab.read_value(calibration) if needs_calibration else None
-    edits: list[RecipeFieldEdit] = []
-    retained: list[_FrequencyLeaf] = []
-    for leaf in leaves:
-        path = leaf[0]
-        if frequency_mhz is not None:
-            edits.append(RecipeFieldEdit(path, frequency_mhz, "explicit"))
-        elif library_roots[path] is not None and _usable_frequency(tab, leaf):
-            retained.append(leaf)
-        elif _finite(calibrated):
-            edits.append(
-                RecipeFieldEdit(path, RecipeExpression(expr=calibration), calibration)
-            )
-        else:
-            return MissingParameter(
+    if frequency_mhz is not None:
+        if not _finite(frequency_mhz):
+            raise ValueError("frequency_mhz must be finite and not boolean")
+        return FrequencyChoice(RecipeFieldEdit(field, frequency_mhz, "explicit"))
+    if prefer_library:
+        state = tab.read_field(field)
+        if (
+            state.value_status == "available"
+            and not state.errors
+            and state.source is not None
+            and _finite(state.value)
+        ):
+            tab.retain_source(field, f"library:{state.source['key']}")
+            return FrequencyChoice(None)
+    calibrated = tab.read_value(calibration)
+    if _finite(calibrated):
+        return FrequencyChoice(
+            RecipeFieldEdit(field, RecipeExpression(expr=calibration), calibration)
+        )
+    return FrequencyChoice(
+        None,
+        (
+            MissingParameter(
                 required,
                 f"Provide an explicit frequency, valid library, or calibrated {calibration}",
-            )
-    _write_frequency_fields(tab, module_field, leaves, edits)
-    for path, source_field, value_path in retained:
-        if source_field is not None:
-            tab.retain_module_source(
-                source_field,
-                summary_field=path,
-                value_path=value_path,
-            )
-    return None
+            ),
+        ),
+    )
+
+
+def apply_frequency(tab: RecipeTab, edit: RecipeFieldEdit) -> None:
+    """Apply a choose_frequency edit after the recipe explicitly copies ancestors.
+
+    tab is opened; edit carries one logical MHz scalar path, supplied value or
+    calibration expression, and its source label. Write one scalar batch, then
+    require an available finite nonboolean frequency without directed errors.
+    Invalid values raise GuiRpcError(invalid_cfg); owner admission, validation
+    and connection failures propagate. No selector is copied, no retry occurs,
+    and a previously committed copy or invalid draft is not rolled back.
+    """
+    tab.set_fields([edit])
+    state = tab.read_field(edit.field)
+    if state.value_status != "available" or state.errors or not _finite(state.value):
+        raise GuiRpcError(f"Invalid {edit.field} frequency", reason="invalid_cfg")
 
 
 @dataclass(frozen=True)
