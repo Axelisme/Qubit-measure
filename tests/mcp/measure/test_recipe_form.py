@@ -520,3 +520,56 @@ def test_invalid_module_projection_records_no_success_prefix(tmp_path: Path) -> 
         captured = tab.run().snapshot()
         assert captured is not None
         assert "pulse.module.freq" not in captured.actual["fields"]
+
+
+def test_logical_ref_scalar_and_copy_keep_summary_facts_detached(tmp_path: Path) -> None:
+    gui = FormGui()
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context, summary_parameters=(
+            SummaryParameter("frequency", "pulse.freq", "MHz"),
+        )).open_tab("lookback")
+        tab.use_library("pulse", "Q1.pulses.pi")
+        before = gui.owner.input.data
+        sent = len(client.transport.sent)
+        observed = tab.read_field("pulse.freq")
+        assert observed.value == 100.0
+        assert observed.value_status == "available"
+        assert observed.mode is None and observed.key is None
+        assert observed.input_present is False and observed.input is None
+        assert observed.readonly and not observed.locked
+        assert observed.source is not None
+        assert observed.source["key"] == "Q1.pulses.pi"
+        assert client.transport.sent[sent:] == [
+            ("tab.read_recipe_field", {"tab_id": "t", "path": ["pulse", "freq"]}),
+        ]
+        assert gui.owner.input.data == before
+        with pytest.raises((GuiRpcError, ValueError)):
+            tab.set("pulse.freq", 125.0)
+        assert gui.owner.input.data == before
+        tab.retain_source("pulse.freq", "library:Q1.pulses.pi")
+        captured = tab.run().snapshot()
+        assert captured is not None
+        assert captured.actual["fields"]["pulse.freq"]["value"] == 100.0
+        tab.use_inline("pulse")
+        tab.set("pulse.freq", 125.0)
+        assert captured.actual["fields"]["pulse.freq"]["value"] == 100.0
+        assert observed.value == 100.0
+
+
+def test_logical_scalar_batch_sends_one_owner_command_without_preflight_reads(tmp_path: Path) -> None:
+    from zcu_tools.mcp.measure.recipe import RecipeFieldEdit
+
+    gui = FormGui()
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        tab.use_library("pulse", "Q1.pulses.pi")
+        tab.use_inline("pulse")
+        sent = len(client.transport.sent)
+        tab.set_fields([RecipeFieldEdit("rounds", 9), RecipeFieldEdit("pulse.freq", 125.0)])
+        assert client.transport.sent[sent:] == [
+            ("tab.edit_recipe_fields", {"tab_id": "t", "edits": [
+                {"path": ["rounds"], "value": 9},
+                {"path": ["pulse", "freq"], "value": 125.0},
+            ]}),
+        ]
+        assert tab.read_field("pulse.freq").value == 125.0
