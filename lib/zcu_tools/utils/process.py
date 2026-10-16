@@ -211,7 +211,9 @@ def rescale(signals: NDArray[T_dtype], axis: int | None = None) -> NDArray[T_dty
     signals = signals.copy()  # prevent in-place modification
 
     if signals.dtype == complex:
-        warnings.warn("Rescale complex signals is not supported, do nothing")
+        warnings.warn(
+            "Rescale complex signals is not supported, do nothing", stacklevel=2
+        )
         return signals
 
     if np.all(np.isnan(signals)):
