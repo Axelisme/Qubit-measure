@@ -262,3 +262,21 @@ def test_tree_expand_reports_missing_and_ambiguous_visible_paths(tree_surface, q
         driver.expand_tree(("general",), object_name="parameters")
     with pytest.raises(LookupError, match="missing.*0 candidates"):
         driver.expand_tree(("missing",), object_name="parameters")
+
+
+def test_wide_checkbox_click_reaches_indicator_and_reports_visible_status(surface, qapp) -> None:
+    from PyQt6.QtWidgets import QCheckBox
+
+    checkbox = QCheckBox("Use Simulate Env")
+    checkbox.setObjectName("simulate")
+    surface.centralWidget().currentWidget().layout().addRow(checkbox)
+    checkbox.toggled.connect(
+        lambda checked: surface.statusBar().showMessage("on" if checked else "off")
+    )
+    qapp.processEvents()
+    driver = _user_input.ComponentDriver(surface)
+    assert driver.observe("Use Simulate Env").visible
+    assert driver.observe("Use Simulate Env").enabled
+    assert driver.dialogs() == ()
+    driver.click("Use Simulate Env")
+    assert driver.status().text == "on"
