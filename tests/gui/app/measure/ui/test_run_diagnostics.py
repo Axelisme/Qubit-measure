@@ -70,10 +70,10 @@ def reps_input(tab: ExpTabWidget) -> QLineEdit:
 
 
 def visible_status(window: MainWindow) -> str:
+    status_bar = window.statusBar()
+    assert status_bar is not None
     return "\n".join(
-        label.text()
-        for label in window.statusBar().findChildren(QLabel)
-        if label.isVisible()
+        label.text() for label in status_bar.findChildren(QLabel) if label.isVisible()
     )
 
 
