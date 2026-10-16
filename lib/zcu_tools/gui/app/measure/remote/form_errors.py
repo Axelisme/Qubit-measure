@@ -62,10 +62,11 @@ def recipe_form_errors() -> Generator[None]:
             data=data,
         ) from exc
     except LogicalSourceError as exc:
+        mapped = remote_error_from_expected(exc)
         raise RemoteError(
-            ErrorCode.FAILED_PRECONDITION,
-            str(exc),
-            reason=exc.reason_code,
+            mapped.code,
+            mapped.message,
+            reason=mapped.reason,
             data={
                 "path": list(exc.path),
                 "selector_path": list(exc.selector_path),
