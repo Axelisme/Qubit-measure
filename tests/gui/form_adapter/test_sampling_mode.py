@@ -10,6 +10,8 @@ from zcu_tools.gui.form import (
     FormInput,
     FormModel,
     FormState,
+    StepCenter,
+    StepRange,
 )
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.program.v2.sweep import SweepCfg
@@ -109,7 +111,8 @@ def test_large_offset_step_count_survives_effective_projection(center, descendin
     )
     result = state.result(env)
     assert not isinstance(result, FormErrors)
-    sweep = getattr(result, "sweep")
+    sweep = getattr(result, "sweep", None)
+    assert isinstance(sweep, StepRange | StepCenter)
     try:
         count = sweep.n
         cfg = form.to_cfg(result, env)
