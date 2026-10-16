@@ -569,6 +569,24 @@ class ComponentDriver:
             key_click(widget, Qt.Key.Key_Return)
         QApplication.processEvents()
 
+    def select_combo(self, value: str, *, object_name: str) -> None:
+        """Select an exact combo-box option using keyboard events, if usable."""
+        widget = self._find(None, object_name)
+        if not isinstance(widget, QComboBox):
+            raise TypeError(f"{object_name!r} is not a QComboBox")
+        index = widget.findText(value)
+        if index < 0:
+            raise LookupError(f"{object_name!r} has no option {value!r}")
+        if self._can_interact(widget):
+            mouse_click(widget, widget.rect().center())
+            popup = widget.view()
+            assert popup is not None
+            key_click(popup, Qt.Key.Key_Home)
+            for _ in range(index):
+                key_click(popup, Qt.Key.Key_Down)
+            key_click(popup, Qt.Key.Key_Return)
+        QApplication.processEvents()
+
     def _tab_bar(self, caption: str) -> QTabBar:
         bars = [
             bar
