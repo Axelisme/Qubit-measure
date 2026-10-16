@@ -280,3 +280,32 @@ def test_wide_checkbox_click_reaches_indicator_and_reports_visible_status(surfac
     assert driver.dialogs() == ()
     driver.click("Use Simulate Env")
     assert driver.status().text == "on"
+
+
+def test_checkbox_snapshot_tracks_binary_clicks_and_disabled_hidden_noops(surface, qapp) -> None:
+    from PyQt6.QtWidgets import QCheckBox
+
+    checkbox = QCheckBox("Use Simulate Env")
+    surface.centralWidget().currentWidget().layout().addRow(checkbox)
+    checkbox.toggled.connect(
+        lambda checked: surface.statusBar().showMessage("on" if checked else "off")
+    )
+    qapp.processEvents()
+    driver = _user_input.ComponentDriver(surface)
+    assert driver.observe("Use Simulate Env").checked is False
+    driver.click("Use Simulate Env")
+    assert driver.status().text == "on"
+    assert driver.observe("Use Simulate Env").checked is True
+    driver.click("Use Simulate Env")
+    assert driver.status().text == "off"
+    assert driver.observe("Use Simulate Env").checked is False
+    checkbox.setEnabled(False)
+    driver.click("Use Simulate Env")
+    assert driver.status().text == "off"
+    assert driver.observe("Use Simulate Env").checked is False
+    checkbox.setObjectName("simulate")
+    checkbox.hide()
+    driver.click(object_name="simulate")
+    assert driver.status().text == "off"
+    assert driver.observe(object_name="simulate").checked is None
+    assert driver.observe("Unavailable").checked is None
