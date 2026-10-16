@@ -4,7 +4,7 @@ status: draft
 
 # 模擬環境、FTF preset 與參數檔
 
-**狀態：** 已核准方向的設計草稿。明確環境、FTF 數值工具、離線表及持久單 round 重播已交付，現行入口見各 owner README。F1／F2 校準已跑通，conditional Ramsey 取得一點，依「能跑起來」標準接受。這些歷史證據屬舊 backend，並非目前版本的精度或成本保證。本文保留使用者裁決原話，不以早期候選敘述替代現行 owner 契約。
+**狀態：** 已核准方向的設計草稿。明確環境、FTF 分段引擎及重算式單 round 重播已交付，現行入口見各 owner README。F1／F2 校準已跑通，conditional Ramsey 取得一點，依「能跑起來」標準接受。這些歷史證據屬舊 backend，並非目前版本的精度或成本保證。本文保留使用者裁決原話，不以早期候選敘述替代現行 owner 契約。
 
 **關聯：** [[0064]] 啟動組裝、[[0068]] remote transport、[[0069]] 實驗核心與前端、[[0071]] coherence 單位、[模組定位](../0072-module-boundaries.md)。模擬入口與責任以本文及各 owner README 為準，舊 TLS 遷移已完成。早期選項比較保留於[討論快照](../../discussions/2026-10-13-simulation-environment-ftf-preset.md)。
 
@@ -18,7 +18,7 @@ status: draft
 
 擴充沿用共同 build_environment 回傳、request 與 signal 契約，替換模型與組裝接線。Program frontend／adapter 與 GUI 不寫死 FTF 的元件數、讀出配置或 YAML 欄位。FTF 自己擁有其模型限制；不為後續 preset 預建空 class、registry、plugin discovery 或通用 DSL。
 
-完整 acquire 平均1秒／sweep point 是效能目標，不是已驗證保證。離線建庫及其驗證成本單獨揭露；模擬首用計入表載入、必要模型初始化、控制解析、演化、讀出、抽樣與 packing，warm另列。執行中若觸發補建，該次成本不得隱藏。Reps／rounds不作分母。不能引用舊 M=8、toy gate 或 frozen-state readout 的速度宣稱達標。離線 prototype 只提供有限案例的證據，不等於正式功能。
+完整 acquire 平均 1 秒／sweep point 是效能目標，不是已驗證保證。首用成本計入模型初始化、控制解析、prepare、演化、讀出、抽樣與 packing，warm 成本另列。Reps／rounds 不作分母。不能引用舊 M=8、toy gate 或 frozen-state readout 的速度宣稱達標。
 
 ## 決策
 
@@ -179,41 +179,17 @@ Photon dephasing 使用 joint-state resonator pull 的完整差、total linewidt
 
 這是低 occupation 下的 exponential Markov 近似，不生成精確1/f包絡、Ramsey／echo 差異或逐 shot 低頻 noise trace，echo 不消除此不可逆 dephasing。適用假設留在文件，不以事後降低 I/Q contrast 代替演化。
 
-### 離線演化表與模擬時重用
+### 分段引擎與重算式重播
 
-採用可選離線計算格點、保存演化表，模擬時載入並插值演化。缺少可用資料時，執行期直接求解並保存確定性 direct record，不建立或擴充插值表。預建不是開始模擬的必要前置條件。`simulate.evolution` 擁有格式、完整性、身份、驗證發布與 RAM 管理。`experiment.ftf` 只注入路徑、固定每 round 的發布版本，並組合 Evolution、populations 與 ADC。跨 package 方向仍由 C8、C9、C12 保護，不新增 storage interface 或 ignore。
+FTF acquire 預設使用 `simulate.evolution.Engine` 的快速分段算法。`experiment.ftf` 以模板陣列換算單位、取得 DC 模型，將一組 timeline 交給引擎。引擎切段、分類、去重，先建立共用 prepare，再以 joblib threading chunks 演化至 readout 起點。每個 `FTFSource` 持有一個引擎，跨 acquire 保留記憶體中的 prepare 快取。每次 evolve 自己建立及釋放 worker pool。
 
-首版離線建庫使用本機 Intel Arc OpenCL complex128 批次計算，CPU reference 使用 SciPy expm 獨立對照。共同計算輸入是固定 DC、constant envelope、frequency=0 的聯合 Hamiltonian 與 signed complex 控制比例，插值軸是共同 amplitude scale。Duration、phase、source operators 與 basis 都參與身份。四／六階表在 heldout、相位接續、512 次長序列與 amplitude-scale 參數回收通過後才發布。這不是物理模型或任意設定的收斂保證，也不是 gate infidelity。
+離線 Intel OpenCL 建表、U-table library、archive/reuse/validation 發布流程與 persistent exact density records 已移除。FTF 不需要數值資料庫路徑，也沒有 `build_database.py` 或 `gpu` extra。引擎內部的週期表與 gate prepare 只在記憶體中重用，不是磁碟建庫機制。Prepare-cache 預算不包含模型、solver、ADC、回傳 density 或仍被工作持有的資料，不是 process RAM 上限。
 
-首版 U 表只用於閉系統。非零 bath、動態 flux、其他 envelope 或 frequency 保留完整直接演化與持久 exact density records，不因缺表拒絕合法 FTF。Bath-only 修改可保留 U identity，但直接密度結果必須匹配新 baths。將 U 表和 bath splitting 組合是尚未實作的後續方向。首版沒有空 backend、registry、其他 GPU 實作或 production CPU 建庫 fallback。執行期讀表不要求 GPU。
+每 round 仍捕捉當下 snapshot。同一 acquire 內，snapshot 與上一 round 相同時，組合層重用 density 與條件響應；抽樣身份仍隨 round 改變。Snapshot 改變則重新演化，不跨獨立 shot 承接量子態或隨機輸出。
 
-2026-10-15，使用者確認：「但我覺得目前的路線可行：預先計算成檔案，模擬時載入並插值。」並補充：「認同，通常模擬yaml參數在一輪使用中不怎麼會變。」使用者要求整理的路線是：「離線GPU平行建庫，模擬時插值演化，分段模擬以及快取等。」
+Private replay 保存模型設定、模板 request、snapshot 與抽樣身份。`replay_round(round_path)` 不讀取舊 density 或 U 表，而是在相同 backend、model、`SEGMENT_NUMERIC_VERSION`、RNG 與相依套件版本下重算。Manifest 不再釘住 record；舊 exact-record manifest 明確失敗，不靜默升級。私有輸入含模型真值，不進一般 Run/native/RPC metadata。
 
-FTF環境目錄提供 `build_database.py` 類型的離線入口，直接讀取目前YAML、執行建庫並輸出資料庫檔案。建庫與模擬共用設定解析及物理語意；入口保持薄層，數值行為由可import函式提供。Environment 作者選擇並注入數值資料路徑。`experiment.ftf.build_database` 與 `database.main(argv)` 直接讀 YAML，範例入口位於 `zcu_lab/simulation_envs/FTF/build_database.py`。部分節點按 plan identity 存檔續建，驗證完成後才產生不可變發布檔。
-
-2026-10-15，使用者裁決：「應該只規定資料的格式與解析工具，路徑應該由enviroment/xxx作者注入。」數值 library 擁有演化資料格式、版本、必要檢查與解析／序列化工具，不規定預設資料目錄，也不從 cwd 或全域設定隱式尋找資料。離線建庫與執行期使用 environment 提供的路徑，environment 不自行解碼數值表內部版面。接收明確路徑的讀寫工具不擁有路徑政策。
-
-演化資料是模擬器的衍生數值產物，不因需要存檔就交給 resources。這項設計不新增 simulate→resources 依賴或跨 package storage interface，既有 [[0072]] 的 C12 禁止方向保持不變。Environment 若使用 resources 讀取參數，是另一項配置載入責任。
-
-2026-10-15，使用者提出：「我預期enviroment/FTF下有個build_database之類的腳本，執行就會使用目前的yaml建立計算腳本。」對「1. 執行後直接計算並產生資料庫；2. 只生成另一份待執行計算腳本」的澄清，使用者回答：「1」。因此入口不是計算腳本產生器。這個裁決不決定模擬缺表時的行為。
-
-表保存確定性的傳播作用及插值資料，不跨獨立shot重用隨機輸出或上一個量子態。分段保存原連續波形在一段時間內造成的演化，不把envelope改成水平階梯。事件區間、積分步長與可重用片段長度分開。入口phase與控制狀態須正確接續，不能因分段而任意重設。
-
-固定YAML有利於跨掃描重用，不取代每round的EnvironmentSnapshot。表的適用性由實際Hamiltonian、basis、控制約定、waveform、插值軸與範圍、數值條件及版本決定。Round flux改變時不能只憑YAML未改就重用。Shots或輸出路徑不使U表失效；只改耗散率且Hamiltonian／basis不變時，可保留U表並更新耗散資料。
-
-2026-10-15，使用者調整方案：「還要定義edge ns？那我想改個方案，可以預建資料庫，但執行期也能計算並自動加入」。因此實際pulse的edge、duration與envelope由timeline／waveform提供，不要求為了模擬在database再重複宣告。這些條件仍參與資料識別，不能忽略差異後共用錯誤的U。
-
-合法且受支援的請求若缺少匹配資料，可在執行期求解並保存確定性 direct record，供後續及下次使用。第一版插值表只由離線入口建立或擴充，不在執行期或 acquire 準備階段自動補表。直接紀錄不自動升為插值表，未完成格點集合不冒充已驗證的表。寫入失敗正常回報，不新增背景補表或特殊恢復框架。
-
-2026-10-15，對精度、執行期補表預算及資料保留三項建議，使用者裁決：「1可以 2第一版先不要支援執行期補表，表先由離線建立 3同意」。因此 environment 提供數值容差；加速算法在相同物理模型、basis 及量化後控制下對照高精度直接解，2 ns 量化前後的差異另驗。驗證涵蓋 population 絕對誤差、coherence／phase 與校準參數，於開發及離線建表進行，不新增 runtime 物理適用域審查。具體容差未在本次指定。
-
-檔案載入與參數範圍檢查屬必要資料契約，不是runtime物理適用域認證。不得靜默外插或套用不匹配的表。損壞檔案、非法輸入、不支援操作與solver失敗不是一般cache miss，不以空成功結果或未聲明算法切換掩蓋。首版數值檔使用帶 JSON header 與內部 SHA256 的非 pickle NPZ，發布檔另以全檔 SHA256 命名。Library 驗證版本與陣列形狀，environment 不解碼版面。
-
-不要求一次建出全部參數組合。首版按 family 建完整一維小表，保存未完成格點再續建。指定節點未齊全或驗證失敗時不發布，逐點 lazy 累積與自適應插值不在首版範圍。RAM LRU 預設限制每個 library instance 的常駐 host 陣列總量為 4,000,000,000 bytes，包括 U 格點、scale nodes 與完成 mask。Direct records 目前逐次讀取而不常駐，runtime GPU residency 為零。解碼、模型、solver、ADC 與建庫工作空間另計，不把 cache 預算當成 process RAM 上限。磁碟資料不自動刪除，由 environment 作者管理，沒有磁碟 LRU 或背景清理。刪除內容引用的檔案後，不宣稱仍可完整重播。
-
-離線建庫及驗證、首用載入與初始化、warm完整acquire分別報成本。四階／六階指插值階數，最終選擇需看observable與校準／gate參數偏差及實際成本。研究用保守門檻不是正式誤差承諾。數值能力位於 `simulate.evolution`，不建立 registry 或 cache service。`experiment.ftf` 依 C8、C9 組合穩定工具，C12 繼續禁止 simulate 依賴 resources、program 或 device。
-
-早期比較與使用者修正保留於[討論快照](../../discussions/2026-10-15-offline-propagator-library.md)。現行數值格式、公開入口、精度界線與記憶體歸算見 [evolution README](../../../lib/zcu_tools/simulate/evolution/README.md)。這些能力不改變既有 FTF／flux 範圍或 white_noise 契約。完整 acquire 的效能與持久重播不能由局部插值時間推定。
+數值 API、prepare 快取與記憶體歸算見 [evolution README](../../../lib/zcu_tools/simulate/evolution/README.md)。早期離線建庫方案只保留於[討論快照](../../discussions/2026-10-15-offline-propagator-library.md)，不再描述現行入口。依賴方向仍由 [[0072]] 的 C8、C9、C12 保護，沒有新增 simulate→resources／program／device 依賴。
 
 ### 演化與 ADC 數值工具
 
@@ -227,13 +203,13 @@ FTF環境目錄提供 `build_database.py` 類型的離線入口，直接讀取�
 
 2026-10-15，使用者裁決：「同意，我預期是：basis+density matrix -> population vector -> adc iq，每步由enviroment作者調用工具達成，這樣也能方便紀錄population演化成圖（可用於debug）」。隨後澄清：「我說演化有歧義，我是只沒變成iq的population」。因此 environment 作者可以保存或繪圖檢查 I/Q 生成前的 population，不因此新增時間 trajectory 或內部積分步輸出。繪圖不放入數值工具，診斷 population 不混入量測訊號格式。
 
-模型、表及快取可重用，量子態不隱含承接上次呼叫。同一 shot 內由上層明確接續，跨 shot／round 不繼承。表版本由上層在已定邊界固定，數值工具不自行猜測 round。資料格式與路徑分工沿用上節，演化資料不交給 resources。
+模型及 prepare 快取可重用，量子態不隱含承接上次呼叫。同一 timeline 內由引擎明確接續，跨 shot／round 不繼承。數值工具不自行猜測 round；resources 只保存私有重播輸入，不保存演化表或 density records。
 
 依賴仍受 [[0072]] 的 C8 分層、C9 無循環及 C12 穩定工具不依賴有狀態能力模組約束。這不建立 simulate→program／resources 的新依賴，不放寬 ignore_imports；`program-simulation-entry` contract 限制一般 program 只依賴公開 mixin 入口，入口可委派 frontend 與 adapter。
 
 ### 多體演化與讀出模型
 
-Readout 採弱讀出、dispersive、線性 resonator 與能量基底 QND mixture，不增加 resonator quantum Hilbert space。讀出前完整演化 filtered tail。共同 readout pulse 起點以當時含 DC、offset、殘餘 tail 的實際 flux 建一次 Hro、basis、rates／pulls，整個讀出窗固定使用。這個近似忽略窗內 tail 變化，不宣稱 tail 已消失或 ADC 支援時變 flux。只拒絕讀出期間仍執行的 qubit gate／bias 指令，不因被動 tail 或 tau>0 拒絕，也不設 settling 容差或警告。二階 dispersive pulls 對所有可佔據 retained states 計算，virtual transitions 可來自較大的 parent space，不給 leakage／coupler states 任意零 pull。
+Readout 採弱讀出、dispersive、線性 resonator 與能量基底 QND mixture，不增加 resonator quantum Hilbert space。引擎演化至 readout 起點並回到 DC 能量基底。Readout 固定使用 DC 格點的 basis、rates／pulls，忽略殘餘 flux tail 及重疊 controls；起點之前的 control 部分仍正常演化。每點必須只有一個末端 readout pulse。這是讀出近似，不宣稱 tail 已消失或 ADC 支援時變 flux。二階 dispersive pulls 對所有可佔據 retained states 計算，virtual transitions 可來自較大的 parent space，不給 leakage／coupler states 任意零 pull。
 
 2026-10-14，使用者提出：「readout_source/receiver一個就好，因為共用傳輸線。」對是否也只用一個 generator 與一個 ADC readout channel 的追問，確認：「是的，只有一個gen_ch與ro_ch」。FTF 的 readout_source 與 receiver 各一個，分別綁定 YAML 指定的 gen_ch 與 ro_ch；不合併 microwave／flux control 的其他 generators。兩 resonators 的分次換頻或同次多頻策略尚待收斂，不因本裁決擴大末端讀出時段的契約。
 
@@ -274,12 +250,12 @@ Lookback／acquire_decimated 使用相同有限 pulse 與條件平均場，輸�
 ## 交付狀態與限制
 
 - Program 提供具名環境 binding、Module timeline 與 request／signal 契約。GUI 先發布同一 manager 的 live devices，再還原 remembered devices。正常硬體路徑不變，模擬的 raw compile hooks 明確拒絕。
-- Resources 提供 FTF YAML schema 與 checked JSON private replay 容器。Experiment 組合環境及單 round 重播，EvolutionLibrary 解析並驗證原數值內容引用。重播固定原 table／exact record 來源，不因後來發布 direct record 改道。
-- Evolution 提供 Intel OpenCL complex128 離線建庫、部分續建、驗證發布、磁碟讀回與持久 exact records。每個 instance 的 resident-array LRU 預算為 4,000,000,000 bytes，不是 process RAM 上限。Runtime 不建表，也不要求 GPU。
+- Resources 提供 FTF YAML schema 與 checked JSON private replay 容器。Experiment 組合環境及單 round 重播；重播用相同數值與 RNG 版本重算，不引用已保存的 density。
+- Evolution 提供預設快速分段算法及記憶體 prepare 快取。離線 U 表、Intel OpenCL、持久 exact records 及建庫入口已刪除。快取預算不是 process RAM 上限。
 - 舊 TLS、隱式白雜訊及雙模式 mock API 已移除，Notebook 使用新環境。沒有相容層。參數化 make_mock_soccfg 仍支援離線編譯。
 
-I/Q-only 練習在原版本已跑通 F1、F2，conditional Ramsey 只取得一點。驗收採「能跑起來」，不代表全 16 點完成或原精度達標。歷史正式 workload 的完整 acquire 成本為 cold 平均 2.864 秒／point、warm direct-record 平均 0.457 秒／point，不能稱平均 1 秒已達標。演算法優化另行處理。
+I/Q-only 練習在原版本已跑通 F1、F2，conditional Ramsey 只取得一點。驗收採「能跑起來」，不代表全 16 點完成或原精度達標。歷史正式 workload 的完整 acquire 成本為 cold 平均 2.864 秒／point、warm direct-record 平均 0.457 秒／point，不能稱平均 1 秒已達標。這些數字不能代表現行分段引擎。
 
-現行 FTF backend 是 `ftf-direct-v3`，包含 delayed flux 真實事件分段與重播來源固定。舊版本 private archive 透過公開 replay 入口明確報版本不符，不靜默重解或升級。原校準、raw、seal 與成本證據維持原版本，沒有以 v3 重跑；此處不宣稱 v3 已重新驗證科學精度或效能。
+現行 FTF backend 是 `ftf-segment-v4`，使用分段引擎與重算式 replay。舊版本 private archive 透過公開 replay 入口明確報版本不符，不靜默升級。原校準、raw、seal 與成本證據維持原版本；此處不把舊證據當作目前版本的科學精度或效能驗收。
 
 固定 original basis 的內部自洽驗證與跨 basis population 比較仍保留。跨 basis phase／complex 偏差照實保留，不作通過條件。模擬的絕對頻率與相位有 MHz 級 basis 偏差，不適合對照外部能譜或硬體絕對值。這些限制不改變既定物理模型，也不構成 runtime 收斂認證。

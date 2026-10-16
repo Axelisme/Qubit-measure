@@ -14,25 +14,16 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
 
+from tests.core._simulation import single_point_template
 from tests.resources._ftf_data import ftf_document
 
 
-def test_point_composition_units_signed_drive_and_tail_freeze() -> None:
-    from zcu_tools.experiment.ftf import plan_point
+def test_template_composition_units_signed_drive_and_dc_readout() -> None:
+    from zcu_tools.experiment.ftf import plan_template
+    from zcu_tools.experiment.ftf.numeric import joint_parameters, resonators
+    from zcu_tools.simulate.ftf import JointModel
 
-    settings = parse_ftf(
-        ftf_document()
-        | {
-            "flux_sources": [
-                {
-                    "name": "flux",
-                    "gen_ch": 1,
-                    "coefficients_phi0_per_gain": [0.0, 0.1, 0.0],
-                    "tau_ns": 100.0,
-                }
-            ]
-        }
-    )
+    settings = parse_ftf(ftf_document())
     snapshot = EnvironmentSnapshot("ftf-v1", "test", (("bias", 0.2),))
     events = (
         PulseEvent(1, 0.0, 0.5, 0.0, 0.0, 0.4),
@@ -40,35 +31,46 @@ def test_point_composition_units_signed_drive_and_tail_freeze() -> None:
         PulseEvent(0, 2.0, 0.5, 6000.0, 90.0, 0.1),
     )
     window = ReadoutWindow(0, 0, 10, 100.0, (1.9,), (6000.0,), (45.0,), (0,))
-    plan = plan_point(settings, snapshot, PointTimeline((), events, (window,), 2.5))
-    assert plan.readout_start_ns == 2000.0
-    assert plan.pulses[0].frequency_ghz == 6.0
-    assert plan.pulses[0].phase_rad == pytest.approx(np.pi / 2, abs=1e-12, rel=0)
-    assert plan.controls.pulses[1].start_ns == 500.0
-    assert plan.controls.pulses[1].end_ns == 1000.0
-    assert plan.controls.pulses[1].frequency_ghz == 0.02
+    template = single_point_template(PointTimeline((), events, (window,), 2.5))
+    plan = plan_template(settings, snapshot, template)
+    np.testing.assert_array_equal(plan.batch.end_ns, [2000.0])
+    pulse = plan.readout.pulses[0][0]
+    assert pulse.frequency_ghz == 6.0
+    assert pulse.phase_rad == pytest.approx(np.pi / 2, abs=1e-12, rel=0)
+    track = plan.batch.tracks[0]
+    np.testing.assert_array_equal(track.start_ns, [500.0])
+    np.testing.assert_array_equal(track.duration_ns, [500.0])
+    np.testing.assert_array_equal(track.frequency_ghz, [0.02])
+    np.testing.assert_array_equal(track.amplitude, [-0.2])
     np.testing.assert_allclose(
-        plan.grid.times_ns, 1900 + 10 * np.arange(10), atol=1e-12, rtol=0
+        plan.readout.grids[0][0].times_ns, 1900 + 10 * np.arange(10), atol=1e-12, rtol=0
     )
-    expected_flux = 0.22 + 0.04 * (1 - np.exp(-5)) * np.exp(-15)
-    assert plan.readout_flux[1] == pytest.approx(expected_flux, abs=1e-12, rel=0)
-    assert plan.readout_flux[1] != 0.22
-    source = next(s for s in plan.evolution_model.sources if s.name == "mw")
+    # Native bias maps to DC coupler flux 0.2 + 0.1 * 0.2, independent of pulses.
+    dc = np.array([0.3, 0.2 + 0.1 * 0.2, 0.4])
+    joint = JointModel(joint_parameters(settings), dc, temperature_k=0.0)
+    model = plan.source.model((0, 0, 0))
+    source = next(s for s in model.drives if s.name == "mw")
+    _, vectors = joint.eigensystem(dc)
     expected = sum(
-        (c * plan.joint.charge_operator(i) for i, c in enumerate([0.02, 0.0, -0.01])),
+        (c * joint.charge_operator(i) for i, c in enumerate([0.02, 0.0, -0.01])),
         np.zeros((8, 8), dtype=complex),
     )
-    np.testing.assert_allclose(source.in_phase_ghz, expected, atol=1e-12, rtol=0)
     expected_q = sum(
-        (-c * plan.joint.charge_operator(i) for i, c in enumerate([0.01, 0.0, 0.02])),
+        (-c * joint.charge_operator(i) for i, c in enumerate([0.01, 0.0, 0.02])),
         np.zeros((8, 8), dtype=complex),
     )
-    if source.quadrature_ghz is None:
-        raise AssertionError("microwave source must retain its quadrature operator")
-    np.testing.assert_allclose(source.quadrature_ghz, expected_q, atol=1e-12, rtol=0)
     np.testing.assert_allclose(
-        plan.readout_model.frequencies_ghz,
-        plan.joint.readout_frequencies_ghz(plan.readout_flux, plan.resonators),
+        source.in_phase_ghz, vectors.conj().T @ expected @ vectors, atol=1e-12, rtol=0
+    )
+    np.testing.assert_allclose(
+        source.quadrature_ghz,
+        vectors.conj().T @ expected_q @ vectors,
+        atol=1e-12,
+        rtol=0,
+    )
+    np.testing.assert_allclose(
+        plan.readout.model.frequencies_ghz,
+        joint.readout_frequencies_ghz(dc, resonators(settings)),
         atol=1e-12,
         rtol=0,
     )
@@ -82,7 +84,7 @@ def test_point_composition_units_signed_drive_and_tail_freeze() -> None:
 def test_common_carrier_origin_survives_pulse_start_quantization(
     phase_deg: float, expected_second: float
 ) -> None:
-    from zcu_tools.experiment.ftf import plan_point
+    from zcu_tools.experiment.ftf import plan_template
 
     settings = parse_ftf(ftf_document())
     snapshot = EnvironmentSnapshot("ftf-v1", "test", (("bias", 0.2),))
@@ -93,99 +95,25 @@ def test_common_carrier_origin_survives_pulse_start_quantization(
             PulseEvent(2, second_start_us, 0.016, 250.0, phase_deg, -0.2),
             PulseEvent(0, 0.1, 0.04, 6000.0, 0.0, 0.1),
         )
-        plan = plan_point(
-            settings, snapshot, PointTimeline((), events, (window,), 0.14)
+        plan = plan_template(
+            settings,
+            snapshot,
+            single_point_template(PointTimeline((), events, (window,), 0.14)),
         )
-        first, second = plan.controls.pulses
+        first, second = plan.batch.tracks
+
         # Both observations are whole carrier cycles from their common origin.
-        assert plan.controls.amplitude(first, 8.0) == pytest.approx(
-            0.2, abs=1e-12, rel=0
-        )
-        assert plan.controls.amplitude(second, 40.0) == pytest.approx(
+        def amplitude(track, time):
+            return track.amplitude[0] * np.exp(
+                1j * (2 * np.pi * track.frequency_ghz[0] * time + track.phase_rad[0])
+            )
+
+        assert first.start_ns[0] == 0.0
+        assert second.start_ns[0] == 32.0
+        assert amplitude(first, 8.0) == pytest.approx(0.2, abs=1e-12, rel=0)
+        assert amplitude(second, 40.0) == pytest.approx(
             expected_second, abs=1e-12, rel=0
         )
-
-
-def test_delayed_short_flux_pulse_survives_long_idle_with_large_max_step() -> None:
-    from dataclasses import replace
-
-    from zcu_tools.experiment.ftf import plan_point
-    from zcu_tools.simulate.evolution import Evolution, SolverSettings
-
-    settings = parse_ftf(ftf_document())
-    # Low-frequency synthetic circuits permit adaptive steps longer than the pulse.
-    scale = 1e-4
-    model = settings.model
-    settings = settings.model_copy(
-        update={
-            "model": model.model_copy(
-                update={
-                    "f1": model.f1.model_copy(
-                        update={
-                            "ej_ghz": 3.0 * scale,
-                            "ec_ghz": 0.8 * scale,
-                            "el_ghz": 0.6 * scale,
-                        }
-                    ),
-                    "coupler": model.coupler.model_copy(
-                        update={
-                            "ejmax_ghz": 10.0 * scale,
-                            "ec_ghz": 0.3 * scale,
-                            "q_cap": None,
-                        }
-                    ),
-                    "f2": model.f2.model_copy(
-                        update={
-                            "ej_ghz": 3.3 * scale,
-                            "ec_ghz": 0.7 * scale,
-                            "el_ghz": 0.55 * scale,
-                        }
-                    ),
-                    "g1c_ghz": 0.03 * scale,
-                    "g2c_ghz": 0.04 * scale,
-                    "g12_ghz": -0.02 * scale,
-                    "retained_levels": 2,
-                }
-            ),
-            "flux_sources": (
-                settings.flux_sources[0].model_copy(
-                    update={
-                        "coefficients_phi0_per_gain": (0.0, 0.0, 0.1),
-                        "delay_ns": 400.0,
-                        "tau_ns": 0.0,
-                    }
-                ),
-            ),
-            "solver": settings.solver.model_copy(
-                update={
-                    "max_step_ns": 10000.0,
-                    "bath_segment_ns": 2000.0,
-                }
-            ),
-        }
-    )
-    window = ReadoutWindow(0, 0, 4, 100.0, (1.0,), (6000.0,), (0.0,), (0,))
-    events = (
-        PulseEvent(1, 0.0, 0.002, 0.0, 0.0, 1.0),
-        PulseEvent(0, 1.0, 0.04, 6000.0, 0.0, 0.1),
-    )
-    plan = plan_point(
-        settings,
-        EnvironmentSnapshot("ftf-v1", "test", (("bias", 0.2),)),
-        PointTimeline((), events, (window,), 1.04),
-    )
-    initial = plan.joint.initial_state()
-    solver_settings = SolverSettings(rtol=1e-8, atol=1e-10, max_step_ns=10000.0)
-    # Independent event geometry: the actual flux pulse is [400,402) ns.
-    reference_model = replace(plan.evolution_model, event_times_ns=(400.0, 402.0))
-    expected = Evolution(reference_model, solver_settings).evolve(
-        initial, plan.controls, end_ns=1000.0
-    )
-    assert np.max(np.abs(expected.density - initial.density)) > 1e-5
-    actual = Evolution(plan.evolution_model, solver_settings).evolve(
-        initial, plan.controls, end_ns=1000.0
-    )
-    np.testing.assert_allclose(actual.density, expected.density, atol=2e-7, rtol=0)
 
 
 def _readout() -> PulseReadoutCfg:
@@ -269,19 +197,3 @@ def test_ftf_public_acquire_tau_tail_round_dc_and_same_trace_raw() -> None:
         )
     finally:
         env.devices.close_all_devices()
-
-
-@pytest.mark.parametrize("kind", ["gate", "bias"])
-def test_readout_rejects_active_controls_not_passive_tail(kind: str) -> None:
-    from zcu_tools.experiment.ftf import plan_point
-
-    settings = parse_ftf(ftf_document())
-    readout = PulseEvent(0, 0.02, 0.04, 6000.0, 0.0, 0.1)
-    control = PulseEvent(2 if kind == "gate" else 1, 0.03, 0.02, 0.0, 0.0, 0.1)
-    window = ReadoutWindow(0, 0, 10, 100.0, (0.02,), (6000.0,), (0.0,), (0,))
-    with pytest.raises(ValueError, match="readout.*control|control.*readout"):
-        plan_point(
-            settings,
-            EnvironmentSnapshot("ftf-v1", "test", (("bias", 0.2),)),
-            PointTimeline((), (readout, control), (window,), 0.07),
-        )

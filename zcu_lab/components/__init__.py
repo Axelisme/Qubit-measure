@@ -55,7 +55,6 @@ def register_all(registry: ComponentRegistry) -> None:
         ("resonator", "resonator"),
         ("control", "qubit/*"),
         ("target", "qubit/*"),
-        ("coupler", "coupler/*"),
     ):
         registry.roles.register(name, RoleSpec(kind))
     registry.roles.configure(shorthand=("qubit", "resonator"), focus_kinds=("qubit/*",))
