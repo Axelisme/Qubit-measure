@@ -52,7 +52,11 @@ def test_batch_midpoints_and_waveform_match_scalar_filter(gain, sampled):
             "bias",
             start,
             start + duration,
-            Envelope(lambda t: track.amplitude[p] * envelope.at(t)),
+            Envelope(
+                lambda t, gain=track.amplitude[p], envelope=envelope: (
+                    gain * envelope.at(t)
+                )
+            ),
             track.frequency_ghz[p],
             track.phase_rad[p] + 2 * np.pi * track.frequency_ghz[p] * start,
             breakpoints_ns=tuple(start + t for t in spec.sample_ns if t <= duration),
