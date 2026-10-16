@@ -189,7 +189,7 @@ Photon dephasing 使用 joint-state resonator pull 的完整差、total linewidt
 
 2026-10-15，使用者確認：「但我覺得目前的路線可行：預先計算成檔案，模擬時載入並插值。」並補充：「認同，通常模擬yaml參數在一輪使用中不怎麼會變。」使用者要求整理的路線是：「離線GPU平行建庫，模擬時插值演化，分段模擬以及快取等。」
 
-FTF環境目錄提供 `build_database.py` 類型的離線入口，直接讀取目前YAML、執行建庫並輸出資料庫檔案。建庫與模擬共用設定解析及物理語意；入口保持薄層，數值行為由可import函式提供。Environment 作者選擇並注入數值資料路徑。`experiment.ftf.build_database` 與 `database.main(argv)` 直接讀 YAML，範例入口位於 `notebook_md/simulation/build_database.py`。部分節點按 plan identity 存檔續建，驗證完成後才產生不可變發布檔。
+FTF環境目錄提供 `build_database.py` 類型的離線入口，直接讀取目前YAML、執行建庫並輸出資料庫檔案。建庫與模擬共用設定解析及物理語意；入口保持薄層，數值行為由可import函式提供。Environment 作者選擇並注入數值資料路徑。`experiment.ftf.build_database` 與 `database.main(argv)` 直接讀 YAML，範例入口位於 `zcu_lab/simulation_envs/build_database.py`。部分節點按 plan identity 存檔續建，驗證完成後才產生不可變發布檔。
 
 2026-10-15，使用者裁決：「應該只規定資料的格式與解析工具，路徑應該由enviroment/xxx作者注入。」數值 library 擁有演化資料格式、版本、必要檢查與解析／序列化工具，不規定預設資料目錄，也不從 cwd 或全域設定隱式尋找資料。離線建庫與執行期使用 environment 提供的路徑，environment 不自行解碼數值表內部版面。接收明確路徑的讀寫工具不擁有路徑政策。
 

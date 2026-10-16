@@ -1,6 +1,6 @@
 # Scripts
 
-**Last updated:** 2026-10-13，使用者入口與 agent 組合根分開
+**Last updated:** 2026-10-16，明確的模擬環境啟動範例
 
 這裡只放使用者自己執行的入口。Agent MCP 組合根在 [mcp_servers/](../mcp_servers/README.md)，repo 品質檢查在 [tools/](../tools/README.md)。
 工作站腳本請使用該 worktree 的 interpreter，例如
@@ -15,6 +15,17 @@
 - `run_fluxdep_gui.py`、`run_dispersive_gui.py`：工作站 Python 3.13 GUI profile，分別啟動 fluxonium flux-dependence 與 dispersive-shift 分析 GUI。可輸入 chip、qubit、結果目錄與資料庫路徑；傳入的 project 與 repo root 交給 GUI runtime。預設各開 remote-control TCP socket（預設 port 8766、8767，未指定時占用會回退到臨時 port）；GUI 的分析或存檔由各自 app 負責，啟動器不直接改寫原始資料。見 [fluxdep](../lib/zcu_tools/gui/app/fluxdep/README.md) 與 [dispersive](../lib/zcu_tools/gui/app/dispersive/README.md)。
 - 三個 GUI 的 `.bat` 檔會先切換至腳本目錄，使用 `uv run --extra gui` 啟動相應 Python 檔；repo root 仍由入口檔的 parent 定位。
 - `start_server.py`、`start_server.ipynb`：ZCU 板端 PYNQ Python 3.8 啟動 QICK Pyro nameserver 與 proxy server。Python 腳本接收 daemon port、nameserver port、SoC 版本與網卡；它由自身位置將 repo root 加入 `sys.path`，`lib` 仍需由板端環境提供。Notebook 在 `scripts/` 執行，使用相對路徑 `../`、`../lib/` 與 `../qick/qick_lib/`。兩者均需能 import repo-root [`bitfiles`](../bitfiles/README.md) 與 [`zcu_tools.qick_remote`](../lib/zcu_tools/qick_remote/README.md)，會開網路服務並連接板端 SoC；板端需自行安裝或放置 QICK。板端部署、啟動與資產版本相容性**待核實**，尚未在硬體上測試。不要用工作站 Python 執行。
+
+## 量測 GUI 模擬
+
+`--simulate` 必須接可信 Python 環境檔路徑，不是單獨的開關。在 repo root 執行：
+
+```bash
+uv run --directory . --no-sync -- python scripts/run_measure_gui.py \
+  --simulate zcu_lab/simulation_envs/environment.py
+```
+
+[FTF 範例環境](../zcu_lab/simulation_envs/README.md) 與 Notebook 共用 `build_environment()`，相鄰的 `ftf.yaml` 提供模型與接線參數。環境檔會執行 Python，只載入可信檔案。修改環境或 YAML 後須重啟；載入失敗會中止，不會回退正常模式。
 
 ## 資料作業
 
