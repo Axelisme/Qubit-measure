@@ -6,7 +6,7 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
-from scipy.linalg import expm
+from scipy.linalg import expm, solve
 
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
@@ -14,7 +14,8 @@ from ..secular import ModelSource, SecularModel
 
 @dataclass(frozen=True)
 class _ChannelProblem:
-    static: NDArray[np.complex128]
+    diagonal: NDArray[np.complex128]
+    rates: NDArray[np.float64]
     cosine: NDArray[np.complex128]
     sine: NDArray[np.complex128]
     frequency: float
@@ -22,16 +23,36 @@ class _ChannelProblem:
     steps: int
     tolerance: float
 
+    def rhs(
+        self, time: float, flat: NDArray[np.complex128], theta: float
+    ) -> NDArray[np.complex128]:
+        """Apply the secular generator to every channel column without a Kronecker product."""
+        size = len(self.rates)
+        dimension = size * size
+        phase = theta + 2 * np.pi * self.frequency * time
+        h = np.cos(phase) * self.cosine + np.sin(phase) * self.sine
+        channel = flat.reshape(size, size, dimension)
+        left = (h @ channel.reshape(size, size * dimension)).reshape(channel.shape)
+        right = (channel.transpose(0, 2, 1) @ h).transpose(0, 2, 1)
+        columns = flat.reshape(dimension, dimension)
+        result = -2j * np.pi * (left - right).reshape(columns.shape)
+        result += self.diagonal[:, None] * columns
+        populations = np.arange(size) * (size + 1)
+        result[populations] += self.rates @ columns[populations]
+        return result.ravel()
+
     def channel(self, theta: float) -> NDArray[np.complex128]:
-        """Build one full-duration channel, with no input density involved."""
-        size = len(self.static)
+        """Build a direct channel for static drive or an ill-conditioned phase origin."""
+        size = len(self.diagonal)
         identity = np.eye(size, dtype=np.complex128)
         if self.duration == 0:
             return identity
         if self.frequency == 0:
-            generator = (
-                self.static + np.cos(theta) * self.cosine + np.sin(theta) * self.sine
+            generator = np.diag(self.diagonal) + _commutator(
+                np.cos(theta) * self.cosine + np.sin(theta) * self.sine
             )
+            populations = np.arange(len(self.rates)) * (len(self.rates) + 1)
+            generator[np.ix_(populations, populations)] += self.rates
             result = expm(self.duration * generator)
         else:
             period = 1 / abs(self.frequency)
@@ -46,22 +67,30 @@ class _ChannelProblem:
         return np.asarray(result, dtype=np.complex128)
 
     def integrate(self, duration: float, theta: float) -> NDArray[np.complex128]:
-        """Integrate a period or its tail in r-selected physical substeps."""
-        size = len(self.static)
+        """Integrate a period or tail, retaining only the endpoint channel."""
+        return self.samples(duration, theta, np.array([duration]))[0]
+
+    def samples(
+        self, duration: float, theta: float, times: NDArray[np.float64]
+    ) -> NDArray[np.complex128]:
+        """Sample sorted unique times in [0, duration], discarding dense-output stages."""
+        size = len(self.diagonal)
         channel = np.eye(size, dtype=np.complex128)
+        samples = np.empty((len(times), size, size), dtype=np.complex128)
+        if times[0] == 0:
+            samples[0] = channel
         period = 1 / abs(self.frequency)
         boundaries = np.linspace(
             0, duration, max(1, int(np.ceil(duration / period * self.steps))) + 1
         )
 
         def rhs(time: float, flat: NDArray[np.complex128]) -> NDArray[np.complex128]:
-            phase = theta + 2 * np.pi * self.frequency * time
-            generator = (
-                self.static + np.cos(phase) * self.cosine + np.sin(phase) * self.sine
-            )
-            return (generator @ flat.reshape(size, size)).ravel()
+            return self.rhs(time, flat, theta)
 
         for start, stop in zip(boundaries[:-1], boundaries[1:], strict=True):
+            first, last = np.searchsorted(times, [start, stop], side="right")
+            # Always retain the boundary for restart, but no solver history.
+            evaluation = np.unique(np.r_[times[first:last], stop])
             solution = solve_ivp(
                 rhs,
                 (start, stop),
@@ -70,13 +99,56 @@ class _ChannelProblem:
                 rtol=self.tolerance,
                 atol=self.tolerance * 0.01,
                 max_step=period / self.steps,
+                t_eval=evaluation,
             )
             if not solution.success:
                 raise RuntimeError(
                     f"t6: periodic integration failed: {solution.message}"
                 )
+            samples[first:last] = solution.y[:, : last - first].T.reshape(
+                last - first, size, size
+            )
             channel = solution.y[:, -1].reshape(size, size)
-        return channel
+        return samples
+
+
+def _phase_channels(
+    problem: _ChannelProblem, phases: NDArray[np.float64], budget: float
+) -> NDArray[np.complex128]:
+    """Reuse one fundamental solve for this grid and its off-grid probes."""
+    if problem.frequency == 0 or problem.duration == 0:
+        return np.stack([problem.channel(float(theta)) for theta in phases])
+    period = 1 / abs(problem.frequency)
+    count = int(problem.duration // period)
+    tail = problem.duration - count * period
+    origins = (phases / (2 * np.pi * problem.frequency)) % period
+    ends = origins + tail
+    extra_period = (ends >= period).astype(np.int64)
+    remainders = ends - extra_period * period
+    times, indices = np.unique(np.r_[origins, remainders, period], return_inverse=True)
+    samples = problem.samples(period, 0.0, times)
+    powers = {
+        n: np.linalg.matrix_power(samples[-1], int(n))
+        for n in np.unique(count + extra_period)
+    }
+    values = np.empty((len(phases), *samples.shape[1:]), dtype=np.complex128)
+    # Limit amplification of solver error, not just roundoff in the linear solve.
+    condition_limit = budget / (128 * problem.tolerance)
+    for k, theta in enumerate(phases):
+        origin = samples[indices[k]]
+        condition = np.linalg.cond(origin)
+        if not np.isfinite(condition) or condition > condition_limit:
+            values[k] = problem.channel(float(theta))
+            continue
+        end = samples[indices[len(phases) + k]] @ powers[count + extra_period[k]]
+        try:
+            # U * F(t_theta) = F(r) * F(T)**n; never form an explicit inverse.
+            values[k] = solve(origin.T, end.T, check_finite=False).T
+        except np.linalg.LinAlgError:
+            values[k] = problem.channel(float(theta))
+    if not np.isfinite(values).all():
+        raise RuntimeError("t6: nonfinite periodic channel")
+    return values
 
 
 def _commutator(hamiltonian: NDArray[np.complex128]) -> NDArray[np.complex128]:
@@ -98,11 +170,7 @@ def _problem(
     energies = model.energies_ghz
     outgoing = model.rates_per_ns.sum(axis=0)
     decay = (outgoing[:, None] + outgoing[None, :]) / 2 + model.dephasing_per_ns
-    static = _commutator(np.diag(energies).astype(np.complex128)) - np.diag(
-        decay.ravel()
-    )
-    populations = np.arange(len(energies)) * (len(energies) + 1)
-    static[np.ix_(populations, populations)] = model.rates_per_ns - np.diag(outgoing)
+    diagonal = (-2j * np.pi * (energies[:, None] - energies[None, :]) - decay).ravel()
     coupling = 2 * np.abs(amplitude * drive.in_phase_ghz)
     detuning = np.abs(energies[:, None] - energies[None, :] - frequency)
     driven = (coupling > 0) & ~np.eye(len(energies), dtype=bool)
@@ -116,9 +184,10 @@ def _problem(
         2.3e-14, min(1e-8, budget * 0.002 / max(1, duration * abs(frequency)))
     )
     return _ChannelProblem(
-        static,
-        _commutator(amplitude * drive.in_phase_ghz),
-        _commutator(amplitude * drive.quadrature_ghz),
+        diagonal,
+        model.rates_per_ns,
+        amplitude * drive.in_phase_ghz,
+        amplitude * drive.quadrature_ghz,
         frequency,
         duration,
         steps,
@@ -129,11 +198,11 @@ def _problem(
 def _fourier(problem: _ChannelProblem, budget: float) -> NDArray[np.complex128]:
     """Refine phase sampling until off-grid channels and spectral tails agree."""
     probes = np.array([0.371, 2.137, 5.319])
-    exact = np.stack([problem.channel(float(theta)) for theta in probes])
     for count in (16, 32, 64, 128, 256, 512):
-        values = np.stack(
-            [problem.channel(2 * np.pi * k / count) for k in range(count)]
+        channels = _phase_channels(
+            problem, np.r_[probes, 2 * np.pi * np.arange(count) / count], budget
         )
+        exact, values = channels[: len(probes)], channels[len(probes) :]
         coefficients = np.fft.fft(values, axis=0) / count
         modes = np.fft.fftfreq(count, 1 / count)
         interpolated = np.einsum(
