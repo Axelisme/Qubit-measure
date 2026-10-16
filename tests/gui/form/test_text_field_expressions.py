@@ -19,8 +19,8 @@ from zcu_tools.gui.form import (
     FormPath,
     FormState,
     FormWritePath,
-    ModuleRef,
 )
+from zcu_tools.gui.form_adapter import ModuleRef
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext

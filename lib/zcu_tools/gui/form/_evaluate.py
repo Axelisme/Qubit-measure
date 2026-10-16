@@ -14,11 +14,10 @@ from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_ex
 from ._json import copy_object, default_json, expr_text
 from ._sources import check_sources, error_path
 from ._structure import (
-    accepts_expression,
     alternatives,
     discriminator,
+    expression_allowed,
     leaves,
-    library_key,
     selected,
     unwrap,
 )
@@ -69,7 +68,7 @@ class _Decoding:
 def _decode(
     info: FieldInfo, value: JsonValue, path: FormPath, decoding: _Decoding
 ) -> FormValue:
-    text_field = accepts_expression(info.annotation, path)
+    text_field = expression_allowed(info, path)
     annotation = _non_null_annotation(info.annotation)
     child = selected(info, value)
     if child is not None and isinstance(value, dict):
@@ -190,7 +189,6 @@ def _decode_model(
     return {
         key: _decode(info, value, (*path, key), decoding)
         if (info := model.model_fields.get(key)) is not None
-        and not library_key(model, key)
         else _ordinary(value)
         for key, value in data.items()
     }
@@ -399,14 +397,14 @@ def _evaluate_section(
     """Evaluate one model object's Expr leaves in place; tag_key is its selector."""
     for name, value in tuple(data.items()):
         info = model.model_fields.get(name)
-        if info is None or name == tag_key or library_key(model, name):
+        if info is None or name == tag_key:
             continue
         path = (*prefix, name)
         child = selected(info, value)
         if child is not None and isinstance(value, dict):
             _evaluate_section(child, value, env, path, discriminator(info), substituted)
             continue
-        text_field = accepts_expression(info.annotation, path)
+        text_field = expression_allowed(info, path)
         text = expr_text(value)
         if text is None or not text_field:
             continue

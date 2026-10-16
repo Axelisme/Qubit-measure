@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from types import UnionType, new_class
 from typing import (
@@ -32,14 +32,12 @@ from zcu_tools.cfg_model import (
     WaveformSpec,
 )
 from zcu_tools.gui.form import (
+    Display,
     FormEnv,
     FormErrors,
     FormInput,
     FormModel,
     FormState,
-    KeyRef,
-    ModuleInline,
-    ModuleRef,
     Option,
     OptionCommand,
     static_defaults,
@@ -62,6 +60,7 @@ from ._seeds import (
     template_seed_tree,
 )
 from ._types import annotated_type, literal_type, members, type_tag, union_type
+from .input_types import KeyRef, ModuleInline, ModuleRef
 
 _SPEC_BY_TAG = {
     type_tag(model): model
@@ -382,7 +381,10 @@ def editable_spec(
             derived.default_factory = None
         if name in locks:
             derived.default = locks[name]
-        if (display := field_display(info, locked=name in locks)) is not None:
+        display = field_display(info, locked=name in locks)
+        if name == _spec_tag(model)[0]:
+            display = replace(display or Display(), hidden=True)
+        if display is not None:
             derived.metadata.append(display)
         namespace[name] = derived
 

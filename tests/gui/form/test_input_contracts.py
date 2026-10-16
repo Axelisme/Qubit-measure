@@ -25,7 +25,9 @@ class SourceTree(form.FormModel):
     count: int = 1
 
 
-def test_source_hook_directs_nested_failures_and_restore_reverts_only_consumer() -> None:
+def test_source_hook_directs_nested_failures_and_restore_reverts_only_consumer() -> (
+    None
+):
     env = form.FormEnv()
     state = form.FormState(form.FormInput(SourceTree, {"child": {"name": "ok"}}))
     before = state.input.data
@@ -37,7 +39,9 @@ def test_source_hook_directs_nested_failures_and_restore_reverts_only_consumer()
     errors = invalid.result(env)
     assert isinstance(errors, form.FormErrors)
     assert ("child", "name") in errors.messages
-    assert state.write_compatible({"child": {"name": "missing"}, "count": 4}, env) == (("child", "name"),)
+    assert state.write_compatible({"child": {"name": "missing"}, "count": 4}, env) == (
+        ("child", "name"),
+    )
     assert state.input.data == {"child": {"name": "ok"}, "count": 4}
 
 
@@ -57,9 +61,12 @@ def test_prepare_install_is_detached_preserves_base_and_notifies_once() -> None:
         state.install_input(form.FormInput(CapturedName, {"name": "ok"}))
 
 
-def test_input_policy_disables_expression_across_description_defaults_and_restore() -> None:
+def test_input_policy_disables_expression_across_description_defaults_and_restore() -> (
+    None
+):
     model = create_model(
-        "LiteralText", __base__=form.FormModel,
+        "LiteralText",
+        __base__=form.FormModel,
         text=(Annotated[str, form.InputPolicy(expression=False)], {"expr": "1 / 0"}),
     )
     env = form.FormEnv()

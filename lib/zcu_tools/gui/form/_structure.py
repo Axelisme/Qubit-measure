@@ -15,7 +15,7 @@ from pydantic_core import PydanticCustomError
 
 from ._json import copy_json, copy_object, default_json, expr_text
 from .defaults import static_defaults
-from .model import FormEnv, FormModel, FormPath, FormWritePath, KeyRef
+from .model import FormEnv, FormModel, FormPath, FormWritePath, InputPolicy
 
 
 def unwrap(annotation: object) -> object:
@@ -49,7 +49,7 @@ def accepts_expression(annotation: object, path: FormPath) -> bool:
     picked values (Literal, Enum, bool), chosen from a dropdown or checkbox.
     A text field has a text member and no picked member, possibly nullable.
     Two leaves this annotation check cannot see are not text fields: a
-    leaf with declared choices (by path) and a KeyRef name (see library_key).
+    leaf with declared choices (by path) and a field restricted by InputPolicy.
 
     path is the leaf's field path, used only in the error. A union with both
     text and picked members raises ValueError naming path: the editor has no
@@ -74,12 +74,12 @@ def accepts_expression(annotation: object, path: FormPath) -> bool:
     return text
 
 
-def library_key(model: type[BaseModel], name: str) -> bool:
-    """Whether field name of model holds a literal key: a KeyRef's name.
-
-    A library key is a plain string, never an Expr envelope.
-    """
-    return issubclass(model, KeyRef) and name == "name"
+def expression_allowed(info: FieldInfo, path: FormPath) -> bool:
+    """Return the annotation capability restricted by explicit InputPolicy."""
+    capable = accepts_expression(info.annotation, path)
+    return capable and not any(
+        isinstance(item, InputPolicy) and not item.expression for item in info.metadata
+    )
 
 
 def model_types(annotation: object) -> tuple[type[BaseModel], ...]:
@@ -492,7 +492,7 @@ def _compatible(info: FieldInfo, value: JsonValue, path: FormPath) -> bool:
     A union of text and picked values raises ValueError (see
     accepts_expression).
     """
-    text_field = accepts_expression(info.annotation, path)
+    text_field = expression_allowed(info, path)
     # Containers are whole leaves, but nested selectors still require ordinary tags.
     tag = discriminator(info)
     if tag is not None and isinstance(value, dict) and isinstance(value.get(tag), dict):
@@ -656,7 +656,7 @@ def _restore_model(
     for name, value in saved.items():
         path = (*prefix, name)
         info = model.model_fields.get(name)
-        if info is None or (library_key(model, name) and isinstance(value, dict)):
+        if info is None:
             # A library key is a plain string, so an envelope cannot restore.
             dropped.append(path)
         else:

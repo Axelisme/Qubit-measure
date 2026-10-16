@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Annotated, Literal, Self, final
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from pydantic_core import PydanticCustomError
 
-from zcu_tools.cfg_model import ModuleSpec
 from zcu_tools.device import BaseDeviceInfo
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot
@@ -60,6 +59,18 @@ class FormPathError(ValueError):
         """Store the full requested path and use message as the exception text."""
         super().__init__(message)
         self.path = path
+
+
+@dataclass(frozen=True)
+class InputPolicy:
+    """Input capability restriction on an Annotated field.
+
+    expression=False disables Expr envelopes in descriptions, evaluation,
+    defaults and compatible restore. True retains the annotation's capability;
+    it cannot enable expressions on categorical or container fields.
+    """
+
+    expression: bool = True
 
 
 @dataclass(frozen=True)
@@ -258,6 +269,18 @@ class FormModel(BaseModel):
         return static_defaults(cls)
 
     @classmethod
+    def check_sources(cls, data: Mapping[str, JsonValue], env: FormEnv) -> None:
+        """Check this model's consumed captured sources, without mutation.
+
+        data is this level's raw authored input, including Expr envelopes.
+        env is a borrowed fixed capture. Do not recurse or validate ordinary
+        values: core traverses active children, including used static defaults.
+        Raise field_error(relative_path, message) for directed source failures;
+        an empty path means this whole model. Unexpected provider errors propagate.
+        The default consumes no sources.
+        """
+
+    @classmethod
     def choices(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
         """Return dynamic legal values by relative field path; empty means none.
 
@@ -400,12 +423,36 @@ class FormState[F: FormModel]:
         Notify subscribers once after a changed batch is installed, not for
         intermediate branches. No Engine update, revision check or I/O occurs.
         """
+        self.install_input(self.prepare_write(batch, env))
+
+    def prepare_write(
+        self, batch: Mapping[FormWritePath, JsonValue], env: FormEnv
+    ) -> FormInput[F]:
+        """Build an isolated candidate using write's structural/source admission.
+
+        Ordinary model-invalid values remain editable. Structural ValueError or
+        directed source errors leave state untouched. No subscribers run and
+        base is preserved. Use only in the same owner turn/current input/env,
+        without crossing await, reset or guard boundaries; not an authorization
+        or revision token. install_input does not repeat defaults/source checks.
+        """
         from ._sources import check_sources
         from ._structure import build_candidate
 
         candidate = build_candidate(self._model, self._data, batch, env)
         check_sources(self._model, candidate, env)
-        self._install(candidate)
+        return FormInput(self._model, candidate)
+
+    def install_input(self, candidate: FormInput[F]) -> None:
+        """Install a same-model prepared input, preserving base.
+
+        A different model raises TypeError. Changed content notifies subscribers
+        once after installation; equal content is a no-op. Hosts guard the whole
+        prepare/install turn. This does not repeat validation or source checks.
+        """
+        if candidate.model is not self._model:
+            raise TypeError("Cannot install a different form model class")
+        self._install(candidate.data)
 
     def describe(self, path: FormWritePath, env: FormEnv) -> FormDescription:
         """Describe one canonical model-field path and its next layer.
@@ -615,39 +662,3 @@ class LinRange(FormModel):
     start: float = 0.0
     stop: float = 1.0
     n: int = Field(default=3, ge=1)
-
-
-class KeyRef(FormModel):
-    """Tagged key-only input, without source lookup or inline content.
-
-    kind is always ref. name is a literal key string, including strings that
-    look like expressions. Expr envelopes are invalid and never evaluated.
-    Source validation, if required, belongs to a specialized ref subclass.
-    """
-
-    kind: Literal["ref"] = "ref"
-    name: str
-
-
-class ModuleRef(KeyRef):
-    """Library module reference; no inline override or cached materialization.
-
-    kind selects ref. name is an actual LibrarySnapshot module key, not a role
-    or alias. A used ref needs captured library; missing/invalid names fail at
-    the consuming path through public library reads, never fall back to defaults.
-    """
-
-
-class ModuleInline(FormModel):
-    """Detached inline Spec, not a runtime cfg or linked library cache.
-
-    kind selects inline. module is the ordinary cfg_model ModuleSpec preserving
-    its own references. Adapter to_cfg owns materialization/family requirements.
-    """
-
-    kind: Literal["inline"] = "inline"
-    module: ModuleSpec
-
-
-type ModuleInput = Annotated[ModuleRef | ModuleInline, Field(discriminator="kind")]
-"""Reference or inline Spec with wire {kind: inline, module: {...}}."""
