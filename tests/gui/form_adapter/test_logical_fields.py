@@ -1,8 +1,18 @@
 """Logical edits and captured Spec observations through the public Form seam."""
 
+from collections.abc import Mapping
+from typing import Self
+
 import pytest
 from pydantic import Field, JsonValue
-from zcu_tools.cfg_model import ArbWaveformCfg, ConfigBase, PulseSpec, Template, TemplateDef
+from zcu_tools.cfg_model import (
+    ArbWaveformCfg,
+    ConfigBase,
+    ConstWaveformCfg,
+    PulseSpec,
+    Template,
+    TemplateDef,
+)
 from zcu_tools.gui import form_adapter as adapter
 from zcu_tools.gui.form import (
     FormEnv,
@@ -11,6 +21,7 @@ from zcu_tools.gui.form import (
     FormModel,
     FormPathError,
     FormState,
+    FormValue,
 )
 from zcu_tools.program.v2.modules import PulseCfg
 from zcu_tools.resources.context.library import (
@@ -47,7 +58,7 @@ def captured() -> FormEnv:
                 components={
                     "Q": ComponentLibrary(
                         pulses={"drive": pulse},
-                        waveforms={"wave": {"style": "const", "length": 0.08}},
+                        waveforms={"wave": ConstWaveformCfg(length=0.08)},
                     )
                 },
             )
@@ -55,7 +66,25 @@ def captured() -> FormEnv:
     )
 
 
-def keyed(form: adapter.Form, env: FormEnv) -> FormInput[FormModel]:
+def object_at(
+    data: Mapping[str, JsonValue], path: tuple[str, ...]
+) -> dict[str, JsonValue]:
+    """Narrow a public authored input subtree for its behavioral assertions."""
+    value: JsonValue = dict(data)
+    for name in path:
+        assert isinstance(value, dict), path
+        value = value[name]
+    assert isinstance(value, dict), path
+    return value
+
+
+def ordinary_object(value: FormValue) -> dict[str, FormValue]:
+    """Narrow an observed ordinary subtree, not a product implementation detail."""
+    assert isinstance(value, dict)
+    return value
+
+
+def keyed(form: adapter.Form[LogicalCfg], env: FormEnv) -> FormInput[FormModel]:
     state = FormState(form.default_input(env))
     state.write({("drive",): {"kind": "ref", "name": "Q.pulses.drive"}}, env)
     return state.input
@@ -100,7 +129,7 @@ def test_copy_is_explicit_preserves_child_key_and_batch_keeps_expressions() -> N
         "kind": "ref",
         "name": "Q.pulses.drive",
     }
-    assert candidate.input.data["drive"]["module"]["waveform"] == {
+    assert object_at(candidate.input.data, ("drive", "module"))["waveform"] == {
         "kind": "ref",
         "name": "Q.waveforms.wave",
     }
@@ -111,9 +140,9 @@ def test_copy_is_explicit_preserves_child_key_and_batch_keeps_expressions() -> N
         adapter.LogicalEdit(("real", "module", "value"), 9),
     ]
     result = form.prepare_logical_edits(child.input, edits, env)
-    assert result.input.data["drive"]["module"]["waveform"]["module"]["length"] == {
-        "expr": "1 / 4"
-    }
+    assert object_at(result.input.data, ("drive", "module", "waveform", "module"))[
+        "length"
+    ] == {"expr": "1 / 4"}
     leaf = form.read_logical_field(result.input, ("drive", "waveform", "length"), env)
     assert leaf.input_present and leaf.input == {"expr": "1 / 4"} and leaf.value == 0.25
     assert not leaf.readonly and leaf.source is None
@@ -173,10 +202,12 @@ def test_selector_metadata_selection_disable_and_unavailable_source_are_distinct
     assert all(
         field.path == ("drive", field.name) for field in observed.description.children
     )
-    assert observed.value["waveform"] == "Q.waveforms.wave"
+    assert ordinary_object(observed.value)["waveform"] == "Q.waveforms.wave"
     unavailable = form.read_logical_field(input, ("drive",), FormEnv())
     assert (
-        unavailable.selector.mode == "key" and unavailable.value_status == "unavailable"
+        unavailable.selector is not None
+        and unavailable.selector.mode == "key"
+        and unavailable.value_status == "unavailable"
     )
     assert (
         unavailable.source is None
@@ -214,7 +245,7 @@ def test_spec_template_locks_and_handwritten_generated_fields_use_same_mapper() 
         == 4100
     )
     copied = form.prepare_inline_copy(input, ("extras", "reference"), env)
-    assert copied.input.data["extras"]["reference"]["kind"] == "inline"
+    assert object_at(copied.input.data, ("extras", "reference"))["kind"] == "inline"
     spec = adapter.module_form(PulseSpec)
     template = spec.template_input(
         Template("pulse", lock={"freq": 42.0}),
@@ -227,14 +258,19 @@ def test_spec_template_locks_and_handwritten_generated_fields_use_same_mapper() 
                     "nqz": 1,
                     "freq": 10.0,
                     "gain": 0.3,
-                    "waveform": {"style": "const", "length": 0.1},
+                    "waveform.style": "const",
+                    "waveform.length": 0.1,
                 },
             )
         },
         env,
     )
     locked = spec.read_logical_field(template, ("freq",), env)
-    assert locked.description.target.fixed and locked.value == 42.0
+    assert (
+        locked.description.target is not None
+        and locked.description.target.fixed
+        and locked.value == 42.0
+    )
     assert (
         spec.prepare_logical_edits(
             template, [adapter.LogicalEdit(("gain",), 0.5)], env
@@ -264,7 +300,9 @@ def test_logical_errors_hide_only_generated_wrappers_and_preserve_indexes() -> N
     }
 
 
-def test_root_observation_contains_logical_subtrees_and_scalar_failure_is_unavailable() -> None:
+def test_root_observation_contains_logical_subtrees_and_scalar_failure_is_unavailable() -> (
+    None
+):
     form = adapter.Form(LogicalCfg, {})
     env = captured()
     input = form.prepare_inline_copy(keyed(form, env), ("drive",), env).input
@@ -278,20 +316,28 @@ def test_root_observation_contains_logical_subtrees_and_scalar_failure_is_unavai
     unrelated = form.read_logical_field(invalid.input, ("drive", "freq"), env)
     assert unrelated.value == 4100 and unrelated.errors is None
     leaf = form.read_logical_field(invalid.input, ("reps",), env)
-    assert leaf.value_status == "unavailable" and leaf.value is None and leaf.errors is not None
+    assert (
+        leaf.value_status == "unavailable"
+        and leaf.value is None
+        and leaf.errors is not None
+    )
 
 
-def test_parent_model_errors_are_relevant_but_unrelated_sibling_errors_are_not() -> None:
+def test_parent_model_errors_are_relevant_but_unrelated_sibling_errors_are_not() -> (
+    None
+):
     from pydantic import model_validator
+
     class RootError(FormModel):
         first: int = 1
         second: int = 2
 
         @model_validator(mode="after")
-        def reject_pair(self):
+        def reject_pair(self) -> Self:
             if self.first == self.second:
                 raise ValueError("Pair must differ")
             return self
+
     form = adapter.Form(LogicalCfg, {}, extras=RootError, lower=lambda extras, cfg: cfg)
     input = FormInput(form.model, {"extras": {"first": 2, "second": 2}})
     observation = form.read_logical_field(input, ("extras", "first"), FormEnv())
@@ -302,7 +348,9 @@ def test_ref_source_with_missing_child_key_does_not_block_scalar_or_fallback() -
     form = adapter.Form(LogicalCfg, {})
     env = captured()
     assert env.library is not None
-    missing = env.library.replaced_waveform("Q.waveforms.wave", ArbWaveformCfg(data="not-an-asset"))
+    missing = env.library.replaced_waveform(
+        "Q.waveforms.wave", ArbWaveformCfg(data="not-an-asset")
+    )
     env = FormEnv(library=missing)
     input = keyed(form, env)
     scalar = form.read_logical_field(input, ("drive", "freq"), env)
@@ -312,3 +360,26 @@ def test_ref_source_with_missing_child_key_does_not_block_scalar_or_fallback() -
     with pytest.raises(adapter.LogicalSourceError) as failure:
         form.read_logical_field(input, ("drive", "waveform", "length"), empty)
     assert failure.value.selector_path == ("drive", "waveform")
+
+
+def test_root_nested_sections_and_captured_inline_subtrees_never_expose_wrappers() -> None:
+    from zcu_tools.cfg_model import FlatTopWaveformSpec
+
+    class Container(ConfigBase):
+        modules: LogicalCfg
+
+    form = adapter.Form(Container, {})
+    env = captured()
+    assert env.library is not None
+    pulse = PulseSpec(ch=1, nqz=1, freq=12, gain=0.2,
+                      waveform=FlatTopWaveformSpec(length=2, raise_waveform="Q.waveforms.edge"))
+    env = FormEnv(library=env.library.replaced_module("Q.pulses.drive", pulse))
+    input = FormInput(form.model, {"modules": {"drive": {"kind": "ref", "name": "Q.pulses.drive"}}})
+    copied = form.prepare_inline_copy(input, ("modules", "drive"), env).input
+    root = ordinary_object(form.read_logical_field(copied, (), env).value)
+    drive = ordinary_object(ordinary_object(root["modules"])["drive"])
+    assert drive["freq"] == 12 and "module" not in drive
+    source = form.read_logical_field(input, ("modules", "drive"), env)
+    waveform = ordinary_object(ordinary_object(source.value)["waveform"])
+    assert waveform["raise_waveform"] == "Q.waveforms.edge"
+    assert source.errors is None
