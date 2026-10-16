@@ -106,6 +106,88 @@ def test_common_carrier_origin_survives_pulse_start_quantization(
         )
 
 
+def test_delayed_short_flux_pulse_survives_long_idle_with_large_max_step() -> None:
+    from dataclasses import replace
+
+    from zcu_tools.experiment.ftf import plan_point
+    from zcu_tools.simulate.evolution import Evolution, SolverSettings
+
+    settings = parse_ftf(ftf_document())
+    # Low-frequency synthetic circuits permit adaptive steps longer than the pulse.
+    scale = 1e-4
+    model = settings.model
+    settings = settings.model_copy(
+        update={
+            "model": model.model_copy(
+                update={
+                    "f1": model.f1.model_copy(
+                        update={
+                            "ej_ghz": 3.0 * scale,
+                            "ec_ghz": 0.8 * scale,
+                            "el_ghz": 0.6 * scale,
+                        }
+                    ),
+                    "coupler": model.coupler.model_copy(
+                        update={
+                            "ejmax_ghz": 10.0 * scale,
+                            "ec_ghz": 0.3 * scale,
+                            "q_cap": None,
+                        }
+                    ),
+                    "f2": model.f2.model_copy(
+                        update={
+                            "ej_ghz": 3.3 * scale,
+                            "ec_ghz": 0.7 * scale,
+                            "el_ghz": 0.55 * scale,
+                        }
+                    ),
+                    "g1c_ghz": 0.03 * scale,
+                    "g2c_ghz": 0.04 * scale,
+                    "g12_ghz": -0.02 * scale,
+                    "retained_levels": 2,
+                }
+            ),
+            "flux_sources": (
+                settings.flux_sources[0].model_copy(
+                    update={
+                        "coefficients_phi0_per_gain": (0.0, 0.0, 0.1),
+                        "delay_ns": 400.0,
+                        "tau_ns": 0.0,
+                    }
+                ),
+            ),
+            "solver": settings.solver.model_copy(
+                update={
+                    "max_step_ns": 10000.0,
+                    "bath_segment_ns": 2000.0,
+                }
+            ),
+        }
+    )
+    window = ReadoutWindow(0, 0, 4, 100.0, (1.0,), (6000.0,), (0.0,), (0,))
+    events = (
+        PulseEvent(1, 0.0, 0.002, 0.0, 0.0, 1.0),
+        PulseEvent(0, 1.0, 0.04, 6000.0, 0.0, 0.1),
+    )
+    plan = plan_point(
+        settings,
+        EnvironmentSnapshot("ftf-v1", "test", (("bias", 0.2),)),
+        PointTimeline((), events, (window,), 1.04),
+    )
+    initial = plan.joint.initial_state()
+    solver_settings = SolverSettings(rtol=1e-8, atol=1e-10, max_step_ns=10000.0)
+    # Independent event geometry: the actual flux pulse is [400,402) ns.
+    reference_model = replace(plan.evolution_model, event_times_ns=(400.0, 402.0))
+    expected = Evolution(reference_model, solver_settings).evolve(
+        initial, plan.controls, end_ns=1000.0
+    )
+    assert np.max(np.abs(expected.density - initial.density)) > 1e-5
+    actual = Evolution(plan.evolution_model, solver_settings).evolve(
+        initial, plan.controls, end_ns=1000.0
+    )
+    np.testing.assert_allclose(actual.density, expected.density, atol=2e-7, rtol=0)
+
+
 def _readout() -> PulseReadoutCfg:
     return PulseReadoutCfg(
         gen_ch=0,

@@ -37,6 +37,31 @@ class RawProgram(ModularProgramV2):
         self.asm_inst({"CMD": "NOP"})
 
 
+class RawMakeProgram(ModularProgramV2):
+    """Hardware compilation hook adding instructions outside the Modules."""
+
+    def make_program(self):
+        super().make_program()
+        self.asm_inst({"CMD": "NOP"})
+
+
+class RawCleanupProgram(ModularProgramV2):
+    """Hardware cleanup hook adding instructions outside the Modules."""
+
+    def _cleanup(self, cfg):
+        self.asm_inst({"CMD": "NOP"})
+
+
+@pytest.mark.parametrize("program_type", [RawMakeProgram, RawCleanupProgram])
+@pytest.mark.parametrize("method", ["acquire", "acquire_decimated"])
+def test_raw_compile_hooks_rejected_before_simulation_round(program_type, method):
+    env = white_noise(std_adc=0)
+    prog = program_type(env.soccfg, ProgramV2Cfg(), modules=[readout("readout")])
+    with pytest.raises(ValueError, match=f"{program_type.__name__}.*raw.*unsupported"):
+        getattr(prog, method)(env.soc, progress=False)
+    assert not env.soc.binding.rounds
+
+
 @pytest.mark.parametrize("method", ["acquire", "acquire_decimated"])
 def test_raw_program_body_rejected_instead_of_silently_ignoring_instructions(method):
     env = white_noise(std_adc=0)

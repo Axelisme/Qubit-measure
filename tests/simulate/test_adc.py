@@ -219,6 +219,17 @@ def test_lookback_does_not_move_readout_population_origin():
     assert_allclose(response.traces[:, :3], np.tile([0.3, -0.2], (3, 3, 1)), atol=2e-9)
 
 
+@pytest.mark.parametrize("scale", [1e-12, 1e-100])
+@pytest.mark.parametrize(
+    "covariance", [np.diag([-0.5, 0.0]), np.array([[1.0, 2.0], [2.0, 1.0]])]
+)
+def test_receiver_rejects_non_psd_covariance_at_its_own_scale(scale, covariance):
+    from zcu_tools.simulate.adc import Receiver
+
+    with pytest.raises(ValueError, match="positive semidefinite"):
+        Receiver(noise_covariance=scale * covariance)
+
+
 def test_invalid_rates_covariance_and_population_are_rejected():
     from zcu_tools.simulate.adc import PopulationInput, Receiver
 
