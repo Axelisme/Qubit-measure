@@ -59,6 +59,9 @@ def test_registered_workflow_sweep_restores_center_expression(
         driver.screenshot(tmp_path / "04-workflow-reset.png")
         assert float(driver.observe(object_name="form.input.sweep.start").text) == 10.0
         window.restore_persisted_state(saved)
+        # Restore replaces panels; scope queries to the new public panel, not
+        # retired hidden controls waiting for Qt's deferred deletion.
+        driver = ComponentDriver(window.plan_panel)
         driver.screenshot(tmp_path / "05-workflow-restored.png")
         assert driver.observe(object_name="form.input.sweep.center").text == "3 + 4"
         assert driver.observe(object_name="form.input.sweep.n").text == "4"
