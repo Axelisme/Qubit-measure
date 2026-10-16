@@ -1,11 +1,18 @@
-"""Batch engine input/output records; scheduling is implemented separately."""
+"""Acquire-level segment engine and immutable ns/GHz timeline records."""
+
+from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from hashlib import sha256
-from threading import Event
+from threading import Event, Lock
 from types import MappingProxyType
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+from joblib import Parallel
+
+if TYPE_CHECKING:
+    from .kernel import Kernel
 
 import numpy as np
 from numpy.typing import NDArray
@@ -245,17 +252,48 @@ class Cancelled(Exception):
 
 
 class Engine:
-    """Segment engine API, not yet implemented; methods raise NotImplementedError.
+    """Segment engine with one persistent threading pool and prepare-payload LRU.
 
-    workers: positive sole parallel width (joblib threads, kernels single-threaded).
-    cache_bytes: nonnegative resident-array byte limit for the shared prepare LRU.
-    One instance owns a worker pool and prepare cache across acquire calls.
-    This interface does not change the existing Evolution implementation.
+    workers: positive sole parallel width; kernels remain single-threaded.
+    cache_bytes: nonnegative resident-array byte limit, not a process RAM cap.
+    kernels: optional algorithm collection replacing the production registry;
+        each stateless collaborator implements the internal Kernel contract and
+        has a unique name. Missing required names raise, never silently reroute.
+    chunks_per_worker: positive chunk multiplier; only scheduling, not physics.
+
+    The zero-level model identity names the entire ModelSource: all physical
+    parameters and absolute DC flux. Kernel keys include row flux levels.
+    Cache namespaces also include the error budget, so stricter requests cannot
+    reuse looser preparations. Calls on one instance serialize; close is
+    idempotent and waits for any active acquire before releasing the pool.
     """
 
-    def __init__(self, workers: int, cache_bytes: int) -> None:
-        """Create the pool and bounded prepare cache (implementation pending)."""
-        raise NotImplementedError("segment engine scheduling is not implemented")
+    def __init__(
+        self,
+        workers: int,
+        cache_bytes: int,
+        *,
+        kernels: Sequence[Kernel] | None = None,
+        chunks_per_worker: int = 6,
+    ) -> None:
+        """Create the pool and cache; reject invalid sizes or duplicate names."""
+        from ._schedule import PrepareCache
+        from .kernels import REGISTRY
+
+        if workers < 1 or cache_bytes < 0 or chunks_per_worker < 1:
+            raise ValueError(
+                "workers/chunks must be positive and cache_bytes nonnegative"
+            )
+        collection = REGISTRY if kernels is None else kernels
+        self._kernels = {kernel.name: kernel for kernel in collection}
+        if len(self._kernels) != len(collection):
+            raise ValueError("kernel names must be unique")
+        self._cache: PrepareCache = PrepareCache(cache_bytes)
+        self._chunks = workers * chunks_per_worker
+        self._lock = Lock()
+        self._closed = False
+        self._pool = Parallel(n_jobs=workers, backend="threading")
+        self._pool.__enter__()
 
     def evolve(
         self,
@@ -275,8 +313,36 @@ class Engine:
         naming the point and segment. Results do not depend on chunking or
         worker width except for floating-point rounding.
         """
-        raise NotImplementedError("segment engine scheduling is not implemented")
+        from ._dispatch import classify
+        from ._planning import plan
+        from ._schedule import Schedule
+
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("engine is closed")
+            if not np.isfinite(budget) or budget <= 0:
+                raise ValueError("budget must be finite and positive")
+            if cancel.is_set():
+                raise Cancelled()
+            if not batches or not any(len(batch.points) for batch in batches):
+                size = source.initial_density.shape[0]
+                return EvolutionResult(
+                    np.empty(0, dtype=np.int64),
+                    np.empty((0, size, size), dtype=np.complex128),
+                    PathDiagnostics(),
+                )
+            geometry = plan(source, batches)
+            dispatch = classify(geometry, self._kernels, source, budget)
+            schedule = Schedule(geometry, dispatch, source, budget, cancel)
+            states = schedule.run(self._kernels, self._cache, self._pool, self._chunks)
+            if cancel.is_set():
+                raise Cancelled()
+            return EvolutionResult(geometry.points, states, dispatch.diagnostics)
 
     def close(self) -> None:
-        """Stop the worker pool; idempotent once scheduling is implemented."""
-        raise NotImplementedError("segment engine scheduling is not implemented")
+        """Wait for active work, release the worker pool/cache; safe to repeat."""
+        with self._lock:
+            if not self._closed:
+                self._closed = True
+                self._pool.__exit__(None, None, None)
+                self._cache.clear()

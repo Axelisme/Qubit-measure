@@ -1,6 +1,6 @@
 # Evolution APIs and data reuse
 
-**Last updated:** 2026-04-23
+**Last updated:** 2026-10-17
 
 ## Segment engine contracts
 
@@ -13,8 +13,27 @@ copies and reject invalid shapes and numeric invariants at construction.
 `EnvelopeSpec` describes unity or sampled complex amplitudes. Its shared
 `values` method interpolates real and imaginary parts and holds the final
 sample. `TimelineBatch` supplies all points of a template. `EvolutionResult`
-represents densities at readout start in the DC eigenbasis. `Engine` currently
-provides signatures only and raises `NotImplementedError`.
+represents densities at readout start in the DC eigenbasis. `Engine` segments
+all templates with array event sorting, selects kernels by name, and runs
+independent joblib-threading chunks. Missing required registry entries raise
+with the segment and kernel name. T4 implements exact zero-drive secular
+propagation. Other algorithm families plug into the internal registry.
+
+The engine counts prepare keys with `np.unique`. Repeated keys are prepared
+in the shared A stage. Single-use keys are prepared inside their timeline
+chunk and discarded afterward. The LRU charges whole opaque prepared batches;
+a live acquire can retain evicted payloads until its chunks finish. The cache
+namespace includes the kernel name, zero-level model identity and budget.
+The zero-level identity must describe the entire source, including all model
+parameters and absolute DC flux. Row keys also include quantized flux levels.
+
+Chunk-local waves call apply once per group of next rows sharing a kernel and
+prepared batch. Consecutive DOP853 rows form chains only within the same kernel
+and prepared batch, never across `dop853` and `flux_dop853`. Their kernels own
+basis changes inside a chain; the engine changes basis between apply calls
+and returns the final state to the DC eigenbasis. Cancellation is checked at
+chunk boundaries and raises `Cancelled` without partial results. `close()`
+waits for active work, releases the pool/cache and is safe to repeat.
 
 The internal `kernel` module defines `SegmentTable`, `Kernel` and the opaque
 `Prepared.nbytes` contract. Only apply receives density arrays. The shared
