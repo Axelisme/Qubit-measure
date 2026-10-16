@@ -58,7 +58,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--simulate",
         type=Path,
-        help="Trusted Python environment defining build_environment(); fixed for this process",
+        help=(
+            "Trusted Python environment defining build_environment(); fixed for this "
+            "process. Example: --simulate zcu_lab/simulation_envs/environment.py"
+        ),
     )
     return parser.parse_args(argv)
 

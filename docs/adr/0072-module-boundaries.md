@@ -50,6 +50,14 @@
 
 使用者於 2026-10-16 改定驗收方式：「算了，我認為不用真的測試ZCU_LAB移開後會不會出現錯誤。這中東西直接看有沒有import就好，偷偷做的在review也會被抓到，感覺是浪費時間測試」。Tests 不依賴 `zcu_lab` 的原則不變，由 review 檢查 import，必要時以 grep 輔助。不再暫移 `zcu_lab/` 跑 pytest，也不新增 `ZCU_LAB` 環境變數或 import hook。
 
+### 使用者元件與模擬環境的放置
+
+`zcu_lab.components` 是 package。共用欄位型別、通用 wiring 與基礎元件放在 `base.py`；qubit 共用定義與參數轉換放在 `qubit.py`。Fluxonium、transmon、resonator、JPA 與 mux 各自擁有一個子模組。Package 入口保留明確的 `register_all()` 與公開匯出，不作 import-time 註冊。
+
+GUI／Notebook 共用的範例環境、FTF YAML 與相鄰離線建庫入口放在 `zcu_lab/simulation_envs/`，不放在 Notebook 文件目錄。框架仍以 caller 傳入的路徑載入可信 Python，不自動探索這個目錄；C14 與 C16 繼續禁止框架反向 import 使用者定義。
+
+2026-10-16，使用者要求：「比如components我希望除了基礎原件，其他的都是獨立的子模塊檔。」對上述拆分與環境搬移確認：「可以移到zcu_lab/simulation_envs/中嗎？2同意」。
+
 ### Library 分組與 module slot
 
 Library 的設計是「元件 → 分組 → Pydantic model」。分組是擴充點，不是永久封閉的種類清單。現行格式仍只接受既有四分組；有第五種需求時才調整容器與 key 驗證，不把任意分組寫成目前已支援。

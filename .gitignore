@@ -48,7 +48,7 @@ package-lock.json
 *.pdf
 
 # Explicit example-owned numeric data and OpenCL compiler artifacts.
-/notebook_md/simulation/evolution_data/
+/zcu_lab/simulation_envs/evolution_data/
 
 # Jupytext generated files
 notebook/*
