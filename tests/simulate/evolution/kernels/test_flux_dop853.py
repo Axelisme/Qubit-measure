@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from threading import Event
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -23,15 +24,25 @@ def flux_case(size: int = 3, sampled: bool = True) -> KernelCase:
     model = synthetic_model(size)
     x = model.drives[0].in_phase_ghz
     y = model.drives[0].quadrature_ghz
+    kinds: tuple[Literal["cos_2pi", "sin_2pi", "cos_pi", "sin_pi"], ...] = (
+        "cos_2pi",
+        "sin_2pi",
+        "cos_pi",
+        "sin_pi",
+    )
     expansion = evolution.FluxExpansion(
         np.diag(model.energies_ghz).astype(complex),
         tuple(
             evolution.FluxTerm(loop, kind, scale * matrix)
-            for loop, kind, scale, matrix in (
-                (0, "cos_2pi", 0.03, x),
-                (0, "sin_2pi", 0.09, y),
-                (1, "cos_pi", 0.02, y),
-                (1, "sin_pi", 0.08, x),
+            for kind, (loop, scale, matrix) in zip(
+                kinds,
+                (
+                    (0, 0.03, x),
+                    (0, 0.09, y),
+                    (1, 0.02, y),
+                    (1, 0.08, x),
+                ),
+                strict=True,
             )
         ),
     )
