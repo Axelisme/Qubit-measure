@@ -82,7 +82,7 @@ def receiver():
     )
 
 
-def example(case, env):
+def example(case, env) -> tuple[list[Module], list[tuple[str, SweepCfg | int]]]:
     """Return modules and sweep axes for one supported semantic mechanism."""
     if case in ("sweep", "join", "flat_top", "flat_top_sweep"):
         return waveform_example(case)
@@ -97,7 +97,7 @@ def example(case, env):
     return table_example(case, env)
 
 
-def waveform_example(case):
+def waveform_example(case) -> tuple[list[Module], list[tuple[str, SweepCfg | int]]]:
     """Swept clocks, Join scheduling and flat-top envelope scenarios."""
     sweep: list[tuple[str, SweepCfg | int]] = [("axis", 3)]
     tail = [receiver().build("readout")]
@@ -135,7 +135,7 @@ def waveform_example(case):
     raise AssertionError(case)
 
 
-def control_example(case):
+def control_example(case) -> tuple[list[Module], list[tuple[str, SweepCfg | int]]]:
     """Register-dependent selection, Repeat masks and structural branches."""
     sweep: list[tuple[str, SweepCfg | int]] = [("axis", 3)]
     tail = [receiver().build("readout")]
@@ -178,7 +178,7 @@ def control_example(case):
     raise AssertionError(case)
 
 
-def table_example(case, env):
+def table_example(case, env) -> tuple[list[Module], list[tuple[str, SweepCfg | int]]]:
     """Consumer word decoding, variable lengths and loop table hooks."""
     sweep: list[tuple[str, SweepCfg | int]] = [("axis", 3)]
     tail = [receiver().build("readout")]
