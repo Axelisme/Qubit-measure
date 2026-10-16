@@ -138,7 +138,7 @@ TEMPLATES: dict[str, TemplateDef] = {
         default_name="readout_dpm",
     ),
     "qub_probe": TemplateDef(
-        PulseSpec, "Qubit probe pulse", pulse(), default_name="qub_pulse"
+        PulseSpec, "Qubit probe pulse", pulse(length=1.0), default_name="qub_pulse"
     ),
     "pi_pulse": TemplateDef(PulseSpec, "Pi pulse", pulse(), default_name="pi_amp"),
     "pi2_pulse": TemplateDef(PulseSpec, "Pi/2 pulse", pulse(), default_name="pi2_amp"),

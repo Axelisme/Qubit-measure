@@ -13,13 +13,16 @@ from .template_nodes import Expr, Template, TemplateSeed
 class Range:
     """A linear sweep declaration in the core field's units.
 
-    start/stop are literal endpoints or Expr nodes; expts is the point count.
+    start/stop are literal endpoints, Expr nodes, or None; expts is the point
+    count. None leaves that endpoint visibly blank and required in the Form.
+    It is not 0/1 or an executable default: the operator must enter a number
+    before submission, even when the endpoint's input key is absent.
     Conversion to a core sweep validates the endpoints and count. The helpers
     treat string arguments as expression bodies, unlike ordinary tree strings.
     """
 
-    start: float | Expr
-    stop: float | Expr
+    start: float | Expr | None
+    stop: float | Expr | None
     expts: int
 
     @staticmethod
@@ -35,8 +38,13 @@ class Range:
         )
 
     @staticmethod
-    def between(start: str | float, stop: str | float, expts: int) -> Range:
-        """Create a sweep from endpoints; strings opt into expression evaluation."""
+    def between(
+        start: str | float | None, stop: str | float | None, expts: int
+    ) -> Range:
+        """Create endpoints; strings denote expressions, None means blank required.
+
+        expts is passed unchanged to core sweep validation. No evaluation occurs.
+        """
         return Range(
             Expr(start) if isinstance(start, str) else start,
             Expr(stop) if isinstance(stop, str) else stop,

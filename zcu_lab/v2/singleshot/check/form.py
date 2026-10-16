@@ -1,8 +1,9 @@
 """Starting values for singleshot/check; sources are captured at Open/Reset."""
 
-from zcu_tools.cfg_model import Expr, Hidden, Locked, Slot, Template
+from zcu_tools.cfg_model import Hidden, Locked, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
+from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
 from zcu_lab.v2.singleshot.check.core import CheckCfg
 
 
@@ -19,7 +20,7 @@ def make_form(ctx: FormContext) -> Form[CheckCfg]:
                 if ctx.has("$qubit.module.readout")
                 else Template("readout"),
             },
-            "relax_delay": Expr("5.0 * $qubit.t1"),
+            "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "shots": 5000,
             "reps": Locked(1),
             "rounds": Locked(1),
