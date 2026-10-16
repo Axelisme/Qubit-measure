@@ -34,7 +34,11 @@ def test_guard_rejects_only_local_invalidity(kernel_case: KernelCase) -> None:
     assert not case.kernel.guard(strong, rows, case.source, case.budget).any()
     shaped = replace(
         case.table,
-        envelopes=(EnvelopeSpec("sampled", np.array([0.0, 1.0]), np.ones(2, complex)),),
+        envelopes=(
+            EnvelopeSpec(
+                "sampled", samples=np.ones(2, complex), sample_ns=np.array([0.0, 1.0])
+            ),
+        ),
     )
     assert not case.kernel.guard(shaped, rows, case.source, case.budget).any()
 
