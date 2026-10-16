@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMenu,
     QPushButton,
+    QScrollArea,
     QStatusBar,
     QTabWidget,
     QVBoxLayout,
@@ -430,3 +431,43 @@ def test_file_chooser_enters_existing_path_through_real_modal_events(
     driver.choose_file("Choose file", native)
     assert driver.status().text == f"Selected {native}"
     assert driver.dialogs() == ()
+
+
+def test_viewport_clipped_widgets_cannot_be_observed_or_operated(surface, qapp) -> None:
+    scroll = QScrollArea()
+    content = QWidget()
+    content.setFixedSize(500, 1200)
+    entry = QLineEdit("retained original", content)
+    entry.setObjectName("clipped_input")
+    entry.setToolTip("Offscreen help")
+    entry.setGeometry(10, 1000, 250, 30)
+    entry.editingFinished.connect(lambda: surface.statusBar().showMessage("Input committed"))
+    button = QPushButton("Offscreen action", content)
+    button.setObjectName("clipped_action")
+    button.setGeometry(10, 1040, 250, 30)
+    button.clicked.connect(lambda: surface.statusBar().showMessage("Action fired"))
+    scroll.setWidget(content)
+    surface.setCentralWidget(scroll)
+    surface.statusBar().showMessage("Unchanged")
+    qapp.processEvents()
+    driver = _user_input.ComponentDriver(surface)
+    observed = driver.observe(object_name="clipped_input")
+    assert observed.visible is False, "A viewport-clipped field is not on screen"
+    assert observed.text == "" and observed.tooltip == ""
+    assert not driver.observe(object_name="clipped_action").visible
+    assert not any(w.object_name.startswith("clipped_") for w in driver.visible().widgets)
+    with pytest.raises(LookupError, match="0 candidates"):
+        driver.click("Offscreen action")
+    driver.click(object_name="clipped_action")
+    driver.enter_text(object_name="clipped_input", value="must not commit")
+    assert driver.status().text == "Unchanged"
+    # Reveal the retained synthetic field to check no hidden edit was performed.
+    scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().maximum())
+    qapp.processEvents()
+    assert driver.observe(object_name="clipped_input").visible
+    assert driver.observe(object_name="clipped_input").text == "retained original"
+    driver.enter_text(object_name="clipped_input", value="visible edit")
+    assert driver.status().text == "Input committed"
+    assert driver.observe(object_name="clipped_input").text == "visible edit"
+    driver.click("Offscreen action")
+    assert driver.status().text == "Action fired"
