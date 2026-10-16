@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-16，mux Run／Record 與實驗定義驗證邊界
+**Last updated:** 2026-10-16，mux FIT／capture writeback
 
 # Measure GUI contracts
 
@@ -22,6 +22,7 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned 
   契約見 `measure-authoring.md`。
 - `_support/measure/` 是 private package，只放至少被兩個 concrete adapters 共用的 mechanics；它
   不擁有 registry order，也不 import concrete adapter。
+- `_support/resonator.py` 不依賴 GUI，供 onetone/freq core 與 mux adapter 共用模型／畫圖 mechanics。Selection、delay mode 與 writeback policy 留 caller，不讓 core 經 `_support/measure/` 載入 GUI。
 - `../definitions.py` 明確列出可重載的 adapter catalog；`../components.py` 擁有 startup-only component schema 註冊。
 - Reload experiments 會重建 concrete adapters 及 family helpers，但保留 framework `BaseAdapter` 與 `_support/measure/`。
   修改這些共用基礎層需重啟 app；concrete module import 不得有硬體或背景工作副作用。
@@ -31,7 +32,9 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned 
 T1／GE／Lookback／OneTone Freq、PowerDep 的 GUI run 將同次 cfg 與純 Result 配成 RunRecord，analyze 使用該 source。GE post 另接已採用的 primary calibration，不使用未重新分析的表單。
 BaseAdapter 的 load/save 直接傳遞核心 records；load 不用目前 cfg 補來源，save 將 explicit source 和 exact path 交給核心，override 可接受 cfg=None。
 GUI LoadService 保留目前表單與固定來源，不從 loaded record.cfg 回填；歷史 cfg 屬於 loaded RunRecord，缺失或不可採用時也不撤回有效 loaded data。
-Mux OneTone 的 Readout 初值取 `$mux.module.readout`，沒有來源可手填有效 readout。active_tones=None 量全部；指定 list 須非空、唯一且為完整 readout 範圍內的整數，不接受 bool、float 或字串。無效 selection 沿宿主 result／Run 診斷定位 active_tones 並拒絕 Run，不保證欄位變紅。Lab 按輸入順序投影 subset 交 program，RunRecord 保存完整 readout、labels 與 selection，不另存 members 或 group identity。Live 圖有 K 條線，legend 由 plotting owner callback 設定；原始 tone_indices 與 signals columns 同序，不重新編號。目前 capability 是 NONE，沒有分析或 writeback。
+Mux OneTone 的 Readout 初值取 `$mux.module.readout`，沒有來源可手填有效 readout。active_tones=None 量全部；指定 list 須非空、唯一且為完整 readout 範圍內的整數，不接受 bool、float 或字串。無效 selection 沿宿主 result／Run 診斷定位 active_tones 並拒絕 Run，不保證欄位變紅。Lab 按輸入順序投影 subset 交 program，RunRecord 保存完整 readout、labels 與 selection，不另存 members 或 group identity。Live 圖有 K 條線，legend 由 plotting owner callback 設定；原始 tone_indices 與 signals columns 同序，不重新編號。Capability 為 FIT，所有 active 共用 onetone/freq 的 model、background 及 auto／calibrated／manual delay 選項。FIT 核對保存的 cfg、selection、原始座標與資料 shape，每個 column 使用原始 base frequency 加 nominal dfs 並去首尾點。`fit_i` 用原始序號命名，重複 label 不覆蓋圖。每個 active 的 typed outcome 保留成功 scalars 或失敗原因；inactive 不參與分析。缺 cfg 拒絕 FIT，不借目前表單。
+Module proposal 從完整 run readout 建立，只換成功 active 的 freq；失敗和 inactive 保留原值，全失敗不提 module。Target 固定 `$mux.readout.readout_rf`，不追來源 slot。Adapter 從 Run／Load capture 公開 lookup 取得 `$mux.members`，長度須等於完整 N，不是 active K。成功 tone i 以 members[i] 提 freq、kappa、ext.theta0 和可 persist 的 route-qualified ext.edelay，每個參數獨立一列。Members 長度不符只提 module 並回報 summary 原因。Alias／來源故障仍傳播，不以長度不符掩蓋。
+Prior 同樣只查 capture 的 member.ext.edelay，按原始 tone 的 generator／ADC route 比對。Auto 缺 prior 用 global，calibrated 缺 prior 是該 tone 的失敗，manual 共用有限 scalar。Delay 只有 seeded 或非等距 grid 才可 persist，沿單 tone 政策。無 capture 仍可純計算，非空 Apply 沿既有拒絕。Load 使用同 entry 檔案 history 的 point／roles capture，不讀當前 aliases。Duplicate members 不去重，由既有 Apply 的重複 destination 驗證處理。
 OneTone Freq 保 route-qualified delay calibration 與 readout writeback。PowerDep 把 SNR stop control 放進 typed cfg，不提供 analysis。
 OneTone FluxDep 的 run 將同次 cfg 與純 Result 配成 RunRecord，interactive plugin 明確取該 source 的資料並捕捉成唯讀 inputs。
 GE 的 FIT／post 分別發布 `fit`／`post` 具名圖，post 使用已採用的 primary FIT；
