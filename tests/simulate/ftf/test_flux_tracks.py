@@ -37,9 +37,12 @@ def test_batch_midpoints_and_waveform_match_scalar_filter(gain, sampled):
     )
     dc = np.array([0.31, 0.17, 0.43])
     lines = (FluxLine("bias", (0.11, -0.06, 0.03), 3.0, 6.0),)
-    kwargs = dict(dc_flux=dc, lines=lines, sample_period_ns=2.0, points=3)
-    schedule = ftf.schedule((track,), **kwargs)
-    waveform = ftf.flux_waveform((track,), **kwargs)
+    schedule = ftf.schedule(
+        (track,), dc_flux=dc, lines=lines, sample_period_ns=2.0, points=3
+    )
+    waveform = ftf.flux_waveform(
+        (track,), dc_flux=dc, lines=lines, sample_period_ns=2.0, points=3
+    )
     for p in range(2):
         start, duration = track.start_ns[p], track.duration_ns[p]
         # FilteredFlux uses local carrier phase; FluxTrack uses absolute phase.
@@ -131,15 +134,15 @@ def test_overlapping_lines_sum_before_quantizing_and_tails_use_absolute_bounds()
 
 
 def test_empty_template_has_one_dc_span_per_point():
-    kwargs = dict(
-        dc_flux=np.array([0.2, 0.3, 0.4]), lines=(), sample_period_ns=2, points=4
+    dc_flux = np.array([0.2, 0.3, 0.4])
+    schedule = ftf.schedule((), dc_flux=dc_flux, lines=(), sample_period_ns=2, points=4)
+    waveform = ftf.flux_waveform(
+        (), dc_flux=dc_flux, lines=(), sample_period_ns=2, points=4
     )
-    schedule = ftf.schedule((), **kwargs)
-    waveform = ftf.flux_waveform((), **kwargs)
     np.testing.assert_array_equal(schedule.offsets, np.arange(5))
     np.testing.assert_array_equal(schedule.level, np.zeros((4, 3), dtype=int))
     np.testing.assert_array_equal(waveform.offsets, np.arange(5))
-    np.testing.assert_array_equal(waveform.flux, np.tile(kwargs["dc_flux"], (4, 1)))
+    np.testing.assert_array_equal(waveform.flux, np.tile(dc_flux, (4, 1)))
 
 
 def test_track_validation_rejects_invalid_shape_and_unknown_source():
