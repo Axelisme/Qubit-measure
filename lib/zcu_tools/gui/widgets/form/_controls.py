@@ -203,13 +203,13 @@ def _direct_input(value: FormValue) -> JsonValue:
     return _JSON.validate_python(value)
 
 
-def _show_text_menu(widget: QLineEdit, action: QAction, pos: QPoint) -> None:
+def _show_text_menu(widget: QLineEdit, actions: list[QAction], pos: QPoint) -> None:
     """Open widget's standard context menu at pos with action appended."""
     menu = widget.createStandardContextMenu()
     if menu is None:
         raise RuntimeError("QLineEdit.createStandardContextMenu() returned None")
     menu.addSeparator()
-    menu.addAction(action)
+    menu.addActions(actions)
     menu.exec(widget.mapToGlobal(pos))
     menu.deleteLater()
 
@@ -552,6 +552,12 @@ class FieldRow:
         header.addWidget(widget)
         if self.field.expression and isinstance(widget, QLineEdit):
             self.mode = self._build_mode(widget)
+            for item in self.field.commands:
+                action = QAction(item.label, widget)
+                action.setObjectName(f"{self._name('command')}.{item.name}")
+                action.triggered.connect(partial(self._command_triggered, item.name))
+                widget.addAction(action)
+                self._commands.append(action)
         # Text commits on Enter or focus loss, not per keystroke; a checkbox
         # commits each toggle.
         connect_committed_value_widget(widget, self._input_changed)
@@ -566,7 +572,7 @@ class FieldRow:
         # Keep the text field's standard menu; mode follows it.
         widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         widget.customContextMenuRequested.connect(
-            lambda pos: _show_text_menu(widget, mode, pos)
+            lambda pos: _show_text_menu(widget, [mode, *self._commands], pos)
         )
         return mode
 
@@ -686,6 +692,8 @@ class FieldRow:
         fold stays as built or as the user last set it.
         """
         self.field = field
+        for action in self._commands:
+            action.setEnabled(editable)
         self._local = local
         self._displaying = True
         try:

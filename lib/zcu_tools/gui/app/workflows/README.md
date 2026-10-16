@@ -1,6 +1,6 @@
 # gui/app/workflows — Workflow host
 
-**Last updated:** 2026-10-15，單層 Form 描述、共用 Inspect／Devices 與 ARB run lock
+**Last updated:** 2026-10-17，sweep 座標指令與共用 Form 描述
 
 ## 註冊與組裝
 
@@ -29,6 +29,8 @@ Pause 保留 operation、RUN lease、progress、plan、input capture 與 Plots�
 ## Input 與 reload
 
 Wire 5 的 `workflow.form` 回 input／values／errors 與 native revision，不帶 schema。`workflow.describe_form(form, path, run_id, batch)` 沿同一 target selection 和固定 env，在同一 owner turn 回 candidate observation 與單層 description。Root path 是 `[]`，其他 path 使用 model-field names。Read 納入 local parse errors。Batch preview 只讀 parsed candidate，不提交。
+
+Sweep 表單沿用共用 Range／Center input 與數值欄位 commands，Qt 只派發 owner 指令。Memento 保存 active 表示與 expression，Prepare forms 恢復 fresh defaults。Description 的 field commands 保留 target 與參與 inputs；selector 只控制 dropdown 呈現。
 
 Description 的 options 只帶 value／label／commands，selected index 由 core 判定，children 保留完整 path。can_expand 只表示結構可展開，不保證 children 非空。selection_fixed 表示本層只有一個非 null selector 分支，不凍結內層 choices。null 只控制啟停，不算另一個分支，停用時也一樣。fixed／fixed_value 表示完整值固定。Wire 直接投影 core 的這些能力，不重算規則。未知、inactive 或穿入 whole leaf 的 path 以 FormPathError 回報。RPC 將它投影為 invalid_params／form_path，data 帶完整 form_path。其他 ValueError 保留 controller_error。
 

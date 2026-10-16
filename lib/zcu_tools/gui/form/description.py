@@ -48,11 +48,15 @@ class FormCommandDescription:
     """Available action metadata; no callable or captured sources are exposed.
 
     name is the identifier passed to run_command; label is display text.
-    Both are nonempty and names are unique within their option.
+    Both are nonempty and names are unique within their option or field.
+    For field conversions, target is the replaced model's canonical path and
+    inputs are participating canonical paths. Option actions leave both empty.
     """
 
     name: str
     label: str
+    target: FormWritePath = ()
+    inputs: tuple[FormWritePath, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -101,7 +105,9 @@ class FormFieldDescription:
     this leaf or the complete option value; fixed_value is that detached JSON
     value (meaningful only when fixed, otherwise None). An outer model branch
     can be selection_fixed while inner choices keep fixed False. Both flags
-    may be True. constraints contains finite leaf hints.
+    may be True. constraints contains finite leaf hints. commands lists explicit
+    field actions with replacement target and participating inputs. selector=False
+    hides the dropdown only, not its options or active structure.
     """
 
     path: FormWritePath
@@ -125,6 +131,8 @@ class FormFieldDescription:
     fixed: bool
     fixed_value: JsonValue
     constraints: FormConstraints
+    commands: tuple[FormCommandDescription, ...] = ()
+    selector: bool = True
 
 
 @dataclass(frozen=True)

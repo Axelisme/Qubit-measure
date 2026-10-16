@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import JsonValue
 
 from zcu_tools.gui.form import (
+    FormCommandDescription,
     FormFieldDescription,
     FormOptionDescription,
     FormPreview,
@@ -55,6 +56,7 @@ class FieldView:
     decimals: int | None
     fixed: bool
     group: str | None
+    commands: tuple[FormCommandDescription, ...]
 
 
 def _control_presentation(
@@ -66,7 +68,7 @@ def _control_presentation(
     explicit commands. Only a fixed scalar without actions is plain text.
     No branch matching or annotation interpretation occurs here.
     """
-    options = field.options
+    options = field.options if field.selector else None
     if (
         field.fixed
         and field.kind != "model"
@@ -125,4 +127,5 @@ def project_field(
         decimals=field.decimals,
         fixed=field.fixed,
         group=field.group,
+        commands=field.commands,
     )

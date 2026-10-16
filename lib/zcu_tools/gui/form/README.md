@@ -1,6 +1,6 @@
 # gui/form — Qt-free Pydantic input editing
 
-**Last updated:** 2026-10-16，通用來源 hook、輸入政策與 prepare/install
+**Last updated:** 2026-10-17，座標模式與欄位換算指令
 
 `FormState.describe(path, env)` 直接從 model 宣告與目前 input 回傳 `FormDescription`，不產生 JSON Schema。Root path 是 `()`，其他位置用 model-field tuple。`target` 是指定欄位的 metadata，root 則為 None；`children` 只列下一層 metadata。每個 child 保留完整 path，不攜帶 descendants。選中選項只有一個非 nullable、沒有 options 的普通 model wrapper 時，children 攤平一層，但 wrapper 的完整 path 仍可查詢。
 
@@ -48,6 +48,10 @@ WriteRejected 是 host 寫入入口拒絕一批輸入時 raise 的具名例外�
 
 Display 只承載欄位呈現資訊。順序沿欄位宣告，段落沿 nested model；collapsed 只用於子 model。`group` 是同層畫面群組名稱，空字串在建構時報錯。`decimals` 是 float 顯示精度，非 float 宣告在 describe 報錯，不改 input。`hidden=True` 不畫 controls，但值、預設與驗證保留。Nested model 沒有 label 時，title 是欄位名，底線換空白且只有首字母大寫。普通 model 的單值結構 tag 標 hidden；branch 身分從 annotation 判斷，含其子類別與 LinRange.kind。Union 位置的 tag 仍是 selector。Editor、host 與 MCP 共用 description，但不反向成為 core dependency。
 
-掃描輸入只提供 `LinRange`，由表單 owner 在轉 cfg 時展開 start／stop／n。不提供 explicit-list 分支。
+掃描使用 tagged `SweepInput`，包含 `LinRange` 的 start／stop／n 與 `CenterSpan` 的 center／span／n。Span 是帶方向的完整寬度。生成表單預設 Range + Expts，手寫表單可使用同一個 SweepInput。表單 owner 在轉 cfg 時展開有效端點與點數，不提供 explicit-list 分支。
+
+數值欄位的 `InputCommand` metadata 宣告 name、label、參與 sibling names 與完整 parent replacement callable。Description 將 target 與參與 inputs 投影成完整 canonical paths。`run_command` 在固定 env 中求值參與座標，原子替換 parent，不套普通分支 defaults，也不要求 n 或其他欄位有效。未參與的 input 保留原文與缺席狀態。缺座標、expression 或換算失敗 raise `FormCommandError(ValueError)`，不安裝部分結果。普通 OptionCommand 與 union selector 仍使用 fresh defaults。
+
+Range／Center 的右鍵指令只在成功時把座標 expression 改成 direct 數字。之後的新 expression 照常保存。Input、preview 與 result 的讀取不正規化原稿，也不保留舊模式快取。`Display(selector=False)` 隱藏 dropdown，但保留 selector metadata 與 active branch；數值欄位的 commands 提供顯式操作。
 
 跨模組契約見 ADR-0065、ADR-0062 與 ADR-0008。Measure、Library／Inspect、writeback 與 workflows 共用本核心，各宿主持有 state 並決定 capture、Apply 與保存。Core cfg 推導與持久 Spec 投影由上層 `gui.form_adapter` 組合，不放進本 package。Complex codec 直接使用 `core.complex_codec`，不經舊 cfg owner。

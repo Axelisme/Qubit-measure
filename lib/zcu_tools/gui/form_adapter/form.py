@@ -27,6 +27,7 @@ from zcu_tools.cfg_model import (
     get_field_meta,
 )
 from zcu_tools.gui.form import (
+    CenterSpan,
     Display,
     FormEnv,
     FormErrors,
@@ -64,7 +65,13 @@ class SweepRange(LinRange):
     n: Annotated[int, Display(label="Expts")] = Field(default=3, ge=1)
 
 
-def _sweep_model(node: FormNode, info: FieldInfo) -> type[SweepRange]:
+class SweepCenter(CenterSpan):
+    """Center coordinates with the same Expts label as the Range branch."""
+
+    n: Annotated[int, Display(label="Expts")] = Field(default=3, ge=1)
+
+
+def _sweep_model(node: FormNode, info: FieldInfo) -> object:
     """Generate endpoint requirements and float precision for one core sweep.
 
     node is the authored sweep value; info is its core field declaration.
@@ -87,8 +94,6 @@ def _sweep_model(node: FormNode, info: FieldInfo) -> type[SweepRange]:
         if decimals is not None:
             endpoint.metadata.append(Display(decimals=decimals))
         fields[name] = endpoint
-    if not fields:
-        return SweepRange
     namespace: dict[str, object] = {
         "__module__": __name__,
         "__annotations__": {name: float for name in fields},
@@ -99,7 +104,24 @@ def _sweep_model(node: FormNode, info: FieldInfo) -> type[SweepRange]:
     )
     if not issubclass(model, SweepRange):
         raise TypeError("Generated sweep model must implement SweepRange")
-    return model
+    center_fields = {
+        name: deepcopy(SweepCenter.model_fields[name]) for name in ("center", "span")
+    }
+    if decimals is not None:
+        for endpoint in center_fields.values():
+            endpoint.metadata.append(Display(decimals=decimals))
+    center = new_class(
+        "AuthoredSweepCenter",
+        (SweepCenter,),
+        exec_body=lambda ns: ns.update(
+            {
+                "__module__": __name__,
+                "__annotations__": {name: float for name in center_fields},
+                **center_fields,
+            }
+        ),
+    )
+    return Annotated[union_type((model, center)), Field(discriminator="kind")]
 
 
 def _section_type(annotation: object) -> type[BaseModel] | None:
@@ -138,9 +160,10 @@ def _alias_name(node: AliasName, env: FormEnv) -> str | None:
 
 def _field_info(info: FieldInfo, *, locked: bool) -> FieldInfo:
     result = deepcopy(info)
-    if (display := field_display(info, locked=locked)) is not None:
-        if SweepCfg in _members(info.annotation):
-            display = replace(display, decimals=None)
+    display = field_display(info, locked=locked)
+    if SweepCfg in _members(info.annotation) and not locked:
+        display = replace(display or Display(), decimals=None, selector=False)
+    if display is not None:
         result.metadata.append(display)
     return result
 
@@ -228,7 +251,9 @@ class _Section:
                 continue
             annotation = self._annotation(name, info, node)
             field_info = _field_info(info, locked=isinstance(node, Locked))
-            if name in self.modules and not self.modules[name].locks:
+            if (name in self.modules and not self.modules[name].locks) or (
+                not isinstance(node, Locked) and SweepCfg in _members(info.annotation)
+            ):
                 field_info.discriminator = "kind"
             if isinstance(node, Expr):
                 field_info.default = PydanticUndefined
@@ -328,8 +353,16 @@ class _Section:
             else child.model
         )
 
+    def _sweep_defaults(self) -> dict[str, JsonValue]:
+        """Select Range + Expts for fresh, otherwise unauthored sweep fields."""
+        return {
+            name: static_defaults(SweepRange)
+            for name, info in self.core.model_fields.items()
+            if name in self.model.model_fields and SweepCfg in _members(info.annotation)
+        }
+
     def default_data(self, env: FormEnv) -> dict[str, JsonValue]:
-        data = static_defaults(self.model)
+        data = {**self._sweep_defaults(), **static_defaults(self.model)}
         for name, node in self.tree.items():
             if isinstance(node, Hidden):
                 continue
@@ -394,7 +427,7 @@ class _Section:
             if name not in value.__class__.model_fields:
                 continue
             item: object = getattr(value, name)
-            if isinstance(item, LinRange):
+            if isinstance(item, LinRange | CenterSpan):
                 try:
                     sweep = SweepCfg(
                         start=item.start,

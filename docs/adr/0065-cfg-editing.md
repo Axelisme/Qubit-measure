@@ -34,7 +34,11 @@ Host 決定 capture、Apply、Discard 與 input 保存時機。Library／writeba
 
 Input 保存 ordinary JSON、顯式 `{expr: text}`、complex tags 與 model field names。普通字串保持 literal。Preview 提供 ordinary leaf values，不代表可以 Run。Form errors 包含帶路徑的診斷，合法但尚未完成的 input 保持可編輯。結構或來源錯誤拒絕整批，不保留成功前綴。
 
-`tab.get_cfg`、`tab.edit_cfg` 與 `tab.reset_cfg` 回傳 input、values、errors，不附 schema。Values 是 path/value 葉清單，errors 是 path/message 清單。Tab 以字串陣列指定 model-field leaf paths，range 分別寫 start、stop、n。Wire 不提供 CfgSchema kind、ref 子樹或 Valid/Invalid/Unavailable publication。
+`tab.get_cfg`、`tab.edit_cfg` 與 `tab.reset_cfg` 回傳 input、values、errors，不附 schema。Values 是 path/value 葉清單，errors 是 path/message 清單。Tab 以字串陣列指定 model-field paths。Sweep 的 tagged branch 決定 active 座標，Range 使用 start／stop，Center 使用 center／span，Expts 使用 n。Inactive paths 沿 form_path 契約拒絕。Wire 不提供 CfgSchema kind、ref 子樹或 Valid/Invalid/Unavailable publication。
+
+Sweep 的模式與 active 原稿存於 FormInput，不由 widget 保存。座標欄位的 InputCommand 宣告參與 inputs 與 replacement target，FormState 在固定 env 中只求值座標，再原子安裝 target branch。成功只把參與 expression 改成 direct 數字；n 的原文、錯誤或缺席不變。失敗保留模式與整組原稿。普通 union 的 fresh-default 切換不變。Preview、result 與 description 都不暗改 input。Form adapter 將兩種表示轉成同一既有 SweepCfg，方向、單點與點數一致性仍由執行契約驗證。
+
+`tab.run_cfg_command(tab_id, path, name)` 只派發目前 active path 描述的公開指令，沿 resource 的控制身份、busy、lifetime 與 mutation guard。成功回 input／values／errors。數值欄位 description 帶 command name／label、target 與參與 inputs，Qt 只據此檢查 local parse errors，不猜模型結構或自行換算。標準文字與 Expression 選單保留，折疊標題沒有 command。禁止編輯時指令也不可執行。
 
 `tab.describe_cfg(path)` 以 model-field 字串陣列查目標與直接 children，不產生整棵 JSON Schema。回覆同時包含局部 input_present、input、value 與 Form preview 定向 errors，不 materialize 或呼叫 to_cfg。Lowered cfg errors 用 get_cfg 或 Run admission 檢查。Unknown、inactive 與 whole-leaf 子路徑回 invalid_params／form_path，data.form_path 保留請求路徑。其他 ValueError 維持 controller_error。Writeback 的 observe_entry 同樣只回 input、values、errors。
 
@@ -60,7 +64,7 @@ RecipeSession.open_tab 的公開 aliases/reuse 用法不變。新 tab 與 reuse 
 
 Form Slot 使用公開 ModuleRef/ModuleInline input。Key branch 保存 `{kind: ref, name: actual_library_key}`，inline branch 保存 `{kind: inline, module: Spec input}`。Nested key-or-inline 欄位用普通字串作 key。RecipeTab.use_library 寫實際 key，不建立舊 __ref editing intent。Locked Slot 只有 inline branch，use_library 在送 RPC 前拒絕選 key。
 
-RecipeTab.read_field 每次以一次 `tab.describe_cfg` 讀同一 owner turn 的目前欄位，回傳具名 RecipeFormField，包含 authored input、input_present、ordinary value、key/inline mode、actual key、Form lock、目前 child field names 與 directed errors。它不投影 CfgSchema kind，也不承諾 ref descendants 唯讀。Inline model 的路徑包含 module，例如 `modules.readout.module.freq`。Range count 的路徑是 n，set_sweep 的公開 expts 參數對到這個葉欄位。
+RecipeTab.read_field 每次以一次 `tab.describe_cfg` 讀同一 owner turn 的目前欄位，回傳具名 RecipeFormField，包含 authored input、input_present、ordinary value、key/inline mode、actual key、Form lock、目前 child field names 與 directed errors。它不投影 CfgSchema kind，也不承諾 ref descendants 唯讀。Inline model 的路徑包含 module，例如 `modules.readout.module.freq`。Range count 的路徑是 n。set_sweep 的完整 start／stop／expts 設定以一次 container edit 建立 Range + Expts，不寫 Center 的 inactive paths，也不要求舊 draft 可換算。部分設定仍只編輯目前 active leaves。
 
 實驗 cfg 依 [[0073]] 使用具名裝置欄位，例如 flux_dev、jpa_flux_dev，不再保存 dev role mapping。Form 的 AliasName 在 Open／Reset 解析 direct 名稱。使用 flux 的 cfg 必填 flux_unit，值為 A、V 或 native。Core 與 Notebook 不提供隱含 default，GUI 的初始值為 A。Recipe helper 只比 cached unit，成功後寫 caller 指定的具名裝置欄位與獨立 flux_unit，不換算、不連線或 setup。
 

@@ -53,7 +53,7 @@ group 是 MCP 單層欄位描述可用的前端中立分類名稱 hint，因此�
 
 `gui.form_adapter.Form(core_cfg, tree)` 從 Pydantic 型別推導 FormModel、起始 input
 與輸出轉換。純量、nullable、Literal／enum、巢狀 model 與 module／waveform
-由共用生成器處理。SweepCfg 使用 LinRange input，count 葉名為 n。
+由共用生成器處理。SweepCfg 使用 Range／Center tagged input，count 葉名為 n。新表單選 Range + Expts。Center 保存中心與帶正負號的完整 span，不保存另一份端點快取。
 持久 Spec 保留 child key，to_cfg 不從 library materialize 或改寫 key。
 未知 seed、受屏蔽 seed、缺必要 discriminator 與不支援的選項在入口報錯。
 
@@ -81,7 +81,10 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
 
 初值 expression 在建立 fresh input 時求值，成功後保存 direct 值。
 缺來源或求值失敗不補數字 fallback；必要欄位維持未填。
-使用者寫入的 expression 保留原式。換分支用 fresh defaults，不繼承 previous input。
+使用者寫入的 expression 保留原式。普通換分支用 fresh defaults，不繼承 previous input。
+Sweep 的顯式座標指令是保值換算，不套 fresh defaults。共用 Form 只求值參與座標，
+保留 n 原稿；成功原子安裝目標表示，失敗保留整組 input。未填座標不補數字。
+Adapter 集中座標 metadata 的精度與既有 SweepCfg lowering，Qt／MCP 不各算一套。
 `to_inline` 是明確複製固定 library 內容的指令。Widget 與 MCP 只消費 core 提供的
 description 的 Option label、value 與 commands，不猜 union 或 library 結構。
 Option.fields 仍是作者宣告，不進選單回覆；查所選 path 才列直接 children。

@@ -14,6 +14,7 @@ from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
 from zcu_tools.gui.form import (
+    FormCommandError,
     FormEnv,
     FormErrors,
     FormFieldDescription,
@@ -602,19 +603,45 @@ class FormEditor[F: FormModel](QWidget):
             self._publish()
 
     def _run_command(self, path: FormWritePath, name: str) -> None:
-        """Run option command name at path, or keep its rejection local."""
+        """Dispatch owner commands, guarding only declared participating local text."""
+        if not self._editing_enabled:
+            return
         state = self._require_state()
+        field = state.describe(path, self._require_env()).target
+        command = (
+            next((item for item in field.commands if item.name == name), None)
+            if field
+            else None
+        )
+        if command is not None and any(key in self._local for key in command.inputs):
+            return
+        saved = dict(self._local) if command is not None else {}
         publication = self._publication_count
-        self._local.pop(path, None)
-        if self._host_command is None:
-            state.run_command(path, name, self._require_env())
-        else:
-            try:
+        if command is None:
+            self._local.pop(path, None)
+        try:
+            if self._host_command is None:
+                state.run_command(path, name, self._require_env())
+            else:
                 self._host_command(path, name)
-            except WriteRejected as exc:
-                # The host changed nothing: show its message at the field.
-                self._local[path] = self._rows[path].rejected_input(exc.message)
-        if self._publication_count == publication:
+        except WriteRejected as exc:
+            self._local[path] = self._rows[path].rejected_input(exc.message)
+        except FormCommandError:
+            if command is None:
+                raise
+            # State preview already reports the participating expression/missing
+            # error. Do not create a local parse error on a valid peer field.
+            self._local.update(saved)
+        else:
+            if command is not None:
+                self._local.update(
+                    {
+                        key: local
+                        for key, local in saved.items()
+                        if key not in command.inputs
+                    }
+                )
+        if self._publication_count == publication or saved:
             self._publish()
 
     def _unparsed(self, path: FormWritePath, local: LocalText) -> None:

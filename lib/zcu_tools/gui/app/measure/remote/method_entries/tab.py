@@ -14,6 +14,22 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
+        "tab.run_cfg_command",
+        "tab:h_tab_run_cfg_command",
+        MethodSpec(
+            5.0,
+            "Run a named command exposed by the current active Form description. "
+            "path is a model-field string array. Same holder, busy and lifetime "
+            "guards as edits. Conversion failures leave input unchanged; success "
+            "returns input/values/errors. No arbitrary method execution.",
+            (
+                required_string("tab_id"),
+                ParamSpec("path", JsonType.ARRAY),
+                required_string("name"),
+            ),
+        ),
+    ),
+    method_entry(
         "tab.read_recipe_field",
         "tab:h_tab_read_recipe_field",
         MethodSpec(
