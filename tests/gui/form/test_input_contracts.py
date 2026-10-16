@@ -86,3 +86,15 @@ def test_input_policy_disables_expression_across_description_defaults_and_restor
     restored = form.FormState(form.FormInput(model, {"text": "$literal"}))
     assert restored.write_compatible(state.input.data, env) == (("text",),)
     assert restored.input.data == {"text": "$literal"}
+
+
+def test_expression_restriction_does_not_disable_complex_literal_restore() -> None:
+    model = create_model(
+        "LiteralComplex", __base__=form.FormModel,
+        value=(Annotated[complex, form.InputPolicy(expression=False)], ...),
+    )
+    env = form.FormEnv()
+    state = form.FormState(form.FormInput(model, {}))
+    assert state.write_compatible({"value": {"__complex__": [1, 2]}}, env) == ()
+    preview = state.preview(env)
+    assert preview.values[("value",)] == 1 + 2j and preview.errors is None

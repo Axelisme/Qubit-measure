@@ -362,7 +362,9 @@ def test_ref_source_with_missing_child_key_does_not_block_scalar_or_fallback() -
     assert failure.value.selector_path == ("drive", "waveform")
 
 
-def test_root_nested_sections_and_captured_inline_subtrees_never_expose_wrappers() -> None:
+def test_root_nested_sections_and_captured_inline_subtrees_never_expose_wrappers() -> (
+    None
+):
     from zcu_tools.cfg_model import FlatTopWaveformSpec
 
     class Container(ConfigBase):
@@ -371,10 +373,17 @@ def test_root_nested_sections_and_captured_inline_subtrees_never_expose_wrappers
     form = adapter.Form(Container, {})
     env = captured()
     assert env.library is not None
-    pulse = PulseSpec(ch=1, nqz=1, freq=12, gain=0.2,
-                      waveform=FlatTopWaveformSpec(length=2, raise_waveform="Q.waveforms.edge"))
+    pulse = PulseSpec(
+        ch=1,
+        nqz=1,
+        freq=12,
+        gain=0.2,
+        waveform=FlatTopWaveformSpec(length=2, raise_waveform="Q.waveforms.edge"),
+    )
     env = FormEnv(library=env.library.replaced_module("Q.pulses.drive", pulse))
-    input = FormInput(form.model, {"modules": {"drive": {"kind": "ref", "name": "Q.pulses.drive"}}})
+    input = FormInput(
+        form.model, {"modules": {"drive": {"kind": "ref", "name": "Q.pulses.drive"}}}
+    )
     copied = form.prepare_inline_copy(input, ("modules", "drive"), env).input
     root = ordinary_object(form.read_logical_field(copied, (), env).value)
     drive = ordinary_object(ordinary_object(root["modules"])["drive"])
@@ -400,7 +409,30 @@ def test_source_admission_reports_consuming_edit_not_later_batch_item() -> None:
     form = adapter.Form(LogicalCfg, {}, extras=Consumer, lower=lambda extras, cfg: cfg)
     input = form.default_input(FormEnv())
     with pytest.raises(adapter.LogicalEditError) as failure:
-        form.prepare_logical_edits(input, [adapter.LogicalEdit(("extras", "name"), "missing"), adapter.LogicalEdit(("reps",), 12)], FormEnv())
+        form.prepare_logical_edits(
+            input,
+            [
+                adapter.LogicalEdit(("extras", "name"), "missing"),
+                adapter.LogicalEdit(("reps",), 12),
+            ],
+            FormEnv(),
+        )
     assert failure.value.reason_code == "form_source"
     assert failure.value.edit_index == 0 and failure.value.path == ("extras", "name")
     assert input.data["reps"] == 1
+
+
+def test_missing_null_and_failed_scalar_values_have_distinct_statuses() -> None:
+    class Values(FormModel):
+        missing: int
+        explicit: int | None = None
+        invalid: int = 1
+
+    form = adapter.Form(LogicalCfg, {}, extras=Values, lower=lambda extras, cfg: cfg)
+    input = FormInput(form.model, {"extras": {"explicit": None, "invalid": {"expr": "1 / 0"}}})
+    missing = form.read_logical_field(input, ("extras", "missing"), FormEnv())
+    assert missing.value_status == "missing" and not missing.input_present
+    explicit = form.read_logical_field(input, ("extras", "explicit"), FormEnv())
+    assert explicit.value_status == "available" and explicit.input_present and explicit.value is None
+    failed = form.read_logical_field(input, ("extras", "invalid"), FormEnv())
+    assert failed.value_status == "unavailable" and failed.input_present and failed.value is None
