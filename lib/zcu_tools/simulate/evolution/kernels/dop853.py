@@ -8,11 +8,11 @@ from numpy.typing import NDArray
 
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource
-from ._dop853 import Tolerances, integrate, tolerances
+from ._dop853 import tolerances
+from ._dop853_chain import run_chain
 from ._dop853_data import (
     Context,
     Models,
-    Segments,
     hamiltonian,
     pack_models,
     pack_segments,
@@ -44,48 +44,10 @@ def _rhs(time, state, context):
     return derivative.ravel()
 
 
-# Passing a compiled RHS into the generic stepper prevents disk caching here.
-@njit(nogil=True)
-def _apply_batch(
-    models: Models,
-    segments: Segments,
-    rows: NDArray[np.int64],
-    key_index: NDArray[np.int64],
-    states: NDArray[np.complex128],
-    controls: Tolerances,
-):
-    last_step = controls.max_step
-    for index in range(len(rows)):
-        row = rows[index]
-        model = key_index[index]
-        state = states[index].copy()
-        if index > 0:
-            previous_row = rows[index - 1]
-            boundary = segments.start[previous_row] + segments.duration[previous_row]
-            chained = (
-                segments.timeline[row] == segments.timeline[previous_row]
-                and abs(segments.start[row] - boundary) <= 1e-9
-            )
-            if chained:
-                previous_model = key_index[index - 1]
-                state = states[index - 1].copy()
-                if previous_model != model:
-                    overlap = (
-                        models.basis[model].conj().T @ models.basis[previous_model]
-                    )
-                    state = overlap @ state @ overlap.conj().T
-            else:
-                last_step = controls.max_step
-        context = Context(models, segments, row, model)
-        result, last_step = integrate(
-            _rhs,
-            context,
-            state.ravel(),
-            float(segments.duration[row]),
-            controls,
-            last_step,
-        )
-        states[index] = result.reshape(state.shape)
+@njit(nogil=True, cache=True)
+def _context(data, row, model):
+    models, segments = data
+    return Context(models, segments, row, model)
 
 
 class DOP853Kernel:
@@ -183,4 +145,15 @@ class DOP853Kernel:
         playing = np.arange(table.tone_port.shape[1])[None, :] < table.tones[rows, None]
         if np.any(playing & (table.tone_port[rows] >= models.ports[key_index, None])):
             raise ValueError("DOP853 tone port absent from model")
-        _apply_batch(models, pack_segments(table), rows, key_index, states, controls)
+        segments = pack_segments(table)
+        run_chain(
+            _rhs,
+            _context,
+            (models, segments),
+            models,
+            segments,
+            rows,
+            key_index,
+            states,
+            controls,
+        )

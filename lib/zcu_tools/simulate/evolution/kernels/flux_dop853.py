@@ -9,7 +9,8 @@ from numpy.typing import NDArray
 
 from ..kernel import Prepared, SegmentTable
 from ..secular import FluxExpansion, ModelSource
-from ._dop853 import Tolerances, integrate, tolerances
+from ._dop853 import tolerances
+from ._dop853_chain import run_chain
 from ._dop853_data import (
     Context,
     Models,
@@ -105,45 +106,10 @@ def _rhs(time, state, context):
     return derivative.ravel()
 
 
-# The same generic numba DOP853 stepper serves constant and continuous flux.
-@njit(nogil=True)
-def _apply_batch(
-    data: _FluxData,
-    rows: NDArray[np.int64],
-    bath_index: NDArray[np.int64],
-    states: NDArray[np.complex128],
-    controls: Tolerances,
-):
+@njit(nogil=True, cache=True)
+def _context(data, row, model):
     models, segments, expansion, waveform = data
-    last_step = controls.max_step
-    for index in range(len(rows)):
-        row, model = rows[index], bath_index[index]
-        state = states[index].copy()
-        if index > 0:
-            previous = rows[index - 1]
-            boundary = segments.start[previous] + segments.duration[previous]
-            if (
-                segments.timeline[row] == segments.timeline[previous]
-                and abs(segments.start[row] - boundary) <= 1e-9
-            ):
-                overlap = (
-                    models.basis[model].conj().T @ models.basis[bath_index[index - 1]]
-                )
-                state = overlap @ states[index - 1] @ overlap.conj().T
-            else:
-                last_step = controls.max_step
-        context = _FluxContext(
-            Context(models, segments, row, model), expansion, waveform
-        )
-        result, last_step = integrate(
-            _rhs,
-            context,
-            state.ravel(),
-            float(segments.duration[row]),
-            controls,
-            last_step,
-        )
-        states[index] = result.reshape(state.shape)
+    return _FluxContext(Context(models, segments, row, model), expansion, waveform)
 
 
 class FluxDOP853Kernel:
@@ -257,15 +223,13 @@ class FluxDOP853Kernel:
         playing = np.arange(table.tone_port.shape[1])[None, :] < table.tones[rows, None]
         if np.any(playing & (table.tone_port[rows] >= models.ports[inverse, None])):
             raise ValueError("flux DOP853 tone port absent from model")
-        _apply_batch(
-            _FluxData(
-                models,
-                pack_segments(table),
-                prepared.expansion,
-                _Waveform(waveform.offsets, waveform.time_ns, waveform.flux),
-            ),
-            rows,
-            inverse,
-            states,
-            controls,
+        segments = pack_segments(table)
+        data = _FluxData(
+            models,
+            segments,
+            prepared.expansion,
+            _Waveform(waveform.offsets, waveform.time_ns, waveform.flux),
+        )
+        run_chain(
+            _rhs, _context, data, models, segments, rows, inverse, states, controls
         )
