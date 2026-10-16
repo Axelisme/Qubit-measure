@@ -380,7 +380,9 @@ def test_plot_axes_and_curves_observe_rendered_artists_only(surface, qapp) -> No
     canvas.draw()
     qapp.processEvents()
     driver = _user_input.ComponentDriver(surface)
-    assert callable(getattr(driver, "plots", None)), "Driver must observe raw plot axes and visible curves"
+    assert callable(getattr(driver, "plots", None)), (
+        "Driver must observe raw plot axes and visible curves"
+    )
     observed = driver.plots().axes
     assert len(observed) == 1
     assert observed[0].xlabel == "Frequency (MHz)"

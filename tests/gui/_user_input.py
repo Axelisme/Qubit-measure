@@ -130,6 +130,22 @@ class LegendObservation:
     texts: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class PlotAxesObservation:
+    """Visible axis labels and rendered line-curve count for one matplotlib axes."""
+
+    xlabel: str  # Horizontal label text; empty if the label or axis is hidden.
+    ylabel: str  # Vertical label text; empty if the label or axis is hidden.
+    visible_curves: int  # Nontransparent stroked line paths intersecting the axes.
+
+
+@dataclass(frozen=True)
+class PlotObservation:
+    """Visible axes in canvas/axes order, without retaining artists or result data."""
+
+    axes: tuple[PlotAxesObservation, ...]  # Empty when no plot axes are visible.
+
+
 def _display_text(widget: QWidget) -> str:
     if isinstance(widget, (QAbstractButton, QLabel, QLineEdit)):
         return widget.text()
@@ -498,6 +514,46 @@ class ComponentDriver:
                         t.get_text() for t in legend.get_texts() if t.get_visible()
                     )
         return LegendObservation(tuple(texts))
+
+    def plots(self) -> PlotObservation:
+        """Read labels and visible stroked curves from shown matplotlib canvases.
+
+        Hidden axes/canvases, transparent lines, empty paths and paths outside
+        the displayed axes do not count. Counts describe public rendered artists,
+        not acquisition results; use a PNG to review appearance and occlusion.
+        """
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+        observed: list[PlotAxesObservation] = []
+        for canvas in self._window.findChildren(FigureCanvasQTAgg):
+            if not canvas.isVisible():
+                continue
+            for axes in canvas.figure.axes:
+                if not axes.get_visible():
+                    continue
+                curves = sum(
+                    1
+                    for line in axes.lines
+                    if line.get_visible()
+                    and line.get_alpha() != 0
+                    and line.get_linewidth() > 0
+                    and line.get_linestyle() not in ("None", "", " ")
+                    and line.get_path()
+                    .transformed(line.get_transform())
+                    .intersects_bbox(axes.bbox, filled=False)
+                )
+                observed.append(
+                    PlotAxesObservation(
+                        axes.get_xlabel()
+                        if axes.xaxis.get_visible() and axes.xaxis.label.get_visible()
+                        else "",
+                        axes.get_ylabel()
+                        if axes.yaxis.get_visible() and axes.yaxis.label.get_visible()
+                        else "",
+                        curves,
+                    )
+                )
+        return PlotObservation(tuple(observed))
 
     def screenshot(self, path: Path) -> Path:
         """Grab the window to caller-chosen PNG path, creating parent directories.
