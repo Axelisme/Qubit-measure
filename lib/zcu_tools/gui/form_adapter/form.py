@@ -37,6 +37,8 @@ from zcu_tools.gui.form import (
     FormWritePath,
     LinRange,
     Option,
+    StepCenter,
+    StepRange,
     static_defaults,
 )
 from zcu_tools.program.v2.base import ProgramV2Cfg
@@ -59,69 +61,56 @@ from ._types import members as _members
 from .logical import LogicalEdit, LogicalEditCandidate, LogicalFieldObservation
 
 
-class SweepRange(LinRange):
-    """Core sweep input uses n internally, with the user-facing label Expts."""
-
-    n: Annotated[int, Display(label="Expts")] = Field(default=3, ge=1)
-
-
-class SweepCenter(CenterSpan):
-    """Center coordinates with the same Expts label as the Range branch."""
-
-    n: Annotated[int, Display(label="Expts")] = Field(default=3, ge=1)
-
-
-def _sweep_model(node: FormNode, info: FieldInfo) -> object:
-    """Generate endpoint requirements and float precision for one core sweep.
-
-    node is the authored sweep value; info is its core field declaration.
-    Only Expr endpoints lose the inherited LinRange default. FieldMeta decimals
-    decorates start/stop, never n or the outer model. Literal or unauthored
-    endpoints keep ordinary defaults. No expression is evaluated, and neither
-    the core declaration nor the shared SweepRange class is modified.
-    """
-    meta = get_field_meta(info)
-    decimals = meta.decimals if meta is not None else None
+def _sweep_branch(
+    base: type[FormModel], node: FormNode, decimals: int | None
+) -> type[FormModel]:
+    """Specialize authored endpoint requirements and float display precision."""
     fields: dict[str, FieldInfo] = {}
-    for name in ("start", "stop"):
-        required = isinstance(node, Range) and isinstance(getattr(node, name), Expr)
+    for name, info in base.model_fields.items():
+        if info.annotation is not float:
+            continue
+        required = isinstance(node, Range) and isinstance(
+            getattr(node, name, None), Expr
+        )
         if not required and decimals is None:
             continue
-        endpoint = deepcopy(SweepRange.model_fields[name])
+        endpoint = deepcopy(info)
         if required:
             endpoint.default = PydanticUndefined
             endpoint.default_factory = None
         if decimals is not None:
             endpoint.metadata.append(Display(decimals=decimals))
         fields[name] = endpoint
-    namespace: dict[str, object] = {
-        "__module__": __name__,
-        "__annotations__": {name: float for name in fields},
-        **fields,
-    }
     model = new_class(
-        "AuthoredSweepRange", (SweepRange,), exec_body=lambda ns: ns.update(namespace)
-    )
-    if not issubclass(model, SweepRange):
-        raise TypeError("Generated sweep model must implement SweepRange")
-    center_fields = {
-        name: deepcopy(SweepCenter.model_fields[name]) for name in ("center", "span")
-    }
-    if decimals is not None:
-        for endpoint in center_fields.values():
-            endpoint.metadata.append(Display(decimals=decimals))
-    center = new_class(
-        "AuthoredSweepCenter",
-        (SweepCenter,),
+        f"Authored{base.__name__}",
+        (base,),
         exec_body=lambda ns: ns.update(
             {
                 "__module__": __name__,
-                "__annotations__": {name: float for name in center_fields},
-                **center_fields,
+                "__annotations__": {name: float for name in fields},
+                **fields,
             }
         ),
     )
-    return Annotated[union_type((model, center)), Field(discriminator="kind")]
+    if not issubclass(model, FormModel):
+        raise TypeError("Generated sweep model must implement FormModel")
+    return model
+
+
+def _sweep_model(node: FormNode, info: FieldInfo) -> object:
+    """Build four active branches; only Expr endpoints lose inherited defaults.
+
+    node is the authored sweep; info is its core field declaration. Float
+    precision applies to all coordinates and step, never n or the outer model.
+    No expression is evaluated and no shared branch class is modified.
+    """
+    meta = get_field_meta(info)
+    decimals = meta.decimals if meta is not None else None
+    branches = tuple(
+        _sweep_branch(base, node, decimals)
+        for base in (LinRange, CenterSpan, StepRange, StepCenter)
+    )
+    return Annotated[union_type(branches), Field(discriminator="kind")]
 
 
 def _section_type(annotation: object) -> type[BaseModel] | None:
@@ -356,7 +345,7 @@ class _Section:
     def _sweep_defaults(self) -> dict[str, JsonValue]:
         """Select Range + Expts for fresh, otherwise unauthored sweep fields."""
         return {
-            name: static_defaults(SweepRange)
+            name: static_defaults(LinRange)
             for name, info in self.core.model_fields.items()
             if name in self.model.model_fields and SweepCfg in _members(info.annotation)
         }
@@ -427,13 +416,15 @@ class _Section:
             if name not in value.__class__.model_fields:
                 continue
             item: object = getattr(value, name)
-            if isinstance(item, LinRange | CenterSpan):
+            if isinstance(item, LinRange | CenterSpan | StepRange | StepCenter):
                 try:
                     sweep = SweepCfg(
                         start=item.start,
                         stop=item.stop,
                         expts=item.n,
-                        step=(item.stop - item.start) / (item.n - 1)
+                        step=item.step
+                        if isinstance(item, StepRange | StepCenter)
+                        else (item.stop - item.start) / (item.n - 1)
                         if item.n > 1
                         else 0,
                     )

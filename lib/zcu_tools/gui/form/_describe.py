@@ -28,7 +28,7 @@ from .description import (
 )
 from .model import Display, FormEnv, FormModel, FormWritePath, InputCommand
 from .options import Option
-from .sweep import CenterSpan, LinRange
+from .sweep import CenterSpan, LinRange, StepCenter, StepRange
 
 
 def _kind(target: Field) -> FormFieldKind:
@@ -237,6 +237,8 @@ def _description_tags(roots: tuple[object, ...]) -> dict[type[BaseModel], str]:
     tags = branch_tags(roots)
     tags[LinRange] = "kind"
     tags[CenterSpan] = "kind"
+    tags[StepRange] = "kind"
+    tags[StepCenter] = "kind"
     return tags
 
 

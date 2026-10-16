@@ -687,7 +687,8 @@ class FieldRow:
         nothing about model validity. local overrides
         the text and mode of a text input and hides its evaluated label;
         checkboxes and dropdowns still show state. The value label shows
-        only a resolved Expression-mode value; Direct input is not echoed.
+        resolved Expressions, or an Effective value when numeric preview differs
+        from authored Direct input. Equal Direct values are not echoed.
         Shape changes require a new row; metadata stays as built, and the
         fold stays as built or as the user last set it.
         """
@@ -699,13 +700,19 @@ class FieldRow:
         try:
             self._display_input(local, editable=editable)
             shown = ""
-            if local is None and field.has_value and _expression(field):
+            effective = (
+                field.kind in ("integer", "number", "complex")
+                and field.present
+                and not _expression(field)
+                and field.value != field.raw
+            )
+            if local is None and field.has_value and (_expression(field) or effective):
                 resolved = (
                     json.dumps(field.value, ensure_ascii=False)
                     if isinstance(field.value, str)
                     else _rounded(field, field.value)
                 )
-                shown = f"= {resolved}"
+                shown = f"Effective: {resolved}" if effective else f"= {resolved}"
             self.value.setText(shown)
             self.value.setVisible(bool(shown))
         finally:
