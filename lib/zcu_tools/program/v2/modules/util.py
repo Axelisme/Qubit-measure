@@ -24,6 +24,7 @@ def round_timestamp(
     t: float | QickParam,
     gen_ch: int | None = None,
     ro_ch: int | None = None,
+    *,
     take_ceil: bool = True,
 ) -> float | QickParam:
     fclk = get_fclk(prog, gen_ch=gen_ch, ro_ch=ro_ch)

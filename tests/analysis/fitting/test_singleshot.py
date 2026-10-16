@@ -145,7 +145,9 @@ def test_row_population_is_legal_and_shared_ratio_is_honored(
     params = (-1.0, 1.0, 0.3, 0.9, 0.1, 0.8, length_ratio)
     # An over-normalized target used to produce a negative other population.
     pdf = 1.2 * calc_population_pdf(xs, *params)
-    fitted, covariance = fit_singleshot_p0(xs, pdf, 0.8, 0.2, params, fit_length_ratio)
+    fitted, covariance = fit_singleshot_p0(
+        xs, pdf, 0.8, 0.2, params, fit_length_ratio=fit_length_ratio
+    )
     assert min(fitted[:2]) >= 0
     assert sum(fitted[:2]) <= 1
     if not fit_length_ratio or length_ratio == 0:
@@ -251,7 +253,9 @@ def test_row_fit_limits_adjustable_ratio(target_ratio, expected_ratio):
     params = (-1.0, 1.0, 0.3, 0.6, 0.2, 0.7, 0.7)
     pdf = calc_population_pdf(xs, *params[:6], target_ratio)
 
-    fitted, covariance = fit_singleshot_p0(xs, pdf, 0.6, 0.2, params, True)
+    fitted, covariance = fit_singleshot_p0(
+        xs, pdf, 0.6, 0.2, params, fit_length_ratio=True
+    )
 
     assert 0.35 <= fitted[2] <= 1.4
     assert fitted[2] == pytest.approx(expected_ratio, abs=0.001)

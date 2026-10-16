@@ -285,12 +285,12 @@ class FluxDepInteraction(Generic[CfgT, ResultT]):
 
     def _set_conjugate(self, change: dict[str, Any]) -> None:
         if not self.is_finished:
-            self.picker.set_conjugate(bool(change["new"]))
+            self.picker.set_conjugate(on=bool(change["new"]))
             self._refresh()
 
     def _set_magnitude(self, change: dict[str, Any]) -> None:
         if not self.is_finished:
-            self.picker.set_magnitude_only(bool(change["new"]))
+            self.picker.set_magnitude_only(on=bool(change["new"]))
             self._refresh()
 
     def _on_press(self, event: MouseEvent) -> None:

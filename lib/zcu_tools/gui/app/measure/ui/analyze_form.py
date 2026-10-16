@@ -141,7 +141,7 @@ class AnalyzeFormWidget(QWidget):
                 widget,
                 binding.bare_type,
                 binding.choices,
-                binding.optional,
+                optional=binding.optional,
             )
         return reconstruct_params(self._params_cls, raw)
 
@@ -188,6 +188,7 @@ class AnalyzeFormWidget(QWidget):
         widget: QWidget,
         bare_type: type,
         choices: list[Any] | None,
+        *,
         optional: bool = False,
     ) -> Any:
         if choices is not None and isinstance(widget, QComboBox):

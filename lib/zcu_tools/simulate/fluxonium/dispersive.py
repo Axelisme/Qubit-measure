@@ -104,11 +104,12 @@ def calculate_dispersive_sweep(
     update_fn: Callable[[Fluxonium, Any], None],
     g: float,
     bare_rf: float,
-    progress: bool = True,
     res_dim: int = 5,
     qub_cutoff: int = 30,
     qub_dim: int = 20,
     return_dim: int = 2,
+    *,
+    progress: bool = True,
 ) -> tuple[NDArray[np.float64], ...]:
     """
     Calculate the dispersive shift of ground and excited state vs. params of fluxonium
@@ -131,7 +132,7 @@ def calculate_dispersive_sweep(
     def update_hilbertspace(sweep_param: Any) -> None:
         update_fn(fluxonium, sweep_param)
 
-    with scq_progress(progress):
+    with scq_progress(progress=progress):
         sweep = ParameterSweep(
             hilbertspace,
             {"params": sweep_list},
@@ -157,11 +158,12 @@ def calculate_dispersive_vs_flux(
     fluxs: NDArray[np.float64],
     bare_rf: float,
     g: float,
-    progress: bool = True,
     res_dim: int = 10,
     qub_cutoff: int = 30,
     qub_dim: int = 10,
     return_dim: int = 2,
+    *,
+    progress: bool = True,
 ) -> tuple[NDArray[np.float64], ...]:
     """
     Calculate the dispersive shift of ground and excited state vs. flux
@@ -178,11 +180,11 @@ def calculate_dispersive_vs_flux(
         update_hilbertspace,
         g,
         bare_rf,
-        progress,
-        res_dim,
-        qub_cutoff,
-        qub_dim,
-        return_dim,
+        progress=progress,
+        res_dim=res_dim,
+        qub_cutoff=qub_cutoff,
+        qub_dim=qub_dim,
+        return_dim=return_dim,
     )
 
 
@@ -191,10 +193,11 @@ def calculate_chi_sweep(
     update_fn: Callable[[Fluxonium, Any], None],
     g: float,
     bare_rf: float,
-    progress: bool = True,
     resonator_dim: int = 5,
     cutoff: int = 30,
     evals_count: int = 20,
+    *,
+    progress: bool = True,
 ) -> NDArray[np.float64]:
     """
     Calculate the chi of ground and excited state vs. params of fluxonium
@@ -217,7 +220,7 @@ def calculate_chi_sweep(
     def update_hilbertspace(sweep_param: Any) -> None:
         update_fn(fluxonium, sweep_param)
 
-    with scq_progress(progress):
+    with scq_progress(progress=progress):
         sweep = ParameterSweep(
             hilbertspace,
             {"params": np.asarray(sweep_list)},
@@ -235,10 +238,11 @@ def calculate_chi_vs_flux(
     fluxs: NDArray[np.float64],
     bare_rf: float,
     g: float,
-    progress: bool = True,
     res_dim: int = 5,
     qub_cutoff: int = 30,
     qub_dim: int = 20,
+    *,
+    progress: bool = True,
 ) -> NDArray[np.float64]:
     """
     Calculate the dispersive shift of ground and excited state vs. flux
@@ -257,10 +261,10 @@ def calculate_chi_vs_flux(
         update_hilbertspace,
         g,
         bare_rf,
-        progress,
-        res_dim,
-        qub_cutoff,
-        qub_dim,
+        progress=progress,
+        resonator_dim=res_dim,
+        cutoff=qub_cutoff,
+        evals_count=qub_dim,
     )
 
 

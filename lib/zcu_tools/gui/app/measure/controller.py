@@ -708,7 +708,7 @@ class Controller(SessionControllerMixin):
     def has_soc(self) -> bool:
         return self._soc_svc.has_soc()
 
-    def get_soc_info(self, include_cfg: bool = False) -> dict[str, object]:
+    def get_soc_info(self, *, include_cfg: bool = False) -> dict[str, object]:
         """Read the connected board's GUI-owned compact or full hardware view."""
         from .soc_view import project_soc_info
 

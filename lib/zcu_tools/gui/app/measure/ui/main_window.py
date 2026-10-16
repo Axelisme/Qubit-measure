@@ -310,7 +310,7 @@ class MainWindow(QMainWindow):
         self._tabs.setCurrentWidget(tab_w)
         self._refresh_empty_hint()
 
-        self._toolbar.set_new_tab_enabled(True)
+        self._toolbar.set_new_tab_enabled(enabled=True)
         # A tab can be added while another tab is running. Project the current
         # State-owned running identity immediately instead of waiting for a new
         # lifecycle event.
@@ -471,7 +471,7 @@ class MainWindow(QMainWindow):
     def refresh_run_lock(self, running_tab_id: str | None) -> None:
         logger.debug("refresh_run_lock: running_tab_id=%r", running_tab_id)
         self._refresh_tab_activity_markers(running_tab_id)
-        self._toolbar.set_new_tab_enabled(True)
+        self._toolbar.set_new_tab_enabled(enabled=True)
         for tab_id, tab_w in self._tab_widgets.items():
             if self._ctrl.has_tab(tab_id):
                 tab_w.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
@@ -705,7 +705,7 @@ class MainWindow(QMainWindow):
             message += f"\n\nDiscard {preview.skipped_count} previously skipped tab configurations from RAM?"
         self._reload_prompt_open = True
 
-        def on_decision(confirmed: bool) -> None:
+        def on_decision(*, confirmed: bool) -> None:
             self._reload_prompt_open = False
             if not confirmed or self._shutdown_requested or self._closing:
                 return
@@ -720,7 +720,7 @@ class MainWindow(QMainWindow):
             "Reload experiments",
             message,
             action_text="Discard Results and Reload",
-            on_decision=on_decision,
+            on_decision=lambda confirmed: on_decision(confirmed=confirmed),
             default=False,
         )
 
@@ -785,7 +785,7 @@ class MainWindow(QMainWindow):
 
         self._pending_tab_closes.add(tab_id)
 
-        def _on_decision(confirmed: bool) -> None:
+        def _on_decision(*, confirmed: bool) -> None:
             self._pending_tab_closes.discard(tab_id)
             if not confirmed or self._shutdown_requested or self._closing:
                 return
@@ -798,7 +798,7 @@ class MainWindow(QMainWindow):
             "Unsaved measurement data",
             "Measurement data in this tab has not been saved. Discard unsaved data and close tab?",
             action_text="Discard and Close",
-            on_decision=_on_decision,
+            on_decision=lambda confirmed: _on_decision(confirmed=confirmed),
             default=False,
         )
 
@@ -1179,7 +1179,7 @@ class MainWindow(QMainWindow):
         self._close_prompt_open = True
         self._post_shutdown_prompt_open = True
 
-        def _on_decision(confirmed: bool) -> None:
+        def _on_decision(*, confirmed: bool) -> None:
             self._close_prompt_open = False
             self._post_shutdown_prompt_open = False
             if self._programmatic_shutdown_requested or self._closing:
@@ -1196,7 +1196,7 @@ class MainWindow(QMainWindow):
             "An operation completed with unsaved measurement data while the app "
             "was closing. Discard unsaved data and close?",
             action_text="Discard and Close",
-            on_decision=_on_decision,
+            on_decision=lambda confirmed: _on_decision(confirmed=confirmed),
             default=False,
         )
 
@@ -1205,7 +1205,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         self._close_prompt_open = True
 
-        def _on_decision(confirmed: bool) -> None:
+        def _on_decision(*, confirmed: bool) -> None:
             if not confirmed or self._shutdown_requested or self._closing:
                 self._close_prompt_open = False
                 return
@@ -1232,7 +1232,7 @@ class MainWindow(QMainWindow):
                 "in progress. Discard unsaved data, cancel active operation(s), "
                 "and close?",
                 action_text="Discard and Close",
-                on_decision=_on_decision,
+                on_decision=lambda confirmed: _on_decision(confirmed=confirmed),
                 default=False,
             )
         elif has_unsaved:
@@ -1241,7 +1241,7 @@ class MainWindow(QMainWindow):
                 "Unsaved measurement data",
                 "There is unsaved measurement data. Discard unsaved data and close?",
                 action_text="Discard and Close",
-                on_decision=_on_decision,
+                on_decision=lambda confirmed: _on_decision(confirmed=confirmed),
                 default=False,
             )
         else:
@@ -1249,7 +1249,7 @@ class MainWindow(QMainWindow):
                 self,
                 "Operations in progress",
                 f"Cancel {active} operation(s) in progress and close once they stop?",
-                on_decision=_on_decision,
+                on_decision=lambda confirmed: _on_decision(confirmed=confirmed),
                 default=False,
             )
 

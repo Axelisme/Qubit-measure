@@ -340,7 +340,7 @@ class SingleShotMixin(TypedAcquireMixin):
                     "g_center and e_center must be provided when ge_radius is set"
                 )
             self.shots = self._apply_classification(
-                acc_buf, g_center, e_center, ge_radius, remove_offset
+                acc_buf, g_center, e_center, ge_radius, remove_offset=remove_offset
             )
             for i, ch_shot in enumerate(self.shots):
                 d_reps[i] = ch_shot
@@ -359,6 +359,7 @@ class SingleShotMixin(TypedAcquireMixin):
         g_center: complex,
         e_center: complex,
         ge_radius: float,
+        *,
         remove_offset: bool,
     ) -> list[NDArray[np.float64]]:
         shots = []

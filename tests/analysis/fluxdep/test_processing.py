@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import numpy as np
 import pytest
 from zcu_tools.analysis.fluxdep import (
@@ -10,6 +12,17 @@ from zcu_tools.analysis.fluxdep import (
     onetone_background,
     spectrum2d_findpoint,
 )
+
+
+@pytest.mark.parametrize(
+    "invalid_call", [cast2real_and_norm], ids=["cast2real_and_norm"]
+)
+def test_cast2real_and_norm_rejects_positional_phase_option(
+    invalid_call: Callable[..., object],
+) -> None:
+    signals = np.ones((3, 5), dtype=np.complex128)
+    with pytest.raises(TypeError, match="positional"):
+        invalid_call(signals, False, 1, "gaussian")
 
 
 def test_cast2real_and_norm_keeps_constant_rows_finite() -> None:

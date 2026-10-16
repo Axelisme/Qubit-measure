@@ -924,16 +924,16 @@ class DeviceService:
             registered = True
             return device.get_info()
         except DeviceRegistrationError:
-            self._cleanup_failed_connection(req.name, device, registered)
+            self._cleanup_failed_connection(req.name, device, registered=registered)
             raise
         except Exception as exc:
-            self._cleanup_failed_connection(req.name, device, registered)
+            self._cleanup_failed_connection(req.name, device, registered=registered)
             raise DeviceRegistrationError(
                 f"Failed to connect {req.type_name} {req.name!r}: {exc}"
             ) from exc
 
     def _cleanup_failed_connection(
-        self, name: str, device: DeviceProtocol | None, registered: bool
+        self, name: str, device: DeviceProtocol | None, *, registered: bool
     ) -> None:
         # Was @staticmethod; now instance method so it can use self._registry.
         if registered:

@@ -89,8 +89,9 @@ def start_server(
 def make_soc_proxy(
     ns_host: str,
     ns_port: int,
-    remote_traceback: bool = True,
     lookup_name: str = "myqick",
+    *,
+    remote_traceback: bool = True,
 ) -> tuple[Any, QickConfig]:
     # CONNECT-TIME FAIL-FAST: scope the 1s cap to this function only.
     #

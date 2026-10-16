@@ -97,7 +97,9 @@ def apply_mask_stroke(
     )
 
     for point in samples:
-        toggle_near_mask(dev_values, freqs, mask, point.x, point.y, width, select)
+        toggle_near_mask(
+            dev_values, freqs, mask, point.x, point.y, width, select=select
+        )
 
 
 def points_in_normalized_stroke(

@@ -151,5 +151,5 @@ f01 = predictor.predict_freq(current_value)                    # MHz
 
 - 能譜/矩陣元計算成本隨 `cutoff`, `evals_count`, `res_dim × qub_dim` 顯著上升;預設值已在準確度與速度間取平衡,調整前先確認。
 - `calculate_energy_vs_flux` 的去重邏輯 **只對 `fluxs % 1` 後落在 [0, 0.5] 的範圍有效**;若需要跨週期非對稱量(如電流偏移),請使用 `FluxoniumPredictor` 處理座標。
-- sweep 類函式透過 `scq_settings.scq_progress(progress)` 暫時切換 `scq_settings.PROGRESSBAR_DISABLED`,可藉 `progress=False` 靜音；中途例外會還原全域設定。
+- sweep 類函式透過 `scq_settings.scq_progress(progress=progress)` 暫時切換 `scq_settings.PROGRESSBAR_DISABLED`,可藉 `progress=False` 靜音；中途例外會還原全域設定。
 - `_with` 變體能大幅降低批次呼叫成本 — 優先使用。

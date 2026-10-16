@@ -73,7 +73,7 @@ class Round_Tee(QComponent):
         )
         self.make_round_tee(p.cpw_width, p.tee_fillet, p.tee_width, subtract=False)
 
-    def make_round_tee(self, cpw_width, fillet, tee_width, subtract=False):
+    def make_round_tee(self, cpw_width, fillet, tee_width, *, subtract=False):
         p = self.p
         Q = self.p.ref_qc.options
         self.pos_x, self.pos_y = Q.pos_x, Q.pos_y

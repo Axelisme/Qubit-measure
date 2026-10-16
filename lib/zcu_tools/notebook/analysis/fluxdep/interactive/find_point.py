@@ -253,7 +253,7 @@ class InteractiveFindPoints:
         plt.close(self.fig)
 
     def get_positions(
-        self, finish: bool = True
+        self, *, finish: bool = True
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         if not self.is_finished and finish:
             self.finish_interactive()

@@ -66,7 +66,7 @@ class DevicePanelProtocol(Protocol):
     def load(self, info: Any) -> None: ...
     def read(self) -> Any: ...
     def reset_eval_fields(self) -> None: ...
-    def set_editing_enabled(self, enabled: bool) -> None: ...
+    def set_editing_enabled(self, *, enabled: bool) -> None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +126,7 @@ class _FakeDevicePanel(QWidget):
         self._value_field.reset_to_direct()
         self._rampstep_field.reset_to_direct()
 
-    def set_editing_enabled(self, enabled: bool) -> None:
+    def set_editing_enabled(self, *, enabled: bool) -> None:
         self._output_combo.setEnabled(enabled)
         self._value_field.setEnabled(enabled)
         self._rampstep_field.setEnabled(enabled)
@@ -185,7 +185,7 @@ class _YOKOGS200Panel(QWidget):
         """Reset all eval-mode fields to direct mode (R3 device-switch guard)."""
         self._value_field.reset_to_direct()
 
-    def set_editing_enabled(self, enabled: bool) -> None:
+    def set_editing_enabled(self, *, enabled: bool) -> None:
         self._output_combo.setEnabled(enabled)
         self._value_field.setEnabled(enabled)
 
@@ -244,7 +244,7 @@ class _SGS100APanel(QWidget):
         self._freq_field.reset_to_direct()
         self._power_field.reset_to_direct()
 
-    def set_editing_enabled(self, enabled: bool) -> None:
+    def set_editing_enabled(self, *, enabled: bool) -> None:
         self._output_combo.setEnabled(enabled)
         self._freq_field.setEnabled(enabled)
         self._power_field.setEnabled(enabled)
@@ -457,7 +457,7 @@ class DeviceDialog(QDialog):
 
         return right_widget
 
-    def set_read_only(self, read_only: bool) -> None:
+    def set_read_only(self, *, read_only: bool) -> None:
         """Switch the dialog to inspection mode without blocking read paths."""
         self._read_only = bool(read_only)
         self._refresh_button_states(self._selected_device_name())
@@ -661,7 +661,7 @@ class DeviceDialog(QDialog):
             self._apply_btn.setText("Apply Changes")
             self._apply_btn.setStyleSheet("")
             self._apply_btn.setToolTip("")
-            self._set_add_box_enabled(True)
+            self._set_add_box_enabled(enabled=True)
             self._apply_current_panel_editing_state(None)
             return
 
@@ -677,7 +677,7 @@ class DeviceDialog(QDialog):
         )
 
         # --- Add-box: always enabled (a new-name connect never conflicts) ---
-        self._set_add_box_enabled(True)
+        self._set_add_box_enabled(enabled=True)
 
         # --- Drop button ---
         # Dropping the selected device disconnects it; that conflicts with its
@@ -711,7 +711,7 @@ class DeviceDialog(QDialog):
             self._apply_btn.setToolTip("")
         self._apply_current_panel_editing_state(snapshot)
 
-    def _set_add_box_enabled(self, enabled: bool) -> None:
+    def _set_add_box_enabled(self, *, enabled: bool) -> None:
         effective = bool(enabled) and not self._read_only
         self._add_box.setEnabled(effective)
         self._type_combo.setEnabled(effective)
@@ -726,7 +726,7 @@ class DeviceDialog(QDialog):
         if not isinstance(panel, DevicePanelProtocol):
             return
         panel.set_editing_enabled(
-            not self._read_only
+            enabled=not self._read_only
             and snapshot is not None
             and snapshot.status is DeviceStatus.CONNECTED
         )

@@ -29,7 +29,7 @@ def calculate_eff_t1_with(
     Other options pass to scqubits; ``total`` defaults to True (both directions).
     """
     fluxonium.flux = flux
-    with scq_t1_default_warning(False):
+    with scq_t1_default_warning(enabled=False):
         # With energy/h in GHz, scqubits already returns physical ns (ADR-0071).
         return fluxonium.t1_effective(
             noise_channels=noise_channels,
@@ -83,7 +83,7 @@ def calculate_eff_t1_vs_flux_with(
     pbar = None
 
     eff_t1s = np.zeros_like(fluxs, dtype=np.float64)
-    with scq_t1_default_warning(False):
+    with scq_t1_default_warning(enabled=False):
         for i, flux in enumerate(fluxs):
             fluxonium.flux = flux
 

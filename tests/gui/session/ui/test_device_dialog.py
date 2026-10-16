@@ -498,7 +498,7 @@ def test_device_dialog_read_only_blocks_mutations_but_keeps_refresh(qapp):
     _listing(dialog).setCurrentRow(0)
     panel = _panel(dialog)
 
-    dialog.set_read_only(True)
+    dialog.set_read_only(read_only=True)
 
     assert not _button(dialog, "Add Device").isEnabled()
     assert not _button(dialog, "Drop").isEnabled()
@@ -522,7 +522,7 @@ def test_device_dialog_read_only_blocks_mutations_but_keeps_refresh(qapp):
 
     ctrl.get_device_info.assert_called_once_with("fd")
 
-    dialog.set_read_only(False)
+    dialog.set_read_only(read_only=False)
 
     assert _button(dialog, "Add Device").isEnabled()
     assert _button(dialog, "Drop").isEnabled()

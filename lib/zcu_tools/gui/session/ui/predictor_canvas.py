@@ -155,7 +155,7 @@ class PredictorCurveCanvas(QWidget):
         """Inject a callback fired when the primary axes x-limits change."""
         self._on_xlim_changed = on_xlim_changed
 
-    def set_interaction_enabled(self, enabled: bool) -> None:
+    def set_interaction_enabled(self, *, enabled: bool) -> None:
         """Enable or disable user marker interaction."""
         self._interaction_enabled = bool(enabled)
         if not self._interaction_enabled:

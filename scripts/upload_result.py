@@ -169,7 +169,7 @@ def list_files_in_folder(service, folder_id):
 
 
 def collect_upload_tasks(
-    service, local_folder_path, parent_folder_id, tasks_list, prune=False
+    service, local_folder_path, parent_folder_id, tasks_list, *, prune=False
 ):
     """Recursively traverses a local folder and collects upload/update/delete tasks.
 

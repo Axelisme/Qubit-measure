@@ -219,7 +219,9 @@ def _h_spectrum_load(
     assert spec_type == "OneTone" or spec_type == "TwoTone"
     assert inherit_from is None or isinstance(inherit_from, str)
     assert isinstance(transpose_axes, bool)
-    name = adapter.ctrl.load_spectrum(filepath, spec_type, inherit_from, transpose_axes)
+    name = adapter.ctrl.load_spectrum(
+        filepath, spec_type, inherit_from, transpose_axes=transpose_axes
+    )
     return {"name": name}
 
 
