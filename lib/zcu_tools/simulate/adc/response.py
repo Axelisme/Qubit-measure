@@ -1,10 +1,11 @@
 """Joint state-conditioned first moments for a shared two-resonator line."""
 
 import numpy as np
+import scipy.linalg
 from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 
-from .model import ReadoutModel, RealArray
+from .model import ReadoutModel, RealArray, readonly_array
 from .readout_batch import ConditionalSums, ReadoutBatch
 from .request import ConditionalResponse, ReadoutPulse, SampleGrid
 
@@ -27,6 +28,11 @@ class ConditionalReadout:
             raise ValueError("readout tolerances must be positive finite")
         self.model = model
         self.rtol, self.atol = rtol, atol
+        # Keep pulse references alive: arbitrary envelope callbacks are keyed by
+        # identity because the pulse contract exposes no serializable content.
+        self._responses: dict[
+            tuple[object, ...], tuple[tuple[ReadoutPulse, ...], tuple[RealArray, ...]]
+        ] = {}
         self._v = np.sqrt(model.kappa_external_per_ns / 2)
         self._q = model.rates_per_ns - np.diag(model.rates_per_ns.sum(axis=0))
         detuning = model.frequencies_ghz - model.reference_frequency_ghz
@@ -44,8 +50,15 @@ class ConditionalReadout:
         batch supplies the DC model, finite pulses and grids in ns/GHz/radians.
         Its model defines the state order; no flux tail or overlapping controls
         enter this calculation. Cache each distinct (model identity, pulses,
-        grids) response once. Constant pulses use the closed-form matrix
-        exponential; other envelopes use the existing DOP853 moment ODE.
+        grids) response for this instance's lifetime. Keys include the full
+        numeric model and receiver content, not just its identity string, plus
+        pulse parameters and exact grid times/demodulation. Arbitrary envelope
+        callbacks are held alive and keyed by callable identity; callers must
+        keep them deterministic. Equivalent separately constructed numeric inputs
+        reuse the cache. Traces are retained internally, so switching include_traces
+        does not solve again. Constant pulses (envelope=None, carrier exactly
+        equal to model reference) use the closed-form matrix exponential; other
+        envelopes/carriers use the existing DOP853 moment ODE.
         ConditionalSums.sums has shape (contents, reads, states, 2), after
         demodulation/gain/phase/offset. Traces have shape
         (contents, reads, states, samples, 2) only if batch.include_traces;
@@ -53,10 +66,54 @@ class ConditionalReadout:
         Inputs are not mutated; populations are never clipped or normalized.
         Raise ValueError for incompatible grids/sample counts or invalid
         callbacks; RuntimeError for solver failure or invalid final populations.
-        The batched solver is not implemented yet and currently raises
-        NotImplementedError. The existing single-grid response is unchanged.
+        All contents must have the same sample counts per read. Dense traces
+        also require equal sample counts across reads. The existing single-grid
+        response continues to use DOP853.
         """
-        raise NotImplementedError("batched conditional readout is not implemented")
+        counts = np.array([len(g.times_ns) for g in batch.grids[0]], dtype=np.int64)
+        if any(
+            [len(g.times_ns) for g in grids] != counts.tolist() for grids in batch.grids
+        ):
+            raise ValueError("sample counts must match across grid contents")
+        if batch.include_traces and np.any(counts != counts[0]):
+            raise ValueError("dense traces require equal sample counts across reads")
+        model_key = _model_key(batch.model)
+        solver = (
+            self
+            if batch.model is self.model
+            else ConditionalReadout(batch.model, rtol=self.rtol, atol=self.atol)
+        )
+        contents = []
+        for pulses, grids in zip(batch.pulses, batch.grids, strict=True):
+            key = (model_key, _pulse_key(pulses), _grid_key(grids))
+            if key not in self._responses:
+                times = np.unique(np.concatenate([g.times_ns for g in grids]))
+                constant = all(
+                    p.envelope is None
+                    and p.frequency_ghz == batch.model.reference_frequency_ghz
+                    for p in pulses
+                )
+                outgoing, _ = solver._fields(pulses, times, constant=constant)
+                traces = tuple(
+                    readonly_array(
+                        solver._calibrate(
+                            outgoing[np.searchsorted(times, g.times_ns)], g
+                        ),
+                        "conditional traces",
+                    )
+                    for g in grids
+                )
+                self._responses[key] = (pulses, traces)
+            contents.append(self._responses[key][1])
+        sums = np.stack(
+            [np.stack([trace.sum(axis=-2) for trace in traces]) for traces in contents]
+        )
+        dense = (
+            np.stack([np.stack(traces) for traces in contents])
+            if batch.include_traces
+            else None
+        )
+        return ConditionalSums(sums, counts, dense)
 
     def response(
         self, pulses: tuple[ReadoutPulse, ...], grid: SampleGrid
@@ -72,8 +129,16 @@ class ConditionalReadout:
         integration or invalid probability/moment output. No density Hilbert
         space, jump-time sampling, clipping or renormalization is introduced.
         """
+        outgoing, state = self._fields(pulses, grid.times_ns, constant=False)
+        iq = self._calibrate(outgoing, grid)
+        return ConditionalResponse(self.model.state_labels, iq, state[:, 0, :].real.T)
+
+    def _fields(
+        self, pulses: tuple[ReadoutPulse, ...], times: RealArray, *, constant: bool
+    ) -> tuple[NDArray[np.complex128], NDArray[np.complex128]]:
+        """Solve one physical trajectory on the union of all requested read grids."""
         start = min(p.start_ns for p in pulses) if pulses else 0.0
-        end = max(start, float(grid.times_ns[-1]))
+        end = max(start, float(times[-1]))
         points = sorted(
             {start, end}
             | {
@@ -87,17 +152,17 @@ class ConditionalReadout:
         # state component, [population,moment_1,moment_2], initial condition
         state: NDArray[np.complex128] = np.zeros((n, 3, n), dtype=np.complex128)
         state[:, 0, :] = np.eye(n)
-        outputs = np.zeros((len(grid.times_ns), n, 3, n), dtype=np.complex128)
-        outputs[grid.times_ns <= start] = state
+        outputs = np.zeros((len(times), n, 3, n), dtype=np.complex128)
+        outputs[times <= start] = state
+        interval = self._constant_interval if constant else self._interval
         for left, right in zip(points[:-1], points[1:], strict=True):
-            state = self._interval(state, pulses, grid.times_ns, outputs, left, right)
+            state = interval(state, pulses, times, outputs, left, right)
         self._validate_solution(state)
         moments = outputs[:, :, 1:, :].sum(axis=1)
-        outgoing = np.array([self._incident(pulses, t) for t in grid.times_ns])[
+        outgoing = np.array([self._incident(pulses, t) for t in times])[
             :, None
         ] - np.einsum("r,kri->ki", self._v, moments)
-        iq = self._calibrate(outgoing, grid)
-        return ConditionalResponse(self.model.state_labels, iq, state[:, 0, :].real.T)
+        return outgoing, state
 
     def _incident(self, pulses: tuple[ReadoutPulse, ...], t: float) -> complex:
         return sum(
@@ -161,6 +226,38 @@ class ConditionalReadout:
             outputs[selected] = solution.sol(times[selected]).T.reshape((-1, *shape))
         return np.asarray(solution.y[:, -1].reshape(shape), dtype=np.complex128)
 
+    def _constant_interval(
+        self, state, pulses, times, outputs, left, right
+    ) -> NDArray[np.complex128]:
+        """Exact homogeneous moment propagation for a constant incident field."""
+        n = len(self.model.state_labels)
+        generator = np.zeros((3 * n, 3 * n), dtype=np.complex128)
+        population = np.arange(0, 3 * n, 3)
+        generator[np.ix_(population, population)] = self._q
+        incident = self._incident(pulses, left)
+        for r in range(2):
+            moments = population + r + 1
+            generator[np.ix_(moments, moments)] = self._q
+            generator[moments, population] = self._v[r] * incident
+        for s in range(n):
+            generator[3 * s + 1 : 3 * s + 3, 3 * s + 1 : 3 * s + 3] -= self._a[s]
+        propagators: dict[float, NDArray[np.complex128]] = {}
+        selected = np.flatnonzero((times > left) & (times <= right))
+        previous = left
+        flat = state.reshape(3 * n, n)
+        for index in selected:
+            dt = float(times[index] - previous)
+            if dt not in propagators:
+                propagators[dt] = np.asarray(
+                    scipy.linalg.expm(generator * dt), dtype=np.complex128
+                )
+            flat = propagators[dt] @ flat
+            outputs[index] = flat.reshape(state.shape)
+            previous = float(times[index])
+        if previous < right:
+            flat = scipy.linalg.expm(generator * (right - previous)) @ flat
+        return flat.reshape(state.shape)
+
     def _calibrate(self, outgoing, grid: SampleGrid) -> RealArray:
         receiver = self.model.receiver
         oscillator = np.exp(
@@ -189,3 +286,44 @@ class ConditionalReadout:
             raise RuntimeError("readout produced invalid probabilities")
         if not np.allclose(probabilities.sum(axis=0), 1, rtol=0, atol=1e-8):
             raise RuntimeError("readout probabilities do not sum to one")
+
+
+def _model_key(model: ReadoutModel) -> tuple[object, ...]:
+    """Lossless numeric content key; model identity alone may name many DC points."""
+    receiver = model.receiver
+    return (
+        model.identity,
+        model.state_labels,
+        model.reference_frequency_ghz,
+        model.frequencies_ghz.tobytes(),
+        model.kappa_internal_per_ns.tobytes(),
+        model.kappa_external_per_ns.tobytes(),
+        model.rates_per_ns.tobytes(),
+        receiver.gain,
+        receiver.phase_rad,
+        receiver.offset.tobytes(),
+        receiver.noise_covariance.tobytes(),
+    )
+
+
+def _pulse_key(pulses: tuple[ReadoutPulse, ...]) -> tuple[object, ...]:
+    """Exact pulse parameters plus identity of retained, opaque envelope callbacks."""
+    return tuple(
+        (
+            p.start_ns,
+            p.end_ns,
+            p.amplitude,
+            p.frequency_ghz,
+            p.phase_rad,
+            id(p.envelope),
+            p.breakpoints_ns,
+        )
+        for p in pulses
+    )
+
+
+def _grid_key(grids: tuple[SampleGrid, ...]) -> tuple[object, ...]:
+    """Physical sample coordinates and demodulation, preserving read order."""
+    return tuple(
+        (g.times_ns.tobytes(), g.demodulation_frequency_ghz, g.phase_rad) for g in grids
+    )

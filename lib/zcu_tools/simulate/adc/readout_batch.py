@@ -11,7 +11,13 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import RoundSignals, RoundStatistics
+from zcu_tools.core.simulation import (
+    ChannelSignals,
+    ChannelStatistics,
+    RoundSignals,
+    RoundStatistics,
+    SamplingIdentity,
+)
 
 from .model import ReadoutModel, RealArray, Receiver, readonly_array
 from .request import ReadoutPulse, SampleGrid
@@ -191,10 +197,31 @@ def round_statistics(
     same RNG/numeric version. No jump-time trajectory variance is modeled.
 
     Raise ValueError for invalid probabilities, reps/identity, duplicate ADCs,
-    incompatible point/state shapes or unequal read sample counts. The batched
-    sampler is not implemented yet and currently raises NotImplementedError.
+    incompatible point/state shapes or unequal read sample counts.
     """
-    raise NotImplementedError("batched round statistics are not implemented")
+    probabilities = _validate_round_inputs(populations, channels, reps)
+    identity = SamplingIdentity(seed, (acquire_sequence, round_index, 0))
+    rng = np.random.Generator(
+        np.random.PCG64(np.random.SeedSequence((identity.seed, *identity.stream)))
+    )
+    counts = rng.multinomial(reps, probabilities)
+    output = []
+    for channel in channels:
+        conditional = channel.conditional.sums[channel.content_index]
+        covariance = (
+            int(channel.conditional.sample_counts[0])
+            * channel.receiver.noise_covariance
+        )
+        means = np.einsum("...s,...rsi->...ri", counts, conditional)
+        noise = _gaussian_noise(rng, reps * (covariance + np.eye(2) / 12), means.shape)
+        output.append(
+            ChannelStatistics(channel.channel, means + noise, conditional, covariance)
+        )
+    return RoundStatistics(
+        counts,
+        tuple(output),
+        SamplingIdentity(seed, (acquire_sequence, round_index, 1)),
+    )
 
 
 def sample_traces(
@@ -219,7 +246,67 @@ def sample_traces(
     then shots. Traces already contain gain/phase/offset; only per-sample noise
     is added, with no integrated rounding term or normalization. No trajectory
     jump-time variance is modeled. Inputs and global RNG state remain unchanged.
-    Missing traces also raise ValueError. The batched sampler is not implemented
-    yet and currently raises NotImplementedError.
+    Missing traces also raise ValueError.
     """
-    raise NotImplementedError("batched trace sampling is not implemented")
+    probabilities = _validate_round_inputs(populations, channels, reps)
+    if any(channel.conditional.traces is None for channel in channels):
+        raise ValueError("decimated sampling requires conditional traces")
+    identity = SamplingIdentity(seed, (acquire_sequence, round_index, 0))
+    rng = np.random.Generator(
+        np.random.PCG64(np.random.SeedSequence((identity.seed, *identity.stream)))
+    )
+    uniforms = rng.random((*probabilities.shape[:-1], reps))
+    states = np.zeros(uniforms.shape, dtype=np.int64)
+    # Loop over states, never over points or shots; memory stays O(points * reps).
+    for boundary in np.moveaxis(probabilities.cumsum(axis=-1)[..., :-1], -1, 0):
+        states += uniforms >= boundary[..., None]
+    output = []
+    for channel in channels:
+        traces = channel.conditional.traces
+        if traces is None:
+            raise ValueError("decimated sampling requires conditional traces")
+        selected = traces[channel.content_index[..., None], :, states, :, :]
+        noise = _gaussian_noise(rng, channel.receiver.noise_covariance, selected.shape)
+        iq = (selected + noise).reshape((-1, *traces.shape[1:2], *traces.shape[-2:]))
+        output.append(ChannelSignals(channel.channel, iq))
+    return RoundSignals(tuple(output))
+
+
+def _validate_round_inputs(
+    populations: RealArray, channels: tuple[ChannelReadout, ...], reps: int
+) -> RealArray:
+    """Validate the shared probability/layout contract without repairing inputs."""
+    probabilities = np.asarray(populations, dtype=np.float64)
+    if (
+        probabilities.ndim < 1
+        or probabilities.shape[-1] == 0
+        or not np.isfinite(probabilities).all()
+        or np.any(probabilities < 0)
+        or np.any(np.abs(probabilities.sum(axis=-1) - 1) > 1e-10)
+    ):
+        raise ValueError(
+            "populations must be finite nonnegative probabilities summing to one"
+        )
+    if type(reps) is not int or reps < 0:
+        raise ValueError("reps must be a nonnegative integer")
+    if len({channel.channel for channel in channels}) != len(channels):
+        raise ValueError("duplicate channel in round readout")
+    for channel in channels:
+        if channel.content_index.shape != probabilities.shape[:-1]:
+            raise ValueError("channel point shape must match populations")
+        conditional = channel.conditional
+        if conditional.sums.shape[2] != probabilities.shape[-1]:
+            raise ValueError("conditional state axis must match populations")
+        if np.any(conditional.sample_counts != conditional.sample_counts[0]):
+            raise ValueError("reads of one channel must have equal sample counts")
+    return probabilities
+
+
+def _gaussian_noise(
+    rng: np.random.Generator, covariance: RealArray, shape: tuple[int, ...]
+) -> RealArray:
+    """Independent I/Q draws, including degenerate receiver covariances."""
+    eigenvalues, vectors = np.linalg.eigh(covariance)
+    # Receiver already validates PSD. Only factorization roundoff may be negative.
+    root = vectors @ np.diag(np.sqrt(np.maximum(eigenvalues, 0)))
+    return rng.standard_normal(shape) @ root.T
