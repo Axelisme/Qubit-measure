@@ -1,5 +1,7 @@
 """Public acquisition classifies normalized IQ without depending on lab cores."""
 
+import sys
+
 import numpy as np
 import pytest
 from zcu_tools.analysis.singleshot import classify_result
@@ -9,6 +11,48 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 from tests.program._acquisition_soc import make_acquisition_soc
+
+
+@pytest.mark.parametrize("stepped", [False, True])
+def test_acquire_threshold_warning_identifies_the_public_caller(stepped: bool) -> None:
+    soc, soccfg = make_acquisition_soc()
+    program = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=1, rounds=2),
+        modules=[
+            PulseReadoutCfg(
+                gen_ch=0,
+                nqz=1,
+                gain=0.1,
+                waveform=ConstWaveformCfg(length=1.0),
+                ro_ch=0,
+                ro_length=1.0,
+                freq=100.0,
+            ).build("readout")
+        ],
+    )
+    options = dict(threshold=1.0, ge_radius=0.5, progress=False)
+    if stepped:
+        program.acquire(soc, step_rounds=True, **options)
+        with pytest.warns(
+            UserWarning,
+            match="^Both threshold and ge_radius are set, threshold will be applied and ge_radius will be ignored$",
+        ) as recorded:
+            for _ in range(2):
+                call_line = sys._getframe().f_lineno + 1
+                program.finish_round()
+        result = program.finish_acquire()
+    else:
+        with pytest.warns(
+            UserWarning,
+            match="^Both threshold and ge_radius are set, threshold will be applied and ge_radius will be ignored$",
+        ) as recorded:
+            call_line = sys._getframe().f_lineno + 1
+            result = program.acquire(soc, **options)
+    assert len(recorded) == 2
+    assert all(warning.filename == __file__ for warning in recorded)
+    assert all(warning.lineno == call_line for warning in recorded)
+    np.testing.assert_array_equal(result[0], np.zeros((1, 2)))
 
 
 @pytest.mark.parametrize("radius", [0.5, 1.0, 1.5, 2.0, 3.0])

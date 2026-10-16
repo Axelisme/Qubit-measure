@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import threading
 from typing import Any, Literal, cast
 
@@ -79,6 +80,26 @@ def _make_yoko(
     rm = DummyYokoResourceManager(session)
     dev = YOKOGS200("YOKO::INSTR", cast(Any, rm))
     return dev, session
+
+
+def test_yoko_setup_warning_identifies_the_setup_caller() -> None:
+    dev, session = _make_yoko(output="off")
+    cfg = YOKOGS200Info(address="YOKO::INSTR", output="on", mode="voltage", value=0.0)
+    try:
+        with pytest.warns(
+            UserWarning,
+            match=r"^YOKOGS200 output is off, did you forget to turn it on\?$",
+        ) as recorded:
+            call_line = sys._getframe().f_lineno + 1
+            result = dev.setup(cfg, progress=False)
+        assert len(recorded) == 1
+        assert recorded[0].filename == __file__
+        assert recorded[0].lineno == call_line
+        assert result is None
+        assert session.output == "1"
+        assert session.level == 0.0
+    finally:
+        dev.close()
 
 
 def test_fake_device_stop_event_prevents_ramp_value_change() -> None:
