@@ -4,10 +4,11 @@ QTest's PyQt6 stubs read its functions as unbound instance methods, so GUI
 tests send the same Qt events through QApplication.sendEvent instead.
 """
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt, QTimer
+from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, Qt, QTimer
 from PyQt6.QtGui import QKeyEvent, QMouseEvent
 from PyQt6.QtWidgets import (
     QAbstractButton,
@@ -83,11 +84,17 @@ class WidgetObservation:
 
 @dataclass(frozen=True)
 class TreeRowObservation:
-    """One on-screen tree row, without model data or retained Qt objects."""
+    """One on-screen tree row; fully clipped/hidden cells have empty captions.
+
+    Paths retain their depth and columns retain their original indices even when
+    column-zero captions are not on screen. Empty captions are not wildcards.
+    """
 
     tree_name: str  # Containing tree's objectName; empty if the UI provides none.
-    path: tuple[str, ...]  # Root-to-row captions from column zero, not domain keys.
-    columns: tuple[str, ...]  # Display order, hidden columns empty; units unchanged.
+    path: tuple[str, ...]  # Root-to-row column-zero captions; unseen levels empty.
+    columns: tuple[
+        str, ...
+    ]  # Original column indices; unseen cells empty, units unchanged.
     expanded: bool  # Whether the row currently exposes its children.
 
 
@@ -280,8 +287,21 @@ class ComponentDriver:
 
     @staticmethod
     def _tree_columns(tree: QTreeWidget, item: QTreeWidgetItem) -> tuple[str, ...]:
+        viewport = tree.viewport()
+        assert viewport is not None
+        row = tree.visualItemRect(item)
         return tuple(
-            "" if tree.isColumnHidden(i) else item.text(i)
+            item.text(i)
+            if not tree.isColumnHidden(i)
+            and viewport.visibleRegion().intersects(
+                QRect(
+                    tree.columnViewportPosition(i),
+                    row.y(),
+                    tree.columnWidth(i),
+                    row.height(),
+                )
+            )
+            else ""
             for i in range(tree.columnCount())
         )
 
@@ -296,7 +316,7 @@ class ComponentDriver:
         def visit(item: QTreeWidgetItem, parent: tuple[str, ...]) -> None:
             if item.isHidden():
                 return
-            path = (*parent, item.text(0))
+            path = (*parent, ComponentDriver._tree_columns(tree, item)[0])
             if viewport.visibleRegion().intersects(tree.visualItemRect(item)):
                 rows.append((item, path))
             if item.isExpanded():
@@ -315,6 +335,8 @@ class ComponentDriver:
         """Expand an on-screen QTreeWidget row by clicking it then pressing Right.
 
         path is the exact root-to-row column-zero caption tuple, not model keys.
+        Unseen captions are empty strings, never wildcards. A matched row whose
+        column-zero click target is outside the visible viewport is a no-op.
         Only rows intersecting the viewport are candidates: collapsed ancestors,
         hidden rows and off-screen rows are not bypassed or scrolled into view.
         Missing/ambiguous trees or visible paths raise LookupError with candidates;
@@ -340,7 +362,10 @@ class ComponentDriver:
             rect = tree.visualItemRect(item)
             viewport = tree.viewport()
             assert viewport is not None
-            mouse_click(viewport, QPoint(rect.left() + 10, rect.center().y()))
+            target = QPoint(rect.left() + 10, rect.center().y())
+            if tree.isColumnHidden(0) or not viewport.visibleRegion().contains(target):
+                return
+            mouse_click(viewport, target)
             key_click(tree, Qt.Key.Key_Right)
         QApplication.processEvents()
 
@@ -441,7 +466,12 @@ class ComponentDriver:
 
         The opener must synchronously open a non-native QFileDialog with Qt's
         visible fileNameEdit. The caller supplies an existing file path (spaces
-        allowed). If evidence is a PNG path, capture the visible file chooser
+        allowed). Before looking up the opener or applying unavailable no-ops,
+        nonexistent paths raise FileNotFoundError and existing non-files raise
+        ValueError. Visible caption matches take precedence over hidden copies;
+        if none are on screen, a unique unseen opener is a no-op (multiple or
+        missing matches still raise LookupError).
+        If evidence is a PNG path, capture the visible file chooser
         there before typing or accepting; None skips capture. Capture creates
         parent directories and raises OSError on save failure. Missing/ambiguous
         widgets or a different modal raise LookupError. Disabled/hidden/clipped/
@@ -450,35 +480,27 @@ class ComponentDriver:
         watchdog guards that delivery. On delivery failure Escape dismisses the
         chooser before the exception returns. No dialog return value is patched.
         """
-        button = self._find(opener, None)
+        if not path.exists():
+            raise FileNotFoundError(path)
+        if not path.is_file():
+            raise ValueError(f"Not a file: {path}")
+        matches = [w for w in self._widgets() if _display_text(w) == opener]
+        visible = [w for w in matches if self._on_screen(w)]
+        candidates = visible or matches
+        button = _unique(
+            opener,
+            candidates,
+            [f"{type(w).__name__}(objectName={w.objectName()!r})" for w in candidates],
+        )
         if not self._can_interact(button):
             return
         errors: list[Exception] = []
 
         def choose() -> None:
             try:
-                # Deliver the chooser's already-posted activation/focus events
-                # before Ctrl+A can be interpreted by an unfocused file view.
-                QApplication.processEvents()
-                dialog = QApplication.activeModalWidget()
-                if not isinstance(dialog, QFileDialog):
-                    raise LookupError("No visible Qt file chooser")
-                chooser = ComponentDriver(dialog)
-                if not self._on_screen(dialog):
-                    raise LookupError("Qt file chooser is not on screen")
-                if evidence is not None:
-                    # Input delivery is executing here, not queued behind the
-                    # screenshot's layout flush, so capture precedes acceptance.
-                    chooser.screenshot(evidence)
-                filename = chooser._find(None, "fileNameEdit", editable=True)
-                mouse_click(filename, filename.rect().center())
-                key_click(filename, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
-                type_text(filename, str(path))
-                # Completion popups consume Enter and may replace the typed path.
-                if (popup := QApplication.activePopupWidget()) is not None:
-                    key_click(popup, Qt.Key.Key_Escape)
-                chooser.click("&Open")
-            except (LookupError, OSError, RuntimeError, ValueError) as error:
+                self._choose_visible_file(path, evidence)
+            except Exception as error:
+                logging.exception("File chooser input delivery failed")
                 errors.append(error)
                 dismiss()
 
@@ -493,14 +515,43 @@ class ComponentDriver:
         watchdog = QTimer()
         watchdog.setSingleShot(True)
         watchdog.timeout.connect(timed_out)
+        delivery = QTimer()
+        delivery.setSingleShot(True)
+        delivery.timeout.connect(choose)
+        # The synchronous opener enters a nested Qt loop that must deliver choose.
         watchdog.start(30_000)
-        QTimer.singleShot(0, choose)
+        delivery.start(0)
         try:
             self.click(opener)
         finally:
+            delivery.stop()
             watchdog.stop()
         if errors:
             raise errors[0]
+
+    @staticmethod
+    def _choose_visible_file(path: Path, evidence: Path | None) -> None:
+        """Capture and fill the active external chooser using real input."""
+        # Flush already-posted focus events so Ctrl+A reaches the filename field.
+        QApplication.processEvents()
+        dialog = QApplication.activeModalWidget()
+        if not isinstance(dialog, QFileDialog):
+            raise LookupError("No visible Qt file chooser")
+        chooser = ComponentDriver(dialog)
+        if not ComponentDriver._on_screen(dialog):
+            raise LookupError("Qt file chooser is not on screen")
+        if evidence is not None:
+            # This callback is executing, not queued behind the screenshot flush,
+            # so capture occurs while the chooser is still awaiting input.
+            chooser.screenshot(evidence)
+        filename = chooser._find(None, "fileNameEdit", editable=True)
+        mouse_click(filename, filename.rect().center())
+        key_click(filename, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+        type_text(filename, str(path))
+        # Completion popups consume Enter and may replace the typed path.
+        if (popup := QApplication.activePopupWidget()) is not None:
+            key_click(popup, Qt.Key.Key_Escape)
+        chooser.click("&Open")
 
     def enter_text(
         self,
@@ -589,7 +640,7 @@ class ComponentDriver:
                 continue
             for axes in canvas.figure.axes:
                 legend = axes.get_legend()
-                if legend is not None and legend.get_visible():
+                if axes.get_visible() and legend is not None and legend.get_visible():
                     texts.extend(
                         t.get_text() for t in legend.get_texts() if t.get_visible()
                     )

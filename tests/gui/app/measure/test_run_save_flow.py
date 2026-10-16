@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Generator, Sequence
 from pathlib import Path
 from typing import ClassVar
@@ -9,7 +10,7 @@ from typing import ClassVar
 import pytest
 from matplotlib.figure import Figure
 from PyQt6.QtCore import QTimer
-from PyQt6.QtWidgets import QFileDialog, QWidget
+from PyQt6.QtWidgets import QApplication, QDialog, QWidget
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -251,29 +252,50 @@ def _load_saved_signal(
     flow: _user_input.ComponentDriver,
     shots: Path,
     native_path: str,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Choose the saved file through Load's modal and the external file chooser."""
-    # QFileDialog is the external chooser boundary; the real Load dialog and
-    # native reader still run. No application methods or result owners are patched.
-    monkeypatch.setattr(
-        QFileDialog, "getOpenFileName", lambda *a, **kw: (native_path, "")
-    )
     dialog_errors: list[Exception] = []
+
+    def dismiss_modals() -> None:
+        # Failure cleanup only: release nested Qt loops even if a caption changed.
+        for widget in QApplication.topLevelWidgets():
+            if isinstance(widget, QDialog) and widget.isVisible():
+                widget.reject()
+
+    def timed_out() -> None:
+        dialog_errors.append(TimeoutError("Load dialog input delivery did not finish"))
+        dismiss_modals()
 
     def choose_native_file() -> None:
         try:
             assert flow.dialogs()[0].title == "Load Data"
             flow.screenshot(shots / "07-load-dialog.png")
-            flow.click("File…")
-        except (AssertionError, LookupError, OSError) as error:
+            flow.choose_file(
+                "File…", Path(native_path), evidence=shots / "07-file-chooser.png"
+            )
+        except Exception as error:
+            logging.exception("Load dialog input delivery failed")
             dialog_errors.append(error)
-            flow.click("Cancel")
+            dismiss_modals()
 
-    # The next owner turn enters the real modal Load dialog; its nested loop
-    # delivers this callback, which chooses File through the driver.
-    QTimer.singleShot(0, choose_native_file)
-    flow.click("Load Data")
+    # Clicking Load synchronously enters its modal loop; that loop must deliver
+    # the queued File callback. The 30-second timer guards a broken delivery only.
+    watchdog = QTimer()
+    watchdog.setSingleShot(True)
+    watchdog.timeout.connect(timed_out)
+    delivery = QTimer()
+    delivery.setSingleShot(True)
+    delivery.timeout.connect(choose_native_file)
+    watchdog.start(30_000)
+    delivery.start(0)
+    try:
+        flow.click("Load Data")
+    except Exception:
+        dismiss_modals()
+        raise
+    finally:
+        delivery.stop()
+        watchdog.stop()
     if dialog_errors:
         raise dialog_errors[0]
     flow.screenshot(shots / "08-loaded.png")
@@ -282,7 +304,7 @@ def _load_saved_signal(
 
 
 def test_load_then_analyze_and_apply_only_selected_proposal(
-    measure_window: QWidget, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    measure_window: QWidget, tmp_path: Path
 ) -> None:
     flow = _user_input.ComponentDriver(measure_window)
     shots = tmp_path / "load-analyze-apply"
@@ -290,7 +312,7 @@ def test_load_then_analyze_and_apply_only_selected_proposal(
     flow.click("Close")
     flow.screenshot(shots / "02-ready.png")
     native_path = _run_and_save_signal(flow, shots)
-    _load_saved_signal(flow, shots, native_path, monkeypatch)
+    _load_saved_signal(flow, shots, native_path)
     flow.select_tab("Analysis")
     flow.screenshot(shots / "09-analysis-ready.png")
     assert flow.observe("Analyze").enabled

@@ -4,7 +4,7 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QImage
 from PyQt6.QtWidgets import (
     QDialog,
@@ -510,7 +510,9 @@ def test_file_chooser_saves_png_before_real_selection_closes_modal(
     assert driver.status().text == f"Selected {native}"
 
 
-@pytest.mark.parametrize("field_visible", [True, False], ids=["field-visible", "value-visible"])
+@pytest.mark.parametrize(
+    "field_visible", [True, False], ids=["field-visible", "value-visible"]
+)
 def test_tree_snapshot_redacts_cells_outside_horizontal_viewport(
     tree_surface, qapp, field_visible: bool
 ) -> None:
@@ -567,7 +569,7 @@ def test_file_chooser_rejects_bad_path_before_opener_side_effects(
     errors: list[Exception] = []
     try:
         driver.choose_file("Safe synthetic opener", path)
-    except Exception as error:
+    except (LookupError, OSError, RuntimeError, ValueError) as error:
         errors.append(error)
     assert len(errors) == 1 and type(errors[0]) is expected
     assert clicked == []
@@ -597,7 +599,7 @@ def test_file_chooser_valid_path_unavailable_opener_is_noop(
     errors: list[Exception] = []
     try:
         driver.choose_file("Unavailable chooser", native, evidence=shot)
-    except Exception as error:
+    except (LookupError, OSError, RuntimeError, ValueError) as error:
         errors.append(error)
     assert errors == []
     assert clicked == []
