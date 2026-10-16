@@ -949,7 +949,9 @@ def test_recipe_tab_uses_real_rpc_for_nested_captured_refs_and_copy(form_rpc, tm
                 prepared.set_fields([RecipeFieldEdit("gain", 0.9),
                                      RecipeFieldEdit("pulse.freq", 125.0)])
             assert rejected.value.reason == "ref_ancestor"
-            assert rejected.value.data["edit_index"] == 1
+            data = rejected.value.data
+            assert data is not None
+            assert data["edit_index"] == 1
             assert owner.input.data == before
             assert notices == []
             with pytest.raises(GuiRpcError) as ancestor:
