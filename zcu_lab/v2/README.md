@@ -1,6 +1,6 @@
 # v2 experiments
 
-**Last updated:** 2026-10-16，mux family 與有序 tone 資料
+**Last updated:** 2026-10-16，mux family 與 GUI Run／Record
 
 ZigZag 的 Run 與離線編譯共用 `build_zigzag_modules`，使用 register loop。
 `reset_phase_cycle` 可在偶數 averaging sweeps 間交替最後 reset qubit pulse 的 0/180°
@@ -13,9 +13,10 @@ population 或 repeated-gate 誤差；支援 TwoPulse/Bath reset，需獨立驗�
 
 `v2` 延續 program/v2 的版本脈絡，不表示 GUI framework 的第二版。通用 runtime、量化、SNR 與 tracker 工具留在 `zcu_tools.experiment.v2`。Core 不依賴 GUI，import-linter C15 檢查 core 到 GUI framework 的直接與間接依賴。
 
-`mux/onetone` 使用 `readout/mux`，在每個 sweep 點對所有 tone 加上共同的名目頻率偏移。
-每條曲線對應 cfg 的同序 tone，資料保存共同偏移軸、tone 序號與二維 signals。
+`mux/onetone` 使用 `readout/mux`，在每個 sweep 點對選定 tone 加上共同的名目頻率偏移。
+每條曲線透過原始 tone 序號對應完整 cfg，資料保存共同偏移軸、原始序號與二維 signals。
 Tone label 是可重複的顯示文字，不是 component 名稱，也不改變資料軸。
+`mux/onetone` adapter 從 group 的 readout slot 建立初值。active_tones=None 量全部，指定非空、唯一的整數 list 則按輸入順序量測原始序號。Lab 將 subset 交 program，不改完整 cfg。RunRecord 與 native cfg restore 保留完整 readout、labels 及 selection，不以目前表單補歷史資料。此版提供 Run 與 K 條 active live 曲線，analysis 為 NONE。
 Module 可整組引用或 inline 編輯，tones 使用單行 JSON。
 Library 的 `readout/mux:blank` 只給 scalar 編輯初值，作者必須填 tones 並確認接線；範本不是硬體安全預設。
 
