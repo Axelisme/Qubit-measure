@@ -7,7 +7,7 @@ from typing import Any, Literal
 import pytest
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
-from qtpy.QtCore import QEvent, QPoint, QPointF, QRect, Qt
+from qtpy.QtCore import QEvent, QPoint, QPointF, Qt
 from qtpy.QtGui import QKeyEvent, QMouseEvent
 from qtpy.QtWidgets import (
     QApplication,
@@ -16,7 +16,6 @@ from qtpy.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QScrollArea,
     QTreeWidget,
     QTreeWidgetItem,
     QWidget,
@@ -641,14 +640,13 @@ def test_dialog_fields_follow_the_kind_schema_and_rebuild_on_kind_change(
     widget, _control = component_widget
     driver = ComponentDriver(widget)
     driver.click("Add component…")
+    driver.screenshot(tmp_path / "opened.png")
     driver.select_combo("test/form", object_name="add_kind")
     driver.screenshot(tmp_path / "required-form.png")
-    dialog = _visible_dialogs(widget)[0]
-
     fields = {
-        field.objectName()
-        for field in dialog.findChildren(QWidget)
-        if field.objectName().startswith("field:")
+        field.object_name
+        for field in driver.visible().widgets
+        if field.object_name.startswith("field:")
     }
     assert fields == {
         "field:label",
@@ -664,19 +662,15 @@ def test_dialog_fields_follow_the_kind_schema_and_rebuild_on_kind_change(
         submit.tooltip
         == "Missing: name, label, routing.main.ch, rate, mode, enabled, count"
     )
-    nested = _child(dialog, QLabel, "label:routing.main.ch")
-    assert nested.text() == "routing.main.ch *"
-    assert nested.indent() == 0
+    assert (
+        driver.observe(object_name="label:routing.main.ch").text == "routing.main.ch *"
+    )
     assert driver.observe(object_name="field:routing.main.ch").visible
     assert (
         "Channel index." in driver.observe(object_name="field:routing.main.ch").tooltip
     )
-    labels = {label.text() for label in dialog.findChildren(QLabel)}
+    labels = {item.text for item in driver.visible().widgets if item.kind == "QLabel"}
     assert "routing" not in labels and "main" not in labels
-    mode = _child(dialog, QComboBox, "field:mode")
-    assert _combo_items(mode) == ["", "A", "V"]
-    enabled = _child(dialog, QComboBox, "field:enabled")
-    assert set(_combo_items(enabled)) == {"", "true", "false"}
     assert driver.observe(object_name="unit:rate").text == "MHz"
 
     driver.select_combo("test/required", object_name="add_kind")
@@ -685,15 +679,20 @@ def test_dialog_fields_follow_the_kind_schema_and_rebuild_on_kind_change(
     assert (
         driver.observe(object_name="add_submit").tooltip == "Missing: name, reference"
     )
-    assert dialog.findChild(QWidget, "field:label") is None
+    assert {
+        item.object_name
+        for item in driver.visible().widgets
+        if item.object_name.startswith("field:")
+    } == {"field:reference"}
 
 
 def test_dialog_without_required_fields_shows_hint_and_adds_name_and_kind(
     qapp, component_widget, tmp_path
 ):
-    widget, control = component_widget
+    widget, _control = component_widget
     driver = ComponentDriver(widget)
     driver.click("Add component…")
+    driver.screenshot(tmp_path / "opened.png")
     driver.select_combo("test/open", object_name="add_kind")
     driver.screenshot(tmp_path / "no-required-fields.png")
     assert "No required fields. Edit the others in Inspect after adding." in {
@@ -705,6 +704,17 @@ def test_dialog_without_required_fields_shows_hint_and_adds_name_and_kind(
     driver.enter_text(object_name="add_name", value="O1")
     driver.screenshot(tmp_path / "added.png")
     assert driver.dialogs() == ()
+    assert any(row.path == ("O1",) for row in driver.visible().tree_rows)
+
+
+def test_dialog_without_required_fields_submits_only_name_and_kind(
+    qapp, component_widget
+):
+    """Submission contract, separate from the driver-only UI scenario."""
+    widget, control = component_widget
+    dialog = _open_add_dialog(qapp, widget, "test/open")
+    _child(dialog, QLineEdit, "add_name").setText("O1")
+    _submit(qapp, dialog)
     assert document_value(control.inspect_document(), "O1") == {"kind": "test/open"}
 
 
@@ -720,8 +730,16 @@ def _fill_required_form(dialog: QDialog, *, count: str = "3") -> None:
 def test_dialog_submits_filled_fields_as_nested_mapping_and_selects_the_component(
     qapp, component_widget
 ):
+    """Submission/field contract; the driver scenarios cover visible interaction."""
     widget, control = component_widget
     dialog = _open_add_dialog(qapp, widget, "test/form")
+    assert _combo_items(_child(dialog, QComboBox, "field:mode")) == ["", "A", "V"]
+    assert set(_combo_items(_child(dialog, QComboBox, "field:enabled"))) == {
+        "",
+        "true",
+        "false",
+    }
+    assert _child(dialog, QLabel, "label:routing.main.ch").indent() == 0
     _child(dialog, QLineEdit, "add_name").setText("P1")
     _fill_required_form(dialog)
     assert _child(dialog, QLabel, "label:routing.main.ch").text() == "routing.main.ch *"
@@ -800,36 +818,35 @@ def test_owner_rejection_stays_in_the_dialog_with_input_kept(qapp, component_wid
     assert _error(widget).text() == ""
 
 
-def test_dialog_height_stays_within_the_screen_and_fields_scroll(
-    qapp, component_widget, tmp_path
-):
+@pytest.fixture
+def near_bottom_dialog(qapp, component_widget) -> ComponentDriver:
+    """Set up a short dialog where a user could have left it near screen bottom."""
     widget, _control = component_widget
-    driver = ComponentDriver(widget)
-    driver.click("Add component…")
-    driver.select_combo("test/required", object_name="add_kind")
-    dialog = _visible_dialogs(widget)[0]
+    dialog = _open_add_dialog(qapp, widget, "test/required")
     screen = dialog.screen()
     assert screen is not None
     available = screen.availableGeometry()
-    # Set up a short window near the bottom, as a user may have placed it.
     dialog.move(
         available.left() + 10, available.bottom() - dialog.frameGeometry().height() - 10
     )
     qapp.processEvents()
+    return ComponentDriver(widget)
+
+
+def test_dialog_height_stays_within_the_screen_and_fields_scroll(
+    near_bottom_dialog: ComponentDriver, tmp_path
+):
+    driver = near_bottom_dialog
     driver.screenshot(tmp_path / "short-kind.png")
-    assert available.contains(dialog.frameGeometry())
+    assert driver.dialogs()[0].frame_within_screen
     driver.select_combo("test/tall", object_name="add_kind")
     driver.screenshot(tmp_path / "tall-kind.png")
-    assert available.contains(dialog.frameGeometry())
-    assert dialog.height() <= 0.9 * available.height()
-    scroll = _child(dialog, QScrollArea, "add_fields")
-    scrollbar = scroll.verticalScrollBar()
-    assert scrollbar is not None and scrollbar.maximum() > 0
+    placement = driver.dialogs()[0]
+    assert placement.frame_within_screen
+    assert placement.height_fraction <= 0.9
+    assert driver.scroll_area(object_name="add_fields").vertical_scrollable
     for name in ("add_submit", "add_cancel"):
-        assert driver.observe(object_name=name).visible
-        button = _child(dialog, QPushButton, name)
-        placed = QRect(button.mapTo(dialog, QPoint(0, 0)), button.size())
-        assert dialog.rect().contains(placed)
+        assert driver.observe(object_name=name).fully_visible
     driver.click("Cancel")
     driver.screenshot(tmp_path / "cancelled.png")
     assert driver.dialogs() == ()

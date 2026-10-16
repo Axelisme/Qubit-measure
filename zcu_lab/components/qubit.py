@@ -10,7 +10,7 @@ from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.predictor import PredictorInputError
 from zcu_tools.simulate.transmon import TransmonParams
 
-from .base import BuiltinComponent, Duration, Flux, Frequency
+from .base import BuiltinComponent, Duration, Flux, Frequency, reject_null_channel
 
 
 class QubitWiringSchema(BaseModel):
@@ -25,13 +25,9 @@ class QubitWiringSchema(BaseModel):
         default=None, ge=0, strict=True, description="Local flux channel index."
     )
 
-    @field_validator("ch", "lo_flux_ch", mode="before")
-    @classmethod
-    def reject_null_channels(cls, value: object) -> object:
-        """Reject explicit null; omission leaves the channel unset."""
-        if value is None:
-            raise ValueError("a supplied wiring channel must be a non-negative integer")
-        return value
+    reject_null_channels = field_validator("ch", "lo_flux_ch", mode="before")(
+        reject_null_channel
+    )
 
 
 class QubitBaseSchema(BuiltinComponent):

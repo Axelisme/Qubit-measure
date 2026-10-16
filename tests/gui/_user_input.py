@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMenu,
     QPlainTextEdit,
+    QScrollArea,
     QStatusBar,
     QStyle,
     QStyleOptionButton,
@@ -75,6 +76,7 @@ class WidgetObservation:
     text: str  # Rendered widget value/caption; empty when hidden or without text.
     enabled: bool  # Effective Qt enabled flag, including disabled ancestors.
     visible: bool  # On-screen Qt region exists, including ancestor/viewport clipping.
+    fully_visible: bool  # Entire widget rectangle survives ancestor/viewport clipping.
     object_name: str  # Stable objectName if provided by the UI, otherwise empty.
     tooltip: str  # Hover help; empty when hidden or without a tooltip.
     checked: (
@@ -117,10 +119,19 @@ class StatusObservation:
 
 @dataclass(frozen=True)
 class DialogObservation:
-    """A visible dialog's title and visible widget texts, in widget-tree order."""
+    """A visible dialog's captions and placement on its current screen."""
 
     title: str
-    texts: tuple[str, ...]
+    texts: tuple[str, ...]  # Visible widget texts, in widget-tree order.
+    frame_within_screen: bool  # Entire frame lies within available screen bounds.
+    height_fraction: float  # Client height divided by available screen height.
+
+
+@dataclass(frozen=True)
+class ScrollObservation:
+    """Visible scroll affordances of one scroll area."""
+
+    vertical_scrollable: bool  # Visible vertical scrollbar has a nonempty range.
 
 
 @dataclass(frozen=True)
@@ -255,6 +266,7 @@ class ComponentDriver:
             text=_display_text(widget) if on_screen else "",
             enabled=widget.isEnabled(),
             visible=on_screen,
+            fully_visible=on_screen and widget.visibleRegion().contains(widget.rect()),
             object_name=widget.objectName(),
             tooltip=widget.toolTip() if on_screen else "",
             checked=(
@@ -643,9 +655,35 @@ class ComponentDriver:
                     for widget in dialog.findChildren(QWidget)
                     if self._on_screen(widget) and (text := _display_text(widget))
                 ),
+                self._dialog_frame_within_screen(dialog),
+                self._dialog_height_fraction(dialog),
             )
             for dialog in self._window.findChildren(QDialog)
             if self._on_screen(dialog)
+        )
+
+    @staticmethod
+    def _dialog_frame_within_screen(dialog: QDialog) -> bool:
+        screen = dialog.screen()
+        if screen is None:
+            raise RuntimeError("Visible dialog has no screen")
+        return screen.availableGeometry().contains(dialog.frameGeometry())
+
+    @staticmethod
+    def _dialog_height_fraction(dialog: QDialog) -> float:
+        screen = dialog.screen()
+        if screen is None:
+            raise RuntimeError("Visible dialog has no screen")
+        return dialog.height() / screen.availableGeometry().height()
+
+    def scroll_area(self, *, object_name: str) -> ScrollObservation:
+        """Read a scroll area's visible scrollbar; wrong widget types fail fast."""
+        widget = self._find(None, object_name)
+        if not isinstance(widget, QScrollArea):
+            raise TypeError(f"{object_name!r} is not a QScrollArea")
+        bar = widget.verticalScrollBar()
+        return ScrollObservation(
+            bar is not None and self._on_screen(bar) and bar.maximum() > bar.minimum()
         )
 
     def legends(self) -> LegendObservation:
