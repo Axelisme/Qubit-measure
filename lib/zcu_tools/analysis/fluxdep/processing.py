@@ -23,9 +23,10 @@ def _require_1d_axis(axis: NDArray[np.float64], name: str) -> None:
 
 def cast2real_and_norm(
     signals: NDArray[np.complexfloating[Any, Any]],
-    use_phase: bool = True,
     sigma: float = 1,
     smooth_method: SmoothMethod = "wavelet",
+    *,
+    use_phase: bool = True,
 ) -> NDArray[np.float64]:
     """Convert complex spectra to real-valued, row-normalised features."""
 

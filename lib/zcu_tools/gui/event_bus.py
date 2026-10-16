@@ -17,14 +17,14 @@ build on this base, each supplying its own event enum + payloads and aliasing
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import Enum
 from itertools import count
 from threading import Lock
-from typing import Any, ClassVar, Generic, Iterator, Literal, TypeVar
+from typing import Any, ClassVar, Generic, Literal, TypeVar
 
 logger = logging.getLogger(__name__)
 

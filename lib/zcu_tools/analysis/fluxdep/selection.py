@@ -46,6 +46,7 @@ def toggle_near_mask(
     x: float,
     y: float,
     width: float,
+    *,
     select: bool,
 ) -> None:
     """In-place select/erase a 2D grid mask inside a normalised circular brush."""

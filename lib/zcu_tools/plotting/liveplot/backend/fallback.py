@@ -19,7 +19,7 @@ class FallbackBackend(LivePlotBackend):
     """
 
     def make_plot_frame(
-        self, n_row: int, n_col: int, plot_instant: bool = False, **kwargs: Any
+        self, n_row: int, n_col: int, *, plot_instant: bool = False, **kwargs: Any
     ) -> tuple[Figure, list[list[Axes]]]:
         import matplotlib.pyplot as plt
 

@@ -279,7 +279,7 @@ class JPAOptimizer:
         # Filter flux values within bounds
         valid_flux = [
             f
-            for f in self.data.flux_best.keys()
+            for f in self.data.flux_best
             if self.bounds.flux[0] <= f <= self.bounds.flux[1]
         ]
         if not valid_flux:

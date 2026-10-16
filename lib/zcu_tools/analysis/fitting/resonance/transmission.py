@@ -228,11 +228,12 @@ class TransmissionModel:
         freqs: NDArray[np.float64],
         signals: NDArray[np.complex128],
         edelay: float | None = None,
-        fit_bg_amp_slope: bool = False,
-        fit_bg_phase_curvature: bool = False,
         edelay_search_radius: float | None = None,
         edelay_branch_seed: float | None = None,
         edelay_max_search_radius: float | None = None,
+        *,
+        fit_bg_amp_slope: bool = False,
+        fit_bg_phase_curvature: bool = False,
     ) -> TransmissionParams:
         """Fit a transmission response, resolving delay aliases within a radius."""
         validate_complex_fit_inputs(freqs, signals)

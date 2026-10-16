@@ -68,7 +68,7 @@ def h_arb_waveform_set(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = require_str(params, "name")
-    overwrite = optional_bool(params, "overwrite", False)
+    overwrite = optional_bool(params, "overwrite", default=False)
     try:
         recipe = FormulaRecipe.from_raw(params["recipe"])
         status = adapter.ctrl.arb_waveforms.set_formula(

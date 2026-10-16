@@ -74,5 +74,5 @@ def test_info_and_remember_edits_do_not_bump_set_version():
     st = _make_state()
     st.put_device(_dev("yoko"))
     set_ver = st.version.get(DEVICE_SET_VERSION_KEY)
-    st.set_device_remember("yoko", True)
+    st.set_device_remember("yoko", remember=True)
     assert st.version.get(DEVICE_SET_VERSION_KEY) == set_ver

@@ -213,7 +213,7 @@ def _initialize_rendering(app: GuiApplication) -> None:
     )
 
     ensure_host()
-    app.aboutToQuit.connect(lambda: set_shutting_down(True))
+    app.aboutToQuit.connect(lambda: set_shutting_down(value=True))
     install_mathtext_lock()
     prewarm_mathtext()
 

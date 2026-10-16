@@ -46,6 +46,7 @@ class LoadValue(Module):
         values: Sequence[int],
         idx_reg: str,
         val_reg: str,
+        *,
         use_existed: bool = False,
         auto_compress: bool = True,
     ) -> None:
@@ -214,6 +215,7 @@ class LoadWord(Module):
         values: Sequence[int],
         idx_reg: str,
         val_reg: str,
+        *,
         use_existed: bool = False,
     ) -> None:
         self.name = name
@@ -266,7 +268,12 @@ class LoadWord(Module):
 
 class ScanWith(Module):
     def __init__(
-        self, name: str, values: Sequence[int], val_reg: str, use_existed: bool = False
+        self,
+        name: str,
+        values: Sequence[int],
+        val_reg: str,
+        *,
+        use_existed: bool = False,
     ) -> None:
         self.name = name
 

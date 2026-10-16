@@ -38,7 +38,8 @@ Render cache (S3):
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from qtpy.QtCore import QEvent, QSize, Qt
 from qtpy.QtGui import QPixmap

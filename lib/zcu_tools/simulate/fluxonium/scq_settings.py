@@ -5,7 +5,7 @@ from contextlib import contextmanager
 
 
 @contextmanager
-def scq_progress(progress: bool) -> Iterator[None]:
+def scq_progress(*, progress: bool) -> Iterator[None]:
     """Temporarily set the scqubits progress-bar switch for one operation."""
 
     import scqubits.settings as scq_settings
@@ -19,7 +19,7 @@ def scq_progress(progress: bool) -> Iterator[None]:
 
 
 @contextmanager
-def scq_t1_default_warning(enabled: bool) -> Iterator[None]:
+def scq_t1_default_warning(*, enabled: bool) -> Iterator[None]:
     """Temporarily set the scqubits T1 default-warning switch for one operation."""
 
     import scqubits.settings as scq_settings

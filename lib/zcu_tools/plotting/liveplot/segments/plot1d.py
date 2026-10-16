@@ -18,8 +18,9 @@ class Plot1DSegment(AbsSegment):
         ylabel: str,
         title: str | None = None,
         num_lines: int = 1,
-        show_grid: bool = True,
         line_kwargs: Sequence[Mapping[str, Any] | None] | None = None,
+        *,
+        show_grid: bool = True,
     ) -> None:
         self.xlabel = xlabel
         self.ylabel = ylabel

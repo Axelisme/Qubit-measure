@@ -307,11 +307,12 @@ class HangerModel:
         freqs: NDArray[np.float64],
         signals: NDArray[np.complex128],
         edelay: float | None = None,
-        fit_bg_amp_slope: bool = False,
-        fit_bg_phase_curvature: bool = False,
         edelay_search_radius: float | None = None,
         edelay_branch_seed: float | None = None,
         edelay_max_search_radius: float | None = None,
+        *,
+        fit_bg_amp_slope: bool = False,
+        fit_bg_phase_curvature: bool = False,
     ) -> HangerParams:
         """Fit a hanger response on a finite, strictly monotonic frequency grid.
 

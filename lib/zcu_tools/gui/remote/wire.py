@@ -94,7 +94,7 @@ def require_int(params: Mapping[str, object], key: str) -> int:
     return val
 
 
-def optional_bool(params: Mapping[str, object], key: str, default: bool) -> bool:
+def optional_bool(params: Mapping[str, object], key: str, *, default: bool) -> bool:
     val = params.get(key)
     if val is None:
         return default

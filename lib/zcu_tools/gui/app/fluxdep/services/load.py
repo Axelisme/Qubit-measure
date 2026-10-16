@@ -63,6 +63,7 @@ class LoadService:
         filepath: str,
         spec_type: SpecType,
         inherit_from: str | None = None,
+        *,
         transpose_axes: bool = False,
     ) -> str:
         """Load ``filepath`` as a new spectrum and write it into State.

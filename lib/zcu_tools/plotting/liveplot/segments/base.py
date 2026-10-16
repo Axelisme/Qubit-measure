@@ -32,6 +32,7 @@ class BaseSegmentLivePlot(AbsLivePlot):
         self,
         segments: list[list[AbsSegment]],
         existed_axes: list[list[Axes]] | None = None,
+        *,
         auto_close: bool = True,
         disable: bool = False,
     ) -> None:

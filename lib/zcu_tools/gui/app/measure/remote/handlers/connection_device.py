@@ -42,7 +42,7 @@ def coerce_connect_device_request(
         type_name=require_str(params, "type_name"),
         name=require_str(params, "name"),
         address=require_str(params, "address"),
-        remember=optional_bool(params, "remember", True),
+        remember=optional_bool(params, "remember", default=True),
     )
 
 
@@ -51,7 +51,7 @@ def coerce_disconnect_device_request(
 ) -> DisconnectDeviceRequest:
     return DisconnectDeviceRequest(
         name=require_str(params, "name"),
-        remember=optional_bool(params, "remember", True),
+        remember=optional_bool(params, "remember", default=True),
     )
 
 

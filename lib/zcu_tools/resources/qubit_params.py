@@ -634,7 +634,7 @@ class QubitParams:
     """
 
     def __init__(
-        self, params_path: str | Path | None = None, readonly: bool = False
+        self, params_path: str | Path | None = None, *, readonly: bool = False
     ) -> None:
         self._data: dict[str, Any] = {}
         self._path = Path(params_path) if params_path is not None else None

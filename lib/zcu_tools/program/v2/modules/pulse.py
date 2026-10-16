@@ -64,9 +64,9 @@ class Pulse(Module):
         name: str,
         cfg: PulseCfg | None,
         tag: str | None = None,
-        block_mode: bool = True,
         pulse_id: str | None = None,
         *,
+        block_mode: bool = True,
         ro_ch: int | None = None,
     ) -> None:
         """Capture a pulse and optional runtime ADC channel for frequency matching.
