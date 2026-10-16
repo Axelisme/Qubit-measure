@@ -361,3 +361,36 @@ def test_tree_snapshot_does_not_expose_hidden_column_text(tree_surface, qapp) ->
     qapp.processEvents()
     driver = _user_input.ComponentDriver(window)
     assert driver.visible().tree_rows[0].columns == ("general", "", "")
+
+
+def test_plot_axes_and_curves_observe_rendered_artists_only(surface, qapp) -> None:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+    from matplotlib.figure import Figure
+
+    figure = Figure()
+    axes = figure.subplots()
+    axes.set(xlabel="Frequency (MHz)", ylabel="Amplitude", xlim=(0, 1), ylim=(0, 2))
+    axes.plot([0, 1], [0.5, 1.5])  # Raw plots need not have a legend.
+    axes.plot([0, 1], [1, 1], visible=False)
+    axes.plot([0, 1], [1, 1], alpha=0)
+    axes.plot([2, 3], [1, 1])  # Outside the displayed axes.
+    axes.plot([], [])
+    canvas = FigureCanvasQTAgg(figure)
+    surface.setCentralWidget(canvas)
+    canvas.draw()
+    qapp.processEvents()
+    driver = _user_input.ComponentDriver(surface)
+    assert callable(getattr(driver, "plots", None)), "Driver must observe raw plot axes and visible curves"
+    observed = driver.plots().axes
+    assert len(observed) == 1
+    assert observed[0].xlabel == "Frequency (MHz)"
+    assert observed[0].ylabel == "Amplitude"
+    assert observed[0].visible_curves == 1
+    assert driver.legends().texts == ()
+    axes.xaxis.label.set_visible(False)
+    assert driver.plots().axes[0].xlabel == ""
+    axes.set_visible(False)
+    assert driver.plots().axes == ()
+    axes.set_visible(True)
+    canvas.hide()
+    assert driver.plots().axes == ()
