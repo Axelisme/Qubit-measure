@@ -29,7 +29,10 @@ class ReplayAcquire(BaseModel):
     numeric-library root, or None when no numeric persistence was used.
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+    # Template arrays have no JSON codec yet; the legacy path keeps templates=().
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, allow_inf_nan=False, arbitrary_types_allowed=True
+    )
     version: Literal[1] = 1
     settings: FTFSettings
     request: AcquireRequest

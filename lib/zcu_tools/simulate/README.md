@@ -65,7 +65,9 @@ state per shot, then adds independent per-sample receiver noise. It does not dra
 jump times or solve an ODE per shot. The result includes float64 traces and their
 exact discrete sums from one realization. Offset is added once per sample.
 A zero or singular positive-semidefinite 2x2 I/Q noise covariance is valid.
-`SamplingIdentity` selects a local PCG64 stream, without changing global RNG state.
+`SamplingIdentity`, imported from `zcu_tools.core.simulation`, selects a local
+PCG64 stream without changing global RNG state. The ADC and deferred integrated
+raw generation share this identity format.
 
 Environment code owns unit conversion from QICK us/MHz/degrees to ns/GHz/radians
 and composes evolution, explicit populations and ADC. Program adapters still own

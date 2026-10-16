@@ -4,17 +4,42 @@ Times are us, frequencies MHz, phases degrees, gain normalized DAC amplitude.
 Execution is C-order over loop_dims (including reps); read order is trigger order.
 Arrays in RoundSignals are float64 ADC sample units, last axis [I, Q]. Backend
 sums are not normalized or rounded. No driver, Module or callback crosses here.
-These frozen records describe the boundary; their constructors do not validate
-field ranges, layouts or array contents. Frontend and adapter checks are separate.
+Frozen records do not freeze borrowed arrays. SamplingIdentity validates entropy;
+AcquireRequest validates template coordinate names. Frontend and adapter checks
+validate the remaining field ranges, layouts and contents against the request.
 """
 
 from dataclasses import dataclass
+from math import prod
 from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
 
 AcquisitionMode = Literal["integrated", "decimated"]
+
+
+@dataclass(frozen=True)
+class SamplingIdentity:
+    """Explicit deterministic shot/noise stream identity, without global RNG.
+
+    seed: nonnegative integer root entropy.
+    stream: tuple of nonnegative integer identity components chosen by the
+        environment (e.g. acquire,round,execution,read). Equal full identity and
+        equal calls reproduce arrays; changing identity selects a new stream.
+        NumPy SeedSequence((seed,*stream)) with PCG64 defines this implementation's
+        realization; cross-NumPy-version bitwise replay is not promised here.
+    No acquire/round identity is guessed, and nothing is persisted by this tool.
+    """
+
+    seed: int
+    stream: tuple[int, ...] = ()
+
+    def __post_init__(self) -> None:
+        if any(type(x) is not int or x < 0 for x in (self.seed, *self.stream)):
+            raise ValueError(
+                "sampling identity components must be nonnegative integers"
+            )
 
 
 @dataclass(frozen=True)
@@ -119,7 +144,8 @@ class PointTimeline:
 
     Attributes:
         coordinates: Quantized hardware-loop (name, zero-based index) pairs in
-            outermost-first order, including reps. Control values in events are
+            outermost-first order. Template diagnostics exclude reps; legacy
+            per-execution timelines include reps. Control values in events are
             already rounded by the board's clocks/DDS; indices are not voltages.
         events: Generator events in semantic emission order, not time-sorted.
         readouts: ADC declaration order; each window retains trigger emission
@@ -132,6 +158,85 @@ class PointTimeline:
     events: tuple[PulseEvent, ...]
     readouts: tuple[ReadoutWindow, ...]
     duration_us: float
+
+
+@dataclass(frozen=True)
+class EventSlot:
+    """One generator position shared by the points of a TimelineTemplate.
+
+    All arrays have shape (points,) in template.points order. Inactive entries
+    retain finite placeholders. Arrays are borrowed, not frozen by this record.
+
+    gen_ch: Fixed zero-based generator index.
+    source: Originating Module name, for diagnostics only.
+    iterations: Fixed enclosing Repeat (name, zero-based iteration) pairs.
+    start_us: Start relative to the execution origin.
+    duration_us: Generator-clock quantized duration.
+    frequency_mhz: DDS-quantized carrier frequency.
+    phase_deg: Phase-word phase; carrier phase at time t is phase_deg plus
+        360 * frequency_mhz * (t - phase_reference_us).
+    gain: Signed normalized DAC amplitude, nominal full scale [-1, 1].
+    envelopes: Candidate envelopes; None means unity. Plain pulses have one
+        candidate; computed pulses include every selected candidate.
+    envelope_index: int64 candidate index for each point.
+    active: bool mask; False omits this event at that point.
+    phase_reference_us: Fixed common oscillator origin; current frontends use 0.
+    """
+
+    gen_ch: int
+    source: str
+    iterations: tuple[tuple[str, int], ...]
+    start_us: NDArray[np.float64]
+    duration_us: NDArray[np.float64]
+    frequency_mhz: NDArray[np.float64]
+    phase_deg: NDArray[np.float64]
+    gain: NDArray[np.float64]
+    envelopes: tuple[PulseEnvelope | None, ...]
+    envelope_index: NDArray[np.int64]
+    active: NDArray[np.bool_]
+    phase_reference_us: float = 0.0
+
+
+@dataclass(frozen=True)
+class ReadoutSlot:
+    """One ADC's trigger layout in template.points order.
+
+    Arrays are borrowed and have shape (points, reads); reads is the fixed
+    compiled trigger count of this ADC, in trigger emission order.
+
+    channel: Fixed zero-based ADC index.
+    samples: Fixed compiled samples per trigger.
+    sample_rate_mhz: Fixed ADC output rate, in samples/us.
+    trigger_us: Trigger start relative to execution zero.
+    frequency_mhz: Demodulation frequency per trigger.
+    phase_deg: Demodulation phase per trigger, relative to execution zero.
+    generator_channels: int64 generator route per trigger.
+    """
+
+    channel: int
+    samples: int
+    sample_rate_mhz: float
+    trigger_us: NDArray[np.float64]
+    frequency_mhz: NDArray[np.float64]
+    phase_deg: NDArray[np.float64]
+    generator_channels: NDArray[np.int64]
+
+
+@dataclass(frozen=True)
+class TimelineTemplate:
+    """One structural class of points with borrowed parameter arrays.
+
+    points: Sorted int64 flat indices. A request's templates partition
+        range(prod(point_dims)), with point axes flattened in C order.
+    events: Generator slots in semantic emission order, not time-sorted.
+    readouts: One slot per declared ADC, in declaration order.
+    duration_us: float64 (points,) body end times, excluding relax_delay.
+    """
+
+    points: NDArray[np.int64]
+    events: tuple[EventSlot, ...]
+    readouts: tuple[ReadoutSlot, ...]
+    duration_us: NDArray[np.float64]
 
 
 @dataclass(frozen=True)
@@ -157,6 +262,13 @@ class AcquireRequest:
             Empty only for callers constructing legacy shape-only records.
             readouts above supplies fixed shapes; timelines carries dynamic
             triggers and demodulation values without changing those shapes.
+        point_dims: Loop lengths without the reps axis, flattened in C order
+            for template point indices. Empty means a single unswept point.
+        point_names: Hardware loop names aligned with point_dims, excluding reps.
+            Required when templates are supplied; length mismatch raises ValueError.
+        reps: Length of the reps axis; repetitions do not create new points.
+        templates: Structural point classes partitioning range(prod(point_dims)).
+            Empty for callers still supplying legacy controls/timelines.
         root_seed: Nonnegative integer entropy supplied by the environment
             author or generated once by the binding when seed is omitted.
         sequence: Zero-based, monotonically increasing acquire identity from
@@ -180,6 +292,73 @@ class AcquireRequest:
     sequence: int
     rng_version: str
     timelines: tuple[PointTimeline, ...] = ()
+    point_dims: tuple[int, ...] = ()
+    point_names: tuple[str, ...] = ()
+    reps: int = 1
+    templates: tuple[TimelineTemplate, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.templates and len(self.point_names) != len(self.point_dims):
+            raise ValueError("point_names must align with point_dims for templates")
+
+    def materialize_point(self, point: int) -> PointTimeline:
+        """Expand a flat C-order point into detached diagnostic controls.
+
+        point must be in [0, prod(point_dims)); otherwise raise ValueError.
+        Coordinates pair point_names with point-axis indices, excluding reps.
+        Only active events are emitted, retaining semantic order. Arrays become
+        immutable scalar/tuple values. Fixed ADC gen_ch comes from readouts.
+        Raises ValueError if no template covers the requested point.
+        """
+        if not 0 <= point < prod(self.point_dims):
+            raise ValueError("point is outside point_dims")
+        for template in self.templates:
+            local = int(np.searchsorted(template.points, point))
+            if local < len(template.points) and template.points[local] == point:
+                coordinates = tuple(
+                    (name, int(index))
+                    for name, index in zip(
+                        self.point_names, np.unravel_index(point, self.point_dims)
+                    )
+                )
+                events = tuple(
+                    PulseEvent(
+                        gen_ch=slot.gen_ch,
+                        source=slot.source,
+                        iterations=slot.iterations,
+                        start_us=float(slot.start_us[local]),
+                        duration_us=float(slot.duration_us[local]),
+                        frequency_mhz=float(slot.frequency_mhz[local]),
+                        phase_deg=float(slot.phase_deg[local]),
+                        gain=float(slot.gain[local]),
+                        envelope=slot.envelopes[int(slot.envelope_index[local])],
+                        phase_reference_us=slot.phase_reference_us,
+                    )
+                    for slot in template.events
+                    if slot.active[local]
+                )
+                routes = {window.channel: window.gen_ch for window in self.readouts}
+                readouts = tuple(
+                    ReadoutWindow(
+                        channel=slot.channel,
+                        gen_ch=routes[slot.channel],
+                        samples=slot.samples,
+                        sample_rate_mhz=slot.sample_rate_mhz,
+                        trigger_us=tuple(float(x) for x in slot.trigger_us[local]),
+                        frequency_mhz=tuple(
+                            float(x) for x in slot.frequency_mhz[local]
+                        ),
+                        phase_deg=tuple(float(x) for x in slot.phase_deg[local]),
+                        generator_channels=tuple(
+                            int(x) for x in slot.generator_channels[local]
+                        ),
+                    )
+                    for slot in template.readouts
+                )
+                return PointTimeline(
+                    coordinates, events, readouts, float(template.duration_us[local])
+                )
+        raise ValueError("no template covers point")
 
     @property
     def executions(self) -> int:
@@ -282,3 +461,153 @@ class RoundSignals:
     """
 
     channels: tuple[ChannelSignals, ...]
+
+
+@dataclass(frozen=True)
+class ChannelStatistics:
+    """Borrowed integrated round statistics of one ADC, in ADC sample-sum units.
+
+    With P = point_dims, R = reads, S = readout states:
+
+    channel: Zero-based ADC index, independent of tuple position.
+    sums: float64 (*P, R, 2) totals over reps, without normalization. Includes
+        receiver noise and the int64 rounding variance reps/12 per component.
+    conditional_sums: float64 (*P, R, S, 2) noiseless per-shot sums conditioned
+        on the initial readout state. State order matches state_counts.
+    shot_covariance: float64 (2, 2) positive-semidefinite receiver-noise
+        covariance of one sum, samples times the per-sample covariance.
+        Zero and singular covariance are valid. It excludes rounding variance.
+
+    Final axes use [I, Q]. Producers must not mutate arrays during the borrow.
+    Constructors do not validate these layouts; materialize_raw checks inputs
+    it needs, and the adapter checks correspondence to the acquire request.
+    """
+
+    channel: int
+    sums: NDArray[np.float64]
+    conditional_sums: NDArray[np.float64]
+    shot_covariance: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class RoundStatistics:
+    """Integrated-mode summary of one software round, with borrowed arrays.
+
+    state_counts: int64 (*point_dims, states) nonnegative multinomial counts,
+        summing to reps per point. Counts are shared by all ADCs and reads.
+    channels: One ChannelStatistics per requested ADC, in any order.
+    raw_identity: Local PCG64 identity for deferred shots. Producers use stream
+        (acquire_sequence, round_index, 1), separate from counts/sums stream
+        (acquire_sequence, round_index, 0). Drawing raw does not change either.
+
+    Arrays must remain unchanged during the borrow. Adapter validation checks
+    channels/shapes/finiteness against the request; this record has no request.
+    """
+
+    state_counts: NDArray[np.int64]
+    channels: tuple[ChannelStatistics, ...]
+    raw_identity: SamplingIdentity
+
+    def materialize_raw(
+        self, reps: int, avg_level: int
+    ) -> dict[int, NDArray[np.int64]]:
+        """Generate detached per-shot int64 sums consistent with this summary.
+
+        reps and avg_level come from AcquireRequest; point_dims is inferred from
+        state_counts.shape[:-1]. Return arrays (*loop_dims, reads, 2), inserting
+        the reps axis at avg_level. A random permutation of each point's counts
+        assigns the same initial state to each ADC/read of a shot. Independent
+        receiver noise is shifted to match sums before nearest-even rounding.
+        Each total differs from sums by at most reps/2 ADC units after rounding.
+        The same identity and inputs reproduce raw without touching global RNG.
+
+        Raise ValueError for reps/count mismatch, avg_level outside
+        [0, len(point_dims)], invalid count/statistic layouts or values, duplicate
+        channels, or int64 overflow. Zero reps requires zero totals and returns
+        empty shot axes. No noise or rounding is added to the stored statistics.
+        """
+        counts = self.state_counts
+        if counts.ndim < 1 or counts.dtype != np.int64 or np.any(counts < 0):
+            raise ValueError("state_counts must be nonnegative int64 state rows")
+        point_dims = counts.shape[:-1]
+        if type(reps) is not int or reps < 0 or np.any(counts.sum(axis=-1) != reps):
+            raise ValueError("reps must match every state_counts row sum")
+        if type(avg_level) is not int or not 0 <= avg_level <= len(point_dims):
+            raise ValueError("avg_level is outside the point-axis layout")
+        rng = np.random.Generator(
+            np.random.PCG64(
+                np.random.SeedSequence(
+                    (self.raw_identity.seed, *self.raw_identity.stream)
+                )
+            )
+        )
+        points, state_count = prod(point_dims), counts.shape[-1]
+        states = np.empty((points, reps), dtype=np.int64)
+        for point, row in enumerate(counts.reshape(points, state_count)):
+            states[point] = rng.permutation(np.repeat(np.arange(state_count), row))
+        raw: dict[int, NDArray[np.int64]] = {}
+        for channel in self.channels:
+            if channel.channel in raw:
+                raise ValueError("duplicate channel statistics")
+            shots = _materialize_channel(channel, point_dims, states, rng)
+            reads = channel.sums.shape[-2]
+            # Flat points become their C-order sweep axes before inserting reps
+            # at the hardware averaging axis, which may be between sweep axes.
+            layout = shots.swapaxes(1, 2).reshape((*point_dims, reps, reads, 2))
+            raw[channel.channel] = np.moveaxis(layout, -3, avg_level)
+        return raw
+
+
+def _materialize_channel(
+    channel: ChannelStatistics,
+    point_dims: tuple[int, ...],
+    states: NDArray[np.int64],
+    rng: np.random.Generator,
+) -> NDArray[np.int64]:
+    """Draw one ADC as (flat point, read, shot, IQ), rejecting unsafe conversion."""
+    points, reps = states.shape
+    sums, means, covariance = (
+        channel.sums,
+        channel.conditional_sums,
+        channel.shot_covariance,
+    )
+    if (
+        sums.ndim != len(point_dims) + 2
+        or sums.shape[:-2] != point_dims
+        or sums.shape[-1] != 2
+        or means.ndim != sums.ndim + 1
+        or means.shape[:-2] != sums.shape[:-1]
+        or means.shape[-1] != 2
+        or covariance.shape != (2, 2)
+        or not all(np.all(np.isfinite(x)) for x in (sums, means, covariance))
+    ):
+        raise ValueError("invalid channel statistics shape or nonfinite values")
+    reads, state_count = means.shape[-3:-1]
+    if reps and np.any(states >= state_count):
+        raise ValueError("conditional_sums must cover every sampled state")
+    if not np.allclose(covariance, covariance.T, rtol=0, atol=1e-12):
+        raise ValueError("shot_covariance must be symmetric")
+    eigenvalues, vectors = np.linalg.eigh(covariance)
+    if np.any(eigenvalues < -1e-12):
+        raise ValueError("shot_covariance must be positive semidefinite")
+    if not reps:
+        if np.any(sums != 0):
+            raise ValueError("zero reps requires zero sums")
+        return np.empty((points, reads, 0, 2), dtype=np.int64)
+    shots = np.take_along_axis(
+        means.reshape(points, reads, state_count, 2), states[:, None, :, None], axis=2
+    ).copy()
+    if np.any(covariance):
+        # A singular PSD covariance may have tiny negative eigenvalue residuals.
+        root = vectors @ np.diag(np.sqrt(np.maximum(eigenvalues, 0)))
+        shots += rng.standard_normal(shots.shape) @ root.T
+    shots += (sums.reshape(points, reads, 2) - shots.sum(axis=2))[:, :, None, :] / reps
+    rounded = np.rint(shots)
+    # float64(int64.max) equals 2**63, so the upper comparison must be strict.
+    if (
+        not np.all(np.isfinite(rounded))
+        or np.any(rounded < -(2.0**63))
+        or np.any(rounded >= 2.0**63)
+    ):
+        raise ValueError("raw sums overflow int64")
+    return rounded.astype(np.int64)

@@ -12,6 +12,5 @@ from .request import (
     PopulationInput,
     ReadoutPulse,
     SampleGrid,
-    SamplingIdentity,
 )
 from .sampling import ADC

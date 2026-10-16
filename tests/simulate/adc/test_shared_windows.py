@@ -1,6 +1,7 @@
 """Multiple ADC windows retain one joint-initial draw per independent shot."""
 
 import numpy as np
+from zcu_tools.core.simulation import SamplingIdentity
 from zcu_tools.simulate.adc import (
     ADC,
     PopulationInput,
@@ -8,7 +9,6 @@ from zcu_tools.simulate.adc import (
     ReadoutPulse,
     Receiver,
     SampleGrid,
-    SamplingIdentity,
 )
 
 

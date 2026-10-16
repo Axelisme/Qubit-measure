@@ -12,6 +12,7 @@ from zcu_tools.core.simulation import (
     PointTimeline,
     RoundRequest,
     RoundSignals,
+    SamplingIdentity,
 )
 from zcu_tools.device import DeviceManager
 from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
@@ -20,7 +21,7 @@ from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.simulation import SimulationBinding, SimulationSoc
 from zcu_tools.resources.ftf import FTFSettings, load_ftf, parse_ftf
 from zcu_tools.resources.simulation_replay import ReplayAcquire, save_replay
-from zcu_tools.simulate.adc import ADC, PopulationInput, SamplingIdentity
+from zcu_tools.simulate.adc import ADC, PopulationInput
 from zcu_tools.simulate.evolution import (
     EvaluationReceipt,
     Evolution,
