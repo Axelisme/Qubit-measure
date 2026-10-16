@@ -311,6 +311,7 @@ def test_complete_set_sweep_replaces_invalid_step_draft(tmp_path: Path) -> None:
         assert commands, "Owner must expose sampling conversion"
         gui.owner.run_command(("range", "n"), commands[0].name)
         coords = getattr(gui.owner.describe(("range", "start")).target, "commands", ())
+        assert coords, "Step endpoints must expose coordinate conversion"
         gui.owner.run_command(("range", "start"), coords[0].name)
         gui.owner.write({("range", "step"): {"expr": "1 / 0"}})
         tab.set_sweep("range", start=10.0, stop=4.0, expts=4)
