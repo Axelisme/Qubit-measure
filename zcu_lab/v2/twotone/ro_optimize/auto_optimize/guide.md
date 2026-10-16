@@ -4,7 +4,7 @@ Automatic readout optimization: a Bayesian optimizer (skopt) searches readout fr
 
 ## Expects (parameter context)
 
-Search bounds seed 51 frequency points at `$resonator.freq` +/- 0.2 * `$resonator.kappa`, 51 gain points from 0.1 to 0.25, and 51 length points from 5.0 to 10.0 us. These are optimizer bounds, not an acquisition grid. Relax delay reads 3.0 * `$qubit.t1`; optimizer points start at 1001. Open and Reset evaluate starting expressions once into direct input using captured sources. Inline qubit pulses read `$qubit.freq` and `$qubit.wiring.L01.ch.` Inline readout reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.ext.time_of_fly` + 0.05 us for trigger timing. Missing or invalid required sources leave the affected fields empty and Invalid; supply calibration or direct values before Run. No numeric calibration fallback is supplied.
+Search bounds seed 51 frequency points at `$resonator.freq` +/- 0.2 * `$resonator.kappa`, 51 gain points from 0.1 to 0.25, and 51 length points from 5.0 to 10.0 us. These are optimizer bounds, not an acquisition grid. Relax delay reads 3.0 * `$qubit.t1`; optimizer points start at 1001. Open and Reset evaluate starting expressions once into direct input using captured sources. Inline qubit pulses read `$qubit.freq` and `$qubit.wiring.ch.` Inline readout reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.ext.time_of_fly` + 0.05 us for trigger timing. Missing or invalid required sources leave the affected fields empty and Invalid; supply calibration or direct values before Run. No numeric calibration fallback is supplied.
 
 ## Expects (ModuleLibrary)
 

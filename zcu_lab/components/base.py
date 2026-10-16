@@ -43,12 +43,6 @@ class WiringSchema(BaseModel):
         return value
 
 
-class ChannelSchema(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    ch: int = Field(ge=0, strict=True, description="Generator (output) channel index.")
-
-
 class BuiltinComponent(ComponentSchema):
     model_config = ConfigDict(extra="forbid")
 

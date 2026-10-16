@@ -4,7 +4,7 @@ Reset Rabi check: sweeps the initialisation (rabi) pulse gain and acquires three
 
 ## Expects (parameter context)
 
-Seeds 51 gain points from 0.0 to 1.0, with relax delay 1.0 us. Run overwrites the Rabi pulse gain. Open and Reset evaluate starting expressions once into direct input using captured sources. Inline qubit pulses read `$qubit.freq` and `$qubit.wiring.L01.ch.` Inline readout reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.ext.time_of_fly` + 0.05 us for trigger timing. Missing or invalid required sources leave the affected fields empty and Invalid; supply calibration or direct values before Run. No numeric calibration fallback is supplied.
+Seeds 51 gain points from 0.0 to 1.0, with relax delay 1.0 us. Run overwrites the Rabi pulse gain. Open and Reset evaluate starting expressions once into direct input using captured sources. Inline qubit pulses read `$qubit.freq` and `$qubit.wiring.ch.` Inline readout reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.ext.time_of_fly` + 0.05 us for trigger timing. Missing or invalid required sources leave the affected fields empty and Invalid; supply calibration or direct values before Run. No numeric calibration fallback is supplied.
 
 ## Expects (ModuleLibrary)
 
