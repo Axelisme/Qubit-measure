@@ -73,7 +73,7 @@ class WidgetObservation:
     kind: str  # Qt widget class name, e.g. QPushButton or QLabel.
     text: str  # Rendered widget value/caption; empty when hidden or without text.
     enabled: bool  # Effective Qt enabled flag, including disabled ancestors.
-    visible: bool  # Effective Qt visibility, including hidden ancestors.
+    visible: bool  # On-screen Qt region exists, including ancestor/viewport clipping.
     object_name: str  # Stable objectName if provided by the UI, otherwise empty.
     tooltip: str  # Hover help; empty when hidden or without a tooltip.
     checked: (
@@ -172,7 +172,9 @@ class ComponentDriver:
     ``object_name`` instead matches exact objectName, including hidden widgets,
     so availability can be observed. Zero or multiple matches raise LookupError
     with candidate descriptions; supply exactly one selector. Operations on
-    disabled, hidden, or modal-blocked widgets are no-ops. Clicks and edits use
+    disabled, hidden, viewport-clipped, or modal-blocked widgets are no-ops.
+    On-screen means a nonempty Qt visible region, not OS-level occlusion.
+    Clicks and edits use
     mouse/key events, never button.click(), setText(), or application commands.
     The caller owns window/worker startup, completion waits and teardown.
     """
@@ -198,7 +200,7 @@ class ComponentDriver:
                 caption = (
                     self._field_label(widget) if editable else _display_text(widget)
                 )
-                matches = widget.isVisible() and caption == text
+                matches = self._on_screen(widget) and caption == text
             if matches:
                 candidates.append(widget)
         descriptions = [
@@ -219,10 +221,14 @@ class ComponentDriver:
         return ""
 
     @staticmethod
+    def _on_screen(widget: QWidget) -> bool:
+        return widget.isVisible() and not widget.visibleRegion().isEmpty()
+
+    @staticmethod
     def _can_interact(widget: QWidget) -> bool:
         modal = QApplication.activeModalWidget()
         return (
-            widget.isVisible()
+            ComponentDriver._on_screen(widget)
             and widget.isEnabled()
             and (modal is None or widget is modal or modal.isAncestorOf(widget))
         )
@@ -236,16 +242,17 @@ class ComponentDriver:
 
     @staticmethod
     def _observe_widget(widget: QWidget) -> WidgetObservation:
+        on_screen = ComponentDriver._on_screen(widget)
         return WidgetObservation(
             kind=type(widget).__name__,
-            text=_display_text(widget) if widget.isVisible() else "",
+            text=_display_text(widget) if on_screen else "",
             enabled=widget.isEnabled(),
-            visible=widget.isVisible(),
+            visible=on_screen,
             object_name=widget.objectName(),
-            tooltip=widget.toolTip() if widget.isVisible() else "",
+            tooltip=widget.toolTip() if on_screen else "",
             checked=(
                 widget.isChecked()
-                if widget.isVisible()
+                if on_screen
                 and isinstance(widget, QAbstractButton)
                 and widget.isCheckable()
                 else None
@@ -256,7 +263,7 @@ class ComponentDriver:
         """Snapshot all visible widgets for completion predicates with changing captions."""
         return VisibleObservation(
             widgets=tuple(
-                self._observe_widget(w) for w in self._widgets() if w.isVisible()
+                self._observe_widget(w) for w in self._widgets() if self._on_screen(w)
             ),
             tree_rows=tuple(
                 TreeRowObservation(
@@ -266,7 +273,7 @@ class ComponentDriver:
                     item.isExpanded(),
                 )
                 for tree in self._window.findChildren(QTreeWidget)
-                if tree.isVisible()
+                if self._on_screen(tree)
                 for item, path in self._visible_tree_items(tree)
             ),
         )
@@ -290,7 +297,7 @@ class ComponentDriver:
             if item.isHidden():
                 return
             path = (*parent, item.text(0))
-            if viewport.rect().intersects(tree.visualItemRect(item)):
+            if viewport.visibleRegion().intersects(tree.visualItemRect(item)):
                 rows.append((item, path))
             if item.isExpanded():
                 for index in range(item.childCount()):
@@ -504,7 +511,7 @@ class ComponentDriver:
         bars = [
             bar
             for bar in self._window.findChildren(QTabBar)
-            if bar.isVisible() and caption in self._tab_captions(bar)
+            if self._on_screen(bar) and caption in self._tab_captions(bar)
         ]
         return _unique(caption, bars, [repr(self._tab_captions(bar)) for bar in bars])
 
@@ -532,14 +539,18 @@ class ComponentDriver:
 
     def status(self) -> StatusObservation:
         """Read the one visible status bar's message or selectable direct labels."""
-        bars = [bar for bar in self._window.findChildren(QStatusBar) if bar.isVisible()]
+        bars = [
+            bar for bar in self._window.findChildren(QStatusBar) if self._on_screen(bar)
+        ]
         bar = _unique("status bar", bars, [bar.objectName() for bar in bars])
         message = bar.currentMessage()
         if not message:
             labels = bar.findChildren(
                 QLabel, options=Qt.FindChildOption.FindDirectChildrenOnly
             )
-            message = "\n".join(label.text() for label in labels if label.isVisible())
+            message = "\n".join(
+                label.text() for label in labels if self._on_screen(label)
+            )
         return StatusObservation(message)
 
     def dialogs(self) -> tuple[DialogObservation, ...]:
@@ -550,11 +561,11 @@ class ComponentDriver:
                 tuple(
                     text
                     for widget in dialog.findChildren(QWidget)
-                    if widget.isVisible() and (text := _display_text(widget))
+                    if self._on_screen(widget) and (text := _display_text(widget))
                 ),
             )
             for dialog in self._window.findChildren(QDialog)
-            if dialog.isVisible()
+            if self._on_screen(dialog)
         )
 
     def legends(self) -> LegendObservation:
@@ -563,7 +574,7 @@ class ComponentDriver:
 
         texts: list[str] = []
         for canvas in self._window.findChildren(FigureCanvasQTAgg):
-            if not canvas.isVisible():
+            if not self._on_screen(canvas):
                 continue
             for axes in canvas.figure.axes:
                 legend = axes.get_legend()
@@ -584,7 +595,7 @@ class ComponentDriver:
 
         observed: list[PlotAxesObservation] = []
         for canvas in self._window.findChildren(FigureCanvasQTAgg):
-            if not canvas.isVisible():
+            if not self._on_screen(canvas):
                 continue
             for axes in canvas.figure.axes:
                 if not axes.get_visible():
