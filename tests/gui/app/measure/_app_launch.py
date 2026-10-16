@@ -64,6 +64,7 @@ def launched_measure_app(
     previous_hook = sys.excepthook
     background = BackgroundRunner()
     window: MainWindow | None = None
+    controller: Controller | None = None
     remote: RemoteControlAdapter | None = None
     bridge = None
     try:
@@ -103,7 +104,7 @@ def launched_measure_app(
             bridge.disconnect()
         if remote is not None:
             remote.stop()
-        if window is not None:
+        if controller is not None:
             controller.close()
         background.quiesce()
         if window is not None:

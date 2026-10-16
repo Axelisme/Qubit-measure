@@ -41,7 +41,9 @@ class PlottedSavingAdapter(SavingAdapter):
 
         def draw(figure: Figure) -> None:
             axes = figure.axes[0]
-            axes.plot(record.result.frequency, record.result.signal.real, label="Signal")
+            axes.plot(
+                record.result.frequency, record.result.signal.real, label="Signal"
+            )
             axes.legend()
 
         context.plots.draw("signal", draw)
@@ -85,10 +87,12 @@ def test_run_curve_then_save_all_reports_native_save_in_bottom_status(
     # The offline adapter returns after its host draw; terminal owner delivery restores Run.
     # qt_until's 30-second watchdog only guards a stuck worker/Qt delivery.
     qt_until(
-        lambda: flow.legends().texts == ("Signal",)
-        and any(
-            w.kind == "QPushButton" and w.text == "Run" and w.enabled and w.visible
-            for w in flow.visible().widgets
+        lambda: (
+            flow.legends().texts == ("Signal",)
+            and any(
+                w.kind == "QPushButton" and w.text == "Run" and w.enabled and w.visible
+                for w in flow.visible().widgets
+            )
         ),
         label="synthetic Run result and idle button",
     )
@@ -104,7 +108,7 @@ def test_run_curve_then_save_all_reports_native_save_in_bottom_status(
     assert flow.status().text.startswith("Saved ")
     assert " for run " in flow.status().text
     assert "failed" not in flow.status().text
-    assert flow.observe("Saved").visible
+    assert flow.observe("✓ SAVED").visible
     assert flow.dialogs() == ()
 
 

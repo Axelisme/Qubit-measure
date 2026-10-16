@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QPushButton,
+    QStatusBar,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -33,7 +34,9 @@ def surface(qapp) -> Generator[QMainWindow]:
     entry.setObjectName("sample_name")
     layout.addRow("Sample name:", entry)
     status = QLabel("Ready")
-    window.statusBar().addWidget(status)
+    status_bar = QStatusBar()
+    window.setStatusBar(status_bar)
+    status_bar.addWidget(status)
     entry.editingFinished.connect(lambda: status.setText(f"Committed: {entry.text()}"))
     for name in ("first", "second"):
         button = QPushButton("Duplicate")
@@ -102,7 +105,9 @@ def test_disabled_and_hidden_actions_leave_visible_status_unchanged(
     assert driver.status().text == "Ready"
 
 
-def test_visible_dialog_text_and_caller_chosen_png_path(surface, qapp, tmp_path) -> None:
+def test_visible_dialog_text_and_caller_chosen_png_path(
+    surface, qapp, tmp_path
+) -> None:
     dialog = QDialog(surface)
     dialog.setWindowTitle("Confirmation")
     layout = QVBoxLayout(dialog)
@@ -120,13 +125,17 @@ def test_visible_dialog_text_and_caller_chosen_png_path(surface, qapp, tmp_path)
         path = driver.screenshot(tmp_path / "nested" / "confirmation.png")
         assert path == tmp_path / "nested" / "confirmation.png"
         assert path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+        dialog_path = path.with_stem(f"{path.stem}-dialog-1")
+        assert dialog_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
         driver.click("Dismiss")
         assert driver.dialogs() == ()
     finally:
         dialog.deleteLater()
 
 
-def test_visible_snapshot_distinguishes_running_button_from_caption(surface, qapp) -> None:
+def test_visible_snapshot_distinguishes_running_button_from_caption(
+    surface, qapp
+) -> None:
     page = surface.centralWidget().currentWidget()
     button = QPushButton("Run")
     page.layout().addRow(button)
@@ -165,3 +174,31 @@ def test_only_visible_legend_text_is_observed(surface, qapp) -> None:
     assert driver.legends().texts == ("Measured signal",)
     canvas.hide()
     assert driver.legends().texts == ()
+
+
+def test_disabled_or_hidden_input_cannot_commit_and_tab_availability_is_respected(
+    surface, qapp
+) -> None:
+    entry = surface.findChild(QLineEdit, "sample_name")
+    entry.setEnabled(False)
+    driver = _user_input.ComponentDriver(surface)
+    driver.enter_text(object_name="sample_name", value="blocked")
+    assert driver.status().text == "Ready"
+    assert driver.observe(object_name="sample_name").text == "original"
+    entry.setEnabled(True)
+    entry.hide()
+    driver.enter_text(object_name="sample_name", value="hidden")
+    assert driver.status().text == "Ready"
+    tabs = surface.centralWidget()
+    tabs.setTabEnabled(1, False)
+    driver.select_tab("Data")
+    assert driver.tabs("Run").current == "Run"
+    tabs.setTabEnabled(1, True)
+    tabs.setTabVisible(1, False)
+    driver.select_tab("Data")
+    assert driver.tabs("Run").current == "Run"
+    tabs.setTabVisible(1, True)
+    tabs.addTab(QWidget(), "Data")
+    qapp.processEvents()
+    with pytest.raises(LookupError, match="Data.*2 candidates.*1.*2"):
+        driver.select_tab("Data")
