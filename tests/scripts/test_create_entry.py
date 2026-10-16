@@ -61,7 +61,7 @@ def test_materialized_entry_opens_with_setup_aliases_and_first_point(
     )
 
     assert snapshot(entry.setup).components["M1"].model_dump()["reading"] == 7.5
-    assert entry.list_points() == ("initial",)
+    assert entry.list_points() == ["initial"]
     point = entry.use_point("initial")
     assert snapshot(point).components["M1"].model_dump()["reading"] == 7.5
     aliases = entry.load_aliases()
