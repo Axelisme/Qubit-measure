@@ -24,7 +24,11 @@ Cancel 是請求，不是停止、rollback 或 cleanup 完成。`OperationHandle
 
 ## Shutdown 與 device 資源
 
-Measure 在 begin_shutdown 時阻止新的 experiment entry，`ShutdownCoordinator` 對當時的 live handles 發出 cancel request，以非阻塞 poll 回報 WAITING／SETTLED／TIMED_OUT。同步 Save 不在 Handle 清單中，也沒有要等待的 Save worker。清單仍不能代表 auto-align 等全部背景工作。timeout 僅代表等待期限已到，**不是** cleanup 完成或可安全退出的證明。核准的共用預設是不自動強關，目前 Qt shutdown driver 在 timeout 仍執行 close callback，且未涵蓋所有無 handle 工作。等待 executor cleanup、未完成狀態回報與關閉順序的轉正條件見 [operation draft](draft/operation-lifecycle-boundaries.md)。Autofluxdep 的 running-run 強制關閉是 app 明示選項，不是 generic runner 的預設。
+Measure 在 begin_shutdown 時阻止新的 experiment entry，`ShutdownCoordinator` 對當時的 live handles 發出 cancel request，以非阻塞 poll 回報 WAITING／SETTLED／TIMED_OUT。同步 Save 不在 Handle 清單中，也沒有要等待的 Save worker。清單仍不能代表 auto-align 等全部背景工作。timeout 僅代表等待期限已到，**不是** cleanup 完成或可安全退出的證明。共用 Qt shutdown driver 目前在 timeout 仍執行 close callback，且未涵蓋所有無 handle 工作。共用 timeout 不自動強關是尚未落實的目標，不是這個 driver 的現行保證。未完成邊界及轉正條件見 [operation draft](draft/operation-lifecycle-boundaries.md)。
+
+Measure 的 caller 已另有背景 drain。`Controller.close(timeout_ms=5000)` 在 owner thread 停止接受新工作，再等待 worker 與 owner delivery；逾時 raise TimeoutError，保留已關閉的 admission 供重試。成功後重複 close 無害。MainWindow 在保存狀態、停止 remote 與釋放 view 前呼叫 close；逾時保留視窗，讓使用者選「再等一下」或明示「強制關閉」。強制關閉接受晚到 callback 的風險，不能當作 cleanup 完成。使用者於 2026-10-15 以「A+」選擇背景 drain 逾時留窗、再等或明示強關的方案，避免未停止的 worker 回呼已銷毀的 view。
+
+這個 measure-specific drain 不取代 begin_shutdown 的取消協調，不處理硬體斷線或 RF 安全，也不表示 shared shutdown driver、其他 app 或 GUI device/factory teardown 已全部完成。Autofluxdep 的 running-run 強制關閉是 app 明示選項，不是 generic runner 的預設。
 
 已註冊 device 的 manager close API 由 registry 協調 disconnect；registry claim 防止同一 driver identity 被兩個 manager close 同時處理，driver 自己仍須守住 mutating operation 與單次 I/O 的同步。`drop_device` 只移除登記，不是 disconnect。Notebook 由建立 ResourceManager 的 owner 在所管理的 device sessions 成功 disconnect 後才關閉 factory；manager close 的部分失敗保留未完成資源與錯誤供明確處置，不把嘗試過 close 當成成功，也不保證重試一定成功。Notebook 的已實作順序與 registry failure contract 見 [device owner](../../lib/zcu_tools/device/README.md)；GUI DeviceService 目前仍直接 close/drop，不能宣稱已全部走 manager close API 或已具備對應 factory teardown，核准目標與轉正條件見 [operation draft](draft/operation-lifecycle-boundaries.md)。GUI State 擁有對外可觀察的 device cache，registry 保存 driver identity，cache 不是即時硬體狀態的證明。
 

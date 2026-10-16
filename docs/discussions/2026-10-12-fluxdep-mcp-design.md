@@ -4,7 +4,7 @@ status: active
 superseded_by: null
 related:
   - docs/discussions/2026-10-12-agent-interface-layers.md
-  - docs/adr/draft/agent-interface-layers.md
+  - docs/adr/0075-agent-interface-layers.md
   - docs/adr/0068-remote-transport.md
 basis:
   - main@0e469d8bc
@@ -174,7 +174,7 @@ fluxdep 在 agent 介面分層的定位：L3 跨實驗整合分析，獨立、�
 ## 依據
 
 - [ADR-0068 Remote／Transport](../adr/0068-remote-transport.md)
-- [Agent 介面分層 ADR draft](../adr/draft/agent-interface-layers.md)：fluxdep 位於跨實驗整合分析層。
+- [ADR-0075 Agent 介面分層](../adr/0075-agent-interface-layers.md)：fluxdep 位於跨實驗整合分析層。
 - [fluxdep MCP README](../../lib/zcu_tools/mcp/fluxdep/README.md)
 - [fluxdep 分析模組 README](../../lib/zcu_tools/analysis/fluxdep/README.md)
 - `lib/zcu_tools/gui/app/fluxdep/`：互動 owner `interactive.py`、remote `remote/`、Filter 遮罩 `state.py` 與 `services/fit.py`

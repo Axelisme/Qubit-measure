@@ -33,6 +33,12 @@ RecordsLedger 讀取 envelope 與依 kind 選出的 payload 時忽略未知欄�
 
 使用者於 2026-10-14 對保存位置選擇「A」，正本只放資料檔。對前端讀回裁定：「Notebook與GUI應該都讀data.h5，只有log browser讀Labber檔。」2026-10-15 確認：「1可以，2採用忽略不支援欄位的方式，3同意，4一起做吧」。其中 ledger 採忽略未知欄位，不改寫歷史行；Labber-only 資料先離線遷移，Load 不回填表單。
 
+### MCP call log 與 ledger
+
+MCP call log 是 best-effort 除錯紀錄，可以截斷、清除或停用，不併入 ledger，也不能代替 ledger 的事實紀錄。Ledger 的 origin 只標示 gui、notebook 或 mcp，不帶 MCP call id。跨 MCP、GUI 與 ledger 傳遞 call id 會增加耦合，卻無法讓可丟棄的 call log 成為可靠證據。使用者於 2026-10-08 以「採用建議」確認刪除這條跨層 call id 傳遞，只保留 origin。
+
+這個分工不增加跨檔原子性、fsync 或掉電保證。Ledger append 與輸出檔案的失敗邊界仍依本篇，不因 call log 存在就視為已提交。
+
 ### Run 輸出位置與 writer 權責
 
 `resources.entry.ResultEntry` 提供條目的不可變身分，以及 exact Result／Database paths 與 scoped ledger。小資料在 `results/<name>/`，量測輸出在 `Database/<name>/`。`SaveLayout` 根據這些 paths、run_id、保存時間與 artifact key 計算各格式的 exact outputs。它不建立目錄或寫檔，也不從舊的日期目錄猜 entry。C8 分層與 C9 無循環 contract 涵蓋 experiment 使用 datafile／resources 的方向。
@@ -123,4 +129,4 @@ Asset repository 的 rename／delete 只處理資產，不掃描或改寫 Module
 
 ## 後果
 
-維護者先找保存對象的 owner，再查其就地格式契約：[`datafile`](../../lib/zcu_tools/datafile/README.md)、[`experiment`](../../lib/zcu_tools/experiment/README.md)、[`QubitParams`](../../lib/zcu_tools/resources/qubit_params.md)、[`parameter entry`](../../lib/zcu_tools/resources/entry/README.md)、[`SampleTable`](../../lib/zcu_tools/resources/sample_table/README.md)、[`waveform assets`](../../lib/zcu_tools/resources/waveform_assets.md)、[`program waveform`](../../lib/zcu_tools/program/v2/README.md)、[main GUI](../../lib/zcu_tools/gui/app/measure/README.md) 與 [autofluxdep](../../lib/zcu_tools/gui/app/autofluxdep/README.md)。本 ADR 不保證多檔 all-or-nothing、crash safety、多 writer 協調、autosave、resume、browser 或任何使用者資料遷移。
+維護者先找保存對象的 owner，再查其就地格式契約：[`datafile`](../../lib/zcu_tools/datafile/README.md)、[`experiment`](../../lib/zcu_tools/experiment/README.md)、[`QubitParams`](../../lib/zcu_tools/resources/qubit_params.md)、[`parameter entry`](../../lib/zcu_tools/resources/entry/README.md)、[`SampleTable`](../../lib/zcu_tools/resources/sample_table/README.md)、[`waveform assets`](../../lib/zcu_tools/resources/waveform_assets.md)、[`program waveform`](../../lib/zcu_tools/program/v2/README.md)、[main GUI](../../lib/zcu_tools/gui/app/measure/README.md) 與 [autofluxdep](retired/0018-autofluxdep-orchestrator-requirement-resolver-builder-currying.md)。本 ADR 不保證多檔 all-or-nothing、crash safety、多 writer 協調、autosave、resume、browser 或任何使用者資料遷移。

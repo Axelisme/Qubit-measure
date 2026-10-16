@@ -12,7 +12,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Concurrency / Lifecycle
 
-- [0066 — Operation 執行、取消與關閉](0066-operation-lifecycle.md)：guard／lease／handle、runner、互動、shutdown 與 device disconnect 的跨 owner 責任；尚未落實的核准目標見 [Operation draft](draft/operation-lifecycle-boundaries.md)。
+- [0066 — Operation 執行、取消與關閉](0066-operation-lifecycle.md)：guard／lease／handle、runner、互動、shutdown 與 device disconnect 的跨 owner 責任；measure close 已有 caller drain／逾時留窗；其餘未落實目標見 [Operation draft](draft/operation-lifecycle-boundaries.md)。
 - [0001 — Domain guard 與 Lease 分離](0001-permit-lease-typed-guard.md)：typed Permit proof 已由 0066 的 checks／RunInputs 取代，保留 guard 與 lease 的責任分界。
 - [0002 — Version table + off-main handler（handle 模型沿革）](0002-version-table-async-handle-off-main.md)：owner resource counters 與 RPC off-main handler 的局部契約仍有效；Remote 權限由 0070 的 holder 取代版本 guard，operation handle 分界由 0066 承接。
 - [0053 — Owner scheduler 與 gate presence](0053-owner-scheduler-and-gate-presence.md)：scheduler port、State owner guard、completion facts 與 gate presence 的局部契約仍有效；operation owner-loop 規則由 0066 承接。
@@ -41,6 +41,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Remote / Transport
 
+- [0075 — Agent 介面分層](0075-agent-interface-layers.md)：L0 至 L3 定位、共享狀態交接、recipe 推導 owner、generator 工作步驟／提問與取消結果。Workflow 的 agent yield 仍是方向，不等同現行 Engine effects。
 - [0070 — GUI 與 agent 的控制身份](0070-control-identity.md)：measure／fluxdep 的單一 holder、固定連線身份、GUI 編輯停用、共用對話框由宿主決定唯讀、明確收回與 ref-free cfg acceptance。
 - [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：共用傳輸、holder dispatch 和 app policy 分界、事件與錯誤投影、measure 固定工具及 live catalog、穩定名稱寫回、analysis-only JSON 投影，以及 Fluxdep pipeline／interactive 控制、獨立 workflows app 的同一 GUI/MCP run。尚未實作的 GUI 收合見 [draft](draft/remote-event-coalescing.md)。
 
@@ -70,22 +71,20 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 
 ## Draft
 
-- [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：核准方向、尚未實作。啟動固定 Python environment，FTF 用 YAML 調參；同步 acquire 固定量測要求、逐 round 捕捉環境，backend 固定輸入輸出。物理與依賴邊界已定；離線GPU建庫、存檔與模擬時插值的方向已確認，GPU建表及載入尚待驗證。具體型別、schema、遷移與驗收待完成。
+- [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：保留 draft，尚未轉正；由模擬 owner 在成果 land 後核對狀態。啟動固定 Python environment，FTF 用 YAML 調參；同步 acquire 固定量測要求、逐 round 捕捉環境，backend 固定輸入輸出。物理與依賴邊界已定；離線GPU建庫、存檔與模擬時插值的方向已確認，GPU建表及載入尚待驗證。具體型別、schema、遷移與驗收待完成。
 
-
-- [Pydantic 表單、輸入與宿主提交](draft/pydantic-form-tool.md)：Qt-free core 與 editor 分離，共用 defaults hook、evaluator 與 complex codec。Expression 保存在 input，Engine journal 只記普通值。各宿主共用 FormEditor，Library／writeback 提交持久 Spec；Measure 推導見 [[0073]]。
-
-- [Agent 介面分層](draft/agent-interface-layers.md)：L0 實驗環境、L1 GUI／Notebook、L2 recipe、L3 workflow 與跨實驗分析的定位；L1 由 agent 決定在哪一步介入，L2 recipe 與 L3 workflow 由自己決定在哪裡 yield；自動推導歸 recipe、workflow 內部或 GUI adapter 的初始參數生成；層間以共享狀態交接，選層由上而下。Workflow yield 由進行中的重構實作；無人回應時停在 yield，預設決定與 L0 強制有需求再設計。
 - [GUI 事件收合](draft/remote-event-coalescing.md)：GUI 訂閱端依 payload type 與 tab 的 per-tick 收合尚未落實；cfg 表單 snapshot 收合已實作。
 - [GUI adapter capability 入口檢查](draft/gui-adapter-capability-guards.md)：analysis／post-analysis application 入口的完整拒絕尚待實作。
 - [Operation 關閉與 disconnect](draft/operation-lifecycle-boundaries.md)：shutdown 期限、無 handle 背景工作與 GUI device/factory owner 的未落實目標。
 
 ## Retired
 
-- [量測成果 Artifact、設定快照與讀回](draft/artifact-persistence.md)：已結案，由 0063、0069、0067 接替；保留原提案與討論連結供追溯。
+- [Pydantic 表單、輸入與宿主提交](draft/pydantic-form-tool.md)：superseded，穩定邊界併入 0065／0062，持久 Spec 與推導由 0008／0073 承接；原稿留存歷史。
 
-- [Cfg 編輯接縫與使用邊界](draft/cfg-editing-boundaries.md)：已結案並由 0065、0008、0073 接替，正文只供歷史追溯。
-- [Cfg 資源公開契約與同步發布](draft/cfg-resource-contract.md)：已結案並由 0065、0008、0073 接替，正文只供歷史追溯。
+- [量測成果 Artifact、設定快照與讀回](retired/artifact-persistence.md)：已結案，由 0063、0069、0067 接替；保留原提案與討論連結供追溯。
+
+- [Cfg 編輯接縫與使用邊界](retired/cfg-editing-boundaries.md)：已結案並由 0065、0008、0073 接替，正文只供歷史追溯。
+- [Cfg 資源公開契約與同步發布](retired/cfg-resource-contract.md)：已結案並由 0065、0008、0073 接替，正文只供歷史追溯。
 
 - [具名 workflows 與可丟棄的步驟執行](retired/workflows-engine.md)：期 0 候選草稿，workflow 執行契約由 0062 接替。
 - [0018 — Autofluxdep resolver builder](retired/0018-autofluxdep-orchestrator-requirement-resolver-builder-currying.md) 與 [Autofluxdep 逐項宣告依賴與 predictor 載入](retired/autofluxdep-explicit-dependencies.md)：autofluxdep 已於 04799f2f2 移除。

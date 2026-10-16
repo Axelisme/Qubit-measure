@@ -267,7 +267,7 @@ class TestPulseIntegration:
         prog = _make_prog(modules=[pulse, Readout("readout", _readout_cfg())])
         total = pulse.total_length(prog)
         assert isinstance(total, float)
-        # Captured from the unchanged scalar path before the D190 correction.
+        # Scalar timing must remain unchanged by swept-length quantization.
         assert prog.us2cycles(us=total) == 348
         end = pulse.run(prog, t=0.25)
         assert end == pytest.approx(0.25 + total if block_mode else 0.25)

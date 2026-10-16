@@ -1,6 +1,6 @@
 # Fluxdep MCP control
 
-**Last updated:** 2026-10-14, Filter drafts start from the published brush selection
+**Last updated:** 2026-10-16, Filter drafts start from the published brush selection; accepted ADR navigation
 
 Fluxdep MCP composes native GUI RPCs into handwritten agent decision tools over
 one shared bridge. It is an independent, optional L3 cross-experiment analysis
@@ -21,7 +21,7 @@ without an agent decision during computation wait until terminal. GUI and MCP
 use the same renderer. Skill supplies the workflow and completion criteria;
 measure_knowledge supplies detailed interpretation, examples and counterexamples.
 These design principles are recorded in
-[Agent interface layers](../../../../docs/adr/draft/agent-interface-layers.md#mcp-設計原則).
+[Agent interface layers](../../../../docs/adr/0075-agent-interface-layers.md#mcp-設計原則).
 Fluxdep's fit dependency model is app-specific, not a rule for every MCP.
 
 ## Tool inventory

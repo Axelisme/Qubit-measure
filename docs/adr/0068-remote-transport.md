@@ -6,6 +6,8 @@
 
 Qt 視窗、socket client 與 MCP agent 都能接觸同一個 GUI application。若每個入口另存可提交的狀態、複製 guard，或由共用 socket 層決定實驗方法，使用者與 agent 會依入口不同而看到不同結果。Remote 是 application 的 driving adapter；它呼叫同一批 owner 的查詢與命令，不建立第二份業務真相。Measure 的 `RemoteControlAdapter` 接在共用 endpoint 上，承接 Controller 的診斷並將請求送到 application owner。GUI 的草稿與互動分析 committed session 仍由其原 owner 持有；GUI-local pointer preview 不是遠端可提交的狀態。Qt 的 screenshot、dialog 和焦點是 frontend 能力。Agent 寫入後切換 tab／pane 的行為由 measure app 的 view 命令決定，不由 socket 或通用 MCP bridge 暗中決定。共用 application 狀態與前端邊界見 [[0067]]。
 
+Recipe 自動推導的 owner、generator 協作及取消結果見 [[0075]]；MCP call log 與 ledger 的分界見 [[0063]]。本篇維護傳輸與遠端投影，不複製這些規則。
+
 ## 分層與連線
 
 使用者在 2026-10-13 裁定：「mcp跑的腳本不要放scripts，這個資料夾是給用戶使用的。」因此 `scripts/` 只放使用者自己執行的入口。使用者選址「C」，即 repo root 的新資料夾 `mcp_servers/`，agent 的 measure／workflows MCP 組合根放在這裡。Workflows 入口的裁定是「留」，保留入口並搬到 `mcp_servers/workflows.py`。組合根同時知道 lab 定義與 framework，放在 lib 會反向依賴使用者套件，放在 `zcu_lab` 則混入框架啟動責任。`tools/` 只放 repo 品質檢查。Fluxdep、dispersive 無需 lab 注入，維持 lib 的 `server.py`。Repo 的三份 MCP client 設定使用同一組入口，各自保留既有啟動與曝光政策。Agent 驗證 workflow 使用 workflows GUI 的模擬模式，不維護獨立模擬腳本。
@@ -14,7 +16,7 @@ Qt 視窗、socket client 與 MCP agent 都能接觸同一個 GUI application。
 
 2026-10-12 使用者裁決 RPC 與 MCP 的分工：「前者(MCP)面向agent，設計上要考慮agent使用負擔，後者(RPC)是控制接口，設計上要簡單基礎通用。前者透過組裝後者來兼顧雙方需求」。Fluxdep 工具直接表達階段意圖，open、context id 與 search token 只在單次組裝內使用。
 
-Auto Align 與 search 中途沒有 agent 可影響結果的判斷，因此 MCP 輪詢到結束才回，不設整體等待上限。等待時同一 stdio server 不處理其他呼叫。GUI 仍持有 context lifetime、operation、完整 inputs、recorded quality 與 fit freshness。GUI Show 和 MCP 使用同一 fit renderer；MCP 不回過期結果的疊圖，GUI 仍顯示過期與原因。這是 fluxdep 的局部契約，不把 fit 依賴模型升為所有 app 的規則。跨 app 的 MCP 設計原則見 [Agent 介面分層](draft/agent-interface-layers.md#mcp-設計原則)。
+Auto Align 與 search 中途沒有 agent 可影響結果的判斷，因此 MCP 輪詢到結束才回，不設整體等待上限。等待時同一 stdio server 不處理其他呼叫。GUI 仍持有 context lifetime、operation、完整 inputs、recorded quality 與 fit freshness。GUI Show 和 MCP 使用同一 fit renderer；MCP 不回過期結果的疊圖，GUI 仍顯示過期與原因。這是 fluxdep 的局部契約，不把 fit 依賴模型升為所有 app 的規則。跨 app 的 MCP 設計原則見 [[0075]] 的 MCP 設計原則。
 
 同機跨程序的 MCP 使用 socket；同機並不等於同程序呼叫。GUI 可停用 remote socket，GUI core 不依賴 MCP。MCP `connect` 可接上現有 GUI，或經明確選項啟動 GUI；MCP server 結束只斷開連線，不關閉 GUI。外部 CLI／MCP workflow 擁有 agent 的啟動。GUI 不啟動 agent terminal、不管理可恢復的 agent session，也不注入 bootstrap prompt。Connection authentication 與 method exposure 是兩道不同的邊界：有 token 時 GUI 在 method 前驗證；沒有 token 的 loopback 允許本機可連線程序控制 GUI。隱藏 method 不等於授權機制，現有連線方式不承諾任意跨機部署。
 
