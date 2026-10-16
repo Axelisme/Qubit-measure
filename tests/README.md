@@ -33,7 +33,8 @@ recording adapter 放明確可 import 的支援模組，不把 `conftest.py` 當
 
 有 UI 改動的票，驗收須包含元件驅動情境。情境使用
 [`ComponentDriver`](gui/_user_input.py)，依使用者可見文字或既有 objectName 找元件，
-以真實鍵盤／滑鼠事件操作。Disabled 或 hidden 元件不繞過。
+以真實鍵盤／滑鼠事件操作。Disabled、hidden 或完全被 scroll viewport 裁掉的元件不繞過。
+可見性依 Qt visible region 判斷，不偵測 OS 層的其他視窗遮蔽。
 啟動與 teardown 可用公開 fixture；情境本身只經 driver 操作與觀察。
 直接呼叫 Controller／`MainWindow` 指令方法的 smoke 不算 UI 驗證，review 須標出這項缺口。
 
