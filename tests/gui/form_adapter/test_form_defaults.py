@@ -220,14 +220,22 @@ class OptionalCore(ConfigBase):
     probe: PulseCfg | None = None
 
 
-@pytest.mark.parametrize("optional", [False, True])
-def test_unbound_slot_obeys_core_required_or_optional_default(optional: bool) -> None:
-    cfg_type = OptionalCore if optional else Core
+class NullableRequiredCore(ConfigBase):
+    """Allowing None does not declare a disabled initial selection."""
+
+    probe: PulseCfg | None
+
+
+@pytest.mark.parametrize("cfg_type", [Core, NullableRequiredCore, OptionalCore])
+def test_unbound_slot_obeys_core_required_or_optional_default(
+    cfg_type: type[ConfigBase],
+) -> None:
+    optional = cfg_type is OptionalCore
     form = Form(cfg_type, {"probe": Slot("$unbound.module.probe")})
     form.bind_templates(templates(), adapter="synthetic-optional")
     env = environment()
     state = FormState(form.default_input(env))
-    assert state.input.data == {}
+    assert state.input.data == ({"probe": None} if optional else {})
     value = state.result(env)
     if not optional:
         assert isinstance(value, FormErrors)
@@ -235,6 +243,79 @@ def test_unbound_slot_obeys_core_required_or_optional_default(optional: bool) ->
         return
     assert not isinstance(value, FormErrors), value
     assert form.to_cfg(value, env) == OptionalCore(probe=None)
+
+
+@pytest.mark.parametrize("missing_slot", [False, True], ids=["absent", "missing-slot"])
+@pytest.mark.parametrize("nested", [False, True], ids=["root", "nested"])
+def test_default_none_module_is_explicit_and_selectable(
+    missing_slot: bool, nested: bool
+) -> None:
+    class NestedCore(ConfigBase):
+        modules: OptionalCore
+
+    tree = {"probe": Slot("Q.pulses.missing")} if missing_slot else {}
+    form = Form(NestedCore, {"modules": tree}) if nested else Form(OptionalCore, tree)
+    env = environment()
+    state = FormState(form.default_input(env))
+    path = ("modules", "probe") if nested else ("probe",)
+    assert state.input.data == (
+        {"modules": {"probe": None}} if nested else {"probe": None}
+    )
+    target = state.describe(path, env).target
+    assert target is not None and target.options is not None
+    assert target.selected is not None
+    assert target.options[target.selected].label == "None"
+    assert not target.can_expand
+    value = state.result(env)
+    if isinstance(value, FormErrors):
+        pytest.fail(str(value.messages))
+    cfg = form.to_cfg(value, env)
+    assert cfg == (NestedCore(modules=OptionalCore()) if nested else OptionalCore())
+
+    # Disabling is only an initial choice; a captured module remains selectable.
+    state.write({path: {"kind": "ref", "name": "Q.pulses.probe"}}, env)
+    value = state.result(env)
+    if isinstance(value, FormErrors):
+        pytest.fail(str(value.messages))
+    cfg = form.to_cfg(value, env)
+    if isinstance(cfg, FormErrors):
+        pytest.fail(str(cfg.messages))
+    probe = cfg.modules.probe if isinstance(cfg, NestedCore) else cfg.probe
+    assert probe is not None and probe.gain == 0.3
+
+
+@pytest.mark.parametrize(
+    "node",
+    [
+        Slot("Q.pulses.probe"),
+        Slot("Q.pulses.probe", copy=True),
+        Slot("Q.pulses.probe", lock={"freq": 0.0}),
+        Template("pulse"),
+    ],
+    ids=["key", "copy", "lock", "template"],
+)
+def test_optional_module_keeps_available_initial_selection(
+    node: Slot | Template,
+) -> None:
+    form = Form(OptionalCore, {"probe": node})
+    form.bind_templates(templates(), adapter="synthetic")
+    env = environment()
+    state = FormState(form.default_input(env))
+    probe_input = state.input.data["probe"]
+    assert isinstance(probe_input, dict)
+    assert probe_input["kind"] == (
+        "ref"
+        if isinstance(node, Slot) and not node.copy and not node.lock
+        else "inline"
+    )
+    value = state.result(env)
+    if isinstance(value, FormErrors):
+        pytest.fail(str(value.messages))
+    cfg = form.to_cfg(value, env)
+    assert isinstance(cfg, OptionalCore) and cfg.probe is not None
+    assert cfg.probe.freq == (
+        120 if isinstance(node, Template) else 0 if node.lock else 100
+    )
 
 
 class ResetCore(ConfigBase):
