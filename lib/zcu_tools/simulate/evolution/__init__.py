@@ -26,4 +26,4 @@ from .secular import (
     SecularDrive,
     SecularModel,
 )
-from .state import Basis, DensityState, Populations, populations
+from .state import Basis, DensityState, Populations, batch_populations, populations

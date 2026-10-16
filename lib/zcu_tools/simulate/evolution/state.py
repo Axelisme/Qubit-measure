@@ -106,6 +106,31 @@ def populations(state: DensityState, target_basis: Basis) -> Populations:
     """
     if state.basis.vectors.shape != target_basis.vectors.shape:
         raise ValueError("source and target basis dimensions must match")
-    transform = target_basis.vectors.conj().T @ state.basis.vectors
-    transformed = transform @ state.density @ transform.conj().T
-    return Populations(target_basis, np.diag(transformed).real)
+    values = batch_populations(state.density[None], state.basis, target_basis)
+    return Populations(target_basis, values[0])
+
+
+def batch_populations(
+    densities: NDArray[np.complex128], source_basis: Basis, target_basis: Basis
+) -> NDArray[np.float64]:
+    """Convert a batch of densities to ordered target-basis populations.
+
+    densities: finite complex (batch, M, M) in source_basis coordinates.
+        Callers supply physical density matrices; this conversion does not
+        certify positivity, Hermiticity or trace, including solver residuals.
+    source_basis/target_basis: ordered bases in the same ambient space, of
+        dimension M. The caller owns that physical correspondence.
+    Returns an owned real (batch, M) array in target_basis.labels order.
+    Inputs remain unchanged. No projection, clipping or normalization occurs.
+    Raises ValueError for nonfinite densities or incompatible shapes/bases.
+    This operation models neither measurement trajectories nor time evolution.
+    """
+    if source_basis.vectors.shape != target_basis.vectors.shape:
+        raise ValueError("source and target basis dimensions must match")
+    if densities.ndim != 3 or densities.shape[1:] != source_basis.vectors.shape:
+        raise ValueError("densities must have shape (batch, M, M) matching basis")
+    if not np.isfinite(densities).all():
+        raise ValueError("densities must be finite")
+    transform = target_basis.vectors.conj().T @ source_basis.vectors
+    transformed = transform @ densities @ transform.conj().T
+    return transformed.diagonal(axis1=-2, axis2=-1).real.copy()

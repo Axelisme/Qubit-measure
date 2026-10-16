@@ -31,7 +31,12 @@ from zcu_tools.simulate.adc import (
     round_statistics,
     sample_traces,
 )
-from zcu_tools.simulate.evolution import Engine, PathDiagnostics
+from zcu_tools.simulate.evolution import (
+    Basis,
+    Engine,
+    PathDiagnostics,
+    batch_populations,
+)
 
 from .replay import BACKEND_VERSION, replay_versions
 from .template import plan_template
@@ -145,9 +150,17 @@ class FTFAcquire:
         )
         state_count = evolved.densities.shape[-1]
         probabilities = np.empty((prod(acquire.point_dims), state_count))
-        probabilities[evolved.points] = evolved.densities.diagonal(
-            axis1=-2, axis2=-1
-        ).real
+        dc_model = plans[0].source.model((0,) * plans[0].batch.flux.level.shape[1])
+        # Evolution returns DC energy coordinates; readout uses that same basis
+        # with the ADC model's explicit state order.
+        readout_basis = Basis(
+            dc_model.identity,
+            plans[0].readout.model.state_labels,
+            dc_model.eigenvectors,
+        )
+        probabilities[evolved.points] = batch_populations(
+            evolved.densities, readout_basis, readout_basis
+        )
         response = ConditionalReadout(
             plans[0].readout.model,
             rtol=owner.settings.solver.rtol,

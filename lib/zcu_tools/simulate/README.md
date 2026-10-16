@@ -26,7 +26,7 @@ continuous-flux and model tools. They do not define an acquisition backend.
 
 Call `populations(state, target_basis)` explicitly before readout. Basis vectors
 are ordered columns in common ambient coordinates. The result preserves target
-state labels and can be recorded independently of ADC generation.
+state labels and can be recorded independently of ADC generation. For engine\nbatches, call `batch_populations(densities, source_basis, target_basis)`; it\nreturns a real array in target state order without clipping solver residuals.
 
 ## ADC readout
 
