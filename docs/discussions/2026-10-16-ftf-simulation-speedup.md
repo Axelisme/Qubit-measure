@@ -350,3 +350,45 @@ bath 在建構時就是 secular 的：jump 是 H0 eigenbasis 上的 |i⟩⟨j|�
   - `lib/zcu_tools/program/v2/simulation/frontend.py`
   - `zcu_lab/v2/twotone/rb/program.py`：gate 的 phase 組成
   - `zcu_lab/v2/twotone/ac_stark/core.py`：兩 tone 同時播放
+
+## 後記（2026-10-16）
+
+快照 commit 之後，又定了三項。
+
+### 排程：A 階段加波次
+
+使用者指出：「既然計算不需要序列，除了需要初態的演化都可以考慮批次化+平行化，需要初態的演化可以等最後再一次批次計算，或是條件齊全在個別計算，但效率」。據此定下的排程，取代前文的 ready queue：
+
+1. **規劃。** 切段，並對段內容去重、計數。波次數等於各 timeline 中狀態類段數的最大值。
+2. **A 階段。** 使用兩次以上的傳播子類內容，依 kernel 分批平行計算，順序不限。
+3. **波次。** 每條 timeline 先用傳播子乘積，把狀態推進到下一個狀態類段的入口。接著把這一波所有 timeline 的狀態類段，依 kernel 合成一個 batch 一次算完。
+4. **收尾。** 推進到終點，再接 readout 與統計。
+
+多數實驗只要 0–1 個波次：twotone、gaussian amplitude Rabi、ac_stark 是 1 波；constant Rabi、T1、Ramsey、echo、RB 是 0 波。
+
+只用一次的傳播子不存，在波次中建好就作用到狀態上，用完即丟。2001 個週期傳播子各 1 MiB，存起來會吃掉 2 GiB。是否快取由使用次數決定，不由路徑種類決定。
+
+不採用「條件齊全就個別計算」，原因有三：batch 太小時，prange 吃不滿核心；Dyson 的向量化效益下降；每次呼叫都有開銷。acquire 的結果本來就整批交出，低延遲用不上。
+
+### GPU 與 joblib
+
+使用者選 A：「A，好，但請你注意python迴圈低效的問題」。
+
+- **只用 numba。**
+- **GPU。** Dyson batch 在 OpenCL 上約快 1.5 倍，是唯一值得上 GPU 的 kernel。批次 expm、gate 建表、DOP853 都不划算。第一批不做 GPU，但 Dyson kernel 的介面寫成「數值陣列進、結果陣列出」，以後可以換成 OpenCL 後端。
+- **joblib。** 已在 `client` extra 中。它只適合 numba 化不了的 Python 與 scipy 工作，例如 A 階段的 scipy expm、模型與 bath 建立、Floquet prepare。對 numba kernel 來說，process pool 和 prange 速度相當，還要多付 worker 啟動與 pickle 的成本。第一批完成後量各階段耗時，若上述工作成為最大項，再加 joblib。
+
+### Python 迴圈的界線
+
+這次找到的主要瓶頸，幾乎都是 Python 迴圈的次數隨 shot 或點數放大：逐 shot 解譯、分組、抽樣，以及逐 RHS 組 H(t)。
+
+使用者確認的規則：Python 層迴圈的次數，只能隨模板數、唯一內容數、kernel 種類或波次數增長；不能隨 sweep 點數、段數 × 點數、reps 或 rounds 增長。
+
+具體做法：
+
+- 規劃以模板為單位，參數用 numpy 陣列沿 sweep layout 廣播。
+- 去重用 `np.unique`。
+- 傳播子的作用與連乘，由單一 numba kernel 依段索引表執行。
+- batch 的組成與還原只用索引陣列。
+
+驗收時，在使用者規模下單獨 profile Python 層。點數加倍時，這部分的耗時不能跟著加倍。
