@@ -383,3 +383,24 @@ def test_root_nested_sections_and_captured_inline_subtrees_never_expose_wrappers
     waveform = ordinary_object(ordinary_object(source.value)["waveform"])
     assert waveform["raise_waveform"] == "Q.waveforms.edge"
     assert source.errors is None
+
+
+def test_source_admission_reports_consuming_edit_not_later_batch_item() -> None:
+    from zcu_tools.gui.form import field_error
+
+    class Consumer(FormModel):
+        name: str = "ok"
+
+        @classmethod
+        def check_sources(cls, data: Mapping[str, JsonValue], env: FormEnv) -> None:
+            del env
+            if data.get("name") == "missing":
+                raise field_error(("name",), "Missing synthetic source")
+
+    form = adapter.Form(LogicalCfg, {}, extras=Consumer, lower=lambda extras, cfg: cfg)
+    input = form.default_input(FormEnv())
+    with pytest.raises(adapter.LogicalEditError) as failure:
+        form.prepare_logical_edits(input, [adapter.LogicalEdit(("extras", "name"), "missing"), adapter.LogicalEdit(("reps",), 12)], FormEnv())
+    assert failure.value.reason_code == "form_source"
+    assert failure.value.edit_index == 0 and failure.value.path == ("extras", "name")
+    assert input.data["reps"] == 1
