@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-15，退休 builder 與角色 defaults
+**Last updated:** 2026-10-17，T1 初值選源
 
 # Measure domain support
 
@@ -15,6 +15,8 @@ helper 留在群組內 `_shared.py`。
 表單形狀與初值由各實驗的 `form.py` 提供 `make_form(ctx)`，共用生成器位於
 `zcu_tools.gui.form_adapter`。持久範本表由 `zcu_lab.templates.TEMPLATES` 擁有，
 組合根注入 Registry 與 Library 新建選單。不再維護 builder、Seed wrapper 或角色 default 表。
+
+`ctx_helpers.t1_initial_time` 集中 T1 衍生初值的選源。它從固定 capture 讀普通 T1，tone 掃描先讀歷史 tone T1，只有缺值才下探普通 T1。無 capture 或所有候選 leaf 缺失／null 時使用 30 µs 時間尺度；已存無效值回 None，讓衍生必填欄位留空。來源與 alias／path 錯誤仍傳遞，不寫回校準。各 Form 明確指定等待或掃描所需倍率，自然等待不使用 tone T1。
 
 `singleshot_shared.py` 從 AnalyzeRequest 的固定 Run ParameterContext 讀取分類、chi/kappa
 與可選分析校準。缺 capture 明示失敗；可選 leaf 缺少或 null 時交給 core 的既有預設。
