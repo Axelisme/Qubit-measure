@@ -1,11 +1,10 @@
 ---
 date: 2026-10-15
-status: active
-superseded_by: null
+status: superseded
+superseded_by: docs/discussions/2026-10-16-ftf-simulation-speedup.md
 related:
   - docs/adr/draft/simulation-environments.md
   - docs/discussions/2026-10-13-simulation-environment-ftf-preset.md
-  - .agent_state/plans/measure-simulation-environment/spec/offline-library.md
 basis:
   - "repo@57f3370d3e24301b7554bf90ef8180f20c9c6b23，文件整理時HEAD；研究來源與既有未提交文件不在此commit內"
   - "本機研究產物截至2026-10-15；Python 3.13.11、NumPy 2.4.6、SciPy 1.17.1、Numba 0.65.1、scqubits 4.3.1"
@@ -46,7 +45,7 @@ basis:
 
 四階在512個LO-reset雙路pulses後，population最大絕對差約2.65e−7，trace偏離約7.49e−7。Agent原先依保守研究門檻判為未通過長sequence。使用者指出：「看起來還是夠小啊？相對誤差多少？那四階與六階的模擬成本呢？」
 
-這個修正指出了驗收重點。2.65e−7相對0～1滿刻度只有.265ppm；相對實際population仍需對應分母，尤其近零leakage不能只看相對誤差。當時未保存逐項reference population，不能報實際最大相對誤差。研究門檻不是產品要求，最後應比較取得的frequency、π amplitude、RB／gate參數偏差與成本。四階仍是實用候選，並未正式採用或排除。完整數值見[雙amplitude報告](../../.agent_state/plans/measure-simulation-environment/scratch/ftf-dual-amplitude-report.md)。
+這個修正指出了驗收重點。2.65e−7相對0～1滿刻度只有.265ppm；相對實際population仍需對應分母，尤其近零leakage不能只看相對誤差。當時未保存逐項reference population，不能報實際最大相對誤差。研究門檻不是產品要求，最後應比較取得的frequency、π amplitude、RB／gate參數偏差與成本。四階仍是實用候選，並未正式採用或排除。完整數值記在雙 amplitude 報告中，該報告是本機工作檔，沒有入庫。
 
 ### 最新CPU表的成本
 
@@ -84,8 +83,16 @@ basis:
 ## 依據
 
 - 現行方向與引用原話：[模擬環境ADR](../adr/draft/simulation-environments.md#離線演化表與模擬時重用)。
-- Task入口：[spec](../../.agent_state/plans/measure-simulation-environment/spec.md)，細節：[離線表](../../.agent_state/plans/measure-simulation-environment/spec/offline-library.md)，成果與下一步：[本輪交接](../../.agent_state/plans/measure-simulation-environment/scratch/offline-library-handoff.md)。
-- [單路phase／amplitude](../../.agent_state/plans/measure-simulation-environment/scratch/ftf-phase-amplitude-report.md)、[frequency平台](../../.agent_state/plans/measure-simulation-environment/scratch/ftf-frequency-phase-report.md)、[完整spectroscopy原始JSON](../../.agent_state/plans/measure-simulation-environment/scratch/ftf-spectroscopy-table-probe.json)。
-- [GPU CZ](../../.agent_state/plans/measure-simulation-environment/scratch/ftf-batch-cz-report.md)、[CPU／GPU batch比較](../../.agent_state/plans/measure-simulation-environment/scratch/ftf-batch-sweep-report.md)。
+- 研究產物包括：task spec、離線表細節、本輪交接，以及單路 phase／amplitude、frequency 平台、完整 spectroscopy 原始 JSON、GPU CZ、CPU／GPU batch 比較等報告。它們都是本機工作檔，沒有入庫；本文的數字已寫在正文。
 
-Task與scratch是gitignored本機資料，這些連結不代表產物已隨repo commit保存。交接須另保留來源、JSON、NPZ及既有manifest。最新完整spectroscopy輪次尚未補專屬manifest；上述數字依原始JSON／log，不宣稱已有完整封存。本文的commit與外部版本見frontmatter，沒有新增第三方效能結論。
+這些研究產物沒有隨 repo commit 保存。交接須另保留來源、JSON、NPZ及既有manifest。最新完整spectroscopy輪次尚未補專屬manifest；上述數字依原始JSON／log，不宣稱已有完整封存。本文的commit與外部版本見frontmatter，沒有新增第三方效能結論。
+
+## 後記（2026-10-16）
+
+使用者在 sim-speed 的討論中指出：「因為一定有耗散，離線U表機制可以刪除了，除非你找到可以支援耗散的算法」。之後同意刪除離線 U 表與 exact density record。
+
+本文的離線建庫路線因此被取代：
+- 固定 DC、constant plateau 改由 flux 值量化加 secular 解析傳播子處理，在 runtime 以 lazy 方式建立並快取，含耗散。
+- gate 類區段改由 runtime 的分段 superoperator 快取處理。
+
+比較與理由見[FTF 模擬加速](2026-10-16-ftf-simulation-speedup.md)。刪除會等 measure-simulation-environment 收票後才進行，模擬環境 ADR 也會同步更新。

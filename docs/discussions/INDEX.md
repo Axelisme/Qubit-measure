@@ -11,7 +11,8 @@
 
 ## 模擬量測環境
 
-- 2026-10-15 [離線GPU建庫、分段演化與插值重用](2026-10-15-offline-propagator-library.md)：固定模型採離線建庫存檔、模擬載入插值；CPU可行性已有證據，GPU建表與檔案載入仍待驗證，四階精度以量測用途評估。
+- 2026-10-16 [FTF 模擬加速：快速路徑、shot 統計、分段快取與分派決策圖](2026-10-16-ftf-simulation-speedup.md)：主要瓶頸是 acquire 重複 reps × rounds 次。改為每點只算一次並用統計抽樣，各段依決策圖分派到 Dyson、週期、靜態、gate 快取、Floquet 或 numba DOP853，使用者規模從約 8 天降到 13 分鐘至 2 小時；只用 numba，刪除離線 U 表與 density record。
+- 2026-10-15 [離線GPU建庫、分段演化與插值重用](2026-10-15-offline-propagator-library.md)：固定模型採離線建庫存檔、模擬載入插值；CPU可行性已有證據，GPU建表與檔案載入仍待驗證，四階精度以量測用途評估。已被 2026-10-16 的 FTF 模擬加速取代：FTF 一定有耗散，離線 U 表會刪除，改用 runtime lazy 快取。
 - 2026-10-13 [模擬量測環境、低能投影與 FTF preset 的討論](2026-10-13-simulation-environment-ftf-preset.md)：早期選項與 prototype 的歷史快照；後續決策以[模擬環境 ADR](../adr/draft/simulation-environments.md)為準，文末後記說明已定案與仍待完成的範圍。
 
 ## Cfg 與表單
