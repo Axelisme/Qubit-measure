@@ -10,7 +10,10 @@ from numpy.typing import NDArray
 
 
 def quantize_ns(time_ns: float) -> float:
-    """Round absolute ns to the nearest 2 ns, ties to even, from origin zero."""
+    """Round finite absolute ns to the nearest 2 ns, ties to even, from origin zero.
+
+    Negative times are allowed. Non-finite time_ns raises ValueError.
+    """
     if not np.isfinite(time_ns):
         raise ValueError("event time must be finite")
     return float(2 * np.rint(time_ns / 2))
