@@ -399,22 +399,30 @@ def test_plot_axes_and_curves_observe_rendered_artists_only(surface, qapp) -> No
     assert driver.plots().axes == ()
 
 
-def test_file_chooser_enters_existing_path_through_real_modal_events(surface, tmp_path) -> None:
+def test_file_chooser_enters_existing_path_through_real_modal_events(
+    surface, tmp_path, qapp
+) -> None:
     native = tmp_path / "saved signal.h5"
     native.write_bytes(b"synthetic native file")
     button = QPushButton("Choose file")
     surface.setCentralWidget(button)
+    qapp.processEvents()
 
     def choose() -> None:
         filename, _ = QFileDialog.getOpenFileName(
-            surface, "Open native data", str(tmp_path), "Data (*.h5)",
+            surface,
+            "Open native data",
+            str(tmp_path),
+            "Data (*.h5)",
             options=QFileDialog.Option.DontUseNativeDialog,
         )
         surface.statusBar().showMessage(f"Selected {filename}")
 
     button.clicked.connect(choose)
     driver = _user_input.ComponentDriver(surface)
-    assert callable(getattr(driver, "choose_file", None)), "Driver must select files using real modal input"
+    assert callable(getattr(driver, "choose_file", None)), (
+        "Driver must select files using real modal input"
+    )
     driver.choose_file("Choose file", native)
     assert driver.dialogs() == ()
     assert driver.status().text == f"Selected {native}"
