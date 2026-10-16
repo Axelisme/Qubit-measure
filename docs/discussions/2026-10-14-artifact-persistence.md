@@ -3,7 +3,6 @@ date: 2026-10-14
 status: active
 superseded_by: null
 related:
-  - docs/adr/draft/artifact-persistence.md
   - docs/adr/0063-persistence-ownership.md
   - docs/adr/0069-experiment-core-and-frontends.md
   - docs/adr/0067-gui-application.md
@@ -17,7 +16,7 @@ basis:
 
 ## 結論
 
-決策見 [Artifact persistence ADR draft](../adr/draft/artifact-persistence.md)。實作排在 measure-form 與 cfgschema-retire 之後。本篇記推導過程、使用者的修正與被否決的路。
+決策見 [ADR-0063 保存權威](../adr/0063-persistence-ownership.md)、[ADR-0069 核心與讀回](../adr/0069-experiment-core-and-frontends.md) 及 [ADR-0067 GUI 職責](../adr/0067-gui-application.md)。實作排在 measure-form 與 cfgschema-retire 之後。本篇記推導過程、使用者的修正與被否決的路。
 
 - 設定快照的正本只在 `data.h5` 的 `/cfg`，Labber 照抄給 Log Browser；ledger `acquired` 事件刪除 `cfg_summary`。
 - Notebook 與 GUI 都讀 `data.h5`。

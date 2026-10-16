@@ -3,7 +3,7 @@ date: 2026-10-16
 status: active
 superseded_by: null
 related:
-  - docs/adr/draft/agent-interface-layers.md
+  - docs/adr/0075-agent-interface-layers.md
   - docs/adr/0053-owner-scheduler-and-gate-presence.md
   - docs/adr/0062-experiment-workflow.md
   - docs/discussions/2026-10-12-agent-interface-layers.md
@@ -25,7 +25,7 @@ Agent 或使用者主動送給執行中腳本的訊息，只支援兩類：
 
 不支援 (c)：帶資料、而且 Run 進行中就要反應的訊息。
 
-Recipe 改用和 workflow 一樣的有型別 `yield from` helper，並把「工作步驟」與「交還控制權」分成兩種呼叫。決策目前記在 storage-redesign map 的決策紀錄，之後寫進 [Agent 介面分層 ADR draft](../adr/draft/agent-interface-layers.md)。
+Recipe 改用和 workflow 一樣的有型別 `yield from` helper，並把「工作步驟」與「交還控制權」分成兩種呼叫。決策目前記在 storage-redesign map 的決策紀錄，之後寫進 [ADR-0075 Agent 介面分層](../adr/0075-agent-interface-layers.md)。
 
 ## 問題
 
@@ -104,7 +104,7 @@ Workflow 等裝置設定完成時，agent 可能送出停止命令，這就是�
 
 - 什麼時候重新評估 async：出現 (c) 類需求，或 ADR-0053 預留的 web 或 headless consumer。
 - 如果只需要讓腳本在自己選的點接收帶資料訊息，先考慮 `update = yield from env.receive(SpanUpdate)` 這類接收點。接收點由腳本宣告，訊息寫進 journal，仍在 generator 模型內，不需要 async。
-- Agent 介面分層 ADR draft 提到 workflow 的 agent yield 由另一項重構實作，但目前沒有相應程式碼。實作時，它的回覆屬於「交還控制權」這一類，應該用有型別的 `ask` 呼叫。
+- ADR-0075 Agent 介面分層提到 workflow 的 agent yield 由另一項重構實作，但目前沒有相應程式碼。實作時，它的回覆屬於「交還控制權」這一類，應該用有型別的 `ask` 呼叫。
 
 ## 依據
 

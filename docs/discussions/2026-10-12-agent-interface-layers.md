@@ -3,7 +3,7 @@ date: 2026-10-12
 status: active
 superseded_by: null
 related:
-  - docs/adr/draft/agent-interface-layers.md
+  - docs/adr/0075-agent-interface-layers.md
   - docs/discussions/2026-10-12-qca-frontend-evaluation.md
 basis:
   - main@9c956097f
@@ -13,7 +13,7 @@ basis:
 
 ## 結論
 
-measure-gui 相關的 MCP 依抽象程度分成四層：L0 實驗環境與硬體、L1 GUI／Notebook、L2 recipe、L3 workflow 與跨實驗分析。設計方向是把自動化往下推，agent 只在流程宣告的判斷交接處介入，層與層之間以工作點、ledger、資料檔等共享狀態交接。決策本身寫在 [Agent 介面分層 ADR draft](../adr/draft/agent-interface-layers.md)，詞彙寫在 [CONTEXT](../CONTEXT.md) 的「Agent 介面」一節。本篇記錄推導過程與對照。
+measure-gui 相關的 MCP 依抽象程度分成四層：L0 實驗環境與硬體、L1 GUI／Notebook、L2 recipe、L3 workflow 與跨實驗分析。設計方向是把自動化往下推，agent 只在流程宣告的判斷交接處介入，層與層之間以工作點、ledger、資料檔等共享狀態交接。決策本身寫在 [ADR-0075 Agent 介面分層](../adr/0075-agent-interface-layers.md)，詞彙寫在 [CONTEXT](../CONTEXT.md) 的「Agent 介面」一節。本篇記錄推導過程與對照。
 
 ## 問題
 
@@ -73,7 +73,7 @@ QCA 的模型：agent 決定每一步的參數、每一步之後的判斷與下�
 
 ## 依據
 
-- [Agent 介面分層 ADR draft](../adr/draft/agent-interface-layers.md)
+- [ADR-0075 Agent 介面分層](../adr/0075-agent-interface-layers.md)
 - [ADR-0068](../adr/0068-remote-transport.md) 的 recipe 優先與 RPC 排查指引
 - [zcu_lab workflows README](../../zcu_lab/workflows/README.md) 的接受度與 reason 提交
 - [measure MCP README](../../lib/zcu_tools/mcp/measure/README.md) 的 recipe 互動交接

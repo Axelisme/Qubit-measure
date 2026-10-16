@@ -1,8 +1,10 @@
 ---
-status: draft
+status: superseded
 ---
 
 # Pydantic 表單、輸入與宿主提交
+
+**狀態：** superseded。使用者於 2026-10-16 以「都採用建議」確認將穩定邊界併入 [[0065]]／[[0062]]，持久 Spec 與 Measure 推導由 [[0008]]／[[0073]] 承接。以下保留歷史設計與方法細節，現行契約以 accepted ADR 及 owner 文件為準，不另升一篇大型 ADR。
 
 **Last updated:** 2026-10-15，單層描述與懶建 editor
 
@@ -131,7 +133,7 @@ Engine 不保存 expression 原文，也不求值。Input JSON 的 expression �
 
 `.importlinter` 的 `form-core-no-ui-policy` 禁止 core 依賴 app、widgets、remote、session services/UI/adapters、experiment 與 Qt。`form-editor-no-host` 禁止 editor 依賴 app、remote、experiment 與 MCP。C18 保護 Engine 的 GUI independence，C16 禁止 framework import zcu_lab，C13 限制 MCP 的 remote 路徑。
 
-Core 到 gui.session.expression、core.complex_codec、resources.context、cfg_model 與 device 型別的依賴沿 C8/C9 的 frontend 方向。C11 保護 cfg_model 不反向依賴 GUI。具體 GUI 附件可以消費 framework 與 native workflow models。現有 C15 只保護 `zcu_lab.v2.**.core`，不涵蓋 `zcu_lab.workflows`。Native workflow definitions 不依賴 GUI 的規則目前以 source review 確認，尚無專屬 contract。
+Core 到 gui.session.expression、core.complex_codec、resources.context、cfg_model 與 device 型別的依賴沿 C8/C9 的 frontend 方向。C11 保護 cfg_model 不反向依賴 GUI。具體 GUI 附件可以消費 framework 與 native workflow models。現有 C15 只保護 `zcu_lab.v2.**.core`，不涵蓋 `zcu_lab.workflows`。`workflow-science-no-frontends` 與 `trend-science-no-frontends` 已保護其中列明的校準／workflow 及 overnight trend modules，不是對整個 zcu_lab.workflows 的禁令。其他 native definitions 的邊界仍需 source review，不藉本篇擴張 contract。
 
 公開 FormState、單層 describe、保存還原、Engine start/update/execute 與 journal 驗證資料契約。Qt editor 測試觀察 editor 到 FormState 的行為。具體表單測試觀察 defaults、result 與 native conversion。文件、設定、依賴宣告與 Qt-free 性質由直接 source review 及 import contracts 確認，不以 tests 另啟程序。
 

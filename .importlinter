@@ -252,7 +252,7 @@ layers =
     zcu_tools.gui.app
     zcu_tools.gui.interactive
 
-# D72: concrete definitions are supplied by the external composition root.
+# Concrete definitions are supplied by the external composition root.
 [importlinter:contract:framework-no-user]
 name = C16: the framework does not import the user experiment package
 type = forbidden
@@ -288,7 +288,7 @@ forbidden_modules =
     PySide2
     PySide6
 
-# D75: experiment cores remain independent of all GUI attachments and helpers.
+# Experiment cores remain independent of all GUI attachments and helpers.
 [importlinter:contract:user-core-no-gui]
 name = C15: user experiment cores do not depend on the GUI
 type = forbidden

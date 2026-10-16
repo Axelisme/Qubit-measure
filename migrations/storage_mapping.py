@@ -81,22 +81,30 @@ _CHANNEL_PATHS = (
 )
 
 _MODULE_KEY_PATHS = (
-    ("pi_gain", "qubit.module.x180.gain", "D122"),
-    ("pi_len", "qubit.module.x180.waveform.length", "D122"),
-    ("pi2_gain", "qubit.module.x90.gain", "D122"),
-    ("pi2_len", "qubit.module.x90.waveform.length", "D122"),
+    ("pi_gain", "qubit.module.x180.gain", "Pulse gain belongs to the x180 module"),
+    (
+        "pi_len",
+        "qubit.module.x180.waveform.length",
+        "Pulse length belongs to the x180 waveform",
+    ),
+    ("pi2_gain", "qubit.module.x90.gain", "Pulse gain belongs to the x90 module"),
+    (
+        "pi2_len",
+        "qubit.module.x90.waveform.length",
+        "Pulse length belongs to the x90 waveform",
+    ),
 )
 
 _REMOVED = (
-    ("readout_f", "D121: use resonator.freq"),
-    ("qub_ch", "D122: explicit band wiring replaces ambiguous channel"),
-    ("flx_bias", "D123: obsolete alias"),
-    ("mA_c", "D123: obsolete flux value"),
-    ("mA_e", "D123: obsolete flux value"),
-    ("resetf1_w", "D125: removed reset width"),
-    ("cur_jpa_A", "D126: obsolete JPA alias"),
-    ("fake_peak", "D127: fake adapter uses real fields/ext"),
-    ("log_scale", "D127: analysis parameter, not a stored component value"),
+    ("readout_f", "Use resonator.freq instead of the removed readout frequency alias"),
+    ("qub_ch", "Explicit band wiring replaces the ambiguous channel"),
+    ("flx_bias", "Obsolete alias; flux_bias holds the predictor's flux offset"),
+    ("mA_c", "Obsolete flux value"),
+    ("mA_e", "Obsolete flux value"),
+    ("resetf1_w", "Removed reset width"),
+    ("cur_jpa_A", "Obsolete JPA flux alias"),
+    ("fake_peak", "Fake adapter uses component fields and ext"),
+    ("log_scale", "Analysis parameter, not a stored component value"),
 )
 
 # Candidates follow existing role_table Lib priority, not source YAML order.
@@ -147,7 +155,7 @@ def build_mapping(
                 old_key=key,
                 target_path=path,
                 action="value",
-                reason="D120-D129/D133: working units unchanged",
+                reason="Preserve legacy working units without conversion",
             )
             for key, path in _VALUE_PATHS
         )
@@ -157,7 +165,7 @@ def build_mapping(
                 target_path=path,
                 action="value",
                 requires_keys=(unit_key,),
-                reason="D123/D126/D129: explicit flux unit required",
+                reason="Flux current or voltage requires an explicit unit key",
             )
             for key, path, unit_key in _FLUX_PATHS
         )
@@ -167,7 +175,7 @@ def build_mapping(
                 target_path=path,
                 action="value",
                 wrap_key="ch",
-                reason="D123/D129: explicit band/flux channel",
+                reason="Explicit band or flux wiring channel",
             )
             for key, path in _CHANNEL_PATHS
         )
@@ -176,7 +184,7 @@ def build_mapping(
                 old_key=key,
                 target_path=path,
                 action="stderr",
-                reason="D128: working-unit stderr",
+                reason="Store standard error in the value's working units",
             )
             for key, path in (
                 ("t1err", "Q1.t1"),
@@ -211,7 +219,7 @@ def build_mapping(
                 reference_path=reference,
                 reason="Fixed reset root; downstream selection unchanged"
                 if name in ("reset_10", "reset_120", "reset_bath", "reset_bath_e")
-                else "D156: named legacy candidate",
+                else "Preserve the named legacy module as an explicit library candidate",
             )
             for name, target, reference in _MODULE_NAMES
         ),

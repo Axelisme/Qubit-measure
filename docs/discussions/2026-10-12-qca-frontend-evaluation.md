@@ -4,7 +4,7 @@ status: active
 superseded_by: null
 related:
   - docs/discussions/2026-10-12-agent-interface-layers.md
-  - docs/adr/draft/agent-interface-layers.md
+  - docs/adr/0075-agent-interface-layers.md
 basis:
   - main@9c956097f
   - NVIDIA/Quantum-Calibration-Agent-Blueprint@d8d37bc（2026-07-29，v0.1.0）
@@ -90,7 +90,7 @@ NVIDIA Quantum-Calibration-Agent-Blueprint（下稱 QCA）不適合取代 measur
 - 關注重點是存檔格式，因此展開了五個角色與格式分層的討論。
 - 不加寫回實驗；關心的是參數如何在實驗之間傳遞。
 - Claude 與 Codex 都有桌面 app 並支援 MCP，「不用終端機的使用者需要 Web UI」不成立。
-- 進行中的[控制身份](../adr/draft/control-identity.md)重構把 seen guard、`CfgRef` 改為單一 holder 的控制權模型，回應了「MCP 協定對模型負擔過重」的缺點。重新取得控制權後仍需先重讀狀態。
+- 進行中的[控制身份](../adr/0070-control-identity.md)重構把 seen guard、`CfgRef` 改為單一 holder 的控制權模型，回應了「MCP 協定對模型負擔過重」的缺點。重新取得控制權後仍需先重讀狀態。
 
 ## 留下的問題
 

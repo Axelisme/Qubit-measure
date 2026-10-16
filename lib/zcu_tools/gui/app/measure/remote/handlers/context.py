@@ -164,9 +164,8 @@ def h_context_snapshot(
     segment. Path replies include target, aliases, path and value.
     No refresh, file I/O or asset materialization occurs. EMPTY/source faults
     retain owner errors. Unsupported/nonfinite values fail the entire read with
-    PRECONDITION_FAILED/unserializable_context, even in partial modes. Shared
-    dispatch records context seen only after successfully encoding a read that
-    omitted both parameters; explicit false/empty values are partial too.
+    PRECONDITION_FAILED/unserializable_context, even in partial modes.
+    This read does not establish a per-connection mutation baseline.
     """
     parameters = adapter.context_control.read_context()
     try:

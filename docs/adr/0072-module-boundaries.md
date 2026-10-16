@@ -50,6 +50,14 @@
 
 使用者於 2026-10-16 改定驗收方式：「算了，我認為不用真的測試ZCU_LAB移開後會不會出現錯誤。這中東西直接看有沒有import就好，偷偷做的在review也會被抓到，感覺是浪費時間測試」。Tests 不依賴 `zcu_lab` 的原則不變，由 review 檢查 import，必要時以 grep 輔助。不再暫移 `zcu_lab/` 跑 pytest，也不新增 `ZCU_LAB` 環境變數或 import hook。
 
+### Library 分組與 module slot
+
+Library 的設計是「元件 → 分組 → Pydantic model」。分組是擴充點，不是永久封閉的種類清單。現行格式仍只接受既有四分組；有第五種需求時才調整容器與 key 驗證，不把任意分組寫成目前已支援。
+
+原裁決日期未記錄，使用者於 2026-10-16 map 結案時確認沿用，原話「都採用建議」。原裁決原話為「我無法知道元件下會需要什麼欄位，我認為元件->xxx->pydantic model比較適合，不規定只有四種」及「我選D，但暫時沒有超過這四種的需求」。這裡選擇的是元件下自由命名分組的設計方向，不是當時就改格式。
+
+Component 的 module slot 指向下游實驗要使用的模組，不用來為每一種校準方案保存一個 slot。參數累積、哪些實驗只提參數、哪些收尾實驗建立或更新模組，都由實驗作者決定。Framework 不提供通用的齊全檢查或累積機制。具體欄位、reset 名稱及 pair 方向留在實驗作者文件，不提升成框架規則。使用者於 2026-10-16 以「都採用建議」確認這個歸檔範圍。
+
 ### Mux group 是實驗室的 component 定義
 
 `zcu_lab.components.MuxGroupSchema` 宣告 `group/mux`，沿既有 ComponentRegistry 註冊。

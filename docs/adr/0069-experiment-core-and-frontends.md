@@ -47,6 +47,20 @@ GUI 插件自行定義 typed 成功輸出的欄位。插件決定是否輸出選
 
 實驗跨入 zcu_tools 時使用公開絕對 import，預設置頂。只有具體重型依賴或初始化限制才延遲，不藉此外移模組或建立設定式 discovery。
 
+### Notebook 中斷與部分結果
+
+Schedule 在自己的 with 保護區域接住 KeyboardInterrupt，將同次 StopSignal 記為 interrupted，保留 buffer 內已完成的資料，讓實驗在離開 scope 後組成 partial result。Notebook 共用包裝層將正常返回的 interrupted 視為 stopped，發布可保存的 RunRecord，而非丟棄這次資料。Failed signal 與逃出 core.run 的例外仍失敗，不取代上一筆成功 record。
+
+這個責任放在 Schedule 與 Notebook 包裝層，不要求每個實驗各包一層 try/catch，也不加 stop widget、背景 thread 或事件 pump。保護區域外的中斷、重複中斷及收尾例外不保證產生 partial record，細節由 Schedule／Notebook 公開契約維護。
+
+原裁決日期未記錄，使用者於 2026-10-16 map 結案時確認沿用，原話「都採用建議」。原裁決原話為「但我不想要每個實驗都包一層try/catch，Schedule用with大概也很難攔截吧？」。
+
+### Experiment tag 與 adapter
+
+實驗核心宣告持久化 tag，GUI adapter 轉接或明確覆寫 experiment_tag。Framework 只讀 adapter 的公開 tag，不取得實驗類別，也不從泛型反推實驗類。這讓核心擁有持久化身分，同時保留 adapter 黑箱；代價是每個 adapter 必須明確接上 tag。
+
+原裁決日期未記錄，使用者於 2026-10-16 map 結案時確認沿用，原話「都採用建議」。原裁決原話為「插隊問題我的想法是tag應該放實驗類讓adapter轉接或複寫才對」及「不太建議暴露實驗類給框架，最好都經由adapter轉接」。
+
 ### 圖形產物與呈現
 
 `plots` 是本次操作的繪圖能力，不是全域服務查詢器。

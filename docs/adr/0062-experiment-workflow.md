@@ -4,7 +4,7 @@ status: accepted
 
 # ADR-0062 — 實驗執行與 workflow 編排
 
-**Last updated:** 2026-10-12，獨立 workflow 轉換與 frontend run 分工
+**Last updated:** 2026-10-16，補記 capability、driver limits 與 FormInput／Engine 提交分工
 
 關聯 [[0066]]，operation 與取消。保存權威見 [[0063]]，表單與 cfg 的使用邊界見 [[0065]]。
 
@@ -13,6 +13,20 @@ status: accepted
 一個 workflow run 可以執行多個步驟，也可以在暫停後重做未提交的步驟。Worker 返回不代表 run 終局。若每次返回都終局 operation，宿主就必須另外保管 progress、目標身分與 Resume admission，並協調多處狀態。
 
 具名 workflow 宣告 plan、tunables 與 init，步驟函式透過 env effects 執行實驗、操作裝置、畫圖與保存。Engine 迭代步驟並記錄結果，不決定具體實驗的校準接受度。Workflow 擁有 cfg 組裝、分析與正常步驟失敗的政策。非正常失敗的例外停止 run，不改標為 Pause。
+
+## Capability 與 driver limits
+
+Workflow 作者可在步驟開頭檢查所需的 soc、devices 或 context 並 fast fail。Engine 不維護 requires 宣告，也不保證啟動前完成 capability admission；未自行檢查的缺少 port 在使用時失敗。使用者於 2026-10-08 裁定：「workflow定義者可以開頭自己檢查是否有需要的而fast fail，這不由框架保證」，並補充「我認為可以信任workflow定義者，只要做best-effort防呆就好」。這不放寬各入口既有的 holder、RUN lease、driver safety 或當次硬體授權。
+
+裝置 limits 留在儀器 driver，不另外建立 workflow 宿主 limits policy。這讓各前端使用同一份領域檢查，而不是只有 workflow 被保護。Driver 失敗向外傳播，不 retry 或 clamp。使用者於 2026-10-08 說明：「儀器driver hardcode檢查，這樣最有保證且符合領域認知集中」，並確認既有 device 不需改動：「目前的device就已經可以了，為什麼要改device?」。
+
+Generator 協作、recipe 的取消結果與尚未落實的 workflow agent yield 見 [[0075]]。Engine 的 effect yield 不是 agent 問答入口。
+
+## 表單 input 與 Engine 普通值
+
+FormInput 保存 expression 原文；宿主捕捉求值環境，決定 Start、Apply、Discard 與 input 保存時機。Engine 只接收已驗證的普通 plan／tunables 值，擁有 numeric validation、revision、step capture 與 journal publication，不求值或保存 expression。Journal append 成功後才發布新值；stale revision、model error 或 append failure 不發布候選。當前 step 的 capture 不隨新 revision 改變，後續 step 或 Resume 才取最新值。
+
+Workflow host 只有在 Engine 成功 publication 後才接受 input／base。失敗保留可修正的 draft，不以輸入已編輯推定 Engine 已接受。這避免 Engine 維護另一份 input 狀態，代價是 Engine journal 無法重建當時的 expression。Form／editor 的共用與宿主提交邊界見 [[0065]]，具體接線見 [workflows host](../../lib/zcu_tools/gui/app/workflows/README.md)。使用者於 2026-10-16 以「都採用建議」確認將表單草稿的這些穩定邊界併入現行 ADR。
 
 ## 一個 run 的 operation
 
