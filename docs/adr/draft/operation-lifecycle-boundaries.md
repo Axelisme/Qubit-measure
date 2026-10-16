@@ -1,12 +1,16 @@
 # Operation 關閉與 disconnect 的未落實邊界（draft）
 
-**狀態：** 已核准待實作；以下不是現行保證。
+**狀態：** draft。Measure close 的背景 drain／逾時留窗已併入 [[0066]]，其餘保留未落實目標。舊核准未保存裁決日期與使用者原話，不把它當成 accepted 契約；本票只處理文件，不新增機制。
 
 ## Shutdown 期限與背景工作
 
 核准目標：關閉時停止接受新工作，請求可取消工作停止，等待必要的 domain 終局與 executor cleanup。期限到達只回報未完成；共用預設不自動強制退出。若 app 提供強制退出，必須明示未保存結果、未完成寫入和資源未清理的風險。
 
-現況證據：`gui/session/services/shutdown.py` 的 `tick()` 可以回報 `TIMED_OUT`；`gui/session/adapters/qt_shutdown_driver.py` 的 `_on_tick()` 對 `WAITING` 之外的狀態都執行 `_finish_shutdown()`，包括 `TIMED_OUT` 和 tick 例外。measure `ui/main_window.py::_perform_close()` 隨後 persist、停止 remote 並關窗，沒有檢查 executor quiescence。autofluxdep `ui/main_window.py::_perform_close()` 呼叫 `quiesce_background()`，但未使用其 bool 結果阻止 close。`OperationHandles.cancel_all()` 只列出 live handles，包含 data save 與 artifact batch save，但不涵蓋無 handle 的 auto-align 背景工作及單項同步 image export。autofluxdep 在 running RUN close 另有 app-local 確認與明示 Force Close 分支，不能視為其他工作的共用預設。
+現況證據：`gui/session/services/shutdown.py` 的 tick 可以回報 TIMED_OUT；`gui/session/adapters/qt_shutdown_driver.py` 的 `_on_tick()` 對 WAITING 之外的狀態都呼叫完成 callback，包括 TIMED_OUT 和 tick 例外。這個共用 driver 尚未改為逾時留窗。
+
+Measure 的 `Controller.close` 已先 stop_accepting 再 quiesce，逾時 raise TimeoutError。`MainWindow._perform_close` 成功 drain 才 teardown，逾時保留視窗並詢問再等或強關，見 [[0066]] 的 2026-10-15 裁決。這是 measure caller 的保護，不表示共用 driver 已完成。
+
+`OperationHandles.cancel_all()` 只列 live handles。Measure data save 與 artifact batch save 已同步完成，沒有 Save handle 或 Save worker。無 handle 的背景工作仍不能只靠 live handles 清單判定 quiescence。Autofluxdep 的 app-local 強關選項不能當作其他工作的共用預設。
 
 轉正條件：共用 timeout 不觸發預設 close callback；各 app 能回報未完成狀態並區分使用者明示的強制退出；需要等待的無 handle 背景工作（例如 auto-align）有 owner／executor 的可驗證 quiescence 契約，保存與 remote／資源 teardown 在必要工作清理後才執行。不以本 draft 指示當前實作立即退出或自動恢復。
 

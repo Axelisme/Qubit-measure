@@ -1,6 +1,6 @@
 # GUI 事件收合（draft）
 
-**狀態：** 已確認待實作；不代表現行架構。來源為原事件 attribution 決策的 subscriber-side coalescing 目標。
+**狀態：** draft，保留舊確認待實作目標；原確認日期與使用者原話未記錄。不代表現行架構。來源為原事件 attribution 決策的 subscriber-side coalescing 目標。
 
 ## 現況
 

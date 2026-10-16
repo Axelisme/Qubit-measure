@@ -4,7 +4,7 @@ status: active
 superseded_by: null
 related:
   - docs/discussions/2026-10-12-agent-interface-layers.md
-  - docs/adr/draft/agent-interface-layers.md
+  - docs/adr/0075-agent-interface-layers.md
 basis:
   - main@9c956097f
   - NVIDIA/Quantum-Calibration-Agent-Blueprint@d8d37bc（2026-07-29，v0.1.0）

@@ -22,6 +22,14 @@ None、library keys 與各 Inline kind 在同一個合併下拉。Key 只顯示�
 
 實驗 adapter 宣告 `Form(core_cfg, tree)`。Core annotations 定義可編輯形狀，tree 定義起始值、Slot、Template 與 lock。Open 與 Reset 計算 defaults。Memento 保存 Form input，不保存來源覆寫。Make_form、範本與固定來源的契約見 [[0073]]。Reset 可在同一資源內更換形狀與初值；成功後舊 editor state 不再承接寫入。
 
+## Input 與宿主提交
+
+FormInput 保存未填、null 與 expression 原文，FormModel 實例只承載求值後的普通值。FormState 擁有 draft／base，不持有 Engine revision。FormEditor 擁有尚未 parse 的文字與 local parse errors；宿主提交前檢查這些錯誤，再取得 Form result，不能把 preview 當成可提交結果。
+
+Host 決定 capture、Apply、Discard 與 input 保存時機。Library／writeback 提交持久 Spec；workflow host 交普通 plan／tunables 給 Engine，只有 Engine 成功 publication 後才接受 input／base，見 [[0062]]。Expression 留在 FormInput，不進 Engine journal。Host 保留 input 的責任不表示它擁有另一套 evaluator、validator 或 codec。
+
+共用核心不依賴 app、widgets、remote、experiment 或 Qt，editor 不依賴 app、remote、experiment 或 MCP。既有 `.importlinter` contracts `form-core-no-ui-policy` 與 `form-editor-no-host` 投影這兩個方向。使用者於 2026-10-16 以「都採用建議」確認將表單草稿的這些穩定邊界併入本篇及 [[0062]]，方法與欄位細節留在 owner 文件。
+
 ## Measure tab 的 input 與使用
 
 Input 保存 ordinary JSON、顯式 `{expr: text}`、complex tags 與 model field names。普通字串保持 literal。Preview 提供 ordinary leaf values，不代表可以 Run。Form errors 包含帶路徑的診斷，合法但尚未完成的 input 保持可編輯。結構或來源錯誤拒絕整批，不保留成功前綴。

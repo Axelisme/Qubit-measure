@@ -5,7 +5,7 @@ status: superseded
 # 量測成果 Artifact、設定快照與讀回
 
 **狀態：** 已結案，由 [[0063]] 的保存權威、[[0069]] 的 native restore 與 [[0067]] 的 GUI Artifact／Writeback 職責接替。原先等待 measure-form 與 cfgschema-retire 的排程不再是依賴。以下保留提案與當時的問題，現行契約以正式 ADR 為準。
-**關聯：** [[0063]] 的保存權威、[[0069]] 的核心與前端分工、[[0067]] 的 adapter interface、[[0072]] 的分層、[[0062]] 的 workflow 自行保存、[Measure 表單草稿](measure-form-derivation.md) 的 cfg schema 升版。推導過程見 [討論紀錄](../../discussions/2026-10-14-artifact-persistence.md)。
+**關聯：** [[0063]] 的保存權威、[[0069]] 的核心與前端分工、[[0067]] 的 adapter interface、[[0072]] 的分層、[[0062]] 的 workflow 自行保存、[Measure 表單推導](../0073-measure-form-derivation.md) 的 cfg schema 升版。推導過程見 [討論紀錄](../../discussions/2026-10-14-artifact-persistence.md)。
 
 ## 脈絡
 
