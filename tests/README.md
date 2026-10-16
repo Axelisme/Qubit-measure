@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-16，確定性等待政策
+**Last updated:** 2026-10-16，UI 驗證與確定性等待政策
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -28,6 +28,24 @@ recording adapter 放明確可 import 的支援模組，不把 `conftest.py` 當
 `test_*.py` 匯入。Fixture 的可見範圍取決於所在目錄，`scope=` 則決定實例的生命週期；
 不要為了少建幾次物件把 fixture 提升到更廣的可見範圍。Root fixture 必須具有全套件用途。
 相似 setup 只有在代表相同語意時才共用；不同責任不為減少行數而塞入帶多個旗標的萬用 fixture。
+
+## UI 驗證
+
+有 UI 改動的票，驗收須包含元件驅動情境。情境使用
+[`ComponentDriver`](gui/_user_input.py)，依使用者可見文字或既有 objectName 找元件，
+以真實鍵盤／滑鼠事件操作。Disabled 或 hidden 元件不繞過。
+啟動與 teardown 可用公開 fixture；情境本身只經 driver 操作與觀察。
+直接呼叫 Controller／`MainWindow` 指令方法的 smoke 不算 UI 驗證，review 須標出這項缺口。
+
+判定只讀 driver 的具名可見狀態快照，包括底部 status、元件 enabled／visible／tooltip、
+可見對話框及其文字、欄位顯示值與圖例文字。不讀 Controller、state store 或私有屬性。
+背景工作依下方的 [Qt owner-loop 等待](#qt-owner-loop-等待)規則，用公開終局條件等待。
+
+框架情境用合成 adapter，放在對應 owner 的 `tests/` 路徑。
+實驗定義的走查腳本用同一個 driver，放在各 task scratch，不 commit。
+每一步將視窗截圖存為 PNG 到呼叫端指定的 task scratch 或測試 `tmp_path`。
+Agent 在 review-done 前須跑完情境並親自看過每步截圖，留下精確重跑命令、截圖路徑與判讀結論。
+使用者走查只判斷外觀與操作手感，不承擔行為測試。
 
 ## 搬遷驗收
 

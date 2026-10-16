@@ -85,6 +85,8 @@ Worktree 只隔離檔案，不隔離 ZCU／儀器、GUI subprocess 或固定 por
 
 ### 4. 實作與測試
 
+有 UI 改動時，實作與 review 前讀 [UI 驗證](tests/README.md#ui-驗證)，依元件情境驗收。
+
 優先使用內建工具。子字串替換先用 function 或 MCP 工具，其次用 Python script，不用 `sed`。
 
 測試遵循以下契約；新增、拆分或搬遷測試前，先讀 [tests/README.md](tests/README.md) 的套件結構、fixture 與搬遷規則，找出既有行為的 owner：
