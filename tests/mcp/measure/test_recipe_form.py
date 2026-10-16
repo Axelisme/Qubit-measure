@@ -17,7 +17,7 @@ from zcu_tools.cfg_model import (
     TemplateDef,
 )
 from zcu_tools.gui.app.measure.remote.form_description import description_wire
-from zcu_tools.gui.app.measure.remote.form_observation import form_writes, observe_form
+from zcu_tools.gui.app.measure.remote.form_observation import observe_form
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
 from zcu_tools.gui.form import (
     FormEnv,
@@ -77,9 +77,6 @@ class FormGui(LookbackGui):
 
     def __call__(self, method: str, params: dict[str, object]) -> dict[str, object]:
         if method in ("tab.reset_cfg", "tab.get_cfg"):
-            return dict(observe_form(self.owner))
-        if method == "tab.edit_recipe_fields":
-            self.owner.write(form_writes(params["edits"]))
             return dict(observe_form(self.owner))
         if method == "tab.run_start":
             assert params == {"tab_id": "t"}

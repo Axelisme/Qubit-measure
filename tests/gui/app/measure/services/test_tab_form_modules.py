@@ -1,5 +1,7 @@
 """Execution module observations and guarded conversion through the Form owner."""
 
+from collections.abc import Mapping
+
 import pytest
 from pydantic import BaseModel
 from zcu_tools.cfg_model import (
@@ -13,7 +15,7 @@ from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionReason,
 )
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
-from zcu_tools.gui.form import FormEnv, FormPathError
+from zcu_tools.gui.form import FormEnv, FormPath, FormPathError, Option
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
@@ -371,7 +373,7 @@ def test_recipe_nested_and_extra_selectors_require_explicit_ancestor_copies() ->
 
     class ExtraSelectors(FormModel):
         @classmethod
-        def options(cls, env: FormEnv):
+        def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
             return {("reference",): field.options(env)}
 
     extras = create_model(
