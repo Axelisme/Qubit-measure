@@ -220,7 +220,9 @@ def tree_surface(surface, qapp):
     return surface, tree
 
 
-def test_visible_tree_rows_and_real_expand_reveal_displayed_values(tree_surface) -> None:
+def test_visible_tree_rows_and_real_expand_reveal_displayed_values(
+    tree_surface,
+) -> None:
     window, _ = tree_surface
     driver = _user_input.ComponentDriver(window)
     before = driver.visible().tree_rows
@@ -235,7 +237,9 @@ def test_visible_tree_rows_and_real_expand_reveal_displayed_values(tree_surface)
     ]
 
 
-def test_tree_expand_refuses_disabled_hidden_and_collapsed_descendants(tree_surface) -> None:
+def test_tree_expand_refuses_disabled_hidden_and_collapsed_descendants(
+    tree_surface,
+) -> None:
     window, tree = tree_surface
     driver = _user_input.ComponentDriver(window)
     with pytest.raises(LookupError, match="peak.*0 candidates"):
@@ -251,7 +255,9 @@ def test_tree_expand_refuses_disabled_hidden_and_collapsed_descendants(tree_surf
     assert not driver.visible().tree_rows[0].expanded
 
 
-def test_tree_expand_reports_missing_and_ambiguous_visible_paths(tree_surface, qapp) -> None:
+def test_tree_expand_reports_missing_and_ambiguous_visible_paths(
+    tree_surface, qapp
+) -> None:
     from PyQt6.QtWidgets import QTreeWidgetItem
 
     window, tree = tree_surface
@@ -264,7 +270,9 @@ def test_tree_expand_reports_missing_and_ambiguous_visible_paths(tree_surface, q
         driver.expand_tree(("missing",), object_name="parameters")
 
 
-def test_wide_checkbox_click_reaches_indicator_and_reports_visible_status(surface, qapp) -> None:
+def test_wide_checkbox_click_reaches_indicator_and_reports_visible_status(
+    surface, qapp
+) -> None:
     from PyQt6.QtWidgets import QCheckBox
 
     checkbox = QCheckBox("Use Simulate Env")
@@ -282,7 +290,9 @@ def test_wide_checkbox_click_reaches_indicator_and_reports_visible_status(surfac
     assert driver.status().text == "on"
 
 
-def test_checkbox_snapshot_tracks_binary_clicks_and_disabled_hidden_noops(surface, qapp) -> None:
+def test_checkbox_snapshot_tracks_binary_clicks_and_disabled_hidden_noops(
+    surface, qapp
+) -> None:
     from PyQt6.QtWidgets import QCheckBox
 
     checkbox = QCheckBox("Use Simulate Env")

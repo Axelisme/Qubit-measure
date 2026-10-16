@@ -12,6 +12,7 @@ from PyQt6.QtGui import QKeyEvent, QMouseEvent
 from PyQt6.QtWidgets import (
     QAbstractButton,
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QFormLayout,
@@ -19,8 +20,12 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QPlainTextEdit,
     QStatusBar,
+    QStyle,
+    QStyleOptionButton,
     QTabBar,
     QTextEdit,
+    QTreeWidget,
+    QTreeWidgetItem,
     QWidget,
 )
 
@@ -69,6 +74,21 @@ class WidgetObservation:
     visible: bool  # Effective Qt visibility, including hidden ancestors.
     object_name: str  # Stable objectName if provided by the UI, otherwise empty.
     tooltip: str  # Hover help; empty when hidden or without a tooltip.
+    checked: (
+        bool | None
+    )  # Visible checkable button state; None if hidden or not checkable.
+
+
+@dataclass(frozen=True)
+class TreeRowObservation:
+    """One on-screen tree row, without model data or retained Qt objects."""
+
+    tree_name: str  # Containing tree's objectName; empty if the UI provides none.
+    path: tuple[str, ...]  # Root-to-row captions from column zero, not domain keys.
+    columns: tuple[
+        str, ...
+    ]  # Displayed column texts in left-to-right order, no units converted.
+    expanded: bool  # Whether the row currently exposes its children.
 
 
 @dataclass(frozen=True)
@@ -76,6 +96,9 @@ class VisibleObservation:
     """Visible widgets only, each described without retaining a Qt object."""
 
     widgets: tuple[WidgetObservation, ...]
+    tree_rows: tuple[
+        TreeRowObservation, ...
+    ]  # Rows intersecting visible tree viewports.
 
 
 @dataclass(frozen=True)
@@ -204,19 +227,116 @@ class ComponentDriver:
             visible=widget.isVisible(),
             object_name=widget.objectName(),
             tooltip=widget.toolTip() if widget.isVisible() else "",
+            checked=(
+                widget.isChecked()
+                if widget.isVisible()
+                and isinstance(widget, QAbstractButton)
+                and widget.isCheckable()
+                else None
+            ),
         )
 
     def visible(self) -> VisibleObservation:
         """Snapshot all visible widgets for completion predicates with changing captions."""
         return VisibleObservation(
-            tuple(self._observe_widget(w) for w in self._widgets() if w.isVisible())
+            widgets=tuple(
+                self._observe_widget(w) for w in self._widgets() if w.isVisible()
+            ),
+            tree_rows=tuple(
+                TreeRowObservation(
+                    tree.objectName(),
+                    path,
+                    tuple(item.text(i) for i in range(tree.columnCount())),
+                    item.isExpanded(),
+                )
+                for tree in self._window.findChildren(QTreeWidget)
+                if tree.isVisible()
+                for item, path in self._visible_tree_items(tree)
+            ),
         )
 
+    @staticmethod
+    def _visible_tree_items(
+        tree: QTreeWidget,
+    ) -> list[tuple[QTreeWidgetItem, tuple[str, ...]]]:
+        rows: list[tuple[QTreeWidgetItem, tuple[str, ...]]] = []
+        viewport = tree.viewport()
+        assert viewport is not None
+
+        def visit(item: QTreeWidgetItem, parent: tuple[str, ...]) -> None:
+            if item.isHidden():
+                return
+            path = (*parent, item.text(0))
+            if viewport.rect().intersects(tree.visualItemRect(item)):
+                rows.append((item, path))
+            if item.isExpanded():
+                for index in range(item.childCount()):
+                    child = item.child(index)
+                    if child is not None:
+                        visit(child, path)
+
+        for index in range(tree.topLevelItemCount()):
+            item = tree.topLevelItem(index)
+            if item is not None:
+                visit(item, ())
+        return rows
+
+    def expand_tree(self, path: tuple[str, ...], *, object_name: str) -> None:
+        """Expand an on-screen QTreeWidget row by clicking it then pressing Right.
+
+        path is the exact root-to-row column-zero caption tuple, not model keys.
+        Only rows intersecting the viewport are candidates: collapsed ancestors,
+        hidden rows and off-screen rows are not bypassed or scrolled into view.
+        Missing/ambiguous trees or visible paths raise LookupError with candidates;
+        a non-tree selector raises TypeError. Disabled, hidden or modal-blocked
+        trees are no-ops. Already-expanded rows are left unchanged.
+        """
+        tree = self._find(None, object_name)
+        if not isinstance(tree, QTreeWidget):
+            raise TypeError(f"{object_name!r} is not a QTreeWidget")
+        if not self._can_interact(tree):
+            return
+        candidates = [
+            item
+            for item, captions in self._visible_tree_items(tree)
+            if captions == path
+        ]
+        item = _unique(
+            repr(path),
+            candidates,
+            [
+                repr(tuple(i.text(c) for c in range(tree.columnCount())))
+                for i in candidates
+            ],
+        )
+        if not item.isExpanded() and item.flags() & Qt.ItemFlag.ItemIsEnabled:
+            rect = tree.visualItemRect(item)
+            viewport = tree.viewport()
+            assert viewport is not None
+            mouse_click(viewport, QPoint(rect.left() + 10, rect.center().y()))
+            key_click(tree, Qt.Key.Key_Right)
+        QApplication.processEvents()
+
     def click(self, text: str | None = None, *, object_name: str | None = None) -> None:
-        """Send a left click at the matched widget's centre, if usable."""
+        """Click a usable widget with real mouse events.
+
+        Checkboxes use the style's indicator centre: a stretched checkbox's
+        widget centre can be outside Qt's clickable label/indicator region.
+        Other widgets use their rectangle centre. Availability rules are unchanged.
+        """
         widget = self._find(text, object_name)
         if self._can_interact(widget):
-            mouse_click(widget, widget.rect().center())
+            point = widget.rect().center()
+            if isinstance(widget, QCheckBox):
+                option = QStyleOptionButton()
+                option.initFrom(widget)
+                option.text = widget.text()
+                style = widget.style()
+                assert style is not None
+                point = style.subElementRect(
+                    QStyle.SubElement.SE_CheckBoxIndicator, option, widget
+                ).center()
+            mouse_click(widget, point)
         QApplication.processEvents()
 
     def enter_text(
