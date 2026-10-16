@@ -35,8 +35,12 @@ def kernel_case(request: pytest.FixtureRequest) -> KernelCase:
         tones=np.ones(count, dtype=np.int64),
         tone_port=np.zeros((count, 1), dtype=np.int64),
         tone_frequency_ghz=np.array([0.7, 0.7, 0.7, 0, -0.4, 0.13, 0.7, 0.7])[:, None],
-        tone_amplitude=np.array([0.25, 0.08, 0.08, -0.04, 0.15, 0.0006, 0.0006, 0.04])[:, None],
-        tone_theta_rad=np.array([0.3, 0.123, 5.678, -1.53, 0.922, 2.41, 0.66, -3.1])[:, None],
+        tone_amplitude=np.array([0.25, 0.08, 0.08, -0.04, 0.15, 0.0006, 0.0006, 0.04])[
+            :, None
+        ],
+        tone_theta_rad=np.array([0.3, 0.123, 5.678, -1.53, 0.922, 2.41, 0.66, -3.1])[
+            :, None
+        ],
         tone_envelope=np.zeros((count, 1), dtype=np.int64),
         tone_envelope_offset_ns=np.ones((count, 1)) * 7,
         envelopes=(EnvelopeSpec("constant"),),
@@ -66,21 +70,36 @@ def test_guard_only_accepts_one_constant_tone(kernel_case: KernelCase) -> None:
     table = replace(
         case.table,
         tones=np.full(len(rows), 2, dtype=np.int64),
-        **{name: np.repeat(getattr(case.table, name), 2, axis=1) for name in (
-            "tone_port", "tone_frequency_ghz", "tone_amplitude", "tone_theta_rad",
-            "tone_envelope", "tone_envelope_offset_ns",
-        )},
+        **{
+            name: np.repeat(getattr(case.table, name), 2, axis=1)
+            for name in (
+                "tone_port",
+                "tone_frequency_ghz",
+                "tone_amplitude",
+                "tone_theta_rad",
+                "tone_envelope",
+                "tone_envelope_offset_ns",
+            )
+        },
     )
     assert not case.kernel.guard(table, rows, case.source, case.budget).any()
 
 
-def test_keys_share_phase_but_distinguish_model_and_drive(kernel_case: KernelCase) -> None:
+def test_keys_share_phase_but_distinguish_model_and_drive(
+    kernel_case: KernelCase,
+) -> None:
     case = kernel_case
     rows = np.array([1, 2], dtype=np.int64)
     keys = case.kernel.prepare_keys(case.table, rows)
     assert keys.dtype.itemsize > 0
     assert keys[0] == keys[1]
-    for field in ("duration_ns", "level", "tone_frequency_ghz", "tone_amplitude", "tone_port"):
+    for field in (
+        "duration_ns",
+        "level",
+        "tone_frequency_ghz",
+        "tone_amplitude",
+        "tone_port",
+    ):
         values = getattr(case.table, field).copy()
         values[2] += 1
         changed = replace(case.table, **{field: values})
@@ -103,6 +122,8 @@ def test_long_segment_at_tight_budget(kernel_case: KernelCase) -> None:
         case.kernel.prepare_keys(table, row), table, row, case.source, budget
     )
     actual = case.states[row].copy()
-    case.kernel.apply(prepared, np.array([0], dtype=np.int64), table, row, actual, budget)
+    case.kernel.apply(
+        prepared, np.array([0], dtype=np.int64), table, row, actual, budget
+    )
     expected = reference(replace(case, table=table), 1, case.states[1])
     assert_budget(actual[0], expected, budget)
