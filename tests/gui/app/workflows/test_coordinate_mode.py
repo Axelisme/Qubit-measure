@@ -10,7 +10,6 @@ from zcu_tools.program.v2.sweep import SweepCfg
 
 from tests.gui._user_input import ComponentDriver
 
-from ._start_fakes import StartHarness
 from ._synthetic import Context, Plan, TunablesForm, sample_step
 
 
@@ -18,7 +17,9 @@ class SweepPlanCfg(ConfigBase):
     sweep: SweepCfg
 
 
-def test_registered_workflow_sweep_restores_center_expression(qapp, tmp_path: Path):
+def test_registered_workflow_sweep_restores_center_expression(
+    qapp, tmp_path: Path, attachment
+):
     form = Form(SweepPlanCfg, {"sweep": Range.between(10, 4, 4)})
     registration = WorkflowAttachment(
         step=sample_step,
@@ -28,7 +29,7 @@ def test_registered_workflow_sweep_restores_center_expression(qapp, tmp_path: Pa
         knobs_to_cfg=TunablesForm.to_cfg,
         seed=lambda plan, value: Context(1),
     )
-    harness = StartHarness()
+    _, harness, _ = attachment
     window = WorkflowWindow(
         harness.state,
         harness.services,
@@ -56,7 +57,7 @@ def test_registered_workflow_sweep_restores_center_expression(qapp, tmp_path: Pa
         saved = window.capture_persisted_state()
         window.prepare_forms()
         driver.screenshot(tmp_path / "04-workflow-reset.png")
-        assert driver.observe(object_name="form.input.sweep.start").text == "10.0"
+        assert float(driver.observe(object_name="form.input.sweep.start").text) == 10.0
         window.restore_persisted_state(saved)
         driver.screenshot(tmp_path / "05-workflow-restored.png")
         assert driver.observe(object_name="form.input.sweep.center").text == "3 + 4"
