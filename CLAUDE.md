@@ -141,6 +141,7 @@ Agent plans 與 worktree 工作檔放在 gitignored `.agent_state/`。
 
 - 每個討論濃縮成一篇 `YYYY-MM-DD-slug.md`，並在 `INDEX.md` 依主題加一行：日期、標題連結、一句結論。
 - 快照不擁有決策。決策寫進 ADR，討論只連結；討論中的事實由程式碼、ADR 或 README 擁有時，附路徑而不複製。
+- 快照必須 self-contained：只連結 tracked 檔案或外部公開來源，不引用 `.agent_state/` 或其他 gitignored、本機路徑。當時依據未入庫的工作檔時，把結論與必要事實寫進正文，並註明原始工作檔未入庫。
 - Frontmatter 記 `date`、`status`（`active`／`superseded`）、`superseded_by`、`related`，以及 `basis`：當時依據的本 repo commit 與外部來源版本。
 - 正文依序寫結論、問題、考慮過的選項與比較、被否決的選項與理由、留下的問題、依據。保留使用者的判斷與修正；省略工具輸出、對話往返與可從程式碼讀到的事實。
-- 寫完後不改寫成現在式。發現錯誤時在文末加「後記」；被新討論或 ADR 取代時改 `status` 並填 `superseded_by`。
+- 寫完後不改寫成現在式。發現錯誤時在文末加「後記」；被新討論或 ADR 取代時改 `status` 並填 `superseded_by`。移除本機路徑、補成 self-contained 不算改寫。

@@ -91,6 +91,6 @@ core 的 `Annotated` 或 adapter 的 overlay。使用者：「我想放core會�
 
 ## 依據
 
-- 原型（未追蹤）：`.agent_state/maps/storage-redesign/scratch/prototype-form-derivation/`，用真實的 `PROGRAM_SHAPES` 與 spec 型別推導 twotone/freq 與 onetone/flux_dep，diff 舊 builder 只剩已知三項。
+- 原型（一次性工作檔，未入庫）：用真實的 `PROGRAM_SHAPES` 與 spec 型別推導 twotone/freq 與 onetone/flux_dep，diff 舊 builder 只剩已知三項。
 - 現況程式：`zcu_lab/v2/_support/measure/`（schema_builder、seeds、defaults/role_table）、`lib/zcu_tools/experiment/cfg_editing/catalog.py`、`lib/zcu_tools/gui/app/measure/adapter/analyze_params.py`（`Annotated` 推導的先例）。
 - 相關 ADR：[0012](../adr/0012-cfgbuilder-value-layer-fluent-assembly.md)、[0009](../adr/0009-spec-value-fluent-and-literal-lock.md)、[0065](../adr/0065-cfg-editing.md)。

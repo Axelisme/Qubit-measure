@@ -108,8 +108,8 @@ Workflow 等裝置設定完成時，agent 可能送出停止命令，這就是�
 
 ## 依據
 
-- 調查紀錄：`.agent_state/maps/storage-redesign/scratch/yield-vs-async-research.md`，含檔案與行號。
+- 調查結果：檔案、yield 數量與機制已濃縮於上文「現況」；含行號的原調查筆記未入庫。
 - `lib/zcu_tools/mcp/measure/recipe.py`、`recipe_execution.py`
 - `lib/zcu_tools/experiment/workflows/execution.py`、`env.py`、`effects.py`、`models.py`、`clock.py`
 - `docs/adr/0053-owner-scheduler-and-gate-presence.md`
-- `.agent_state/proposals/2026-10-06-autofluxdep-workflow-engine.md`
+- 2026-10-06 的 autofluxdep workflow 引擎提案（未入庫）：使用者當時否決「workflow 寫成普通函式」，要求保留 `yield` 控制 workflow 的進行，見上文「現況」。

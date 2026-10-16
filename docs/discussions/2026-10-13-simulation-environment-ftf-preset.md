@@ -124,9 +124,7 @@ I/Q-only conditional Ramsey 找到 hold 約 423.39 ns，新資料確認 0.99805�
 ## 依據
 
 - 已確認方向：[模擬環境 ADR draft](../adr/draft/simulation-environments.md)。現況分工見其引用的啟動、裝置環境及模組定位 ADR。
-- 本機工作紀錄：`.agent_state/wayfinder/measure-simulation/`，包含 decision map、使用者引文與逐輪 evidence。此目錄 gitignored，不隨一般 clone 提供。
-- 本機數值依據：同任務的 `evidence/007-multiqubit-dressed-prototype.md`、`evidence/007-conditional-ramsey-prototype.md`、`evidence/004-readout-prototype.md`。
-- 程式、raw I/Q、S12、JSON 結果及 SHA256 manifest：同任務的 `prototypes/runtime-cost/`。它們是可丟棄的 prototype，未併入正式模擬器。本快照保存結論與限制，不代替這些原始產物。
+- 當時的工作紀錄（decision map、使用者引文、逐輪 evidence）、多 qubit dressed、conditional Ramsey 與讀出的數值 prototype，以及其程式、raw I/Q、S12、JSON 結果與 SHA256 manifest，都是一次性工作檔，未入庫。本快照保存其結論與限制，不代替原始產物。
 - Frontmatter 的 repo commits 是各輪當時的 tracked tree 基準，不包含 gitignored prototype；軟體版本以各輪 manifest 為準。
 
 ## 後記（2026-10-14）
@@ -135,4 +133,4 @@ I/Q-only conditional Ramsey 找到 hold 約 423.39 ns，新資料確認 0.99805�
 
 完整 YAML schema／預設值、具體 Python 型別、保存與遷移細節及完整效能仍未完成，不能將前文「留下的問題」全部視為已結案。T1／pointwise Q／Purcell 的單位修正另已交付，契約見 [ADR-0071](../adr/0071-coherence-units.md)。原型不是完整 FTF 或每點效能的驗收證據。
 
-本機規格交接入口為 `.agent_state/plans/measure-simulation-environment/spec.md`，研究狀態見該 task 的 `scratch/evidence-map.md`。這些是 gitignored 工作文件，不隨一般 clone 提供；tracked 的現行決策請讀 ADR。
+當時的規格交接與研究狀態是未入庫的工作文件；現行決策請讀 ADR。
