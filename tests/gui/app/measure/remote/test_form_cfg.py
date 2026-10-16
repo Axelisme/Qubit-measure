@@ -769,3 +769,94 @@ def test_inline_noop_takes_busy_reentry_and_lifetime_guards(
     finally:
         if tab in fixture.ctrl.list_tab_ids():
             fixture.ctrl.tab_control.close_tab(tab)
+
+
+def test_recipe_rpc_logical_batch_invalid_draft_and_atomic_rejection(form_rpc) -> None:
+    fixture, tab, rpc = form_rpc
+    owner = fixture.ctrl.cfg_resources.lookup(tab)
+    base = owner.editor_state.base.data
+    version_key = f"tab:{tab}:cfg"
+    version = fixture.state.version.get(version_key)
+    notifications: list[str] = []
+    owner.subscribe(lambda: notifications.append("changed"))
+    changed = rpc.call("tab.edit_recipe_fields", {
+        "tab_id": tab,
+        "edits": [{"path": ["gain"], "value": 0.75},
+                  {"path": ["sweep", "start"], "value": 8.0}],
+    })
+    assert changed["ok"], changed
+    assert changed["result"] == {"changed": True, "errors": []}
+    assert notifications == ["changed"]
+    assert fixture.state.version.get(version_key) == version + 1
+    assert owner.editor_state.base.data == base
+    before = owner.input.data
+    rejected = rpc.call("tab.edit_recipe_fields", {
+        "tab_id": tab,
+        "edits": [{"path": ["gain"], "value": 0.1},
+                  {"path": ["missing"], "value": 1}],
+    })
+    assert not rejected["ok"], rejected
+    assert rejected["error"]["reason"] == "form_path"
+    assert rejected["error"]["data"]["form_path"] == ["missing"]
+    assert rejected["error"]["data"]["edit_index"] == 1
+    assert owner.input.data == before
+    assert notifications == ["changed"]
+    invalid = rpc.call("tab.edit_recipe_fields", {
+        "tab_id": tab,
+        "edits": [{"path": ["gain"], "value": {"expr": "1 / 0"}}],
+    })
+    assert invalid["ok"], invalid
+    assert invalid["result"]["changed"] is True
+    assert invalid["result"]["errors"][0]["path"] == ["gain"]
+    assert owner.input.data["gain"] == {"expr": "1 / 0"}
+
+
+@pytest.mark.parametrize("selection", [
+    {"action": "use_library"},
+    {"action": "use_library", "key": None},
+    {"action": "use_library", "key": " "},
+    {"action": "use_inline", "key": None},
+    {"action": "disable", "key": "unexpected"},
+])
+def test_recipe_selector_rejects_bad_key_shape_without_effects(form_rpc, selection) -> None:
+    fixture, tab, rpc = form_rpc
+    owner = fixture.ctrl.cfg_resources.lookup(tab)
+    before = owner.input.data
+    result = rpc.call("tab.select_recipe_module", {
+        "tab_id": tab, "path": ["pulse"], **selection,
+    })
+    assert not result["ok"], result
+    assert result["error"]["code"] == "invalid_params"
+    assert result["error"]["reason"] == "form_errors"
+    assert owner.input.data == before
+
+
+def test_recipe_rpc_read_and_noop_preserve_observer_busy_and_notification_policy(form_rpc) -> None:
+    fixture, _, rpc = form_rpc
+    fixture.registry.register("logical-module", ModuleRpcAdapter)
+    tab = fixture.ctrl.new_tab("logical-module")
+    try:
+        owner = fixture.ctrl.cfg_resources.lookup(tab)
+        owner.write({("pulse", "kind"): "inline"})
+        version_key = f"tab:{tab}:cfg"
+        version = fixture.state.version.get(version_key)
+        selection = {"tab_id": tab, "path": ["pulse"], "action": "use_inline"}
+        noop = rpc.call("tab.select_recipe_module", selection)
+        assert noop["ok"], noop
+        assert noop["result"]["changed"] is False
+        assert noop["result"]["field"]["selector"]["mode"] == "inline"
+        assert fixture.state.version.get(version_key) == version
+        fixture.state.set_tab_running(tab, running=True)
+        busy = rpc.call("tab.select_recipe_module", selection)
+        assert not busy["ok"]
+        assert busy["error"]["reason"] == "mutation_blocked"
+        fixture.ctrl.control_identity.reclaim_local()
+        read = rpc.call("tab.read_recipe_field", {"tab_id": tab, "path": ["pulse"]})
+        assert read["ok"], read
+        assert read["result"]["selector"]["mode"] == "inline"
+        denied = rpc.call("tab.select_recipe_module", selection)
+        assert not denied["ok"]
+        assert denied["error"]["reason"] == "not_holder"
+    finally:
+        fixture.state.set_tab_running(tab, running=False)
+        fixture.ctrl.tab_control.close_tab(tab)
