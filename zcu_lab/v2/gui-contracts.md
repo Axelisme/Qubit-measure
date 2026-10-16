@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-16，mux FIT／capture writeback
+**Last updated:** 2026-10-17，共用初值政策的 owner 邊界
 
 # Measure GUI contracts
 
@@ -25,8 +25,10 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned 
   `initial_delay` 維持 core-owned hidden default。auto optimizer 的 sweep `expts`
   是 allocation resolution hint，flux 則使用中性 device-value contract。完整家族
   契約見 `measure-authoring.md`。
-- `_support/measure/` 是 private package，只放至少被兩個 concrete adapters 共用的 mechanics；它
-  不擁有 registry order，也不 import concrete adapter。
+- `_support/measure/` 是 private package，提供至少被兩個 concrete adapters 共用的 mechanics。
+  已定案且供多個 Form 共用的初值政策也可集中在具名 domain helper，目前限 T1 時間尺度選源與 Rabi 的來源、有效性及首次初值。
+  各 Form 仍明確選擇倍率或場景，並組合表單結構。校準政策不進入 generic framework，也不擴及 writeback 或實驗順序。
+  本 package 不擁有 registry order，也不 import concrete adapter。
 - `_support/resonator.py` 不依賴 GUI，供 onetone/freq core 與 mux adapter 共用模型／畫圖 mechanics。Selection、delay mode 與 writeback policy 留 caller，不讓 core 經 `_support/measure/` 載入 GUI。
 - `../definitions.py` 明確列出可重載的 adapter catalog；`../components/` 擁有 startup-only component schema 註冊。
 - Reload experiments 會重建 concrete adapters 及 family helpers，但保留 framework `BaseAdapter` 與 `_support/measure/`。
@@ -91,10 +93,10 @@ policy 留在 concrete adapter，因此使用者不必跨 `spec` / `default_valu
 
 ## 修改原則
 
-1. 單一實驗的設定、文字與流程 policy 留在 authoritative adapter file。
-2. helper 確實出現第二個 caller，且有清楚 mechanics seam 時，才移入 `_support/measure/`。
+1. 單一實驗的初值政策留在其 `form.py`；其他設定、文字與流程 policy 留在 authoritative adapter file。
+2. helper 確實出現第二個 caller，且有清楚 mechanics seam 或符合上述共用初值政策邊界時，才移入 `_support/measure/`。
 3. 不以 forwarding wrapper 隱藏單行邏輯；不讓 `_support` 解讀 registry key 或實驗順序。
 4. 新增 adapter 時同步加入 `../definitions.py` 與 operator guide。實驗定義以直接 review、表單開啟 smoke 與離線合成資料保存／讀回走查驗證，不寫 lab 專屬 pytest，也不建立 `tests/zcu_lab/`。Framework owner 用最小合成 adapter 驗證公開契約，不 import `zcu_lab`；刪掉本套件後整套 pytest 仍須通過，包含 slow。
 
-range centre/span/fallback、writeback target/description/role 等 experiment policy 直接寫在
-authoritative adapter；`_support` 只提供不含這些具體值的 parameterized mechanics。
+單一實驗的 range centre/span/fallback 直接寫在其 `form.py`。已定案且多個 Form 共用的初值來源、有效性與首次值，可由上述具名 domain helper 擁有。
+writeback target/description/role 仍直接寫在 authoritative adapter；共用 writeback helper 只提供不含這些具體值的 parameterized mechanics。

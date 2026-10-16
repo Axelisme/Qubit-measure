@@ -5,7 +5,7 @@ from __future__ import annotations
 from math import isfinite
 from typing import TYPE_CHECKING
 
-from zcu_tools.cfg_model import PulseSpec, Slot, Template
+from zcu_tools.cfg_model import ArbWaveformCfg, PulseSpec, Slot, Template, WaveformSpec
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.parameters import ParameterContext
@@ -22,9 +22,10 @@ def len_rabi_initial_values(
     Read pi_len from its persistent waveform, following a waveform library key
     without materializing the pulse. A finite positive non-bool pi_len gives
     stop=4*pi_len; an invalid stored pi_len gives None for a required blank.
+    Arb has no persistent scalar length and uses stop=1.0 us without assets.
 
-    Reads validated Specs, whose waveform length is required and non-null,
-    not pre-validation raw source data. Alias, malformed
+    Reads validated Specs, not pre-validation raw source data. Scalar waveform
+    length is required and non-null at this boundary. Alias, malformed
     or dangling references, source and library errors propagate unchanged.
     A non-pulse x180 raises TypeError. Nothing is refreshed or written back.
     """
@@ -33,7 +34,10 @@ def len_rabi_initial_values(
     pulse = _x180_spec(parameters)
     if pulse is None:
         return Template("qub_probe", set={"gain": 1.0}), 1.0
-    pi_len = _valid_pi_len(parameters, pulse)
+    waveform = _waveform_spec(parameters, pulse)
+    if isinstance(waveform, ArbWaveformCfg):
+        return Slot("$qubit.module.x180"), 1.0
+    pi_len = _valid_pi_len(waveform)
     stop = None if pi_len is None else 4 * pi_len
     return Slot("$qubit.module.x180"), stop
 
@@ -42,8 +46,10 @@ def amp_rabi_initial_pulse(parameters: ParameterContext | None) -> Slot | Templa
     """Return an editable Amplitude Rabi pulse from the fixed Open/Reset capture.
 
     Missing capture or missing/null x180 selects qub_probe with gain 1.0 and
-    explicit waveform length 1.0 us. Otherwise copy captured x180 and override
-    only waveform.length with 1.5*pi_len*pi_gain in us. pi_len must be finite
+    explicit waveform length 1.0 us. Arb x180 keeps its original Slot and data,
+    without copying, reading assets or overriding its asset-derived length.
+    For scalar waveforms, copy captured x180 and override only waveform.length
+    with 1.5*pi_len*pi_gain in us. pi_len must be finite
     and positive; pi_gain must be finite and in (0, 1]. Neither accepts bool.
     Invalid stored values leave the required length blank, not a fallback.
     Only nonfinite gain also leaves gain blank so the copied pulse is editable
@@ -60,7 +66,10 @@ def amp_rabi_initial_pulse(parameters: ParameterContext | None) -> Slot | Templa
     pulse = _x180_spec(parameters)
     if pulse is None:
         return Template("qub_probe", set={"gain": 1.0, "waveform.length": 1.0})
-    pi_len = _valid_pi_len(parameters, pulse)
+    waveform = _waveform_spec(parameters, pulse)
+    if isinstance(waveform, ArbWaveformCfg):
+        return Slot("$qubit.module.x180")
+    pi_len = _valid_pi_len(waveform)
     pi_gain = pulse.gain
     if not isfinite(pi_gain):
         return Slot(
@@ -78,12 +87,17 @@ def amp_rabi_initial_pulse(parameters: ParameterContext | None) -> Slot | Templa
     return Slot("$qubit.module.x180", copy=True, set={"waveform.length": length})
 
 
-def _valid_pi_len(parameters: ParameterContext, pulse: PulseSpec) -> float | None:
-    waveform = (
+def _waveform_spec(parameters: ParameterContext, pulse: PulseSpec) -> WaveformSpec:
+    return (
         parameters.library.waveform_spec(pulse.waveform)
         if isinstance(pulse.waveform, str)
         else pulse.waveform
     )
+
+
+def _valid_pi_len(waveform: WaveformSpec) -> float | None:
+    if isinstance(waveform, ArbWaveformCfg):
+        raise TypeError("Arb waveform has no persistent scalar length")
     pi_len = waveform.length
     if (
         isinstance(pi_len, bool)
