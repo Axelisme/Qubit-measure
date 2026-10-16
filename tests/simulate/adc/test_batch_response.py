@@ -61,7 +61,52 @@ def test_batched_response_agrees_with_dop853_for_all_reads(detuned, monkeypatch)
     np.testing.assert_allclose(result.traces[0], expected, atol=1e-9, rtol=0)
     np.testing.assert_allclose(result.sums[0], expected.sum(axis=-2), atol=1e-9, rtol=0)
     np.testing.assert_array_equal(result.sample_counts, [7, 7])
-    assert bool(calls) == (not detuned)
+    assert calls
+
+
+@pytest.mark.parametrize("carrier_ghz", [5.982, 6.008])
+@pytest.mark.parametrize("start_ns", [3.0, -7.3])
+def test_detuned_constant_response_uses_no_ode_and_preserves_frame_phases(
+    carrier_ghz, start_ns, monkeypatch
+):
+    m = model()
+    pulse = adc.ReadoutPulse(
+        start_ns,
+        start_ns + 20.0,
+        1.2 + 0.3j,
+        carrier_ghz,
+        phase_rad=0.73,
+        breakpoints_ns=(start_ns + 4.2, start_ns + 11.6),
+    )
+    inputs = batch(m, pulse=pulse)
+    inputs = replace(
+        inputs,
+        grids=(
+            tuple(
+                replace(g, times_ns=g.times_ns + start_ns - 3.0)
+                for g in inputs.grids[0]
+            ),
+        ),
+    )
+    reference = adc.ConditionalReadout(m, rtol=1e-12, atol=1e-14)
+    expected = np.stack(
+        [reference.response((pulse,), g).traces for g in inputs.grids[0]]
+    )
+    ode_calls = []
+    from zcu_tools.simulate.adc import response
+
+    solve_ivp = response.solve_ivp
+
+    def observe_ode(*args, **kwargs):
+        ode_calls.append(1)
+        return solve_ivp(*args, **kwargs)
+
+    monkeypatch.setattr(response, "solve_ivp", observe_ode)
+    result = adc.ConditionalReadout(m).responses(inputs)
+    assert not ode_calls, "constant carriers must use expm, not DOP853"
+    assert result.traces is not None
+    np.testing.assert_allclose(result.traces[0], expected, atol=1e-9, rtol=0)
+    np.testing.assert_allclose(result.sums[0], expected.sum(axis=-2), atol=1e-9, rtol=0)
 
 
 def test_response_cache_reuses_content_across_batches_and_trace_requests():
