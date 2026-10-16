@@ -53,11 +53,13 @@ def launched_measure_app(
     tmp_path: Path,
     *,
     restore: AppPersistedState | None = None,
+    registry: Registry | None = None,
 ) -> Generator[LaunchedMeasureApp]:
     """Run launch and attach readonly MCP without taking the open Setup modal.
 
     ``restore`` stands in for the saved settings the persistence caretaker would
     load in ``before_show``; it goes through the Controller's memento restore.
+    ``registry`` supplies the caller's synthetic catalog instead of an empty one.
     """
     previous_hook = sys.excepthook
     background = BackgroundRunner()
@@ -66,7 +68,7 @@ def launched_measure_app(
     bridge = None
     try:
         behavior = MeasureGuiBehavior(
-            lambda: (Registry(), Loader()),
+            lambda: (registry if registry is not None else Registry(), Loader()),
             alias_presets={"default": ALIAS_PRESET},
             clean=True,
             project_root=str(tmp_path),
@@ -101,6 +103,8 @@ def launched_measure_app(
             bridge.disconnect()
         if remote is not None:
             remote.stop()
+        if window is not None:
+            controller.close()
         background.quiesce()
         if window is not None:
             window.close_dialog(DialogName.SETUP)
