@@ -4,10 +4,11 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-from PyQt6.QtCore import QTimer
-from PyQt6.QtGui import QImage
+from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtGui import QAction, QImage
 from PyQt6.QtWidgets import (
     QDialog,
+    QComboBox,
     QFileDialog,
     QFormLayout,
     QLabel,
@@ -605,3 +606,63 @@ def test_file_chooser_valid_path_unavailable_opener_is_noop(
     assert clicked == []
     assert driver.dialogs() == ()
     assert not shot.exists()
+
+
+@pytest.fixture
+def choice_surface(qapp) -> Generator[QWidget]:
+    window = QWidget()
+    layout = QFormLayout(window)
+    combo = QComboBox()
+    combo.setObjectName("choice")
+    combo.addItems(["One", "Two", "Three"])
+    status = QLabel("Ready")
+    status.setObjectName("choice_status")
+    combo.currentTextChanged.connect(lambda text: status.setText(text))
+    action = QAction("Copy choice", combo)
+    action.triggered.connect(lambda: status.setText("Copied"))
+    combo.addAction(action)
+    combo.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
+    layout.addRow("Selection:", combo)
+    layout.addRow(status)
+    window.show()
+    qapp.processEvents()
+    yield window
+    window.deleteLater()
+    qapp.processEvents()
+
+
+def test_choose_option_and_context_action_use_visible_captions(choice_surface) -> None:
+    driver = _user_input.ComponentDriver(choice_surface)
+    driver.choose_option("Selection:", "Three")
+    assert driver.observe(object_name="choice").text == "Three"
+    assert driver.observe(object_name="choice_status").text == "Three"
+    driver.invoke_context_action(object_name="choice", action="Copy choice")
+    assert driver.observe(object_name="choice_status").text == "Copied"
+    with pytest.raises(LookupError):
+        driver.choose_option(object_name="choice", value="Missing")
+    with pytest.raises(LookupError):
+        driver.invoke_context_action(object_name="choice", action="Missing")
+    assert driver.dialogs() == ()
+    driver.choose_option(object_name="choice", value="Two")
+    assert driver.observe(object_name="choice_status").text == "Two"
+
+
+def test_choice_operations_reject_wrong_selector_and_ignore_unavailable_widgets(choice_surface, qapp) -> None:
+    driver = _user_input.ComponentDriver(choice_surface)
+    with pytest.raises(TypeError):
+        driver.choose_option(object_name="choice_status", value="Two")
+    with pytest.raises(ValueError):
+        driver.choose_option(value="Two")
+    with pytest.raises(LookupError):
+        driver.invoke_context_action(object_name="missing", action="Copy choice")
+    combo = choice_surface.findChild(QComboBox, "choice")
+    combo.setEnabled(False)
+    driver.choose_option(object_name="choice", value="Two")
+    driver.invoke_context_action(object_name="choice", action="Copy choice")
+    assert driver.observe(object_name="choice_status").text == "Ready"
+    combo.setEnabled(True)
+    combo.hide()
+    qapp.processEvents()
+    driver.choose_option(object_name="choice", value="Two")
+    driver.invoke_context_action(object_name="choice", action="Copy choice")
+    assert driver.observe(object_name="choice_status").text == "Ready"
