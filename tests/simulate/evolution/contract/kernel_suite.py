@@ -142,10 +142,14 @@ class KernelContract:
         case = kernel_case
         rows = np.arange(len(case.states), dtype=np.int64)
         assert case.kernel.guard(case.table, rows, case.source, case.budget).all()
-        keys, inverse = np.unique(
-            case.kernel.prepare_keys(case.table, rows), return_inverse=True
+        keys, first, inverse = np.unique(
+            case.kernel.prepare_keys(case.table, rows),
+            return_index=True,
+            return_inverse=True,
         )
-        prepared = case.kernel.prepare(keys, case.source, case.budget)
+        prepared = case.kernel.prepare(
+            keys, case.table, rows[first], case.source, case.budget
+        )
         assert prepared.nbytes >= 0
         actual = case.states.copy()
         case.kernel.apply(prepared, inverse, case.table, rows, actual, case.budget)
@@ -157,10 +161,14 @@ class KernelContract:
     def test_rows_can_be_split(self, kernel_case: KernelCase) -> None:
         case = kernel_case
         rows = np.arange(len(case.states), dtype=np.int64)
-        keys, inverse = np.unique(
-            case.kernel.prepare_keys(case.table, rows), return_inverse=True
+        keys, first, inverse = np.unique(
+            case.kernel.prepare_keys(case.table, rows),
+            return_index=True,
+            return_inverse=True,
         )
-        prepared = case.kernel.prepare(keys, case.source, case.budget)
+        prepared = case.kernel.prepare(
+            keys, case.table, rows[first], case.source, case.budget
+        )
         whole = case.states.copy()
         case.kernel.apply(prepared, inverse, case.table, rows, whole, case.budget)
         split = case.states.copy()
@@ -176,8 +184,10 @@ class KernelContract:
     def test_prepare_is_density_independent(self, kernel_case: KernelCase) -> None:
         case = kernel_case
         rows = np.arange(len(case.states), dtype=np.int64)
-        keys, inverse = np.unique(
-            case.kernel.prepare_keys(case.table, rows), return_inverse=True
+        keys, first, inverse = np.unique(
+            case.kernel.prepare_keys(case.table, rows),
+            return_index=True,
+            return_inverse=True,
         )
 
         def no_density_source() -> evolution.ModelSource:
@@ -188,7 +198,9 @@ class KernelContract:
 
             return NoDensity(case.states[0], case.source.model)
 
-        prepared = case.kernel.prepare(keys, no_density_source(), case.budget)
+        prepared = case.kernel.prepare(
+            keys, case.table, rows[first], no_density_source(), case.budget
+        )
         for states in (
             case.states,
             np.repeat(

@@ -165,10 +165,19 @@ class Kernel(Protocol):
         ...
 
     def prepare(
-        self, keys: NDArray[np.void], source: ModelSource, budget: float
+        self,
+        keys: NDArray[np.void],
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source: ModelSource,
+        budget: float,
     ) -> Prepared:
         """Build data for unique keys in their given order; never read density.
 
+        rows: one representative row of table per key, aligned with keys;
+        prepare_keys(table, rows) equals keys. Content a fixed-width key cannot
+        carry (e.g. envelope samples) is read from these rows; the result must
+        depend only on the keys, so any representative gives the same payload.
         budget is the positive absolute per-segment error allowance.
         Numerical failure raises RuntimeError. Prepared data is immutable to
         apply workers and reports its resident array bytes through nbytes.

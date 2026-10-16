@@ -55,7 +55,12 @@ class DemoKernel:
         return np.ones(len(rows))
 
     def prepare(
-        self, keys: NDArray[np.void], source: evolution.ModelSource, budget: float
+        self,
+        keys: NDArray[np.void],
+        table: kernel.SegmentTable,
+        rows: NDArray[np.int64],
+        source: evolution.ModelSource,
+        budget: float,
     ) -> DemoPrepared:
         model = source.model((0,))
         size = len(model.energies_ghz)
@@ -162,10 +167,15 @@ def test_suite_detects_incorrect_dynamics(kernel_case: KernelCase) -> None:
 def test_suite_detects_prepare_reading_density(kernel_case: KernelCase) -> None:
     class ReadsDensity(DemoKernel):
         def prepare(
-            self, keys: NDArray[np.void], source: evolution.ModelSource, budget: float
+            self,
+            keys: NDArray[np.void],
+            table: kernel.SegmentTable,
+            rows: NDArray[np.int64],
+            source: evolution.ModelSource,
+            budget: float,
         ) -> DemoPrepared:
             _ = source.initial_density
-            return super().prepare(keys, source, budget)
+            return super().prepare(keys, table, rows, source, budget)
 
     with pytest.raises(AssertionError, match="must not read density"):
         KernelContract().test_prepare_is_density_independent(
