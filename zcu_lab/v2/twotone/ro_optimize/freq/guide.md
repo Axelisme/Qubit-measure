@@ -4,7 +4,7 @@ Readout frequency optimization: with the qubit prepared in g and e (a pi pulse t
 
 ## Expects (parameter context)
 
-Seeds 301 frequency points at `$resonator.freq` +/- `$resonator.kappa.` Relax delay reads 5.0 * `$qubit.t1.` Open and Reset evaluate starting expressions once into direct input using captured sources. Inline qubit pulses read `$qubit.freq` and `$qubit.wiring.L01.ch.` Inline readout reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.ext.time_of_fly` + 0.05 us for trigger timing. Missing or invalid required sources leave the affected fields empty and Invalid; supply calibration or direct values before Run. No numeric calibration fallback is supplied.
+Seeds 301 frequency points at `$resonator.freq` +/- `$resonator.kappa.` Relax delay reads 5.0 * `$qubit.t1.` Open and Reset evaluate starting expressions once into direct input using captured sources. Inline qubit pulses read `$qubit.freq` and `$qubit.wiring.ch.` Inline readout reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.ext.time_of_fly` + 0.05 us for trigger timing. Missing or invalid required sources leave the affected fields empty and Invalid; supply calibration or direct values before Run. No numeric calibration fallback is supplied.
 
 ## Expects (ModuleLibrary)
 

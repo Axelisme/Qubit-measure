@@ -4,7 +4,7 @@ Single-tone sideband-reset frequency sweep: drives the tested pulse-reset tone a
 
 ## Expects (parameter context)
 
-Seeds 201 frequency points at `$qubit.ext.reset_f` +/- 1.5 * `$qubit.ext.reset_fwhm.` The tested pulse has gain 0.3, length 5.0 us, and post-delay 5.0 / (2 * pi * `$resonator.kappa`) us. Relax delay reads `$qubit.t1.` Open and Reset evaluate starting expressions once into direct input using captured sources. Inline qubit pulses read `$qubit.freq` and `$qubit.wiring.L01.ch.` Inline readout reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.ext.time_of_fly` + 0.05 us for trigger timing. Missing or invalid required sources leave the affected fields empty and Invalid; supply calibration or direct values before Run. No numeric calibration fallback is supplied.
+Seeds 201 frequency points at `$qubit.ext.reset_f` +/- 1.5 * `$qubit.ext.reset_fwhm.` The tested pulse has gain 0.3, length 5.0 us, and post-delay 5.0 / (2 * pi * `$resonator.kappa`) us. Relax delay reads `$qubit.t1.` Open and Reset evaluate starting expressions once into direct input using captured sources. Inline qubit pulses read `$qubit.freq` and `$qubit.wiring.ch.` Inline readout reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.ext.time_of_fly` + 0.05 us for trigger timing. Missing or invalid required sources leave the affected fields empty and Invalid; supply calibration or direct values before Run. No numeric calibration fallback is supplied.
 
 ## Expects (ModuleLibrary)
 

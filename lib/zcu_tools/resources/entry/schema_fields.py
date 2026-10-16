@@ -28,7 +28,7 @@ class FieldSpec:
     """One declared field of a registered component kind.
 
     segments: path inside the component, one literal key per nesting level,
-        for example ("wiring", "flux", "ch"). Each key is the field alias when
+        for example ("wiring", "ch"). Each key is the field alias when
         the model declares one, otherwise the field name. Never empty and
         never the top-level kind field.
     value_kind: editor category of the annotation after removing None:
@@ -61,7 +61,7 @@ class FieldSpec:
 
     @property
     def path(self) -> str:
-        """Return segments joined by dots, for example "wiring.flux.ch"."""
+        """Return segments joined by dots, for example "wiring.ch"."""
         return ".".join(self.segments)
 
 

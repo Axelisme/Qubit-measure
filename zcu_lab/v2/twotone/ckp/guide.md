@@ -4,7 +4,7 @@ CKP ground/excited-resolved spectroscopy: prepares the qubit in g and e, drives 
 
 ## Expects (parameter context)
 
-Inline templates read qubit.freq, qubit.wiring.L01.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.ext.time_of_fly + 0.05 us from the fixed capture. Missing required calibration remains Invalid; no numeric fallback. Resonator sweep is resonator.freq ± 1.5 * resonator.kappa. Qubit sweep runs qubit.freq - 10 to qubit.freq + 5 MHz. Probe timing scales inversely with resonator.kappa.
+Inline templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.ext.time_of_fly + 0.05 us from the fixed capture. Missing required calibration remains Invalid; no numeric fallback. Resonator sweep is resonator.freq ± 1.5 * resonator.kappa. Qubit sweep runs qubit.freq - 10 to qubit.freq + 5 MHz. Probe timing scales inversely with resonator.kappa.
 
 ## Expects (ModuleLibrary)
 

@@ -8,7 +8,6 @@ from zcu_tools.resources.entry.registry import ComponentRegistry, RoleSpec
 
 from .base import (
     BuiltinComponent,
-    ChannelSchema,
     Duration,
     Energy,
     Flux,
@@ -25,7 +24,6 @@ from .transmon import TransmonSchema
 
 __all__ = [
     "BuiltinComponent",
-    "ChannelSchema",
     "Duration",
     "Energy",
     "Flux",
