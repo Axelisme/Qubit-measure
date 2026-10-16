@@ -28,20 +28,23 @@ from zcu_tools.mcp.measure.analysis_execution import (
 from zcu_tools.mcp.measure.raw_save import SaveReport
 from zcu_tools.mcp.measure.recipe import (
     AnalysisStage,
+    AnalysisStepResult,
     AnalyzeOperation,
     MissingParameter,
     RecipeDefinition,
-    RecipeDelivery,
     RecipeGenerator,
     RecipeNeedsParameters,
     RecipeOperation,
     RecipeSession,
+    RecipeStep,
     RecipeWritebackPreview,
     RunOperation,
+    RunStepResult,
     StepStatus,
     WritebackDecision,
     WritebackQuestion,
     WritebackReceipt,
+    WritebackResult,
 )
 from zcu_tools.mcp.measure.recipe_capture import RecipeActual
 from zcu_tools.mcp.measure.recipe_inputs import RecipeInputs
@@ -498,7 +501,7 @@ class RecipeExecution:
         if self._closed.is_set() or self._session_closed.is_set():
             raise GuiRpcError("MCP session is closed", reason="session_closed")
 
-    def _complete(self, operation: RecipeOperation) -> RecipeDelivery:
+    def _complete(self, operation: RecipeOperation) -> StepStatus:
         with self._condition:
             self._active = operation
             phase: RecipePhase = (
@@ -532,13 +535,13 @@ class RecipeExecution:
                     )
                 )
                 self._check_open()
-                delivery: RecipeDelivery = (
-                    (None, "cancelled")
+                operation.delivery = (
+                    WritebackResult(None, "cancelled")
                     if self._consume_cancel()
-                    else (self._answer, "completed")
+                    else WritebackResult(self._answer, "completed")
                 )
                 self._answer = None
-                return delivery
+                return operation.delivery.status
         if stop_requested:
             self._cancel_active(operation)
         if isinstance(operation, RunOperation):
@@ -553,12 +556,14 @@ class RecipeExecution:
                     status = "finished_early"
                 elif status == "cancelled":
                     self._consume_cancel()
-            return run, status
+            operation.delivery = RunStepResult(run, status)
+            return status
         try:
-            delivery = operation.complete_in_current_worker()
-            if delivery[1] == "cancelled":
+            analysis, status = operation.complete_in_current_worker()
+            if status == "cancelled":
                 self._consume_cancel()
-            return delivery
+            operation.delivery = AnalysisStepResult(analysis, status)
+            return status
         finally:
             # Keep each stage and its confirmed previews even when completion fails.
             capture = operation.snapshot()
@@ -567,11 +572,17 @@ class RecipeExecution:
                     self._analysis_images[capture.stage] = operation.preview_images()
 
     def _advance(self, generator: RecipeGenerator) -> None:
-        operation = next(generator)
+        step = next(generator)
         while True:
             self._check_open()
+            if not isinstance(step, RecipeStep):
+                raise TypeError(
+                    "Do not yield an operation directly; use yield from tab.run_step(), "
+                    "yield from run.analyze_step(...), or yield from ask(question)"
+                )
+            operation = step.operation
             try:
-                delivery = self._complete(operation)
+                status = self._complete(operation)
             except Exception as error:  # Throw operation failure at the author's yield.
                 logger.exception("Recipe operation failed; delivering to generator")
                 self._check_open()
@@ -584,12 +595,12 @@ class RecipeExecution:
                     )
                     self._active = None
                     self._condition.notify_all()
-                operation = generator.throw(error)
+                step = generator.throw(error)
                 continue
             self._check_open()
             with self._condition:
                 self._active = None
-                self._last_status = delivery[1]
+                self._last_status = status
                 self._progress = replace(
                     self._progress,
                     status="running",
@@ -601,7 +612,7 @@ class RecipeExecution:
                     question_preview=None,
                 )
                 self._condition.notify_all()
-            operation = generator.send(delivery)
+            step = next(generator)
 
     def _run(self) -> None:
         generator: RecipeGenerator | None = None

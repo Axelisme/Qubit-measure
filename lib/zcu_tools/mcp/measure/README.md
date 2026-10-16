@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-16，Load cfg_issue、單層欄位查詢、lean cfg 與 Library／writeback Form
+**Last updated:** 2026-10-16，typed recipe helpers、Load cfg_issue 與 Library／writeback Form
 
 # `zcu_tools/mcp/measure/`
 
@@ -33,6 +33,10 @@ Predictor 透過 `rpc_call(method="predictor.predict"|"predictor.calibrate"|"pre
 Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.connect` 回傳 handle，caller 用 `wait(op)` 等待後再讀 `device.snapshot`。`tab.save_data` 與 `tab.save_artifacts` 同步返回當次完整 Save report，不回 Save handle。Report 的 run_id 沿用 Run 時產生的同一個 ID，即使全部輸出失敗也不為 null。Caller 用各路徑的 status 與 error 判斷保存成功，不以 run_id 是否存在判斷。Report 保留全部 members，不用 await 或再次讀 snapshot。Readonly snapshot 的 confirmed run_id 仍只表示已有持久輸出成功。
 
 ## Recipe 與 execution
+
+作者以 `result = yield from tab.run_step()` 等待 Run，以 `analysis = yield from result.run.analyze_step("primary")` 等待分析。兩者分別回傳 `RunStepResult` 與 `AnalysisStepResult`，欄位為 run／analysis 與 status。Run status 為 completed、finished_early 或 cancelled；分析為 completed 或 cancelled。Cancelled Run 可保留 partial handle，未送出 Run 時 run 為 None；cancelled analysis 的 analysis 為 None。作者檢查 status，自行收尾並 return，不以例外代表取消。
+
+需要寫回判斷時，作者用 `decision = yield from ask(run.propose_writeback())`，回傳 `WritebackResult`。Status 為 completed 時 decision 是 accepted 或 skipped，cancelled 時為 None。`ask` 只接受已捕捉的 WritebackQuestion，不寫入資料。Opaque operation 不可迭代，也不能直接 yield；driver 會拒絕並提示 helper 寫法。Driver 將具名結果放在 operation.delivery，以 None 推進 generator，原有 completion failure 仍 throw 到作者的 helper 呼叫處。
 
 `RecipeTab.use_library` 選實際 library key，不建立舊 ref tree，也不複製內容。Slot 與 nested key 保存 tagged ref 的 kind/name，inline 保存 kind/module。持久 Spec 的 child key 仍是字串。`use_library` 只寫清單中 value 恰為該 ref 的 Option，以一次整個欄位 write 選 key。未列出的 key 在 RPC 前拒絕，訊息指名欄位並列可用 keys。Locked Slot 的固定 inline tag 也在 RPC 前拒絕 key selection；沒有 captured library 的普通欄位不因此變成 locked。
 
