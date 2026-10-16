@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, JsonValue
 from zcu_tools import cfg_model as nodes
 from zcu_tools.cfg_model import ConfigBase, Expr, FieldMeta
 from zcu_tools.gui import form_adapter
-from zcu_tools.gui.form import FormEnv, FormErrors, FormModel, FormState
+from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormModel, FormState
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
@@ -130,7 +130,7 @@ def test_blank_range_endpoints_remain_required_when_input_keys_are_absent(
         partial["start"] = 2.0
     if "stop" not in blank:
         partial["stop"] = 8.0
-    state.write({("sweep", "freq"): partial}, env)
+    state = FormState(FormInput(form.model, {"sweep": {"freq": partial}}))
     missing = state.result(env)
     assert isinstance(missing, FormErrors), "Absent blank endpoints must not use 0/1"
     assert missing.messages == {
@@ -153,8 +153,9 @@ def test_blank_range_endpoints_remain_required_when_input_keys_are_absent(
     control = form_adapter.Form(
         ScalarCfg, {"sweep": {"freq": nodes.Range(2.0, 8.0, 4)}}
     )
-    control_state = FormState(control.default_input(env))
-    control_state.write({("sweep", "freq"): {"kind": "linrange", "n": 4}}, env)
+    control_state = FormState(
+        FormInput(control.model, {"sweep": {"freq": {"kind": "linrange", "n": 4}}})
+    )
     control_cfg = control.to_cfg(require_result(control_state, env), env)
     if isinstance(control_cfg, FormErrors):
         pytest.fail(str(control_cfg.messages))
