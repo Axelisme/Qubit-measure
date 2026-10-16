@@ -887,17 +887,19 @@ def test_recipe_rpc_read_and_noop_preserve_observer_busy_and_notification_policy
         fixture.ctrl.tab_control.close_tab(tab)
 
 
-def test_recipe_tab_uses_real_rpc_for_nested_captured_refs_and_copy(form_rpc, tmp_path) -> None:
+@pytest.fixture
+def nested_recipe_rpc(form_rpc, tmp_path):
     from contextlib import closing
 
     from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
     from zcu_tools.gui.remote.errors import RemoteError
-    from zcu_tools.mcp.measure.execution_reply import SummaryParameter
-    from zcu_tools.mcp.measure.recipe import RecipeFieldEdit, RecipeSession
-    from zcu_tools.mcp.measure.session import GuiRpcError
 
     from tests.mcp.measure._support import make_client
-    from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
+    from tests.resources.entry.fakes import (
+        register_fakes,
+        registry_state,
+        restore_registry,
+    )
 
     fixture, _, rpc = form_rpc
     registry_before = registry_state()
@@ -908,9 +910,17 @@ def test_recipe_tab_uses_real_rpc_for_nested_captured_refs_and_copy(form_rpc, tm
         context.add_component("Q1", "fake/drive/a", {})
         target = context.read_context().target
         context.set_waveform(target, "Q1.waveforms.seed", ConstWaveformCfg(length=0.1))
-        context.set_module(target, "Q1.pulses.pi", PulseSpec(
-            ch=0, nqz=1, freq=100.0, gain=0.2, waveform="Q1.waveforms.seed",
-        ))
+        context.set_module(
+            target,
+            "Q1.pulses.pi",
+            PulseSpec(
+                ch=0,
+                nqz=1,
+                freq=100.0,
+                gain=0.2,
+                waveform="Q1.waveforms.seed",
+            ),
+        )
         fixture.registry.register("nested-recipe", ModuleRpcAdapter)
         tab = fixture.ctrl.new_tab("nested-recipe")
 
@@ -918,57 +928,75 @@ def test_recipe_tab_uses_real_rpc_for_nested_captured_refs_and_copy(form_rpc, tm
             reply = rpc.call(method, params)
             if not reply["ok"]:
                 error = reply["error"]
-                raise RemoteError(error["code"], error["message"],
-                                  reason=error.get("reason"), data=error.get("data"))
+                raise RemoteError(
+                    error["code"],
+                    error["message"],
+                    reason=error.get("reason"),
+                    data=error.get("data"),
+                )
             return reply["result"]
 
         client = make_client(tmp_path, respond)
         with closing(client.context.session):
-            prepared = RecipeSession(client.context, summary_parameters=(
-                SummaryParameter("length", "pulse.waveform.length"),
-            )).open_tab("nested-recipe", reuse=tab)
-            prepared.use_library("pulse", "Q1.pulses.pi")
-            owner = fixture.ctrl.cfg_resources.lookup(tab)
-            before = owner.input.data
-            base = owner.editor_state.base.data
-            version = fixture.state.version.get(f"tab:{tab}:cfg")
-            notices: list[str] = []
-            owner.subscribe(lambda: notices.append("changed"))
-            context.set_waveform(target, "Q1.waveforms.seed", ConstWaveformCfg(length=0.9))
-            field = prepared.read_field("pulse.waveform.length")
-            assert field.value == 0.1 and field.readonly
-            assert field.source is not None
-            assert field.source["key"] == "Q1.waveforms.seed"
-            assert field.source["selector_path"] == ["pulse", "waveform"]
-            assert field.input_present is False and field.mode is None
-            assert owner.input.data == before
-            assert owner.editor_state.base.data == base
-            assert fixture.state.version.get(f"tab:{tab}:cfg") == version
-            assert notices == []
-            with pytest.raises(GuiRpcError) as rejected:
-                prepared.set_fields([RecipeFieldEdit("gain", 0.9),
-                                     RecipeFieldEdit("pulse.freq", 125.0)])
-            assert rejected.value.reason == "ref_ancestor"
-            data = rejected.value.data
-            assert data is not None
-            assert data["edit_index"] == 1
-            assert owner.input.data == before
-            assert notices == []
-            with pytest.raises(GuiRpcError) as ancestor:
-                prepared.use_inline("pulse.waveform")
-            assert ancestor.value.reason == "ref_ancestor"
-            prepared.use_inline("pulse")
-            prepared.use_inline("pulse.waveform")
-            prepared.set("pulse.waveform.length", 0.08)
-            prepared.retain_source("pulse.waveform.length", "explicit")
-            assert prepared.read_field("pulse.waveform.length").value == 0.08
-            operation = prepared.run()
-            fixture.ctrl.close()
-            captured = operation.snapshot()
-            assert captured is not None
-            assert captured.actual["fields"]["pulse.waveform.length"]["value"] == 0.08
-            assert field.value == 0.1
+            yield fixture, tab, client, context, target
     finally:
         if tab is not None and tab in fixture.ctrl.list_tab_ids():
             fixture.ctrl.tab_control.close_tab(tab)
         restore_registry(registry_before)
+
+
+def test_recipe_tab_uses_real_rpc_for_nested_captured_refs_and_copy(
+    nested_recipe_rpc,
+) -> None:
+    from zcu_tools.cfg_model import ConstWaveformCfg
+    from zcu_tools.mcp.measure.execution_reply import SummaryParameter
+    from zcu_tools.mcp.measure.recipe import RecipeFieldEdit, RecipeSession
+    from zcu_tools.mcp.measure.session import GuiRpcError
+
+    fixture, tab, client, context, target = nested_recipe_rpc
+    prepared = RecipeSession(
+        client.context,
+        summary_parameters=(SummaryParameter("length", "pulse.waveform.length"),),
+    ).open_tab("nested-recipe", reuse=tab)
+    prepared.use_library("pulse", "Q1.pulses.pi")
+    owner = fixture.ctrl.cfg_resources.lookup(tab)
+    before = owner.input.data
+    base = owner.editor_state.base.data
+    version = fixture.state.version.get(f"tab:{tab}:cfg")
+    notices: list[str] = []
+    owner.subscribe(lambda: notices.append("changed"))
+    context.set_waveform(target, "Q1.waveforms.seed", ConstWaveformCfg(length=0.9))
+    field = prepared.read_field("pulse.waveform.length")
+    assert field.value == 0.1 and field.readonly
+    assert field.source is not None
+    assert field.source["key"] == "Q1.waveforms.seed"
+    assert field.source["selector_path"] == ["pulse", "waveform"]
+    assert field.input_present is False and field.mode is None
+    assert owner.input.data == before
+    assert owner.editor_state.base.data == base
+    assert fixture.state.version.get(f"tab:{tab}:cfg") == version
+    assert notices == []
+    with pytest.raises(GuiRpcError) as rejected:
+        prepared.set_fields(
+            [RecipeFieldEdit("gain", 0.9), RecipeFieldEdit("pulse.freq", 125.0)]
+        )
+    assert rejected.value.reason == "ref_ancestor"
+    data = rejected.value.data
+    assert data is not None
+    assert data["edit_index"] == 1
+    assert owner.input.data == before
+    assert notices == []
+    with pytest.raises(GuiRpcError) as ancestor:
+        prepared.use_inline("pulse.waveform")
+    assert ancestor.value.reason == "ref_ancestor"
+    prepared.use_inline("pulse")
+    prepared.use_inline("pulse.waveform")
+    prepared.set("pulse.waveform.length", 0.08)
+    prepared.retain_source("pulse.waveform.length", "explicit")
+    assert prepared.read_field("pulse.waveform.length").value == 0.08
+    operation = prepared.run()
+    fixture.ctrl.close()
+    captured = operation.snapshot()
+    assert captured is not None
+    assert captured.actual["fields"]["pulse.waveform.length"]["value"] == 0.08
+    assert field.value == 0.1
