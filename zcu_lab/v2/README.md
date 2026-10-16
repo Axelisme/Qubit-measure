@@ -1,6 +1,6 @@
 # v2 experiments
 
-**Last updated:** 2026-10-13，持久範本來源與框架測試分離
+**Last updated:** 2026-10-16，mux family 與有序 tone 資料
 
 ZigZag 的 Run 與離線編譯共用 `build_zigzag_modules`，使用 register loop。
 `reset_phase_cycle` 可在偶數 averaging sweeps 間交替最後 reset qubit pulse 的 0/180°
@@ -12,6 +12,12 @@ population 或 repeated-gate 誤差；支援 TwoPulse/Bath reset，需獨立驗�
 每個實驗有自己的資料夾。`core.py` 擁有 cfg、Result、量測與分析政策。`gui.py` 是可選的 measure-gui adapter。Leaf 的 `__init__.py` 只提供 core exports，不載入 GUI。
 
 `v2` 延續 program/v2 的版本脈絡，不表示 GUI framework 的第二版。通用 runtime、量化、SNR 與 tracker 工具留在 `zcu_tools.experiment.v2`。Core 不依賴 GUI，import-linter C15 檢查 core 到 GUI framework 的直接與間接依賴。
+
+`mux/onetone` 使用 `readout/mux`，在每個 sweep 點對所有 tone 加上共同的名目頻率偏移。
+每條曲線對應 cfg 的同序 tone，資料保存共同偏移軸、tone 序號與二維 signals。
+Tone label 是可重複的顯示文字，不是 component 名稱，也不改變資料軸。
+Module 可整組引用或 inline 編輯，tones 使用單行 JSON。
+Library 的 `readout/mux:blank` 只給 scalar 編輯初值，作者必須填 tones 並確認接線；範本不是硬體安全預設。
 
 ## Layout
 

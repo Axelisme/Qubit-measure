@@ -24,7 +24,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Cfg / Value Model
 
-- [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Readout 自有 generator／ADC 欄位、單一頻率、waveform 引用、runtime ADC matching 與表單路徑。
+- [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Pulse 與 mux Readout 自有 generator／ADC 欄位，分別保存單一頻率與有序 tones；規範 waveform 引用、label、Library 新建與表單路徑。
 
 - [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：make_form、固定捕捉、adapter 黑箱、持久範本與具名裝置欄位。
 - [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用 Form、持久 Spec、Library／Inspect／writeback 的提交邊界、固定來源與共用 Inspect Aliases 頁。

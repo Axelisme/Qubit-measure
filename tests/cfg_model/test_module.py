@@ -517,11 +517,17 @@ def test_mux_numeric_cfg_preserves_order_and_list_serialization(count: int):
     raw = mux_raw(count)
     cfg = cfg_model.ModuleCfgFactory.from_raw(raw)
     assert isinstance(cfg, cfg_model.MuxReadoutCfg)
-    assert cfg.to_dict()["tones"] == raw["tones"]
+    tones = raw["tones"]
+    assert isinstance(tones, list)
+    expected = []
+    for tone in tones:
+        assert isinstance(tone, dict)
+        expected.append({**tone, "label": ""})
+    assert cfg.to_dict()["tones"] == expected
     assert isinstance(cfg.model_dump()["tones"], list)
     assert (cfg.pre_delay, cfg.post_delay, cfg.trig_offset) == (0.0, 0.0, 0.0)
     cfg.tones[0].freq = -100.0
-    assert cfg_model.ModuleCfgFactory.from_raw(raw).to_dict()["tones"] == raw["tones"]
+    assert cfg_model.ModuleCfgFactory.from_raw(raw).to_dict()["tones"] == expected
 
 
 def test_mux_labels_default_and_round_trip_through_spec_and_materialization() -> None:

@@ -209,7 +209,13 @@ def test_mux_persistent_spec_roundtrips_numeric_tones(count: int):
     spec = module_spec_from_raw(raw)
     assert isinstance(spec, cfg_model.MuxReadoutSpec)
     assert module_spec_from_raw(spec).to_dict() == spec.to_dict()
-    assert spec.to_dict()["tones"] == raw["tones"]
+    tones = raw["tones"]
+    assert isinstance(tones, list)
+    expected = []
+    for tone in tones:
+        assert isinstance(tone, dict)
+        expected.append({**tone, "label": ""})
+    assert spec.to_dict()["tones"] == expected
     assert ModuleCfgFactory.from_raw(spec).to_dict() == spec.to_dict()
 
 
@@ -318,6 +324,6 @@ def test_mux_allows_equal_negative_frequencies_full_gain_and_phase_default():
     ]
     spec = module_spec_from_raw(raw)
     assert ModuleCfgFactory.from_raw(spec).to_dict()["tones"] == [
-        {"freq": -100.0, "gain": -1.0, "phase": 0.0, "ro_ch": 4},
-        {"freq": -100.0, "gain": 1.0, "phase": 0.0, "ro_ch": 1},
+        {"freq": -100.0, "gain": -1.0, "phase": 0.0, "ro_ch": 4, "label": ""},
+        {"freq": -100.0, "gain": 1.0, "phase": 0.0, "ro_ch": 1, "label": ""},
     ]
