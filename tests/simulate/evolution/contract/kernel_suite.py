@@ -18,7 +18,7 @@ from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 
 if TYPE_CHECKING:
-    from zcu_tools.simulate.evolution.kernel import Kernel, SegmentTable
+    from zcu_tools.simulate.evolution import kernel
 
 
 def synthetic_model(size: int = 3) -> evolution.SecularModel:
@@ -53,9 +53,9 @@ class KernelCase:
     budget: population and low-four absolute error allowance.
     """
 
-    kernel: Kernel
+    kernel: kernel.Kernel
     source: evolution.ModelSource
-    table: SegmentTable
+    table: kernel.SegmentTable
     states: NDArray[np.complex128]
     budget: float = 1e-3
 

@@ -14,7 +14,7 @@ from scipy.linalg import expm
 from .kernel_suite import KernelCase, KernelContract, synthetic_model
 
 if TYPE_CHECKING:
-    from zcu_tools.simulate.evolution.kernel import Prepared, SegmentTable
+    from zcu_tools.simulate.evolution import kernel
 
 
 @dataclass(frozen=True)
@@ -35,7 +35,7 @@ class DemoKernel:
 
     def guard(
         self,
-        table: SegmentTable,
+        table: kernel.SegmentTable,
         rows: NDArray[np.int64],
         source: evolution.ModelSource,
         budget: float,
@@ -43,13 +43,15 @@ class DemoKernel:
         return table.tones[rows] == 0
 
     def prepare_keys(
-        self, table: SegmentTable, rows: NDArray[np.int64]
+        self, table: kernel.SegmentTable, rows: NDArray[np.int64]
     ) -> NDArray[np.void]:
         keys = np.empty(len(rows), dtype=[("duration", "f8")])
         keys["duration"] = table.duration_ns[rows]
         return keys
 
-    def cost(self, table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.float64]:
+    def cost(
+        self, table: kernel.SegmentTable, rows: NDArray[np.int64]
+    ) -> NDArray[np.float64]:
         return np.ones(len(rows))
 
     def prepare(
@@ -78,9 +80,9 @@ class DemoKernel:
 
     def apply(
         self,
-        prepared: Prepared,
+        prepared: kernel.Prepared,
         key_index: NDArray[np.int64],
-        table: SegmentTable,
+        table: kernel.SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
         budget: float,
@@ -95,16 +97,16 @@ class DemoKernel:
 
 @pytest.fixture(params=[3, 4])
 def kernel_case(request: pytest.FixtureRequest) -> KernelCase:
-    from zcu_tools.simulate.evolution.kernel import SegmentTable
-
     size: int = request.param
     model = synthetic_model(size)
+    from zcu_tools.simulate.evolution import kernel
+
     source = evolution.ModelSource(
         (np.eye(size, dtype=np.complex128) / size).astype(np.complex128),
         lambda level: replace(model, level=level),
     )
     rows = 4
-    table = SegmentTable(
+    table = kernel.SegmentTable(
         np.arange(rows),
         np.array([0.0, 2.0, 7.0, 1.0]),
         np.array([0.7, 1.3, 0.7, 2.1]),
@@ -142,9 +144,9 @@ def test_suite_detects_incorrect_dynamics(kernel_case: KernelCase) -> None:
     class NoEvolution(DemoKernel):
         def apply(
             self,
-            prepared: Prepared,
+            prepared: kernel.Prepared,
             key_index: NDArray[np.int64],
-            table: SegmentTable,
+            table: kernel.SegmentTable,
             rows: NDArray[np.int64],
             states: NDArray[np.complex128],
             budget: float,
@@ -175,9 +177,9 @@ def test_suite_detects_row_position_dependence(kernel_case: KernelCase) -> None:
     class PositionDependent(DemoKernel):
         def apply(
             self,
-            prepared: Prepared,
+            prepared: kernel.Prepared,
             key_index: NDArray[np.int64],
-            table: SegmentTable,
+            table: kernel.SegmentTable,
             rows: NDArray[np.int64],
             states: NDArray[np.complex128],
             budget: float,
