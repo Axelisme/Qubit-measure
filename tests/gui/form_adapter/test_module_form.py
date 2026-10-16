@@ -32,8 +32,8 @@ from zcu_tools.gui.form import (
     FormModel,
     FormState,
     FormWritePath,
-    ModuleInline,
 )
+from zcu_tools.gui.form_adapter import ModuleInline
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
     ContextSourceUnavailableError,

@@ -6,7 +6,6 @@ from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParame
 from zcu_tools.mcp.measure.recipe import (
     MissingParameter,
     RecipeDefinition,
-    RecipeFieldEdit,
     RecipeGenerator,
     RecipeNeedsParameters,
     RecipeSession,
@@ -15,9 +14,10 @@ from zcu_tools.mcp.measure.recipe import (
 
 from .helpers import (
     FrequencySweepCalibration,
-    set_frequency,
+    apply_frequency,
+    choose_frequency,
+    retain_scalar,
     set_frequency_sweep,
-    set_nested_module_scalar,
 )
 
 
@@ -117,42 +117,29 @@ def twotone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool
             expts=points,
         )
     )
-    if (
-        parameter := set_frequency(
-            tab,
-            "modules.readout",
-            calibration="$resonator.freq",
-            required="readout_ref",
-        )
-    ) is not None:
-        missing.append(parameter)
+    frequency = choose_frequency(
+        tab,
+        "modules.readout.freq",
+        calibration="$resonator.freq",
+        required="readout_ref",
+    )
+    missing.extend(frequency.missing)
+    if frequency.edit is not None:
+        tab.use_inline("modules.readout")
+        apply_frequency(tab, frequency.edit)
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
 
-    if (
-        gain is None
-        and pulse_length_us is None
-        and tab.read_field("modules.qub_pulse").mode == "key"
-    ):
-        # Key input has no inline leaves; report the library values instead.
-        tab.retain_module_source(
-            "modules.qub_pulse",
-            summary_field="modules.qub_pulse.module.gain",
-            value_path=("gain",),
-        )
+    if gain is not None or pulse_length_us is not None:
+        tab.use_inline("modules.qub_pulse")
+        tab.set("modules.qub_pulse.gain", gain, source="explicit")
     else:
-        if gain is not None or pulse_length_us is not None:
-            tab.use_inline("modules.qub_pulse")
-        tab.set("modules.qub_pulse.module.gain", gain, source="explicit")
-    set_nested_module_scalar(
-        tab,
-        "modules.qub_pulse",
-        "modules.qub_pulse.module.waveform",
-        RecipeFieldEdit(
-            "modules.qub_pulse.module.waveform.module.length", pulse_length_us
-        ),
-        ("waveform", "length"),
-    )
+        retain_scalar(tab, "modules.qub_pulse.gain")
+    if pulse_length_us is not None:
+        tab.use_inline("modules.qub_pulse.waveform")
+        tab.set("modules.qub_pulse.waveform.length", pulse_length_us)
+    else:
+        retain_scalar(tab, "modules.qub_pulse.waveform.length")
     tab.set("reps", reps, source="explicit")
     tab.set("rounds", rounds, source="explicit")
 
@@ -199,17 +186,15 @@ DEFINITION = RecipeDefinition(
     summary_parameters=(
         SummaryParameter(
             "readout_frequency_mhz",
-            "modules.readout.module.freq",
+            "modules.readout.freq",
             "MHz",
         ),
         SummaryParameter("readout_ref", "modules.readout"),
         SummaryParameter("use_reset", "modules.reset"),
         SummaryParameter("reps", "reps"),
         SummaryParameter("rounds", "rounds"),
-        SummaryParameter(
-            "pulse_length_us", "modules.qub_pulse.module.waveform.module.length", "us"
-        ),
-        SummaryParameter("gain", "modules.qub_pulse.module.gain"),
+        SummaryParameter("pulse_length_us", "modules.qub_pulse.waveform.length", "us"),
+        SummaryParameter("gain", "modules.qub_pulse.gain"),
         SummaryParameter("frequency_sweep", "sweep.freq", "MHz"),
         SummaryParameter("drive_ref", "modules.qub_pulse"),
     ),

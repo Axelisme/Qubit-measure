@@ -25,9 +25,8 @@ from zcu_tools.gui.form import (
     FormErrors,
     FormPath,
     LinRange,
-    ModuleInput,
 )
-from zcu_tools.gui.form_adapter import ModuleInputField
+from zcu_tools.gui.form_adapter import ModuleInput, ModuleInputField
 from zcu_tools.gui.session.context_types import ContextSourceUnavailableError
 from zcu_tools.program.v2.modules import ArbWaveformCfg, PulseCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory

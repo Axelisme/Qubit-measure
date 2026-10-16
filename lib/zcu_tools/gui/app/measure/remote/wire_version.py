@@ -6,9 +6,9 @@ WIRE_VERSION; it reports GUI_VERSION without comparing it.
 
 from __future__ import annotations
 
-# Native Load cfg_issue and startup environments share this wire revision.
-WIRE_VERSION = 107
+# Logical recipe reads, edits and selectors share this wire revision.
+WIRE_VERSION = 108
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 140
+GUI_VERSION = 141

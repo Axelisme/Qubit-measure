@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, Qt, QTimer
-from PyQt6.QtGui import QKeyEvent, QMouseEvent
+from PyQt6.QtGui import QContextMenuEvent, QKeyEvent, QMouseEvent
 from PyQt6.QtWidgets import (
     QAbstractButton,
     QApplication,
@@ -403,6 +403,121 @@ class ComponentDriver:
             mouse_click(widget, point)
         QApplication.processEvents()
 
+    def _field_control(self, text: str | None, object_name: str | None) -> QWidget:
+        if (text is None) == (object_name is None):
+            raise ValueError("Supply exactly one of text or object_name")
+        if text is not None:
+            fields = [
+                widget
+                for widget in self._widgets()
+                if self._on_screen(widget) and self._field_label(widget) == text
+            ]
+            if fields:
+                return _unique(text, fields, [widget.objectName() for widget in fields])
+        return self._find(text, object_name)
+
+    def choose_option(
+        self,
+        text: str | None = None,
+        value: str = "",
+        *,
+        object_name: str | None = None,
+    ) -> None:
+        """Choose an exact visible option caption using real combo keyboard events.
+
+        Supply exactly one exact text/form-label or object_name selector. Missing
+        or ambiguous widget/option captions raise LookupError; a non-combo target
+        raises TypeError. Disabled, hidden, clipped or modal-blocked targets and
+        disabled options are no-ops. value is a caption, never userData or index.
+        No target is shown or scrolled into view. Popups close on failure.
+        """
+        widget = self._field_control(text, object_name)
+        if not isinstance(widget, QComboBox):
+            raise TypeError("choose_option requires QComboBox")
+        if not self._can_interact(widget):
+            return
+        index = _unique(
+            value,
+            [i for i in range(widget.count()) if widget.itemText(i) == value],
+            [widget.itemText(i) for i in range(widget.count())],
+        )
+        model = widget.model()
+        if (
+            model is None
+            or not model.flags(model.index(index, widget.modelColumn()))
+            & Qt.ItemFlag.ItemIsEnabled
+        ):
+            return
+        mouse_click(widget, widget.rect().center())
+        try:
+            view = widget.view()
+            if view is None:
+                raise RuntimeError("Combo has no option view")
+            key_click(view, Qt.Key.Key_Home)
+            for _ in range(index):
+                key_click(view, Qt.Key.Key_Down)
+            key_click(view, Qt.Key.Key_Return)
+        finally:
+            popup = QApplication.activePopupWidget()
+            if popup is not None:
+                key_click(popup, Qt.Key.Key_Escape)
+        QApplication.processEvents()
+
+    def invoke_context_action(
+        self,
+        text: str | None = None,
+        action: str = "",
+        *,
+        object_name: str | None = None,
+    ) -> None:
+        """Open a control's context menu and click an exact visible action caption.
+
+        Supply exactly one exact text/form-label or object_name selector. Missing/
+        ambiguous captions raise LookupError; non-combo/non-line-edit targets raise
+        TypeError. Unavailable widgets and disabled actions are no-ops. Hidden
+        actions are not selected. Real context-menu/mouse events are delivered;
+        actions and product handlers are never called directly. A scheduled menu
+        delivery has a 30-second watchdog; all popup/callback failures are returned
+        to the caller after closing the menu, never left in Qt's event loop.
+        """
+        widget = self._field_control(text, object_name)
+        if not isinstance(widget, (QComboBox, QLineEdit)):
+            raise TypeError("Context action requires QComboBox or QLineEdit")
+        if not self._can_interact(widget):
+            return
+        errors: list[Exception] = []
+
+        def choose() -> None:
+            try:
+                self._select_menu_path((action,))
+            except (LookupError, RuntimeError, ValueError, TypeError) as error:
+                errors.append(error)
+                self._dismiss_menus()
+
+        def timed_out() -> None:
+            errors.append(TimeoutError("Context menu delivery did not finish"))
+            self._dismiss_menus()
+
+        watchdog = QTimer()
+        watchdog.setSingleShot(True)
+        watchdog.timeout.connect(timed_out)
+        watchdog.start(30_000)
+        QTimer.singleShot(0, choose)
+        try:
+            point = widget.rect().center()
+            QApplication.sendEvent(
+                widget,
+                QContextMenuEvent(
+                    QContextMenuEvent.Reason.Mouse, point, widget.mapToGlobal(point)
+                ),
+            )
+            QApplication.processEvents()
+        finally:
+            watchdog.stop()
+            self._dismiss_menus()
+        if errors:
+            raise errors[0]
+
     def select_menu(self, opener: str, path: tuple[str, ...]) -> None:
         """Click opener and select exact captions in its blocking QMenu.
 
@@ -469,7 +584,9 @@ class ComponentDriver:
             mouse_click(menu, menu.actionGeometry(action).center())
             if index < len(path) - 1:
                 key_click(menu, Qt.Key.Key_Right)
-            QApplication.processEvents()
+                QApplication.processEvents()
+            # Let the final click unwind QMenu.exec before deferred deletions.
+            # Commands may retire their action and control synchronously.
 
     def choose_file(
         self, opener: str, path: Path, *, evidence: Path | None = None

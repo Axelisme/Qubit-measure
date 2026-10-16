@@ -9,7 +9,7 @@ from pydantic_core import PydanticCustomError
 
 from ._json import copy_object, default_json
 from ._structure import alternatives, choice_fields, revert_leaf, selected
-from .model import FormEnv, FormModel, FormPath, ModuleRef, field_error
+from .model import FormEnv, FormModel, FormPath, field_error
 
 
 def error_path(error: PydanticCustomError) -> FormPath:
@@ -29,20 +29,6 @@ def prefix_error(error: PydanticCustomError, prefix: FormPath) -> PydanticCustom
     return field_error(
         path, f"{'.'.join(str(part) for part in path)}: {error.message()}"
     )
-
-
-def _reference(data: Mapping[str, JsonValue], env: FormEnv, prefix: FormPath) -> None:
-    name = data.get("name")
-    if not isinstance(name, str):
-        return
-    path = (*prefix, "name")
-    label = ".".join(str(part) for part in path)
-    if env.library is None:
-        raise field_error(path, f"{label}: Missing captured library")
-    try:
-        env.library.module_spec(name)
-    except (ValueError, KeyError) as exc:
-        raise field_error(path, f"{label}: {exc}") from exc
 
 
 def _children(
@@ -107,7 +93,7 @@ def check_sources(
 
     Missing fields with static defaults still consume their declared sources.
     Invalid ordinary drafts are not validated here. Directed source failures
-    raise PydanticCustomError; library roots are read as Specs, never cfgs.
+    raise PydanticCustomError; domain hooks own the consumed source policy.
     validate_paths rejects invalid local choices declarations with ValueError;
     enclosing container keys/indexes only prefix errors, not declarations.
     Nested local options override enclosing options at the same leaf path.
@@ -120,8 +106,11 @@ def check_sources(
             options[(*prefix, *path)] = values
     except PydanticCustomError as exc:
         raise prefix_error(exc, prefix) from exc
-    if issubclass(model, ModuleRef):
-        _reference(data, env, prefix)
+    if issubclass(model, FormModel):
+        try:
+            model.check_sources(data, env)
+        except PydanticCustomError as exc:
+            raise prefix_error(exc, prefix) from exc
     for name, info in model.model_fields.items():
         value = data.get(name)
         if name not in data and not info.is_required():

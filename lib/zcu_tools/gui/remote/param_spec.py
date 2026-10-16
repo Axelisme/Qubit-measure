@@ -163,7 +163,10 @@ class ParamSpec:
     items (string by default, or number), without changing handler validation.
     minimum/maximum declare inclusive numeric schema limits; None omits a limit.
     Domain handlers own range validation, including dependent ranges.
-    Invalid enum/item declarations raise ValueError during construction.
+    omit_when_missing omits absent keys from handler params when True; explicit
+    null still reaches the handler as None. It requires optional/default=None.
+    False preserves the usual absent/null/default behavior and does not affect
+    schema requiredness. Invalid declarations raise ValueError at construction.
     """
 
     name: str
@@ -181,8 +184,11 @@ class ParamSpec:
     array_item_type: Literal["string", "number"] = "string"
     minimum: float | None = None
     maximum: float | None = None
+    omit_when_missing: bool = False
 
     def __post_init__(self) -> None:
+        if self.omit_when_missing and (self.required or self.default is not None):
+            raise ValueError("omit_when_missing requires optional with default=None")
         if self.array_item_type not in ("string", "number"):
             raise ValueError("array_item_type must be string or number")
         if self.json_type is not JsonType.ARRAY and self.array_item_type != "string":
@@ -313,6 +319,8 @@ def validate_params(
     out: dict[str, object] = {}
     for spec in specs:
         present = spec.name in params
+        if spec.omit_when_missing and not present:
+            continue
         value = _coerce_param(spec, params.get(spec.name), present=present)
         if spec.enum is not None and value is not None and value not in spec.enum:
             raise RemoteError(
