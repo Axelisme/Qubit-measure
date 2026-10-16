@@ -40,7 +40,7 @@ basis changes inside a chain; the engine changes basis between apply calls
 and returns the final state to the DC eigenbasis. Cancellation is checked at
 chunk boundaries and raises `Cancelled` without partial results. `close()`
 waits for active work, clears the prepare cache and is safe to repeat. Each
-`evolve` call owns its threading pool; no worker resources survive the call.
+`evolve` call opens and closes its own joblib threading pool. The prepare cache\npersists across `evolve` calls, but no worker resources survive a call.
 `SEGMENT_NUMERIC_VERSION` identifies engine numerics for checked replay.
 
 The internal `kernel` module defines `SegmentTable`, `Kernel` and the opaque

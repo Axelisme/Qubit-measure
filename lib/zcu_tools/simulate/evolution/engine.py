@@ -276,7 +276,7 @@ class Engine:
     Cache namespaces also include the error budget, so stricter requests cannot
     reuse looser preparations. Calls on one instance serialize; close is
     idempotent and waits for active work before clearing the cache. No worker
-    resource survives an evolve call.
+    resource survives an evolve call. The prepare cache persists across evolve\n    calls; each evolve opens and closes its own joblib threading pool.
     """
 
     def __init__(
