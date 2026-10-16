@@ -32,7 +32,7 @@ from zcu_tools.simulate.evolution import (
 )
 
 from .point import FTFPointPlan, plan_point
-from .replay import replay_versions
+from .replay import BACKEND_VERSION, replay_versions
 
 
 @dataclass(frozen=True)
@@ -277,7 +277,7 @@ def ftf(
         binding = SimulationBinding(
             coordinator.snapshot,
             coordinator.execute,
-            backend_version="ftf-direct-v1",
+            backend_version=BACKEND_VERSION,
             seed=settings.seed,
         )
         gens = (

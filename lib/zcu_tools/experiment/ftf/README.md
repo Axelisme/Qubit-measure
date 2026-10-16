@@ -22,8 +22,10 @@ No density, source filter state or receiver noise is inherited by another shot.
 
 `plan_point` is an author diagnostic interface. It converts each execution's
 QICK us/MHz/degrees into ns/GHz/radians, preserving signed complex waveforms and
-common carrier phase. The plan contains independent numeric inputs, not QICK
-buffers. `FTFSource` explicitly calls `Evolution.evolve`, `populations`, then
+common carrier phase. Local numeric phase advances to the quantized support
+start using the numeric owner's nearest-2-ns geometry, so rounding a pulse start
+does not shift its common oscillator reference. The plan contains independent
+numeric inputs, not QICK buffers. `FTFSource` explicitly calls `Evolution.evolve`, `populations`, then
 `ADC.sample_windows`. The program adapter owns packing, rounding and averaging.
 
 The receiver PSD is a two-sided white spectral density in ADC sample units²*ns.
@@ -60,7 +62,10 @@ rounds save checked content-addressed private inputs through
 snapshot and sampling identity. Detached complex waveform samples and full
 settings survive source-file edits. `replay_round(round_path)` runs only that
 round, without drivers, earlier acquisitions or current YAML. Exact numerical
-and RNG dependency versions must match. EvolutionLibrary owns opaque manifests
+and RNG dependency versions must match. Backend `ftf-direct-v2` identifies the
+corrected common-origin conversion; archives from the earlier backend fail
+explicitly instead of silently executing different phase arithmetic.
+EvolutionLibrary owns opaque manifests
 that pin/check the original publications and exact records before any solve.
 Missing/damaged references fail, even if current inputs could be solved again.
 Numeric files remain in the explicitly selected library and must be retained.

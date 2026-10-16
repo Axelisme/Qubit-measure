@@ -8,6 +8,8 @@ from zcu_tools.device import DeviceManager
 from zcu_tools.resources.simulation_replay import read_replay
 from zcu_tools.simulate.evolution import NUMERIC_VERSION, EvolutionLibrary
 
+BACKEND_VERSION = "ftf-direct-v2"
+
 
 def replay_versions() -> tuple[tuple[str, str], ...]:
     """Exact FTF backend/model/numeric/RNG dependency versions required for replay.
@@ -16,7 +18,7 @@ def replay_versions() -> tuple[tuple[str, str], ...]:
     equal seeds do not promise bit-exact results across library versions.
     """
     return (
-        ("backend", "ftf-direct-v1"),
+        ("backend", BACKEND_VERSION),
         ("model", "ftf-v1"),
         ("numeric", NUMERIC_VERSION),
         ("rng", "PCG64/SeedSequence-v1"),
