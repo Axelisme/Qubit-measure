@@ -429,23 +429,52 @@ def test_missing_null_and_failed_scalar_values_have_distinct_statuses() -> None:
         invalid: int = 1
 
     form = adapter.Form(LogicalCfg, {}, extras=Values, lower=lambda extras, cfg: cfg)
-    input = FormInput(form.model, {"extras": {"explicit": None, "invalid": {"expr": "1 / 0"}}})
+    input = FormInput(
+        form.model, {"extras": {"explicit": None, "invalid": {"expr": "1 / 0"}}}
+    )
     missing = form.read_logical_field(input, ("extras", "missing"), FormEnv())
     assert missing.value_status == "missing" and not missing.input_present
     explicit = form.read_logical_field(input, ("extras", "explicit"), FormEnv())
-    assert explicit.value_status == "available" and explicit.input_present and explicit.value is None
+    assert (
+        explicit.value_status == "available"
+        and explicit.input_present
+        and explicit.value is None
+    )
     failed = form.read_logical_field(input, ("extras", "invalid"), FormEnv())
-    assert failed.value_status == "unavailable" and failed.input_present and failed.value is None
+    assert (
+        failed.value_status == "unavailable"
+        and failed.input_present
+        and failed.value is None
+    )
 
 
-def test_locked_selector_rejects_library_and_disable_without_changing_input() -> None:
+def test_locked_selector_rejects_library_and_preserves_inline_noop() -> None:
     form = adapter.Form(LogicalCfg, {"drive": Template("pulse", lock={"freq": 7.0})})
-    form.bind_templates({"pulse": TemplateDef(PulseSpec, "Locked pulse", {"ch": 1, "nqz": 1, "freq": 1.0, "gain": 0.2, "waveform.style": "const", "waveform.length": 0.1})}, adapter="synthetic")
+    form.bind_templates(
+        {
+            "pulse": TemplateDef(
+                PulseSpec,
+                "Locked pulse",
+                {
+                    "ch": 1,
+                    "nqz": 1,
+                    "freq": 1.0,
+                    "gain": 0.2,
+                    "waveform.style": "const",
+                    "waveform.length": 0.1,
+                },
+            )
+        },
+        adapter="synthetic",
+    )
     env = captured()
     input = form.default_input(env)
     before = input.to_json()
     observed = form.read_logical_field(input, ("drive",), env)
-    assert observed.description.target is not None and observed.description.target.selection_fixed
+    assert (
+        observed.description.target is not None
+        and observed.description.target.selection_fixed
+    )
     with pytest.raises(adapter.LogicalEditError) as failure:
         form.prepare_library_selection(input, ("drive",), "Q.pulses.drive", env)
     assert failure.value.reason_code == "module_selector"
@@ -453,7 +482,9 @@ def test_locked_selector_rejects_library_and_disable_without_changing_input() ->
     assert input.to_json() == before
 
 
-def test_ordinary_union_partial_write_keeps_core_defaults_and_initial_active_structure() -> None:
+def test_ordinary_union_partial_write_keeps_core_defaults_and_initial_active_structure() -> (
+    None
+):
     from typing import Annotated, Literal
 
     class Flat(FormModel):
@@ -469,10 +500,44 @@ def test_ordinary_union_partial_write_keeps_core_defaults_and_initial_active_str
         shape: Annotated[Flat | Ramp, Field(discriminator="kind")]
 
     form = adapter.Form(LogicalCfg, {}, extras=Extras, lower=lambda extras, cfg: cfg)
-    input = FormInput(form.model, {"extras": {"shape": {"kind": "flat", "length": 9.0}}})
+    input = FormInput(
+        form.model, {"extras": {"shape": {"kind": "flat", "length": 9.0}}}
+    )
     env = FormEnv()
-    candidate = form.prepare_logical_edits(input, [adapter.LogicalEdit(("extras", "shape"), {"kind": "ramp", "start": 3.0})], env)
-    assert object_at(candidate.input.data, ("extras", "shape")) == {"kind": "ramp", "start": 3.0, "stop": 1.0}
+    candidate = form.prepare_logical_edits(
+        input,
+        [adapter.LogicalEdit(("extras", "shape"), {"kind": "ramp", "start": 3.0})],
+        env,
+    )
+    assert object_at(candidate.input.data, ("extras", "shape")) == {
+        "kind": "ramp",
+        "start": 3.0,
+        "stop": 1.0,
+    }
     with pytest.raises(adapter.LogicalEditError) as failure:
-        form.prepare_logical_edits(input, [adapter.LogicalEdit(("reps",), 8), adapter.LogicalEdit(("extras", "shape", "start"), 3)], env)
+        form.prepare_logical_edits(
+            input,
+            [
+                adapter.LogicalEdit(("reps",), 8),
+                adapter.LogicalEdit(("extras", "shape", "start"), 3),
+            ],
+            env,
+        )
     assert failure.value.reason_code == "form_path" and failure.value.edit_index == 1
+
+
+def test_ref_selector_observation_keeps_affecting_ancestor_failure() -> None:
+    from typing import Self
+    from pydantic import create_model, model_validator
+
+    class Parent(FormModel):
+        @model_validator(mode="after")
+        def fail(self) -> Self:
+            raise ValueError("Ancestor failure")
+
+    field = adapter.ModuleInputField(PulseSpec)
+    extras = create_model("InvalidParent", __base__=Parent, reference=(field.annotation, ...))
+    form = adapter.Form(LogicalCfg, {}, extras=extras, lower=lambda extras, cfg: cfg)
+    input = FormInput(form.model, {"extras": {"reference": {"kind": "ref", "name": "Q.pulses.drive"}}})
+    observed = form.read_logical_field(input, ("extras", "reference"), captured())
+    assert observed.errors is not None and ("extras",) in observed.errors.messages
