@@ -72,7 +72,7 @@ def test_channels_for_arbitrary_coherent_inputs(
 
     model = synthetic_model(3)
     model = replace(model, rates_per_ns=model.rates_per_ns * rate_scale)
-    source = ModelSource(np.eye(3, dtype=complex) / 3, lambda level: model)
+    source = ModelSource(np.eye(3, dtype=np.complex128) / 3, lambda level: model)
     # Basis projectors and real/imaginary pair superpositions span Hermitian
     # inputs. One prepared key must work for all of them, not just a thermal state.
     vectors = list(np.eye(3, dtype=complex))
