@@ -18,7 +18,7 @@
    文件、靜態內容、設定值及腳本旗標直接審閱；既有白箱或靜態檢查案例不因本頁宣稱已搬遷。
    不新增頂層 unit／integration／e2e 目錄，亦不測 Notebook／腳本的主要內容。
 
-框架測試用最小合成 workflow／adapter，不 import `zcu_lab`，包括其 fake 實驗。Adapter、workflow 與 recipes 的個別實驗流程與預設值不寫測試；只因實驗定義改動而失敗的測試應刪除，不修成固定 lab 行為。宿主最高接縫是 caller 的註冊清單，再從 Window、RPC 或 MCP 驗證結果。刪掉 `zcu_lab/` 後整套 pytest 仍須通過，包含 slow，見 [模組定位 ADR](../docs/adr/0072-module-boundaries.md#分層)。
+框架測試用最小合成 workflow／adapter，不 import `zcu_lab`，包括其 fake 實驗。Adapter、workflow 與 recipes 的個別實驗流程與預設值不寫測試；只因實驗定義改動而失敗的測試應刪除，不修成固定 lab 行為。宿主最高接縫是 caller 的註冊清單，再從 Window、RPC 或 MCP 驗證結果。Review 檢查 tests 沒有 import `zcu_lab`，必要時以 grep 輔助。不暫移目錄跑 pytest，也不新增 `ZCU_LAB` 環境變數或 import hook，見 [模組定位 ADR](../docs/adr/0072-module-boundaries.md#分層)。
 
 ## Fixture 與測試支援碼
 
