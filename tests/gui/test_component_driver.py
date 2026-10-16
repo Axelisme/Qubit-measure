@@ -212,15 +212,19 @@ def test_blocking_menu_selection_uses_visible_nested_captions(surface, qapp) -> 
     menu = QMenu(surface)
     group = menu.addMenu("Group")
     assert group is not None
-    group.addAction("Open")
-    menu.addAction("Open")
+    nested = group.addAction("Open")
+    root = menu.addAction("Open")
+    assert nested is not None and root is not None
+    nested.triggered.connect(
+        lambda: surface.statusBar().showMessage("Selected nested Open")
+    )
+    root.triggered.connect(lambda: surface.statusBar().showMessage("Wrong root Open"))
     selected: list[str] = []
 
     def open_menu() -> None:
         action = menu.exec(button.mapToGlobal(button.rect().bottomLeft()))
         if action is not None:
             selected.append(action.text())
-            surface.statusBar().showMessage("Selected nested Open")
 
     button.clicked.connect(open_menu)
     qapp.processEvents()
