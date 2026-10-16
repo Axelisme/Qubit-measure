@@ -21,7 +21,7 @@ def kernel_case(request: pytest.FixtureRequest) -> KernelCase:
     vector = np.exp(1j * np.arange(size)) / np.sqrt(size)
     state = np.outer(vector, vector.conj())
     source = ModelSource(
-        np.diag(np.arange(size, 0, -1) / sum(range(1, size + 1))),
+        np.diag(np.arange(size, 0, -1) / sum(range(1, size + 1))).astype(np.complex128),
         lambda level: replace(model, level=level),
     )
     durations = np.array([2.0, 3.0, 1.5, 0.0])
