@@ -9,6 +9,7 @@ from numpy.typing import NDArray
 from zcu_tools.core.simulation import SamplingIdentity
 
 from .model import RealArray, readonly_array
+from .populations import validate_populations
 
 
 @dataclass(frozen=True)
@@ -110,7 +111,9 @@ class PopulationInput:
 
     state_labels: explicit order matching ReadoutModel.state_labels exactly.
     values: owned/read-only dimensionless (state,) probabilities, nonnegative
-        and summing to one within 1e-10. No clipping or renormalization occurs.
+        and summing to one within 1e-6 (inclusive float64 endpoints).
+        The caller supplies an explicitly normalized distribution; this record
+        only validates and copies it. No clipping or renormalization occurs.
         Convert density explicitly with evolution.populations if appropriate;
         ADC does not infer a basis or turn coherences into probabilities.
         These describe the earliest readout pulse start_ns, or origin zero when
@@ -129,10 +132,7 @@ class PopulationInput:
             or len(set(self.state_labels)) != len(values)
         ):
             raise ValueError("population vector must match unique state labels")
-        if np.any(values < 0):
-            raise ValueError("populations must be nonnegative")
-        if abs(float(values.sum()) - 1) > 1e-10:
-            raise ValueError("populations must sum to one")
+        validate_populations(values)
         object.__setattr__(self, "values", values)
 
 

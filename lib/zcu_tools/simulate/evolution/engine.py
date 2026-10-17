@@ -206,6 +206,9 @@ class PathDiagnostics:
     exceeded_by_kernel: kernel name -> post-apply accuracy exceedance segment
         count, with only positive counts retained. Exceeded results remain
         committed without correction or retry; these are not solver failures.
+    max_trace_error: maximum absolute complex trace-minus-one of final
+        readout densities; zero for an empty evolve. Report-only, with no
+        correction, rejection or readout-specific tolerance comparison.
     All mappings default empty, own immutable copies and reject empty names
     or negative counts with ValueError. A point may participate in several
     path classes.
@@ -214,8 +217,11 @@ class PathDiagnostics:
     segments_by_kernel: Mapping[str, int] = field(default_factory=dict)
     points_by_class: Mapping[str, int] = field(default_factory=dict)
     exceeded_by_kernel: Mapping[str, int] = field(default_factory=dict)
+    max_trace_error: float = 0.0
 
     def __post_init__(self) -> None:
+        if not np.isfinite(self.max_trace_error) or self.max_trace_error < 0:
+            raise ValueError("max_trace_error must be finite and nonnegative")
         for name, counts in (
             ("segments_by_kernel", self.segments_by_kernel),
             ("points_by_class", self.points_by_class),

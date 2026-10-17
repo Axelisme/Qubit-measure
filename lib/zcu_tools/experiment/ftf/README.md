@@ -33,7 +33,14 @@ engine uses the quantized T4 subsegments without a drive and continuous-flux
 DOP853 when flux changes during a drive. It evolves every template together to
 readout start.
 
-Readout uses the DC model and populations in its energy basis. It ignores flux
+Readout uses the DC model and populations in its energy basis. FTF explicitly
+calls ADC's `normalize_populations` once after `batch_populations`, before
+conditional responses or sampling. ADC owns the 1e-6 probability tolerance,
+tolerated-negative cleanup and row normalization. Invalid rows fail without
+sampling; the error reports rejected row counts. The source retains the latest
+evolve diagnostics even when this preparation fails, including the engine's
+report-only maximum trace error. Raw evolution densities remain unchanged.
+It ignores flux
 tails and controls during or after readout. Earlier control portions still evolve
 normally. Each point must have exactly one active readout pulse, including when
 several mutually exclusive slots represent that pulse. The environment supports
