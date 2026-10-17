@@ -679,10 +679,16 @@ own. Weak rows cannot dilute a strong row through a pooled RMS. Tolerances,
 the 0.1 ns seed and the active-knot ceiling remain unchanged. This preserves the
 local control strength, not an end-to-end error bound. Independent rows keep
 the same numerical path under row reordering, apply partition or worker-width
-changes.
-Calls containing touching chains, zero-gain rows or non-single-tone rows retain
-the original lab-frame runner. `flux_dop853` also retains its original numerical
-path. Both frames use Hermitian Hamiltonians and densities, requiring only one
+changes, including calls mixing IP-eligible and lab-frame rows.
+
+Zero-gain and non-single-tone rows retain the original lab-frame runner, as does
+every row in a touching chain. A chain is recognized only between adjacent,
+same-timeline rows within an apply call whose supports touch within 1e-9 ns.
+It is not inferred from the complete segment table. Chain endpoints within that
+call remain bitwise identical to the original runner. Splitting a chain across
+calls restarts integration and can change its frame, so that comparison retains
+the original within-budget contract rather than bitwise equality.
+`flux_dop853` also retains its original numerical path. Both frames use Hermitian Hamiltonians and densities, requiring only one
 dense product per row per RHS. With `P = H @ rho`, the commutator is
 `P - P.conj().T`. Real Runge--Kutta weights preserve Hermitian intermediate stages.
 The RHS fuses the commutator and secular coherence loss, then adds population

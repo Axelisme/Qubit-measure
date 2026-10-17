@@ -137,9 +137,8 @@ def _run_interaction(data, row_models, states, controls):
                 states[index, i, j] *= phases[i] * phases[j].conjugate()
 
 
-def _independent_single_tones(segments: Segments, rows: NDArray[np.int64]) -> bool:
-    if np.any(segments.tones[rows] != 1) or np.any(segments.gain[rows, 0] == 0):
-        return False
+def _interaction_mask(segments: Segments, rows: NDArray[np.int64]) -> NDArray[np.bool_]:
+    eligible = (segments.tones[rows] == 1) & (segments.gain[rows, 0] != 0)
     previous, following = rows[:-1], rows[1:]
     touching = (segments.timeline[previous] == segments.timeline[following]) & (
         np.abs(
@@ -149,7 +148,10 @@ def _independent_single_tones(segments: Segments, rows: NDArray[np.int64]) -> bo
         )
         <= 1e-9
     )
-    return not np.any(touching)
+    # Both endpoints of each touching edge belong to the lab-frame chain.
+    eligible[:-1] &= ~touching
+    eligible[1:] &= ~touching
+    return eligible
 
 
 class DOP853Kernel:
@@ -272,9 +274,12 @@ class DOP853Kernel:
         pooled RMS. Tolerances, seed and active-knot ceiling are unchanged. This
         is local control, not a new end-to-end error bound. No adaptive history
         carries between rows or calls, so row order and worker/apply partition
-        do not change an independent row's numerical path.
-        Calls containing touching chains, zero gain or
-        non-single-tone rows retain the unchanged lab-frame runner. No RWA,
+        do not change an independent row's numerical path, including mixed
+        IP/lab calls. Zero-gain and non-single-tone rows, and every row in a
+        touching chain, retain the unchanged lab-frame runner. Chains are
+        recognized only between adjacent rows in this apply call, not in the
+        complete table. Splitting a chain across calls can change its frame;
+        such restarts preserve results within budget, not bitwise. No RWA,
         drive truncation, splitting, routing or envelope changes are made.
 
         Raises ValueError for incompatible prepared data, state/index shapes or
@@ -299,6 +304,18 @@ class DOP853Kernel:
         if np.any(playing & (table.tone_port[rows] >= models.ports[key_index, None])):
             raise ValueError("DOP853 tone port absent from model")
         segments = pack_segments(table)
-        runner = _run_interaction if _independent_single_tones(segments, rows) else _run
-        runner(_Data(models, segments), (rows, key_index), states, controls)
+        interaction = _interaction_mask(segments, rows)
+        boundaries = np.r_[
+            0, np.flatnonzero(interaction[1:] != interaction[:-1]) + 1, len(rows)
+        ]
+        # Keep contiguous runs: gathering all lab rows could accidentally join
+        # chains separated by an independent row in the caller's ordering.
+        for begin, end in zip(boundaries[:-1], boundaries[1:], strict=True):
+            runner = _run_interaction if interaction[begin] else _run
+            runner(
+                _Data(models, segments),
+                (rows[begin:end], key_index[begin:end]),
+                states[begin:end],
+                controls,
+            )
         return np.zeros(len(rows), dtype=np.bool_)
