@@ -301,9 +301,9 @@ def _flux_tail_groups(
     """Certify repeated nonempty no-drive prefixes within this source/evolve.
 
     Compare complete segment sequences, not their final level. Source and
-    initial density are common to the entire plan. Continuous samples are
-    compared in full, conservatively keeping even future samples in the key:
-    this cannot merge unequal prefixes or miss an interpolation endpoint.
+    initial density are common to the entire plan. Compare continuous samples
+    before probe start and the first sample at or after it, which closes the
+    prefix's final interpolation interval. Later samples cannot affect it.
     """
     candidates = np.flatnonzero(known & (table.start_ns > 0) & (table.tones == 1))
     groups: list[int | None] = [None] * len(table.timeline)
@@ -331,6 +331,10 @@ def _flux_tail_groups(
         available = table.flux_waveform_available
         if waveform is not None and (available is None or available[timeline]):
             a, b = waveform.offsets[timeline : timeline + 2]
+            endpoint = np.searchsorted(
+                waveform.time_ns[a:b], table.start_ns[row], side="left"
+            )
+            b = min(b, a + endpoint + 1)
             key += (waveform.time_ns[a:b].tobytes(), waveform.flux[a:b].tobytes())
         matches.setdefault(key, []).append(int(row))
     for group, rows in enumerate(matches.values()):
