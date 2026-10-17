@@ -9,6 +9,7 @@ surfaced as a RemoteError(PRECONDITION_FAILED) on the remote path.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
 from unittest.mock import MagicMock
 
@@ -46,7 +47,7 @@ def _make_controller(readiness: ContextReadiness) -> Controller:
     return fixture.ctrl
 
 
-def _dispatch(ctrl: Controller, method: str, params: dict) -> object:
+def _dispatch(ctrl: Controller, method: str, params: Mapping[str, object]) -> object:
     """Mirror the service path: validate params against the method's ParamSpec
     before invoking the handler. Handlers receive the adapter (ADR-0068), so
     wrap ctrl in a minimal adapter stub."""
