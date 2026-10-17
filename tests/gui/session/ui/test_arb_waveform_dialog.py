@@ -71,8 +71,9 @@ class _FakeController:
         del self.assets[data_key]
 
 
-@pytest.fixture(autouse=True)
-def _qt(qapp):
+@pytest.fixture(autouse=True, name="_qt")
+def fixture_qt(qapp):
+    """Keep the QApplication available throughout each test."""
     yield
 
 

@@ -30,8 +30,8 @@ def _bg() -> BackgroundRunner:
     return bg
 
 
-@pytest.fixture(autouse=True)
-def _quiesce_bg():
+@pytest.fixture(autouse=True, name="_quiesce_bg")
+def fixture_quiesce_bg():
     """Join all worker threads and flush their queued deliveries before GC."""
     yield
     for bg in _LIVE_BG:

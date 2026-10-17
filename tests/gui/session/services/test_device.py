@@ -55,8 +55,9 @@ _workers = DeviceWorkers()
 _bg = _workers.background
 
 
-@pytest.fixture(autouse=True)
-def _quiesce_services():
+@pytest.fixture(autouse=True, name="_quiesce_services")
+def fixture_quiesce_services():
+    """Close tracked service workers after each test."""
     try:
         yield
     finally:
