@@ -704,6 +704,9 @@ def test_main_window_load_data_dialog_calls_controller(
     ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
+    ctrl.get_tab_snapshot.return_value = _snapshot(
+        "tab-1", supports_load_data=True, has_figure=False
+    )
     database_root = tmp_path / "Database" / "Q3_2D" / "Q1"
     database_root.mkdir(parents=True)
     ctrl.save_control.list_saved_runs.return_value = ()
@@ -723,41 +726,45 @@ def test_main_window_load_data_dialog_calls_controller(
     )
     dialogs = RecordingDialogPresenter()
     window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=dialogs)
-    window._tab_widgets["tab-1"] = MagicMock()
-    window.show_status_message = MagicMock()
+    window.add_tab_widget("tab-1", "fake")
+    try:
+        assert window.has_tab_widget("tab-1") is True
+        window.show_status_message = MagicMock()
 
-    captured_dir: dict[str, str] = {}
+        captured_dir: dict[str, str] = {}
 
-    def fake_get_open_file_name(*args, **kwargs):
-        captured_dir["directory"] = args[2]
-        return ("/tmp/result.hdf5", "")
+        def fake_get_open_file_name(*args, **kwargs):
+            captured_dir["directory"] = args[2]
+            return ("/tmp/result.hdf5", "")
 
-    monkeypatch.setattr(
-        QFileDialog,
-        "getOpenFileName",
-        fake_get_open_file_name,
-    )
-
-    def choose_file(dialog: RunLoadDialog) -> int:
-        button = dialog.findChild(QPushButton, "load_file")
-        assert button is not None
-        button.click()
-        return dialog.result()
-
-    monkeypatch.setattr(RunLoadDialog, "exec", choose_file)
-    window.load_tab_data_dialog("tab-1")
-
-    ctrl.load_tab_result.assert_called_once_with("tab-1", "/tmp/result.hdf5")
-    window.show_status_message.assert_called_once()
-    assert captured_dir["directory"] == str(database_root)
-    if analysis_error is not None:
-        assert [(call.kind, call.title) for call in dialogs.calls] == [
-            ("warning", "Analysis preparation failed"),
-        ]
-        assert "Data loaded successfully" in dialogs.consume_message_containing(
-            "warning", analysis_error
+        monkeypatch.setattr(
+            QFileDialog,
+            "getOpenFileName",
+            fake_get_open_file_name,
         )
-    dialogs.assert_no_unexpected_messages()
+
+        def choose_file(dialog: RunLoadDialog) -> int:
+            button = dialog.findChild(QPushButton, "load_file")
+            assert button is not None
+            button.click()
+            return dialog.result()
+
+        monkeypatch.setattr(RunLoadDialog, "exec", choose_file)
+        window.load_tab_data_dialog("tab-1")
+
+        ctrl.load_tab_result.assert_called_once_with("tab-1", "/tmp/result.hdf5")
+        window.show_status_message.assert_called_once()
+        assert captured_dir["directory"] == str(database_root)
+        if analysis_error is not None:
+            assert [(call.kind, call.title) for call in dialogs.calls] == [
+                ("warning", "Analysis preparation failed"),
+            ]
+            assert "Data loaded successfully" in dialogs.consume_message_containing(
+                "warning", analysis_error
+            )
+        dialogs.assert_no_unexpected_messages()
+    finally:
+        window.remove_tab_widget("tab-1")
 
 
 def test_main_window_successful_writeback_relies_on_event_owned_projection(
@@ -886,20 +893,27 @@ def test_main_window_load_data_dialog_cancel_is_noop(
     ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
+    ctrl.get_tab_snapshot.return_value = _snapshot(
+        "tab-1", supports_load_data=True, has_figure=False
+    )
     ctrl.save_control.list_saved_runs.return_value = ()
     window = MainWindow(ctrl, templates=lambda: {})
-    window._tab_widgets["tab-1"] = MagicMock()
+    window.add_tab_widget("tab-1", "fake")
+    try:
+        assert window.has_tab_widget("tab-1") is True
 
-    def cancel(dialog: RunLoadDialog) -> int:
-        button = dialog.findChild(QPushButton, "load_cancel")
-        assert button is not None
-        button.click()
-        return dialog.result()
+        def cancel(dialog: RunLoadDialog) -> int:
+            button = dialog.findChild(QPushButton, "load_cancel")
+            assert button is not None
+            button.click()
+            return dialog.result()
 
-    monkeypatch.setattr(RunLoadDialog, "exec", cancel)
-    window.load_tab_data_dialog("tab-1")
+        monkeypatch.setattr(RunLoadDialog, "exec", cancel)
+        window.load_tab_data_dialog("tab-1")
 
-    ctrl.load_tab_result.assert_not_called()
+        ctrl.load_tab_result.assert_not_called()
+    finally:
+        window.remove_tab_widget("tab-1")
 
 
 def test_main_window_load_data_dialog_shows_user_facing_error(
@@ -913,34 +927,41 @@ def test_main_window_load_data_dialog_shows_user_facing_error(
     ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
+    ctrl.get_tab_snapshot.return_value = _snapshot(
+        "tab-1", supports_load_data=True, has_figure=False
+    )
     ctrl.save_control.list_saved_runs.return_value = ()
     ctrl.load_tab_result.side_effect = LoadDataError(
         "Cannot load this data file into the current tab.\n\nDetails: bad axes",
         reason_code="invalid_data_file",
     )
     window = MainWindow(ctrl, templates=lambda: {})
-    window._tab_widgets["tab-1"] = MagicMock()
-    window.show_error_dialog = MagicMock()
-    monkeypatch.setattr(
-        QFileDialog,
-        "getOpenFileName",
-        lambda *args, **kwargs: ("/tmp/bad.hdf5", ""),
-    )
+    window.add_tab_widget("tab-1", "fake")
+    try:
+        assert window.has_tab_widget("tab-1") is True
+        window.show_error_dialog = MagicMock()
+        monkeypatch.setattr(
+            QFileDialog,
+            "getOpenFileName",
+            lambda *args, **kwargs: ("/tmp/bad.hdf5", ""),
+        )
 
-    def choose_file(dialog: RunLoadDialog) -> int:
-        button = dialog.findChild(QPushButton, "load_file")
-        assert button is not None
-        button.click()
-        return dialog.result()
+        def choose_file(dialog: RunLoadDialog) -> int:
+            button = dialog.findChild(QPushButton, "load_file")
+            assert button is not None
+            button.click()
+            return dialog.result()
 
-    monkeypatch.setattr(RunLoadDialog, "exec", choose_file)
-    window.load_tab_data_dialog("tab-1")
+        monkeypatch.setattr(RunLoadDialog, "exec", choose_file)
+        window.load_tab_data_dialog("tab-1")
 
-    window.show_error_dialog.assert_called_once()
-    title, message = window.show_error_dialog.call_args.args
-    assert title == "Load data failed"
-    assert "Cannot load this data file" in message
-    assert "bad axes" in message
+        window.show_error_dialog.assert_called_once()
+        title, message = window.show_error_dialog.call_args.args
+        assert title == "Load data failed"
+        assert "Cannot load this data file" in message
+        assert "bad axes" in message
+    finally:
+        window.remove_tab_widget("tab-1")
 
 
 def test_main_window_run_lock_keeps_new_tab_available(control_factory, qapp):
