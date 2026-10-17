@@ -865,29 +865,42 @@ def test_main_window_named_dialog_facade_delegates_to_registry(
 
 
 def test_show_error_dialog_retains_until_close(control_factory, qapp):
+    from unittest.mock import patch
+
     from qtpy.QtWidgets import QMessageBox
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+    from zcu_tools.gui.widgets.dialog_lifecycle import DialogRefStore
 
-    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
-    ctrl.get_bus.return_value = EventBus()
-    window = MainWindow(ctrl, templates=lambda: {})
+    with patch.object(
+        DialogRefStore,
+        "open_transient",
+        autospec=True,
+        side_effect=DialogRefStore.open_transient,
+    ) as open_transient:
+        ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
+        ctrl.get_bus.return_value = EventBus()
+        window = MainWindow(ctrl, templates=lambda: {})
 
-    window.show_error_dialog("Broken", "Something failed")
-    qapp.processEvents()
+        window.show_error_dialog("Broken", "Something failed")
+        qapp.processEvents()
 
-    dialogs = [
-        dialog
-        for dialog in window.findChildren(QMessageBox)
-        if dialog.windowTitle() == "Broken"
-    ]
-    assert len(dialogs) == 1
-    assert len(window._dialog_refs) == 1
-    assert window.list_open_dialogs() == []
+        dialogs = [
+            dialog
+            for dialog in window.findChildren(QMessageBox)
+            if dialog.windowTitle() == "Broken"
+        ]
+        assert len(dialogs) == 1
+        assert open_transient.call_args is not None
+        receiver = open_transient.call_args.args[0]
+        assert isinstance(receiver, DialogRefStore)
+        open_transient.assert_called_once_with(receiver, dialogs[0])
+        assert len(receiver) == 1
+        assert window.list_open_dialogs() == []
 
-    dialogs[0].reject()
-    qapp.processEvents()
+        dialogs[0].reject()
+        qapp.processEvents()
 
-    assert len(window._dialog_refs) == 0
+        assert len(receiver) == 0
 
 
 def test_main_window_load_data_dialog_cancel_is_noop(
