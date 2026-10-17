@@ -244,9 +244,9 @@ def macro_benches(
     return out
 
 
-def run(args) -> dict:
+def run(args) -> dict[str, object]:
     warm_up()
-    results = {
+    results: dict[str, object] = {
         "git_sha": _git_sha(),
         "quick": args.quick,
         "micro": micro_benches(args.quick),
