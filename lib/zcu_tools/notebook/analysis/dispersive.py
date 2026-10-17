@@ -27,7 +27,7 @@ def search_proper_g(
     bare_rf: float,
     sp_fluxs: NDArray[np.float64],
     sp_freqs: NDArray[np.float64],
-    sp_signals: NDArray,
+    sp_signals: NDArray[np.generic],
     g_bound: tuple[float, float],
     g_init: float | None = None,
 ) -> Callable[[], tuple[float, float]]:
@@ -217,7 +217,7 @@ def auto_fit_dispersive(
     bare_rf_GHz: float,
     sp_fluxs: NDArray[np.float64],
     sp_freqs: NDArray[np.float64],
-    sp_signals: NDArray,
+    sp_signals: NDArray[np.generic],
     g_bound: tuple[float, float] = (0.01, 0.2),
     g_init: float | None = None,
     *,
@@ -318,7 +318,7 @@ def plot_dispersive_with_onetone(
     plot_rfs: tuple[NDArray[np.float64], ...],
     sp_fluxs: NDArray[np.float64],
     sp_freqs: NDArray[np.float64],
-    sp_signals: NDArray,
+    sp_signals: NDArray[np.generic],
 ) -> go.Figure:
     """
     Plot the dispersive resonator frequency vs. flux with one tone signal
