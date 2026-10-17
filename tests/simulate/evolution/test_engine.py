@@ -315,3 +315,47 @@ def test_dop853_adjacent_rows_are_one_chain():
     table, rows, _ = k.calls[0]
     assert table.start_ns[rows].tolist() == [0.0, 1.0]
     assert table.timeline[rows].tolist() == [0, 0]
+
+
+def test_preceding_idle_flux_uses_arbitrary_input_dyson_bound():
+    model = synthetic_model(3)
+    x = np.zeros((3, 3), dtype=complex)
+    x[1, 2] = x[2, 1] = 1
+    model = replace(
+        model,
+        energies_ghz=np.zeros(3),
+        rates_per_ns=np.zeros((3, 3)),
+        dephasing_per_ns=np.zeros((3, 3)),
+        drives=(replace(model.drives[0], in_phase_ghz=x, quadrature_ghz=x * 0),),
+    )
+    basis = np.eye(3, dtype=complex)[[1, 0, 2]]
+
+    def build(level):
+        return replace(
+            model,
+            level=level,
+            identity=str(level),
+            eigenvectors=np.eye(3, dtype=complex) if level == (0,) else basis,
+        )
+
+    src = ModelSource(np.diag([0.999, 0.001, 0.0]).astype(complex), build)
+    pulse = replace(
+        track(1, EnvelopeSpec("constant"), start=1, duration=1),
+        frequency_ghz=np.zeros(1),
+        amplitude=np.full(1, 0.003),
+    )
+    b = replace(
+        batch(1, duration=2),
+        tracks=(pulse,),
+        flux=FluxSchedule(np.array([0, 2]), np.array([0.0, 1.0]), np.array([[1], [0]])),
+    )
+    result = run(Engine(1, 100000), src, (b,))
+    assert result.paths.segments_by_kernel.get("dyson", 0) == 0
+    assert result.paths.segments_by_kernel["t4"] == 1
+    assert sum(result.paths.segments_by_kernel.values()) == 2
+    # The identical drive without a preceding segment can use DC ground input.
+    direct = replace(
+        batch(1, duration=1), tracks=(replace(pulse, start_ns=np.zeros(1)),)
+    )
+    direct_result = run(Engine(1, 100000), src, (direct,))
+    assert direct_result.paths.segments_by_kernel == {"dyson": 1}
