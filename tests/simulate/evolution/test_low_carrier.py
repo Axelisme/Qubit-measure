@@ -120,3 +120,68 @@ def test_many_low_carrier_keys_do_not_all_stay_live():
     assert result.paths.segments_by_kernel == {"floquet_period": 2 * count}
     assert peak < count
     assert live == 0
+
+
+def test_long_plateau_reuses_period_across_durations():
+    frequency = 0.05
+    from .test_engine import RecordingKernel
+
+    model = synthetic_model(3)
+    model = replace(
+        model,
+        energies_ghz=np.array([0.0, abs(frequency), 0.9]),
+        rates_per_ns=model.rates_per_ns * 0.01,
+        dephasing_per_ns=model.dephasing_per_ns * 0.01,
+    )
+    vector = np.array([1, 1j, -1]) / np.sqrt(3)
+    initial = np.outer(vector, vector.conj())
+    src = ModelSource(initial, lambda level: model)
+    durations = np.array([37.3, 81.7, 163.1])
+    pulse = replace(
+        track(3, EnvelopeSpec("constant")),
+        frequency_ghz=np.full(3, frequency),
+        duration_ns=durations,
+        amplitude=np.full(3, 0.2),
+        phase_rad=np.full(3, 1.3),
+    )
+    timeline = replace(batch(3), tracks=(pulse,), end_ns=durations)
+    prepared_keys = []
+
+    class ObservedPeriod(FloquetPeriodKernel):
+        def prepare(self, keys, table, rows, source, budget):
+            prepared_keys.extend(keys)
+            return super().prepare(keys, table, rows, source, budget)
+
+    result = run(
+        Engine(
+            1,
+            0,
+            kernels=(
+                RecordingKernel("dyson", accepts=False),
+                ObservedPeriod(),
+                RecordingKernel("t6"),
+            ),
+        ),
+        src,
+        (timeline,),
+    )
+    assert result.paths.segments_by_kernel == {"floquet_period": 3}
+    assert len(prepared_keys) == 1
+    table = SegmentTable(
+        timeline=np.arange(3),
+        start_ns=np.zeros(3),
+        duration_ns=durations,
+        level=np.zeros((3, 1), dtype=np.int64),
+        tones=np.ones(3, dtype=np.int64),
+        tone_port=np.zeros((3, 1), dtype=np.int64),
+        tone_frequency_ghz=pulse.frequency_ghz[:, None],
+        tone_amplitude=pulse.amplitude[:, None],
+        tone_theta_rad=pulse.phase_rad[:, None],
+        tone_envelope=np.zeros((3, 1), dtype=np.int64),
+        tone_envelope_offset_ns=np.zeros((3, 1)),
+        envelopes=(EnvelopeSpec("constant"),),
+    )
+    case = KernelCase(FloquetPeriodKernel(), src, table, result.densities)
+    expected = np.array([reference(case, row, initial) for row in range(3)])
+    np.testing.assert_allclose(result.densities, expected, atol=1e-2, rtol=0)
+    assert result.paths.max_trace_error < 1e-8
