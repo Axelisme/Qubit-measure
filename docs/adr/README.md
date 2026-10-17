@@ -57,7 +57,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Analysis / Simulation / Waveform
 
-- [0076 — Numerical candidates、plan ownership 與 checked replay](0076-numerical-plans-and-replay.md)：constant cover ownership、逐算法成本與有限大型配置估算、明確選用的 evidence admission、developer acquire evaluation 與 inline pinned replay，預設 Engine 不變。
+- [0077 — Numerical candidates、plan ownership 與 checked replay](0077-numerical-plans-and-replay.md)：constant cover ownership、逐算法成本與有限大型配置估算、明確選用的 evidence admission、developer acquire evaluation 與 inline pinned replay，預設 Engine 不變。
 
 - [0071 — Coherence 頻率與時間單位](0071-coherence-units.md)：energy/h=GHz、physical ns、標準 loss parameters 與 spectral-rate 換算；T1／pointwise Q 與 Purcell 的實作契約、獨立物理驗證及歷史 2π 修改證據。
 

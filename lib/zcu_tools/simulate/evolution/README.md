@@ -224,7 +224,7 @@ execution. This explicit legacy mode never uses constant profile admission.
 cover using algorithm-specific eligibility, identity data, bounded shadow search
 and the existing scheduler. Engine calls the planner only for explicitly selected
 constant profiles or developer evaluation, never for `legacy-plan`.
-Ownership and admission rules are in [ADR-0076](../../../../docs/adr/0076-numerical-plans-and-replay.md).
+Ownership and admission rules are in [ADR-0077](../../../../docs/adr/0077-numerical-plans-and-replay.md).
 
 Only nonempty acquires with exactly one start-zero, fixed-quantized-flux,
 zero/one-tone constant interval per timeline are supported. Multi-interval,

@@ -1,4 +1,4 @@
-# 0076 — Numerical candidates、plan ownership 與 checked replay
+# 0077 — Numerical candidates、plan ownership 與 checked replay
 
 ## 脈絡
 
