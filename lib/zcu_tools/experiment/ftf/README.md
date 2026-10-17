@@ -82,8 +82,8 @@ receiver noise and the integrated rounding term.
 `replay_round(round_path)` recomputes one round without drivers, earlier rounds,
 current YAML or numeric records. Backend, engine numeric version, RNG version and
 dependency versions must match. The stream policy is `PCG64/SeedSequence-v2`.
-The backend is `ftf-segment-v5`, which identifies microwave IQ, delay and
-mismatch semantics. Earlier numeric versions and old exact-record manifests
+The backend is `ftf-segment-v6`, which identifies microwave IQ, delay,
+mismatch and guarded direct discrete readout sums. Earlier numeric versions and old exact-record manifests
 fail explicitly. Archives contain model truth and
 must not appear in ordinary Run/native/RPC metadata. Normal provenance remains
 the opaque simulation identifier.
