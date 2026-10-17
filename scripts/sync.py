@@ -4,7 +4,9 @@ import copy
 import json
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
+from typing import TypedDict
 
 import jupytext
 from nbformat import NotebookNode
@@ -39,8 +41,29 @@ def _is_git_ignored(path: Path) -> bool:
     return result.returncode == 0
 
 
-def _normalize_notebook(nb: dict) -> dict[str, object]:
-    """Return a deep-copied notebook dict with unstable fields removed."""
+class _NotebookForComparison(TypedDict, total=False):
+    """Describe only the optional notebook fields used during comparison.
+
+    cells contains mutable cell dictionaries; each optional ``id`` is removed.
+    metadata is mutable; optional ``kernelspec`` and ``language_info`` are removed.
+    Other top-level fields remain open and are preserved without interpretation.
+    """
+
+    cells: list[dict[str, object]]
+    metadata: dict[str, object]
+
+
+def _normalize_notebook(
+    nb: _NotebookForComparison | NotebookNode,
+) -> Mapping[str, object]:
+    """Return a deep-copied notebook with unstable comparison fields removed.
+
+    Accept a JSON-decoded record or a NotebookNode with the optional fields
+    described by _NotebookForComparison. Preserve the concrete type and all
+    other data through deepcopy, leaving the input unchanged. Mapping describes
+    only read-only observation of the result; it does not freeze or convert it.
+    Deep-copy and field-operation errors propagate to the caller.
+    """
     nb_copy = copy.deepcopy(nb)
 
     # Remove random cell IDs
