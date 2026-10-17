@@ -38,7 +38,7 @@ def test_v2_derives_sparse_channels_and_acquires_with_live_dc() -> None:
             freq=250.0,
             phase=90.0,
             gain=-0.2,
-            waveform=ConstWaveformCfg(length=0.004),
+            waveform=ConstWaveformCfg(length=0.008),
         )
         ro = PulseReadoutCfg(
             gen_ch=0,
