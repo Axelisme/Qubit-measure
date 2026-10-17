@@ -5,16 +5,14 @@ from dataclasses import dataclass
 import numpy as np
 from numba import njit
 from numpy.typing import NDArray
-from scipy.integrate import solve_ivp
 from scipy.linalg import expm
 
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
+from ._dop853 import Tolerances, integrate_dense
 
 _MIN_FREQUENCY_GHZ = 0.3
 _MAX_SPLIT_ESTIMATE = 1.0
-_NODES = np.cos(np.pi * (np.arange(8) + 0.5) / 8)
-_VANDER = np.polynomial.chebyshev.chebvander(_NODES, 7)
 
 
 @dataclass(frozen=True)
@@ -67,7 +65,8 @@ def _bath(model: SecularModel) -> tuple[NDArray[np.float64], NDArray[np.float64]
 
 
 @njit(nogil=True, cache=True)
-def _rhs(time, flat, h0, x, y, frequency):
+def _rhs(time, flat, context):
+    h0, x, y, frequency = context
     size = len(h0)
     phase = 2 * np.pi * frequency * time
     h = h0 + np.cos(phase) * x + np.sin(phase) * y
@@ -91,31 +90,19 @@ def _build(
     x, y = gain * drive.in_phase_ghz, gain * drive.quadrature_ghz
     # Polar projection removes integrator norm drift before thousands of steps.
     tolerance = min(1e-10, budget * 1e-4)
-    solution = solve_ivp(
-        lambda t, u: _rhs(t, u, h0, x, y, frequency),
-        (0, period),
+    times, coefficients, final = integrate_dense(
+        _rhs,
+        (h0, x, y, frequency),
         np.eye(size, dtype=complex).ravel(),
-        method="DOP853",
-        rtol=tolerance,
-        atol=tolerance * 0.01,
-        max_step=period / 4,
-        dense_output=True,
+        period,
+        Tolerances(tolerance, tolerance * 0.01, period / 4),
     )
-    if not solution.success or solution.sol is None:
-        raise RuntimeError(f"Floquet period integration failed: {solution.message}")
-    times = solution.t.copy()
-    sample_times = (times[1:] + times[:-1])[:, None] / 2 + (times[1:] - times[:-1])[
-        :, None
-    ] * _NODES / 2
-    samples = solution.sol(sample_times.ravel()).T.reshape(-1, 8, size * size)
-    # DOP853 dense output is degree seven. Re-express it through the public
-    # evaluator, retaining only finite arrays, not a solver object or its internals.
-    coefficients = np.linalg.solve(_VANDER, samples).reshape(-1, 8, size, size)
+    coefficients = coefficients.reshape(-1, 8, size, size)
     generator, decay = _bath(model)
     arrays = (
         times,
         coefficients,
-        _unitary(solution.y[:, -1].reshape(size, size)),
+        _unitary(final.reshape(size, size)),
         generator,
         decay,
         expm(generator * period / 2).astype(complex),
@@ -132,13 +119,15 @@ def _build(
 def _dense(times, coefficients, time):
     step = min(np.searchsorted(times, time, side="right") - 1, len(times) - 2)
     step = max(0, step)
-    scaled = 2 * (time - times[step]) / (times[step + 1] - times[step]) - 1
-    previous = np.zeros_like(coefficients[step, 0])
-    current = np.zeros_like(previous)
-    for degree in range(7, 0, -1):
-        updated = coefficients[step, degree] + 2 * scaled * current - previous
-        previous, current = current, updated
-    return coefficients[step, 0] + scaled * current - previous
+    scaled = (time - times[step]) / (times[step + 1] - times[step])
+    result = np.zeros_like(coefficients[step, 0])
+    for index in range(7):
+        result += coefficients[step, 7 - index]
+        if index % 2 == 0:
+            result *= scaled
+        else:
+            result *= 1 - scaled
+    return coefficients[step, 0] + result
 
 
 @njit(nogil=True, cache=True)
@@ -217,10 +206,13 @@ class FloquetPeriodKernel:
     mixed/coherent inputs and phase-shifted tails. The 1.0 limit covers the
     measured maximum, not a universal error bound. Lower carriers, shaped
     tones and estimates above 1.0 fall through to the existing T6 path.
-    The 0.3 GHz cutoff includes the measured low-frequency range. Warm builds
-    averaged 53-57 ms/key, versus 204-300 ms/key at tolerance 1e-13.
+    The 0.3 GHz cutoff includes the measured low-frequency range.
 
-    Integration uses tolerance min(1e-10, budget*1e-4). Polar projection of
+    Integration uses tolerance min(1e-10, budget*1e-4) and max_step=T/4.
+    DOP853 stages, error control and degree-seven dense construction run in
+    single-threaded nogil code. The payload keeps the dense polynomial's native
+    nested coefficients, without resampling or a per-key basis conversion.
+    Only accepted steps are retained; no solver object is kept. Polar projection of
     U(T) and dense fundamental solutions restores unitarity before phase
     translation and tail composition; density is never normalized. Measured
     coherent-input trace drift fell from 1.34e-10 to 1.68e-12. Prototype

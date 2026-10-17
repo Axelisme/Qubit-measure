@@ -203,13 +203,17 @@ The 1.0 threshold covers the measured maximum; it is a calibrated heuristic,
 not a universal error bound or segment-budget guarantee. Carriers below
 0.3 GHz and estimates above 1.0 fall through to T6.
 
-Preparation uses tolerance min(1e-10, budget*1e-4), retains U(T) and finite
-degree-seven dense coefficients, and charges every array to the prepare cache.
+Preparation uses tolerance min(1e-10, budget*1e-4) and max_step=T/4. The
+single-threaded nogil DOP853 core builds both integration stages and the
+degree-seven dense extension. It retains U(T) and the native nested polynomial
+coefficients on accepted steps. There are no Python RHS callbacks, dense
+resampling or per-key polynomial-basis solves. Every retained array counts
+against the prepare cache; no solver object is kept.
 Polar projection restores unitarity of U(T) and dense fundamental solutions
 before phase translation and fractional-tail composition. It does not normalize
-density. Low-frequency warm builds averaged 53-57 ms/key, versus 204-300 ms/key
-at tolerance 1e-13. Coherent-input trace drift fell from 1.34e-10 to 1.68e-12.
-Prototype high-carrier S3/S5 population errors were 1.1e-7 and 2.3e-6. Duration, start and theta do not enter keys.
+density. Coherent-input trace drift in the calibration fell from 1.34e-10 to
+1.68e-12. Prototype high-carrier S3/S5 population errors were 1.1e-7 and 2.3e-6.
+Duration, start and theta do not enter keys.
 Time translation handles signed frequency and phase; the fractional tail uses
 the same dense solution with a periodic extension across the boundary. Each full
 period and tail applies D/2, U, D/2 without constructing a Liouville channel.
