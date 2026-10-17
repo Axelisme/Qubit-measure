@@ -237,6 +237,28 @@ class RWAKernel:
             )
         )
 
+    def guard_prepared(
+        self,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source: ModelSource,
+        budget: float,
+    ) -> None:
+        """Decline guard preparation handoff; the engine calls guard normally."""
+        del table, rows, source, budget
+
+    def bind_input(
+        self,
+        prepared: Prepared,
+        key_index: int,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source_initial: NDArray[np.complex128],
+        budget: float,
+    ) -> None:
+        """Decline input binding; apply uses the model-only prepared payload."""
+        del prepared, key_index, table, rows, source_initial, budget
+
     def apply(
         self,
         prepared: Prepared,
@@ -245,8 +267,11 @@ class RWAKernel:
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
         budget: float,
-    ) -> None:
-        """Advance arbitrary input densities in place in the lab eigenbasis."""
+    ) -> NDArray[np.bool_]:
+        """Advance arbitrary input densities in place in the lab eigenbasis.
+
+        Return an all-False bool mask aligned with rows; no post-apply check.
+        """
         if not np.isfinite(budget) or budget <= 0:
             raise ValueError("RWA requires positive budget")
         if not isinstance(prepared, _Prepared):
@@ -267,3 +292,4 @@ class RWAKernel:
                         f"RWA nonfinite density in segment rows {rows[selected]}"
                     )
                 states[selected] = result
+        return np.zeros(len(rows), dtype=np.bool_)

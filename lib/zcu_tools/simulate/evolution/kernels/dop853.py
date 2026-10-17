@@ -115,6 +115,28 @@ class DOP853Kernel:
         ]
         return _Prepared(pack_models(models))
 
+    def guard_prepared(
+        self,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source: ModelSource,
+        budget: float,
+    ) -> None:
+        """Decline guard preparation handoff; the engine calls guard normally."""
+        del table, rows, source, budget
+
+    def bind_input(
+        self,
+        prepared: Prepared,
+        key_index: int,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source_initial: NDArray[np.complex128],
+        budget: float,
+    ) -> None:
+        """Decline input binding; apply uses the model-only prepared payload."""
+        del prepared, key_index, table, rows, source_initial, budget
+
     def apply(
         self,
         prepared: Prepared,
@@ -123,7 +145,7 @@ class DOP853Kernel:
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
         budget: float,
-    ) -> None:
+    ) -> NDArray[np.bool_]:
         """Advance independent rows or consecutive same-timeline intervals.
 
         Rows chain when their time supports touch within 1e-9 ns. A chain's
@@ -136,6 +158,8 @@ class DOP853Kernel:
         Raises ValueError for incompatible prepared data, state/index shapes or
         nonexistent ports. RuntimeError signals numerical failure; earlier rows
         may already have been advanced. No state normalization/clipping occurs.
+
+        Return an all-False bool mask aligned with rows; no post-apply check.
         """
         controls = tolerances(budget)
         if not isinstance(prepared, _Prepared):
@@ -143,7 +167,7 @@ class DOP853Kernel:
         if key_index.shape != rows.shape or states.shape[0] != len(rows):
             raise ValueError("DOP853 state/index shape mismatch")
         if len(rows) == 0:
-            return
+            return np.zeros(len(rows), dtype=np.bool_)
         models = prepared.models
         if states.shape[1:] != (models.energies.shape[1],) * 2:
             raise ValueError("DOP853 state shape mismatch")
@@ -161,3 +185,4 @@ class DOP853Kernel:
             states,
             controls,
         )
+        return np.zeros(len(rows), dtype=np.bool_)

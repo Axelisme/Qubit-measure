@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17
+**Last updated:** 2026-10-17, known-source coherence in Dyson classification, paired shared-path pruning, Floquet guard preparation handoff, and prefix-local waveform identity for repeated no-drive flux prefixes
 
 ## Segment engine contracts
 
@@ -34,7 +34,13 @@ The zero-level identity must describe the entire source, including all model
 parameters and absolute DC flux. Row keys also include quantized flux levels.
 
 Chunk-local waves call apply once per group of next rows sharing a kernel and
-prepared batch. Consecutive DOP853 rows form chains only within the same kernel
+prepared batch. Apply advances densities in place and returns a bool accuracy
+exceedance mask aligned with its rows. Kernels without a post-apply check return
+all False. An exceedance is not a numerical failure: the engine keeps the
+uncorrected approximation without retry. `PathDiagnostics.exceeded_by_kernel`
+counts exceeded segments by kernel and omits kernels with no exceedances.
+Each `evolve` call with exceedances emits one `RuntimeWarning`, with the total
+segment count and each kernel's count. Consecutive DOP853 rows form chains only within the same kernel
 and prepared batch, never across `dop853` and `flux_dop853`. Their kernels own
 basis changes inside a chain; the engine changes basis between apply calls
 and returns the final state to the DC eigenbasis. Cancellation is checked at
@@ -42,15 +48,40 @@ chunk boundaries and raises `Cancelled` without partial results. `close()`
 waits for active work, clears the prepare cache and is safe to repeat. Each
 `evolve` call opens and closes its own joblib threading pool. The prepare cache
 persists across `evolve` calls, but no worker resources survive a call.
-`SEGMENT_NUMERIC_VERSION` identifies engine numerics for checked replay.
+`SEGMENT_NUMERIC_VERSION` is `segment-engine-v2` and identifies engine numerics
+for checked replay.
 
 The internal `kernel` module defines `SegmentTable`, `Kernel` and the opaque
-`Prepared.nbytes` contract. Only apply receives density arrays. The shared
+`Prepared.nbytes` contract. The optional `guard_prepared` hook returns a
+`GuardResult` containing the ordinary row-local acceptance mask and model-only
+`GuardPreparation` batches. Floquet returns its guard's preparations; other
+kernels return None and the engine calls their ordinary guard. The engine reuses
+payloads only for accepted rows with the same kernel, prepare key, source and
+budget within this evolve. Shared keys follow normal PrepareCache admission;
+singletons bypass the cache. Neither the hook nor the handoff retains kernel
+state or creates a separate cross-evolve store. Only apply and `bind_input` receive density arrays.
+The hook receives the source initial density or an engine-computed no-drive
+prefix output, never worker densities. For shared prepared batches, the engine
+calls the hook once per prepare key, port and identical input group before
+timeline chunks start. The engine converts that input into the row model basis. A returned opaque
+payload replaces the prepared argument to apply, with key indices all zero.
+None keeps the ordinary apply path. Input-bound payloads are read-only and
+belong to one evolve call. They never enter PrepareCache or kernel state.
+Dyson contracts its paths and groups first-order factors in this hook. Other
+kernels return None. The shared
 contract suite lives in `tests/simulate/evolution/contract/kernel_suite.py`.
 Kernel tests inherit `KernelContract` and provide a `kernel_case` fixture with
 accepted rows, a synthetic model and input densities. The suite compares against
-an independent strict DOP853 reference and checks row splitting and preparation
-without density access. The demo kernel stays in tests.
+an independent strict DOP853 reference. It checks guard row locality across
+single-row, unequal and reversed-order split calls, apply row splitting for
+both densities and bool exceedance masks, mask shape and dtype, and preparation
+without density access. It also checks guard handoff acceptance across row
+subsets and compares handed-off payloads with fresh preparation. The suite also checks that input binding leaves its
+inputs unchanged for both source and pre-evolved prefix inputs. Bound and
+ordinary apply agree within budget across repeated, reversed, non-contiguous
+and empty subsets. Prefix-bound Dyson results agree within the budget/8
+shared pruning allowance. The demo kernel stays in
+tests.
 
 ## Dispatch
 
@@ -64,7 +95,8 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | Varying flux, no drive | T5 quantizes flux at DAC-interval midpoints to 1e-3 Phi0 subsegments, then uses T4 with basis changes. |
 | Varying flux with drive | `flux_dop853` integrates continuous flux with the exact Hamiltonian expansion; baths switch at quantized grid boundaries. |
 | Fixed flux, no drive | T4 uses analytic secular propagation. |
-| One constant tone, known input density, all Dyson guards pass | T7 second-order Dyson, batched over frequency, gain, duration and phase. |
+| One constant tone, known input density, r, r₂ and B2 guards pass | T7 second-order Dyson, batched over frequency, gain, duration and phase. |
+| One constant tone after an identical shared no-drive prefix, r and r₂ pass | Dyson with the actual prefix output. B2 does not apply; post-apply population changes only report. |
 | Same constant-tone branch, Dyson fails but r <= 0.2 | Reduced RWA if its omitted-sideband error bound fits the segment budget; otherwise T6. |
 | One constant tone with unknown input density, or outside the weak-drive branch | T6 periodic propagation. |
 | One shaped tone, prepare-key usage >= 10 | Gate cache with four Strang subsegments, closed-system U plus secular dissipation, and 16 carrier-phase Fourier samples. |
@@ -73,23 +105,59 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | Other two-tone segments, including failed Floquet guards | Sum both drives in batched numba DOP853. |
 | Three or more tones | Sum all drives in batched numba DOP853. |
 
+Dyson's B2 guard uses the full source density in the segment model basis for rows
+starting at zero. It takes actual pair coherence magnitudes and the off-diagonal
+trace norm, so diagonal mixed inputs contribute no coherence terms. Other later rows use an arbitrary-input density bound, except certified flux-tail
+rows. A flux-tail group requires a nonempty prefix with no tones and at least two
+identical prefix sequences in the same source/evolve. Identity includes every
+segment's start, duration and level, the target basis and continuous flux samples.
+Different tail lengths never share an input just because their final levels match.
+The planner compares samples before probe start and the first sample at or after
+it to retain the prefix's interpolation boundary. Later samples do not affect
+prefix identity. Prefixes with earlier drives or no identical partner retain
+ordinary dispatch. Source and initial density are
+common to one evolve and no prefix identity persists across calls.
+
 The model supplies the secular form. Missing secular data fails at entry rather
 than selecting another evolution backend.
 
 ### Accuracy and truncation
 
-Dyson requires all three guards:
+Ordinary Dyson rows require all three guards. Certified flux-tail rows require
+only r and r₂, because the long-pulse coherence term in B2 can reject even a
+small actual population change:
 
 - r <= min(0.1, 0.25 * budget^(1/3)).
-- |Δp| <= min(0.02, (1.5 * budget)^(2/3)).
+- B2 + budget/8 <= min(0.02, (1.5 * budget)^(2/3)).
 - r₂ <= 0.05.
+
+B2 bounds driven-minus-free population changes in unpruned second-order Dyson.
+It sums transition-wise scalar bounds from the secular model and pulse parameters,
+without evolving a density or evaluating modal paths. For rows starting at zero,
+source populations determine population differences, actual |rho_ij| bounds pair
+coherence, and the actual off-diagonal trace norm bounds coherent contributions.
+These values are taken after basis conversion, without zeroing small coherence.
+Coherence phases are bounded, not evaluated. Diagonal inputs have c = L = 0.
+Later rows use the arbitrary-input version, with population difference at most 1,
+pair coherence at most 1/2 and off-diagonal trace norm at most 2. The budget/8 margin reserves the
+omitted-path allowance.
+
+After apply, Dyson also measures |Δp| from the output populations minus the
+same input's free-evolved populations. Free evolution uses only the secular
+population block, without transforming coherence modes. The threshold remains
+min(0.02, (1.5 * budget)^(2/3)). This check only reports exceedances through
+`PathDiagnostics.exceeded_by_kernel` and the per-evolve warning. It does not
+reject, recompute or correct the output, and does not guarantee accuracy.
 
 The r limit follows cubic off-resonant coherence-error scaling. The population
 limit follows the two-level resonant estimate (2/3)|Δp|^(3/2). Synthetic-model
 scans calibrate and check the coefficients 0.25 and 1.5; neither threshold is a
 rigorous multilevel error bound. At the default budget of 1e-3, the limits are
-r <= 0.025 and |Δp| <= 0.0131. Rejected Dyson segments try reduced RWA only in
-the r <= 0.2 branch. RWA segments whose error bound exceeds their budget use T6.
+r <= 0.025 and B2 + 0.000125 <= 0.0131. Classification uses this bound to avoid
+large |Δp|. A post-apply |Δp| check only reports excess; it does not correct the
+Dyson result or guarantee exact-dynamics accuracy. Rejected Dyson segments try
+reduced RWA only in the r <= 0.2 branch. RWA segments whose error bound exceeds
+their budget use T6.
 
 Each segment receives a default budget of 1e-3. The end-to-end acceptance
 threshold is a maximum absolute error of 1e-2 in both final readout-basis
@@ -112,8 +180,22 @@ avoid building a full dissipative propagator for every phase.
 All non-reps sweep points enter as template arrays. Prepare does not depend on
 input density; apply does. The engine deduplicates prepare keys across the
 acquire. Keys used at least twice are prepared in shared A-stage chunks before
-timeline work starts. Single-use preparations stay inside their timeline chunk
-and are discarded afterward.
+timeline work starts. Floquet's guard hands its model-only preparations to
+A-stage, avoiding another build for matching keys. Guard-built singleton
+payloads also reach timeline chunks without cache admission or input binding. Other single-use
+preparations stay inside their timeline chunk and are discarded afterward. The input-bound hook is an A-stage exception to
+model-only preparation. It contracts the source initial density or a shared
+flux-tail prefix output once per shared key, port and input group. A-stage evolves
+one representative of each needed prefix with the ordinary T4 payloads and basis
+changes. The contracted payload lives only until this evolve finishes. Single-use
+keys, later rows without a certified shared prefix and kernels returning None
+keep the per-batch path. Dyson uses the maximum absolute gain and maximum duration of all shared
+rows to build its path superset. The shared table drops conjugate path pairs
+by increasing summed entrywise bound, up to budget/8, matching B2's reserved
+margin. Workers reuse retained paths and factors in original order without
+further pruning. Ordinary per-batch tables keep their original cutoffs.
+Fixed-size modal reconstruction keeps shared Dyson results bitwise identical
+across worker counts and chunk splits.
 
 Timeline chunks interleave estimated costs, with six chunks per worker by
 default. Within a chunk, local waves batch next segments by kernel and prepared

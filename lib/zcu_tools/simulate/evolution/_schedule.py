@@ -1,8 +1,8 @@
 """Shared opaque-payload LRU and independent chunk-local apply waves."""
 
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from threading import Event
 
 import numpy as np
@@ -11,7 +11,7 @@ from numpy.typing import NDArray
 
 from ._dispatch import Dispatch
 from ._planning import Geometry
-from .engine import Cancelled
+from .engine import Cancelled, EvolutionResult
 from .kernel import Kernel, Prepared, SegmentTable
 from .secular import ModelSource
 
@@ -38,6 +38,13 @@ class _Binding:
     payload: _Payload
     rows: NDArray[np.int64]
     indices: NDArray[np.int64]
+
+
+@dataclass(frozen=True)
+class _ChunkResult:
+    points: NDArray[np.int64]
+    states: NDArray[np.complex128]
+    exceeded_by_kernel: Counter[str]
 
 
 class PrepareCache:
@@ -149,7 +156,12 @@ class Schedule:
     def prepare_shared(
         self, entries: list[_Entries], cache: PrepareCache, pool: Parallel, chunks: int
     ) -> list[_Binding]:
-        """Prepare repeated keys in A-stage batches; reuse read-only LRU hits."""
+        """Reuse guard payloads/LRU hits and prepare missing repeated keys.
+
+        Dispatch belongs to this Schedule's source and budget. Guard payloads
+        are eligible only for matching kernel keys selected by that dispatch.
+        Singleton guard payloads bypass the LRU but reach timeline chunks too.
+        """
         bindings: list[_Binding] = []
         jobs: list[tuple[_Entries, NDArray[np.int64], tuple[str, str, float]]] = []
         dc = self.source.model(tuple(0 for _ in range(self.table.level.shape[1])))
@@ -161,6 +173,24 @@ class Schedule:
             for payload in hits:
                 bindings.append(_bind(entry, payload, shared[entry.inverse]))
                 key_set.difference_update(payload.keys)
+            available = key_set | {key.tobytes() for key in entry.keys[~shared]}
+            shared_keys = {key.tobytes() for key in entry.keys[shared]}
+            for preparation in self.dispatch.preparations.get(entry.kernel.name, ()):
+                payload = _Payload(
+                    preparation.prepared,
+                    tuple(key.tobytes() for key in preparation.keys),
+                )
+                reusable = available.intersection(payload.keys)
+                if not reusable:
+                    continue
+                eligible = np.array(
+                    [key.tobytes() in reusable for key in entry.keys], dtype=bool
+                )
+                bindings.append(_bind(entry, payload, eligible[entry.inverse]))
+                if set(payload.keys).issubset(shared_keys):
+                    cache.add(namespace, payload)
+                key_set.difference_update(payload.keys)
+                available.difference_update(payload.keys)
             missing = np.array(
                 [i for i, key in enumerate(entry.keys) if key.tobytes() in key_set],
                 dtype=np.int64,
@@ -182,7 +212,106 @@ class Schedule:
                 raise RuntimeError("prepare job returned no payload")
             cache.add(namespace, payload)
             bindings.append(_bind(entry, payload, entry.counts[entry.inverse] >= 2))
-        return bindings
+        return self.bind_inputs(bindings)
+
+    def bind_inputs(self, bindings: list[_Binding]) -> list[_Binding]:
+        """Add evolve-local input bindings after model-only cache admission.
+
+        Only repeated keys receive the hook; guard-built singletons bypass it.
+        All eligible rows for a key/port reach one call before chunk partitioning.
+        Opaque returned data is
+        referenced by the returned list alone, never by Schedule or the cache.
+        """
+        bound: list[_Binding] = []
+        zero = tuple(0 for _ in range(self.table.level.shape[1]))
+        dc = self.source.model(zero)
+        prefixes = self.prefix_inputs(bindings)
+        for binding in bindings:
+            for key, rows, group in self.input_groups(binding, prefixes):
+                level = tuple(int(v) for v in self.table.level[rows[0]])
+                initial = (
+                    self.source.initial_density if group is None else prefixes[group]
+                )
+                if level != zero:
+                    model = self.source.model(level)
+                    overlap = model.eigenvectors.conj().T @ dc.eigenvectors
+                    initial = overlap @ initial @ overlap.conj().T
+                initial.setflags(write=False)
+                payload = binding.kernel.bind_input(
+                    binding.payload.prepared,
+                    key,
+                    self.table,
+                    rows,
+                    initial,
+                    self.budget,
+                )
+                if payload is not None:
+                    bound.append(
+                        _Binding(
+                            binding.kernel,
+                            _Payload(payload, ()),
+                            rows,
+                            np.zeros(len(rows), dtype=np.int64),
+                        )
+                    )
+        # Later bindings override model-only ones for eligible rows in _Chunk.
+        return [*bindings, *bound]
+
+    def prefix_inputs(
+        self, bindings: list[_Binding]
+    ) -> dict[int, NDArray[np.complex128]]:
+        """Evolve one representative per needed prefix using shared T4 payloads.
+
+        Equal no-drive prefixes guarantee repeated T4 keys, so all their model
+        preparations already exist. The ordinary chunk runner preserves basis
+        changes and returns DC coordinates, just as for final evolution.
+        """
+        groups = self.table.flux_tail_group
+        if groups is None:
+            return {}
+        representatives: dict[int, int] = {}
+        for binding in bindings:
+            if binding.kernel.name == "dyson":
+                for row in binding.rows:
+                    group = groups[row]
+                    if group is not None:
+                        representatives.setdefault(group, int(row))
+        output: dict[int, NDArray[np.complex128]] = {}
+        for group, row in representatives.items():
+            if self.cancel.is_set():
+                raise Cancelled()
+            point = self.table.timeline[row]
+            selected = (self.table.timeline == point) & (
+                self.table.start_ns < self.table.start_ns[row]
+            )
+            result = _Chunk(
+                self, np.array([point]), selected, bindings, stop=np.array([row])
+            ).run()
+            output[group] = result.states[0]
+        return output
+
+    def input_groups(
+        self, binding: _Binding, prefixes: Mapping[int, NDArray[np.complex128]]
+    ):
+        """Yield repeated-key/port/input groups; None denotes the source at start zero."""
+        groups = self.table.flux_tail_group
+        uses = np.bincount(binding.indices)
+        selected: dict[tuple[int, int, int | None], list[int]] = {}
+        for row, key in zip(binding.rows, binding.indices, strict=True):
+            if uses[key] < 2:
+                # Guard-built singletons keep their per-batch payload.
+                continue
+            group = groups[row] if groups is not None else None
+            if self.table.start_ns[row] != 0 and group not in prefixes:
+                continue
+            port = (
+                int(self.table.tone_port[row, 0])
+                if self.table.tone_port.shape[1]
+                else -1
+            )
+            selected.setdefault((int(key), port, group), []).append(int(row))
+        for (key, _, group), rows in selected.items():
+            yield key, np.array(rows, dtype=np.int64), group
 
     def run(
         self,
@@ -190,8 +319,8 @@ class Schedule:
         cache: PrepareCache,
         pool: Parallel,
         chunks: int,
-    ) -> NDArray[np.complex128]:
-        """Return densities in point order, independent of chunk ownership."""
+    ) -> EvolutionResult:
+        """Return point-ordered densities and aggregate post-apply diagnostics."""
         entries = _deduplicate(self.table, self.dispatch, kernels)
         shared = self.prepare_shared(entries, cache, pool, chunks)
         count = len(self.geometry.points)
@@ -204,12 +333,14 @@ class Schedule:
         output = np.empty(
             (count, *self.source.initial_density.shape), dtype=np.complex128
         )
+        exceeded: Counter[str] = Counter()
         for result in results:
             if result is None:
                 raise RuntimeError("timeline job returned no densities")
-            points, states = result
-            output[points] = states
-        return output
+            output[result.points] = result.states
+            exceeded.update(result.exceeded_by_kernel)
+        diagnostics = replace(self.dispatch.diagnostics, exceeded_by_kernel=exceeded)
+        return EvolutionResult(self.geometry.points, output, diagnostics)
 
     def chunk(
         self,
@@ -222,8 +353,15 @@ class Schedule:
             raise Cancelled()
         selected = np.isin(self.table.timeline, points)
         bindings = list(shared)
+        covered = np.zeros(len(selected), dtype=bool)
+        for binding in shared:
+            covered[binding.rows] = True
         for entry in entries:
-            local = selected[entry.rows] & (entry.counts[entry.inverse] == 1)
+            local = (
+                selected[entry.rows]
+                & (entry.counts[entry.inverse] == 1)
+                & ~covered[entry.rows]
+            )
             unique = np.unique(entry.inverse[local])
             if len(unique):
                 payload = _build(
@@ -240,10 +378,12 @@ class _Chunk:
         points: NDArray[np.int64],
         selected: NDArray[np.bool_],
         bindings: Sequence[_Binding],
+        stop: NDArray[np.int64] | None = None,
     ):
         self.schedule, self.points = schedule, points
         self.table = schedule.table
         self.bindings = bindings
+        self.exceeded: Counter[str] = Counter()
         rows = len(self.table.timeline)
         self.binding = np.full(rows, -1, dtype=np.int64)
         self.key = np.zeros(rows, dtype=np.int64)
@@ -252,7 +392,11 @@ class _Chunk:
             self.binding[binding.rows[mask]] = index
             self.key[binding.rows[mask]] = binding.indices[mask]
         self.cursor = np.searchsorted(self.table.timeline, points, side="left")
-        self.end = np.searchsorted(self.table.timeline, points, side="right")
+        self.end = (
+            np.searchsorted(self.table.timeline, points, side="right")
+            if stop is None
+            else stop
+        )
         self.states = np.repeat(
             schedule.source.initial_density[None], len(points), axis=0
         ).copy()
@@ -300,7 +444,7 @@ class _Chunk:
         )
         states = self.states[slots[repeated]].copy()
         try:
-            binding.kernel.apply(
+            exceeded = binding.kernel.apply(
                 binding.payload.prepared,
                 self.key[rows],
                 self.table,
@@ -318,6 +462,9 @@ class _Chunk:
             raise RuntimeError(
                 f"nonfinite density at point {self.schedule.geometry.points[self.table.timeline[rows[bad]]]} segment {rows[bad]}"
             )
+        count = int(np.count_nonzero(exceeded))
+        if count:
+            self.exceeded[binding.kernel.name] += count
         last = offsets[1:] - 1
         self.states[slots] = states[last]
         self.level[slots] = self.table.level[rows[last]]
@@ -331,4 +478,4 @@ class _Chunk:
             for index in np.unique(binding_ids):
                 self._apply(int(index), pending[binding_ids == index])
         self._basis(np.arange(len(self.points)), np.zeros_like(self.level))
-        return self.points, self.states
+        return _ChunkResult(self.points, self.states, self.exceeded)

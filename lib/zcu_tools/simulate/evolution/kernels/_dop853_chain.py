@@ -8,7 +8,7 @@ from ._dop853 import Tolerances, integrate
 
 
 # Compiled callables specialize this runner for each kernel's context and RHS.
-@njit(nogil=True)
+@njit(nogil=True, cache=True)
 def run_chain(
     rhs,
     make_context,

@@ -42,6 +42,12 @@ class SegmentTable:
     flux_waveform_available: optional bool (timelines,) mask. False marks
         placeholder timelines without continuous samples. None means all
         waveform timelines have samples (or no waveform is supplied).
+    flux_tail_group: optional immutable tuple (rows,) of nonnegative group IDs
+        or None per row. Equal IDs certify identical nonempty no-drive prefixes
+        in this evolve/source, including timing, levels and flux samples. Each
+        group contains at least two rows with identical actual input density.
+        None (the field or a row entry) means no shared prefix is certified.
+        Only the planner assigns groups; kernels must not infer them from level.
     Arrays own read-only copies. Invalid shapes/counts/indices raise ValueError.
     Adjacent rows of one timeline may be merged by DOP853 kernels into a
     multi-interval work item: stop at boundaries and retain the accepted step.
@@ -65,6 +71,7 @@ class SegmentTable:
     envelopes: tuple[EnvelopeSpec, ...]
     flux_waveform: FluxWaveform | None = None
     flux_waveform_available: NDArray[np.bool_] | None = None
+    flux_tail_group: tuple[int | None, ...] | None = None
 
     def __post_init__(self) -> None:
         timeline = integers(self.timeline, "segment timelines")
@@ -95,6 +102,13 @@ class SegmentTable:
             )
             shape(mask, (len(self.flux_waveform.offsets) - 1,), "waveform availability")
             object.__setattr__(self, "flux_waveform_available", mask)
+        if self.flux_tail_group is not None:
+            groups = tuple(self.flux_tail_group)
+            if len(groups) != rows or any(g is not None and g < 0 for g in groups):
+                raise ValueError(
+                    "flux tail groups must align with rows and be nonnegative"
+                )
+            object.__setattr__(self, "flux_tail_group", groups)
         self._validate_tones(rows)
 
     def _validate_tones(self, rows: int) -> None:
@@ -136,8 +150,12 @@ class SegmentTable:
 
 
 class Prepared(Protocol):
-    """Opaque state-independent kernel payload, shared read-only by workers.
+    """Opaque kernel payload, shared read-only by workers.
 
+    prepare and guard_prepared return state-independent data eligible for
+    PrepareCache under the ordinary shared-key rules. bind_input
+    may wrap it in an input-bound payload used only within one evolve call;
+    that wrapper never enters PrepareCache.
     Each kernel defines its own concrete payload. nbytes counts resident array
     bytes owned by the whole batch of prepared entries, not Python overhead,
     models, solver workspaces or process RSS. It must be a nonnegative integer
@@ -148,6 +166,50 @@ class Prepared(Protocol):
     def nbytes(self) -> int:
         """Resident array bytes charged to the prepare cache for this payload."""
         ...
+
+
+@dataclass(frozen=True)
+class GuardPreparation:
+    """Model-only preparation returned by a guard for this evolve's source/budget.
+
+    keys: read-only unique fixed-width prepare keys, in the payload's entry order.
+    prepared: opaque read-only payload equivalent to prepare(keys, ...), with
+        no density access. Keys may include rejected rows, but only accepted
+        rows are reused. No kernel may retain this record in its own state.
+    Owns a read-only key copy; a non-vector/non-void key array raises ValueError.
+    """
+
+    keys: NDArray[np.void]
+    prepared: Prepared
+
+    def __post_init__(self) -> None:
+        keys = self.keys.copy()
+        if keys.ndim != 1 or keys.dtype.kind != "V":
+            raise ValueError("guard preparation keys must be a fixed-width vector")
+        keys.setflags(write=False)
+        object.__setattr__(self, "keys", keys)
+
+
+@dataclass(frozen=True)
+class GuardResult:
+    """Row-local guard decision plus optional model-only preparations.
+
+    accepted: read-only bool (len(rows),) mask identical to guard for the same arguments.
+    preparations: disjoint key batches constructed with that call's source and
+        budget. Empty means no handoff. Records live only within this evolve;
+        shared keys may enter PrepareCache under its ordinary admission rules.
+    Owns a read-only mask copy; a non-vector/non-bool mask raises ValueError.
+    """
+
+    accepted: NDArray[np.bool_]
+    preparations: tuple[GuardPreparation, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.accepted.ndim != 1 or self.accepted.dtype != np.bool_:
+            raise ValueError("guard acceptance must be a bool vector")
+        object.__setattr__(
+            self, "accepted", owned(self.accepted, np.bool_, "guard acceptance")
+        )
 
 
 class Kernel(Protocol):
@@ -169,8 +231,38 @@ class Kernel(Protocol):
     ) -> NDArray[np.bool_]:
         """Pure validity mask (len(rows),) at positive per-segment error budget.
 
+        Each row's mask depends only on that row's table data, source and
+        budget, never on other rows in the call. Splitting rows into arbitrary
+        segments, calling guard separately and concatenating results in the
+        original row order must match a whole call bit for bit, regardless of
+        call order.
+
         Only algorithm-local guards apply here; the engine owns branch order
         and cross-family rules such as prepare-key usage counts.
+        """
+        ...
+
+    def guard_prepared(
+        self,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source: ModelSource,
+        budget: float,
+    ) -> GuardResult | None:
+        """Optionally return guard decisions and the preparations they required.
+
+        Called instead of guard during classification. None declines the hook,
+        so the engine calls guard unchanged. Floquet supplies GuardResult; all
+        other families return None. Acceptance must obey guard's row locality,
+        including empty/reversed subsets. No density is read or mutated.
+
+        The engine reuses returned preparations only for accepted rows with
+        the same kernel, prepare key, source and budget in this evolve. They
+        reach A-stage before input binding and are also reused for singleton
+        rows without cache admission. Shared-key batches follow normal LRU
+        rules; otherwise references expire with this evolve. No kernel state
+        or separate cross-evolve store is permitted. Failure semantics match
+        guard/prepare, including RuntimeError on numerical failure.
         """
         ...
 
@@ -208,6 +300,35 @@ class Kernel(Protocol):
         """
         ...
 
+    def bind_input(
+        self,
+        prepared: Prepared,
+        key_index: int,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source_initial: NDArray[np.complex128],
+        budget: float,
+    ) -> Prepared | None:
+        """Optionally contract a common input into an evolve-local read-only payload.
+
+        Called in A-stage only for shared prepared batches (repeated keys).
+        key_index selects one entry in prepared. rows share that prepare key,
+        first tone port and input density, in arbitrary order. They either all
+        start at zero or belong to one certified flux_tail_group.
+        source_initial is complex128 (M,M) in these rows' model basis: either
+        the source initial density or the engine-computed no-drive prefix output,
+        never a worker's evolving density. No input may be modified. budget is
+        the positive absolute per-segment allowance.
+
+        None declines sharing and keeps the ordinary per-batch apply path.
+        A returned payload replaces prepared in apply for these rows, with
+        key_index all zero. It must be immutable to workers and usable with
+        arbitrary subsets/order (including empty rows) from this group. It
+        lives only for this evolve, never in PrepareCache or kernel state.
+        Numerical failure raises RuntimeError.
+        """
+        ...
+
     def apply(
         self,
         prepared: Prepared,
@@ -216,12 +337,19 @@ class Kernel(Protocol):
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
         budget: float,
-    ) -> None:
+    ) -> NDArray[np.bool_]:
         """Advance complex128 states (len(rows),M,M) in place through rows.
 
+        prepared is either model-only prepare data or a bind_input payload;
+        the latter requires the same input density supplied to bind_input.
         key_index maps each row to its prepared entry. budget is the positive
         absolute per-segment allowance. Called by a joblib worker thread;
         numba implementations must be nogil and single-threaded. Prepared
-        data and table stay unchanged. Numerical failure raises RuntimeError.
+        data and table stay unchanged. Return a bool mask (len(rows),), aligned
+        with rows: True marks a post-apply accuracy threshold exceedance, not
+        a failure. Results are still committed without correction or retry.
+        Kernels without a post-apply check return all False. Masks, like states,
+        retain row order when independent rows are split across calls.
+        Numerical failure raises RuntimeError.
         """
         ...

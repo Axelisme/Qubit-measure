@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from hashlib import sha256
@@ -22,7 +23,7 @@ from ._validation import integers, owned, shape
 from .secular import FluxSchedule, FluxWaveform, ModelSource
 
 # Replay identity of the segment engine numerical algorithms, independent of records.
-SEGMENT_NUMERIC_VERSION = "segment-engine-v1"
+SEGMENT_NUMERIC_VERSION = "segment-engine-v2"
 
 
 @dataclass(frozen=True)
@@ -202,21 +203,30 @@ class PathDiagnostics:
 
     segments_by_kernel: kernel name -> nonnegative segment count.
     points_by_class: dispatch path-class name -> nonnegative point count.
-    Both mappings default empty, own immutable copies and reject negative
-    counts with ValueError. A point may participate in several path classes.
+    exceeded_by_kernel: kernel name -> post-apply accuracy exceedance segment
+        count, with only positive counts retained. Exceeded results remain
+        committed without correction or retry; these are not solver failures.
+    All mappings default empty, own immutable copies and reject empty names
+    or negative counts with ValueError. A point may participate in several
+    path classes.
     """
 
     segments_by_kernel: Mapping[str, int] = field(default_factory=dict)
     points_by_class: Mapping[str, int] = field(default_factory=dict)
+    exceeded_by_kernel: Mapping[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         for name, counts in (
             ("segments_by_kernel", self.segments_by_kernel),
             ("points_by_class", self.points_by_class),
+            ("exceeded_by_kernel", self.exceeded_by_kernel),
         ):
             if any(not key or value < 0 for key, value in counts.items()):
                 raise ValueError("diagnostics require names and nonnegative counts")
-            object.__setattr__(self, name, MappingProxyType(dict(counts)))
+            copied = dict(counts)
+            if name == "exceeded_by_kernel":
+                copied = {key: value for key, value in copied.items() if value > 0}
+            object.__setattr__(self, name, MappingProxyType(copied))
 
 
 @dataclass(frozen=True)
@@ -321,7 +331,9 @@ class Engine:
         when set, raises Cancelled, without returning partial results.
         Model ValueErrors propagate; numerical failure raises RuntimeError
         naming the point and segment. Results do not depend on chunking or
-        worker width except for floating-point rounding.
+        worker width except for floating-point rounding. Post-apply accuracy
+        exceedances stay in the result's paths.exceeded_by_kernel and produce
+        exactly one RuntimeWarning per call, without correction or retry.
         """
         from ._dispatch import classify
         from ._planning import plan
@@ -345,10 +357,21 @@ class Engine:
             dispatch = classify(geometry, self._kernels, source, budget)
             schedule = Schedule(geometry, dispatch, source, budget, cancel)
             with Parallel(n_jobs=self._workers, backend="threading") as pool:
-                states = schedule.run(self._kernels, self._cache, pool, self._chunks)
+                result = schedule.run(self._kernels, self._cache, pool, self._chunks)
             if cancel.is_set():
                 raise Cancelled()
-            return EvolutionResult(geometry.points, states, dispatch.diagnostics)
+            exceeded = result.paths.exceeded_by_kernel
+            if exceeded:
+                details = ", ".join(
+                    f"{name}: {count}" for name, count in sorted(exceeded.items())
+                )
+                warnings.warn(
+                    f"segment accuracy check exceeded in {sum(exceeded.values())} segments "
+                    f"({details}); results use the uncorrected approximation",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+            return result
 
     def close(self) -> None:
         """Wait for active work, clear the cache and reject later evolve calls; idempotent."""
