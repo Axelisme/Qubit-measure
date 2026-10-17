@@ -27,7 +27,7 @@ from zcu_tools.gui.app.measure.events.tab import (
 )
 from zcu_tools.gui.app.measure.remote import service as app_service_module
 from zcu_tools.gui.app.measure.remote.events import EVENT_SERIALIZERS
-from zcu_tools.gui.event_bus import EventMeta
+from zcu_tools.gui.event_bus import BaseEventBus, EventMeta
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.events import (
     AliasesChangedPayload,
@@ -502,26 +502,68 @@ def test_writer_queue_overflow_eventually_closes_wedged_client(fx, caplog):
 
 
 def test_stop_unsubscribes_event_bus(qapp):
-    f = Fixture()
-    f.start()
-    # Confirm at least one subscription is installed.
-    subs = f.bus._meta_subs  # type: ignore[attr-defined]
-    assert subs.get(RunFinishedPayload), "service should have subscribed"
-    controller_subs = tuple(  # type: ignore[attr-defined]
-        f.bus._subs.get(RunFinishedPayload, [])
-    )
-    assert controller_subs, "Controller consumes the run completion fact"
-    assert len(f.service._bus_subs) == len(EVENT_SERIALIZERS)
-    f.stop()
-    subs_after = f.bus._meta_subs  # type: ignore[attr-defined]
-    # The RemoteEventService's subscriptions are gone after stop. RUN_FINISHED
-    # has a permanent Controller subscriber, but the remote meta subscriber must
-    # be empty. (MD_CHANGED is *also* held
-    # permanently by CfgEditorService for owned-model refresh — ADR-0008 — so it
-    # is not a clean proxy for the remote view's teardown.)
-    assert len(f.service._bus_subs) == 0
-    assert not subs_after.get(RunFinishedPayload)
-    assert tuple(f.bus._subs.get(RunFinishedPayload, [])) == controller_subs  # type: ignore[attr-defined]
+    with (
+        patch.object(
+            BaseEventBus,
+            "subscribe",
+            autospec=True,
+            side_effect=BaseEventBus.subscribe,
+        ) as subscribe,
+        patch.object(
+            BaseEventBus,
+            "unsubscribe",
+            autospec=True,
+            side_effect=BaseEventBus.unsubscribe,
+        ) as unsubscribe,
+        patch.object(
+            BaseEventBus,
+            "subscribe_with_meta",
+            autospec=True,
+            side_effect=BaseEventBus.subscribe_with_meta,
+        ) as subscribe_meta,
+        patch.object(
+            BaseEventBus,
+            "unsubscribe_with_meta",
+            autospec=True,
+            side_effect=BaseEventBus.unsubscribe_with_meta,
+        ) as unsubscribe_meta,
+    ):
+        f = Fixture()
+        try:
+            controller_subs = [
+                fullcall
+                for fullcall in subscribe.call_args_list
+                if fullcall.args[0] is f.bus and fullcall.args[1] is RunFinishedPayload
+            ]
+            assert controller_subs, "Controller consumes the run completion fact"
+            # Observe only the service's start-to-stop meta subscriptions.
+            subscribe_meta.reset_mock()
+            unsubscribe_meta.reset_mock()
+            f.start()
+            service_subs = [
+                fullcall
+                for fullcall in subscribe_meta.call_args_list
+                if fullcall.args[0] is f.bus
+            ]
+            assert {fullcall.args[1] for fullcall in service_subs} == set(
+                EVENT_SERIALIZERS
+            )
+            assert len(service_subs) == len(EVENT_SERIALIZERS)
+            assert any(
+                fullcall.args[1] is RunFinishedPayload for fullcall in service_subs
+            ), "service should have subscribed"
+            assert len(f.service._bus_subs) == len(EVENT_SERIALIZERS)
+        finally:
+            f.stop()
+
+        assert len(f.service._bus_subs) == 0
+        # Match self, payload, callback and kwargs with multiplicity, not order.
+        meta_unsubs = unsubscribe_meta.call_args_list
+        assert len(meta_unsubs) == len(service_subs)
+        for fullcall in service_subs:
+            assert meta_unsubs.count(fullcall) == service_subs.count(fullcall)
+        for fullcall in controller_subs:
+            assert fullcall not in unsubscribe.call_args_list
 
 
 # ---------------------------------------------------------------------------
