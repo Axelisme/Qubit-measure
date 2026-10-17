@@ -23,6 +23,8 @@ golden values correspond to that grid, not the design.ipynb ``max_photon=70``.
 
 from __future__ import annotations
 
+from typing import NotRequired, TypedDict, Unpack
+
 import numpy as np
 import pytest
 from zcu_tools.simulate.fluxonium.branch.floquet import (
@@ -31,9 +33,29 @@ from zcu_tools.simulate.fluxonium.branch.floquet import (
     calc_ge_snr,
 )
 
+
+class _SnrKwargs(TypedDict):
+    """Shared ge-SNR grid with an optional strict-solver override."""
+
+    flux: float  # Normalized magnetic flux, Phi/Phi_0.
+    r_f: float  # Bare resonator frequency in GHz.
+    g: float  # Qubit-resonator coupling in GHz.
+    rf_w: float  # Resonator linewidth in GHz.
+    qub_dim: int  # Number of retained qubit levels.
+    qub_cutoff: int  # Qubit oscillator-basis cutoff.
+    max_photon: int  # Maximum photon number for the grid.
+    solver_options: NotRequired[None]  # Absent uses the callee default; None is strict.
+
+
+class _SnrOverrides(TypedDict, total=False):
+    """Optional override used by the existing strict-golden calls."""
+
+    solver_options: None  # Absent uses the callee default; None is strict.
+
+
 # Shared grid for every case. max_photon=30 keeps each call well under 1s while
 # leaving the branch-tracking resolution intact for these parameter points.
-_COMMON = dict(
+_COMMON = _SnrKwargs(
     flux=0.5,
     r_f=5.927,
     g=0.11,
@@ -52,9 +74,11 @@ _GOLDEN: list[tuple[tuple[float, float, float], float]] = [
 ]
 
 
-def _snr3(params: tuple[float, float, float], **overrides) -> float:
+def _snr3(
+    params: tuple[float, float, float], **overrides: Unpack[_SnrOverrides]
+) -> float:
     """Run the ge-SNR pipeline and return the design metric ``sort(snr)[-3]``."""
-    kwargs = {**_COMMON, **overrides}
+    kwargs: _SnrKwargs = {**_COMMON, **overrides}
     _, snrs = calc_ge_snr(params=params, **kwargs)
     return float(np.sort(snrs)[-3])
 
