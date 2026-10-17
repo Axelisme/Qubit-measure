@@ -106,6 +106,64 @@ def test_batch_of_distinct_coherent_inputs(kernel_case: KernelCase) -> None:
     np.testing.assert_allclose(actual[3], states[3], rtol=0, atol=1e-14)
 
 
+@pytest.mark.parametrize("gap", [0.0, 9e-6, 1.1e-5, 0.249, 0.251, 0.499, 0.501])
+def test_resonant_repeated_and_nearby_modes(
+    kernel_case: KernelCase, gap: float
+) -> None:
+    case = kernel_case
+    model = case.source.model((0,))
+    size = len(model.energies_ghz)
+    # Unit duration makes adjacent free-mode gaps equal to gap, in radians.
+    # Equal spacings and a resonant carrier also create repeated shifted roots.
+    # The 2*gap endpoints cross 0.5 as well as the adjacent-mode endpoints.
+    model = replace(
+        model,
+        energies_ghz=np.arange(size) * gap / (2 * np.pi),
+        rates_per_ns=np.zeros((size, size)),
+        dephasing_per_ns=np.zeros((size, size)),
+        drives=(
+            replace(
+                model.drives[0],
+                quadrature_ghz=np.zeros((size, size), dtype=np.complex128),
+            ),
+        ),
+    )
+    source = ModelSource(
+        case.source.initial_density, lambda level: replace(model, level=level)
+    )
+    table = replace(
+        case.table,
+        duration_ns=np.ones(4),
+        tone_frequency_ghz=np.full((4, 1), gap / (2 * np.pi)),
+        tone_amplitude=np.array([[1e-5], [-2e-5], [0.0], [1e-5]]),
+    )
+    case = replace(case, source=source, table=table, budget=1e-10)
+    rows = np.arange(4, dtype=np.int64)
+    keys, first, inverse = np.unique(
+        case.kernel.prepare_keys(table, rows), return_index=True, return_inverse=True
+    )
+    prepared = case.kernel.prepare(keys, table, rows[first], source, case.budget)
+    for distinct in (False, True):
+        states = case.states.copy()
+        if distinct:
+            states[1] = np.eye(size) / size
+            states[2] = np.diag(np.arange(1, size + 1) / sum(range(1, size + 1)))
+            states[3] = states[0].conj()
+        actual = states.copy()
+        case.kernel.apply(prepared, inverse, table, rows, actual, case.budget)
+        expected = np.stack(
+            [reference(case, row, state) for row, state in enumerate(states)]
+        )
+        assert_budget(actual, expected, case.budget)
+        np.testing.assert_allclose(actual, expected, rtol=0, atol=case.budget)
+        np.testing.assert_allclose(
+            actual, actual.conj().swapaxes(-1, -2), rtol=0, atol=1e-13
+        )
+        np.testing.assert_allclose(
+            np.trace(actual, axis1=-2, axis2=-1), 1, rtol=0, atol=1e-13
+        )
+
+
 @pytest.mark.parametrize("changed_basis", [False, True])
 def test_guard_retains_first_order_population_from_coherence(
     kernel_case: KernelCase, changed_basis: bool
