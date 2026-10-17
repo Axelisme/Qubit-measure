@@ -279,6 +279,11 @@ class Engine:
     kernels: optional algorithm collection replacing the production registry;
         each stateless collaborator implements the internal Kernel contract and
         has a unique name. Missing required names raise, never silently reroute.
+        Terminal families must cover their full dispatch domain: t4 handles all
+        no-tone rows, t6 all single constant-tone rows, gate_cache repeated
+        shaped rows, and period_table the remaining single shaped-tone rows.
+        If a terminal guard rejects a dispatched row, evolve raises RuntimeError
+        with "no valid kernel"; it does not reroute that row to DOP853.
     chunks_per_worker: positive chunk multiplier; only scheduling, not physics.
 
     The zero-level model identity names the entire ModelSource: all physical

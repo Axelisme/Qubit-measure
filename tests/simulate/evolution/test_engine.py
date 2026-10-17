@@ -252,6 +252,49 @@ def test_constant_decision_order_and_sequence_middle(
     assert result.paths.segments_by_kernel == counts
 
 
+@pytest.mark.parametrize(
+    ("family", "n", "later_pulse"),
+    [
+        ("t4", 1, False),
+        ("t6", 1, False),
+        ("t6", 1, True),
+        ("gate_cache", 10, False),
+        ("period_table", 1, False),
+    ],
+)
+def test_incomplete_terminal_family_fails_instead_of_rerouting(family, n, later_pulse):
+    kernels = tuple(
+        RecordingKernel(
+            name, accepts=name == "dop853" or (name == "dyson" and later_pulse)
+        )
+        for name in (
+            "t4",
+            "dyson",
+            "rwa",
+            "floquet_period",
+            "t6",
+            "gate_cache",
+            "period_table",
+            "dop853",
+        )
+    )
+    b = batch(n, duration=6 if later_pulse else 3)
+    if family != "t4":
+        envelope = (
+            EnvelopeSpec("constant")
+            if family == "t6"
+            else EnvelopeSpec(
+                "sampled", np.array([0, 1, 0], complex), np.array([0.0, 1.0, 3.0])
+            )
+        )
+        tracks = (track(n, envelope),)
+        if later_pulse:
+            tracks += (track(n, envelope, start=3),)
+        b = replace(b, tracks=tracks)
+    with pytest.raises(RuntimeError, match="no valid kernel for segment"):
+        run(Engine(1, 0, kernels=kernels), source(), (b,))
+
+
 def test_missing_kernel_names_segment_and_flux_overlap():
     b = replace(batch(1), tracks=(track(1, EnvelopeSpec("constant")),))
     engine = Engine(1, 0, kernels=())
