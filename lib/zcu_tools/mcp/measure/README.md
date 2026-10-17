@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-16，logical recipe fields 與固定來源讀取
+**Last updated:** 2026-10-17，完整 sweep 設定與 logical recipe fields
 
 # `zcu_tools/mcp/measure/`
 
@@ -48,7 +48,7 @@ Recipe helper 分成「工作步驟」與「交還控制權」。工作步驟以
 
 需要交還控制權做寫回判斷時，作者用 `decision = yield from ask(run.propose_writeback())`，回傳 `WritebackResult`。`decision.status` 為 completed 時，`decision.decision` 是 accepted 或 skipped；cancelled 時為 None。`ask` 只接受已捕捉的 WritebackQuestion，不寫入資料。Opaque operation 不可迭代，也不能直接 yield；driver 會拒絕並提示 helper 寫法。Driver 將具名結果放在 operation.delivery，以 None 推進 generator，原有 completion failure 仍 throw 到作者的 helper 呼叫處。
 
-`RecipeTab` 的欄位、origins 與 summary 宣告使用 logical paths。例如 `modules.readout.freq`、`modules.qub_pulse.waveform.length`。Adapter 只隱藏生成器加入的 wrapper，真實名為 module 的欄位仍保留。Range count 是 n，`set_sweep` 的公開 expts 參數送出時轉為 n。
+`RecipeTab` 的欄位、origins 與 summary 宣告使用 logical paths。例如 `modules.readout.freq`、`modules.qub_pulse.waveform.length`。Adapter 只隱藏生成器加入的 wrapper，真實名為 module 的欄位仍保留。Range count 是 n，`set_sweep` 的公開 expts 參數送出時轉為 n。完整 start／stop／expts 以一次 container edit 選 Range + Expts，可覆蓋無效 Center／Step draft；部分設定只編輯 active leaves，不在 caller 換算座標或採樣。細部切換先讀 `tab.describe_cfg` 的 active 數值欄位 commands，再由 `rpc_call` 呼叫 `tab.run_cfg_command`，沒有額外高階 tool。Step 的 input 是 authored 原稿，value／values 明示有效端點，讀取不改 input。
 
 `read_field` 每次送一次 `tab.read_recipe_field`。同一 owner turn 回傳 metadata、authored input、ordinary value、value_status、selector/source、readonly 與局部 logical errors。Input_present 區分未填與 null。Value_status 區分 available、missing 與 unavailable；available 的 null 是有效觀察。Value 與局部 errors 不證明整份 cfg 有效，get_cfg 與 Run admission 仍檢查 cfg。
 

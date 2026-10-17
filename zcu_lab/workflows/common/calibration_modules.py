@@ -24,7 +24,7 @@ from zcu_tools.gui.form import (
     FormEnv,
     FormErrors,
     FormPath,
-    LinRange,
+    SweepInput,
 )
 from zcu_tools.gui.form_adapter import ModuleInput, ModuleInputField
 from zcu_tools.gui.session.context_types import ContextSourceUnavailableError
@@ -168,7 +168,7 @@ def calibration_choices(env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]
     }
 
 
-def expand_fluxes(fluxes: LinRange) -> tuple[float, ...]:
+def expand_fluxes(fluxes: SweepInput) -> tuple[float, ...]:
     """Expand a validated linear range using its exact start/stop/n count.
 
     Descending and repeated setpoints keep their order. No unit conversion,

@@ -1195,15 +1195,28 @@ class RecipeTab:
         _field_path(field)
         if not values:
             return
-        reply = self._edit(
-            [
+        edits: list[_CfgEdit]
+        if {"start", "stop", "expts"} <= values.keys():
+            edits = [
+                {
+                    "path": _field_path(field),
+                    "value": {
+                        "kind": "linrange",
+                        "start": values["start"],
+                        "stop": values["stop"],
+                        "n": values["expts"],
+                    },
+                }
+            ]
+        else:
+            edits = [
                 {
                     "path": [*_field_path(field), "n" if key == "expts" else key],
                     "value": value,
                 }
                 for key, value in values.items()
             ]
-        )
+        reply = self._edit(edits)
         if reply is not None and directed_errors(reply, tuple(_field_path(field))):
             raise GuiRpcError(
                 f"Invalid {field} sweep; draft retained", reason="invalid_cfg"
@@ -1218,7 +1231,12 @@ class RecipeTab:
         expts: int | None = None,
         sources: SweepSources | None = None,
     ) -> None:
-        """Edit only supplied sweep fields in their native unit; retain omitted ones.
+        """Set sweep coordinates in native units; complete values select Range + Expts.
+
+        Supplying start, stop and expts replaces the whole sweep atomically,
+        independent of active coordinate mode or an invalid previous draft.
+        Partial values edit only active Range leaves, retaining omitted ones;
+        inactive paths reject rather than guessing a conversion.
 
         Supplied numeric endpoints must be finite and not boolean; RecipeExpression
         endpoints pass unchanged to the GUI for parsing/resolution/validation.

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import Field, JsonValue
 from qtpy.QtWidgets import QApplication, QLabel
 from zcu_tools.cfg_model import PulseSpec
 from zcu_tools.datafile import RunSnapshot
@@ -28,7 +29,9 @@ from zcu_tools.gui.form import (
     FormInput,
     FormModel,
     FormPath,
+    LinRange,
     Option,
+    SweepInput,
 )
 from zcu_tools.gui.form_adapter import ModuleInline, ModuleInputField, ModuleRef
 from zcu_tools.gui.session.persistence import SingleFileCaretaker
@@ -87,6 +90,32 @@ def test_original_expressions_roundtrip_and_restore_base(
     assert window.capture_persisted_state() == saved
     assert window.plan_panel.state.base.data == saved.plan
     assert window.tunables_panel.state.base.data == saved.knobs
+
+
+class PersistedSweepForm(FormModel):
+    sweep: SweepInput = Field(default_factory=LinRange)
+
+
+@pytest.mark.parametrize(
+    "sweep",
+    [
+        {"kind": "center", "center": {"expr": "3 + 4"}, "span": -6, "n": 4},
+        {"kind": "center_step", "center": 0.5, "span": 1, "step": {"expr": "0.1 * 3"}},
+    ],
+    ids=["center-expts", "center-step"],
+)
+def test_sweep_modes_and_expressions_roundtrip_through_window_memento(
+    sweep_window, sweep: JsonValue
+) -> None:
+    original = sweep_window(PersistedSweepForm, None)
+    original.plan_panel.state.write({("sweep",): sweep}, original.plan_panel.env)
+    saved = original.capture_persisted_state()
+    assert saved.plan["sweep"] == sweep
+    codec = WorkflowInputCodec()
+    restored = sweep_window(PersistedSweepForm, codec.decode(codec.encode(saved)))
+    assert restored.capture_persisted_state() == saved
+    assert restored.plan_panel.state.input.data == saved.plan
+    assert restored.plan_panel.state.base.data == saved.plan
 
 
 def test_incompatible_fields_drop_without_losing_other_input(

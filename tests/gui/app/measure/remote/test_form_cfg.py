@@ -708,3 +708,108 @@ def test_inline_noop_takes_busy_reentry_and_lifetime_guards(
     finally:
         if tab in fixture.ctrl.list_tab_ids():
             fixture.ctrl.tab_control.close_tab(tab)
+
+
+def test_headless_sampling_commands_project_actual_values_and_reset(form_rpc):
+    fixture, tab, rpc = form_rpc
+    owner = fixture.ctrl.cfg_resources.lookup(tab)
+    owner.write({("sweep", "start"): 0, ("sweep", "stop"): 1, ("sweep", "n"): 5})
+    described = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["sweep", "n"]})
+    commands = described["result"]["description"]["target"].get("commands", [])
+    assert commands, "Expts must expose sampling commands through RPC"
+    assert commands[0]["inputs"] == [
+        ["sweep", "start"],
+        ["sweep", "stop"],
+        ["sweep", "n"],
+    ]
+    reply = rpc.call(
+        "tab.run_cfg_command",
+        {"tab_id": tab, "path": ["sweep", "n"], "name": commands[0]["name"]},
+    )
+    assert reply["ok"], reply
+    owner.write({("sweep", "step"): 0.3})
+    before = owner.input.to_json()
+    observed = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["sweep", "stop"]})
+    assert observed["ok"], observed
+    assert observed["result"]["input"] == 1
+    assert observed["result"]["value"] == pytest.approx(0.9)
+    assert owner.input.to_json() == before
+    inactive = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["sweep", "n"]})
+    assert not inactive["ok"]
+    assert inactive["error"]["reason"] == "form_path"
+    reset = rpc.call("tab.reset_cfg", {"tab_id": tab})
+    assert reset["ok"], reset
+    assert "n" in reset["result"]["input"]["sweep"]
+    assert "step" not in reset["result"]["input"]["sweep"]
+
+
+def test_headless_coordinate_command_observation_and_active_paths(form_rpc):
+    fixture, tab, rpc = form_rpc
+    owner = fixture.ctrl.cfg_resources.lookup(tab)
+    owner.write({("sweep", "start"): 10, ("sweep", "stop"): 4, ("sweep", "n"): 4})
+    described = rpc.call(
+        "tab.describe_cfg", {"tab_id": tab, "path": ["sweep", "start"]}
+    )
+    assert described["ok"], described
+    commands = described["result"]["description"]["target"].get("commands", [])
+    assert commands, "Numeric fields must expose coordinate commands"
+    command = commands[0]
+    assert command["inputs"] == [["sweep", "start"], ["sweep", "stop"]]
+    assert command["target"] == ["sweep"]
+    changed = rpc.call(
+        "tab.run_cfg_command",
+        {"tab_id": tab, "path": ["sweep", "start"], "name": command["name"]},
+    )
+    assert changed["ok"], changed
+    assert changed["result"]["input"]["sweep"] == {
+        "kind": "center",
+        "center": 7.0,
+        "span": -6.0,
+        "n": 4,
+    }
+    inactive = rpc.call(
+        "tab.run_cfg_command",
+        {"tab_id": tab, "path": ["sweep", "start"], "name": command["name"]},
+    )
+    assert not inactive["ok"]
+    assert inactive["error"]["reason"] == "form_path"
+    before = owner.input.to_json()
+    unknown = rpc.call(
+        "tab.run_cfg_command",
+        {"tab_id": tab, "path": ["sweep", "center"], "name": "not-a-command"},
+    )
+    assert not unknown["ok"]
+    assert owner.input.to_json() == before
+    owner.write({("sweep", "center"): {"expr": "1 / 0"}})
+    desc = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["sweep", "center"]})
+    back = desc["result"]["description"]["target"]["commands"][0]["name"]
+    before = owner.input.to_json()
+    rejected = rpc.call(
+        "tab.run_cfg_command",
+        {"tab_id": tab, "path": ["sweep", "center"], "name": back},
+    )
+    assert not rejected["ok"]
+    assert owner.input.to_json() == before
+
+
+@pytest.mark.parametrize("guard", ["busy", "holder"])
+def test_coordinate_rpc_retains_host_guards(form_rpc, guard):
+    fixture, tab, rpc = form_rpc
+    owner = fixture.ctrl.cfg_resources.lookup(tab)
+    before = owner.input.to_json()
+    if guard == "busy":
+        fixture.state.set_tab_running(tab, running=True)
+    else:
+        fixture.ctrl.control_identity.reclaim_local()
+    try:
+        reply = rpc.call(
+            "tab.run_cfg_command",
+            {"tab_id": tab, "path": ["sweep", "start"], "name": "to_center"},
+        )
+        assert not reply["ok"]
+        assert reply["error"].get("reason") == (
+            "mutation_blocked" if guard == "busy" else "not_holder"
+        ), reply
+        assert owner.input.to_json() == before
+    finally:
+        fixture.state.set_tab_running(tab, running=False)

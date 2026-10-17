@@ -10,9 +10,9 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from logging import getLogger
-from typing import TYPE_CHECKING, Literal, Self, final
+from typing import TYPE_CHECKING, Self, final
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, JsonValue
 from pydantic_core import PydanticCustomError
 
 from zcu_tools.device import BaseDeviceInfo
@@ -44,6 +44,10 @@ type FormValue = (
 """Ordinary evaluated data, including whole sequences and their nested values."""
 
 
+class FormCommandError(ValueError):
+    """An unavailable action or unconvertible participating input; no write occurs."""
+
+
 class FormPathError(ValueError):
     """A requested model-field path is unknown or structurally unreachable.
 
@@ -59,6 +63,26 @@ class FormPathError(ValueError):
         """Store the full requested path and use message as the exception text."""
         super().__init__(message)
         self.path = path
+
+
+@dataclass(frozen=True)
+class InputCommand:
+    """A field action replacing its parent model without installing defaults.
+
+    name/label identify the action. inputs names participating direct siblings;
+    views reject local parse errors only on those paths. run receives detached
+    parent input and fixed env, returns the complete replacement parent object,
+    and must not mutate sources. ValueError rejects conversion atomically.
+    result_tag optionally identifies the replacement branch as (field, literal
+    value). Such actions are available only when the enclosing annotation accepts
+    that tag. Declarations belong in field Annotated metadata, not view state.
+    """
+
+    name: str
+    label: str
+    inputs: tuple[str, ...]
+    run: Callable[[Mapping[str, JsonValue], FormEnv], dict[str, JsonValue]]
+    result_tag: tuple[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -92,6 +116,8 @@ class Display:
     level's groups after its ungrouped fields. None leaves the field
     ungrouped; an empty name raises ValueError here. Groups never change
     validation, defaults, choices or input.
+    selector=False hides the dropdown, retaining its description and active
+    branch. Explicit commands then provide the editing action.
     Declaration order sets order; nested models set sections. No layout registry.
     """
 
@@ -103,6 +129,7 @@ class Display:
     decimals: int | None = None
     hidden: bool = False
     group: str | None = None
+    selector: bool = True
 
     def __post_init__(self) -> None:
         """Reject a negative decimals count or an empty group with ValueError."""
@@ -477,11 +504,15 @@ class FormState[F: FormModel]:
         return describe(self._model, self._data, path, env)
 
     def run_command(self, path: FormWritePath, name: str, env: FormEnv) -> None:
-        """Execute a named action on the first option matching current raw input.
+        """Execute a declared field action or a selected option's named action.
 
-        path addresses the option field; name is a command identifier from
-        its effective description options. Resolve declarations with the same fixed
-        env used by the host for writes and sources. Unknown paths, inactive
+        path addresses an active field; name comes from its commands or the
+        selected option's commands. InputCommand replaces the parent model with
+        no fresh defaults, evaluates only its declared inputs and preserves
+        nonparticipants. FormCommandError rejects unavailable or unconvertible
+        actions atomically. OptionCommand retains ordinary partial-write rules.
+        Resolve declarations with the same fixed env used by the host for writes
+        and sources. Unknown paths, inactive
         descendants and whole-leaf traversal raise FormPathError with the full
         requested path. Missing current input, no matching option or unavailable
         commands raise ValueError, never silently do nothing. Other failures
@@ -491,9 +522,12 @@ class FormState[F: FormModel]:
         validation failures remain drafts for result/preview. No refresh,
         library semantics, I/O policy or separate state is introduced.
         """
+        from ._commands import run_input_command
         from ._selection import resolve
 
         target = resolve(self._model, self._data, path, env)
+        if run_input_command(self, target, name, env):
+            return
         option = (
             target.options[target.selected]
             if target.options is not None and target.selected is not None
@@ -505,7 +539,7 @@ class FormState[F: FormModel]:
             else None
         )
         if command is None:
-            raise ValueError(f"Unavailable option command {name!r} at {path!r}")
+            raise FormCommandError(f"Unavailable option command {name!r} at {path!r}")
         self.write({path: command.run(env)}, env)
 
     def _install(self, candidate: dict[str, JsonValue]) -> None:
@@ -648,17 +682,3 @@ class FormState[F: FormModel]:
         )
         self._install(candidate)
         return (*dropped, *unmatched)
-
-
-class LinRange(FormModel):
-    """Stored linear range; adapters expand it only when converting to cfg.
-
-    kind identifies the stored linear shape. start/stop are finite endpoints in caller units;
-    n is the positive number of points (one point is permitted). Descending or
-    repeated endpoints are allowed; no step/expts synchronization occurs.
-    """
-
-    kind: Literal["linrange"] = "linrange"
-    start: float = 0.0
-    stop: float = 1.0
-    n: int = Field(default=3, ge=1)

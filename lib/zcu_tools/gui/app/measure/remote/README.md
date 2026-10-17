@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-16，logical recipe RPC
+**Last updated:** 2026-10-17，通用 Form command RPC
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -39,6 +39,12 @@ router scaffolding. Typed envelopes live in [`gui.remote.wire`](../../../remote/
 
 - One connection has at most one in-flight RPC.
 - Request and response roots are JSON objects.
+
+## Form commands
+
+`tab.run_cfg_command(tab_id, path, name)` 呼叫目前 active path 公開的 Form command。Path 是既有 canonical model-field 字串陣列。Description 的數值欄位 commands 帶 name、label、target 與 inputs；remote 只投影，不求值或換算。成功回 input／values／errors，失敗不改 input。Unknown command 回 invalid_params/form_errors，inactive path 回 invalid_params/form_path。控制身份、busy、lifetime 與 mutation guard 沿既有 resource.run_command。任意 provider/declaration ValueError 不被重分類為 command rejection。
+
+方法列在 live catalog，由既有 rpc_call 呼叫，不增加 MCP tool。to_inline 專用入口保持原契約。
 
 ## Recipe 欄位
 
