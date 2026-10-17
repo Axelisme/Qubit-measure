@@ -43,7 +43,7 @@ def test_coordinate_constants_unique_and_in_order() -> None:
         FLUX_INT_COLUMN,
         FLUX_PERIOD_COLUMN,
     )
-    assert SAMPLE_COORDINATE_COLUMNS == expected
+    assert expected == SAMPLE_COORDINATE_COLUMNS
     assert FLUX_COLUMN == "flux"
     assert DEV_VALUE_COLUMN == "dev_value"
     assert DEV_UNIT_COLUMN == "dev_unit"
