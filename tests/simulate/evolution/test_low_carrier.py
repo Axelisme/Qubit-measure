@@ -8,8 +8,8 @@ from zcu_tools.simulate.evolution import Engine, EnvelopeSpec, ModelSource
 from zcu_tools.simulate.evolution.kernel import SegmentTable
 from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
 
+from ._engine import batch, run, track
 from .contract.kernel_suite import KernelCase, reference, synthetic_model
-from .test_engine import batch, run, track
 
 
 @pytest.mark.parametrize("frequency", [0.038, -0.05, 0.22, 0.294])
@@ -66,7 +66,7 @@ def test_many_low_carrier_keys_do_not_all_stay_live():
     import weakref
     from dataclasses import dataclass
 
-    from .test_engine import RecordingKernel
+    from ._engine import RecordingKernel
 
     live = 0
     peak = 0
@@ -124,7 +124,7 @@ def test_many_low_carrier_keys_do_not_all_stay_live():
 
 def test_long_plateau_reuses_period_across_durations():
     frequency = 0.05
-    from .test_engine import RecordingKernel
+    from ._engine import RecordingKernel
 
     model = synthetic_model(3)
     model = replace(

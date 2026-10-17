@@ -2,7 +2,7 @@
 
 from collections import Counter, OrderedDict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from threading import Event
 
 import numpy as np
@@ -14,9 +14,11 @@ from ._dispatch import diagnostics as dispatch_diagnostics
 from ._parallel import Executor
 from ._planning import Geometry
 from ._prepare_keys import group_keys
-from .engine import Cancelled, EvolutionResult
+from .engine import Cancelled, EvolutionResult, PathDiagnostics
 from .kernel import Kernel, Prepared, SegmentTable
 from .secular import ModelSource
+
+_CHAINABLE_KERNELS = frozenset(("dop853", "flux_dop853"))
 
 
 @dataclass(frozen=True)
@@ -328,14 +330,38 @@ class Schedule:
                 raise RuntimeError("timeline job returned no densities")
             output[result.points] = result.states
             exceeded.update(result.exceeded_by_kernel)
-        diagnostics = replace(
-            dispatch_diagnostics(self.table, self.dispatch.names),
-            exceeded_by_kernel=exceeded,
-            max_trace_error=float(
-                np.max(np.abs(np.trace(output, axis1=1, axis2=2) - 1))
-            ),
-        )
+        diagnostics = self.diagnostics(output, exceeded)
         return EvolutionResult(self.geometry.points, output, diagnostics)
+
+    def diagnostics(
+        self, output: NDArray[np.complex128], exceeded: Counter[str]
+    ) -> PathDiagnostics:
+        """Count suffix work plus actual prefix paths once per adopting timeline."""
+        paths = dispatch_diagnostics(self.table, self.dispatch.names)
+        segments = Counter(paths.segments_by_kernel)
+        points = {
+            name: set(self.table.timeline[self.dispatch.names == name].tolist())
+            for name in paths.points_by_class
+        }
+        groups = self.table.prefix_group
+        if groups is not None:
+            for point, row in enumerate(self.geometry.resume_rows):
+                if row < 0:
+                    continue
+                group = groups[row]
+                if group is None:
+                    raise RuntimeError("adopted prefix has no group")
+                prefix = self.geometry.prefix_paths[group]
+                segments.update(prefix.segments_by_kernel)
+                exceeded.update(prefix.exceeded_by_kernel)
+                for name in prefix.points_by_class:
+                    points.setdefault(name, set()).add(point)
+        return PathDiagnostics(
+            segments,
+            {name: len(timelines) for name, timelines in points.items()},
+            exceeded,
+            float(np.max(np.abs(np.trace(output, axis1=1, axis2=2) - 1))),
+        )
 
     def resolve_deferred(self, rows: NDArray[np.int64]) -> list[_Binding]:
         """Guard/fall back once inside a timeline and reuse accepted guard data.
@@ -465,6 +491,18 @@ class _Chunk:
         zero = tuple(0 for _ in range(self.table.level.shape[1]))
         self.dc = schedule.source.model(zero)
         self.level = np.zeros((len(points), len(zero)), dtype=np.int64)
+        # Prefix inputs are DC-coordinate outputs of the one representative
+        # solve. Adopt the latest one, so binding, apply and free baselines all
+        # see exactly the same numerical input despite reuse-dependent dispatch.
+        groups, inputs = self.table.prefix_group, self.table.prefix_inputs
+        if groups is not None:
+            for slot, row in enumerate(schedule.geometry.resume_rows[points]):
+                if row >= 0:
+                    group = groups[row]
+                    if group is None:
+                        raise RuntimeError("adopted prefix has no group")
+                    self.states[slot] = inputs[group]
+                    self.cursor[slot] = row
 
     def _basis(self, slots: NDArray[np.int64], target: NDArray[np.int64]) -> None:
         """Convert only at apply-call boundaries, never within a DOP853 chain."""
@@ -485,7 +523,7 @@ class _Chunk:
         first = self.cursor[slots]
         self._basis(slots, self.table.level[first])
         lengths = np.ones(len(slots), dtype=np.int64)
-        if binding.kernel.name in ("dop853", "flux_dop853"):
+        if binding.kernel.name in _CHAINABLE_KERNELS:
             # Extend each chain until the binding, timeline or continuity changes.
             while True:
                 next_row = first + lengths
@@ -540,7 +578,7 @@ class _Chunk:
             raise RuntimeError(f"missing preparation for segment {row}")
         entry = self.entries[index]
         rows = np.array([row], dtype=np.int64)
-        if entry.kernel.name in ("dop853", "flux_dop853"):
+        if entry.kernel.name in _CHAINABLE_KERNELS:
             candidates = np.arange(row, self.end[slot], dtype=np.int64)
             contiguous = (self.local_entry[candidates] == index) & (
                 self.binding[candidates] < 0

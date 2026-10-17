@@ -37,7 +37,8 @@ class Segments(NamedTuple):
     sample_offsets: (envelopes+1,) ragged bounds into sample_time (ns) and
     samples (complex amplitudes); an empty span denotes constant unity.
     flux_offsets/time: optional ragged absolute flux-waveform sample times for
-    the row's sampled-control step ceiling. Empty offsets denote no waveform.
+    the row's sampled-control step ceiling. Ordinary DOP853 leaves these empty;
+    only continuous-flux DOP853 packs them.
     """
 
     timeline: NDArray[np.int64]
@@ -98,8 +99,13 @@ def pack_models(models: list[SecularModel]) -> Models:
     return packed
 
 
-def pack_segments(table: SegmentTable) -> Segments:
-    """Share table columns and concatenate its envelopes into numeric arrays."""
+def pack_segments(table: SegmentTable, *, include_flux: bool = False) -> Segments:
+    """Pack envelopes and optionally flux knots for continuous-flux integration.
+
+    Ordinary DOP853 ignores the flux waveform and keeps empty flux arrays.
+    The chain runner considers only knots within each row's local time window.
+    """
+    waveform = table.flux_waveform if include_flux else None
     offsets = np.zeros(len(table.envelopes) + 1, dtype=np.int64)
     offsets[1:] = np.cumsum([len(envelope.samples) for envelope in table.envelopes])
     if table.envelopes:
@@ -122,10 +128,8 @@ def pack_segments(table: SegmentTable) -> Segments:
         offsets,
         times,
         samples,
-        table.flux_waveform.offsets
-        if table.flux_waveform is not None
-        else np.empty(0, dtype=np.int64),
-        table.flux_waveform.time_ns if table.flux_waveform is not None else np.empty(0),
+        waveform.offsets if waveform is not None else np.empty(0, dtype=np.int64),
+        waveform.time_ns if waveform is not None else np.empty(0),
     )
 
 

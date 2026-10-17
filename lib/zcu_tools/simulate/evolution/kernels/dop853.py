@@ -167,8 +167,10 @@ class DOP853Kernel:
         A basis overlap is applied on model changes within a chain. Across
         calls, the engine supplies the next input in the next model's basis.
         Each row starts from a deterministic 0.1 ns step seed and adapts up to
-        its smallest active sampled-envelope spacing. Constant envelopes have
-        no sampling ceiling. No adaptive history carries between rows.
+        the smallest spacing between envelope knots inside the row's local
+        envelope window. Samples outside that window and all flux waveform
+        samples are ignored. Constant envelopes have no sampling ceiling.
+        No adaptive history carries between rows.
 
         Raises ValueError for incompatible prepared data, state/index shapes or
         nonexistent ports. RuntimeError signals numerical failure; earlier rows

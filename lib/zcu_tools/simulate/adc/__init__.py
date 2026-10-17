@@ -6,7 +6,11 @@ receiver noise; QICK representation/normalization belongs to the adapter.
 """
 
 from .model import ReadoutModel, Receiver
-from .populations import POPULATION_TOLERANCE, normalize_populations
+from .populations import (
+    POPULATION_TOLERANCE,
+    PopulationValidationError,
+    normalize_populations,
+)
 from .readout_batch import (
     ChannelReadout,
     ConditionalSums,

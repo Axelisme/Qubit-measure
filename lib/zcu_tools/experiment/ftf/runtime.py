@@ -28,6 +28,7 @@ from zcu_tools.simulate.adc import (
     ChannelReadout,
     ConditionalReadout,
     ConditionalSums,
+    PopulationValidationError,
     normalize_populations,
     round_statistics,
     sample_traces,
@@ -49,12 +50,15 @@ class FTFNumericUse:
 
     acquire_sequence/round_index identify the solve's sampling scope. paths counts
     actual engine segment paths; it contains no densities or noise realizations.
-    A reused snapshot does not create a new solve or change this record.
+    rejected_rows is zero after successful ADC preparation, or the number of
+    rows ADC rejected under its reported validation rule. The record survives
+    that failure. A reused snapshot does not create a new solve or change it.
     """
 
     acquire_sequence: int
     round_index: int
     paths: PathDiagnostics
+    rejected_rows: int = 0
 
 
 @dataclass(frozen=True)
@@ -161,9 +165,16 @@ class FTFAcquire:
             plans[0].readout.model.state_labels,
             dc_model.eigenvectors,
         )
-        probabilities[evolved.points] = normalize_populations(
-            batch_populations(evolved.densities, readout_basis, readout_basis)
-        )
+        populations = batch_populations(evolved.densities, readout_basis, readout_basis)
+        try:
+            probabilities[evolved.points] = normalize_populations(populations)
+        except PopulationValidationError as error:
+            owner.evaluations = (
+                FTFNumericUse(
+                    acquire.sequence, index, evolved.paths, error.rejected_rows
+                ),
+            )
+            raise
         response = ConditionalReadout(
             plans[0].readout.model,
             rtol=owner.settings.numerics.solver.rtol,

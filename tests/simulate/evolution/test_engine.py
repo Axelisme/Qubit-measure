@@ -11,107 +11,16 @@ import pytest
 from numpy.typing import NDArray
 from zcu_tools.simulate.evolution import (
     Cancelled,
-    DriveTrack,
     Engine,
     EnvelopeSpec,
     FluxSchedule,
     ModelSource,
     SecularModel,
-    TimelineBatch,
 )
-from zcu_tools.simulate.evolution.kernel import GuardResult, Prepared, SegmentTable
+from zcu_tools.simulate.evolution.kernel import GuardResult
 
+from ._engine import Payload, RecordingKernel, batch, run, source, track
 from .contract.kernel_suite import synthetic_model
-
-
-def source() -> ModelSource:
-    model = synthetic_model()
-    return ModelSource(
-        np.diag([0.2, 0.3, 0.5]).astype(complex),
-        lambda level: replace(model, level=level),
-    )
-
-
-def batch(n: int = 12, *, duration: float = 3.0) -> TimelineBatch:
-    return TimelineBatch(
-        np.arange(n),
-        (),
-        FluxSchedule(np.arange(n + 1), np.zeros(n), np.zeros((n, 1), dtype=np.int64)),
-        np.full(n, duration),
-    )
-
-
-def track(
-    n: int, envelope: EnvelopeSpec, *, start: float = 0, duration: float = 3
-) -> DriveTrack:
-    return DriveTrack(
-        "drive",
-        np.full(n, start),
-        np.full(n, duration),
-        np.full(n, 0.1),
-        np.zeros(n),
-        np.ones(n),
-        (envelope,),
-        np.zeros(n, dtype=np.int64),
-        np.ones(n, dtype=bool),
-    )
-
-
-@dataclass
-class Payload:
-    count: int
-
-    @property
-    def nbytes(self) -> int:
-        return self.count * 16
-
-
-class RecordingKernel:
-    """Identity dynamics with public observations at the kernel boundary."""
-
-    guard_builds = False
-
-    def __init__(self, name: str, *, accepts: bool = True, cancel: Event | None = None):
-        self.name = name
-        self.accepts = accepts
-        self.cancel = cancel
-        self.preparations = 0
-        self.calls: list[
-            tuple[SegmentTable, NDArray[np.int64], NDArray[np.complex128]]
-        ] = []
-
-    def guard(self, table, rows, source, budget):
-        return np.full(len(rows), self.accepts)
-
-    def prepare_keys(self, table, rows):
-        keys = np.empty(
-            len(rows), dtype=[("level", "i8", table.level.shape[1]), ("duration", "f8")]
-        )
-        keys["level"] = table.level[rows]
-        keys["duration"] = table.duration_ns[rows]
-        return keys
-
-    def cost(self, table, rows):
-        return np.ones(len(rows))
-
-    def prepare(self, keys, table, rows, source, budget):
-        self.preparations += len(keys)
-        return Payload(len(keys))
-
-    def guard_prepared(self, table, rows, source, budget) -> GuardResult | None:
-        """Keep the ordinary guard path for this test collaborator."""
-        del table, rows, source, budget
-
-    def bind_input(
-        self, prepared, key_index, table, rows, source_initial, budget
-    ) -> Prepared | None:
-        return None
-
-    def apply(self, prepared: Prepared, key_index, table, rows, states, budget):
-        self.calls.append((table, rows.copy(), states.copy()))
-        if self.cancel is not None:
-            self.cancel.set()
-        return np.zeros(len(rows), dtype=np.bool_)
 
 
 class TimelineKernel(RecordingKernel):
@@ -123,13 +32,6 @@ class TimelineKernel(RecordingKernel):
 
     def prepare_keys(self, table, rows):
         return (table.timeline[rows] // self.copies).copy().view("V8")
-
-
-def run(engine: Engine, src: ModelSource, batches: tuple[TimelineBatch, ...]):
-    try:
-        return engine.evolve(src, batches, cancel=Event())
-    finally:
-        engine.close()
 
 
 def test_idle_reference_and_worker_chunk_batch_independence():
@@ -1053,3 +955,111 @@ def test_unknown_input_probe_uses_dyson_without_binding_and_matches_dop853():
         rtol=0,
         atol=1e-3,
     )
+
+
+@pytest.mark.parametrize("bind", [False, True])
+def test_shared_shaped_prefix_supplies_one_input_to_probe_and_later_segments(bind):
+    class PrefixKernel(RecordingKernel):
+        def __init__(self, name, delta):
+            super().__init__(name)
+            self.delta = delta
+            self.applied_rows = 0
+
+        def apply(self, prepared, key_index, table, rows, states, budget):
+            self.applied_rows += len(rows)
+            states[:, 0, 0] += self.delta
+            states[:, 1, 1] -= self.delta
+            return super().apply(prepared, key_index, table, rows, states, budget)
+
+    class ProbeKernel(RecordingKernel):
+        def __init__(self):
+            super().__init__("dyson")
+            self.known_inputs = []
+
+        def bind_input(self, prepared, key_index, table, rows, source_initial, budget):
+            self.known_inputs.append(source_initial.copy())
+            return BoundPayload(source_initial) if bind else None
+
+    # A representative has low reuse and takes Sambe; the full batch's three
+    # shaped rows take the ordinary cost order. Both are valid approximations.
+    spectral = PrefixKernel("shaped_sambe", 0.05)
+    direct = PrefixKernel("dop853", 0.1)
+    probe = ProbeKernel()
+    idle = RecordingKernel("t4")
+    shaped = EnvelopeSpec(
+        "sampled", sample_ns=np.array([0.0, 0.5, 1.0]), samples=np.array([0, 1, 0])
+    )
+    b = replace(
+        batch(3),
+        tracks=(
+            track(3, shaped, duration=1),
+            track(3, EnvelopeSpec("constant"), start=1, duration=1),
+        ),
+    )
+    src = source()
+    result = run(Engine(1, 0, kernels=(spectral, direct, probe, idle)), src, (b,))
+    assert len(probe.known_inputs) == 1
+    saved = probe.known_inputs[0]
+    assert np.max(abs(saved - src.initial_density)) > 0.01
+    for _, _, received in (*probe.calls, *idle.calls):
+        np.testing.assert_array_equal(
+            received, np.repeat(saved[None], len(received), axis=0)
+        )
+    np.testing.assert_array_equal(result.densities, np.repeat(saved[None], 3, axis=0))
+    assert spectral.applied_rows + direct.applied_rows == 1, (
+        "identical prefixes must be evolved once, not again in workers"
+    )
+
+
+def test_shared_prefix_paths_and_exceedances_count_each_adopting_timeline():
+    class ExceededPrefix(RecordingKernel):
+        def apply(self, prepared, key_index, table, rows, states, budget):
+            super().apply(prepared, key_index, table, rows, states, budget)
+            return np.ones(len(rows), dtype=bool)
+
+    class RejectedDirect(RecordingKernel):
+        def __init__(self):
+            super().__init__("dop853", accepts=False)
+            self.guarded_rows = 0
+
+        def guard(self, table, rows, source, budget):
+            self.guarded_rows += len(rows)
+            return super().guard(table, rows, source, budget)
+
+    spectral = ExceededPrefix("shaped_sambe")
+    direct = RejectedDirect()
+    gate = RecordingKernel("gate_cache")
+    shaped = EnvelopeSpec(
+        "sampled", sample_ns=np.array([0.0, 0.5, 1.0]), samples=np.array([0, 1, 0])
+    )
+    b = replace(
+        batch(3),
+        tracks=(
+            track(3, shaped, duration=1),
+            track(3, EnvelopeSpec("constant"), start=1, duration=1),
+        ),
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = run(
+            Engine(
+                1,
+                0,
+                kernels=(
+                    spectral,
+                    direct,
+                    gate,
+                    RecordingKernel("dyson"),
+                    RecordingKernel("t4"),
+                ),
+            ),
+            source(),
+            (b,),
+        )
+    assert result.paths.segments_by_kernel == {"shaped_sambe": 3, "dyson": 3, "t4": 3}
+    assert result.paths.points_by_class == {"shaped_sambe": 3, "dyson": 3, "t4": 3}
+    assert result.paths.exceeded_by_kernel == {"shaped_sambe": 3}
+    assert len(caught) == 1
+    assert "3 segments (shaped_sambe: 3)" in str(caught[0].message)
+    assert direct.guarded_rows == 0, "adopted prefix rows must not be reclassified"
+    assert not gate.preparations, "adopted prefix rows must not be prepared again"

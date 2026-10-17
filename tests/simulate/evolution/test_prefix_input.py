@@ -80,11 +80,24 @@ def engine(kernel):
     )
 
 
-def reference(src, b):
+def reference(src, b, end_ns=None):
     """Independent tiny unitary DOP853, stopped at pulse boundaries."""
     model = src.model((0,))
     state = src.initial_density.copy()
-    for start, end in [(0.0, 2.0), (2.0, 3.0), (3.0, 6.0)]:
+    stop = b.end_ns[0] if end_ns is None else end_ns
+    boundaries = sorted(
+        {
+            0.0,
+            float(stop),
+            *(float(t.start_ns[0]) for t in b.tracks if t.start_ns[0] < stop),
+            *(
+                float(t.start_ns[0] + t.duration_ns[0])
+                for t in b.tracks
+                if t.start_ns[0] + t.duration_ns[0] < stop
+            ),
+        }
+    )
+    for start, end in zip(boundaries[:-1], boundaries[1:], strict=True):
 
         def rhs(t, flat, midpoint=(start + end) / 2):
             h = np.diag(model.energies_ghz).astype(complex)
@@ -205,7 +218,30 @@ def test_driven_prefix_population_bound_uses_the_actual_coherent_input(gain, acc
 
 
 def test_nested_shared_prefixes_use_their_own_known_input():
-    src, b, kernel = source(), batch(), ObservedDyson()
+    from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
+    from zcu_tools.simulate.evolution.kernels.t4 import T4
+
+    applications = []
+
+    def record(table, rows, states):
+        applications.extend(zip(table.start_ns[rows], states.copy(), strict=True))
+
+    class NestedDyson(ObservedDyson):
+        def apply(self, prepared, key_index, table, rows, states, budget):
+            record(table, rows, states)
+            return super().apply(prepared, key_index, table, rows, states, budget)
+
+    class NestedPeriod(FloquetPeriodKernel):
+        def apply(self, prepared, key_index, table, rows, states, budget):
+            record(table, rows, states)
+            return super().apply(prepared, key_index, table, rows, states, budget)
+
+    class NestedIdle(T4):
+        def apply(self, prepared, key_index, table, rows, states, budget):
+            record(table, rows, states)
+            return super().apply(prepared, key_index, table, rows, states, budget)
+
+    src, b, kernel = source(), batch(), NestedDyson()
     b = replace(
         b,
         tracks=(
@@ -214,11 +250,32 @@ def test_nested_shared_prefixes_use_their_own_known_input():
             track(4.5, 1.5, 0.45, 1e-5),
         ),
     )
-    with closing(engine(kernel)) as solver:
-        solver.evolve(src, (b,), cancel=Event())
-    inputs = {float(starts[0]): rho for starts, rho in kernel.inputs}
-    assert 3.0 in inputs and 4.5 in inputs
-    assert np.max(abs(inputs[3.0] - inputs[4.5])) > 0.1
+    replacements = {k.name: k for k in (kernel, NestedPeriod(), NestedIdle())}
+    with closing(
+        Engine(1, 100000, kernels=tuple(replacements.get(k.name, k) for k in REGISTRY))
+    ) as solver:
+        result = solver.evolve(src, (b,), cancel=Event())
+    inputs = {float(start): rho for start, rho in applications}
+    bound = {float(starts[0]): rho for starts, rho in kernel.inputs}
+    for start in (3.0, 4.5):
+        expected = reference(src, b, start)
+        np.testing.assert_allclose(inputs[start], expected, atol=1e-3, rtol=0)
+        if start in bound:
+            np.testing.assert_allclose(bound[start], expected, atol=1e-3, rtol=0)
+    assert 4.5 in bound
+    # Each nested history segment runs once in a representative solve. Only
+    # the final probe runs once per adopting timeline.
+    for start in (0.0, 2.0, 3.0, 4.0):
+        assert sum(time == start for time, _ in applications) == 1
+    assert sum(time == 4.5 for time, _ in applications) == 2
+    np.testing.assert_allclose(
+        result.densities,
+        np.repeat(reference(src, b)[None], 2, axis=0),
+        atol=1e-3,
+        rtol=0,
+    )
+    assert result.paths.segments_by_kernel == {"floquet_period": 2, "t4": 4, "dyson": 4}
+    assert result.paths.points_by_class == {"floquet_period": 2, "t4": 2, "dyson": 2}
 
 
 def test_diagonal_source_shared_output_keeps_its_bitwise_baseline():

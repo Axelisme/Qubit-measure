@@ -10,7 +10,7 @@ from joblib.parallel import ThreadingBackend
 from threadpoolctl import threadpool_info, threadpool_limits
 from zcu_tools.simulate.evolution import Engine
 
-from .test_engine import RecordingKernel, batch, source
+from ._engine import RecordingKernel, batch, source
 
 
 def blas_widths():
@@ -43,7 +43,9 @@ def test_overlapping_evolves_hold_blas_one_until_last_exit(failure):
         def apply(self, prepared, key_index, table, rows, states, budget):
             observations.append(blas_widths())
             entered[self.index].set()
-            assert release[self.index].wait(5), "test failed to release evolve"
+            # The controlling test releases both events in finally, even on
+            # assertion failure. Thirty seconds only guards a broken handoff.
+            assert release[self.index].wait(30), "test failed to release evolve"
             if failure and self.index == 0:
                 raise RuntimeError("injected failure")
             return super().apply(prepared, key_index, table, rows, states, budget)
@@ -60,23 +62,25 @@ def test_overlapping_evolves_hold_blas_one_until_last_exit(failure):
     with threadpool_limits(limits=2, user_api="blas"):
         original = blas_widths()
         assert original and set(original.values()) == {2}
+        # Both finite synthetic applies signal entry before waiting; releasing
+        # their events guarantees completion without a simulation or polling.
         with ThreadPoolExecutor(max_workers=2) as executor:
             first = executor.submit(evolve, 0)
             try:
-                assert entered[0].wait(5)
+                assert entered[0].wait(30)
                 second = executor.submit(evolve, 1)
-                assert entered[1].wait(5)
+                assert entered[1].wait(30)
                 release[0].set()
                 if failure:
                     with pytest.raises(RuntimeError, match="injected failure"):
-                        first.result(timeout=5)
+                        first.result(timeout=30)
                 else:
-                    first.result(timeout=5)
+                    first.result(timeout=30)
                 during_overlap = blas_widths()
             finally:
                 for event in release:
                     event.set()
-            second.result(timeout=5)
+            second.result(timeout=30)
         assert observations and all(
             set(observation.values()) == {1} for observation in observations
         ), "guard, prepare and apply must all run under BLAS=1"

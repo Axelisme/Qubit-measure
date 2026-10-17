@@ -13,14 +13,25 @@ def _sample_ceiling(segments, row):
     for tone in range(segments.tones[row]):
         envelope = segments.envelope[row, tone]
         begin, end = segments.sample_offsets[envelope : envelope + 2]
-        for index in range(begin + 1, end):
+        local_start = segments.offset[row, tone]
+        local_end = local_start + segments.duration[row]
+        times = segments.sample_time[begin:end]
+        first = begin + np.searchsorted(times, local_start, side="left")
+        stop = begin + np.searchsorted(times, local_end, side="right")
+        for index in range(first + 1, stop):
             ceiling = min(
                 ceiling, segments.sample_time[index] - segments.sample_time[index - 1]
             )
     if len(segments.flux_offsets):
         point = segments.timeline[row]
         begin, end = segments.flux_offsets[point : point + 2]
-        for index in range(begin + 1, end):
+        start = segments.start[row]
+        times = segments.flux_time[begin:end]
+        first = begin + np.searchsorted(times, start, side="left")
+        stop = begin + np.searchsorted(
+            times, start + segments.duration[row], side="right"
+        )
+        for index in range(first + 1, stop):
             ceiling = min(
                 ceiling, segments.flux_time[index] - segments.flux_time[index - 1]
             )
@@ -45,8 +56,9 @@ def run_chain(
     Each chain reads only its first input slot; subsequent rows use the previous
     endpoint, changing basis on model changes. Disjoint rows read their own
     input. Each row resets a deterministic 0.1 ns initial seed, then adapts up
-    to its smallest active envelope/flux sample spacing. Constant envelopes
-    have no sampling ceiling. Contiguity uses 1e-9 ns.
+    to the smallest spacing between knots inside that row's envelope-local
+    windows and, when packed, absolute flux window. Constant envelopes and
+    ordinary DOP853's unpacked flux add no sampling ceiling. Contiguity uses 1e-9 ns.
     Integration failures propagate; earlier endpoints may already be stored.
     """
     models, segments = data.models, data.segments
@@ -74,7 +86,7 @@ def run_chain(
             controls.atol,
             min(controls.max_step, _sample_ceiling(segments, row)),
         )
-        result, _ = integrate(
+        result = integrate(
             rhs,
             context,
             state.ravel(),

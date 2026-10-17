@@ -200,7 +200,9 @@ class TimelineBatch:
 class PathDiagnostics:
     """Author-only aggregate counts, not acquisition results.
 
-    segments_by_kernel: kernel name -> nonnegative segment count.
+    segments_by_kernel: kernel name -> nonnegative timeline-segment count.
+        A shared prefix segment counts once per adopting timeline under the
+        kernel that computed it. Its exceedances scale by the same rule.
     points_by_class: dispatch path-class name -> nonnegative point count.
     exceeded_by_kernel: kernel name -> post-apply accuracy exceedance segment
         count, with only positive counts retained. Exceeded results remain
@@ -285,10 +287,11 @@ class Engine:
         each stateless collaborator implements the internal Kernel contract and
         has a unique name. Missing required names raise, never silently reroute.
         Terminal families must cover their full dispatch domain: t4 handles all
-        no-tone rows, t6 all single constant-tone rows, gate_cache repeated
-        shaped rows, and period_table the remaining single shaped-tone rows.
-        If a terminal guard rejects a dispatched row, evolve raises RuntimeError
-        with "no valid kernel"; it does not reroute that row to DOP853.
+        no-tone rows and t6 all single constant-tone rows. If either terminal
+        guard rejects a dispatched row, evolve raises RuntimeError with
+        "no valid kernel". Shaped rows try gate_cache, period_table and dop853
+        in amortized-cost order; a guard rejection tries the next candidate.
+        Preparation and apply failures propagate without reclassification.
     chunks_per_worker: positive chunk multiplier; only scheduling, not physics.
 
     The zero-level model identity names the entire ModelSource: all physical

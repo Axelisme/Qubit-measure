@@ -148,10 +148,9 @@ class _Classifier:
         self.names = np.full(len(self.table.timeline), "", dtype="U16")
         self.costs = np.zeros(len(self.names))
         self.deferred = np.zeros(len(self.names), dtype=bool)
-        self.scope = np.ones(len(self.names), dtype=bool)
+        self.scope = geometry.pending
         if selection is not None:
-            self.scope[:] = False
-            self.scope[selection.rows] = True
+            self.scope &= np.isin(np.arange(len(self.names)), selection.rows)
         self.shaped = selection.shaped if selection is not None else None
         self.preparations: dict[str, list[GuardPreparation]] = {}
         self.rejected: dict[str, NDArray[np.bool_]] = {}
@@ -259,7 +258,7 @@ class _Classifier:
             constant[playing] &= kinds[table.tone_envelope[playing, slot]]
         single = ordinary & (table.tones == 1)
         self.accept(rows[(single & constant)[rows]], ("dyson", "floquet_period", "t6"))
-        shaped = np.flatnonzero(single & ~constant)
+        shaped = np.flatnonzero(single & ~constant & self.scope)
         if np.any(self.scope[shaped]):
             self.classify_shaped(shaped)
         self.accept(

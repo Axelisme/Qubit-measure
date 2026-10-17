@@ -128,7 +128,10 @@ def _representative(geometry: Geometry, first: int, stop: int) -> Geometry:
         else None,
     )
     return Geometry(
-        subset, geometry.points[point : point + 1], geometry.flux_drive[first:stop]
+        subset,
+        geometry.points[point : point + 1],
+        geometry.flux_drive[first:stop],
+        geometry.prefix_paths,
     )
 
 
@@ -166,6 +169,7 @@ class PrefixResolver:
         if not representatives:
             return geometry
         inputs = {}
+        paths = {}
         for group, row in sorted(
             representatives.items(), key=lambda item: table.start_ns[item[1]]
         ):
@@ -184,10 +188,13 @@ class PrefixResolver:
                 if previous in inputs:
                     first, initial = earlier, inputs[previous]
             table = replace(table, prefix_inputs=inputs)
-            geometry = replace(geometry, table=table)
+            geometry = replace(geometry, table=table, prefix_paths=paths)
             prefix = _representative(geometry, first, row)
             dispatch = classify(prefix, kernels, source, budget)
             schedule = Schedule(prefix, dispatch, source, budget, cancel, initial)
             result = schedule.run(kernels, cache, pool, chunks)
             inputs[group] = result.densities[0]
-        return replace(geometry, table=replace(table, prefix_inputs=inputs))
+            paths[group] = result.paths
+        return replace(
+            geometry, table=replace(table, prefix_inputs=inputs), prefix_paths=paths
+        )

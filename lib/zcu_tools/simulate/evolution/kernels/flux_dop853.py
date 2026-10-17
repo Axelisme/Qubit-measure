@@ -123,8 +123,8 @@ class FluxDOP853Kernel:
     other kernels. Operators and states use each row's bath eigenbasis. Chained
     rows switch basis at boundaries. The shared single-threaded, nogil DOP853
     core resets a deterministic initial step per row and limits steps by the
-    smallest active envelope/flux sample spacing. No flux/DAC midpoint freezing
-    occurs.
+    smallest spacing of envelope/flux knots inside the row's local window.
+    No flux/DAC midpoint freezing occurs.
     """
 
     name = "flux_dop853"
@@ -251,7 +251,7 @@ class FluxDOP853Kernel:
         playing = np.arange(table.tone_port.shape[1])[None, :] < table.tones[rows, None]
         if np.any(playing & (table.tone_port[rows] >= models.ports[inverse, None])):
             raise ValueError("flux DOP853 tone port absent from model")
-        segments = pack_segments(table)
+        segments = pack_segments(table, include_flux=True)
         data = _FluxData(
             models,
             segments,
