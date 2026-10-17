@@ -1,12 +1,12 @@
 """Vectorized event geometry for one acquire, without point-wise Python loops."""
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 
 import numpy as np
 from numpy.typing import NDArray
 
-from .engine import EnvelopeSpec, TimelineBatch
+from .engine import EnvelopeSpec, PathDiagnostics, TimelineBatch
 from .kernel import SegmentTable
 from .secular import FluxWaveform, ModelSource
 
@@ -16,6 +16,30 @@ class Geometry:
     table: SegmentTable
     points: NDArray[np.int64]
     flux_drive: NDArray[np.bool_]
+    prefix_paths: Mapping[int, PathDiagnostics] = field(default_factory=dict)
+
+    @property
+    def resume_rows(self) -> NDArray[np.int64]:
+        """Latest resolved prefix row per timeline, or -1 for source input."""
+        resume = np.full(len(self.points), -1, dtype=np.int64)
+        if self.table.prefix_group is not None:
+            rows = np.array(
+                [
+                    i
+                    for i, group in enumerate(self.table.prefix_group)
+                    if group is not None and group in self.table.prefix_inputs
+                ],
+                dtype=np.int64,
+            )
+            np.maximum.at(resume, self.table.timeline[rows], rows)
+        return resume
+
+    @property
+    def pending(self) -> NDArray[np.bool_]:
+        """Rows after the adopted input, excluding already computed prefixes."""
+        return (
+            np.arange(len(self.table.timeline)) >= self.resume_rows[self.table.timeline]
+        )
 
 
 def _events(timeline, time):

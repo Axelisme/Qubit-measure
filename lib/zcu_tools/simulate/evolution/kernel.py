@@ -51,8 +51,9 @@ class SegmentTable:
     prefix_no_drive: group-aligned tuple. True preserves no-drive B2 exemption.
     prefix_inputs: immutable group-ID to read-only DC density mapping. The
         engine computes these known inputs before dependent rows are classified.
-        These are never worker states and never enter model-only preparations
-        or PrepareCache. Absent groups have no known input yet.
+        Workers adopt the latest saved input and skip its preceding rows.
+        These densities never enter model-only preparations or PrepareCache.
+        Absent groups have no known input yet.
     Arrays own read-only copies. Invalid shapes/counts/indices raise ValueError.
     Adjacent rows of one timeline may be merged by DOP853 kernels into a
     multi-interval work item: stop at boundaries and retain the accepted step.

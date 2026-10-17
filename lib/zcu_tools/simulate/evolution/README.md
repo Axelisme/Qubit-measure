@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, timeline-owned preparation, shared-pool spectral shaped guards, inline single-timeline execution and evolve-wide BLAS limit
+**Last updated:** 2026-10-17, single-input prefix reuse and per-timeline prefix diagnostics
 
 ## Segment engine contracts
 
@@ -50,6 +50,10 @@ exceedance mask aligned with its rows. Kernels without a post-apply check return
 all False. An exceedance is not a numerical failure: the engine keeps the
 uncorrected approximation without retry. `PathDiagnostics.exceeded_by_kernel`
 counts exceeded segments by kernel and omits kernels with no exceedances.
+Shared prefix segments count once per adopting timeline under the kernel that
+actually computed them. Their exceedances scale by the same rule and enter the
+single warning for the evolve call. Point-class counts include each adopting
+timeline once per kernel, even when that kernel also runs in the suffix.
 Each `evolve` call with exceedances emits one `RuntimeWarning`, with the total
 segment count and each kernel's count. Consecutive DOP853 rows form chains only within the same kernel
 and prepared batch, never across `dop853` and `flux_dop853`. Their kernels own
@@ -255,7 +259,11 @@ final states or final levels alone never certifies a shared input.
 
 Before dependent probes are classified, the engine resolves each group in time
 order with ordinary dispatch, preparation, apply and basis changes. Nested
-groups resume from their latest resolved prefix input. Known inputs belong to
+groups resume from their latest resolved prefix input. Timeline workers adopt
+that same saved DC density and skip classification, preparation and evolution
+of the preceding rows. Binding, B2, the probe result, its free baseline and all
+later segments therefore use one numerical input, even when the representative's
+shaped reuse counts differ from the full acquire. Known inputs belong to
 this evolve alone. They never enter PrepareCache. Shared input binding consumes
 the same known input as B2, in the row model basis. All constant single tones
 still enter the ordinary family decision order.

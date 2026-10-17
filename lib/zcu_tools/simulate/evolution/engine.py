@@ -200,7 +200,9 @@ class TimelineBatch:
 class PathDiagnostics:
     """Author-only aggregate counts, not acquisition results.
 
-    segments_by_kernel: kernel name -> nonnegative segment count.
+    segments_by_kernel: kernel name -> nonnegative timeline-segment count.
+        A shared prefix segment counts once per adopting timeline under the
+        kernel that computed it. Its exceedances scale by the same rule.
     points_by_class: dispatch path-class name -> nonnegative point count.
     exceeded_by_kernel: kernel name -> post-apply accuracy exceedance segment
         count, with only positive counts retained. Exceeded results remain

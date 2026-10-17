@@ -1100,7 +1100,9 @@ def test_shared_shaped_prefix_supplies_one_input_to_probe_and_later_segments(bin
     saved = probe.known_inputs[0]
     assert np.max(abs(saved - src.initial_density)) > 0.01
     for _, _, received in (*probe.calls, *idle.calls):
-        np.testing.assert_array_equal(received, np.repeat(saved[None], len(received), axis=0))
+        np.testing.assert_array_equal(
+            received, np.repeat(saved[None], len(received), axis=0)
+        )
     np.testing.assert_array_equal(result.densities, np.repeat(saved[None], 3, axis=0))
     assert spectral.applied_rows + direct.applied_rows == 1, (
         "identical prefixes must be evolved once, not again in workers"
@@ -1138,7 +1140,17 @@ def test_shared_prefix_paths_and_exceedances_count_each_adopting_timeline():
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         result = run(
-            Engine(1, 0, kernels=(spectral, direct, gate, RecordingKernel("dyson"), RecordingKernel("t4"))),
+            Engine(
+                1,
+                0,
+                kernels=(
+                    spectral,
+                    direct,
+                    gate,
+                    RecordingKernel("dyson"),
+                    RecordingKernel("t4"),
+                ),
+            ),
             source(),
             (b,),
         )
