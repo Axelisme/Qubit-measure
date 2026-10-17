@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-17
+**Last updated:** 2026-10-17, typed population rejection diagnostics
 
 ADC consumes explicitly ordered classical populations, not densities. The
 probability tolerance is `POPULATION_TOLERANCE = 1e-6`. This is 1000 times below
@@ -13,8 +13,10 @@ operation. It checks finite values, a nonempty state axis, row sums in the close
 float64 interval [1-1e-6, 1+1e-6], and entries at least -1e-6. It then sets tolerated
 negative entries to zero and divides each row by its sum, returning an owned
 array without changing its input. It never clips upper values or accepts rows
-outside tolerance. A failure raises `ValueError` with the number of rejected
-rows, without returning partial results.
+outside tolerance. Invalid shapes raise `ValueError`. Row validation raises
+`PopulationValidationError`, a `ValueError` subclass whose `rejected_rows: int`
+counts rows failing the first reported rule. It returns no partial results.
+Callers can retain this count without parsing error text.
 
 `PopulationInput`, `round_statistics` and `sample_traces` validate the same trace
 interval and require nonnegative entries. They expect explicitly normalized

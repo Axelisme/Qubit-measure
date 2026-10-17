@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-17，欄位指南導航
+**Last updated:** 2026-10-17, retained ADC rejection counts
 
 `ftf(path_or_settings, *, workers=1)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -46,7 +46,10 @@ Readout uses the DC model and populations in its energy basis. FTF explicitly
 calls ADC's `normalize_populations` once after `batch_populations`, before
 conditional responses or sampling. ADC owns the 1e-6 probability tolerance,
 tolerated-negative cleanup and row normalization. Invalid rows fail without
-sampling; the error reports rejected row counts. The source retains the latest
+sampling. ADC raises `PopulationValidationError` with `rejected_rows` for the
+reported validation rule. FTF catches only that type, retains its count in
+`FTFNumericUse.rejected_rows`, then re-raises without sampling. Successful
+preparations retain zero rejected rows. The source retains the latest
 evolve diagnostics even when this preparation fails, including the engine's
 report-only maximum trace error. Raw evolution densities remain unchanged.
 It ignores charge controls during or after readout. Earlier control portions still evolve
