@@ -53,8 +53,8 @@ def register_all(registry: ComponentRegistry) -> None:
     for name, kind in (
         ("qubit", "qubit/*"),
         ("resonator", "resonator"),
-        ("control", "qubit/*"),
-        ("target", "qubit/*"),
+        ("qubit1", "qubit/*"),
+        ("qubit2", "qubit/*"),
     ):
         registry.roles.register(name, RoleSpec(kind))
     registry.roles.configure(shorthand=("qubit", "resonator"), focus_kinds=("qubit/*",))
