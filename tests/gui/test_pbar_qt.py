@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -228,7 +228,11 @@ def test_total_change_updates_widget_in_place_no_flicker(qapp):
     QApplication.processEvents()
 
 
-def test_progress_stack_skips_unchanged_bar_properties(qapp):
+def test_progress_stack_skips_unchanged_bar_properties(
+    qapp, monkeypatch: pytest.MonkeyPatch
+):
+    from zcu_tools.gui.session.pbar_host import ProgressBarModel
+
     stack = _make_stack(qapp)
     profile_calls: list[tuple[str, float, str]] = []
     stack.set_profile_callback(
@@ -237,40 +241,67 @@ def test_progress_stack_skips_unchanged_bar_properties(qapp):
         )
     )
 
-    class FakeBar:
-        def __init__(self) -> None:
-            self.calls: list[tuple[str, int | str]] = []
+    class _FixedFormatModel(ProgressBarModel):
+        """Isolate live clock formatting across the four property-cache cases.
 
-        def setMaximum(self, value: int) -> None:
-            self.calls.append(("maximum", value))
+        ``display_format`` is the exact Qt format string returned by ``format``;
+        all numeric state and Qt value/maximum derivation use the real model.
+        """
 
-        def setFormat(self, value: str) -> None:
-            self.calls.append(("format", value))
+        display_format: str = "rounds %v/%m"
 
-        def setValue(self, value: int) -> None:
-            self.calls.append(("value", value))
+        def format(self) -> str:
+            """Return the controlled display string without reading the clock."""
+            return self.display_format
 
-    bar = FakeBar()
-    bar_arg = cast(Any, bar)
+    model = _FixedFormatModel(label="rounds", total=10, start_time=0.0)
+    model.set_n(2)
+    bar = stack.push()
+    calls: list[tuple[str, int | str]] = []
+    set_maximum = bar.setMaximum
+    set_format = bar.setFormat
+    set_value = bar.setValue
 
-    stack._apply_bar_snapshot(bar_arg, (10, "rounds %v/%m", 2))
-    assert bar.calls == [
+    def observe_maximum(value: int) -> None:
+        """Record the maximum write, delegating its value, result and errors."""
+        calls.append(("maximum", value))
+        return set_maximum(value)
+
+    def observe_format(value: str) -> None:
+        """Record the format write, delegating its value, result and errors."""
+        calls.append(("format", value))
+        return set_format(value)
+
+    def observe_value(value: int) -> None:
+        """Record the value write, delegating its value, result and errors."""
+        calls.append(("value", value))
+        return set_value(value)
+
+    monkeypatch.setattr(bar, "setMaximum", observe_maximum)
+    monkeypatch.setattr(bar, "setFormat", observe_format)
+    monkeypatch.setattr(bar, "setValue", observe_value)
+
+    stack.render_models((model,))
+    assert calls == [
         ("maximum", 10),
         ("format", "rounds %v/%m"),
         ("value", 2),
     ]
 
-    bar.calls.clear()
-    stack._apply_bar_snapshot(bar_arg, (10, "rounds %v/%m", 2))
-    assert bar.calls == []
+    calls.clear()
+    stack.render_models((model,))
+    assert calls == []
     assert profile_calls[-1][0] == "snapshot_noop"
 
-    stack._apply_bar_snapshot(bar_arg, (10, "rounds %v/%m", 3))
-    assert bar.calls == [("value", 3)]
+    model.set_n(3)
+    stack.render_models((model,))
+    assert calls == [("value", 3)]
 
-    bar.calls.clear()
-    stack._apply_bar_snapshot(bar_arg, (20, "rounds %v/%m [0:01]", 3))
-    assert bar.calls == [
+    calls.clear()
+    model.set_total(20)
+    model.display_format = "rounds %v/%m [0:01]"
+    stack.render_models((model,))
+    assert calls == [
         ("maximum", 20),
         ("format", "rounds %v/%m [0:01]"),
     ]
