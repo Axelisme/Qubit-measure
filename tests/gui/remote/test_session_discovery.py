@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import os
 import socket
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -63,8 +65,15 @@ def test_stale_dead_pid_is_swept(session_root: Path) -> None:
     """A live socket but a dead pid is stale: read returns None and deletes file."""
     listener, port = _open_listener()
     try:
-        # PID 1-off: a pid that is essentially never alive. Use a clearly-dead one.
-        dead_pid = _find_dead_pid()
+        # The pass-only child exits without consulting the liveness implementation.
+        with subprocess.Popen([sys.executable, "-c", "pass"]) as child:
+            try:
+                child.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait()
+                raise
+        dead_pid = child.pid
         sd.write_session(
             "fluxdep",
             port,
@@ -185,11 +194,3 @@ def test_resolve_falls_back_to_default_without_discovery(
 
     cfg = _bridge_config("measure", 8765)
     assert resolve_connect_port(cfg, None) == 8765
-
-
-def _find_dead_pid() -> int:
-    """Return a pid that is not currently alive (best-effort, high range)."""
-    for candidate in range(2**22, 2**22 - 2000, -1):
-        if not sd._pid_alive(candidate):
-            return candidate
-    raise RuntimeError("could not find a dead pid for the test")
