@@ -239,5 +239,5 @@ def test_invalid_rates_covariance_and_population_are_rejected():
         Receiver(noise_covariance=np.array([[1, 2], [2, 1.0]]))
     with pytest.raises(ValueError, match="nonnegative"):
         signal_model(rates=np.array([[0, -0.1, 0], [0, 0, 0], [0, 0, 0]]))
-    with pytest.raises(ValueError, match="sum"):
+    with pytest.raises(ValueError, match="population trace outside tolerance"):
         PopulationInput(("g", "e"), np.array([0.2, 0.1]))
