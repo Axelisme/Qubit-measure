@@ -1,12 +1,22 @@
 """Full-carrier, arbitrary-state second-order evolution at the C5 seam."""
 
+from collections.abc import Callable
 from dataclasses import replace
 
 import numpy as np
 import pytest
+from scipy.linalg import expm
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource
+from zcu_tools.simulate.evolution.kernel import SegmentTable
+from zcu_tools.simulate.evolution.kernels.dyson import DysonKernel
 
-from ..contract.kernel_suite import KernelCase, KernelContract, assert_budget, reference
+from ..contract.kernel_suite import (
+    KernelCase,
+    KernelContract,
+    assert_budget,
+    reference,
+    synthetic_model,
+)
 
 KERNEL_NAME = "dyson"
 
@@ -196,7 +206,7 @@ def test_guard_retains_first_order_population_from_coherence(
         case.table,
         level=np.full((4, 1), int(changed_basis), dtype=np.int64),
         tone_frequency_ghz=np.zeros((4, 1)),
-        tone_amplitude=np.array([[0.002], [0.004], [0.2], [0.2]]),
+        tone_amplitude=np.array([[0.001], [0.004], [0.2], [0.2]]),
         tone_theta_rad=np.zeros((4, 1)),
         duration_ns=np.array([1.0, 1.0, 1.0, 0.0]),
     )
@@ -209,6 +219,154 @@ def test_guard_retains_first_order_population_from_coherence(
     case = replace(case, source=source, table=table)
     exact = np.diag(reference(case, 1, coherent) - coherent)
     assert np.max(abs(exact)) > 0.02
+
+
+@pytest.mark.parametrize("size", [3, 4])
+@pytest.mark.parametrize("dissipative", [False, True])
+def test_population_bound_is_conservative_for_ground_and_coherent_inputs(
+    size: int, dissipative: bool, record_property: Callable[[str, object], None]
+) -> None:
+    model = synthetic_model(size)
+    if not dissipative:
+        model = replace(
+            model,
+            rates_per_ns=np.zeros((size, size)),
+            dephasing_per_ns=np.zeros((size, size)),
+        )
+    frequency, gain, duration = np.meshgrid(
+        [-0.3, 0.0, 0.129, 0.13, 0.131, 0.4],
+        [0.0, 0.0004, 0.002, 0.01],
+        [0.0, 1.0, 5.0],
+        indexing="ij",
+    )
+    n = frequency.size
+    table = SegmentTable(
+        np.arange(n),
+        np.zeros(n),
+        duration.ravel(),
+        np.zeros((n, 1), dtype=np.int64),
+        np.ones(n, dtype=np.int64),
+        np.zeros((n, 1), dtype=np.int64),
+        frequency.reshape(n, 1),
+        gain.reshape(n, 1),
+        np.full((n, 1), 0.7),
+        np.zeros((n, 1), dtype=np.int64),
+        np.zeros((n, 1)),
+        (EnvelopeSpec("constant"),),
+    )
+    kernel = DysonKernel()
+    rows = np.arange(n, dtype=np.int64)
+    budget = 1e-3
+    threshold = min(0.02, (1.5 * budget) ** (2 / 3))
+    ground = np.zeros(size, dtype=complex)
+    ground[0] = 1
+    coherent = np.exp(1j * np.arange(size)) / np.sqrt(size)
+    outgoing = model.rates_per_ns.sum(axis=0)
+    q = model.rates_per_ns - np.diag(outgoing)
+    leaks, extra = 0, 0
+    for vector in (ground, coherent):
+        initial = np.outer(vector, vector.conj())
+        source = ModelSource(initial, lambda level: replace(model, level=level))
+        accepted = kernel.guard(table, rows, source, budget)
+        keys, first, inverse = np.unique(
+            kernel.prepare_keys(table, rows), return_index=True, return_inverse=True
+        )
+        prepared = kernel.prepare(keys, table, rows[first], source, budget)
+        actual = np.repeat(initial[None], n, axis=0)
+        kernel.apply(prepared, inverse, table, rows, actual, budget)
+        free = np.stack(
+            [expm(q * t) @ np.real(np.diag(initial)) for t in duration.ravel()]
+        )
+        transfer = np.max(abs(np.diagonal(actual, axis1=1, axis2=2) - free), axis=1)
+        leaks += int(np.count_nonzero(accepted & (transfer > threshold)))
+        extra += int(np.count_nonzero(~accepted & (transfer <= threshold)))
+    record_property("rows", 2 * n)
+    record_property("leaks", leaks)
+    record_property("extra_rejections", extra)
+    assert leaks == 0
+    assert extra > 0
+
+
+def test_population_guard_reserves_pruning_margin(kernel_case: KernelCase) -> None:
+    case = kernel_case
+    model = case.source.model((0,))
+    size = len(model.energies_ghz)
+    x = np.zeros((size, size), dtype=complex)
+    x[0, 1] = x[1, 0] = 1
+    model = replace(
+        model,
+        energies_ghz=np.zeros(size),
+        rates_per_ns=np.zeros((size, size)),
+        dephasing_per_ns=np.zeros((size, size)),
+        drives=(replace(model.drives[0], in_phase_ghz=x, quadrature_ghz=x * 0),),
+    )
+    source = ModelSource(
+        np.diag([1.0] + [0.0] * (size - 1)).astype(complex),
+        lambda level: replace(model, level=level),
+    )
+    threshold = min(0.02, (1.5 * case.budget) ** (2 / 3))
+    # On resonance, second-order transfer and B2 are both (2*pi*g*T)**2.
+    # Both rows are below the old population threshold, but only row 0 has
+    # enough headroom for the omitted-path allowance.
+    gains = np.sqrt(
+        threshold - case.budget * np.array([1 / 4, 1 / 16, 1 / 4, 1 / 16])
+    ) / (2 * np.pi)
+    table = replace(
+        case.table,
+        start_ns=np.zeros(4),
+        duration_ns=np.ones(4),
+        tone_frequency_ghz=np.zeros((4, 1)),
+        tone_theta_rad=np.zeros((4, 1)),
+        tone_amplitude=gains[:, None],
+    )
+    rows = np.arange(2, dtype=np.int64)
+    np.testing.assert_array_equal(
+        case.kernel.guard(table, rows, source, case.budget), [True, False]
+    )
+
+
+@pytest.mark.parametrize("size", [3, 4])
+def test_guard_bounds_unknown_coherence_phase_and_prior_history(size: int) -> None:
+    model = synthetic_model(size)
+    x = np.zeros((size, size), dtype=complex)
+    x[1, 2] = x[2, 1] = 1
+    model = replace(
+        model,
+        energies_ghz=np.zeros(size),
+        rates_per_ns=np.zeros((size, size)),
+        dephasing_per_ns=np.zeros((size, size)),
+        drives=(replace(model.drives[0], in_phase_ghz=x, quadrature_ghz=x * 0),),
+    )
+    table = SegmentTable(
+        np.arange(2),
+        np.array([0.0, 1.0]),
+        np.ones(2),
+        np.zeros((2, 1), dtype=np.int64),
+        np.ones(2, dtype=np.int64),
+        np.zeros((2, 1), dtype=np.int64),
+        np.zeros((2, 1)),
+        np.full((2, 1), 0.003),
+        np.zeros((2, 1)),
+        np.zeros((2, 1), dtype=np.int64),
+        np.zeros((2, 1)),
+        (EnvelopeSpec("constant"),),
+    )
+    ground = np.diag([0.999, 0.001] + [0.0] * (size - 2)).astype(complex)
+    source = ModelSource(ground, lambda level: replace(model, level=level))
+    kernel = DysonKernel()
+    rows = np.arange(2, dtype=np.int64)
+    # Near-ground DC populations give negligible transfer on this edge.
+    # Only the first row is allowed to rely on them.
+    np.testing.assert_array_equal(
+        kernel.guard(table, rows, source, 1e-3), [True, False]
+    )
+    vector = np.zeros(size, dtype=complex)
+    vector[1:3] = 1 / np.sqrt(2)
+    stationary = np.outer(vector, vector.conj())
+    coherent_source = ModelSource(stationary, lambda level: replace(model, level=level))
+    # The actual real coherence commutes with X. B2 must nevertheless account
+    # for every coherence phase consistent with these populations.
+    assert not kernel.guard(table, rows[:1], coherent_source, 1e-3)[0]
 
 
 @pytest.mark.parametrize("budget", [1e-3, 1.0])

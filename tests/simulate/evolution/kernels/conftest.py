@@ -25,7 +25,9 @@ def kernel_case(request: pytest.FixtureRequest) -> KernelCase:
         lambda level: replace(model, level=level),
     )
     durations = np.array([2.0, 3.0, 1.5, 0.0])
-    gains = np.array([0.0004, 0.0006, -0.0003, 0.0])
+    # Dyson's arbitrary-input B2 bound also covers unknown coherence phases
+    # after earlier segments, so keep this accepted-row fixture weak enough.
+    gains = np.array([0.00004, 0.00006, -0.00003, 0.0])
     if name == "rwa":
         # Keep weak-drive/coherence coverage without a long accuracy scan.
         durations = np.array([2.0, 3.0, 1.5, 0.0])

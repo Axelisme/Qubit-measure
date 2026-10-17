@@ -48,7 +48,8 @@ chunk boundaries and raises `Cancelled` without partial results. `close()`
 waits for active work, clears the prepare cache and is safe to repeat. Each
 `evolve` call opens and closes its own joblib threading pool. The prepare cache
 persists across `evolve` calls, but no worker resources survive a call.
-`SEGMENT_NUMERIC_VERSION` identifies engine numerics for checked replay.
+`SEGMENT_NUMERIC_VERSION` is `segment-engine-v2` and identifies engine numerics
+for checked replay.
 
 The internal `kernel` module defines `SegmentTable`, `Kernel` and the opaque
 `Prepared.nbytes` contract. Only apply receives density arrays. The shared
@@ -72,7 +73,7 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | Varying flux, no drive | T5 quantizes flux at DAC-interval midpoints to 1e-3 Phi0 subsegments, then uses T4 with basis changes. |
 | Varying flux with drive | `flux_dop853` integrates continuous flux with the exact Hamiltonian expansion; baths switch at quantized grid boundaries. |
 | Fixed flux, no drive | T4 uses analytic secular propagation. |
-| One constant tone, known input density, all Dyson guards pass | T7 second-order Dyson, batched over frequency, gain, duration and phase. |
+| One constant tone, known input density, r, r₂ and B2 guards pass | T7 second-order Dyson, batched over frequency, gain, duration and phase. |
 | Same constant-tone branch, Dyson fails but r <= 0.2 | Reduced RWA if its omitted-sideband error bound fits the segment budget; otherwise T6. |
 | One constant tone with unknown input density, or outside the weak-drive branch | T6 periodic propagation. |
 | One shaped tone, prepare-key usage >= 10 | Gate cache with four Strang subsegments, closed-system U plus secular dissipation, and 16 carrier-phase Fourier samples. |
@@ -80,6 +81,11 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | Two constant tones with a weak probe and passing Floquet guards | Floquet k=0 preparation, then modal second-order Dyson in H_F + D₀; a failing probe guard uses periodic T6 propagation in that frame. |
 | Other two-tone segments, including failed Floquet guards | Sum both drives in batched numba DOP853. |
 | Three or more tones | Sum all drives in batched numba DOP853. |
+
+Dyson's B2 guard uses source populations in the segment model basis for rows
+starting at zero. After any preceding segment, including a no-drive flux segment,
+it uses an arbitrary-input density bound. The planner's known-input eligibility
+does not imply that the source density still describes the segment input.
 
 The model supplies the secular form. Missing secular data fails at entry rather
 than selecting another evolution backend.
@@ -89,8 +95,16 @@ than selecting another evolution backend.
 Dyson requires all three guards:
 
 - r <= min(0.1, 0.25 * budget^(1/3)).
-- The classification population estimate |Δp| <= min(0.02, (1.5 * budget)^(2/3)).
+- B2 + budget/8 <= min(0.02, (1.5 * budget)^(2/3)).
 - r₂ <= 0.05.
+
+B2 bounds driven-minus-free population changes in unpruned second-order Dyson.
+It sums transition-wise scalar bounds from the secular model and pulse parameters,
+without evolving a density or evaluating modal paths. Source populations bound
+all compatible coherence phases for rows starting at zero. Later rows use the
+arbitrary-input version, with population difference at most 1, pair coherence at
+most 1/2 and off-diagonal trace norm at most 2. The budget/8 margin reserves the
+omitted-path allowance.
 
 After apply, Dyson also measures |Δp| from the output populations minus the
 same input's free-evolved populations. Free evolution uses only the secular
@@ -103,8 +117,11 @@ The r limit follows cubic off-resonant coherence-error scaling. The population
 limit follows the two-level resonant estimate (2/3)|Δp|^(3/2). Synthetic-model
 scans calibrate and check the coefficients 0.25 and 1.5; neither threshold is a
 rigorous multilevel error bound. At the default budget of 1e-3, the limits are
-r <= 0.025 and |Δp| <= 0.0131. Rejected Dyson segments try reduced RWA only in
-the r <= 0.2 branch. RWA segments whose error bound exceeds their budget use T6.
+r <= 0.025 and B2 + 0.000125 <= 0.0131. Classification uses this bound to avoid
+large |Δp|. A post-apply |Δp| check only reports excess; it does not correct the
+Dyson result or guarantee exact-dynamics accuracy. Rejected Dyson segments try
+reduced RWA only in the r <= 0.2 branch. RWA segments whose error bound exceeds
+their budget use T6.
 
 Each segment receives a default budget of 1e-3. The end-to-end acceptance
 threshold is a maximum absolute error of 1e-2 in both final readout-basis

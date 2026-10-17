@@ -23,7 +23,7 @@ from ._validation import integers, owned, shape
 from .secular import FluxSchedule, FluxWaveform, ModelSource
 
 # Replay identity of the segment engine numerical algorithms, independent of records.
-SEGMENT_NUMERIC_VERSION = "segment-engine-v1"
+SEGMENT_NUMERIC_VERSION = "segment-engine-v2"
 
 
 @dataclass(frozen=True)
