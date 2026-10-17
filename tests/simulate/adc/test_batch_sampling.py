@@ -164,3 +164,38 @@ def test_decimated_requires_traces_and_zero_reps_returns_empty_shots():
         adc.sample_traces(
             populations, (missing,), reps=1, seed=1, acquire_sequence=0, round_index=0
         )
+
+
+@pytest.mark.parametrize("sampler", [adc.round_statistics, adc.sample_traces])
+def test_round_draws_accept_engine_trace_tolerance_without_mutation(sampler):
+    def rng():
+        return np.random.Generator(
+            np.random.PCG64(np.random.SeedSequence((1, 0, 0, 0)))
+        )
+
+    # Put the first uniform between the raw and normalized CDF boundaries.
+    boundary = rng().random() * (1 + 4e-7)
+    populations = np.array([[[boundary, 1 + 9e-7 - boundary], [0.4, 0.6]]])
+    original = populations.copy()
+    reps = 1_000_000_000 if sampler is adc.round_statistics else 3
+    try:
+        result = sampler(
+            populations,
+            channels(),
+            reps=reps,
+            seed=1,
+            acquire_sequence=0,
+            round_index=0,
+        )
+    except ValueError as error:
+        pytest.fail(f"in-budget engine trace residual must be accepted: {error}")
+    if isinstance(result, RoundStatistics):
+        expected = rng().multinomial(reps, populations)
+        repaired = rng().multinomial(
+            reps, populations / populations.sum(axis=-1, keepdims=True)
+        )
+        np.testing.assert_array_equal(result.state_counts, expected)
+        assert not np.array_equal(expected, repaired)
+    else:
+        np.testing.assert_array_equal(result.channels[0].iq[0, 0, 0], [1, 2])
+    np.testing.assert_array_equal(populations, original)

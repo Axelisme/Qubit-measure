@@ -595,3 +595,23 @@ def test_shared_dyson_is_bitwise_chunk_independent_and_source_local():
         np.testing.assert_array_equal(original, outputs[0][0])
         np.testing.assert_array_equal(changed, outputs[0][1])
     assert np.max(abs(outputs[0][0] - outputs[0][1])) > 0.01
+
+
+@pytest.mark.parametrize("residual", [2.62e-8, 2e-3])
+def test_trace_diagnostics_report_maximum_without_correcting_kernel_output(residual):
+    class TraceResidualKernel(RecordingKernel):
+        def apply(self, prepared, key_index, table, rows, states, budget):
+            states[:, 0, 0] += residual * (table.timeline[rows] + 1)
+            return np.zeros(len(rows), dtype=np.bool_)
+
+    engine = Engine(1, 0, kernels=(TraceResidualKernel("t4"),))
+    result = run(engine, source(), (batch(3),))
+    expected = np.repeat(source().initial_density[None], 3, axis=0)
+    expected[:, 0, 0] += residual * np.arange(1, 4)
+    np.testing.assert_allclose(result.densities, expected, rtol=0, atol=1e-15)
+    assert getattr(result.paths, "max_trace_error", None) == pytest.approx(3 * residual)
+
+
+def test_empty_evolve_has_zero_trace_diagnostic():
+    result = run(Engine(1, 0), source(), ())
+    assert getattr(result.paths, "max_trace_error", None) == 0.0

@@ -309,3 +309,60 @@ def test_round_statistics_reuse_snapshot_and_engine_across_acquires() -> None:
         assert traces.channels[0].iq.shape == (6, 1, 4, 2)
     finally:
         source.close()
+
+
+class ResidualEngine(Engine):
+    """Configured executor supplying controlled densities at the C3 boundary."""
+
+    def __init__(self, populations):
+        super().__init__(1, 0)
+        self.populations = populations
+
+    def evolve(self, source, batches, *, budget=1e-3, cancel):
+        from zcu_tools.simulate.evolution import EvolutionResult, PathDiagnostics
+
+        points = np.concatenate([batch.points for batch in batches])
+        densities = np.repeat(np.diag(self.populations)[None], len(points), axis=0)
+        return EvolutionResult(points, densities, PathDiagnostics())
+
+
+@pytest.mark.parametrize(
+    "populations, normalized",
+    [
+        ([0.25 * (1 + 9e-7), 0.75 * (1 + 9e-7)], [0.25, 0.75]),
+        ([-1e-6, 1.000001], [0, 1]),
+        ([0, 0.999999], [0, 1]),
+    ],
+)
+def test_acquire_explicitly_normalizes_in_budget_evolution(populations, normalized):
+    from zcu_tools.experiment.ftf import FTFSource
+
+    source = FTFSource(settings(), DeviceManager(), engine=ResidualEngine(populations))
+    acquire = replace(request(), reps=1_000_000_000)
+    try:
+        try:
+            result = expect_statistics(
+                source.open_acquire(acquire).sample_round(snapshot(), 0)
+            )
+        except ValueError as error:
+            pytest.fail(f"in-budget evolution must complete acquire: {error}")
+        identity = np.random.SeedSequence((acquire.root_seed, acquire.sequence, 0, 0))
+        rng = np.random.Generator(np.random.PCG64(identity))
+        expected = rng.multinomial(acquire.reps, np.tile(normalized, (2, 1)))
+        np.testing.assert_array_equal(result.state_counts, expected)
+    finally:
+        source.close()
+
+
+@pytest.mark.parametrize("populations", [[0, 1.000002], [-2e-6, 1.000002]])
+def test_acquire_rejects_out_of_budget_evolution_and_retains_diagnostics(populations):
+    from zcu_tools.experiment.ftf import FTFSource
+
+    source = FTFSource(settings(), DeviceManager(), engine=ResidualEngine(populations))
+    try:
+        with pytest.raises(ValueError, match="2 rows"):
+            source.open_acquire(request()).sample_round(snapshot(), 0)
+        assert len(source.evaluations) == 1
+        assert source.evaluations[0].round_index == 0
+    finally:
+        source.close()
