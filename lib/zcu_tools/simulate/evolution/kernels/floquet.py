@@ -319,6 +319,35 @@ def _k(q: complex, b: complex, a: complex, duration: float) -> complex:
 
 
 @njit(nogil=True, cache=True)
+def _first_factors(lam, duration, omega):
+    """Tabulate each exp[lambda_i, lambda_j + i*r*omega] once per row.
+
+    Factors include duration. Base and carrier exponentials are also returned
+    for free evolution and shifted second-order factors, respectively.
+    """
+    scaled = lam * duration
+    exponentials = np.exp(scaled)
+    carriers = np.exp(1j * np.arange(-2, 3) * omega * duration)
+    factors = np.empty((2, len(lam), len(lam)), dtype=np.complex128)
+    for outer in range(2):
+        sign = 2 * outer - 1
+        for i in range(len(lam)):
+            for j in range(len(lam)):
+                z = scaled[j] + 1j * sign * omega * duration - scaled[i]
+                if abs(z) < 1e-5:
+                    factors[outer, i, j] = (
+                        exponentials[i]
+                        * duration
+                        * (1 + z / 2 + z * z / 6 + z**3 / 24 + z**4 / 120)
+                    )
+                else:
+                    factors[outer, i, j] = (
+                        exponentials[j] * carriers[sign + 2] - exponentials[i]
+                    ) / (lam[j] + 1j * sign * omega - lam[i])
+    return factors, exponentials, carriers
+
+
+@njit(nogil=True, cache=True)
 def _rotation(entry_coefficients, harmonic, phase):
     result = np.zeros(entry_coefficients.shape[1:], dtype=np.complex128)
     for k in range(len(harmonic)):
@@ -341,25 +370,42 @@ def _modal(entry_data, parameters, states):
         transformed = np.empty(len(lam), dtype=np.complex128)
         b = couplings[int(port)] * gain
         omega = 2 * np.pi * frequency
+        factors, exponentials, carriers = _first_factors(lam, duration, omega)
+        phases = np.exp(1j * np.array([-1, 1]) * theta)
         for i in range(len(lam)):
-            value = np.exp(lam[i] * duration) * u[i]
+            value = exponentials[i] * u[i]
             for outer in range(2):
                 sign = 2 * outer - 1
-                phase = np.exp(1j * sign * theta)
+                phase = phases[outer]
                 for j in range(len(lam)):
                     first = b[outer, i, j] * phase
                     if abs(first) == 0:
                         continue
                     a = lam[j] + 1j * sign * omega
-                    value += first * u[j] * _f(lam[i], a, duration)
+                    value += first * u[j] * factors[outer, i, j]
                     for inner in range(2):
                         sign2 = 2 * inner - 1
-                        phase2 = np.exp(1j * sign2 * theta)
+                        phase2 = phases[inner]
                         for k in range(len(lam)):
                             product = first * b[inner, j, k] * phase2 * u[k]
                             if abs(product) != 0:
                                 bb = lam[k] + 1j * (sign + sign2) * omega
-                                value += product * _k(lam[i], bb, a, duration)
+                                gap = lam[i] - bb
+                                if (
+                                    abs(bb - a) * duration >= 1e-6
+                                    and abs(gap) * duration >= 0.5
+                                ):
+                                    # Shift the second edge's first factor by
+                                    # the outer carrier before differencing.
+                                    second = (
+                                        factors[outer, i, j]
+                                        - carriers[sign + 2] * factors[inner, j, k]
+                                    ) / gap
+                                else:
+                                    # Preserve the existing repeated-pole and
+                                    # close-endpoint formulas without regrouping.
+                                    second = _k(lam[i], bb, a, duration)
+                                value += product * second
             transformed[i] = value
         density = (modes @ transformed).reshape(states.shape[1:])
         states[row] = end @ density @ end.conj().T
