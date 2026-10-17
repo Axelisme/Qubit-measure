@@ -1396,9 +1396,8 @@ def _emit_run_finished(bus, tab_id: str, outcome: str) -> None:
     bus.emit(RunFinishedPayload(tab_id=tab_id, outcome=outcome))
 
 
-def test_finished_run_preserves_selected_subtab(control_factory, qapp):
+def test_finished_run_preserves_selected_subtab(control_factory, qapp, monkeypatch):
     """RUN_FINISHED refreshes state without choosing a result pane."""
-    from qtpy.QtWidgets import QTabWidget, QWidget
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
@@ -1407,20 +1406,29 @@ def test_finished_run_preserves_selected_subtab(control_factory, qapp):
     ctrl.get_running_tab_id.return_value = None
     ctrl.get_tab_snapshot.return_value = _snapshot("tab-1", has_run_result=True)
     window = MainWindow(ctrl, templates=lambda: {})
-    tab = MagicMock()
-    tab._left_tabs = QTabWidget()
-    for label in ("Run", "Analysis", "Data"):
-        tab._left_tabs.addTab(QWidget(), label)
-    tab._left_tabs.setCurrentIndex(2)
-    window._tab_widgets["tab-1"] = tab
+    try:
+        window.add_tab_widget("tab-1", "fake")
+        tab = next(
+            tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == "tab-1"
+        )
+        left_tabs = _left_tabs(tab)
+        left_tabs.setCurrentIndex(2)
+        assert left_tabs.currentIndex() == 2
+        assert left_tabs.tabText(2) == "Data"
+        focus_result_panel = MagicMock(wraps=tab.focus_result_panel)
+        monkeypatch.setattr(tab, "focus_result_panel", focus_result_panel)
 
-    _emit_run_finished(bus, "tab-1", outcome="finished")
+        _emit_run_finished(bus, "tab-1", outcome="finished")
 
-    assert tab._left_tabs.currentIndex() == 2
-    tab.focus_result_panel.assert_not_called()
+        assert left_tabs.currentIndex() == 2
+        focus_result_panel.assert_not_called()
+    finally:
+        window.remove_tab_widget("tab-1")
 
 
-def test_stopped_run_does_not_auto_switch_to_analysis_tab(control_factory, qapp):
+def test_stopped_run_does_not_auto_switch_to_analysis_tab(
+    control_factory, qapp, monkeypatch
+):
     """A stopped (cancelled) run may leave a partial result, but the user
     interrupted on purpose — must not yank them to the Analysis tab."""
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
@@ -1431,17 +1439,26 @@ def test_stopped_run_does_not_auto_switch_to_analysis_tab(control_factory, qapp)
     ctrl.get_running_tab_id.return_value = None
     ctrl.get_tab_snapshot.return_value = _snapshot("tab-1", has_run_result=True)
     window = MainWindow(ctrl, templates=lambda: {})
-    tab = MagicMock()
-    window._tab_widgets["tab-1"] = tab
+    try:
+        window.add_tab_widget("tab-1", "fake")
+        tab = next(
+            tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == "tab-1"
+        )
+        left_tabs = _left_tabs(tab)
+        set_current_index = MagicMock(wraps=left_tabs.setCurrentIndex)
+        monkeypatch.setattr(left_tabs, "setCurrentIndex", set_current_index)
 
-    _emit_run_finished(bus, "tab-1", outcome="cancelled")
+        _emit_run_finished(bus, "tab-1", outcome="cancelled")
 
-    tab._left_tabs.setCurrentIndex.assert_not_called()
+        set_current_index.assert_not_called()
+    finally:
+        window.remove_tab_widget("tab-1")
 
 
-def test_non_analysis_adapter_run_preserves_selected_subtab(control_factory, qapp):
+def test_non_analysis_adapter_run_preserves_selected_subtab(
+    control_factory, qapp, monkeypatch
+):
     """Non-analysis adapters also retain the user's selected pane after Run."""
-    from qtpy.QtWidgets import QTabWidget, QWidget
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
@@ -1452,21 +1469,28 @@ def test_non_analysis_adapter_run_preserves_selected_subtab(control_factory, qap
         "tab-1", has_run_result=True, supports_analysis=False, analyze_params=None
     )
     window = MainWindow(ctrl, templates=lambda: {})
-    tab = MagicMock()
-    tab._left_tabs = QTabWidget()
-    for label in ("Run", "Data", "Guide"):
-        tab._left_tabs.addTab(QWidget(), label)
-    tab._left_tabs.setCurrentIndex(1)
-    window._tab_widgets["tab-1"] = tab
+    try:
+        window.add_tab_widget("tab-1", "fake")
+        tab = next(
+            tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == "tab-1"
+        )
+        left_tabs = _left_tabs(tab)
+        left_tabs.setCurrentIndex(1)
+        assert left_tabs.currentIndex() == 1
+        assert left_tabs.tabText(1) == "Data"
+        focus_result_panel = MagicMock(wraps=tab.focus_result_panel)
+        monkeypatch.setattr(tab, "focus_result_panel", focus_result_panel)
 
-    _emit_run_finished(bus, "tab-1", outcome="finished")
+        _emit_run_finished(bus, "tab-1", outcome="finished")
 
-    assert tab._left_tabs.currentIndex() == 1
-    tab.focus_result_panel.assert_not_called()
+        assert left_tabs.currentIndex() == 1
+        focus_result_panel.assert_not_called()
+    finally:
+        window.remove_tab_widget("tab-1")
 
 
 def test_refresh_analyze_form_skips_non_analysis_adapter_without_raising(
-    control_factory, qapp
+    control_factory, qapp, monkeypatch
 ):
     """A finished run on a non-analysis adapter has no analyze params; the
     content refresh must skip the analyze form rather than hit the Fast-Fail
@@ -1481,13 +1505,20 @@ def test_refresh_analyze_form_skips_non_analysis_adapter_without_raising(
         "tab-1", has_run_result=True, supports_analysis=False, analyze_params=None
     )
     window = MainWindow(ctrl, templates=lambda: {})
-    tab = MagicMock()
-    window._tab_widgets["tab-1"] = tab
+    try:
+        window.add_tab_widget("tab-1", "fake")
+        tab = next(
+            tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == "tab-1"
+        )
+        populate_analyze_params = MagicMock(wraps=tab.populate_analyze_params)
+        monkeypatch.setattr(tab, "populate_analyze_params", populate_analyze_params)
 
-    # Must not raise "Run result has no initialized analyze parameters".
-    window.refresh_tab_analyze_form("tab-1")
+        # Must not raise "Run result has no initialized analyze parameters".
+        window.refresh_tab_analyze_form("tab-1")
 
-    tab.populate_analyze_params.assert_not_called()
+        populate_analyze_params.assert_not_called()
+    finally:
+        window.remove_tab_widget("tab-1")
 
 
 def _editor_wiring_ctrl(control_factory: Callable[[], ControlIdentity]) -> MagicMock:
