@@ -179,8 +179,9 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
     def _set_voltage_smart(
         self,
         voltage: float,
-        progress: bool = False,
         stop_event: threading.Event | None = None,
+        *,
+        progress: bool = False,
     ) -> None:
         self._check_voltage(voltage)
         current_voltage = self.get_voltage()
@@ -202,8 +203,9 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
     def set_voltage(
         self,
         voltage: float,
-        progress: bool = True,
         stop_event: threading.Event | None = None,
+        *,
+        progress: bool = True,
     ) -> float:
         mode = self.get_mode()
         if mode != "voltage":
@@ -233,8 +235,9 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
     def _set_current_smart(
         self,
         current: float,
-        progress: bool = False,
         stop_event: threading.Event | None = None,
+        *,
+        progress: bool = False,
     ) -> None:
         self._check_current(current)
         current_current = self.get_current()
@@ -259,8 +262,9 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
     def set_current(
         self,
         current: float,
-        progress: bool = True,
         stop_event: threading.Event | None = None,
+        *,
+        progress: bool = True,
     ) -> float:
         mode = self.get_mode()
         if mode != "current":
@@ -281,8 +285,9 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
     def set_mode(
         self,
         mode: Literal["voltage", "current"],
-        force: bool = False,
         rampstep: float | None = None,
+        *,
+        force: bool = False,
     ) -> None:
         """Select source mode and a positive finite ramp step (V or A).
 
@@ -350,7 +355,10 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         stop_event: threading.Event | None = None,
     ) -> None:
         if self.get_output() != "on" and cfg.output == "on":
-            warnings.warn("YOKOGS200 output is off, did you forget to turn it on?")
+            # _setup -> BaseDevice.setup -> device_operation wrapper -> caller.
+            warnings.warn(
+                "YOKOGS200 output is off, did you forget to turn it on?", stacklevel=4
+            )
         self.set_output(cfg.output)
 
         cur_mode = self.get_mode()

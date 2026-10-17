@@ -203,7 +203,7 @@ def test_picker_drag_swap_and_compute_apply() -> None:
 def test_picker_magnitude_toggle() -> None:
     picker = _make_picker()
     assert picker.magnitude_only is False
-    picker.set_magnitude_only(True)
+    picker.set_magnitude_only(on=True)
     assert picker.magnitude_only is True
 
 

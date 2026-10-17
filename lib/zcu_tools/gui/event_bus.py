@@ -17,14 +17,14 @@ build on this base, each supplying its own event enum + payloads and aliasing
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import Enum
 from itertools import count
 from threading import Lock
-from typing import Any, ClassVar, Generic, Iterator, Literal, TypeVar
+from typing import Any, ClassVar, Generic, Literal, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -198,14 +198,14 @@ class BaseEventBus:
         for cb in list(self._meta_subs.get(type(payload), ())):
             try:
                 cb(payload, meta)
-            except Exception:  # noqa: BLE001 — one bad subscriber must not break the rest
+            except Exception:  # one bad subscriber must not break the rest
                 logger.exception(
                     "EventBus subscriber for %s raised", type(payload).__name__
                 )
         for cb in list(self._subs.get(type(payload), ())):
             try:
                 cb(payload)
-            except Exception:  # noqa: BLE001 — one bad subscriber must not break the rest
+            except Exception:  # one bad subscriber must not break the rest
                 logger.exception(
                     "EventBus subscriber for %s raised", type(payload).__name__
                 )

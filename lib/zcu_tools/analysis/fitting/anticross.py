@@ -33,6 +33,7 @@ def fit_hyperbolic(
     xs: NDArray[np.float64],
     ys1: NDArray[np.float64],
     ys2: NDArray[np.float64],
+    *,
     horizontal_line: bool = False,
 ) -> tuple[float, float, float, float, float, float]:
     if np.sum(ys1 > ys2) < len(ys1) / 2:
@@ -103,6 +104,7 @@ def fit_anticross(
     xs: NDArray[np.float64],
     freqs1: NDArray[np.float64],
     freqs2: NDArray[np.float64],
+    *,
     horizontal_line: bool = False,
 ) -> tuple[
     float,

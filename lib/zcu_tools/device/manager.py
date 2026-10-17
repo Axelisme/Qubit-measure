@@ -66,7 +66,7 @@ class DeviceManager:
                 )
             self._devices[name] = device
 
-    def drop_device(self, name: str, ignore_error: bool = False) -> None:
+    def drop_device(self, name: str, *, ignore_error: bool = False) -> None:
         with self._lock:
             if name not in self._devices:
                 if ignore_error:

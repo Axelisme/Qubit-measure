@@ -41,6 +41,7 @@ class LivePlotScatter(BaseSegmentLivePlot):
         | NDArray[np.float64]
         | None = None,
         title: str | None = None,
+        *,
         refresh: bool = True,
     ) -> None:
         if self.disable:

@@ -115,20 +115,19 @@ def find_or_create_folder(service, name, parent_id):
         if files:
             print(f"Found existing folder '{name}' (ID: {files[0].get('id')}).")
             return files[0].get("id")
-        else:
-            print(f"Folder '{name}' not found. Creating it...")
-            file_metadata = {
-                "name": name,
-                "mimeType": "application/vnd.google-apps.folder",
-                "parents": [parent_id],
-            }
-            folder = (
-                service.files()
-                .create(body=file_metadata, fields="id", supportsAllDrives=True)
-                .execute()
-            )
-            print(f"Created new folder '{name}' (ID: {folder.get('id')}).")
-            return folder.get("id")
+        print(f"Folder '{name}' not found. Creating it...")
+        file_metadata = {
+            "name": name,
+            "mimeType": "application/vnd.google-apps.folder",
+            "parents": [parent_id],
+        }
+        folder = (
+            service.files()
+            .create(body=file_metadata, fields="id", supportsAllDrives=True)
+            .execute()
+        )
+        print(f"Created new folder '{name}' (ID: {folder.get('id')}).")
+        return folder.get("id")
     except HttpError as e:
         print(f"An error occurred while finding/creating folder '{name}': {e}")
         return None
@@ -169,7 +168,7 @@ def list_files_in_folder(service, folder_id):
 
 
 def collect_upload_tasks(
-    service, local_folder_path, parent_folder_id, tasks_list, prune=False
+    service, local_folder_path, parent_folder_id, tasks_list, *, prune=False
 ):
     """Recursively traverses a local folder and collects upload/update/delete tasks.
 

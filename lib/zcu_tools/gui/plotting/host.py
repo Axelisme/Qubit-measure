@@ -41,7 +41,7 @@ _host: Any = None
 _shutting_down: bool = False
 
 
-def set_shutting_down(value: bool) -> None:
+def set_shutting_down(*, value: bool) -> None:
     global _shutting_down
     _shutting_down = value
 

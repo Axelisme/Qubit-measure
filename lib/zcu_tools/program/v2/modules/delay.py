@@ -59,9 +59,10 @@ class DelayAuto(Module):
         self,
         name: str,
         t: float | QickParam | str = 0.0,
+        tag: str | None = None,
+        *,
         gens: bool = True,
         ros: bool = True,
-        tag: str | None = None,
     ) -> None:
         self.name = name
         self.t = t

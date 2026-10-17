@@ -204,7 +204,7 @@ class SessionState:
         self.devices[name] = replace(self.devices[name], info=info)
         self.version.bump(f"device:{name}")
 
-    def set_device_remember(self, name: str, remember: bool) -> None:
+    def set_device_remember(self, name: str, *, remember: bool) -> None:
         self._assert_owner()
         logger.debug("set_device_remember: name=%r remember=%s", name, remember)
         self.devices[name] = replace(self.devices[name], remember=remember)

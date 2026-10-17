@@ -258,6 +258,7 @@ def sweep2array(
     sweep: SweepCfg | list | NDArray,
     round_type: Literal["none", "time", "freq", "phase", "gain"] = "none",
     round_info: dict[str, Any] | None = None,
+    *,
     allow_array: bool = False,
 ) -> NDArray[np.float64]:
     if round_info is None:

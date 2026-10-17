@@ -46,8 +46,8 @@ class FakeDevice(BaseDevice[FakeDeviceInfo]):
 
     def __init__(
         self,
-        fast_mode: bool = False,
         *,
+        fast_mode: bool = False,
         value_unit: Literal["native", "V", "A"] = "native",
     ) -> None:
         """Create a memory source with a lifetime-fixed value/rampstep unit.
@@ -99,8 +99,9 @@ class FakeDevice(BaseDevice[FakeDeviceInfo]):
     def _set_value_smart(
         self,
         value: float,
-        progress: bool = False,
         stop_event: threading.Event | None = None,
+        *,
+        progress: bool = False,
     ) -> None:
         current_value = self.get_value()
 

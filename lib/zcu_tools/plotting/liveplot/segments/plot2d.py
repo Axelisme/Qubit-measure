@@ -15,9 +15,10 @@ class Plot2DSegment(AbsSegment):
         xlabel: str,
         ylabel: str,
         title: str | None = None,
-        flip: bool = False,
         vmin: float | None = None,
         vmax: float | None = None,
+        *,
+        flip: bool = False,
     ) -> None:
         self.xlabel = xlabel
         self.ylabel = ylabel
@@ -101,9 +102,10 @@ class PlotNonUniform2DSegment(AbsSegment):
         xlabel: str,
         ylabel: str,
         title: str | None = None,
-        flip: bool = False,
         vmin: float | None = None,
         vmax: float | None = None,
+        *,
+        flip: bool = False,
     ) -> None:
         self.xlabel = xlabel
         self.ylabel = ylabel

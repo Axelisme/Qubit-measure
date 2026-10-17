@@ -8,17 +8,21 @@ from numpy.typing import NDArray
 
 @overload
 def value2flux(
-    value: float, flux_half: float, flux_period: float, fold: bool = False
+    value: float, flux_half: float, flux_period: float, *, fold: bool = False
 ) -> float: ...
 
 
 @overload
 def value2flux(
-    value: NDArray[np.float64], flux_half: float, flux_period: float, fold: bool = False
+    value: NDArray[np.float64],
+    flux_half: float,
+    flux_period: float,
+    *,
+    fold: bool = False,
 ) -> NDArray[np.float64]: ...
 
 
-def value2flux(value, flux_half: float, flux_period: float, fold: bool = False):
+def value2flux(value, flux_half: float, flux_period: float, *, fold: bool = False):
     fluxs = (value - flux_half) / flux_period + 0.5
     if fold:
         fluxs = np.mod(fluxs, 1)

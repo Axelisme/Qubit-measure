@@ -435,6 +435,7 @@ def fit_resonant_params(
     freqs: NDArray[np.float64],
     signals: NDArray[np.complex128],
     circle_params: tuple[float, float, float],
+    *,
     fit_theta0: bool = True,
 ) -> tuple[float, float, float]:
     """Return ``[resonant_freq, Ql, theta0]`` from circle phase."""

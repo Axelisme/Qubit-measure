@@ -32,7 +32,6 @@ def test_bootstrap_standalone_server_fails_fast_for_missing_module(
 ) -> None:
     def missing_spec(name: str):
         assert name == "missing_dep"
-        return None
 
     monkeypatch.setattr(importlib.util, "find_spec", missing_spec)
 

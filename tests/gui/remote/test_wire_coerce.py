@@ -74,17 +74,17 @@ def testrequire_int_rejects_none():
 
 
 def testoptional_bool_default():
-    assert optional_bool({}, "k", True) is True
-    assert optional_bool({}, "k", False) is False
+    assert optional_bool({}, "k", default=True) is True
+    assert optional_bool({}, "k", default=False) is False
 
 
 def testoptional_bool_ok():
-    assert optional_bool({"k": False}, "k", True) is False
+    assert optional_bool({"k": False}, "k", default=True) is False
 
 
 def testoptional_bool_not_bool():
     with pytest.raises(RemoteError):
-        optional_bool({"k": "yes"}, "k", True)
+        optional_bool({"k": "yes"}, "k", default=True)
 
 
 # ---------------------------------------------------------------------------

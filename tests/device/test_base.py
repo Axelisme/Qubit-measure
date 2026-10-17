@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 from typing import Any, Literal, cast
 
 import pytest
 from _pytest.capture import CaptureFixture
 from _pytest.logging import LogCaptureFixture
 from zcu_tools.device import BaseDevice, BaseDeviceInfo, FakeDevice, FakeDeviceInfo
+
+
+@pytest.mark.parametrize("invalid_call", [FakeDevice], ids=["FakeDevice"])
+def test_fake_device_rejects_positional_fast_mode(
+    invalid_call: Callable[..., object],
+) -> None:
+    with pytest.raises(TypeError, match="positional"):
+        invalid_call(True)
 
 
 class DummyDeviceInfo(BaseDeviceInfo):

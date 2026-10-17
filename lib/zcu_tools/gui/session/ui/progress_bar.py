@@ -99,7 +99,7 @@ class LightweightProgressBar(QWidget):
             .replace("%p", str(percent))
         )
 
-    def paintEvent(self, a0) -> None:  # noqa: ANN001
+    def paintEvent(self, a0) -> None:
         del a0
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)

@@ -115,7 +115,7 @@ class _PanelEdgeHandle(QToolButton):
         self.setAutoRaise(True)
         self._collapsed = False
 
-    def set_collapsed(self, collapsed: bool) -> None:
+    def set_collapsed(self, *, collapsed: bool) -> None:
         self._collapsed = collapsed
         self.setToolTip("Expand left panel" if collapsed else "Collapse left panel")
         self.update()
@@ -233,7 +233,7 @@ class _LedgerSection(QWidget):
         self._toggle_btn.setText("▶" if self._collapsed else "▼")
         self._toggle_btn.setChecked(not self._collapsed)
 
-    def set_collapsed(self, collapsed: bool) -> None:
+    def set_collapsed(self, *, collapsed: bool) -> None:
         if bool(collapsed) == self._collapsed:
             return
         self._toggle()
@@ -645,7 +645,7 @@ class ExpTabWidget(QWidget):
         self._update_left_panel_controls()
 
     def _update_left_panel_controls(self) -> None:
-        self._left_edge_handle.set_collapsed(self._left_panel_collapsed)
+        self._left_edge_handle.set_collapsed(collapsed=self._left_panel_collapsed)
         self._left_edge_handle.setVisible(True)
         self._schedule_handle_layout()
         self._left_edge_handle.raise_()

@@ -22,7 +22,7 @@ from zcu_tools.plotting.liveplot.backend import (
 
 class _StubBackend(LivePlotBackend):
     def make_plot_frame(
-        self, n_row: int, n_col: int, plot_instant: bool = False, **kwargs: Any
+        self, n_row: int, n_col: int, *, plot_instant: bool = False, **kwargs: Any
     ) -> tuple[Figure, list[list[Axes]]]:
         raise NotImplementedError
 

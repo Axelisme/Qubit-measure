@@ -89,6 +89,7 @@ def add_Q_fit(
     omegas: NDArray[np.float64],
     Q_vs_omega: NDArray[np.float64],
     omega_range: tuple[float | None, float | None] | None = None,
+    *,
     fit_constant: bool = False,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """omegas: rad/ns, Q_vs_omega: ns/rad, omega_range: (rad/ns, rad/ns)"""

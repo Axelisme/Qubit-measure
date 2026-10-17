@@ -103,7 +103,7 @@ class MainDialogRegistry:
                 parent=self._parent,
                 before_stop=self._reclaim_for_stop,
             )
-            dialog.set_read_only(not writable)
+            dialog.set_read_only(read_only=not writable)
             return dialog
         if name is DialogName.PREDICTOR:
             from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog

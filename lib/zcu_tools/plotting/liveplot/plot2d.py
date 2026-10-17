@@ -75,6 +75,7 @@ class LivePlot2D(BaseSegmentLivePlot, Generic[Seg2D_T]):
         ys: NDArray[np.float64],
         signals: NDArray[np.float64],
         title: str | None = None,
+        *,
         refresh: bool = True,
     ) -> None:
         if self.disable:
@@ -103,9 +104,10 @@ class LivePlot2DwithLine(BaseSegmentLivePlot, Generic[Seg2D_T]):
         line_axis: Literal[0, 1],
         num_lines: int = ...,
         title: str | None = ...,
-        uniform: Literal[True] = ...,
         segment2d_kwargs: dict[str, Any] | None = ...,
         segment1d_line_kwargs: list[dict[str, Any]] | None = ...,
+        *,
+        uniform: Literal[True] = ...,
         **kwargs,
     ) -> None: ...
 
@@ -117,9 +119,10 @@ class LivePlot2DwithLine(BaseSegmentLivePlot, Generic[Seg2D_T]):
         line_axis: Literal[0, 1],
         num_lines: int = ...,
         title: str | None = ...,
-        uniform: Literal[False] = ...,
         segment2d_kwargs: dict[str, Any] | None = ...,
         segment1d_line_kwargs: list[dict[str, Any]] | None = ...,
+        *,
+        uniform: Literal[False] = ...,
         **kwargs,
     ) -> None: ...
 
@@ -130,9 +133,10 @@ class LivePlot2DwithLine(BaseSegmentLivePlot, Generic[Seg2D_T]):
         line_axis: Literal[0, 1],
         num_lines: int = 1,
         title: str | None = None,
-        uniform: bool = True,
         segment2d_kwargs: dict[str, Any] | None = None,
         segment1d_line_kwargs: list[dict[str, Any]] | None = None,
+        *,
+        uniform: bool = True,
         **kwargs,
     ) -> None:
         if segment2d_kwargs is None:
@@ -170,6 +174,7 @@ class LivePlot2DwithLine(BaseSegmentLivePlot, Generic[Seg2D_T]):
         ys: NDArray[np.float64],
         signals: NDArray[np.float64],
         title: str | None = None,
+        *,
         refresh: bool = True,
     ) -> None:
         if self.disable:

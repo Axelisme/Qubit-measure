@@ -53,6 +53,7 @@ class _BaseFloquetBranchAnalysis:
         self,
         fbasis_n: Sequence[qt.FloquetBasis],
         branchs: list[int],
+        *,
         progress: bool = True,
     ) -> dict[int, list[int]]:
         branch_infos = {b: [] for b in branchs}
@@ -79,7 +80,7 @@ class _BaseFloquetBranchAnalysis:
     def calc_branch_energies(
         self, fbasis_n: list[qt.FloquetBasis], branch_infos: dict[int, list[int]]
     ) -> dict[int, list[float]]:
-        branch_energies = {b: [] for b in branch_infos.keys()}
+        branch_energies = {b: [] for b in branch_infos}
         for b, b_list in branch_infos.items():
             for n, b_idx in enumerate(b_list):
                 branch_energies[b].append(fbasis_n[n].e_quasi[b_idx])
@@ -90,6 +91,7 @@ class _BaseFloquetBranchAnalysis:
         fbasis_n: list[qt.FloquetBasis],
         branch_infos: dict[int, list[int]],
         avg_times: NDArray[np.float64] | None = None,
+        *,
         progress: bool = True,
     ) -> dict[int, list[float]]:
         if avg_times is None:
@@ -118,7 +120,7 @@ class _BaseFloquetBranchAnalysis:
                 calc_pop(fstates_t, i)
                 for fstates_t, i in zip(fstates_t_n, branch_infos[b], strict=False)
             ]
-            for b in branch_infos.keys()
+            for b in branch_infos
         }
 
 

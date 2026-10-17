@@ -35,6 +35,7 @@ class LivePlot1D(BaseSegmentLivePlot):
         xs: NDArray[np.float64],
         signals: NDArray[np.float64],
         title: str | None = None,
+        *,
         refresh: bool = True,
     ) -> None:
         if self.disable:

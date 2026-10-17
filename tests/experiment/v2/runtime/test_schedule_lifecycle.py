@@ -7,6 +7,7 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 
 from tests.experiment.v2.runtime._flow_cfg import FlowCfg
 from tests.experiment.v2.runtime._flow_cfg import make_flow_cfg as _cfg
+from tests.experiment.v2.runtime._flow_fakes import RecordingBuffer
 
 
 def test_schedule_uses_own_stop_signal():
@@ -85,3 +86,28 @@ def test_schedule_repeat_obeys_stop_signal():
         assert sched.outcome.status == "stopped"
 
     assert seen == [0]
+
+
+def test_schedule_step_data_operations_require_context() -> None:
+    step = None
+    root = {"child": {"signals": np.full((1,), np.nan)}}
+
+    with Schedule(_cfg(), RecordingBuffer(root), stop=StopSignal()) as sched:
+        step = next(iter(sched.batch({"child": lambda child: child}).values()))
+        assert step.path == ("child",)
+
+    assert step is not None
+    for operation in (
+        lambda: step.data,
+        lambda: step.set_data({"signals": np.array([1.0])}),
+        lambda: step.child("signals"),
+        step.trigger_update,
+    ):
+        try:
+            operation()
+        except RuntimeError as exc:
+            assert "with Schedule" in str(exc)
+        else:
+            raise AssertionError(
+                "ScheduleStep operations should require active context"
+            )

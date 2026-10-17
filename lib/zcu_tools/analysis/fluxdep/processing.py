@@ -23,11 +23,28 @@ def _require_1d_axis(axis: NDArray[np.float64], name: str) -> None:
 
 def cast2real_and_norm(
     signals: NDArray[np.complexfloating[Any, Any]],
+    *,
     use_phase: bool = True,
     sigma: float = 1,
     smooth_method: SmoothMethod = "wavelet",
 ) -> NDArray[np.float64]:
-    """Convert complex spectra to real-valued, row-normalised features."""
+    """Convert 2D complex spectra to real features without modifying the input.
+
+    ``signals`` has one spectrum per row and frequency samples along columns.
+    With ``use_phase=True``, subtract each row's complex mean, smooth along
+    columns, take the magnitude, and divide by that magnitude's row standard
+    deviation. Constant rows use divisor 1. With ``use_phase=False``, smooth
+    the input magnitudes without centering or normalization.
+
+    ``smooth_method`` selects "wavelet" coefficient thresholding or "gaussian"
+    filtering. ``sigma`` is the wavelet threshold scale or the positive Gaussian
+    width in samples. All options must be passed by keyword. Return a real-valued
+    array with the same shape as signals.
+
+    Raise ValueError for non-2D input or an unsupported smoothing method.
+    Smoothing errors propagate; wavelet smoothing requires PyWavelets and raises
+    RuntimeError when it is unavailable.
+    """
 
     if signals.ndim != 2:
         raise ValueError("signals must be a 2D array")

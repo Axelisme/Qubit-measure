@@ -75,7 +75,7 @@ class Controller(BaseController[DispersiveState, EventBus]):
 
     # --- load ------------------------------------------------------------
 
-    def load_onetone(self, filepath: str, transpose_axes: bool = False) -> str:
+    def load_onetone(self, filepath: str, *, transpose_axes: bool = False) -> str:
         name = self._load.load_onetone(filepath, transpose_axes=transpose_axes)
         self._invalidate_predictor()
         self._emit(OnetoneLoadedPayload(name=name))
