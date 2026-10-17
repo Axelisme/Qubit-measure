@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, known-source coherence in Dyson classification
+**Last updated:** 2026-10-17, Floquet guard preparation handoff
 
 ## Segment engine contracts
 
@@ -52,7 +52,14 @@ persists across `evolve` calls, but no worker resources survive a call.
 for checked replay.
 
 The internal `kernel` module defines `SegmentTable`, `Kernel` and the opaque
-`Prepared.nbytes` contract. Only apply and `bind_input` receive density arrays.
+`Prepared.nbytes` contract. The optional `guard_prepared` hook returns a
+`GuardResult` containing the ordinary row-local acceptance mask and model-only
+`GuardPreparation` batches. Floquet returns its guard's preparations; other
+kernels return None and the engine calls their ordinary guard. The engine reuses
+payloads only for accepted rows with the same kernel, prepare key, source and
+budget within this evolve. Shared keys follow normal PrepareCache admission;
+singletons bypass the cache. Neither the hook nor the handoff retains kernel
+state or creates a separate cross-evolve store. Only apply and `bind_input` receive density arrays.
 The hook receives only the source initial density, never worker densities.
 For shared prepared batches, the engine calls the hook once per prepare key
 and port with all rows starting at zero, before timeline chunks start. The
@@ -68,7 +75,8 @@ accepted rows, a synthetic model and input densities. The suite compares against
 an independent strict DOP853 reference. It checks guard row locality across
 single-row, unequal and reversed-order split calls, apply row splitting for
 both densities and bool exceedance masks, mask shape and dtype, and preparation
-without density access. The suite also checks that input binding leaves its
+without density access. It also checks guard handoff acceptance across row
+subsets and compares handed-off payloads with fresh preparation. The suite also checks that input binding leaves its
 inputs unchanged and that bound and ordinary apply agree within budget across
 repeated, reversed, non-contiguous and empty subsets. The demo kernel stays in
 tests.
@@ -161,8 +169,10 @@ avoid building a full dissipative propagator for every phase.
 All non-reps sweep points enter as template arrays. Prepare does not depend on
 input density; apply does. The engine deduplicates prepare keys across the
 acquire. Keys used at least twice are prepared in shared A-stage chunks before
-timeline work starts. Single-use preparations stay inside their timeline chunk
-and are discarded afterward. The input-bound hook is an A-stage exception to
+timeline work starts. Floquet's guard hands its model-only preparations to
+A-stage, avoiding another build for matching keys. Guard-built singleton
+payloads also reach timeline chunks without cache admission. Other single-use
+preparations stay inside their timeline chunk and are discarded afterward. The input-bound hook is an A-stage exception to
 model-only preparation. It contracts the source initial density once per shared
 key and port, and its payload lives only until this evolve finishes. Single-use
 keys, rows starting after zero and kernels returning None keep the per-batch

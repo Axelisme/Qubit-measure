@@ -96,6 +96,10 @@ class RecordingKernel:
         self.preparations += len(keys)
         return Payload(len(keys))
 
+    def guard_prepared(self, table, rows, source, budget) -> None:
+        """Keep the ordinary guard path for this test collaborator."""
+        del table, rows, source, budget
+
     def bind_input(
         self, prepared, key_index, table, rows, source_initial, budget
     ) -> Prepared | None:
