@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# ADR-0076 — Device 活動通知與 run 後讀回
+# ADR-0076 — Device 活動快照與 run 後讀回
 
 **Last updated:** 2026-10-18
 
@@ -10,39 +10,35 @@ status: accepted
 
 ## 問題與決策
 
-Experiment 直接透過公開 driver 操作儀器，不經 Device dialog 的 Apply 路徑。只觀察 Apply 無法辨認 experiment、MCP 或 workflow 實際操作哪台儀器。活動通知由 device 的共同操作入口發出，host 負責投遞，Device dialog 負責呈現。活動通知不攜帶數值，run 後另做背景讀回。
+Experiment 直接透過公開 driver 操作儀器，不經 Device dialog 的 Apply 路徑。只觀察 Apply 無法辨認 experiment、MCP 或 workflow 實際操作哪台儀器。GUI 需要各台儀器目前是否在操作或剛結束，不需要逐次活動的事件歷史。Driver 記錄活動狀態，DeviceManager 提供具名快照，GUI 定時讀取。活動快照不攜帶數值，run 後另做背景讀回。
 
-使用者於 2026-10-18 提出：「由環境注入提供儀器給實驗操作，然後基本儀器類加入事件hook接口讓host注入」。使用者接受事件只帶活動資訊、通知失敗不中斷量測，以及標記由 GUI UI/UX 負責，回覆為「1a認同,2可以，這是gui的uiux負責，3可以 4可以」。
+使用者於 2026-10-18 接受活動狀態快照方案：「Device的建議採用」。此方案取代 sink 注入與活動事件投遞。同日使用者限制範圍：「請參考我的設計理念與分工明確的脈絡，我沒提到的請不要過度工程，沒想到的請不要猜」。本設計不加入額外的活動事件、queue 或硬體控制機制。
 
-同日使用者限制範圍：「請參考我的設計理念與分工明確的脈絡，我沒提到的請不要過度工程，沒想到的請不要猜」。本設計不加入未裁定的活動追蹤或硬體控制機制。
+## Driver 狀態與 manager 快照
 
-## 事件來源與失敗隔離
+Device 層的 `device_operation` 是共同的活動記錄入口。Driver 在其中只為活動記錄更新兩個欄位，是否在操作中，以及最後一次操作結束的 monotonic 時間。活動記錄在持鎖期間只寫這兩個屬性，不呼叫外部 callback。Device README 的持鎖禁令不加例外。
 
-Device 層的 `device_operation` decorator 是活動事件的單一來源。受它保護的 driver 操作不因呼叫者是 dialog Apply、experiment、MCP 或 workflow 而另建通知路徑。Device 層定義 sink 介面，不 import GUI，也不理解 flux／RF 角色。
+`DeviceManager.activity_snapshot()` 回傳每個已登記名稱對應的活動狀態，每台一筆固定大小資料。沒有 consumer 時，活動資料也不增長。回傳資料以具名型別描述欄位與時間語意，不提供修改 driver 狀態的介面。快照不讀硬體，不攜帶寫入值，也不包含操作名稱、結果或事件歷史。不注入或取消注入 sink，不提供活動事件流或 queue。
 
-活動事件只帶 operation 與 started／finished／failed，不帶寫入值。Device 層攔下並記錄 sink 例外，不讓通知失敗中斷量測，也不改變原本儀器操作的成功或失敗。
+既有 driver 操作互斥、巢狀操作與 busy fail-fast 不變。活動資訊只供觀察，不接管硬體控制、取消、lease 或 operation settlement。這些責任仍依 [[0066]] 由各 owner 處理。
 
-活動通知保留 driver 既有的操作互斥、巢狀操作及 registry close 契約。事件只供觀察，不接管硬體控制、取消、lease 或 operation settlement。這些責任仍依 [[0066]] 由各 owner 處理。
+## GUI 觀察與標記
 
-## Sink 注入與拆除
+GUI 在主 thread 定時讀取活動快照，初始約每 200 ms。Device dialog 擁有「運作中」標記的呈現與時序。初始做法在操作中或最後結束後約 1 秒保持標記，合併後更新。連續快速操作保持穩定標記，停手後熄滅。後續 UI/UX 打磨由 GUI 負責，不改變 device 的狀態來源。
 
-環境是建立並持有 `DeviceManager` 的一方。GUI 的環境是 session，notebook／腳本的環境是呼叫者自身。環境在建立 `DeviceManager` 時提供可省略的 sink。未提供 sink 時，既有 notebook／腳本行為不變。
+Dialog Apply、experiment、MCP 與 workflow 經由公開 driver 操作時，都使用相同的活動狀態。GUI 不解析 cfg 預查裝置名稱，也不把全部已連線儀器一律標為操作中。標記不是 driver busy admission 或 operation lease，呼叫者不能用它決定能否操作硬體。
 
-Registry 在 `register_device(name, device)` 時綁定裝置名稱，將 sink 安裝到 driver，讓 host 能辨認事件所屬的儀器。Registry 在 `drop_device`／`close_device` 時拆除 sink，生命週期仍遵守既有 registry 契約。Host 不逐台重做註冊與拆除配對，各 driver 建構子也不承擔 host sink 注入。
+## 單名稱 registry
 
-使用者於 2026-10-18 確認環境定義與由 registry 注入的方案：「你的理解沒錯， 而目前需求看起來A即可」。
+使用者於 2026-10-18 裁定：「我認為devicemanager不要支援同儀器異名比較好」。DeviceManager 不支援同一 driver 同時登記多個名字。`register_device(name, device)` 遇到已用其他名字登記的 driver 時，在入口 raise，不提交第二筆登記。只為 alias 存在的 close cleanup、批次 identity 分組及專用測試一併移除。不加入 alias 相容、重新綁名或 fan-out。
 
-## 持鎖投遞與 GUI 呈現
+不同 driver 的登記與同名 overwrite 契約不變。與 alias 無關的並行 close claims、失敗保留與重試、批次部分成功、成功清理、同名 replacement 保護及鎖外硬體 I/O 仍保留。
 
-持鎖期間可以同步呼叫 sink，但 sink 只能把事件排進 owner thread 的佇列後立刻返回。Sink 不執行 GUI 工作，也不等待任何 thread。GUI host 將事件交回主執行緒後才更新呈現。
-
-這是持鎖規則中僅限非阻塞投遞的例外，不允許在鎖內同步執行或等待 GUI 回呼。Sink 介面的 docstring 與 device README 明定此契約。顧問於 2026-10-18 裁定這個鎖邊界，避免為了把通知移到鎖外而改變 decorator 時序。
-
-Device dialog 擁有「運作中」標記的呈現與時序。初始做法在最後一次 finished 後保留約 1 秒，合併後更新。後續 UI/UX 打磨由 GUI 負責，不改變事件來源。標記不是 driver busy admission 或 operation lease，呼叫者不能用它決定能否操作硬體。
+顧問於 2026-10-18 細化 register 的拒絕條件。Register 使用既有 close claims，遇到正在 close 的 driver 時在入口 raise，即使原名字已被 drop 或 overwrite。這不新增 registry、鎖或追蹤結構，也不恢復 alias 掃描。`register_device` 的 docstring 寫明此契約。這是顧問對並行 close 邊界的細化，不是使用者原話。
 
 ## 活動資訊與數值讀回
 
-活動事件不把寫入目標推定為儀器實際值，也不在每次 setter 或 sweep 的每一步新增硬體讀取。Run 結束後，host 在背景讀取一次已連線儀器，由 State owner 將讀回結果寫入 cached DeviceInfo。Device dialog 透過 State 的觀察投影顯示讀回值。
+活動狀態不把寫入目標推定為儀器實際值，也不在每次 setter 或 sweep 的每一步新增硬體讀取。Run 結束後，host 在背景讀取一次已連線儀器，由 State owner 將讀回結果寫入 cached DeviceInfo。Device dialog 透過 State 的觀察投影顯示讀回值。
 
 Run 前 acquisition snapshot 與 run 後 cache 讀回的用途不同。Run 前 capture 在 experiment callback 前固定硬體證據，讀取失敗仍依 [[0062]]、[[0063]] 拒絕執行，不以 cache 補值。Run 後讀回只更新 GUI 觀察值，不改寫已保存的 provenance 或 `RunMetadata.device_snapshot`，也不把 cache 變成下一次 Run 的控制命令。
 
@@ -50,25 +46,25 @@ Run 前 acquisition snapshot 與 run 後 cache 讀回的用途不同。Run 前 c
 
 ## 未採用的做法
 
+不採用 sink 注入、取消注入或持鎖投遞。Sink 是否非阻塞只能靠呼叫者遵守紀律，driver 沒有必要為活動記錄在持鎖期間呼叫外部程式碼。
+
+不建立 bounded queue。GUI 不需要事件歷史，queue 會多出取出與合併工作。若未來需要失敗紀錄或操作歷史，必須另行決定有上限的事件機制，本設計不預留。
+
 不在每個 driver 維護 operation 到 Info 欄位的映射。那會把 GUI 的數值投影規則放進儀器操作介面，還需要處理設定目標與實際讀回的差異。
 
-Experiment 繼續直接使用 driver，不改 experiment 層，也不在 RunContext 包 proxy。Proxy 只涵蓋 run 路徑，無法作為所有呼叫者的單一事件來源。
-
-不解析 cfg 預查裝置名稱，也不把全部已連線儀器一律標成運作中。標記反映實際 driver 操作，不推測實驗可能使用哪些儀器。
-
-不另加 alias fan-out、新 registry 或通用 telemetry 機制。Sink 安裝與拆除由現有 registry 負責，host 不再維護第二套逐台配對。
+Experiment 繼續直接使用 driver，不改 experiment 層，也不在 RunContext 包 proxy。Proxy 只涵蓋 run 路徑，無法觀察所有呼叫者的操作。
 
 ## 分層與依賴契約
 
-依 [[0072]]，`device` 是能力模組，`experiment` 是實驗框架，GUI host 是前端。Experiment 使用 device，GUI host 使用較低層的公開介面。Device 定義 sink，GUI host 提供實作，不因 runtime callback 反向 import GUI。
+依 [[0072]]，`device` 是能力模組，`experiment` 是實驗框架，GUI host 是前端。Experiment 使用 device，GUI 透過公開 query 觀察活動。Device 不 import GUI 或 experiment，也不理解 flux／RF 角色。
 
 這些方向由既有 `.importlinter` contracts 涵蓋，不新增依賴例外。
 
-| Contract ID | 本設計的適用範圍 |
-| --- | --- |
-| C8，`layers` | 前端依賴 experiment／device，experiment 依賴 device；device 不反向依賴前端或 experiment。 |
-| C9，`top-level-acyclic` | host 投遞與 device sink 不形成頂層 package import 循環。 |
-| C1，`experiment-no-gui` | experiment 不為活動顯示依賴 GUI。 |
-| C2，`session-no-app` | 共用 session 不反向依賴各 app 的 run policy 或呈現。 |
+| Contract ID | `.importlinter` name | 本設計的適用範圍 |
+| --- | --- | --- |
+| C8，`layers` | C8: frontends over the experiment framework over capability modules | 前端依賴 experiment／device，experiment 依賴 device；device 不反向依賴前端或 experiment。 |
+| C9，`top-level-acyclic` | C9: top-level packages form no import cycle | GUI 查詢與 device 活動狀態不形成頂層 package import 循環。 |
+| C1，`experiment-no-gui` | C1: the experiment domain does not depend on the GUI | experiment 不為活動顯示依賴 GUI。 |
+| C2，`session-no-app` | C2: shared session does not depend on apps | 共用 session 不反向依賴各 app 的 run policy 或呈現。 |
 
-本篇記錄設計契約，不代表活動通知、GUI 呈現或 run 後讀回的程式碼已通過驗證。
+本篇記錄設計契約，不代表活動快照、單名稱 registry、GUI 呈現或 run 後讀回的程式碼已通過驗證。
