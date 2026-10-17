@@ -516,7 +516,7 @@ def _resolve_timestamps(timestamps, n_entry, creation_time: float | None = None)
 
 def save_labber_trace_data(
     path: str,
-    z: tuple[str, str, Sequence],
+    z: tuple[str, str, Sequence[ArrayLike]],
     x: tuple[str, str, ArrayLike | Sequence[ArrayLike]],
     y: tuple[str, str, ArrayLike] | None = None,
     *,
