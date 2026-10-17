@@ -16,7 +16,6 @@ class Geometry:
     table: SegmentTable
     points: NDArray[np.int64]
     flux_drive: NDArray[np.bool_]
-    known_input: NDArray[np.bool_]
 
 
 def _events(timeline, time):
@@ -215,9 +214,7 @@ def _batch_geometry(batch: TimelineBatch, source: ModelSource) -> Geometry:
         envelopes,
         batch.flux_waveform,
     )
-    first_drive = np.full(len(batch.points), np.inf)
-    np.minimum.at(first_drive, point[tones > 0], start[tones > 0])
-    return Geometry(table, batch.points, flux_drive, start == first_drive[point])
+    return Geometry(table, batch.points, flux_drive)
 
 
 def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
@@ -285,19 +282,15 @@ def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
             else None
         ),
     )
-    known = np.concatenate([g.known_input for g in geometries])
-    combined = replace(combined, flux_tail_group=_flux_tail_groups(combined, known))
+    combined = replace(combined, flux_tail_group=_flux_tail_groups(combined))
     return Geometry(
         combined,
         points,
         np.concatenate([g.flux_drive for g in geometries]),
-        known,
     )
 
 
-def _flux_tail_groups(
-    table: SegmentTable, known: NDArray[np.bool_]
-) -> tuple[int | None, ...]:
+def _flux_tail_groups(table: SegmentTable) -> tuple[int | None, ...]:
     """Certify repeated nonempty no-drive prefixes within this source/evolve.
 
     Compare complete segment sequences, not their final level. Source and
@@ -305,8 +298,19 @@ def _flux_tail_groups(
     before probe start and the first sample at or after it, which closes the
     prefix's final interpolation interval. Later samples cannot affect it.
     """
-    candidates = np.flatnonzero(known & (table.start_ns > 0) & (table.tones == 1))
     groups: list[int | None] = [None] * len(table.timeline)
+    if not len(table.timeline):
+        return tuple(groups)
+    # First-drive detection only certifies no-drive prefixes; it does not
+    # restrict which constant-tone rows can try Dyson.
+    first_drive = np.full(int(table.timeline.max()) + 1, np.inf)
+    driven = table.tones > 0
+    np.minimum.at(first_drive, table.timeline[driven], table.start_ns[driven])
+    candidates = np.flatnonzero(
+        (table.start_ns == first_drive[table.timeline])
+        & (table.start_ns > 0)
+        & (table.tones == 1)
+    )
     if not len(candidates):
         return tuple(groups)
     first = np.searchsorted(table.timeline, table.timeline[candidates], side="left")
