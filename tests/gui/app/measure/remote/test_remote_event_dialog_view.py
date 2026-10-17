@@ -56,6 +56,12 @@ from ._helpers import (
 
 @pytest.fixture(autouse=True)
 def event_serializers_guard(request: pytest.FixtureRequest) -> Generator[None]:
+    """Use pytest request to identify the polluter without changing the registry.
+
+    Yield without modifying the binding or entries. On teardown, raise
+    AssertionError if the test leaves either unrestored; request.node.nodeid
+    identifies the polluting test.
+    """
     original_binding = app_service_module.EVENT_SERIALIZERS
     original_entries = dict(original_binding)
     assert original_binding is EVENT_SERIALIZERS, (
