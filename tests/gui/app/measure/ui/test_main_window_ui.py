@@ -1036,7 +1036,8 @@ def test_main_window_tabs_are_movable_and_close_uses_moved_widget(
         window.remove_tab_widget("tab-b")
 
 
-def test_main_window_soc_changed_refreshes_run_lock(control_factory, qapp):
+def test_main_window_soc_changed_refreshes_run_lock(control_factory, qapp, monkeypatch):
+    from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
@@ -1047,12 +1048,19 @@ def test_main_window_soc_changed_refreshes_run_lock(control_factory, qapp):
     ctrl.get_tab_snapshot.return_value = _snapshot("tab-1", has_soc=False)
 
     window = MainWindow(ctrl, templates=lambda: {})
-    tab = MagicMock()
-    window._tab_widgets["tab-1"] = tab
+    try:
+        window.add_tab_widget("tab-1", "fake")
+        tab = next(
+            tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == "tab-1"
+        )
+        update_interaction_state = MagicMock(wraps=tab.update_interaction_state)
+        monkeypatch.setattr(tab, "update_interaction_state", update_interaction_state)
 
-    bus.emit(SocChangedPayload(soc=None, soccfg=None))
+        bus.emit(SocChangedPayload(soc=None, soccfg=None))
 
-    tab.update_interaction_state.assert_called()
+        update_interaction_state.assert_called()
+    finally:
+        window.remove_tab_widget("tab-1")
 
 
 def test_main_window_content_event_queries_single_tab_snapshot(control_factory, qapp):
@@ -1075,13 +1083,14 @@ def test_main_window_content_event_queries_single_tab_snapshot(control_factory, 
 
 
 def test_main_window_interaction_event_refreshes_finished_analysis_figure(
-    control_factory, qapp
+    control_factory, qapp, monkeypatch
 ):
     from matplotlib.figure import Figure
     from zcu_tools.gui.app.measure.events.tab import (
         TabInteractionChangedPayload,
         TabInteractionFact,
     )
+    from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
@@ -1099,29 +1108,43 @@ def test_main_window_interaction_event_refreshes_finished_analysis_figure(
         writeback_items=(writeback_item,),
     )
     window = MainWindow(ctrl, templates=lambda: {})
-    tab = MagicMock()
-    window._tab_widgets["tab-1"] = tab
+    try:
+        window.add_tab_widget("tab-1", "fake")
+        tab = next(
+            tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == "tab-1"
+        )
+        update_writeback_items = MagicMock(wraps=tab.update_writeback_items)
+        monkeypatch.setattr(tab, "update_writeback_items", update_writeback_items)
+        show_analysis_figures = MagicMock(wraps=tab.show_analysis_figures)
+        monkeypatch.setattr(tab, "show_analysis_figures", show_analysis_figures)
+        ctrl.get_tab_snapshot.reset_mock()
 
-    bus.emit(
-        TabInteractionChangedPayload("tab-1", TabInteractionFact.PRIMARY_ANALYZE_FAILED)
-    )
+        bus.emit(
+            TabInteractionChangedPayload(
+                "tab-1", TabInteractionFact.PRIMARY_ANALYZE_FAILED
+            )
+        )
 
-    ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
-    tab.update_writeback_items.assert_not_called()
-    snapshot = ctrl.get_tab_snapshot.return_value
-    assert snapshot.analysis is not None
-    tab.show_analysis_figures.assert_called_once_with(snapshot.analysis.figures)
+        ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
+        update_writeback_items.assert_not_called()
+        snapshot = ctrl.get_tab_snapshot.return_value
+        assert snapshot.analysis is not None
+        show_analysis_figures.assert_called_once_with(snapshot.analysis.figures)
+    finally:
+        window.remove_tab_widget("tab-1")
 
 
 def test_main_window_interaction_event_does_not_restore_old_figure_on_analyze_start(
     control_factory,
     qapp,
+    monkeypatch,
 ):
     from matplotlib.figure import Figure
     from zcu_tools.gui.app.measure.events.tab import (
         TabInteractionChangedPayload,
         TabInteractionFact,
     )
+    from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
@@ -1137,17 +1160,25 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_analyze_st
         figure=figure,
     )
     window = MainWindow(ctrl, templates=lambda: {})
-    tab = MagicMock()
-    window._tab_widgets["tab-1"] = tab
-
-    bus.emit(
-        TabInteractionChangedPayload(
-            "tab-1", TabInteractionFact.PRIMARY_ANALYZE_STARTED
+    try:
+        window.add_tab_widget("tab-1", "fake")
+        tab = next(
+            tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == "tab-1"
         )
-    )
+        show_analysis_figures = MagicMock(wraps=tab.show_analysis_figures)
+        monkeypatch.setattr(tab, "show_analysis_figures", show_analysis_figures)
+        ctrl.get_tab_snapshot.reset_mock()
 
-    ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
-    tab.show_analysis_figures.assert_not_called()
+        bus.emit(
+            TabInteractionChangedPayload(
+                "tab-1", TabInteractionFact.PRIMARY_ANALYZE_STARTED
+            )
+        )
+
+        ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
+        show_analysis_figures.assert_not_called()
+    finally:
+        window.remove_tab_widget("tab-1")
 
 
 def test_main_window_interaction_event_does_not_restore_old_figure_on_run_start(
@@ -1187,13 +1218,14 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_run_start(
 
 
 def test_main_window_interaction_event_shows_post_figure_after_primary(
-    control_factory, qapp
+    control_factory, qapp, monkeypatch
 ):
     from matplotlib.figure import Figure
     from zcu_tools.gui.app.measure.events.tab import (
         TabInteractionChangedPayload,
         TabInteractionFact,
     )
+    from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
@@ -1213,19 +1245,32 @@ def test_main_window_interaction_event_shows_post_figure_after_primary(
         post_figure=post,
     )
     window = MainWindow(ctrl, templates=lambda: {})
-    tab = MagicMock()
-    window._tab_widgets["tab-1"] = tab
+    try:
+        window.add_tab_widget("tab-1", "fake")
+        tab = next(
+            tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == "tab-1"
+        )
+        show_analysis_figures = MagicMock(wraps=tab.show_analysis_figures)
+        monkeypatch.setattr(tab, "show_analysis_figures", show_analysis_figures)
+        show_post_analysis_figures = MagicMock(wraps=tab.show_post_analysis_figures)
+        monkeypatch.setattr(
+            tab, "show_post_analysis_figures", show_post_analysis_figures
+        )
 
-    bus.emit(
-        TabInteractionChangedPayload("tab-1", TabInteractionFact.PRIMARY_ANALYZE_FAILED)
-    )
+        bus.emit(
+            TabInteractionChangedPayload(
+                "tab-1", TabInteractionFact.PRIMARY_ANALYZE_FAILED
+            )
+        )
 
-    snapshot = ctrl.get_tab_snapshot.return_value
-    assert snapshot.analysis is not None and snapshot.post_analysis is not None
-    tab.show_analysis_figures.assert_called_once_with(snapshot.analysis.figures)
-    tab.show_post_analysis_figures.assert_called_once_with(
-        snapshot.post_analysis.figures
-    )
+        snapshot = ctrl.get_tab_snapshot.return_value
+        assert snapshot.analysis is not None and snapshot.post_analysis is not None
+        show_analysis_figures.assert_called_once_with(snapshot.analysis.figures)
+        show_post_analysis_figures.assert_called_once_with(
+            snapshot.post_analysis.figures
+        )
+    finally:
+        window.remove_tab_widget("tab-1")
 
 
 @pytest.mark.parametrize(
@@ -1265,27 +1310,28 @@ def test_analysis_terminal_restore_rebuilds_real_primary_then_post_canvas(
     )
     ctrl.get_tab_snapshot.return_value = snapshot
     window = MainWindow(ctrl, templates=lambda: {})
-    tab = ExpTabWidget(
-        "tab-1",
-        ctrl,
-        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
-    )
-    window._tab_widgets["tab-1"] = tab
-    assert snapshot.analysis is not None and snapshot.post_analysis is not None
-    tab.show_analysis_figures(snapshot.analysis.figures)
-    tab.show_post_analysis_figures(snapshot.post_analysis.figures)
+    try:
+        window.add_tab_widget("tab-1", "fake")
+        tab = next(
+            tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == "tab-1"
+        )
+        assert snapshot.analysis is not None and snapshot.post_analysis is not None
+        tab.show_analysis_figures(snapshot.analysis.figures)
+        tab.show_post_analysis_figures(snapshot.post_analysis.figures)
 
-    # Simulate operation start clearing only its pane; here clear both figures to emulate stale state
-    tab.get_analysis_container().clear_dynamic_canvases()
-    tab.get_post_container().clear_dynamic_canvases()
-    assert tab.get_current_figure_for_pane("analysis") is None
-    assert tab.get_current_figure_for_pane("post_analysis") is None
+        # Simulate operation start clearing only its pane; here clear both figures to emulate stale state
+        tab.get_analysis_container().clear_dynamic_canvases()
+        tab.get_post_container().clear_dynamic_canvases()
+        assert tab.get_current_figure_for_pane("analysis") is None
+        assert tab.get_current_figure_for_pane("post_analysis") is None
 
-    bus.emit(TabInteractionChangedPayload("tab-1", TabInteractionFact(fact)))
+        bus.emit(TabInteractionChangedPayload("tab-1", TabInteractionFact(fact)))
 
-    # Coordinator failure/cancel re-renders retained figures per pane
-    assert tab.get_current_figure_for_pane("analysis") is primary
-    assert tab.get_current_figure_for_pane("post_analysis") is post
+        # Coordinator failure/cancel re-renders retained figures per pane
+        assert tab.get_current_figure_for_pane("analysis") is primary
+        assert tab.get_current_figure_for_pane("post_analysis") is post
+    finally:
+        window.remove_tab_widget("tab-1")
 
 
 def test_loaded_content_clears_stale_real_canvas_when_state_has_no_figure(
@@ -1320,19 +1366,22 @@ def test_loaded_content_clears_stale_real_canvas_when_state_has_no_figure(
     )
     ctrl.get_tab_snapshot.return_value = snapshot
     window = MainWindow(ctrl, templates=lambda: {})
-    tab = ExpTabWidget(
-        "tab-1",
-        ctrl,
-        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
-    )
-    window._tab_widgets["tab-1"] = tab
-    tab.show_analysis_figures(ready_figures(Figure()))
-    assert tab.get_current_figure_for_pane("analysis") is not None
+    try:
+        window.add_tab_widget("tab-1", "fake")
+        tab = next(
+            tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == "tab-1"
+        )
+        tab.show_analysis_figures(ready_figures(Figure()))
+        assert tab.get_current_figure_for_pane("analysis") is not None
 
-    bus.emit(TabContentChangedPayload("tab-1", TabContentFact.LOADED_RESULT_COMMITTED))
+        bus.emit(
+            TabContentChangedPayload("tab-1", TabContentFact.LOADED_RESULT_COMMITTED)
+        )
 
-    assert tab.get_current_figure_for_pane("analysis") is None
-    assert tab.get_current_figure_for_pane("post_analysis") is None
+        assert tab.get_current_figure_for_pane("analysis") is None
+        assert tab.get_current_figure_for_pane("post_analysis") is None
+    finally:
+        window.remove_tab_widget("tab-1")
 
 
 def _emit_run_finished(bus, tab_id: str, outcome: str) -> None:
