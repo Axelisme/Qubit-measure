@@ -299,7 +299,7 @@ def test_memory_infeasible_option_retains_complete_accepted_incumbent():
     )
     assert result.selected.cover == safe
     assert result.incumbent.feasible
-    assert result.selected.required_bytes <= 20
+    assert result.selected.required_bytes == 14  # 12 state + 2 workers * 1 scratch
     assert any("memory" in reason for reason in result.reasons)
 
 

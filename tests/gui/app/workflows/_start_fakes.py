@@ -17,7 +17,12 @@ from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 
 class DeferredBackground:
-    """Separate submit, worker return and owner delivery for lifecycle assertions."""
+    """Separate submit, worker return and owner delivery for lifecycle assertions.
+
+    Set fail_submit to reject only the next submission with OSError; later
+    submissions, including terminal readback, retain normal execution/delivery.
+    on_submit observes each submission until the caller clears it.
+    """
 
     def __init__(self) -> None:
         self.fail_submit = False
@@ -40,6 +45,7 @@ class DeferredBackground:
         if self.on_submit is not None:
             self.on_submit()
         if self.fail_submit:
+            self.fail_submit = False
             raise OSError("submit failed")
         if self.work is not None:
             raise RuntimeError("another deferred worker is pending")

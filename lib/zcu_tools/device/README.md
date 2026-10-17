@@ -1,6 +1,6 @@
 # Device Note for `zcu_tools/device`
 
-**Last updated:** 2026-10-17，固定 FakeDevice V/A/native 座標
+**Last updated:** 2026-10-18，driver 活動狀態與 manager 快照
 
 這份筆記整理 `lib/zcu_tools/device` 的設計：以 VISA（pyvisa）為底層，抽出 `BaseDevice` + `BaseDeviceInfo` 的通用契約，再由 `DeviceManager` 管理 caller 明確建立的 registry。內建裝置包含 `YOKOGS200`（電流/電壓源）、`RohdeSchwarzSGS100A`（微波訊號源）與 `FakeDevice`（mock 測試）。
 
@@ -31,6 +31,20 @@ DeviceInfo = Union[
 ```
 
 ---
+
+## DeviceManager 單名稱登記
+
+同一個 driver 在一個 `DeviceManager` 中只接受一個名字。`register_device` 遇到已用其他名字登記的同一實例時拋出 `ValueError`，registry 保留原狀。同名登記仍發出 warning 並覆寫該名稱，可以登記原 driver 或另一個 driver。不同名稱可以各自登記不同 driver。
+
+Manager close 尚未完成時，`register_device` 拒絕登記該 driver，拋出 `DeviceCloseInProgressError`。即使原名稱已被 drop 或被另一個 driver 覆寫，也不能重新登記正在 close 的 driver。
+
+## 活動觀察
+
+Driver 在 `device_operation` 內記錄自己的兩項活動資訊。`DeviceActivity.in_operation` 初始為 `False`，最外層操作開始後為 `True`，巢狀操作返回不會提早清除。`last_finished_monotonic` 初始為 `None`，最外層操作成功或失敗結束時更新為 `time.monotonic()` 的秒數。Busy rejection 不改活動資訊。
+
+`DeviceManager.activity_snapshot()` 回傳目前登記名字到 `DeviceActivity` 的 dict，每台一筆。`BaseDevice.activity` 提供同一種只讀觀察。這些快照不讀硬體、不等待 operation 或 I/O lock，也不呼叫活動 callback。沒有 consumer 時不累積歷史。回傳 dict 與 driver 分離，值不可修改。
+
+任意 thread 都可讀取活動快照，包括正在操作的 thread。Registry 名單在 manager 鎖內複製，活動欄位在鎖外分別取樣，不保證跨欄位或跨 driver 原子一致。時間只與同一 process 的 monotonic clock 比較，不當作 wall-clock 時間。GUI 定時讀取這些資訊作顯示，不用活動快照決定 admission、取消或 settlement。
 
 ## 實驗控制與 acquisition snapshot
 
@@ -122,15 +136,16 @@ predictor device-value flow 把非 numeric input 當作有效硬體值。
 
 | API | 用途 |
 | --- | ---- |
-| `register_device(name, device)` | 註冊 `BaseDevice` 實例；非 `BaseDevice` 入口 `TypeError`，重名會 warn 並覆蓋 |
+| `register_device(name, device)` | 登記 `BaseDevice` 實例；同一 driver 只接受一個名字，拒絕正在 close 的 driver，同名仍 warn 並覆寫 |
 | `drop_device(name, *, ignore_error=False)` | 移除 registry entry（不 close） |
 | `get_device(name)` | 取得；找不到 `ValueError` |
 | `get_all_devices()` | 回傳整個 dict |
+| `activity_snapshot()` | 回傳每個已登記名稱的唯讀活動值，不讀硬體、不等待長操作 |
 | `setup_devices(dev_cfg: Mapping[str, DeviceInfo], *, progress=True, cancel_signal=None)` | 批次對已註冊裝置呼叫 `setup(cfg)` |
 | `get_info(name)` | 取得單一 device 的 `get_info()` 結果；找不到 `ValueError` |
 | `get_all_info()` | 把每個 device 的 `get_info()` 收成 dict，方便存檔 |
-| `close_device(name, *, ignore_missing=False)` | close 單一 device 並在成功後移除其 stale aliases |
-| `close_all_devices()` | close 所有 registered devices（identity 去重），聚合 named failures |
+| `close_device(name, *, ignore_missing=False)` | close 單一 device，成功後移除仍指向該 driver 的登記 |
+| `close_all_devices()` | close 所有 registered devices，聚合 named failures |
 
 **registry-owned disconnect（`close_device` / `close_all_devices`）**：manager 以
 `id(device)` 為 key 維護 private in-flight close claims（claim 持有 strong reference，防止
@@ -139,16 +154,15 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 
 - 同一 identity 已被任何 manager close API claim 時，第二個呼叫者立即收到
   `DeviceCloseInProgressError`（fail-fast，不等待、不重複 close）。
-- close 成功後移除當下所有仍指向同一 identity 的 aliases（包含 close 進行中新增的同
-  identity alias）；同名不同 replacement（不同 identity）保留，close 後新註冊的不同 device
-  不屬正在進行的 batch。
-- ordinary failure 包裝為 `DeviceCloseFailure(names, cause)`（names 含 batch 中該 identity
-  的所有 aliases），release claim 且保留 entries 供重試；`BaseException` 不包裝、直接傳播，
-  但一樣 release claim。
-- `close_all_devices()` snapshot 後 identity 去重，嘗試 close 所有可 claim identities；
-  ordinary failures 與 in-progress identities 不阻斷其餘 entries，in-progress 以
-  `DeviceCloseInProgressError`（含該 identity 的所有 snapshot aliases）聚合，連同 named
-  failures 一起以 built-in `ExceptionGroup` 拋出；empty registry 是 no-op。
+- close 成功後移除仍指向該 driver 的原名稱登記。同名不同 replacement 保留。
+  Batch 開始後才登記的不同 device 不屬正在進行的 batch。
+- ordinary failure 包裝為 `DeviceCloseFailure(names, cause)`，names 是該筆登記名稱的
+  單元素 tuple。Manager release claim 並保留 entry 供重試。`BaseException` 不包裝，
+  直接傳播，但一樣 release claim。
+- `close_all_devices()` 依 registry snapshot 嘗試 close 所有可 claim drivers。
+  Ordinary failures 與 in-progress drivers 不阻斷其餘 entries，in-progress 以
+  `DeviceCloseInProgressError` 記錄該筆名稱。Manager 將這些錯誤與 named failures
+  一起以 built-in `ExceptionGroup` 拋出。Empty registry 是 no-op。
 - close 只 disconnect session，絕不執行 RF/current/voltage state mutation；也不會取代
   `drop_device()` 或 GUI disconnect 語義。`BaseDevice.close()` 仍按 driver 自己的 `_op_lock` /
   `_io_lock` 同步；registry claim 不取代 driver 鎖。

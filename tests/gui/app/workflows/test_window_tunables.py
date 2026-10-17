@@ -441,6 +441,7 @@ def test_rpc_tunables_native_failure_keeps_base_revision_and_local_text(
     start_button = window.findChild(QPushButton, "workflow.run.start")
     assert start_button is not None and start_button.isEnabled()
     assert not harness.progress.bars_for_owner("workflow")
+    harness.complete_segment()  # Deliver terminal device readback before replacement.
     # A failed idle update must not leave unfinished presentation behind.
     assert isinstance(window.start("after-failure"), int)
     harness.complete_segment()

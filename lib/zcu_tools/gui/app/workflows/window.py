@@ -871,6 +871,7 @@ class WorkflowWindow[C](QWidget):
         if error is None and status is not None and status.lifecycle == "paused":
             self._run_view.paused()
             return
+        self._services.device.refresh_connected_device_info()
         self._run_view.ended(status, error)
         self._sync_run_locked_controls()
         self._figure_views.finish_native()

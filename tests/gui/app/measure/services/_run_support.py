@@ -187,6 +187,7 @@ def make_run_service(
         writeback,
         gate=gate,
         devices=lambda: {} if devices is None else devices,
+        refresh_devices=lambda: None,
     )
     return svc, gate, bg, handles
 

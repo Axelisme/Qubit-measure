@@ -93,7 +93,16 @@ class RunService:
         *,
         gate: ExclusionGate,
         devices: Callable[[], Mapping[str, BaseDevice[Any]]],
+        refresh_devices: Callable[[], None],
     ) -> None:
+        """Borrow drivers and a terminal observation command from the session.
+
+        devices supplies connected drivers at admission. refresh_devices runs
+        on the owner after terminal handling, on success, failure or cancellation;
+        it schedules best-effort reads without changing run evidence or outcome.
+        Its owner handles observation failures. No hardware I/O runs here.
+        """
+        self._refresh_devices = refresh_devices
         self._state = state
         self._devices = devices
         self._runner = runner
@@ -141,18 +150,21 @@ class RunService:
     def _on_run_terminal(
         self, op: _RunOperation, bg: BgResult, settle: SettleFn
     ) -> None:
-        # Schedule failures set the stop flag too, but are not cancellations.
-        if bg.ok:
-            if op.cancel_requested.is_set() or op.stop_event.is_set():
-                self._run_cancelled(op, bg.result, settle)
+        try:
+            # Schedule failures set the stop flag too, but are not cancellations.
+            if bg.ok:
+                if op.cancel_requested.is_set() or op.stop_event.is_set():
+                    self._run_cancelled(op, bg.result, settle)
+                else:
+                    self._run_finished(op, bg.result, settle)
+                return
+            if op.cancel_requested.is_set() and op.stop_signal.error is None:
+                self._run_cancelled(op, NO_RESULT, settle)
             else:
-                self._run_finished(op, bg.result, settle)
-            return
-        if op.cancel_requested.is_set() and op.stop_signal.error is None:
-            self._run_cancelled(op, NO_RESULT, settle)
-        else:
-            error = bg.error or RuntimeError("Run worker failed without an error")
-            self._run_failed(op, error, settle)
+                error = bg.error or RuntimeError("Run worker failed without an error")
+                self._run_failed(op, error, settle)
+        finally:
+            self._refresh_devices()
 
     def _publish_run_result(
         self, op: _RunOperation, result: Any, settle: SettleFn

@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-18, microwave IQ, causal line delay and mismatch
+**Last updated:** 2026-10-18, shared flat-pulse scattering projections
 
 ADC consumes explicitly ordered classical populations, not densities. The
 probability tolerance is `POPULATION_TOLERANCE = 1e-6`. This is 1000 times below
@@ -44,7 +44,15 @@ reciprocal shared-line generator and transition rates are unchanged. This is a
 scattering-phase model, not a full impedance network or a global signal rotation.
 
 `ConditionalReadout` computes state-conditioned responses once per distinct
-content. Its lossless numeric cache key includes delay and both mismatch phases. Round samplers share an initial-state draw across channels and windows,
+content. Flat pulses share frequency-independent Schur bases and sampled output
+projections when enough contents reuse the same relative grid to amortize their
+construction. These grids evaluate scattered fields directly without advancing
+a dense moment tensor at every sample. Other grids retain step propagation with
+shared Schur bases. Ringdown subtracts the delayed step response;
+ill-conditioned driven blocks retain the full matrix-exponential propagation.
+Neither path assumes diagonalizable rate matrices or changes populations.
+Its lossless numeric cache key includes delay and both mismatch phases.
+Round samplers share an initial-state draw across channels and windows,
 then add independent receiver noise. The integrated sampler also accounts for
 nearest-even shot rounding variance. These are conditional moments, not random
 jump trajectories. QICK buffer layout and acquisition averaging belong to the
