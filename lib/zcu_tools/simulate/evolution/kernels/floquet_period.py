@@ -11,8 +11,8 @@ from scipy.linalg import expm
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
 
-_MIN_FREQUENCY_GHZ = 1.0
-_MAX_SPLIT_ESTIMATE = 1e-2
+_MIN_FREQUENCY_GHZ = 0.3
+_MAX_SPLIT_ESTIMATE = 1.0
 _NODES = np.cos(np.pi * (np.arange(8) + 0.5) / 8)
 _VANDER = np.polynomial.chebyshev.chebvander(_NODES, 7)
 
@@ -74,6 +74,12 @@ def _rhs(time, flat, h0, x, y, frequency):
     return (-2j * np.pi * (h @ flat.reshape(size, size))).ravel()
 
 
+def _unitary(matrix: NDArray[np.complex128]) -> NDArray[np.complex128]:
+    """Return the polar unitary of an integrated fundamental solution."""
+    left, _, right = np.linalg.svd(matrix)
+    return left @ right
+
+
 def _build(
     model: SecularModel, port: int, frequency: float, gain: float, budget: float
 ) -> _Period:
@@ -83,8 +89,8 @@ def _build(
     # Removing the common energy zero only changes an unobservable global phase.
     h0 = np.diag(model.energies_ghz - model.energies_ghz[0]).astype(complex)
     x, y = gain * drive.in_phase_ghz, gain * drive.quadrature_ghz
-    # Thousands of unitary steps must still satisfy the ADC's trace contract.
-    tolerance = min(1e-13, budget * 1e-4)
+    # Polar projection removes integrator norm drift before thousands of steps.
+    tolerance = min(1e-10, budget * 1e-4)
     solution = solve_ivp(
         lambda t, u: _rhs(t, u, h0, x, y, frequency),
         (0, period),
@@ -109,7 +115,7 @@ def _build(
     arrays = (
         times,
         coefficients,
-        solution.y[:, -1].reshape(size, size).copy(),
+        _unitary(solution.y[:, -1].reshape(size, size)),
         generator,
         decay,
         expm(generator * period / 2).astype(complex),
@@ -166,14 +172,14 @@ def _row(
         return rho
     period = float(entry.times[-1])
     origin = (theta / (2 * np.pi * frequency)) % period
-    start = _dense(entry.times, entry.coefficients, origin)
+    start = _unitary(_dense(entry.times, entry.coefficients, origin))
     unitary = start @ entry.unitary @ start.conj().T
     count = int(duration // period)
     tail = duration - count * period
     result = _advance(rho, unitary, entry.population_half, entry.coherence_half, count)
     if tail > 0:
         end = origin + tail
-        tail_unitary = _dense(entry.times, entry.coefficients, end % period)
+        tail_unitary = _unitary(_dense(entry.times, entry.coefficients, end % period))
         if end >= period:
             tail_unitary = tail_unitary @ entry.unitary
         tail_unitary = tail_unitary @ start.conj().T
@@ -197,16 +203,28 @@ class FloquetPeriodKernel:
     each period and the separately evaluated fractional tail apply D/2, U, D/2.
     Known and unknown densities, including coherent inputs, use the same channel.
 
-    The density-free guard requires |f| >= 1 GHz and the heuristic estimate
-    duration*T**2*Gamma*V**2 <= 1e-2, where T=1/|f| in ns,
+    The density-free guard requires |f| >= 0.3 GHz and the heuristic estimate
+    duration*T**2*Gamma*V**2 <= 1.0, where T=1/|f| in ns,
     V=2*pi*|gain|*(||X||_2+||Y||_2) is an angular drive norm bound (rad/ns),
     Q=R-diag(R.sum(axis=0)), and Gamma=max(||Q||_2, max coherence decay)
     in 1/ns. These are not rigorous total-error bounds or budget guarantees.
-    The cutoff separates measured 6.789 GHz builds (~3 ms/key) from measured
-    0.4-0.5 GHz builds (~35 ms/key). Prototype S3/S5 population errors against
-    strict DOP853 were 1.1e-7/2.3e-6; 1e-2 reserves a conservative splitting
-    allowance relative to those observations. Low carriers, shaped tones and
-    excessive estimates fall through to existing engine families.
+    Calibration used a 16-level FTF half-flux Q1 with EJ/EC/EL=4/1/1 GHz,
+    dressed f01=0.581742664 GHz, carriers 0.3-0.6 GHz, gains 0.02-1 and
+    durations 8-790 ns. For estimates up to 0.871443, strict DOP853 gave
+    max population/low-four errors of 2.55e-6/9.62e-6 for known input and
+    1.28e-5/1.28e-5 for coherent unknown input, overall <= 1.3e-5 against
+    budget 1e-3. Three/four-level synthetic scans also cover strong drive,
+    mixed/coherent inputs and phase-shifted tails. The 1.0 limit covers the
+    measured maximum, not a universal error bound. Lower carriers, shaped
+    tones and estimates above 1.0 fall through to the existing T6 path.
+    The 0.3 GHz cutoff includes the measured low-frequency range. Warm builds
+    averaged 53-57 ms/key, versus 204-300 ms/key at tolerance 1e-13.
+
+    Integration uses tolerance min(1e-10, budget*1e-4). Polar projection of
+    U(T) and dense fundamental solutions restores unitarity before phase
+    translation and tail composition; density is never normalized. Measured
+    coherent-input trace drift fell from 1.34e-10 to 1.68e-12. Prototype
+    high-carrier S3/S5 population errors were 1.1e-7/2.3e-6.
 
     Invalid budgets/representatives/payloads raise ValueError. Integration or
     nonfinite numeric output raises RuntimeError, never retries or reroutes.
