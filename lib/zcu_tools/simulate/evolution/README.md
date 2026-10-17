@@ -132,16 +132,18 @@ across the evolve call, including unknown-input rows. For duration tau in ns,
 carrier magnitude f in GHz, and gate/table key counts qg and qp, its relative
 work scores are:
 
-- DOP853: `tau * (1 + 0.3*f)`.
+- DOP853: `0.8*tau * (1 + 0.3*f)`.
 - Gate cache: `tau * (60 + 3*f) / qg + 0.04`.
-- Period table: `(150 + 550/f) / qp + c*tau*f + 5*tail*(1 + 0.3*f)`.
+- Period table: `(150 + 550/f) / qp + c*tau*f + 4*tail*(1 + 0.3*f)`.
 
 Here tail is the fractional-period duration. The coefficient c is 0.008 for real
 envelopes and 0.064 for complex envelopes. DC skips the table score. These scores
 come from single-threaded prepare/apply comparisons on 16-level FTF models over
 50 MHz to 7 GHz, 30 ns to 10 us, and reuse counts 1, 2, 5, 9, 10 and 20. They are
-cost estimates, not timing probes or numerical guards. Short-pulse scans use all
-six reuse counts; long-pulse comparisons use one row. Port-local tables and
+cost estimates, not timing probes or numerical guards. The direct coefficient
+and fractional-tail coefficient include the approximately 20% direct integration
+cost reduction from the Hermitian commutator. Short-pulse scans use all six reuse
+counts; long-pulse comparisons use one row. Port-local tables and
 removal of the common energy zero reduce preparation work. Real-envelope apply
 contracts the phase Fourier coefficients once per row for positive and negative
 amplitudes, then evaluates only the amplitude polynomial each period. Complex
@@ -238,8 +240,18 @@ using fixed-order approximations. They can conservatively reject low carriers;
 DOP853 then preserves accuracy at a higher apply cost. Neither shaped family
 performs a density-dependent retry or post-apply correction.
 
-DOP853 defaults to rtol=1e-5, atol=1e-7 and
-max_step=0.1 ns, tightening tolerances for smaller budgets.
+DOP853 integrates the density in the lab frame. Its Hermitian Hamiltonian and
+density require only one dense product per RHS evaluation. With `P = H @ rho`,
+the commutator is `P - P.conj().T`. Real Runge--Kutta weights preserve this
+Hermitian structure through the intermediate stages. The RHS fuses the
+commutator and secular coherence loss into one elementwise loop, then adds
+population transfer. It does not normalize or clip the density.
+
+DOP853 defaults to rtol=1e-5, atol=1e-7 and max_step=0.1 ns, tightening
+tolerances for smaller budgets. The step ceiling and sampled-envelope playback
+are unchanged. Diagonal H0 separation and the H0 interaction picture did not
+reduce low-carrier row cost in the 16-level comparisons. Looser tolerances did
+not help those stability- or ceiling-limited rows.
 
 Flux-tail truncation uses an absolute flux bound, not elapsed multiples of a
 filter time constant. FTF sums absolute pulse-tail contributions and truncates
