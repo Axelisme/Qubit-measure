@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from threading import get_ident
@@ -162,7 +162,7 @@ class ExperimentReloadService:
             return self._load_and_restore(loader, plan)
 
     @contextmanager
-    def _switch(self) -> Iterator[None]:
+    def _switch(self) -> Generator[None, None, None]:
         self._access.switching = True
         try:
             yield

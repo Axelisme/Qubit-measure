@@ -7,7 +7,7 @@ the session device service and the app-layer run/analyze services can use it.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager, nullcontext
 from typing import Any
 
@@ -15,7 +15,7 @@ from typing import Any
 @contextmanager
 def progress_ambient(
     pbar_factory: Callable[..., Any] | None,
-) -> Iterator[None]:
+) -> Generator[None, None, None]:
     """Install ``pbar_factory`` as the per-worker pbar ContextVar for the
     current thread.  If ``pbar_factory`` is ``None`` this is a no-op.
 

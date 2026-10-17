@@ -17,7 +17,7 @@ build on this base, each supplying its own event enum + payloads and aliasing
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -148,7 +148,7 @@ class BaseEventBus:
         return self._origin.get()
 
     @contextmanager
-    def origin(self, origin: EventOrigin) -> Iterator[None]:
+    def origin(self, origin: EventOrigin) -> Generator[None, None, None]:
         """Temporarily declare the origin for emits on this bus.
 
         Context variables do not propagate to newly created threads. Worker
