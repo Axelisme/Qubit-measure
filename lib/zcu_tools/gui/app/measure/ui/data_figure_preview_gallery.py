@@ -272,7 +272,7 @@ class _PreviewCard(QWidget):
     def displayed_pixmap(self) -> QPixmap | None:
         """Return currently displayed (scaled) pixmap, or None."""
         pm = self._image_label.pixmap()
-        if pm is None or pm.isNull():
+        if pm.isNull():
             return None
         return pm
 
