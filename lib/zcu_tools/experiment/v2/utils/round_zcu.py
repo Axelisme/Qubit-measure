@@ -254,8 +254,8 @@ def round_sweep_dict(
     return SweepCfg(start=round_start, stop=round_stop, expts=expts, step=round_step)
 
 
-def sweep2array(
-    sweep: SweepCfg | list | np.ndarray,
+def sweep2array[T_SweepItem](
+    sweep: SweepCfg | list[T_SweepItem] | np.ndarray,
     round_type: Literal["none", "time", "freq", "phase", "gain"] = "none",
     round_info: dict[str, Any] | None = None,
     *,
