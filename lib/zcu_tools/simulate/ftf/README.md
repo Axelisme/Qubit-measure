@@ -75,6 +75,21 @@ carriers analytically across the point arrays, without per-point quadrature.
 `readout_model(joint, resonators)` supplies the existing ADC model at DC, with a
 zero reference frequency and neutral receiver for composition to calibrate.
 
+## Readout and Floquet paths
+
+FTF passes readout populations and the DC readout model to `simulate.adc`.
+For constant readout pulses, `envelope=None`, the batch response uses the exact
+matrix exponential in the carrier frame, even when the carrier differs from
+the model reference. Only nonconstant readout envelopes use the DOP853 moment
+ODE on this acquisition path.
+
+Two constant microwave tones can use evolution's Floquet k=0 path when one is a
+weak probe and the Floquet guards pass. The strong tone defines the effective
+Hamiltonian and dissipator. The probe uses modal second-order Dyson for arbitrary
+input densities, with periodic T6 propagation when its guard fails. Segments
+that fail the Floquet guards use the summed-drive DOP853 path. This approximation
+does not add a physical drive-dressed bath to the FTF model.
+
 This package takes numeric GHz/ns/K values only. `baths` owns directional spectra,
 `dephasing` owns pure-rate formulas, `lines` owns causal scalar delay/lowpass,
 `evolution` owns density propagation and `adc` owns shared-line conditional fields
