@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, constant-tone dispatch, sideband-selective RWA coverage, terminal-family coverage, readout trace diagnostics, low-frequency Hilbert propagation and compiled shared Dyson tables
+**Last updated:** 2026-10-17, constant-tone dispatch, terminal-family coverage, readout trace diagnostics, low-frequency Hilbert propagation and compiled shared Dyson tables
 
 ## Segment engine contracts
 
@@ -105,7 +105,7 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | Fixed flux, no drive | T4 uses analytic secular propagation. |
 | One constant tone, known or unknown input, r, r₂ and B2 guards pass | T7 second-order Dyson, batched over frequency, gain, duration and phase. |
 | One constant tone after an identical shared no-drive prefix, r and r₂ pass | Dyson with the actual prefix output. B2 does not apply; post-apply population changes only report. |
-| Same constant-tone branch, Dyson fails but r <= 0.2 | Reduced RWA if its input-independent omitted-sideband error bound fits the segment budget. This retains a fast path for sideband-selective ports; otherwise try the Hilbert period kernel. |
+| Same constant-tone branch, Dyson fails but r <= 0.2 | Reduced RWA if its input-independent omitted-sideband error bound fits the segment budget; otherwise try the Hilbert period kernel. |
 | One constant tone not accepted above, known or unknown input, with abs(f) >= 0.3 GHz and duration*T²*Gamma*V² <= 1.0 | `floquet_period` integrates one Hilbert-space U(T), translates the carrier phase in time, and steps each period with secular Strang dissipation. |
 | Same constant-tone branch, Hilbert period guard fails | T6 periodic propagation accepts every single constant-tone row. |
 | One shaped tone, prepare-key usage >= 10 | Gate cache with four Strang subsegments, closed-system U plus secular dissipation, and 16 carrier-phase Fourier samples. |
@@ -139,34 +139,6 @@ common to one evolve and no prefix identity persists across calls.
 
 The model supplies the secular form. Missing secular data fails at entry rather
 than selecting another evolution backend.
-
-### Reduced RWA coverage
-
-RWA is not dominated by Dyson or the Hilbert period kernel for sideband-selective
-ports. Its photon forest retains the near-resonant ladder. If `B` is the omitted
-part of `(X-iY)/2`, the guard requires
-`8*pi*abs(gain)*duration*||B||₂ <= budget`, in addition to `r <= 0.2`.
-Nearly circular quadratures can make `B` small while the retained drive makes
-`r` exceed Dyson's limit. Linear polarization generally does not offer this
-separation. These conditions apply to known and unknown inputs, not to a
-particular experiment name.
-
-A three-level synthetic DC model demonstrates this remaining domain at carriers
-of 0.05, 0.6 and 7 GHz, with constant pulses of 30, 80 and 10000 ns and weak
-secular baths. Set `A[0,1]=0.5`, `A[1,2]=0.35`, all other entries zero,
-`X=A+A†` and `Y=0.9999*i*(A-A†)`. With `abs(gain)*duration=0.18`, these rows
-have `r` about 0.18 and an omitted bound of 1.131e-4 at budget 1e-3.
-Dyson rejects them and Engine selects RWA. Ground, mixed and coherent inputs
-were checked against strict full-carrier DOP853.
-
-For these rows, single-threaded warm-process preparation plus apply takes
-0.160–0.253 ms for RWA, 5.489–5.988 ms for the Hilbert period solver and
-13.236–31.924 ms for T6. Maximum RWA population and density-entry errors
-are 1.01e-7 and 5.65e-7. The 50 MHz comparisons explicitly bypass only the
-Hilbert kernel's carrier guard to measure its current solver; production still
-rejects those rows. These are small synthetic ports, not measurements of the
-16-level FTF model or a speed guarantee for arbitrary quadratures. Retain RWA
-for this domain and recheck the comparison when the Hilbert period solver changes.
 
 ### Accuracy and truncation
 
