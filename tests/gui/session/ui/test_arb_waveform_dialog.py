@@ -11,10 +11,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from zcu_tools.gui.session.services import arb_waveform
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
-from zcu_tools.gui.session.ui.arb_waveform_dialog import (
-    ArbWaveformDialog,
-    _PreviewCanvas,
-)
+from zcu_tools.gui.session.ui.arb_waveform_dialog import ArbWaveformDialog
 from zcu_tools.gui.widgets import error_colour
 from zcu_tools.resources.waveform_assets import (
     ArbWaveformData,
@@ -220,41 +217,86 @@ def test_dialog_validates_segments_and_saves_preview(
     assert "arb_data1" not in ctrl.assets
 
 
-def test_preview_canvas_autoscales_y_axis_for_normalized_and_raw(qapp) -> None:
+def test_preview_canvas_autoscales_y_axis_for_normalized_and_raw(
+    qapp, preview_clock: PreviewClock
+) -> None:
     data = render_formula_recipe(
         {
             "segments": [{"duration": 0.002, "formula": "0.25 + 0.5*I"}],
             "normalize": "none",
         }
     )
-    canvas = _PreviewCanvas()
+    ctrl = _FakeController()
+    ctrl.assets["subunit"] = data
+    dlg = ArbWaveformDialog(ctrl)
+    try:
+        editor = _Editor(dlg)
+        editor.assets.selectRow(0)
+        editor.normalize.setChecked(True)
+        preview_clock.drain()
 
-    canvas.plot("subunit", data, normalize=True)
+        axes = _preview_axes(dlg)
+        i_line = next(
+            (
+                line
+                for line in axes.lines
+                if isinstance(label := line.get_label(), str) and label.startswith("I:")
+            ),
+            None,
+        )
+        q_line = next(
+            (
+                line
+                for line in axes.lines
+                if isinstance(label := line.get_label(), str) and label.startswith("Q:")
+            ),
+            None,
+        )
+        assert i_line is not None
+        assert q_line is not None
+        assert axes.get_ylabel() == "Normalized amplitude"
+        assert np.asarray(i_line.get_ydata(), dtype=float)[0] == pytest.approx(
+            0.25 / data.peak_abs
+        )
+        assert np.asarray(q_line.get_ydata(), dtype=float)[0] == pytest.approx(
+            0.5 / data.peak_abs
+        )
+        normalized_y_min, normalized_y_max = axes.get_ylim()
+        assert -0.1 < normalized_y_min < 0.0
+        assert 1.0 < normalized_y_max < 1.1
 
-    assert canvas._i_line is not None
-    assert canvas._q_line is not None
-    assert canvas._ax.get_ylabel() == "Normalized amplitude"
-    assert np.asarray(canvas._i_line.get_ydata(), dtype=float)[0] == pytest.approx(
-        0.25 / data.peak_abs
-    )
-    assert np.asarray(canvas._q_line.get_ydata(), dtype=float)[0] == pytest.approx(
-        0.5 / data.peak_abs
-    )
-    normalized_y_min, normalized_y_max = canvas._ax.get_ylim()
-    assert -0.1 < normalized_y_min < 0.0
-    assert 1.0 < normalized_y_max < 1.1
+        editor.normalize.setChecked(False)
+        preview_clock.drain()
 
-    canvas.plot("subunit", data, normalize=False)
-
-    assert canvas._i_line is not None
-    assert canvas._q_line is not None
-    assert canvas._ax.get_ylabel() == "Amplitude"
-    assert np.asarray(canvas._i_line.get_ydata(), dtype=float)[0] == pytest.approx(0.25)
-    assert np.asarray(canvas._q_line.get_ydata(), dtype=float)[0] == pytest.approx(0.5)
-    raw_y_min, raw_y_max = canvas._ax.get_ylim()
-    assert -0.1 < raw_y_min < 0.0
-    assert 0.5 < raw_y_max < 1.0
-    assert raw_y_max < normalized_y_max
+        axes = _preview_axes(dlg)
+        i_line = next(
+            (
+                line
+                for line in axes.lines
+                if isinstance(label := line.get_label(), str) and label.startswith("I:")
+            ),
+            None,
+        )
+        q_line = next(
+            (
+                line
+                for line in axes.lines
+                if isinstance(label := line.get_label(), str) and label.startswith("Q:")
+            ),
+            None,
+        )
+        assert i_line is not None
+        assert q_line is not None
+        assert axes.get_ylabel() == "Amplitude"
+        assert np.asarray(i_line.get_ydata(), dtype=float)[0] == pytest.approx(0.25)
+        assert np.asarray(q_line.get_ydata(), dtype=float)[0] == pytest.approx(0.5)
+        raw_y_min, raw_y_max = axes.get_ylim()
+        assert -0.1 < raw_y_min < 0.0
+        assert 0.5 < raw_y_max < 1.0
+        assert raw_y_max < normalized_y_max
+    finally:
+        dlg.close()
+        dlg.deleteLater()
 
 
 # ---------------------------------------------------------------------------
