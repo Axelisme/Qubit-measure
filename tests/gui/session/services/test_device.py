@@ -926,7 +926,7 @@ def _make_svc_with_fake_registry(
 
 def test_registry_port_connect_registers_in_fake_not_global(qapp):
     """Connect registers the driver through the injected registry port."""
-    svc, device, registry = _make_svc_with_fake_registry()
+    svc, _device, registry = _make_svc_with_fake_registry()
     _connect(svc, _req())
 
     # Device registered in the fake registry.

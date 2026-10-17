@@ -46,7 +46,7 @@ def test_linker_wait_address_calculation():
     ir = BlockNode(insts=[bb_l1, bb_l2, bb_l3, bb_l4])
 
     linker = IRLinker()
-    prog_list, labels, meta_infos, cursor = _link_root(linker, ir)
+    prog_list, labels, _meta_infos, cursor = _link_root(linker, ir)
 
     # Expected addresses:
     # Label L1 starts at address 0.
