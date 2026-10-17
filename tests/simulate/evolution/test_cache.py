@@ -188,6 +188,28 @@ def test_model_only_revision_and_proof_are_metadata_not_row_acceptance():
     assert cache.bytes == 10
 
 
+@pytest.mark.parametrize("value", [False, True, -1, 1.5])
+def test_cache_constructor_rejects_noninteger_or_negative_limits(value):
+    with pytest.raises(ValueError, match="nonnegative integers"):
+        PrepareCache(value)
+
+
+@pytest.mark.parametrize("value", [False, True, -1, 1.5])
+@pytest.mark.parametrize("operation", ["add", "reference"])
+def test_invalid_byte_charges_preserve_resident_and_live_ownership(value, operation):
+    cache = PrepareCache(10)
+    counts = AllocationCounts()
+    cache.add(SPACE, payload(counts, 10, b"resident"))
+    before = cache.inventory()
+    invalid = payload(counts, value, b"invalid")
+    admit = cache.add if operation == "add" else cache.reference
+    with pytest.raises(ValueError, match="nonnegative integers"):
+        admit(SPACE, invalid)
+    assert cache.inventory() == before
+    assert cache.bytes == 10
+    assert cache.live_bytes == 0
+
+
 def test_invalid_charges_and_conflicting_allocation_metadata_fail_before_eviction():
     cache = PrepareCache(10)
     assert cache.inventory() == ()

@@ -161,6 +161,91 @@ def test_whole_graph_workers_cache_and_order_without_numerical_work(
         )
 
 
+@pytest.mark.parametrize("tentative", [False, True])
+@pytest.mark.parametrize(
+    "layout", ["whole", "split", "namespaces", "wrong-namespace", "wrong-revision"]
+)
+def test_multi_key_cache_acquisition_is_charged_per_allocation_not_per_key(
+    layout, tentative
+):
+    direct, direct_cost = family("direct", 0, 100)
+    cached, cached_cost = family("cached", 10, 1, bind=2, resident=8)
+    cached = replace(cached, guard=GuardDeclaration(("model-build",), True))
+    cached_cost = replace(
+        cached_cost, stages=replace(cached_cost.stages, task_overhead=3)
+    )
+    safe = tuple(option(row, direct, bytes([row])) for row in range(2))
+    alternatives = tuple(
+        replace(
+            option(row, cached, key),
+            binding_key=b"same-input-different-prepare-key",
+            guard="tentative" if tentative else "accepted",
+        )
+        for row, key in enumerate((b"a", b"b"))
+    )
+    cache = PrepareCache(128)
+    namespace = alternatives[0].namespace
+    revision = "synthetic-v1"
+    if layout == "wrong-namespace":
+        namespace = (namespace[0], "another-model", namespace[2])
+    elif layout == "wrong-revision":
+        revision = "old-revision"
+    if layout == "split":
+        for key in (b"a", b"b"):
+            cache.add(namespace, PreparedPayload(Payload(1), (key,), revision))
+    elif layout == "namespaces":
+        # Identical keys in different allocations/namespaces are not one acquisition.
+        other = (namespace[0], "another-model", namespace[2])
+        alternatives = (alternatives[0], replace(alternatives[1], namespace=other))
+        for space in (namespace, other):
+            cache.add(space, PreparedPayload(Payload(1), (b"a", b"b"), revision))
+    else:
+        cache.add(namespace, PreparedPayload(Payload(1), (b"a", b"b"), revision))
+    before = cache.inventory()
+    result = shadow_plan(
+        idle_table([1.0, 1.0]),
+        safe + alternatives,
+        tuple(c.candidate_id for c in safe),
+        profile(direct_cost, cached_cost),
+        before,
+        ShadowRequest(
+            dimension=3, budget=1e-3, workers=1, memory_allowance=128, state_bytes=0
+        ),
+    )
+    # One acquisition costs 3; two independent binds cost 2+3 each;
+    # two independent applies cost 1+3 each. Cold builds instead cost 10+3 each.
+    hit = layout not in ("wrong-namespace", "wrong-revision")
+    expected = 21 if layout == "whole" else 24 if hit else 44
+    assert result.selected.wall_seconds == expected + (7 if tentative else 0)
+    assert result.selected.cover == alternatives
+    builds = [t for t in result.selected.tasks if t.stage == "build"]
+    binds = [t for t in result.selected.tasks if t.stage == "bind"]
+    applies = [t for t in result.selected.tasks if t.stage == "apply"]
+    guards = [t for t in result.selected.tasks if t.stage == "guard"]
+    assert len(builds) == (1 if layout == "whole" else 2)
+    assert len(binds) == len(applies) == 2
+    assert [t.seconds for t in binds] == [5, 5]
+    assert [t.seconds for t in applies] == [4, 4]
+    for candidate in alternatives:
+        build = next(t for t in builds if candidate.candidate_id in t.candidate_ids)
+        bind = next(t for t in binds if candidate.candidate_id in t.candidate_ids)
+        apply = next(t for t in applies if candidate.candidate_id in t.candidate_ids)
+        assert build.task_id in bind.dependencies
+        assert bind.task_id in apply.dependencies
+        if tentative:
+            guard = next(t for t in guards if candidate.candidate_id in t.candidate_ids)
+            assert build.task_id in guard.dependencies
+            assert guard.task_id in apply.dependencies
+    assert result.selected.tentative == (
+        tuple(c.candidate_id for c in alternatives) if tentative else ()
+    )
+    assert result.selected.cache_allocations == (
+        tuple(e.allocation_id for e in before) if hit else ()
+    )
+    assert cache.inventory() == before
+    assert cache.live_bytes == 0
+
+
 def test_reuse_partition_moves_escape_row_local_minima_and_preserve_timeline_dependencies():
     table = replace(
         idle_table([1.0] * 4),

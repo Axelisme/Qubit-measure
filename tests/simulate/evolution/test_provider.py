@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from zcu_tools.simulate.evolution import EnvelopeSpec
+from zcu_tools.simulate.evolution import Engine, EnvelopeSpec, ModelSource, SecularModel
 from zcu_tools.simulate.evolution.declarations import (
     AlgorithmIdentity,
     Eligibility,
@@ -22,7 +22,7 @@ from zcu_tools.simulate.evolution.provider import (
     segment,
 )
 
-from ._engine import Payload, RecordingKernel, batch, source, track
+from ._engine import Payload, RecordingKernel, batch, run, source, track
 
 
 def declaration(name: str, *, builds: bool = False) -> KernelDeclaration:
@@ -65,6 +65,109 @@ def test_candidate_discovery_excludes_impossible_rows_without_guards_or_builds()
     assert candidates["t4"].size == 0
     np.testing.assert_array_equal(candidates["dyson"], rows)
     assert idle.preparations == driven.preparations == 0
+
+
+def test_default_provider_entry_prepares_and_applies_exact_idle_decay():
+    initial = np.array([[0.5, 0.5], [0.5, 0.5]], dtype=complex)
+    model = SecularModel(
+        (0,),
+        "two-level-decay",
+        np.array([0.0, 0.25]),
+        np.eye(2, dtype=complex),
+        (),
+        np.array([[0.0, 0.2], [0.0, 0.0]]),
+        np.zeros((2, 2)),
+    )
+    src = ModelSource(initial, lambda level: replace(model, level=level))
+    provider = LegacyProvider()
+    geometry = segment(src, (batch(1, duration=2.0),))
+    dispatch = provider.classify(geometry, src, 1e-3)
+    np.testing.assert_array_equal(dispatch.names, ["t4"])
+    kernel = provider.entry(str(dispatch.names[0])).kernel
+    rows = np.array([0], dtype=np.int64)
+    prepared = kernel.prepare(
+        kernel.prepare_keys(geometry.table, rows), geometry.table, rows, src, 1e-3
+    )
+    states = initial[None].copy()
+    exceeded = kernel.apply(
+        prepared, np.array([0], dtype=np.int64), geometry.table, rows, states, 1e-3
+    )
+    excited = 0.5 * np.exp(-0.4)
+    coherence = -0.5 * np.exp(-0.2)
+    np.testing.assert_allclose(
+        states[0], [[1 - excited, coherence], [coherence, excited]], atol=1e-14
+    )
+    np.testing.assert_array_equal(exceeded, [False])
+    with pytest.raises(KeyError, match="unknown-family"):
+        provider.entry("unknown-family")
+
+
+def test_active_envelopes_control_eligibility_and_legacy_dispatch_in_any_row_order():
+    constant = EnvelopeSpec("constant")
+    shaped = EnvelopeSpec(
+        "sampled", np.array([0.2, 1.0], dtype=complex), np.array([0.0, 3.0])
+    )
+    # No drive, one constant, one shaped, two constant, shaped in either slot.
+    first = replace(
+        track(6, constant),
+        envelopes=(constant, shaped),
+        envelope_index=np.array([0, 0, 1, 0, 1, 0]),
+        active=np.array([False, True, True, True, True, True]),
+    )
+    second = replace(
+        track(6, constant),
+        envelopes=(constant, shaped),
+        envelope_index=np.array([0, 0, 0, 0, 0, 1]),
+        active=np.array([False, False, False, True, True, True]),
+    )
+    batches = (replace(batch(6), tracks=(first, second)),)
+    entries = tuple(
+        LegacyKernelAdapter(
+            RecordingKernel(name), replace(declaration(name), eligibility=eligibility)
+        )
+        for name, eligibility in (
+            ("t4", Eligibility(max_tones=0)),
+            ("dyson", Eligibility(1, 2, "constant")),
+            ("floquet", Eligibility(2, 2, "constant")),
+            ("shaped_sambe", Eligibility(1, 2, "shaped")),
+            ("dop853", Eligibility()),
+        )
+    )
+    provider = LegacyProvider(entries)
+    src = source()
+    geometry = segment(src, batches)
+    # The sampled envelope also occupies inactive track slots in this fixture.
+    for rows, expected_constant, expected_shaped in (
+        (np.arange(6), [1, 3], [2, 4, 5]),
+        (np.arange(6)[::-1], [3, 1], [5, 4, 2]),
+        (np.array([5, 0, 3, 2]), [3], [5, 2]),
+        (np.array([], dtype=np.int64), [], []),
+    ):
+        candidates = provider.eligible(geometry.table, rows)
+        np.testing.assert_array_equal(candidates["dyson"], expected_constant)
+        np.testing.assert_array_equal(candidates["shaped_sambe"], expected_shaped)
+    expected = ["t4", "dyson", "shaped_sambe", "floquet", "dop853", "dop853"]
+    dispatch = provider.classify(geometry, src, 1e-3)
+    np.testing.assert_array_equal(dispatch.names, expected)
+    for rows in (np.arange(6)[::-1], np.array([5, 0, 3, 2])):
+        subset = provider.classify(
+            geometry,
+            src,
+            1e-3,
+            selection=Selection(rows, dispatch.shaped, dispatch.rejected),
+        )
+        np.testing.assert_array_equal(subset.names[rows], np.array(expected)[rows])
+    result = run(Engine(1, 0, kernels=tuple(e.kernel for e in entries)), src, batches)
+    assert result.paths.segments_by_kernel == {
+        "t4": 1,
+        "dyson": 1,
+        "shaped_sambe": 1,
+        "floquet": 1,
+        "dop853": 2,
+    }
+    np.testing.assert_array_equal(
+        result.densities, np.repeat(src.initial_density[None], 6, axis=0)
+    )
 
 
 @pytest.mark.parametrize("value", [-1.0, np.inf, np.nan])
