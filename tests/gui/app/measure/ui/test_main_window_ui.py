@@ -997,7 +997,7 @@ def test_main_window_tabs_are_movable_and_close_uses_moved_widget(
     assert _experiment_tabs(window).widget(1) is tab_a
     ctrl.reorder_tabs.assert_called_once_with(["tab-b", "tab-a"])
 
-    window._on_tab_close_requested(1)
+    _experiment_tabs(window).tabCloseRequested.emit(1)
 
     ctrl.close_tab.assert_called_once_with("tab-a")
 
@@ -1837,12 +1837,14 @@ def _add_tab(
     window: MainWindow,
     tab_id: str,
     *,
+    ctrl: MagicMock,
     has_run: bool = False,
     saved: bool = False,
 ) -> ExpTabWidget:
+    """Add a tab using the same controller that was passed to the window."""
     tab = ExpTabWidget(
         tab_id,
-        window._ctrl,
+        ctrl,
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
     )
     snap = _snapshot(
@@ -2019,7 +2021,7 @@ def test_tab_close_without_result_closes_immediately(control_factory, qapp):
     """Scenario 1: Tab with NO_RESULT closes without prompting."""
     dialogs = RecordingDialogPresenter()
     window, ctrl = _setup_window_with_tabs(control_factory, dialogs)
-    _add_tab(window, "tab-1", has_run=False)
+    _add_tab(window, "tab-1", has_run=False, ctrl=ctrl)
 
     _experiment_tabs(window).tabCloseRequested.emit(0)
 
@@ -2031,7 +2033,7 @@ def test_tab_close_with_saved_data_closes_immediately(control_factory, qapp):
     """Scenario 1: Tab with SAVED data closes without prompting."""
     dialogs = RecordingDialogPresenter()
     window, ctrl = _setup_window_with_tabs(control_factory, dialogs)
-    tab = _add_tab(window, "tab-1", has_run=True, saved=True)
+    tab = _add_tab(window, "tab-1", has_run=True, saved=True, ctrl=ctrl)
     assert tab.has_unsaved_data() is False
 
     _experiment_tabs(window).tabCloseRequested.emit(0)
@@ -2049,7 +2051,7 @@ def test_tab_close_with_unsaved_data_declined_keeps_tab(
     """Cancelling tab-close leaves either unsaved data state untouched."""
     dialogs = RecordingDialogPresenter(destructive_answers=[False])
     window, ctrl = _setup_window_with_tabs(control_factory, dialogs)
-    tab = _add_tab(window, "tab-1", has_run=True, saved=False)
+    tab = _add_tab(window, "tab-1", has_run=True, saved=False, ctrl=ctrl)
     tab.update_interaction_state(_snapshot("tab-1", data_status=data_status))
     assert tab.has_unsaved_data() is True
 
@@ -2068,7 +2070,7 @@ def test_tab_close_with_unsaved_data_confirmed_closes_tab(control_factory, qapp)
     """Scenario 2: Confirming tab-close closes the unsaved tab."""
     dialogs = RecordingDialogPresenter(destructive_answers=[True])
     window, ctrl = _setup_window_with_tabs(control_factory, dialogs)
-    tab = _add_tab(window, "tab-1", has_run=True, saved=False)
+    tab = _add_tab(window, "tab-1", has_run=True, saved=False, ctrl=ctrl)
     assert tab.has_unsaved_data() is True
 
     _experiment_tabs(window).tabCloseRequested.emit(0)
@@ -2085,8 +2087,8 @@ def test_moved_tab_with_unsaved_data_closes_by_captured_identity(control_factory
     """Scenario 3: A tab moved before close request closes by captured widget identity."""
     dialogs = RecordingDialogPresenter(destructive_answers=[True])
     window, ctrl = _setup_window_with_tabs(control_factory, dialogs)
-    tab_a = _add_tab(window, "tab-a", has_run=True, saved=False)
-    _add_tab(window, "tab-b", has_run=False)
+    tab_a = _add_tab(window, "tab-a", has_run=True, saved=False, ctrl=ctrl)
+    _add_tab(window, "tab-b", has_run=False, ctrl=ctrl)
     assert tab_a.has_unsaved_data() is True
 
     tab_bar = _experiment_tabs(window).tabBar()
@@ -2136,8 +2138,8 @@ def test_tab_moved_while_confirmation_pending_closes_captured_widget(
 
     deferred_presenter = _DeferredPresenter(destructive_answers=[True])
     window, ctrl = _setup_window_with_tabs(control_factory, deferred_presenter)
-    tab_a = _add_tab(window, "tab-a", has_run=True, saved=False)
-    _add_tab(window, "tab-b", has_run=False)
+    tab_a = _add_tab(window, "tab-a", has_run=True, saved=False, ctrl=ctrl)
+    _add_tab(window, "tab-b", has_run=False, ctrl=ctrl)
 
     tabs = window.findChild(QTabWidget)
     assert tabs is not None
@@ -2189,7 +2191,7 @@ def test_tab_close_suppresses_duplicate_prompt_while_decision_pending(
 
     deferred_presenter = _DeferredPresenter(destructive_answers=[True])
     window, ctrl = _setup_window_with_tabs(control_factory, deferred_presenter)
-    _add_tab(window, "tab-1", has_run=True, saved=False)
+    _add_tab(window, "tab-1", has_run=True, saved=False, ctrl=ctrl)
 
     tabs = window.findChild(QTabWidget)
     assert tabs is not None
@@ -2214,7 +2216,7 @@ def test_app_close_idle_with_no_unsaved_tabs_shuts_down_without_prompt(
     window, ctrl = _setup_window_with_tabs(
         control_factory, dialogs, active_operations=0
     )
-    _add_tab(window, "tab-1", has_run=True, saved=True)
+    _add_tab(window, "tab-1", has_run=True, saved=True, ctrl=ctrl)
 
     window.close()
 
@@ -2260,7 +2262,7 @@ def test_app_close_with_unsaved_tabs_prompts_and_declining_cancels(
     window, ctrl = _setup_window_with_tabs(
         control_factory, dialogs, active_operations=0
     )
-    _add_tab(window, "tab-1", has_run=True, saved=False)
+    _add_tab(window, "tab-1", has_run=True, saved=False, ctrl=ctrl)
 
     window.close()
 
@@ -2281,8 +2283,8 @@ def test_app_close_with_unsaved_tabs_prompts_and_confirming_shuts_down(
     window, ctrl = _setup_window_with_tabs(
         control_factory, dialogs, active_operations=0
     )
-    _add_tab(window, "tab-1", has_run=True, saved=False)
-    _add_tab(window, "tab-2", has_run=False)
+    _add_tab(window, "tab-1", has_run=True, saved=False, ctrl=ctrl)
+    _add_tab(window, "tab-2", has_run=False, ctrl=ctrl)
 
     window.close()
 
@@ -2301,7 +2303,7 @@ def test_app_close_with_both_unsaved_tabs_and_active_operations(control_factory,
     window, ctrl = _setup_window_with_tabs(
         control_factory, dialogs, active_operations=3
     )
-    _add_tab(window, "tab-1", has_run=True, saved=False)
+    _add_tab(window, "tab-1", has_run=True, saved=False, ctrl=ctrl)
 
     window.close()
 
@@ -2324,7 +2326,7 @@ def test_app_close_with_both_unsaved_tabs_and_active_operations_declined(
     window, ctrl = _setup_window_with_tabs(
         control_factory, dialogs, active_operations=2
     )
-    _add_tab(window, "tab-1", has_run=True, saved=False)
+    _add_tab(window, "tab-1", has_run=True, saved=False, ctrl=ctrl)
 
     window.close()
 
@@ -2345,7 +2347,7 @@ def test_app_close_with_active_operations_only_uses_confirm_async(
     window, ctrl = _setup_window_with_tabs(
         control_factory, dialogs, active_operations=2
     )
-    _add_tab(window, "tab-1", has_run=True, saved=True)
+    _add_tab(window, "tab-1", has_run=True, saved=True, ctrl=ctrl)
 
     window.close()
 
@@ -2392,7 +2394,7 @@ def test_app_close_suppresses_duplicate_prompt_while_decision_pending(
     window, ctrl = _setup_window_with_tabs(
         control_factory, deferred_presenter, active_operations=0
     )
-    _add_tab(window, "tab-1", has_run=True, saved=False)
+    _add_tab(window, "tab-1", has_run=True, saved=False, ctrl=ctrl)
 
     # First close
     window.close()
@@ -2415,7 +2417,7 @@ def test_app_close_reprompts_if_unsaved_data_appears_before_decision(
     window, ctrl = _setup_window_with_tabs(
         control_factory, dialogs, active_operations=1
     )
-    tab = _add_tab(window, "tab-1", has_run=True, saved=True)
+    tab = _add_tab(window, "tab-1", has_run=True, saved=True, ctrl=ctrl)
 
     window.close()
 
@@ -2443,7 +2445,7 @@ def test_app_close_suppresses_reentry_while_shutdown_is_coordinating(
     window, ctrl = _setup_window_with_tabs(
         control_factory, dialogs, active_operations=1
     )
-    _add_tab(window, "tab-1", has_run=True, saved=True)
+    _add_tab(window, "tab-1", has_run=True, saved=True, ctrl=ctrl)
 
     window.close()
     window.close()
@@ -2462,7 +2464,7 @@ def test_app_close_suppresses_duplicate_idle_shutdown_requests(control_factory, 
     window, ctrl = _setup_window_with_tabs(
         control_factory, dialogs, active_operations=0
     )
-    _add_tab(window, "tab-1", has_run=True, saved=True)
+    _add_tab(window, "tab-1", has_run=True, saved=True, ctrl=ctrl)
 
     window.close()
     window.close()
@@ -2483,7 +2485,7 @@ def test_app_close_rechecks_unsaved_data_after_operations_settle(control_factory
     window, ctrl = _setup_window_with_tabs(
         control_factory, dialogs, active_operations=1
     )
-    tab = _add_tab(window, "tab-1", has_run=True, saved=True)
+    tab = _add_tab(window, "tab-1", has_run=True, saved=True, ctrl=ctrl)
 
     window.close()
     QCoreApplication.processEvents()
@@ -2515,7 +2517,7 @@ def test_app_close_waits_for_pending_tab_close_decision(control_factory, qapp):
     window, ctrl = _setup_window_with_tabs(
         control_factory, dialogs, active_operations=0
     )
-    _add_tab(window, "tab-1", has_run=True, saved=False)
+    _add_tab(window, "tab-1", has_run=True, saved=False, ctrl=ctrl)
 
     _experiment_tabs(window).tabCloseRequested.emit(0)
     window.close()
@@ -2534,7 +2536,7 @@ def test_repeated_programmatic_shutdown_waits_for_pre_prompt_coordination(
     window, ctrl = _setup_window_with_tabs(
         control_factory, dialogs, active_operations=1
     )
-    _add_tab(window, "tab-1", has_run=True, saved=True)
+    _add_tab(window, "tab-1", has_run=True, saved=True, ctrl=ctrl)
 
     window.close()
     assert [call.kind for call in dialogs.calls] == ["confirm"]
@@ -2562,7 +2564,7 @@ def test_programmatic_shutdown_supersedes_user_shutdown_coordination(
     window, ctrl = _setup_window_with_tabs(
         control_factory, dialogs, active_operations=1
     )
-    tab = _add_tab(window, "tab-1", has_run=True, saved=True)
+    tab = _add_tab(window, "tab-1", has_run=True, saved=True, ctrl=ctrl)
 
     window.close()
     QCoreApplication.processEvents()
@@ -2584,7 +2586,7 @@ def test_programmatic_shutdown_supersedes_final_unsaved_prompt(control_factory, 
     window, ctrl = _setup_window_with_tabs(
         control_factory, dialogs, active_operations=1
     )
-    tab = _add_tab(window, "tab-1", has_run=True, saved=True)
+    tab = _add_tab(window, "tab-1", has_run=True, saved=True, ctrl=ctrl)
 
     window.close()
     dialogs.confirm_decisions.pop()(True)
@@ -2614,7 +2616,7 @@ def test_programmatic_request_shutdown_bypasses_unsaved_guard(control_factory, q
     window, ctrl = _setup_window_with_tabs(
         control_factory, dialogs, active_operations=1
     )
-    _add_tab(window, "tab-1", has_run=True, saved=False)
+    _add_tab(window, "tab-1", has_run=True, saved=False, ctrl=ctrl)
 
     window.request_shutdown()
 
