@@ -602,7 +602,8 @@ def test_finished_analysis_keeps_captured_inputs_across_later_edits(qapp):
 def test_on_analyze_finished_updates_state(qapp):
     state = _make_state()
     bus = EventBus()
-    svc, bg = _make_service(state, bus)
+    handles = OperationHandles()
+    svc, bg = _make_service(state, bus, handles=handles)
 
     token = svc.start_analyze("tab1", analyze_params_instance=object(), plots=_plots())
 
@@ -630,7 +631,7 @@ def test_on_analyze_finished_updates_state(qapp):
     assert len(finished_signals) == 1
     assert finished_signals[0] == ("tab1", fake_result)
     # Handle settles on terminal
-    outcome = svc._handles.poll(token)
+    outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "finished"
 
 
@@ -782,8 +783,9 @@ def test_plugin_record_failure_settles_failed_and_keeps_previous_result(qapp):
     previous_plots.finish()
     state.update_tab_analyze("tab1", previous, previous_plots, source_operation_id=900)
     handles = OperationHandles()
+    writeback = MagicMock()
     bus = EventBus()
-    svc, _ = _make_service(state, bus, handles=handles)
+    svc, _ = _make_service(state, bus, handles=handles, writeback=writeback)
     plugin = PluginDefinition(
         "pick",
         2,
@@ -800,8 +802,6 @@ def test_plugin_record_failure_settles_failed_and_keeps_previous_result(qapp):
     )
     active = svc.get_interactive("tab1")
     assert active is not None
-    writeback = svc._writeback
-    assert isinstance(writeback, MagicMock)
     writeback.create_draft.side_effect = RuntimeError("writeback boom")
 
     assert svc.finish_plugin("tab1") is True
@@ -952,7 +952,7 @@ def test_cancel_interactive_clears_analyzing_and_settles_cancelled(qapp):
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "cancelled"
     assert handles.live_count() == 0
-    assert "tab1" not in svc._active_tokens
+    assert "tab1" not in dict(svc.active_operations())
     # Interaction event fired; no failure signal.
     assert received == [TabInteractionFact.PRIMARY_ANALYZE_CANCELLED]
     assert failed == []
@@ -987,18 +987,19 @@ def test_cancelled_interaction_retains_previous_pane_operation_sources(qapp):
 
 def test_cancel_interactive_no_inflight_is_graceful_noop(qapp):
     state = _make_state()
-    svc, _ = _make_service(state, EventBus())
+    handles = OperationHandles()
+    svc, _ = _make_service(state, EventBus(), handles=handles)
 
     # No analyze started at all -> graceful no-op, no raise, no state change.
     assert svc.cancel_interactive("tab1") is False
     assert state.get_tab("tab1").is_analyzing is False
-    assert svc._handles.live_count() == 0
+    assert handles.live_count() == 0
 
 
 def test_cancel_interactive_does_not_touch_fit_analyze(qapp):
     state = _make_state()
-    svc, bg = _make_service(state, EventBus())
-    handles = svc._handles
+    handles = OperationHandles()
+    svc, bg = _make_service(state, EventBus(), handles=handles)
 
     # A worker-backed FIT analyze is in flight (its callback will settle it later).
     token = svc.start_analyze("tab1", analyze_params_instance=object(), plots=_plots())
@@ -1059,7 +1060,8 @@ def test_finish_after_cancel_interactive_is_inert(qapp):
 def test_background_analyze_failure_resets_state(qapp):
     state = _make_state()
     bus = EventBus()
-    svc, bg = _make_service(state, bus)
+    handles = OperationHandles()
+    svc, bg = _make_service(state, bus, handles=handles)
 
     token = svc.start_analyze("tab1", analyze_params_instance=object(), plots=_plots())
     assert state.get_tab("tab1").is_analyzing is True
@@ -1073,7 +1075,7 @@ def test_background_analyze_failure_resets_state(qapp):
 
     assert state.get_tab("tab1").is_analyzing is False
     assert len(failed_signals) == 1
-    outcome = svc._handles.poll(token)
+    outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "failed"
 
 
@@ -1101,8 +1103,8 @@ def test_background_analyze_failure_emits_interaction_event(qapp):
 
 def test_two_tabs_settle_their_own_tokens(qapp):
     state = _make_two_tab_state()
-    svc, bg = _make_service(state, EventBus())
-    handles = svc._handles
+    handles = OperationHandles()
+    svc, bg = _make_service(state, EventBus(), handles=handles)
 
     token1 = svc.start_analyze("tab1", analyze_params_instance=object(), plots=_plots())
     # Save tab1's on_done before tab2 overwrites it in the bg stub
@@ -1137,7 +1139,7 @@ def test_two_tabs_settle_their_own_tokens(qapp):
     outcome2 = handles.poll(token2)
     assert outcome2 is not None and outcome2.status == "finished"
     assert handles.live_count() == 0
-    assert "tab2" not in svc._active_tokens
+    assert "tab2" not in dict(svc.active_operations())
 
 
 # ---------------------------------------------------------------------------
@@ -1147,15 +1149,14 @@ def test_two_tabs_settle_their_own_tokens(qapp):
 
 def test_on_analyze_finished_post_processing_raise_settles_failed(qapp):
     state = _make_state()
-    svc, bg = _make_service(state, EventBus())
-    handles = svc._handles
+    handles = OperationHandles()
+    writeback = MagicMock()
+    svc, bg = _make_service(state, EventBus(), handles=handles, writeback=writeback)
 
     token = svc.start_analyze("tab1", analyze_params_instance=object(), plots=_plots())
 
     # Make the service-side post-processing raise (writeback compute blows up).
     boom = RuntimeError("writeback boom")
-    writeback = svc._writeback
-    assert isinstance(writeback, MagicMock)
     writeback.create_draft.side_effect = boom
 
     failed: list[tuple[str, str]] = []
