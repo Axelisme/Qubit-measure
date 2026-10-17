@@ -127,6 +127,29 @@ def _guard_key(
     return _Guarded(selected, rows[~accepted], preparations)
 
 
+def _unshared_driven_input(table: SegmentTable) -> NDArray[np.bool_]:
+    """Mark rows after a drive without a shared prefix input certificate.
+
+    Rows are timeline-major and chronological. A preceding drive in another
+    timeline does not change the source input. Certificates retain Dyson's
+    shared input contraction; no-drive histories retain its cheap source path.
+    """
+    index = np.arange(len(table.timeline))
+    first = np.searchsorted(table.timeline, table.timeline, side="left")
+    last_drive = np.maximum.accumulate(np.where(table.tones > 0, index, -1))
+    previous_drive = np.r_[-1, last_drive[:-1]]
+    shared = (
+        np.fromiter(
+            (group is not None for group in table.prefix_group),
+            dtype=bool,
+            count=len(index),
+        )
+        if table.prefix_group is not None
+        else np.zeros(len(index), dtype=bool)
+    )
+    return (previous_drive >= first) & ~shared
+
+
 class _Classifier:
     def __init__(
         self,
@@ -255,7 +278,14 @@ class _Classifier:
             np.arange(len(table.timeline), dtype=np.int64)
         )
         single = ordinary & (table.tones == 1)
-        self.accept(rows[(single & constant)[rows]], ("dyson", "floquet_period", "t6"))
+        plateau = rows[(single & constant)[rows]]
+        # Distinct inputs cannot share Dyson paths; period propagation is cheaper
+        # within the 10 us FTF coverage. Keep Dyson when the period guard rejects.
+        distinct_input = _unshared_driven_input(table) & (table.duration_ns <= 10000.0)
+        self.accept(plateau[distinct_input[plateau]], ("floquet_period", "dyson", "t6"))
+        self.accept(
+            plateau[~distinct_input[plateau]], ("dyson", "floquet_period", "t6")
+        )
         shaped = np.flatnonzero(single & ~constant & self.scope)
         if np.any(self.scope[shaped]):
             self.classify_shaped(shaped)

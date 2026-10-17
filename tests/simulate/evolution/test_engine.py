@@ -902,9 +902,9 @@ def test_unknown_input_probe_uses_dyson_without_binding_and_matches_dop853():
     src = source()
     probe = replace(
         track(3, EnvelopeSpec("constant"), duration=0.6),
-        # Distinct idle prefixes cannot receive flux-tail certification.
+        # Below the period carrier floor, distinct inputs still reach Dyson.
         start_ns=np.array([1.2, 1.3, 1.4]),
-        frequency_ghz=np.full(3, 1.2),
+        frequency_ghz=np.full(3, 0.025),
         amplitude=np.array([1e-5, 2e-5, 0.3]),
         phase_rad=np.array([0.2, -0.5, 1.1]),
     )
@@ -947,7 +947,13 @@ def test_unknown_input_probe_uses_dyson_without_binding_and_matches_dop853():
     )
     assert all(start == 0 for start in dyson.bound_starts)
     assert dyson.bound_starts
-    expected = run(Engine(1, 0, kernels=(ReferenceDrive(), ReferenceIdle())), src, (b,))
+    expected = run(
+        Engine(
+            1, 0, kernels=(ReferenceDrive(), ReferenceIdle(), FloquetPeriodKernel())
+        ),
+        src,
+        (b,),
+    )
     np.testing.assert_allclose(actual.densities, expected.densities, rtol=0, atol=1e-3)
     np.testing.assert_allclose(
         np.diagonal(actual.densities, axis1=1, axis2=2),

@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, opt-in shadow planner and one-core profile contracts
+**Last updated:** 2026-10-18, distinct driven-input plateau routing
 
 ## Segment engine contracts
 
@@ -288,7 +288,8 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | Varying flux, no drive | The FTF model owner quantizes flux at DAC-interval midpoints to 1e-3 Phi0 subsegments. This T5 path uses T4 with basis changes, not a separate kernel. |
 | Varying flux with drive | `flux_dop853` integrates continuous flux with the exact Hamiltonian expansion; baths switch at quantized grid boundaries. |
 | Fixed flux, no drive | T4 uses analytic secular propagation. |
-| One constant tone, known or unknown input, r, r₂ and B2 guards pass | T7 second-order Dyson, batched over frequency, gain, duration and phase. |
+| One constant tone after a driven prefix without a shared-input certificate, duration <= 10 us, Hilbert period guard passes | Try `floquet_period` before Dyson. Distinct inputs cannot share Dyson's contracted paths. If the period guard rejects, retain Dyson before T6. |
+| Other single constant tone, r, r₂ and B2 guards pass | T7 second-order Dyson, batched over frequency, gain, duration and phase. |
 | One constant tone after an identical shared driven prefix, r, r₂ and actual-input B2 pass | Dyson with the actual prefix output and a shared contracted table. |
 | One constant tone after an identical shared no-drive prefix, r and r₂ pass | Dyson with the actual prefix output. B2 does not apply; post-apply population changes only report. |
 | One constant tone not accepted above, known or unknown input, with abs(f) >= 0.03 GHz and duration*T²*Gamma*V²/m² <= 1.0 for some m in 1..64 | `floquet_period` builds one Hilbert-space U(T), translates the carrier phase in time, and steps each period with secular Strang dissipation. |
@@ -417,8 +418,11 @@ of the preceding rows. Binding, B2, the probe result, its free baseline and all
 later segments therefore use one numerical input, even when the representative's
 shaped reuse counts differ from the full acquire. Known inputs belong to
 this evolve alone. They never enter PrepareCache. Shared input binding consumes
-the same known input as B2, in the row model basis. All constant single tones
-still enter the ordinary family decision order.
+the same known input as B2, in the row model basis. Source inputs, no-drive
+prefixes and certified shared driven inputs retain Dyson-first ordering.
+Unshared driven-input plateaus up to 10 us try the Hilbert period kernel first.
+Longer plateaus retain Dyson-first ordering. The preference uses timeline
+geometry and certificates, never the evolving worker density.
 
 The model supplies the secular form. Missing secular data fails at entry rather
 than selecting another evolution backend.
