@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, override
 
 from .base import BaseDevice, BaseDeviceInfo, device_operation
 
@@ -92,6 +92,7 @@ class RohdeSchwarzSGS100A(BaseDevice[RohdeSchwarzSGS100AInfo]):
 
     # ==========================================================================#
 
+    @override
     def _setup(
         self,
         cfg: RohdeSchwarzSGS100AInfo,

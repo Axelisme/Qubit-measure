@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, override
 
 from .base import BaseDevice, BaseDeviceInfo, device_operation
 
@@ -84,6 +84,7 @@ class AnritsuMG3692(BaseDevice[AnritsuMG3692Info]):
 
     # ==========================================================================#
 
+    @override
     def _setup(
         self,
         cfg: AnritsuMG3692Info,
