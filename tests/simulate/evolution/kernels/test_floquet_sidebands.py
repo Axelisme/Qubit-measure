@@ -69,7 +69,7 @@ def _adversarial_case(name: str) -> KernelCase:
     model = SecularModel(
         (0,),
         name,
-        np.arange(size) * 0.13,
+        np.arange(size, dtype=np.float64) * 0.13,
         np.eye(size, dtype=complex),
         (SecularDrive("stark", stark, zero), SecularDrive("probe", probe, zero)),
         rates,
