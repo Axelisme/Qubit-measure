@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, compiled gate-cache preparation, driven-input plateau routing, Hilbert endpoints and timeline-owned waves
+**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, compiled gate-cache preparation, driven-input plateau routing, Hilbert endpoints, timeline-owned waves and spectral-family reuse
 
 ## Segment engine contracts
 
@@ -513,7 +513,16 @@ refines to 3/4 when needed. It retains the lower cutoff only when its difference
 to the next cutoff fits budget/4. It starts with four amplitude nodes. A geometric tail
 estimate from the last two polynomial coefficients selects eight nodes if
 needed. The cycle-scaled harmonic and amplitude estimates must fit budget/2.
-The guard never reads a density or evolves a trial input. Cross-timeline keys
+The guard never reads a density or evolves a trial input. Within one evolve,
+ramps share immutable spectral coefficients by model identity, level, port,
+signed carrier, peak gain, subperiod resolution, harmonic cutoff and amplitude
+node count. Budget and algorithm revision also scope this workspace. A per-family
+lock prevents duplicate worker builds without serializing different carriers.
+Each ramp still selects cutoffs and evaluates admission with its own cycle count;
+duration, slope and direct-tail preparations remain row-specific. The built-in
+kernel releases spectral workspace after evolve. Accepted payloads can retain
+coefficients in the prepare LRU, where each payload conservatively charges the
+full coefficient allocation even when another payload shares it. Cross-timeline keys
 hand accepted, immutable model-only payloads to A-stage. For timeline-local keys,
 the worker runs guard preparation and applies the returned table before releasing
 it. It does not discard the convergence table and rebuild it in prepare. Failed spectral keys retain the old

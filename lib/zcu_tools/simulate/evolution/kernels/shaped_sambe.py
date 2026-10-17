@@ -1,6 +1,7 @@
 """Low-reuse real-envelope periods from finite Hilbert Fourier matrices."""
 
 from dataclasses import dataclass
+from threading import Lock
 
 import numpy as np
 from numba import njit
@@ -91,6 +92,59 @@ def _coefficients(
     return coefficients
 
 
+class _SpectralFamily:
+    """Serialize lazy, immutable spectral builds for one model/carrier lattice."""
+
+    def __init__(self) -> None:
+        self.lock = Lock()
+        self.errors: dict[int, float] = {}
+        self.polynomials: dict[
+            tuple[int, int], tuple[NDArray[np.complex128], float, float]
+        ] = {}
+
+    def error(
+        self,
+        model: SecularModel,
+        port: int,
+        frequency: float,
+        bound: float,
+        step: float,
+        modes: int,
+    ) -> float:
+        # The caller holds the family lock across admission and interpolation.
+        if modes not in self.errors:
+            fine = _spectral(model, port, frequency, bound, modes + 1, step)
+            coarse = _spectral(model, port, frequency, bound, modes, step)
+            self.errors[modes] = float(
+                np.sum(np.linalg.norm(fine - coarse, axis=(-2, -1)))
+            )
+        return self.errors[modes]
+
+    def polynomial(
+        self,
+        model: SecularModel,
+        port: int,
+        frequency: float,
+        bound: float,
+        step: float,
+        orders: tuple[int, int],
+    ) -> tuple[NDArray[np.complex128], float, float]:
+        if orders not in self.polynomials:
+            nodes, _ = orders
+            coefficients = _coefficients(model, port, frequency, bound, step, orders)
+            last = float(
+                np.sum(np.linalg.norm(coefficients[:, nodes - 1], axis=(-2, -1)))
+            )
+            previous = float(
+                np.sum(np.linalg.norm(coefficients[:, nodes - 2], axis=(-2, -1)))
+            )
+            ratio = last / max(previous, 1e-30)
+            interpolation = last * ratio / max(1 - ratio, 1e-30) if nodes == 4 else last
+            coefficients.setflags(write=False)
+            self.polynomials[orders] = coefficients, interpolation, ratio
+        return self.polynomials[orders]
+
+
 @dataclass(frozen=True)
 class _Data:
     # Period tables own arrays. Models/ports identify the frozen-tail Hamiltonian.
@@ -118,16 +172,25 @@ class ShapedSambeKernel:
     """
 
     declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("shaped_sambe", "legacy-v1"),
+        identity=AlgorithmIdentity("shaped_sambe", "spectral-reuse-v2"),
         eligibility=Eligibility(1, 1, "shaped"),
         guard=GuardDeclaration(("model-build",), builds_model=True),
         accuracy="guarded-approximation",
-        reuse=ReuseDeclaration("shaped_sambe/legacy-v1/serial"),
+        reuse=ReuseDeclaration("shaped_sambe/spectral-reuse-v2/serial"),
         fallback="legacy-order",
     )
 
     name = "shaped_sambe"
     guard_builds = True
+
+    def __init__(self) -> None:
+        # Engine gives the built-in kernel an evolve-local lifetime. This cache
+        # is workspace, not a second persistent prepared-payload LRU.
+        self._families: dict[
+            tuple[str, tuple[int, ...], int, float, float, int, float, str],
+            _SpectralFamily,
+        ] = {}
+        self._families_lock = Lock()
 
     def prepare_keys(
         self,
@@ -242,30 +305,36 @@ class ShapedSambeKernel:
             # Compare the limiting amplitude, not 128 carrier-phase ODEs.
             # The bandwidth guard and the retained polynomial's last degree
             # accompany this calibrated (not rigorous) convergence estimate.
-            fine = _spectral(model, port, f, bound, modes + 1, step)
-            coarse = _spectral(model, port, f, bound, modes, step)
-            error = float(np.sum(np.linalg.norm(fine - coarse, axis=(-2, -1))))
-            if error * cycles > budget / 4:
-                modes = 3
-                finer = _spectral(model, port, f, bound, modes + 1, step)
-                error = float(np.sum(np.linalg.norm(finer - fine, axis=(-2, -1))))
-            coefficients = _coefficients(model, port, f, bound, step, (nodes, modes))
-            last = float(
-                np.sum(np.linalg.norm(coefficients[:, nodes - 1], axis=(-2, -1)))
+            family_key = (
+                model.identity,
+                model.level,
+                port,
+                f,
+                bound,
+                m,
+                budget,
+                self.declaration.identity.revision,
             )
-            previous = float(
-                np.sum(np.linalg.norm(coefficients[:, nodes - 2], axis=(-2, -1)))
-            )
-            ratio = last / max(previous, 1e-30)
-            interpolation = last * ratio / max(1 - ratio, 1e-30)
-            if ratio > 0.25 or interpolation * cycles > budget / 8:
-                nodes = 8
-                coefficients = _coefficients(
+            with self._families_lock:
+                family = self._families.get(family_key)
+                if family is None:
+                    family = _SpectralFamily()
+                    self._families[family_key] = family
+            # Only equal families serialize. Other workers build independent
+            # carriers concurrently; every ramp still uses its own cycles.
+            with family.lock:
+                error = family.error(model, port, f, bound, step, modes)
+                if error * cycles > budget / 4:
+                    modes = 3
+                    error = family.error(model, port, f, bound, step, modes)
+                coefficients, interpolation, ratio = family.polynomial(
                     model, port, f, bound, step, (nodes, modes)
                 )
-                interpolation = float(
-                    np.sum(np.linalg.norm(coefficients[:, -1], axis=(-2, -1)))
-                )
+                if ratio > 0.25 or interpolation * cycles > budget / 8:
+                    nodes = 8
+                    coefficients, interpolation, _ = family.polynomial(
+                        model, port, f, bound, step, (nodes, modes)
+                    )
             errors.append((error + interpolation) * cycles)
             outgoing = model.rates_per_ns.sum(axis=0)
             populations = np.asarray(

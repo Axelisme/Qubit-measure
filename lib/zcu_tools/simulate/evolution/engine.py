@@ -336,6 +336,19 @@ class Engine:
         self._workers = workers
         self._builtin_kernels = kernels is None
 
+    def _evolve_kernels(self) -> Mapping[str, Kernel]:
+        """Scope built-in spectral workspace to this evolve, including prefixes.
+
+        Only prepared payloads persist in the Engine LRU. Injected collections
+        are caller-owned and keep their explicitly supplied kernel lifetimes.
+        """
+        from .kernels.shaped_sambe import ShapedSambeKernel
+
+        kernels = dict(self._kernels)
+        if self._builtin_kernels:
+            kernels["shaped_sambe"] = ShapedSambeKernel()
+        return kernels
+
     def evolve(
         self,
         source: ModelSource,
@@ -503,6 +516,7 @@ class Engine:
                     budget=budget,
                     evaluation=evaluation,
                 )
+            kernels = self._evolve_kernels()
             with execution_pool(workers) as pool:
                 if constant_dispatch is not None:
                     schedule = Schedule(
@@ -510,20 +524,18 @@ class Engine:
                     )
                 elif mode == "legacy-plan":
                     geometry = PrefixResolver(
-                        geometry, self._kernels, source, budget, cancel
+                        geometry, kernels, source, budget, cancel
                     ).resolve(self._cache, pool, self._chunks)
                     schedule = Schedule.from_legacy_plan(
-                        geometry, self._kernels, source, budget, cancel, pool
+                        geometry, kernels, source, budget, cancel, pool
                     )
                 else:
                     geometry = PrefixResolver(
-                        geometry, self._kernels, source, budget, cancel
+                        geometry, kernels, source, budget, cancel
                     ).resolve(self._cache, pool, self._chunks)
-                    dispatch = classify(
-                        geometry, self._kernels, source, budget, pool=pool
-                    )
+                    dispatch = classify(geometry, kernels, source, budget, pool=pool)
                     schedule = Schedule(geometry, dispatch, source, budget, cancel)
-                result = schedule.run(self._kernels, self._cache, pool, self._chunks)
+                result = schedule.run(kernels, self._cache, pool, self._chunks)
             if cancel.is_set():
                 raise Cancelled()
             exceeded = result.paths.exceeded_by_kernel
