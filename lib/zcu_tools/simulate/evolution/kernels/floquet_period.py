@@ -13,12 +13,13 @@ from ._dop853 import Tolerances, integrate_dense
 
 _MIN_FREQUENCY_GHZ = 0.03
 _MAX_SPLIT_ESTIMATE = 1.0
-_MAX_SUBDIVISIONS = 4
+_MAX_SUBDIVISIONS = 64
+_MAGNUS_FREQUENCY_GHZ = 1.0
 
 
 @dataclass(frozen=True)
 class _Period:
-    # Per-key arrays, including degree-seven dense U on each accepted ODE step.
+    # Dense DOP853 coefficients, or CF4 prefix unitaries plus Hamiltonian data.
     times: NDArray[np.float64]
     coefficients: NDArray[np.complex128]
     unitary: NDArray[np.complex128]
@@ -27,6 +28,15 @@ class _Period:
     population_half: NDArray[np.complex128]
     coherence_half: NDArray[np.float64]
     split_rate: float
+    magnus: (
+        tuple[
+            NDArray[np.complex128],
+            NDArray[np.complex128],
+            NDArray[np.complex128],
+            float,
+        ]
+        | None
+    )
 
     @property
     def nbytes(self) -> int:
@@ -41,7 +51,7 @@ class _Period:
                 self.population_half,
                 self.coherence_half,
             )
-        )
+        ) + (sum(a.nbytes for a in self.magnus[:3]) if self.magnus is not None else 0)
 
 
 @dataclass(frozen=True)
@@ -110,16 +120,26 @@ def _build(
     # Removing the common energy zero only changes an unobservable global phase.
     h0 = np.diag(model.energies_ghz - model.energies_ghz[0]).astype(complex)
     x, y = gain * drive.in_phase_ghz, gain * drive.quadrature_ghz
-    # Polar projection removes integrator norm drift before thousands of steps.
-    tolerance = min(1e-10, budget * 1e-4)
-    times, coefficients, final = integrate_dense(
-        _rhs,
-        (h0, x, y, frequency),
-        np.eye(size, dtype=complex).ravel(),
-        period,
-        Tolerances(tolerance, tolerance * 0.01, period / 4),
-    )
-    coefficients = coefficients.reshape(-1, 8, size, size)
+    magnus = None
+    if abs(frequency) < _MAGNUS_FREQUENCY_GHZ:
+        # Low carriers make Schrödinger DOP853 resolve many unobservable H0 turns.
+        # CF4 exponentiates H0 exactly; only carrier motion needs approximation.
+        tolerance = min(1e-4, budget * 0.1)
+        times, coefficients = _magnus_build(h0, x, y, frequency, tolerance)
+        final = coefficients[-1]
+        magnus = (h0, x, y, frequency)
+        for array in (h0, x, y):
+            array.setflags(write=False)
+    else:
+        tolerance = min(1e-10, budget * 1e-4)
+        times, coefficients, final = integrate_dense(
+            _rhs,
+            (h0, x, y, frequency),
+            np.eye(size, dtype=complex).ravel(),
+            period,
+            Tolerances(tolerance, tolerance * 0.01, period / 4),
+        )
+        coefficients = coefficients.reshape(-1, 8, size, size)
     generator, decay = _bath(model)
     arrays = (
         times,
@@ -134,7 +154,67 @@ def _build(
         if not np.isfinite(array).all():
             raise RuntimeError("Floquet period preparation produced nonfinite data")
         array.setflags(write=False)
-    return _Period(*arrays, _split_rate(model, port, frequency, gain))
+    return _Period(*arrays, _split_rate(model, port, frequency, gain), magnus)
+
+
+@njit(nogil=True, cache=True)
+def _hermitian_exponential(h, step):
+    energies, vectors = np.linalg.eigh(h)
+    return (vectors * np.exp(-2j * np.pi * step * energies)) @ vectors.conj().T
+
+
+@njit(nogil=True, cache=True)
+def _magnus_step(h0, x, y, frequency, time, step):
+    # Fourth-order commutator-free Magnus, two Gauss nodes and two exponentials.
+    a = (3 - 2 * np.sqrt(3)) / 12
+    b = (3 + 2 * np.sqrt(3)) / 12
+    first = 2 * np.pi * frequency * (time + (0.5 - np.sqrt(3) / 6) * step)
+    last = 2 * np.pi * frequency * (time + (0.5 + np.sqrt(3) / 6) * step)
+    h1 = h0 + np.cos(first) * x + np.sin(first) * y
+    h2 = h0 + np.cos(last) * x + np.sin(last) * y
+    return _hermitian_exponential(a * h1 + b * h2, step) @ _hermitian_exponential(
+        b * h1 + a * h2, step
+    )
+
+
+@njit(nogil=True, cache=True)
+def _magnus_prefixes(h0, x, y, frequency, count):
+    period = 1 / abs(frequency)
+    times = np.linspace(0.0, period, count + 1)
+    prefixes = np.empty((count + 1, len(h0), len(h0)), dtype=np.complex128)
+    prefixes[0] = np.eye(len(h0), dtype=np.complex128)
+    for j in range(count):
+        prefixes[j + 1] = (
+            _magnus_step(h0, x, y, frequency, times[j], period / count) @ prefixes[j]
+        )
+    return times, prefixes
+
+
+@njit(nogil=True, cache=True)
+def _magnus_build(h0, x, y, frequency, tolerance):
+    period = 1 / abs(frequency)
+    # Keep both grids away from a full spectral turn, where sampled carrier
+    # motion can alias. The retained grid stays below half a spectral turn.
+    width = (
+        np.max(h0.real) - np.min(h0.real) + 2 * (np.linalg.norm(x) + np.linalg.norm(y))
+    )
+    count = max(8, 8 * int(np.ceil(1.5 * period * width / 8)))
+    _, coarse = _magnus_prefixes(h0, x, y, frequency, count)
+    for _ in range(12):
+        finer = 8 * int(np.ceil(1.5 * count / 8))
+        times, fine = _magnus_prefixes(h0, x, y, frequency, finer)
+        error = 0.0
+        # Compare micromotion at eight phase intervals, not just U(T), where
+        # errors can cancel. Both grids include these endpoints exactly.
+        for j in range(9):
+            error = max(
+                error, np.linalg.norm(coarse[j * count // 8] - fine[j * finer // 8])
+            )
+        if error <= tolerance:
+            return times, fine
+        count = finer
+        coarse = fine
+    raise RuntimeError("Floquet Magnus preparation failed to converge")
 
 
 @njit(nogil=True, cache=True)
@@ -182,7 +262,22 @@ def _advance_segments(rho, unitaries, population, coherence, count):
 
 def _fundamental(entry: _Period, time: float) -> NDArray[np.complex128]:
     period = float(entry.times[-1])
-    value = _unitary(_dense(entry.times, entry.coefficients, time % period))
+    local = time % period
+    if entry.magnus is None:
+        value = _unitary(_dense(entry.times, entry.coefficients, local))
+    else:
+        index = min(
+            int(np.searchsorted(entry.times, local, side="right")) - 1,
+            len(entry.times) - 2,
+        )
+        h0, x, y, frequency = entry.magnus
+        value = (
+            _magnus_step(
+                h0, x, y, frequency, entry.times[index], local - entry.times[index]
+            )
+            @ entry.coefficients[index]
+        )
+        value = _unitary(value)
     if time >= period:
         value = value @ entry.unitary
     return value
@@ -240,16 +335,14 @@ def _row(
     subdivisions = _subdivisions(duration * entry.split_rate)
     if subdivisions > 1:
         return _subdivided_row(entry, origin, duration, rho, subdivisions)
-    start = _unitary(_dense(entry.times, entry.coefficients, origin))
+    start = _fundamental(entry, origin)
     unitary = start @ entry.unitary @ start.conj().T
     count = int(duration // period)
     tail = duration - count * period
     result = _advance(rho, unitary, entry.population_half, entry.coherence_half, count)
     if tail > 0:
         end = origin + tail
-        tail_unitary = _unitary(_dense(entry.times, entry.coefficients, end % period))
-        if end >= period:
-            tail_unitary = tail_unitary @ entry.unitary
+        tail_unitary = _fundamental(entry, end)
         tail_unitary = tail_unitary @ start.conj().T
         result = _advance(
             result,
@@ -265,26 +358,36 @@ class FloquetPeriodKernel:
     """One constant tone, independent of input density and absolute start.
 
     Keys contain only level, port, signed frequency (GHz) and signed gain.
-    Preparation integrates one Hilbert-space U(T), retaining U(T) and bounded
-    degree-seven dense coefficients on its finite accepted steps. No Liouville
+    Preparation builds one Hilbert-space U(T), retaining U(T) and finite
+    endpoint data (CF4 prefixes or degree-seven DOP853 coefficients). No Liouville
     channel is built. Theta translates the time origin by theta/(2*pi*f) mod T;
     each subperiod and the separately evaluated fractional tail apply D/2, U, D/2.
     Known and unknown densities, including coherent inputs, use the same channel.
 
     The density-free guard requires |f| >= 0.03 GHz and selects the smallest
-    m in 1..4 such that duration*T**2*Gamma*V**2/m**2 <= 1.0. Here T=1/|f|
+    m in 1..64 such that duration*T**2*Gamma*V**2/m**2 <= 1.0. Here T=1/|f|
     is in ns, V=2*pi*|gain|*(||X||_2+||Y||_2) in rad/ns, and Gamma is the
     larger of the population generator norm and coherence decay in 1/ns.
     This retains the calibrated splitting allowance, not a rigorous total-error
-    bound or segment-budget guarantee. Each subperiod uses exact dense Hilbert
-    endpoints from the same integration. The tail uses the same step ceiling.
+    bound or segment-budget guarantee. Each subperiod uses unitary Hilbert
+    endpoints from the same Hilbert trajectory. The tail uses the same step ceiling.
     The subdivision count depends only on model and row, never density; it is
     not part of the preparation key. Rows outside this domain still try T6.
 
-    Integration uses tolerance min(1e-10, budget*1e-4) and max_step=T/4.
-    DOP853 stages, error control and degree-seven dense construction run in
-    single-threaded nogil code. The payload keeps the dense polynomial's native
-    nested coefficients, without resampling or a per-key basis conversion.
+    Below 1 GHz, preparation uses fourth-order commutator-free Magnus (CF4)
+    with exact Hermitian exponentials, retaining unitary prefixes. A fractional
+    endpoint uses a CF4 step from its preceding prefix, not interpolation.
+    Uniform grids start below 2/3 of a spectral turn and compare prefix
+    trajectories with a 1.5x finer grid at eight phase intervals. The maximum
+    operator defect must be <= min(1e-4, budget*0.1); the finer trajectory is
+    retained. Its steps are below half a spectral turn. This is a calibrated
+    numerical estimate, not a rigorous bound. It depends only on model and key, and keeps
+    duration out of the payload and cache key.
+
+    Higher carriers use DOP853 tolerance min(1e-10, budget*1e-4), max_step=T/4.
+    Both builders run in single-threaded nogil code. The high-carrier payload
+    keeps the dense polynomial's native nested coefficients, without resampling
+    or a per-key basis conversion.
     Only accepted steps are retained; no solver object is kept. Polar projection of
     U(T) and dense fundamental solutions restores unitarity before phase
     translation and tail composition; density is never normalized. Measured

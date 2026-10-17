@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, Dyson-to-periodic constant-tone dispatch, terminal-family coverage, readout trace diagnostics, low-frequency Hilbert propagation, compiled shared Dyson tables, shared driven-prefix inputs, amortized shaped dispatch, model-only shaped guards and port-local period tables
+**Last updated:** 2026-10-17, Dyson-to-periodic constant-tone dispatch, terminal-family coverage, readout trace diagnostics, low-frequency Hilbert propagation, compiled shared Dyson tables, shared driven-prefix inputs, amortized shaped dispatch, model-only shaped guards, port-local period tables and low-carrier CF4 propagators
 
 ## Segment engine contracts
 
@@ -107,7 +107,7 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | One constant tone, known or unknown input, r, r₂ and B2 guards pass | T7 second-order Dyson, batched over frequency, gain, duration and phase. |
 | One constant tone after an identical shared driven prefix, r, r₂ and actual-input B2 pass | Dyson with the actual prefix output and a shared contracted table. |
 | One constant tone after an identical shared no-drive prefix, r and r₂ pass | Dyson with the actual prefix output. B2 does not apply; post-apply population changes only report. |
-| One constant tone not accepted above, known or unknown input, with abs(f) >= 0.03 GHz and duration*T²*Gamma*V²/m² <= 1.0 for some m in 1..4 | `floquet_period` integrates one Hilbert-space U(T), translates the carrier phase in time, and steps each period with secular Strang dissipation. |
+| One constant tone not accepted above, known or unknown input, with abs(f) >= 0.03 GHz and duration*T²*Gamma*V²/m² <= 1.0 for some m in 1..64 | `floquet_period` builds one Hilbert-space U(T), translates the carrier phase in time, and steps each period with secular Strang dissipation. |
 | Same constant-tone branch, Hilbert period guard fails | T6 periodic propagation accepts every single constant-tone row. |
 | One shaped tone | Order gate cache, period table and DOP853 by amortized preparation plus apply work. Try each numerical guard in that order. There is no fixed gate-key reuse threshold. |
 | Shaped gate cache passes its split guard | Four Strang subsegments, closed-system U plus secular dissipation, and 16 carrier-phase Fourier samples. |
@@ -249,13 +249,14 @@ The Hilbert period kernel uses T=1/|f| and the density-free splitting estimate
 `duration*T²*Gamma*V²/m²`. Here `V=2*pi*|gain|*(||X||₂+||Y||₂)` is an angular
 drive norm bound. `Gamma` is the larger of the population-generator spectral
 norm and the maximum coherence decay rate. The guard requires abs(f) >= 0.03 GHz
-and chooses the smallest integer m in 1..4 that keeps this estimate <= 1.0.
+and chooses the smallest integer m in 1..64 that keeps this estimate <= 1.0.
 Each period is divided into m equal Strang steps. Their unitary endpoints come
-from the same dense Hilbert integration. The tail uses steps no longer than T/m.
+from the same Hilbert trajectory. The tail uses steps no longer than T/m.
 The count depends on the model and row duration, not the input density, and does
 not enter preparation keys. This preserves the splitting allowance rather than
 raising it to admit strong low-frequency drives. Rows below the carrier floor
-or requiring more than four subdivisions still use T6.
+or requiring more than 64 subdivisions still use T6. This covers long plateaus
+without putting duration in a period key; the splitting allowance stays 1.0.
 
 The original 16-level half-flux calibration covered 0.3-0.6 GHz and estimates
 up to 0.871443. Its maximum population and low-four errors against strict DOP853
@@ -271,8 +272,21 @@ sweet-spot constant spectra at 0.294 and 0.219 GHz gave population errors below
 bound or segment-budget guarantee. Small synthetic Engine tests cover mixed and
 coherent inputs, signed carriers and phase-translated cross-period tails.
 
-Preparation uses tolerance min(1e-10, budget*1e-4) and max_step=T/4. The
-single-threaded nogil DOP853 core builds both integration stages and the
+Below 1 GHz, preparation uses fourth-order commutator-free Magnus (CF4).
+Each step multiplies two exact Hermitian matrix exponentials. Uniform grids
+start below 2/3 of an instantaneous spectral turn. Preparation compares prefix
+unitaries with a 1.5x finer grid at eight phase intervals, including U(T).
+It retains the finer grid when the maximum Frobenius-norm difference is at most
+min(1e-4, budget*0.1); otherwise it refines again. Accepted steps stay below
+half a spectral turn. The comparison includes micromotion because errors at
+U(T) alone can cancel. This is a calibrated convergence estimate, not a total
+population-error bound. Prefix unitaries and the three Hamiltonian matrices
+are immutable and charged to the cache. Arbitrary phase, subperiod and tail
+endpoints use a fractional CF4 step from the preceding prefix, not interpolation.
+No density enters preparation or the step selection.
+
+At higher carriers, preparation keeps tolerance min(1e-10, budget*1e-4) and
+max_step=T/4. The single-threaded nogil DOP853 core builds integration stages and the
 degree-seven dense extension. It retains U(T) and the native nested polynomial
 coefficients on accepted steps. There are no Python RHS callbacks, dense
 resampling or per-key polynomial-basis solves. Stage sums reuse a state buffer
@@ -284,7 +298,7 @@ density. Coherent-input trace drift in the calibration fell from 1.34e-10 to
 1.68e-12. Prototype high-carrier S3/S5 population errors were 1.1e-7 and 2.3e-6.
 Duration, start and theta do not enter keys.
 Time translation handles signed frequency and phase; the fractional tail uses
-the same dense solution with a periodic extension across the boundary. Each full
+the same Hilbert trajectory with a periodic extension across the boundary. Each full
 subperiod and tail applies D/2, U, D/2 without constructing a Liouville channel.
 Apply does not compare half-period results, normalize, retry or reroute.
 Low-frequency flux-tail probes retain Dyson and two-tone rows retain Floquet.
@@ -306,7 +320,9 @@ payloads also reach timeline chunks without cache admission or input binding. Ot
 preparations stay inside their timeline chunk and are discarded afterward.
 Low-carrier Hilbert-period singleton keys, below 0.3 GHz, instead stream one
 timeline at a time inside each worker chunk. This avoids retaining a sweep of
-long dense trajectories, about 80 MB each at 50 MHz. Shared Hilbert-period keys
+many distinct per-key trajectories. CF4 replaces the former roughly 80 MB
+DOP853 trajectories at 50 MHz with compact unitary prefixes, but streaming
+still prevents memory from growing with the number of sweep keys. Shared Hilbert-period keys
 still use A-stage when there are at most four distinct low-carrier shared keys.
 Larger low-carrier key sets prepare locally and stream timelines too. The LRU
 limit alone cannot bound A-stage memory because live bindings retain evicted
