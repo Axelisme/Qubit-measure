@@ -20,9 +20,10 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Mapping
 from functools import partial
 from statistics import median
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, ReadOnly, TypedDict
 
 import numpy as np
 
@@ -88,6 +89,40 @@ class _MacroReport(TypedDict, total=False):
     search_njobs1: _MacroCaseStats
     search_njobsN: _MacroCaseStats
     fit_spectrum: _MacroCaseStats
+
+
+class _RunReport(TypedDict):
+    """Report produced by run for summary, comparison, and JSON output.
+
+    git_sha: Current revision string, or "unknown" if git lookup fails.
+    quick: Original args.quick value, preserved without conversion or validation.
+    micro: Case names mapped to elapsed-time statistics in seconds and repeat
+        counts; always present.
+    macro: Sparse macrobenchmark results, with case times in seconds; absent
+        unless args.db is truthy. An unavailable DB produces an empty section.
+    """
+
+    git_sha: str
+    quick: object
+    micro: dict[str, _TimingStats]
+    macro: NotRequired[_MacroReport]
+
+
+class _ComparisonReport(TypedDict, total=False):
+    """Shared section projection for a current run and historical JSON baseline.
+
+    micro: Optional mapping from microbenchmark case names to arbitrary payloads;
+        timing payloads conventionally contain elapsed seconds.
+    macro: Optional mapping from macrobenchmark entry names to arbitrary payloads;
+        timing payloads conventionally contain elapsed seconds.
+
+    Neither entry fields nor extra top-level keys are restricted here. ReadOnly
+    permits the producer's more specific sections without freezing or copying
+    the underlying dictionaries; the comparison reader does not assign them.
+    """
+
+    micro: ReadOnly[Mapping[str, object]]
+    macro: ReadOnly[Mapping[str, object]]
 
 
 def _timed(fn, *, repeat=5) -> _TimingStats:
@@ -244,9 +279,14 @@ def macro_benches(
     return out
 
 
-def run(args) -> dict[str, object]:
+def run(args) -> _RunReport:
+    """Warm up and run benchmarks using args.quick, args.db, and args.n_fluxs.
+
+    Return the original report data for printing and JSON output. A truthy db
+    enables macrobenchmarks; benchmark failures propagate to the caller.
+    """
     warm_up()
-    results: dict[str, object] = {
+    results: _RunReport = {
         "git_sha": _git_sha(),
         "quick": args.quick,
         "micro": micro_benches(args.quick),
@@ -256,7 +296,12 @@ def run(args) -> dict[str, object]:
     return results
 
 
-def print_summary(r: dict) -> None:
+def print_summary(r: _RunReport) -> None:
+    """Print a run's timings in milliseconds (micro) and seconds (macro).
+
+    Print other macro entries unchanged. Missing timing fields and incompatible
+    arithmetic or formatting values raise their original errors.
+    """
     print(f"git: {r.get('git_sha')}  quick={r.get('quick')}")
     print("-- micro (median seconds) --")
     for k, v in sorted(r.get("micro", {}).items()):
@@ -270,8 +315,15 @@ def print_summary(r: dict) -> None:
                 print(f"  {k}: {v}")
 
 
-def print_compare(cur: dict, base: dict) -> None:
+def print_compare(cur: _ComparisonReport, base: _ComparisonReport) -> None:
+    """Print current versus baseline timings and percentage changes.
+
+    Sections may be absent and entry payloads remain unrestricted. Skip non-dict
+    entries and None timings; prefer median over time without validating values.
+    Incompatible arithmetic or formatting and a zero baseline still raise.
+    """
     print("-- compare vs baseline (neg = faster) --")
+    section: Literal["micro", "macro"]
     for section in ("micro", "macro"):
         for k, v in cur.get(section, {}).items():
             if not isinstance(v, dict):
