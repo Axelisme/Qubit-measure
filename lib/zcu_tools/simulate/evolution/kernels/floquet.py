@@ -410,6 +410,51 @@ def _rotation(entry_coefficients, harmonic, phase):
 
 
 @njit(nogil=True, cache=True)
+def _second_contraction(data, duration, omega, outer, inner):
+    """Contract the middle mode with BLAS, retaining stable close-pole formulas."""
+    lam, b, factors, carriers = data
+    sign = 2 * outer - 1
+    sign2 = 2 * inner - 1
+    first = b[outer] * factors[outer]
+    second = b[inner] * factors[inner]
+    numerator = first @ b[inner] - carriers[sign + 2] * (b[outer] @ second)
+    result = np.empty_like(numerator)
+    for i in range(len(lam)):
+        for k in range(len(lam)):
+            bb = lam[k] + 1j * (sign + sign2) * omega
+            gap = lam[i] - bb
+            if abs(gap) * duration >= 0.5:
+                result[i, k] = numerator[i, k] / gap
+            else:
+                value = 0.0j
+                for j in range(len(lam)):
+                    product = b[outer, i, j] * b[inner, j, k]
+                    if abs(product) != 0:
+                        a = lam[j] + 1j * sign * omega
+                        value += product * _k(lam[i], bb, a, duration)
+                result[i, k] = value
+    # Preserve the old repeated-inner-pole branch even for separated endpoints.
+    # Its edge list is independent of the outer endpoint, so scan only m^2 edges.
+    for j in range(len(lam)):
+        a = lam[j] + 1j * sign * omega
+        for k in range(len(lam)):
+            bb = lam[k] + 1j * (sign + sign2) * omega
+            if abs(bb - a) * duration >= 1e-6:
+                continue
+            for i in range(len(lam)):
+                gap = lam[i] - bb
+                if abs(gap) * duration < 0.5:
+                    continue
+                product = b[outer, i, j] * b[inner, j, k]
+                if abs(product) != 0:
+                    rational = (
+                        factors[outer, i, j] - carriers[sign + 2] * factors[inner, j, k]
+                    ) / gap
+                    result[i, k] += product * (_k(lam[i], bb, a, duration) - rational)
+    return result
+
+
+@njit(nogil=True, cache=True)
 def _modal(entry_data, parameters, states):
     lam, modes, inverse, coefficients, harmonic, couplings = entry_data
     # This loop runs in one GIL-free chunk; parallelism belongs to the engine.
@@ -421,46 +466,18 @@ def _modal(entry_data, parameters, states):
         end = _rotation(coefficients, harmonic, end_phase)
         density = start.conj().T @ states[row] @ start
         u = inverse @ density.ravel()
-        transformed = np.empty(len(lam), dtype=np.complex128)
-        b = couplings[int(port)] * gain
         omega = 2 * np.pi * frequency
         factors, exponentials, carriers = _first_factors(lam, duration, omega)
         phases = np.exp(1j * np.array([-1, 1]) * theta)
-        for i in range(len(lam)):
-            value = exponentials[i] * u[i]
-            for outer in range(2):
-                sign = 2 * outer - 1
-                phase = phases[outer]
-                for j in range(len(lam)):
-                    first = b[outer, i, j] * phase
-                    if abs(first) == 0:
-                        continue
-                    a = lam[j] + 1j * sign * omega
-                    value += first * u[j] * factors[outer, i, j]
-                    for inner in range(2):
-                        sign2 = 2 * inner - 1
-                        phase2 = phases[inner]
-                        for k in range(len(lam)):
-                            product = first * b[inner, j, k] * phase2 * u[k]
-                            if abs(product) != 0:
-                                bb = lam[k] + 1j * (sign + sign2) * omega
-                                gap = lam[i] - bb
-                                if (
-                                    abs(bb - a) * duration >= 1e-6
-                                    and abs(gap) * duration >= 0.5
-                                ):
-                                    # Shift the second edge's first factor by
-                                    # the outer carrier before differencing.
-                                    second = (
-                                        factors[outer, i, j]
-                                        - carriers[sign + 2] * factors[inner, j, k]
-                                    ) / gap
-                                else:
-                                    # Preserve the existing repeated-pole and
-                                    # close-endpoint formulas without regrouping.
-                                    second = _k(lam[i], bb, a, duration)
-                                value += product * second
-            transformed[i] = value
+        b = couplings[int(port)] * gain
+        transformed = exponentials * u
+        for outer in range(2):
+            transformed += phases[outer] * ((b[outer] * factors[outer]) @ u)
+            for inner in range(2):
+                second = _second_contraction(
+                    (lam, b, factors, carriers), duration, omega, outer, inner
+                )
+                transformed += phases[outer] * phases[inner] * (second @ u)
         density = (modes @ transformed).reshape(states.shape[1:])
         states[row] = end @ density @ end.conj().T
 
