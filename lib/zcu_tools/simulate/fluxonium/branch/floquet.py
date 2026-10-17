@@ -270,17 +270,17 @@ class FloquetWithTLSBranchAnalysis(_BaseFloquetBranchAnalysis):
         )
         if esys is None:
             esys = fluxonium.eigensys(evals_count=qub_dim)
-        H = qt.Qobj(fluxonium.hamiltonian(energy_esys=esys))
+        hamiltonian = qt.Qobj(fluxonium.hamiltonian(energy_esys=esys))
         n_op = qt.Qobj(fluxonium.n_operator(energy_esys=esys))
 
-        H = (
-            qt.tensor(H, qt.identity(2))
+        hamiltonian = (
+            qt.tensor(hamiltonian, qt.identity(2))
             + qt.tensor(qt.identity(qub_dim), 0.5 * E_tls * qt.sigmaz())
             + g_tls * qt.tensor(n_op, qt.sigmax())
         )
         n_op = qt.tensor(n_op, qt.identity(2))
 
-        self.H_with_drive = [H, [n_op, lambda t, amp: amp * np.cos(r_f * t)]]
+        self.H_with_drive = [hamiltonian, [n_op, lambda t, amp: amp * np.cos(r_f * t)]]
 
     def _floquet_args(self, photon: float) -> dict[str, float]:
         return {"amp": 2 * self.g * np.sqrt(photon)}
