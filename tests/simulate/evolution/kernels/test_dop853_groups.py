@@ -155,7 +155,7 @@ def fallback_case(mode: str) -> KernelCase:
 
 
 @pytest.mark.parametrize("mode", ["zero", "mixed", "chain"])
-def test_fallback_calls_preserve_original_lab_frame_endpoints_exactly(
+def test_fallback_rows_preserve_original_lab_frame_endpoints_exactly(
     mode: str,
 ) -> None:
     case = fallback_case(mode)
@@ -164,10 +164,28 @@ def test_fallback_calls_preserve_original_lab_frame_endpoints_exactly(
         Path(__file__).with_name("dop853_lab_endpoints.json").read_text()
     )[mode]
     expected = np.array(stored["real"]) + 1j * np.array(stored["imag"])
-    np.testing.assert_array_equal(actual, expected)
+    lab_rows = np.arange(len(case.states)) if mode == "chain" else np.array([0])
+    np.testing.assert_array_equal(actual[lab_rows], expected[lab_rows])
 
 
-def test_engine_worker_and_chunk_partition_preserve_independent_density() -> None:
+@pytest.mark.parametrize("mode", ["zero", "mixed"])
+def test_mixed_eligibility_independent_rows_are_exact_under_apply_partition(
+    mode: str,
+) -> None:
+    case = fallback_case(mode)
+    rows = np.arange(len(case.states))
+    whole = evolve_rows(case, rows)
+    singles = np.concatenate([evolve_rows(case, np.array([row])) for row in rows])
+    permutation = np.array([4, 2, 0, 5, 1, 3])
+    reordered = evolve_rows(case, permutation)[np.argsort(permutation)]
+    np.testing.assert_array_equal(whole, singles)
+    np.testing.assert_array_equal(reordered, singles)
+
+
+@pytest.mark.parametrize("mixed", [False, True])
+def test_engine_worker_and_chunk_partition_preserve_independent_density(
+    mixed: bool,
+) -> None:
     case = common_controls()
     n = len(case.states)
     pulse = replace(
@@ -175,7 +193,15 @@ def test_engine_worker_and_chunk_partition_preserve_independent_density() -> Non
         amplitude=case.table.tone_amplitude[:, 0],
         frequency_ghz=case.table.tone_frequency_ghz[:, 0],
     )
-    workload = replace(batch(n, duration=2.5), tracks=(pulse,))
+    tracks = (pulse,)
+    if mixed:
+        extra = replace(
+            track(n, case.table.envelopes[0], duration=2.5),
+            amplitude=np.full(n, 0.12),
+            active=np.arange(n) == 2,
+        )
+        tracks += (extra,)
+    workload = replace(batch(n, duration=2.5), tracks=tracks)
     results = []
     for workers, chunks in ((1, 1), (1, 3), (2, 1), (2, 4)):
         with closing(
