@@ -38,6 +38,7 @@ from zcu_tools.gui.app.measure.services.tab_form import (
 from zcu_tools.gui.app.measure.state import State, TabInteractionState
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+from zcu_tools.gui.app.measure.writeback import WritebackItem
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.form_adapter import Form
@@ -177,7 +178,7 @@ def _snapshot(
     supports_load_data: bool = False,
     analyze_params: object = _DEFAULT_PARAMS,
     post_analyze_params: object | None = None,
-    writeback_items: tuple = (),
+    writeback_items: tuple[WritebackItem, ...] = (),
     figure: object = _DEFAULT_PARAMS,
     post_figure: object = _DEFAULT_PARAMS,
     data_status: SaveStatus | None = None,

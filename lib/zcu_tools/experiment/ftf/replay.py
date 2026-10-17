@@ -19,7 +19,7 @@ def replay_versions() -> tuple[tuple[str, str], ...]:
     """
     return (
         ("backend", BACKEND_VERSION),
-        ("model", "ftf-v1"),
+        ("model", "ftf-v2"),
         ("numeric", SEGMENT_NUMERIC_VERSION),
         ("rng", "PCG64/SeedSequence-v2"),
         *((name, version(name)) for name in ("numpy", "scipy", "scqubits")),
@@ -49,7 +49,7 @@ def replay_round(path: Path) -> RoundStatistics | RoundSignals:
     source = FTFSource(acquire.settings, DeviceManager())
     try:
         if (
-            record.snapshot.version != "ftf-v1"
+            record.snapshot.version != "ftf-v2"
             or record.snapshot.model_identity != source.identity
         ):
             raise ValueError("private replay model identity mismatch")

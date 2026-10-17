@@ -1,14 +1,15 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-17
+**Last updated:** 2026-10-17，欄位指南導航
 
 `ftf(path_or_settings)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
-`DeviceManager`, applies their initial values once and binds the selected channel
+`DeviceManager`, applies their initial values once and binds the derived channel
 counts to the fixed mock QICK profile. The returned manager owns cleanup. A
 builder failure closes its resources and preserves both startup and close errors.
 The executable example is `zcu_lab/simulation_envs/FTF/environment.py` with adjacent
 `ftf.yaml`, a working copy of the tracked `default.yaml`. The Notebook walkthrough is `notebook_md/single_qubit.md`.
+欄位用途、單位與 entry 接線請讀 [FTF YAML v2 欄位指南](../../../../zcu_lab/simulation_envs/FTF/field-guide.md)。
 
 `FTFSource.snapshot` reads live DC values before each round. It checks units and
 limits without restoring startup values. `execute` consumes detached templates.
@@ -27,11 +28,11 @@ The binding serializes calls; direct author callers must do the same.
 `plan_template` converts QICK us/MHz/degrees into ns/GHz/radians with point
 arrays. It preserves signed gains, complex sampled envelopes and the common
 carrier origin. Pulse supports use absolute nearest-2-ns rounding, ties even.
-The model owner supplies a DC `ModelSource` and filters flux tracks into a ragged
-lattice schedule and a continuous waveform sampled on the same DAC grid. The
-engine uses the quantized T4 subsegments without a drive and continuous-flux
-DOP853 when flux changes during a drive. It evolves every template together to
-readout start.
+The model owner supplies a fixed-DC `ModelSource` and static schedule for each
+round. Charge microwave controls evolve every template to readout start. FTF
+constructs no flux lines or flux controls; shared simulation-engine flux support
+is unchanged. Version 2 settings group physical values, named DC/charge lines,
+readout and numerics. Version 1 is not accepted.
 
 Readout uses the DC model and populations in its energy basis. FTF explicitly
 calls ADC's `normalize_populations` once after `batch_populations`, before
@@ -40,8 +41,7 @@ tolerated-negative cleanup and row normalization. Invalid rows fail without
 sampling; the error reports rejected row counts. The source retains the latest
 evolve diagnostics even when this preparation fails, including the engine's
 report-only maximum trace error. Raw evolution densities remain unchanged.
-It ignores flux
-tails and controls during or after readout. Earlier control portions still evolve
+It ignores charge controls during or after readout. Earlier control portions still evolve
 normally. Each point must have exactly one active readout pulse, including when
 several mutually exclusive slots represent that pulse. The environment supports
 one bound ADC with multiple trigger windows. Constant readout envelope values

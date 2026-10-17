@@ -1,110 +1,115 @@
-# Illustrative F1-C-F2 sample, not a calibrated chip or converged truncation.
+# Illustrative F1-coupler-F2 settings. Truncation convergence is not guaranteed.
+# Circuit energies, couplings and resonator frequencies: Device A, Table 5.1,
+# Chapter 5, FTF Architecture for Quantum Computing. Other values are local settings.
 format: zcu.ftf
-version: 1
-channels:
-  generators: 3
-  readouts: 1
-model:
+version: 2
+
+chip:
   f1:
-    ej_ghz: 8.0
-    ec_ghz: 1.0
-    el_ghz: 0.5
-    native_cutoff: 24
-    levels: 4
+    ej_ghz: 6.27
+    ec_ghz: 1.41
+    el_ghz: 0.80
     q_cap: 1000000.0
     q_ind: 100000000.0
     xqp: 0.0000002
     aphi: 0.000002
   coupler:
-    ejmax_ghz: 12.0
-    ec_ghz: 0.3
-    asymmetry: 0.15
+    ejmax_ghz: 16.4 # EJ1 + EJ2 = 3.4 + 13 GHz
+    ec_ghz: 0.32
+    asymmetry: 0.58536585 # abs(EJ1 - EJ2) / (EJ1 + EJ2)
     ng: 0.0
-    charge_cutoff: 8
-    levels: 4
     q_cap: 1000000.0
     aphi: 0.000002
     # Charge/flux line losses are disabled when their parameters are omitted.
   f2:
-    ej_ghz: 8.6
-    ec_ghz: 0.9
-    el_ghz: 0.55
-    native_cutoff: 24
-    levels: 4
+    ej_ghz: 5.71
+    ec_ghz: 1.30
+    el_ghz: 0.59
     q_cap: 1000000.0
     q_ind: 100000000.0
     xqp: 0.0000002
     aphi: 0.000002
-  g1c_ghz: 0.06
-  g2c_ghz: 0.07
-  g12_ghz: -0.01
-  temperature_k: 0.02
-  # Increase native/local/global dimensions independently to check your sample.
-  retained_levels: 16
-devices:
-  - name: f1_bias
-    unit: V
-    limits: [-1.0, 1.0]
-    initial: 0.0
-    rampstep: 0.01
-  - name: coupler_bias
-    unit: V
-    limits: [-1.0, 1.0]
-    initial: 0.1
-    rampstep: 0.01
-  - name: f2_bias
-    unit: V
-    limits: [-1.0, 1.0]
-    initial: 0.0
-    rampstep: 0.01
-dc_mapping:
-  offset: [0.48, 0.2, 0.49]
-  columns:
-    # Each voltage mainly biases its own circuit; rows are F1, C, F2.
-    - source: f1_bias
-      unit: Phi0/V
-      coefficients: [0.2, 0.002, -0.001]
-    - source: coupler_bias
-      unit: Phi0/V
-      coefficients: [0.001, 0.2, -0.001]
-    - source: f2_bias
-      unit: Phi0/V
-      coefficients: [-0.001, 0.002, 0.2]
-flux_sources:
-  - name: coupler_flux
-    gen_ch: 1
-    coefficients_phi0_per_gain: [0.002, 0.1, -0.002]
-    delay_ns: 2.0
-    tau_ns: 8.0
-microwave_sources:
-  - name: microwave
+  g_f1_coupler_ghz: 0.570
+  g_f2_coupler_ghz: 0.560
+  g_f1_f2_ghz: 0.125
+  temperature_k: 0.05
+
+dc_bias:
+  offset_phi0: { f1: 0.48, coupler: 0.2, f2: 0.49 }
+  # Loop flux = offset + sum(source current * flux_per_unit).
+  # Approximate main-loop periods: f1 7.8 mA, coupler 8.0 mA, f2 8.2 mA.
+  # Signed DC calibration in Phi0/A, including crosstalk.
+  sources:
+    f1_bias:
+      unit: A
+      limits: [-0.01, 0.01] # -10 to +10 mA
+      initial: 0.0
+      ramp_step: 0.000001 # A, equivalent to 0.001 mA
+      flux_per_unit: { f1: 128.2, coupler: 2, f2: -1 }
+    coupler_bias:
+      unit: A
+      limits: [-0.01, 0.01]
+      initial: 0.0
+      ramp_step: 0.000001
+      flux_per_unit: { f1: 1.5, coupler: 125.0, f2: -1.5 }
+    f2_bias:
+      unit: A
+      limits: [-0.01, 0.01]
+      initial: 0.0
+      ramp_step: 0.000001
+      flux_per_unit: { f1: -1, coupler: 2, f2: 122.0 }
+
+
+drive_lines:
+  microwave:
     gen_ch: 2
-    # Each pair is [real,imag] GHz/gain multiplying full n, not normalized n01.
-    coefficients_ghz_per_gain: [[0.1, 0.0], [0.0, 0.0], [0.002, -0.001]]
-readout_source:
-  gen_ch: 0
-  input_per_gain: 1.0 # sqrt(photons/ns)/gain
-receiver:
-  ro_ch: 0
-  gain: 10000.0 # ADC sample units / sqrt(photons/ns)
-  phase_deg: 0.0
-  offset_adc: [0.0, 0.0]
-  # Two-sided white PSD in ADC^2*ns. Sample covariance is this matrix / dt_ns.
-  noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]]
-resonators:
-  - frequency_ghz: 6.0
-    charge_coefficients_ghz: [0.03, 0.005, 0.0]
-    kappa_external_mhz: 1.0 # kappa_external/(2*pi), MHz
-    kappa_internal_mhz: 0.1
-    thermal_occupation: 0.0 # Omit for Bose(common temperature, bare frequency).
-  - frequency_ghz: 6.2
-    charge_coefficients_ghz: [0.0, 0.005, 0.03]
-    kappa_external_mhz: 1.0
-    kappa_internal_mhz: 0.1
-    thermal_occupation: 0.0
-solver:
-  rtol: 0.00000001
-  atol: 0.0000000001
-  max_step_ns: 0.1
-  bath_segment_ns: 2.0 # nearest 2 ns, at least one tick
-seed: 123
+    # GHz/gain multiplying full charge n, not normalized n01.
+    charge_drive_ghz_per_gain:
+      f1: { real: 0.1, imag: 0.0 }
+      coupler: { real: 0.1, imag: 0.0 }
+      f2: { real: 0.1, imag: 0.0 }
+
+readout:
+  drive:
+    gen_ch: 0
+    input_per_gain: 10.0 # sqrt(photons/ns)/gain
+  resonators:
+    r1:
+      frequency_ghz: 7.19
+      charge_coefficients_ghz: { f1: 0.03, coupler: 0.005, f2: 0.0 }
+      kappa_external_mhz: 1.0 # kappa_external/(2*pi), MHz
+      kappa_internal_mhz: 0.1
+      thermal_occupation: 0.0 # Omit for Bose(common temperature, bare frequency).
+    r2:
+      frequency_ghz: 7.08
+      charge_coefficients_ghz: { f1: 0.0, coupler: 0.005, f2: 0.03 }
+      kappa_external_mhz: 1.0
+      kappa_internal_mhz: 0.1
+      thermal_occupation: 0.0
+  adc:
+    ro_ch: 0
+    gain: 100.0 # ADC sample units / sqrt(photons/ns)
+    phase_deg: 0.0
+    offset_adc: [0.0, 0.0] # I, Q
+    # Two-sided white PSD in ADC^2*ns. Sample covariance = PSD / dt_ns.
+    noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]]
+
+numerics:
+  # Increase native/local/global dimensions independently to check convergence.
+  truncation:
+    f1:
+      native_cutoff: 24
+      levels: 4
+    coupler:
+      charge_cutoff: 8
+      levels: 4
+    f2:
+      native_cutoff: 24
+      levels: 4
+    retained_levels: 16
+  solver:
+    rtol: 0.00000001
+    atol: 0.0000000001
+    max_step_ns: 0.1
+    bath_segment_ns: 2.0 # nearest 2 ns, at least one tick
+  seed: 123

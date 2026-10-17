@@ -4,144 +4,219 @@ from pathlib import Path
 
 import pytest
 import yaml
+from zcu_tools.resources.ftf import parse_ftf
 
 from tests.resources._ftf_data import ftf_document
 
 
 def test_singular_receiver_spectral_density_is_legal() -> None:
-    from zcu_tools.resources.ftf import parse_ftf
-
-    config = parse_ftf(
-        ftf_document()
-        | {
-            "receiver": {
-                "ro_ch": 0,
-                "gain": 0.0,
-                "noise_psd_adc2_ns": [[1.0, 0.1], [0.1, 0.01]],
-            }
-        }
-    )
-    assert config.receiver.noise_psd_adc2_ns == ((1.0, 0.1), (0.1, 0.01))
+    document = ftf_document()
+    _set_field(document, "readout.adc.gain", 0.0)
+    _set_field(document, "readout.adc.noise_psd_adc2_ns", [[1.0, 0.1], [0.1, 0.01]])
+    config = parse_ftf(document)
+    assert config.readout.adc.noise_psd_adc2_ns == ((1.0, 0.1), (0.1, 0.01))
 
 
 def test_ftf_loads_detached_named_settings(tmp_path: Path) -> None:
     from zcu_tools.resources.ftf import load_ftf
 
+    document = ftf_document()
     path = tmp_path / "model.yaml"
-    path.write_text(yaml.safe_dump(ftf_document()), encoding="utf-8")
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
     config = load_ftf(path)
-    assert config.model.g12_ghz == -0.02
-    assert config.devices[0].unit == "V"
-    assert config.flux_sources[0].delay_ns == 0
-    assert config.flux_sources[0].tau_ns == 0
-    assert config.receiver.noise_psd_adc2_ns == ((0.0, 0.0), (0.0, 0.0))
-    assert config.model.coupler.ng == 0
+    document.clear()
+    assert config.chip.g_f1_f2_ghz == -0.02
+    assert config.dc_bias.sources["bias"].unit == "V"
+    assert config.readout.adc.noise_psd_adc2_ns == ((0.0, 0.0), (0.0, 0.0))
+    assert config.chip.coupler.ng == 0
+    assert config.dc_bias.sources["bias"].flux_per_unit.coupler == 0.1
+    assert config.dc_bias.offset_phi0.f2 == 0.4
+    assert config.drive_lines["mw"].charge_drive_ghz_per_gain.f2.imag == 0.02
+    assert config.readout.resonators.r2.frequency_ghz == 6.2
+    assert config.numerics.truncation.f1.native_cutoff == 8
+    assert config.numerics.truncation.retained_levels == 8
+    assert config.readout.adc.offset_adc == (0.0, 0.0)
+
+
+def test_ftf_load_preserves_merge_defaults_and_explicit_overrides(
+    tmp_path: Path,
+) -> None:
+    from zcu_tools.resources.ftf import load_ftf
+
+    text = (
+        yaml.safe_dump(ftf_document())
+        .replace(
+            "    bias:\n",
+            "    bias:\n      <<: &defaults {initial: 0.6, ramp_step: 0.3}\n",
+        )
+        .replace("      ramp_step: 0.1\n", "")
+    )
+    path = tmp_path / "merged.yaml"
+    path.write_text(text, encoding="utf-8")
+
+    config = load_ftf(path)
+
+    assert config.dc_bias.sources["bias"].initial == 0.2
+    assert config.dc_bias.sources["bias"].ramp_step == 0.3
+    assert config.dc_bias.sources["bias"].unit == "V"
 
 
 @pytest.mark.parametrize(
-    "patch,path",
+    "name,key_line,first_value",
     [
-        ({"mystery": 1}, "mystery"),
-        ({"channels": {"generators": 3, "readouts": 1, "clock": 10}}, "channels.clock"),
         (
-            {
-                "devices": [
-                    {
-                        "name": "bias",
-                        "unit": "mA",
-                        "limits": [-1, 1],
-                        "initial": 0,
-                        "rampstep": 0.1,
-                    }
-                ]
-            },
-            "devices.0.unit",
+            "bias",
+            "    bias:\n",
+            "{unit: A, limits: [-2, 2], initial: 0.5, ramp_step: 0.2, "
+            "flux_per_unit: {f1: 0, coupler: 0.2, f2: 0}}",
         ),
         (
-            {
-                "devices": [
-                    {
-                        "name": "bias",
-                        "unit": "V",
-                        "limits": [-1, 1],
-                        "initial": 2,
-                        "rampstep": 0.1,
-                    }
-                ]
-            },
-            "devices.0.initial",
-        ),
-        (
-            {
-                "dc_mapping": {
-                    "offset": [0, 0, 0],
-                    "columns": [
-                        {
-                            "source": "missing",
-                            "unit": "Phi0/V",
-                            "coefficients": [0, 1, 0],
-                        }
-                    ],
-                }
-            },
-            "dc_mapping.columns.0.source",
-        ),
-        (
-            {
-                "dc_mapping": {
-                    "offset": [0, 0, 0],
-                    "columns": [
-                        {"source": "bias", "unit": "Phi0/A", "coefficients": [0, 1, 0]}
-                    ],
-                }
-            },
-            "dc_mapping.columns.0.unit",
-        ),
-        (
-            {
-                "flux_sources": [
-                    {
-                        "name": "flux",
-                        "gen_ch": 0,
-                        "coefficients_phi0_per_gain": [0, 1, 0],
-                    }
-                ]
-            },
-            "flux_sources.0.gen_ch",
-        ),
-        (
-            {
-                "flux_sources": [
-                    {"name": "flux", "gen_ch": 1, "coefficients_phi0_per_gain": [0, 1]}
-                ]
-            },
-            "flux_sources.0.coefficients_phi0_per_gain",
-        ),
-        (
-            {
-                "receiver": {
-                    "ro_ch": 0,
-                    "gain": 1,
-                    "noise_psd_adc2_ns": [[1, 2], [2, 1]],
-                }
-            },
-            "receiver.noise_psd_adc2_ns",
-        ),
-        (
-            {
-                "solver": {
-                    "rtol": 0,
-                    "atol": 1e-8,
-                    "max_step_ns": 1,
-                    "bath_segment_ns": 4,
-                }
-            },
-            "solver.rtol",
+            "mw",
+            "  mw:\n",
+            "{gen_ch: 3, charge_drive_ghz_per_gain: "
+            "{f1: {real: 0.1, imag: 0}, coupler: {real: 0, imag: 0}, "
+            "f2: {real: 0, imag: 0}}}",
         ),
     ],
 )
-def test_ftf_field_path_diagnostics(patch: dict[str, object], path: str) -> None:
-    from zcu_tools.resources.ftf import parse_ftf
+def test_duplicate_yaml_keys_are_rejected_before_overwrite(
+    tmp_path: Path, name: str, key_line: str, first_value: str
+) -> None:
+    from zcu_tools.resources.ftf import load_ftf
 
-    with pytest.raises(ValueError, match=path.replace(".", r"\.")):
-        parse_ftf(ftf_document() | patch)
+    text = yaml.safe_dump(ftf_document())
+    text = text.replace(key_line, f"{key_line.rstrip()} {first_value}\n{key_line}")
+    path = tmp_path / "duplicate.yaml"
+    path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(
+        ValueError, match=rf"(?s)duplicate.*{name}.*line [0-9]+"
+    ) as error:
+        load_ftf(path)
+    assert str(path) in str(error.value)
+
+
+def _set_field(document: dict[str, object], path: str, value: object) -> None:
+    node = document
+    *parents, field = path.split(".")
+    for key in parents:
+        child = node[key]
+        if not isinstance(child, dict):
+            raise TypeError("synthetic field path must traverse mappings")
+        node = child
+    node[field] = value
+
+
+@pytest.mark.parametrize(
+    "path,value,error_path",
+    [
+        ("mystery", 1, "mystery"),
+        ("dc_bias.sources.bias.unit", "mA", "dc_bias.sources.bias.unit"),
+        ("dc_bias.sources.bias.initial", 2, "dc_bias.sources.bias.initial"),
+        ("dc_bias.sources.bias.limits", [1, -1], "dc_bias.sources.bias"),
+        ("dc_bias.sources.bias.ramp_step", 0, "dc_bias.sources.bias.ramp_step"),
+        (
+            "dc_bias.sources.bias.flux_per_unit",
+            {"f1": 0, "coupler": 1},
+            "dc_bias.sources.bias.flux_per_unit.f2",
+        ),
+        (
+            "dc_bias.sources.bias.flux_per_unit.f1",
+            float("inf"),
+            "dc_bias.sources.bias.flux_per_unit.f1",
+        ),
+        ("drive_lines.mw.gen_ch", 0, "drive_lines.mw.gen_ch"),
+        ("drive_lines.mw.gen_ch", -1, "drive_lines.mw.gen_ch"),
+        (
+            "drive_lines.mw.charge_drive_ghz_per_gain.f1",
+            {"real": 0},
+            "drive_lines.mw.charge_drive_ghz_per_gain.f1.imag",
+        ),
+        (
+            "readout.adc.noise_psd_adc2_ns",
+            [[1, 2], [2, 1]],
+            "readout.adc.noise_psd_adc2_ns",
+        ),
+        ("numerics.solver.rtol", 0, "numerics.solver.rtol"),
+        ("numerics.truncation.f1.levels", 9, "numerics.truncation.f1"),
+        ("numerics.truncation.coupler.levels", 8, "numerics.truncation.coupler"),
+        ("numerics.truncation.retained_levels", 9, "numerics.truncation"),
+        ("numerics.seed", -1, "numerics.seed"),
+        ("chip.coupler.flux_resistance_ohm", 50, "chip.coupler"),
+        ("version", 2.0, "version"),
+    ],
+)
+def test_ftf_field_path_diagnostics(path: str, value: object, error_path: str) -> None:
+    document = ftf_document()
+    _set_field(document, path, value)
+    with pytest.raises(ValueError, match=error_path.replace(".", r"\.")):
+        parse_ftf(document)
+
+
+def test_duplicate_dc_and_drive_names_are_rejected() -> None:
+    document = ftf_document()
+    _set_field(
+        document,
+        "drive_lines.bias",
+        {
+            "gen_ch": 1,
+            "charge_drive_ghz_per_gain": {
+                "f1": {"real": 0, "imag": 0},
+                "coupler": {"real": 0, "imag": 0},
+                "f2": {"real": 0, "imag": 0},
+            },
+        },
+    )
+    with pytest.raises(ValueError, match=r"drive_lines.bias: duplicate source name"):
+        parse_ftf(document)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("flux_lines", {}),
+        ("flux_lines", {"line": {"gen_ch": 1}}),
+        ("flux_sources", []),
+        ("channels", {"generators": 3}),
+    ],
+)
+def test_v2_rejects_removed_and_unknown_top_level_fields(
+    field: str, value: object
+) -> None:
+    document = ftf_document()
+    try:
+        parse_ftf(document)
+    except ValueError as error:
+        pytest.fail(f"v2 base must validate before checking {field}: {error}")
+    with pytest.raises(ValueError, match=field):
+        parse_ftf(document | {field: value})
+
+
+def test_version_one_is_rejected_at_version_field() -> None:
+    with pytest.raises(ValueError, match=r"version:.*2"):
+        parse_ftf(ftf_document() | {"version": 1})
+
+
+@pytest.mark.parametrize(
+    "section,path",
+    [
+        ("dc_bias", "offset_phi0.f2"),
+        ("drive_lines", "mw.charge_drive_ghz_per_gain.f2"),
+        ("readout", "resonators.r1.charge_coefficients_ghz.f2"),
+    ],
+)
+def test_v2_requires_every_named_loop(section: str, path: str) -> None:
+    document = ftf_document()
+    try:
+        parse_ftf(document)
+    except ValueError as error:
+        pytest.fail(f"v2 base must validate before checking loop maps: {error}")
+    # Work with decoded YAML just as a caller editing a file would.
+    node = document[section]
+    for key in path.split(".")[:-1]:
+        assert isinstance(node, dict)
+        node = node[key]
+    assert isinstance(node, dict)
+    del node["f2"]
+    with pytest.raises(ValueError, match=(section + "." + path).replace(".", r"\.")):
+        parse_ftf(document)

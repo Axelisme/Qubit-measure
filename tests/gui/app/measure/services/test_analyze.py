@@ -939,7 +939,7 @@ def test_cancel_interactive_clears_analyzing_and_settles_cancelled(qapp):
     received: list[TabInteractionFact] = []
     bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
     # A cancel is not a failure: analyze_failed must NOT fire (no error dialog).
-    failed: list = []
+    failed: list[tuple[str, str]] = []
     on_analyze_failed(svc, lambda tid, err: failed.append((tid, err)))
 
     cancelled = svc.cancel_interactive("tab1")
@@ -1064,7 +1064,7 @@ def test_background_analyze_failure_resets_state(qapp):
     token = svc.start_analyze("tab1", analyze_params_instance=object(), plots=_plots())
     assert state.get_tab("tab1").is_analyzing is True
 
-    failed_signals: list = []
+    failed_signals: list[tuple[str, str]] = []
     on_analyze_failed(svc, lambda tid, err: failed_signals.append((tid, err)))
 
     error = RuntimeError("analysis failed")
@@ -1158,7 +1158,7 @@ def test_on_analyze_finished_post_processing_raise_settles_failed(qapp):
     assert isinstance(writeback, MagicMock)
     writeback.create_draft.side_effect = boom
 
-    failed: list = []
+    failed: list[tuple[str, str]] = []
     on_analyze_failed(svc, lambda tid, err: failed.append((tid, err)))
 
     result = object()

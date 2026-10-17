@@ -46,8 +46,8 @@ def test_replay_retains_complex_samples_and_deduplicated_acquire(
         request=request,
         versions=(("backend", "test-v1"),),
     )
-    a = EnvironmentSnapshot("ftf-v1", "fixed-model", (("bias", 0.2),))
-    b = EnvironmentSnapshot("ftf-v1", "fixed-model", (("bias", 0.4),))
+    a = EnvironmentSnapshot("ftf-v2", "fixed-model", (("bias", 0.2),))
+    b = EnvironmentSnapshot("ftf-v2", "fixed-model", (("bias", 0.4),))
     first = save_replay(tmp_path, fixed, a, 0)
     second = save_replay(tmp_path, fixed, b, 1)
     restored = read_replay(first)

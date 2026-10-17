@@ -194,7 +194,7 @@ def calculate_purcell_t1_vs_flux(
         )
 
         def get_purcell_t1(
-            paramsweep: ParameterSweep, paramindex_tuple: tuple[int, ...], **kwargs
+            paramsweep: ParameterSweep, paramindex_tuple: tuple[int, ...], **_kwargs
         ) -> NDArray[np.float64]:
             fluxonium = paramsweep.get_subsys(0)
             resonator = paramsweep.get_subsys(1)
