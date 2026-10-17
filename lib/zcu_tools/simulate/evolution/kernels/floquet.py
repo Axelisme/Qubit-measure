@@ -181,7 +181,9 @@ def _fourier_averages(samples: NDArray[np.complex128]):
     # The coarse zero mode is the mean of every other sample, so it needs no
     # transform. Compute it before the in-place full transform.
     coarse_zero = samples[::2].sum(axis=0) / (count // 2)
-    fourier = fft(samples, axis=0, overwrite_x=True, workers=1)
+    fourier = np.asarray(
+        fft(samples, axis=0, overwrite_x=True, workers=1), dtype=np.complex128
+    )
     fourier /= count
     return fourier, coarse_zero
 
