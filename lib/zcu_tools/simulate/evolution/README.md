@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, opt-in shadow planner and one-core profile contracts
+**Last updated:** 2026-10-18, compiled gate-cache preparation
 
 ## Segment engine contracts
 
@@ -582,7 +582,16 @@ T6 remains the terminal constant-tone route outside the Hilbert-period domain.
 It uses 1, 4 or 8 steps per carrier period according to r, powers the period
 propagator and adds the fractional-period tail. Carrier phase uses Fourier
 interpolation. Gate-cache Strang splitting and phase Fourier interpolation
-avoid building a full dissipative propagator for every phase.
+avoid building a full dissipative propagator for every phase. Gate preparation
+integrates its sixteen Hilbert phase nodes together through the shared compiled
+DOP853 interval core. Sample knots and the four Strang boundaries restart the
+integration. Single-threaded, nogil preparation lets Engine workers build
+different gate keys concurrently without Python RHS callbacks. Keys, phase
+nodes and the 0.1 ns step ceiling stay unchanged. Unitary integration uses
+rtol=min(1e-8, budget*1e-4) and atol=rtol*0.01. This leaves the segment budget
+for splitting and Fourier interpolation without oversolving high-energy modes.
+An SVD polar projection restores each Hilbert endpoint before the phase Fourier
+transform. It removes accumulated solver norm loss without normalizing density.
 
 ### Chunk scheduling and parallelism
 
