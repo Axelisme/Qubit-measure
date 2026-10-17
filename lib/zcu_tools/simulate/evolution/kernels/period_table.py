@@ -10,11 +10,14 @@ from scipy.linalg import expm
 
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource, SecularDrive, SecularModel
+from ._shaped import drive_bounds, envelope_bounds
+from .dop853 import DOP853Kernel
 
 
 @dataclass(frozen=True)
 class _Entry:
-    model: SecularModel
+    fallback: Prepared
+    tail_budget: float
     frequency: float
     bound: float
     coefficients: NDArray[np.complex128]
@@ -29,15 +32,18 @@ class _Prepared:
     @property
     def nbytes(self) -> int:
         return sum(
-            e.coefficients.nbytes + e.populations.nbytes + e.coherences.nbytes
+            e.coefficients.nbytes
+            + e.populations.nbytes
+            + e.coherences.nbytes
+            + e.fallback.nbytes
             for e in self.entries
         )
 
 
 def _unitary_table(
-    model: SecularModel, frequency: float, bound: float
+    model: SecularModel, port: int, frequency: float, bound: float
 ) -> NDArray[np.complex128]:
-    """Return Chebyshev coefficients of Fourier coefficients for every port."""
+    """Return amplitude/phase coefficients for the row's actual drive port."""
     size = len(model.energies_ghz)
     angles = np.pi * (np.arange(8) + 0.5) / 8
     amplitudes = bound * (1 + np.cos(angles)) / 2
@@ -45,7 +51,10 @@ def _unitary_table(
     transform = 2 / 8 * np.cos(np.arange(8)[:, None] * angles)
     transform[0] /= 2
     tables = []
-    for drive in model.drives:
+    # A common energy shift is unobservable and reduces low-carrier ODE work.
+    energies = model.energies_ghz
+    h0 = np.diag(energies - (energies[0] + energies[-1]) / 2)
+    for drive in (model.drives[port],):
 
         def rhs(
             time: float,
@@ -56,7 +65,7 @@ def _unitary_table(
                 1j * (phases[None, :] + 2 * np.pi * frequency * time)
             )
             h = (
-                np.diag(model.energies_ghz)
+                h0
                 + z.real[..., None, None] * drive.in_phase_ghz
                 + z.imag[..., None, None] * drive.quadrature_ghz
             )
@@ -84,6 +93,25 @@ def _unitary_table(
 
 
 @njit(nogil=True, cache=True)
+def _phase_coefficients(coefficients, theta):
+    result = np.zeros_like(coefficients[:, 0])
+    for mode_index in range(16):
+        mode = mode_index if mode_index < 8 else mode_index - 16
+        result += np.exp(1j * mode * theta) * coefficients[:, mode_index]
+    return result
+
+
+@njit(nogil=True, cache=True)
+def _amplitude_unitary(coefficients, x):
+    previous = np.zeros_like(coefficients[0])
+    current = previous.copy()
+    for degree in range(7, 0, -1):
+        updated = 2 * x * current - previous + coefficients[degree]
+        previous, current = current, updated
+    return x * current - previous + coefficients[0]
+
+
+@njit(nogil=True, cache=True)
 def _periods(states, playback, unitary_table, dissipator):
     """Apply independent rows in one single-threaded, GIL-free batch."""
     ports, amplitudes, phases, cycles = playback
@@ -92,22 +120,21 @@ def _periods(states, playback, unitary_table, dissipator):
     size = states.shape[1]
     for row in range(len(states)):
         rho = states[row].copy()
+        real = np.all(amplitudes[row].imag == 0)
+        # Real envelopes only use two phases, including signed gains. Contract
+        # Fourier modes once, rather than sixteen times per carrier cycle.
+        positive = _phase_coefficients(coefficients[ports[row]], phases[row])
+        negative = _phase_coefficients(coefficients[ports[row]], phases[row] + np.pi)
         for cycle in range(cycles[row]):
             amplitude = amplitudes[row, cycle]
             x = 2 * abs(amplitude) / bound - 1
-            theta = phases[row] + np.angle(amplitude)
-            u = np.zeros((size, size), np.complex128)
-            for mode_index in range(16):
-                mode = mode_index if mode_index < 8 else mode_index - 16
-                b1 = np.zeros((size, size), np.complex128)
-                b2 = b1.copy()
-                for degree in range(7, 0, -1):
-                    b0 = 2 * x * b1 - b2 + coefficients[ports[row], degree, mode_index]
-                    b2 = b1
-                    b1 = b0
-                u += np.exp(1j * mode * theta) * (
-                    x * b1 - b2 + coefficients[ports[row], 0, mode_index]
+            if real:
+                phase_coefficients = positive if amplitude.real >= 0 else negative
+            else:
+                phase_coefficients = _phase_coefficients(
+                    coefficients[ports[row]], phases[row] + np.angle(amplitude)
                 )
+            u = _amplitude_unitary(phase_coefficients, x)
             for half in range(2):
                 diagonal = np.diag(rho).copy()
                 rho *= coherences
@@ -139,62 +166,54 @@ def _tail(
     starts: NDArray[np.float64],
     states: NDArray[np.complex128],
 ) -> None:
-    """Integrate all residual intervals jointly, with full secular dissipation."""
+    """Advance residual intervals with the existing compiled strict DOP853.
+
+    Shift carrier phase and envelope-local time together. Tail rows are
+    independent even when the caller supplies touching same-timeline segments.
+    """
     durations = table.duration_ns[rows] - starts
-    if not np.any(durations > 0):
+    selected = np.flatnonzero(durations > 0)
+    if not len(selected):
         return
-    model = entry.model
-    size = states.shape[-1]
-    ports = table.tone_port[rows, 0]
-    x = np.stack([d.in_phase_ghz for d in model.drives])[ports]
-    y = np.stack([d.quadrature_ghz for d in model.drives])[ports]
-    outgoing = model.rates_per_ns.sum(axis=0)
-    decay = (outgoing[:, None] + outgoing[None, :]) / 2 + model.dephasing_per_ns
-    diagonal = np.arange(size)
-
-    def rhs(time: float, flat: NDArray[np.complex128]) -> NDArray[np.complex128]:
-        elapsed = starts + durations * time
-        amplitude = _envelopes(table, rows, elapsed[:, None])[:, 0]
-        z = amplitude * np.exp(
-            1j * (table.tone_theta_rad[rows, 0] + 2 * np.pi * entry.frequency * elapsed)
-        )
-        h = (
-            np.diag(model.energies_ghz)
-            + z.real[:, None, None] * x
-            + z.imag[:, None, None] * y
-        )
-        rho = flat.reshape(states.shape)
-        derivative = -2j * np.pi * (h @ rho - rho @ h) - decay * rho
-        derivative[:, diagonal, diagonal] += (
-            np.diagonal(rho, axis1=1, axis2=2) @ model.rates_per_ns.T
-        )
-        return (durations[:, None, None] * derivative).ravel()
-
-    solution = solve_ivp(
-        rhs,
-        (0, 1),
-        states.ravel().copy(),
-        method="DOP853",
-        rtol=2e-10,
-        atol=2e-12,
-        max_step=min(1.0, 0.05 / float(durations.max())),
-        t_eval=[1.0],
+    active = rows[selected]
+    elapsed = starts[selected, None]
+    local_rows = np.arange(len(active), dtype=np.int64)
+    tail_table = SegmentTable(
+        timeline=local_rows,
+        start_ns=np.zeros(len(active)),
+        duration_ns=durations[selected],
+        level=table.level[active],
+        tones=table.tones[active],
+        tone_port=table.tone_port[active],
+        tone_frequency_ghz=table.tone_frequency_ghz[active],
+        tone_amplitude=table.tone_amplitude[active],
+        tone_theta_rad=table.tone_theta_rad[active]
+        + 2 * np.pi * table.tone_frequency_ghz[active] * elapsed,
+        tone_envelope=table.tone_envelope[active],
+        tone_envelope_offset_ns=table.tone_envelope_offset_ns[active] + elapsed,
+        envelopes=table.envelopes,
     )
-    if not solution.success:
-        raise RuntimeError(f"period table tail: {solution.message}")
-    states[:] = solution.y[:, -1].reshape(states.shape)
+    chunk = states[selected].copy()
+    DOP853Kernel().apply(
+        entry.fallback,
+        np.zeros(len(active), dtype=np.int64),
+        tail_table,
+        local_rows,
+        chunk,
+        entry.tail_budget,
+    )
+    states[selected] = chunk
 
 
 class PeriodTableKernel:
-    """Shaped one-tone kernel; the engine owns shape and reuse-count dispatch.
+    """Shaped one-tone kernel; the engine owns amortized preparation dispatch.
 
-    Keys contain flux level, signed carrier and a power-of-two amplitude band.
-    The engine namespaces keys by ModelSource identity. Tables include every
-    model port, allowing port, phase, gain, envelope and duration to vary at
-    apply. Eight Chebyshev nodes cover [0, 2**band]; sixteen Fourier samples
-    cover phase. Zero drives use the DC direct-integration path. No numerical
-    validity guard is imposed in this first version; its accuracy allowance is
-    1e-2 rather than the general per-segment budget.
+    Keys contain flux level, port, signed carrier and a power-of-two amplitude
+    band. The engine namespaces keys by ModelSource identity. Phase, gain,
+    envelope and duration can vary at apply. Eight Chebyshev nodes cover [0, 2**band]; sixteen Fourier samples
+    cover phase. Zero drives use the DC direct-integration path. Model-only
+    guards limit envelope motion, table bandwidth and secular splitting; their
+    calibrated allowance is 1e-2 rather than the general per-segment budget.
     """
 
     name = "period_table"
@@ -206,18 +225,38 @@ class PeriodTableKernel:
         source: ModelSource,
         budget: float,
     ) -> NDArray[np.bool_]:
-        """Accept dispatched shaped single-tone rows without an error guard."""
-        del table, source, budget
-        return np.ones(len(rows), dtype=np.bool_)
+        """Check model-only envelope, interpolation and splitting estimates.
+
+        Rejected rows need direct integration. These calibrated estimates do
+        not certify arbitrary multilevel dynamics against the segment budget.
+        No density is read and no trial evolution is performed.
+        """
+        del budget
+        keys = self.prepare_keys(table, rows)
+        frequencies = np.abs(keys["frequency"])
+        period = 1 / np.where(frequencies > 0, frequencies, 1)
+        strength, gamma = drive_bounds(table, rows, source)
+        peaks, slopes = envelope_bounds(table)
+        envelopes = table.tone_envelope[rows, 0]
+        gain = np.abs(table.tone_amplitude[rows, 0])
+        motion = 2 * np.pi * gain * strength * slopes[envelopes] * period**2
+        bandwidth = np.exp2(keys["band"]) * strength * period
+        split = (
+            table.duration_ns[rows]
+            * period**2
+            * gamma
+            * (gain * peaks[envelopes] * strength) ** 2
+        )
+        # DC and zero gain use direct integration in apply.
+        return (frequencies == 0) | (
+            (motion <= 0.05) & (bandwidth <= 0.5) & (split <= 0.01)
+        )
 
     def prepare_keys(
         self, table: SegmentTable, rows: NDArray[np.int64]
     ) -> NDArray[np.void]:
-        """Share a band table across shape, duration, phase and port changes."""
-        peaks = np.ones(len(table.envelopes))
-        for index, envelope in enumerate(table.envelopes):
-            if envelope.kind == "sampled":
-                peaks[index] = np.max(np.abs(envelope.samples))
+        """Share a port's band table across shape, duration and phase changes."""
+        peaks, _ = envelope_bounds(table)
         maximum = (
             np.abs(table.tone_amplitude[rows, 0]) * peaks[table.tone_envelope[rows, 0]]
         )
@@ -226,11 +265,13 @@ class PeriodTableKernel:
             len(rows),
             dtype=[
                 ("level", "i8", (table.level.shape[1],)),
+                ("port", "i8"),
                 ("frequency", "f8"),
                 ("band", "i8"),
             ],
         )
         keys["level"] = table.level[rows]
+        keys["port"] = table.tone_port[rows, 0]
         keys["frequency"] = np.where(maximum > 0, table.tone_frequency_ghz[rows, 0], 0)
         keys["band"] = band
         return keys
@@ -253,9 +294,10 @@ class PeriodTableKernel:
         rows are representative table rows aligned with keys; numerical solver
         failure raises RuntimeError. DC entries retain only model data.
         """
-        del table, rows, budget
+        tail_budget = min(budget, 1e-8)
+        fallback = DOP853Kernel()
         entries = []
-        for key in keys:
+        for index, key in enumerate(keys):
             model = source.model(tuple(int(v) for v in key["level"]))
             frequency = float(key["frequency"])
             bound = float(2.0 ** int(key["band"]))
@@ -277,11 +319,27 @@ class PeriodTableKernel:
                         + model.dephasing_per_ns
                     )
                 )
-                coefficients = _unitary_table(model, frequency, bound)
+                coefficients = _unitary_table(model, int(key["port"]), frequency, bound)
             for array in (coefficients, populations, coherences):
                 array.setflags(write=False)
+            representative = rows[index : index + 1]
+            tail_data = fallback.prepare(
+                fallback.prepare_keys(table, representative),
+                table,
+                representative,
+                source,
+                tail_budget,
+            )
             entries.append(
-                _Entry(model, frequency, bound, coefficients, populations, coherences)
+                _Entry(
+                    tail_data,
+                    tail_budget,
+                    frequency,
+                    bound,
+                    coefficients,
+                    populations,
+                    coherences,
+                )
             )
         return _Prepared(tuple(entries))
 
@@ -346,7 +404,7 @@ class PeriodTableKernel:
                 _periods(
                     chunk,
                     (
-                        table.tone_port[selected, 0],
+                        np.zeros(len(selected), dtype=np.int64),
                         amplitudes,
                         table.tone_theta_rad[selected, 0],
                         cycles,

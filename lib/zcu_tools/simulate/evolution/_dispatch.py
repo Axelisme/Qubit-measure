@@ -7,6 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ._planning import Geometry
+from ._shaped_dispatch import preference
 from .engine import PathDiagnostics
 from .kernel import GuardPreparation, Kernel, SegmentTable
 from .secular import ModelSource
@@ -35,39 +36,6 @@ def require(
             f"segment {row} (timeline {table.timeline[row]}, start {table.start_ns[row]} ns) requires kernel {name}"
         )
     return kernels[name]
-
-
-def _shape_counts(table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.int64]:
-    """Count phase-independent shaped gate contents before selecting a family."""
-    if not len(rows):
-        return np.empty(0, dtype=np.int64)
-    keys = np.empty(
-        len(rows),
-        dtype=[
-            ("level", "i8", table.level.shape[1]),
-            ("envelope", "S64"),
-            ("port", "i8"),
-            ("frequency", "f8"),
-            ("amplitude", "f8"),
-            ("duration", "f8"),
-            ("offset", "f8"),
-        ],
-    )
-    identities = np.array(
-        [envelope.identity for envelope in table.envelopes], dtype="S64"
-    )
-    keys["level"] = table.level[rows]
-    keys["envelope"] = identities[table.tone_envelope[rows, 0]]
-    for name, column in [
-        ("port", table.tone_port),
-        ("frequency", table.tone_frequency_ghz),
-        ("amplitude", table.tone_amplitude),
-        ("offset", table.tone_envelope_offset_ns),
-    ]:
-        keys[name] = column[rows, 0]
-    keys["duration"] = table.duration_ns[rows]
-    _, inverse, counts = np.unique(keys, return_inverse=True, return_counts=True)
-    return counts[inverse]
 
 
 class _Classifier:
@@ -123,20 +91,12 @@ class _Classifier:
         single = ordinary & (table.tones == 1)
         self.accept(rows[single & constant], ("dyson", "rwa", "floquet_period", "t6"))
         shaped = rows[single & ~constant]
-        gate = self.kernels.get("gate_cache")
-        if gate is None:
-            # The canonical gate identity still identifies a required missing
-            # registry entry without consulting another numerical family.
-            counts = _shape_counts(table, shaped)
-        else:
-            _, inverse, usage = np.unique(
-                gate.prepare_keys(table, shaped),
-                return_inverse=True,
-                return_counts=True,
-            )
-            counts = usage[inverse]
-        self.accept(shaped[counts >= 10], ("gate_cache",))
-        self.accept(shaped[counts < 10], ("period_table",))
+        if len(shaped):
+            families = ("gate_cache", "period_table", "dop853")
+            order = preference(table, shaped, self.kernels)
+            for permutation in np.unique(order, axis=0):
+                selected = shaped[np.all(order == permutation, axis=1)]
+                self.accept(selected, tuple(families[index] for index in permutation))
         self.accept(
             rows[ordinary & (table.tones == 2) & constant], ("floquet", "dop853")
         )
@@ -177,5 +137,5 @@ def classify(
     source: ModelSource,
     budget: float,
 ) -> Dispatch:
-    """Apply branch order, gate repetition threshold and numerical fallbacks."""
+    """Apply branch order, amortized shaped costs and numerical fallbacks."""
     return _Classifier(geometry, kernels, source, budget).classify()

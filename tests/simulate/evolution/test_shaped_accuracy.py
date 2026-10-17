@@ -4,6 +4,7 @@ from threading import Event
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 from zcu_tools.simulate.evolution import (
     DriveTrack,
@@ -19,8 +20,8 @@ from zcu_tools.simulate.evolution import (
 
 def circular_pulse(
     frequency: float,
-    times: np.ndarray,
-    samples: np.ndarray,
+    times: NDArray[np.float64],
+    samples: NDArray[np.float64],
     *,
     n: int = 1,
     rate: float = 0,
@@ -59,7 +60,7 @@ def circular_pulse(
     return source, batch
 
 
-def evolve(source: ModelSource, batch: TimelineBatch) -> np.ndarray:
+def evolve(source: ModelSource, batch: TimelineBatch) -> NDArray[np.complex128]:
     engine = Engine(1, 0)
     try:
         return engine.evolve(source, (batch,), cancel=Event()).densities
@@ -75,7 +76,7 @@ def test_subperiod_ramp_preserves_resonant_population_transfer(
     # slope prevents plateau splitting; the triangle is almost invisible at
     # the full-period midpoint. Its total area is 2.08 ns.
     source, batch = circular_pulse(
-        frequency, np.array([0.0, 2.0, 4.0, 20.0]), np.array([0, 1, 0, 0.01])
+        frequency, np.array([0.0, 2.0, 4.0, 20.0]), np.array([0.0, 1.0, 0.0, 0.01])
     )
     density = evolve(source, batch)
     expected_population = np.sin(2 * np.pi * 0.05 * 2.08) ** 2
@@ -89,7 +90,7 @@ def test_repeated_shaped_pulse_resolves_dissipation_during_rotation() -> None:
 
     # Independent resonant Bloch equations. The rotating frame removes the
     # carrier exactly, and amplitude damping commutes with that frame change.
-    def bloch(time: float, state: np.ndarray) -> list[float]:
+    def bloch(time: float, state: NDArray[np.float64]) -> list[float]:
         w, v = state
         omega = 2 * np.pi * 0.05 * np.interp(time, times, samples)
         return [-2 * omega * v + rate * (1 - w), 2 * omega * w - rate * v / 2]
