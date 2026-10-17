@@ -52,11 +52,11 @@ def test_schedule_rejects_registering_multiple_root_buffers() -> None:
     first = RecordingBuffer(np.zeros((1,)))
     second = RecordingBuffer(np.zeros((1,)))
 
-    with Schedule(_cfg(), first, stop=StopSignal()) as sched:
-        with np.testing.assert_raises_regex(
-            ValueError, "at most one root result buffer"
-        ):
-            sched.register_buffer(second)
+    with (
+        Schedule(_cfg(), first, stop=StopSignal()) as sched,
+        np.testing.assert_raises_regex(ValueError, "at most one root result buffer"),
+    ):
+        sched.register_buffer(second)
 
 
 def test_schedule_allows_registering_one_root_buffer_later() -> None:

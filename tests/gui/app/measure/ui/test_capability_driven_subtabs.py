@@ -714,7 +714,7 @@ def test_post_writeback_operates_on_its_own_draft(qapp, exp_tab_widget, make_ctr
     )
     # Toggle should route to post_analysis pane, not analysis
     # Find checkbox and toggle
-    for child in tab.post_writeback_widget.findChildren(MagicMock):
+    for _child in tab.post_writeback_widget.findChildren(MagicMock):
         pass
     # Directly call handler via widget
     tab.post_writeback_widget._on_check_toggled(item)

@@ -203,13 +203,13 @@ def _direct_input(value: FormValue) -> JsonValue:
     return _JSON.validate_python(value)
 
 
-def _show_text_menu(widget: QLineEdit, action: QAction, pos: QPoint) -> None:
+def _show_text_menu(widget: QLineEdit, actions: list[QAction], pos: QPoint) -> None:
     """Open widget's standard context menu at pos with action appended."""
     menu = widget.createStandardContextMenu()
     if menu is None:
         raise RuntimeError("QLineEdit.createStandardContextMenu() returned None")
     menu.addSeparator()
-    menu.addAction(action)
+    menu.addActions(actions)
     menu.exec(widget.mapToGlobal(pos))
     menu.deleteLater()
 
@@ -552,6 +552,12 @@ class FieldRow:
         header.addWidget(widget)
         if self.field.expression and isinstance(widget, QLineEdit):
             self.mode = self._build_mode(widget)
+            for item in self.field.commands:
+                action = QAction(item.label, widget)
+                action.setObjectName(f"{self._name('command')}.{item.name}")
+                action.triggered.connect(partial(self._command_triggered, item.name))
+                widget.addAction(action)
+                self._commands.append(action)
         # Text commits on Enter or focus loss, not per keystroke; a checkbox
         # commits each toggle.
         connect_committed_value_widget(widget, self._input_changed)
@@ -566,7 +572,7 @@ class FieldRow:
         # Keep the text field's standard menu; mode follows it.
         widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         widget.customContextMenuRequested.connect(
-            lambda pos: _show_text_menu(widget, mode, pos)
+            lambda pos: _show_text_menu(widget, [mode, *self._commands], pos)
         )
         return mode
 
@@ -681,23 +687,32 @@ class FieldRow:
         nothing about model validity. local overrides
         the text and mode of a text input and hides its evaluated label;
         checkboxes and dropdowns still show state. The value label shows
-        only a resolved Expression-mode value; Direct input is not echoed.
+        resolved Expressions, or an Effective value when numeric preview differs
+        from authored Direct input. Equal Direct values are not echoed.
         Shape changes require a new row; metadata stays as built, and the
         fold stays as built or as the user last set it.
         """
         self.field = field
+        for action in self._commands:
+            action.setEnabled(editable)
         self._local = local
         self._displaying = True
         try:
             self._display_input(local, editable=editable)
             shown = ""
-            if local is None and field.has_value and _expression(field):
+            effective = (
+                field.kind in ("integer", "number", "complex")
+                and field.present
+                and not _expression(field)
+                and field.value != field.raw
+            )
+            if local is None and field.has_value and (_expression(field) or effective):
                 resolved = (
                     json.dumps(field.value, ensure_ascii=False)
                     if isinstance(field.value, str)
                     else _rounded(field, field.value)
                 )
-                shown = f"= {resolved}"
+                shown = f"Effective: {resolved}" if effective else f"= {resolved}"
             self.value.setText(shown)
             self.value.setVisible(bool(shown))
         finally:

@@ -627,7 +627,7 @@ class PipelinePanelWidget(QWidget):
         except Exception:  # a sample dot must not break tuning
             logger.exception("sample-point prediction failed")
             return
-        for sample, r0, r1 in zip(samples, rf_0, rf_1):
+        for sample, r0, r1 in zip(samples, rf_0, rf_1, strict=False):
             update_sample_dots(self._tune_artists, sample, float(r0), float(r1))
 
     def _on_tune(self) -> None:

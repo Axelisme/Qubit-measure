@@ -76,7 +76,7 @@ def fit_singleshot2d(
     params = params[sort_idxs]
 
     # 創建圖表
-    fig, ax = plt.subplots(figsize=(10, 8))
+    _fig, ax = plt.subplots(figsize=(10, 8))
 
     # 繪製數據點，所有點使用統一黑色
     colors = list(TABLEAU_COLORS.values())

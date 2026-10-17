@@ -916,7 +916,7 @@ class Controller(SessionControllerMixin):
         return self._writeback_control.get_writeback_applied_for_pane(tab_id, pane)
 
     # ------------------------------------------------------------------
-    # Context / IO (ContextService)
+    # Context and IO operations via ContextService
     # ------------------------------------------------------------------
 
     def read_context(
@@ -1116,7 +1116,7 @@ class Controller(SessionControllerMixin):
         return None
 
     # ------------------------------------------------------------------
-    # Device (DeviceService)
+    # Device operations via DeviceService
     # ------------------------------------------------------------------
 
     def list_device_names(self) -> list[str]:
@@ -1144,7 +1144,7 @@ class Controller(SessionControllerMixin):
         return self._project_root
 
     # ------------------------------------------------------------------
-    # Connection / Predictor (SoCConnectionService + PredictorService)
+    # Connection and predictor operations via SoCConnectionService and PredictorService
     # ------------------------------------------------------------------
 
     def connect_sync(self, req: ConnectRequest) -> None:

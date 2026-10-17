@@ -433,7 +433,9 @@ class TrackerMixin(TypedAcquireMixin):
 
             assert isinstance(ro_chs, dict)
             assert len(self.acc_buf) == len(ro_chs)
-            for d_rep, tracker, ro in zip(self.acc_buf, trackers, ro_chs.values()):
+            for d_rep, tracker, ro in zip(
+                self.acc_buf, trackers, ro_chs.values(), strict=False
+            ):
                 assert self.avg_level is not None
                 d_rep = np.moveaxis(d_rep, [-2, self.avg_level], [0, -2])
 
@@ -482,22 +484,16 @@ class RoundHookMixin(TypedAcquireMixin):
 
         assert self.rounds_buf is not None
         if self._inc_sum_state is None:  # first round
-            self._inc_sum_state = cast(
-                list[NDArray[np.float64]],
-                [
-                    np.zeros_like(self.rounds_buf[0][i], dtype=np.float64)
-                    for i in range(n_ro_chs)
-                ],
-            )
+            self._inc_sum_state = [
+                np.zeros_like(self.rounds_buf[0][i], dtype=np.float64)
+                for i in range(n_ro_chs)
+            ]
 
         # update the state with the new data
         for i in range(n_ro_chs):
             self._inc_sum_state[i] += rounds_buf[-1][i]
 
-        return cast(
-            list[NDArray[np.float64]],
-            [d / self._inc_sum_count for d in self._inc_sum_state],
-        )
+        return [d / self._inc_sum_count for d in self._inc_sum_state]
 
     def _inc_summarize_decimated(
         self, rounds_buf: list[NDArray[np.float64]]

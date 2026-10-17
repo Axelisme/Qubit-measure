@@ -1,12 +1,13 @@
 # cfg_model — 共享配置核心
 
-**Last updated:** 2026-10-17，Range 空端點
+**Last updated:** 2026-10-17，Range 空端點與 Pulse 欄位順序
 
 `cfg_model` 提供不含執行行為或 I/O 的配置模型與具名依賴契約。
 Caller 從 package root import 公開名稱。
 
 - `ConfigBase` 提供 Pydantic 欄位驗證、巢狀更新與序列化。非 module consumer 的行為保持不變。
 - `FieldMeta` 在 core 與持久 Spec 欄位承載 label、unit、decimals、description 與 group，不改驗證或序列化的值。group 是 MCP schema 可用的前端中立分類名稱 hint，因此由 core 保存。前端用 `get_field_meta` 讀取，並決定實際的 widget、排版與折疊行為。`Expr`、`Range`、`AliasName`、`Hidden`、`Locked`、`Slot` 與 `Template` 是前端中立的起始值宣告。它們不求值、不讀來源。上層 Form 將它們翻成輸入與 cfg；`TemplateDef` 的持久 Spec 目錄由呼叫者注入。
+- Pulse 與 Pulse readout 依模型宣告結構排列主要欄位，順序為 Waveform、Gen ch、Freq、Gain。Form 不另設前端排序表。Pulse 的持久欄位仍為 `ch`，Pulse readout 仍為 `gen_ch`；儲存形狀與驗證不因排版改變。Mux readout 沒有 waveform，不新增該欄位。
 - `Range.start`／`stop` 與 `Range.between` 的端點接受 `None`。它表示 Form 中可見空白且必填的端點，不是 0／1 或可執行預設。即使對應 input key 缺席，生成 model 仍要求操作員填入數字才能提交。另一端點與 `expts` 不受影響。Literal 與 `Expr` 端點沿用既有語意。
 - `WaveformSamples` 由 core.waveform_format 擁有。它攜帶一次 asset 讀取的 reference time axis 與 normalized I/Q samples，不從 cfg_model re-export。
 - `ModuleSpec`／`WaveformSpec` 表示持久候選，保留具體 key 的 child 引用。兩個 `spec_from_raw` 入口驗證持久值，不查 library 或 assets，不將 runtime 資訊轉成字串。

@@ -53,7 +53,7 @@ group 是 MCP 單層欄位描述可用的前端中立分類名稱 hint，因此�
 
 `gui.form_adapter.Form(core_cfg, tree)` 從 Pydantic 型別推導 FormModel、起始 input
 與輸出轉換。純量、nullable、Literal／enum、巢狀 model 與 module／waveform
-由共用生成器處理。SweepCfg 使用 LinRange input，count 葉名為 n。
+由共用生成器處理。SweepCfg 使用 Range／Center 與 Expts／Step 的四個 tagged branches。Count 葉名為 n，步長葉名為 step。新表單選 Range + Expts。每個分支只保存 active 座標與採樣輸入。Center 的 span 是帶正負號的完整寬度，不保存另一份端點快取。
 持久 Spec 保留 child key，to_cfg 不從 library materialize 或改寫 key。
 未知 seed、受屏蔽 seed、缺必要 discriminator 與不支援的選項在入口報錯。
 
@@ -81,7 +81,13 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
 
 初值 expression 在建立 fresh input 時求值，成功後保存 direct 值。
 缺來源或求值失敗不補數字 fallback；必要欄位維持未填。
-使用者寫入的 expression 保留原式。換分支用 fresh defaults，不繼承 previous input。
+使用者寫入的 expression 保留原式。普通換分支用 fresh defaults，不繼承 previous input。
+Sweep 的顯式指令是保值換算，不套 fresh defaults。座標換算只求值座標，保留 n／step 原稿。
+採樣換算求值座標與採樣欄位，成功原子安裝 direct 數字，失敗保留整組 input。
+未填參與欄位不補數字。非零 span 配 n=1、零 span 配多點都不能藉切換修成其他掃描。
+Step 的 floor count、相對容差與有效端點由共用 Form 驗證層擁有，契約見 [[0065]]。
+Adapter 集中座標與 step metadata 的精度，lowering 使用有效端點、點數與原 step。
+Qt 明示原稿與有效值的差異，MCP 讀同一份 values。兩者不換算，讀取也不寫回 input。
 `to_inline` 是明確複製固定 library 內容的指令。Widget 與 MCP 只消費 core 提供的
 description 的 Option label、value 與 commands，不猜 union 或 library 結構。
 Option.fields 仍是作者宣告，不進選單回覆；查所選 path 才列直接 children。
@@ -140,6 +146,15 @@ Flux_unit 獨立保存在 cfg。Recipe 的公開參數與來源政策不變，he
 使用者 2026-10-13：「目前沒有實驗在改版後使用，所以不需要處理遷移邏輯」。
 
 ### Owner 與驗證邊界
+
+單一實驗的初值政策留在該實驗的 form.py。已定案且供多個 Form 共用的初值政策，
+可集中在 zcu_lab 的具名 domain helper，目前包括 T1 時間尺度選源，以及 Rabi 的
+來源、有效性與首次初值。各 Form 仍明確選擇倍率或場景，並組合結構。
+政策不進入 generic framework，不擴及 writeback 或實驗順序。
+這個分工讓同類 Form 使用同一政策，避免改了一個、漏改另一個。
+跨 owner 的依賴方向仍由下述 C15、C16 與 form-adapter-no-host contracts 保護。
+
+使用者 2026-10-17：「同意，這判斷標準沒問題」
 
 `cfg_model` 擁有 Qt-free 節點與 TemplateDef，不依賴 GUI。C11 保護這個方向。
 `gui.form_adapter` 擁有生成器，不 import gui.app 或 zcu_lab，

@@ -154,8 +154,7 @@ def download_file(service, file_id, local_path):
         downloader = MediaIoBaseDownload(fh, request)
         done = False
         while done is False:
-            status, done = downloader.next_chunk()
-            # print(f"Download {int(status.progress() * 100)}%.")
+            _status, done = downloader.next_chunk()
 
         with open(local_path, "wb") as f:
             f.write(fh.getbuffer())

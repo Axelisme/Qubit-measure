@@ -26,8 +26,9 @@ from .description import (
     FormFieldKind,
     FormOptionDescription,
 )
-from .model import Display, FormEnv, FormModel, FormWritePath, LinRange
+from .model import Display, FormEnv, FormModel, FormWritePath
 from .options import Option
+from .sweep import CenterSpan, LinRange, StepCenter, StepRange
 
 
 def _kind(target: Field) -> FormFieldKind:
@@ -208,6 +209,16 @@ def _metadata(
         fixed=fixed,
         fixed_value=copy_json(fixed_value),
         constraints=_constraints(target),
+        selector=display.selector,
+        commands=tuple(
+            FormCommandDescription(
+                item.name,
+                item.label,
+                target.level.prefix,
+                tuple((*target.level.prefix, name) for name in item.inputs),
+            )
+            for item in target.input_commands
+        ),
     )
 
 
@@ -224,6 +235,9 @@ def _children(
 def _description_tags(roots: tuple[object, ...]) -> dict[type[BaseModel], str]:
     tags = branch_tags(roots)
     tags[LinRange] = "kind"
+    tags[CenterSpan] = "kind"
+    tags[StepRange] = "kind"
+    tags[StepCenter] = "kind"
     return tags
 
 
