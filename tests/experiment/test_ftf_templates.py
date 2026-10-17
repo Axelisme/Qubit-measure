@@ -224,9 +224,11 @@ def test_acquire_rejects_out_of_budget_evolution_and_retains_diagnostics(populat
 
     source = FTFSource(settings(), DeviceManager(), engine=ResidualEngine(populations))
     try:
-        with pytest.raises(ValueError, match="2 rows"):
+        with pytest.raises(ValueError, match="2 rows") as rejection:
             source.open_acquire(request()).sample_round(snapshot(), 0)
         assert len(source.evaluations) == 1
         assert source.evaluations[0].round_index == 0
+        assert getattr(source.evaluations[0], "rejected_rows", None) == 2
+        assert getattr(rejection.value, "rejected_rows", None) == 2
     finally:
         source.close()
