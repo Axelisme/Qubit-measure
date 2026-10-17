@@ -659,6 +659,8 @@ class DysonKernel:
     populations, actual pair coherence magnitudes and off-diagonal trace norm.
     Coherence phases are bounded, not evaluated. Later rows use an arbitrary-input
     density bound because preceding idle/flux segments may change the state.
+    Certified shared no-drive prefixes instead use only r and r2 for admission;
+    the engine binds their actual evolved input. Population changes only report.
     The r limit follows cubic off-resonant coherence-error scaling; the population
     limit follows the two-level estimate (2/3)*abs(delta_p)**(3/2). Coefficients
     are calibrated by synthetic scans, not a rigorous multilevel remainder
@@ -685,7 +687,8 @@ class DysonKernel:
 
         At start_ns==0, B2 uses the source density in the row model basis,
         including exact coherence magnitudes and off-diagonal trace norm.
-        Later rows use an arbitrary-input density bound. The budget/8 margin
+        Certified flux-tail rows require only r and r2. Other later rows use
+        an arbitrary-input density bound. The budget/8 margin
         covers pruning. Threshold coefficients are synthetic-scan calibrations,
         not rigorous multilevel error guarantees. Returns a row-aligned mask;
         invalid budgets raise ValueError.
@@ -703,6 +706,23 @@ class DysonKernel:
                 eligible = (one <= min(0.1, 0.25 * budget ** (1 / 3))) & (two <= 0.05)
                 accepted[selected] = False
                 selected, params = selected[eligible], params[eligible]
+                if not len(selected):
+                    continue
+                # Certified flux-tail rows have one common actual prefix input.
+                # Their long-pulse coherence bound is too loose; only r and r2
+                # are admission conditions. The population check still reports.
+                groups = table.flux_tail_group
+                tail = np.array(
+                    [
+                        groups is not None
+                        and groups[row] is not None
+                        and table.start_ns[row] > 0
+                        for row in rows[selected]
+                    ],
+                    dtype=bool,
+                )
+                accepted[selected[tail]] = True
+                selected, params = selected[~tail], params[~tail]
                 if not len(selected):
                     continue
                 dc_model = source.model((0,) * len(model.level))
@@ -773,7 +793,7 @@ class DysonKernel:
         source_initial: NDArray[np.complex128],
         budget: float,
     ) -> _BoundInput | None:
-        """Contract one shared key/port's source input in its row model basis.
+        """Contract one key/port's common source or prefix input in its row basis.
 
         C5 Kernel.bind_input defines the read-only, evolve-local contract.
         Empty rows return None. Max absolute gain and max duration over all

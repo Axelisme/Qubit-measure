@@ -225,45 +225,93 @@ class Schedule:
         bound: list[_Binding] = []
         zero = tuple(0 for _ in range(self.table.level.shape[1]))
         dc = self.source.model(zero)
+        prefixes = self.prefix_inputs(bindings)
         for binding in bindings:
-            eligible = self.table.start_ns[binding.rows] == 0
-            for key in np.unique(binding.indices[eligible]):
-                if np.count_nonzero(binding.indices == key) < 2:
-                    continue
-                candidates = binding.rows[eligible & (binding.indices == key)]
-                ports = (
-                    self.table.tone_port[candidates, 0]
-                    if self.table.tone_port.shape[1]
-                    else np.full(len(candidates), -1, dtype=np.int64)
+            for key, rows, group in self.input_groups(binding, prefixes):
+                level = tuple(int(v) for v in self.table.level[rows[0]])
+                initial = (
+                    self.source.initial_density if group is None else prefixes[group]
                 )
-                for port in np.unique(ports):
-                    rows = candidates[ports == port]
-                    level = tuple(int(v) for v in self.table.level[rows[0]])
-                    initial = self.source.initial_density
-                    if level != zero:
-                        model = self.source.model(level)
-                        overlap = model.eigenvectors.conj().T @ dc.eigenvectors
-                        initial = overlap @ initial @ overlap.conj().T
-                    initial.setflags(write=False)
-                    payload = binding.kernel.bind_input(
-                        binding.payload.prepared,
-                        int(key),
-                        self.table,
-                        rows,
-                        initial,
-                        self.budget,
-                    )
-                    if payload is not None:
-                        bound.append(
-                            _Binding(
-                                binding.kernel,
-                                _Payload(payload, ()),
-                                rows,
-                                np.zeros(len(rows), dtype=np.int64),
-                            )
+                if level != zero:
+                    model = self.source.model(level)
+                    overlap = model.eigenvectors.conj().T @ dc.eigenvectors
+                    initial = overlap @ initial @ overlap.conj().T
+                initial.setflags(write=False)
+                payload = binding.kernel.bind_input(
+                    binding.payload.prepared,
+                    key,
+                    self.table,
+                    rows,
+                    initial,
+                    self.budget,
+                )
+                if payload is not None:
+                    bound.append(
+                        _Binding(
+                            binding.kernel,
+                            _Payload(payload, ()),
+                            rows,
+                            np.zeros(len(rows), dtype=np.int64),
                         )
+                    )
         # Later bindings override model-only ones for eligible rows in _Chunk.
         return [*bindings, *bound]
+
+    def prefix_inputs(
+        self, bindings: list[_Binding]
+    ) -> dict[int, NDArray[np.complex128]]:
+        """Evolve one representative per needed prefix using shared T4 payloads.
+
+        Equal no-drive prefixes guarantee repeated T4 keys, so all their model
+        preparations already exist. The ordinary chunk runner preserves basis
+        changes and returns DC coordinates, just as for final evolution.
+        """
+        groups = self.table.flux_tail_group
+        if groups is None:
+            return {}
+        representatives: dict[int, int] = {}
+        for binding in bindings:
+            if binding.kernel.name == "dyson":
+                for row in binding.rows:
+                    group = groups[row]
+                    if group is not None:
+                        representatives.setdefault(group, int(row))
+        output: dict[int, NDArray[np.complex128]] = {}
+        for group, row in representatives.items():
+            if self.cancel.is_set():
+                raise Cancelled()
+            point = self.table.timeline[row]
+            selected = (self.table.timeline == point) & (
+                self.table.start_ns < self.table.start_ns[row]
+            )
+            result = _Chunk(
+                self, np.array([point]), selected, bindings, stop=np.array([row])
+            ).run()
+            output[group] = result.states[0]
+        return output
+
+    def input_groups(
+        self, binding: _Binding, prefixes: Mapping[int, NDArray[np.complex128]]
+    ):
+        """Yield repeated-key/port/input groups; None denotes the source at start zero."""
+        groups = self.table.flux_tail_group
+        uses = np.bincount(binding.indices)
+        selected: dict[tuple[int, int, int | None], list[int]] = {}
+        for row, key in zip(binding.rows, binding.indices, strict=True):
+            if uses[key] < 2:
+                # Guard-built singletons keep their per-batch payload.
+                continue
+            group = groups[row] if groups is not None else None
+            if self.table.start_ns[row] != 0 and group not in prefixes:
+                continue
+            port = (
+                int(self.table.tone_port[row, 0])
+                if self.table.tone_port.shape[1]
+                else -1
+            )
+            selected.setdefault((int(key), port, group), []).append(int(row))
+        for (key, _, group), rows in selected.items():
+            yield key, np.array(rows, dtype=np.int64), group
 
     def run(
         self,
@@ -330,6 +378,7 @@ class _Chunk:
         points: NDArray[np.int64],
         selected: NDArray[np.bool_],
         bindings: Sequence[_Binding],
+        stop: NDArray[np.int64] | None = None,
     ):
         self.schedule, self.points = schedule, points
         self.table = schedule.table
@@ -343,7 +392,11 @@ class _Chunk:
             self.binding[binding.rows[mask]] = index
             self.key[binding.rows[mask]] = binding.indices[mask]
         self.cursor = np.searchsorted(self.table.timeline, points, side="left")
-        self.end = np.searchsorted(self.table.timeline, points, side="right")
+        self.end = (
+            np.searchsorted(self.table.timeline, points, side="right")
+            if stop is None
+            else stop
+        )
         self.states = np.repeat(
             schedule.source.initial_density[None], len(points), axis=0
         ).copy()

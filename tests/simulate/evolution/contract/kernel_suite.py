@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import numpy as np
+import pytest
 import zcu_tools.simulate.evolution as evolution
 from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
@@ -369,13 +370,18 @@ class KernelContract:
             )
             assert_budget(actual, expected, case.budget)
 
+    @pytest.mark.parametrize("prefix_input", [False, True], ids=["source", "prefix"])
     def test_bind_input_is_read_only_and_apply_equivalent(
-        self, kernel_case: KernelCase
+        self, kernel_case: KernelCase, prefix_input: bool
     ) -> None:
         case = kernel_case
         bind = getattr(case.kernel, "bind_input", None)
         assert callable(bind), "every C5 kernel must offer bind_input"
-        table = replace(case.table, start_ns=np.zeros(len(case.states)))
+        table = replace(
+            case.table,
+            start_ns=np.full(len(case.states), 7.0 if prefix_input else 0.0),
+            flux_tail_group=(tuple(0 for _ in case.states) if prefix_input else None),
+        )
         rows = np.arange(len(case.states), dtype=np.int64)
         keys, first, inverse = np.unique(
             case.kernel.prepare_keys(table, rows),
@@ -386,6 +392,19 @@ class KernelContract:
             keys, table, rows[first], case.source, case.budget
         )
         initial = case.states[0].copy()
+        if prefix_input:
+            # Independently evolve a no-drive prefix. The hook accepts this
+            # actual input at a later start, not just source.initial_density.
+            idle = replace(
+                table,
+                start_ns=np.zeros(len(rows)),
+                duration_ns=np.full(len(rows), 7.0),
+                tones=np.zeros(len(rows), dtype=np.int64),
+                tone_port=np.full_like(table.tone_port, -1),
+                tone_envelope=np.full_like(table.tone_envelope, -1),
+                flux_tail_group=None,
+            )
+            initial = reference(replace(case, table=idle), 0, initial)
         initial.setflags(write=False)
         before = initial.copy()
         for key in range(len(keys)):
@@ -404,7 +423,7 @@ class KernelContract:
                 np.testing.assert_array_equal(initial, before)
                 np.testing.assert_array_equal(selected, saved_rows)
                 if case.kernel.name == "dyson":
-                    assert bound is not None, "Dyson must bind source-input paths"
+                    assert bound is not None, "Dyson must bind common-input paths"
                 if bound is None:
                     continue
                 states = np.repeat(initial[None], len(selected), axis=0)
@@ -434,5 +453,10 @@ class KernelContract:
                         case.budget,
                     )
                     if len(subset):
-                        assert_budget(actual, expected[subset], case.budget)
+                        allowance = (
+                            case.budget / 8
+                            if prefix_input and case.kernel.name == "dyson"
+                            else case.budget
+                        )
+                        assert_budget(actual, expected[subset], allowance)
                     np.testing.assert_array_equal(actual_mask, expected_mask[subset])

@@ -119,5 +119,8 @@ def test_keys_share_shapes_phases_and_ports_but_separate_bands(
     assert np.isfinite(case.kernel.cost(table, rows)).all()
 
 
-def test_bind_input_contract(kernel_case: KernelCase) -> None:
-    KernelContract().test_bind_input_is_read_only_and_apply_equivalent(kernel_case)
+@pytest.mark.parametrize("prefix_input", [False, True], ids=["source", "prefix"])
+def test_bind_input_contract(kernel_case: KernelCase, prefix_input: bool) -> None:
+    KernelContract().test_bind_input_is_read_only_and_apply_equivalent(
+        kernel_case, prefix_input
+    )
