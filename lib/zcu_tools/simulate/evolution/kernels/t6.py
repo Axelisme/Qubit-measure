@@ -229,7 +229,7 @@ class _T6Prepared:
         return self.coefficients.nbytes + self.modes.nbytes + self.counts.nbytes
 
 
-@njit(nogil=True)
+@njit(nogil=True, cache=True)
 def _apply_channels(coefficients, modes, counts, key_index, theta, states):
     size = states.shape[1]
     dimension = size * size
