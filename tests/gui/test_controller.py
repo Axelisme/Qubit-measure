@@ -6,6 +6,7 @@ import dataclasses
 import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
+from tempfile import mkdtemp
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -59,7 +60,6 @@ from tests.gui._controller_adapter import (
 )
 from tests.gui._qt_waits import qt_until as _wait_for
 from tests.gui.app.measure._load_support import write_native_file
-from tests.gui.app.measure.remote._helpers import _context_root
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -114,7 +114,7 @@ class ControllerFixture:
             registry=self.registry,
             view=self.view,
             bus=self.bus,
-            project_root=project_root or str(_context_root()),
+            project_root=project_root or mkdtemp(prefix="context-"),
         )
         self.ctrl.setup_control.new_entry(EntryRequest("fake_qubit"))
         self.ctrl.setup_control.new_point(
