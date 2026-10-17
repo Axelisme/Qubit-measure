@@ -121,9 +121,7 @@ class _Classifier:
             playing = table.tones > slot
             constant[playing] &= kinds[table.tone_envelope[playing, slot]]
         single = ordinary & (table.tones == 1)
-        known = single & constant & self.geometry.known_input
-        self.accept(rows[known], ("dyson", "rwa", "floquet_period", "t6"))
-        self.accept(rows[single & constant & ~known], ("floquet_period", "t6"))
+        self.accept(rows[single & constant], ("dyson", "rwa", "floquet_period", "t6"))
         shaped = rows[single & ~constant]
         gate = self.kernels.get("gate_cache")
         if gate is None:

@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, terminal-family coverage, readout trace diagnostics, and low-frequency constant-tone Hilbert propagation
+**Last updated:** 2026-10-17, terminal-family coverage, readout trace diagnostics, low-frequency constant-tone Hilbert propagation, and Dyson-first constant-tone dispatch for arbitrary inputs
 
 ## Segment engine contracts
 
@@ -103,9 +103,9 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | Varying flux, no drive | The FTF model owner quantizes flux at DAC-interval midpoints to 1e-3 Phi0 subsegments. This T5 path uses T4 with basis changes, not a separate kernel. |
 | Varying flux with drive | `flux_dop853` integrates continuous flux with the exact Hamiltonian expansion; baths switch at quantized grid boundaries. |
 | Fixed flux, no drive | T4 uses analytic secular propagation. |
-| One constant tone, known input density, r, r₂ and B2 guards pass | T7 second-order Dyson, batched over frequency, gain, duration and phase. |
+| One constant tone, known or unknown input, r, r₂ and B2 guards pass | T7 second-order Dyson, batched over frequency, gain, duration and phase. |
 | One constant tone after an identical shared no-drive prefix, r and r₂ pass | Dyson with the actual prefix output. B2 does not apply; post-apply population changes only report. |
-| Same constant-tone branch, Dyson fails but r <= 0.2 | Reduced RWA if its omitted-sideband error bound fits the segment budget; otherwise try the Hilbert period kernel. |
+| Same constant-tone branch, Dyson fails but r <= 0.2 | Reduced RWA if its input-independent omitted-sideband error bound fits the segment budget; otherwise try the Hilbert period kernel. |
 | One constant tone not accepted above, known or unknown input, with abs(f) >= 0.3 GHz and duration*T²*Gamma*V² <= 1.0 | `floquet_period` integrates one Hilbert-space U(T), translates the carrier phase in time, and steps each period with secular Strang dissipation. |
 | Same constant-tone branch, Hilbert period guard fails | T6 periodic propagation accepts every single constant-tone row. |
 | One shaped tone, prepare-key usage >= 10 | Gate cache with four Strang subsegments, closed-system U plus secular dissipation, and 16 carrier-phase Fourier samples. |
@@ -131,8 +131,10 @@ segment's start, duration and level, the target basis and continuous flux sample
 Different tail lengths never share an input just because their final levels match.
 The planner compares samples before probe start and the first sample at or after
 it to retain the prefix's interpolation boundary. Later samples do not affect
-prefix identity. Prefixes with earlier drives or no identical partner retain
-ordinary dispatch. Source and initial density are
+prefix identity. Prefixes with earlier drives or no identical partner still try
+Dyson first, using arbitrary-input B2, then RWA, Hilbert period and T6.
+Input knowledge only selects B2's source values and A-stage input contraction;
+it does not restrict Dyson or RWA eligibility. Source and initial density are
 common to one evolve and no prefix identity persists across calls.
 
 The model supplies the secular form. Missing secular data fails at entry rather
@@ -140,9 +142,9 @@ than selecting another evolution backend.
 
 ### Accuracy and truncation
 
-Ordinary Dyson rows require all three guards. Certified flux-tail rows require
-only r and r₂, because the long-pulse coherence term in B2 can reject even a
-small actual population change:
+Ordinary Dyson rows, including segments after earlier drives, require all three
+guards. Certified flux-tail rows require only r and r₂, because the long-pulse
+coherence term in B2 can reject even a small actual population change:
 
 - r <= min(0.1, 0.25 * budget^(1/3)).
 - B2 + budget/8 <= min(0.02, (1.5 * budget)^(2/3)).
@@ -156,8 +158,10 @@ coherence, and the actual off-diagonal trace norm bounds coherent contributions.
 These values are taken after basis conversion, without zeroing small coherence.
 Coherence phases are bounded, not evaluated. Diagonal inputs have c = L = 0.
 Later rows use the arbitrary-input version, with population difference at most 1,
-pair coherence at most 1/2 and off-diagonal trace norm at most 2. The budget/8 margin reserves the
-omitted-path allowance.
+pair coherence at most 1/2 and off-diagonal trace norm at most 2. These bounds
+cover unknown inputs after driven or non-certified no-drive prefixes without
+reading worker densities. Such rows keep ordinary per-batch apply, not A-stage
+input contraction. The budget/8 margin reserves the omitted-path allowance.
 
 After apply, Dyson also measures |Δp| from the output populations minus the
 same input's free-evolved populations. Free evolution uses only the secular
