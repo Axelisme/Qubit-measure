@@ -1,7 +1,7 @@
 """Vectorized event geometry for one acquire, without point-wise Python loops."""
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from numpy.typing import NDArray
@@ -231,7 +231,13 @@ def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
     columns = {
         name: []
         for name in SegmentTable.__dataclass_fields__
-        if name not in ("envelopes", "flux_waveform", "flux_waveform_available")
+        if name
+        not in (
+            "envelopes",
+            "flux_waveform",
+            "flux_waveform_available",
+            "flux_tail_group",
+        )
     }
     envelopes: list[EnvelopeSpec] = []
     timeline_base = 0
@@ -253,7 +259,17 @@ def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
         envelopes.extend(table.envelopes)
     waveform = _combine_waveforms(batches)
     combined = SegmentTable(
-        **{name: np.concatenate(values) for name, values in columns.items()},
+        timeline=np.concatenate(columns["timeline"]),
+        start_ns=np.concatenate(columns["start_ns"]),
+        duration_ns=np.concatenate(columns["duration_ns"]),
+        level=np.concatenate(columns["level"]),
+        tones=np.concatenate(columns["tones"]),
+        tone_port=np.concatenate(columns["tone_port"]),
+        tone_frequency_ghz=np.concatenate(columns["tone_frequency_ghz"]),
+        tone_amplitude=np.concatenate(columns["tone_amplitude"]),
+        tone_theta_rad=np.concatenate(columns["tone_theta_rad"]),
+        tone_envelope=np.concatenate(columns["tone_envelope"]),
+        tone_envelope_offset_ns=np.concatenate(columns["tone_envelope_offset_ns"]),
         envelopes=tuple(envelopes),
         flux_waveform=waveform,
         flux_waveform_available=(
@@ -269,12 +285,63 @@ def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
             else None
         ),
     )
+    known = np.concatenate([g.known_input for g in geometries])
+    combined = replace(combined, flux_tail_group=_flux_tail_groups(combined, known))
     return Geometry(
         combined,
         points,
         np.concatenate([g.flux_drive for g in geometries]),
-        np.concatenate([g.known_input for g in geometries]),
+        known,
     )
+
+
+def _flux_tail_groups(
+    table: SegmentTable, known: NDArray[np.bool_]
+) -> tuple[int | None, ...]:
+    """Certify repeated nonempty no-drive prefixes within this source/evolve.
+
+    Compare complete segment sequences, not their final level. Source and
+    initial density are common to the entire plan. Compare continuous samples
+    before probe start and the first sample at or after it, which closes the
+    prefix's final interpolation interval. Later samples cannot affect it.
+    """
+    candidates = np.flatnonzero(known & (table.start_ns > 0) & (table.tones == 1))
+    groups: list[int | None] = [None] * len(table.timeline)
+    if not len(candidates):
+        return tuple(groups)
+    first = np.searchsorted(table.timeline, table.timeline[candidates], side="left")
+    sequences = np.empty(
+        len(table.timeline),
+        dtype=[
+            ("start", "f8"),
+            ("duration", "f8"),
+            ("level", "i8", table.level.shape[1]),
+        ],
+    )
+    sequences["start"] = table.start_ns
+    sequences["duration"] = table.duration_ns
+    sequences["level"] = table.level
+    matches: dict[tuple[bytes, ...], list[int]] = {}
+    waveform = table.flux_waveform
+    for row, begin in zip(candidates, first, strict=True):
+        if np.any(table.tones[begin:row] != 0):
+            continue
+        key = (sequences[begin:row].tobytes(), table.level[row].tobytes())
+        timeline = table.timeline[row]
+        available = table.flux_waveform_available
+        if waveform is not None and (available is None or available[timeline]):
+            a, b = waveform.offsets[timeline : timeline + 2]
+            endpoint = np.searchsorted(
+                waveform.time_ns[a:b], table.start_ns[row], side="left"
+            )
+            b = min(b, a + endpoint + 1)
+            key += (waveform.time_ns[a:b].tobytes(), waveform.flux[a:b].tobytes())
+        matches.setdefault(key, []).append(int(row))
+    for group, rows in enumerate(matches.values()):
+        if len(rows) >= 2:
+            for row in rows:
+                groups[row] = group
+    return tuple(groups)
 
 
 def _combine_waveforms(batches: Sequence[TimelineBatch]) -> FluxWaveform | None:

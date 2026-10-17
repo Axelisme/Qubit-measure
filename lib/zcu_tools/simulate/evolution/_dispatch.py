@@ -1,14 +1,14 @@
 """Cross-family decision graph; numerical guards remain kernel-owned."""
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from numpy.typing import NDArray
 
 from ._planning import Geometry
 from .engine import PathDiagnostics
-from .kernel import Kernel, SegmentTable
+from .kernel import GuardPreparation, Kernel, SegmentTable
 from .secular import ModelSource
 
 
@@ -17,6 +17,9 @@ class Dispatch:
     names: NDArray[np.str_]
     diagnostics: PathDiagnostics
     costs: NDArray[np.float64]
+    preparations: Mapping[str, tuple[GuardPreparation, ...]] = field(
+        default_factory=dict
+    )
 
 
 def require(
@@ -55,13 +58,13 @@ def _shape_counts(table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.in
     )
     keys["level"] = table.level[rows]
     keys["envelope"] = identities[table.tone_envelope[rows, 0]]
-    for field, column in [
+    for name, column in [
         ("port", table.tone_port),
         ("frequency", table.tone_frequency_ghz),
         ("amplitude", table.tone_amplitude),
         ("offset", table.tone_envelope_offset_ns),
     ]:
-        keys[field] = column[rows, 0]
+        keys[name] = column[rows, 0]
     keys["duration"] = table.duration_ns[rows]
     _, inverse, counts = np.unique(keys, return_inverse=True, return_counts=True)
     return counts[inverse]
@@ -83,6 +86,7 @@ class _Classifier:
         )
         self.table = geometry.table
         self.names = np.full(len(self.table.timeline), "", dtype="U16")
+        self.preparations: dict[str, tuple[GuardPreparation, ...]] = {}
 
     def accept(self, rows: NDArray[np.int64], candidates: tuple[str, ...]) -> None:
         """Try families in order, checking each numerical guard before fallback."""
@@ -90,7 +94,15 @@ class _Classifier:
             if not len(rows):
                 return
             kernel = require(self.kernels, name, self.table, rows)
-            accepted = kernel.guard(self.table, rows, self.source, self.budget)
+            result = kernel.guard_prepared(self.table, rows, self.source, self.budget)
+            if result is None:
+                accepted = kernel.guard(self.table, rows, self.source, self.budget)
+            else:
+                accepted = result.accepted
+                self.preparations[name] = (
+                    *self.preparations.get(name, ()),
+                    *result.preparations,
+                )
             self.names[rows[accepted]] = name
             rows = rows[~accepted]
         if len(rows):
@@ -154,7 +166,10 @@ class _Classifier:
         if not np.isfinite(costs).all() or np.any(costs < 0):
             raise ValueError("kernel costs must be finite and nonnegative")
         return Dispatch(
-            self.names, PathDiagnostics(segment_counts, point_classes), costs
+            self.names,
+            PathDiagnostics(segment_counts, point_classes),
+            costs,
+            self.preparations,
         )
 
 

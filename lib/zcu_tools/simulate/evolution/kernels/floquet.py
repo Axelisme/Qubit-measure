@@ -33,7 +33,7 @@ from scipy.integrate import solve_ivp
 from scipy.linalg import eig, schur
 from scipy.optimize import linear_sum_assignment
 
-from ..kernel import Prepared, SegmentTable
+from ..kernel import GuardPreparation, GuardResult, Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
 
 
@@ -319,6 +319,35 @@ def _k(q: complex, b: complex, a: complex, duration: float) -> complex:
 
 
 @njit(nogil=True, cache=True)
+def _first_factors(lam, duration, omega):
+    """Tabulate each exp[lambda_i, lambda_j + i*r*omega] once per row.
+
+    Factors include duration. Base and carrier exponentials are also returned
+    for free evolution and shifted second-order factors, respectively.
+    """
+    scaled = lam * duration
+    exponentials = np.exp(scaled)
+    carriers = np.exp(1j * np.arange(-2, 3) * omega * duration)
+    factors = np.empty((2, len(lam), len(lam)), dtype=np.complex128)
+    for outer in range(2):
+        sign = 2 * outer - 1
+        for i in range(len(lam)):
+            for j in range(len(lam)):
+                z = scaled[j] + 1j * sign * omega * duration - scaled[i]
+                if abs(z) < 1e-5:
+                    factors[outer, i, j] = (
+                        exponentials[i]
+                        * duration
+                        * (1 + z / 2 + z * z / 6 + z**3 / 24 + z**4 / 120)
+                    )
+                else:
+                    factors[outer, i, j] = (
+                        exponentials[j] * carriers[sign + 2] - exponentials[i]
+                    ) / (lam[j] + 1j * sign * omega - lam[i])
+    return factors, exponentials, carriers
+
+
+@njit(nogil=True, cache=True)
 def _rotation(entry_coefficients, harmonic, phase):
     result = np.zeros(entry_coefficients.shape[1:], dtype=np.complex128)
     for k in range(len(harmonic)):
@@ -341,25 +370,42 @@ def _modal(entry_data, parameters, states):
         transformed = np.empty(len(lam), dtype=np.complex128)
         b = couplings[int(port)] * gain
         omega = 2 * np.pi * frequency
+        factors, exponentials, carriers = _first_factors(lam, duration, omega)
+        phases = np.exp(1j * np.array([-1, 1]) * theta)
         for i in range(len(lam)):
-            value = np.exp(lam[i] * duration) * u[i]
+            value = exponentials[i] * u[i]
             for outer in range(2):
                 sign = 2 * outer - 1
-                phase = np.exp(1j * sign * theta)
+                phase = phases[outer]
                 for j in range(len(lam)):
                     first = b[outer, i, j] * phase
                     if abs(first) == 0:
                         continue
                     a = lam[j] + 1j * sign * omega
-                    value += first * u[j] * _f(lam[i], a, duration)
+                    value += first * u[j] * factors[outer, i, j]
                     for inner in range(2):
                         sign2 = 2 * inner - 1
-                        phase2 = np.exp(1j * sign2 * theta)
+                        phase2 = phases[inner]
                         for k in range(len(lam)):
                             product = first * b[inner, j, k] * phase2 * u[k]
                             if abs(product) != 0:
                                 bb = lam[k] + 1j * (sign + sign2) * omega
-                                value += product * _k(lam[i], bb, a, duration)
+                                gap = lam[i] - bb
+                                if (
+                                    abs(bb - a) * duration >= 1e-6
+                                    and abs(gap) * duration >= 0.5
+                                ):
+                                    # Shift the second edge's first factor by
+                                    # the outer carrier before differencing.
+                                    second = (
+                                        factors[outer, i, j]
+                                        - carriers[sign + 2] * factors[inner, j, k]
+                                    ) / gap
+                                else:
+                                    # Preserve the existing repeated-pole and
+                                    # close-endpoint formulas without regrouping.
+                                    second = _k(lam[i], bb, a, duration)
+                                value += product * second
             transformed[i] = value
         density = (modes @ transformed).reshape(states.shape[1:])
         states[row] = end @ density @ end.conj().T
@@ -617,9 +663,24 @@ class FloquetKernel:
         budget: float,
     ) -> NDArray[np.bool_]:
         """Return validity for two constant tones, never reading initial density."""
+        return self.guard_prepared(table, rows, source, budget).accepted
+
+    def guard_prepared(
+        self,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source: ModelSource,
+        budget: float,
+    ) -> GuardResult:
+        """Return the unchanged guard mask and evolve-local Floquet preparations.
+
+        Each key's immutable model-only payload can replace prepare for the
+        same source and budget. No preparation is retained on this kernel.
+        """
+        preparations: list[GuardPreparation] = []
         accepted = np.zeros(len(rows), dtype=bool)
         if table.tone_port.shape[1] < 2:
-            return accepted
+            return GuardResult(accepted)
         constants = np.array([e.kind == "constant" for e in table.envelopes])
         playing = table.tones[rows] == 2
         envelopes = np.maximum(0, table.tone_envelope[rows, :2])
@@ -632,7 +693,7 @@ class FloquetKernel:
         frequency = table.tone_frequency_ghz[rows, stark]
         positions = np.flatnonzero(playing & constant & (frequency > 0))
         if not len(positions):
-            return accepted
+            return GuardResult(accepted)
         selected = rows[positions]
         keys, representatives, inverse = np.unique(
             self.prepare_keys(table, selected), return_index=True, return_inverse=True
@@ -650,11 +711,14 @@ class FloquetKernel:
                 source,
                 budget,
             )
+            preparations.append(
+                GuardPreparation(keys[key_index : key_index + 1], prepared)
+            )
             members = np.flatnonzero(inverse == key_index)
             accepted[positions[members]] = _acceptance(
                 prepared.entries[0], params[members], budget
             )
-        return accepted
+        return GuardResult(accepted, tuple(preparations))
 
     def prepare_keys(
         self, table: SegmentTable, rows: NDArray[np.int64]
@@ -709,6 +773,18 @@ class FloquetKernel:
                 raise RuntimeError("Floquet modal construction failed") from error
         return _Prepared(tuple(entries))
 
+    def bind_input(
+        self,
+        prepared: Prepared,
+        key_index: int,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source_initial: NDArray[np.complex128],
+        budget: float,
+    ) -> None:
+        """Decline input binding; apply uses the model-only prepared payload."""
+        del prepared, key_index, table, rows, source_initial, budget
+
     def apply(
         self,
         prepared: Prepared,
@@ -717,11 +793,13 @@ class FloquetKernel:
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
         budget: float,
-    ) -> None:
+    ) -> NDArray[np.bool_]:
         """Advance arbitrary densities, retaining start and end micromotion.
 
         Rows must already pass guard. Wrong payload raises ValueError; nonfinite
         density or an out-of-budget row raises RuntimeError with its segment.
+
+        Return an all-False bool mask aligned with rows; no post-apply check.
         """
         if not isinstance(prepared, _Prepared):
             raise ValueError("Floquet requires its own prepared payload")
@@ -740,3 +818,4 @@ class FloquetKernel:
                     f"Floquet nonfinite density at segments {rows[positions]}"
                 )
             states[positions] = chunk
+        return np.zeros(len(rows), dtype=np.bool_)

@@ -43,6 +43,7 @@ class ConditionalReadout:
                 for f in detuning
             ]
         )
+        self._constant_line = _ConstantLine(self._q, self._a, self._v)
 
     def responses(self, batch: ReadoutBatch) -> ConditionalSums:
         """Return noiseless per-shot sums for each content/read/initial state.
@@ -57,8 +58,10 @@ class ConditionalReadout:
         keep them deterministic. Equivalent separately constructed numeric inputs
         reuse the cache. Traces are retained internally, so switching include_traces
         does not solve again. Constant pulses (envelope=None) use the closed-form
-        matrix exponential in the pulse carrier frame, including detuned carriers;
-        other envelopes use the existing DOP853 moment ODE.
+        matrix exponential in the pulse carrier frame, including detuned carriers.
+        Frequency-independent population and moment propagators are shared across
+        contents; ill-conditioned driven blocks use the full matrix exponential.
+        Other envelopes use the existing DOP853 moment ODE.
         ConditionalSums.sums has shape (contents, reads, states, 2), after
         demodulation/gain/phase/offset. Traces have shape
         (contents, reads, states, samples, 2) only if batch.include_traces;
@@ -162,15 +165,22 @@ class ConditionalReadout:
                 * np.pi
                 * (pulses[0].frequency_ghz - self.model.reference_frequency_ghz)
             )
-            outputs[:, :, 1:, :] *= np.exp(-1j * omega * (times - start))[
-                :, None, None, None
-            ]
+            carrier = np.exp(-1j * omega * (times - start))
+            outputs[:, :, 1:, :] *= carrier[:, None, None, None]
             state[:, 1:, :] *= np.exp(-1j * omega * (end - start))
+            pulse = pulses[0]
+            active = (times >= pulse.start_ns) & (times < pulse.end_ns)
+            incident = np.zeros(len(times), dtype=np.complex128)
+            incident[active] = pulse.amplitude * np.exp(
+                -1j * omega * (times[active] - start) + 1j * pulse.phase_rad
+            )
+            if not np.isfinite(incident).all():
+                raise ValueError("readout envelope must be finite")
+        else:
+            incident = np.array([self._incident(pulses, t) for t in times])
         self._validate_solution(state)
         moments = outputs[:, :, 1:, :].sum(axis=1)
-        outgoing = np.array([self._incident(pulses, t) for t in times])[
-            :, None
-        ] - np.einsum("r,kri->ki", self._v, moments)
+        outgoing = incident[:, None] - np.einsum("r,kri->ki", self._v, moments)
         return outgoing, state
 
     def _incident(self, pulses: tuple[ReadoutPulse, ...], t: float) -> complex:
@@ -246,35 +256,26 @@ class ConditionalReadout:
         generator in this frame regardless of carrier detuning.
         """
         n = len(self.model.state_labels)
-        generator = np.zeros((3 * n, 3 * n), dtype=np.complex128)
-        population = np.arange(0, 3 * n, 3)
-        generator[np.ix_(population, population)] = self._q
         pulse = pulses[0]
         omega = 2 * np.pi * (pulse.frequency_ghz - self.model.reference_frequency_ghz)
         incident = pulse.incident(left, pulse.frequency_ghz)
-        for r in range(2):
-            moments = population + r + 1
-            generator[np.ix_(moments, moments)] = self._q
-            generator[moments, moments] += 1j * omega
-            generator[moments, population] = self._v[r] * incident
-        for s in range(n):
-            generator[3 * s + 1 : 3 * s + 3, 3 * s + 1 : 3 * s + 3] -= self._a[s]
-        propagators: dict[float, NDArray[np.complex128]] = {}
         selected = np.flatnonzero((times > left) & (times <= right))
-        previous = left
-        flat = state.reshape(3 * n, n)
-        for index in selected:
-            dt = float(times[index] - previous)
-            if dt not in propagators:
-                propagators[dt] = np.asarray(
-                    scipy.linalg.expm(generator * dt), dtype=np.complex128
-                )
-            flat = propagators[dt] @ flat
-            outputs[index] = flat.reshape(state.shape)
-            previous = float(times[index])
-        if previous < right:
-            flat = scipy.linalg.expm(generator * (right - previous)) @ flat
-        return flat.reshape(state.shape)
+        targets = np.append(times[selected], right)
+        durations = np.diff(np.concatenate(([left], targets)))
+        propagators = self._constant_line.propagators(omega, incident, durations)
+        populations = state[:, 0, :]
+        moments = state[:, 1:, :].reshape(2 * n, n)
+        result = state.copy()
+        for step, dt in enumerate(durations):
+            if dt:
+                ep, em, driven = propagators[float(dt)]
+                moments = em @ moments + driven @ populations
+                populations = ep @ populations
+            result[:, 0, :] = populations
+            result[:, 1:, :] = moments.reshape(n, 2, n)
+            if step < len(selected):
+                outputs[selected[step]] = result
+        return result
 
     def _calibrate(self, outgoing, grid: SampleGrid) -> RealArray:
         receiver = self.model.receiver
@@ -304,6 +305,85 @@ class ConditionalReadout:
             raise RuntimeError("readout produced invalid probabilities")
         if not np.allclose(probabilities.sum(axis=0), 1, rtol=0, atol=1e-8):
             raise RuntimeError("readout probabilities do not sum to one")
+
+
+class _ConstantLine:
+    """Share homogeneous line propagation while keeping carrier shifts scalar.
+
+    The block generator is [[Q, 0], [b*incident, M+i*omega]]. For a
+    well-separated Sylvester solve (M+i*omega)X-XQ=b, its driven propagator
+    is incident*(exp((M+i*omega)*dt)X-X*exp(Q*dt)). Only X and the scalar
+    carrier phase depend on frequency. No diagonalizability assumption is made.
+    """
+
+    def __init__(self, q: RealArray, a: NDArray[np.complex128], v: RealArray):
+        self._q = q
+        n = len(q)
+        self._m = np.asarray(np.kron(q, np.eye(2)), dtype=np.complex128)
+        self._b = np.zeros((2 * n, n), dtype=np.complex128)
+        for s in range(n):
+            self._m[2 * s : 2 * s + 2, 2 * s : 2 * s + 2] -= a[s]
+            self._b[2 * s : 2 * s + 2, s] = v
+        self._homogeneous: dict[
+            float, tuple[NDArray[np.complex128], NDArray[np.complex128]]
+        ] = {}
+
+    def propagators(self, omega: float, incident: complex, durations: RealArray):
+        """Return population, moment and driven blocks for positive durations.
+
+        Durations are ns, omega is the carrier/reference angular detuning in
+        rad/ns, and incident is the flat drive in its carrier frame. Cache only
+        frequency-independent exponentials, not every carrier's dense matrices.
+        """
+        shifted = self._m + 1j * omega * np.eye(len(self._m))
+        coupling = self._coupling(shifted) if incident else None
+        result = {}
+        for dt in np.unique(durations[durations > 0]):
+            dt = float(dt)
+            if dt not in self._homogeneous:
+                self._homogeneous[dt] = (
+                    np.asarray(scipy.linalg.expm(self._q * dt), dtype=np.complex128),
+                    np.asarray(scipy.linalg.expm(self._m * dt), dtype=np.complex128),
+                )
+            ep, base = self._homogeneous[dt]
+            em = base * np.exp(1j * omega * dt)
+            if not incident:
+                driven = np.zeros_like(self._b)
+            elif coupling is None:
+                result[dt] = self._full_step(shifted, incident, dt)
+                continue
+            else:
+                driven = incident * (em @ coupling - coupling @ ep)
+            result[dt] = (ep, em, driven)
+        return result
+
+    def _coupling(self, shifted):
+        try:
+            coupling = scipy.linalg.solve_sylvester(shifted, -self._q, self._b)
+        except np.linalg.LinAlgError:
+            # A singular driven block still has a valid full exponential.
+            return None
+        # Near coincident spectra can make the difference of two large terms
+        # lose precision. Use the original exponential rather than regularizing
+        # rates, clipping populations or assuming a diagonalizable generator.
+        roundoff = np.finfo(float).eps * np.linalg.norm(coupling, ord=np.inf)
+        residual = shifted @ coupling - coupling @ self._q - self._b
+        if (
+            not np.isfinite(coupling).all()
+            or roundoff > 1e-13
+            or np.linalg.norm(residual, ord=np.inf) > 1e-13
+        ):
+            return None
+        return coupling
+
+    def _full_step(self, shifted, incident, dt):
+        n = len(self._q)
+        generator = np.zeros((3 * n, 3 * n), dtype=np.complex128)
+        generator[:n, :n] = self._q
+        generator[n:, n:] = shifted
+        generator[n:, :n] = self._b * incident
+        step = np.asarray(scipy.linalg.expm(generator * dt), dtype=np.complex128)
+        return step[:n, :n], step[n:, n:], step[n:, :n]
 
 
 def _model_key(model: ReadoutModel) -> tuple[object, ...]:

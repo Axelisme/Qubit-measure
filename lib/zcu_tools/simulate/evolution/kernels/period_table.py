@@ -285,6 +285,28 @@ class PeriodTableKernel:
             )
         return _Prepared(tuple(entries))
 
+    def guard_prepared(
+        self,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source: ModelSource,
+        budget: float,
+    ) -> None:
+        """Decline guard preparation handoff; the engine calls guard normally."""
+        del table, rows, source, budget
+
+    def bind_input(
+        self,
+        prepared: Prepared,
+        key_index: int,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source_initial: NDArray[np.complex128],
+        budget: float,
+    ) -> None:
+        """Decline input binding; apply uses the model-only prepared payload."""
+        del prepared, key_index, table, rows, source_initial, budget
+
     def apply(
         self,
         prepared: Prepared,
@@ -293,12 +315,14 @@ class PeriodTableKernel:
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
         budget: float,
-    ) -> None:
+    ) -> NDArray[np.bool_]:
         """Advance rows in place with per-period Strang and directly solved tails.
 
         Negative carriers use period 1/abs(f); DC integrates the whole shape.
         A payload from another kernel raises ValueError. Nonfinite output or
         integration failure raises RuntimeError, never a silent fallback.
+
+        Return an all-False bool mask aligned with rows; no post-apply check.
         """
         del budget
         if not isinstance(prepared, _Prepared):
@@ -335,3 +359,4 @@ class PeriodTableKernel:
             if not np.isfinite(chunk).all():
                 raise RuntimeError(f"period table nonfinite density in rows {selected}")
             states[mask] = chunk
+        return np.zeros(len(rows), dtype=np.bool_)

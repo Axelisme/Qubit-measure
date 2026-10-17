@@ -1,5 +1,8 @@
 """Engine behavior through public batches and injected C5 collaborators."""
 
+import warnings
+import weakref
+from contextlib import closing
 from dataclasses import dataclass, replace
 from threading import Event
 
@@ -16,7 +19,7 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     TimelineBatch,
 )
-from zcu_tools.simulate.evolution.kernel import Prepared, SegmentTable
+from zcu_tools.simulate.evolution.kernel import GuardResult, Prepared, SegmentTable
 
 from .contract.kernel_suite import synthetic_model
 
@@ -93,10 +96,20 @@ class RecordingKernel:
         self.preparations += len(keys)
         return Payload(len(keys))
 
+    def guard_prepared(self, table, rows, source, budget) -> GuardResult | None:
+        """Keep the ordinary guard path for this test collaborator."""
+        del table, rows, source, budget
+
+    def bind_input(
+        self, prepared, key_index, table, rows, source_initial, budget
+    ) -> Prepared | None:
+        return None
+
     def apply(self, prepared: Prepared, key_index, table, rows, states, budget):
         self.calls.append((table, rows.copy(), states.copy()))
         if self.cancel is not None:
             self.cancel.set()
+        return np.zeros(len(rows), dtype=np.bool_)
 
 
 def run(engine: Engine, src: ModelSource, batches: tuple[TimelineBatch, ...]):
@@ -294,6 +307,7 @@ def test_cancel_between_chunks_and_nonfinite_failure():
     class Broken(RecordingKernel):
         def apply(self, prepared, key_index, table, rows, states, budget):
             states[:] = np.nan
+            return np.zeros(len(rows), dtype=np.bool_)
 
     engine = Engine(1, 0, kernels=(Broken("t4"),))
     try:
@@ -315,3 +329,264 @@ def test_dop853_adjacent_rows_are_one_chain():
     table, rows, _ = k.calls[0]
     assert table.start_ns[rows].tolist() == [0.0, 1.0]
     assert table.timeline[rows].tolist() == [0, 0]
+
+
+def test_gibbs_constant_pulse_at_zero_uses_dyson_for_every_driven_row():
+    model = synthetic_model(3)
+    model = replace(
+        model,
+        rates_per_ns=np.zeros((3, 3)),
+        dephasing_per_ns=np.zeros((3, 3)),
+    )
+    weights = np.exp(-model.energies_ghz / 0.2)
+    weights /= weights.sum()
+    src = ModelSource(
+        np.diag(weights).astype(complex), lambda level: replace(model, level=level)
+    )
+    n = 3
+    pulse = replace(
+        track(n, EnvelopeSpec("constant"), duration=8),
+        frequency_ghz=np.linspace(0.36, 0.44, n),
+        amplitude=np.full(n, 0.002),
+    )
+    b = replace(batch(n, duration=9), tracks=(pulse,))
+    result = run(Engine(1, 100000), src, (b,))
+    assert result.paths.segments_by_kernel == {"dyson": n, "t4": n}
+    assert result.paths.exceeded_by_kernel == {}
+
+
+def test_preceding_idle_flux_uses_arbitrary_input_dyson_bound():
+    model = synthetic_model(3)
+    x = np.zeros((3, 3), dtype=complex)
+    x[1, 2] = x[2, 1] = 1
+    model = replace(
+        model,
+        energies_ghz=np.zeros(3),
+        rates_per_ns=np.zeros((3, 3)),
+        dephasing_per_ns=np.zeros((3, 3)),
+        drives=(replace(model.drives[0], in_phase_ghz=x, quadrature_ghz=x * 0),),
+    )
+    basis = np.eye(3, dtype=complex)[[1, 0, 2]]
+
+    def build(level):
+        return replace(
+            model,
+            level=level,
+            identity=str(level),
+            eigenvectors=np.eye(3, dtype=complex) if level == (0,) else basis,
+        )
+
+    src = ModelSource(np.diag([0.999, 0.001, 0.0]).astype(complex), build)
+    pulse = replace(
+        track(1, EnvelopeSpec("constant"), start=1, duration=1),
+        frequency_ghz=np.zeros(1),
+        amplitude=np.full(1, 0.003),
+    )
+    b = replace(
+        batch(1, duration=2),
+        tracks=(pulse,),
+        flux=FluxSchedule(np.array([0, 2]), np.array([0.0, 1.0]), np.array([[1], [0]])),
+    )
+    result = run(Engine(1, 100000), src, (b,))
+    assert result.paths.segments_by_kernel.get("dyson", 0) == 0
+    assert result.paths.segments_by_kernel["t4"] == 1
+    assert sum(result.paths.segments_by_kernel.values()) == 2
+    # The identical drive without a preceding segment can use DC ground input.
+    direct = replace(
+        batch(1, duration=1), tracks=(replace(pulse, start_ns=np.zeros(1)),)
+    )
+    direct_result = run(Engine(1, 100000), src, (direct,))
+    assert direct_result.paths.segments_by_kernel == {"dyson": 1}
+
+
+@pytest.mark.parametrize("chunks", [1, 4])
+def test_exceeded_counts_warn_once_per_evolve_and_keep_results(chunks: int) -> None:
+    class ReportingKernel(RecordingKernel):
+        report = True
+
+        def apply(self, prepared, key_index, table, rows, states, budget):
+            super().apply(prepared, key_index, table, rows, states, budget)
+            return (table.timeline[rows] % 2 == 0) & self.report
+
+    kernels = (ReportingKernel("dyson"), ReportingKernel("t4"))
+    engine = Engine(1, 1000, kernels=kernels, chunks_per_worker=chunks)
+    src = source()
+    b = replace(batch(6, duration=6), tracks=(track(6, EnvelopeSpec("constant")),))
+    try:
+        for _ in range(2):
+            with pytest.warns(RuntimeWarning) as caught:
+                result = engine.evolve(src, (b,), cancel=Event())
+            assert len(caught) == 1
+            message = str(caught[0].message)
+            assert "6 segments" in message
+            assert "dyson: 3" in message
+            assert "t4: 3" in message
+            assert "results use the uncorrected approximation" in message
+            assert result.paths.exceeded_by_kernel == {"dyson": 3, "t4": 3}
+            np.testing.assert_array_equal(
+                result.densities, np.repeat(src.initial_density[None], 6, axis=0)
+            )
+        for kernel in kernels:
+            kernel.report = False
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = engine.evolve(src, (b,), cancel=Event())
+        assert not caught
+        assert result.paths.exceeded_by_kernel == {}
+    finally:
+        engine.close()
+
+
+@dataclass(frozen=True)
+class BoundPayload:
+    initial: NDArray[np.complex128]
+
+    @property
+    def nbytes(self) -> int:
+        return self.initial.nbytes
+
+
+class InputBindingKernel(RecordingKernel):
+    """C5 collaborator observing lifetime and grouping without engine internals."""
+
+    def __init__(self, *, decline: bool = False):
+        super().__init__("dyson")
+        self.decline = decline
+        self.groups: list[tuple[NDArray[np.float64], NDArray[np.float64]]] = []
+        self.bound_refs: list[weakref.ReferenceType[BoundPayload]] = []
+        self.bound_rows: list[int] = []
+        self.unbound_rows: list[int] = []
+
+    def prepare_keys(self, table, rows):
+        return np.zeros(len(rows), dtype="V8")
+
+    def bind_input(self, prepared, key_index, table, rows, source_initial, budget):
+        assert np.all(table.start_ns[rows] == 0)
+        assert len(np.unique(table.tone_port[rows, 0])) == 1
+        assert not source_initial.flags.writeable
+        self.groups.append((table.tone_amplitude[rows, 0], table.duration_ns[rows]))
+        if self.decline:
+            return None
+        bound = BoundPayload(source_initial)
+        self.bound_refs.append(weakref.ref(bound))
+        return bound
+
+    def apply(self, prepared, key_index, table, rows, states, budget):
+        if isinstance(prepared, BoundPayload):
+            assert np.all(key_index == 0)
+            self.bound_rows.extend(table.timeline[rows].tolist())
+            states[:] = prepared.initial
+        else:
+            self.unbound_rows.extend(table.timeline[rows].tolist())
+        return np.zeros(len(rows), dtype=np.bool_)
+
+
+@pytest.mark.parametrize("decline", [False, True])
+def test_input_bound_payload_grouping_fallback_and_evolve_lifetime(decline):
+    n = 8
+    k = InputBindingKernel(decline=decline)
+    drive = replace(
+        track(n, EnvelopeSpec("constant")),
+        start_ns=np.array([0.0] * 6 + [1.0, 2.0]),
+        duration_ns=(np.arange(n) + 1) / 8,
+        amplitude=np.linspace(-0.001, 0.002, n),
+    )
+    b = replace(batch(n), tracks=(drive,))
+    src = source()
+    model = src.model((0,))
+    other = ModelSource(
+        np.diag([0.6, 0.1, 0.3]).astype(complex),
+        lambda level: replace(model, level=level),
+    )
+    from zcu_tools.simulate.evolution.kernels.t4 import T4
+
+    with closing(Engine(2, 100000, kernels=(k, T4()), chunks_per_worker=3)) as engine:
+        first = engine.evolve(src, (b,), cancel=Event())
+        assert len(k.groups) == 1, (
+            "A-stage must bind all same-key source-input rows once"
+        )
+        np.testing.assert_array_equal(
+            np.sort(k.groups[0][0]), np.sort(drive.amplitude[:6])
+        )
+        np.testing.assert_array_equal(
+            np.sort(k.groups[0][1]), np.sort(drive.duration_ns[:6])
+        )
+        assert all(ref() is None for ref in k.bound_refs), (
+            "bound payload must not enter PrepareCache"
+        )
+        second = engine.evolve(other, (b,), cancel=Event())
+        assert len(k.groups) == 2
+        assert all(ref() is None for ref in k.bound_refs)
+        assert set(k.bound_rows) == (set() if decline else set(range(6)))
+        assert set(k.unbound_rows) == (set(range(n)) if decline else {6, 7})
+        assert not np.array_equal(first.densities, second.densities)
+
+
+def test_guard_handoff_only_binds_repeated_keys():
+    from zcu_tools.simulate.evolution.kernel import GuardPreparation
+
+    class GuardBindingKernel(InputBindingKernel):
+        def prepare_keys(self, table, rows):
+            return table.duration_ns[rows].copy().view("V8")
+
+        def guard_prepared(self, table, rows, source, budget):
+            keys, first = np.unique(self.prepare_keys(table, rows), return_index=True)
+            prepared = self.prepare(keys, table, rows[first], source, budget)
+            return GuardResult(
+                self.guard(table, rows, source, budget),
+                (GuardPreparation(keys, prepared),),
+            )
+
+    k = GuardBindingKernel()
+    durations = np.array([1.0, 1.0, 2.0])
+    drive = replace(track(3, EnvelopeSpec("constant")), duration_ns=durations)
+    b = replace(batch(3), tracks=(drive,), end_ns=durations)
+    src = source()
+    with closing(Engine(1, 0, kernels=(k,))) as engine:
+        result = engine.evolve(src, (b,), cancel=Event())
+    assert len(k.groups) == 1, "guard-built singletons must bypass bind_input"
+    np.testing.assert_array_equal(k.groups[0][1], [1.0, 1.0])
+    assert k.bound_rows == [0, 1]
+    assert k.unbound_rows == [2]
+    assert k.preparations == 2
+    np.testing.assert_array_equal(
+        result.densities, np.repeat(src.initial_density[None], 3, axis=0)
+    )
+
+
+def test_shared_dyson_is_bitwise_chunk_independent_and_source_local():
+    from zcu_tools.simulate.evolution.kernels.dyson import DysonKernel
+    from zcu_tools.simulate.evolution.kernels.t4 import T4
+
+    n = 10
+    drive = replace(
+        track(n, EnvelopeSpec("constant")),
+        duration_ns=(np.arange(n) + 1) / 16,
+        frequency_ghz=np.linspace(0.11, 0.2, n),
+        amplitude=np.linspace(-0.0002, 0.0002, n),
+    )
+    b = replace(batch(n), tracks=(drive,))
+    src = source()
+    model = src.model((0,))
+    vector = np.exp(1j * np.arange(3)) / np.sqrt(3)
+    other = ModelSource(
+        np.outer(vector, vector.conj()), lambda level: replace(model, level=level)
+    )
+    assert callable(getattr(DysonKernel(), "bind_input", None)), (
+        "Dyson must share source-input paths"
+    )
+    outputs = []
+    for workers, chunks in ((1, 1), (1, 3), (2, 1), (2, 4)):
+        with closing(
+            Engine(
+                workers, 100000, kernels=(DysonKernel(), T4()), chunks_per_worker=chunks
+            )
+        ) as engine:
+            result = engine.evolve(src, (b,), cancel=Event())
+            changed = engine.evolve(other, (b,), cancel=Event())
+        assert result.paths.segments_by_kernel["dyson"] == n
+        outputs.append((result.densities, changed.densities))
+    for original, changed in outputs[1:]:
+        np.testing.assert_array_equal(original, outputs[0][0])
+        np.testing.assert_array_equal(changed, outputs[0][1])
+    assert np.max(abs(outputs[0][0] - outputs[0][1])) > 0.01

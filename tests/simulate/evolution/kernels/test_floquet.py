@@ -64,6 +64,73 @@ class TestFloquetContract(KernelContract):
     pass
 
 
+@pytest.mark.parametrize("count", [1, 4])
+def test_engine_reuses_guard_preparations_once_per_key(
+    kernel_case: KernelCase, count: int
+) -> None:
+    from contextlib import closing
+    from threading import Event
+
+    from zcu_tools.simulate.evolution import (
+        DriveTrack,
+        Engine,
+        FluxSchedule,
+        TimelineBatch,
+    )
+    from zcu_tools.simulate.evolution.kernels.floquet import FloquetKernel
+
+    class CountingFloquet(FloquetKernel):
+        def __init__(self):
+            self.prepared_keys = []
+
+        def prepare(self, keys, table, rows, source, budget):
+            self.prepared_keys.extend(key.tobytes() for key in keys)
+            return super().prepare(keys, table, rows, source, budget)
+
+    case = kernel_case
+    tracks = tuple(
+        DriveTrack(
+            "drive",
+            np.zeros(count),
+            np.full(count, 1.1),
+            np.full(count, frequency),
+            np.full(count, phase),
+            np.full(count, amplitude),
+            (EnvelopeSpec("constant"),),
+            np.zeros(count, dtype=np.int64),
+            np.ones(count, dtype=bool),
+        )
+        for frequency, amplitude, phase in ((3.7, 0.1, 0.7), (0.11, 0.002, -0.3))
+    )
+    batch = TimelineBatch(
+        np.arange(count),
+        tracks,
+        FluxSchedule(np.arange(count + 1), np.zeros(count), np.zeros((count, 1), int)),
+        np.full(count, 1.1),
+    )
+    counted = CountingFloquet()
+    with closing(Engine(1, 0, kernels=(counted,))) as engine:
+        actual = engine.evolve(case.source, (batch,), cancel=Event())
+        assert actual.paths.segments_by_kernel == {"floquet": count}
+        assert len(counted.prepared_keys) == len(set(counted.prepared_keys)) == 1
+        # Evolve-local handoff must not leave hidden state on the kernel.
+        engine.evolve(case.source, (batch,), cancel=Event())
+        assert len(counted.prepared_keys) == 2
+    rows = np.array([0], dtype=np.int64)
+    prepared = case.kernel.prepare(
+        case.kernel.prepare_keys(case.table, rows),
+        case.table,
+        rows,
+        case.source,
+        case.budget,
+    )
+    expected = case.source.initial_density[None].copy()
+    case.kernel.apply(prepared, rows, case.table, rows, expected, case.budget)
+    np.testing.assert_allclose(
+        actual.densities, np.repeat(expected, count, axis=0), atol=1e-13
+    )
+
+
 def test_probe_parameters_share_prepare_but_stark_and_level_do_not(
     kernel_case: KernelCase,
 ) -> None:

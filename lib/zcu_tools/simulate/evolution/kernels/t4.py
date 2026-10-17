@@ -108,6 +108,28 @@ class T4:
         coherence.setflags(write=False)
         return _Static(population, coherence)
 
+    def guard_prepared(
+        self,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source: ModelSource,
+        budget: float,
+    ) -> None:
+        """Decline guard preparation handoff; the engine calls guard normally."""
+        del table, rows, source, budget
+
+    def bind_input(
+        self,
+        prepared: Prepared,
+        key_index: int,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source_initial: NDArray[np.complex128],
+        budget: float,
+    ) -> None:
+        """Decline input binding; apply uses the model-only prepared payload."""
+        del prepared, key_index, table, rows, source_initial, budget
+
     def apply(
         self,
         prepared: Prepared,
@@ -116,9 +138,13 @@ class T4:
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
         budget: float,
-    ) -> None:
-        """Advance states in place without changing the shared payload."""
-        del table, rows, budget
+    ) -> NDArray[np.bool_]:
+        """Advance states in place without changing the shared payload.
+
+        Return an all-False bool mask aligned with rows; no post-apply check.
+        """
+        del table, budget
         if not isinstance(prepared, _Static):
             raise ValueError("T4 requires its own prepared payload")
         _apply(prepared.population, prepared.coherence, key_index, states)
+        return np.zeros(len(rows), dtype=np.bool_)

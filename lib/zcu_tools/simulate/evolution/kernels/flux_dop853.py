@@ -175,6 +175,28 @@ class FluxDOP853Kernel:
             raise ValueError("flux expansion loop exceeds waveform width")
         return _Prepared(source, _pack_expansion(expansion))
 
+    def guard_prepared(
+        self,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source: ModelSource,
+        budget: float,
+    ) -> None:
+        """Decline guard preparation handoff; the engine calls guard normally."""
+        del table, rows, source, budget
+
+    def bind_input(
+        self,
+        prepared: Prepared,
+        key_index: int,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source_initial: NDArray[np.complex128],
+        budget: float,
+    ) -> None:
+        """Decline input binding; apply uses the model-only prepared payload."""
+        del prepared, key_index, table, rows, source_initial, budget
+
     def apply(
         self,
         prepared: Prepared,
@@ -183,7 +205,7 @@ class FluxDOP853Kernel:
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
         budget: float,
-    ) -> None:
+    ) -> NDArray[np.bool_]:
         """Advance independent rows or touching same-timeline interval chains.
 
         The first slot is a chain's input; each slot receives its own endpoint
@@ -194,6 +216,8 @@ class FluxDOP853Kernel:
         ValueError for absent samples, incompatible payload/shapes/ports/indices;
         RuntimeError on integration failure, without clipping or renormalizing.
         Earlier rows may already be advanced on numerical failure.
+
+        Return an all-False bool mask aligned with rows; no post-apply check.
         """
         controls = tolerances(budget)
         if not isinstance(prepared, _Prepared):
@@ -213,7 +237,7 @@ class FluxDOP853Kernel:
         if np.any(key_index != 0):
             raise ValueError("flux DOP853 prepared index out of range")
         if not len(rows):
-            return
+            return np.zeros(len(rows), dtype=np.bool_)
         levels, inverse = np.unique(table.level[rows], axis=0, return_inverse=True)
         models = pack_models(
             [prepared.source.model(tuple(int(v) for v in level)) for level in levels]
@@ -231,3 +255,4 @@ class FluxDOP853Kernel:
             _Waveform(waveform.offsets, waveform.time_ns, waveform.flux),
         )
         run_chain(_rhs, _context, data, (rows, inverse), states, controls)
+        return np.zeros(len(rows), dtype=np.bool_)
