@@ -13,6 +13,7 @@ from zcu_tools.gui.session.events import (
 )
 
 if TYPE_CHECKING:
+    from zcu_tools.device import DeviceActivity
     from zcu_tools.device.base import BaseDeviceInfo
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
     from zcu_tools.gui.session.services.device import (
@@ -46,6 +47,16 @@ class DeviceControlPort(Protocol):
     def start_setup_device(self, req: SetupDeviceRequest) -> int: ...
     def forget_device(self, name: str) -> None: ...
     def cancel_device_operation(self, name: str) -> None: ...
+
+    def activity_snapshot(self) -> dict[str, DeviceActivity]:
+        """Read detached named driver activity on the session owner thread.
+
+        No hardware I/O or operation-lock wait occurs. The caller owns the
+        mapping; immutable values are non-atomic observations across fields
+        and drivers. End times use process-local monotonic seconds. Never use
+        this query for admission or settlement. Registry query errors propagate.
+        """
+        ...
 
     def list_devices(self) -> list[DeviceEntry]: ...
     def get_device_snapshot(self, name: str) -> DeviceSnapshot | None: ...
@@ -111,6 +122,16 @@ class DeviceControlFacet:
 
     def cancel_device_operation(self, name: str) -> None:
         self._device.cancel_device_operation(name)
+
+    def activity_snapshot(self) -> dict[str, DeviceActivity]:
+        """Read detached named driver activity on the session owner thread.
+
+        The caller owns the mapping; values are immutable. No hardware I/O or
+        operation-lock wait occurs. Fields/drivers are not observed atomically.
+        End times are process-local monotonic seconds. This query grants no
+        admission and does not settle operations. Registry errors propagate.
+        """
+        return self._device.activity_snapshot()
 
     def list_devices(self) -> list[DeviceEntry]:
         return self._device.list_devices()

@@ -46,6 +46,7 @@ def test_admission_notification_can_cancel_current_start(
         assert isinstance(window.start("previous"), int)
         harness.complete_segment()
         assert not harness.gate.snapshot()
+        harness.complete_segment()  # Deliver the previous run's device readback.
         calls.clear()
     old = fixed.binding
     if old is not None:
@@ -128,6 +129,7 @@ def test_replacement_accepted_progress_uses_current_host_and_form_capture(
     catalog_source.install(step, window)
     assert isinstance(window.start("old"), int)
     harness.complete_segment()
+    harness.complete_segment()  # Deliver the old run's device readback.
     old = window.controller.binding
     assert old is not None
     old.state.write({("sample", "value"): 87.0}, old.env)
@@ -210,6 +212,7 @@ def test_gate_registration_reentrant_start_preserves_outer_controller(
         harness.background.execute()
         harness.background.deliver()
         assert not harness.gate.snapshot()
+        harness.complete_segment()  # Deliver the previous run's device readback.
 
     observed: list[tuple[str | None, int | None, bool]] = []
     rejections: list[InvalidRunState] = []

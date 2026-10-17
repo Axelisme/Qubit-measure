@@ -7,10 +7,19 @@ the hardware, and becomes read-only from Start until terminal delivery,
 whether opened before or during the run.
 """
 
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from threading import get_ident
+
+import pytest
 from qtpy.QtWidgets import QApplication, QListWidget, QPushButton, QWidget
+from zcu_tools.device import FakeDevice
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
+
+from tests.gui._user_input import ComponentDriver
+from tests.gui.app._owner_waits import owner_result
 
 from ._window_support import WindowSession, bind_point, install_soc
 
@@ -35,7 +44,7 @@ def devices_button(window: QWidget) -> QPushButton:
 
 def open_devices(window: QWidget, qapp: QApplication) -> DeviceDialog:
     """Click Devices… and return the single dialog a user now sees."""
-    devices_button(window).click()
+    ComponentDriver(window).click(object_name="workflow.source.devices")
     qapp.processEvents()
     shown = [d for d in window.findChildren(DeviceDialog) if d.isVisible()]
     assert len(shown) == 1
@@ -128,3 +137,74 @@ def test_dialog_opened_during_a_run_is_read_only(
     status = window.controller.status()
     assert status is not None and status.lifecycle == "done"
     assert accepts_new_device(open_devices(window, qapp))
+
+
+@pytest.mark.parametrize("stop_paused", [False, True], ids=["done", "stopped"])
+def test_workflow_terminal_refreshes_cached_values_but_pause_does_not(
+    window_session: WindowSession, qapp: QApplication, tmp_path: Path, stop_paused: bool
+) -> None:
+    session = window_session
+    connect_flux(session)
+    harness = session.harness
+    window = shown_window(session, qapp)
+    driver = harness.services.device.get_connected_devices()["flux"]
+    assert isinstance(driver, FakeDevice)
+    commits: list[int] = []
+    harness.services.device_control.on_device_changed(
+        lambda _: commits.append(get_ident())
+    )
+
+    def change_device(_point: int) -> None:
+        driver.set_value(0.45)
+
+    session.during_point = change_device
+    if stop_paused:
+        session.pause_at = 0
+    ui = ComponentDriver(window)
+    devices = ComponentDriver(open_devices(window, qapp))
+    devices.select_list_row(
+        next(row.text for row in devices.list_rows() if "flux (" in row.text)
+    )
+    devices.screenshot(tmp_path / "workflow-before.png")
+    devices.click("Close")
+    ui.click("Start")
+    ui.screenshot(tmp_path / "workflow-running.png")
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        owner_result(
+            harness.owner,
+            pool.submit(harness.background.execute),
+            label="workflow producer",
+        )
+    harness.owner.pump_all()
+    harness.background.deliver()
+    ui.screenshot(tmp_path / "workflow-delivered.png")
+    if stop_paused:
+        status = window.controller.status()
+        assert status is not None and status.lifecycle == "paused"
+        assert harness.background.work is None, (
+            "pause retains the run; it is not terminal"
+        )
+        ui.click("Stop")
+        ui.screenshot(tmp_path / "workflow-stopped.png")
+    assert harness.services.device_control.get_cached_device_value("flux") == 0.0
+    assert harness.background.work is not None, (
+        "terminal must submit a background readback"
+    )
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pool.submit(harness.background.execute).result(timeout=30)
+    assert harness.services.device_control.get_cached_device_value("flux") == 0.0
+    harness.background.deliver()
+    assert harness.services.device_control.get_cached_device_value("flux") == 0.45
+    assert commits == [get_ident()]
+    status = window.controller.status()
+    assert status is not None and status.lifecycle == (
+        "stopped" if stop_paused else "done"
+    )
+    assert not harness.gate.has_active("run")
+    devices = ComponentDriver(open_devices(window, qapp))
+    devices.select_list_row(
+        next(row.text for row in devices.list_rows() if "flux (" in row.text)
+    )
+    assert any(w.text == "0.45" for w in devices.visible().widgets)
+    devices.screenshot(tmp_path / "workflow-after.png")
+    devices.click("Close")
