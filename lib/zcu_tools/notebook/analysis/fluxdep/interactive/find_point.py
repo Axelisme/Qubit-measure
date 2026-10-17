@@ -16,7 +16,7 @@ from zcu_tools.analysis.fluxdep import (
 class InteractiveFindPoints:
     def __init__(
         self,
-        signals: NDArray[np.generic],
+        signals: NDArray,
         dev_values: NDArray[np.float64],
         freqs: NDArray[np.float64],
         threshold=1.0,
