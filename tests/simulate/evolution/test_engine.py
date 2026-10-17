@@ -1105,3 +1105,47 @@ def test_shared_shaped_prefix_supplies_one_input_to_probe_and_later_segments(bin
     assert spectral.applied_rows + direct.applied_rows == 1, (
         "identical prefixes must be evolved once, not again in workers"
     )
+
+
+def test_shared_prefix_paths_and_exceedances_count_each_adopting_timeline():
+    class ExceededPrefix(RecordingKernel):
+        def apply(self, prepared, key_index, table, rows, states, budget):
+            super().apply(prepared, key_index, table, rows, states, budget)
+            return np.ones(len(rows), dtype=bool)
+
+    class RejectedDirect(RecordingKernel):
+        def __init__(self):
+            super().__init__("dop853", accepts=False)
+            self.guarded_rows = 0
+
+        def guard(self, table, rows, source, budget):
+            self.guarded_rows += len(rows)
+            return super().guard(table, rows, source, budget)
+
+    spectral = ExceededPrefix("shaped_sambe")
+    direct = RejectedDirect()
+    gate = RecordingKernel("gate_cache")
+    shaped = EnvelopeSpec(
+        "sampled", sample_ns=np.array([0.0, 0.5, 1.0]), samples=np.array([0, 1, 0])
+    )
+    b = replace(
+        batch(3),
+        tracks=(
+            track(3, shaped, duration=1),
+            track(3, EnvelopeSpec("constant"), start=1, duration=1),
+        ),
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = run(
+            Engine(1, 0, kernels=(spectral, direct, gate, RecordingKernel("dyson"), RecordingKernel("t4"))),
+            source(),
+            (b,),
+        )
+    assert result.paths.segments_by_kernel == {"shaped_sambe": 3, "dyson": 3, "t4": 3}
+    assert result.paths.points_by_class == {"shaped_sambe": 3, "dyson": 3, "t4": 3}
+    assert result.paths.exceeded_by_kernel == {"shaped_sambe": 3}
+    assert len(caught) == 1
+    assert "3 segments (shaped_sambe: 3)" in str(caught[0].message)
+    assert direct.guarded_rows == 0, "adopted prefix rows must not be reclassified"
+    assert not gate.preparations, "adopted prefix rows must not be prepared again"
