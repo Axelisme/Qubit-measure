@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from collections.abc import Callable
 
 # Pin the BLAS backend to a single thread BEFORE numpy is imported (numpy locks
 # the BLAS thread count at import time). On these tiny 40x40 Hamiltonians,
@@ -50,8 +51,6 @@ import os
 # effective here. Respect any value the caller already exported.
 for _blas_var in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
     os.environ.setdefault(_blas_var, "1")
-
-from collections.abc import Callable
 
 import h5py as h5
 import numpy as np
