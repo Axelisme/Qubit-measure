@@ -90,6 +90,12 @@ def _mock_ctrl(control_factory: Callable[[], ControlIdentity]) -> MagicMock:
     return ctrl
 
 
+def _experiment_tabs(window: MainWindow) -> QTabWidget:
+    tabs = window.findChild(QTabWidget)
+    assert tabs is not None
+    return tabs
+
+
 def test_main_window_role_failure_is_presented_without_registering_tab(
     control_factory, qapp
 ):
@@ -942,15 +948,15 @@ def test_main_window_tabs_are_movable_and_close_uses_moved_widget(
     tab_b.attach(_snapshot("tab-b", has_run_result=False), _RecordingTabActions())
     window._tab_widgets["tab-a"] = tab_a
     window._tab_widgets["tab-b"] = tab_b
-    window._tabs.addTab(tab_a, "A")
-    window._tabs.addTab(tab_b, "B")
+    _experiment_tabs(window).addTab(tab_a, "A")
+    _experiment_tabs(window).addTab(tab_b, "B")
 
-    assert window._tabs.isMovable() is True
+    assert _experiment_tabs(window).isMovable() is True
 
-    tab_bar = window._tabs.tabBar()
+    tab_bar = _experiment_tabs(window).tabBar()
     assert tab_bar is not None
     tab_bar.moveTab(0, 1)
-    assert window._tabs.widget(1) is tab_a
+    assert _experiment_tabs(window).widget(1) is tab_a
     ctrl.reorder_tabs.assert_called_once_with(["tab-b", "tab-a"])
 
     window._on_tab_close_requested(1)
@@ -1784,7 +1790,7 @@ def _add_tab(
     )
     tab.attach(snap, _RecordingTabActions())
     window._tab_widgets[tab_id] = tab
-    window._tabs.addTab(tab, tab_id)
+    _experiment_tabs(window).addTab(tab, tab_id)
     return tab
 
 
@@ -1953,7 +1959,7 @@ def test_tab_close_without_result_closes_immediately(control_factory, qapp):
     window, ctrl = _setup_window_with_tabs(control_factory, dialogs)
     _add_tab(window, "tab-1", has_run=False)
 
-    window._tabs.tabCloseRequested.emit(0)
+    _experiment_tabs(window).tabCloseRequested.emit(0)
 
     assert len(dialogs.calls) == 0
     ctrl.close_tab.assert_called_once_with("tab-1")
@@ -1966,7 +1972,7 @@ def test_tab_close_with_saved_data_closes_immediately(control_factory, qapp):
     tab = _add_tab(window, "tab-1", has_run=True, saved=True)
     assert tab.has_unsaved_data() is False
 
-    window._tabs.tabCloseRequested.emit(0)
+    _experiment_tabs(window).tabCloseRequested.emit(0)
 
     assert len(dialogs.calls) == 0
     ctrl.close_tab.assert_called_once_with("tab-1")
@@ -1985,7 +1991,7 @@ def test_tab_close_with_unsaved_data_declined_keeps_tab(
     tab.update_interaction_state(_snapshot("tab-1", data_status=data_status))
     assert tab.has_unsaved_data() is True
 
-    window._tabs.tabCloseRequested.emit(0)
+    _experiment_tabs(window).tabCloseRequested.emit(0)
 
     assert len(dialogs.calls) == 1
     call = dialogs.calls[0]
@@ -2003,7 +2009,7 @@ def test_tab_close_with_unsaved_data_confirmed_closes_tab(control_factory, qapp)
     tab = _add_tab(window, "tab-1", has_run=True, saved=False)
     assert tab.has_unsaved_data() is True
 
-    window._tabs.tabCloseRequested.emit(0)
+    _experiment_tabs(window).tabCloseRequested.emit(0)
 
     assert len(dialogs.calls) == 1
     call = dialogs.calls[0]
@@ -2021,14 +2027,14 @@ def test_moved_tab_with_unsaved_data_closes_by_captured_identity(control_factory
     _add_tab(window, "tab-b", has_run=False)
     assert tab_a.has_unsaved_data() is True
 
-    tab_bar = window._tabs.tabBar()
+    tab_bar = _experiment_tabs(window).tabBar()
     assert tab_bar is not None
     # Move tab-a from index 0 to index 1
     tab_bar.moveTab(0, 1)
-    assert window._tabs.widget(1) is tab_a
+    assert _experiment_tabs(window).widget(1) is tab_a
 
     # Request close on moved tab (now at index 1)
-    window._tabs.tabCloseRequested.emit(1)
+    _experiment_tabs(window).tabCloseRequested.emit(1)
 
     assert len(dialogs.calls) == 1
     assert dialogs.calls[0].kind == "destructive_confirm"
@@ -2449,7 +2455,7 @@ def test_app_close_waits_for_pending_tab_close_decision(control_factory, qapp):
     )
     _add_tab(window, "tab-1", has_run=True, saved=False)
 
-    window._tabs.tabCloseRequested.emit(0)
+    _experiment_tabs(window).tabCloseRequested.emit(0)
     window.close()
 
     assert [call.kind for call in dialogs.calls] == ["destructive_confirm"]
