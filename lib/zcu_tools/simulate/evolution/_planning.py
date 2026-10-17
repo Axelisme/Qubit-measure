@@ -13,6 +13,15 @@ from .secular import FluxWaveform, ModelSource
 
 @dataclass(frozen=True)
 class Geometry:
+    """Segmented acquire supplied to the legacy provider and engine scheduler.
+
+    table contains global rows and optional engine-computed prefix certificates.
+    points maps timeline indices to unique caller point IDs.
+    flux_drive is a bool vector per global row, True for continuous flux motion.
+    prefix_paths maps computed prefix IDs to diagnostics adopted by timelines.
+    segment(source, batches) constructs geometry without evolving a density.
+    """
+
     table: SegmentTable
     points: NDArray[np.int64]
     flux_drive: NDArray[np.bool_]

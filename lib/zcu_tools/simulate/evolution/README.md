@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, prefix adoption, row-local sampling ceilings and timeline-owned scheduling
+**Last updated:** 2026-10-17, kernel declarations and the opt-in legacy provider
 
 ## Segment engine contracts
 
@@ -124,6 +124,72 @@ ordinary apply agree within budget across repeated, reversed, non-contiguous
 and empty subsets. Prefix-bound Dyson results agree within the budget/8
 shared pruning allowance. The demo kernel stays in
 tests.
+
+## Kernel declarations and the legacy provider
+
+Each registered family supplies a typed `declaration` from
+`evolution.declarations`. It records algorithm identity and revision,
+table-only eligibility, guard validation and build handoff, accuracy class,
+representation transition, reuse namespace, coverage and parallel capability.
+`DeclaredKernel` extends the developer contract without changing `Kernel` or
+`Engine(kernels=...)`. The initial algorithm revision is `legacy-v1`. Numerical
+changes must update the affected identity revision and reuse namespace.
+
+Cost declarations separate guard, build, bind, apply, basis conversion, lift and
+task overhead. They also state batch dependence and an execution curve.
+All built-in cost and memory estimates are currently unknown, represented by
+`None`. Unknown is not zero. Costs are uncalibrated and cannot enter production
+cost competition. `Kernel.cost` remains a relative scheduling weight.
+`Prepared.nbytes` still charges opaque resident arrays, not RSS.
+Memory declarations distinguish resident, build workspace, apply scratch and
+evolve-local input bindings. Reuse contracts require model, budget,
+representation and algorithm namespaces for builds. Binding adds certificates,
+ports and endpoint-affecting parameters. Endpoint reuse also requires complete
+span controls and phase history. These requirements do not change existing
+cache keys or add endpoint caching.
+
+`evolution.provider` is an opt-in developer seam:
+
+```python
+from zcu_tools.simulate.evolution.provider import LegacyProvider, Selection, segment
+
+provider = LegacyProvider()
+geometry = segment(source, batches)
+rows = np.arange(len(geometry.table.timeline), dtype=np.int64)
+candidates = provider.eligible(geometry.table, rows)
+dispatch = provider.classify(geometry, source, budget=1e-3)
+```
+
+`eligible` returns row indices per family without running guards or building
+models. True eligibility does not certify a numerical method. `classify`
+delegates to the existing dispatch, including shaped ordering and terminal-domain
+errors. It deliberately ignores declared costs and eligibility when reproducing
+legacy selection. It returns the existing `Dispatch` record with guard products,
+deferred rows, acquire-wide shaped ordering and rejected-family masks.
+
+For a deferred timeline, pass
+`Selection(timeline_rows, dispatch.shaped, dispatch.rejected)` back to
+`provider.classify(..., selection=selection)`. No local builder runs until that
+selection. Obtain the original kernel through `provider.entry(name).kernel`.
+Use accepted `dispatch.preparations[name]` payloads directly, with their
+prepare-key indices, in ordinary `Kernel.bind_input` and `Kernel.apply`.
+Call `Kernel.prepare` only for keys without an accepted guard product.
+Guard rejection advances the legacy chain. Guard, preparation and apply
+exceptions propagate; none authorizes retry or density correction.
+
+For an injected kernel without metadata, explicitly construct
+`LegacyKernelAdapter(kernel, declaration)` and pass the adapters to
+`LegacyProvider(entries)`. The adapter rejects mismatched names or build
+handoffs. The provider never guesses attributes or adds missing fallback
+families. `Engine(kernels=...)` continues accepting the original kernels
+without adapters or declarations.
+
+The provider does not compute shared prefix densities, execute work or own a
+cache. Plain `segment` geometry has only source inputs and unresolved prefixes.
+An engine collaborator can instead supply geometry with engine-computed prefix
+certificates. Unknown input remains unknown. `Engine.evolve` remains the
+production entry point and keeps its current dispatch, scheduling, diagnostics
+and numerical behavior.
 
 ## Dispatch
 

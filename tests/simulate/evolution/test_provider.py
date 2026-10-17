@@ -4,7 +4,6 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-
 from zcu_tools.simulate.evolution import EnvelopeSpec
 from zcu_tools.simulate.evolution.declarations import (
     AlgorithmIdentity,
@@ -46,13 +45,17 @@ def test_candidate_discovery_excludes_impossible_rows_without_guards_or_builds()
 
     idle = Unguardable("t4")
     driven = Unguardable("dyson")
-    provider = LegacyProvider((
-        LegacyKernelAdapter(idle, declaration("t4")),
-        LegacyKernelAdapter(
-            driven,
-            replace(declaration("dyson"), eligibility=Eligibility(1, 1, "constant")),
-        ),
-    ))
+    provider = LegacyProvider(
+        (
+            LegacyKernelAdapter(idle, declaration("t4")),
+            LegacyKernelAdapter(
+                driven,
+                replace(
+                    declaration("dyson"), eligibility=Eligibility(1, 1, "constant")
+                ),
+            ),
+        )
+    )
     geometry = segment(
         source(),
         (replace(batch(1), tracks=(track(1, EnvelopeSpec("constant")),)),),
@@ -85,9 +88,9 @@ def test_legacy_adapter_requires_matching_identity_and_handoff():
 
 def test_legacy_provider_preserves_terminal_and_missing_family_errors():
     geometry = segment(source(), (batch(1),))
-    provider = LegacyProvider((
-        LegacyKernelAdapter(RecordingKernel("t4", accepts=False), declaration("t4")),
-    ))
+    provider = LegacyProvider(
+        (LegacyKernelAdapter(RecordingKernel("t4", accepts=False), declaration("t4")),)
+    )
     with pytest.raises(RuntimeError, match="no valid kernel for segment 0"):
         provider.classify(geometry, source(), 1e-3)
     with pytest.raises(RuntimeError, match="t4"):
@@ -111,9 +114,9 @@ def test_legacy_provider_retains_shared_and_deferred_guard_products(count):
             pytest.fail("accepted guard payload must not be rebuilt")
 
     kernel = BuildingIdle("t4")
-    provider = LegacyProvider((
-        LegacyKernelAdapter(kernel, declaration("t4", builds=True)),
-    ))
+    provider = LegacyProvider(
+        (LegacyKernelAdapter(kernel, declaration("t4", builds=True)),)
+    )
     src = source()
     geometry = segment(src, (batch(count),))
     result = provider.classify(geometry, src, 1e-3)
