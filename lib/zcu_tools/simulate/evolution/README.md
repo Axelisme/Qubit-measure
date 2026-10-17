@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, kernel declarations and the opt-in legacy provider
+**Last updated:** 2026-10-17, documented opaque prepare-cache collaborator
 
 ## Segment engine contracts
 
@@ -571,3 +571,8 @@ The prepare-cache budget charges prepared payloads, not process RSS. Models,
 returned densities, live chunk references, solver workspaces and ADC preparations
 are separate allocations. Clearing the cache or closing the engine releases
 in-memory preparations without deleting replay inputs.
+
+The `cache` module exposes `PrepareCache` and `PreparedPayload` to numeric
+scheduling collaborators. It owns the shared whole-batch LRU; scheduler and
+prefix resolution use this same cache. Calls require the engine call lock.
+Only model-only payloads belong in it, never input-bound state.
