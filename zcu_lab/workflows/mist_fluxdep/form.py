@@ -14,8 +14,8 @@ from zcu_tools.gui.form import (
     FormErrors,
     FormModel,
     FormPath,
-    LinRange,
     Option,
+    SweepInput,
     field_error,
 )
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory
@@ -64,7 +64,7 @@ class MISTPlanForm(FormModel):
     flux_unit: Annotated[Literal["A", "V", "native"], Display(label="Flux unit")] = (
         Field(description="Explicit setpoint unit")
     )
-    fluxes: Annotated[LinRange, Display(label="Fluxes")] = Field(
+    fluxes: Annotated[SweepInput, Display(label="Fluxes", selector=False)] = Field(
         description="Ordered absolute flux setpoints"
     )
     pi_length_us: Annotated[float, Display(label="Pi length", unit="µs")] = Field(

@@ -35,6 +35,13 @@ class FormCommandWire(TypedDict):
     label: str
 
 
+class FormInputCommandWire(FormCommandWire):
+    """target is the replaced model path; inputs are participating field paths."""
+
+    target: list[str]
+    inputs: list[list[str]]
+
+
 class FormOptionWire(TypedDict):
     """Ordered option: label is UI text; value is detached writable input JSON.
 
@@ -65,7 +72,9 @@ class FormFieldWire(TypedDict):
     a branch, even while disabled. It carries no value and ignores dynamic
     menu size. fixed
     constrains the complete value, fixed_value is meaningful only when fixed.
-    Both flags may be true. constraints are hints.
+    Both flags may be true. constraints are hints. commands lists field actions
+    with target and participating inputs. selector=False hides the dropdown,
+    retaining options and active structure.
     """
 
     path: list[str]
@@ -102,6 +111,8 @@ class FormFieldWire(TypedDict):
     fixed: bool
     fixed_value: JsonValue
     constraints: FormConstraintsWire
+    commands: list[FormInputCommandWire]
+    selector: bool
 
 
 class FormDescriptionWire(TypedDict):
@@ -181,9 +192,19 @@ def _field_wire(field: FormFieldDescription) -> FormFieldWire:
         if field.options is not None
         else None,
         "selected": field.selected,
+        "selector": field.selector,
         "selection_fixed": field.selection_fixed,
         "fixed": field.fixed,
         "fixed_value": field.fixed_value,
+        "commands": [
+            {
+                "name": item.name,
+                "label": item.label,
+                "target": list(item.target),
+                "inputs": [list(path) for path in item.inputs],
+            }
+            for item in field.commands
+        ],
         "constraints": {
             "ge": hints.ge,
             "gt": hints.gt,

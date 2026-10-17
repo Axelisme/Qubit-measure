@@ -31,6 +31,13 @@ class FormCommandReply(TypedDict):
     label: str
 
 
+class FormInputCommandReply(FormCommandReply):
+    """target is the replaced model; inputs are participating canonical paths."""
+
+    target: list[str]
+    inputs: list[list[str]]
+
+
 class FormOptionReply(TypedDict):
     """One ordered option, without branch fields or validation schema.
 
@@ -64,7 +71,9 @@ class FormFieldReply(TypedDict):
     selection_fixed does not depend on menu size and carries no value.
     fixed says the declaration/selection fixes the leaf or complete option value;
     fixed_value is meaningful only when fixed, otherwise null. Both flags may be
-    true. constraints carries leaf hints.
+    true. constraints carries leaf hints. commands lists field actions with
+    target and participating inputs. selector=False hides the dropdown without
+    changing options or active structure.
     """
 
     path: list[str]
@@ -88,6 +97,8 @@ class FormFieldReply(TypedDict):
     fixed: bool
     fixed_value: JsonValue
     constraints: FormConstraintsReply
+    commands: list[FormInputCommandReply]
+    selector: bool
 
 
 class FormDescriptionReply(TypedDict):
@@ -136,6 +147,16 @@ def _project_field(field: FormFieldDescription) -> FormFieldReply:
             for option in field.options
         ],
         "selected": field.selected,
+        "selector": field.selector,
+        "commands": [
+            {
+                "name": item.name,
+                "label": item.label,
+                "target": list(item.target),
+                "inputs": [list(path) for path in item.inputs],
+            }
+            for item in field.commands
+        ],
         "selection_fixed": field.selection_fixed,
         "fixed": field.fixed,
         "fixed_value": field.fixed_value,

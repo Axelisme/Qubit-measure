@@ -2,7 +2,7 @@
 
 import json
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
@@ -18,7 +18,10 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
     workflow,
 )
+from zcu_tools.gui.app.workflows.attachment import WorkflowAttachment
+from zcu_tools.gui.app.workflows.persistence import WorkflowInputSnapshot
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
+from zcu_tools.gui.form import FormModel
 from zcu_tools.gui.remote.control_service import ControlOptions
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request
@@ -42,7 +45,15 @@ from tests.resources.entry.fakes import Driver, registry_state, restore_registry
 from ._recording_transport import WindowTransport, WireRoute
 from ._reload_source import InjectedCatalog
 from ._start_fakes import StartHarness
-from ._synthetic import Component, Context, Plan, Tunables, inline_input
+from ._synthetic import (
+    Component,
+    Context,
+    Plan,
+    Tunables,
+    TunablesForm,
+    inline_input,
+    sample_step,
+)
 from ._window_support import QUBIT_KIND, RpcRequest, WindowSession
 
 
@@ -124,6 +135,53 @@ def attachment(
             )
         finally:
             restore_registry(before)
+
+
+@pytest.fixture
+def sweep_window(
+    qapp: QApplication,
+    attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
+) -> Iterator[
+    Callable[[type[FormModel], WorkflowInputSnapshot | None], WorkflowWindow[Context]]
+]:
+    """Assemble synthetic sweep forms, optional startup restore, and Qt teardown."""
+    _, harness, _ = attachment
+    windows: list[WorkflowWindow[Context]] = []
+
+    def open_window(
+        model: type[FormModel], snapshot: WorkflowInputSnapshot | None
+    ) -> WorkflowWindow[Context]:
+        registration = WorkflowAttachment(
+            step=sample_step,
+            plan_model=model,
+            knobs_model=TunablesForm,
+            plan_to_cfg=lambda value, env, snapshot: Plan(snapshot=snapshot),
+            knobs_to_cfg=TunablesForm.to_cfg,
+            seed=lambda plan, value: Context(1),
+        )
+        window = WorkflowWindow(
+            harness.state,
+            harness.services,
+            harness.owner,
+            templates={},
+            alias_presets=None,
+            registrations=(registration,),
+        )
+        windows.append(window)
+        if snapshot is not None:
+            window.restore_persisted_state(snapshot)
+        window.resize(1100, 900)
+        window.show()
+        qapp.processEvents()
+        return window
+
+    try:
+        yield open_window
+    finally:
+        for window in reversed(windows):
+            window.close()
+            window.deleteLater()
+        qapp.processEvents()
 
 
 @pytest.fixture

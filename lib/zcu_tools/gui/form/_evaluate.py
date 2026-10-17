@@ -302,7 +302,43 @@ def preview(
         for path in leaves(model, data)
         if not any(failed[: len(path)] == path for failed in failed_decoding)
     }
+    _project_valid_children(model, data, ordinary, (), failed_decoding, values)
     return FormPreview(values, validated)
+
+
+def _project_valid_children(
+    model: type[BaseModel],
+    data: Mapping[str, JsonValue],
+    ordinary: Mapping[str, FormValue],
+    prefix: FormWritePath,
+    failed: tuple[FormPath, ...],
+    values: dict[FormWritePath, FormValue],
+) -> None:
+    """Keep validated child projections even when a sibling invalidates the root.
+
+    Only successfully decoded subtrees are validated. Failed children retain the
+    ordinary fallback leaves; their descendants can still have valid projections.
+    This uses each model's validators, not a consumer-specific normalizer.
+    """
+    for name, info in model.model_fields.items():
+        raw, decoded = data.get(name), ordinary.get(name)
+        child = selected(info, raw)
+        if child is None or not isinstance(raw, dict) or not isinstance(decoded, dict):
+            continue
+        path = (*prefix, name)
+        if any(error[: len(path)] == path for error in failed):
+            _project_valid_children(child, raw, decoded, path, failed, values)
+            continue
+        try:
+            validated = child.model_validate(decoded)
+        except ValidationError:
+            _project_valid_children(child, raw, decoded, path, failed, values)
+        else:
+            complete = {
+                key: default_json(getattr(validated, key)) for key in child.model_fields
+            }
+            for leaf in leaves(child, complete):
+                values[(*path, *leaf)] = value_at(validated, leaf)
 
 
 def _start(

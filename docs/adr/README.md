@@ -26,8 +26,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 - [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Pulse 與 mux Readout 自有 generator／ADC 欄位，分別保存單一頻率與有序 tones；規範 waveform 引用、label、Library 新建與表單路徑。
 
-- [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：make_form、固定捕捉、adapter 黑箱、持久範本與具名裝置欄位。
-- [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用 Form、持久 Spec、Library／Inspect／writeback 的提交邊界、固定來源與共用 Inspect Aliases 頁。
+- [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：make_form、固定捕捉、adapter 黑箱、持久範本、具名裝置欄位與 sweep 四種座標／採樣表示。
+- [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用 Form、sweep 座標／採樣指令與有效端點、持久 Spec、Library／Inspect／writeback 的提交邊界、固定來源與共用 Inspect Aliases 頁。
 - [0008 — Headless Form 與 writeback draft](0008-cfg-editor-session.md)：Headless Form 的宿主所有權、opaque writeback draft、ModuleSpec proposal 與 selected Apply 的成功前綴。
 - [0009 — Spec/Value fluent + LiteralSpec lock](0009-spec-value-fluent-and-literal-lock.md)：已被 [[0065]]、[[0073]] 的 Form／持久 Spec 取代，保留歷史設計。
 - [0010 — Complete value tree](0010-value-tree-complete-none-for-empty.md)：已被 [[0065]] 的 Form input／result 取代，保留歷史設計。

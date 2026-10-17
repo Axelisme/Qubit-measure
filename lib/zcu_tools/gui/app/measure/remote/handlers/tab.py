@@ -12,7 +12,7 @@ from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
 )
-from zcu_tools.gui.form import FormPathError
+from zcu_tools.gui.form import FormCommandError, FormPathError
 from zcu_tools.gui.form_adapter import LogicalEdit
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
@@ -333,6 +333,51 @@ def h_tab_reset_cfg(
         resource.reset(aliases=temporary_aliases(params))
     except CfgPreconditionError as exc:
         raise cfg_error_to_remote(exc) from exc
+    follow_tab(adapter, tab_id, "run")
+    return dict(observe_form(resource))
+
+
+def h_tab_run_cfg_command(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Dispatch a named active Form action through the same mutation host as edits.
+
+    params contains tab_id, canonical path array and name from description.
+    Unknown/inactive paths and unavailable commands reject before installation.
+    Success returns current input/values/errors. No remote conversion runs.
+    """
+    from ..form_errors import cfg_error_to_remote
+    from ..form_observation import observe_form
+
+    raw = params["path"]
+    if (
+        not isinstance(raw, list)
+        or not raw
+        or any(not isinstance(part, str) or not part for part in raw)
+    ):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            "path must contain nonempty strings",
+            reason="form_errors",
+        )
+    path = tuple(str(part) for part in raw)
+    tab_id = str(params["tab_id"])
+    try:
+        resource = adapter.cfg_lookup(tab_id)
+        resource.run_command(path, str(params["name"]))
+    except CfgPreconditionError as exc:
+        raise cfg_error_to_remote(exc) from exc
+    except FormPathError as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            str(exc),
+            reason="form_path",
+            data={"form_path": list(exc.path)},
+        ) from exc
+    except FormCommandError as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, str(exc), reason="form_errors"
+        ) from exc
     follow_tab(adapter, tab_id, "run")
     return dict(observe_form(resource))
 

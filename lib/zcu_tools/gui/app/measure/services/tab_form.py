@@ -334,8 +334,8 @@ class TabFormResource:
     def run_command(self, path: FormWritePath, name: str) -> None:
         """Execute a current option's named command against the fixed capture.
 
-        path is a tuple of model-field names identifying an option field.
-        name comes from that selected option's description commands, for example
+        path is a tuple of model-field names identifying an active field.
+        name comes from field commands or selected option commands, for example
         run_command(("modules", "qub_pulse"), "to_inline"). The Form owner
         computes the replacement; this host never copies or refreshes sources.
         Success commits one atomic FormState write and publishes once through
