@@ -27,7 +27,7 @@ class InteractiveLines:
 
     def __init__(
         self,
-        signals: NDArray,
+        signals: NDArray[np.generic],
         dev_values: NDArray[np.float64],
         freqs: NDArray[np.float64],
         flux_half: float | None = None,
