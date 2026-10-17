@@ -20,8 +20,8 @@ from zcu_tools.simulate.evolution import (
 def test_subperiod_ramp_preserves_resonant_population_transfer(frequency: float) -> None:
     # A circular resonant drive commutes with itself in the interaction frame.
     # Its exact rotation angle is 2*pi*strength*integral(envelope), independent
-    # of carrier phase. The narrow triangle has area 2 ns, but its value at
-    # the only full-period midpoint is zero.
+    # of carrier phase. A small terminal slope prevents plateau splitting;
+    # the narrow triangle is almost invisible at the full-period midpoint.
     strength = 0.05
     x = strength * np.array([[0, 1], [1, 0]], dtype=complex)
     y = strength * np.array([[0, 1j], [-1j, 0]], dtype=complex)
@@ -37,7 +37,7 @@ def test_subperiod_ramp_preserves_resonant_population_transfer(frequency: float)
     source = ModelSource(np.diag([1.0, 0.0]).astype(complex), lambda _: model)
     envelope = EnvelopeSpec(
         "sampled",
-        np.array([0, 1, 0, 0], dtype=complex),
+        np.array([0, 1, 0, 0.01], dtype=complex),
         np.array([0.0, 2.0, 4.0, 20.0]),
     )
     track = DriveTrack(
@@ -62,5 +62,5 @@ def test_subperiod_ramp_preserves_resonant_population_transfer(frequency: float)
         result = engine.evolve(source, (batch,), cancel=Event())
     finally:
         engine.close()
-    expected_population = np.sin(2 * np.pi * strength * 2) ** 2
+    expected_population = np.sin(2 * np.pi * strength * 2.08) ** 2
     assert result.densities[0, 1, 1].real == pytest.approx(expected_population, abs=1e-3)
