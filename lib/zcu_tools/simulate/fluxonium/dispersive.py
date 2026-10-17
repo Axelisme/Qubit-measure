@@ -189,7 +189,7 @@ def calculate_dispersive_vs_flux(
 
 
 def calculate_chi_sweep(
-    sweep_list: NDArray | list,
+    sweep_list: NDArray[np.generic] | list,
     update_fn: Callable[[Fluxonium, Any], None],
     g: float,
     bare_rf: float,
