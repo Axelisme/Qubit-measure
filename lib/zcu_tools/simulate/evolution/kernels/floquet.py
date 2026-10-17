@@ -14,7 +14,8 @@ An additional exponential-series remainder bounds orders >= 3 by budget.
 Floquet validity requires assigned bare-mode overlap >= .5, modal condition
 <= 1e8, maximum Re(lambda) <= 1e-10/ns, and unitary/periodic residual <= 1e-9.
 The norm sum of *all* omitted harmonics (including k=+/-1) bounds k=0's
-error by Duhamel's formula. This is stricter than a sampled k=0 versus +/-1
+error by Duhamel's formula. Drive harmonics use spectral norms; bath harmonics
+use sqrt(||B||_1 ||B||_inf), which dominates the spectral norm without an SVD. This is stricter than a sampled k=0 versus +/-1
 comparison. Harmonic truncation and quadrature convergence must each fit a third of
 budget. Probe limits or Dyson-remainder failures use a one-period propagator
 of H_F+D0 plus the probe, binary powering, and direct remainder integration. Frames needing more than 4096 phase
@@ -29,6 +30,7 @@ from dataclasses import dataclass
 import numpy as np
 from numba import njit
 from numpy.typing import NDArray
+from scipy.fft import fft
 from scipy.integrate import solve_ivp
 from scipy.linalg import eig, schur
 from scipy.optimize import linear_sum_assignment
@@ -99,16 +101,6 @@ def _comm(h: NDArray[np.complex128]) -> NDArray[np.complex128]:
     return -2j * np.pi * (np.kron(h, eye) - np.kron(eye, h.T))
 
 
-def _bath(model: SecularModel) -> NDArray[np.complex128]:
-    size = len(model.energies_ghz)
-    loss = model.rates_per_ns.sum(axis=0)
-    gamma = (loss[:, None] + loss[None, :]) / 2 + model.dephasing_per_ns
-    result = np.diag(-gamma.ravel()).astype(np.complex128)
-    index = np.arange(size) * (size + 1)
-    result[np.ix_(index, index)] = model.rates_per_ns - np.diag(loss)
-    return result
-
-
 def _slots(table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.int64]:
     return np.argmax(np.abs(table.tone_amplitude[rows, :2]), axis=1).astype(np.int64)
 
@@ -120,24 +112,15 @@ def _fourier_norm(values: NDArray[np.complex128]) -> float:
 
 
 def _bath_fourier_norm(values: NDArray[np.complex128]) -> float:
-    """Bound every omitted bath harmonic, pairing opposite Fourier modes."""
-    count, dimension, _ = values.shape
-    size = int(np.sqrt(dimension))
-    result = float(np.linalg.norm(values[count // 2], 2))
-    for harmonic in range(1, count // 2):
-        positive = values[harmonic]
-        # Lindblad and frame maps preserve Hermiticity: B[-k] = P conj(B[k]) P.
-        paired = (
-            positive.reshape((size,) * 4)
-            .transpose(1, 0, 3, 2)
-            .conj()
-            .reshape(dimension, dimension)
-        )
-        # The residual also makes this a bound when the identity has roundoff
-        # error: ||B[-k]||_2 <= ||B[k]||_2 + ||B[-k] - paired||_F.
-        residual = np.linalg.norm(values[-harmonic] - paired, "fro")
-        result += 2 * float(np.linalg.norm(positive, 2)) + float(residual)
-    return result
+    """Bound every omitted bath harmonic with sqrt(||B||_1 ||B||_inf).
+
+    This dominates the spectral norm without a singular-value solve. Summing
+    both signs directly needs no Hermitian pairing or roundoff residual.
+    """
+    magnitudes = np.abs(values[1:])
+    columns = magnitudes.sum(axis=1).max(axis=1)
+    rows = magnitudes.sum(axis=2).max(axis=1)
+    return float(np.sqrt(columns * rows).sum())
 
 
 def _frame_samples(model: SecularModel, row: tuple[int, float, float], count: int):
@@ -190,14 +173,15 @@ def _frame_samples(model: SecularModel, row: tuple[int, float, float], count: in
 
 
 def _fourier_averages(samples: NDArray[np.complex128]):
-    """Return all harmonics and the even-sample zero mode, with FFT reductions."""
+    """Return all harmonics and the even-sample zero mode.
+
+    The array is overwritten by its transform; callers must not reuse samples.
+    """
     count = len(samples)
-    # Only the coarse zero mode is used. Copy it so the other coarse harmonics
-    # are released before allocating the full spectrum; keep the FFT summation
-    # order used by the convergence check rather than substituting a mean.
-    coarse_zero = np.fft.fft(samples[::2], axis=0)[0].copy()
-    coarse_zero /= count // 2
-    fourier = np.fft.fft(samples, axis=0)
+    # The coarse zero mode is the mean of every other sample, so it needs no
+    # transform. Compute it before the in-place full transform.
+    coarse_zero = samples[::2].sum(axis=0) / (count // 2)
+    fourier = fft(samples, axis=0, overwrite_x=True, workers=1)
     fourier /= count
     return fourier, coarse_zero
 
@@ -205,7 +189,10 @@ def _fourier_averages(samples: NDArray[np.complex128]):
 def _averages(model: SecularModel, rotations: NDArray[np.complex128]):
     """Transform each sample once and return full harmonics and convergence."""
     count, size, _ = rotations.shape
-    dissipator = _bath(model).reshape((size,) * 4)
+    loss = model.rates_per_ns.sum(axis=0)
+    gamma = (loss[:, None] + loss[None, :]) / 2 + model.dephasing_per_ns
+    # Population rows use the transfer matrix, which already contains -loss.
+    np.fill_diagonal(gamma, loss)
     baths = np.empty((count, size * size, size * size), dtype=np.complex128)
     xs = np.zeros((count, len(model.drives), size, size), dtype=np.complex128)
     ys = np.zeros_like(xs)
@@ -213,18 +200,17 @@ def _averages(model: SecularModel, rotations: NDArray[np.complex128]):
     active_y = [p for p, d in enumerate(model.drives) if np.any(d.quadrature_ghz)]
     for index, rotation in enumerate(rotations):
         adjoint = rotation.conj().T
-        # (R x R*)^dagger D (R x R*) in row-major density coordinates.
-        # Contract one Hilbert index at a time: O(size^5), not two dense
-        # Liouville products of O(size^6). Never form the Kronecker transform.
-        baths[index] = np.einsum(
-            "ia,jb,ijkl,kc,ld->abcd",
-            rotation.conj(),
-            rotation,
-            dissipator,
-            rotation,
-            rotation.conj(),
-            optimize=True,
-        ).reshape(size * size, size * size)
+        # The secular bath is diagonal coherence loss plus population transfer.
+        # pairs[i,a,c] = conj(R[i,a])*R[i,c] contracts each part with two
+        # small dense products, without a full Liouville basis transform.
+        pairs = (rotation.conj()[:, :, None] * rotation[:, None, :]).reshape(
+            size, size * size
+        )
+        decay = (pairs.T @ gamma @ pairs.conj()).reshape((size,) * 4)
+        transfer = (pairs.T @ model.rates_per_ns @ pairs.conj()).reshape((size,) * 4)
+        baths[index] = (transfer - decay.transpose(0, 2, 1, 3)).reshape(
+            size * size, size * size
+        )
         for port in active_x:
             xs[index, port] = adjoint @ model.drives[port].in_phase_ghz @ rotation
         for port in active_y:
@@ -732,11 +718,11 @@ class FloquetKernel:
     """
 
     declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("floquet", "modal-blas-v2"),
+        identity=AlgorithmIdentity("floquet", "modal-blas-v3"),
         eligibility=Eligibility(2, 2, "constant"),
         guard=GuardDeclaration(("model-build",), builds_model=True),
         accuracy="guarded-approximation",
-        reuse=ReuseDeclaration("floquet/modal-blas-v2/serial"),
+        reuse=ReuseDeclaration("floquet/modal-blas-v3/serial"),
         fallback="legacy-order",
     )
 
