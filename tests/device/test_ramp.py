@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import inspect
 import threading
+from collections.abc import Callable
 from typing import Any, Literal, cast
+from unittest.mock import Mock
 
 import pytest
 from pydantic import ValidationError
@@ -80,6 +82,58 @@ def _make_yoko(
     rm = DummyYokoResourceManager(session)
     dev = YOKOGS200("YOKO::INSTR", cast(Any, rm))
     return dev, session
+
+
+@pytest.mark.parametrize(
+    "getter,response,expected,command",
+    [
+        (YOKOGS200.get_output, "1", "on", ":OUTPut?"),
+        (YOKOGS200.get_output, "0", "off", ":OUTPut?"),
+        (YOKOGS200.get_mode, "VOLT", "voltage", ":SOURce:FUNCtion?"),
+        (YOKOGS200.get_mode, "CURR", "current", ":SOURce:FUNCtion?"),
+    ],
+)
+def test_yoko_getter_maps_one_scpi_response_without_writing(
+    monkeypatch: pytest.MonkeyPatch,
+    getter: Callable[[YOKOGS200], str],
+    response: str,
+    expected: str,
+    command: str,
+) -> None:
+    device, session = _make_yoko()
+    query = Mock(return_value=response)
+    monkeypatch.setattr(session, "query", query)
+    try:
+        assert getter(device) == expected
+        query.assert_called_once_with(command)
+        assert session.writes == []
+    finally:
+        device.close()
+
+
+@pytest.mark.parametrize(
+    "getter,command",
+    [
+        (YOKOGS200.get_output, ":OUTPut?"),
+        (YOKOGS200.get_mode, ":SOURce:FUNCtion?"),
+    ],
+)
+def test_yoko_getter_unknown_response_propagates_key_error(
+    monkeypatch: pytest.MonkeyPatch,
+    getter: Callable[[YOKOGS200], str],
+    command: str,
+) -> None:
+    device, session = _make_yoko()
+    query = Mock(return_value="UNKNOWN")
+    monkeypatch.setattr(session, "query", query)
+    try:
+        with pytest.raises(KeyError, match="UNKNOWN") as error:
+            getter(device)
+        assert error.value.args == ("UNKNOWN",)
+        query.assert_called_once_with(command)
+        assert session.writes == []
+    finally:
+        device.close()
 
 
 def test_yoko_setup_warning_identifies_the_setup_caller() -> None:

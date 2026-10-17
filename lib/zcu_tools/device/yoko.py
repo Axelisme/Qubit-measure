@@ -14,8 +14,11 @@ from .base import BaseDevice, BaseDeviceInfo, device_operation
 if TYPE_CHECKING:
     from pyvisa import ResourceManager
 
-STATUS_MAP = {"on": "1", "off": "0"}
-MODE_MAPS = {"voltage": "VOLT", "current": "CURR"}
+STATUS_MAP: dict[Literal["on", "off"], str] = {"on": "1", "off": "0"}
+MODE_MAPS: dict[Literal["voltage", "current"], str] = {
+    "voltage": "VOLT",
+    "current": "CURR",
+}
 DEFAULT_RAMPSTEP = {
     "voltage": 1e-3,
     "current": 1e-6,
@@ -28,8 +31,10 @@ MAX_RAMPSTEP = {
 }
 
 
-STATUS_MAP_INV = {v: k for k, v in STATUS_MAP.items()}
-MODE_MAPS_INV = {v: k for k, v in MODE_MAPS.items()}
+STATUS_MAP_INV: dict[str, Literal["on", "off"]] = {v: k for k, v in STATUS_MAP.items()}
+MODE_MAPS_INV: dict[str, Literal["voltage", "current"]] = {
+    v: k for k, v in MODE_MAPS.items()
+}
 
 
 def _yoko_value_unit(mode: object) -> Literal["A", "V"]:
@@ -135,7 +140,7 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
     # ==========================================================================#
 
     def get_output(self) -> Literal["on", "off"]:
-        return STATUS_MAP_INV[self.query(":OUTPut?")]  # type: ignore
+        return STATUS_MAP_INV[self.query(":OUTPut?")]
 
     @device_operation
     def set_output(self, status: Literal["on", "off"]) -> None:
@@ -315,7 +320,7 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
 
     # Returns the mode (voltage or current)
     def get_mode(self) -> Literal["voltage", "current"]:
-        return MODE_MAPS_INV[self.query(":SOURce:FUNCtion?")]  # type: ignore
+        return MODE_MAPS_INV[self.query(":SOURce:FUNCtion?")]
 
     # ==========================================================================#
 

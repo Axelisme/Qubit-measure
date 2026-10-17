@@ -27,8 +27,11 @@ class _Codec:
         return {"value": state.value}
 
 
+_DEFAULT_STATE = _State()
+
+
 class _Originator:
-    def __init__(self, state: _State = _State()) -> None:
+    def __init__(self, state: _State = _DEFAULT_STATE) -> None:
         self.state = state
         self.restored: _State | None = None
 
