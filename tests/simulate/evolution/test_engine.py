@@ -4,7 +4,7 @@ import warnings
 import weakref
 from contextlib import closing
 from dataclasses import dataclass, replace
-from threading import Event
+from threading import Event, get_ident
 
 import numpy as np
 import pytest
@@ -406,6 +406,43 @@ def test_timeline_local_payloads_are_released_before_the_next_timeline(repeated,
         "local payloads must not accumulate in A-stage or chunks"
     )
     assert kernel.live == 0, "the evolve call must release all local payloads"
+
+
+def test_guard_pool_preserves_dispatch_and_density_and_skips_small_key_sets():
+    class ObservingDyson(RecordingKernel):
+        def __init__(self):
+            super().__init__("dyson")
+            self.guard_threads: set[int] = set()
+
+        def prepare_keys(self, table, rows):
+            return table.timeline[rows].copy().view("V8")
+
+        def guard(self, table, rows, source, budget):
+            self.guard_threads.add(get_ident())
+            return table.timeline[rows] % 3 != 0
+
+    caller = get_ident()
+    for count in (7, 16):
+        outputs = []
+        for workers in (1, 2):
+            kernel = ObservingDyson()
+            b = replace(batch(count), tracks=(track(count, EnvelopeSpec("constant")),))
+            result = run(
+                Engine(workers, 0, kernels=(kernel, RecordingKernel("floquet_period"))),
+                source(),
+                (b,),
+            )
+            outputs.append(result)
+            if workers == 1 or count < 8:
+                assert kernel.guard_threads == {caller}, "small guards must stay serial"
+            else:
+                assert caller not in kernel.guard_threads, (
+                    "guards must reuse Engine's pool"
+                )
+        assert (
+            outputs[0].paths.segments_by_kernel == outputs[1].paths.segments_by_kernel
+        )
+        np.testing.assert_array_equal(outputs[0].densities, outputs[1].densities)
 
 
 def test_cancel_between_chunks_and_nonfinite_failure():
