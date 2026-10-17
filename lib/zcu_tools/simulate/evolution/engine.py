@@ -342,7 +342,11 @@ class Engine:
         when set, raises Cancelled, without returning partial results.
         Model ValueErrors propagate; numerical failure raises RuntimeError
         naming the point and segment. Results do not depend on chunking or
-        worker width except for floating-point rounding. Post-apply accuracy
+        worker width except for floating-point rounding. Classification may
+        borrow this call's worker pool for eight or more shared prepare keys.
+        Local guards run in timeline workers and hand their tables to apply.
+        Guard decisions remain independent of worker width and execution order.
+        Post-apply accuracy
         exceedances stay in the result's paths.exceeded_by_kernel and produce
         exactly one RuntimeWarning per call, without correction or retry.
         """
@@ -370,7 +374,7 @@ class Engine:
                 geometry = PrefixResolver(
                     geometry, self._kernels, source, budget, cancel
                 ).resolve(self._cache, pool, self._chunks)
-                dispatch = classify(geometry, self._kernels, source, budget)
+                dispatch = classify(geometry, self._kernels, source, budget, pool=pool)
                 schedule = Schedule(geometry, dispatch, source, budget, cancel)
                 result = schedule.run(self._kernels, self._cache, pool, self._chunks)
             if cancel.is_set():

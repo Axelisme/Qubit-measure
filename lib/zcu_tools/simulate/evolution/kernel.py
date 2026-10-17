@@ -240,6 +240,9 @@ class Kernel(Protocol):
     name: stable algorithm name for diagnostics and cache partitioning.
     Multiple numerical families share this seam so the scheduler need not know
     their representation. All index arrays below are int64 vectors.
+    Engine may call guards concurrently on its existing threading pool. Guards
+    must be pure with respect to model/table inputs, with decisions independent
+    of worker width and execution order. Kernels never open a numerical pool.
     """
 
     name: str
