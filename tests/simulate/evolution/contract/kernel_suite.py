@@ -247,6 +247,48 @@ class KernelContract:
                 )
             np.testing.assert_array_equal(split, whole)
 
+    def test_guard_prepared_matches_guard_and_fresh_apply(
+        self, kernel_case: KernelCase
+    ) -> None:
+        case = kernel_case
+        hook = getattr(case.kernel, "guard_prepared", None)
+        assert callable(hook), "every C5 kernel must offer guard_prepared"
+        rows = np.arange(len(case.states), dtype=np.int64)
+        expected_mask = case.kernel.guard(case.table, rows, case.source, case.budget)
+        for subset in (rows, rows[::-1], rows[::2], rows[:0]):
+            result = hook(case.table, subset, case.source, case.budget)
+            if result is None:
+                continue
+            np.testing.assert_array_equal(result.accepted, expected_mask[subset])
+            assert result.accepted.dtype == np.bool_
+            for item in result.preparations:
+                keys = case.kernel.prepare_keys(case.table, subset)
+                positions = {key.tobytes(): i for i, key in enumerate(item.keys)}
+                selected = np.array(
+                    [i for i, key in enumerate(keys) if key.tobytes() in positions],
+                    dtype=np.int64,
+                )
+                selected = selected[result.accepted[selected]]
+                indices = np.array(
+                    [positions[key.tobytes()] for key in keys[selected]], dtype=np.int64
+                )
+                chosen = subset[selected]
+                actual = case.states[chosen].copy()
+                case.kernel.apply(
+                    item.prepared, indices, case.table, chosen, actual, case.budget
+                )
+                fresh_keys, first, inverse = np.unique(
+                    keys[selected], return_index=True, return_inverse=True
+                )
+                fresh = case.kernel.prepare(
+                    fresh_keys, case.table, chosen[first], case.source, case.budget
+                )
+                expected = case.states[chosen].copy()
+                case.kernel.apply(
+                    fresh, inverse, case.table, chosen, expected, case.budget
+                )
+                np.testing.assert_array_equal(actual, expected)
+
     def test_rows_can_be_split(self, kernel_case: KernelCase) -> None:
         case = kernel_case
         rows = np.arange(len(case.states), dtype=np.int64)
