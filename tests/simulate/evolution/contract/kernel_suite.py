@@ -256,7 +256,9 @@ class KernelContract:
         rows = np.arange(len(case.states), dtype=np.int64)
         expected_mask = case.kernel.guard(case.table, rows, case.source, case.budget)
         for subset in (rows, rows[::-1], rows[::2], rows[:0]):
-            result = hook(case.table, subset, case.source, case.budget)
+            result = case.kernel.guard_prepared(
+                case.table, subset, case.source, case.budget
+            )
             if result is None:
                 continue
             np.testing.assert_array_equal(result.accepted, expected_mask[subset])
