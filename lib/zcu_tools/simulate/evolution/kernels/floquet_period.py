@@ -112,6 +112,13 @@ def _rhs(time, flat, context):
     return (-2j * np.pi * (h @ flat.reshape(size, size))).ravel()
 
 
+@njit(nogil=True, cache=True)
+def _integrate_dense(context, state, duration, controls):
+    # A callback-free entry point caches the linked shared integrator across
+    # processes; the RHS dispatcher itself has a process-specific cache key.
+    return integrate_dense(_rhs, context, state, duration, controls)
+
+
 def _unitary(matrix: NDArray[np.complex128]) -> NDArray[np.complex128]:
     """Return the polar unitary of an integrated fundamental solution."""
     left, _, right = np.linalg.svd(matrix)
@@ -139,8 +146,7 @@ def _build(
             array.setflags(write=False)
     else:
         tolerance = min(1e-10, budget * 1e-4)
-        times, coefficients, final = integrate_dense(
-            _rhs,
+        times, coefficients, final = _integrate_dense(
             (h0, x, y, frequency),
             np.eye(size, dtype=complex).ravel(),
             period,

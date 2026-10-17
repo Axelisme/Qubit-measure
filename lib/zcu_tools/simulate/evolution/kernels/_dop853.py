@@ -5,6 +5,8 @@ Hairer's DOP853 coefficients (also used by SciPy). Interval callers stop
 exactly at each control/bath boundary and restart with a deterministic seed.
 The dense variant retains the degree-seven extension for Hilbert propagators.
 A fresh RHS evaluation at each boundary avoids stale derivatives.
+Callback-taking helpers inline into kernel-owned compiled entry points. This
+keeps process-specific dispatcher pointers out of those entry points' disk cache.
 """
 
 from collections.abc import Callable
@@ -181,7 +183,7 @@ def tolerances(budget: float) -> Tolerances:
     return Tolerances(min(1e-4, budget * scale), min(1e-6, budget * scale * 0.01))
 
 
-@njit(nogil=True, cache=True)
+@njit(nogil=True, cache=True, inline="always")
 def _trial(rhs, context, state, time, step):
     """Accumulate nonzero tableau weights in place, reusing one stage buffer."""
     stages = np.empty((12, state.size), dtype=np.complex128)
@@ -224,7 +226,7 @@ def _error_norm(stages, state, candidate, step, controls):
     return step * fifth_norm / np.sqrt((fifth_norm + 0.01 * third_norm) * state.size)
 
 
-@njit(nogil=True, cache=True)
+@njit(nogil=True, cache=True, inline="always")
 def integrate(
     rhs: Callable[[float, NDArray[np.complex128], Context], NDArray[np.complex128]],
     context: Context,
@@ -410,7 +412,7 @@ _D = np.array(
 )
 
 
-@njit(nogil=True, cache=True)
+@njit(nogil=True, cache=True, inline="always")
 def _dense_step(rhs, context, state, trial, time, step):
     """Build an accepted step polynomial with fused, nonzero weighted sums."""
     candidate, stages = trial
@@ -443,7 +445,7 @@ def _dense_step(rhs, context, state, trial, time, step):
     return dense
 
 
-@njit(nogil=True, cache=True)
+@njit(nogil=True, cache=True, inline="always")
 def integrate_dense(
     rhs: Callable[[float, NDArray[np.complex128], Context], NDArray[np.complex128]],
     context: Context,
