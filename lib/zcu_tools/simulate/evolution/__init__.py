@@ -1,9 +1,9 @@
 """Independent ns/GHz evolution, explicit bases and population conversion.
 
 No QICK, environment, device, resource or YAML dependencies. Import public
-records and tools here. The kernel, cache, declarations and provider modules are the
-explicit developer seams for numerical algorithm collaborators; other submodule
-layout is not a second integration interface.
+records and tools here. The kernel, cache, declarations, provider, shadow and
+constant modules are the explicit developer seams for numerical algorithm
+collaborators; other submodule layout is not a second integration interface.
 """
 
 from .controls import ControlPulse, ControlSequence, Envelope, PhaseEvent, quantize_ns

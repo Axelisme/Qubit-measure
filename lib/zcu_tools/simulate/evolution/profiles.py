@@ -1,7 +1,8 @@
-"""Immutable, explicitly versioned one-core estimates for shadow planning only."""
+"""Immutable, versioned one-core estimates for non-production planning only."""
 
 from dataclasses import dataclass
 from math import isfinite
+from typing import Literal
 
 from .declarations import AlgorithmIdentity, MemoryDeclaration, StageCosts
 
@@ -93,8 +94,23 @@ class FamilyProfile:
 
 
 @dataclass(frozen=True)
+class ProfileAdmission:
+    """Production decision before assignment, never recovery from numerical failure.
+
+    execution is legacy for every currently uncalibrated profile. revisions_match
+    compares full measured algorithm identities (including parameters/variant)
+    with the required current kernels. reason distinguishes stale revisions from
+    missing calibration; matching revisions alone never qualify a profile.
+    """
+
+    execution: Literal["legacy"]
+    revisions_match: bool
+    reason: str
+
+
+@dataclass(frozen=True)
 class OneCoreProfile:
-    """Versioned, immutable shadow-only profile with full evidence labels.
+    """Versioned, immutable experimental-only profile with full evidence labels.
 
     schema must be shadow-one-core-v1. profile_id and revision identify this
     fixed dataset, independently of planner/numeric revisions. domain limits
@@ -131,6 +147,28 @@ class OneCoreProfile:
             or len(identities) != len(set(identities))
         ):
             raise ValueError("invalid shadow profile identity, units or uncertainty")
+
+    def production_admission(
+        self, current: tuple[AlgorithmIdentity, ...]
+    ) -> ProfileAdmission:
+        """Choose legacy before production assignment for stale or uncalibrated data.
+
+        current lists every kernel identity required by the proposed policy.
+        Missing or changed measured identities are non-admission, not exceptions
+        or permission to retry a failed computation. Actual calibrated admission
+        requires a separate evidence-qualified profile contract.
+        """
+        measured = {family.identity for family in self.families}
+        stale = sorted(
+            identity.name for identity in current if identity not in measured
+        )
+        if stale:
+            return ProfileAdmission(
+                "legacy", False, "kernel revision mismatch: " + ", ".join(stale)
+            )
+        return ProfileAdmission(
+            "legacy", True, "uncalibrated profile: production not admitted"
+        )
 
     def family(self, identity: AlgorithmIdentity) -> FamilyProfile:
         """Return matching full identity; unsupported algorithm revisions raise ValueError."""

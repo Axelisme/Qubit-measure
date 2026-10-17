@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-18, opt-in legacy single-interval plan execution
+**Last updated:** 2026-10-18, experimental constant covers and checked inline replay
 
 ## Segment engine contracts
 
@@ -211,6 +211,74 @@ their legacy semantics. Guard/build/apply exceptions propagate without retry or
 reclassification. Cancellation, cache ownership, trace diagnostics and the one
 uncorrected-output exceedance warning use the same engine lifecycle as default
 execution. No new plan, profile or revision admission is enabled.
+
+## Experimental constant planning and replay
+
+`evolution.constant.ConstantPlanner` validates and pins a numerical constant
+cover using the existing declarations, bounded shadow search and scheduler.
+This developer seam is not called by Engine, including `legacy-plan`.
+Ownership and admission rules are in [ADR-0076](../../../../docs/adr/0076-numerical-plans-and-replay.md).
+
+Only nonempty acquires with exactly one start-zero, fixed-quantized-flux,
+zero/one-tone constant interval per timeline are supported. Multi-interval,
+sampled, continuous-flux and unknown-prefix inputs raise `ValueError`.
+No rows are silently omitted. Current constant guards do not build tables;
+injected guard-building variants are unsupported rather than retained in a
+cross-replay table store.
+
+```python
+from threading import Event
+from zcu_tools.simulate.evolution.constant import ConstantPlanner
+from zcu_tools.simulate.evolution.shadow import ShadowRequest
+
+planner = ConstantPlanner(cache_bytes=cache_bytes)
+try:
+    pinned = planner.plan(
+        source,
+        batches,
+        neutral_profile,
+        ShadowRequest(dimension, budget, logical_workers, live_bytes, state_bytes),
+    )
+    result = planner.replay(pinned, source, batches, cancel=Event())
+finally:
+    planner.close()
+```
+
+The caller supplies a labelled `OneCoreProfile`, not machine measurements or
+YAML. Plan runs eligible numerical guards with the source input, obtains keys
+from `Kernel.prepare_keys`, and records accepted and rejected row certificates.
+It preserves a complete accepted T4/T6 incumbent. Missing or rejecting terminal
+families fail explicitly. Dyson, Hilbert period and direct methods compete only
+after their own guards pass; accuracy class does not impose an order.
+
+Logical workers change graph capacity, not guards or one-core costs. Repeated
+fixed requests produce the same assignment. `pinned.report` remains a shadow
+report with `production_safe=False`. The adapter consumes only its complete,
+accepted numerical cover, not graph task instructions. Binding costs are
+conservatively partitioned by row and full input/control digest. The existing
+scheduler may coalesce identical actual inputs during inline execution.
+
+The pin retains numerical geometry, full algorithm identities and parameters,
+profile ID/revision, planner/numeric/kernel revisions, certificates and a digest
+of the original resource/cache assumptions. It retains no evolved densities,
+bindings or prepared tables. Replay checks the actual model arrays, source
+density, point IDs and every segmented control against the pin before apply.
+Caller-owned records are trusted numeric inputs, not a serialization or security
+boundary. Reconstructing or editing pins is not an admission mechanism.
+
+Replay never reruns assignment. Cold, warm or differently sized prepare caches
+recompute the same selected methods. Replay is currently inline only and exposes
+no worker-width option. This does not yet establish cross-actual-worker replay.
+Guard exceptions propagate during planning; build/bind/apply exceptions propagate
+during replay. Cancellation returns no partial result. Exceedances produce one
+warning and retain uncorrected densities, as in Engine.
+
+`OneCoreProfile.production_admission(current_identities)` returns legacy with a
+revision-mismatch reason when measured and current identities differ. Matching
+identities still return legacy because every current profile is uncalibrated.
+`pinned.admission` records that decision for the candidate set. This decision
+does not execute a fallback. Unsupported pinned replay revisions raise instead.
+Matched calibration and held-out production admission are separate work.
 
 ## Shadow planning
 
