@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, evolve-local input binding
+**Last updated:** 2026-10-17, known-source coherence in Dyson classification
 
 ## Segment engine contracts
 
@@ -94,9 +94,11 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | Other two-tone segments, including failed Floquet guards | Sum both drives in batched numba DOP853. |
 | Three or more tones | Sum all drives in batched numba DOP853. |
 
-Dyson's B2 guard uses source populations in the segment model basis for rows
-starting at zero. After any preceding segment, including a no-drive flux segment,
-it uses an arbitrary-input density bound. The planner's known-input eligibility
+Dyson's B2 guard uses the full source density in the segment model basis for rows
+starting at zero. It takes actual pair coherence magnitudes and the off-diagonal
+trace norm, so diagonal mixed inputs contribute no coherence terms. After any
+preceding segment, including a no-drive flux segment, it uses an arbitrary-input
+density bound. The planner's known-input eligibility
 does not imply that the source density still describes the segment input.
 
 The model supplies the secular form. Missing secular data fails at entry rather
@@ -112,10 +114,13 @@ Dyson requires all three guards:
 
 B2 bounds driven-minus-free population changes in unpruned second-order Dyson.
 It sums transition-wise scalar bounds from the secular model and pulse parameters,
-without evolving a density or evaluating modal paths. Source populations bound
-all compatible coherence phases for rows starting at zero. Later rows use the
-arbitrary-input version, with population difference at most 1, pair coherence at
-most 1/2 and off-diagonal trace norm at most 2. The budget/8 margin reserves the
+without evolving a density or evaluating modal paths. For rows starting at zero,
+source populations determine population differences, actual |rho_ij| bounds pair
+coherence, and the actual off-diagonal trace norm bounds coherent contributions.
+These values are taken after basis conversion, without zeroing small coherence.
+Coherence phases are bounded, not evaluated. Diagonal inputs have c = L = 0.
+Later rows use the arbitrary-input version, with population difference at most 1,
+pair coherence at most 1/2 and off-diagonal trace norm at most 2. The budget/8 margin reserves the
 omitted-path allowance.
 
 After apply, Dyson also measures |Δp| from the output populations minus the
