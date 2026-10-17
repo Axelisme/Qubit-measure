@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from qtpy.QtCore import QEvent, Qt, QUrl
 from qtpy.QtGui import QColor, QDesktopServices, QPalette, QResizeEvent
 from qtpy.QtWidgets import (
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -264,13 +265,16 @@ class ArtifactSaveCenter(QWidget):
         header.addWidget(save)
         layout.addLayout(header)
         outputs = QVBoxLayout()
+        outputs.setSpacing(8)
         layout.addLayout(outputs)
         return _ArtifactRow(container, title, status, save, outputs)
 
     def _build_output(self) -> _OutputRow:
-        container = QWidget(self)
+        container = QFrame(self)
+        container.setFrameShape(QFrame.Shape.Box)
+        container.setForegroundRole(QPalette.ColorRole.Mid)
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(2)
         row = QHBoxLayout()
         row.setSpacing(6)

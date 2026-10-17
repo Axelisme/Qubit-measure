@@ -172,9 +172,12 @@ Carrier、envelope 與 phase 由 program 提供。`input_per_gain` 是物理入�
 | `charge_coefficients_ghz.f1`、`.coupler`、`.f2` | Resonator 對三迴路 full charge `n` 的耦合 | 有限 signed GHz，0 表示無該耦合 | 三個都必填，不是 g01，也沒有 bias-dependent n01 重正規化 |
 | `kappa_external_mhz` | 與共用 readout line 的 external linewidth | kappa_external/(2*pi)，MHz，有限數，≥ 0 | 必填 |
 | `kappa_internal_mhz` | Internal loss linewidth | kappa_internal/(2*pi)，MHz，有限數，≥ 0 | 必填 |
+| `mismatch_phase_rad` | 此 resonator 散射項相對直通項的相位 | radians，有限 signed 數 | 省略為 0；不接受 `null` 或非有限值 |
 | `thermal_occupation` | 殘餘 thermal photon occupation nth | 無因次，有限數，≥ 0 | 省略或 `null` 時，以共通 temperature 與 bare frequency 計算 Bose occupation；明寫 0 才停用此 occupation |
 
 每個 resonator 的 external + internal linewidth 都必須 > 0，且兩個 resonator 至少一個的 external linewidth > 0。轉成 photon decay rate 時使用 `2*pi*kappa_mhz/1000`，單位 1/ns；不要把 angular decay rate 直接填進 MHz 欄位。
+
+`mismatch_phase_rad` 分別控制 r1、r2。微波 IQ 中，散射項乘 `exp(+i*phi)`，符號與 hanger 分析模型一致。零相位保留對稱線形，非零相位可產生不對稱線形。它不旋轉整個訊號，也不改 linewidth、shared-line damping 或量子演化。整體接收相位仍由 ADC 的 `phase_deg` 控制。
 
 ### ADC
 
@@ -184,9 +187,14 @@ Carrier、envelope 與 phase 由 program 提供。`input_per_gain` 是物理入�
 | --- | --- | --- | --- |
 | `ro_ch` | ADC readout index | 無單位，整數 ≥ 0 | 必填 |
 | `gain` | 場到 ADC sample 的轉換 | ADC sample units / sqrt(photons/ns)，有限 signed 數，可為 0 | 必填，不縮放另加的 noise |
+| `time_of_flight_ns` | 總讀取線延遲，同時決定波形抵達時間與 electronic-delay phase | ns，有限數，≥ 0 | 省略為 0；不接受 `null`、負數或非有限值 |
 | `phase_deg` | 額外的 receiver phase | degree，有限 signed 數 | 省略為 0；不接受 `null` |
 | `offset_adc` | 每個 sample 的 I、Q offset | ADC sample units，有限二元素 `[I, Q]` | 省略為 `[0, 0]`；不接受 `null` |
 | `noise_psd_adc2_ns` | Two-sided white receiver noise spectral density | ADC²*ns，有限、對稱、positive-semidefinite 的 2×2 matrix，順序為 I、Q | 必填；零矩陣與 singular matrix 合法，不能省略代表無 noise |
+
+`time_of_flight_ns` 把物理輸出延後 τ，包含 lookback 的前導無訊號、ringup、ringdown 與 shaped envelope。它同時產生 `exp(-i*2*pi*f*τ)`，f 使用絕對 carrier frequency。τ = 400 ns 時，額外相位斜率約為 -2.513 rad/MHz。沒有獨立 edelay 旋鈕，也不需要為了此延遲修改 pulse 或 trigger metadata。
+
+ADC 先延後物理場，再解調並取共軛，轉成微波分析的 I+iQ。接著套 gain 與 `phase_deg`，加入 offset，最後加入 noise。前導無訊號區仍有 offset 與 noise。共軛不翻轉 offset 或 noise 的 I/Q covariance，receiver phase 也不旋轉 noise。
 
 矩陣的對角項是 I、Q 的 PSD，非對角項是相關 PSD，兩個非對角值必須相等。非對角項可為負，但整體仍須 positive-semidefinite。這個矩陣不是每個 sample 的 covariance，也不是三迴路 map。
 

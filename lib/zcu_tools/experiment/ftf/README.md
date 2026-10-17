@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-17, CPU worker selection and retained ADC rejection counts
+**Last updated:** 2026-10-18, receiver delay/mismatch wiring and numeric replay identity
 
 `ftf(path_or_settings, *, workers=1)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -59,6 +59,12 @@ one bound ADC with multiple trigger windows. Constant readout envelope values
 fold into amplitude with `envelope=None`, enabling the exact field solution.
 Conditional responses are solved once per distinct content, not per shot.
 
+`plan_template` passes `readout.adc.time_of_flight_ns` to the numeric receiver
+and the ordered r1/r2 `mismatch_phase_rad` values to `ReadoutModel`. All default
+to zero. Delay does not move evolution's endpoint, pulse support or ADC grids.
+ADC owns the causal output shift, absolute carrier delay phase, per-resonator
+scattering phase and conjugation to microwave I+iQ before calibration/noise.
+
 The receiver noise PSD is two-sided, in ADC sample units squared times ns.
 Discrete sample covariance is PSD/dt_ns using the ADC output rate. Receiver gain
 does not scale noise. Integrated acquisition returns `RoundStatistics` with joint
@@ -76,7 +82,9 @@ receiver noise and the integrated rounding term.
 `replay_round(round_path)` recomputes one round without drivers, earlier rounds,
 current YAML or numeric records. Backend, engine numeric version, RNG version and
 dependency versions must match. The stream policy is `PCG64/SeedSequence-v2`.
-Old exact-record manifests fail explicitly. Archives contain model truth and
+The backend is `ftf-segment-v5`, which identifies microwave IQ, delay and
+mismatch semantics. Earlier numeric versions and old exact-record manifests
+fail explicitly. Archives contain model truth and
 must not appear in ordinary Run/native/RPC metadata. Normal provenance remains
 the opaque simulation identifier.
 

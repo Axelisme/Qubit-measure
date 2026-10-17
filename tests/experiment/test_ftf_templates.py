@@ -232,3 +232,41 @@ def test_acquire_rejects_out_of_budget_evolution_and_retains_diagnostics(populat
         assert getattr(rejection.value, "rejected_rows", None) == 2
     finally:
         source.close()
+
+
+def test_template_wires_receiver_delay_and_mismatch_without_delaying_evolution() -> (
+    None
+):
+    from zcu_tools.experiment.ftf import plan_template
+
+    base = settings()
+    pair = base.readout.resonators
+    configured = base.model_copy(
+        update={
+            "readout": base.readout.model_copy(
+                update={
+                    "adc": base.readout.adc.model_copy(
+                        update={"time_of_flight_ns": 400.0}
+                    ),
+                    "resonators": pair.model_copy(
+                        update={
+                            "r1": pair.r1.model_copy(
+                                update={"mismatch_phase_rad": 0.6}
+                            ),
+                            "r2": pair.r2.model_copy(
+                                update={"mismatch_phase_rad": -0.4}
+                            ),
+                        }
+                    ),
+                }
+            ),
+        }
+    )
+    plan = plan_template(configured, snapshot(), template())
+    assert getattr(plan.readout.model.receiver, "time_of_flight_ns", None) == 400.0
+    np.testing.assert_array_equal(
+        getattr(plan.readout.model, "mismatch_phase_rad", None), [0.6, -0.4]
+    )
+    np.testing.assert_array_equal(plan.batch.end_ns, [8.0, 10.0])
+    assert plan.readout.pulses[0][0].start_ns == 8.0
+    np.testing.assert_array_equal(plan.readout.grids[0][0].times_ns, [8, 9, 10, 11])
