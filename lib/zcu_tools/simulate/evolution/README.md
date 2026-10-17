@@ -40,7 +40,8 @@ basis changes inside a chain; the engine changes basis between apply calls
 and returns the final state to the DC eigenbasis. Cancellation is checked at
 chunk boundaries and raises `Cancelled` without partial results. `close()`
 waits for active work, clears the prepare cache and is safe to repeat. Each
-`evolve` call opens and closes its own joblib threading pool. The prepare cache\npersists across `evolve` calls, but no worker resources survive a call.
+`evolve` call opens and closes its own joblib threading pool. The prepare cache
+persists across `evolve` calls, but no worker resources survive a call.
 `SEGMENT_NUMERIC_VERSION` identifies engine numerics for checked replay.
 
 The internal `kernel` module defines `SegmentTable`, `Kernel` and the opaque
@@ -50,6 +51,82 @@ Kernel tests inherit `KernelContract` and provide a `kernel_case` fixture with
 accepted rows, a synthetic model and input densities. The suite compares against
 an independent strict DOP853 reference and checks row splitting and preparation
 without density access. The demo kernel stays in tests.
+
+## Dispatch
+
+The engine classifies segments by flux motion, active tones, envelope shape and
+prepare-key reuse. It does not know the experiment name. Flat-top plateaus of
+at least 10 ns split into constant segments; shorter flat-tops stay shaped.
+
+| Segment condition | Kernel |
+| --- | --- |
+| Readout start | Stop quantum evolution and hand populations to the ADC tools. FTF readout uses the DC model and ignores residual flux tails and overlapping controls. |
+| Varying flux, no drive | T5 quantizes flux at DAC-interval midpoints to 1e-3 Phi0 subsegments, then uses T4 with basis changes. |
+| Varying flux with drive | `flux_dop853` integrates continuous flux with the exact Hamiltonian expansion; baths switch at quantized grid boundaries. |
+| Fixed flux, no drive | T4 uses analytic secular propagation. |
+| One constant tone, known input density, all Dyson guards pass | T7 second-order Dyson, batched over frequency, gain, duration and phase. |
+| Same constant-tone branch, Dyson fails but r <= 0.2 | Reduced RWA if its omitted-sideband error bound fits the segment budget; otherwise T6. |
+| One constant tone with unknown input density, or outside the weak-drive branch | T6 periodic propagation. |
+| One shaped tone, prepare-key usage >= 10 | Gate cache with four Strang subsegments, closed-system U plus secular dissipation, and 16 carrier-phase Fourier samples. |
+| One shaped tone, prepare-key usage < 10 | Period table with midpoint-frozen envelopes, eight amplitude Chebyshev nodes and 16 phase Fourier samples; integrate the fractional-period tail directly. This branch has no per-segment accuracy guard. |
+| Two constant tones with a weak probe and passing Floquet guards | Floquet k=0 preparation, then modal second-order Dyson in H_F + D₀; a failing probe guard uses periodic T6 propagation in that frame. |
+| Other two-tone segments, including failed Floquet guards | Sum both drives in batched numba DOP853. |
+| Three or more tones | Sum all drives in batched numba DOP853. |
+
+The model supplies the secular form. Missing secular data fails at entry rather
+than selecting another evolution backend.
+
+### Accuracy and truncation
+
+Dyson requires all three guards:
+
+- r <= min(0.1, 0.25 * budget^(1/3)).
+- |Δp| <= min(0.02, (1.5 * budget)^(2/3)).
+- r₂ <= 0.05.
+
+The r limit follows cubic off-resonant coherence-error scaling. The population
+limit follows the two-level resonant estimate (2/3)|Δp|^(3/2). Synthetic-model
+scans calibrate and check the coefficients 0.25 and 1.5; neither threshold is a
+rigorous multilevel error bound. At the default budget of 1e-3, the limits are
+r <= 0.025 and |Δp| <= 0.0131. Rejected Dyson segments try reduced RWA only in
+the r <= 0.2 branch. RWA segments whose error bound exceeds their budget use T6.
+
+Each segment receives a default budget of 1e-3. The end-to-end acceptance
+threshold is a maximum absolute error of 1e-2 in both final readout-basis
+populations and low-four density entries, for experiments up to about 10 us.
+A segment budget is not a runtime guarantee of the total error, especially for
+unguarded period tables. DOP853 defaults to rtol=1e-5, atol=1e-7 and
+max_step=0.1 ns, tightening tolerances for smaller budgets.
+
+Flux-tail truncation uses an absolute flux bound, not elapsed multiples of a
+filter time constant. FTF sums absolute pulse-tail contributions and truncates
+below 5e-4 Phi0 on every loop.
+
+T6 uses 1, 4 or 8 steps per carrier period according to r, powers the period
+propagator and adds the fractional-period tail. Carrier phase uses Fourier
+interpolation. Gate-cache Strang splitting and phase Fourier interpolation
+avoid building a full dissipative propagator for every phase.
+
+### Chunk scheduling and parallelism
+
+All non-reps sweep points enter as template arrays. Prepare does not depend on
+input density; apply does. The engine deduplicates prepare keys across the
+acquire. Keys used at least twice are prepared in shared A-stage chunks before
+timeline work starts. Single-use preparations stay inside their timeline chunk
+and are discarded afterward.
+
+Timeline chunks interleave estimated costs, with six chunks per worker by
+default. Within a chunk, local waves batch next segments by kernel and prepared
+payload. A timeline preserves apply order, but different chunks do not
+synchronize waves. A-stage completion and final collection are the global
+waiting points. Cancellation is checked between chunks.
+
+Joblib threading is the only parallel layer. Worker numba kernels are
+single-threaded and use `nogil`; there is no process pool, GPU or Rust backend.
+Each `evolve` call opens and closes its threading pool. Across acquires, the
+engine retains only its prepare cache, not worker resources. Numba results need
+not match NumPy bit for bit; numerical acceptance uses the observable-error
+thresholds above, not a separate NumPy backend.
 
 ## Default execution and replay
 
