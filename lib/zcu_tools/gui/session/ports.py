@@ -28,6 +28,7 @@ from zcu_tools.gui.event_bus import OriginKind
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
 if TYPE_CHECKING:
+    from zcu_tools.device import DeviceActivity
     from zcu_tools.gui.session.context_types import EntryInfo
     from zcu_tools.gui.session.services.device import DeviceProtocol
     from zcu_tools.gui.session.types import ParameterContext
@@ -298,3 +299,13 @@ class DeviceRegistryPort(Protocol):
     def get_device(self, name: str) -> Any: ...
     def get_all_devices(self) -> dict[str, Any]: ...
     def get_info(self, name: str) -> Any: ...
+
+    def activity_snapshot(self) -> dict[str, DeviceActivity]:
+        """Return detached named activity without hardware I/O or operation locks.
+
+        Values are immutable; the returned mapping belongs to the caller.
+        Fields/drivers are not observed atomically. End times are monotonic
+        seconds, comparable only with this process's monotonic clock. This
+        observation must not be used for admission or operation settlement.
+        """
+        ...

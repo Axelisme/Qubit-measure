@@ -6,6 +6,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -21,6 +22,27 @@ from zcu_tools.cfg_model import ConfigBase
 
 if TYPE_CHECKING:
     from pyvisa import ResourceManager
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceActivity:
+    """Immutable, memory-only observation of one driver's mutating operations.
+
+    ``in_operation`` is initially False and is True while an admitted outermost
+    ``device_operation`` is running, including its nested operations.
+    ``last_finished_monotonic`` is initially None; after that outermost operation
+    ends, successfully or with an exception, it holds ``time.monotonic()`` seconds.
+    Its origin is unspecified: compare it only with the same process's monotonic
+    clock, not wall-clock timestamps. Busy rejections do not update either field.
+
+    Concurrent readers sample the two fields independently without waiting for
+    operation or I/O locks. This best-effort observation is not an atomic pair or
+    an admission/settlement guarantee. Retaining or attempting to mutate this
+    value cannot change the driver; field assignment raises AttributeError.
+    """
+
+    in_operation: bool
+    last_finished_monotonic: float | None
 
 
 class DeviceBusyError(RuntimeError):
@@ -75,7 +97,14 @@ class _DeviceSession(Protocol):
 
 
 def device_operation(method: Callable[..., T_Return]) -> Callable[..., T_Return]:
-    """Guard a public mutating device operation with op_lock and logging."""
+    """Guard a public mutator with fail-fast exclusion, activity and logging.
+
+    Another thread holding the operation lock causes DeviceBusyError without
+    changing activity. Same-thread nested calls reuse the lock. Only the outer
+    call marks activity and records its monotonic end time, even on failure;
+    return values and exceptions from the mutator pass through unchanged.
+    Activity recording only writes driver fields and invokes no callbacks.
+    """
 
     @functools.wraps(method)
     def wrapper(self: Any, *args: Any, **kwargs: Any) -> T_Return:
@@ -92,6 +121,7 @@ def device_operation(method: Callable[..., T_Return]) -> Callable[..., T_Return]
         outer = self._op_depth == 0
         start: float | None = None
         if outer:
+            self._in_operation = True
             start = time.monotonic()
             self._logger.info("device operation started: %s", operation)
 
@@ -118,6 +148,9 @@ def device_operation(method: Callable[..., T_Return]) -> Callable[..., T_Return]
             return result
         finally:
             self._op_depth -= 1
+            if outer:
+                self._last_finished_monotonic = time.monotonic()
+                self._in_operation = False
             self._op_lock.release()
 
     return wrapper
@@ -154,6 +187,8 @@ class BaseDevice(ABC, Generic[T_DeviceInfo]):
     def __init__(self, address: str, rm: ResourceManager | None) -> None:
         self.address = address
         self._init_locks()
+        self._in_operation = False
+        self._last_finished_monotonic: float | None = None
 
         self.session: _DeviceSession | None = self._open_session(rm)
         if self.session is not None:
@@ -162,6 +197,18 @@ class BaseDevice(ABC, Generic[T_DeviceInfo]):
             self.connect_message()
 
     # ----- helper methods -----
+
+    @property
+    def activity(self) -> DeviceActivity:
+        """Return detached activity without I/O, callbacks or operation-lock waits.
+
+        Any thread may read this property, including the operating thread.
+        The two fields are sampled independently, so concurrent operation
+        transitions can be visible between reads. See DeviceActivity for initial
+        values and monotonic time units. Reading has no effect on the driver and
+        no device/busy failure mode; use mutators, not this value, for admission.
+        """
+        return DeviceActivity(self._in_operation, self._last_finished_monotonic)
 
     def _init_locks(self) -> None:
         # op_lock guards logical mutating operations and must be reentrant because

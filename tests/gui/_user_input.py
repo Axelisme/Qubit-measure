@@ -20,6 +20,8 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMenu,
     QPlainTextEdit,
     QScrollArea,
@@ -98,6 +100,15 @@ class TreeRowObservation:
         str, ...
     ]  # Original column indices; unseen cells empty, units unchanged.
     expanded: bool  # Whether the row currently exposes its children.
+
+
+@dataclass(frozen=True)
+class ListRowObservation:
+    """Rendered caption, hover help and selection of one visible list row."""
+
+    text: str
+    tooltip: str
+    selected: bool
 
 
 @dataclass(frozen=True)
@@ -277,6 +288,47 @@ class ComponentDriver:
                 else None
             ),
         )
+
+    def list_rows(self) -> tuple[ListRowObservation, ...]:
+        """Observe rows intersecting visible QListWidget viewports in this window."""
+        rows: list[ListRowObservation] = []
+        for listing in self._window.findChildren(QListWidget):
+            if not self._on_screen(listing):
+                continue
+            viewport = listing.viewport()
+            assert viewport is not None
+            for index in range(listing.count()):
+                item = listing.item(index)
+                if item is not None and listing.visualItemRect(item).intersects(
+                    viewport.rect()
+                ):
+                    rows.append(
+                        ListRowObservation(
+                            item.text(), item.toolTip(), item.isSelected()
+                        )
+                    )
+        return tuple(rows)
+
+    def select_list_row(self, text: str) -> None:
+        """Click the unique visible row with this exact rendered caption."""
+        matches: list[tuple[QListWidget, QListWidgetItem]] = []
+        for listing in self._window.findChildren(QListWidget):
+            if not self._can_interact(listing):
+                continue
+            viewport = listing.viewport()
+            assert viewport is not None
+            for index in range(listing.count()):
+                item = listing.item(index)
+                if (
+                    item is not None
+                    and item.text() == text
+                    and viewport.rect().contains(listing.visualItemRect(item))
+                ):
+                    matches.append((listing, item))
+        listing, item = _unique(text, matches, [i.text() for _, i in matches])
+        viewport = listing.viewport()
+        assert viewport is not None
+        mouse_click(viewport, listing.visualItemRect(item).center())
 
     def visible(self) -> VisibleObservation:
         """Snapshot all visible widgets for completion predicates with changing captions."""

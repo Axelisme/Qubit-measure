@@ -150,6 +150,37 @@ def test_register_device_rejects_non_base_device_without_mutating_registry(
     assert "bad" not in manager.get_all_devices()
 
 
+@pytest.mark.parametrize("second_name_exists", [False, True])
+def test_register_device_rejects_second_name_without_mutating_registry(
+    manager: DeviceManager, second_name_exists: bool
+) -> None:
+    device = _make_fast_device()
+    manager.register_device("flux", device)
+    if second_name_exists:
+        manager.register_device("other", _make_fast_device())
+    before = manager.get_all_devices()
+
+    with pytest.raises(ValueError, match="already registered"):
+        manager.register_device("other", device)
+
+    assert manager.get_all_devices() == before
+    assert manager.get_device("flux") is device
+
+
+@pytest.mark.parametrize("replace_driver", [False, True])
+def test_register_device_same_name_preserves_overwrite_contract(
+    manager: DeviceManager, replace_driver: bool
+) -> None:
+    original = _make_fast_device()
+    manager.register_device("flux", original)
+    replacement = _make_fast_device() if replace_driver else original
+
+    with pytest.warns(UserWarning, match="already registered, overwriting"):
+        manager.register_device("flux", replacement)
+
+    assert manager.get_all_devices() == {"flux": replacement}
+
+
 def test_managers_isolate_names_setup_and_disconnect(manager: DeviceManager) -> None:
     other = DeviceManager()
     first = _make_fast_device()
@@ -332,28 +363,12 @@ def test_close_device_ignore_missing_is_noop(manager: DeviceManager) -> None:
     manager.close_device("ghost", ignore_missing=True)
 
 
-def test_close_device_success_removes_all_aliases_of_identity(
-    manager: DeviceManager,
-) -> None:
-    dev = _make_fast_device()
-    probe = _hook_close(dev)
-    probe.release.set()  # no blocking needed for the success path
-    manager.register_device("A", dev)
-    manager.register_device("alias", dev)
-
-    manager.close_device("A")
-
-    assert len(probe.calls) == 1
-    assert manager.get_all_devices() == {}
-
-
 def test_close_device_failure_keeps_entries_then_retry_succeeds(
     manager: DeviceManager,
 ) -> None:
     dev = _make_fast_device()
     probe = _hook_close(dev, fail="first")
     manager.register_device("A", dev)
-    manager.register_device("alias", dev)
 
     with pytest.raises(DeviceCloseFailure) as excinfo:
         manager.close_device("A")
@@ -361,8 +376,8 @@ def test_close_device_failure_keeps_entries_then_retry_succeeds(
     failure = excinfo.value
     assert failure.names == ("A",)
     assert isinstance(failure.cause, RuntimeError)
-    # Failure must not remove entries or aliases: they stay retryable.
-    assert set(manager.get_all_devices()) == {"A", "alias"}
+    # Failure keeps the entry retryable.
+    assert manager.get_all_devices() == {"A": dev}
 
     # The claim was released on failure: the retry reaches the device again.
     probe.release.set()
@@ -376,26 +391,6 @@ def test_close_all_empty_registry_is_noop(manager: DeviceManager) -> None:
     manager.close_all_devices()
 
 
-def test_close_all_dedupes_identity_and_closes_each_once(
-    manager: DeviceManager,
-) -> None:
-    dev1 = _make_fast_device()
-    dev2 = _make_fast_device()
-    probe1 = _hook_close(dev1)
-    probe2 = _hook_close(dev2)
-    probe1.release.set()
-    probe2.release.set()
-    manager.register_device("A", dev1)
-    manager.register_device("alias", dev1)  # same identity
-    manager.register_device("B", dev2)
-
-    manager.close_all_devices()
-
-    assert len(probe1.calls) == 1  # aliases dedupe to one close per identity
-    assert len(probe2.calls) == 1
-    assert manager.get_all_devices() == {}
-
-
 def test_close_all_aggregates_named_failures_and_keeps_entries(
     manager: DeviceManager,
 ) -> None:
@@ -404,7 +399,6 @@ def test_close_all_aggregates_named_failures_and_keeps_entries(
     _hook_close(dev1, fail="always")
     _hook_close(dev2, fail="always")
     manager.register_device("A", dev1)
-    manager.register_device("alias", dev1)
     manager.register_device("B", dev2)
 
     with pytest.raises(ExceptionGroup) as excinfo:
@@ -415,12 +409,12 @@ def test_close_all_aggregates_named_failures_and_keeps_entries(
     ]
     assert len(failures) == 2
     name_sets = {tuple(sorted(e.names)) for e in failures}
-    assert name_sets == {("A", "alias"), ("B",)}
+    assert name_sets == {("A",), ("B",)}
     assert all(isinstance(e.cause, RuntimeError) for e in failures)
 
     # Entries stay registered for retry; claims were released (a second
     # close_device call reaches the device instead of raising InProgressError).
-    assert set(manager.get_all_devices()) == {"A", "alias", "B"}
+    assert set(manager.get_all_devices()) == {"A", "B"}
     with pytest.raises(DeviceCloseFailure):
         manager.close_device("A")
 
@@ -446,6 +440,47 @@ def test_close_all_continues_after_failure_and_removes_successes(
     assert "A" in manager.get_all_devices()
     assert "B" not in manager.get_all_devices()
     assert len(probe2.calls) == 1
+
+
+@pytest.mark.parametrize("registry_change", ["keep", "drop", "overwrite"])
+@pytest.mark.parametrize("close_all", [False, True])
+def test_register_device_rejects_closing_driver_without_mutating_registry(
+    manager: DeviceManager,
+    workers: DeviceThreads,
+    registry_change: str,
+    close_all: bool,
+) -> None:
+    device = _make_fast_device()
+    probe = _hook_close(device)
+    manager.register_device("flux", device)
+
+    def closer() -> None:
+        if close_all:
+            manager.close_all_devices()
+        else:
+            manager.close_device("flux")
+
+    thread = workers.thread(release=probe.release, target=closer)
+    thread.start()
+    workers.arrived(probe.entered, "close did not enter device.close()")
+
+    if registry_change == "drop":
+        manager.drop_device("flux")
+    elif registry_change == "overwrite":
+        with pytest.warns(UserWarning, match="overwriting"):
+            manager.register_device("flux", _make_fast_device())
+    before = manager.get_all_devices()
+    # Also reject the original name while it still refers to the driver.
+    requested_name = "flux" if registry_change == "keep" else "new"
+    with pytest.raises(DeviceCloseInProgressError):
+        manager.register_device(requested_name, device)
+    assert manager.get_all_devices() == before
+
+    probe.release.set()
+    workers.join(thread)
+    assert len(probe.calls) == 1
+    manager.register_device("new", device)
+    assert manager.get_device("new") is device
 
 
 def test_concurrent_same_identity_close_device_follower_fast_fails(
@@ -803,8 +838,8 @@ def test_close_all_base_exception_cleans_successes_and_releases_claims(
     """A BaseException in the batch still cleans up earlier successes.
 
     A3/D6: when a later device raises ``BaseException``, the batch propagates
-    it unwrapped but first atomically drops aliases of identities already
-    closed successfully and releases every owned claim.  A follower
+    it unwrapped but first atomically drops entries already closed
+    successfully and releases every owned claim.  A follower
     fast-fails while the batch is in flight; after the abort the success is
     gone and the interrupted identity stays retryable.
     """
@@ -926,23 +961,28 @@ def test_close_all_io_not_under_registry_lock(
     assert manager.get_all_devices() == {}
 
 
-def test_close_success_keeps_replacement_and_new_devices_removes_stale_alias(
+@pytest.mark.parametrize("close_all", [False, True])
+def test_close_success_keeps_replacement_and_new_devices(
     manager: DeviceManager,
     workers: DeviceThreads,
+    close_all: bool,
 ) -> None:
     dev1 = _make_fast_device()
     probe1 = _hook_close(dev1)
     manager.register_device("A", dev1)
 
     def closer() -> None:
-        manager.close_device("A")
+        if close_all:
+            manager.close_all_devices()
+        else:
+            manager.close_device("A")
 
     t_closer = workers.thread(release=probe1.release, target=closer)
     t_closer.start()
     workers.arrived(probe1.entered, "close did not enter device.close()")
 
-    # Same-name replacement, a distinct new device, and an alias pointing at
-    # the closing identity all appear while the close is in flight.
+    # A same-name replacement and a distinct new device appear while the
+    # close is in flight.
     dev2 = _make_fast_device()
     dev3 = _make_fast_device()
     probe2 = _hook_close(dev2)
@@ -951,7 +991,6 @@ def test_close_success_keeps_replacement_and_new_devices_removes_stale_alias(
     probe3.release.set()
     manager.register_device("A", dev2)  # overwrite warning expected
     manager.register_device("B", dev3)
-    manager.register_device("stale", dev1)
 
     probe1.release.set()
     workers.join(t_closer)
@@ -962,7 +1001,6 @@ def test_close_success_keeps_replacement_and_new_devices_removes_stale_alias(
     devices = manager.get_all_devices()
     assert devices["A"] is dev2  # same-name replacement survives
     assert devices["B"] is dev3  # distinct new device survives
-    assert "stale" not in devices  # alias of the closed identity is removed
 
 
 def test_close_all_snapshot_excludes_devices_registered_during_close(

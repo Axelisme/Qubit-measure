@@ -100,6 +100,7 @@ def _native_controls(
         writeback,
         gate=MagicMock(),
         devices=lambda: {},
+        refresh_devices=lambda: None,
     )
     analyze = AnalyzeService(
         session.state, runner, session.bus, writeback, session.handles

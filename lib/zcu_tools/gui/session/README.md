@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-17，Library／Inspect 共用 Form 與 ARB 唯讀
+**Last updated:** 2026-10-18，device 活動觀察與 run 後讀回
 
 # gui/session/ — 量測 session core
 
@@ -28,7 +28,7 @@ measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 dev
 - **SessionEnv** 是已發布的 session environment。EMPTY 的 `parameters` 是 None，ACTIVE 持有無 consumer roles 的固定 `ParameterContext`。它不提供 md/ml 欄位；SoC 與 cached value sources 保持各自 owner。
 - **Run snapshot** 是依該次 Run 契約捕捉的輸入，接受後不因後續編輯或 refresh 改用新的 cfg。持有 live `SessionEnv` 不等於持有這份不可變證據；SoC、driver 等 live handles 也不作為普通資料整包凍結。
 
-DeviceState.info 與 ValueSourceBinder 的 device sources 是已發布 cache，供 dialog、defaults 與 resolve-once 輸入使用，不是 Run 的控制命令或硬體 snapshot。GUI Run 框架在 hardware lease 後、adapter.run 前讀一次全部已連線 device 的 get_info。任一讀取失敗拒絕 Run，不以 cache 補值；無 device 記 `{}`。這份實驗前 snapshot 隨 RunMetadata 保存，後續 sweep 或 Save 不重讀、不改寫。實驗層 helpers 操作選定 driver，RunContext 不提供 setters。DeviceService 的獨立手動 setup 與 best-effort poll 保留各自責任，不代替 Run snapshot。
+DeviceState.info 與 ValueSourceBinder 的 device sources 是已發布 cache，供 dialog、defaults 與 resolve-once 輸入使用，不是 Run 的控制命令或硬體 snapshot。GUI Run 框架在 hardware lease 後、adapter.run 前讀一次全部已連線 device 的 get_info。任一讀取失敗拒絕 Run，不以 cache 補值；無 device 記 `{}`。這份實驗前 snapshot 隨 RunMetadata 保存，後續 sweep 或 Save 不重讀、不改寫。實驗層 helpers 操作選定 driver，RunContext 不提供 setters。DeviceService 的獨立手動 setup 與 best-effort poll 保留各自責任，不代替 Run snapshot。Run 終局後，host 另請 DeviceService 在背景讀一次已連線儀器。成功讀取由 State owner 更新 cache，失敗台保留原 cache，不改寫固定 snapshot、run 終局或 lease。
 
 ## 結構
 
@@ -122,13 +122,13 @@ handle、lease、cancel hook 或 progress factory。Owner 負責 producer exclus
 
 ## Operation markers
 
-`DeviceDialog` owns the shared device-list activity projection. Each row reads its
-State-owned `DeviceStatus` through `DeviceControlPort` and receives the same compact
-blue `●` treatment as the MainWindow Run tab while that device is `SETTING_UP`.
-Setup start, every terminal outcome, device-change repaint, and dialog reopen derive
-rows again from State; concurrent devices therefore clear independently and the
-user's selection remains unchanged. No persisted marker or competing busy cache is
-introduced.
+`DeviceDialog` reads named driver activity through `DeviceControlPort` on the GUI
+thread while visible. Each row uses the compact blue `●` during an operation and
+for about one second after its last finish. Repeated short operations keep the
+marker steady. Activity reads do not access hardware, rebuild selection, or decide
+admission. Apply, experiments, remote callers and workflows share the same driver
+observations. State-owned setup status still controls Stop and editing, separately
+from these markers. The selected-device value poller keeps its independent lifetime.
 
 ## 關鍵設計
 

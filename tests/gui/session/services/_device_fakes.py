@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from zcu_tools.device import DeviceActivity
+
 
 class FakeDeviceRegistry:
     """In-memory DeviceRegistryPort for unit tests.
@@ -34,3 +36,6 @@ class FakeDeviceRegistry:
 
     def get_info(self, name: str) -> Any:
         return self.get_device(name).get_info()
+
+    def activity_snapshot(self) -> dict[str, DeviceActivity]:
+        return {name: device.activity for name, device in self._devices.items()}

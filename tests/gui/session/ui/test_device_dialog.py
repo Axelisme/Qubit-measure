@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from pathlib import Path
+from threading import Event
 from unittest.mock import MagicMock
 
 import pytest
@@ -85,10 +90,12 @@ class _PollTimer(QObject):
     def __init__(self, parent: QObject) -> None:
         super().__init__(parent)
         self.running = False
+        self.interval = 0
 
     def setInterval(self, milliseconds: int) -> None:
         """Accept the production interval without scheduling wall-clock work."""
         assert milliseconds > 0
+        self.interval = milliseconds
 
     def isActive(self) -> bool:
         return self.running
@@ -159,6 +166,7 @@ def _make_ctrl() -> MagicMock:
     ctrl.list_devices.return_value = []
     ctrl.is_memory_device.return_value = False
     ctrl.get_device_snapshot.return_value = None
+    ctrl.activity_snapshot.return_value = {}
     ctrl.try_poll_device_info.return_value = True
     ctrl.read_context.return_value = None
     return ctrl
@@ -401,7 +409,7 @@ def test_poll_tick_polls_selected_device(qapp, poll_timers):
     )
 
     dialog = _make_dialog(ctrl)
-    (timer,) = poll_timers
+    timer = poll_timers[0]
     try:
         _listing(dialog).setCurrentRow(1)  # select "B"
         timer.tick()
@@ -454,7 +462,7 @@ def test_poll_tick_polls_selected_setting_up_device(qapp, poll_timers):
         assert _button(dialog, "Refresh").isEnabled() is False
 
         dialog.show()
-        (timer,) = poll_timers
+        timer = poll_timers[0]
         timer.tick()
 
         ctrl.try_poll_device_info.assert_called_once_with("fd")
@@ -612,55 +620,6 @@ def _setup_two_device_dialog(qapp):
     dialog = _make_dialog(ctrl)
     _listing(dialog).setCurrentRow(1)  # "fd_b"
     return dialog, ctrl, setting_up
-
-
-def test_setup_markers_follow_each_device_and_preserve_selection(qapp):
-    """Rows project each device's State status independently on start/finish."""
-    setting_up: set[str] = set()
-    ctrl = _two_device_ctrl(setting_up)
-    dialog = _make_dialog(ctrl)
-    _listing(dialog).setCurrentRow(1)  # Keep fd_b selected while fd_a settles.
-
-    setting_up.add("fd_a")
-    ctrl.get_bus.return_value.emit(DeviceSetupStartedPayload(name="fd_a"))
-
-    first = _listing(dialog).item(0)
-    second = _listing(dialog).item(1)
-    assert first is not None and first.text() == "● fd_a (FakeDevice)"
-    assert second is not None and second.text() == "fd_b (FakeDevice)"
-    selected = _listing(dialog).currentItem()
-    assert (
-        selected is not None
-        and selected.text().removeprefix("● ") == "fd_b (FakeDevice)"
-    )
-
-    setting_up.add("fd_b")
-    ctrl.get_bus.return_value.emit(DeviceSetupStartedPayload(name="fd_b"))
-    second = _listing(dialog).item(1)
-    assert second is not None and second.text() == "● fd_b (FakeDevice)"
-
-    setting_up.remove("fd_a")
-    ctrl.get_bus.return_value.emit(
-        DeviceSetupFinishedPayload(name="fd_a", outcome="failed")
-    )
-
-    first = _listing(dialog).item(0)
-    second = _listing(dialog).item(1)
-    assert first is not None and first.text() == "fd_a (FakeDevice)"
-    assert second is not None and second.text() == "● fd_b (FakeDevice)"
-    selected = _listing(dialog).currentItem()
-    assert (
-        selected is not None
-        and selected.text().removeprefix("● ") == "fd_b (FakeDevice)"
-    )
-
-    setting_up.remove("fd_b")
-    ctrl.get_bus.return_value.emit(
-        DeviceSetupFinishedPayload(name="fd_b", outcome="cancelled")
-    )
-
-    items = [_listing(dialog).item(row) for row in range(_listing(dialog).count())]
-    assert all(item is not None and not item.text().startswith("● ") for item in items)
 
 
 def test_setup_running_list_remains_enabled(qapp):
@@ -1171,3 +1130,112 @@ def test_device_status_replaces_error_foreground(
         dialog.close()
         dialog.deleteLater()
         qapp.processEvents()
+
+
+@contextmanager
+def _activity_dialog(qapp, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
+    from zcu_tools.device.base import device_operation
+    from zcu_tools.gui.app.measure.controller import Controller
+    from zcu_tools.gui.app.measure.registry import Registry
+    from zcu_tools.gui.app.measure.state import State
+    from zcu_tools.gui.session.types import SessionEnv
+
+    from tests.gui._user_input import ComponentDriver
+
+    entered, release = Event(), Event()
+
+    class HoldingDevice(FakeDevice):
+        info_model = FakeDeviceInfo
+
+        @device_operation
+        def hold(self) -> None:
+            entered.set()
+            # The test releases this operation in finally, even on assertion failure.
+            assert release.wait(30)
+
+    clock = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    flux, unused = HoldingDevice(fast_mode=True), FakeDevice(fast_mode=True)
+    manager = DeviceManager()
+    manager.register_device("flux", flux)
+    manager.register_device("unused", unused)
+    ctrl = Controller(
+        State(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        Registry(),
+        None,
+        EventBus(),
+        project_root=str(tmp_path),
+        device_registry=manager,
+    )
+    dialog = DeviceDialog(ctrl.device_control, parameter_provider=lambda: None)
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        dialog.show()
+        qapp.processEvents()
+        yield ComponentDriver(dialog), flux, clock, entered, release, pool
+    finally:
+        release.set()
+        pool.shutdown(wait=True)
+        ctrl.close(timeout_ms=30_000)
+        dialog.close()
+        dialog.deleteLater()
+        manager.close_all_devices()
+
+
+def test_driver_activity_marks_only_operated_rows_and_holds_between_short_writes(
+    qapp, poll_timers, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    with _activity_dialog(qapp, monkeypatch, tmp_path) as (
+        ui,
+        flux,
+        clock,
+        entered,
+        release,
+        pool,
+    ):
+        ui.select_list_row("unused (FakeDevice)")
+        ui.screenshot(tmp_path / "01-idle.png")
+        future = pool.submit(flux.hold)
+        assert entered.wait(30), "submitted fake operation must enter before release"
+        for timer in poll_timers:
+            timer.tick()
+        rows = ui.list_rows()
+        assert [row.text for row in rows] == [
+            "● flux (FakeDevice)",
+            "unused (FakeDevice)",
+        ]
+        assert rows[0].tooltip == "Operating or recently active"
+        assert rows[1].selected
+        assert ui.observe("Apply Changes").enabled, (
+            "activity is observation, not admission"
+        )
+        ui.screenshot(tmp_path / "02-operation.png")
+        release.set()
+        future.result(timeout=30)
+        for index, now in enumerate((100.4, 100.8, 101.2)):
+            clock[0] = now
+            flux.set_value(0.1)
+            for timer in poll_timers:
+                if timer.interval < 1000:
+                    timer.tick()
+            assert ui.list_rows()[0].text == "● flux (FakeDevice)"
+            assert ui.list_rows()[1].selected
+            ui.screenshot(tmp_path / f"03-short-write-{index}.png")
+        clock[0] = 102.0
+        for timer in poll_timers:
+            if timer.interval < 1000:
+                timer.tick()
+        assert ui.list_rows()[0].text == "● flux (FakeDevice)"
+        ui.screenshot(tmp_path / "04-hold.png")
+        clock[0] = 102.4
+        for timer in poll_timers:
+            if timer.interval < 1000:
+                timer.tick()
+        assert [row.text for row in ui.list_rows()] == [
+            "flux (FakeDevice)",
+            "unused (FakeDevice)",
+        ]
+        assert ui.list_rows()[1].selected
+        ui.screenshot(tmp_path / "05-idle-again.png")
+        ui.click("Close")

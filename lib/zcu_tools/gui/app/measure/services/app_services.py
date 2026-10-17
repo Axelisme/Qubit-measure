@@ -217,6 +217,7 @@ def build_app_services(
         writeback,
         gate=operation_gate,
         devices=device.get_connected_devices,
+        refresh_devices=device.refresh_connected_device_info,
     )
     analyze = AnalyzeService(state, session.runner, bus, writeback, handles)
     post_analyze = PostAnalyzeService(

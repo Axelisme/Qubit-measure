@@ -117,24 +117,26 @@ def attachment(
         window.plan_panel.state.reset(inline_input())
         yield window, harness, entry
     finally:
-        if window is not None:
-            if harness.background.work is not None:
-                controller = window.controller
-                assert controller is not None and controller.operation_id is not None
-                harness.handles.cancel(controller.operation_id)
-                harness.background.execute()
-                harness.background.deliver()
-            window.close()
-            for driver in harness.services.device.get_connected_devices().values():
-                driver.close()
-            window.deleteLater()
-            qapp.processEvents()
         try:
-            assert registry_state() == installed, (
-                "workflow window test polluted registries"
-            )
+            if window is not None:
+                token = window.controller.operation_id
+                if token is not None:
+                    harness.handles.cancel(token)
+                # Terminal delivery can enqueue readback without a live operation.
+                while harness.background.work is not None:
+                    harness.complete_segment()
+                window.close()
+                for driver in harness.services.device.get_connected_devices().values():
+                    driver.close()
+                window.deleteLater()
+                qapp.processEvents()
         finally:
-            restore_registry(before)
+            try:
+                assert registry_state() == installed, (
+                    "workflow window test polluted registries"
+                )
+            finally:
+                restore_registry(before)
 
 
 @pytest.fixture

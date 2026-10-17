@@ -241,6 +241,7 @@ def test_rpc_empty_figures_and_stale_run_rejects_reads(
         )
     assert harness.gate.snapshot()
     assert rpc("workflow.stop", {"run_id": "tuning"})["ok"] is True
+    harness.complete_segment()  # Deliver the stopped run's device readback.
     # New Start must not retain even a previous terminal run's figure membership.
     assert isinstance(window.start("replacement"), int)
     assert window.controller.status() is None

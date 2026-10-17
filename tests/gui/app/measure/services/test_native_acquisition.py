@@ -80,6 +80,7 @@ def _acquire_to_terminal(
         MagicMock(),
         gate=gate,
         devices=lambda: {},
+        refresh_devices=lambda: None,
     )
 
     def provenance(*, context: RunContext) -> SoftwareProvenance:

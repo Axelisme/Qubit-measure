@@ -15,6 +15,7 @@ def test_session_core_connects_and_cancels_on_owner_thread(
     request: pytest.FixtureRequest,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from zcu_tools.device import DeviceActivity
     from zcu_tools.device.fake import FakeDevice
     from zcu_tools.gui.event_bus import BaseEventBus, EventOrigin
     from zcu_tools.gui.session.adapters.manual_owner_scheduler import (
@@ -92,6 +93,9 @@ def test_session_core_connects_and_cancels_on_owner_thread(
 
         def get_info(self, name: str) -> Any:
             return self.get_device(name).get_info()
+
+        def activity_snapshot(self) -> dict[str, DeviceActivity]:
+            return {name: device.activity for name, device in self._devices.items()}
 
     def unexpected_driver_factory(type_name: str, address: str) -> Any:
         raise AssertionError(
