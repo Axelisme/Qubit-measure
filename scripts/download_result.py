@@ -155,7 +155,6 @@ def download_file(service, file_id, local_path):
         done = False
         while done is False:
             status, done = downloader.next_chunk()
-            # print(f"Download {int(status.progress() * 100)}%.")
 
         with open(local_path, "wb") as f:
             f.write(fh.getbuffer())

@@ -303,10 +303,7 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         cur_mode = self.get_mode()
 
         if cur_mode != mode:
-            if cur_mode == "voltage":
-                value = self.get_voltage()
-            else:
-                value = self.get_current()
+            value = self.get_voltage() if cur_mode == "voltage" else self.get_current()
             if value != 0.0 and not force:
                 raise RuntimeError(
                     "Try to change mode while value is not zero. Please set value to zero before changing mode, "

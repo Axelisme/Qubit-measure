@@ -162,24 +162,29 @@ def test_writeback_runtime_errors_escape_handlers_unchanged(
     control.has_tab.return_value = True
     if handler_name == "set":
         control.set_writeback_item_for_pane.side_effect = error
-        call = lambda: h_tab_writeback_set(
-            cast(Any, SimpleNamespace(writeback_control=control)),
-            {
-                "tab_id": "t1",
-                "subtab_id": "analysis",
-                "id": "item-1",
-                "selected": True,
-                "target_name": None,
-                "proposed_value": None,
-                "edits": None,
-            },
-        )
+
+        def call() -> object:
+            return h_tab_writeback_set(
+                cast(Any, SimpleNamespace(writeback_control=control)),
+                {
+                    "tab_id": "t1",
+                    "subtab_id": "analysis",
+                    "id": "item-1",
+                    "selected": True,
+                    "target_name": None,
+                    "proposed_value": None,
+                    "edits": None,
+                },
+            )
     else:
         control.apply_writeback_for_pane.side_effect = error
-        call = lambda: h_tab_writeback_apply(
-            cast(Any, SimpleNamespace(writeback_control=control)),
-            {"tab_id": "t1", "subtab_id": "analysis"},
-        )
+
+        def call() -> object:
+            return h_tab_writeback_apply(
+                cast(Any, SimpleNamespace(writeback_control=control)),
+                {"tab_id": "t1", "subtab_id": "analysis"},
+            )
+
     _assert_escapes_unchanged(call, error)
 
 
