@@ -15,9 +15,10 @@ Floquet validity requires assigned bare-mode overlap >= .5, modal condition
 <= 1e8, maximum Re(lambda) <= 1e-10/ns, and unitary/periodic residual <= 1e-9.
 The norm sum of *all* omitted harmonics (including k=+/-1) bounds k=0's
 error by Duhamel's formula. Drive harmonics use spectral norms; bath harmonics
-use sqrt(||B||_1 ||B||_inf), which dominates the spectral norm without an SVD. This is stricter than a sampled k=0 versus +/-1
-comparison. Harmonic truncation and quadrature convergence must each fit a third of
-budget. Probe limits or Dyson-remainder failures use a one-period propagator
+use sqrt(||B||_1 ||B||_inf), which dominates the spectral norm without an SVD.
+Bounding all omitted harmonics is stricter than a sampled k=0 versus +/-1
+comparison. Harmonic truncation and quadrature convergence must each fit a third
+of budget. Probe limits or Dyson-remainder failures use a one-period propagator
 of H_F+D0 plus the probe, binary powering, and direct remainder integration. Frames needing more than 4096 phase
 samples (spectral span including drive / Stark frequency > 128) are rejected.
 No density is clipped or renormalized.
@@ -205,6 +206,8 @@ def _averages(model: SecularModel, rotations: NDArray[np.complex128]):
         # The secular bath is diagonal coherence loss plus population transfer.
         # pairs[i,a,c] = conj(R[i,a])*R[i,c] contracts each part with two
         # small dense products, without a full Liouville basis transform.
+        # Transfer already has (a,b,c,d) order. Decay starts in (a,c,b,d)
+        # order, so its middle axes must be swapped for row-major rho.
         pairs = (rotation.conj()[:, :, None] * rotation[:, None, :]).reshape(
             size, size * size
         )
