@@ -643,7 +643,9 @@ def test_analysis_adapter_shows_analysis_widgets_and_labels_tab(control_factory,
     )
 
     assert _left_tabs(tab).tabText(1) == "Analysis"
-    assert tab._analyze_section.isHidden() is False
+    analysis_pane = _left_tabs(tab).widget(1)
+    assert analysis_pane is not None
+    assert tab.analyze_form.isVisibleTo(analysis_pane) is True
     assert tab.analyze_btn.isHidden() is False
     saves = [
         button for button in tab.findChildren(QPushButton) if button.text() == "Save"
