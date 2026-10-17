@@ -64,21 +64,45 @@ def _make_factory(stack, *, operation_id: int = 1, owner_id: str = "owner"):
 # ---------------------------------------------------------------------------
 
 
-def test_lightweight_progress_bar_format_and_value(qapp):
+def test_lightweight_progress_bar_format_and_value(
+    qapp, monkeypatch: pytest.MonkeyPatch
+):
+    from PyQt6.QtCore import QRect
+    from PyQt6.QtGui import QPainter, QPixmap
     from zcu_tools.gui.session.ui.progress_bar import LightweightProgressBar
 
     bar = LightweightProgressBar()
-    bar.setMaximum(10)
-    bar.setValue(3)
-    bar.setFormat("rounds %v/%m %p%")
+    try:
+        bar.setMaximum(10)
+        bar.setValue(3)
+        bar.setFormat("rounds %v/%m %p%")
 
-    assert bar.maximum() == 10
-    assert bar.value() == 3
-    assert bar.format() == "rounds %v/%m %p%"
-    assert bar._text() == "rounds 3/10 30%"
+        assert bar.maximum() == 10
+        assert bar.value() == 3
+        assert bar.format() == "rounds %v/%m %p%"
 
-    bar.setValue(99)
-    assert bar.value() == 10
+        bar.resize(bar.fontMetrics().horizontalAdvance("rounds 3/10 30%") + 100, 30)
+        pixmap = QPixmap(bar.size())
+        captured_texts: list[str | None] = []
+        real_draw_text = QPainter.drawText
+
+        def observe_draw_text(
+            painter: QPainter, rectangle: QRect, flags: int, text: str | None
+        ) -> QRect | None:
+            """Record Qt's text while preserving the real drawing call and result."""
+            captured_texts.append(text)
+            return real_draw_text(painter, rectangle, flags, text)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(QPainter, "drawText", observe_draw_text)
+            bar.render(pixmap)
+        assert captured_texts == ["rounds 3/10 30%"]
+
+        bar.setValue(99)
+        assert bar.value() == 10
+    finally:
+        bar.deleteLater()
+        qapp.processEvents()
 
 
 def test_factory_push_and_pop_leave_false(qapp):
