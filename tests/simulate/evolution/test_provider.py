@@ -4,7 +4,13 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from zcu_tools.simulate.evolution import Engine, EnvelopeSpec, ModelSource, SecularModel
+from zcu_tools.simulate.evolution import (
+    Engine,
+    EnvelopeSpec,
+    ModelSource,
+    SecularDrive,
+    SecularModel,
+)
 from zcu_tools.simulate.evolution.declarations import (
     AlgorithmIdentity,
     Eligibility,
@@ -247,3 +253,33 @@ def test_legacy_provider_retains_shared_and_deferred_guard_products(count):
     )
     np.testing.assert_array_equal(states, before)
     np.testing.assert_array_equal(exceeded, np.zeros(count, dtype=bool))
+
+
+def test_repeated_shaped_key_uses_sambe_when_spectral_guard_accepts():
+    """Ordinary period-key reuse must not exclude valid spectral preparation."""
+    x = np.array([[0, 0.012], [0.012, 0]], dtype=complex)
+    model = SecularModel(
+        (0,),
+        "repeated-spectral-ramp",
+        np.array([0.0, 0.294]),
+        np.eye(2, dtype=complex),
+        (SecularDrive("drive", x, np.zeros_like(x)),),
+        np.array([[0.0, 1e-5], [0.0, 0.0]]),
+        np.zeros((2, 2)),
+    )
+    src = ModelSource(np.diag([0.6, 0.4]).astype(complex), lambda _: model)
+    envelope = EnvelopeSpec(
+        "sampled", np.array([0.0, 1.0], dtype=complex), np.array([0.0, 100.3])
+    )
+    ramp = replace(
+        track(3, envelope, duration=100.3),
+        frequency_ghz=np.full(3, 0.294),
+        amplitude=np.full(3, 0.3),
+    )
+    geometry = segment(src, (replace(batch(3, duration=100.3), tracks=(ramp,)),))
+    provider = LegacyProvider()
+    rows = np.arange(3, dtype=np.int64)
+    spectral = provider.entry("shaped_sambe").kernel
+    np.testing.assert_array_equal(spectral.guard(geometry.table, rows, src, 1e-3), True)
+    dispatch = provider.classify(geometry, src, 1e-3)
+    np.testing.assert_array_equal(dispatch.names, ["shaped_sambe"] * 3)
