@@ -330,6 +330,16 @@ class T6Kernel:
         ]
         return _pack(entries)
 
+    def guard_prepared(
+        self,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source: ModelSource,
+        budget: float,
+    ) -> None:
+        """Decline guard preparation handoff; the engine calls guard normally."""
+        del table, rows, source, budget
+
     def bind_input(
         self,
         prepared: Prepared,

@@ -156,7 +156,12 @@ class Schedule:
     def prepare_shared(
         self, entries: list[_Entries], cache: PrepareCache, pool: Parallel, chunks: int
     ) -> list[_Binding]:
-        """Prepare repeated keys in A-stage batches; reuse read-only LRU hits."""
+        """Reuse guard payloads/LRU hits and prepare missing repeated keys.
+
+        Dispatch belongs to this Schedule's source and budget. Guard payloads
+        are eligible only for matching kernel keys selected by that dispatch.
+        Singleton guard payloads bypass the LRU but reach timeline chunks too.
+        """
         bindings: list[_Binding] = []
         jobs: list[tuple[_Entries, NDArray[np.int64], tuple[str, str, float]]] = []
         dc = self.source.model(tuple(0 for _ in range(self.table.level.shape[1])))
@@ -168,6 +173,24 @@ class Schedule:
             for payload in hits:
                 bindings.append(_bind(entry, payload, shared[entry.inverse]))
                 key_set.difference_update(payload.keys)
+            available = key_set | {key.tobytes() for key in entry.keys[~shared]}
+            shared_keys = {key.tobytes() for key in entry.keys[shared]}
+            for preparation in self.dispatch.preparations.get(entry.kernel.name, ()):
+                payload = _Payload(
+                    preparation.prepared,
+                    tuple(key.tobytes() for key in preparation.keys),
+                )
+                reusable = available.intersection(payload.keys)
+                if not reusable:
+                    continue
+                eligible = np.array(
+                    [key.tobytes() in reusable for key in entry.keys], dtype=bool
+                )
+                bindings.append(_bind(entry, payload, eligible[entry.inverse]))
+                if set(payload.keys).issubset(shared_keys):
+                    cache.add(namespace, payload)
+                key_set.difference_update(payload.keys)
+                available.difference_update(payload.keys)
             missing = np.array(
                 [i for i, key in enumerate(entry.keys) if key.tobytes() in key_set],
                 dtype=np.int64,
@@ -194,8 +217,9 @@ class Schedule:
     def bind_inputs(self, bindings: list[_Binding]) -> list[_Binding]:
         """Add evolve-local input bindings after model-only cache admission.
 
-        Only repeated keys are present here. All eligible rows for a key/port
-        reach one hook call, before chunk partitioning. Opaque returned data is
+        Only repeated keys receive the hook; guard-built singletons bypass it.
+        All eligible rows for a key/port reach one call before chunk partitioning.
+        Opaque returned data is
         referenced by the returned list alone, never by Schedule or the cache.
         """
         bound: list[_Binding] = []
@@ -269,10 +293,14 @@ class Schedule:
     def input_groups(
         self, binding: _Binding, prefixes: Mapping[int, NDArray[np.complex128]]
     ):
-        """Yield key/port/input groups; None denotes the source at start zero."""
+        """Yield repeated-key/port/input groups; None denotes the source at start zero."""
         groups = self.table.flux_tail_group
+        uses = np.bincount(binding.indices)
         selected: dict[tuple[int, int, int | None], list[int]] = {}
         for row, key in zip(binding.rows, binding.indices, strict=True):
+            if uses[key] < 2:
+                # Guard-built singletons keep their per-batch payload.
+                continue
             group = groups[row] if groups is not None else None
             if self.table.start_ns[row] != 0 and group not in prefixes:
                 continue
@@ -325,8 +353,15 @@ class Schedule:
             raise Cancelled()
         selected = np.isin(self.table.timeline, points)
         bindings = list(shared)
+        covered = np.zeros(len(selected), dtype=bool)
+        for binding in shared:
+            covered[binding.rows] = True
         for entry in entries:
-            local = selected[entry.rows] & (entry.counts[entry.inverse] == 1)
+            local = (
+                selected[entry.rows]
+                & (entry.counts[entry.inverse] == 1)
+                & ~covered[entry.rows]
+            )
             unique = np.unique(entry.inverse[local])
             if len(unique):
                 payload = _build(

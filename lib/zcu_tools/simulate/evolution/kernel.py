@@ -152,7 +152,8 @@ class SegmentTable:
 class Prepared(Protocol):
     """Opaque kernel payload, shared read-only by workers.
 
-    prepare returns state-independent data eligible for PrepareCache. bind_input
+    prepare and guard_prepared return state-independent data eligible for
+    PrepareCache under the ordinary shared-key rules. bind_input
     may wrap it in an input-bound payload used only within one evolve call;
     that wrapper never enters PrepareCache.
     Each kernel defines its own concrete payload. nbytes counts resident array
@@ -165,6 +166,50 @@ class Prepared(Protocol):
     def nbytes(self) -> int:
         """Resident array bytes charged to the prepare cache for this payload."""
         ...
+
+
+@dataclass(frozen=True)
+class GuardPreparation:
+    """Model-only preparation returned by a guard for this evolve's source/budget.
+
+    keys: read-only unique fixed-width prepare keys, in the payload's entry order.
+    prepared: opaque read-only payload equivalent to prepare(keys, ...), with
+        no density access. Keys may include rejected rows, but only accepted
+        rows are reused. No kernel may retain this record in its own state.
+    Owns a read-only key copy; a non-vector/non-void key array raises ValueError.
+    """
+
+    keys: NDArray[np.void]
+    prepared: Prepared
+
+    def __post_init__(self) -> None:
+        keys = self.keys.copy()
+        if keys.ndim != 1 or keys.dtype.kind != "V":
+            raise ValueError("guard preparation keys must be a fixed-width vector")
+        keys.setflags(write=False)
+        object.__setattr__(self, "keys", keys)
+
+
+@dataclass(frozen=True)
+class GuardResult:
+    """Row-local guard decision plus optional model-only preparations.
+
+    accepted: read-only bool (len(rows),) mask identical to guard for the same arguments.
+    preparations: disjoint key batches constructed with that call's source and
+        budget. Empty means no handoff. Records live only within this evolve;
+        shared keys may enter PrepareCache under its ordinary admission rules.
+    Owns a read-only mask copy; a non-vector/non-bool mask raises ValueError.
+    """
+
+    accepted: NDArray[np.bool_]
+    preparations: tuple[GuardPreparation, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.accepted.ndim != 1 or self.accepted.dtype != np.bool_:
+            raise ValueError("guard acceptance must be a bool vector")
+        object.__setattr__(
+            self, "accepted", owned(self.accepted, np.bool_, "guard acceptance")
+        )
 
 
 class Kernel(Protocol):
@@ -194,6 +239,30 @@ class Kernel(Protocol):
 
         Only algorithm-local guards apply here; the engine owns branch order
         and cross-family rules such as prepare-key usage counts.
+        """
+        ...
+
+    def guard_prepared(
+        self,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source: ModelSource,
+        budget: float,
+    ) -> GuardResult | None:
+        """Optionally return guard decisions and the preparations they required.
+
+        Called instead of guard during classification. None declines the hook,
+        so the engine calls guard unchanged. Floquet supplies GuardResult; all
+        other families return None. Acceptance must obey guard's row locality,
+        including empty/reversed subsets. No density is read or mutated.
+
+        The engine reuses returned preparations only for accepted rows with
+        the same kernel, prepare key, source and budget in this evolve. They
+        reach A-stage before input binding and are also reused for singleton
+        rows without cache admission. Shared-key batches follow normal LRU
+        rules; otherwise references expire with this evolve. No kernel state
+        or separate cross-evolve store is permitted. Failure semantics match
+        guard/prepare, including RuntimeError on numerical failure.
         """
         ...
 
