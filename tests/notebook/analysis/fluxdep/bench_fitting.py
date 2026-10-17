@@ -22,7 +22,7 @@ import sys
 import time
 from functools import partial
 from statistics import median
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 import numpy as np
 
@@ -59,6 +59,35 @@ class _TimingStats(TypedDict):
     median: float
     min: float
     n: int
+
+
+class _MacroCaseStats(TypedDict):
+    """Result shared by the search and spectrum-fit benchmark cases.
+
+    time: Elapsed time for the case, in seconds.
+    best: Best EJ, EC, EL parameters, in the database's original units.
+    max_rel_err: Maximum dimensionless relative error against true_params.
+    """
+
+    time: float
+    best: list[float]
+    max_rel_err: float
+
+
+class _MacroReport(TypedDict, total=False):
+    """Sparse macrobenchmark report; all fields are absent if the DB is missing.
+
+    true_params: Synthetic observation's reference parameter tuple, in the
+        database's original units; present when the DB exists.
+    search_njobs1: Search result with one worker; present when the DB exists.
+    search_njobsN: Search result with all workers; present when the DB exists.
+    fit_spectrum: Spectrum-fit result; absent in quick mode or if the DB is missing.
+    """
+
+    true_params: tuple[float, ...]
+    search_njobs1: _MacroCaseStats
+    search_njobsN: _MacroCaseStats
+    fit_spectrum: _MacroCaseStats
 
 
 def _timed(fn, *, repeat=5) -> _TimingStats:
@@ -146,7 +175,9 @@ def _synth_observation(db_path: str, idx: int, n_fluxs: int, transitions):
     return fluxs, freqs, params
 
 
-def macro_benches(db_path: str, quick: bool, n_fluxs: int | None = None) -> dict:
+def macro_benches(
+    db_path: str, quick: bool, n_fluxs: int | None = None
+) -> _MacroReport:
     if not os.path.exists(db_path):
         print(f"[skip macro] DB not found: {db_path}")
         return {}
@@ -162,14 +193,14 @@ def macro_benches(db_path: str, quick: bool, n_fluxs: int | None = None) -> dict
     ECb = (0.2, 2.0)
     ELb = (0.5, 2.0)
 
-    out: dict = {"true_params": true_params}
+    out: _MacroReport = {"true_params": true_params}
 
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    cases: list[tuple[str, int]] = [
+    cases: list[tuple[Literal["search_njobs1", "search_njobsN"], int]] = [
         ("search_njobs1", 1),
         ("search_njobsN", -1),
     ]
