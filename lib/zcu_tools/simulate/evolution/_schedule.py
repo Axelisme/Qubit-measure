@@ -18,6 +18,8 @@ from .engine import Cancelled, EvolutionResult, PathDiagnostics
 from .kernel import Kernel, Prepared, SegmentTable
 from .secular import ModelSource
 
+_CHAINABLE_KERNELS = frozenset(("dop853", "flux_dop853"))
+
 
 @dataclass(frozen=True)
 class _Payload:
@@ -521,7 +523,7 @@ class _Chunk:
         first = self.cursor[slots]
         self._basis(slots, self.table.level[first])
         lengths = np.ones(len(slots), dtype=np.int64)
-        if binding.kernel.name in ("dop853", "flux_dop853"):
+        if binding.kernel.name in _CHAINABLE_KERNELS:
             # Extend each chain until the binding, timeline or continuity changes.
             while True:
                 next_row = first + lengths
@@ -576,7 +578,7 @@ class _Chunk:
             raise RuntimeError(f"missing preparation for segment {row}")
         entry = self.entries[index]
         rows = np.array([row], dtype=np.int64)
-        if entry.kernel.name in ("dop853", "flux_dop853"):
+        if entry.kernel.name in _CHAINABLE_KERNELS:
             candidates = np.arange(row, self.end[slot], dtype=np.int64)
             contiguous = (self.local_entry[candidates] == index) & (
                 self.binding[candidates] < 0

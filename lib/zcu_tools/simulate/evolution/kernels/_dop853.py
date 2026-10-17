@@ -2,7 +2,7 @@
 
 The explicit 8th-order tableau and embedded 5th/3rd-order estimators are
 Hairer's DOP853 coefficients (also used by SciPy). Interval callers stop
-exactly at each control/bath boundary and restart with the last accepted step.
+exactly at each control/bath boundary and restart with a deterministic seed.
 The dense variant retains the degree-seven extension for Hilbert propagators.
 A fresh RHS evaluation at each boundary avoids stale derivatives.
 """
@@ -232,20 +232,19 @@ def integrate(
     duration_ns: float,
     controls: Tolerances,
     first_step: float,
-) -> tuple[NDArray[np.complex128], float]:
-    """Integrate one smooth interval, returning final state and accepted step.
+) -> NDArray[np.complex128]:
+    """Integrate one smooth interval and return its final state.
 
     rhs(time_ns, flat_state, context) is a numba-compiled autonomous context
     callback, with time local to this interval. state is a complex128 vector;
     it is not mutated. duration_ns is nonnegative. first_step is positive ns,
-    usually the previous interval's last accepted step, or max_step initially.
-    Zero duration preserves both state and step. No derivative is reused across
+    capped by max_step; no accepted-step history is returned. Zero duration
+    preserves the state. No derivative is reused across
     calls, so controls and bath can jump at boundaries. RuntimeError signals
     nonfinite derivatives/errors, step underflow or exhausted iterations.
     """
     time = 0.0
     step = min(first_step, controls.max_step)
-    accepted_step = first_step
     rejected = False
     attempts = 0
     while time < duration_ns:
@@ -260,7 +259,6 @@ def integrate(
         if error <= 1:
             state = candidate
             time += step
-            accepted_step = step
             factor = 10.0 if error == 0 else min(10.0, 0.9 * error ** (-1 / 8))
             if rejected:
                 factor = min(1.0, factor)
@@ -269,7 +267,7 @@ def integrate(
         else:
             step *= max(0.2, 0.9 * error ** (-1 / 8))
             rejected = True
-    return state, accepted_step
+    return state
 
 
 # Extra stages and weights for the degree-seven continuous extension.

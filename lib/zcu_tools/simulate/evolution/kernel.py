@@ -56,7 +56,7 @@ class SegmentTable:
         Absent groups have no known input yet.
     Arrays own read-only copies. Invalid shapes/counts/indices raise ValueError.
     Adjacent rows of one timeline may be merged by DOP853 kernels into a
-    multi-interval work item: stop at boundaries and retain the accepted step.
+    multi-interval work item: stop at boundaries and reset each row's step seed.
 
     Raises:
         ValueError: message names shape for misaligned arrays, tone counts

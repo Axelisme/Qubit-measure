@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-17, retained ADC rejection counts
+**Last updated:** 2026-10-17, CPU worker selection and retained ADC rejection counts
 
 `ftf(path_or_settings, *, workers=1)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -17,8 +17,8 @@ The segment engine's fast algorithms are the default numeric path.
 One source owns one `Engine`, whose prepare cache survives across acquires.
 The keyword `workers` selects the engine's sole parallel width; direct callers
 use one worker by default. GUI and Notebook use the shared FTF environment entry,
-which selects `max(1, os.process_cpu_count() - 2)` workers, or one when the count
-is unknown. An eight-core process therefore uses six workers. Evolution limits
+which selects `max(1, (os.cpu_count() or 1) - 2)` workers. Unknown CPU counts
+therefore use one worker. An eight-core host uses six workers. Evolution limits
 native BLAS to one thread for the entire call. Overlapping evolves share a
 process-level reference count: the first sets the limit and the last restores
 it. Do not independently change threadpoolctl limits while an evolve is active.

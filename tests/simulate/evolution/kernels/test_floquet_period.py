@@ -141,7 +141,7 @@ def test_engine_dispatches_rejected_dyson_rows_to_hilbert_period() -> None:
     from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
     from zcu_tools.simulate.evolution.kernels.t6 import T6Kernel
 
-    from ..test_engine import RecordingKernel, batch, run, source, track
+    from .._engine import RecordingKernel, batch, run, source, track
 
     pulse = replace(
         track(2, EnvelopeSpec("constant"), duration=0.3),
@@ -167,7 +167,7 @@ def test_engine_dispatches_rejected_dyson_rows_to_hilbert_period() -> None:
 def test_engine_dispatches_low_carrier_strong_and_unknown_inputs() -> None:
     from zcu_tools.simulate.evolution import Engine
 
-    from ..test_engine import batch, run, track
+    from .._engine import batch, run, track
 
     model = synthetic_model(3)
     model = replace(

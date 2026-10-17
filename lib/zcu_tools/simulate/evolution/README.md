@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, single-input prefix reuse and per-timeline prefix diagnostics
+**Last updated:** 2026-10-17, prefix adoption, row-local sampling ceilings and timeline-owned scheduling
 
 ## Segment engine contracts
 
@@ -80,7 +80,8 @@ for an empty call. This diagnostic never changes, rejects or retries kernel
 output and does not compare against an ADC tolerance. The environment explicitly
 converts densities to populations and calls ADC's `normalize_populations` once
 before sampling. ADC owns its 1e-6 trace and negative-residual contract and
-reports rejected row counts in `ValueError`; evolution does not import ADC.
+reports rejected row counts through `PopulationValidationError.rejected_rows`;
+evolution does not import ADC.
 
 `SEGMENT_NUMERIC_VERSION` is `segment-engine-v3` and identifies engine numerics
 for checked replay.
@@ -346,11 +347,12 @@ factor. A three-tone isolated sampled feature at budget=1e-8 sets that factor;
 margin for interval composition, but they do not prove a global error bound.
 
 There is no fixed 0.1 ns accepted-step ceiling. For sampled envelopes, the
-ceiling is the smallest sample spacing among active envelopes. A step crosses
-at most one knot in each envelope, so it cannot skip a narrow sampled feature.
-Constant envelopes add no sampling ceiling. `flux_dop853` also includes its
-continuous-flux waveform spacing. The original samples and linear playback
-remain unchanged. The solver need not stop exactly at interior knots.
+ceiling is the smallest spacing between knots inside each active envelope's
+row-local window, including its endpoints. Samples outside that window do not
+cap the row. Constant envelopes add no sampling ceiling. Ordinary `dop853`
+ignores flux waveform samples. `flux_dop853` also includes spacing between flux
+knots inside the row's absolute time interval. The original samples and linear
+playback remain unchanged. The solver need not stop exactly at interior knots.
 
 Each row starts from a deterministic 0.1 ns seed, capped by its sample spacing.
 The seed is not an accepted-step ceiling. No adaptive history carries between
@@ -435,21 +437,14 @@ avoid building a full dissipative propagator for every phase.
 
 All non-reps sweep points enter as template arrays. Prepare does not depend on
 input density; apply does. The engine deduplicates prepare keys across the
-acquire. Keys used at least twice are prepared in shared A-stage chunks before
-timeline work starts. Floquet's guard hands its model-only preparations to
-A-stage, avoiding another build for matching keys. Guard-built singleton
-payloads also reach timeline chunks without cache admission or input binding. Other single-use
-preparations stay inside their timeline chunk and are discarded afterward.
-Low-carrier Hilbert-period singleton keys, below 0.3 GHz, instead stream one
-timeline at a time inside each worker chunk. This avoids retaining a sweep of
-many distinct per-key trajectories. CF4 replaces the former roughly 80 MB
-DOP853 trajectories at 50 MHz with compact unitary prefixes, but streaming
-still prevents memory from growing with the number of sweep keys. Shared Hilbert-period keys
-still use A-stage when there are at most four distinct low-carrier shared keys.
-Larger low-carrier key sets prepare locally and stream timelines too. The LRU
-limit alone cannot bound A-stage memory because live bindings retain evicted
-payloads. This policy bounds sweep-wide low-carrier retention; a single timeline
-can still retain its own distinct pulse keys. High-carrier batching is unchanged.
+acquire. Only keys used by distinct timelines enter shared A-stage preparation
+and the LRU. Repeating a key within one timeline does not make it shared.
+Guard-built shared payloads reach A-stage without rebuilding. For local keys,
+the timeline worker runs the guard, prepares and applies accepted payloads,
+then releases them after that timeline. Single-use keys without a guard-built
+table prepare at their apply wave and release immediately. These rules apply
+to every family, independent of carrier frequency or the number of shared keys.
+The LRU limits resident cache bytes, not live acquire references or process RSS.
 The input-bound hook is an A-stage exception to
 model-only preparation. It contracts the source initial density or a shared
 prefix output once per shared key, port and input group. Before final dispatch,
@@ -484,8 +479,9 @@ waiting points. Cancellation is checked between chunks.
 
 Joblib threading is the only parallel layer. Worker numba kernels are
 single-threaded and use `nogil`; there is no process pool, GPU or Rust backend.
-Each `evolve` call opens and closes its threading pool. Across acquires, the
-engine retains only its prepare cache, not worker resources. Numba results need
+Multi-timeline calls with more than one worker open and close a threading pool.
+Empty work, one timeline and `workers=1` execute inline without a pool.
+Across acquires, the engine retains only its prepare cache, not worker resources. Numba results need
 not match NumPy bit for bit; numerical acceptance uses the observable-error
 thresholds above, not a separate NumPy backend.
 
