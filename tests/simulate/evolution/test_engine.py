@@ -19,7 +19,7 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     TimelineBatch,
 )
-from zcu_tools.simulate.evolution.kernel import Prepared, SegmentTable
+from zcu_tools.simulate.evolution.kernel import GuardResult, Prepared, SegmentTable
 
 from .contract.kernel_suite import synthetic_model
 
@@ -95,6 +95,10 @@ class RecordingKernel:
     def prepare(self, keys, table, rows, source, budget):
         self.preparations += len(keys)
         return Payload(len(keys))
+
+    def guard_prepared(self, table, rows, source, budget) -> GuardResult | None:
+        """Keep the ordinary guard path for this test collaborator."""
+        del table, rows, source, budget
 
     def bind_input(
         self, prepared, key_index, table, rows, source_initial, budget
@@ -516,6 +520,38 @@ def test_input_bound_payload_grouping_fallback_and_evolve_lifetime(decline):
         assert set(k.bound_rows) == (set() if decline else set(range(6)))
         assert set(k.unbound_rows) == (set(range(n)) if decline else {6, 7})
         assert not np.array_equal(first.densities, second.densities)
+
+
+def test_guard_handoff_only_binds_repeated_keys():
+    from zcu_tools.simulate.evolution.kernel import GuardPreparation
+
+    class GuardBindingKernel(InputBindingKernel):
+        def prepare_keys(self, table, rows):
+            return table.duration_ns[rows].copy().view("V8")
+
+        def guard_prepared(self, table, rows, source, budget):
+            keys, first = np.unique(self.prepare_keys(table, rows), return_index=True)
+            prepared = self.prepare(keys, table, rows[first], source, budget)
+            return GuardResult(
+                self.guard(table, rows, source, budget),
+                (GuardPreparation(keys, prepared),),
+            )
+
+    k = GuardBindingKernel()
+    durations = np.array([1.0, 1.0, 2.0])
+    drive = replace(track(3, EnvelopeSpec("constant")), duration_ns=durations)
+    b = replace(batch(3), tracks=(drive,), end_ns=durations)
+    src = source()
+    with closing(Engine(1, 0, kernels=(k,))) as engine:
+        result = engine.evolve(src, (b,), cancel=Event())
+    assert len(k.groups) == 1, "guard-built singletons must bypass bind_input"
+    np.testing.assert_array_equal(k.groups[0][1], [1.0, 1.0])
+    assert k.bound_rows == [0, 1]
+    assert k.unbound_rows == [2]
+    assert k.preparations == 2
+    np.testing.assert_array_equal(
+        result.densities, np.repeat(src.initial_density[None], 3, axis=0)
+    )
 
 
 def test_shared_dyson_is_bitwise_chunk_independent_and_source_local():

@@ -33,7 +33,7 @@ from scipy.integrate import solve_ivp
 from scipy.linalg import eig, schur
 from scipy.optimize import linear_sum_assignment
 
-from ..kernel import Prepared, SegmentTable
+from ..kernel import GuardPreparation, GuardResult, Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
 
 
@@ -663,9 +663,24 @@ class FloquetKernel:
         budget: float,
     ) -> NDArray[np.bool_]:
         """Return validity for two constant tones, never reading initial density."""
+        return self.guard_prepared(table, rows, source, budget).accepted
+
+    def guard_prepared(
+        self,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source: ModelSource,
+        budget: float,
+    ) -> GuardResult:
+        """Return the unchanged guard mask and evolve-local Floquet preparations.
+
+        Each key's immutable model-only payload can replace prepare for the
+        same source and budget. No preparation is retained on this kernel.
+        """
+        preparations: list[GuardPreparation] = []
         accepted = np.zeros(len(rows), dtype=bool)
         if table.tone_port.shape[1] < 2:
-            return accepted
+            return GuardResult(accepted)
         constants = np.array([e.kind == "constant" for e in table.envelopes])
         playing = table.tones[rows] == 2
         envelopes = np.maximum(0, table.tone_envelope[rows, :2])
@@ -678,7 +693,7 @@ class FloquetKernel:
         frequency = table.tone_frequency_ghz[rows, stark]
         positions = np.flatnonzero(playing & constant & (frequency > 0))
         if not len(positions):
-            return accepted
+            return GuardResult(accepted)
         selected = rows[positions]
         keys, representatives, inverse = np.unique(
             self.prepare_keys(table, selected), return_index=True, return_inverse=True
@@ -696,11 +711,14 @@ class FloquetKernel:
                 source,
                 budget,
             )
+            preparations.append(
+                GuardPreparation(keys[key_index : key_index + 1], prepared)
+            )
             members = np.flatnonzero(inverse == key_index)
             accepted[positions[members]] = _acceptance(
                 prepared.entries[0], params[members], budget
             )
-        return accepted
+        return GuardResult(accepted, tuple(preparations))
 
     def prepare_keys(
         self, table: SegmentTable, rows: NDArray[np.int64]

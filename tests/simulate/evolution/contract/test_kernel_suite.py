@@ -83,6 +83,10 @@ class DemoKernel:
             )
         )
 
+    def guard_prepared(self, table, rows, source, budget) -> None:
+        """Keep the ordinary guard path for this test collaborator."""
+        del table, rows, source, budget
+
     def bind_input(
         self,
         prepared: kernel.Prepared,
