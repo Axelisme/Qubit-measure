@@ -473,9 +473,8 @@ class FloquetPeriodKernel:
     retaining unitary prefixes. The matrix one-norm selects scaling at the
     0.9504178996162932 backward-error radius. Centering each exponential removes
     its common energy during evaluation and restores its scalar phase afterward.
-    A fractional
-    endpoint uses a CF4 step from its preceding prefix, not interpolation.
-    Uniform grids start below 2/3 of a spectral turn and compare prefix
+    A fractional endpoint uses a CF4 step from its preceding prefix, not
+    interpolation. Uniform grids start below 2/3 of a spectral turn and compare prefix
     trajectories with a 1.5x finer grid at eight phase intervals. The maximum
     operator defect must be <= min(1e-4, budget*0.1); the finer trajectory is
     retained. Its steps are below half a spectral turn. This is a calibrated

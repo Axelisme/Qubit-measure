@@ -92,26 +92,39 @@ def _coefficients(
 
 
 class _SpectralFamily:
-    """Reuse immutable spectral builds within one guard/prepare call."""
+    """One model/port/carrier/peak-gain/subperiod spectral family.
 
-    def __init__(self) -> None:
-        self.errors: dict[int, float] = {}
-        self.polynomials: dict[
-            tuple[int, int], tuple[NDArray[np.complex128], float, float]
-        ] = {}
+    The constructor fixes all physical build inputs. Only harmonic cutoffs and
+    amplitude-node counts vary within its caches. One guard/prepare call owns
+    the instance; accepted payloads may retain its immutable coefficient arrays.
+    """
 
-    def error(
+    def __init__(
         self,
         model: SecularModel,
         port: int,
         frequency: float,
         bound: float,
         step: float,
-        modes: int,
-    ) -> float:
+    ) -> None:
+        self.model = model
+        self.port = port
+        self.frequency = frequency
+        self.bound = bound
+        self.step = step
+        self.errors: dict[int, float] = {}
+        self.polynomials: dict[
+            tuple[int, int], tuple[NDArray[np.complex128], float, float]
+        ] = {}
+
+    def error(self, modes: int) -> float:
         if modes not in self.errors:
-            fine = _spectral(model, port, frequency, bound, modes + 1, step)
-            coarse = _spectral(model, port, frequency, bound, modes, step)
+            fine = _spectral(
+                self.model, self.port, self.frequency, self.bound, modes + 1, self.step
+            )
+            coarse = _spectral(
+                self.model, self.port, self.frequency, self.bound, modes, self.step
+            )
             self.errors[modes] = float(
                 np.sum(np.linalg.norm(fine - coarse, axis=(-2, -1)))
             )
@@ -119,16 +132,13 @@ class _SpectralFamily:
 
     def polynomial(
         self,
-        model: SecularModel,
-        port: int,
-        frequency: float,
-        bound: float,
-        step: float,
         orders: tuple[int, int],
     ) -> tuple[NDArray[np.complex128], float, float]:
         if orders not in self.polynomials:
             nodes, _ = orders
-            coefficients = _coefficients(model, port, frequency, bound, step, orders)
+            coefficients = _coefficients(
+                self.model, self.port, self.frequency, self.bound, self.step, orders
+            )
             last = float(
                 np.sum(np.linalg.norm(coefficients[:, nodes - 1], axis=(-2, -1)))
             )
@@ -311,20 +321,16 @@ class ShapedSambeKernel:
             )
             family = families.get(family_key)
             if family is None:
-                family = _SpectralFamily()
+                family = _SpectralFamily(model, port, f, bound, step)
                 families[family_key] = family
-            error = family.error(model, port, f, bound, step, modes)
+            error = family.error(modes)
             if error * cycles > budget / 4:
                 modes = 3
-                error = family.error(model, port, f, bound, step, modes)
-            coefficients, interpolation, ratio = family.polynomial(
-                model, port, f, bound, step, (nodes, modes)
-            )
+                error = family.error(modes)
+            coefficients, interpolation, ratio = family.polynomial((nodes, modes))
             if ratio > 0.25 or interpolation * cycles > budget / 8:
                 nodes = 8
-                coefficients, interpolation, _ = family.polynomial(
-                    model, port, f, bound, step, (nodes, modes)
-                )
+                coefficients, interpolation, _ = family.polynomial((nodes, modes))
             errors.append((error + interpolation) * cycles)
             outgoing = model.rates_per_ns.sum(axis=0)
             populations = np.asarray(

@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, compiled gate-cache preparation, driven-input plateau routing, Hilbert endpoints, timeline-owned waves and spectral-family reuse
+**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves and spectral-family reuse
 
 ## Segment engine contracts
 
@@ -709,8 +709,9 @@ bound or segment-budget guarantee. Small synthetic Engine tests cover mixed and
 coherent inputs, signed carriers and phase-translated cross-period tails.
 
 Below 1 GHz, preparation uses fourth-order commutator-free Magnus (CF4).
-Each step multiplies two exact Hermitian matrix exponentials. Uniform grids
-start below 2/3 of an instantaneous spectral turn. Preparation compares prefix
+Each step multiplies two scaled-and-squared [7/7] Padé exponentials of the
+centered Hermitian generator. Fractional CF4 endpoints use the same exponentials.
+Uniform grids start below 2/3 of an instantaneous spectral turn. Preparation compares prefix
 unitaries with a 1.5x finer grid at eight phase intervals, including U(T).
 It retains the finer grid when the maximum Frobenius-norm difference is at most
 min(1e-4, budget*0.1); otherwise it refines again. Accepted steps stay below
