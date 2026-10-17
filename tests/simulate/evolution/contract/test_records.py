@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from threading import Barrier
@@ -252,3 +252,16 @@ def test_sampled_envelope_requires_zero_time_origin() -> None:
             samples=np.ones(2, dtype=np.complex128),
             sample_ns=np.array([1.0, 2.0]),
         )
+
+
+def test_exceeded_diagnostics_default_validation_and_immutable_copy() -> None:
+    default = evolution.PathDiagnostics()
+    assert getattr(default, "exceeded_by_kernel", None) == {}
+    counts = {"dyson": 2, "t4": 0}
+    diagnostics = replace(default, exceeded_by_kernel=counts)
+    counts["dyson"] = 99
+    assert diagnostics.exceeded_by_kernel == {"dyson": 2}
+    assert not isinstance(diagnostics.exceeded_by_kernel, MutableMapping)
+    for invalid in ({"dyson": -1}, {"": 1}):
+        with pytest.raises(ValueError, match="names|nonnegative"):
+            replace(default, exceeded_by_kernel=invalid)

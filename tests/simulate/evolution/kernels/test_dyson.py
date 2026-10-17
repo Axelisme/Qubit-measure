@@ -151,3 +151,86 @@ def test_guard_retains_first_order_population_from_coherence(
     case = replace(case, source=source, table=table)
     exact = np.diag(reference(case, 1, coherent) - coherent)
     assert np.max(abs(exact)) > 0.02
+
+
+@pytest.mark.parametrize("budget", [1e-3, 1.0])
+def test_apply_reports_population_transfer_without_correcting_output(
+    kernel_case: KernelCase, budget: float
+) -> None:
+    case = kernel_case
+    model = case.source.model((0,))
+    size = len(model.energies_ghz)
+    x = np.zeros((size, size), dtype=np.complex128)
+    x[0, 1] = x[1, 0] = 1
+    model = replace(
+        model,
+        energies_ghz=np.zeros(size),
+        rates_per_ns=np.zeros((size, size)),
+        dephasing_per_ns=np.zeros((size, size)),
+        drives=(replace(model.drives[0], in_phase_ghz=x, quadrature_ghz=x * 0),),
+    )
+    vector = np.zeros(size, dtype=np.complex128)
+    vector[:2] = np.array([1, 1j]) / np.sqrt(2)
+    coherent = np.outer(vector, vector.conj())
+    src = ModelSource(coherent, lambda level: replace(model, level=level))
+    table = replace(
+        case.table,
+        tone_frequency_ghz=np.zeros((4, 1)),
+        tone_amplitude=np.array([[0.004], [0.0005], [0.003], [0.0]]),
+        tone_theta_rad=np.zeros((4, 1)),
+        duration_ns=np.ones(4),
+    )
+    rows = np.array([2, 0, 3, 1], dtype=np.int64)
+    keys, first, inverse = np.unique(
+        case.kernel.prepare_keys(table, rows), return_index=True, return_inverse=True
+    )
+    prepared = case.kernel.prepare(keys, table, rows[first], src, budget)
+    actual = np.repeat(coherent[None], 4, axis=0)
+    mask = case.kernel.apply(prepared, inverse, table, rows, actual, budget)
+    assert isinstance(mask, np.ndarray), "apply must return an exceeded mask"
+    # 2*pi*g is the population transfer. .003 crosses the budget-scaled
+    # threshold .0131 but not the .02 cap; .004 crosses both.
+    expected_mask = (
+        [True, True, False, False] if budget < 1 else [False, True, False, False]
+    )
+    np.testing.assert_array_equal(mask, expected_mask)
+    # Independent second-order polynomial for static H=g*X. A warning must
+    # neither correct nor recompute the output, including exceeded rows.
+    for slot, row in enumerate(rows):
+        h = 2 * np.pi * table.tone_amplitude[row, 0] * x
+        commutator = h @ coherent - coherent @ h
+        expected = coherent - 1j * commutator - (h @ commutator - commutator @ h) / 2
+        np.testing.assert_allclose(actual[slot], expected, rtol=0, atol=1e-14)
+    split_masks = []
+    for slot, row in enumerate(rows):
+        state = coherent[None].copy()
+        split_masks.append(
+            case.kernel.apply(
+                prepared,
+                inverse[slot : slot + 1],
+                table,
+                np.array([row]),
+                state,
+                budget,
+            )
+        )
+        np.testing.assert_allclose(state[0], actual[slot], rtol=0, atol=1e-14)
+    np.testing.assert_array_equal(np.concatenate(split_masks), mask)
+
+
+def test_apply_population_check_subtracts_free_decay(kernel_case: KernelCase) -> None:
+    case = kernel_case
+    rows = np.arange(4, dtype=np.int64)
+    table = replace(
+        case.table, tone_amplitude=np.zeros((4, 1)), duration_ns=np.full(4, 20.0)
+    )
+    keys, first, inverse = np.unique(
+        case.kernel.prepare_keys(table, rows), return_index=True, return_inverse=True
+    )
+    prepared = case.kernel.prepare(keys, table, rows[first], case.source, case.budget)
+    actual = case.states.copy()
+    mask = case.kernel.apply(prepared, inverse, table, rows, actual, case.budget)
+    assert isinstance(mask, np.ndarray), "apply must return an exceeded mask"
+    assert not mask.any()
+    change = np.diagonal(actual - case.states, axis1=1, axis2=2)
+    assert np.max(abs(change)) > 0.02
