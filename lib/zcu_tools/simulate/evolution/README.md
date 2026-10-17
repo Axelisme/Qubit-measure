@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, evolve-local input binding
+**Last updated:** 2026-10-17, paired shared-path pruning
 
 ## Segment engine contracts
 
@@ -162,9 +162,12 @@ model-only preparation. It contracts the source initial density once per shared
 key and port, and its payload lives only until this evolve finishes. Single-use
 keys, rows starting after zero and kernels returning None keep the per-batch
 path. Dyson uses the maximum absolute gain and maximum duration of all shared
-rows to build its path superset. Workers reuse the path and factor tables and
-check each row's original pruning bound. Fixed-size modal reconstruction keeps
-shared Dyson results bitwise identical across worker counts and chunk splits.
+rows to build its path superset. The shared table drops conjugate path pairs
+by increasing summed entrywise bound, up to budget/8, matching B2's reserved
+margin. Workers reuse retained paths and factors in original order without
+further pruning. Ordinary per-batch tables keep their original cutoffs.
+Fixed-size modal reconstruction keeps shared Dyson results bitwise identical
+across worker counts and chunk splits.
 
 Timeline chunks interleave estimated costs, with six chunks per worker by
 default. Within a chunk, local waves batch next segments by kernel and prepared

@@ -77,9 +77,10 @@ def _build_paths(
     modes: NDArray[np.complex128],
     couplings: NDArray[np.complex128],
     pruning: NDArray[np.float64],
-    outputs: NDArray[np.int64],
+    cutoffs: tuple[float, float] = (1e-16, 1e-12),
 ) -> tuple[NDArray[np.int64], NDArray[np.complex128]]:
-    """Contract one input into paths; retain a superset for all batch parameters."""
+    """Contract paths with (first,second) coefficient cutoffs; shared uses zeros."""
+    first_cutoff, second_cutoff = cutoffs
     dimension = len(modes)
     # Each discarded path gets an equal share of budget/8. The actual modal
     # input and max gain/duration bound every row; thresholds remain unchanged.
@@ -89,7 +90,7 @@ def _build_paths(
     growth = np.exp(max(0.0, np.max(eigenvalues.real)) * duration)
     indices = []
     coefficients = []
-    for a in outputs:
+    for a in range(dimension):
         for outer in range(2):
             r = 2 * outer - 1
             for b in range(dimension):
@@ -98,7 +99,7 @@ def _build_paths(
                     continue
                 first = coefficient * modes[b]
                 bound = abs(first * gain) * duration * growth * pruning[a]
-                if abs(first) > 1e-16 or bound > allowance:
+                if abs(first) > first_cutoff or bound > allowance:
                     # c=-1 marks first order; all other records are second order.
                     indices.append((a, b, -1, r, 0))
                     coefficients.append(first)
@@ -113,13 +114,170 @@ def _build_paths(
                             * growth
                             * pruning[a]
                         )
-                        if abs(second) > 1e-12 or bound > allowance:
+                        if abs(second) > second_cutoff or bound > allowance:
                             indices.append((a, b, c, r, s))
                             coefficients.append(second)
-    return (
-        np.array(indices, dtype=np.int64).reshape((-1, 5)),
-        np.array(coefficients, dtype=np.complex128),
+    # Numba cannot reshape an empty list of tuples to a known width.
+    path_indices = np.empty((len(indices), 5), dtype=np.int64)
+    for path in range(len(indices)):
+        path_indices[path] = indices[path]
+    return path_indices, np.array(coefficients, dtype=np.complex128)
+
+
+@dataclass(frozen=True)
+class DriveExtent:
+    """Conservative shared-row drive bounds; invalid values raise ValueError.
+
+    max_abs_gain: finite nonnegative maximum absolute signed gain (unitless).
+    max_duration_ns: finite nonnegative maximum duration, in ns. The two maxima
+        may come from different rows.
+    """
+
+    max_abs_gain: float
+    max_duration_ns: float
+
+    def __post_init__(self) -> None:
+        if (
+            not np.isfinite(self.max_abs_gain)
+            or self.max_abs_gain < 0
+            or not np.isfinite(self.max_duration_ns)
+            or self.max_duration_ns < 0
+        ):
+            raise ValueError("Dyson drive extent requires finite nonnegative bounds")
+
+
+class PrunedDysonPaths(NamedTuple):
+    """Budgeted contracted paths in their original accumulation order."""
+
+    indices: NDArray[np.int64]
+    """Retained (paths,5) records (a,b,c,r,s); c=-1 denotes first order."""
+
+    coefficients: NDArray[np.complex128]
+    """Retained (paths,) coefficients, already contracted with input modes."""
+
+    discarded_bound: float
+    """Sum of omitted path bounds on each reconstructed density entry."""
+
+
+def _paired_path_groups(
+    indices: NDArray[np.int64], conjugates: NDArray[np.int64]
+) -> NDArray[np.int64]:
+    """Return disjoint conjugate pairs; unmatched paths must remain retained."""
+    lookup = {tuple(int(v) for v in row): i for i, row in enumerate(indices)}
+    if len(lookup) != len(indices):
+        raise ValueError("Dyson path records must be unique")
+    groups = []
+    for path, (a, b, c, r, s) in enumerate(indices):
+        partner = lookup.get(
+            (
+                int(conjugates[a]),
+                int(conjugates[b]),
+                -1 if c == -1 else int(conjugates[c]),
+                -int(r),
+                -int(s),
+            )
+        )
+        if partner is not None and path <= partner:
+            groups.append((path, partner))
+    return np.array(groups, dtype=np.int64).reshape(-1, 2)
+
+
+def prune_dyson_paths(
+    indices: NDArray[np.int64],
+    coefficients: NDArray[np.complex128],
+    eigenvalues: NDArray[np.complex128],
+    conjugates: NDArray[np.int64],
+    pruning: NDArray[np.float64],
+    extent: DriveExtent,
+) -> PrunedDysonPaths:
+    """Greedily omit complete conjugate groups within an entrywise budget/8.
+
+    indices (N,5) contains unique (a,b,c,r,s) modal path records. a,b,c index
+    eigenvalues (D,); c=-1 marks first order with s=0. Carrier signs r and
+    second-order s are -1 or +1. coefficients (N,) include the actual input
+    modes. Carrier shifts must be purely imaginary. conjugates (D,) is an
+    involution mapping each mode to its density-adjoint partner.
+
+    pruning (D+1,) contains max(abs(W[:,a])) then the positive segment budget.
+    extent holds the maximum absolute gain and duration over all shared rows.
+    The maxima may come from different rows. Positive real eigenvalues are
+    allowed: every bound includes
+    exp(max(0,max(Re(eigenvalues)))*duration).
+
+    First-order bounds are |coefficient|*G*T*growth*pruning[a], with G and T
+    from extent. Second-order bounds replace G*T with G**2*T**2/2.
+    Groups are ordered by their summed bound (stable on ties), and omitted
+    until the next group would exceed budget/8. Missing partners stay retained;
+    a self-conjugate record is counted once. Retained records keep input order.
+    No per-row pruning may follow this operation. Inputs are not changed.
+
+    Raises ValueError for invalid shapes, nonfinite inputs or bounds, negative
+    duration/weights, nonpositive budget, invalid records or conjugate mapping.
+    """
+    dimension = len(eigenvalues)
+    if (
+        eigenvalues.ndim != 1
+        or dimension == 0
+        or indices.ndim != 2
+        or indices.shape[1] != 5
+        or coefficients.shape != (len(indices),)
+        or conjugates.shape != (dimension,)
+        or pruning.shape != (dimension + 1,)
+    ):
+        raise ValueError("Dyson pruning requires aligned path and modal shapes")
+    if (
+        not all(np.isfinite(v).all() for v in (coefficients, eigenvalues, pruning))
+        or np.any(pruning[:-1] < 0)
+        or pruning[-1] <= 0
+    ):
+        raise ValueError("Dyson pruning requires finite bounds and positive budget")
+    if (
+        not np.issubdtype(indices.dtype, np.integer)
+        or not np.issubdtype(conjugates.dtype, np.integer)
+        or np.any(conjugates < 0)
+        or np.any(conjugates >= dimension)
+    ):
+        raise ValueError("Dyson pruning requires integer paths and conjugate modes")
+    if not np.array_equal(conjugates[conjugates], np.arange(dimension)):
+        raise ValueError("Dyson conjugate modes must form an involution")
+    a, b, c, r, s = indices.T
+    if (
+        np.any(a < 0)
+        or np.any(a >= dimension)
+        or np.any(b < 0)
+        or np.any(b >= dimension)
+        or np.any(c < -1)
+        or np.any(c >= dimension)
+        or np.any(abs(r) != 1)
+        or np.any(np.where(c == -1, s != 0, abs(s) != 1))
+    ):
+        raise ValueError("Dyson pruning received an invalid path record")
+    strength = np.float64(extent.max_abs_gain) * extent.max_duration_ns
+    with np.errstate(over="ignore", invalid="ignore"):
+        growth = np.exp(
+            max(0.0, float(np.max(eigenvalues.real))) * extent.max_duration_ns
+        )
+        bounds = (
+            abs(coefficients)
+            * np.where(c == -1, strength, strength**2 / 2)
+            * growth
+            * pruning[a]
+        )
+    if not np.isfinite(bounds).all():
+        raise ValueError("Dyson pruning bounds must be finite")
+    groups = _paired_path_groups(indices, conjugates)
+    group_bounds = bounds[groups[:, 0]] + np.where(
+        groups[:, 0] == groups[:, 1], 0.0, bounds[groups[:, 1]]
     )
+    keep = np.ones(len(indices), dtype=np.bool_)
+    discarded = 0.0
+    for group in np.argsort(group_bounds, kind="stable"):
+        total = discarded + float(group_bounds[group])
+        if total > pruning[-1] / 8:
+            break
+        discarded = total
+        keep[groups[group]] = False
+    return PrunedDysonPaths(indices[keep], coefficients[keep], discarded)
 
 
 @njit(nogil=True, cache=True)
@@ -143,7 +301,10 @@ def _group_first_factors(
                 lookup[key] = len(pairs)
                 pairs.append(key)
             path_pairs[path, 1] = lookup[key]
-    return np.array(pairs, dtype=np.int64).reshape((-1, 3)), path_pairs
+    factor_pairs = np.empty((len(pairs), 3), dtype=np.int64)
+    for pair in range(len(pairs)):
+        factor_pairs[pair] = pairs[pair]
+    return factor_pairs, path_pairs
 
 
 @njit(nogil=True, cache=True)
@@ -176,7 +337,7 @@ class _Paths(NamedTuple):
     coefficients: NDArray[np.complex128]
     pairs: NDArray[np.int64]
     path_pairs: NDArray[np.int64]
-    recheck: bool
+    shared: bool
 
 
 @njit(nogil=True, cache=True)
@@ -187,15 +348,16 @@ def _evaluate_paths(
     pruning: NDArray[np.float64],
     paths: _Paths,
 ) -> NDArray[np.complex128]:
-    """Evaluate indices/coefficients/factor keys/lookup; recheck shared supersets."""
-    indices, coefficients, pairs, path_pairs, recheck = paths
+    """Evaluate paths; shared tables already spent their pruning budget."""
+    indices, coefficients, pairs, path_pairs, shared = paths
     dimension = len(modes)
     allowance = pruning[-1] / (8 * (2 * dimension**2 + 4 * dimension**3))
     result = np.empty((len(params), dimension), dtype=np.complex128)
-    # With equal |gain| and duration, the table already applied each row's exact
-    # bound. Mixed batches still recheck it below, preserving row splitting.
-    uniform_bound = (
-        not recheck
+    # Shared tables keep every retained pair on every row: another cutoff would
+    # spend beyond budget/8 and could break Hermiticity. Ordinary batches retain
+    # their original per-row policy, including the uniform-batch shortcut.
+    uniform_bound = shared or (
+        len(params) > 0
         and np.all(np.abs(params[:, 1]) == abs(params[0, 1]))
         and np.all(params[:, 2] == params[0, 2])
     )
@@ -274,7 +436,6 @@ def _evaluate_batch(
     initial_modes: NDArray[np.complex128],
     couplings: NDArray[np.complex128],
     pruning: NDArray[np.float64],
-    outputs: NDArray[np.int64],
 ) -> NDArray[np.complex128]:
     """Share contracted paths for equal inputs; handle distinct states rowwise."""
     if len(params) == 0:
@@ -283,7 +444,7 @@ def _evaluate_batch(
         return np.exp(params[:, 2:3] * eigenvalues) * initial_modes
     if np.all(initial_modes == initial_modes[0]):
         indices, coefficients = _build_paths(
-            params, eigenvalues, initial_modes[0], couplings, pruning, outputs
+            params, eigenvalues, initial_modes[0], couplings, pruning
         )
         pairs, path_pairs = _group_first_factors(indices)
         return _evaluate_paths(
@@ -291,7 +452,7 @@ def _evaluate_batch(
             eigenvalues,
             initial_modes[0],
             pruning,
-            _Paths(indices, coefficients, pairs, path_pairs, recheck=False),
+            _Paths(indices, coefficients, pairs, path_pairs, shared=False),
         )
     result = np.empty_like(initial_modes)
     for job in range(len(params)):
@@ -301,7 +462,6 @@ def _evaluate_batch(
             initial_modes[job],
             couplings,
             pruning,
-            outputs,
         )
         pairs, path_pairs = _group_first_factors(indices)
         result[job] = _evaluate_paths(
@@ -309,7 +469,7 @@ def _evaluate_batch(
             eigenvalues,
             initial_modes[job],
             pruning,
-            _Paths(indices, coefficients, pairs, path_pairs, recheck=False),
+            _Paths(indices, coefficients, pairs, path_pairs, shared=False),
         )[0]
     return result
 
@@ -340,7 +500,6 @@ def evaluate_dyson(
         initial_modes,
         couplings,
         pruning,
-        np.arange(len(eigenvalues), dtype=np.int64),
     )
 
 
@@ -422,7 +581,7 @@ def _advance_bound(
             bound.coefficients,
             bound.pairs,
             bound.path_pairs,
-            recheck=True,
+            shared=True,
         ),
     )
     return _restore_bound_modes(modes, entry.vectors).reshape(shape)
@@ -505,7 +664,11 @@ class DysonKernel:
     proof. Guard failures follow the engine's reduced RWA/T6 path.
     Prepared modes are shared across frequency, gain, duration, phase and port.
     Preparation never reads a density. apply accepts arbitrary densities, not
-    only diagonal or stationary states.
+    only diagonal or stationary states. bind_input greedily prunes the shared
+    input-contracted table by summed entrywise bounds, dropping conjugate pairs
+    together up to budget/8, consistent with B2's reserved margin. Retained paths
+    accumulate in original order without further row cutoffs. Ordinary apply
+    keeps its existing per-batch pruning policy.
     """
 
     name = "dyson"
@@ -603,8 +766,10 @@ class DysonKernel:
 
         C5 Kernel.bind_input defines the read-only, evolve-local contract.
         Empty rows return None. Max absolute gain and max duration over all
-        supplied rows bound the retained path superset, independent of chunks.
-        Workers recheck each row's original pruning bound without rebuilding.
+        supplied rows bound every candidate, independent of chunks. Greedy
+        pruning drops complete conjugate pairs up to budget/8, matching B2's
+        reserved margin. Workers retain all remaining paths in original order;
+        they do not spend any further per-row pruning allowance.
         """
         if not isinstance(prepared, _Prepared):
             raise ValueError("Dyson requires model-only prepared data for binding")
@@ -616,14 +781,32 @@ class DysonKernel:
         port = int(table.tone_port[rows[0], 0])
         modes = source_initial.ravel() @ entry.inverse.T
         pruning = np.r_[np.max(abs(entry.vectors), axis=0), budget]
+        params = parameters(table, rows)
         indices, coefficients = _build_paths(
-            parameters(table, rows),
+            params,
             entry.values,
             modes,
             entry.couplings[port],
             pruning,
-            np.arange(len(entry.values), dtype=np.int64),
+            cutoffs=(0.0, 0.0),
         )
+        size = len(source_initial)
+        # Adjoint each column of W, then express it in modal coordinates. Unlike
+        # nearest-eigenvalue matching, this handles repeated coherence roots and
+        # complex-conjugate population eigenmodes of a real rate generator.
+        adjoints = entry.vectors.reshape(size, size, -1).conj().swapaxes(0, 1)
+        conjugates = np.argmax(
+            abs(entry.inverse @ adjoints.reshape(size**2, -1)), axis=0
+        )
+        pruned = prune_dyson_paths(
+            indices,
+            coefficients,
+            entry.values,
+            conjugates,
+            pruning,
+            DriveExtent(float(np.max(abs(params[:, 1]))), float(np.max(params[:, 2]))),
+        )
+        indices, coefficients = pruned.indices, pruned.coefficients
         pairs, path_pairs = _group_first_factors(indices)
         for array in (pruning, indices, pairs, path_pairs):
             array.setflags(write=False)

@@ -43,8 +43,7 @@ def test_pruning_sorts_pair_bounds_but_retains_original_path_order(
         np.full(4, growth, dtype=complex),
         np.array([0, 2, 1, 3]),
         np.array([2.0, 3.0, 4.0, 1.0, 8.0]),
-        -0.5,
-        2.0,
+        dyson.DriveExtent(max_abs_gain=0.5, max_duration_ns=2.0),
     )
     np.testing.assert_array_equal(result.indices, indices[[0, 4]])
     np.testing.assert_array_equal(result.coefficients, coefficients[[0, 4]])
@@ -61,8 +60,7 @@ def test_zero_strength_can_prune_every_path(gain: float, duration: float) -> Non
         np.array([0.2 + 0j]),
         np.array([0]),
         np.array([2.0, 1e-3]),
-        gain,
-        duration,
+        dyson.DriveExtent(max_abs_gain=abs(gain), max_duration_ns=duration),
     )
     assert result.indices.shape == (0, 5)
     assert result.coefficients.shape == (0,)
@@ -161,8 +159,7 @@ def test_bound_apply_error_is_bounded_and_preserves_hermiticity(
         np.zeros(9, complex),
         np.arange(9).reshape(3, 3).T.ravel(),
         np.r_[np.ones(9), budget],
-        0.04,
-        3.0,
+        dyson.DriveExtent(max_abs_gain=0.04, max_duration_ns=3.0),
     )
     assert 0 < pruned.discarded_bound <= budget / 8
     kernel = dyson.DysonKernel()
