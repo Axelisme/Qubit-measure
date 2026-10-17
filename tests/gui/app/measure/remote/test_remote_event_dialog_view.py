@@ -12,7 +12,8 @@ Each test spins up a real TCP socket on an ephemeral loopback port via
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from collections.abc import Generator
+from unittest.mock import MagicMock, patch
 
 import pytest
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
@@ -24,6 +25,7 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
+from zcu_tools.gui.app.measure.remote import service as app_service_module
 from zcu_tools.gui.app.measure.remote.events import EVENT_SERIALIZERS
 from zcu_tools.gui.event_bus import EventMeta
 from zcu_tools.gui.session.aliases import AliasRow
@@ -50,6 +52,24 @@ from ._helpers import (
 # ---------------------------------------------------------------------------
 # Fixture
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def event_serializers_guard(request: pytest.FixtureRequest) -> Generator[None]:
+    original_binding = app_service_module.EVENT_SERIALIZERS
+    original_entries = dict(original_binding)
+    assert original_binding is EVENT_SERIALIZERS, (
+        f"EVENT_SERIALIZERS binding polluter: {request.node.nodeid}"
+    )
+    try:
+        yield
+    finally:
+        assert app_service_module.EVENT_SERIALIZERS is original_binding, (
+            f"EVENT_SERIALIZERS binding polluter: {request.node.nodeid}"
+        )
+        assert original_binding == original_entries, (
+            f"EVENT_SERIALIZERS entries polluter: {request.node.nodeid}"
+        )
 
 
 @pytest.fixture()
@@ -233,12 +253,13 @@ def test_subscribe_then_run_started_arrives(fx):
 def test_no_matching_subscription_skips_serializer_and_encode(qapp, monkeypatch):
     from zcu_tools.gui.remote import control_service as service_module
 
-    f = Fixture()
     serializer = MagicMock(return_value={"tab_id": "tab-x"})
-    f.service._event_serializers = {
-        **f.service._event_serializers,
-        RunStartedPayload: serializer,
-    }
+    with patch.object(
+        app_service_module,
+        "EVENT_SERIALIZERS",
+        {**EVENT_SERIALIZERS, RunStartedPayload: serializer},
+    ):
+        f = Fixture()
     encode = MagicMock(wraps=service_module.encode_line)
     monkeypatch.setattr(service_module, "encode_line", encode)
     f.start()
@@ -259,12 +280,13 @@ def test_no_matching_subscription_skips_serializer_and_encode(qapp, monkeypatch)
 def test_multiple_subscribers_serialize_and_encode_once(qapp, monkeypatch):
     from zcu_tools.gui.remote import control_service as service_module
 
-    f = Fixture()
     serializer = MagicMock(return_value={"tab_id": "tab-x"})
-    f.service._event_serializers = {
-        **f.service._event_serializers,
-        RunStartedPayload: serializer,
-    }
+    with patch.object(
+        app_service_module,
+        "EVENT_SERIALIZERS",
+        {**EVENT_SERIALIZERS, RunStartedPayload: serializer},
+    ):
+        f = Fixture()
     encode = MagicMock(wraps=service_module.encode_line)
     monkeypatch.setattr(service_module, "encode_line", encode)
     f.start()
@@ -294,12 +316,13 @@ def test_multiple_subscribers_serialize_and_encode_once(qapp, monkeypatch):
 
 
 def test_serializer_failure_is_lazy_logged_and_isolated(qapp, caplog):
-    f = Fixture()
     serializer = MagicMock(side_effect=RuntimeError("broken serializer"))
-    f.service._event_serializers = {
-        **f.service._event_serializers,
-        RunStartedPayload: serializer,
-    }
+    with patch.object(
+        app_service_module,
+        "EVENT_SERIALIZERS",
+        {**EVENT_SERIALIZERS, RunStartedPayload: serializer},
+    ):
+        f = Fixture()
     later_subscriber = MagicMock()
     f.bus.subscribe(RunStartedPayload, later_subscriber)
     f.start()
@@ -320,12 +343,13 @@ def test_serializer_failure_is_lazy_logged_and_isolated(qapp, caplog):
 
 
 def test_serializer_returning_none_only_runs_for_subscriber(qapp):
-    f = Fixture()
     serializer = MagicMock(return_value=None)
-    f.service._event_serializers = {
-        **f.service._event_serializers,
-        RunStartedPayload: serializer,
-    }
+    with patch.object(
+        app_service_module,
+        "EVENT_SERIALIZERS",
+        {**EVENT_SERIALIZERS, RunStartedPayload: serializer},
+    ):
+        f = Fixture()
     f.start()
     sock = open_client(f.service.port)
     try:
