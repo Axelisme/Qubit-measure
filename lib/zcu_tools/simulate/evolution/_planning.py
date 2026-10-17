@@ -1,7 +1,7 @@
 """Vectorized event geometry for one acquire, without point-wise Python loops."""
 
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
@@ -233,7 +233,9 @@ def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
             "envelopes",
             "flux_waveform",
             "flux_waveform_available",
-            "flux_tail_group",
+            "prefix_group",
+            "prefix_no_drive",
+            "prefix_inputs",
         )
     }
     envelopes: list[EnvelopeSpec] = []
@@ -282,70 +284,14 @@ def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
             else None
         ),
     )
-    combined = replace(combined, flux_tail_group=_flux_tail_groups(combined))
+    from ._prefix import certify
+
+    combined = certify(combined)
     return Geometry(
         combined,
         points,
         np.concatenate([g.flux_drive for g in geometries]),
     )
-
-
-def _flux_tail_groups(table: SegmentTable) -> tuple[int | None, ...]:
-    """Certify repeated nonempty no-drive prefixes within this source/evolve.
-
-    Compare complete segment sequences, not their final level. Source and
-    initial density are common to the entire plan. Compare continuous samples
-    before probe start and the first sample at or after it, which closes the
-    prefix's final interpolation interval. Later samples cannot affect it.
-    """
-    groups: list[int | None] = [None] * len(table.timeline)
-    if not len(table.timeline):
-        return tuple(groups)
-    # First-drive detection only certifies no-drive prefixes; it does not
-    # restrict which constant-tone rows can try Dyson.
-    first_drive = np.full(int(table.timeline.max()) + 1, np.inf)
-    driven = table.tones > 0
-    np.minimum.at(first_drive, table.timeline[driven], table.start_ns[driven])
-    candidates = np.flatnonzero(
-        (table.start_ns == first_drive[table.timeline])
-        & (table.start_ns > 0)
-        & (table.tones == 1)
-    )
-    if not len(candidates):
-        return tuple(groups)
-    first = np.searchsorted(table.timeline, table.timeline[candidates], side="left")
-    sequences = np.empty(
-        len(table.timeline),
-        dtype=[
-            ("start", "f8"),
-            ("duration", "f8"),
-            ("level", "i8", table.level.shape[1]),
-        ],
-    )
-    sequences["start"] = table.start_ns
-    sequences["duration"] = table.duration_ns
-    sequences["level"] = table.level
-    matches: dict[tuple[bytes, ...], list[int]] = {}
-    waveform = table.flux_waveform
-    for row, begin in zip(candidates, first, strict=True):
-        if np.any(table.tones[begin:row] != 0):
-            continue
-        key = (sequences[begin:row].tobytes(), table.level[row].tobytes())
-        timeline = table.timeline[row]
-        available = table.flux_waveform_available
-        if waveform is not None and (available is None or available[timeline]):
-            a, b = waveform.offsets[timeline : timeline + 2]
-            endpoint = np.searchsorted(
-                waveform.time_ns[a:b], table.start_ns[row], side="left"
-            )
-            b = min(b, a + endpoint + 1)
-            key += (waveform.time_ns[a:b].tobytes(), waveform.flux[a:b].tobytes())
-        matches.setdefault(key, []).append(int(row))
-    for group, rows in enumerate(matches.values()):
-        if len(rows) >= 2:
-            for row in rows:
-                groups[row] = group
-    return tuple(groups)
 
 
 def _combine_waveforms(batches: Sequence[TimelineBatch]) -> FluxWaveform | None:

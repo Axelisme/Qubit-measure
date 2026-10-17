@@ -9,8 +9,8 @@ from numpy.typing import NDArray
 
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
-from ._dyson_bound import population_bound
-from ._dyson_paths import build_shared_paths
+from ._dyson_bound import accepts_population_bound
+from ._dyson_paths import build_shared_paths, contractible_modes
 from ._weak import (
     commutator,
     constant_mask,
@@ -739,7 +739,8 @@ class DysonKernel:
 
         At start_ns==0, B2 uses the source density in the row model basis,
         including exact coherence magnitudes and off-diagonal trace norm.
-        Certified flux-tail rows require only r and r2. Other later rows use
+        Certified no-drive prefixes require only r and r2. Driven prefixes
+        use their engine-computed known input. Other later rows use
         an arbitrary-input density bound. The budget/8 margin
         covers pruning. Threshold coefficients are synthetic-scan calibrations,
         not rigorous multilevel error guarantees. Returns a row-aligned mask;
@@ -760,39 +761,13 @@ class DysonKernel:
                 selected, params = selected[eligible], params[eligible]
                 if not len(selected):
                     continue
-                # Certified flux-tail rows have one common actual prefix input.
-                # Their long-pulse coherence bound is too loose; only r and r2
-                # are admission conditions. The population check still reports.
-                groups = table.flux_tail_group
-                tail = np.array(
-                    [
-                        groups is not None
-                        and groups[row] is not None
-                        and table.start_ns[row] > 0
-                        for row in rows[selected]
-                    ],
-                    dtype=bool,
-                )
-                accepted[selected[tail]] = True
-                selected, params = selected[~tail], params[~tail]
-                if not len(selected):
-                    continue
-                dc_model = source.model((0,) * len(model.level))
-                initial = source.initial_density
-                # Equal bases are exactly the same coordinates. Multiplying a
-                # near-identity overlap would introduce spurious coherence.
-                if not np.array_equal(model.eigenvectors, dc_model.eigenvectors):
-                    overlap = model.eigenvectors.conj().T @ dc_model.eigenvectors
-                    initial = overlap @ initial @ overlap.conj().T
-                bound = population_bound(
+                accepted[selected] = accepts_population_bound(
+                    table,
+                    rows[selected],
+                    source,
                     model,
                     int(port),
-                    params,
-                    initial,
-                    table.start_ns[rows[selected]] == 0,
-                )
-                accepted[selected] = bound + budget / 8 <= min(
-                    0.02, (1.5 * budget) ** (2 / 3)
+                    budget,
                 )
         return accepted
 
@@ -865,7 +840,6 @@ class DysonKernel:
         modes = source_initial.ravel() @ entry.inverse.T
         pruning = np.r_[np.max(abs(entry.vectors), axis=0), budget]
         params = parameters(table, rows)
-        indices, coefficients = build_shared_paths(modes, entry.couplings[port])
         size = len(source_initial)
         # Adjoint each column of W, then express it in modal coordinates. Unlike
         # nearest-eigenvalue matching, this handles repeated coherence roots and
@@ -874,12 +848,32 @@ class DysonKernel:
         conjugates = np.argmax(
             abs(entry.inverse @ adjoints.reshape(size**2, -1)), axis=0
         )
+        path_modes, spent = modes, 0.0
+        if np.any(source_initial != np.diag(np.diag(source_initial))):
+            # Reserve half the omission budget for modes, half for path pruning.
+            strength = float(np.max(abs(params[:, 1])) * np.max(params[:, 2]))
+            growth = float(
+                np.exp(
+                    max(0.0, float(np.max(entry.values.real))) * np.max(params[:, 2])
+                )
+            )
+            path_modes, spent = contractible_modes(
+                modes,
+                entry.couplings[port],
+                pruning[:-1] * growth,
+                conjugates,
+                strength=strength,
+                allowance=budget / 16,
+            )
+        indices, coefficients = build_shared_paths(path_modes, entry.couplings[port])
+        remaining = pruning.copy()
+        remaining[-1] = budget - 8 * spent
         pruned = prune_dyson_paths(
             indices,
             coefficients,
             entry.values,
             conjugates,
-            pruning,
+            remaining,
             DriveExtent(float(np.max(abs(params[:, 1]))), float(np.max(params[:, 2]))),
         )
         indices, coefficients = pruned.indices, pruned.coefficients

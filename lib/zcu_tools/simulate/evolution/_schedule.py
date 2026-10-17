@@ -143,6 +143,7 @@ class Schedule:
         source: ModelSource,
         budget: float,
         cancel: Event,
+        initial_density: NDArray[np.complex128] | None = None,
     ):
         self.geometry, self.dispatch, self.source, self.budget, self.cancel = (
             geometry,
@@ -152,6 +153,9 @@ class Schedule:
             cancel,
         )
         self.table = geometry.table
+        self.initial_density = (
+            source.initial_density if initial_density is None else initial_density
+        )
 
     def prepare_shared(
         self, entries: list[_Entries], cache: PrepareCache, pool: Parallel, chunks: int
@@ -225,7 +229,7 @@ class Schedule:
         bound: list[_Binding] = []
         zero = tuple(0 for _ in range(self.table.level.shape[1]))
         dc = self.source.model(zero)
-        prefixes = self.prefix_inputs(bindings)
+        prefixes = self.table.prefix_inputs
         for binding in bindings:
             for key, rows, group in self.input_groups(binding, prefixes):
                 level = tuple(int(v) for v in self.table.level[rows[0]])
@@ -257,44 +261,11 @@ class Schedule:
         # Later bindings override model-only ones for eligible rows in _Chunk.
         return [*bindings, *bound]
 
-    def prefix_inputs(
-        self, bindings: list[_Binding]
-    ) -> dict[int, NDArray[np.complex128]]:
-        """Evolve one representative per needed prefix using shared T4 payloads.
-
-        Equal no-drive prefixes guarantee repeated T4 keys, so all their model
-        preparations already exist. The ordinary chunk runner preserves basis
-        changes and returns DC coordinates, just as for final evolution.
-        """
-        groups = self.table.flux_tail_group
-        if groups is None:
-            return {}
-        representatives: dict[int, int] = {}
-        for binding in bindings:
-            if binding.kernel.name == "dyson":
-                for row in binding.rows:
-                    group = groups[row]
-                    if group is not None:
-                        representatives.setdefault(group, int(row))
-        output: dict[int, NDArray[np.complex128]] = {}
-        for group, row in representatives.items():
-            if self.cancel.is_set():
-                raise Cancelled()
-            point = self.table.timeline[row]
-            selected = (self.table.timeline == point) & (
-                self.table.start_ns < self.table.start_ns[row]
-            )
-            result = _Chunk(
-                self, np.array([point]), selected, bindings, stop=np.array([row])
-            ).run()
-            output[group] = result.states[0]
-        return output
-
     def input_groups(
         self, binding: _Binding, prefixes: Mapping[int, NDArray[np.complex128]]
     ):
         """Yield repeated-key/port/input groups; None denotes the source at start zero."""
-        groups = self.table.flux_tail_group
+        groups = self.table.prefix_group
         uses = np.bincount(binding.indices)
         selected: dict[tuple[int, int, int | None], list[int]] = {}
         for row, key in zip(binding.rows, binding.indices, strict=True):
@@ -384,7 +355,6 @@ class _Chunk:
         points: NDArray[np.int64],
         selected: NDArray[np.bool_],
         bindings: Sequence[_Binding],
-        stop: NDArray[np.int64] | None = None,
     ):
         self.schedule, self.points = schedule, points
         self.table = schedule.table
@@ -398,13 +368,9 @@ class _Chunk:
             self.binding[binding.rows[mask]] = index
             self.key[binding.rows[mask]] = binding.indices[mask]
         self.cursor = np.searchsorted(self.table.timeline, points, side="left")
-        self.end = (
-            np.searchsorted(self.table.timeline, points, side="right")
-            if stop is None
-            else stop
-        )
+        self.end = np.searchsorted(self.table.timeline, points, side="right")
         self.states = np.repeat(
-            schedule.source.initial_density[None], len(points), axis=0
+            schedule.initial_density[None], len(points), axis=0
         ).copy()
         zero = tuple(0 for _ in range(self.table.level.shape[1]))
         self.dc = schedule.source.model(zero)

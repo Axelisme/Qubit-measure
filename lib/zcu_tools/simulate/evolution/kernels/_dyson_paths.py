@@ -74,3 +74,42 @@ def build_shared_paths(
                             coefficients[count] = second
                             count += 1
     return indices[:count], coefficients[:count]
+
+
+def contractible_modes(
+    modes: NDArray[np.complex128],
+    couplings: NDArray[np.complex128],
+    weights: NDArray[np.float64],
+    conjugates: NDArray[np.int64],
+    *,
+    strength: float,
+    allowance: float,
+) -> tuple[NDArray[np.complex128], float]:
+    """Omit conjugate input-mode groups using a bound on all their driven paths.
+
+    weights[a] bounds each reconstructed density entry of output mode a.
+    strength is max gain times max duration. The caller includes free modal
+    exponential growth in weights. Summing absolute couplings bounds every
+    first/second-order path from a source mode without enumerating those paths. Return a copy for
+    driven-path construction and the spent entrywise bound. Free propagation
+    must still use the original modes. Inputs are unchanged.
+    """
+    absolute = np.abs(couplings).sum(axis=0)
+    first = weights @ absolute
+    bounds = abs(modes) * (strength * first + strength**2 / 2 * (first @ absolute))
+    representatives = np.flatnonzero(np.arange(len(modes)) <= conjugates)
+    group_bounds = bounds[representatives] + np.where(
+        representatives == conjugates[representatives],
+        0.0,
+        bounds[conjugates[representatives]],
+    )
+    contracted = modes.copy()
+    spent = 0.0
+    for index in np.argsort(group_bounds, kind="stable"):
+        total = spent + float(group_bounds[index])
+        if total > allowance:
+            break
+        mode = representatives[index]
+        contracted[mode] = contracted[conjugates[mode]] = 0
+        spent = total
+    return contracted, spent
