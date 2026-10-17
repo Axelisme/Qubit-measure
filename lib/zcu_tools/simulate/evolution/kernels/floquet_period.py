@@ -184,8 +184,25 @@ def _build(
 
 @njit(nogil=True, cache=True)
 def _hermitian_exponential(h, step):
-    energies, vectors = np.linalg.eigh(h)
-    return (vectors * np.exp(-2j * np.pi * step * energies)) @ vectors.conj().T
+    # Scaling and squaring with the [7/7] Pade approximant. Its double-
+    # precision backward-error radius is 0.9504178996162932. Centering the
+    # spectrum reduces scaling without changing the returned global phase.
+    size = len(h)
+    center = np.trace(h).real / size
+    identity = np.eye(size, dtype=np.complex128)
+    matrix = (-2j * np.pi * step) * (h - center * identity)
+    norm = np.max(np.sum(np.abs(matrix), axis=0))
+    squarings = max(0, int(np.ceil(np.log2(max(norm / 0.9504178996162932, 1.0)))))
+    matrix = matrix / 2.0**squarings
+    square = matrix @ matrix
+    fourth = square @ square
+    sixth = fourth @ square
+    odd = matrix @ (8648640.0 * identity + 277200.0 * square + 1512.0 * fourth + sixth)
+    even = 17297280.0 * identity + 1995840.0 * square + 25200.0 * fourth + 56.0 * sixth
+    result = np.ascontiguousarray(np.linalg.solve(even - odd, even + odd))
+    for _ in range(squarings):
+        result = result @ result
+    return np.exp(-2j * np.pi * step * center) * result
 
 
 @njit(nogil=True, cache=True)
@@ -452,7 +469,11 @@ class FloquetPeriodKernel:
     not part of the preparation key. Rows outside this domain still try T6.
 
     Below 1 GHz, preparation uses fourth-order commutator-free Magnus (CF4)
-    with exact Hermitian exponentials, retaining unitary prefixes. A fractional
+    with scaling-and-squaring [7/7] Pade exponentials at double precision,
+    retaining unitary prefixes. The matrix one-norm selects scaling at the
+    0.9504178996162932 backward-error radius. Centering each exponential removes
+    its common energy during evaluation and restores its scalar phase afterward.
+    A fractional
     endpoint uses a CF4 step from its preceding prefix, not interpolation.
     Uniform grids start below 2/3 of a spectral turn and compare prefix
     trajectories with a 1.5x finer grid at eight phase intervals. The maximum
@@ -480,11 +501,11 @@ class FloquetPeriodKernel:
     """
 
     declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("floquet_period", "newton-polar-v2"),
+        identity=AlgorithmIdentity("floquet_period", "cf4-pade7-v3"),
         eligibility=Eligibility(1, 1, "constant"),
         guard=GuardDeclaration(),
         accuracy="guarded-approximation",
-        reuse=ReuseDeclaration("floquet_period/newton-polar-v2/serial"),
+        reuse=ReuseDeclaration("floquet_period/cf4-pade7-v3/serial"),
         fallback="legacy-order",
     )
 
