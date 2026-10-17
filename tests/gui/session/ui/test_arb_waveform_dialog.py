@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 from typing import Any, Literal, Never
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -580,12 +581,21 @@ def test_asset_load_failure_keeps_editor_state(qapp, monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_E12_recipe_from_ui_returns_formula_recipe(qapp) -> None:
-    """_recipe_from_ui always returns a typed FormulaRecipe, never a plain dict."""
+def test_E12_recipe_from_ui_returns_formula_recipe(
+    qapp, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Save delivers a typed FormulaRecipe, never a plain dict."""
     ctrl = _FakeController()
+    observer = MagicMock(wraps=ctrl.set_formula)
+    monkeypatch.setattr(ctrl, "set_formula", observer)
     dlg = ArbWaveformDialog(ctrl)
+    editor = _Editor(dlg)
 
-    result = dlg._recipe_from_ui()
+    assert editor.save.isEnabled()
+    editor.save.click()
+    observer.assert_called_once()
+    assert observer.call_args is not None
+    result = observer.call_args.args[1]
     assert isinstance(result, FormulaRecipe)
     assert len(result.segments) == 3
     assert result.normalize in ("peak", "none")
