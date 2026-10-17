@@ -557,7 +557,8 @@ def test_asset_load_failure_keeps_editor_state(qapp, monkeypatch) -> None:
 
     ctrl = _FakeController()
     dlg = ArbWaveformDialog(ctrl)
-    draft_key = dlg._data_key_edit.text()
+    editor = _Editor(dlg)
+    draft_key = editor.key.text()
 
     # Simulate selecting an asset that lists fine but fails to load.
     monkeypatch.setattr(dlg, "_selected_data_key", lambda: "broken")
@@ -567,13 +568,13 @@ def test_asset_load_failure_keeps_editor_state(qapp, monkeypatch) -> None:
 
     monkeypatch.setattr(ctrl, "load_data", _raise_load)
 
-    dlg._on_asset_selection_changed()
+    editor.assets.itemSelectionChanged.emit()
 
-    assert dlg._data_key_edit.text() == draft_key
+    assert editor.key.text() == draft_key
     assert dlg._current_data_key is None
     # Warning is shown (the dialog is never .show()n in tests, so check the
     # explicit hidden flag rather than isVisible(), which needs a shown ancestry).
-    assert not dlg._warning.isHidden()
+    assert not editor.warning.isHidden()
 
 
 # ---------------------------------------------------------------------------
