@@ -23,6 +23,7 @@ from zcu_tools.simulate.evolution.profiles import (
 from zcu_tools.simulate.evolution.shadow import (
     SearchLimits,
     ShadowCandidate,
+    ShadowRequest,
     shadow_plan,
 )
 
@@ -117,11 +118,13 @@ def test_whole_graph_workers_cache_and_order_without_numerical_work(
         tuple(c.candidate_id for c in safe[::-1]),
         costs,
         before,
-        dimension=3,
-        budget=1e-3,
-        workers=workers,
-        memory_allowance=256,
-        state_bytes=12,
+        ShadowRequest(
+            dimension=3,
+            budget=1e-3,
+            workers=workers,
+            memory_allowance=256,
+            state_bytes=12,
+        ),
     )
     expected_shared = warm or workers != 6
     expected_wall = (
@@ -181,11 +184,9 @@ def test_reuse_partition_moves_escape_row_local_minima_and_preserve_timeline_dep
             tuple(c.candidate_id for c in safe),
             profile(d, p, w),
             (),
-            dimension=3,
-            budget=1e-3,
-            workers=1,
-            memory_allowance=100,
-            state_bytes=0,
+            ShadowRequest(
+                dimension=3, budget=1e-3, workers=1, memory_allowance=100, state_bytes=0
+            ),
         )
         assert [c.declaration.identity.name for c in result.selected.cover] == [
             "whole"
@@ -207,11 +208,9 @@ def test_memory_infeasible_option_retains_complete_accepted_incumbent():
         tuple(c.candidate_id for c in safe),
         costs,
         (),
-        dimension=3,
-        budget=1e-3,
-        workers=2,
-        memory_allowance=20,
-        state_bytes=12,
+        ShadowRequest(
+            dimension=3, budget=1e-3, workers=2, memory_allowance=20, state_bytes=12
+        ),
     )
     assert result.selected.cover == safe
     assert result.incumbent.feasible
@@ -241,11 +240,9 @@ def test_cache_hit_cannot_validate_build_or_actual_input_guard():
         tuple(c.candidate_id for c in safe),
         costs,
         cache.inventory(),
-        dimension=3,
-        budget=1e-3,
-        workers=1,
-        memory_allowance=128,
-        state_bytes=0,
+        ShadowRequest(
+            dimension=3, budget=1e-3, workers=1, memory_allowance=128, state_bytes=0
+        ),
     )
     assert result.selected.tentative == tuple(c.candidate_id for c in pending)
     assert not result.production_safe
@@ -257,11 +254,9 @@ def test_cache_hit_cannot_validate_build_or_actual_input_guard():
         tuple(c.candidate_id for c in safe),
         costs,
         cache.inventory(),
-        dimension=3,
-        budget=1e-3,
-        workers=1,
-        memory_allowance=128,
-        state_bytes=0,
+        ShadowRequest(
+            dimension=3, budget=1e-3, workers=1, memory_allowance=128, state_bytes=0
+        ),
     )
     assert fallback.selected.cover == safe
 
@@ -280,12 +275,14 @@ def test_fixed_limits_and_ties_do_not_expand_timeline_cartesian_product():
             tuple(c.candidate_id for c in safe),
             profile(estimate),
             (),
-            dimension=3,
-            budget=1e-3,
-            workers=6,
-            memory_allowance=128,
-            state_bytes=0,
-            limits=SearchLimits(2, 2, 2, 8),
+            ShadowRequest(
+                dimension=3,
+                budget=1e-3,
+                workers=6,
+                memory_allowance=128,
+                state_bytes=0,
+                limits=SearchLimits(2, 2, 2, 8),
+            ),
         )
         for ordered in (safe + tied, (safe + tied)[::-1])
     ]
@@ -332,16 +329,18 @@ def test_invalid_request_cannot_claim_a_safe_cover(defect):
             )
             for c in safe
         )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="domain|incumbent|interval"):
         shadow_plan(
             table,
             safe + alternatives,
             tuple(c.candidate_id for c in safe),
             costs,
             (),
-            dimension=dimension,
-            budget=1e-3,
-            workers=1,
-            memory_allowance=allowance,
-            state_bytes=12,
+            ShadowRequest(
+                dimension=dimension,
+                budget=1e-3,
+                workers=1,
+                memory_allowance=allowance,
+                state_bytes=12,
+            ),
         )

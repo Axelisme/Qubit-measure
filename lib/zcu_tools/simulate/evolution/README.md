@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, documented opaque prepare-cache collaborator
+**Last updated:** 2026-10-17, opt-in shadow planner and one-core profile contracts
 
 ## Segment engine contracts
 
@@ -190,6 +190,91 @@ An engine collaborator can instead supply geometry with engine-computed prefix
 certificates. Unknown input remains unknown. `Engine.evolve` remains the
 production entry point and keeps its current dispatch, scheduling, diagnostics
 and numerical behavior.
+
+## Shadow planning
+
+`evolution.shadow.shadow_plan` is an opt-in, pure developer collaborator. It
+accepts the complete `SegmentTable`, explicit `ShadowCandidate` options, a
+complete accepted incumbent, a `OneCoreProfile`, an immutable cache inventory
+and a `ShadowRequest`. It never calls numerical guards, prepare, bind or apply.
+It cannot compute a prefix certificate. `Engine.evolve` does not call it.
+Default dispatch, densities, diagnostics and cache recency stay unchanged.
+
+Candidates cover one interval each. Their row indexes preserve all original
+controls, basis boundaries and continuous-flux geometry. Give every candidate
+a stable unique ID. IDs determine ties, independent of candidate enumeration
+or table row storage order. Declarations supply cheap eligibility, algorithm
+revision, guard requirements, representation and reuse namespace. Only interval,
+full-density, outer-independent options enter this slice. Rejected rows are
+excluded. Options with unsupported profile revisions are diagnosed and excluded;
+an unsupported incumbent fails explicitly.
+
+The caller supplies complete model/source, numeric budget and opaque prepare
+keys in the cache namespace used by the numerical owner. Namespace and key
+construction must partition algorithm settings, revision and representation.
+The graph also partitions builds by the complete declared algorithm identity
+and reuse namespace. A binding key additionally includes an already computed
+input certificate, port and every endpoint-affecting parameter. Never turn an
+unresolved prefix into a known input. `guard="accepted"` means an explicit
+existing result for this row. A matching cached key or proof does not accept a
+row. Candidates needing model-build or actual-input validation remain tentative
+until their owner supplies that result. Shadow does not run validation rounds
+or produce new guard payloads.
+
+`OneCoreProfile` stores a schema, profile ID/revision, inclusive dimension/budget
+domain, workload label, algorithm identities, feature units and evidence
+provenance. Provenance includes source commit, dependency versions, CPU/runtime,
+evidence digest, uncertainty, fit error and held-out error. Unmeasured errors
+are `None`. All profiles in this slice are explicitly `uncalibrated` and cannot
+enter production cost competition. Use clearly labelled synthetic estimates
+when exploring a graph; historical timing reports are not current-head
+calibration. Profile stages use one-core seconds, with constant per-row costs
+and per-key build/bind costs. Memory estimates use bytes. Missing costs or byte
+charges fail, rather than becoming zero. No acquisition benchmarks the machine.
+
+Typical collaborator call, after the numerical owner has supplied candidates
+and a profile:
+
+```python
+from zcu_tools.simulate.evolution.shadow import ShadowRequest, shadow_plan
+
+request = ShadowRequest(
+    dimension=dimension,
+    budget=budget,
+    workers=logical_workers,
+    memory_allowance=live_work_bytes,
+    state_bytes=all_live_states_bytes,
+)
+report = shadow_plan(
+    table, candidates, accepted_candidate_ids, profile, cache.inventory(), request
+)
+```
+
+Take the inventory under the owning call lock or equivalent serialization.
+Shadow reads descriptors only, without reservations, arrays or LRU touches.
+A partial hit charges the whole opaque allocation once. The reported graph
+contains shared build/bind tasks and timeline-ordered apply tasks, plus pending
+guards and nonzero basis/lift stages. A cached build has zero build cost;
+profile task overhead still applies. Logical workers 1, 2 and 6 change capacity,
+not per-task costs, guard outcomes or actual thread count.
+
+The planner preserves the complete accepted incumbent and searches bounded
+reuse-partition, family and single-row moves. It does not enumerate timeline
+Cartesian products. `SearchLimits` fixes options per row, beam width, rounds and
+scored covers. The incumbent consumes one scored cover. Deterministic
+nonpreemptive list scheduling scores each whole-acquire graph. The graph lower
+bound is the maximum of work/workers, the longest dependency chain and the
+largest indivisible build. It is not a global bound over unexplored assignments.
+
+Memory admission conservatively retains every selected build, pinned whole
+cache allocation, binding and caller-supplied state byte through acquire end.
+It adds workers times the largest build-workspace or apply-scratch charge.
+This can reject options that streaming execution could fit. The allowance is
+separate from the resident cache limit and does not measure process RSS.
+An infeasible incumbent raises `ValueError`; infeasible moves cannot replace it.
+Reports include estimated wall, lower bound, required bytes, unresolved guards,
+cache allocation IDs, search effort and reasons. Even a fully accepted shadow
+cover has `production_safe=False`. No graph from this collaborator executes.
 
 ## Dispatch
 
