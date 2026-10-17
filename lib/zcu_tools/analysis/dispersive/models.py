@@ -27,4 +27,4 @@ class PreprocessResult:
     edelays: NDArray[np.float64]
     edelay: float
     median_rf: float = 0.0  # GHz — median of per-flux peak frequencies
-    signature: tuple = ()
+    signature: tuple[object, ...] = ()
