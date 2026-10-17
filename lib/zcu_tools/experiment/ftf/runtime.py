@@ -163,8 +163,8 @@ class FTFAcquire:
         )
         response = ConditionalReadout(
             plans[0].readout.model,
-            rtol=owner.settings.solver.rtol,
-            atol=owner.settings.solver.atol,
+            rtol=owner.settings.numerics.solver.rtol,
+            atol=owner.settings.numerics.solver.atol,
         )
         conditionals = []
         traces = []
@@ -185,7 +185,7 @@ class FTFAcquire:
             np.concatenate(traces) if traces else None,
         )
         channel = ChannelReadout(
-            owner.settings.receiver.ro_ch,
+            owner.settings.readout.adc.ro_ch,
             conditional,
             content_index.reshape(acquire.point_dims),
             plans[0].readout.model.receiver,
@@ -234,19 +234,19 @@ class FTFSource:
     def snapshot(self) -> EnvironmentSnapshot:
         """Read fixed-unit live DC values once, rejecting missing/invalid devices."""
         values = []
-        for source in self.settings.devices:
-            info = self.devices.get_info(source.name)
+        for name, source in self.settings.dc_bias.sources.items():
+            info = self.devices.get_info(name)
             if not isinstance(info, FakeDeviceInfo) or info.value_unit != source.unit:
                 raise ValueError(
-                    f"devices.{source.name}.unit: fixed source unit mismatch"
+                    f"dc_bias.sources.{name}.unit: fixed source unit mismatch"
                 )
             if (
                 not np.isfinite(info.value)
                 or not source.limits[0] <= info.value <= source.limits[1]
             ):
-                raise ValueError(f"devices.{source.name}.value: outside source limits")
-            values.append((source.name, info.value))
-        return EnvironmentSnapshot("ftf-v1", self.identity, tuple(values))
+                raise ValueError(f"dc_bias.sources.{name}.value: outside source limits")
+            values.append((name, info.value))
+        return EnvironmentSnapshot("ftf-v2", self.identity, tuple(values))
 
     def open_acquire(self, request: AcquireRequest) -> FTFAcquire:
         """Start a fixed template request, invalidating/releasing the previous session.
@@ -309,38 +309,35 @@ def ftf(
     )
     devices = DeviceManager()
     try:
-        for source in settings.devices:
+        for name, source in settings.dc_bias.sources.items():
             device = FakeDevice(fast_mode=True, value_unit=source.unit)
-            devices.register_device(source.name, device)
+            devices.register_device(name, device)
             device.setup(
                 FakeDeviceInfo(
                     address=device.address,
                     value_unit=source.unit,
                     output="on",
                     value=source.initial,
-                    rampstep=source.rampstep,
+                    rampstep=source.ramp_step,
                 ),
                 progress=False,
             )
         coordinator = FTFSource(settings, devices, private_replay=private_replay)
-        soccfg = make_mock_soccfg(
-            settings.channels.generators, settings.channels.readouts
+        gens = (
+            settings.readout.drive.gen_ch,
+            *(s.gen_ch for s in settings.drive_lines.values()),
         )
+        soccfg = make_mock_soccfg(max(gens) + 1, settings.readout.adc.ro_ch + 1)
         binding = SimulationBinding(
             coordinator.snapshot,
             coordinator.execute,
             backend_version=BACKEND_VERSION,
-            seed=settings.seed,
-        )
-        gens = (
-            settings.readout_source.gen_ch,
-            *(s.gen_ch for s in settings.flux_sources),
-            *(s.gen_ch for s in settings.microwave_sources),
+            seed=settings.numerics.seed,
         )
         soc = SimulationSoc(
             soccfg,
             binding,
-            routes=tuple((gen, settings.receiver.ro_ch) for gen in gens),
+            routes=tuple((gen, settings.readout.adc.ro_ch) for gen in gens),
         )
         return SimulationEnvironment(
             soc,

@@ -13,59 +13,26 @@ from pydantic import ValidationError
 from .schema import FTFSettings
 
 
-def _dc_wiring(config: FTFSettings) -> set[str]:
-    names: set[str] = set()
-    sources = {}
-    for i, source in enumerate(config.devices):
-        if source.name in names:
-            raise ValueError(f"devices.{i}.name: duplicate device binding")
-        names.add(source.name)
-        sources[source.name] = source
-    columns: set[str] = set()
-    for i, column in enumerate(config.dc_mapping.columns):
-        path = f"dc_mapping.columns.{i}"
-        if column.source not in sources:
-            raise ValueError(f"{path}.source: undefined DC source")
-        if column.source in columns:
-            raise ValueError(f"{path}.source: duplicate DC column")
-        columns.add(column.source)
-        if column.unit != f"Phi0/{sources[column.source].unit}":
-            raise ValueError(f"{path}.unit: calibration differs from device unit")
-    return names
-
-
 def _wiring(config: FTFSettings) -> None:
-    names = _dc_wiring(config)
-    channels = {config.readout_source.gen_ch}
-    if not 0 <= config.readout_source.gen_ch < config.channels.generators:
-        raise ValueError("readout_source.gen_ch: exceeds generator count")
-    for family, controls in (
-        ("flux_sources", config.flux_sources),
-        ("microwave_sources", config.microwave_sources),
-    ):
-        for i, control in enumerate(controls):
-            if (
-                control.gen_ch in channels
-                or control.gen_ch >= config.channels.generators
-            ):
-                raise ValueError(
-                    f"{family}.{i}.gen_ch: duplicate or out-of-range generator binding"
-                )
-            if control.name in names:
-                raise ValueError(f"{family}.{i}.name: duplicate source name")
-            names.add(control.name)
-            channels.add(control.gen_ch)
-    if config.receiver.ro_ch >= config.channels.readouts:
-        raise ValueError("receiver.ro_ch: exceeds readout count")
-    if not any(r.kappa_external_mhz > 0 for r in config.resonators):
-        raise ValueError("resonators: shared line must have external coupling")
+    names = set(config.dc_bias.sources)
+    channels = {config.readout.drive.gen_ch}
+    for name, control in config.drive_lines.items():
+        if control.gen_ch in channels:
+            raise ValueError(f"drive_lines.{name}.gen_ch: duplicate generator binding")
+        if name in names:
+            raise ValueError(f"drive_lines.{name}: duplicate source name")
+        names.add(name)
+        channels.add(control.gen_ch)
+    pair = config.readout.resonators
+    if not any(r.kappa_external_mhz > 0 for r in (pair.r1, pair.r2)):
+        raise ValueError("readout.resonators: shared line must have external coupling")
 
 
 def parse_ftf(document: object) -> FTFSettings:
     """Validate a decoded YAML document and return an immutable named snapshot.
 
     document is an external value, not a numeric kernel parameter. Unknown fields,
-    dimensions, units, duplicate/unbound sources, source limits and receiver PSD
+    dimensions, units, duplicate sources/generators, source limits and receiver PSD
     errors raise ValueError with a dotted field path. No I/O or resource creation.
     """
     try:

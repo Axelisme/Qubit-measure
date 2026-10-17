@@ -47,14 +47,6 @@ class FTFAcquisitionAdapter(SavingAdapter):
                 gain=-0.1,
                 waveform=ConstWaveformCfg(length=0.008),
             ).build("microwave"),
-            PulseCfg(
-                ch=1,
-                nqz=1,
-                freq=0.0,
-                gain=0.2,
-                waveform=ConstWaveformCfg(length=0.008),
-                post_delay=0.008,
-            ).build("flux"),
             PulseReadoutCfg(
                 gen_ch=0,
                 ro_ch=0,

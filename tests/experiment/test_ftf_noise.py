@@ -16,16 +16,27 @@ from tests.core._simulation import single_point_template
 from tests.resources._ftf_data import ftf_document
 
 
+def ftf_document_readout() -> dict[str, object]:
+    """Return a detached synthetic readout record for ADC-only overrides."""
+    readout = ftf_document()["readout"]
+    if not isinstance(readout, dict):
+        raise TypeError("synthetic readout fixture must be a mapping")
+    return readout
+
+
 def test_execution_grid_converts_spectral_density_to_sample_covariance() -> None:
     from zcu_tools.experiment.ftf import plan_template
 
     settings = parse_ftf(
         ftf_document()
         | {
-            "receiver": {
-                "ro_ch": 0,
-                "gain": 0.0,
-                "noise_psd_adc2_ns": [[10.0, 2.0], [2.0, 20.0]],
+            "readout": {
+                **ftf_document_readout(),
+                "adc": {
+                    "ro_ch": 0,
+                    "gain": 0.0,
+                    "noise_psd_adc2_ns": [[10.0, 2.0], [2.0, 20.0]],
+                },
             }
         }
     )
@@ -37,7 +48,7 @@ def test_execution_grid_converts_spectral_density_to_sample_covariance() -> None
     )
     plan = plan_template(
         settings,
-        EnvironmentSnapshot("ftf-v1", "test", (("bias", 0.2),)),
+        EnvironmentSnapshot("ftf-v2", "test", (("bias", 0.2),)),
         single_point_template(timeline),
     )
     np.testing.assert_allclose(
@@ -60,7 +71,7 @@ def test_public_integrated_thermal_mixture_matches_conditional_field_mean() -> N
     from zcu_tools.simulate.adc import ADC
 
     document = ftf_document()
-    model = document["model"]
+    model = document["chip"]
     if not isinstance(model, dict):
         raise TypeError("synthetic model fixture must be a mapping")
     model["temperature_k"] = 0.08
@@ -115,11 +126,14 @@ def test_public_decimated_receiver_noise_psd_and_offset() -> None:
     settings = parse_ftf(
         ftf_document()
         | {
-            "receiver": {
-                "ro_ch": 0,
-                "gain": 0.0,
-                "offset_adc": [10.0, -20.0],
-                "noise_psd_adc2_ns": psd.tolist(),
+            "readout": {
+                **ftf_document_readout(),
+                "adc": {
+                    "ro_ch": 0,
+                    "gain": 0.0,
+                    "offset_adc": [10.0, -20.0],
+                    "noise_psd_adc2_ns": psd.tolist(),
+                },
             }
         }
     )

@@ -27,41 +27,17 @@ Script 建立 `result/ftf-demo/setup.yaml`、`aliases.yaml`、第一個 point `i
 
 在 GUI 的 Setup 選 Open，開啟 `ftf-demo`，再選取 point `initial`。Open 只裝載 setup 與 aliases，不會自動選 point。Q1、Q2、coupler、R1、R2 已在 setup 與初始 point 中。Environment 另外建立 f1_bias、coupler_bias、f2_bias 三個 live device，不把 driver 存進 entry。
 
-`entry-template.yaml` 使用 `default.yaml` 的 EJ/EC/EL 與 resonator 頻率。Energies 用 GHz，R1/R2 頻率為 6000/6200 MHz。Qubit 頻率隨 bias 改變，範本保留 null，不推算頻譜。範本提供接線與引用，不提供 module library 或校準完成的量測參數。若修改工作副本的模型或接線，也要調整 entry 範本或已建立的 entry。
+`entry-template.yaml` 使用 `default.yaml` 的 EJ/EC/EL 與 resonator 頻率。Energies 用 GHz，R1/R2 頻率為 7190/7080 MHz。Qubit 頻率隨 bias 改變，範本保留 null，不推算頻譜。範本提供接線與引用，不提供 module library 或校準完成的量測參數。若修改工作副本的模型或接線，也要調整 entry 範本或已建立的 entry。
 
 初始 alias `qubit` 指向 Q1，`resonator` 與 `flux_dev` 分別讀取其 resonator 與 flux_source。把 `qubit` 改為 Q2 後，兩個連結會跟著切換。`control`、`target` 固定為 Q1、Q2，`coupler` 是普通 alias，指向 qubit/transmon 元件，不是 Notebook role。Inspect > Aliases > Load preset 可選 FTF，再按 Apply 保存。載入 preset 只替換 draft，不會建立元件或 device。
 
 ## 工作副本與調參
 
-新的 `default.yaml` 已包含三個 bias source。若已有舊版 `ftf.yaml`，在 `devices` list 加入以下兩項，保留原 coupler_bias：
-
-```yaml
-  - name: f1_bias
-    unit: V
-    limits: [-1.0, 1.0]
-    initial: 0.0
-    rampstep: 0.01
-  - name: f2_bias
-    unit: V
-    limits: [-1.0, 1.0]
-    initial: 0.0
-    rampstep: 0.01
-```
-
-在 `dc_mapping.columns` 加入以下兩項。Rows 順序是 F1、C、F2，各自的主係數是 0.2 Phi0/V，小係數表示串擾。保留原 coupler_bias column `[0.001, 0.2, -0.001]`，不要重複加入同名 source。
-
-```yaml
-    - source: f1_bias
-      unit: Phi0/V
-      coefficients: [0.2, 0.002, -0.001]
-    - source: f2_bias
-      unit: Phi0/V
-      coefficients: [-0.001, 0.002, 0.2]
-```
+`default.yaml` 使用 `format: zcu.ftf`、整數 `version: 2`。V1 文件不能載入，不自動轉換既有工作副本。三個 DC 電源與校準位於 `dc_bias.sources`，樣板使用 A。Charge drive 位於 `drive_lines`；FTF 不支援 flux pulse，也不接受 `flux_lines`。採用新樣板時請自行保留或重新填入需要的設定，不覆寫尚未保存的本機調整。
 
 `--simulate` 必須接 Python 檔路徑，不直接接受 YAML。環境檔會執行 Python，只載入可信來源。修改環境或 YAML 後須重啟 GUI；載入失敗會中止，不回退正常模式。
 
-`default.yaml` 是示意的 F1–coupler–F2 樣品，包含模型參數、channel 數量與接線。它不是校準過的晶片，也不保證截斷收斂。更換樣品時可複製環境檔與 YAML，並調整 builder 指向的檔案。
+`default.yaml` 是示意的 F1–coupler–F2 樣品，包含模型參數與接線，channel 數量由最大索引加一推導。它不是校準過的晶片，也不保證截斷收斂。更換樣品時可複製環境檔與 YAML，並調整 builder 指向的檔案。
 
 [Notebook 範例](../../../notebook_md/single_qubit.md) 使用同一個環境。Builder 成功回傳後，caller 負責關閉環境的 device manager。完整組裝與數值限制見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md)。
 
