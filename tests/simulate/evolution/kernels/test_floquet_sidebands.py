@@ -63,15 +63,15 @@ def _adversarial_case(name: str) -> KernelCase:
     if name == "ill-conditioned":
         # Equal-rate unidirectional population chain has a defective generator.
         rates[0, 1] = rates[1, 2] = 0.1
-    if name == "exact-resonance":
-        rates[:] = 0
-    stark = zero if name in ("ill-conditioned", "exact-resonance") else drive
+    stark = zero if name == "ill-conditioned" else drive
+    # The DC probe has nonzero diagonal modal coefficients with zero divisors.
+    probe = drive + np.diag([0.02, -0.02]) if name == "exact-resonance" else drive
     model = SecularModel(
         (0,),
         name,
         np.arange(size) * 0.13,
         np.eye(size, dtype=complex),
-        (SecularDrive("stark", stark, zero), SecularDrive("probe", drive, zero)),
+        (SecularDrive("stark", stark, zero), SecularDrive("probe", probe, zero)),
         rates,
         np.zeros((size, size)),
     )
@@ -83,9 +83,9 @@ def _adversarial_case(name: str) -> KernelCase:
         tones=np.array([2]),
         tone_port=np.array([[0, 1]]),
         tone_frequency_ghz=np.array(
-            [[3.7, 0.13 if name == "exact-resonance" else 0.11]]
+            [[0.13, 0.0] if name == "exact-resonance" else [3.7, 0.11]]
         ),
-        tone_amplitude=np.array([[0.5, 0.0001]]),
+        tone_amplitude=np.array([[0.2 if name == "exact-resonance" else 0.5, 0.0001]]),
         tone_theta_rad=np.array([[0.0, 0.3]]),
         tone_envelope=np.zeros((1, 2), dtype=np.int64),
         tone_envelope_offset_ns=np.zeros((1, 2)),
