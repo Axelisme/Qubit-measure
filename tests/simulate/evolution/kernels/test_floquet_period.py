@@ -120,7 +120,7 @@ def test_guard_rejects_low_carrier_shapes_and_large_split_estimate(
 
     source = NoDensity(case.states[0], case.source.model)
     assert case.kernel.guard(case.table, rows, source, case.budget).all()
-    low = replace(case.table, tone_frequency_ghz=np.full((len(rows), 1), 0.1))
+    low = replace(case.table, tone_frequency_ghz=np.full((len(rows), 1), 0.01))
     assert not case.kernel.guard(low, rows, source, case.budget).any()
     sampled = EnvelopeSpec("sampled", np.ones(2, complex), np.array([0.0, 10.0]))
     shaped = replace(case.table, envelopes=(sampled,))

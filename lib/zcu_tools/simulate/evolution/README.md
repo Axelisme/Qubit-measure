@@ -107,7 +107,7 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | One constant tone, known or unknown input, r, r₂ and B2 guards pass | T7 second-order Dyson, batched over frequency, gain, duration and phase. |
 | One constant tone after an identical shared driven prefix, r, r₂ and actual-input B2 pass | Dyson with the actual prefix output and a shared contracted table. |
 | One constant tone after an identical shared no-drive prefix, r and r₂ pass | Dyson with the actual prefix output. B2 does not apply; post-apply population changes only report. |
-| One constant tone not accepted above, known or unknown input, with abs(f) >= 0.3 GHz and duration*T²*Gamma*V² <= 1.0 | `floquet_period` integrates one Hilbert-space U(T), translates the carrier phase in time, and steps each period with secular Strang dissipation. |
+| One constant tone not accepted above, known or unknown input, with abs(f) >= 0.03 GHz and duration*T²*Gamma*V²/m² <= 1.0 for some m in 1..4 | `floquet_period` integrates one Hilbert-space U(T), translates the carrier phase in time, and steps each period with secular Strang dissipation. |
 | Same constant-tone branch, Hilbert period guard fails | T6 periodic propagation accepts every single constant-tone row. |
 | One shaped tone, prepare-key usage >= 10 | Gate cache with four Strang subsegments, closed-system U plus secular dissipation, and 16 carrier-phase Fourier samples. |
 | One shaped tone, prepare-key usage < 10 | Period table with midpoint-frozen envelopes, eight amplitude Chebyshev nodes and 16 phase Fourier samples; integrate the fractional-period tail directly. This branch has no per-segment accuracy guard. |
@@ -201,20 +201,30 @@ filter time constant. FTF sums absolute pulse-tail contributions and truncates
 below 5e-4 Phi0 on every loop.
 
 The Hilbert period kernel uses T=1/|f| and the density-free splitting estimate
-`duration*T²*Gamma*V²`. Here `V=2*pi*|gain|*(||X||₂+||Y||₂)` is an angular
+`duration*T²*Gamma*V²/m²`. Here `V=2*pi*|gain|*(||X||₂+||Y||₂)` is an angular
 drive norm bound. `Gamma` is the larger of the population-generator spectral
-norm and the maximum coherence decay rate. The guard accepts
-abs(f) >= 0.3 GHz and an estimate <= 1.0. Calibration used the 16-level FTF
-model with half-flux Q1 EJ/EC/EL=4/1/1 GHz and dressed f01=0.581742664 GHz.
-The scan covers 0.3-0.6 GHz, gain 0.02-1, duration 8-790 ns, known input and
-coherent unknown input. Estimates reached 0.871443. Against strict DOP853,
-known-input maximum population and low-four errors were 2.55e-6 and 9.62e-6.
-Coherent unknown input gave 1.28e-5 for both, so overall error stayed <= 1.3e-5,
-about two orders below the unchanged 1e-3 budget. Three/four-level synthetic
-scans cover strong drive, mixed/coherent inputs and cross-period tails.
-The 1.0 threshold covers the measured maximum; it is a calibrated heuristic,
-not a universal error bound or segment-budget guarantee. Carriers below
-0.3 GHz and estimates above 1.0 fall through to T6.
+norm and the maximum coherence decay rate. The guard requires abs(f) >= 0.03 GHz
+and chooses the smallest integer m in 1..4 that keeps this estimate <= 1.0.
+Each period is divided into m equal Strang steps. Their unitary endpoints come
+from the same dense Hilbert integration. The tail uses steps no longer than T/m.
+The count depends on the model and row duration, not the input density, and does
+not enter preparation keys. This preserves the splitting allowance rather than
+raising it to admit strong low-frequency drives. Rows below the carrier floor
+or requiring more than four subdivisions still use T6.
+
+The original 16-level half-flux calibration covered 0.3-0.6 GHz and estimates
+up to 0.871443. Its maximum population and low-four errors against strict DOP853
+were <= 1.3e-5, including coherent unknown input. The low-frequency calibration
+also covers a 49.991 MHz auxiliary model and the main-model half-flux sweet spot.
+The 0.03 GHz floor includes the auxiliary spectrum's 0.038-0.062 GHz sweep.
+The 21-point auxiliary strong spectrum and amplitude scans gave maximum
+population/low-four errors of 8.34e-8/3.20e-6 and 3.68e-8/1.71e-6 against
+DOP853 with rtol=1e-8, atol=1e-10 and max_step=0.1 ns. The amplitude scan reaches
+an unsplit estimate of 14.04 and uses all four subdivision counts. Main-model
+sweet-spot constant spectra at 0.294 and 0.219 GHz gave population errors below
+6.1e-8. The 1.0 allowance remains a calibrated heuristic, not a universal error
+bound or segment-budget guarantee. Small synthetic Engine tests cover mixed and
+coherent inputs, signed carriers and phase-translated cross-period tails.
 
 Preparation uses tolerance min(1e-10, budget*1e-4) and max_step=T/4. The
 single-threaded nogil DOP853 core builds both integration stages and the
@@ -230,11 +240,12 @@ density. Coherent-input trace drift in the calibration fell from 1.34e-10 to
 Duration, start and theta do not enter keys.
 Time translation handles signed frequency and phase; the fractional tail uses
 the same dense solution with a periodic extension across the boundary. Each full
-period and tail applies D/2, U, D/2 without constructing a Liouville channel.
+subperiod and tail applies D/2, U, D/2 without constructing a Liouville channel.
 Apply does not compare half-period results, normalize, retry or reroute.
 Low-frequency flux-tail probes retain Dyson and two-tone rows retain Floquet.
 
-T6 uses 1, 4 or 8 steps per carrier period according to r, powers the period
+T6 remains the terminal constant-tone route outside the Hilbert-period domain.
+It uses 1, 4 or 8 steps per carrier period according to r, powers the period
 propagator and adds the fractional-period tail. Carrier phase uses Fourier
 interpolation. Gate-cache Strang splitting and phase Fourier interpolation
 avoid building a full dissipative propagator for every phase.
@@ -247,7 +258,16 @@ acquire. Keys used at least twice are prepared in shared A-stage chunks before
 timeline work starts. Floquet's guard hands its model-only preparations to
 A-stage, avoiding another build for matching keys. Guard-built singleton
 payloads also reach timeline chunks without cache admission or input binding. Other single-use
-preparations stay inside their timeline chunk and are discarded afterward. The input-bound hook is an A-stage exception to
+preparations stay inside their timeline chunk and are discarded afterward.
+Low-carrier Hilbert-period singleton keys, below 0.3 GHz, instead stream one
+timeline at a time inside each worker chunk. This avoids retaining a sweep of
+long dense trajectories, about 80 MB each at 50 MHz. Shared Hilbert-period keys
+still use A-stage when there are at most four distinct low-carrier shared keys.
+Larger low-carrier key sets prepare locally and stream timelines too. The LRU
+limit alone cannot bound A-stage memory because live bindings retain evicted
+payloads. This policy bounds sweep-wide low-carrier retention; a single timeline
+can still retain its own distinct pulse keys. High-carrier batching is unchanged.
+The input-bound hook is an A-stage exception to
 model-only preparation. It contracts the source initial density or a shared
 prefix output once per shared key, port and input group. Before final dispatch,
 the engine evolves one representative of each group with ordinary kernel

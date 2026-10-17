@@ -11,8 +11,9 @@ from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
 from ._dop853 import Tolerances, integrate_dense
 
-_MIN_FREQUENCY_GHZ = 0.3
+_MIN_FREQUENCY_GHZ = 0.03
 _MAX_SPLIT_ESTIMATE = 1.0
+_MAX_SUBDIVISIONS = 4
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,7 @@ class _Period:
     decay: NDArray[np.float64]
     population_half: NDArray[np.complex128]
     coherence_half: NDArray[np.float64]
+    split_rate: float
 
     @property
     def nbytes(self) -> int:
@@ -62,6 +64,26 @@ def _bath(model: SecularModel) -> tuple[NDArray[np.float64], NDArray[np.float64]
         model.rates_per_ns - np.diag(outgoing),
         (outgoing[:, None] + outgoing[None, :]) / 2 + model.dephasing_per_ns,
     )
+
+
+def _split_rate(model: SecularModel, port: int, frequency: float, gain: float) -> float:
+    generator, decay = _bath(model)
+    gamma = max(float(np.linalg.norm(generator, 2)), float(np.max(decay)))
+    drive = model.drives[port]
+    strength = (
+        2
+        * np.pi
+        * abs(gain)
+        * (
+            np.linalg.norm(drive.in_phase_ghz, 2)
+            + np.linalg.norm(drive.quadrature_ghz, 2)
+        )
+    )
+    return float(gamma * (strength / frequency) ** 2)
+
+
+def _subdivisions(estimate: float) -> int:
+    return max(1, int(np.ceil(np.sqrt(estimate / _MAX_SPLIT_ESTIMATE))))
 
 
 @njit(nogil=True, cache=True)
@@ -112,7 +134,7 @@ def _build(
         if not np.isfinite(array).all():
             raise RuntimeError("Floquet period preparation produced nonfinite data")
         array.setflags(write=False)
-    return _Period(*arrays)
+    return _Period(*arrays, _split_rate(model, port, frequency, gain))
 
 
 @njit(nogil=True, cache=True)
@@ -150,6 +172,60 @@ def _advance(rho, unitary, population, coherence, count):
     return rho
 
 
+@njit(nogil=True, cache=True)
+def _advance_segments(rho, unitaries, population, coherence, count):
+    for _ in range(count):
+        for unitary in unitaries:
+            rho = _advance(rho, unitary, population, coherence, 1)
+    return rho
+
+
+def _fundamental(entry: _Period, time: float) -> NDArray[np.complex128]:
+    period = float(entry.times[-1])
+    value = _unitary(_dense(entry.times, entry.coefficients, time % period))
+    if time >= period:
+        value = value @ entry.unitary
+    return value
+
+
+def _subdivided_row(
+    entry: _Period,
+    origin: float,
+    duration: float,
+    rho: NDArray[np.complex128],
+    subdivisions: int,
+) -> NDArray[np.complex128]:
+    period = float(entry.times[-1])
+    step = period / subdivisions
+    boundaries = [
+        _fundamental(entry, origin + j * step) for j in range(subdivisions + 1)
+    ]
+    unitaries = np.array(
+        [
+            end @ start.conj().T
+            for start, end in zip(boundaries[:-1], boundaries[1:], strict=True)
+        ]
+    )
+    population = expm(entry.generator * step / 2).astype(complex)
+    coherence = np.exp(-entry.decay * step / 2)
+    count = int(duration // period)
+    result = _advance_segments(rho, unitaries, population, coherence, count)
+    tail = duration - count * period
+    whole = min(int(tail // step), subdivisions - 1)
+    result = _advance_segments(result, unitaries[:whole], population, coherence, 1)
+    residual = tail - whole * step
+    if residual > 0:
+        unitary = _fundamental(entry, origin + tail) @ boundaries[whole].conj().T
+        result = _advance(
+            result,
+            unitary,
+            expm(entry.generator * residual / 2).astype(complex),
+            np.exp(-entry.decay * residual / 2),
+            1,
+        )
+    return result
+
+
 def _row(
     entry: _Period,
     frequency: float,
@@ -161,6 +237,9 @@ def _row(
         return rho
     period = float(entry.times[-1])
     origin = (theta / (2 * np.pi * frequency)) % period
+    subdivisions = _subdivisions(duration * entry.split_rate)
+    if subdivisions > 1:
+        return _subdivided_row(entry, origin, duration, rho, subdivisions)
     start = _unitary(_dense(entry.times, entry.coefficients, origin))
     unitary = start @ entry.unitary @ start.conj().T
     count = int(duration // period)
@@ -189,24 +268,18 @@ class FloquetPeriodKernel:
     Preparation integrates one Hilbert-space U(T), retaining U(T) and bounded
     degree-seven dense coefficients on its finite accepted steps. No Liouville
     channel is built. Theta translates the time origin by theta/(2*pi*f) mod T;
-    each period and the separately evaluated fractional tail apply D/2, U, D/2.
+    each subperiod and the separately evaluated fractional tail apply D/2, U, D/2.
     Known and unknown densities, including coherent inputs, use the same channel.
 
-    The density-free guard requires |f| >= 0.3 GHz and the heuristic estimate
-    duration*T**2*Gamma*V**2 <= 1.0, where T=1/|f| in ns,
-    V=2*pi*|gain|*(||X||_2+||Y||_2) is an angular drive norm bound (rad/ns),
-    Q=R-diag(R.sum(axis=0)), and Gamma=max(||Q||_2, max coherence decay)
-    in 1/ns. These are not rigorous total-error bounds or budget guarantees.
-    Calibration used a 16-level FTF half-flux Q1 with EJ/EC/EL=4/1/1 GHz,
-    dressed f01=0.581742664 GHz, carriers 0.3-0.6 GHz, gains 0.02-1 and
-    durations 8-790 ns. For estimates up to 0.871443, strict DOP853 gave
-    max population/low-four errors of 2.55e-6/9.62e-6 for known input and
-    1.28e-5/1.28e-5 for coherent unknown input, overall <= 1.3e-5 against
-    budget 1e-3. Three/four-level synthetic scans also cover strong drive,
-    mixed/coherent inputs and phase-shifted tails. The 1.0 limit covers the
-    measured maximum, not a universal error bound. Lower carriers, shaped
-    tones and estimates above 1.0 fall through to the existing T6 path.
-    The 0.3 GHz cutoff includes the measured low-frequency range.
+    The density-free guard requires |f| >= 0.03 GHz and selects the smallest
+    m in 1..4 such that duration*T**2*Gamma*V**2/m**2 <= 1.0. Here T=1/|f|
+    is in ns, V=2*pi*|gain|*(||X||_2+||Y||_2) in rad/ns, and Gamma is the
+    larger of the population generator norm and coherence decay in 1/ns.
+    This retains the calibrated splitting allowance, not a rigorous total-error
+    bound or segment-budget guarantee. Each subperiod uses exact dense Hilbert
+    endpoints from the same integration. The tail uses the same step ceiling.
+    The subdivision count depends only on model and row, never density; it is
+    not part of the preparation key. Rows outside this domain still try T6.
 
     Integration uses tolerance min(1e-10, budget*1e-4) and max_step=T/4.
     DOP853 stages, error control and degree-seven dense construction run in
@@ -243,20 +316,13 @@ class FloquetPeriodKernel:
             if envelope.kind != "constant" or frequency < _MIN_FREQUENCY_GHZ:
                 continue
             model = source.model(tuple(int(v) for v in table.level[row]))
-            drive = model.drives[int(table.tone_port[row, 0])]
-            generator, decay = _bath(model)
-            gamma = max(float(np.linalg.norm(generator, 2)), float(np.max(decay)))
-            strength = (
-                2
-                * np.pi
-                * abs(table.tone_amplitude[row, 0])
-                * (
-                    np.linalg.norm(drive.in_phase_ghz, 2)
-                    + np.linalg.norm(drive.quadrature_ghz, 2)
-                )
+            estimate = table.duration_ns[row] * _split_rate(
+                model,
+                int(table.tone_port[row, 0]),
+                frequency,
+                float(table.tone_amplitude[row, 0]),
             )
-            estimate = table.duration_ns[row] * gamma * (strength / frequency) ** 2
-            accepted[index] = estimate <= _MAX_SPLIT_ESTIMATE
+            accepted[index] = estimate <= _MAX_SPLIT_ESTIMATE * _MAX_SUBDIVISIONS**2
         return accepted
 
     def prepare_keys(

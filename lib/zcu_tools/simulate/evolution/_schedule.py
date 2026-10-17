@@ -102,6 +102,14 @@ def _deduplicate(
             return_inverse=True,
             return_counts=True,
         )
+        if kernel.name == "floquet_period":
+            low_shared = (counts >= 2) & (
+                np.abs(table.tone_frequency_ghz[rows[first], 0]) < 0.3
+            )
+            # Live A-stage bindings outlast LRU eviction. Large low-carrier
+            # sweeps must prepare locally even when their pulse keys repeat.
+            if np.count_nonzero(low_shared) > 4:
+                counts[low_shared] = 1
         entries.append(_Entries(kernel, keys, rows[first], rows, inverse, counts))
     return entries
 
@@ -329,6 +337,26 @@ class Schedule:
         if self.cancel.is_set():
             raise Cancelled()
         selected = np.isin(self.table.timeline, points)
+        # Low carriers retain long dense Hilbert trajectories (~80 MB/key).
+        # Stream singleton timelines so a worker never retains a whole sweep's
+        # payloads. Shared keys remain in A-stage and high carriers stay batched.
+        low_singletons = any(
+            entry.kernel.name == "floquet_period"
+            and np.any(
+                selected[entry.rows]
+                & (entry.counts[entry.inverse] == 1)
+                & (np.abs(self.table.tone_frequency_ghz[entry.rows, 0]) < 0.3)
+            )
+            for entry in entries
+        )
+        if len(points) > 1 and low_singletons:
+            results = [self.chunk(point[None], entries, shared) for point in points]
+            exceeded: Counter[str] = Counter()
+            for result in results:
+                exceeded.update(result.exceeded_by_kernel)
+            return _ChunkResult(
+                points, np.concatenate([result.states for result in results]), exceeded
+            )
         bindings = list(shared)
         covered = np.zeros(len(selected), dtype=bool)
         for binding in shared:

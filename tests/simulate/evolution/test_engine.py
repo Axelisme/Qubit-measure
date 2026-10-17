@@ -253,7 +253,8 @@ def test_constant_decision_order_and_sequence_middle(expected):
 
 
 @pytest.mark.parametrize(
-    ("frequency", "expected"), [(0.05, "t6"), (0.6, "floquet_period")]
+    ("frequency", "expected"),
+    [(0.02, "t6"), (0.05, "floquet_period"), (0.6, "floquet_period")],
 )
 def test_sideband_selective_constant_tone_uses_periodic_propagation(
     frequency, expected
