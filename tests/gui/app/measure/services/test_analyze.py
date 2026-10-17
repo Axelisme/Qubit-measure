@@ -608,7 +608,7 @@ def test_on_analyze_finished_updates_state(qapp):
 
     fake_result = object()
 
-    finished_signals: list = []
+    finished_signals: list[tuple[str, object]] = []
     bus.subscribe(
         TabInteractionChangedPayload,
         lambda payload: (

@@ -250,7 +250,7 @@ def test_on_post_analyze_finished_updates_state(qapp):
 
     post_result = object()
 
-    finished: list = []
+    finished: list[tuple[str, object]] = []
     bus.subscribe(
         TabInteractionChangedPayload,
         lambda payload: (
