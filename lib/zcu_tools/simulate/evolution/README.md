@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-18, near-unitary Hilbert endpoint correction; explicit constant evidence admission and developer acquire evaluation
+**Last updated:** 2026-10-18, Hilbert endpoints and timeline-owned waves; explicit constant evidence admission and developer acquire evaluation
 
 ## Segment engine contracts
 
@@ -774,8 +774,10 @@ across worker counts and chunk splits.
 
 Timeline chunks interleave estimated costs, with six chunks per worker by
 default. Within a chunk, local waves batch next segments by kernel and prepared
-payload. A timeline preserves apply order, but different chunks do not
-synchronize waves. A-stage completion and final collection are the global
+payload. Timelines with deferred builders or repeated local keys stream
+separately to bound retained payload memory. Other points in the same chunk
+keep their shared apply batches. A timeline preserves apply order, but different
+chunks do not synchronize waves. A-stage completion and final collection are the global
 waiting points. Cancellation is checked between chunks.
 
 Joblib threading is the only parallel layer. Worker numba kernels are
