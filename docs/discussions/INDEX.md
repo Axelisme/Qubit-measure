@@ -11,12 +11,14 @@
 
 ## 模擬量測環境
 
+- 2026-10-17 [FTF 分段引擎：Dyson 門檻、分類成本與事後檢查](2026-10-17-ftf-dyson-guard-and-classification.md)：分類只做輕量判斷，同一段不演化兩次；Dyson 的 |Δp| 改為 apply 後只報告不重算，治本靠分類時的解析指標；門檻由每段預算推出，係數由掃描校準；不用 Rust。
 - 2026-10-16 [FTF 模擬加速：快速路徑、shot 統計、分段快取與分派決策圖](2026-10-16-ftf-simulation-speedup.md)：主要瓶頸是 acquire 重複 reps × rounds 次。改為每點只算一次並用統計抽樣，各段依決策圖分派到 Dyson、週期、靜態、gate 快取、Floquet 或 numba DOP853，使用者規模從約 8 天降到 13 分鐘至 2 小時；只用 numba，刪除離線 U 表與 density record。
 - 2026-10-15 [離線GPU建庫、分段演化與插值重用](2026-10-15-offline-propagator-library.md)：固定模型採離線建庫存檔、模擬載入插值；CPU可行性已有證據，GPU建表與檔案載入仍待驗證，四階精度以量測用途評估。已被 2026-10-16 的 FTF 模擬加速取代：FTF 一定有耗散，離線 U 表會刪除，改用 runtime lazy 快取。
 - 2026-10-13 [模擬量測環境、低能投影與 FTF preset 的討論](2026-10-13-simulation-environment-ftf-preset.md)：早期選項與 prototype 的歷史快照；後續決策以[模擬環境 ADR](../adr/draft/simulation-environments.md)為準，文末後記說明已定案與仍待完成的範圍。
 
 ## Cfg 與表單
 
+- 2026-10-17 [Measure Form 的校準初值與 sweep 模式切換](2026-10-17-measure-form-initial-values-and-sweep-mode.md)：缺值給公允值、無效值留空、故障報錯，「可預測與一致比正確重要」，初值開 Form 時算成數字；sweep 模式存於共用 Form 輸入，recipe 一次設定並重設為 range + expts。
 - 2026-10-13 [Measure 表單重設計：從 builder 重抄到 core cfg 推導](2026-10-13-measure-form-redesign.md)：表單形狀從 core cfg 推導、說明放 core、起始值寫在 form.py 樹，角色表退化成範本目錄，`dev` 改具名欄位；決策見 ADR draft `measure-form-derivation`。
 - 2026-10-13 [表單選項的分層：生成器給選項，widget 照清單畫](2026-10-13-form-options-layering.md)：選項清單由生成器產生、核心通用、widget 只照清單畫；換分支不繼承舊值；ref 轉 inline 用選項指令；key-or-inline 統一成有 tag 的形狀；決策見 Pydantic 表單 ADR draft。
 
