@@ -11,6 +11,7 @@ import pytest
 from qtpy.QtCore import QCoreApplication, QEvent, Qt
 from qtpy.QtWidgets import (
     QApplication,
+    QComboBox,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -1241,8 +1242,8 @@ def test_analysis_terminal_restore_rebuilds_real_primary_then_post_canvas(
     tab.show_post_analysis_figures(snapshot.post_analysis.figures)
 
     # Simulate operation start clearing only its pane; here clear both figures to emulate stale state
-    tab._analysis_container.clear_dynamic_canvases()
-    tab._post_container.clear_dynamic_canvases()
+    tab.get_analysis_container().clear_dynamic_canvases()
+    tab.get_post_container().clear_dynamic_canvases()
     assert tab.get_current_figure_for_pane("analysis") is None
     assert tab.get_current_figure_for_pane("post_analysis") is None
 
@@ -1754,6 +1755,27 @@ def test_show_analysis_figure_draws_canvas(control_factory, qapp, monkeypatch):
     canvas.draw.assert_called_once_with()
 
 
+def _figure_pane_stack(tab: ExpTabWidget, accessible_name: str) -> QStackedWidget:
+    """Find the stack beside the selector named by accessible_name within tab.
+
+    Assert a unique selector, a non-null parent pane, and a unique stack in that
+    pane; fail if any part of this public Qt lookup is missing or ambiguous.
+    """
+    selectors = [
+        selector
+        for selector in tab.findChildren(QComboBox)
+        if selector.accessibleName() == accessible_name
+    ]
+    assert len(selectors) == 1
+    (selector,) = selectors
+    pane = selector.parentWidget()
+    assert pane is not None
+    stacks = pane.findChildren(QStackedWidget)
+    assert len(stacks) == 1
+    (stack,) = stacks
+    return stack
+
+
 def test_show_analysis_figure_keeps_two_figures_coexisting(control_factory, qapp):
     """Analysis and Post figures live in independent containers; each pane's history
     is distinct and showing one does not evict the other."""
@@ -1775,9 +1797,12 @@ def test_show_analysis_figure_keeps_two_figures_coexisting(control_factory, qapp
     tab.show_analysis_figures(ready_figures(fig_a1))
     tab.show_post_analysis_figures(ready_figures(fig_p1))
 
+    analysis_stack = _figure_pane_stack(tab, "Analysis figure")
+    post_stack = _figure_pane_stack(tab, "Post-analysis figure")
+
     # Each pane has its own stack with placeholder + 1 canvas
-    assert tab._analysis_stack.count() == 2
-    assert tab._post_stack.count() == 2
+    assert analysis_stack.count() == 2
+    assert post_stack.count() == 2
     assert tab.get_current_figure_for_pane("analysis") is fig_a1
     assert tab.get_current_figure_for_pane("post_analysis") is fig_p1
 
@@ -1786,7 +1811,7 @@ def test_show_analysis_figure_keeps_two_figures_coexisting(control_factory, qapp
     tab.show_analysis_figures(ready_figures(fig_a2))
     assert tab.get_current_figure_for_pane("analysis") is fig_a2
     assert tab.get_current_figure_for_pane("post_analysis") is fig_p1
-    assert tab._post_stack.count() == 2
+    assert post_stack.count() == 2
 
 
 # ---------------------------------------------------------------------------
