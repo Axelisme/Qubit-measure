@@ -4,7 +4,7 @@ status: accepted
 
 # ADR-0062 — 實驗執行與 workflow 編排
 
-**Last updated:** 2026-10-16，補記 capability、driver limits 與 FormInput／Engine 提交分工
+**Last updated:** 2026-10-18，區分 acquisition capture 與 run 後 cache 讀回
 
 關聯 [[0066]]，operation 與取消。保存權威見 [[0063]]，表單與 cfg 的使用邊界見 [[0065]]。
 
@@ -42,7 +42,9 @@ Complete、Stop 或 failure 只有一個終局入口。有 producer 時，必須
 
 Start／Resume 不再讀取所有已連線裝置，也不在 journal 記錄 device snapshot。Start 表單直接使用 DeviceService 的公開 typed cached native mapping。Resume 只接受 run_id；健康 paused run 的提交失敗不建立新 operation，不清掉原 handle／lease。
 
-Device 實際值只由每次 env.run 在同一 RUN lease 下、experiment callback 前捕捉。DevicePort.capture_snapshot 讀取所有 connected drivers，將固定 JSON 交給 Run，再由 native acquisition evidence 與 metadata 保存。讀取失敗使 run failed，不呼叫 experiment，不使用 cache fallback。缺 devices capability 不等於零 device，真正零 device 的 host 明確提供回傳 {} 的 port。SessionDevices 在 worker 借公開 driver mapping，getter 回 detached 的實際 Info 子類。完整 setup 用 selected driver.info_model 重新驗證 dump 後呼叫 driver.setup，傳同一 StopSignal 的 event。Journal 記錄 name 與完整 cfg；框架不認識 flux、unit 或 device 種類。使用者 set_flux 工具重用已交付的 check_flux_unit。Host capture 重用 native acquisition helper，不更新 GUI State。Device 接線與 Window 的 SessionServices 組裝已完成，不能據此宣稱完整 CP-B 或 integration 全綠。
+供 acquisition provenance 使用的 device 實際值由每次 env.run 在同一 RUN lease 下、experiment callback 前捕捉。DevicePort.capture_snapshot 讀取所有 connected drivers，將固定 JSON 交給 Run，再由 native acquisition evidence 與 metadata 保存。讀取失敗使 run failed，不呼叫 experiment，不使用 cache fallback。缺 devices capability 不等於零 device，真正零 device 的 host 明確提供回傳 {} 的 port。SessionDevices 在 worker 借公開 driver mapping，getter 回 detached 的實際 Info 子類。完整 setup 用 selected driver.info_model 重新驗證 dump 後呼叫 driver.setup，傳同一 StopSignal 的 event。Journal 記錄 name 與完整 cfg；框架不認識 flux、unit 或 device 種類。使用者 set_flux 工具重用已交付的 check_flux_unit。Host capture 重用 native acquisition helper；這個 run 前 capture 不更新 GUI State。Device 接線與 Window 的 SessionServices 組裝已完成，不能據此宣稱完整 CP-B 或 integration 全綠。
+
+Run 結束後，host 另在背景讀取一次已連線儀器，由 State owner 更新 cached DeviceInfo，供 dialog 觀察。這筆讀回不改寫 run 前固定 snapshot 或已保存 provenance，不讓 cache 成為 Run 的控制命令，也不改變 acquisition capture 的失敗與保存契約。活動通知與讀回的分工見 [[0076]]。
 
 共用 alias preset、裸 alias 求值與 FormState 的顯式字串 expression 已接線。普通字串仍是 literal，結構 selector 仍使用普通 typed tag。Coherence 的新 flux_dev default 在固定 capture 解析 $flux_dev 並保存 direct literal device name。缺 capture 或 unbound alias 保留 expression error input，由公開 form 指名 Invalid，不補造 device 或阻斷 panel；其他解析錯誤照常拋出。既有 direct draft 不隨 alias 修改，使用者仍能切 eval，合法 saved input 與 MIST defaults 不改。Source reload 與 input 保存由具體 GUI app 擁有，不授權硬體操作。
 

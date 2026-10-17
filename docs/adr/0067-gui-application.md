@@ -2,6 +2,8 @@
 
 **狀態：** accepted。
 
+**Last updated:** 2026-10-18，補記 device 活動投遞與 run 後 cache 讀回
+
 ## 問題與決策
 
 Measure 有 Qt 視窗與 remote 入口，autofluxdep 也複用量測 session。把業務狀態交給各前端管理，會使相同操作走不同的驗證和寫入路徑。本篇約束共享能力的 owner、前端反應及繪圖責任，不規定各 app 的 run loop 或 RPC 格式。
@@ -40,7 +42,9 @@ Workflow 宿主提供同步 `get_device_cfg` 與完整 cfg 的 `setup_device`，
 
 一般實驗與 Workflow 都不在 Run 前預查 device 名稱。Core 實際取 `context.devices[name]` 時，缺名即報錯並指名 device。Workflow 移除 `DevicePort.setup`，不增加 `validate_names`、`names()` 或一般實驗的 `validate_device_names` 預查。Workflow 實際操作 unknown／disconnected device 時，由宿主在該次操作報錯並指名 device，Run 以 failed 停止。這不取消 cfg 格式或必填 unit 的驗證。
 
-State 的 cached DeviceInfo 仍供觀察與 cfg defaults 使用，不是 Run 的控制命令或保存 snapshot。GUI Run 框架在 hardware lease 後、adapter.run 前另讀一次全部已連線 device，任一讀取失敗拒絕 Run。實驗不對未使用的 device 套用舊 setup patch，固定 snapshot 的保存見 [[0063]]。
+State 的 cached DeviceInfo 仍供觀察與 cfg defaults 使用，不是 Run 的控制命令或保存 snapshot。GUI Run 框架在 hardware lease 後、adapter.run 前另讀一次全部已連線 device，任一讀取失敗拒絕 Run。這個 acquisition capture 不更新 GUI State。實驗不對未使用的 device 套用舊 setup patch，固定 snapshot 的保存見 [[0063]]。
+
+Run 結束後，host 另在背景讀取一次已連線儀器，由 State owner 更新 cached DeviceInfo。這只更新觀察值，不改寫 run 前固定 snapshot 或已保存 provenance，也不把 cache 變成下一次 Run 的控制命令。Device 活動事件由 device_operation 單一入口發出，host 只做非阻塞 owner-thread 投遞，Device dialog 負責標記與時序。Sink 注入、持鎖投遞與讀回的完整分工見 [[0076]]。
 
 State 提交由單一 owner loop 序列化。Session 的 `OwnerScheduler` 可由 Qt queued signal 或 headless queue 實作；這個規則不等同於要求 core 依賴 Qt 主線程。操作的取消、handle 與 terminal settle 由 Operation owner 決定，本篇不複製生命週期規則。
 
