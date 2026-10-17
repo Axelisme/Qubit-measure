@@ -136,7 +136,7 @@ def test_guard_rejects_low_carrier_shapes_and_large_split_estimate(
     assert not case.kernel.guard(idle, rows, source, case.budget).any()
 
 
-def test_engine_dispatches_rejected_dyson_and_rwa_rows_to_hilbert_period() -> None:
+def test_engine_dispatches_rejected_dyson_rows_to_hilbert_period() -> None:
     from zcu_tools.simulate.evolution import Engine
     from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
     from zcu_tools.simulate.evolution.kernels.t6 import T6Kernel
@@ -155,7 +155,6 @@ def test_engine_dispatches_rejected_dyson_and_rwa_rows_to_hilbert_period() -> No
         100000,
         kernels=(
             RecordingKernel("dyson", accepts=False),
-            RecordingKernel("rwa", accepts=False),
             FloquetPeriodKernel(),
             T6Kernel(),
         ),

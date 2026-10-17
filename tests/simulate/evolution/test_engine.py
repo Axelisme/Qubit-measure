@@ -200,7 +200,6 @@ def test_flat_top_split_phase_offset_and_small_plateau():
             kernels=(
                 period,
                 RecordingKernel("dyson", accepts=False),
-                RecordingKernel("rwa", accepts=False),
                 RecordingKernel("floquet_period", accepts=False),
                 t6,
             ),
@@ -229,12 +228,18 @@ def test_flat_top_split_phase_offset_and_small_plateau():
     assert result.paths.segments_by_kernel == {"period_table": 1}
 
 
-@pytest.mark.parametrize("expected", ["dyson", "rwa", "floquet_period", "t6"])
+@pytest.mark.parametrize("expected", ["dyson", "floquet_period", "t6"])
 def test_constant_decision_order_and_sequence_middle(expected):
-    order = ["dyson", "rwa", "floquet_period", "t6"]
+    from zcu_tools.simulate.evolution.kernels import REGISTRY
+
+    order = ["dyson", "floquet_period", "t6"]
     kernels = tuple(
-        RecordingKernel(name, accepts=order.index(name) >= order.index(expected))
-        for name in order
+        RecordingKernel(
+            kernel.name,
+            accepts=kernel.name not in order
+            or order.index(kernel.name) >= order.index(expected),
+        )
+        for kernel in REGISTRY
     )
     b = replace(
         batch(2, duration=6),
@@ -248,6 +253,43 @@ def test_constant_decision_order_and_sequence_middle(expected):
 
 
 @pytest.mark.parametrize(
+    ("frequency", "expected"), [(0.05, "t6"), (0.6, "floquet_period")]
+)
+def test_sideband_selective_constant_tone_uses_periodic_propagation(
+    frequency, expected
+):
+    upper = np.diag([0.5, 0.35], 1).astype(complex)
+    model = synthetic_model(3)
+    model = replace(
+        model,
+        energies_ghz=np.array([0.0, frequency, 2.3 * frequency]),
+        drives=(
+            replace(
+                model.drives[0],
+                in_phase_ghz=upper + upper.T,
+                quadrature_ghz=0.9999j * (upper - upper.T),
+            ),
+        ),
+        rates_per_ns=model.rates_per_ns * 1e-5,
+        dephasing_per_ns=model.dephasing_per_ns * 1e-5,
+    )
+    src = ModelSource(np.diag([1.0, 0.0, 0.0]).astype(complex), lambda level: model)
+    pulse = replace(
+        track(1, EnvelopeSpec("constant"), duration=30.0),
+        frequency_ghz=np.array([frequency]),
+        amplitude=np.array([0.006]),
+        phase_rad=np.array([0.37]),
+    )
+    result = run(
+        Engine(1, 100000),
+        src,
+        (replace(batch(1, duration=30.0), tracks=(pulse,)),),
+    )
+    assert result.paths.segments_by_kernel == {expected: 1}
+    assert result.paths.exceeded_by_kernel == {}
+
+
+@pytest.mark.parametrize(
     ("family", "n"),
     [("t4", 1), ("t6", 1), ("gate_cache", 10), ("period_table", 1)],
 )
@@ -257,7 +299,6 @@ def test_incomplete_terminal_family_fails_instead_of_rerouting(family, n):
         for name in (
             "t4",
             "dyson",
-            "rwa",
             "floquet_period",
             "t6",
             "gate_cache",
@@ -648,7 +689,6 @@ def test_unknown_input_probe_uses_dyson_without_binding_and_matches_dop853():
     from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Kernel
     from zcu_tools.simulate.evolution.kernels.dyson import DysonKernel
     from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
-    from zcu_tools.simulate.evolution.kernels.rwa import RWAKernel
     from zcu_tools.simulate.evolution.kernels.t4 import T4
     from zcu_tools.simulate.evolution.kernels.t6 import T6Kernel
 
@@ -701,7 +741,6 @@ def test_unknown_input_probe_uses_dyson_without_binding_and_matches_dop853():
             kernels=(
                 T4(),
                 dyson,
-                RWAKernel(),
                 FloquetPeriodKernel(),
                 T6Kernel(),
                 DOP853Kernel(),

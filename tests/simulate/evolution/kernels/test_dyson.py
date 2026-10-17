@@ -18,8 +18,6 @@ from ..contract.kernel_suite import (
     synthetic_model,
 )
 
-KERNEL_NAME = "dyson"
-
 
 class TestDysonKernel(KernelContract):
     pass

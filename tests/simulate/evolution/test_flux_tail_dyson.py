@@ -26,10 +26,7 @@ from zcu_tools.simulate.evolution.kernels.t4 import T4
 class Fallback(T4):
     """Cheap identity fallback isolates Dyson dispatch from other algorithms."""
 
-    name = "rwa"
-
-    def __init__(self, name="rwa"):
-        self.name = name
+    name = "t6"
 
     def guard(self, table, rows, source, budget):
         return np.ones(len(rows), dtype=bool)
@@ -97,9 +94,8 @@ def evolve(src, b):
             kernels=(
                 T4(),
                 DysonKernel(),
-                Fallback(),
                 FloquetPeriodKernel(),
-                Fallback("t6"),
+                Fallback(),
             ),
         )
     ) as engine:
@@ -114,12 +110,12 @@ def test_only_repeated_no_drive_prefixes_bypass_population_bound():
     # Unequal idle tails, earlier drive, and zero-start inputs retain their
     # ordinary guard. A duplicate final level alone is not a shared prefix.
     unequal = evolve(src, batch((7.0, 8.0)))
-    assert unequal.paths.segments_by_kernel == {"t4": 4, "rwa": 2}
+    assert unequal.paths.segments_by_kernel == {"t4": 4, "floquet_period": 2}
     earlier = replace(b.tracks[0], start_ns=np.zeros(2), duration_ns=np.ones(2))
     driven = evolve(src, replace(b, tracks=(earlier, *b.tracks)))
     # The two start-zero prefix pulses retain Dyson. The later probes fail
-    # arbitrary-input B2 and try RWA next, without shared-prefix admission.
-    assert driven.paths.segments_by_kernel == {"dyson": 2, "t4": 4, "rwa": 2}
+    # arbitrary-input B2 and use Hilbert period, without shared-prefix admission.
+    assert driven.paths.segments_by_kernel == {"dyson": 2, "t4": 4, "floquet_period": 2}
     zero = replace(
         b,
         tracks=(replace(b.tracks[0], start_ns=np.zeros(2)),),
@@ -161,7 +157,7 @@ def test_flux_tail_identity_ignores_future_samples_but_keeps_prefix_boundary():
     unequal_prefix = evolve(
         src, replace(b, flux_waveform=replace(waveform, flux=prefix_flux))
     )
-    assert unequal_prefix.paths.segments_by_kernel == {"t4": 4, "rwa": 2}
+    assert unequal_prefix.paths.segments_by_kernel == {"t4": 4, "floquet_period": 2}
 
     # Keep the first sample after probe start in the identity even when
     # equal endpoint values happen to make the interpolated flux flat.
@@ -170,7 +166,7 @@ def test_flux_tail_identity_ignores_future_samples_but_keeps_prefix_boundary():
     unequal_boundary = evolve(
         src, replace(b, flux_waveform=replace(waveform, time_ns=boundary_times))
     )
-    assert unequal_boundary.paths.segments_by_kernel == {"t4": 4, "rwa": 2}
+    assert unequal_boundary.paths.segments_by_kernel == {"t4": 4, "floquet_period": 2}
 
 
 def ordinary_probe(src, b, initial):
@@ -217,7 +213,9 @@ def test_distinct_repeated_tails_use_their_own_actual_input_with_pruning_budget(
     # contracted table. The same engine must not reuse another source's input.
     other = ModelSource(np.diag([0.0, 1.0, 0.0]).astype(complex), src.model)
     with closing(
-        Engine(1, 100000, kernels=(T4(), DysonKernel(), Fallback(), Fallback("t6")))
+        Engine(
+            1, 100000, kernels=(T4(), DysonKernel(), FloquetPeriodKernel(), Fallback())
+        )
     ) as engine:
         engine.evolve(src, (b,), cancel=Event())
         changed = engine.evolve(other, (b,), cancel=Event())
