@@ -4,7 +4,9 @@ Dual-tone reset gain map: a 2D sweep of the two reset-tone gains (pulse1 × puls
 
 ## Expects (parameter context)
 
-Tested frequencies read `$qubit.ext.reset_f1` and `$qubit.ext.reset_f2.` Seeds two 51-point gain axes from 0.0 to 1.0, with relax delay 0.5 us. Open and Reset evaluate starting expressions once into direct input using captured sources. Inline qubit pulses read `$qubit.freq` and `$qubit.wiring.ch.` Inline readout reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.ext.time_of_fly` + 0.05 us for trigger timing. Missing or invalid required sources leave the affected fields empty and Invalid; supply calibration or direct values before Run. No numeric calibration fallback is supplied.
+Tested frequencies read `$qubit.ext.reset_f1` and `$qubit.ext.reset_f2.` Seeds two 51-point gain axes from 0.0 to 1.0, with relax delay starting at 5*T1. Open and Reset evaluate starting expressions once into direct input using captured sources. Inline qubit pulses read `$qubit.freq` and `$qubit.wiring.ch.` Inline readout reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.ext.time_of_fly` + 0.05 us for trigger timing. Other missing or invalid required sources leave the affected fields Invalid; supply calibration or direct values before Run.
+
+T1-derived defaults use the fixed Open/Reset capture. A missing/null T1 or absent capture uses 30 us, so the 5*T1 wait starts at 150 us. Stored invalid T1 leaves derived required fields empty while the Form opens. Alias/path/source failures propagate. Defaults remain editable, are not written back as calibration, and do not shorten automatically for active reset.
 
 ## Expects (ModuleLibrary)
 

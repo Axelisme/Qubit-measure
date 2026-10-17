@@ -9,8 +9,8 @@
 ## 目錄佈局
 
 實驗的 leaf layout 見[套件 README](README.md)。`../definitions.py` 明列 adapter catalog，
-`../templates.py` 提供注入 Registry 的持久範本目錄。Private `_support/measure/` 只放跨 adapter
-共用的 analysis、writeback 與 context mechanics。
+`../templates.py` 提供注入 Registry 的持久範本目錄。Private `_support/measure/` 提供跨 adapter
+共用的 analysis、writeback 與 context mechanics，也可集中已定案且供多個 Form 共用的具名初值政策。
 
 每個實驗在 `core.py` 定義 cfg 與 FieldMeta，在 `form.py` 提供 Qt-free `make_form(ctx)`。
 `gui.py` 把這個 factory 接到 BaseAdapter，並擁有 Run、analysis、writeback 與 operator guide。
@@ -33,7 +33,7 @@ Reload 是開發便利功能，依賴處理採 best-effort。允許函式內 imp
 已捕捉到的錯誤仍正常回報，不主動吞掉例外。這項取捨只放寬依賴完整性保證，不放寬 tab
 關閉確認、RAM snapshot/retry、操作排他或 shutdown lifecycle 的契約。
 
-每個實驗的 `gui.py` 是其 GUI policy 的修改入口。至少被兩個 adapter 共用的 mechanics 才放進 private `_support/measure/`。單一實驗的 policy 留在原檔。
+每個實驗的 `gui.py` 是其 GUI policy 的修改入口。至少被兩個 adapter 共用的 mechanics 或已定案初值政策才放進 private `_support/measure/`。單一實驗的初值政策留在 `form.py`。
 
 Adapter 以 `guide_path: ClassVar[Path | None]` 宣告同目錄的 operator-facing Markdown。
 BaseAdapter 每次 `guide()` 讀 UTF-8 檔案，回 `AdapterGuide(markdown, resource_dir)`。
@@ -43,7 +43,7 @@ BaseAdapter 每次 `guide()` 讀 UTF-8 檔案，回 `AdapterGuide(markdown, reso
 Make_form 只在 Open／Reset 執行。`ctx.has(ref)` 用固定來源選 Slot 或 Template，
 缺參照回 False，來源故障 raise。字串是 literal，Expr 才是運算式。
 初值 expression 在建立 input 時求成 direct 值；使用者輸入的 expression 保留原文。
-必要來源缺少時留 Invalid，不補數字 fallback。Reset 重新捕捉並可換形狀，Run 使用畫面上的值。
+必要來源缺少時留 Invalid，不由 framework 補數字。實驗可在 `make_form` 明確選擇已定案的首次初值，見下節。Reset 重新捕捉並可換形狀，Run 使用畫面上的值。
 
 持久範本目錄由組合根以 Registry(templates=TEMPLATES) 注入，也供 Library 新建選單使用。
 範本儲存 Spec defaults 與 seeds，不維護另一份角色 shape／blank／ref 表。
@@ -188,6 +188,79 @@ GUI 的 maximum search radius 預設為 `100.0`（MHz 軸時單位為 us）；�
 `edelay`，不重新搜尋 branch。
 
 ---
+
+## 校準初值政策
+
+Open／Reset 從固定 capture 產生可覆寫的 direct 初值，既有 Form 不隨來源變動重填。
+初值不寫回校準。Notebook 歷史常數不是相容契約。
+單一實驗的政策留在 `form.py`；多個 Form 共用的 T1／Rabi 政策由
+[`_support/measure/`](_support/measure/README.md) 的具名 helper 擁有。
+Form 明確選擇倍率或場景並組結構，不把校準政策放進 generic framework。
+
+### T1 與等待
+
+T1 有效值是非 bool 的有限正實數。Leaf 缺失／null 或沒有 capture 時，
+以 30 µs 作首次時間尺度。已存但無效的值讓衍生必填欄位留空，Form 仍可開啟。
+Alias 未綁、namespace／path 錯誤與來源讀取故障保留 owner 錯誤，不當成缺值。
+不新增單次人工估計框架，也不把 30 µs 寫回為校準 T1。
+
+等待初值的適用範圍如下。Active reset 不自動縮短等待。
+
+| adapter 範圍 | relax_delay 初值 |
+| --- | --- |
+| Rabi 4、coherence 7、gate characterization 6、singleshot／MIST／AC Stark 7、readout optimization 5、reset calibration 9、CKP 1，共 39 個 | 5*T1，缺 T1 時為 150 µs |
+| JPA freq、flux、power、auto_optimize，共 4 個 qubit SNR adapter | 1*T1，缺 T1 時為 30 µs |
+| Twotone freq、power_dep、flux_dep，共 3 個頻譜 adapter | 維持 1 µs |
+| Lookback、Onetone freq／power_dep／flux_dep、Mux Onetone、JPA flux_onetone／check，共 7 個 | 維持各自原值 |
+
+普通 T1 的 sweep.stop 為上述時間尺度的五倍，缺 T1 時為 150 µs。
+T1 with tone 的 sweep.stop 依序使用歷史 t1_with_tone、普通 T1、30 µs，再乘五。
+只有缺值才下探下一來源；tone T1 無效時留空，不跳過它。
+自然等待仍用普通 T1，不用 tone T1。這些初值不保證熱平衡或指定保真度。
+Reps、rounds、shots、點數與其他特殊時序不因等待政策改動。
+
+### Probe 與 Rabi
+
+`qub_probe` 與 `twotone/freq` 的 probe waveform.length 公允值為 1 µs，
+不依 x180／pi_len，也不新增 probe_length alias。
+
+兩種 Amplitude Rabi 的 gain 都從 −0.3 掃到 1.0，不依 x180.gain 縮放。
+有 x180 且 waveform 有持久 scalar length 時，複製捕捉的 x180，
+只覆寫 waveform.length 為 1.5*pi_len*pi_gain µs。
+pi_len 為 x180 waveform.length，須為非 bool 的有限正數。
+pi_gain 為 x180 gain，須為非 bool 的有限數且在 (0, 1]。
+Leaf 缺失／null 或無效時，長度留空，不取絕對值、不 clamp、不 fallback。
+有限但無效的 gain 保留原值；gain 為 NaN 或 ±Inf 時，gain 與 length 同時留空。
+沒有 x180 時，兩者使用同一個 qub_probe Template，明確設 gain=1 與 length=1 µs。
+
+x180 為 arb 時，Amp 保留原來源 Slot、形狀與 data，不複製、不覆寫 length，
+也不讀 asset。gain 掃描仍為 −0.3～1.0。要調長度須先換 waveform。
+
+兩種 Length Rabi 都從 0.03 µs 掃到 4*pi_len。
+pi_len leaf 缺失／null 時，上限為 1 µs；值存在但無效時，上限留空。
+有 x180 時保留其 Slot 與 gain；沒有時用同一個 qub_probe Template，gain=1。
+arb 沒有持久 scalar length，依缺 leaf 規則用 1 µs 上限，保留來源與 gain。
+
+以上分類只針對 owner 提供的 validated capture。
+Capture 前已被 schema 拒絕或轉型的資料，交來源 owner 處理。
+Form 不重讀原始 YAML、不吞 ValidationError，也不自行拆 key 拼 cfg。
+Nested copy 由 Form adapter 擁有，不讀 asset，不改來源或無關 child key。
+
+### Lookback 與 Onetone 採樣
+
+Lookback 的 Form 不提供 Reset 與 Init pulse；core 保留兩欄。
+缺 time_of_fly 時，trig_offset 初值為 0 µs，ro_length 維持可編輯的 1.5 µs。
+有效 TOF 是非 bool 的有限實數且 ≥ 0；重測使用 TOF−0.1 µs。
+即使結果為負也原樣帶入，不 clamp、不改 core 限制。
+已存但無效的 TOF 讓 trig_offset 留空，來源故障保留原錯誤。
+0 µs 不寫回為 TOF 校準。訊號抵達時間加 pulse 長度超過 1.5 µs 時，操作員須加長視窗。
+
+Onetone/freq 只有一個 Linear／Homophasal 選擇，不另設 Enabled。
+Linear 不提供 Homophasal 參數，轉回 core 的 homophasal=None。
+Homophasal 的 r_f、rf_w、theta0 必填，分別以 resonator.freq、resonator.kappa、
+resonator.ext.theta0 作初值。缺來源或無法求值時留空。
+可求值但無效的值保留並顯示驗證錯誤，阻止提交，由 core 驗證，不新增 adapter 驗證。
+實驗透過 extras／lower 轉回 core 的 sampling_mode 與 homophasal，widget 不特判實驗。
 
 ## Operator workflow guide 約束
 

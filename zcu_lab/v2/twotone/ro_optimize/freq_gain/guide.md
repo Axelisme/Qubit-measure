@@ -4,7 +4,9 @@ Readout frequency–power joint optimization: with the qubit toggled between g a
 
 ## Expects (parameter context)
 
-Seeds 31 frequency points at `$resonator.freq` +/- 0.5 * `$resonator.kappa`, not `$qubit.ext.best_ro_freq.` Seeds 31 gain points from 0.0 to 0.2. Relax delay reads 5.0 * `$qubit.t1.` Open and Reset evaluate starting expressions once into direct input using captured sources. Inline qubit pulses read `$qubit.freq` and `$qubit.wiring.ch.` Inline readout reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.ext.time_of_fly` + 0.05 us for trigger timing. Missing or invalid required sources leave the affected fields empty and Invalid; supply calibration or direct values before Run. No numeric calibration fallback is supplied.
+Seeds 31 frequency points at `$resonator.freq` +/- 0.5 * `$resonator.kappa`, not `$qubit.ext.best_ro_freq.` Seeds 31 gain points from 0.0 to 0.2. Relax delay reads 5.0 * `$qubit.t1.` Open and Reset evaluate starting expressions once into direct input using captured sources. Inline qubit pulses read `$qubit.freq` and `$qubit.wiring.ch.` Inline readout reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.ext.time_of_fly` + 0.05 us for trigger timing. Other missing or invalid required sources leave the affected fields Invalid; supply calibration or direct values before Run.
+
+T1-derived defaults use the fixed Open/Reset capture. A missing/null T1 or absent capture uses 30 us, so the 5*T1 wait starts at 150 us. Stored invalid T1 leaves derived required fields empty while the Form opens. Alias/path/source failures propagate. Defaults remain editable, are not written back as calibration, and do not shorten automatically for active reset.
 
 ## Expects (ModuleLibrary)
 

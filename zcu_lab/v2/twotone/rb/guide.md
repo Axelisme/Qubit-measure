@@ -4,7 +4,9 @@ Single-qubit Clifford RB: each independent random seed supplies a shared prefix 
 
 ## Expects (parameter context)
 
-Depth runs 0 to 100 Cliffords over 21 points, seed 42 and 20 sequences. Relax delay is 5 * qubit.t1 us. Missing calibration leaves the affected fields empty and Invalid; no numeric fallback.
+Depth runs 0 to 100 Cliffords over 21 points, seed 42 and 20 sequences. Relax delay is 5 * qubit.t1 us. Other missing required calibration leaves the affected fields empty and Invalid.
+
+T1-derived defaults use the fixed Open/Reset capture. A missing/null T1 or absent capture uses 30 us, so the 5*T1 wait starts at 150 us. Stored invalid T1 leaves derived required fields empty while the Form opens. Alias/path/source failures propagate. Defaults remain editable, are not written back as calibration, and do not shorten automatically for active reset.
 
 ## Expects (ModuleLibrary)
 
