@@ -150,3 +150,69 @@ def test_prepared_entries_follow_key_mapping(kernel_case: KernelCase) -> None:
     )
     assert_budget(actual, expected, case.budget)
     np.testing.assert_allclose(actual[0], case.states[0], atol=1e-14)
+
+
+@pytest.mark.parametrize(
+    ("frequency", "amplitude", "noncovariant"),
+    [
+        (0.13, 0.055, False),
+        (-0.13, -0.055, False),
+        (3.7, 0.21, False),
+        (-0.13, 0.35, True),
+        (0.13, 0.055, True),
+    ],
+)
+def test_phase_interpolation_preserves_coherent_inputs(
+    frequency: float, amplitude: float, noncovariant: bool
+) -> None:
+    """Off-grid phases agree with independent Lindblad, even beyond coarse resolution."""
+    from zcu_tools.simulate.evolution.kernels.gate_cache import GateCacheKernel
+
+    size = 3
+    base = synthetic_model(size)
+    drive = base.drives[0]
+    if noncovariant:
+        # Break ladder phase covariance to exercise higher phase harmonics at
+        # both weak and strong drive, not just a finite conjugation polynomial.
+        drive = replace(
+            drive,
+            in_phase_ghz=drive.in_phase_ghz + np.diag([0.9, -0.4, 0.2]),
+            quadrature_ghz=0.67 * drive.quadrature_ghz,
+        )
+    model = replace(
+        base,
+        drives=(drive,),
+        rates_per_ns=np.zeros((size, size)),
+        dephasing_per_ns=np.zeros((size, size)),
+    )
+    source = evolution.ModelSource(
+        np.eye(size, dtype=np.complex128) / size,
+        lambda level: replace(model, level=level),
+    )
+    table = replace(
+        shaped_table(),
+        tone_frequency_ghz=np.full((6, 1), frequency),
+        tone_amplitude=np.full((6, 1), amplitude),
+    )
+    # Include independent complex superpositions, not just populations or one
+    # low transition. Every phase is off both the coarse and legacy node grids.
+    rng = np.random.default_rng(718)
+    vectors = rng.normal(size=(6, size)) + 1j * rng.normal(size=(6, size))
+    vectors /= np.linalg.norm(vectors, axis=1)[:, None]
+    states = vectors[:, :, None] * vectors[:, None, :].conj()
+    case = KernelCase(GateCacheKernel(), source, table, states)
+    rows = np.arange(6, dtype=np.int64)
+    assert case.kernel.guard(table, rows, source, case.budget).all()
+    keys = case.kernel.prepare_keys(table, rows[:1])
+    prepared = case.kernel.prepare(keys, table, rows[:1], source, case.budget)
+    actual = states.copy()
+    rejected = case.kernel.apply(
+        prepared, np.zeros(6, dtype=np.int64), table, rows, actual, case.budget
+    )
+    assert not rejected.any()
+    expected = np.stack([reference(case, int(row), states[row]) for row in rows])
+    # Use the same accuracy budget that the phase guard is allowed to spend.
+    assert_budget(actual, expected, case.budget)
+    np.testing.assert_allclose(
+        np.trace(actual, axis1=-2, axis2=-1), 1, atol=case.budget, rtol=0
+    )

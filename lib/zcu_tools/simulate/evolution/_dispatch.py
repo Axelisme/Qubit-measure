@@ -190,17 +190,18 @@ class _Classifier:
     def guard_keys(
         self, kernel: Kernel, rows: NDArray[np.int64]
     ) -> Iterable[_Guarded | None]:
-        """Defer local builders; guard shared keys with the existing pool."""
+        """Batch one timeline's local builders; guard shared keys with the pool."""
+        if self.selection is not None:
+            # This worker owns one timeline. A single batch lets the kernel
+            # reuse call-local work across distinct prepare keys, then drop it.
+            return (_guard_key(kernel, self.table, self.source, self.budget, rows),)
         groups = group_keys(kernel, self.table, rows)
-        if self.selection is None:
-            local = rows[~groups.shared[groups.inverse]]
-            self.deferred[local] = True
-            if len(local):
-                self.costs[local] = kernel.cost(self.table, local)
+        local = rows[~groups.shared[groups.inverse]]
+        self.deferred[local] = True
+        if len(local):
+            self.costs[local] = kernel.cost(self.table, local)
         selections = (
-            selected
-            for index, selected in groups.selections()
-            if self.selection is not None or groups.shared[index]
+            selected for index, selected in groups.selections() if groups.shared[index]
         )
         if self.pool is not None and np.count_nonzero(groups.shared) >= 8:
             return self.pool(

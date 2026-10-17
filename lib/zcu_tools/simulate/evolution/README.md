@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, compiled gate-cache preparation, driven-input plateau routing, Hilbert endpoints and timeline-owned waves
+**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves and spectral-family reuse
 
 ## Segment engine contracts
 
@@ -93,8 +93,9 @@ True means `guard_prepared` builds the model payload it validates and returns a
 `GuardResult` with its ordinary row-local acceptance mask and model-only
 `GuardPreparation` batches. The engine asks for this handoff only for
 cross-timeline builder candidates before A-stage. Timeline workers use the
-same hook for deferred keys and pass accepted
-products directly to apply. Rejected keys follow the remaining candidates in
+same hook for deferred rows, batching one timeline's eligible rows for each
+builder kernel into one call. They pass accepted products directly to apply.
+The caller still guards shared prepare keys separately. Rejected keys follow the remaining candidates in
 order. Neither path rebuilds an accepted guard table. Handoffs use the same
 kernel, prepare key, source and budget within this evolve. A shared candidate's
 guard may accept only a subset of its timelines; that subset still reuses its
@@ -441,7 +442,7 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | Same constant-tone branch, Hilbert period guard fails | T6 periodic propagation accepts every single constant-tone row. |
 | One real shaped tone with at most two uses of its ordinary period-band key and passing spectral guards | `shaped_sambe` builds finite-Hilbert-Fourier subperiods at four or eight amplitude nodes. |
 | Other shaped tone, or rejected spectral key | Compute gate/period/DOP853 amortized cost order once over all shaped rows before any spectral guard. Try each numerical guard in that fixed order. There is no fixed gate-key reuse threshold. |
-| Shaped gate cache passes its split guard | Four Strang subsegments, closed-system U plus secular dissipation, and 16 carrier-phase Fourier samples. |
+| Shaped gate cache passes its split guard | Four Strang subsegments, closed-system U plus secular dissipation, and 16 carrier-phase Fourier modes with checked adaptive preparation. |
 | Shaped period table passes its envelope-motion, bandwidth and split guards | Midpoint-frozen envelopes, eight amplitude Chebyshev nodes and 16 phase Fourier samples for the actual drive port. Integrate the fractional-period tail directly. |
 | Shaped approximations rejected, or direct integration costs less | DOP853, with no input-state restriction. |
 | Two constant tones with a valid Floquet frame and passing harmonic omission and convergence bounds | Floquet k=0 preparation. Passing probe guards select modal second-order Dyson in H_F + D₀; other probes use periodic propagation in the same accepted frame. |
@@ -513,7 +514,18 @@ refines to 3/4 when needed. It retains the lower cutoff only when its difference
 to the next cutoff fits budget/4. It starts with four amplitude nodes. A geometric tail
 estimate from the last two polynomial coefficients selects eight nodes if
 needed. The cycle-scaled harmonic and amplitude estimates must fit budget/2.
-The guard never reads a density or evolves a trial input. Cross-timeline keys
+The guard never reads a density or evolves a trial input. Within one guard or
+prepare call, ramps share immutable spectral coefficients by model identity,
+level, port, signed carrier, peak gain, subperiod resolution, harmonic cutoff
+and amplitude node count. Budget and algorithm revision scope the call-local
+workspace. Each ramp selects cutoffs and evaluates admission with its own cycle
+count. Duration, slope and direct-tail preparations remain row-specific.
+The kernel retains no workspace after the call returns. Timeline workers batch
+their local ramps in one guard call, so live workspace follows concurrent
+timelines rather than the frequency grid. Accepted payloads retain coefficients
+until their timeline finishes, or in the prepare LRU for shared keys. Each
+payload conservatively charges the full coefficient allocation even when
+another payload shares it. Cross-timeline keys
 hand accepted, immutable model-only payloads to A-stage. For timeline-local keys,
 the worker runs guard preparation and applies the returned table before releasing
 it. It does not discard the convergence table and rebuild it in prepare. Failed spectral keys retain the old
@@ -697,8 +709,9 @@ bound or segment-budget guarantee. Small synthetic Engine tests cover mixed and
 coherent inputs, signed carriers and phase-translated cross-period tails.
 
 Below 1 GHz, preparation uses fourth-order commutator-free Magnus (CF4).
-Each step multiplies two exact Hermitian matrix exponentials. Uniform grids
-start below 2/3 of an instantaneous spectral turn. Preparation compares prefix
+Each step multiplies two scaled-and-squared [7/7] Padé exponentials of the
+centered Hermitian generator. Fractional CF4 endpoints use the same exponentials.
+Uniform grids start below 2/3 of an instantaneous spectral turn. Preparation compares prefix
 unitaries with a 1.5x finer grid at eight phase intervals, including U(T).
 It retains the finer grid when the maximum Frobenius-norm difference is at most
 min(1e-4, budget*0.1); otherwise it refines again. Accepted steps stay below
@@ -737,11 +750,18 @@ It uses 1, 4 or 8 steps per carrier period according to r, powers the period
 propagator and adds the fractional-period tail. Carrier phase uses Fourier
 interpolation. Gate-cache Strang splitting and phase Fourier interpolation
 avoid building a full dissipative propagator for every phase. Gate preparation
-integrates its sixteen Hilbert phase nodes together through the shared compiled
-DOP853 interval core. Sample knots and the four Strang boundaries restart the
-integration. Single-threaded, nogil preparation lets Engine workers build
-different gate keys concurrently without Python RHS callbacks. Keys, phase
-nodes and the 0.1 ns step ceiling stay unchanged. Unitary integration uses
+first integrates six equispaced Hilbert phase nodes and two independent probes
+(pi/6 and sqrt(3) radians) for positive-duration gates up to 30 ns. Both probes
+must match the six-node Fourier interpolation at every Strang endpoint within
+min(1e-4, budget*0.1) in full-unitary Frobenius norm. Accepted polynomials are
+expanded to the original sixteen nodes and polar-projected before the FFT.
+Failed phase checks, zero-duration keys and longer gates use the original
+sixteen-node builder. This is an empirical convergence check, not a global bound
+on arbitrary phase harmonics. Numerical failures still propagate.
+All nodes use the shared compiled DOP853 interval core. Sample knots and the four
+Strang boundaries restart integration. Single-threaded, nogil preparation lets
+Engine workers build different gate keys concurrently without Python RHS
+callbacks. Keys, routing scores and the 0.1 ns step ceiling stay unchanged. Unitary integration uses
 rtol=min(1e-8, budget*1e-4) and atol=rtol*0.01. This leaves the segment budget
 for splitting and Fourier interpolation without oversolving high-energy modes.
 An SVD polar projection restores each Hilbert endpoint before the phase Fourier

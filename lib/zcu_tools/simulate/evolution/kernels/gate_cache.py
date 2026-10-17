@@ -1,14 +1,12 @@
 """Fourier closed-system gates interleaved with compact secular dissipation."""
 
 from dataclasses import dataclass
-from typing import NamedTuple
 
 import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
-from .._envelope import sample_value
 from ..declarations import (
     AlgorithmIdentity,
     Eligibility,
@@ -17,8 +15,9 @@ from ..declarations import (
     ReuseDeclaration,
 )
 from ..kernel import Prepared, SegmentTable
-from ..secular import ModelSource, SecularModel
-from ._dop853 import Tolerances, integrate
+from ..secular import ModelSource
+from . import gate_phase
+from ._gate_endpoints import build_endpoints
 from ._shaped import drive_bounds, envelope_bounds
 
 _PHASE_COUNT = 16
@@ -42,97 +41,6 @@ class _GatePrepared:
 def _check_budget(budget: float) -> None:
     if not np.isfinite(budget) or budget <= 0:
         raise ValueError("gate cache budget must be finite and positive")
-
-
-class _GateContext(NamedTuple):
-    # Hamiltonian in GHz, envelope-local offset and interval origin in ns.
-    h0: NDArray[np.complex128]
-    x: NDArray[np.complex128]
-    y: NDArray[np.complex128]
-    frequency: float
-    amplitude: float
-    offset: float
-    sample_ns: NDArray[np.float64]
-    samples: NDArray[np.complex128]
-    origin: float
-
-
-@njit(nogil=True, cache=True)
-def _gate_rhs(time, flat, context):
-    time += context.origin
-    envelope = context.amplitude * sample_value(
-        time + context.offset, context.sample_ns, context.samples
-    )
-    size = len(context.h0)
-    states = flat.reshape((_PHASE_COUNT, size, size))
-    result = np.empty_like(states)
-    for phase in range(_PHASE_COUNT):
-        z = envelope * np.exp(
-            1j
-            * (
-                phase * (2 * np.pi / _PHASE_COUNT)
-                + 2 * np.pi * context.frequency * time
-            )
-        )
-        h = context.h0 + z.real * context.x + z.imag * context.y
-        result[phase] = (-2j * np.pi) * (h @ states[phase])
-    return result.ravel()
-
-
-def _unitaries(
-    model: SecularModel, table: SegmentTable, row: int, budget: float
-) -> NDArray[np.complex128]:
-    """Integrate phase nodes in compiled DOP853, restarting at sample knots."""
-    size = len(model.energies_ghz)
-    drive = model.drives[int(table.tone_port[row, 0])]
-    envelope = table.envelopes[int(table.tone_envelope[row, 0])]
-    offset = float(table.tone_envelope_offset_ns[row, 0])
-    frequency = float(table.tone_frequency_ghz[row, 0])
-    amplitude = float(table.tone_amplitude[row, 0])
-    duration = float(table.duration_ns[row])
-    energies = model.energies_ghz
-    h0 = np.diag(energies - (energies[0] + energies[-1]) / 2).astype(complex)
-    identity = np.broadcast_to(np.eye(size, dtype=complex), (_PHASE_COUNT, size, size))
-    samples = np.empty((_SUBSEGMENTS, _PHASE_COUNT, size, size), dtype=complex)
-    # Reserve the segment budget for Strang/Fourier errors. A 1e-8 U tolerance
-    # avoids oversolving high-energy modes while retaining budget scaling.
-    tolerance = min(1e-8, budget * 1e-4)
-    controls = Tolerances(
-        tolerance, tolerance * 0.01, min(0.1, 0.25 / max(abs(frequency), 1e-12))
-    )
-    knots = envelope.sample_ns - offset
-    for segment in range(_SUBSEGMENTS):
-        start, end = (
-            duration * segment / _SUBSEGMENTS,
-            duration * (segment + 1) / _SUBSEGMENTS,
-        )
-        boundaries = np.concatenate(
-            ([start], knots[(knots > start) & (knots < end)], [end])
-        )
-        unitary = identity.copy().ravel()
-        for left, right in zip(boundaries[:-1], boundaries[1:], strict=True):
-            if right == left:
-                continue
-            context = _GateContext(
-                h0,
-                drive.in_phase_ghz,
-                drive.quadrature_ghz,
-                frequency,
-                amplitude,
-                offset,
-                envelope.sample_ns,
-                envelope.samples,
-                float(left),
-            )
-            unitary = integrate(
-                _gate_rhs, context, unitary, float(right - left), controls, 0.01
-            )
-        samples[segment] = unitary.reshape(identity.shape)
-    # The solver's small norm loss must not accumulate across repeated gates.
-    # Retract the Hilbert endpoints, never the evolving density.
-    left, _, right = np.linalg.svd(samples)
-    samples = left @ right
-    return np.fft.fft(samples, axis=1) / _PHASE_COUNT
 
 
 @njit(nogil=True, cache=True)
@@ -175,7 +83,9 @@ class GateCacheKernel:
     the DC model identity. Keys encode flux level, port, envelope content identity,
     envelope-local offset, frequency, signed amplitude and duration. Absolute
     segment start and carrier theta do not affect preparation. Four closed U
-    subsegments use 16 phase nodes each, with half-step secular D on both sides.
+    subsegments retain 16 phase modes each, with half-step secular D on both
+    sides. Short gates first try six nodes checked at two independent phases;
+    failed phase convergence uses the original sixteen-node builder.
     A model-only secular split guard rejects long dissipative gates before
     preparation. Numerical build failures raise RuntimeError; invalid budgets,
     unsupported rows or mismatched representative keys raise ValueError. This
@@ -183,11 +93,11 @@ class GateCacheKernel:
     """
 
     declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("gate_cache", "compiled-dop853-v2"),
+        identity=AlgorithmIdentity("gate_cache", "phase-adaptive-dop853-v3"),
         eligibility=Eligibility(1, 1, "shaped"),
         guard=GuardDeclaration(),
         accuracy="guarded-approximation",
-        reuse=ReuseDeclaration("gate_cache/compiled-dop853-v2/serial"),
+        reuse=ReuseDeclaration("gate_cache/phase-adaptive-dop853-v3/serial"),
         fallback="legacy-order",
     )
 
@@ -298,7 +208,19 @@ class GateCacheKernel:
                 -half_step
                 * ((outgoing[:, None] + outgoing[None, :]) / 2 + model.dephasing_per_ns)
             )
-            coefficients.append(_unitaries(model, table, int(row), budget))
+            # Keep zero/long-duration keys on the original builder. Routing and
+            # its split guard are deliberately independent of this optimization.
+            coefficient = None
+            if 0 < table.duration_ns[row] <= gate_phase.MAX_DURATION_NS:
+                coefficient = gate_phase.build(model, table, int(row), budget)
+            if coefficient is None:
+                phases = np.asarray(
+                    np.arange(_PHASE_COUNT) * (2 * np.pi / _PHASE_COUNT),
+                    dtype=np.float64,
+                )
+                endpoints = build_endpoints(model, table, int(row), budget, phases)
+                coefficient = np.fft.fft(endpoints, axis=1) / _PHASE_COUNT
+            coefficients.append(coefficient)
             populations.append(population)
             coherences.append(coherence)
         if len(rows):
