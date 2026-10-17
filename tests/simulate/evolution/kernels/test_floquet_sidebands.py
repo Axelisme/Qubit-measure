@@ -33,7 +33,7 @@ def test_resonant_bath_sidebands_are_evolved_instead_of_averaged() -> None:
         tones=np.array([2]),
         tone_port=np.array([[0, 1]]),
         tone_frequency_ghz=np.array([[0.13, 0.11]]),
-        tone_amplitude=np.array([[0.5, 0.0001]]),
+        tone_amplitude=np.array([[0.2, 0.0001]]),
         tone_theta_rad=np.array([[0.0, 0.3]]),
         tone_envelope=np.zeros((1, 2), dtype=np.int64),
         tone_envelope_offset_ns=np.zeros((1, 2)),
