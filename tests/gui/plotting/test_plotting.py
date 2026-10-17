@@ -209,22 +209,22 @@ def test_attach_ignores_stale_previous_container_entry(qapp):
     detach_canvas on the stale one (which would flip it to its placeholder)."""
     del qapp
     import matplotlib.pyplot as plt
-    from zcu_tools.gui.plotting.host import _fig_container_registry
 
     stale_container, stale_stack = _make_container()
     target_container, target_stack = _make_container()
 
-    # Give the stale container a real, current canvas of its own so we can detect
-    # an erroneous placeholder flip.
     other_fig = plt.figure()
-    other_canvas = attach_existing_figure_to_container(other_fig, stale_container)
-    assert stale_stack.currentWidget() is other_canvas
-
     fig = plt.figure()
     try:
-        # Craft the stale state: registry says ``fig`` lives in stale_container,
-        # but stale_container never hosted fig's canvas.
-        _fig_container_registry[fig] = stale_container
+        # Detach presentation without dropping the figure's container mapping.
+        stale_canvas = attach_existing_figure_to_container(fig, stale_container)
+        stale_container.detach_canvas(stale_canvas)
+        assert get_figure_container(fig) is stale_container
+        assert stale_stack.indexOf(stale_canvas) == -1
+
+        # Give the stale container a current canvas to detect a placeholder flip.
+        other_canvas = attach_existing_figure_to_container(other_fig, stale_container)
+        assert stale_stack.currentWidget() is other_canvas
 
         canvas = attach_existing_figure_to_container(fig, target_container)
 
