@@ -20,6 +20,7 @@ import os
 import subprocess
 import sys
 import time
+from functools import partial
 from statistics import median
 
 import numpy as np
@@ -87,16 +88,16 @@ def micro_benches(quick: bool) -> dict:
         d_true = eval_dist_bounded(A, 1.5, B, C, 1e9)
 
         out[f"eval_dist_bounded_loose/{key}"] = _timed(
-            lambda: eval_dist_bounded(A, 1.5, B, C, 1e9), repeat=repeat
+            partial(eval_dist_bounded, A, 1.5, B, C, 1e9), repeat=repeat
         )
         out[f"eval_dist_bounded_tight/{key}"] = _timed(
-            lambda: eval_dist_bounded(A, 1.5, B, C, d_true + 1e-9), repeat=repeat
+            partial(eval_dist_bounded, A, 1.5, B, C, d_true + 1e-9), repeat=repeat
         )
         out[f"candidate_breakpoint_search/{key}"] = _timed(
-            lambda: candidate_breakpoint_search(A, B, C, 0.5, 3.0), repeat=repeat
+            partial(candidate_breakpoint_search, A, B, C, 0.5, 3.0), repeat=repeat
         )
         out[f"entry_lower_bound/{key}"] = _timed(
-            lambda: entry_lower_bound(A, B, C, 0.5, 3.0), repeat=repeat
+            partial(entry_lower_bound, A, B, C, 0.5, 3.0), repeat=repeat
         )
 
         # Correctness assert for regressions.
