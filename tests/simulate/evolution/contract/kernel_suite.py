@@ -9,7 +9,7 @@ It constructs individual Lindblad jumps, never production RHS helpers.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -324,3 +324,69 @@ class KernelContract:
                 [reference(case, row, state) for row, state in enumerate(states)]
             )
             assert_budget(actual, expected, case.budget)
+
+    def test_bind_input_is_read_only_and_apply_equivalent(
+        self, kernel_case: KernelCase
+    ) -> None:
+        case = kernel_case
+        bind = getattr(case.kernel, "bind_input", None)
+        assert callable(bind), "every C5 kernel must offer bind_input"
+        table = replace(case.table, start_ns=np.zeros(len(case.states)))
+        rows = np.arange(len(case.states), dtype=np.int64)
+        keys, first, inverse = np.unique(
+            case.kernel.prepare_keys(table, rows),
+            return_index=True,
+            return_inverse=True,
+        )
+        prepared = case.kernel.prepare(
+            keys, table, rows[first], case.source, case.budget
+        )
+        initial = case.states[0].copy()
+        initial.setflags(write=False)
+        before = initial.copy()
+        for key in range(len(keys)):
+            candidates = rows[inverse == key]
+            ports = (
+                table.tone_port[candidates, 0]
+                if table.tone_port.shape[1]
+                else np.zeros(len(candidates))
+            )
+            for port in np.unique(ports):
+                selected = candidates[ports == port][::-1]
+                saved_rows = selected.copy()
+                bound = bind(prepared, key, table, selected, initial, case.budget)
+                np.testing.assert_array_equal(initial, before)
+                np.testing.assert_array_equal(selected, saved_rows)
+                if case.kernel.name == "dyson":
+                    assert bound is not None, "Dyson must bind source-input paths"
+                if bound is None:
+                    continue
+                states = np.repeat(initial[None], len(selected), axis=0)
+                expected = states.copy()
+                expected_mask = case.kernel.apply(
+                    prepared,
+                    np.full(len(selected), key, dtype=np.int64),
+                    table,
+                    selected,
+                    expected,
+                    case.budget,
+                )
+                # Repeated reversed/non-contiguous applies may not consume or mutate
+                # the payload. Empty batches must also be harmless.
+                for subset in (
+                    np.arange(len(selected)),
+                    np.arange(len(selected))[::-2],
+                    np.empty(0, dtype=np.int64),
+                ):
+                    actual = states[subset].copy()
+                    actual_mask = case.kernel.apply(
+                        bound,
+                        np.zeros(len(subset), dtype=np.int64),
+                        table,
+                        selected[subset],
+                        actual,
+                        case.budget,
+                    )
+                    if len(subset):
+                        assert_budget(actual, expected[subset], case.budget)
+                    np.testing.assert_array_equal(actual_mask, expected_mask[subset])

@@ -83,6 +83,17 @@ class DemoKernel:
             )
         )
 
+    def bind_input(
+        self,
+        prepared: kernel.Prepared,
+        key_index: int,
+        table: kernel.SegmentTable,
+        rows: NDArray[np.int64],
+        source_initial: NDArray[np.complex128],
+        budget: float,
+    ) -> kernel.Prepared | None:
+        return None
+
     def apply(
         self,
         prepared: kernel.Prepared,

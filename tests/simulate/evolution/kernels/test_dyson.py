@@ -292,3 +292,59 @@ def test_apply_population_check_subtracts_free_decay(kernel_case: KernelCase) ->
     assert not mask.any()
     change = np.diagonal(actual - case.states, axis1=1, axis2=2)
     assert np.max(abs(change)) > 0.02
+
+
+@pytest.mark.parametrize("gap", [0.0, 9e-6, 1.1e-5, 0.249, 0.251, 0.499, 0.501])
+def test_input_bound_paths_match_reference_at_modal_boundaries(
+    kernel_case: KernelCase, gap: float
+) -> None:
+    case = kernel_case
+    bind = getattr(case.kernel, "bind_input", None)
+    assert callable(bind), "Dyson must offer input-bound path evaluation"
+    model = case.source.model((0,))
+    size = len(model.energies_ghz)
+    model = replace(
+        model,
+        energies_ghz=np.arange(size) * gap / (2 * np.pi),
+        rates_per_ns=np.zeros((size, size)),
+        dephasing_per_ns=np.zeros((size, size)),
+    )
+    source = ModelSource(
+        case.source.initial_density, lambda level: replace(model, level=level)
+    )
+    table = replace(
+        case.table,
+        start_ns=np.zeros(4),
+        duration_ns=np.array([1.0, 2.0, 0.0, 1.0]),
+        tone_frequency_ghz=np.array(
+            [[0.0], [gap / (2 * np.pi)], [0.13], [-gap / (2 * np.pi)]]
+        ),
+        tone_amplitude=np.array([[1e-5], [-2e-5], [1e-5], [0.0]]),
+    )
+    case = replace(case, source=source, table=table, budget=1e-9)
+    rows = np.arange(4, dtype=np.int64)
+    keys = np.unique(case.kernel.prepare_keys(table, rows))
+    prepared = case.kernel.prepare(keys, table, rows[:1], source, case.budget)
+    for initial in (case.states[0], source.initial_density):
+        bound = bind(prepared, 0, table, rows[::-1], initial, case.budget)
+        assert bound is not None
+        actual = np.repeat(initial[None], 4, axis=0)
+        for subset in (rows[::2][::-1], rows[1::2][::-1]):
+            states = actual[subset].copy()
+            case.kernel.apply(
+                bound,
+                np.zeros(len(subset), dtype=np.int64),
+                table,
+                subset,
+                states,
+                case.budget,
+            )
+            actual[subset] = states
+        expected = np.stack([reference(case, row, initial) for row in rows])
+        assert_budget(actual, expected, case.budget)
+        np.testing.assert_allclose(
+            actual, actual.conj().swapaxes(-1, -2), rtol=0, atol=1e-13
+        )
+        np.testing.assert_allclose(
+            np.trace(actual, axis1=-2, axis2=-1), 1, rtol=0, atol=1e-13
+        )

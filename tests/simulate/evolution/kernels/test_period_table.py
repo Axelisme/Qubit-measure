@@ -117,3 +117,7 @@ def test_keys_share_shapes_phases_and_ports_but_separate_bands(
     assert keys[0] != keys[7]
     assert keys[0] != keys[6]
     assert np.isfinite(case.kernel.cost(table, rows)).all()
+
+
+def test_bind_input_contract(kernel_case: KernelCase) -> None:
+    KernelContract().test_bind_input_is_read_only_and_apply_equivalent(kernel_case)

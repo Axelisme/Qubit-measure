@@ -1,6 +1,8 @@
 """Engine behavior through public batches and injected C5 collaborators."""
 
 import warnings
+import weakref
+from contextlib import closing
 from dataclasses import dataclass, replace
 from threading import Event
 
@@ -93,6 +95,9 @@ class RecordingKernel:
     def prepare(self, keys, table, rows, source, budget):
         self.preparations += len(keys)
         return Payload(len(keys))
+
+    def bind_input(self, prepared, key_index, table, rows, source_initial, budget):
+        return None
 
     def apply(self, prepared: Prepared, key_index, table, rows, states, budget):
         self.calls.append((table, rows.copy(), states.copy()))
@@ -356,3 +361,126 @@ def test_exceeded_counts_warn_once_per_evolve_and_keep_results(chunks: int) -> N
         assert result.paths.exceeded_by_kernel == {}
     finally:
         engine.close()
+
+
+@dataclass(frozen=True)
+class BoundPayload:
+    initial: NDArray[np.complex128]
+
+    @property
+    def nbytes(self) -> int:
+        return self.initial.nbytes
+
+
+class InputBindingKernel(RecordingKernel):
+    """C5 collaborator observing lifetime and grouping without engine internals."""
+
+    def __init__(self, *, decline: bool = False):
+        super().__init__("dyson")
+        self.decline = decline
+        self.groups: list[tuple[NDArray[np.float64], NDArray[np.float64]]] = []
+        self.bound_refs: list[weakref.ReferenceType[BoundPayload]] = []
+        self.bound_rows: list[int] = []
+        self.unbound_rows: list[int] = []
+
+    def prepare_keys(self, table, rows):
+        return np.zeros(len(rows), dtype="V8")
+
+    def bind_input(self, prepared, key_index, table, rows, source_initial, budget):
+        assert np.all(table.start_ns[rows] == 0)
+        assert len(np.unique(table.tone_port[rows, 0])) == 1
+        assert not source_initial.flags.writeable
+        self.groups.append((table.tone_amplitude[rows, 0], table.duration_ns[rows]))
+        if self.decline:
+            return None
+        bound = BoundPayload(source_initial)
+        self.bound_refs.append(weakref.ref(bound))
+        return bound
+
+    def apply(self, prepared, key_index, table, rows, states, budget):
+        if isinstance(prepared, BoundPayload):
+            assert np.all(key_index == 0)
+            self.bound_rows.extend(table.timeline[rows].tolist())
+            states[:] = prepared.initial
+        else:
+            self.unbound_rows.extend(table.timeline[rows].tolist())
+        return np.zeros(len(rows), dtype=np.bool_)
+
+
+@pytest.mark.parametrize("decline", [False, True])
+def test_input_bound_payload_grouping_fallback_and_evolve_lifetime(decline):
+    n = 8
+    k = InputBindingKernel(decline=decline)
+    drive = replace(
+        track(n, EnvelopeSpec("constant")),
+        start_ns=np.array([0.0] * 6 + [1.0, 2.0]),
+        duration_ns=(np.arange(n) + 1) / 8,
+        amplitude=np.linspace(-0.001, 0.002, n),
+    )
+    b = replace(batch(n), tracks=(drive,))
+    src = source()
+    model = src.model((0,))
+    other = ModelSource(
+        np.diag([0.6, 0.1, 0.3]).astype(complex),
+        lambda level: replace(model, level=level),
+    )
+    from zcu_tools.simulate.evolution.kernels.t4 import T4
+
+    with closing(Engine(2, 100000, kernels=(k, T4()), chunks_per_worker=3)) as engine:
+        first = engine.evolve(src, (b,), cancel=Event())
+        assert len(k.groups) == 1, (
+            "A-stage must bind all same-key source-input rows once"
+        )
+        np.testing.assert_array_equal(
+            np.sort(k.groups[0][0]), np.sort(drive.amplitude[:6])
+        )
+        np.testing.assert_array_equal(
+            np.sort(k.groups[0][1]), np.sort(drive.duration_ns[:6])
+        )
+        assert all(ref() is None for ref in k.bound_refs), (
+            "bound payload must not enter PrepareCache"
+        )
+        second = engine.evolve(other, (b,), cancel=Event())
+        assert len(k.groups) == 2
+        assert all(ref() is None for ref in k.bound_refs)
+        assert set(k.bound_rows) == (set() if decline else set(range(6)))
+        assert set(k.unbound_rows) == (set(range(n)) if decline else {6, 7})
+        assert not np.array_equal(first.densities, second.densities)
+
+
+def test_shared_dyson_is_bitwise_chunk_independent_and_source_local():
+    from zcu_tools.simulate.evolution.kernels.dyson import DysonKernel
+    from zcu_tools.simulate.evolution.kernels.t4 import T4
+
+    n = 10
+    drive = replace(
+        track(n, EnvelopeSpec("constant")),
+        duration_ns=(np.arange(n) + 1) / 16,
+        frequency_ghz=np.linspace(0.11, 0.2, n),
+        amplitude=np.linspace(-0.0002, 0.0002, n),
+    )
+    b = replace(batch(n), tracks=(drive,))
+    src = source()
+    model = src.model((0,))
+    vector = np.exp(1j * np.arange(3)) / np.sqrt(3)
+    other = ModelSource(
+        np.outer(vector, vector.conj()), lambda level: replace(model, level=level)
+    )
+    assert callable(getattr(DysonKernel(), "bind_input", None)), (
+        "Dyson must share source-input paths"
+    )
+    outputs = []
+    for workers, chunks in ((1, 1), (1, 3), (2, 1), (2, 4)):
+        with closing(
+            Engine(
+                workers, 100000, kernels=(DysonKernel(), T4()), chunks_per_worker=chunks
+            )
+        ) as engine:
+            result = engine.evolve(src, (b,), cancel=Event())
+            changed = engine.evolve(other, (b,), cancel=Event())
+        assert result.paths.segments_by_kernel["dyson"] == n
+        outputs.append((result.densities, changed.densities))
+    for original, changed in outputs[1:]:
+        np.testing.assert_array_equal(original, outputs[0][0])
+        np.testing.assert_array_equal(changed, outputs[0][1])
+    assert np.max(abs(outputs[0][0] - outputs[0][1])) > 0.01
