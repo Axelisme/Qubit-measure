@@ -1082,7 +1082,9 @@ def test_main_window_soc_changed_refreshes_run_lock(control_factory, qapp, monke
         window.remove_tab_widget("tab-1")
 
 
-def test_main_window_content_event_queries_single_tab_snapshot(control_factory, qapp):
+def test_main_window_content_event_queries_single_tab_snapshot(
+    control_factory, qapp, monkeypatch
+):
     from zcu_tools.gui.app.measure.events.tab import (
         TabContentChangedPayload,
         TabContentFact,
@@ -1092,13 +1094,29 @@ def test_main_window_content_event_queries_single_tab_snapshot(control_factory, 
     ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
-    ctrl.get_tab_snapshot.return_value = _snapshot("tab-1")
+    snapshot = _snapshot("tab-1")
+    assert snapshot.analysis is not None
+    ctrl.get_tab_snapshot.return_value = snapshot
     window = MainWindow(ctrl, templates=lambda: {})
-    window._tab_widgets["tab-1"] = MagicMock()
+    tab = MagicMock()
+    try:
+        window.add_tab_widget("tab-1", "fake")
+        view = next(
+            view for view in window.findChildren(ExpTabWidget) if view.tab_id == "tab-1"
+        )
+        monkeypatch.setattr(view.analyze_form, "sync", tab.analyze_form.sync)
+        monkeypatch.setattr(view, "update_writeback_items", tab.update_writeback_items)
+        ctrl.get_tab_snapshot.reset_mock()
 
-    bus.emit(TabContentChangedPayload("tab-1", TabContentFact.RUN_RESULT_COMMITTED))
+        bus.emit(TabContentChangedPayload("tab-1", TabContentFact.RUN_RESULT_COMMITTED))
 
-    ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
+        ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
+        tab.analyze_form.sync.assert_called_once_with(snapshot.analysis.params)
+        tab.update_writeback_items.assert_called_once_with(
+            list(snapshot.analysis.writeback_items)
+        )
+    finally:
+        window.remove_tab_widget("tab-1")
 
 
 def test_main_window_interaction_event_refreshes_finished_analysis_figure(
@@ -1203,6 +1221,7 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_analyze_st
 def test_main_window_interaction_event_does_not_restore_old_figure_on_run_start(
     control_factory,
     qapp,
+    monkeypatch,
 ):
     from matplotlib.figure import Figure
     from zcu_tools.gui.app.measure.events.tab import (
@@ -1216,7 +1235,7 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_run_start(
     ctrl.get_bus.return_value = bus
     ctrl.has_tab.return_value = True
     figure = Figure()
-    ctrl.get_tab_snapshot.return_value = _snapshot(
+    snapshot = _snapshot(
         "tab-1",
         is_running=True,
         is_analyzing=False,
@@ -1224,16 +1243,32 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_run_start(
         has_figure=True,
         figure=figure,
     )
+    assert snapshot.analysis is not None
+    ctrl.get_tab_snapshot.return_value = snapshot
     window = MainWindow(ctrl, templates=lambda: {})
     tab = MagicMock()
-    window._tab_widgets["tab-1"] = tab
+    try:
+        window.add_tab_widget("tab-1", "fake")
+        view = next(
+            view for view in window.findChildren(ExpTabWidget) if view.tab_id == "tab-1"
+        )
+        monkeypatch.setattr(view.analyze_form, "sync", tab.analyze_form.sync)
+        monkeypatch.setattr(view, "update_writeback_items", tab.update_writeback_items)
+        monkeypatch.setattr(view, "show_analysis_figures", tab.show_analysis_figures)
+        ctrl.get_tab_snapshot.reset_mock()
 
-    bus.emit(
-        TabInteractionChangedPayload("tab-1", TabInteractionFact.RUN_START_REJECTED)
-    )
+        bus.emit(
+            TabInteractionChangedPayload("tab-1", TabInteractionFact.RUN_START_REJECTED)
+        )
 
-    ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
-    tab.show_analysis_figures.assert_not_called()
+        ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
+        tab.show_analysis_figures.assert_not_called()
+        tab.analyze_form.sync.assert_called_once_with(snapshot.analysis.params)
+        tab.update_writeback_items.assert_called_once_with(
+            list(snapshot.analysis.writeback_items)
+        )
+    finally:
+        window.remove_tab_widget("tab-1")
 
 
 def test_main_window_interaction_event_shows_post_figure_after_primary(
