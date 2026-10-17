@@ -280,10 +280,16 @@ def macro_benches(
 
 
 def run(args) -> _RunReport:
-    """Warm up and run benchmarks using args.quick, args.db, and args.n_fluxs.
+    """Warm up and run benchmarks using attributes of args.
 
-    Return the original report data for printing and JSON output. A truthy db
-    enables macrobenchmarks; benchmark failures propagate to the caller.
+    args.quick can be any value: its truthiness selects reduced workloads,
+    and its original value is retained without conversion. args.db is the
+    macro database path, passed through unchanged; a falsey value disables
+    macrobenchmarks. args.n_fluxs is an integer count of observed flux points,
+    or None to use 30 points for quick workloads and 128 otherwise.
+
+    Return the original report data for printing and JSON output. Benchmark
+    failures propagate to the caller.
     """
     warm_up()
     results: _RunReport = {
