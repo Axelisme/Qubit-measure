@@ -32,7 +32,7 @@ def _make_onetone(name: str = "r1") -> OnetoneEntry:
     return OnetoneEntry(name=name, raw=raw)
 
 
-def _make_preprocess(signature: tuple = ("a",)) -> PreprocessResult:
+def _make_preprocess(signature: tuple[object, ...] = ("a",)) -> PreprocessResult:
     e = np.linspace(0.0, 1.0, 3).astype(np.float64)
     return PreprocessResult(
         sp_fluxs=e.copy(),
