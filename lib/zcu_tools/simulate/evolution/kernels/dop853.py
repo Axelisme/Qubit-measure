@@ -7,6 +7,7 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
+from .._envelope import sample_value
 from ..declarations import (
     AlgorithmIdentity,
     Eligibility,
@@ -26,7 +27,6 @@ from ._dop853_data import (
     pack_models,
     pack_segments,
 )
-from ._dop853_group import grouped_apply
 
 
 class _Data(NamedTuple):
@@ -82,6 +82,76 @@ def _run(data, row_models, states, controls):
     run_chain(_rhs, _context, data, row_models, states, controls)
 
 
+@njit(nogil=True, cache=True)
+def _interaction_rhs(time, state, context):
+    models, segments, row, model = context
+    size = models.energies.shape[1]
+    rho = state.reshape(size, size)
+    envelope = segments.envelope[row, 0]
+    begin, end = segments.sample_offsets[envelope : envelope + 2]
+    amplitude = sample_value(
+        time + segments.offset[row, 0],
+        segments.sample_time[begin:end],
+        segments.samples[begin:end],
+    )
+    phase = segments.theta[row, 0] + 2 * np.pi * segments.frequency[row, 0] * time
+    z = segments.gain[row, 0] * amplitude * np.exp(1j * phase)
+    port = segments.port[row, 0]
+    # Build the drive directly: subtracting H0 from a full Hamiltonian would
+    # lose small diagonal drive terms to cancellation at weak gains.
+    h = z.real * models.x[model, port] + z.imag * models.y[model, port]
+    phases = np.exp(2j * np.pi * models.energies[model] * time)
+    for i in range(size):
+        for j in range(size):
+            h[i, j] *= phases[i] * phases[j].conjugate()
+    product = h @ rho
+    derivative = np.empty_like(rho)
+    for target in range(size):
+        for source in range(size):
+            derivative[target, source] = (
+                -2j
+                * np.pi
+                * (product[target, source] - product[source, target].conjugate())
+                - models.decay[model, target, source] * rho[target, source]
+            )
+        for source in range(size):
+            derivative[target, target] += (
+                models.rates[model, target, source] * rho[source, source]
+            )
+    return derivative.ravel()
+
+
+@njit(nogil=True, cache=True)
+def _run_interaction(data, row_models, states, controls):
+    # Only independent rows enter: each starts at sigma(0)=rho(0), with its own
+    # controller and seed. The callback-free entry point has a stable disk key.
+    run_chain(_interaction_rhs, _context, data, row_models, states, controls)
+    rows, model_index = row_models
+    for index in range(len(rows)):
+        row, model = rows[index], model_index[index]
+        phases = np.exp(
+            -2j * np.pi * data.models.energies[model] * data.segments.duration[row]
+        )
+        for i in range(len(phases)):
+            for j in range(len(phases)):
+                states[index, i, j] *= phases[i] * phases[j].conjugate()
+
+
+def _independent_single_tones(segments: Segments, rows: NDArray[np.int64]) -> bool:
+    if np.any(segments.tones[rows] != 1) or np.any(segments.gain[rows, 0] == 0):
+        return False
+    previous, following = rows[:-1], rows[1:]
+    touching = (segments.timeline[previous] == segments.timeline[following]) & (
+        np.abs(
+            segments.start[following]
+            - segments.start[previous]
+            - segments.duration[previous]
+        )
+        <= 1e-9
+    )
+    return not np.any(touching)
+
+
 class DOP853Kernel:
     """C5 fallback for all tone counts and complex sampled envelopes.
 
@@ -96,7 +166,7 @@ class DOP853Kernel:
         eligibility=Eligibility(min_tones=1),
         guard=GuardDeclaration(),
         accuracy="adaptive",
-        reuse=ReuseDeclaration("dop853/interaction-v2/grouped"),
+        reuse=ReuseDeclaration("dop853/interaction-v2/independent"),
         fallback="terminal-domain",
     )
 
@@ -196,14 +266,14 @@ class DOP853Kernel:
         samples are ignored. Constant envelopes have no sampling ceiling.
         Independent single-tone rows use sigma(t)=exp(+i*2*pi*H0*t) rho(t)
         exp(-i*2*pi*H0*t), integrating the full transformed drive and unchanged
-        secular dissipator, then return to model eigenbasis. Group keys contain
-        prepared model, duration, port, signed carrier, phase, envelope identity,
-        envelope-local offset and floor(log2(abs(gain))). Only real gain differs.
-        Each trial must pass the original normalized RMS error norm for every
-        row separately; a group's error is the maximum, not a pooled RMS.
-        Tolerances, seed and active-knot ceiling are unchanged. This is local
-        control, not a new end-to-end error bound. No adaptive history carries
-        between groups or calls. Calls containing touching chains, zero gain or
+        secular dissipator, then return to model eigenbasis. Each row keeps its
+        own adaptive step controller and original normalized RMS error norm,
+        independent of the other rows in the call. There is no gain grouping or
+        pooled RMS. Tolerances, seed and active-knot ceiling are unchanged. This
+        is local control, not a new end-to-end error bound. No adaptive history
+        carries between rows or calls, so row order and worker/apply partition
+        do not change an independent row's numerical path.
+        Calls containing touching chains, zero gain or
         non-single-tone rows retain the unchanged lab-frame runner. No RWA,
         drive truncation, splitting, routing or envelope changes are made.
 
@@ -229,11 +299,6 @@ class DOP853Kernel:
         if np.any(playing & (table.tone_port[rows] >= models.ports[key_index, None])):
             raise ValueError("DOP853 tone port absent from model")
         segments = pack_segments(table)
-        if not grouped_apply(models, segments, rows, key_index, states, controls):
-            _run(
-                _Data(models, segments),
-                (rows, key_index),
-                states,
-                controls,
-            )
+        runner = _run_interaction if _independent_single_tones(segments, rows) else _run
+        runner(_Data(models, segments), (rows, key_index), states, controls)
         return np.zeros(len(rows), dtype=np.bool_)

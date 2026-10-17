@@ -272,59 +272,6 @@ def integrate(
     return state
 
 
-@njit(nogil=True, cache=True, inline="always")
-def integrate_rows(rhs, context, state, width, duration, controls):
-    """Integrate packed independent rows using the worst existing row error norm.
-
-    state is a flat complex vector with equal-size contiguous rows of width
-    elements. Each row uses the ordinary embedded DOP853 RMS estimator and the
-    common positive tolerances. A step passes only when every row passes.
-    max_step caps the deterministic 0.1 ns seed and all later steps. Return
-    the final vector. Numerical failures raise RuntimeError. This helper must
-    inline into a callback-free runner; row count is not a specialization key.
-    """
-    count = state.size // width
-    ceiling = controls.max_step
-    time = 0.0
-    step = min(0.1, ceiling)
-    rejected = False
-    attempts = 0
-    while time < duration:
-        attempts += 1
-        step = min(step, ceiling, duration - time)
-        if attempts > 10000000 or step <= 0 or time + step == time:
-            raise RuntimeError("Grouped DOP853 step underflow or iteration limit")
-        candidate, stages = _trial(rhs, context, state, time, step)
-        error = 0.0
-        for row in range(count):
-            start, end = row * width, (row + 1) * width
-            row_error = _error_norm(
-                stages[:, start:end],
-                state[start:end],
-                candidate[start:end],
-                step,
-                controls,
-            )
-            # max(0, nan) can hide a failed row, so check before reducing.
-            if not np.isfinite(row_error):
-                raise RuntimeError("Grouped DOP853 nonfinite row error estimate")
-            error = max(error, row_error)
-        if not np.isfinite(error) or not np.isfinite(candidate).all():
-            raise RuntimeError("Grouped DOP853 nonfinite solution or error estimate")
-        if error <= 1:
-            state = candidate
-            time += step
-            factor = 10.0 if error == 0 else min(10.0, 0.9 * error ** (-1 / 8))
-            if rejected:
-                factor = min(1.0, factor)
-            step *= factor
-            rejected = False
-        else:
-            step *= max(0.2, 0.9 * error ** (-1 / 8))
-            rejected = True
-    return state
-
-
 # Extra stages and weights for the degree-seven continuous extension.
 _A_EXTRA = np.array(
     [

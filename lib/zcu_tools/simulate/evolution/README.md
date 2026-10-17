@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves, spectral-family reuse and interaction-picture density groups
+**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves, spectral-family reuse and interaction-picture independent densities
 
 ## Segment engine contracts
 
@@ -672,18 +672,14 @@ returns endpoints in the model eigenbasis. This removes the diagonal H0 phases
 from explicit integration without RWA, drive truncation or splitting. Each RHS
 computes one phase per energy level and forms pair phases by multiplication.
 
-Within each apply call, rows share a drive Hamiltonian only when prepared model,
-duration, port, signed carrier, phase, envelope identity and envelope-local offset
-match. Real gains may differ, with each `floor(log2(abs(gain)))` octave in its own
-group. Every row has its own density and dissipative action. The original
-DOP853 eighth-order tableau and fifth/third-order estimator apply independently
-to each row. A step passes only if the maximum normalized row RMS error passes;
-weak rows never dilute a strong row through a pooled RMS. Tolerances, the
-0.1 ns seed and the active-knot ceiling remain unchanged. This preserves the
-local control strength, not an end-to-end error bound. Changing grouping,
-row order or worker partition can change adaptive steps and rounding, but must
-preserve results within tolerance.
-
+Each row keeps its own adaptive step controller and deterministic seed. Rows do
+not share stages or a gain-group controller. The original DOP853 eighth-order
+tableau and fifth/third-order normalized RMS estimator apply to each row on its
+own. Weak rows cannot dilute a strong row through a pooled RMS. Tolerances,
+the 0.1 ns seed and the active-knot ceiling remain unchanged. This preserves the
+local control strength, not an end-to-end error bound. Independent rows keep
+the same numerical path under row reordering, apply partition or worker-width
+changes.
 Calls containing touching chains, zero-gain rows or non-single-tone rows retain
 the original lab-frame runner. `flux_dop853` also retains its original numerical
 path. Both frames use Hermitian Hamiltonians and densities, requiring only one

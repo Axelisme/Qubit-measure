@@ -8,8 +8,7 @@ from ._dop853 import Tolerances, integrate
 
 
 @njit(nogil=True, cache=True)
-def sample_ceiling(segments, row):
-    """Return the minimum active envelope/flux knot spacing in this row, in ns."""
+def _sample_ceiling(segments, row):
     ceiling = np.inf
     for tone in range(segments.tones[row]):
         envelope = segments.envelope[row, tone]
@@ -86,7 +85,7 @@ def run_chain(
         row_controls = Tolerances(
             controls.rtol,
             controls.atol,
-            min(controls.max_step, sample_ceiling(segments, row)),
+            min(controls.max_step, _sample_ceiling(segments, row)),
         )
         result = integrate(
             rhs,
