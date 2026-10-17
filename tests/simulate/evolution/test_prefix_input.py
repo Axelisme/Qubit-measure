@@ -130,6 +130,27 @@ def reference(src, b, end_ns=None):
     return state
 
 
+@pytest.mark.parametrize("history", ["distinct", "source", "no_drive", "shared"])
+def test_plateau_routing_preserves_reusable_dyson_inputs(history):
+    src, b = source(), batch()
+    if history == "distinct":
+        pre = replace(b.tracks[0], phase_rad=np.array([0.0, 0.1]))
+        b = replace(b, tracks=(pre, b.tracks[1]))
+        expected = {"floquet_period": 4, "t4": 2}
+    elif history == "source":
+        probe = replace(b.tracks[1], start_ns=np.zeros(2))
+        b = replace(b, tracks=(probe,), end_ns=np.full(2, 3.0))
+        expected = {"dyson": 2}
+    elif history == "no_drive":
+        b = replace(b, tracks=(b.tracks[1],))
+        expected = {"dyson": 2, "t4": 2}
+    else:
+        expected = {"floquet_period": 2, "dyson": 2, "t4": 2}
+    with closing(Engine(1, 100000)) as solver:
+        result = solver.evolve(src, (b,), cancel=Event())
+    assert result.paths.segments_by_kernel == expected
+
+
 def test_shared_driven_input_matches_dop853_and_stays_evolve_local():
     src, b, kernel = source(), batch(), ObservedDyson()
     with closing(engine(kernel)) as solver:
