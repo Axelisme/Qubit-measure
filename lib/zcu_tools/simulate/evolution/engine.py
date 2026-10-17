@@ -348,6 +348,7 @@ class Engine:
         """
         from ._dispatch import classify
         from ._planning import plan
+        from ._prefix import PrefixResolver
         from ._schedule import Schedule
 
         with self._lock:
@@ -365,9 +366,12 @@ class Engine:
                     PathDiagnostics(),
                 )
             geometry = plan(source, batches)
-            dispatch = classify(geometry, self._kernels, source, budget)
-            schedule = Schedule(geometry, dispatch, source, budget, cancel)
             with Parallel(n_jobs=self._workers, backend="threading") as pool:
+                geometry = PrefixResolver(
+                    geometry, self._kernels, source, budget, cancel
+                ).resolve(self._cache, pool, self._chunks)
+                dispatch = classify(geometry, self._kernels, source, budget)
+                schedule = Schedule(geometry, dispatch, source, budget, cancel)
                 result = schedule.run(self._kernels, self._cache, pool, self._chunks)
             if cancel.is_set():
                 raise Cancelled()

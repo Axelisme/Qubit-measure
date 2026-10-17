@@ -380,7 +380,8 @@ class KernelContract:
         table = replace(
             case.table,
             start_ns=np.full(len(case.states), 7.0 if prefix_input else 0.0),
-            flux_tail_group=(tuple(0 for _ in case.states) if prefix_input else None),
+            prefix_group=(tuple(0 for _ in case.states) if prefix_input else None),
+            prefix_no_drive=(True,) if prefix_input else (),
         )
         rows = np.arange(len(case.states), dtype=np.int64)
         keys, first, inverse = np.unique(
@@ -402,7 +403,7 @@ class KernelContract:
                 tones=np.zeros(len(rows), dtype=np.int64),
                 tone_port=np.full_like(table.tone_port, -1),
                 tone_envelope=np.full_like(table.tone_envelope, -1),
-                flux_tail_group=None,
+                prefix_group=None,
             )
             initial = reference(replace(case, table=idle), 0, initial)
         initial.setflags(write=False)

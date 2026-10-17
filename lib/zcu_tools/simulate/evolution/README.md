@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, constant-tone dispatch, terminal-family coverage, readout trace diagnostics, low-frequency Hilbert propagation and compiled shared Dyson tables
+**Last updated:** 2026-10-17, constant-tone dispatch, terminal-family coverage, readout trace diagnostics, low-frequency Hilbert propagation, shared driven-prefix inputs and bounded modal pruning
 
 ## Segment engine contracts
 
@@ -67,9 +67,10 @@ kernels return None and the engine calls their ordinary guard. The engine reuses
 payloads only for accepted rows with the same kernel, prepare key, source and
 budget within this evolve. Shared keys follow normal PrepareCache admission;
 singletons bypass the cache. Neither the hook nor the handoff retains kernel
-state or creates a separate cross-evolve store. Only apply and `bind_input` receive density arrays.
-The hook receives the source initial density or an engine-computed no-drive
-prefix output, never worker densities. For shared prepared batches, the engine
+state or creates a separate cross-evolve store. Guard may read the source initial density or a certified, engine-computed
+prefix input, never a worker's evolving density. Guard never evolves density.
+Only apply and `bind_input` receive worker or binding density arguments.
+The hook receives the source initial density or an engine-computed prefix output. For shared prepared batches, the engine
 calls the hook once per prepare key, port and identical input group before
 timeline chunks start. The engine converts that input into the row model basis. A returned opaque
 payload replaces the prepared argument to apply, with key indices all zero.
@@ -104,6 +105,7 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | Varying flux with drive | `flux_dop853` integrates continuous flux with the exact Hamiltonian expansion; baths switch at quantized grid boundaries. |
 | Fixed flux, no drive | T4 uses analytic secular propagation. |
 | One constant tone, known or unknown input, r, r₂ and B2 guards pass | T7 second-order Dyson, batched over frequency, gain, duration and phase. |
+| One constant tone after an identical shared driven prefix, r, r₂ and actual-input B2 pass | Dyson with the actual prefix output and a shared contracted table. |
 | One constant tone after an identical shared no-drive prefix, r and r₂ pass | Dyson with the actual prefix output. B2 does not apply; post-apply population changes only report. |
 | Same constant-tone branch, Dyson fails but r <= 0.2 | Reduced RWA if its input-independent omitted-sideband error bound fits the segment budget; otherwise try the Hilbert period kernel. |
 | One constant tone not accepted above, known or unknown input, with abs(f) >= 0.3 GHz and duration*T²*Gamma*V² <= 1.0 | `floquet_period` integrates one Hilbert-space U(T), translates the carrier phase in time, and steps each period with secular Strang dissipation. |
@@ -122,20 +124,29 @@ Preparation or apply failures also raise; they never trigger reclassification.
 DOP853 remains the fallback for rejected two-tone Floquet frames and the direct
 path for shaped two-tone and three-or-more-tone segments.
 
-Dyson's B2 guard uses the full source density in the segment model basis for rows
-starting at zero. It takes actual pair coherence magnitudes and the off-diagonal
-trace norm, so diagonal mixed inputs contribute no coherence terms. Other later rows use an arbitrary-input density bound, except certified flux-tail
-rows. A flux-tail group requires a nonempty prefix with no tones and at least two
-identical prefix sequences in the same source/evolve. Identity includes every
-segment's start, duration and level, the target basis and continuous flux samples.
-Different tail lengths never share an input just because their final levels match.
-The planner compares samples before probe start and the first sample at or after
-it to retain the prefix's interpolation boundary. Later samples do not affect
-prefix identity. Prefixes with earlier drives or no identical partner still try
-Dyson first, using arbitrary-input B2, then RWA, Hilbert period and T6.
-Input knowledge only selects B2's source values and A-stage input contraction;
-it does not restrict Dyson or RWA eligibility. Source and initial density are
-common to one evolve and no prefix identity persists across calls.
+Dyson's B2 guard uses the full known density in the segment model basis. For
+rows starting at zero this is the source initial density. For shared prefixes
+it is the engine-computed prefix output. Actual pair coherence magnitudes and
+the off-diagonal trace norm enter the bound. Diagonal mixed inputs therefore
+contribute no coherence terms. Later rows without a shared prefix use an
+arbitrary-input density bound. Certified no-drive prefixes retain their B2
+exemption; driven prefixes must pass actual-input B2.
+
+One prefix mechanism covers driven and no-drive histories. A group requires at
+least two identical nonempty segment sequences in one source/evolve. Identity
+includes every segment's start, duration, level and active tone port, frequency,
+gain, phase and envelope, plus the target basis and continuous flux samples.
+Envelope identity uses content, not a batch-local index. The planner compares
+samples before probe start and the first sample at or after it to retain the
+interpolation boundary. Later samples do not affect prefix identity. Matching
+final states or final levels alone never certifies a shared input.
+
+Before dependent probes are classified, the engine resolves each group in time
+order with ordinary dispatch, preparation, apply and basis changes. Nested
+groups resume from their latest resolved prefix input. Known inputs belong to
+this evolve alone. They never enter PrepareCache. Shared input binding consumes
+the same known input as B2, in the row model basis. All constant single tones
+still enter the ordinary family decision order.
 
 The model supplies the secular form. Missing secular data fails at entry rather
 than selecting another evolution backend.
@@ -157,9 +168,9 @@ source populations determine population differences, actual |rho_ij| bounds pair
 coherence, and the actual off-diagonal trace norm bounds coherent contributions.
 These values are taken after basis conversion, without zeroing small coherence.
 Coherence phases are bounded, not evaluated. Diagonal inputs have c = L = 0.
-Later rows use the arbitrary-input version, with population difference at most 1,
+Unshared later rows use the arbitrary-input version, with population difference at most 1,
 pair coherence at most 1/2 and off-diagonal trace norm at most 2. These bounds
-cover unknown inputs after driven or non-certified no-drive prefixes without
+cover unknown inputs after non-certified prefixes without
 reading worker densities. Such rows keep ordinary per-batch apply, not A-stage
 input contraction. The budget/8 margin reserves the omitted-path allowance.
 
@@ -235,9 +246,9 @@ A-stage, avoiding another build for matching keys. Guard-built singleton
 payloads also reach timeline chunks without cache admission or input binding. Other single-use
 preparations stay inside their timeline chunk and are discarded afterward. The input-bound hook is an A-stage exception to
 model-only preparation. It contracts the source initial density or a shared
-flux-tail prefix output once per shared key, port and input group. A-stage evolves
-one representative of each needed prefix with the ordinary T4 payloads and basis
-changes. The contracted payload lives only until this evolve finishes. Single-use
+prefix output once per shared key, port and input group. Before final dispatch,
+the engine evolves one representative of each group with ordinary kernel
+payloads and basis changes. The contracted payload lives only until this evolve finishes. Single-use
 keys, later rows without a certified shared prefix and kernels returning None
 keep the per-batch path. Dyson uses the maximum absolute gain and maximum duration of all shared
 rows to build its path superset. The shared table drops conjugate path pairs
@@ -248,6 +259,12 @@ Conjugate lookup uses integer keys in a preallocated hash array. Pairing and the
 sequential greedy discard loop run in compiled, single-threaded code. Stable
 bound sorting and accumulation order stay unchanged. This reduces A-stage cost
 for small shared groups without adding a density-dependent reuse threshold.
+For coherent inputs, shared construction first bounds all driven paths from
+each input mode using absolute coupling sums. It drops conjugate mode groups
+within budget/16 before allocating candidate paths. The remaining path-pruning
+allowance is budget/8 minus that spent bound, so the total stays within budget/8.
+Free evolution still uses the full input modes. Diagonal inputs skip this step
+and retain the same table and numerical output as before.
 Workers reuse retained paths and factors in original order without further
 pruning. Ordinary per-batch tables keep their original cutoffs.
 Fixed-size modal reconstruction keeps shared Dyson results bitwise identical

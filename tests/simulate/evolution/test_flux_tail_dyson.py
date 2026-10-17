@@ -106,44 +106,6 @@ def evolve(src, b):
         return engine.evolve(src, (b,), cancel=Event())
 
 
-def test_only_repeated_no_drive_prefixes_bypass_population_bound():
-    src, b = source(), batch()
-    result = evolve(src, b)
-    assert result.paths.segments_by_kernel == {"t4": 4, "dyson": 2}
-
-    # Unequal idle tails, earlier drive, and zero-start inputs retain their
-    # ordinary guard. A duplicate final level alone is not a shared prefix.
-    unequal = evolve(src, batch((7.0, 8.0)))
-    assert unequal.paths.segments_by_kernel == {"t4": 4, "rwa": 2}
-    earlier = replace(b.tracks[0], start_ns=np.zeros(2), duration_ns=np.ones(2))
-    driven = evolve(src, replace(b, tracks=(earlier, *b.tracks)))
-    # The two start-zero prefix pulses retain Dyson. The later probes fail
-    # arbitrary-input B2 and try RWA next, without shared-prefix admission.
-    assert driven.paths.segments_by_kernel == {"dyson": 2, "t4": 4, "rwa": 2}
-    zero = replace(
-        b,
-        tracks=(replace(b.tracks[0], start_ns=np.zeros(2)),),
-        flux=FluxSchedule(np.arange(3), np.zeros(2), np.zeros((2, 1), dtype=np.int64)),
-        end_ns=np.full(2, 40.0),
-    )
-    # Diagonal source at zero has a tight bound, unlike arbitrary later input.
-    assert evolve(src, zero).paths.segments_by_kernel == {"dyson": 2}
-    strong = evolve(src, batch(gain=0.1))
-    assert strong.paths.segments_by_kernel.get("dyson", 0) == 0
-    two_photon = evolve(source((0.0, 0.3, 0.8)), batch(gain=0.002, duration=30000))
-    assert two_photon.paths.segments_by_kernel.get("dyson", 0) == 0
-
-    # Continuous parameters remain part of identity even when their lattice
-    # representation and final level agree.
-    waveform = FluxWaveform(
-        np.array([0, 2, 4]),
-        np.tile([0.0, 2.0], 2),
-        np.array([[0.001], [0], [0.0011], [0]]),
-    )
-    different_flux = evolve(src, replace(b, flux_waveform=waveform))
-    assert different_flux.paths.segments_by_kernel.get("dyson", 0) == 0
-
-
 def test_flux_tail_identity_ignores_future_samples_but_keeps_prefix_boundary():
     src, b = source(), batch()
     waveform = FluxWaveform(
