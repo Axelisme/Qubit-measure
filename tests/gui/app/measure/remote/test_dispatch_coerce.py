@@ -8,11 +8,16 @@ than in the transport-pure ``wire.py``; the field-level
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
+from pydantic import create_model
+from zcu_tools.device import BaseDeviceInfo
 from zcu_tools.gui.app.measure.remote.handlers.connection_device import (
     coerce_connect_device_request,
     coerce_connect_request,
     coerce_disconnect_device_request,
+    h_device_setup_spec,
 )
 from zcu_tools.gui.remote.errors import RemoteError
 
@@ -168,15 +173,33 @@ def test_device_disconnect_spec_remember_defaults_to_true():
 # See Item 1 of Phase 5 Step 0: `origin is typing.Union` misses UnionType.
 
 
+def _setup_field_result(annotation: object) -> tuple[object, object]:
+    """Project a synthetic device field with the supplied runtime annotation.
+
+    Return its public wire type and choices, or None when choices are omitted.
+    Raise AssertionError if fields or entries have the wrong shape or value is missing.
+    """
+    info_model = create_model(
+        "__synthetic_device_info", __base__=BaseDeviceInfo, value=(annotation, None)
+    )
+    info = info_model(address="synthetic-address", type="synthetic-type")
+    adapter = MagicMock()
+    adapter.device_control.get_device_info.return_value = info
+    result = h_device_setup_spec(adapter, {"name": "synthetic"})
+    fields = result["fields"]
+    assert isinstance(fields, list)
+    for entry in fields:
+        assert isinstance(entry, dict)
+        if entry["name"] == "value":
+            return entry["type"], entry.get("choices")
+    raise AssertionError("Device setup fields are missing the synthetic value field")
+
+
 def test_field_type_choices_typing_optional_unwraps():
     """Baseline: typing.Optional[float] is unwrapped to ('float', None)."""
     from typing import Optional
 
-    from zcu_tools.gui.app.measure.remote.handlers.connection_device import (
-        _field_type_and_choices,
-    )
-
-    result = _field_type_and_choices(Optional[float])  # noqa: UP045 — runtime arg not annotation
+    result = _setup_field_result(Optional[float])  # noqa: UP045 — runtime arg not annotation
     assert result == ("float", None)
 
 
@@ -184,22 +207,14 @@ def test_field_type_choices_pep604_optional_unwraps():
     """PEP 604: float | None must also be unwrapped to ('float', None)."""
     import types  # noqa: F401 — ensure types.UnionType is available
 
-    from zcu_tools.gui.app.measure.remote.handlers.connection_device import (
-        _field_type_and_choices,
-    )
-
     # Construct the PEP 604 union at runtime (not via annotation string eval).
     annotation = float | None  # type: ignore[operator]
-    result = _field_type_and_choices(annotation)
+    result = _setup_field_result(annotation)
     assert result == ("float", None)
 
 
 def test_field_type_choices_pep604_optional_int_unwraps():
     """PEP 604: int | None must also be unwrapped to ('int', None)."""
-    from zcu_tools.gui.app.measure.remote.handlers.connection_device import (
-        _field_type_and_choices,
-    )
-
     annotation = int | None  # type: ignore[operator]
-    result = _field_type_and_choices(annotation)
+    result = _setup_field_result(annotation)
     assert result == ("int", None)
