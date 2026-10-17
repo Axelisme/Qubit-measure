@@ -247,6 +247,33 @@ Lookback／acquire_decimated 使用相同有限 pulse 與條件平均場，輸�
 
 保留參數化 make_mock_soccfg 的離線設定／編譯能力，QICK adapter 仍歸 program。舊類別可重用的內部邏輯可移到新入口，但不保留舊雙模式 API。Framework fixtures 按被測 seam 使用合成 executor，不一律執行 FTF。只服務已刪邏輯的 tests 一併移除，不新增「舊內容不存在」的斷言。
 
+### 分工契約與模組邊界
+
+2026-10-16，使用者要求：「我反而認為應該是先完成每個分工模塊的contract，然後各自內部平行開始，因為各自都是黑盒」。對六個契約與先定契約的流程，使用者回覆「確認」。
+
+依 [[0072]]，`core` 放無狀態型別，`simulate` 不 import `program`，`experiment.ftf` 負責組合與單位換算。依賴方向由 C8 分層、C9 無循環、C12 穩定工具不依賴有狀態能力模組保護。一般 program 只依賴公開 mixin 入口，由 `program-simulation-entry` contract 限制，不繞過入口操作 frontend 或引擎。
+
+| 契約 | 生產者 | 消費者與邊界 |
+| --- | --- | --- |
+| C1 模板請求 | `program.v2.simulation` | `experiment.ftf` 消費 `core.simulation` 的模板請求，不把 Module 物件交給數值引擎。 |
+| C2 round 結果 | `experiment.ftf` | program mixin 消費 `core.simulation` 的統計或訊號結果，負責 QICK buffer 轉換。 |
+| C3 引擎 API | `simulate.evolution` | `experiment.ftf` 呼叫演化入口，消費 readout 起點的量子態與路徑診斷。 |
+| C4 模型 | `simulate.ftf` | `simulate.evolution` 消費模型與 secular 形式，不讀 YAML 或裝置。 |
+| C5 kernel | `simulate.evolution` 內部的引擎排程與各 kernel | 排程提供分段工作與預算，kernel 提供 prepare 與 apply。這是引擎內部接縫，不是跨 package API。 |
+| C6 readout 與統計 | `simulate.adc` | `experiment.ftf` 消費條件響應與統計抽樣工具，將 population 組合成 C2 結果。 |
+
+### Secular 形式由模型提供
+
+2026-10-16，對模型直接提供 secular 形式、模型不提供就 fast fail 的方案，使用者選擇「2A」。
+
+模型提供 rate matrix Q、coherence 衰減 Γ 與 H0 eigenbasis。快速路徑直接消費這些量，不在執行期從 collapse operators 反推 secular 結構。模型未提供時，在進入點報錯，不保留驗證失敗後退回另一條演化路徑的分支。
+
+### 快速分段算法是預設數值方法
+
+2026-10-16，對快速算法直接取代模擬環境預設數值方法的提議，使用者回覆：「同意，這個task就是來優化算法的」。
+
+模擬環境預設使用快速分段算法，不保留另一條精確演化路徑。分段引擎內部依條件選用解析解、近似或積分 kernel，不由呼叫端維護快速／精確雙模式。嚴格 reference 用於開發驗證，不是另一個 runtime backend。
+
 ## 交付狀態與限制
 
 - Program 提供具名環境 binding、Module timeline 與 request／signal 契約。GUI 先發布同一 manager 的 live devices，再還原 remembered devices。正常硬體路徑不變，模擬的 raw compile hooks 明確拒絕。
