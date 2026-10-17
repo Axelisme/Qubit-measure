@@ -336,7 +336,7 @@ def recv_until(
     sock: socket.socket,
     accept: Callable[[dict[str, object]], bool],
     timeout_s: float = 30.0,
-) -> dict:
+) -> dict[str, Any]:
     """Wait for the first NDJSON line where ``accept(msg)`` is True.
 
     Lines that ``accept`` rejects are **parked** in a per-socket inbox so a
@@ -399,7 +399,9 @@ def reset_inbox(sock: socket.socket) -> None:
     _INBOX_BUF.pop(sock.fileno(), None)
 
 
-def recv_response(sock: socket.socket, rid: str, timeout_s: float = 30.0) -> dict:
+def recv_response(
+    sock: socket.socket, rid: str, timeout_s: float = 30.0
+) -> dict[str, Any]:
     """Wait for a NDJSON response with ``id == rid``; drops pushes."""
     return recv_until(
         sock,
@@ -408,7 +410,9 @@ def recv_response(sock: socket.socket, rid: str, timeout_s: float = 30.0) -> dic
     )
 
 
-def recv_push(sock: socket.socket, event: str, timeout_s: float = 30.0) -> dict:
+def recv_push(
+    sock: socket.socket, event: str, timeout_s: float = 30.0
+) -> dict[str, Any]:
     """Wait for a push line whose ``event`` matches; drops replies."""
     return recv_until(
         sock,
@@ -435,7 +439,7 @@ def call(
     *,
     rid: str = "1",
     timeout_s: float = 30.0,
-) -> dict:
+) -> dict[str, Any]:
     """Send a single RPC and wait for its matching reply.
 
     params must be a JSON-serializable dictionary with string keys. None or an
