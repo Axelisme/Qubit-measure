@@ -4,7 +4,7 @@ import functools
 import operator
 import os
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Protocol, TypeAlias, cast, final
 
 import numpy as np
@@ -86,7 +86,7 @@ class TypedAcquireMixin(AcquireMixin):
 
     def _average_buf(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
-        d_reps: list[NDArray[np.float64]],
+        d_reps: Sequence[NDArray[np.float64] | NDArray[np.int64]],
         length_norm: bool = True,
         remove_offset: bool = True,
     ) -> list[NDArray[np.float64]]:
@@ -97,11 +97,16 @@ class TypedAcquireMixin(AcquireMixin):
         )
 
     def _process_accumulated(  # pyright: ignore[reportIncompatibleMethodOverride]
-        self, acc_buf: list[NDArray[np.float64]]
+        self, acc_buf: Sequence[NDArray[np.float64] | NDArray[np.int64]]
     ) -> list[NDArray[np.float64]]:
         return super()._process_accumulated(acc_buf)  # pyright: ignore[reportReturnType]
 
     def acquire(self, *args, **kwargs) -> list[NDArray[np.float64]]:
+        return self._acquire_configured(*args, **kwargs)
+
+    def _acquire_configured(self, *args, **kwargs) -> list[NDArray[np.float64]]:
+        # Environment adapters can replace buffer allocation after modifiers
+        # have supplied their options through the normal acquire chain.
         return super().acquire(*args, **kwargs)  # pyright: ignore[reportReturnType]
 
     def acquire_decimated(self, *args, **kwargs) -> list[NDArray[np.float64]]:
@@ -366,7 +371,7 @@ class SingleShotMixin(TypedAcquireMixin):
 
     def _apply_classification(
         self,
-        acc_buf: list[NDArray[np.float64]],
+        acc_buf: Sequence[NDArray[np.float64] | NDArray[np.int64]],
         g_center: complex,
         e_center: complex,
         ge_radius: float,
@@ -402,13 +407,13 @@ class TrackerMixin(TypedAcquireMixin):
         if self._completed_round_count() == completed_rounds:
             return not_finish
 
-        assert self.acc_buf is not None
         assert self.acquire_params is not None
 
         trackers = cast(
             list[TrackerProtocol] | None, self.acquire_params.get("trackers")
         )
         if trackers is not None:
+            assert self.acc_buf is not None
             if self.acquire_params["type"] != "accumulated":
                 raise NotImplementedError(
                     "Tracker is not implemented for type other than accumulated"

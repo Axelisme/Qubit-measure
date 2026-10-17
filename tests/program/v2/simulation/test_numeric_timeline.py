@@ -43,7 +43,7 @@ def test_empty_table_is_a_semantic_noop_if_no_consumer_needs_its_register(loader
         prog.acquire(env.soc, progress=False)
     except ValueError as exc:
         pytest.fail(f"empty loader must preserve its hardware no-op semantics: {exc}")
-    assert len(request_of(env).controls[0]) == 1
+    assert len(request_of(env).materialize_point(0).events) == 1
 
 
 def test_arb_preserves_signed_complex_scale_sample_axis_and_detached_ownership(
@@ -57,7 +57,7 @@ def test_arb_preserves_signed_complex_scale_sample_axis_and_detached_ownership(
     module = readout(waveform=ArbWaveformCfg(data="signed", path=str(path)))
     prog = ModularProgramV2(env.soccfg, ProgramV2Cfg(reps=2), modules=[module])
     prog.acquire(env.soc, progress=False)
-    event = request_of(env).controls[0][0]
+    event = request_of(env).materialize_point(0).events[0]
     envelope = event.envelope
     assert envelope is not None
     values = np.asarray(envelope.values, dtype=np.complex128)
@@ -86,7 +86,7 @@ def test_adc_read_windows_retain_each_generator_association():
         env.soccfg, ProgramV2Cfg(), modules=[readout("first"), second]
     )
     prog.acquire(env.soc, progress=False)
-    window = request_of(env).timelines[0].readouts[0]
+    window = request_of(env).materialize_point(0).readouts[0]
     assert getattr(window, "generator_channels", ()) == (0, 1)
 
 
@@ -109,7 +109,12 @@ def test_two_adc_sample_counts_order_round_averaging_and_companion_raw():
                 ChannelSignals(
                     window.channel,
                     np.full(
-                        (request.acquire.executions, window.reads, window.samples, 2),
+                        (
+                            np.prod(request.acquire.loop_dims),
+                            window.reads,
+                            window.samples,
+                            2,
+                        ),
                         10 * window.channel + request.index + 0.25,
                     ),
                 )
@@ -143,13 +148,19 @@ def test_join_swept_branch_emission_order_is_fixed_even_when_times_cross():
     )
     prog.acquire(env.soc, progress=False)
     request = request_of(env)
-    assert [[e.source for e in events] for events in request.controls] == [
+    assert [
+        [e.source for e in events]
+        for events in (
+            request.materialize_point(p).events
+            for p in range(int(np.prod(request.point_dims)))
+        )
+    ] == [
         ["a", "b"],
         ["a", "b"],
     ]
     assert (
-        request.timelines[1].readouts[0].trigger_us[0]
-        > request.timelines[1].readouts[1].trigger_us[0]
+        request.materialize_point(1).readouts[0].trigger_us[0]
+        > request.materialize_point(1).readouts[1].trigger_us[0]
     )
 
 

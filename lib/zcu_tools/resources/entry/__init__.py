@@ -46,6 +46,7 @@ from .schema_fields import (
     role_candidates,
 )
 from .storage import PointStorageBinding, capture_point_storage
+from .template import EntryTemplate, load_entry_template
 from .views import (
     ComponentView,
     DocumentField,

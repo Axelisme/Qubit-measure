@@ -141,9 +141,13 @@ def test_swept_trigger_uses_start_and_truncated_loop_step_not_pointwise_rounding
     )
     prog.acquire(env.soc, progress=False)
     request = request_of(env)
-    assert [t.readouts[0].trigger_us[0] for t in request.timelines] == pytest.approx(
-        [0, 1 / 430.08, 2 / 430.08]
-    )
+    assert [
+        t.readouts[0].trigger_us[0]
+        for t in (
+            request.materialize_point(p)
+            for p in range(int(np.prod(request.point_dims)))
+        )
+    ] == pytest.approx([0, 1 / 430.08, 2 / 430.08])
 
 
 def test_join_emits_interleaved_read_order_and_companion_raw_from_same_realization():
@@ -172,8 +176,12 @@ def test_join_emits_interleaved_read_order_and_companion_raw_from_same_realizati
     env.soc.binding.execute = execute
     traces = prog.acquire_decimated(env.soc, progress=False)[0]
     request = seen[0].acquire
-    assert [e.source for e in request.controls[0]] == ["first", "second", "third"]
-    assert np.all(np.diff(request.timelines[0].readouts[0].trigger_us) > 0)
+    assert [e.source for e in request.materialize_point(0).events] == [
+        "first",
+        "second",
+        "third",
+    ]
+    assert np.all(np.diff(request.materialize_point(0).readouts[0].trigger_us) > 0)
     assert len(seen) == 2
     assert traces.shape == (2, 3, request.readouts[0].samples, 2)
     np.testing.assert_array_equal(traces[:, :, 0, 0], [[5, 6, 7], [8, 9, 10]])

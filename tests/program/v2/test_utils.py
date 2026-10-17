@@ -1,5 +1,7 @@
+import numpy as np
 import pytest
 from qick.asm_v2 import QickParam, QickProgramV2
+from zcu_tools.program.v2 import utils
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.program.v2.utils import (
@@ -181,3 +183,80 @@ def test_generator_word_decode_handles_negative_mixer_relative_dds() -> None:
         mixer_freq=mixer_freq,
         nqz=1,
     ) == pytest.approx(freq_mhz, abs=1e-5)
+
+
+@pytest.mark.parametrize("mixer_freq", [None, 5000.123])
+def test_array_word_decoding_matches_scalar_bit_exactly(mixer_freq):
+    soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+    soccfg["gens"][0]["has_mixer"] = mixer_freq is not None
+    freqs = [100.123, 7000.0, 4900.0]
+    gen, adc = readout_freq_words(
+        soccfg, freqs, gen_ch=0, ro_ch=0, mixer_freq=mixer_freq, nqz=1
+    )
+    expected_gen = np.array(
+        [
+            readout_freq_from_word(
+                soccfg, w, kind="gen", gen_ch=0, ro_ch=0, mixer_freq=mixer_freq, nqz=1
+            )
+            for w in gen
+        ]
+    )
+    decoded = utils.readout_freqs_from_words(
+        soccfg,
+        np.array(gen, dtype=np.int64),
+        kind="gen",
+        gen_ch=0,
+        ro_ch=0,
+        mixer_freq=mixer_freq,
+        nqz=1,
+        paired_ro_words=np.array(adc, dtype=np.int64),
+    )
+    np.testing.assert_array_equal(decoded, expected_gen)
+    expected_adc = np.array(
+        [
+            readout_freq_from_word(
+                soccfg,
+                w,
+                kind="ro",
+                gen_ch=0,
+                ro_ch=0,
+                mixer_freq=mixer_freq,
+                nqz=1,
+                reference_freq_mhz=f,
+            )
+            for w, f in zip(adc, expected_gen, strict=True)
+        ]
+    )
+    np.testing.assert_array_equal(
+        utils.readout_freqs_from_words(
+            soccfg,
+            np.array(adc, dtype=np.int64),
+            kind="ro",
+            gen_ch=0,
+            ro_ch=0,
+            mixer_freq=mixer_freq,
+            nqz=1,
+            reference_freq_mhz=decoded,
+        ),
+        expected_adc,
+    )
+
+
+def test_array_paired_word_validation_rejects_one_bit_corruption():
+    soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+    gen, adc = readout_freq_words(
+        soccfg, [100, 7000], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
+    )
+    adc[1] ^= 1
+    decode = utils.readout_freqs_from_words
+    with pytest.raises(ValueError, match="frequency words are inconsistent"):
+        decode(
+            soccfg,
+            np.array(gen, dtype=np.int64),
+            kind="gen",
+            gen_ch=0,
+            ro_ch=0,
+            mixer_freq=None,
+            nqz=1,
+            paired_ro_words=np.array(adc, dtype=np.int64),
+        )

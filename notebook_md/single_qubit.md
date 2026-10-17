@@ -89,7 +89,7 @@ last_round_raw = program.get_raw()
 lookback_iq = program.acquire_decimated(env.soc, progress=False)
 ```
 
-Use I/Q and ordinary analysis to find working points. Normal GUI/MCP metadata exposes only the environment's public capabilities and opaque provenance ID. It does not expose populations, state labels or a calibrated working point. Environment authors may separately call `experiment.ftf.plan_point`, `Evolution.evolve` and `populations` to inspect numeric states, outside the operator calibration path.
+Use I/Q and ordinary analysis to find working points. Normal GUI/MCP metadata exposes only the environment's public capabilities and opaque provenance ID. It does not expose populations, state labels or a calibrated working point. Environment authors may separately call `experiment.ftf.plan_template`, `Engine.evolve` and `populations` to inspect numeric states, outside the operator calibration path.
 
 The YAML example supplies native/local/global dimensions and solver tolerances explicitly. Check larger fixed parent spaces, thermal-state coverage and segment refinement for your sample. This model uses weak dispersive readout, Markov/secular baths and exponential echo-characteristic dephasing. It does not guarantee arbitrary truncations or reproduce a full 1/f Ramsey/echo envelope.
 

@@ -12,6 +12,12 @@
 
 Resources 只保存與驗證資料表示。Session 的 AliasTable 擁有語法、backward-link 與使用時解析。儲存先寫 sibling temporary，再原子 replace；失敗保舊檔並清 temporary。這不是 point、setup、ledger 或 memento，也不提供跨檔交易、multiwriter merge 或掉電恢復。
 
+## 可攜 entry 範本
+
+`load_entry_template(path)` 讀取 `format: zcu.entry-template`、`format_version: "1.0"`，接受 major 1 的 forward minor。它回傳具名 `EntryTemplate`，包含有序的 `components` model mapping 與 `EntryAliases`。Caller 必須先註冊 component models。Reader 不建立 entry，不產生 UUID 或時間，不載入 module library。
+
+範本必須有 `components` mapping 與 `aliases`。Components 沿用 point 的名稱、kind 與原 model 欄位驗證。`aliases` 是完整嵌套的 `zcu.aliases` 1.x document，內含 `format`、`format_version` 與 `aliases` mapping。Reader 在讀檔時拒絕錯誤 header、kind、欄位與非字串 alias bindings。Alias 語法、backward links 與解析仍由 GUI Session 的 AliasTable 擁有。`scripts/create_entry.py` 組合 reader、ResultEntry 與 alias 保存能力，產生 GUI 可 Open 的普通 entry。
+
 ## 文件與 seed
 
 Setup 是元件範本。Point 自帶 kind、元件、metadata 與 general。General 的固定欄位只有身分（setup 的 entry_id）、created_at、description 與 ext。Caller 可在 general.ext.flux_value／general.ext.flux_unit 記錄 global flux，ext 沿既有 YAML 值契約保存原值，不提供 flux 專用型別、驗證或單位換算。`new_point` 複製建立當下 setup 的 components 與 metadata，使用新的 created_at，並建立只有標頭的 module_cfg。General 不從 setup 繼承。New point 的 description=None 保留 seed／clone 描述，字串明確設定描述，包括空字串。設定在本次建立與失敗清理範圍內完成。Setup 與 point 的修改、引用與快照互不影響。

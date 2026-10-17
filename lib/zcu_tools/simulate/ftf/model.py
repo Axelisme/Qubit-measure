@@ -2,10 +2,13 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
+from hashlib import sha256
 
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.simulate.adc import ReadoutModel
 from zcu_tools.simulate.baths import (
     H_OVER_K,
     CapacitiveLoss,
@@ -26,7 +29,13 @@ from zcu_tools.simulate.evolution import (
     Basis,
     DensityState,
     DriveSource,
+    FluxExpansion,
+    FluxLevel,
+    FluxTerm,
+    ModelSource,
     NumericModel,
+    SecularDrive,
+    SecularModel,
     quantize_ns,
 )
 
@@ -293,42 +302,7 @@ class JointModel:
         flux = self._flux(flux)
         energy, v = self.eigensystem(flux)
         rates = self._bath_rates(flux, energy, v)
-        slopes = np.array(
-            [
-                np.diag(
-                    v.conj().T
-                    @ self._project(self._lift(local.derivative(float(flux[i])), i))
-                    @ v
-                ).real
-                * 2
-                * np.pi
-                * 1000
-                for i, local in enumerate(self._locals)
-            ]
-        )
-        aphi = np.array([c.parameters.aphi for c in self._locals])
-        gamma = flux_dephasing(slopes, aphi)
-        if any(r.thermal_occupation != 0 for r in resonators):
-            pulls = (
-                (
-                    self.readout_frequencies_ghz(flux, resonators)
-                    - np.array([r.frequency_ghz for r in resonators])
-                )
-                * 2
-                * np.pi
-                * 1000
-            )
-            linewidth = (
-                np.array(
-                    [
-                        r.kappa_external_per_ns + r.kappa_internal_per_ns
-                        for r in resonators
-                    ]
-                )
-                * 1000
-            )
-            nth = np.array([self._occupation(r) for r in resonators])
-            gamma += photon_dephasing(pulls.T, linewidth, nth)
+        gamma = self._pure_dephasing(flux, v, resonators)
         pure = tuple(v @ op @ v.conj().T for op in dephasing_operators(gamma))
         return jump_operators(rates, v) + pure
 
@@ -439,3 +413,237 @@ class JointModel:
             return 0.0
         x = H_OVER_K * resonator.frequency_ghz / self.temperature_k
         return 0.0 if x > 700 else float(1 / np.expm1(x))
+
+    def _pure_dephasing(
+        self,
+        flux: RealArray,
+        vectors: Matrix,
+        resonators: tuple[Resonator, Resonator],
+    ) -> RealArray:
+        """Joint eigenbasis pure rates in 1/ns, shared by both model representations."""
+        slopes = np.array(
+            [
+                np.diag(
+                    vectors.conj().T
+                    @ self._project(self._lift(local.derivative(float(flux[i])), i))
+                    @ vectors
+                ).real
+                * 2
+                * np.pi
+                * 1000
+                for i, local in enumerate(self._locals)
+            ]
+        )
+        gamma = flux_dephasing(
+            slopes, np.array([c.parameters.aphi for c in self._locals])
+        )
+        if any(r.thermal_occupation != 0 for r in resonators):
+            pulls = (
+                (
+                    self.readout_frequencies_ghz(flux, resonators)
+                    - np.array([r.frequency_ghz for r in resonators])
+                )
+                * 2
+                * np.pi
+                * 1000
+            )
+            linewidth = (
+                np.array(
+                    [
+                        r.kappa_external_per_ns + r.kappa_internal_per_ns
+                        for r in resonators
+                    ]
+                )
+                * 1000
+            )
+            nth = np.array([self._occupation(r) for r in resonators])
+            gamma += photon_dephasing(pulls.T, linewidth, nth)
+        return gamma
+
+    def secular_model(
+        self,
+        level: FluxLevel,
+        sources: tuple[DriveSource, ...],
+        *,
+        resonators: tuple[Resonator, Resonator],
+    ) -> SecularModel:
+        """Build one F1/C/F2 lattice model at self.dc_flux + 1e-3 * level.
+
+        level has three integers. sources supplies microwave quadratures in joint's
+        fixed DC coordinates; resonators supplies the residual-photon baths. Returns
+        energies, quadratures, directional and pure rates in the instantaneous energy
+        basis, with eigenvectors mapping back to fixed coordinates. Active exact bath
+        degeneracy raises ValueError naming the level and secular requirement. Other
+        invalid shapes or numeric bath inputs retain their existing ValueError.
+        """
+        if len(level) != 3 or np.asarray(level).dtype.kind not in "iu":
+            raise ValueError("FTF level must contain three integers")
+        flux = self.dc_flux + 1e-3 * np.array(level)
+        energy, vectors = self.eigensystem(flux)
+        try:
+            rates = self._bath_rates(flux, energy, vectors)
+        except ValueError as error:
+            if "degenerate secular transition" not in str(error):
+                raise
+            raise ValueError(
+                f"fast simulation requires a secular bath at level {level}"
+            ) from error
+        drives = tuple(
+            SecularDrive(
+                s.name,
+                vectors.conj().T @ s.in_phase_ghz @ vectors,
+                vectors.conj().T
+                @ (
+                    np.zeros_like(s.in_phase_ghz)
+                    if s.quadrature_ghz is None
+                    else s.quadrature_ghz
+                )
+                @ vectors,
+            )
+            for s in sources
+        )
+        return SecularModel(
+            level,
+            _identity(self, level, sources, resonators),
+            energy,
+            vectors,
+            drives,
+            rates,
+            self._pure_dephasing(flux, vectors, resonators),
+        )
+
+    def flux_expansion(self) -> FluxExpansion:
+        """Return the exact trigonometric H(flux)/h expansion in joint fixed coordinates.
+
+        Fluxonium uses cos/sin(2*pi*f); the SQUID uses cos/sin(pi*f). All couplings
+        and flux-independent kinetic terms enter static, in GHz. No sampling or
+        Taylor approximation is used; flux is absolute reduced F1/C/F2 flux.
+        """
+        static = self._coupling.copy()
+        terms: list[FluxTerm] = []
+        for i, local in enumerate(self._locals):
+            static += self._lift(local.kinetic, i)
+            p = local.parameters
+            if isinstance(p, FluxoniumCircuit):
+                terms.extend(
+                    (
+                        FluxTerm(
+                            i,
+                            "cos_2pi",
+                            self._project(self._lift(-p.ej_ghz * local.cosine, i)),
+                        ),
+                        FluxTerm(
+                            i,
+                            "sin_2pi",
+                            self._project(self._lift(p.ej_ghz * local.sine, i)),
+                        ),
+                    )
+                )
+            else:
+                terms.extend(
+                    (
+                        FluxTerm(
+                            i,
+                            "cos_pi",
+                            self._project(self._lift(-p.ejmax_ghz * local.cosine, i)),
+                        ),
+                        FluxTerm(
+                            i,
+                            "sin_pi",
+                            self._project(
+                                self._lift(p.asymmetry * p.ejmax_ghz * local.sine, i)
+                            ),
+                        ),
+                    )
+                )
+        return FluxExpansion(self._project(static), tuple(terms))
+
+
+def _identity(
+    joint: JointModel,
+    level: FluxLevel,
+    sources: tuple[DriveSource, ...],
+    resonators: tuple[Resonator, Resonator],
+) -> str:
+    digest = sha256(b"ftf-secular-v1")
+    digest.update(
+        repr((joint.parameters, joint.temperature_k, level, resonators)).encode()
+    )
+    digest.update(joint.dc_flux.astype("<f8").tobytes())
+    # Fixed-coordinate phase conventions affect drives/overlaps even at equal DC.
+    digest.update(joint.parent_vectors.astype("<c16").tobytes())
+    for source in sources:
+        digest.update(source.name.encode())
+        digest.update(source.in_phase_ghz.astype("<c16").tobytes())
+        if source.quadrature_ghz is not None:
+            digest.update(source.quadrature_ghz.astype("<c16").tobytes())
+    return digest.hexdigest()
+
+
+def secular_model(
+    joint: JointModel,
+    level: FluxLevel,
+    sources: tuple[DriveSource, ...],
+    *,
+    resonators: tuple[Resonator, Resonator],
+) -> SecularModel:
+    """Build joint's instantaneous secular model; see JointModel.secular_model.
+
+    Inputs use F1/C/F2 integer lattice offsets, fixed-DC drive quadratures in
+    GHz and resonator photon baths. Non-secular baths raise ValueError naming
+    level. The resulting model uses the instantaneous energy eigenbasis.
+    """
+    return joint.secular_model(level, sources, resonators=resonators)
+
+
+def flux_expansion(joint: JointModel) -> FluxExpansion:
+    """Return joint's exact trigonometric GHz Hamiltonian in fixed DC coordinates.
+
+    The terms take absolute reduced F1/C/F2 flux. No Taylor approximation or
+    sampling enters this expansion; see JointModel.flux_expansion.
+    """
+    return joint.flux_expansion()
+
+
+def model_source(
+    joint: JointModel,
+    sources: tuple[DriveSource, ...],
+    *,
+    resonators: tuple[Resonator, Resonator],
+) -> ModelSource:
+    """Return a round-local cached secular builder, DC Gibbs density and exact H.
+
+    sources are fixed-DC microwave ports and resonators supplies photon baths.
+    The returned ModelSource owns level caching; joint/source inputs must remain
+    unchanged for its lifetime. Initial density is in the DC energy eigenbasis.
+    Bath applicability errors occur on model(level), not during construction.
+    """
+    energy, _ = joint.eigensystem(joint.dc_flux)
+    return ModelSource(
+        np.diag(gibbs_weights(energy, temperature_k=joint.temperature_k)).astype(
+            complex
+        ),
+        partial(secular_model, joint, sources=sources, resonators=resonators),
+        flux_expansion(joint),
+    )
+
+
+def readout_model(
+    joint: JointModel, resonators: tuple[Resonator, Resonator]
+) -> ReadoutModel:
+    """Return ADC's model at DC, ignoring flux tails and readout-overlapping controls.
+
+    Frequencies and directional rates use DC energy-state order, including every
+    retained state. Resonator linewidths are in 1/ns. Reference frequency is zero
+    GHz and Receiver uses its neutral defaults; composition may replace these
+    calibration fields. Invalid bath/parent response data propagate unchanged.
+    """
+    return ReadoutModel(
+        _identity(joint, (0, 0, 0), (), resonators),
+        joint.basis.labels,
+        joint.readout_frequencies_ghz(joint.dc_flux, resonators),
+        0.0,
+        np.array([r.kappa_internal_per_ns for r in resonators]),
+        np.array([r.kappa_external_per_ns for r in resonators]),
+        joint.rates(joint.dc_flux),
+    )
