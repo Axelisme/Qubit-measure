@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
@@ -263,19 +264,27 @@ def test_reaction_matrix_validator_rejects_missing_and_extra_keys() -> None:
     ],
 )
 def test_interaction_fact_reaction_matrix(
-    fact: TabInteractionFact, reaction_names: list[str]
+    fact: TabInteractionFact,
+    reaction_names: list[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     snapshot = _snapshot(has_analyze_result=True, has_post_analyze_result=True)
     coordinator, log, _ctrl, _host = _coordinator(snapshot)
+    bus = BaseEventBus()
 
-    coordinator._on_tab_interaction_changed(TabInteractionChangedPayload("tab-1", fact))
+    try:
+        coordinator.bind(bus)
+        bus.emit(TabInteractionChangedPayload("tab-1", fact))
 
-    assert log.calls[0:2] == [
-        call("host", "has_tab_widget", "tab-1"),
-        call("ctrl", "get_tab_snapshot", "tab-1"),
-    ]
-    assert [entry.method for entry in log.calls[2:]] == reaction_names
-    assert sum(entry.method == "get_tab_snapshot" for entry in log.calls) == 1
+        assert log.calls[0:2] == [
+            call("host", "has_tab_widget", "tab-1"),
+            call("ctrl", "get_tab_snapshot", "tab-1"),
+        ]
+        assert [entry.method for entry in log.calls[2:]] == reaction_names
+        assert sum(entry.method == "get_tab_snapshot" for entry in log.calls) == 1
+        assert all(record.levelno < logging.ERROR for record in caplog.records)
+    finally:
+        coordinator.close()
 
 
 @pytest.mark.parametrize(
@@ -286,12 +295,20 @@ def test_interaction_fact_reaction_matrix(
         TabInteractionFact.SAVE_PATHS_CHANGED,
     ],
 )
-def test_local_edit_facts_have_zero_qt_reaction(fact: TabInteractionFact) -> None:
+def test_local_edit_facts_have_zero_qt_reaction(
+    fact: TabInteractionFact, caplog: pytest.LogCaptureFixture
+) -> None:
     coordinator, log, _ctrl, _host = _coordinator()
+    bus = BaseEventBus()
 
-    coordinator._on_tab_interaction_changed(TabInteractionChangedPayload("tab-1", fact))
+    try:
+        coordinator.bind(bus)
+        bus.emit(TabInteractionChangedPayload("tab-1", fact))
 
-    assert log.calls == []
+        assert log.calls == []
+        assert all(record.levelno < logging.ERROR for record in caplog.records)
+    finally:
+        coordinator.close()
 
 
 @pytest.mark.parametrize(
@@ -338,32 +355,46 @@ def test_local_edit_facts_have_zero_qt_reaction(fact: TabInteractionFact) -> Non
     ],
 )
 def test_content_fact_reaction_matrix(
-    fact: TabContentFact, reaction_names: list[str]
+    fact: TabContentFact,
+    reaction_names: list[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     snapshot = _snapshot()
     coordinator, log, _ctrl, _host = _coordinator(snapshot)
+    bus = BaseEventBus()
 
-    coordinator._on_tab_content_changed(TabContentChangedPayload("tab-1", fact))
+    try:
+        coordinator.bind(bus)
+        bus.emit(TabContentChangedPayload("tab-1", fact))
 
-    assert log.calls[0:2] == [
-        call("host", "has_tab_widget", "tab-1"),
-        call("ctrl", "get_tab_snapshot", "tab-1"),
-    ]
-    assert [entry.method for entry in log.calls[2:]] == reaction_names
-    assert sum(entry.method == "get_tab_snapshot" for entry in log.calls) == 1
+        assert log.calls[0:2] == [
+            call("host", "has_tab_widget", "tab-1"),
+            call("ctrl", "get_tab_snapshot", "tab-1"),
+        ]
+        assert [entry.method for entry in log.calls[2:]] == reaction_names
+        assert sum(entry.method == "get_tab_snapshot" for entry in log.calls) == 1
+        assert all(record.levelno < logging.ERROR for record in caplog.records)
+    finally:
+        coordinator.close()
 
 
-def test_tab_content_changed_ignores_missing_view_tab() -> None:
+def test_tab_content_changed_ignores_missing_view_tab(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     coordinator, log, _ctrl, host = _coordinator()
     host.tab_ids = []
+    bus = BaseEventBus()
 
-    coordinator._on_tab_content_changed(
-        TabContentChangedPayload("tab-1", TabContentFact.RUN_RESULT_COMMITTED)
-    )
+    try:
+        coordinator.bind(bus)
+        bus.emit(TabContentChangedPayload("tab-1", TabContentFact.RUN_RESULT_COMMITTED))
 
-    assert log.calls == [
-        call("host", "has_tab_widget", "tab-1"),
-    ]
+        assert log.calls == [
+            call("host", "has_tab_widget", "tab-1"),
+        ]
+        assert all(record.levelno < logging.ERROR for record in caplog.records)
+    finally:
+        coordinator.close()
 
 
 def test_bind_routes_events_and_close_unsubscribes() -> None:
@@ -380,31 +411,39 @@ def test_bind_routes_events_and_close_unsubscribes() -> None:
     ]
 
 
-def test_run_finished_refreshes_without_focus_or_navigation() -> None:
+def test_run_finished_refreshes_without_focus_or_navigation(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     snapshot = _snapshot()
     coordinator, log, ctrl, _host = _coordinator(snapshot)
+    bus = BaseEventBus()
 
-    # Terminal events are interpreted against the State-owned running identity,
-    # not against a cached/payload-derived marker value. Neither outcome may
-    # trigger a pane-selection reaction.
-    ctrl.running_tab_id = None
-    coordinator._on_run_finished(RunFinishedPayload("tab-1", outcome="cancelled"))
-    ctrl.running_tab_id = None
-    coordinator._on_run_finished(RunFinishedPayload("tab-1", outcome="finished"))
+    try:
+        coordinator.bind(bus)
+        # Terminal events are interpreted against the State-owned running identity,
+        # not against a cached/payload-derived marker value. Neither outcome may
+        # trigger a pane-selection reaction.
+        ctrl.running_tab_id = None
+        bus.emit(RunFinishedPayload("tab-1", outcome="cancelled"))
+        ctrl.running_tab_id = None
+        bus.emit(RunFinishedPayload("tab-1", outcome="finished"))
 
-    assert log.calls == [
-        call("host", "has_tab_widget", "tab-1"),
-        call("ctrl", "get_tab_snapshot", "tab-1"),
-        call("host", "refresh_tab_interaction", "tab-1", snapshot),
-        call("ctrl", "get_running_tab_id"),
-        call("host", "refresh_run_lock", None),
-        call("host", "has_tab_widget", "tab-1"),
-        call("ctrl", "get_tab_snapshot", "tab-1"),
-        call("host", "refresh_tab_interaction", "tab-1", snapshot),
-        call("ctrl", "get_running_tab_id"),
-        call("host", "refresh_run_lock", None),
-    ]
-    assert all(entry.method != "focus_run_result_panel" for entry in log.calls)
+        assert log.calls == [
+            call("host", "has_tab_widget", "tab-1"),
+            call("ctrl", "get_tab_snapshot", "tab-1"),
+            call("host", "refresh_tab_interaction", "tab-1", snapshot),
+            call("ctrl", "get_running_tab_id"),
+            call("host", "refresh_run_lock", None),
+            call("host", "has_tab_widget", "tab-1"),
+            call("ctrl", "get_tab_snapshot", "tab-1"),
+            call("host", "refresh_tab_interaction", "tab-1", snapshot),
+            call("ctrl", "get_running_tab_id"),
+            call("host", "refresh_run_lock", None),
+        ]
+        assert all(entry.method != "focus_run_result_panel" for entry in log.calls)
+        assert all(record.levelno < logging.ERROR for record in caplog.records)
+    finally:
+        coordinator.close()
 
 
 def test_run_finished_event_preserves_each_selected_subtab(qapp) -> None:
@@ -436,22 +475,30 @@ def test_run_finished_event_preserves_each_selected_subtab(qapp) -> None:
     qapp.processEvents()
 
 
-def test_run_started_refreshes_invalidated_content_once() -> None:
+def test_run_started_refreshes_invalidated_content_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     snapshot = _snapshot(is_running=True)
     coordinator, log, _ctrl, _host = _coordinator(snapshot)
+    bus = BaseEventBus()
 
-    coordinator._on_run_started(RunStartedPayload("tab-1"))
+    try:
+        coordinator.bind(bus)
+        bus.emit(RunStartedPayload("tab-1"))
 
-    assert log.calls == [
-        call("host", "has_tab_widget", "tab-1"),
-        call("ctrl", "get_tab_snapshot", "tab-1"),
-        call("host", "refresh_tab_analyze_form", "tab-1", snapshot),
-        call("host", "refresh_tab_post_analyze_form", "tab-1", snapshot),
-        call("host", "refresh_tab_writeback", "tab-1", snapshot),
-        call("host", "refresh_tab_interaction", "tab-1", snapshot),
-        call("ctrl", "get_running_tab_id"),
-        call("host", "refresh_run_lock", "running-tab"),
-    ]
+        assert log.calls == [
+            call("host", "has_tab_widget", "tab-1"),
+            call("ctrl", "get_tab_snapshot", "tab-1"),
+            call("host", "refresh_tab_analyze_form", "tab-1", snapshot),
+            call("host", "refresh_tab_post_analyze_form", "tab-1", snapshot),
+            call("host", "refresh_tab_writeback", "tab-1", snapshot),
+            call("host", "refresh_tab_interaction", "tab-1", snapshot),
+            call("ctrl", "get_running_tab_id"),
+            call("host", "refresh_run_lock", "running-tab"),
+        ]
+        assert all(record.levelno < logging.ERROR for record in caplog.records)
+    finally:
+        coordinator.close()
 
 
 def test_main_window_run_marker_tracks_state_and_clears(qapp) -> None:
