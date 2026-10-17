@@ -822,7 +822,7 @@ class JPAOptimizer:
         self._iter_count += 1
         return point
 
-    def _get_next_phaseN_point(self, i: int) -> Point3D | None:
+    def _get_next_phaseN_point(self, _i: int) -> Point3D | None:
         """Get the next point during Phase 2+."""
         point = self._get_phaseN_point()
 
