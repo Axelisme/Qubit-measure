@@ -2621,8 +2621,14 @@ def test_programmatic_request_shutdown_bypasses_unsaved_guard(control_factory, q
     window.request_shutdown()
 
     assert len(dialogs.calls) == 0
+    ctrl.begin_shutdown.assert_not_called()
     QCoreApplication.processEvents()
-    ctrl.begin_shutdown.assert_called_once_with(window._perform_close)
+    ctrl.close.assert_not_called()
+    ctrl.persist_all.assert_not_called()
+    _shutdown_callback(ctrl)()
+    ctrl.close.assert_called_once_with()
+    ctrl.persist_all.assert_called_once_with()
+    assert len(dialogs.calls) == 0
 
 
 class ValueCfg(ExpCfgModel):
