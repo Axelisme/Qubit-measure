@@ -334,7 +334,7 @@ def _read_matching_frame(
 
 def recv_until(
     sock: socket.socket,
-    accept: Callable[[dict], bool],
+    accept: Callable[[dict[str, object]], bool],
     timeout_s: float = 30.0,
 ) -> dict:
     """Wait for the first NDJSON line where ``accept(msg)`` is True.
