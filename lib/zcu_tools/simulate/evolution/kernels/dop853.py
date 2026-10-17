@@ -166,7 +166,9 @@ class DOP853Kernel:
         endpoint in its own model eigenbasis. Later input slots are ignored.
         A basis overlap is applied on model changes within a chain. Across
         calls, the engine supplies the next input in the next model's basis.
-        The integrator stops at boundaries and retains its last accepted step.
+        Each row starts from a deterministic 0.1 ns step seed and adapts up to
+        its smallest active sampled-envelope spacing. Constant envelopes have
+        no sampling ceiling. No adaptive history carries between rows.
 
         Raises ValueError for incompatible prepared data, state/index shapes or
         nonexistent ports. RuntimeError signals numerical failure; earlier rows

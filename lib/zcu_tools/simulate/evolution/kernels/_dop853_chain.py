@@ -7,6 +7,26 @@ from numpy.typing import NDArray
 from ._dop853 import Tolerances, integrate
 
 
+@njit(nogil=True, cache=True)
+def _sample_ceiling(segments, row):
+    ceiling = np.inf
+    for tone in range(segments.tones[row]):
+        envelope = segments.envelope[row, tone]
+        begin, end = segments.sample_offsets[envelope : envelope + 2]
+        for index in range(begin + 1, end):
+            ceiling = min(
+                ceiling, segments.sample_time[index] - segments.sample_time[index - 1]
+            )
+    if len(segments.flux_offsets):
+        point = segments.timeline[row]
+        begin, end = segments.flux_offsets[point : point + 2]
+        for index in range(begin + 1, end):
+            ceiling = min(
+                ceiling, segments.flux_time[index] - segments.flux_time[index - 1]
+            )
+    return ceiling
+
+
 # Compiled callables specialize this runner for each kernel's context and RHS.
 @njit(nogil=True, cache=True)
 def run_chain(
@@ -23,13 +43,14 @@ def run_chain(
     compiled kernel-owned callables. data supplies packed models and segments.
     row_models is (rows, model_index), aligned with states (rows, M, M).
     Each chain reads only its first input slot; subsequent rows use the previous
-    endpoint, changing basis on model changes. Disjoint rows reset the adaptive
-    step to controls.max_step and read their own input. Contiguity uses 1e-9 ns.
+    endpoint, changing basis on model changes. Disjoint rows read their own
+    input. Each row resets a deterministic 0.1 ns initial seed, then adapts up
+    to its smallest active envelope/flux sample spacing. Constant envelopes
+    have no sampling ceiling. Contiguity uses 1e-9 ns.
     Integration failures propagate; earlier endpoints may already be stored.
     """
     models, segments = data.models, data.segments
     rows, model_index = row_models
-    last_step = controls.max_step
     for index in range(len(rows)):
         row, model = rows[index], model_index[index]
         state = states[index].copy()
@@ -47,15 +68,18 @@ def run_chain(
                         models.basis[model].conj().T @ models.basis[previous_model]
                     )
                     state = overlap @ state @ overlap.conj().T
-            else:
-                last_step = controls.max_step
         context = make_context(data, row, model)
-        result, last_step = integrate(
+        row_controls = Tolerances(
+            controls.rtol,
+            controls.atol,
+            min(controls.max_step, _sample_ceiling(segments, row)),
+        )
+        result, _ = integrate(
             rhs,
             context,
             state.ravel(),
             float(segments.duration[row]),
-            controls,
-            last_step,
+            row_controls,
+            min(0.1, row_controls.max_step),
         )
         states[index] = result.reshape(state.shape)

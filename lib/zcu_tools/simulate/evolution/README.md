@@ -161,7 +161,7 @@ across the evolve call, including unknown-input rows. For duration tau in ns,
 carrier magnitude f in GHz, and gate/table key counts qg and qp, its relative
 work scores are:
 
-- DOP853: `0.8*tau * (1 + 0.3*f)`.
+- DOP853: `0.8*tau * (1 + 0.3*f - 0.07*max(0, f-1))`.
 - Gate cache: `tau * (60 + 3*f) / qg + 0.04`.
 - Period table: `(150 + 550/f) / qp + c*tau*f + 4*tail*(1 + 0.3*f)`.
 
@@ -171,15 +171,20 @@ come from single-threaded prepare/apply comparisons on 16-level FTF models over
 50 MHz to 7 GHz, 30 ns to 10 us, and reuse counts 1, 2, 5, 9, 10 and 20. They are
 cost estimates, not timing probes or numerical guards. The direct coefficient
 and fractional-tail coefficient include the approximately 20% direct integration
-cost reduction from the Hermitian commutator. Short-pulse scans use all six reuse
+cost reduction from the Hermitian commutator. Ticket 40 reduces the direct
+score's carrier-dependent slope above 1 GHz after removing the fixed step
+ceiling and scaling tolerances to the budget. The frequency term below 1 GHz
+stays unchanged because lab-frame stability can still limit steps there.
+Fractional-tail scores stay conservative at their previous calibration.
+Short-pulse scans use all six reuse
 counts; long-pulse comparisons use one row. Port-local tables and
 removal of the common energy zero reduce preparation work. Real-envelope apply
 contracts the phase Fourier coefficients once per row for positive and negative
 amplitudes, then evaluates only the amplitude polynomial each period. Complex
 envelopes retain their time-varying phase. Fractional tails and DC reuse the
 compiled DOP853 kernel with model-only prepared data. The tail shifts carrier
-phase and envelope-local time together and retains strict rtol <= 1e-10 and
-atol <= 1e-12. Its prepared arrays count toward the period-table cache charge.
+phase and envelope-local time together and retains strict rtol <= 1e-9 and
+atol <= 1e-11. Its prepared arrays count toward the period-table cache charge.
 
 The ordinary shaped cost plan counts all candidate shaped rows, including rows
 later accepted by Sambe. A worker never recomputes reuse from another timeline's
@@ -326,11 +331,29 @@ Hermitian structure through the intermediate stages. The RHS fuses the
 commutator and secular coherence loss into one elementwise loop, then adds
 population transfer. It does not normalize or clip the density.
 
-DOP853 defaults to rtol=1e-5, atol=1e-7 and max_step=0.1 ns, tightening
-tolerances for smaller budgets. The step ceiling and sampled-envelope playback
-are unchanged. Diagonal H0 separation and the H0 interaction picture did not
-reduce low-carrier row cost in the 16-level comparisons. Looser tolerances did
-not help those stability- or ceiling-limited rows.
+DOP853 uses rtol=min(1e-4, 0.03*budget) and
+atol=min(1e-6, 0.0003*budget). Both tolerances scale with the same calibrated
+factor. A three-tone isolated sampled feature at budget=1e-8 sets that factor;
+0.04 exceeds its error allowance, while 0.03 passes. The local controls leave
+margin for interval composition, but they do not prove a global error bound.
+
+There is no fixed 0.1 ns accepted-step ceiling. For sampled envelopes, the
+ceiling is the smallest sample spacing among active envelopes. A step crosses
+at most one knot in each envelope, so it cannot skip a narrow sampled feature.
+Constant envelopes add no sampling ceiling. `flux_dop853` also includes its
+continuous-flux waveform spacing. The original samples and linear playback
+remain unchanged. The solver need not stop exactly at interior knots.
+
+Each row starts from a deterministic 0.1 ns seed, capped by its sample spacing.
+The seed is not an accepted-step ceiling. No adaptive history carries between
+rows, so splitting a chain across apply calls preserves its numerical path.
+Row boundaries still stop integration exactly and switch models or baths.
+
+Joint ceiling/tolerance measurements on 16-level FTF rows found that high-carrier
+work falls as tolerances relax. Low-carrier work can remain stability-limited
+even when population errors are far below budget. The H0 interaction picture
+with loose controls reduced short-row cost but exceeded the 1e-2 population
+allowance at 10 us, so the lab-frame representation is retained.
 
 Flux-tail truncation uses an absolute flux bound, not elapsed multiples of a
 filter time constant. FTF sums absolute pulse-tail contributions and truncates

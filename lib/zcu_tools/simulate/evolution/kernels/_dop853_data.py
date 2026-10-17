@@ -36,6 +36,8 @@ class Segments(NamedTuple):
     model port index, GHz, real gain, rad, envelope index and local offset ns.
     sample_offsets: (envelopes+1,) ragged bounds into sample_time (ns) and
     samples (complex amplitudes); an empty span denotes constant unity.
+    flux_offsets/time: optional ragged absolute flux-waveform sample times for
+    the row's sampled-control step ceiling. Empty offsets denote no waveform.
     """
 
     timeline: NDArray[np.int64]
@@ -51,6 +53,8 @@ class Segments(NamedTuple):
     sample_offsets: NDArray[np.int64]
     sample_time: NDArray[np.float64]
     samples: NDArray[np.complex128]
+    flux_offsets: NDArray[np.int64]
+    flux_time: NDArray[np.float64]
 
 
 class Context(NamedTuple):
@@ -118,6 +122,10 @@ def pack_segments(table: SegmentTable) -> Segments:
         offsets,
         times,
         samples,
+        table.flux_waveform.offsets
+        if table.flux_waveform is not None
+        else np.empty(0, dtype=np.int64),
+        table.flux_waveform.time_ns if table.flux_waveform is not None else np.empty(0),
     )
 
 

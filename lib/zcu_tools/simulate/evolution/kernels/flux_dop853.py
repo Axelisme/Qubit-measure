@@ -121,8 +121,10 @@ class FluxDOP853Kernel:
     thread-safe model cache, never density. apply packs only unique used bath
     levels; model references/workspaces are outside Prepared.nbytes, as for the
     other kernels. Operators and states use each row's bath eigenbasis. Chained
-    rows switch basis at boundaries and reuse the accepted step of the shared
-    single-threaded, nogil DOP853 core. No flux/DAC midpoint freezing occurs.
+    rows switch basis at boundaries. The shared single-threaded, nogil DOP853
+    core resets a deterministic initial step per row and limits steps by the
+    smallest active envelope/flux sample spacing. No flux/DAC midpoint freezing
+    occurs.
     """
 
     name = "flux_dop853"
@@ -213,7 +215,8 @@ class FluxDOP853Kernel:
         in that row's bath eigenbasis. Later input slots in a chain are ignored.
         Waveforms are indexed by table.timeline and interpolated at absolute ns;
         endpoint samples are held outside their span. Bath levels are table.level.
-        Stops at every row boundary, retaining the last accepted step. Raises
+        Stops at every row boundary. Each row resets a deterministic initial
+        step and limits steps by active sampled-control spacing. Raises
         ValueError for absent samples, incompatible payload/shapes/ports/indices;
         RuntimeError on integration failure, without clipping or renormalizing.
         Earlier rows may already be advanced on numerical failure.
