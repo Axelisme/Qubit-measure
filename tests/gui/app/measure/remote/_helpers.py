@@ -270,9 +270,12 @@ class FakeTransport:
         pass
 
 
-def dispatch_handler(ctrl: Any, method: str, params: dict) -> Mapping[str, object]:
+def dispatch_handler(
+    ctrl: Any, method: str, params: Mapping[str, object]
+) -> Mapping[str, object]:
     """Invoke a handler plus the shared expected-error projection boundary.
 
+    Pass ``params`` unchanged to the handler without copying or validating it.
     Handlers now receive the ``RemoteControlAdapter`` (not the bare ctrl) and
     reach the façade via ``adapter.ctrl`` (ADR-0068). This wraps ``ctrl`` in a
     minimal adapter stub so unit tests can drive a single handler without a live
