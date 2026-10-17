@@ -411,7 +411,14 @@ def _rotation(entry_coefficients, harmonic, phase):
 
 @njit(nogil=True, cache=True)
 def _second_contraction(data, duration, omega, outer, inner):
-    """Contract the middle mode with BLAS, retaining stable close-pole formulas."""
+    """Contract the middle mode with BLAS, retaining stable close-pole formulas.
+
+    For separated endpoints the second factor is
+    (F_outer[i,j] - carrier_outer * F_inner[j,k]) / gap[i,k].
+    The denominator is independent of j, so two GEMMs give its numerator.
+    Close endpoints and repeated inner poles still use the scalar divided
+    differences; no modes or coupling paths are pruned.
+    """
     lam, b, factors, carriers = data
     sign = 2 * outer - 1
     sign2 = 2 * inner - 1
@@ -725,11 +732,11 @@ class FloquetKernel:
     """
 
     declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("floquet", "legacy-v1"),
+        identity=AlgorithmIdentity("floquet", "modal-blas-v2"),
         eligibility=Eligibility(2, 2, "constant"),
         guard=GuardDeclaration(("model-build",), builds_model=True),
         accuracy="guarded-approximation",
-        reuse=ReuseDeclaration("floquet/legacy-v1/serial"),
+        reuse=ReuseDeclaration("floquet/modal-blas-v2/serial"),
         fallback="legacy-order",
     )
 
