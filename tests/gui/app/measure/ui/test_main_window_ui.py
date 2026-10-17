@@ -834,17 +834,23 @@ def test_main_window_toolbar_does_not_show_arb_waveforms(control_factory, qapp):
     assert "Arb Waveforms…" not in texts
 
 
-def test_main_window_named_dialog_facade_delegates_to_registry(control_factory, qapp):
+def test_main_window_named_dialog_facade_delegates_to_registry(
+    control_factory, qapp, monkeypatch
+):
     from zcu_tools.gui.app.measure.remote.dialogs import DialogName
+    from zcu_tools.gui.app.measure.ui.main_dialog_registry import MainDialogRegistry
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     ctrl.get_bus.return_value = EventBus()
-    window = MainWindow(ctrl, templates=lambda: {})
     registry = MagicMock()
     registry.visible_names.return_value = [DialogName.PREDICTOR]
     registry.take_screenshot.return_value = b"png"
-    window._dialog_registry = registry
+    monkeypatch.setattr(MainDialogRegistry, "close", registry.close)
+    monkeypatch.setattr(MainDialogRegistry, "open", registry.open)
+    monkeypatch.setattr(MainDialogRegistry, "visible_names", registry.visible_names)
+    monkeypatch.setattr(MainDialogRegistry, "take_screenshot", registry.take_screenshot)
+    window = MainWindow(ctrl, templates=lambda: {})
 
     window.close_dialog(DialogName.PREDICTOR)
     window.open_dialog(DialogName.PREDICTOR)
