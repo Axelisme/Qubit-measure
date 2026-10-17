@@ -18,7 +18,7 @@ from zcu_tools.simulate.evolution import (
 from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Kernel
 
 
-@pytest.mark.parametrize("frequency", [0.05, -0.294, 5.0])
+@pytest.mark.parametrize("frequency", [0.05, -0.05, -0.294, 5.0])
 @pytest.mark.parametrize("coherent", [False, True])
 def test_single_use_ramps_use_spectral_periods_and_match_direct_evolution(
     frequency: float, coherent: bool
@@ -71,7 +71,9 @@ def test_single_use_ramps_use_spectral_periods_and_match_direct_evolution(
         # without patching the dispatcher or reaching into kernel internals.
         reference_track = replace(track, amplitude=track.amplitude / 2)
         reference_batch = replace(batch, tracks=(reference_track, reference_track))
-        expected = direct.evolve(source, (reference_batch,), budget=1e-6, cancel=Event())
+        expected = direct.evolve(
+            source, (reference_batch,), budget=1e-6, cancel=Event()
+        )
     finally:
         engine.close()
         direct.close()
