@@ -24,13 +24,7 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
-from zcu_tools.gui.app.measure.remote.events import (
-    _ser_run_finished,
-    _ser_run_started,
-    _ser_soc_changed,
-    _ser_tab_content_changed,
-    _ser_tab_interaction_changed,
-)
+from zcu_tools.gui.app.measure.remote.events import EVENT_SERIALIZERS
 from zcu_tools.gui.event_bus import EventMeta
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.events import (
@@ -97,10 +91,7 @@ def test_event_serializers_wire_names_locked():
     """All measure-gui EVENT_SERIALIZERS wire names are byte-identical to the
     documented set.  Any payload rename or accidental removal fails here first,
     before a connected agent notices silent breakage."""
-    from zcu_tools.gui.app.measure.remote.events import (
-        EVENT_SERIALIZERS,
-        wire_event_name,
-    )
+    from zcu_tools.gui.app.measure.remote.events import wire_event_name
 
     actual = frozenset(wire_event_name(pt) for pt in EVENT_SERIALIZERS)
     assert actual == _EXPECTED_WIRE_NAMES, (
@@ -111,8 +102,6 @@ def test_event_serializers_wire_names_locked():
 
 
 def test_all_event_serializer_payload_shapes_are_locked() -> None:
-    from zcu_tools.gui.app.measure.remote.events import EVENT_SERIALIZERS
-
     cases = [
         (
             TabAddedPayload(tab_id="tab-x", adapter_name="fake"),
@@ -180,14 +169,16 @@ def test_all_event_serializer_payload_shapes_are_locked() -> None:
 def test_interaction_fact_does_not_change_wire_payload(
     fact: TabInteractionFact,
 ) -> None:
-    assert _ser_tab_interaction_changed(
+    assert EVENT_SERIALIZERS[TabInteractionChangedPayload](
         TabInteractionChangedPayload("tab-x", fact)
     ) == {"tab_id": "tab-x", "requery": ["tab.snapshot"]}
 
 
 @pytest.mark.parametrize("fact", list(TabContentFact))
 def test_content_fact_does_not_change_wire_payload(fact: TabContentFact) -> None:
-    assert _ser_tab_content_changed(TabContentChangedPayload("tab-x", fact)) == {
+    assert EVENT_SERIALIZERS[TabContentChangedPayload](
+        TabContentChangedPayload("tab-x", fact)
+    ) == {
         "tab_id": "tab-x",
         "requery": ["tab.snapshot"],
     }
@@ -481,8 +472,6 @@ def test_writer_queue_overflow_eventually_closes_wedged_client(fx, caplog):
 
 
 def test_stop_unsubscribes_event_bus(qapp):
-    from zcu_tools.gui.app.measure.remote.events import EVENT_SERIALIZERS
-
     f = Fixture()
     f.start()
     # Confirm at least one subscription is installed.
@@ -666,14 +655,14 @@ def test_unauthenticated_subscribe_rejected(qapp):
 
 
 def test_ser_run_started():
-    wire = _ser_run_started(RunStartedPayload(tab_id="tab1"))
+    wire = EVENT_SERIALIZERS[RunStartedPayload](RunStartedPayload(tab_id="tab1"))
     assert wire is not None
     assert wire["tab_id"] == "tab1"
     assert "outcome" not in wire
 
 
 def test_ser_run_finished_includes_outcome():
-    wire = _ser_run_finished(
+    wire = EVENT_SERIALIZERS[RunFinishedPayload](
         RunFinishedPayload(tab_id="tab1", outcome="finished", error_message=None)
     )
     assert wire is not None
@@ -684,7 +673,7 @@ def test_ser_run_finished_includes_outcome():
 
 
 def test_ser_run_finished_failed_includes_error_message():
-    wire = _ser_run_finished(
+    wire = EVENT_SERIALIZERS[RunFinishedPayload](
         RunFinishedPayload(tab_id="tab1", outcome="failed", error_message="timeout")
     )
     assert wire is not None
@@ -693,7 +682,7 @@ def test_ser_run_finished_failed_includes_error_message():
 
 
 def test_ser_run_finished_cancelled():
-    wire = _ser_run_finished(
+    wire = EVENT_SERIALIZERS[RunFinishedPayload](
         RunFinishedPayload(tab_id="tab1", outcome="cancelled", error_message=None)
     )
     assert wire is not None
@@ -703,13 +692,13 @@ def test_ser_run_finished_cancelled():
 
 def test_ser_soc_changed_connected():
     payload = SocChangedPayload(soc=MagicMock(), soccfg=MagicMock())
-    wire = _ser_soc_changed(payload)
+    wire = EVENT_SERIALIZERS[SocChangedPayload](payload)
     assert wire is not None
     assert wire["connected"] is True
 
 
 def test_ser_soc_changed_disconnected():
     payload = SocChangedPayload(soc=None, soccfg=None)
-    wire = _ser_soc_changed(payload)
+    wire = EVENT_SERIALIZERS[SocChangedPayload](payload)
     assert wire is not None
     assert wire["connected"] is False
