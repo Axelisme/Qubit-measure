@@ -164,3 +164,28 @@ def test_unknown_memory_is_not_fabricated_and_t6_channel_allowance_is_separate(s
             planner.plan(src, (b,), estimates, ShadowRequest(3, 1e-3, 1, 0, 288))
     finally:
         planner.close()
+
+
+def test_idle_candidate_preserves_complete_exact_secular_cover(scenario):
+    src, _, pending, _ = scenario
+    b = batch(2, duration=.1)
+    estimates = replace(pending.estimates, families=tuple(
+        replace(f, stages=replace(f.stages, apply=0 if f.identity.name == "t4" else 100))
+        for f in pending.estimates.families
+    ))
+    planner = ConstantPlanner()
+    try:
+        pinned = planner.plan(src, (b,), estimates, ShadowRequest(3, 1e-3, 1, 10000000, 288))
+    finally:
+        planner.close()
+    profile = replace(pending, estimates=estimates,
+                      workloads=(ConstantWorkload(pinned.input_digest, 1, 100000),))
+    engine = Engine(1, 100000)
+    try:
+        expected = engine.evolve(src, (b,), cancel=Event(), execution="legacy")
+        actual = engine.evaluate_constant_profile(src, (b,), profile=profile, cancel=Event())
+        assert actual.paths.segments_by_kernel == {"t4": 2}
+        np.testing.assert_array_equal(actual.points, expected.points)
+        np.testing.assert_allclose(actual.densities, expected.densities, atol=1e-14, rtol=0)
+    finally:
+        engine.close()
