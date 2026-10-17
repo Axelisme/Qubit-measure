@@ -255,12 +255,45 @@ def round_sweep_dict(
 
 
 def sweep2array(
-    sweep: SweepCfg | list | NDArray,
+    sweep: SweepCfg | list | np.ndarray,
     round_type: Literal["none", "time", "freq", "phase", "gain"] = "none",
     round_info: dict[str, Any] | None = None,
     *,
     allow_array: bool = False,
 ) -> NDArray[np.float64]:
+    """Materialize sweep coordinates as float64 values without acquiring hardware.
+
+    ``sweep`` may be a regular ``SweepCfg`` or, with ``allow_array=True``, a
+    list or ndarray. A regular sweep uses ``round_sweep_dict`` to rebuild its
+    grid from ``start``, ``stop`` and ``expts``, not its stored ``step``. Time
+    and frequency grids use QICK start/span and signed step quantization.
+    Other modes round the start and the step derived from the span. Even
+    ``round_type="none"`` rebuilds the step, without hardware quantization.
+    A single-point regular sweep returns only its rounded start.
+
+    Custom lists and arrays first convert to float64, then use ``apply_round``
+    to round each independent point. Array shape is preserved, including
+    multidimensional input; custom points need not form a regular grid.
+
+    ``round_type`` selects no rounding (``"none"``), time in microseconds
+    (``"time"``), frequency in MHz (``"freq"``), phase in degrees (``"phase"``),
+    or gain relative to the generator's maximum (``"gain"``).
+    ``round_info`` is a keyword-argument dict for the selected rounder; None
+    means an empty dict. All hardware modes require ``soccfg``. Frequency,
+    phase and gain also require ``gen_ch``. Time accepts optional ``gen_ch``
+    and ``ro_ch`` to select a clock; frequency and phase accept optional
+    ``ro_ch`` for DAC/ADC grid matching. Hardware modes accept ``scaler``
+    (default 1.0) to scale values before quantization and rescale the result.
+    Frequency also accepts ``mixer_freq`` in MHz: with it, values are absolute
+    RF frequencies and the quantized mixer offset is subtracted; without it,
+    values are DDS frequencies. The ``"none"`` mode takes no rounder kwargs.
+
+    Raise ValueError for disallowed custom input, an invalid sweep format or
+    round type, or a regular sweep whose derived step is effectively zero
+    or whose adjacent points collide after hardware quantization. Conversion
+    errors and selected-rounder errors propagate, including missing or invalid
+    rounder kwargs. Custom arrays do not receive regular-grid collision checks.
+    """
     if round_info is None:
         round_info = {}
 
