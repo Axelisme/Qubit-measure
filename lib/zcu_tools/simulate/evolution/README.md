@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, opt-in shadow planner and one-core profile contracts
+**Last updated:** 2026-10-17, near-unitary Hilbert endpoint correction
 
 ## Segment engine contracts
 
@@ -567,10 +567,15 @@ coefficients on accepted steps. There are no Python RHS callbacks, dense
 resampling or per-key polynomial-basis solves. Stage sums reuse a state buffer
 and skip zero tableau weights instead of allocating weighted-vector temporaries.
 Every retained array counts against the prepare cache; no solver object is kept.
-Polar projection restores unitarity of U(T) and dense fundamental solutions
-before phase translation and fractional-tail composition. It does not normalize
-density. Coherent-input trace drift in the calibration fell from 1.34e-10 to
-1.68e-12. Prototype high-carrier S3/S5 population errors were 1.1e-7 and 2.3e-6.
+One compiled Newton polar step restores unitarity of U(T) and fundamental
+solutions before phase translation and fractional-tail composition. Tight
+DOP853 controls and CF4's Hermitian exponentials keep their singular values near
+one, so this correction squares the norm defect without an SVD. Exact period
+boundaries reuse identity or U(T). High-carrier rows without subdivisions keep
+endpoint composition and density stepping in one nogil call, avoiding repeated
+GIL transitions between short numerical operations. These operations do not
+normalize density. Prototype high-carrier S3/S5 population errors were 1.1e-7
+and 2.3e-6.
 Duration, start and theta do not enter keys.
 Time translation handles signed frequency and phase; the fractional tail uses
 the same Hilbert trajectory with a periodic extension across the boundary. Each full

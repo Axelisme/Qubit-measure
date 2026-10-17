@@ -1,6 +1,7 @@
 """Constant-tone Hilbert propagators with compact secular Strang stepping."""
 
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import numpy as np
 from numba import njit
@@ -22,6 +23,15 @@ _MIN_FREQUENCY_GHZ = 0.03
 _MAX_SPLIT_ESTIMATE = 1.0
 _MAX_SUBDIVISIONS = 64
 _MAGNUS_FREQUENCY_GHZ = 1.0
+
+
+class _DensePeriod(NamedTuple):
+    # Numeric-only view for compiled high-carrier endpoint composition and steps.
+    times: NDArray[np.float64]
+    coefficients: NDArray[np.complex128]
+    unitary: NDArray[np.complex128]
+    population_half: NDArray[np.complex128]
+    coherence_half: NDArray[np.float64]
 
 
 @dataclass(frozen=True)
@@ -112,10 +122,12 @@ def _rhs(time, flat, context):
     return (-2j * np.pi * (h @ flat.reshape(size, size))).ravel()
 
 
+@njit(nogil=True, cache=True)
 def _unitary(matrix: NDArray[np.complex128]) -> NDArray[np.complex128]:
-    """Return the polar unitary of an integrated fundamental solution."""
-    left, _, right = np.linalg.svd(matrix)
-    return left @ right
+    """Retract a near-unitary Hilbert endpoint with one Newton polar step."""
+    # DOP853's <= 1e-10 controls and CF4's Hermitian exponentials keep the
+    # singular values near one. Newton squares that norm defect without an SVD.
+    return 0.5 * (3 * matrix - matrix @ (matrix.conj().T @ matrix))
 
 
 def _build(
@@ -267,24 +279,60 @@ def _advance_segments(rho, unitaries, population, coherence, count):
     return rho
 
 
+@njit(nogil=True, cache=True)
+def _dense_fundamental(times, coefficients, unitary, time):
+    period = times[-1]
+    local = time % period
+    if local == 0:
+        return unitary if time >= period else np.eye(len(unitary), dtype=np.complex128)
+    value = _unitary(_dense(times, coefficients, local))
+    if time >= period:
+        value = value @ unitary
+    return value
+
+
+@njit(nogil=True, cache=True)
+def _dense_row(entry, origin, duration, rho, tail_bath):
+    # Keep endpoint playback, polar correction and all density steps in one
+    # nogil call. Tiny dispatcher calls otherwise contend on the worker GIL.
+    start = _dense_fundamental(entry.times, entry.coefficients, entry.unitary, origin)
+    unitary = start @ entry.unitary @ start.conj().T
+    period = entry.times[-1]
+    count = int(duration // period)
+    tail = duration - count * period
+    result = _advance(rho, unitary, entry.population_half, entry.coherence_half, count)
+    if tail > 0:
+        end = _dense_fundamental(
+            entry.times, entry.coefficients, entry.unitary, origin + tail
+        )
+        result = _advance(result, end @ start.conj().T, tail_bath[0], tail_bath[1], 1)
+    return result
+
+
 def _fundamental(entry: _Period, time: float) -> NDArray[np.complex128]:
+    if entry.magnus is None:
+        return _dense_fundamental(entry.times, entry.coefficients, entry.unitary, time)
     period = float(entry.times[-1])
     local = time % period
-    if entry.magnus is None:
-        value = _unitary(_dense(entry.times, entry.coefficients, local))
-    else:
-        index = min(
-            int(np.searchsorted(entry.times, local, side="right")) - 1,
-            len(entry.times) - 2,
+    if local == 0:
+        # Exact boundaries need neither dense playback nor polar correction.
+        return (
+            entry.unitary
+            if time >= period
+            else np.eye(len(entry.unitary), dtype=complex)
         )
-        h0, x, y, frequency = entry.magnus
-        value = (
-            _magnus_step(
-                h0, x, y, frequency, entry.times[index], local - entry.times[index]
-            )
-            @ entry.coefficients[index]
+    index = min(
+        int(np.searchsorted(entry.times, local, side="right")) - 1,
+        len(entry.times) - 2,
+    )
+    h0, x, y, frequency = entry.magnus
+    value = (
+        _magnus_step(
+            h0, x, y, frequency, entry.times[index], local - entry.times[index]
         )
-        value = _unitary(value)
+        @ entry.coefficients[index]
+    )
+    value = _unitary(value)
     if time >= period:
         value = value @ entry.unitary
     return value
@@ -342,6 +390,22 @@ def _row(
     subdivisions = _subdivisions(duration * entry.split_rate)
     if subdivisions > 1:
         return _subdivided_row(entry, origin, duration, rho, subdivisions)
+    if entry.magnus is None:
+        tail = duration - int(duration // period) * period
+        tail_bath = (entry.population_half, entry.coherence_half)
+        if tail > 0:
+            tail_bath = (
+                expm(entry.generator * tail / 2).astype(complex),
+                np.exp(-entry.decay * tail / 2),
+            )
+        dense = _DensePeriod(
+            entry.times,
+            entry.coefficients,
+            entry.unitary,
+            entry.population_half,
+            entry.coherence_half,
+        )
+        return _dense_row(dense, origin, duration, rho, tail_bath)
     start = _fundamental(entry, origin)
     unitary = start @ entry.unitary @ start.conj().T
     count = int(duration // period)
@@ -395,11 +459,14 @@ class FloquetPeriodKernel:
     Both builders run in single-threaded nogil code. The high-carrier payload
     keeps the dense polynomial's native nested coefficients, without resampling
     or a per-key basis conversion.
-    Only accepted steps are retained; no solver object is kept. Polar projection of
-    U(T) and dense fundamental solutions restores unitarity before phase
-    translation and tail composition; density is never normalized. Measured
-    coherent-input trace drift fell from 1.34e-10 to 1.68e-12. Prototype
-    high-carrier S3/S5 population errors were 1.1e-7/2.3e-6.
+    Only accepted steps are retained; no solver object is kept. One Newton polar
+    step restores unitarity of U(T) and fundamental solutions before phase
+    translation and tail composition. The tight integration controls and CF4's
+    Hermitian exponentials keep endpoints near unitary, so the correction squares
+    their norm defect without an SVD. Exact period boundaries reuse identity or
+    U(T). Unsubdivided high-carrier rows compose endpoints and step density in
+    one nogil call. Density is never normalized. Prototype high-carrier S3/S5 population
+    errors were 1.1e-7/2.3e-6.
 
     Invalid budgets/representatives/payloads raise ValueError. Integration or
     nonfinite numeric output raises RuntimeError, never retries or reroutes.
@@ -407,11 +474,11 @@ class FloquetPeriodKernel:
     """
 
     declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("floquet_period", "legacy-v1"),
+        identity=AlgorithmIdentity("floquet_period", "newton-polar-v2"),
         eligibility=Eligibility(1, 1, "constant"),
         guard=GuardDeclaration(),
         accuracy="guarded-approximation",
-        reuse=ReuseDeclaration("floquet_period/legacy-v1/serial"),
+        reuse=ReuseDeclaration("floquet_period/newton-polar-v2/serial"),
         fallback="legacy-order",
     )
 
