@@ -48,16 +48,21 @@ class ReadbackAdapter(SnapshotAdapter):
         return result
 
 
-@pytest.mark.parametrize("fail_run", [False, True], ids=["finished", "failed"])
-def test_measure_terminal_reads_back_on_worker_and_commits_on_owner(
-    qapp: QApplication, tmp_path: Path, fail_run: bool
-) -> None:
+def _connected_devices() -> tuple[DeviceManager, SnapshotDevice, SnapshotDevice]:
     flux, unused = SnapshotDevice(), SnapshotDevice()
     flux.set_value(0.25)
     unused.set_value(0.6)
     manager = DeviceManager()
     manager.register_device("flux", flux)
     manager.register_device("unused", unused)
+    return manager, flux, unused
+
+
+@pytest.mark.parametrize("fail_run", [False, True], ids=["finished", "failed"])
+def test_measure_terminal_reads_back_on_worker_and_commits_on_owner(
+    qapp: QApplication, tmp_path: Path, fail_run: bool
+) -> None:
+    manager, flux, unused = _connected_devices()
     state, tab_id, _ = make_state()
     adapter = ReadbackAdapter(unused, fail_run)
     state.get_tab(tab_id).cfg = make_form(
@@ -121,7 +126,7 @@ def test_measure_terminal_reads_back_on_worker_and_commits_on_owner(
         ui.select_list_row(
             next(row.text for row in ui.list_rows() if "flux (" in row.text)
         )
-        assert any(w.text == "0.750000" for w in ui.visible().widgets)
+        assert any(w.text == "0.75" for w in ui.visible().widgets)
         ui.screenshot(tmp_path / f"measure-{fail_run}-readback.png")
         ui.click("Close")
     finally:

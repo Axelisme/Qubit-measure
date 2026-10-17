@@ -12,7 +12,7 @@ from typing import (
     runtime_checkable,
 )
 
-from zcu_tools.device import DeviceInfo
+from zcu_tools.device import DeviceActivity, DeviceInfo
 from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
@@ -654,6 +654,31 @@ class DeviceService:
             info=dev.info,
             error=dev.error,
         )
+
+    def activity_snapshot(self) -> dict[str, DeviceActivity]:
+        """Observe named drivers on the session owner without hardware I/O.
+
+        Return a caller-owned mapping of detached immutable activity values.
+        No operation/I/O locks are awaited; fields and drivers are not atomic.
+        End timestamps are process-local monotonic seconds, not wall time.
+        This query does not grant admission or settle operations. Registry
+        query failures propagate.
+        """
+        return self._registry.activity_snapshot()
+
+    def refresh_connected_device_info(self) -> None:
+        """Schedule one best-effort background observation per connected driver.
+
+        Call on the session owner after a run's terminal delivery. Each device
+        uses poll_device_info: successful changed reads commit cache and emit
+        on the owner; failed reads log and retain the previous cache. Missing,
+        disconnecting or otherwise ineligible devices and closed background
+        admission are skipped. No retry, handle, lease or run evidence changes.
+        Hardware I/O runs off-owner and can block. Unexpected submit/registry
+        errors propagate, just as for the individual poll command.
+        """
+        for name in self.get_connected_devices():
+            self.poll_device_info(name)
 
     def get_connected_devices(self) -> dict[str, BaseDevice[Any]]:
         """Borrow the registered drivers without transferring lifecycle ownership."""

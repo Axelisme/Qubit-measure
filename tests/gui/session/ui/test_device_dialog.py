@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 from threading import Event
 from unittest.mock import MagicMock
@@ -165,6 +166,7 @@ def _make_ctrl() -> MagicMock:
     ctrl.list_devices.return_value = []
     ctrl.is_memory_device.return_value = False
     ctrl.get_device_snapshot.return_value = None
+    ctrl.activity_snapshot.return_value = {}
     ctrl.try_poll_device_info.return_value = True
     ctrl.read_context.return_value = None
     return ctrl
@@ -407,7 +409,7 @@ def test_poll_tick_polls_selected_device(qapp, poll_timers):
     )
 
     dialog = _make_dialog(ctrl)
-    (timer,) = poll_timers
+    timer = poll_timers[0]
     try:
         _listing(dialog).setCurrentRow(1)  # select "B"
         timer.tick()
@@ -460,7 +462,7 @@ def test_poll_tick_polls_selected_setting_up_device(qapp, poll_timers):
         assert _button(dialog, "Refresh").isEnabled() is False
 
         dialog.show()
-        (timer,) = poll_timers
+        timer = poll_timers[0]
         timer.tick()
 
         ctrl.try_poll_device_info.assert_called_once_with("fd")
@@ -618,55 +620,6 @@ def _setup_two_device_dialog(qapp):
     dialog = _make_dialog(ctrl)
     _listing(dialog).setCurrentRow(1)  # "fd_b"
     return dialog, ctrl, setting_up
-
-
-def test_setup_markers_follow_each_device_and_preserve_selection(qapp):
-    """Rows project each device's State status independently on start/finish."""
-    setting_up: set[str] = set()
-    ctrl = _two_device_ctrl(setting_up)
-    dialog = _make_dialog(ctrl)
-    _listing(dialog).setCurrentRow(1)  # Keep fd_b selected while fd_a settles.
-
-    setting_up.add("fd_a")
-    ctrl.get_bus.return_value.emit(DeviceSetupStartedPayload(name="fd_a"))
-
-    first = _listing(dialog).item(0)
-    second = _listing(dialog).item(1)
-    assert first is not None and first.text() == "● fd_a (FakeDevice)"
-    assert second is not None and second.text() == "fd_b (FakeDevice)"
-    selected = _listing(dialog).currentItem()
-    assert (
-        selected is not None
-        and selected.text().removeprefix("● ") == "fd_b (FakeDevice)"
-    )
-
-    setting_up.add("fd_b")
-    ctrl.get_bus.return_value.emit(DeviceSetupStartedPayload(name="fd_b"))
-    second = _listing(dialog).item(1)
-    assert second is not None and second.text() == "● fd_b (FakeDevice)"
-
-    setting_up.remove("fd_a")
-    ctrl.get_bus.return_value.emit(
-        DeviceSetupFinishedPayload(name="fd_a", outcome="failed")
-    )
-
-    first = _listing(dialog).item(0)
-    second = _listing(dialog).item(1)
-    assert first is not None and first.text() == "fd_a (FakeDevice)"
-    assert second is not None and second.text() == "● fd_b (FakeDevice)"
-    selected = _listing(dialog).currentItem()
-    assert (
-        selected is not None
-        and selected.text().removeprefix("● ") == "fd_b (FakeDevice)"
-    )
-
-    setting_up.remove("fd_b")
-    ctrl.get_bus.return_value.emit(
-        DeviceSetupFinishedPayload(name="fd_b", outcome="cancelled")
-    )
-
-    items = [_listing(dialog).item(row) for row in range(_listing(dialog).count())]
-    assert all(item is not None and not item.text().startswith("● ") for item in items)
 
 
 def test_setup_running_list_remains_enabled(qapp):
@@ -1179,9 +1132,8 @@ def test_device_status_replaces_error_foreground(
         qapp.processEvents()
 
 
-def test_driver_activity_marks_only_operated_rows_and_holds_between_short_writes(
-    qapp, poll_timers, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+@contextmanager
+def _activity_dialog(qapp, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
     from zcu_tools.device.base import device_operation
     from zcu_tools.gui.app.measure.controller import Controller
@@ -1218,11 +1170,30 @@ def test_driver_activity_marks_only_operated_rows_and_holds_between_short_writes
     )
     dialog = DeviceDialog(ctrl.device_control, parameter_provider=lambda: None)
     pool = ThreadPoolExecutor(max_workers=1)
-    future = None
     try:
         dialog.show()
         qapp.processEvents()
-        ui = ComponentDriver(dialog)
+        yield ComponentDriver(dialog), flux, clock, entered, release, pool
+    finally:
+        release.set()
+        pool.shutdown(wait=True)
+        ctrl.close(timeout_ms=30_000)
+        dialog.close()
+        dialog.deleteLater()
+        manager.close_all_devices()
+
+
+def test_driver_activity_marks_only_operated_rows_and_holds_between_short_writes(
+    qapp, poll_timers, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    with _activity_dialog(qapp, monkeypatch, tmp_path) as (
+        ui,
+        flux,
+        clock,
+        entered,
+        release,
+        pool,
+    ):
         ui.select_list_row("unused (FakeDevice)")
         ui.screenshot(tmp_path / "01-idle.png")
         future = pool.submit(flux.hold)
@@ -1268,12 +1239,3 @@ def test_driver_activity_marks_only_operated_rows_and_holds_between_short_writes
         assert ui.list_rows()[1].selected
         ui.screenshot(tmp_path / "05-idle-again.png")
         ui.click("Close")
-    finally:
-        release.set()
-        if future is not None:
-            future.result(timeout=30)
-        pool.shutdown(wait=True)
-        ctrl.close(timeout_ms=30_000)
-        dialog.close()
-        dialog.deleteLater()
-        manager.close_all_devices()

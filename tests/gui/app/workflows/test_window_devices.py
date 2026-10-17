@@ -44,7 +44,7 @@ def devices_button(window: QWidget) -> QPushButton:
 
 def open_devices(window: QWidget, qapp: QApplication) -> DeviceDialog:
     """Click Devices… and return the single dialog a user now sees."""
-    devices_button(window).click()
+    ComponentDriver(window).click(object_name="workflow.source.devices")
     qapp.processEvents()
     shown = [d for d in window.findChildren(DeviceDialog) if d.isVisible()]
     assert len(shown) == 1
@@ -153,20 +153,22 @@ def test_workflow_terminal_refreshes_cached_values_but_pause_does_not(
     harness.services.device_control.on_device_changed(
         lambda _: commits.append(get_ident())
     )
-    session.during_point = lambda _: driver.set_value(0.45)
+
+    def change_device(_point: int) -> None:
+        driver.set_value(0.45)
+
+    session.during_point = change_device
     if stop_paused:
         session.pause_at = 0
     ui = ComponentDriver(window)
-    ui.click(object_name="workflow.source.devices")
-    qapp.processEvents()
-    dialog = next(d for d in window.findChildren(DeviceDialog) if d.isVisible())
-    devices = ComponentDriver(dialog)
+    devices = ComponentDriver(open_devices(window, qapp))
     devices.select_list_row(
         next(row.text for row in devices.list_rows() if "flux (" in row.text)
     )
     devices.screenshot(tmp_path / "workflow-before.png")
     devices.click("Close")
     ui.click("Start")
+    ui.screenshot(tmp_path / "workflow-running.png")
     with ThreadPoolExecutor(max_workers=1) as pool:
         owner_result(
             harness.owner,
@@ -175,12 +177,15 @@ def test_workflow_terminal_refreshes_cached_values_but_pause_does_not(
         )
     harness.owner.pump_all()
     harness.background.deliver()
+    ui.screenshot(tmp_path / "workflow-delivered.png")
     if stop_paused:
-        assert window.controller.status().lifecycle == "paused"
+        status = window.controller.status()
+        assert status is not None and status.lifecycle == "paused"
         assert harness.background.work is None, (
             "pause retains the run; it is not terminal"
         )
         ui.click("Stop")
+        ui.screenshot(tmp_path / "workflow-stopped.png")
     assert harness.services.device_control.get_cached_device_value("flux") == 0.0
     assert harness.background.work is not None, (
         "terminal must submit a background readback"
@@ -191,17 +196,15 @@ def test_workflow_terminal_refreshes_cached_values_but_pause_does_not(
     harness.background.deliver()
     assert harness.services.device_control.get_cached_device_value("flux") == 0.45
     assert commits == [get_ident()]
-    assert window.controller.status().lifecycle == (
+    status = window.controller.status()
+    assert status is not None and status.lifecycle == (
         "stopped" if stop_paused else "done"
     )
     assert not harness.gate.has_active("run")
-    ui.click(object_name="workflow.source.devices")
-    qapp.processEvents()
-    dialog = next(d for d in window.findChildren(DeviceDialog) if d.isVisible())
-    devices = ComponentDriver(dialog)
+    devices = ComponentDriver(open_devices(window, qapp))
     devices.select_list_row(
         next(row.text for row in devices.list_rows() if "flux (" in row.text)
     )
-    assert any(w.text == "0.450000" for w in devices.visible().widgets)
+    assert any(w.text == "0.45" for w in devices.visible().widgets)
     devices.screenshot(tmp_path / "workflow-after.png")
     devices.click("Close")

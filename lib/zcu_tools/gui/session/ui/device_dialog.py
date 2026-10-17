@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -56,7 +57,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _ACTIVITY_MARKER_PREFIX = "● "
-_ACTIVITY_MARKER_TOOLTIP = "Apply in progress"
+_ACTIVITY_MARKER_ROLE = Qt.ItemDataRole.UserRole + 1
+_ACTIVITY_MARKER_TOOLTIP = "Operating or recently active"
 
 
 @runtime_checkable
@@ -359,6 +361,10 @@ class DeviceDialog(QDialog):
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(1000)
         self._poll_timer.timeout.connect(self._on_poll_tick)
+        # Activity is a lock-free observation, independent of selected-value I/O.
+        self._activity_timer = QTimer(self)
+        self._activity_timer.setInterval(200)
+        self._activity_timer.timeout.connect(self._refresh_activity_markers)
 
         # Tracks the device name most recently loaded into the right panel. Used
         # in _on_selection_changed to distinguish a poll repaint of the SAME device
@@ -470,6 +476,7 @@ class DeviceDialog(QDialog):
         self._event_unsubs.clear()
         self._detach_all_progress()
         self._poll_timer.stop()
+        self._activity_timer.stop()
         self._event_subs_active = False
 
     # --- live-value poller (dialog-scoped + selection-scoped) ----------------
@@ -477,10 +484,14 @@ class DeviceDialog(QDialog):
     def showEvent(self, a0: Any) -> None:
         super().showEvent(a0)
         self._update_poll_timer()
+        self._refresh_activity_markers()
+        if self._event_subs_active:
+            self._activity_timer.start()
 
     def hideEvent(self, a0: Any) -> None:
         super().hideEvent(a0)
         self._update_poll_timer()
+        self._activity_timer.stop()
 
     def _update_poll_timer(self) -> None:
         """(Re)decide whether the live poller should be running.
@@ -526,18 +537,13 @@ class DeviceDialog(QDialog):
             status = (
                 snapshot.status if snapshot is not None else DeviceStatus(entry.status)
             )
-            is_setting_up = status is DeviceStatus.SETTING_UP
             is_live = status in {
                 DeviceStatus.CONNECTED,
                 DeviceStatus.DISCONNECTING,
                 DeviceStatus.SETTING_UP,
             }
             label = f"{entry.name} ({entry.type_name})"
-            if is_setting_up:
-                item = QListWidgetItem(f"{_ACTIVITY_MARKER_PREFIX}{label}")
-                item.setForeground(accent_colour(self))
-                item.setToolTip(_ACTIVITY_MARKER_TOOLTIP)
-            elif is_live:
+            if is_live:
                 item = QListWidgetItem(label)
             else:
                 item = QListWidgetItem(f"{label} [not connected]")
@@ -545,6 +551,7 @@ class DeviceDialog(QDialog):
             item.setData(Qt.ItemDataRole.UserRole, entry.name)  # type: ignore[attr-defined]
             self._list.addItem(item)
         self._empty_hint.setVisible(self._list.count() == 0)
+        self._refresh_activity_markers()
 
         target = select_name if select_name is not None else current_name
         if target is not None:
@@ -559,6 +566,38 @@ class DeviceDialog(QDialog):
         dtype = self._type_combo.currentText()
         existing = {e.name for e in entries}
         self._name_edit.setText(self._unique_name(dtype.lower(), existing))
+
+    def _refresh_activity_markers(self) -> None:
+        activity = self._dev.activity_snapshot()
+        now = time.monotonic()
+        for row in range(self._list.count()):
+            item = self._list.item(row)
+            if item is None:
+                continue
+            observed = activity.get(item.data(Qt.ItemDataRole.UserRole))
+            active = observed is not None and (
+                observed.in_operation
+                or (
+                    observed.last_finished_monotonic is not None
+                    and now - observed.last_finished_monotonic < 1.0
+                )
+            )
+            marked = item.data(_ACTIVITY_MARKER_ROLE) is True
+            if active == marked:
+                continue
+            item.setData(_ACTIVITY_MARKER_ROLE, active)
+            if active:
+                item.setText(f"{_ACTIVITY_MARKER_PREFIX}{item.text()}")
+                item.setForeground(accent_colour(self))
+                item.setToolTip(_ACTIVITY_MARKER_TOOLTIP)
+            else:
+                item.setText(item.text().removeprefix(_ACTIVITY_MARKER_PREFIX))
+                item.setForeground(
+                    secondary_colour(self)
+                    if item.text().endswith(" [not connected]")
+                    else self._list.palette().text()
+                )
+                item.setToolTip("")
 
     def _selected_device_name(self) -> str | None:
         item = self._list.currentItem()
