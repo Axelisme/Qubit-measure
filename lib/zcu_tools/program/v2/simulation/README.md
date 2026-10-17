@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-17 — Compact integrated rounds and deferred raw
+**Last updated:** 2026-10-17
 
 `SimulationAcquireMixin` enters once through `MyProgramV2`. With a
 `SimulationSoc`, it admits a synchronous call, builds one `AcquireRequest`,
@@ -61,6 +61,30 @@ restores preferences afterward. Same-name live devices win; other remembered
 rows remain offline. After operation admission closes and work drains, composition
 closes the manager. Failed driver closes remain registered and propagate. There
 is no automatic retry. `Controller.close()` drains work but does not close drivers.
+
+## Compact timelines and statistics
+
+Each sweep point has one interpreted timeline per acquire, not one per shot.
+The adapter interprets the Module tree in vector mode and emits templates,
+partitioning the grid only where event structure differs. Reps and rounds repeat
+the same controls. A timeline that depends on rep index fails fast with no
+per-shot fallback.
+
+For an unchanged environment snapshot, FTF evolves the initial density once and
+reuses the physical result across rounds. A changed snapshot requires a new
+evolution. Each readout state's conditional mean response is computed once per
+distinct readout content; populations combine these means linearly.
+
+Integrated statistics draw noise once per (round, point), not per shot.
+Multinomial state counts represent projection noise. Gaussian receiver noise
+uses the covariance of the sum over reps. Raw materialization uses the retained
+round identity, so requesting shots does not rerun evolution or draw a new round.
+Raw ADC values remain int64, and round indices select distinct sampling streams.
+
+Python loop counts do not grow with shots or sweep points. Template construction,
+grouping and sampling use NumPy arrays or numba kernels for point-dependent work.
+Python iterates over structural templates and unique content, not individual
+points or reps.
 
 ## Numeric contract and extension points
 
