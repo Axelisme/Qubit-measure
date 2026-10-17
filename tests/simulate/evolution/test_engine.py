@@ -112,6 +112,17 @@ class RecordingKernel:
         return np.zeros(len(rows), dtype=np.bool_)
 
 
+class TimelineKernel(RecordingKernel):
+    """Conservative timeline keys, optionally shared by equivalent copies."""
+
+    def __init__(self, name, *, copies=1):
+        super().__init__(name)
+        self.copies = copies
+
+    def prepare_keys(self, table, rows):
+        return (table.timeline[rows] // self.copies).copy().view("V8")
+
+
 def run(engine: Engine, src: ModelSource, batches: tuple[TimelineBatch, ...]):
     try:
         return engine.evolve(src, batches, cancel=Event())
@@ -353,14 +364,11 @@ def test_shared_cache_namespace_budget_eviction_and_singletons():
 def test_timeline_local_payloads_are_released_before_the_next_timeline(repeated, name):
     from zcu_tools.simulate.evolution.kernel import GuardPreparation
 
-    class LifetimeKernel(RecordingKernel):
+    class LifetimeKernel(TimelineKernel):
         def __init__(self):
             super().__init__(name)
             self.live = 0
             self.peak_live = 0
-
-        def prepare_keys(self, table, rows):
-            return table.timeline[rows].copy().view("V8")
 
         def release(self, count):
             self.live -= count
@@ -409,13 +417,10 @@ def test_timeline_local_payloads_are_released_before_the_next_timeline(repeated,
 
 
 def test_guard_pool_preserves_dispatch_and_density_and_skips_small_key_sets():
-    class ObservingDyson(RecordingKernel):
+    class ObservingDyson(TimelineKernel):
         def __init__(self):
-            super().__init__("dyson")
+            super().__init__("dyson", copies=2)
             self.guard_threads: set[int] = set()
-
-        def prepare_keys(self, table, rows):
-            return table.timeline[rows].copy().view("V8")
 
         def guard(self, table, rows, source, budget):
             self.guard_threads.add(get_ident())
@@ -426,7 +431,9 @@ def test_guard_pool_preserves_dispatch_and_density_and_skips_small_key_sets():
         outputs = []
         for workers in (1, 2):
             kernel = ObservingDyson()
-            b = replace(batch(count), tracks=(track(count, EnvelopeSpec("constant")),))
+            b = replace(
+                batch(2 * count), tracks=(track(2 * count, EnvelopeSpec("constant")),)
+            )
             result = run(
                 Engine(workers, 0, kernels=(kernel, RecordingKernel("floquet_period"))),
                 source(),
@@ -443,6 +450,99 @@ def test_guard_pool_preserves_dispatch_and_density_and_skips_small_key_sets():
             outputs[0].paths.segments_by_kernel == outputs[1].paths.segments_by_kernel
         )
         np.testing.assert_array_equal(outputs[0].densities, outputs[1].densities)
+
+
+@pytest.mark.parametrize(
+    ("duration", "fallback"), [(3, "dop853"), (4000, "period_table")]
+)
+def test_local_guard_tables_build_once_and_match_shared_guard_first_fallback(
+    duration, fallback
+):
+    from zcu_tools.simulate.evolution.kernel import GuardPreparation
+
+    count = 8
+
+    class TableKernel(TimelineKernel):
+        def __init__(self, copies):
+            super().__init__("shaped_sambe", copies=copies)
+            self.builds = np.zeros(count, dtype=np.int64)
+            self.tokens = {}
+            self.used = []
+
+        def prepare(self, keys, table, rows, source, budget):
+            points = keys.view(np.int64)
+            self.builds[points] += 1
+            payload = Payload(len(keys))
+            self.tokens[id(payload)] = self.builds[points].copy()
+            return payload
+
+        def guard_prepared(self, table, rows, source, budget):
+            keys, first = np.unique(self.prepare_keys(table, rows), return_index=True)
+            payload = self.prepare(keys, table, rows[first], source, budget)
+            return GuardResult(
+                (table.timeline[rows] // self.copies) % 2 == 0,
+                (GuardPreparation(keys, payload),),
+            )
+
+        def guard(self, table, rows, source, budget):
+            return self.guard_prepared(table, rows, source, budget).accepted
+
+        def apply(self, prepared, key_index, table, rows, states, budget):
+            self.used.extend(
+                (
+                    int(table.timeline[row] // self.copies),
+                    int(self.tokens[id(prepared)][index]),
+                )
+                for row, index in zip(rows, key_index, strict=True)
+            )
+            return super().apply(prepared, key_index, table, rows, states, budget)
+
+    outputs = []
+    for copies, workers, chunks in ((2, 1, 1), (1, 1, 1), (1, 2, 1), (1, 2, 4)):
+        kernel = TableKernel(copies)
+        total = copies * count
+        b = replace(
+            batch(total),
+            end_ns=np.full(total, duration),
+            tracks=(
+                track(
+                    total,
+                    EnvelopeSpec(
+                        "sampled",
+                        np.array([0, 1, 0], dtype=complex),
+                        np.array([0, duration / 2, duration]),
+                    ),
+                    duration=duration,
+                ),
+            ),
+        )
+        result = run(
+            Engine(
+                workers,
+                0,
+                kernels=(
+                    kernel,
+                    TimelineKernel(
+                        "period_table", copies=2 if duration == 4000 else copies
+                    ),
+                    RecordingKernel("dop853"),
+                ),
+                chunks_per_worker=chunks,
+            ),
+            source(),
+            (b,),
+        )
+        assert result.paths.segments_by_kernel == {
+            "shaped_sambe": total // 2,
+            fallback: total // 2,
+        }
+        np.testing.assert_array_equal(kernel.builds, np.ones(count, dtype=np.int64))
+        assert sorted(kernel.used) == sorted(
+            (point, 1) for point in range(0, count, 2) for _ in range(copies)
+        )
+        outputs.append(result.densities[::copies])
+    for densities in outputs[1:]:
+        np.testing.assert_array_equal(densities, outputs[0])
 
 
 def test_cancel_between_chunks_and_nonfinite_failure():
