@@ -127,6 +127,77 @@ def test_time_of_flight_has_negative_absolute_carrier_slope(reference):
     assert_allclose(np.angle(values[1] / values[0]), -2.5132741228718345, atol=3e-11)
 
 
+@pytest.mark.parametrize(
+    ("path", "shaped"),
+    [("single", False), ("batch", False), ("single", True), ("batch", True)],
+)
+def test_same_physical_pulse_has_reference_independent_iq_and_delay_factor(
+    path, shaped
+):
+    start = 13.25
+    delay = 3.25
+    times = start + np.array([-1.0, 0.0, 2.0, 3.25, 7.0, 20.0, 23.25, 30.0])
+    grid = adc.SampleGrid(times, 6.007, 0.2)
+    observed = []
+    for reference in (6.0, 6.008):
+        model = replace(line_model(), reference_frequency_ghz=reference)
+        # The rotating phase at pulse start changes with the reference so the
+        # physical carrier phase (phase - 2*pi*f_ref*start) stays fixed.
+        pulse = adc.ReadoutPulse(
+            start,
+            start + 20.0,
+            1.0 + 0.2j,
+            6.004,
+            0.3 + 2 * np.pi * (reference - 6.0) * start,
+            envelope=(lambda local: 1 + 0.01j * local) if shaped else None,
+        )
+        delayed = replace(model, receiver=adc.Receiver(time_of_flight_ns=delay))
+        source_grid = replace(grid, times_ns=times - delay)
+        source_iq = traces(model, pulse, source_grid, path)[0]
+        delayed_iq = traces(delayed, pulse, grid, path)[0]
+        source = source_iq[:, 0] + 1j * source_iq[:, 1]
+        actual = delayed_iq[:, 0] + 1j * delayed_iq[:, 1]
+        assert_allclose(
+            actual, source * np.exp(-2j * np.pi * 6.007 * delay), atol=2e-9, rtol=0
+        )
+        assert_allclose(actual[:3], 0.0, atol=0, rtol=0)
+        observed.append((source, actual))
+    assert_allclose(observed[0], observed[1], atol=2e-9, rtol=0)
+
+
+@pytest.mark.parametrize("path", ["single", "constant"])
+def test_nonzero_start_delay_ratio_has_absolute_slope_in_changed_reference(path):
+    start = 13.25
+    ratios_by_reference = []
+    for reference in (6.0, 6.12):
+        base = replace(
+            line_model(),
+            reference_frequency_ghz=reference,
+            kappa_external_per_ns=np.zeros(2),
+        )
+        delayed = replace(base, receiver=adc.Receiver(time_of_flight_ns=400.0))
+        ratios = []
+        for frequency in (6.121, 6.122):
+            pulse = adc.ReadoutPulse(
+                start,
+                start + 450,
+                1.0,
+                frequency,
+                0.3 + 2 * np.pi * (reference - 6.0) * start,
+            )
+            grid = adc.SampleGrid(np.array([start + 425]), frequency)
+            original = traces(base, pulse, grid, path)[0, 0]
+            shifted = traces(delayed, pulse, grid, path)[0, 0]
+            ratio = (shifted[0] + 1j * shifted[1]) / (original[0] + 1j * original[1])
+            assert_allclose(ratio, np.exp(-2j * np.pi * frequency * 400), atol=3e-11)
+            ratios.append(ratio)
+        assert_allclose(
+            np.angle(ratios[1] / ratios[0]), -2.5132741228718345, atol=3e-11
+        )
+        ratios_by_reference.append(ratios)
+    assert_allclose(ratios_by_reference[0], ratios_by_reference[1], atol=3e-11)
+
+
 def test_shaped_envelope_is_delayed_before_receiver_offset_and_noise():
     receiver = adc.Receiver(
         phase_rad=0.4,
