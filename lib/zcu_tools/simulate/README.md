@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-10-17，segment engine and recomputed replay
+**Last updated:** 2026-10-17，segment engine and shared constant-readout propagation
 
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
@@ -45,6 +45,11 @@ and ringdown. `SampleGrid` supplies physical lookback times and demodulation.
 Populations refer to the earliest readout pulse start, or zero with no pulses.
 Earlier samples have zero physical field and do not advance the initial mixture.
 Receiver offset and noise still apply to those samples.
+
+For batched constant pulses, population and homogeneous moment exponentials are
+shared across carrier frequencies. A Sylvester solve supplies the driven block
+without assuming diagonalizable rate matrices. Near-singular driven blocks use
+the full matrix exponential. Shaped envelopes retain the DOP853 solver.
 
 `ADC.sample_windows` shares one initial-state draw across several per-execution
 windows, while receiver noise remains independent across windows.

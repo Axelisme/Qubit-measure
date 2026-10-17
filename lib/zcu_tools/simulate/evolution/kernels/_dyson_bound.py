@@ -10,19 +10,23 @@ def population_bound(
     model: SecularModel,
     port: int,
     params: NDArray[np.float64],
-    populations: NDArray[np.float64],
+    initial: NDArray[np.complex128],
     source_input: NDArray[np.bool_],
 ) -> NDArray[np.float64]:
     """Return B2 for each (frequency GHz, gain, duration ns, phase rad) row.
 
-    populations are source-input populations in this model's eigenbasis.
-    source_input marks rows starting at zero; all other rows use the universal
-    density bound (d0=D=1, cij=1/2, c=2). Phases are deliberately unused:
-    coherence is bounded from populations, not assumed absent. The model must
+    initial is the full source density in this model's eigenbasis.
+    source_input marks rows starting at zero; they use actual pair magnitudes
+    abs(initial[i,j]) and the off-diagonal trace norm, without zeroing small
+    coherence. All other rows use the universal density bound (d0=D=1,
+    cij=1/2, c=2). Coherence phases are deliberately unused. The model must
     supply Hermitian drives and a valid secular Lindblad dissipator. This bounds
     driven-minus-free populations of the unpruned second-order approximation,
     not the error against exact dynamics. No density evolution is performed.
     """
+    populations = np.maximum(np.diag(initial).real, 0.0)
+    off_diagonal = initial - np.diag(np.diag(initial))
+    coherence = float(np.linalg.norm(off_diagonal, "nuc"))
     omega = 2 * np.pi * params[:, 0]
     gain, duration = abs(params[:, 1]), params[:, 2]
     drive = model.drives[port]
@@ -73,13 +77,8 @@ def population_bound(
             )
             simple = (u_minus + u_plus) ** 2 * duration**2 * difference
             diagonal += np.where(resonant, simple, np.minimum(simple, refined))
-            cij = np.where(source_input, np.sqrt(populations[i] * populations[j]), 0.5)
+            cij = np.where(source_input, abs(initial[i, j]), 0.5)
             linear += 2 * cij * (u_minus * j_minus + u_plus * j_plus)
-    size = len(populations)
-    coherence = min(
-        np.sqrt(max(0.0, size * (1 - np.sum(populations**2)))),
-        max(0.0, np.sum(np.sqrt(populations)) ** 2 - 1),
-    )
     c = np.where(source_input, coherence, 2.0)
     a = (
         4
