@@ -15,6 +15,9 @@ from tests.resources._ftf_data import ftf_v2_document
 
 def test_v2_derives_sparse_channels_and_acquires_with_live_dc() -> None:
     document = ftf_v2_document()
+    numerics = document["numerics"]
+    assert isinstance(numerics, dict)
+    numerics["truncation"]["retained_levels"] = 2
     # Use a readout hole as well as the fixture's generator hole.
     readout = document["readout"]
     assert isinstance(readout, dict)
