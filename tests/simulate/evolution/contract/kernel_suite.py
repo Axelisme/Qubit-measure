@@ -228,6 +228,25 @@ class KernelContract:
         )
         assert_budget(actual, expected, case.budget)
 
+    def test_guard_is_row_local(self, kernel_case: KernelCase) -> None:
+        case = kernel_case
+        rows = np.arange(len(case.table.timeline), dtype=np.int64)
+        whole = case.kernel.guard(case.table, rows, case.source, case.budget)
+        partitions = (
+            tuple(rows[i : i + 1] for i in range(len(rows))),
+            (rows[:1], rows[1:]),
+            # Call the later segment first and reverse its rows, then restore
+            # each result to its original row position.
+            (rows[1:][::-1], rows[:1]),
+        )
+        for subsets in partitions:
+            split = np.empty_like(whole)
+            for subset in subsets:
+                split[subset] = case.kernel.guard(
+                    case.table, subset, case.source, case.budget
+                )
+            np.testing.assert_array_equal(split, whole)
+
     def test_rows_can_be_split(self, kernel_case: KernelCase) -> None:
         case = kernel_case
         rows = np.arange(len(case.states), dtype=np.int64)

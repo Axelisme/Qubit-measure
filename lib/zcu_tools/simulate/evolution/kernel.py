@@ -169,6 +169,12 @@ class Kernel(Protocol):
     ) -> NDArray[np.bool_]:
         """Pure validity mask (len(rows),) at positive per-segment error budget.
 
+        Each row's mask depends only on that row's table data, source and
+        budget, never on other rows in the call. Splitting rows into arbitrary
+        segments, calling guard separately and concatenating results in the
+        original row order must match a whole call bit for bit, regardless of
+        call order.
+
         Only algorithm-local guards apply here; the engine owns branch order
         and cross-family rules such as prepare-key usage counts.
         """

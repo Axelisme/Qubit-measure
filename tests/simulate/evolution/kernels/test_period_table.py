@@ -70,6 +70,10 @@ def kernel_case(request: pytest.FixtureRequest) -> KernelCase:
     )
 
 
+def test_guard_is_row_local(kernel_case: KernelCase) -> None:
+    KernelContract().test_guard_is_row_local(kernel_case)
+
+
 def test_rows_can_be_split(kernel_case: KernelCase) -> None:
     KernelContract().test_rows_can_be_split(kernel_case)
 

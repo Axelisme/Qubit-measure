@@ -49,8 +49,9 @@ The internal `kernel` module defines `SegmentTable`, `Kernel` and the opaque
 contract suite lives in `tests/simulate/evolution/contract/kernel_suite.py`.
 Kernel tests inherit `KernelContract` and provide a `kernel_case` fixture with
 accepted rows, a synthetic model and input densities. The suite compares against
-an independent strict DOP853 reference and checks row splitting and preparation
-without density access. The demo kernel stays in tests.
+an independent strict DOP853 reference. It checks guard row locality across
+single-row, unequal and reversed-order split calls, apply row splitting, and
+preparation without density access. The demo kernel stays in tests.
 
 ## Dispatch
 
