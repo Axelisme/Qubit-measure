@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, terminal-family coverage, reachable dispatch fallbacks, and readout trace diagnostics
+**Last updated:** 2026-10-17, compiled shared Dyson path pairing and pruning
 
 ## Segment engine contracts
 
@@ -224,8 +224,14 @@ keys, later rows without a certified shared prefix and kernels returning None
 keep the per-batch path. Dyson uses the maximum absolute gain and maximum duration of all shared
 rows to build its path superset. The shared table drops conjugate path pairs
 by increasing summed entrywise bound, up to budget/8, matching B2's reserved
-margin. Workers reuse retained paths and factors in original order without
-further pruning. Ordinary per-batch tables keep their original cutoffs.
+margin. Shared contraction preallocates candidate arrays from the nonzero
+coupling/input topology instead of building an intermediate tuple list.
+Conjugate lookup uses integer keys in a preallocated hash array. Pairing and the
+sequential greedy discard loop run in compiled, single-threaded code. Stable
+bound sorting and accumulation order stay unchanged. This reduces A-stage cost
+for small shared groups without adding a density-dependent reuse threshold.
+Workers reuse retained paths and factors in original order without further
+pruning. Ordinary per-batch tables keep their original cutoffs.
 Fixed-size modal reconstruction keeps shared Dyson results bitwise identical
 across worker counts and chunk splits.
 
