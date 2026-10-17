@@ -1,6 +1,6 @@
 # Device Note for `zcu_tools/device`
 
-**Last updated:** 2026-10-18，DeviceManager 單名稱登記契約
+**Last updated:** 2026-10-18，driver 活動狀態與 manager 快照
 
 這份筆記整理 `lib/zcu_tools/device` 的設計：以 VISA（pyvisa）為底層，抽出 `BaseDevice` + `BaseDeviceInfo` 的通用契約，再由 `DeviceManager` 管理 caller 明確建立的 registry。內建裝置包含 `YOKOGS200`（電流/電壓源）、`RohdeSchwarzSGS100A`（微波訊號源）與 `FakeDevice`（mock 測試）。
 
@@ -37,6 +37,14 @@ DeviceInfo = Union[
 同一個 driver 在一個 `DeviceManager` 中只接受一個名字。`register_device` 遇到已用其他名字登記的同一實例時拋出 `ValueError`，registry 保留原狀。同名登記仍發出 warning 並覆寫該名稱，可以登記原 driver 或另一個 driver。不同名稱可以各自登記不同 driver。
 
 Manager close 尚未完成時，`register_device` 拒絕登記該 driver，拋出 `DeviceCloseInProgressError`。即使原名稱已被 drop 或被另一個 driver 覆寫，也不能重新登記正在 close 的 driver。
+
+## 活動觀察
+
+Driver 在 `device_operation` 內記錄自己的兩項活動資訊。`DeviceActivity.in_operation` 初始為 `False`，最外層操作開始後為 `True`，巢狀操作返回不會提早清除。`last_finished_monotonic` 初始為 `None`，最外層操作成功或失敗結束時更新為 `time.monotonic()` 的秒數。Busy rejection 不改活動資訊。
+
+`DeviceManager.activity_snapshot()` 回傳目前登記名字到 `DeviceActivity` 的 dict，每台一筆。`BaseDevice.activity` 提供同一種只讀觀察。這些快照不讀硬體、不等待 operation 或 I/O lock，也不呼叫活動 callback。沒有 consumer 時不累積歷史。回傳 dict 與 driver 分離，值不可修改。
+
+任意 thread 都可讀取活動快照，包括正在操作的 thread。Registry 名單在 manager 鎖內複製，活動欄位在鎖外分別取樣，不保證跨欄位或跨 driver 原子一致。時間只與同一 process 的 monotonic clock 比較，不當作 wall-clock 時間。GUI 定時讀取這些資訊作顯示，不用活動快照決定 admission、取消或 settlement。
 
 ## 實驗控制與 acquisition snapshot
 
@@ -132,6 +140,7 @@ predictor device-value flow 把非 numeric input 當作有效硬體值。
 | `drop_device(name, *, ignore_error=False)` | 移除 registry entry（不 close） |
 | `get_device(name)` | 取得；找不到 `ValueError` |
 | `get_all_devices()` | 回傳整個 dict |
+| `activity_snapshot()` | 回傳每個已登記名稱的唯讀活動值，不讀硬體、不等待長操作 |
 | `setup_devices(dev_cfg: Mapping[str, DeviceInfo], *, progress=True, cancel_signal=None)` | 批次對已註冊裝置呼叫 `setup(cfg)` |
 | `get_info(name)` | 取得單一 device 的 `get_info()` 結果；找不到 `ValueError` |
 | `get_all_info()` | 把每個 device 的 `get_info()` 收成 dict，方便存檔 |

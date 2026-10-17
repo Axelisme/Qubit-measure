@@ -5,7 +5,7 @@ import warnings
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
-from .base import BaseDevice
+from .base import BaseDevice, DeviceActivity
 
 if TYPE_CHECKING:
     from . import DeviceInfo
@@ -100,6 +100,22 @@ class DeviceManager:
     def get_all_devices(self) -> dict[str, BaseDevice]:
         with self._lock:
             return dict(self._devices)
+
+    def activity_snapshot(self) -> dict[str, DeviceActivity]:
+        """Return one detached activity value per currently registered name.
+
+        Any thread may call this method. Names/drivers are copied under the
+        registry lock; activity is then sampled without hardware I/O or waiting
+        for operation/I/O locks. Later registry edits do not change the returned
+        mapping. Driver fields and different drivers are not sampled atomically.
+        See DeviceActivity for field meanings, initial values and monotonic
+        seconds. Empty registries return an empty dict; busy drivers do not fail
+        this observation. The returned dict is caller-owned, its values are
+        immutable, and neither can modify driver or registry state.
+        """
+        return {
+            name: device.activity for name, device in self.get_all_devices().items()
+        }
 
     def setup_devices(
         self,
