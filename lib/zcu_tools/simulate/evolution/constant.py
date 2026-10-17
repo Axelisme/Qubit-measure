@@ -9,10 +9,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from threading import Event
 
-from .cache import CacheEntry
+from .cache import CacheEntry, PrepareCache
 from .engine import SEGMENT_NUMERIC_VERSION, EvolutionResult, TimelineBatch
 from .profiles import OneCoreProfile
-from .provider import LegacyKernelAdapter
+from .provider import LegacyKernelAdapter, LegacyProvider
 from .secular import ModelSource
 from .shadow import ShadowPlan, ShadowRequest
 
@@ -71,7 +71,8 @@ class ConstantPlanner:
         cache_bytes: int = 0,
     ) -> None:
         """Capture declared constant kernels; reject invalid resident cache size."""
-        raise NotImplementedError
+        self._provider = LegacyProvider(entries)
+        self._cache = PrepareCache(cache_bytes)
 
     def plan(
         self,
@@ -113,4 +114,4 @@ class ConstantPlanner:
 
     def close(self) -> None:
         """Release replay cache; no worker resources are retained."""
-        raise NotImplementedError
+        self._cache.clear()
