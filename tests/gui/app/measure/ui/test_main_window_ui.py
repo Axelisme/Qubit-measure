@@ -14,8 +14,10 @@ from qtpy.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSplitter,
     QStackedWidget,
     QTabWidget,
+    QToolButton,
 )
 from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -291,6 +293,35 @@ def _snapshot(
     return replace(snapshot, artifacts=tuple(sections))
 
 
+def _left_tabs(tab: ExpTabWidget) -> QTabWidget:
+    """Return the left tab widget, failing if it is missing."""
+    tabs = tab.findChild(QTabWidget)
+    assert tabs is not None
+    return tabs
+
+
+def _left_panel_handle(tab: ExpTabWidget) -> QToolButton:
+    """Return the tooltip-identified panel handle, failing unless it is unique."""
+    handles = [
+        button
+        for button in tab.findChildren(QToolButton)
+        if button.toolTip() in ("Collapse left panel", "Expand left panel")
+    ]
+    assert len(handles) == 1
+    return handles[0]
+
+
+def _new_tab_button(window: MainWindow) -> QPushButton:
+    """Return the New Tab button by its label, failing unless it is unique."""
+    buttons = [
+        button
+        for button in window.findChildren(QPushButton)
+        if button.text() == "New Tab ▾"
+    ]
+    assert len(buttons) == 1
+    return buttons[0]
+
+
 def test_left_panel_toggle_is_attached_to_tab_bar(control_factory, qapp):
     from qtpy.QtWidgets import QApplication
     from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
@@ -303,11 +334,10 @@ def test_left_panel_toggle_is_attached_to_tab_bar(control_factory, qapp):
     tab.show()
     QApplication.processEvents()
 
-    left_tabs = tab.findChild(QTabWidget)
-    assert left_tabs is not None
+    left_tabs = _left_tabs(tab)
     corner = left_tabs.cornerWidget(Qt.Corner.TopLeftCorner)
     assert corner is None
-    assert tab._left_edge_handle.isVisible() is True
+    assert _left_panel_handle(tab).isVisible() is True
 
 
 def test_left_panel_toggle_uses_collapsed_boundary_handle(control_factory, qapp):
@@ -323,24 +353,27 @@ def test_left_panel_toggle_uses_collapsed_boundary_handle(control_factory, qapp)
     tab.show()
     QApplication.processEvents()
 
-    expanded_left = tab._splitter.sizes()[0]
-    expanded_handle_x = tab._left_edge_handle.x()
+    splitter = tab.findChild(QSplitter)
+    assert splitter is not None
+    handle = _left_panel_handle(tab)
+    expanded_left = splitter.sizes()[0]
+    expanded_handle_x = handle.x()
     assert expanded_handle_x > 0
-    assert tab._left_panel_collapsed is False
+    assert handle.toolTip() == "Collapse left panel"
 
-    tab._left_edge_handle.click()
+    handle.click()
     QApplication.processEvents()
 
-    assert tab._splitter.sizes()[0] == 0
-    assert tab._left_panel_collapsed is True
-    assert tab._left_edge_handle.x() == 0
+    assert splitter.sizes()[0] == 0
+    assert handle.toolTip() == "Expand left panel"
+    assert handle.x() == 0
 
-    tab._left_edge_handle.click()
+    handle.click()
     QApplication.processEvents()
 
-    assert tab._left_panel_collapsed is False
-    assert tab._left_edge_handle.x() > 0
-    assert tab._splitter.sizes()[0] >= expanded_left
+    assert handle.toolTip() == "Collapse left panel"
+    assert handle.x() > 0
+    assert splitter.sizes()[0] >= expanded_left
 
 
 def test_left_panel_handle_tracks_splitter_boundary(control_factory, qapp):
@@ -356,19 +389,22 @@ def test_left_panel_handle_tracks_splitter_boundary(control_factory, qapp):
     tab.show()
     QApplication.processEvents()
 
-    initial_x = tab._left_edge_handle.x()
-    splitter_x = tab._splitter.geometry().x()
-    left_boundary = splitter_x + tab._left_tabs.geometry().right() + 1
-    assert abs(initial_x - (left_boundary - tab._left_edge_handle.width() // 2)) <= 2
+    splitter = tab.findChild(QSplitter)
+    assert splitter is not None
+    left_tabs = _left_tabs(tab)
+    handle = _left_panel_handle(tab)
+    initial_x = handle.x()
+    splitter_x = splitter.geometry().x()
+    left_boundary = splitter_x + left_tabs.geometry().right() + 1
+    assert abs(initial_x - (left_boundary - handle.width() // 2)) <= 2
 
-    tab._splitter.setSizes([260, 740])
-    tab._schedule_handle_layout()
+    splitter.moveSplitter(260, 1)
     QApplication.processEvents()
 
-    moved_x = tab._left_edge_handle.x()
-    splitter_x = tab._splitter.geometry().x()
-    left_boundary = splitter_x + tab._left_tabs.geometry().right() + 1
-    assert abs(moved_x - (left_boundary - tab._left_edge_handle.width() // 2)) <= 2
+    moved_x = handle.x()
+    splitter_x = splitter.geometry().x()
+    left_boundary = splitter_x + left_tabs.geometry().right() + 1
+    assert abs(moved_x - (left_boundary - handle.width() // 2)) <= 2
 
 
 def test_exp_tab_disables_local_buttons_while_analyzing(control_factory, qapp):
@@ -572,7 +608,8 @@ def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(
     )
 
     # Fixed order Run | Analysis? | Post? | Data | Guide: Analysis not constructed, Data always visible
-    visible = [tab._left_tabs.tabText(i) for i in range(tab._left_tabs.count())]
+    left_tabs = _left_tabs(tab)
+    visible = [left_tabs.tabText(i) for i in range(left_tabs.count())]
     assert visible == ["Run", "Data", "Guide"]
     # Prove Analysis page and controls were never constructed, not only hidden
     assert not hasattr(tab, "_analysis_panel")
@@ -604,7 +641,7 @@ def test_analysis_adapter_shows_analysis_widgets_and_labels_tab(control_factory,
         _snapshot("tab-1", has_run_result=True, supports_analysis=True)
     )
 
-    assert tab._left_tabs.tabText(1) == "Analysis"
+    assert _left_tabs(tab).tabText(1) == "Analysis"
     assert tab._analyze_section.isHidden() is False
     assert tab.analyze_btn.isHidden() is False
     saves = [
@@ -919,7 +956,7 @@ def test_main_window_run_lock_keeps_new_tab_available(control_factory, qapp):
 
     window.refresh_run_lock("tab-1")
 
-    assert window._toolbar.new_tab_button.isEnabled() is True
+    assert _new_tab_button(window).isEnabled() is True
     tab_one.update_interaction_state.assert_called_once()
     tab_two.update_interaction_state.assert_called_once()
 
@@ -1690,7 +1727,7 @@ def test_new_tab_menu_supports_nested_paths(control_factory, qapp, monkeypatch):
 
     monkeypatch.setattr(QMenu, "exec", _fake_exec)
 
-    window._toolbar.show_new_tab_menu()
+    _new_tab_button(window).click()
 
     ctrl.new_tab.assert_called_once_with("twotone/rabi/length")
 
