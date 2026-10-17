@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-18, constant evidence admission, DOP853 compilation reuse, compiled gate-cache preparation and driven-input plateau routing
+**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, compiled gate-cache preparation, driven-input plateau routing, Hilbert endpoints and timeline-owned waves
 
 ## Segment engine contracts
 
@@ -716,10 +716,15 @@ coefficients on accepted steps. There are no Python RHS callbacks, dense
 resampling or per-key polynomial-basis solves. Stage sums reuse a state buffer
 and skip zero tableau weights instead of allocating weighted-vector temporaries.
 Every retained array counts against the prepare cache; no solver object is kept.
-Polar projection restores unitarity of U(T) and dense fundamental solutions
-before phase translation and fractional-tail composition. It does not normalize
-density. Coherent-input trace drift in the calibration fell from 1.34e-10 to
-1.68e-12. Prototype high-carrier S3/S5 population errors were 1.1e-7 and 2.3e-6.
+One compiled Newton polar step restores unitarity of U(T) and fundamental
+solutions before phase translation and fractional-tail composition. Tight
+DOP853 controls and CF4's Hermitian exponentials keep their singular values near
+one, so this correction squares the norm defect without an SVD. Exact period
+boundaries reuse identity or U(T). High-carrier rows without subdivisions keep
+endpoint composition and density stepping in one nogil call, avoiding repeated
+GIL transitions between short numerical operations. These operations do not
+normalize density. Prototype high-carrier S3/S5 population errors were 1.1e-7
+and 2.3e-6.
 Duration, start and theta do not enter keys.
 Time translation handles signed frequency and phase; the fractional tail uses
 the same Hilbert trajectory with a periodic extension across the boundary. Each full
@@ -782,8 +787,10 @@ across worker counts and chunk splits.
 
 Timeline chunks interleave estimated costs, with six chunks per worker by
 default. Within a chunk, local waves batch next segments by kernel and prepared
-payload. A timeline preserves apply order, but different chunks do not
-synchronize waves. A-stage completion and final collection are the global
+payload. Timelines with deferred builders or repeated local keys stream
+separately to bound retained payload memory. Other points in the same chunk
+keep their shared apply batches. A timeline preserves apply order, but different
+chunks do not synchronize waves. A-stage completion and final collection are the global
 waiting points. Cancellation is checked between chunks.
 
 Joblib threading is the only parallel layer. Worker numba kernels are

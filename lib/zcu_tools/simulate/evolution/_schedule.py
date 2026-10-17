@@ -401,21 +401,28 @@ class Schedule:
             if self.dispatch.deferred is None
             else self.dispatch.deferred & selected
         )
-        local_keys = np.any(deferred) or any(
-            np.any(
+        owned = deferred.copy()
+        for entry in entries:
+            owned[entry.rows] |= (
                 selected[entry.rows]
                 & ~entry.shared[entry.inverse]
                 & (entry.counts[entry.inverse] > 1)
             )
-            for entry in entries
-        )
-        if len(points) > 1 and local_keys:
-            results = [self.chunk(point[None], entries, shared) for point in points]
+        local_points = np.isin(points, self.table.timeline[owned])
+        if len(points) > 1 and local_points.any():
+            # Stream only timelines that own retained local payloads. One such
+            # timeline must not split every other point's shared apply waves.
+            work = [point[None] for point in points[local_points]]
+            if not local_points.all():
+                work.append(points[~local_points])
+            results = [self.chunk(part, entries, shared) for part in work]
             exceeded: Counter[str] = Counter()
             for result in results:
                 exceeded.update(result.exceeded_by_kernel)
             return _ChunkResult(
-                points, np.concatenate([result.states for result in results]), exceeded
+                np.concatenate([result.points for result in results]),
+                np.concatenate([result.states for result in results]),
+                exceeded,
             )
         local_bindings = (
             self.resolve_deferred(np.flatnonzero(deferred)) if np.any(deferred) else []
@@ -490,8 +497,10 @@ class _Chunk:
 
     def _basis(self, slots: NDArray[np.int64], target: NDArray[np.int64]) -> None:
         """Convert only at apply-call boundaries, never within a DOP853 chain."""
-        transitions = np.concatenate([self.level[slots], target], axis=1)
         changed = np.any(self.level[slots] != target, axis=1)
+        if not changed.any():
+            return
+        transitions = np.concatenate([self.level[slots], target], axis=1)
         for transition in np.unique(transitions[changed], axis=0):
             mask = np.all(transitions == transition, axis=1)
             width = target.shape[1]
@@ -507,7 +516,10 @@ class _Chunk:
         first = self.cursor[slots]
         self._basis(slots, self.table.level[first])
         lengths = np.ones(len(slots), dtype=np.int64)
-        if binding.kernel.name in _CHAINABLE_KERNELS:
+        rows, state_slots = first, slots
+        last = np.arange(len(slots))
+        chainable = binding.kernel.name in _CHAINABLE_KERNELS
+        if chainable:
             # Extend each chain until the binding, timeline or continuity changes.
             while True:
                 next_row = first + lengths
@@ -521,12 +533,18 @@ class _Chunk:
                 if not extend.any():
                     break
                 lengths += extend
-        offsets = np.r_[0, np.cumsum(lengths)]
-        repeated = np.repeat(np.arange(len(slots)), lengths)
-        rows = (
-            first[repeated] + np.arange(offsets[-1]) - np.repeat(offsets[:-1], lengths)
-        )
-        states = self.states[slots[repeated]].copy()
+            offsets = np.r_[0, np.cumsum(lengths)]
+            repeated = np.repeat(np.arange(len(slots)), lengths)
+            rows = (
+                first[repeated]
+                + np.arange(offsets[-1])
+                - np.repeat(offsets[:-1], lengths)
+            )
+            state_slots = slots[repeated]
+            last = offsets[1:] - 1
+        # Integer-array indexing already owns a copy. Ordinary kernels need
+        # neither chain expansion nor a second density copy.
+        states = self.states[state_slots]
         try:
             exceeded = binding.kernel.apply(
                 binding.payload.prepared,
@@ -549,9 +567,8 @@ class _Chunk:
         count = int(np.count_nonzero(exceeded))
         if count:
             self.exceeded[binding.kernel.name] += count
-        last = offsets[1:] - 1
-        self.states[slots] = states[last]
-        self.level[slots] = self.table.level[rows[last]]
+        self.states[slots] = states[last] if chainable else states
+        self.level[slots] = self.table.level[rows[last] if chainable else rows]
         self.cursor[slots] += lengths
 
     def _apply_local(self, slot: int) -> None:
@@ -562,7 +579,8 @@ class _Chunk:
             raise RuntimeError(f"missing preparation for segment {row}")
         entry = self.entries[index]
         rows = np.array([row], dtype=np.int64)
-        if entry.kernel.name in _CHAINABLE_KERNELS:
+        chainable = entry.kernel.name in _CHAINABLE_KERNELS
+        if chainable:
             candidates = np.arange(row, self.end[slot], dtype=np.int64)
             contiguous = (self.local_entry[candidates] == index) & (
                 self.binding[candidates] < 0
@@ -573,7 +591,7 @@ class _Chunk:
             )
             stop = np.flatnonzero(~contiguous)
             rows = candidates[: int(stop[0]) if len(stop) else len(candidates)]
-        unique = np.unique(self.local_key[rows])
+        unique = np.unique(self.local_key[rows]) if chainable else self.local_key[rows]
         payload = _build(
             entry,
             unique,
@@ -582,7 +600,11 @@ class _Chunk:
             self.schedule.budget,
             self.schedule.cancel,
         )
-        indices = np.searchsorted(unique, self.local_key[rows])
+        indices = (
+            np.searchsorted(unique, self.local_key[rows])
+            if chainable
+            else np.zeros(1, dtype=np.int64)
+        )
         binding = _Binding(entry.kernel, payload, rows, indices)
         transient = len(self.bindings)
         self.bindings.append(binding)
