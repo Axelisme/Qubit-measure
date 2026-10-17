@@ -82,18 +82,6 @@ def test_common_control_rows_match_full_lab_frame_reference(budget: float) -> No
     np.testing.assert_allclose(actual, expected, atol=budget, rtol=0)
 
 
-def test_strong_row_is_not_diluted_by_weak_rows_in_same_gain_octave() -> None:
-    case = replace(common_controls(), budget=1e-5)
-    # Many nearly stationary weak inputs must not dilute the coherent strong
-    # row's local error. Gains 0.51 and 0.98 belong to the same octave.
-    rows = np.array([0] * 63 + [1], dtype=np.int64)
-    grouped = evolve_rows(case, rows)[-1]
-    alone = evolve_rows(case, np.array([1]))[0]
-    expected = reference(case, 1, case.states[1])
-    np.testing.assert_allclose(grouped, alone, atol=case.budget, rtol=0)
-    np.testing.assert_allclose(grouped, expected, atol=case.budget, rtol=0)
-
-
 def test_row_order_and_apply_partition_preserve_endpoints() -> None:
     case = common_controls()
     rows = np.arange(len(case.states))
@@ -103,7 +91,7 @@ def test_row_order_and_apply_partition_preserve_endpoints() -> None:
     split = np.concatenate([evolve_rows(case, rows[:2]), evolve_rows(case, rows[2:])])
     singles = np.concatenate([evolve_rows(case, np.array([row])) for row in rows])
     for result in (actual, split, singles):
-        np.testing.assert_allclose(result, expected, atol=case.budget * 0.03, rtol=0)
+        np.testing.assert_array_equal(result, expected)
 
 
 def test_different_playback_keys_remain_independent() -> None:
@@ -179,7 +167,7 @@ def test_fallback_calls_preserve_original_lab_frame_endpoints_exactly(
     np.testing.assert_array_equal(actual, expected)
 
 
-def test_engine_worker_and_chunk_partition_preserve_grouped_density() -> None:
+def test_engine_worker_and_chunk_partition_preserve_independent_density() -> None:
     case = common_controls()
     n = len(case.states)
     pulse = replace(
@@ -196,6 +184,4 @@ def test_engine_worker_and_chunk_partition_preserve_grouped_density() -> None:
             results.append(engine.evolve(case.source, (workload,), cancel=Event()))
     for result in results:
         assert result.paths.segments_by_kernel == {"dop853": n}
-        np.testing.assert_allclose(
-            result.densities, results[0].densities, atol=case.budget * 0.03, rtol=0
-        )
+        np.testing.assert_array_equal(result.densities, results[0].densities)
