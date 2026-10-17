@@ -455,6 +455,7 @@ def test_run_started_refreshes_invalidated_content_once() -> None:
 
 
 def test_main_window_run_marker_tracks_state_and_clears(qapp) -> None:
+    from qtpy.QtWidgets import QTabWidget
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = MagicMock()
@@ -473,23 +474,25 @@ def test_main_window_run_marker_tracks_state_and_clears(qapp) -> None:
     tab_b = _TabStub()
     window._tab_widgets["tab-a"] = tab_a  # type: ignore[assignment]
     window._tab_widgets["tab-b"] = tab_b  # type: ignore[assignment]
-    window._tabs.addTab(tab_a, "A")
-    window._tabs.addTab(tab_b, "B")
+    tabs = window.findChild(QTabWidget)
+    assert tabs is not None
+    tabs.addTab(tab_a, "A")
+    tabs.addTab(tab_b, "B")
 
     window.refresh_run_lock(ctrl.get_running_tab_id.return_value)
 
-    tab_bar = window._tabs.tabBar()
+    tab_bar = tabs.tabBar()
     assert tab_bar is not None
-    assert window._tabs.tabText(0) == "● A"
-    assert window._tabs.tabText(1) == "B"
+    assert tabs.tabText(0) == "● A"
+    assert tabs.tabText(1) == "B"
     assert tab_bar.tabTextColor(0).name() == "#286ac7"
     assert tab_bar.tabToolTip(0) == "A — Run in progress"
 
     ctrl.get_running_tab_id.return_value = None
     window.refresh_run_lock(ctrl.get_running_tab_id.return_value)
 
-    assert window._tabs.tabText(0) == "A"
-    assert window._tabs.tabText(1) == "B"
+    assert tabs.tabText(0) == "A"
+    assert tabs.tabText(1) == "B"
     assert tab_bar.tabToolTip(0) == "A"
 
 
