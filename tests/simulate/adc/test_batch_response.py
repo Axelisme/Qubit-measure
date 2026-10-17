@@ -160,9 +160,13 @@ def test_frequency_batch_matches_individual_responses_across_interval_corners(
         result.sums, np.concatenate([r.sums for r in individual]), atol=1e-10, rtol=0
     )
     assert result.traces is not None
+    individual_traces = []
+    for r in individual:
+        assert r.traces is not None
+        individual_traces.append(r.traces)
     np.testing.assert_allclose(
         result.traces,
-        np.concatenate([r.traces for r in individual]),
+        np.concatenate(individual_traces),
         atol=1e-10,
         rtol=0,
     )
