@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.aliases import AliasRow
+from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import CommandOrigin, PointCreateRequest
 from zcu_tools.gui.session.predictor_control import PredictorControlFacet
 from zcu_tools.gui.session.services.context import ContextService
@@ -132,7 +133,9 @@ def test_dialog_trial_calibration_leaves_real_point_unchanged(
         )
         context.install_entry(entry)
         context.new_point(PointCreateRequest("first", "", CommandOrigin("gui")))
-        query = PredictorService(context, components.params_for)
+        query = PredictorService(
+            ContextControlFacet(context=context), components.params_for
+        )
         before = context.read_context().document()
         dialog = PredictorDialog(
             PredictorControlFacet(query), params=query.params_for_qubit("Q1")
@@ -194,7 +197,9 @@ def test_dialog_component_prefill_defaults_to_alias_and_stays_detached(
     qapp, component_context: ContextService
 ) -> None:
     context = component_context
-    query = PredictorService(context, components.params_for)
+    query = PredictorService(
+        ContextControlFacet(context=context), components.params_for
+    )
     before = context.read_context().document()
     dialog = PredictorDialog(
         PredictorControlFacet(query),
@@ -245,7 +250,9 @@ def test_dialog_cache_restores_partial_trial_without_changing_component(
     qapp, tmp_path: Path, component_context: ContextService
 ) -> None:
     context = component_context
-    query = PredictorService(context, components.params_for)
+    query = PredictorService(
+        ContextControlFacet(context=context), components.params_for
+    )
     before = context.read_context().document()
     dialog = PredictorDialog(
         PredictorControlFacet(query), parameter_provider=context.read_context
@@ -334,7 +341,9 @@ def test_dialog_displays_actual_calibration_and_clamping_without_point_writes(
     from qtpy.QtWidgets import QLabel
     from zcu_tools.simulate.transmon import TransmonParams
 
-    query = PredictorService(component_context, components.params_for)
+    query = PredictorService(
+        ContextControlFacet(context=component_context), components.params_for
+    )
     before = component_context.read_context().document()
     params = (
         FluxoniumParams(5.0, 1.0, 0.5, 0.0, 1.0, 0.0)
