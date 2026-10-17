@@ -28,9 +28,9 @@ def test_subperiod_ramp_preserves_resonant_population_transfer(frequency: float)
     model = SecularModel(
         (0,),
         "circular-resonant",
-        np.array([0.0, frequency]),
+        np.array([min(0.0, frequency), max(0.0, frequency)]),
         np.eye(2, dtype=complex),
-        (SecularDrive("drive", x, y),),
+        (SecularDrive("drive", x, y if frequency > 0 else -y),),
         np.zeros((2, 2)),
         np.zeros((2, 2)),
     )
