@@ -115,21 +115,9 @@ def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
 
 
 @pytest.fixture
-def exp_tab_widget(qapp, monkeypatch, make_ctrl):
+def exp_tab_widget(qapp, make_ctrl):
     import zcu_tools.gui.app.measure.ui.exp_tab_widget as mod
 
-    orig_attach = mod.attach_existing_figure_to_container
-
-    def mock_attach(fig, container):
-        from qtpy.QtWidgets import QWidget
-
-        w = QWidget()
-        w.figure = fig
-        container.attach_canvas(w)
-        w.draw = lambda: None
-        return w
-
-    monkeypatch.setattr(mod, "attach_existing_figure_to_container", mock_attach)
     owned_tabs: list[mod.ExpTabWidget] = []
 
     def create_tab(
@@ -145,7 +133,6 @@ def exp_tab_widget(qapp, monkeypatch, make_ctrl):
         for tab in owned_tabs:
             tab.deleteLater()
         owned_tabs.clear()
-        monkeypatch.setattr(mod, "attach_existing_figure_to_container", orig_attach)
 
 
 def test_A5_Run_action_row_status_free_and_20_80_proportions(
