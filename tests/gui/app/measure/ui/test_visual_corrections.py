@@ -164,7 +164,7 @@ def test_A5_Run_action_row_status_free_and_20_80_proportions(
     labels = tab._run_panel.findChildren(QLabel)
     for lb in labels:
         assert lb.objectName() != "readyStatus"
-        assert "Ready" not in lb.text() or lb is tab.findChild(QLabel, "runActionBar")  # type: ignore
+        assert "Ready" not in lb.text() or lb is tab.findChild(QLabel, "runActionBar")
 
     # Run action bar exists and is QFrame with 20/80 stretch
     assert hasattr(tab, "_run_action_bar")
