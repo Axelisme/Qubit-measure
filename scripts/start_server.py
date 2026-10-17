@@ -25,7 +25,7 @@ args = parser.parse_args()
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from zcu_tools.qick_remote.pyro import start_nameserver, start_server  # noqa
+from zcu_tools.qick_remote.pyro import start_nameserver, start_server  # noqa: E402
 
 ns_t = threading.Thread(
     target=start_nameserver, kwargs=dict(ns_port=args.ns_port), daemon=True

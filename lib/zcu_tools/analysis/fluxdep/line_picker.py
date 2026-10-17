@@ -288,7 +288,7 @@ class TwoLinePicker:
         finally:
             self._picked = previous
 
-    def set_conjugate(self, on: bool) -> None:
+    def set_conjugate(self, *, on: bool) -> None:
         self._state = replace(self._state, conjugate=bool(on))
 
     def pick_half(self) -> None:
@@ -313,7 +313,7 @@ class TwoLinePicker:
         center_y = 0.5 * (self._freqs[0] + self._freqs[-1])
         self.show_loss("half", self.flux_half, center_y)
 
-    def set_magnitude_only(self, on: bool) -> None:
+    def set_magnitude_only(self, *, on: bool) -> None:
         self.clear_selection()
         self._state = replace(self._state, magnitude_only=bool(on))
         self._project(magnitude_only=bool(on))

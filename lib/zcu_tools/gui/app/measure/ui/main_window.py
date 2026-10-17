@@ -310,7 +310,7 @@ class MainWindow(QMainWindow):
         self._tabs.setCurrentWidget(tab_w)
         self._refresh_empty_hint()
 
-        self._toolbar.set_new_tab_enabled(True)
+        self._toolbar.set_new_tab_enabled(enabled=True)
         # A tab can be added while another tab is running. Project the current
         # State-owned running identity immediately instead of waiting for a new
         # lifecycle event.
@@ -471,7 +471,7 @@ class MainWindow(QMainWindow):
     def refresh_run_lock(self, running_tab_id: str | None) -> None:
         logger.debug("refresh_run_lock: running_tab_id=%r", running_tab_id)
         self._refresh_tab_activity_markers(running_tab_id)
-        self._toolbar.set_new_tab_enabled(True)
+        self._toolbar.set_new_tab_enabled(enabled=True)
         for tab_id, tab_w in self._tab_widgets.items():
             if self._ctrl.has_tab(tab_id):
                 tab_w.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))

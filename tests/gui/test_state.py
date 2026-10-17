@@ -378,7 +378,7 @@ def test_set_device_info_bumps():
 def test_set_device_remember_bumps():
     state = State(_make_ctx())
     state.put_device(_dev(status=DeviceStatus.CONNECTED, remember=True))
-    state.set_device_remember("dev", False)
+    state.set_device_remember("dev", remember=False)
     dev = state.get_device("dev")
     assert dev is not None and dev.remember is False
     assert state.version.get("device:dev") == 2

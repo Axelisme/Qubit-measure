@@ -428,8 +428,8 @@ def parse_alu_expr(val: AluExpr | str | None) -> AluExpr | None:
         lhs = parse_register(tokens[0])
         try:
             op = AluOp(tokens[1])
-        except ValueError:
-            raise ValueError(f"Unknown ALU operator: {tokens[1]!r}")
+        except ValueError as exc:
+            raise ValueError(f"Unknown ALU operator: {tokens[1]!r}") from exc
         rhs = _parse_alu_rhs(tokens[2])
         if lhs and rhs is not None:
             return AluExpr(lhs, op, rhs)
@@ -439,8 +439,8 @@ def parse_alu_expr(val: AluExpr | str | None) -> AluExpr | None:
         lhs = parse_register(tokens[1])
         try:
             op = AluOp(tokens[0])
-        except ValueError:
-            raise ValueError(f"Unknown ALU unary operator: {tokens[0]!r}")
+        except ValueError as exc:
+            raise ValueError(f"Unknown ALU unary operator: {tokens[0]!r}") from exc
         if lhs:
             return AluExpr(lhs, op=op)
         raise ValueError(f"Cannot parse ALU operand: {tokens[1]}")

@@ -820,7 +820,7 @@ class PredictorDialog(QDialog):
     def _on_close_requested(self) -> None:
         self.reject()
 
-    def set_live_mode(self, enabled: bool, *, status: str | None = None) -> None:
+    def set_live_mode(self, *, enabled: bool, status: str | None = None) -> None:
         """Toggle app-driven live display mode.
 
         Live mode locks local trial fields and marker interaction, driven by
@@ -883,7 +883,7 @@ class PredictorDialog(QDialog):
         self._update_device_buttons()
         self._sync_calibration_button()
         for canvas in self._all_canvases:
-            canvas.set_interaction_enabled(enabled)
+            canvas.set_interaction_enabled(enabled=enabled)
 
     # ------------------------------------------------------------------
     # Model-param widgets / helpers
@@ -1699,7 +1699,7 @@ class PredictorDialog(QDialog):
     # Status helper
     # ------------------------------------------------------------------
 
-    def _set_status(self, msg: str, error: bool = False) -> None:
+    def _set_status(self, msg: str, *, error: bool = False) -> None:
         self._status_label.setText(msg)
         set_foreground(
             self._status_label, error_colour(self) if error else success_colour(self)

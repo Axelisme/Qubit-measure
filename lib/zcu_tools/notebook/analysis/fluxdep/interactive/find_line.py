@@ -227,7 +227,7 @@ class InteractiveLines:
         self._refresh_status()
         plt.close(self.fig)
 
-    def get_positions(self, finish: bool = True) -> tuple[float, float]:
+    def get_positions(self, *, finish: bool = True) -> tuple[float, float]:
         if not self.is_finished and finish:
             self.finish_interactive()
         return self.picker.positions()
@@ -235,11 +235,11 @@ class InteractiveLines:
     def on_toggle_conjugate(self, change) -> None:
         if self.is_finished:
             return
-        self.picker.set_conjugate(bool(change["new"]))
+        self.picker.set_conjugate(on=bool(change["new"]))
 
     def on_toggle_magnitude(self, change) -> None:
         if self.is_finished:
             return
-        self.picker.set_magnitude_only(bool(change["new"]))
+        self.picker.set_magnitude_only(on=bool(change["new"]))
         self._refresh_status()
         self._refresh_position()

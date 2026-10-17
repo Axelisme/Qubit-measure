@@ -760,8 +760,9 @@ class McpBridge:
     def stop(
         self,
         timeout: float = 10.0,
-        timeout_kill: bool = True,
         shutdown_rpc: str | None = None,
+        *,
+        timeout_kill: bool = True,
     ) -> dict[str, Any]:
         """Stop the GUI subprocess this bridge launched (own-cleanup use).
 

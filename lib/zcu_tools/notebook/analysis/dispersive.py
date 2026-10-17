@@ -220,6 +220,7 @@ def auto_fit_dispersive(
     sp_signals: NDArray,
     g_bound: tuple[float, float] = (0.01, 0.2),
     g_init: float | None = None,
+    *,
     fit_bare_rf: bool = False,
 ) -> tuple[float, float | None]:
     """

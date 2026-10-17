@@ -82,7 +82,7 @@ class AdditionalMacroMixin(AsmV2):
             raise RuntimeError("Delay macros are currently disabled.")
         return super().delay(t, tag)
 
-    def delay_reg_auto(self, time_reg: str, gens=True, ros=True) -> None:
+    def delay_reg_auto(self, time_reg: str, *, gens=True, ros=True) -> None:
         """Auto-align to timeline, then increment by runtime cycles from a register."""
         if self._delay_disabled:
             raise RuntimeError("Delay macros are currently disabled.")
@@ -93,6 +93,7 @@ class AdditionalMacroMixin(AsmV2):
         ch: int,
         addr_reg: str,
         t: float | QickParam = 0.0,
+        *,
         flat_top_pulse: bool = False,
     ) -> None:
         """Play a pulse from wmem using a runtime-computed base address register.

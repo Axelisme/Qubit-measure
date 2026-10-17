@@ -23,7 +23,7 @@ def test_single_vertex_matches_existing_mask_brush(select: bool) -> None:
     expected = actual.copy()
     before_xs, before_ys = xs.copy(), ys.copy()
     apply_mask_stroke(xs, ys, actual, [BrushPoint(0, 4.5)], 0.2, select=select)
-    toggle_near_mask(xs, ys, expected, 0, 4.5, 0.2, select)
+    toggle_near_mask(xs, ys, expected, 0, 4.5, 0.2, select=select)
     np.testing.assert_array_equal(actual, expected)
     np.testing.assert_array_equal(xs, before_xs)
     np.testing.assert_array_equal(ys, before_ys)

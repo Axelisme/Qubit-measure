@@ -123,6 +123,7 @@ class ProgressBar(BaseProgressBar):
         handle_id: int,
         label: str = "",
         total: ProgressTotal = None,
+        *,
         leave: bool = True,
         disabled: bool = False,
     ) -> None:

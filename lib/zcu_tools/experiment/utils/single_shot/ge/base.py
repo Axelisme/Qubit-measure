@@ -179,13 +179,13 @@ def fitting_ge_and_plot(
         dict[str, Any],
     ],
     numbins: int | str = "auto",
-    logscale: bool = False,
     length_ratio: float | None = None,
     init_p0_g: float | None = None,
     init_p0_e: float | None = None,
     avg_p: float | None = None,
-    align_t1: bool = True,
     *,
+    logscale: bool = False,
+    align_t1: bool = True,
     plots: Plots,
 ) -> tuple[float, NDArray[np.float64], GE_FitResult]:
     Ig, Ie = signals.real

@@ -44,7 +44,7 @@ class LoadService:
     def __init__(self, state: DispersiveState) -> None:
         self._state = state
 
-    def load_onetone(self, filepath: str, transpose_axes: bool = False) -> str:
+    def load_onetone(self, filepath: str, *, transpose_axes: bool = False) -> str:
         """Load ``filepath`` as the one-tone spectrum and write it into State.
 
         The flux axis is derived via ``value2flux`` from the fit's ``flux_half`` /

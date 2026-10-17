@@ -87,6 +87,7 @@ def fit_ge_decay(
     e_populations: NDArray[np.float64],
     fit_params: Sequence[float | None] | None = None,
     fixedparams: Sequence[float | None] | None = None,
+    *,
     share_t1: bool = True,
 ) -> tuple[
     tuple[

@@ -28,3 +28,23 @@ def test_signal_buffer_flush_forces_throttled_final_callback(
     buffer.trigger_update(flush=True)
 
     assert len(updates) == 2
+
+
+def test_signal_buffer_write_triggers_update_and_manual_trigger():
+    updates: list[np.ndarray] = []
+    buffer = SignalBuffer(
+        (2,),
+        dtype=np.float64,
+        on_update=lambda data: updates.append(data.copy()),
+        update_interval=None,
+    )
+
+    buffer.set(np.array([1.0, 2.0]))
+    slot = buffer[1]
+    slot.set(np.array(3.0))
+    buffer.trigger_update()
+
+    assert np.asarray(slot.value).item() == 3.0
+    assert np.allclose(updates[0], [1.0, 2.0])
+    assert np.allclose(updates[1], [1.0, 3.0])
+    assert np.allclose(updates[2], [1.0, 3.0])
