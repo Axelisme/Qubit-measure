@@ -181,6 +181,37 @@ def test_frequency_batch_matches_individual_responses_across_interval_corners(
     np.testing.assert_allclose(result.traces, expected, atol=1e-10, rtol=0)
 
 
+def test_reused_grid_frequency_batch_matches_independent_trajectories():
+    m = model()
+    m = replace(
+        m,
+        receiver=replace(m.receiver, time_of_flight_ns=1.7),
+        mismatch_phase_rad=np.array([0.2, -0.1]),
+    )
+    times = np.array([-4.0, 3.0, 5.1, 12.0, 23.0, 28.0, 43.0])
+    frequencies = np.linspace(5.988, 6.012, 16)
+    pulses = tuple(
+        (adc.ReadoutPulse(3.0, 23.0, 1.2 + 0.3j, f, phase_rad=0.2),)
+        for f in frequencies
+    )
+    grids = tuple((adc.SampleGrid(times, f, 0.1),) for f in frequencies)
+    inputs = adc.ReadoutBatch(
+        m, pulses, grids, np.arange(len(frequencies), dtype=np.int64), True
+    )
+    result = adc.ConditionalReadout(m).responses(inputs)
+    # Independent ODE trajectories retain delay, mismatch and ringdown at each
+    # carrier, while the batch shares one physical sampling schedule.
+    reference = adc.ConditionalReadout(m, rtol=1e-12, atol=1e-14)
+    expected = np.stack(
+        [reference.response(p, g[0]).traces for p, g in zip(pulses, grids, strict=True)]
+    )
+    assert result.traces is not None
+    np.testing.assert_allclose(result.traces[:, 0], expected, atol=1e-9, rtol=0)
+    np.testing.assert_allclose(
+        result.sums[:, 0], expected.sum(axis=-2), atol=1e-9, rtol=0
+    )
+
+
 def test_response_cache_reuses_content_across_batches_and_trace_requests():
     evaluations = []
 
