@@ -460,7 +460,15 @@ def test_micromotion_bath_matches_independent_lindblad_jumps(
     assert np.max(abs(expected - without_bath)) > 5e-5
     np.testing.assert_allclose(actual, expected, rtol=0, atol=3e-6)
 
-    # Only the rotating bath harmonics can reject these zero-probe rows.
+    # Retaining the rotating bath extends admission without dropping its effect.
     long_table = replace(table, duration_ns=np.full(4, 128.0))
-    assert not case.kernel.guard(long_table, rows, source, case.budget).any()
+    assert case.kernel.guard(long_table, rows, source, case.budget).all()
+    long_case = replace(case, table=long_table)
+    prepared = case.kernel.prepare(keys, long_table, rows[first], source, case.budget)
+    actual = case.states.copy()
+    case.kernel.apply(prepared, inverse, long_table, rows, actual, case.budget)
+    expected = np.stack(
+        [reference(long_case, r, state) for r, state in enumerate(case.states)]
+    )
+    np.testing.assert_allclose(actual, expected, rtol=0, atol=3e-6)
     assert case.kernel.guard(long_table, rows, closed_source, case.budget).all()
