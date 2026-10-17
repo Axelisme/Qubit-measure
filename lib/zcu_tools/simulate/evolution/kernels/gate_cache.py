@@ -18,6 +18,7 @@ from ..declarations import (
 )
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
+from . import gate_phase
 from ._dop853 import Tolerances, integrate
 from ._shaped import drive_bounds, envelope_bounds
 
@@ -175,7 +176,9 @@ class GateCacheKernel:
     the DC model identity. Keys encode flux level, port, envelope content identity,
     envelope-local offset, frequency, signed amplitude and duration. Absolute
     segment start and carrier theta do not affect preparation. Four closed U
-    subsegments use 16 phase nodes each, with half-step secular D on both sides.
+    subsegments retain 16 phase modes each, with half-step secular D on both
+    sides. Short gates first try six nodes checked at two independent phases;
+    failed phase convergence uses the original sixteen-node builder.
     A model-only secular split guard rejects long dissipative gates before
     preparation. Numerical build failures raise RuntimeError; invalid budgets,
     unsupported rows or mismatched representative keys raise ValueError. This
@@ -183,11 +186,11 @@ class GateCacheKernel:
     """
 
     declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("gate_cache", "compiled-dop853-v2"),
+        identity=AlgorithmIdentity("gate_cache", "phase-adaptive-dop853-v3"),
         eligibility=Eligibility(1, 1, "shaped"),
         guard=GuardDeclaration(),
         accuracy="guarded-approximation",
-        reuse=ReuseDeclaration("gate_cache/compiled-dop853-v2/serial"),
+        reuse=ReuseDeclaration("gate_cache/phase-adaptive-dop853-v3/serial"),
         fallback="legacy-order",
     )
 
@@ -298,7 +301,14 @@ class GateCacheKernel:
                 -half_step
                 * ((outgoing[:, None] + outgoing[None, :]) / 2 + model.dephasing_per_ns)
             )
-            coefficients.append(_unitaries(model, table, int(row), budget))
+            # Keep zero/long-duration keys on the original builder. Routing and
+            # its split guard are deliberately independent of this optimization.
+            coefficient = None
+            if 0 < table.duration_ns[row] <= 30:
+                coefficient = gate_phase.build(model, table, int(row), budget)
+            if coefficient is None:
+                coefficient = _unitaries(model, table, int(row), budget)
+            coefficients.append(coefficient)
             populations.append(population)
             coherences.append(coherence)
         if len(rows):
