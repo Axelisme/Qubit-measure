@@ -9,7 +9,8 @@ import numpy as np
 from ._dispatch import classify
 from ._parallel import Executor
 from ._planning import Geometry
-from ._schedule import PrepareCache, Schedule
+from ._schedule import Schedule
+from .cache import PrepareCache
 from .engine import Cancelled
 from .kernel import Kernel, SegmentTable
 from .secular import FluxWaveform, ModelSource

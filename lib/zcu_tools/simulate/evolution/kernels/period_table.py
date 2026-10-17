@@ -5,6 +5,13 @@ from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 from scipy.linalg import expm
 
+from ..declarations import (
+    AlgorithmIdentity,
+    Eligibility,
+    GuardDeclaration,
+    KernelDeclaration,
+    ReuseDeclaration,
+)
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource, SecularDrive, SecularModel
 from ._period_table import (
@@ -128,6 +135,15 @@ class PeriodTableKernel:
     guards limit envelope motion, table bandwidth and secular splitting; their
     calibrated allowance is 1e-2 rather than the general per-segment budget.
     """
+
+    declaration = KernelDeclaration(
+        identity=AlgorithmIdentity("period_table", "legacy-v1"),
+        eligibility=Eligibility(1, 1, "shaped"),
+        guard=GuardDeclaration(),
+        accuracy="guarded-approximation",
+        reuse=ReuseDeclaration("period_table/legacy-v1/serial"),
+        fallback="legacy-order",
+    )
 
     name = "period_table"
     guard_builds = False

@@ -315,7 +315,7 @@ class Engine:
         chunks_per_worker: int = 6,
     ) -> None:
         """Create the prepare cache; reject invalid sizes or duplicate kernel names."""
-        from ._schedule import PrepareCache
+        from .cache import PrepareCache
         from .kernels import REGISTRY
 
         if workers < 1 or cache_bytes < 0 or chunks_per_worker < 1:

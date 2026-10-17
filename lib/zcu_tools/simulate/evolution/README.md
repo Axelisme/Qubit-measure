@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, prefix adoption, row-local sampling ceilings and timeline-owned scheduling
+**Last updated:** 2026-10-17, opt-in shadow planner and one-core profile contracts
 
 ## Segment engine contracts
 
@@ -124,6 +124,157 @@ ordinary apply agree within budget across repeated, reversed, non-contiguous
 and empty subsets. Prefix-bound Dyson results agree within the budget/8
 shared pruning allowance. The demo kernel stays in
 tests.
+
+## Kernel declarations and the legacy provider
+
+Each registered family supplies a typed `declaration` from
+`evolution.declarations`. It records algorithm identity and revision,
+table-only eligibility, guard validation and build handoff, accuracy class,
+representation transition, reuse namespace, coverage and parallel capability.
+`DeclaredKernel` extends the developer contract without changing `Kernel` or
+`Engine(kernels=...)`. The initial algorithm revision is `legacy-v1`. Numerical
+changes must update the affected identity revision and reuse namespace.
+
+Cost declarations separate guard, build, bind, apply, basis conversion, lift and
+task overhead. They also state batch dependence and an execution curve.
+All built-in cost and memory estimates are currently unknown, represented by
+`None`. Unknown is not zero. Costs are uncalibrated and cannot enter production
+cost competition. `Kernel.cost` remains a relative scheduling weight.
+`Prepared.nbytes` still charges opaque resident arrays, not RSS.
+Memory declarations distinguish resident, build workspace, apply scratch and
+evolve-local input bindings. Reuse contracts require model, budget,
+representation and algorithm namespaces for builds. Binding adds certificates,
+ports and endpoint-affecting parameters. Endpoint reuse also requires complete
+span controls and phase history. These requirements do not change existing
+cache keys or add endpoint caching.
+
+`evolution.provider` is an opt-in developer seam:
+
+```python
+from zcu_tools.simulate.evolution.provider import LegacyProvider, Selection, segment
+
+provider = LegacyProvider()
+geometry = segment(source, batches)
+rows = np.arange(len(geometry.table.timeline), dtype=np.int64)
+candidates = provider.eligible(geometry.table, rows)
+dispatch = provider.classify(geometry, source, budget=1e-3)
+```
+
+`eligible` returns row indices per family without running guards or building
+models. True eligibility does not certify a numerical method. `classify`
+delegates to the existing dispatch, including shaped ordering and terminal-domain
+errors. It deliberately ignores declared costs and eligibility when reproducing
+legacy selection. It returns the existing `Dispatch` record with guard products,
+deferred rows, acquire-wide shaped ordering and rejected-family masks.
+
+For a deferred timeline, pass
+`Selection(timeline_rows, dispatch.shaped, dispatch.rejected)` back to
+`provider.classify(..., selection=selection)`. No local builder runs until that
+selection. Obtain the original kernel through `provider.entry(name).kernel`.
+Use accepted `dispatch.preparations[name]` payloads directly, with their
+prepare-key indices, in ordinary `Kernel.bind_input` and `Kernel.apply`.
+Call `Kernel.prepare` only for keys without an accepted guard product.
+Guard rejection advances the legacy chain. Guard, preparation and apply
+exceptions propagate; none authorizes retry or density correction.
+
+For an injected kernel without metadata, explicitly construct
+`LegacyKernelAdapter(kernel, declaration)` and pass the adapters to
+`LegacyProvider(entries)`. The adapter rejects mismatched names or build
+handoffs. The provider never guesses attributes or adds missing fallback
+families. `Engine(kernels=...)` continues accepting the original kernels
+without adapters or declarations.
+
+The provider does not compute shared prefix densities, execute work or own a
+cache. Plain `segment` geometry has only source inputs and unresolved prefixes.
+An engine collaborator can instead supply geometry with engine-computed prefix
+certificates. Unknown input remains unknown. `Engine.evolve` remains the
+production entry point and keeps its current dispatch, scheduling, diagnostics
+and numerical behavior.
+
+## Shadow planning
+
+`evolution.shadow.shadow_plan` is an opt-in, pure developer collaborator. It
+accepts the complete `SegmentTable`, explicit `ShadowCandidate` options, a
+complete accepted incumbent, a `OneCoreProfile`, an immutable cache inventory
+and a `ShadowRequest`. It never calls numerical guards, prepare, bind or apply.
+It cannot compute a prefix certificate. `Engine.evolve` does not call it.
+Default dispatch, densities, diagnostics and cache recency stay unchanged.
+
+Candidates cover one interval each. Their row indexes preserve all original
+controls, basis boundaries and continuous-flux geometry. Give every candidate
+a stable unique ID. IDs determine ties, independent of candidate enumeration
+or table row storage order. Declarations supply cheap eligibility, algorithm
+revision, guard requirements, representation and reuse namespace. Only interval,
+full-density, outer-independent options enter this slice. Rejected rows are
+excluded. Options with unsupported profile revisions are diagnosed and excluded;
+an unsupported incumbent fails explicitly.
+
+The caller supplies complete model/source, numeric budget and opaque prepare
+keys in the cache namespace used by the numerical owner. Namespace and key
+construction must partition algorithm settings, revision and representation.
+The graph also partitions builds by the complete declared algorithm identity
+and reuse namespace. A binding key additionally includes an already computed
+input certificate, port and every endpoint-affecting parameter. Never turn an
+unresolved prefix into a known input. `guard="accepted"` means an explicit
+existing result for this row. A matching cached key or proof does not accept a
+row. Candidates needing model-build or actual-input validation remain tentative
+until their owner supplies that result. Shadow does not run validation rounds
+or produce new guard payloads.
+
+`OneCoreProfile` stores a schema, profile ID/revision, inclusive dimension/budget
+domain, workload label, algorithm identities, feature units and evidence
+provenance. Provenance includes source commit, dependency versions, CPU/runtime,
+evidence digest, uncertainty, fit error and held-out error. Unmeasured errors
+are `None`. All profiles in this slice are explicitly `uncalibrated` and cannot
+enter production cost competition. Use clearly labelled synthetic estimates
+when exploring a graph; historical timing reports are not current-head
+calibration. Profile stages use one-core seconds, with constant per-row costs
+and per-key build/bind costs. Memory estimates use bytes. Missing costs or byte
+charges fail, rather than becoming zero. No acquisition benchmarks the machine.
+
+Typical collaborator call, after the numerical owner has supplied candidates
+and a profile:
+
+```python
+from zcu_tools.simulate.evolution.shadow import ShadowRequest, shadow_plan
+
+request = ShadowRequest(
+    dimension=dimension,
+    budget=budget,
+    workers=logical_workers,
+    memory_allowance=live_work_bytes,
+    state_bytes=all_live_states_bytes,
+)
+report = shadow_plan(
+    table, candidates, accepted_candidate_ids, profile, cache.inventory(), request
+)
+```
+
+Take the inventory under the owning call lock or equivalent serialization.
+Shadow reads descriptors only, without reservations, arrays or LRU touches.
+A partial hit charges the whole opaque allocation once. The reported graph
+contains shared build/bind tasks and timeline-ordered apply tasks, plus pending
+guards and nonzero basis/lift stages. A cached build has zero build cost;
+profile task overhead still applies. Logical workers 1, 2 and 6 change capacity,
+not per-task costs, guard outcomes or actual thread count.
+
+The planner preserves the complete accepted incumbent and searches bounded
+reuse-partition, family and single-row moves. It does not enumerate timeline
+Cartesian products. `SearchLimits` fixes options per row, beam width, rounds and
+scored covers. The incumbent consumes one scored cover. Deterministic
+nonpreemptive list scheduling scores each whole-acquire graph. The graph lower
+bound is the maximum of work/workers, the longest dependency chain and the
+largest indivisible build. It is not a global bound over unexplored assignments.
+
+Memory admission conservatively retains every selected build, pinned whole
+cache allocation, binding and caller-supplied state byte through acquire end.
+It adds workers times the largest build-workspace or apply-scratch charge.
+This can reject options that streaming execution could fit. The allowance is
+separate from the resident cache limit and does not measure process RSS.
+An infeasible incumbent raises `ValueError`; infeasible moves cannot replace it.
+Reports include estimated wall, lower bound, required bytes, unresolved guards,
+cache allocation IDs, search effort and reasons. Even a fully accepted shadow
+cover has `production_safe=False`. No graph from this collaborator executes.
 
 ## Dispatch
 
@@ -505,3 +656,28 @@ The prepare-cache budget charges prepared payloads, not process RSS. Models,
 returned densities, live chunk references, solver workspaces and ADC preparations
 are separate allocations. Clearing the cache or closing the engine releases
 in-memory preparations without deleting replay inputs.
+
+## Cache inventory and ownership
+
+The `cache` module exposes `PrepareCache` and `PreparedPayload` to numeric
+scheduling collaborators. Scheduler and prefix resolution use this same LRU.
+Calls require the engine call lock or equivalent external serialization.
+`inventory()` returns immutable whole-allocation metadata, including all keys,
+opaque byte charge, algorithm revision and owner-supplied proof identifiers.
+Snapshots do not retain arrays or change recency. Partial key coverage still
+charges the entire batch. A proof or key match never replaces a row's guard.
+
+`reserve()` pins selected resident hits without touching their LRU order.
+Consumers acquire independent references before releasing the reservation.
+Eviction and `clear()` remove resident ownership, not those live references.
+Each handle supports explicit release and context-manager cleanup. Stale inventory
+cannot start a new reservation. Explicit find/add operations retain legacy LRU
+order; future planners must issue them in canonical order.
+
+`bytes` counts resident allocations against the cache budget. `live_bytes` counts
+whole allocations held by explicit reservation/consumer handles, once across all
+handles, including resident pins. It can exceed the resident budget. Neither
+counter measures process RSS or all live work. Ordinary active scheduler
+references returned by `find()` are not tracked handles. Oversized allocations
+can have tracked consumer references but never enter the resident LRU. Only
+model-only preparations may persist; input-bound state stays evolve-local.

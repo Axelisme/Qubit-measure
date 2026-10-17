@@ -251,11 +251,9 @@ class _Classifier:
         flux = self.geometry.flux_drive & (table.tones > 0)
         self.accept(rows[flux[rows]], ("flux_dop853",))
         ordinary = ~flux
-        kinds = np.array([envelope.kind == "constant" for envelope in table.envelopes])
-        constant = np.ones(len(table.timeline), dtype=bool)
-        for slot in range(table.tone_port.shape[1]):
-            playing = table.tones > slot
-            constant[playing] &= kinds[table.tone_envelope[playing, slot]]
+        constant = table.constant_envelopes(
+            np.arange(len(table.timeline), dtype=np.int64)
+        )
         single = ordinary & (table.tones == 1)
         self.accept(rows[(single & constant)[rows]], ("dyson", "floquet_period", "t6"))
         shaped = np.flatnonzero(single & ~constant & self.scope)

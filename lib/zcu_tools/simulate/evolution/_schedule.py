@@ -1,6 +1,6 @@
 """Shared opaque-payload LRU and independent chunk-local apply waves."""
 
-from collections import Counter, OrderedDict
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from threading import Event
@@ -14,17 +14,12 @@ from ._dispatch import diagnostics as dispatch_diagnostics
 from ._parallel import Executor
 from ._planning import Geometry
 from ._prepare_keys import group_keys
+from .cache import PrepareCache, PreparedPayload
 from .engine import Cancelled, EvolutionResult, PathDiagnostics
-from .kernel import Kernel, Prepared, SegmentTable
+from .kernel import Kernel, SegmentTable
 from .secular import ModelSource
 
 _CHAINABLE_KERNELS = frozenset(("dop853", "flux_dop853"))
-
-
-@dataclass(frozen=True)
-class _Payload:
-    prepared: Prepared
-    keys: tuple[bytes, ...]
 
 
 @dataclass(frozen=True)
@@ -41,7 +36,7 @@ class _Entries:
 @dataclass(frozen=True)
 class _Binding:
     kernel: Kernel
-    payload: _Payload
+    payload: PreparedPayload
     rows: NDArray[np.int64]
     indices: NDArray[np.int64]
 
@@ -51,48 +46,6 @@ class _ChunkResult:
     points: NDArray[np.int64]
     states: NDArray[np.complex128]
     exceeded_by_kernel: Counter[str]
-
-
-class PrepareCache:
-    """LRU charged once per opaque payload, scoped by source, budget and family."""
-
-    def __init__(self, limit: int):
-        self.limit = limit
-        self.bytes = 0
-        self.payloads: OrderedDict[int, tuple[tuple[str, str, float], _Payload]] = (
-            OrderedDict()
-        )
-        self.next_id = 0
-
-    def find(
-        self, namespace: tuple[str, str, float], keys: set[bytes]
-    ) -> list[_Payload]:
-        """Return matching payloads and mark them recently used."""
-        found: list[_Payload] = []
-        for entry, (space, payload) in list(self.payloads.items()):
-            if space == namespace and keys.intersection(payload.keys):
-                found.append(payload)
-                self.payloads.move_to_end(entry)
-        return found
-
-    def add(self, namespace: tuple[str, str, float], payload: _Payload) -> None:
-        """Admit a bounded payload; oversized data lives only for this acquire."""
-        size = payload.prepared.nbytes
-        if size < 0:
-            raise ValueError("prepared nbytes must be nonnegative")
-        if size > self.limit or self.limit == 0:
-            return
-        while self.bytes + size > self.limit:
-            _, (_, evicted) = self.payloads.popitem(last=False)
-            self.bytes -= evicted.prepared.nbytes
-        self.payloads[self.next_id] = namespace, payload
-        self.next_id += 1
-        self.bytes += size
-
-    def clear(self) -> None:
-        """Release all resident prepared arrays."""
-        self.payloads.clear()
-        self.bytes = 0
 
 
 def _deduplicate(
@@ -124,17 +77,19 @@ def _build(
     source: ModelSource,
     budget: float,
     cancel: Event,
-) -> _Payload:
+) -> PreparedPayload:
     if cancel.is_set():
         raise Cancelled()
     keys = entry.keys[selection]
     prepared = entry.kernel.prepare(
         keys, table, entry.representative[selection], source, budget
     )
-    return _Payload(prepared, tuple(key.tobytes() for key in keys))
+    return PreparedPayload(prepared, tuple(key.tobytes() for key in keys))
 
 
-def _bind(entry: _Entries, payload: _Payload, eligible: NDArray[np.bool_]) -> _Binding:
+def _bind(
+    entry: _Entries, payload: PreparedPayload, eligible: NDArray[np.bool_]
+) -> _Binding:
     positions = {key: i for i, key in enumerate(payload.keys)}
     chosen = np.flatnonzero(eligible)
     needed, inverse = np.unique(entry.inverse[chosen], return_inverse=True)
@@ -198,7 +153,7 @@ class Schedule:
             available = {key.tobytes() for key in entry.keys}
             shared_keys = {key.tobytes() for key in entry.keys[shared]}
             for preparation in self.dispatch.preparations.get(entry.kernel.name, ()):
-                payload = _Payload(
+                payload = PreparedPayload(
                     preparation.prepared,
                     tuple(key.tobytes() for key in preparation.keys),
                 )
@@ -272,7 +227,7 @@ class Schedule:
                     bound.append(
                         _Binding(
                             binding.kernel,
-                            _Payload(payload, ()),
+                            PreparedPayload(payload, (), lifetime="evolve"),
                             rows,
                             np.zeros(len(rows), dtype=np.int64),
                         )
@@ -380,7 +335,7 @@ class Schedule:
         bindings: list[_Binding] = []
         for entry in _deduplicate(self.table, dispatch, self.kernels):
             for preparation in dispatch.preparations.get(entry.kernel.name, ()):
-                payload = _Payload(
+                payload = PreparedPayload(
                     preparation.prepared,
                     tuple(key.tobytes() for key in preparation.keys),
                 )

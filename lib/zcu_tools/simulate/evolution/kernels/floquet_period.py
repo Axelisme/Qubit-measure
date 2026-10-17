@@ -7,6 +7,13 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
+from ..declarations import (
+    AlgorithmIdentity,
+    Eligibility,
+    GuardDeclaration,
+    KernelDeclaration,
+    ReuseDeclaration,
+)
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
 from ._dop853 import Tolerances, integrate_dense
@@ -398,6 +405,15 @@ class FloquetPeriodKernel:
     nonfinite numeric output raises RuntimeError, never retries or reroutes.
     All prepared arrays are immutable; nbytes charges every retained array.
     """
+
+    declaration = KernelDeclaration(
+        identity=AlgorithmIdentity("floquet_period", "legacy-v1"),
+        eligibility=Eligibility(1, 1, "constant"),
+        guard=GuardDeclaration(),
+        accuracy="guarded-approximation",
+        reuse=ReuseDeclaration("floquet_period/legacy-v1/serial"),
+        fallback="legacy-order",
+    )
 
     name = "floquet_period"
     guard_builds = False
