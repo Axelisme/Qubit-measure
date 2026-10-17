@@ -598,10 +598,17 @@ def _integrate_channel(data, tone, duration, tolerance):
         error = np.max(np.abs(halves - whole)) / 15
         if not np.isfinite(error) or time + step == time:
             raise RuntimeError("Floquet period integration failed")
-        if error <= tolerance * step:
+        # Step doubling cannot resolve errors below the channel's roundoff.
+        # Without this floor, a long row's per-ns tolerance can shrink a
+        # rejected step until time + step == time, even for unitary dynamics.
+        allowance = max(
+            tolerance * step,
+            8 * np.finfo(np.float64).eps * max(1.0, np.max(np.abs(channel))),
+        )
+        if error <= allowance:
             channel = halves + (halves - whole) / 15
             time += step
-        factor = 2.0 if error == 0 else 0.9 * (tolerance * step / error) ** 0.2
+        factor = 2.0 if error == 0 else 0.9 * (allowance / error) ** 0.2
         step *= min(2.0, max(0.2, factor))
     raise RuntimeError("Floquet period integration exceeded step limit")
 
@@ -723,11 +730,11 @@ class FloquetKernel:
     """
 
     declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("floquet", "modal-blas-v3"),
+        identity=AlgorithmIdentity("floquet", "period-roundoff-v4"),
         eligibility=Eligibility(2, 2, "constant"),
         guard=GuardDeclaration(("model-build",), builds_model=True),
         accuracy="guarded-approximation",
-        reuse=ReuseDeclaration("floquet/modal-blas-v3/serial"),
+        reuse=ReuseDeclaration("floquet/period-roundoff-v4/serial"),
         fallback="legacy-order",
     )
 
