@@ -1,10 +1,5 @@
-"""Study-only phase-adaptive gate builder; not registered in dispatch.
+"""Model-only phase convergence for short gate-cache Hilbert preparation."""
 
-Retain all temporal tolerances, knot restarts and four Strang subsegments from
-gate_cache. Test phase interpolation independently before retaining fewer nodes.
-"""
-
-from dataclasses import dataclass
 from typing import NamedTuple
 
 import numpy as np
@@ -12,42 +7,11 @@ from numba import njit
 from numpy.typing import NDArray
 
 from .._envelope import sample_value
-from ..declarations import (
-    AlgorithmIdentity,
-    Eligibility,
-    GuardDeclaration,
-    KernelDeclaration,
-    ReuseDeclaration,
-)
 from ..kernel import SegmentTable
 from ..secular import SecularModel
 from ._dop853 import Tolerances, integrate
 
 _SUBSEGMENTS = 4
-DECLARATION = KernelDeclaration(
-    identity=AlgorithmIdentity("gate_phase", "converged-phase-prototype-v1"),
-    eligibility=Eligibility(1, 1, "shaped"),
-    guard=GuardDeclaration(),
-    accuracy="guarded-approximation",
-    reuse=ReuseDeclaration("gate_phase/converged-phase-prototype-v1/serial"),
-    fallback="legacy-order",
-)
-
-
-@dataclass(frozen=True)
-class PhaseBuild:
-    """16-mode coefficients, retained phase count and maximum unitary defects.
-
-    coefficients has shape (4,16,M,M). coarse_defect compares three-node
-    interpolation to six-node samples. probe_defect compares six-node
-    interpolation to an independently integrated off-grid phase. No density
-    contributes to these checks. phases is 6 or 16.
-    """
-
-    coefficients: NDArray[np.complex128]
-    phases: int
-    coarse_defect: float
-    probe_defect: float
 
 
 class _GateContext(NamedTuple):
@@ -157,47 +121,39 @@ def _interpolate(
 
 def build(
     model: SecularModel, table: SegmentTable, row: int, budget: float
-) -> PhaseBuild:
-    """Build a short shaped gate using checked phase resolution.
+) -> NDArray[np.complex128] | None:
+    """Return checked (4,16,M,M) coefficients, or None to request legacy build.
 
-    Require a sampled single tone <=30 ns and a finite positive budget.
-    Integrate six equispaced phases and one independent phase at pi/6 with
-    the original gate-cache DOP853 controls. Compare three-node interpolation to
-    odd six-node samples, and six-node interpolation to the independent
-    phase, at every Strang endpoint. The three-node defect reports the discarded
-    coarse grid's error. The retained six-node grid must match the independent
-    probe within min(1e-4, budget*0.1). Otherwise build all sixteen original phases.
-    Retract the interpolated U at sixteen phase nodes before the Fourier
-    transform to suppress interpolation norm loss. No density is normalized.
-    The return value always uses the existing sixteen-mode coefficient layout.
-    This is an empirical convergence check, not a rigorous global bound.
-    Invalid rows/budgets raise ValueError. Numerical failures propagate.
+    Require a sampled single tone of positive duration <=30 ns and a finite
+    positive budget. Integrate six equispaced phases and two independent probes
+    (pi/6 and sqrt(3) radians), using unchanged temporal tolerances and knot
+    restarts. Every Strang endpoint must match both probes in full-unitary
+    Frobenius norm within min(1e-4, budget*0.1). A failed phase check returns None;
+    the caller must build its original sixteen-node payload instead.
+
+    Retract interpolated unitaries at the original sixteen phase nodes before
+    Fourier transformation. No density is accessed or normalized. This empirical
+    convergence check is not a rigorous global bound for arbitrary harmonics.
+    Invalid rows/budgets raise ValueError; numerical failures propagate.
     """
     if not np.isfinite(budget) or budget <= 0:
         raise ValueError("phase budget must be finite and positive")
     if table.tones[row] != 1 or not 0 < table.duration_ns[row] <= 30:
-        raise ValueError("phase prototype requires a short single-tone gate")
+        raise ValueError("phase preparation requires a short single-tone gate")
     envelope = table.envelopes[int(table.tone_envelope[row, 0])]
     if envelope.kind != "sampled":
-        raise ValueError("phase prototype requires a sampled envelope")
+        raise ValueError("phase preparation requires a sampled envelope")
     phases = np.asarray(np.arange(6) * (2 * np.pi / 6), dtype=np.float64)
-    # Integrating the independent phase in the same batch shares adaptive work.
-    samples = _unitaries(model, table, row, budget, np.r_[phases, np.pi / 6])
-    coarse = _interpolate(samples[:, :6:2], phases[1::2])
-    probe = _interpolate(samples[:, :6], np.array([np.pi / 6], dtype=np.float64))
-    coarse_defect = float(
-        np.max(np.linalg.norm(coarse - samples[:, 1:6:2], axis=(-2, -1)))
-    )
-    probe_defect = float(np.max(np.linalg.norm(probe - samples[:, 6:], axis=(-2, -1))))
-    allowance = min(1e-4, budget * 0.1)
-    if probe_defect <= allowance:
-        # Retract the interpolated phase polynomial at the original 16 nodes.
-        # This removes radial interpolation error without normalizing density.
-        full_phases = np.asarray(np.arange(16) * (2 * np.pi / 16), dtype=np.float64)
-        expanded = _interpolate(samples[:, :6], full_phases)
-        left, _, right = np.linalg.svd(expanded)
-        coefficients = np.fft.fft(left @ right, axis=1) / 16
-        return PhaseBuild(coefficients, 6, coarse_defect, probe_defect)
+    # The irrational second probe avoids sharing a single rational phase grid's
+    # harmonic aliases. Both probes share the adaptive integration batch.
+    probes = np.array([np.pi / 6, np.sqrt(3)], dtype=np.float64)
+    samples = _unitaries(model, table, row, budget, np.r_[phases, probes])
+    predicted = _interpolate(samples[:, :6], probes)
+    defect = float(np.max(np.linalg.norm(predicted - samples[:, 6:], axis=(-2, -1))))
+    if defect > min(1e-4, budget * 0.1):
+        return None
+    # Polar projection removes radial interpolation error, not density error.
     full_phases = np.asarray(np.arange(16) * (2 * np.pi / 16), dtype=np.float64)
-    full = _unitaries(model, table, row, budget, full_phases)
-    return PhaseBuild(np.fft.fft(full, axis=1) / 16, 16, coarse_defect, probe_defect)
+    expanded = _interpolate(samples[:, :6], full_phases)
+    left, _, right = np.linalg.svd(expanded)
+    return np.fft.fft(left @ right, axis=1) / 16

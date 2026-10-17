@@ -441,7 +441,7 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | Same constant-tone branch, Hilbert period guard fails | T6 periodic propagation accepts every single constant-tone row. |
 | One real shaped tone with at most two uses of its ordinary period-band key and passing spectral guards | `shaped_sambe` builds finite-Hilbert-Fourier subperiods at four or eight amplitude nodes. |
 | Other shaped tone, or rejected spectral key | Compute gate/period/DOP853 amortized cost order once over all shaped rows before any spectral guard. Try each numerical guard in that fixed order. There is no fixed gate-key reuse threshold. |
-| Shaped gate cache passes its split guard | Four Strang subsegments, closed-system U plus secular dissipation, and 16 carrier-phase Fourier samples. |
+| Shaped gate cache passes its split guard | Four Strang subsegments, closed-system U plus secular dissipation, and 16 carrier-phase Fourier modes with checked adaptive preparation. |
 | Shaped period table passes its envelope-motion, bandwidth and split guards | Midpoint-frozen envelopes, eight amplitude Chebyshev nodes and 16 phase Fourier samples for the actual drive port. Integrate the fractional-period tail directly. |
 | Shaped approximations rejected, or direct integration costs less | DOP853, with no input-state restriction. |
 | Two constant tones with a valid Floquet frame and passing harmonic omission and convergence bounds | Floquet k=0 preparation. Passing probe guards select modal second-order Dyson in H_F + D₀; other probes use periodic propagation in the same accepted frame. |
@@ -737,11 +737,18 @@ It uses 1, 4 or 8 steps per carrier period according to r, powers the period
 propagator and adds the fractional-period tail. Carrier phase uses Fourier
 interpolation. Gate-cache Strang splitting and phase Fourier interpolation
 avoid building a full dissipative propagator for every phase. Gate preparation
-integrates its sixteen Hilbert phase nodes together through the shared compiled
-DOP853 interval core. Sample knots and the four Strang boundaries restart the
-integration. Single-threaded, nogil preparation lets Engine workers build
-different gate keys concurrently without Python RHS callbacks. Keys, phase
-nodes and the 0.1 ns step ceiling stay unchanged. Unitary integration uses
+first integrates six equispaced Hilbert phase nodes and two independent probes
+(pi/6 and sqrt(3) radians) for positive-duration gates up to 30 ns. Both probes
+must match the six-node Fourier interpolation at every Strang endpoint within
+min(1e-4, budget*0.1) in full-unitary Frobenius norm. Accepted polynomials are
+expanded to the original sixteen nodes and polar-projected before the FFT.
+Failed phase checks, zero-duration keys and longer gates use the original
+sixteen-node builder. This is an empirical convergence check, not a global bound
+on arbitrary phase harmonics. Numerical failures still propagate.
+All nodes use the shared compiled DOP853 interval core. Sample knots and the four
+Strang boundaries restart integration. Single-threaded, nogil preparation lets
+Engine workers build different gate keys concurrently without Python RHS
+callbacks. Keys, routing scores and the 0.1 ns step ceiling stay unchanged. Unitary integration uses
 rtol=min(1e-8, budget*1e-4) and atol=rtol*0.01. This leaves the segment budget
 for splitting and Fourier interpolation without oversolving high-energy modes.
 An SVD polar projection restores each Hilbert endpoint before the phase Fourier
