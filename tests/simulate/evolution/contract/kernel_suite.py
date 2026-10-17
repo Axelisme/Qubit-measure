@@ -354,7 +354,9 @@ class KernelContract:
             for port in np.unique(ports):
                 selected = candidates[ports == port][::-1]
                 saved_rows = selected.copy()
-                bound = bind(prepared, key, table, selected, initial, case.budget)
+                bound = case.kernel.bind_input(
+                    prepared, key, table, selected, initial, case.budget
+                )
                 np.testing.assert_array_equal(initial, before)
                 np.testing.assert_array_equal(selected, saved_rows)
                 if case.kernel.name == "dyson":

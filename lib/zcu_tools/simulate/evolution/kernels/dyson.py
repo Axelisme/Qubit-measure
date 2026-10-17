@@ -1,6 +1,7 @@
 """Full-carrier second-order modal Dyson evolution, with model-only preparation."""
 
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import numpy as np
 from numba import njit
@@ -168,24 +169,35 @@ def _evaluate_first_factors(
     return factors
 
 
+class _Paths(NamedTuple):
+    """Contracted terms, shared first factors and per-row pruning policy."""
+
+    indices: NDArray[np.int64]
+    coefficients: NDArray[np.complex128]
+    pairs: NDArray[np.int64]
+    path_pairs: NDArray[np.int64]
+    recheck: bool
+
+
 @njit(nogil=True, cache=True)
 def _evaluate_paths(
     params: NDArray[np.float64],
     eigenvalues: NDArray[np.complex128],
     modes: NDArray[np.complex128],
     pruning: NDArray[np.float64],
-    indices: NDArray[np.int64],
-    coefficients: NDArray[np.complex128],
+    paths: _Paths,
 ) -> NDArray[np.complex128]:
-    """Evaluate contracted paths, retaining the original per-row pruning bound."""
+    """Evaluate indices/coefficients/factor keys/lookup; recheck shared supersets."""
+    indices, coefficients, pairs, path_pairs, recheck = paths
     dimension = len(modes)
     allowance = pruning[-1] / (8 * (2 * dimension**2 + 4 * dimension**3))
     result = np.empty((len(params), dimension), dtype=np.complex128)
-    pairs, path_pairs = _group_first_factors(indices)
     # With equal |gain| and duration, the table already applied each row's exact
     # bound. Mixed batches still recheck it below, preserving row splitting.
-    uniform_bound = np.all(np.abs(params[:, 1]) == abs(params[0, 1])) and np.all(
-        params[:, 2] == params[0, 2]
+    uniform_bound = (
+        not recheck
+        and np.all(np.abs(params[:, 1]) == abs(params[0, 1]))
+        and np.all(params[:, 2] == params[0, 2])
     )
     for job in range(len(params)):
         frequency, gain, duration, phase = params[job]
@@ -273,8 +285,13 @@ def _evaluate_batch(
         indices, coefficients = _build_paths(
             params, eigenvalues, initial_modes[0], couplings, pruning, outputs
         )
+        pairs, path_pairs = _group_first_factors(indices)
         return _evaluate_paths(
-            params, eigenvalues, initial_modes[0], pruning, indices, coefficients
+            params,
+            eigenvalues,
+            initial_modes[0],
+            pruning,
+            _Paths(indices, coefficients, pairs, path_pairs, recheck=False),
         )
     result = np.empty_like(initial_modes)
     for job in range(len(params)):
@@ -286,13 +303,13 @@ def _evaluate_batch(
             pruning,
             outputs,
         )
+        pairs, path_pairs = _group_first_factors(indices)
         result[job] = _evaluate_paths(
             params[job : job + 1],
             eigenvalues,
             initial_modes[job],
             pruning,
-            indices,
-            coefficients,
+            _Paths(indices, coefficients, pairs, path_pairs, recheck=False),
         )[0]
     return result
 
@@ -348,6 +365,67 @@ class _Prepared:
     @property
     def nbytes(self) -> int:
         return sum(entry.nbytes for entry in self.entries)
+
+
+@dataclass(frozen=True)
+class _BoundInput:
+    """One model/port and source input, owned only by the current evolve."""
+
+    entries: tuple[_Entry, ...]
+    port: int
+    modes: NDArray[np.complex128]
+    pruning: NDArray[np.float64]
+    indices: NDArray[np.int64]
+    coefficients: NDArray[np.complex128]
+    pairs: NDArray[np.int64]
+    path_pairs: NDArray[np.int64]
+
+    @property
+    def nbytes(self) -> int:
+        return self.entries[0].nbytes + sum(
+            array.nbytes
+            for array in (
+                self.modes,
+                self.pruning,
+                self.indices,
+                self.coefficients,
+                self.pairs,
+                self.path_pairs,
+            )
+        )
+
+
+@njit(nogil=True, cache=True)
+def _restore_bound_modes(
+    modes: NDArray[np.complex128], vectors: NDArray[np.complex128]
+) -> NDArray[np.complex128]:
+    """Use fixed-size matrix-vector products independent of worker batch size."""
+    result = np.empty_like(modes)
+    for row in range(len(modes)):
+        result[row] = vectors @ modes[row]
+    return result
+
+
+def _advance_bound(
+    bound: _BoundInput,
+    params: NDArray[np.float64],
+    shape: tuple[int, ...],
+) -> NDArray[np.complex128]:
+    entry = bound.entries[0]
+    modes = _evaluate_paths(
+        params,
+        entry.values,
+        bound.modes,
+        bound.pruning,
+        _Paths(
+            bound.indices,
+            bound.coefficients,
+            bound.pairs,
+            bound.path_pairs,
+            recheck=True,
+        ),
+    )
+    return _restore_bound_modes(modes, entry.vectors).reshape(shape)
 
 
 def _prepare_model(model: SecularModel) -> _Entry:
@@ -512,6 +590,54 @@ class DysonKernel:
             )
         )
 
+    def bind_input(
+        self,
+        prepared: Prepared,
+        key_index: int,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source_initial: NDArray[np.complex128],
+        budget: float,
+    ) -> _BoundInput | None:
+        """Contract one shared key/port's source input in its row model basis.
+
+        C5 Kernel.bind_input defines the read-only, evolve-local contract.
+        Empty rows return None. Max absolute gain and max duration over all
+        supplied rows bound the retained path superset, independent of chunks.
+        Workers recheck each row's original pruning bound without rebuilding.
+        """
+        if not isinstance(prepared, _Prepared):
+            raise ValueError("Dyson requires model-only prepared data for binding")
+        if not np.isfinite(budget) or budget <= 0:
+            raise ValueError("Dyson requires positive budget")
+        if not len(rows):
+            return None
+        entry = prepared.entries[key_index]
+        port = int(table.tone_port[rows[0], 0])
+        modes = source_initial.ravel() @ entry.inverse.T
+        pruning = np.r_[np.max(abs(entry.vectors), axis=0), budget]
+        indices, coefficients = _build_paths(
+            parameters(table, rows),
+            entry.values,
+            modes,
+            entry.couplings[port],
+            pruning,
+            np.arange(len(entry.values), dtype=np.int64),
+        )
+        pairs, path_pairs = _group_first_factors(indices)
+        for array in (pruning, indices, pairs, path_pairs):
+            array.setflags(write=False)
+        return _BoundInput(
+            (entry,),
+            port,
+            freeze(modes),
+            pruning,
+            indices,
+            freeze(coefficients),
+            pairs,
+            path_pairs,
+        )
+
     def apply(
         self,
         prepared: Prepared,
@@ -531,7 +657,7 @@ class DysonKernel:
         """
         if not np.isfinite(budget) or budget <= 0:
             raise ValueError("Dyson requires positive budget")
-        if not isinstance(prepared, _Prepared):
+        if not isinstance(prepared, (_Prepared, _BoundInput)):
             raise ValueError("Dyson requires its own prepared payload")
         exceeded = np.zeros(len(rows), dtype=np.bool_)
         threshold = min(0.02, (1.5 * budget) ** (2 / 3))
@@ -544,13 +670,21 @@ class DysonKernel:
                     table.duration_ns[rows[selected]],
                     states[selected],
                 )
-                result = _advance(
-                    prepared.entries[key],
-                    int(port),
-                    parameters(table, rows[selected]),
-                    states[selected],
-                    budget,
-                )
+                params = parameters(table, rows[selected])
+                if isinstance(prepared, _BoundInput):
+                    if key != 0 or port != prepared.port:
+                        raise ValueError(
+                            "Dyson input-bound payload requires its own key/port"
+                        )
+                    result = _advance_bound(prepared, params, states[selected].shape)
+                else:
+                    result = _advance(
+                        prepared.entries[key],
+                        int(port),
+                        params,
+                        states[selected],
+                        budget,
+                    )
                 if not np.isfinite(result).all():
                     raise RuntimeError(
                         f"Dyson nonfinite density in segment rows {rows[selected]}"

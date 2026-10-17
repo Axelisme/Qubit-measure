@@ -175,6 +175,18 @@ class FluxDOP853Kernel:
             raise ValueError("flux expansion loop exceeds waveform width")
         return _Prepared(source, _pack_expansion(expansion))
 
+    def bind_input(
+        self,
+        prepared: Prepared,
+        key_index: int,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source_initial: NDArray[np.complex128],
+        budget: float,
+    ) -> None:
+        """Decline input binding; apply uses the model-only prepared payload."""
+        del prepared, key_index, table, rows, source_initial, budget
+
     def apply(
         self,
         prepared: Prepared,

@@ -484,7 +484,9 @@ def test_input_bound_paths_match_reference_at_modal_boundaries(
     keys = np.unique(case.kernel.prepare_keys(table, rows))
     prepared = case.kernel.prepare(keys, table, rows[:1], source, case.budget)
     for initial in (case.states[0], source.initial_density):
-        bound = bind(prepared, 0, table, rows[::-1], initial, case.budget)
+        bound = case.kernel.bind_input(
+            prepared, 0, table, rows[::-1], initial, case.budget
+        )
         assert bound is not None
         actual = np.repeat(initial[None], 4, axis=0)
         for subset in (rows[::2][::-1], rows[1::2][::-1]):
@@ -498,7 +500,7 @@ def test_input_bound_paths_match_reference_at_modal_boundaries(
                 case.budget,
             )
             actual[subset] = states
-        expected = np.stack([reference(case, row, initial) for row in rows])
+        expected = np.stack([reference(case, int(row), initial) for row in rows])
         assert_budget(actual, expected, case.budget)
         np.testing.assert_allclose(
             actual, actual.conj().swapaxes(-1, -2), rtol=0, atol=1e-13

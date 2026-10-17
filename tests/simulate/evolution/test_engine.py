@@ -96,7 +96,9 @@ class RecordingKernel:
         self.preparations += len(keys)
         return Payload(len(keys))
 
-    def bind_input(self, prepared, key_index, table, rows, source_initial, budget):
+    def bind_input(
+        self, prepared, key_index, table, rows, source_initial, budget
+    ) -> Prepared | None:
         return None
 
     def apply(self, prepared: Prepared, key_index, table, rows, states, budget):

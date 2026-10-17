@@ -136,8 +136,11 @@ class SegmentTable:
 
 
 class Prepared(Protocol):
-    """Opaque state-independent kernel payload, shared read-only by workers.
+    """Opaque kernel payload, shared read-only by workers.
 
+    prepare returns state-independent data eligible for PrepareCache. bind_input
+    may wrap it in an input-bound payload used only within one evolve call;
+    that wrapper never enters PrepareCache.
     Each kernel defines its own concrete payload. nbytes counts resident array
     bytes owned by the whole batch of prepared entries, not Python overhead,
     models, solver workspaces or process RSS. It must be a nonnegative integer
@@ -214,6 +217,33 @@ class Kernel(Protocol):
         """
         ...
 
+    def bind_input(
+        self,
+        prepared: Prepared,
+        key_index: int,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source_initial: NDArray[np.complex128],
+        budget: float,
+    ) -> Prepared | None:
+        """Optionally contract source input into an evolve-local read-only payload.
+
+        Called in A-stage only for shared prepared batches (repeated keys).
+        key_index selects one entry in prepared. rows are all start_ns == 0
+        rows sharing that prepare key and first tone port, in arbitrary order.
+        source_initial is complex128 (M,M), the source's initial density in
+        these rows' model basis, not a worker's evolving density. No input may
+        be modified. budget is the positive absolute per-segment allowance.
+
+        None declines sharing and keeps the ordinary per-batch apply path.
+        A returned payload replaces prepared in apply for these rows, with
+        key_index all zero. It must be immutable to workers and usable with
+        arbitrary subsets/order (including empty rows) from this group. It
+        lives only for this evolve, never in PrepareCache or kernel state.
+        Numerical failure raises RuntimeError.
+        """
+        ...
+
     def apply(
         self,
         prepared: Prepared,
@@ -225,6 +255,8 @@ class Kernel(Protocol):
     ) -> NDArray[np.bool_]:
         """Advance complex128 states (len(rows),M,M) in place through rows.
 
+        prepared is either model-only prepare data or a bind_input payload;
+        the latter requires the same input density supplied to bind_input.
         key_index maps each row to its prepared entry. budget is the positive
         absolute per-segment allowance. Called by a joblib worker thread;
         numba implementations must be nogil and single-threaded. Prepared

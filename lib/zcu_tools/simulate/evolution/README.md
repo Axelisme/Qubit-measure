@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, post-apply accuracy reports
+**Last updated:** 2026-10-17, evolve-local input binding
 
 ## Segment engine contracts
 
@@ -52,14 +52,26 @@ persists across `evolve` calls, but no worker resources survive a call.
 for checked replay.
 
 The internal `kernel` module defines `SegmentTable`, `Kernel` and the opaque
-`Prepared.nbytes` contract. Only apply receives density arrays. The shared
+`Prepared.nbytes` contract. Only apply and `bind_input` receive density arrays.
+The hook receives only the source initial density, never worker densities.
+For shared prepared batches, the engine calls the hook once per prepare key
+and port with all rows starting at zero, before timeline chunks start. The
+engine converts the source density into the row model basis. A returned opaque
+payload replaces the prepared argument to apply, with key indices all zero.
+None keeps the ordinary apply path. Input-bound payloads are read-only and
+belong to one evolve call. They never enter PrepareCache or kernel state.
+Dyson contracts its paths and groups first-order factors in this hook. Other
+kernels return None. The shared
 contract suite lives in `tests/simulate/evolution/contract/kernel_suite.py`.
 Kernel tests inherit `KernelContract` and provide a `kernel_case` fixture with
 accepted rows, a synthetic model and input densities. The suite compares against
 an independent strict DOP853 reference. It checks guard row locality across
 single-row, unequal and reversed-order split calls, apply row splitting for
 both densities and bool exceedance masks, mask shape and dtype, and preparation
-without density access. The demo kernel stays in tests.
+without density access. The suite also checks that input binding leaves its
+inputs unchanged and that bound and ordinary apply agree within budget across
+repeated, reversed, non-contiguous and empty subsets. The demo kernel stays in
+tests.
 
 ## Dispatch
 
@@ -145,7 +157,14 @@ All non-reps sweep points enter as template arrays. Prepare does not depend on
 input density; apply does. The engine deduplicates prepare keys across the
 acquire. Keys used at least twice are prepared in shared A-stage chunks before
 timeline work starts. Single-use preparations stay inside their timeline chunk
-and are discarded afterward.
+and are discarded afterward. The input-bound hook is an A-stage exception to
+model-only preparation. It contracts the source initial density once per shared
+key and port, and its payload lives only until this evolve finishes. Single-use
+keys, rows starting after zero and kernels returning None keep the per-batch
+path. Dyson uses the maximum absolute gain and maximum duration of all shared
+rows to build its path superset. Workers reuse the path and factor tables and
+check each row's original pruning bound. Fixed-size modal reconstruction keeps
+shared Dyson results bitwise identical across worker counts and chunk splits.
 
 Timeline chunks interleave estimated costs, with six chunks per worker by
 default. Within a chunk, local waves batch next segments by kernel and prepared

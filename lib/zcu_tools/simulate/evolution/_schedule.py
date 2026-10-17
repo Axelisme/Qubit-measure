@@ -189,7 +189,55 @@ class Schedule:
                 raise RuntimeError("prepare job returned no payload")
             cache.add(namespace, payload)
             bindings.append(_bind(entry, payload, entry.counts[entry.inverse] >= 2))
-        return bindings
+        return self.bind_inputs(bindings)
+
+    def bind_inputs(self, bindings: list[_Binding]) -> list[_Binding]:
+        """Add evolve-local input bindings after model-only cache admission.
+
+        Only repeated keys are present here. All eligible rows for a key/port
+        reach one hook call, before chunk partitioning. Opaque returned data is
+        referenced by the returned list alone, never by Schedule or the cache.
+        """
+        bound: list[_Binding] = []
+        zero = tuple(0 for _ in range(self.table.level.shape[1]))
+        dc = self.source.model(zero)
+        for binding in bindings:
+            eligible = self.table.start_ns[binding.rows] == 0
+            for key in np.unique(binding.indices[eligible]):
+                candidates = binding.rows[eligible & (binding.indices == key)]
+                ports = (
+                    self.table.tone_port[candidates, 0]
+                    if self.table.tone_port.shape[1]
+                    else np.full(len(candidates), -1, dtype=np.int64)
+                )
+                for port in np.unique(ports):
+                    rows = candidates[ports == port]
+                    level = tuple(int(v) for v in self.table.level[rows[0]])
+                    initial = self.source.initial_density
+                    if level != zero:
+                        model = self.source.model(level)
+                        overlap = model.eigenvectors.conj().T @ dc.eigenvectors
+                        initial = overlap @ initial @ overlap.conj().T
+                    initial.setflags(write=False)
+                    payload = binding.kernel.bind_input(
+                        binding.payload.prepared,
+                        int(key),
+                        self.table,
+                        rows,
+                        initial,
+                        self.budget,
+                    )
+                    if payload is not None:
+                        bound.append(
+                            _Binding(
+                                binding.kernel,
+                                _Payload(payload, ()),
+                                rows,
+                                np.zeros(len(rows), dtype=np.int64),
+                            )
+                        )
+        # Later bindings override model-only ones for eligible rows in _Chunk.
+        return [*bindings, *bound]
 
     def run(
         self,
