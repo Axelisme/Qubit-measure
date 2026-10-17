@@ -346,6 +346,68 @@ def test_shared_cache_namespace_budget_eviction_and_singletons():
         engine.evolve(src, (batch(),), cancel=Event())
 
 
+@pytest.mark.parametrize(
+    ("repeated", "name"),
+    [(False, "t4"), (False, "dop853"), (True, "t4"), (True, "flux_dop853")],
+)
+def test_timeline_local_payloads_are_released_before_the_next_timeline(repeated, name):
+    from zcu_tools.simulate.evolution.kernel import GuardPreparation
+
+    class LifetimeKernel(RecordingKernel):
+        def __init__(self):
+            super().__init__(name)
+            self.live = 0
+            self.peak_live = 0
+
+        def prepare_keys(self, table, rows):
+            return table.timeline[rows].copy().view("V8")
+
+        def release(self, count):
+            self.live -= count
+
+        def prepare(self, keys, table, rows, source, budget):
+            payload = super().prepare(keys, table, rows, source, budget)
+            self.live += len(keys)
+            self.peak_live = max(self.peak_live, self.live)
+            weakref.finalize(payload, self.release, len(keys))
+            return payload
+
+        def guard_prepared(self, table, rows, source, budget):
+            keys, first = np.unique(self.prepare_keys(table, rows), return_index=True)
+            payload = self.prepare(keys, table, rows[first], source, budget)
+            return GuardResult(
+                self.guard(table, rows, source, budget),
+                (GuardPreparation(keys, payload),),
+            )
+
+    n = 8
+    b = batch(n)
+    if repeated:
+        b = replace(
+            b,
+            flux=FluxSchedule(
+                2 * np.arange(n + 1),
+                np.tile([0.0, 1.0], n),
+                np.tile([[0], [1]], (n, 1)),
+            ),
+        )
+    if name != "t4":
+        b = replace(
+            b, tracks=tuple(track(n, EnvelopeSpec("constant")) for _ in range(3))
+        )
+    kernel = LifetimeKernel()
+    src = source()
+    result = run(Engine(1, 0, kernels=(kernel,), chunks_per_worker=1), src, (b,))
+    np.testing.assert_array_equal(
+        result.densities, np.repeat(src.initial_density[None], n, axis=0)
+    )
+    assert kernel.preparations == n, "same-timeline repeats must prepare only once"
+    assert kernel.peak_live == 1, (
+        "local payloads must not accumulate in A-stage or chunks"
+    )
+    assert kernel.live == 0, "the evolve call must release all local payloads"
+
+
 def test_cancel_between_chunks_and_nonfinite_failure():
     cancel = Event()
     k = RecordingKernel("t4", cancel=cancel)
