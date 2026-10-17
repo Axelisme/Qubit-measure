@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from threading import Event
 from unittest.mock import MagicMock
 
 import pytest
@@ -85,10 +89,12 @@ class _PollTimer(QObject):
     def __init__(self, parent: QObject) -> None:
         super().__init__(parent)
         self.running = False
+        self.interval = 0
 
     def setInterval(self, milliseconds: int) -> None:
         """Accept the production interval without scheduling wall-clock work."""
         assert milliseconds > 0
+        self.interval = milliseconds
 
     def isActive(self) -> bool:
         return self.running
@@ -1171,3 +1177,103 @@ def test_device_status_replaces_error_foreground(
         dialog.close()
         dialog.deleteLater()
         qapp.processEvents()
+
+
+def test_driver_activity_marks_only_operated_rows_and_holds_between_short_writes(
+    qapp, poll_timers, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
+    from zcu_tools.device.base import device_operation
+    from zcu_tools.gui.app.measure.controller import Controller
+    from zcu_tools.gui.app.measure.registry import Registry
+    from zcu_tools.gui.app.measure.state import State
+    from zcu_tools.gui.session.types import SessionEnv
+
+    from tests.gui._user_input import ComponentDriver
+
+    entered, release = Event(), Event()
+
+    class HoldingDevice(FakeDevice):
+        info_model = FakeDeviceInfo
+
+        @device_operation
+        def hold(self) -> None:
+            entered.set()
+            # The test releases this operation in finally, even on assertion failure.
+            assert release.wait(30)
+
+    clock = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    flux, unused = HoldingDevice(fast_mode=True), FakeDevice(fast_mode=True)
+    manager = DeviceManager()
+    manager.register_device("flux", flux)
+    manager.register_device("unused", unused)
+    ctrl = Controller(
+        State(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        Registry(),
+        None,
+        EventBus(),
+        project_root=str(tmp_path),
+        device_registry=manager,
+    )
+    dialog = DeviceDialog(ctrl.device_control, parameter_provider=lambda: None)
+    pool = ThreadPoolExecutor(max_workers=1)
+    future = None
+    try:
+        dialog.show()
+        qapp.processEvents()
+        ui = ComponentDriver(dialog)
+        ui.select_list_row("unused (FakeDevice)")
+        ui.screenshot(tmp_path / "01-idle.png")
+        future = pool.submit(flux.hold)
+        assert entered.wait(30), "submitted fake operation must enter before release"
+        for timer in poll_timers:
+            timer.tick()
+        rows = ui.list_rows()
+        assert [row.text for row in rows] == [
+            "● flux (FakeDevice)",
+            "unused (FakeDevice)",
+        ]
+        assert rows[0].tooltip == "Operating or recently active"
+        assert rows[1].selected
+        assert ui.observe("Apply Changes").enabled, (
+            "activity is observation, not admission"
+        )
+        ui.screenshot(tmp_path / "02-operation.png")
+        release.set()
+        future.result(timeout=30)
+        for index, now in enumerate((100.4, 100.8, 101.2)):
+            clock[0] = now
+            flux.set_value(0.1)
+            for timer in poll_timers:
+                if timer.interval < 1000:
+                    timer.tick()
+            assert ui.list_rows()[0].text == "● flux (FakeDevice)"
+            assert ui.list_rows()[1].selected
+            ui.screenshot(tmp_path / f"03-short-write-{index}.png")
+        clock[0] = 102.0
+        for timer in poll_timers:
+            if timer.interval < 1000:
+                timer.tick()
+        assert ui.list_rows()[0].text == "● flux (FakeDevice)"
+        ui.screenshot(tmp_path / "04-hold.png")
+        clock[0] = 102.4
+        for timer in poll_timers:
+            if timer.interval < 1000:
+                timer.tick()
+        assert [row.text for row in ui.list_rows()] == [
+            "flux (FakeDevice)",
+            "unused (FakeDevice)",
+        ]
+        assert ui.list_rows()[1].selected
+        ui.screenshot(tmp_path / "05-idle-again.png")
+        ui.click("Close")
+    finally:
+        release.set()
+        if future is not None:
+            future.result(timeout=30)
+        pool.shutdown(wait=True)
+        ctrl.close(timeout_ms=30_000)
+        dialog.close()
+        dialog.deleteLater()
+        manager.close_all_devices()
