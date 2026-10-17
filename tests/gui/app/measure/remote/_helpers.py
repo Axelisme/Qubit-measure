@@ -431,12 +431,17 @@ def open_client(port: int) -> socket.socket:
 def call(
     sock: socket.socket,
     method: str,
-    params: dict | None = None,
+    params: Mapping[str, object] | None = None,
     *,
     rid: str = "1",
     timeout_s: float = 30.0,
 ) -> dict:
-    """Send a single RPC and wait for its matching reply."""
+    """Send a single RPC and wait for its matching reply.
+
+    params must be a JSON-serializable dictionary with string keys. None or an
+    empty dictionary sends {}; a nonempty dictionary is passed through without
+    copying. Serialization, socket and receiver errors propagate unchanged.
+    """
     send(sock, {"id": rid, "method": method, "params": params or {}})
     return recv_response(sock, rid, timeout_s)
 
