@@ -31,8 +31,8 @@ def window_palette(qapp, request):
     return palette
 
 
-@pytest.fixture(autouse=True)
-def _drain_qt_events(qapp):
+@pytest.fixture(autouse=True, name="_drain_qt_events")
+def fixture_drain_qt_events(qapp):
     """Drain pending Qt events before and after every test.
 
     Each test process re-uses its session ``QApplication`` across many tests.

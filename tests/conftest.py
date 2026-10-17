@@ -40,13 +40,15 @@ if _LIB_PATH not in sys.path:
     sys.path.insert(0, _LIB_PATH)
 
 
-@pytest.fixture(autouse=True)
-def _np_seed():
+@pytest.fixture(autouse=True, name="_np_seed")
+def fixture_np_seed():
+    """Seed NumPy randomness before each test."""
     np.random.seed(0)
 
 
-@pytest.fixture(autouse=True)
-def _close_matplotlib_figures():
+@pytest.fixture(autouse=True, name="_close_matplotlib_figures")
+def fixture_close_matplotlib_figures():
+    """Close all Matplotlib figures after each test."""
     yield
     import matplotlib.pyplot as plt
 
