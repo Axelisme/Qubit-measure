@@ -50,6 +50,34 @@ class _FloquetSetup(TypedDict):
     """32 equally spaced times over one drive period, excluding its endpoint, in ns."""
 
 
+class _TLSMapKwargs(TypedDict):
+    """Shared keyword inputs for the TLS resonance-map validation cases."""
+
+    branch_pairs: list[tuple[int, int]]
+    """Directed (from, to) branch-label pairs."""
+
+    harmonics: list[int]
+    """Drive harmonics used for the Fourier components."""
+
+    E_tls_axis: NDArray[np.float64]
+    """TLS energy axis in the Hamiltonian's energy units."""
+
+    g_tls: float
+    """TLS coupling strength in the Hamiltonian's energy units."""
+
+    r_f: float
+    """Drive frequency in the Hamiltonian's energy units."""
+
+    ts: NDArray[np.float64]
+    """Fourier sampling times in ns."""
+
+    gamma: float
+    """Lorentzian linewidth in the Hamiltonian's energy units."""
+
+    progress: bool
+    """Whether to display calculation progress."""
+
+
 def _build_floquet_setup() -> _FloquetSetup:
     from scqubits.core.fluxonium import Fluxonium
 
@@ -182,30 +210,38 @@ def test_resonance_map_matches_fourier_melem(floquet_setup: _FloquetSetup) -> No
 
 
 def test_fast_fail_validation(floquet_setup: _FloquetSetup) -> None:
-    kwargs: dict = dict(
-        branch_pairs=[(0, 1)],
-        harmonics=[0],
-        E_tls_axis=np.linspace(0.2, 1.5, 10),
-        g_tls=1e-3,
-        r_f=_R_F,
-        ts=floquet_setup["ts"],
-        gamma=5e-3,
-        progress=False,
-    )
+    kwargs: _TLSMapKwargs = {
+        "branch_pairs": [(0, 1)],
+        "harmonics": [0],
+        "E_tls_axis": np.linspace(0.2, 1.5, 10),
+        "g_tls": 1e-3,
+        "r_f": _R_F,
+        "ts": floquet_setup["ts"],
+        "gamma": 5e-3,
+        "progress": False,
+    }
     args = (
         floquet_setup["fbasis_n"],
         floquet_setup["branch_energies"],
         floquet_setup["branch_infos"],
         floquet_setup["n_op"],
     )
+    invalid_kwargs: _TLSMapKwargs = kwargs.copy()
+    invalid_kwargs["gamma"] = 0.0
     with pytest.raises(ValueError, match="gamma"):
-        calc_tls_resonance_map(*args, **{**kwargs, "gamma": 0.0})
+        calc_tls_resonance_map(*args, **invalid_kwargs)
+    invalid_kwargs = kwargs.copy()
+    invalid_kwargs["E_tls_axis"] = np.array([])
     with pytest.raises(ValueError, match="E_tls_axis"):
-        calc_tls_resonance_map(*args, **{**kwargs, "E_tls_axis": np.array([])})
+        calc_tls_resonance_map(*args, **invalid_kwargs)
+    invalid_kwargs = kwargs.copy()
+    invalid_kwargs["ts"] = np.array([])
     with pytest.raises(ValueError, match="ts"):
-        calc_tls_resonance_map(*args, **{**kwargs, "ts": np.array([])})
+        calc_tls_resonance_map(*args, **invalid_kwargs)
+    invalid_kwargs = kwargs.copy()
+    invalid_kwargs["branch_pairs"] = [(1, 2)]
     with pytest.raises(KeyError, match="branch 2"):
-        calc_tls_resonance_map(*args, **{**kwargs, "branch_pairs": [(1, 2)]})
+        calc_tls_resonance_map(*args, **invalid_kwargs)
     truncated = {b: infos[:-1] for b, infos in floquet_setup["branch_infos"].items()}
     with pytest.raises(ValueError, match="tracking length"):
         calc_tls_resonance_map(args[0], args[1], truncated, args[3], **kwargs)
