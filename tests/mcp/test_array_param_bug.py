@@ -72,7 +72,9 @@ def test_forwarder_passes_list_intact():
 
     received: list[tuple[object, float]] = []
 
-    def _send(method: str, params: dict, *, timeout_seconds: float) -> dict:
+    def _send(
+        method: str, params: dict[str, object], *, timeout_seconds: float
+    ) -> dict[str, object]:
         received.append((params.get("paths"), timeout_seconds))
         return {"ok": True}
 
