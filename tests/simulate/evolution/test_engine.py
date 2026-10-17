@@ -1053,3 +1053,55 @@ def test_unknown_input_probe_uses_dyson_without_binding_and_matches_dop853():
         rtol=0,
         atol=1e-3,
     )
+
+
+@pytest.mark.parametrize("bind", [False, True])
+def test_shared_shaped_prefix_supplies_one_input_to_probe_and_later_segments(bind):
+    class PrefixKernel(RecordingKernel):
+        def __init__(self, name, delta):
+            super().__init__(name)
+            self.delta = delta
+            self.applied_rows = 0
+
+        def apply(self, prepared, key_index, table, rows, states, budget):
+            self.applied_rows += len(rows)
+            states[:, 0, 0] += self.delta
+            states[:, 1, 1] -= self.delta
+            return super().apply(prepared, key_index, table, rows, states, budget)
+
+    class ProbeKernel(RecordingKernel):
+        def __init__(self):
+            super().__init__("dyson")
+            self.known_inputs = []
+
+        def bind_input(self, prepared, key_index, table, rows, source_initial, budget):
+            self.known_inputs.append(source_initial.copy())
+            return BoundPayload(source_initial) if bind else None
+
+    # A representative has low reuse and takes Sambe; the full batch's three
+    # shaped rows take the ordinary cost order. Both are valid approximations.
+    spectral = PrefixKernel("shaped_sambe", 0.05)
+    direct = PrefixKernel("dop853", 0.1)
+    probe = ProbeKernel()
+    idle = RecordingKernel("t4")
+    shaped = EnvelopeSpec(
+        "sampled", sample_ns=np.array([0.0, 0.5, 1.0]), samples=np.array([0, 1, 0])
+    )
+    b = replace(
+        batch(3),
+        tracks=(
+            track(3, shaped, duration=1),
+            track(3, EnvelopeSpec("constant"), start=1, duration=1),
+        ),
+    )
+    src = source()
+    result = run(Engine(1, 0, kernels=(spectral, direct, probe, idle)), src, (b,))
+    assert len(probe.known_inputs) == 1
+    saved = probe.known_inputs[0]
+    assert np.max(abs(saved - src.initial_density)) > 0.01
+    for _, _, received in (*probe.calls, *idle.calls):
+        np.testing.assert_array_equal(received, np.repeat(saved[None], len(received), axis=0))
+    np.testing.assert_array_equal(result.densities, np.repeat(saved[None], 3, axis=0))
+    assert spectral.applied_rows + direct.applied_rows == 1, (
+        "identical prefixes must be evolved once, not again in workers"
+    )
