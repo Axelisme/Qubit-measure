@@ -4,13 +4,12 @@ from pathlib import Path
 
 import pytest
 import yaml
+from zcu_tools.resources.ftf import parse_ftf
 
 from tests.resources._ftf_data import ftf_document
 
 
 def test_singular_receiver_spectral_density_is_legal() -> None:
-    from zcu_tools.resources.ftf import parse_ftf
-
     document = ftf_document()
     _set_field(document, "readout.adc.gain", 0.0)
     _set_field(document, "readout.adc.noise_psd_adc2_ns", [[1.0, 0.1], [0.1, 0.01]])
@@ -21,13 +20,45 @@ def test_singular_receiver_spectral_density_is_legal() -> None:
 def test_ftf_loads_detached_named_settings(tmp_path: Path) -> None:
     from zcu_tools.resources.ftf import load_ftf
 
+    document = ftf_document()
     path = tmp_path / "model.yaml"
-    path.write_text(yaml.safe_dump(ftf_document()), encoding="utf-8")
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
     config = load_ftf(path)
+    document.clear()
     assert config.chip.g_f1_f2_ghz == -0.02
     assert config.dc_bias.sources["bias"].unit == "V"
     assert config.readout.adc.noise_psd_adc2_ns == ((0.0, 0.0), (0.0, 0.0))
     assert config.chip.coupler.ng == 0
+    assert config.dc_bias.sources["bias"].flux_per_unit.coupler == 0.1
+    assert config.dc_bias.offset_phi0.f2 == 0.4
+    assert config.drive_lines["mw"].charge_drive_ghz_per_gain.f2.imag == 0.02
+    assert config.readout.resonators.r2.frequency_ghz == 6.2
+    assert config.numerics.truncation.f1.native_cutoff == 8
+    assert config.numerics.truncation.retained_levels == 8
+    assert config.readout.adc.offset_adc == (0.0, 0.0)
+
+
+def test_ftf_load_preserves_merge_defaults_and_explicit_overrides(
+    tmp_path: Path,
+) -> None:
+    from zcu_tools.resources.ftf import load_ftf
+
+    text = (
+        yaml.safe_dump(ftf_document())
+        .replace(
+            "    bias:\n",
+            "    bias:\n      <<: &defaults {initial: 0.6, ramp_step: 0.3}\n",
+        )
+        .replace("      ramp_step: 0.1\n", "")
+    )
+    path = tmp_path / "merged.yaml"
+    path.write_text(text, encoding="utf-8")
+
+    config = load_ftf(path)
+
+    assert config.dc_bias.sources["bias"].initial == 0.2
+    assert config.dc_bias.sources["bias"].ramp_step == 0.3
+    assert config.dc_bias.sources["bias"].unit == "V"
 
 
 @pytest.mark.parametrize(
@@ -58,7 +89,9 @@ def test_duplicate_yaml_keys_are_rejected_before_overwrite(
     path = tmp_path / "duplicate.yaml"
     path.write_text(text, encoding="utf-8")
 
-    with pytest.raises(ValueError, match=rf"(?s)duplicate.*{name}.*line [0-9]+") as error:
+    with pytest.raises(
+        ValueError, match=rf"(?s)duplicate.*{name}.*line [0-9]+"
+    ) as error:
         load_ftf(path)
     assert str(path) in str(error.value)
 
@@ -114,8 +147,6 @@ def _set_field(document: dict[str, object], path: str, value: object) -> None:
     ],
 )
 def test_ftf_field_path_diagnostics(path: str, value: object, error_path: str) -> None:
-    from zcu_tools.resources.ftf import parse_ftf
-
     document = ftf_document()
     _set_field(document, path, value)
     with pytest.raises(ValueError, match=error_path.replace(".", r"\.")):
@@ -123,8 +154,6 @@ def test_ftf_field_path_diagnostics(path: str, value: object, error_path: str) -
 
 
 def test_duplicate_dc_and_drive_names_are_rejected() -> None:
-    from zcu_tools.resources.ftf import parse_ftf
-
     document = ftf_document()
     _set_field(
         document,
@@ -139,4 +168,55 @@ def test_duplicate_dc_and_drive_names_are_rejected() -> None:
         },
     )
     with pytest.raises(ValueError, match=r"drive_lines.bias: duplicate source name"):
+        parse_ftf(document)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("flux_lines", {}),
+        ("flux_lines", {"line": {"gen_ch": 1}}),
+        ("flux_sources", []),
+        ("channels", {"generators": 3}),
+    ],
+)
+def test_v2_rejects_removed_and_unknown_top_level_fields(
+    field: str, value: object
+) -> None:
+    document = ftf_document()
+    try:
+        parse_ftf(document)
+    except ValueError as error:
+        pytest.fail(f"v2 base must validate before checking {field}: {error}")
+    with pytest.raises(ValueError, match=field):
+        parse_ftf(document | {field: value})
+
+
+def test_version_one_is_rejected_at_version_field() -> None:
+    with pytest.raises(ValueError, match=r"version:.*2"):
+        parse_ftf(ftf_document() | {"version": 1})
+
+
+@pytest.mark.parametrize(
+    "section,path",
+    [
+        ("dc_bias", "offset_phi0.f2"),
+        ("drive_lines", "mw.charge_drive_ghz_per_gain.f2"),
+        ("readout", "resonators.r1.charge_coefficients_ghz.f2"),
+    ],
+)
+def test_v2_requires_every_named_loop(section: str, path: str) -> None:
+    document = ftf_document()
+    try:
+        parse_ftf(document)
+    except ValueError as error:
+        pytest.fail(f"v2 base must validate before checking loop maps: {error}")
+    # Work with decoded YAML just as a caller editing a file would.
+    node = document[section]
+    for key in path.split(".")[:-1]:
+        assert isinstance(node, dict)
+        node = node[key]
+    assert isinstance(node, dict)
+    del node["f2"]
+    with pytest.raises(ValueError, match=(section + "." + path).replace(".", r"\.")):
         parse_ftf(document)

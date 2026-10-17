@@ -10,11 +10,11 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
 
-from tests.resources._ftf_data import ftf_v2_document
+from tests.resources._ftf_data import ftf_document
 
 
 def test_v2_derives_sparse_channels_and_acquires_with_live_dc() -> None:
-    document = ftf_v2_document()
+    document = ftf_document()
     numerics = document["numerics"]
     assert isinstance(numerics, dict)
     numerics["truncation"]["retained_levels"] = 2

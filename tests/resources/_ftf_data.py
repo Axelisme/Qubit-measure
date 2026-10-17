@@ -2,11 +2,6 @@
 
 
 def ftf_document() -> dict[str, object]:
-    """Current synthetic settings shared by resource and composition regressions."""
-    return ftf_v2_document()
-
-
-def ftf_v2_document() -> dict[str, object]:
     """Minimal v2 sample with signed named calibrations and a generator hole."""
     return {
         "format": "zcu.ftf",

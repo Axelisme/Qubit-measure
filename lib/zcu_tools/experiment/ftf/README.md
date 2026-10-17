@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-17
+**Last updated:** 2026-10-17，欄位指南導航
 
 `ftf(path_or_settings)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -9,6 +9,7 @@ counts to the fixed mock QICK profile. The returned manager owns cleanup. A
 builder failure closes its resources and preserves both startup and close errors.
 The executable example is `zcu_lab/simulation_envs/FTF/environment.py` with adjacent
 `ftf.yaml`, a working copy of the tracked `default.yaml`. The Notebook walkthrough is `notebook_md/single_qubit.md`.
+欄位用途、單位與 entry 接線請讀 [FTF YAML v2 欄位指南](../../../../zcu_lab/simulation_envs/FTF/field-guide.md)。
 
 `FTFSource.snapshot` reads live DC values before each round. It checks units and
 limits without restoring startup values. `execute` consumes detached templates.
