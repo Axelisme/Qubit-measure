@@ -5,9 +5,9 @@ from dataclasses import replace
 from threading import Event
 
 import numpy as np
-from joblib import Parallel
 
 from ._dispatch import classify
+from ._parallel import Executor
 from ._planning import Geometry
 from ._schedule import PrepareCache, Schedule
 from .engine import Cancelled
@@ -149,7 +149,7 @@ class PrefixResolver:
         self.budget = budget
         self.cancel = cancel
 
-    def resolve(self, cache: PrepareCache, pool: Parallel, chunks: int) -> Geometry:
+    def resolve(self, cache: PrepareCache, pool: Executor, chunks: int) -> Geometry:
         """Resolve nested groups in time order, never storing inputs in the LRU."""
         geometry, kernels, source, budget, cancel = (
             self.geometry,
