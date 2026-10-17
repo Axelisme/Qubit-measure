@@ -26,6 +26,7 @@ from ._dop853_data import (
     pack_models,
     pack_segments,
 )
+from ._dop853_group import grouped_apply
 
 
 class _Data(NamedTuple):
@@ -91,11 +92,11 @@ class DOP853Kernel:
     """
 
     declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("dop853", "legacy-v1"),
+        identity=AlgorithmIdentity("dop853", "interaction-v2"),
         eligibility=Eligibility(min_tones=1),
         guard=GuardDeclaration(),
         accuracy="adaptive",
-        reuse=ReuseDeclaration("dop853/legacy-v1/serial"),
+        reuse=ReuseDeclaration("dop853/interaction-v2/grouped"),
         fallback="terminal-domain",
     )
 
@@ -193,7 +194,18 @@ class DOP853Kernel:
         the smallest spacing between envelope knots inside the row's local
         envelope window. Samples outside that window and all flux waveform
         samples are ignored. Constant envelopes have no sampling ceiling.
-        No adaptive history carries between rows.
+        Independent single-tone rows use sigma(t)=exp(+i*2*pi*H0*t) rho(t)
+        exp(-i*2*pi*H0*t), integrating the full transformed drive and unchanged
+        secular dissipator, then return to model eigenbasis. Group keys contain
+        prepared model, duration, port, signed carrier, phase, envelope identity,
+        envelope-local offset and floor(log2(abs(gain))). Only real gain differs.
+        Each trial must pass the original normalized RMS error norm for every
+        row separately; a group's error is the maximum, not a pooled RMS.
+        Tolerances, seed and active-knot ceiling are unchanged. This is local
+        control, not a new end-to-end error bound. No adaptive history carries
+        between groups or calls. Calls containing touching chains, zero gain or
+        non-single-tone rows retain the unchanged lab-frame runner. No RWA,
+        drive truncation, splitting, routing or envelope changes are made.
 
         Raises ValueError for incompatible prepared data, state/index shapes or
         nonexistent ports. RuntimeError signals numerical failure; earlier rows
@@ -217,10 +229,11 @@ class DOP853Kernel:
         if np.any(playing & (table.tone_port[rows] >= models.ports[key_index, None])):
             raise ValueError("DOP853 tone port absent from model")
         segments = pack_segments(table)
-        _run(
-            _Data(models, segments),
-            (rows, key_index),
-            states,
-            controls,
-        )
+        if not grouped_apply(models, segments, rows, key_index, states, controls):
+            _run(
+                _Data(models, segments),
+                (rows, key_index),
+                states,
+                controls,
+            )
         return np.zeros(len(rows), dtype=np.bool_)
