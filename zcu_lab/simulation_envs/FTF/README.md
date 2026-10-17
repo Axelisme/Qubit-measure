@@ -1,6 +1,6 @@
 # 模擬環境
 
-**Last updated:** 2026-10-17
+**Last updated:** 2026-10-17，v2 欄位指南
 
 這裡放 GUI 與 Notebook 共用的可信 Python 環境。`environment.py` 定義無參數的 `build_environment()`，讀取相鄰 `ftf.yaml` 並回傳已組裝的 FTF 環境。
 
@@ -10,7 +10,7 @@
 cp zcu_lab/simulation_envs/FTF/default.yaml zcu_lab/simulation_envs/FTF/ftf.yaml
 ```
 
-缺少 `ftf.yaml` 時，`build_environment()` 直接報錯。
+缺少 `ftf.yaml` 時，`build_environment()` 直接報錯。完整欄位、單位、合法範圍、三迴路映射與 entry 接線對照見 [FTF YAML v2 欄位指南](field-guide.md)。
 
 ## 建立 entry 與啟動
 
@@ -33,11 +33,13 @@ Script 建立 `result/ftf-demo/setup.yaml`、`aliases.yaml`、第一個 point `i
 
 ## 工作副本與調參
 
-`default.yaml` 使用 `format: zcu.ftf`、整數 `version: 2`。V1 文件不能載入，不自動轉換既有工作副本。三個 DC 電源與校準位於 `dc_bias.sources`，樣板使用 A。Charge drive 位於 `drive_lines`；FTF 不支援 flux pulse，也不接受 `flux_lines`。採用新樣板時請自行保留或重新填入需要的設定，不覆寫尚未保存的本機調整。
+`default.yaml` 使用 `format: zcu.ftf`、整數 `version: 2`。V1 文件不能載入，不自動轉換既有工作副本，也不自動更新既有 entry。三個 DC 電源與校準位於 `dc_bias.sources`，樣板使用 A。環境每 round 讀取 live DC snapshot，保留靜態磁通掃描。Charge microwave drive 位於 `drive_lines`，不是 flux drive。
+
+FTF 不建構 flux lines 或 flux controls，不提供快速 flux pulse；`flux_lines` 即使為空 map 也按未知欄位拒絕。未綁定 generator 沿用既有處理，沒有額外 flux-pulse 專用報錯。共享 `simulate` 引擎仍保留 flux-pulse 能力，但 FTF 不使用。採用新樣板時請自行保留或重新填入需要的設定，不覆寫尚未保存的本機調整。舊工作副本或預覽若仍含 `flux_lines`，須自行移除。
 
 `--simulate` 必須接 Python 檔路徑，不直接接受 YAML。環境檔會執行 Python，只載入可信來源。修改環境或 YAML 後須重啟 GUI；載入失敗會中止，不回退正常模式。
 
-`default.yaml` 是示意的 F1–coupler–F2 樣品，包含模型參數與接線，channel 數量由最大索引加一推導。它不是校準過的晶片，也不保證截斷收斂。更換樣品時可複製環境檔與 YAML，並調整 builder 指向的檔案。
+`default.yaml` 的 circuit energies、couplings 與 resonator frequencies 採論文 Device A，其餘包含本機手動設定。它不是通用校準結果，也不保證截斷或 solver 收斂。Channel 數量由最大索引加一推導，不是綁定條數；樣板保留 readout gen0 與 microwave gen2，gen1 是未綁定空洞。完整訊號路徑與接線表見 [欄位指南](field-guide.md)。更換樣品時可複製環境檔與 YAML，並調整 builder 指向的檔案。
 
 [Notebook 範例](../../../notebook_md/single_qubit.md) 使用同一個環境。Builder 成功回傳後，caller 負責關閉環境的 device manager。完整組裝與數值限制見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md)。
 
