@@ -252,6 +252,28 @@ class GateCacheKernel:
             array.setflags(write=False)
         return _GatePrepared(*arrays)
 
+    def guard_prepared(
+        self,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source: ModelSource,
+        budget: float,
+    ) -> None:
+        """Decline guard preparation handoff; the engine calls guard normally."""
+        del table, rows, source, budget
+
+    def bind_input(
+        self,
+        prepared: Prepared,
+        key_index: int,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source_initial: NDArray[np.complex128],
+        budget: float,
+    ) -> None:
+        """Decline input binding; apply uses the model-only prepared payload."""
+        del prepared, key_index, table, rows, source_initial, budget
+
     def apply(
         self,
         prepared: Prepared,
@@ -260,12 +282,14 @@ class GateCacheKernel:
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
         budget: float,
-    ) -> None:
+    ) -> NDArray[np.bool_]:
         """Advance aligned densities in place using read-only prepared data.
 
         key_index selects prepared entries; rows selects table theta. Splitting
         or reordering rows does not change their results. The worker loop is
         single-threaded numba and releases the GIL.
+
+        Return an all-False bool mask aligned with rows; no post-apply check.
         """
         _check_budget(budget)
         if not isinstance(prepared, _GatePrepared):
@@ -279,3 +303,4 @@ class GateCacheKernel:
                 table.tone_theta_rad[rows, 0],
                 states,
             )
+        return np.zeros(len(rows), dtype=np.bool_)

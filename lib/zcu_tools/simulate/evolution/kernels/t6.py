@@ -229,7 +229,7 @@ class _T6Prepared:
         return self.coefficients.nbytes + self.modes.nbytes + self.counts.nbytes
 
 
-@njit(nogil=True)
+@njit(nogil=True, cache=True)
 def _apply_channels(coefficients, modes, counts, key_index, theta, states):
     size = states.shape[1]
     dimension = size * size
@@ -330,6 +330,28 @@ class T6Kernel:
         ]
         return _pack(entries)
 
+    def guard_prepared(
+        self,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source: ModelSource,
+        budget: float,
+    ) -> None:
+        """Decline guard preparation handoff; the engine calls guard normally."""
+        del table, rows, source, budget
+
+    def bind_input(
+        self,
+        prepared: Prepared,
+        key_index: int,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        source_initial: NDArray[np.complex128],
+        budget: float,
+    ) -> None:
+        """Decline input binding; apply uses the model-only prepared payload."""
+        del prepared, key_index, table, rows, source_initial, budget
+
     def apply(
         self,
         prepared: Prepared,
@@ -338,8 +360,11 @@ class T6Kernel:
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
         budget: float,
-    ) -> None:
-        """Evaluate phase Fourier series and advance the aligned densities in place."""
+    ) -> NDArray[np.bool_]:
+        """Evaluate phase Fourier series and advance the aligned densities in place.
+
+        Return an all-False bool mask aligned with rows; no post-apply check.
+        """
         _check_budget(budget)
         if not isinstance(prepared, _T6Prepared):
             raise ValueError("t6: incompatible prepared payload")
@@ -353,6 +378,7 @@ class T6Kernel:
         )
         if not np.isfinite(states).all():
             raise RuntimeError("t6: nonfinite density after channel application")
+        return np.zeros(len(rows), dtype=np.bool_)
 
 
 def _pack(entries: list[NDArray[np.complex128]]) -> _T6Prepared:

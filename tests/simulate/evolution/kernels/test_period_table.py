@@ -70,6 +70,10 @@ def kernel_case(request: pytest.FixtureRequest) -> KernelCase:
     )
 
 
+def test_guard_is_row_local(kernel_case: KernelCase) -> None:
+    KernelContract().test_guard_is_row_local(kernel_case)
+
+
 def test_rows_can_be_split(kernel_case: KernelCase) -> None:
     KernelContract().test_rows_can_be_split(kernel_case)
 
@@ -113,3 +117,10 @@ def test_keys_share_shapes_phases_and_ports_but_separate_bands(
     assert keys[0] != keys[7]
     assert keys[0] != keys[6]
     assert np.isfinite(case.kernel.cost(table, rows)).all()
+
+
+@pytest.mark.parametrize("prefix_input", [False, True], ids=["source", "prefix"])
+def test_bind_input_contract(kernel_case: KernelCase, prefix_input: bool) -> None:
+    KernelContract().test_bind_input_is_read_only_and_apply_equivalent(
+        kernel_case, prefix_input
+    )
