@@ -109,6 +109,74 @@ def test_detuned_constant_response_uses_no_ode_and_preserves_frame_phases(
     np.testing.assert_allclose(result.sums[0], expected.sum(axis=-2), atol=1e-9, rtol=0)
 
 
+@pytest.mark.parametrize("degenerate", [False, True])
+def test_frequency_batch_matches_individual_responses_across_interval_corners(
+    degenerate,
+):
+    m = model()
+    if degenerate:
+        # Equal resonators leave an undamped dark mode. Equal cascade rates
+        # also give a defective population generator; neither needs a cutoff.
+        m = replace(
+            m,
+            frequencies_ghz=np.full((3, 2), 6.0),
+            kappa_internal_per_ns=np.zeros(2),
+            kappa_external_per_ns=np.full(2, 0.08),
+            rates_per_ns=np.array(
+                [[0.0, 0.02, 0.0], [0.0, 0.0, 0.02], [0.0, 0.0, 0.0]]
+            ),
+        )
+    frequencies = (5.982, 6.0, 6.0 + 1e-13, 6.008)
+    pulses = tuple(
+        (
+            adc.ReadoutPulse(
+                -2.3,
+                7.7,
+                (1.2 + 0.3j) * (i + 1),
+                frequency,
+                phase_rad=0.23 * i,
+                breakpoints_ns=(-0.2, 4.1),
+            ),
+        )
+        for i, frequency in enumerate(frequencies)
+    )
+    times = np.array([-4.0, -2.3, -1.0, -0.2, 0.0, 4.1, 5.0, 7.7, 9.0])
+    grids = tuple(
+        (
+            adc.SampleGrid(times, frequency, 0.1),
+            adc.SampleGrid(times + 0.1, frequency + 0.002, 0.3),
+        )
+        for frequency in frequencies
+    )
+    inputs = adc.ReadoutBatch(m, pulses, grids, np.arange(4, dtype=np.int64), True)
+    result = adc.ConditionalReadout(m).responses(inputs)
+    individual = [
+        adc.ConditionalReadout(m).responses(
+            adc.ReadoutBatch(m, (p,), (g,), np.array([0], dtype=np.int64), True)
+        )
+        for p, g in zip(pulses, grids, strict=True)
+    ]
+    np.testing.assert_allclose(
+        result.sums, np.concatenate([r.sums for r in individual]), atol=1e-10, rtol=0
+    )
+    assert result.traces is not None
+    np.testing.assert_allclose(
+        result.traces,
+        np.concatenate([r.traces for r in individual]),
+        atol=1e-10,
+        rtol=0,
+    )
+    # An independent ODE reference also covers the resonant, defective case.
+    reference = adc.ConditionalReadout(m, rtol=1e-12, atol=1e-14)
+    expected = np.stack(
+        [
+            np.stack([reference.response(p, g).traces for g in reads])
+            for p, reads in zip(pulses, grids, strict=True)
+        ]
+    )
+    np.testing.assert_allclose(result.traces, expected, atol=1e-10, rtol=0)
+
+
 def test_response_cache_reuses_content_across_batches_and_trace_requests():
     evaluations = []
 
