@@ -10,12 +10,28 @@ from zcu_tools.simulate.evolution.kernel import SegmentTable
 from ..contract.kernel_suite import KernelCase, KernelContract, synthetic_model
 
 
-@pytest.fixture(params=[3, 4])
+@pytest.fixture(
+    params=[
+        (3, False),
+        (4, False),
+        (3, True),
+        (4, True),
+        (3, "threshold"),
+        (4, "threshold"),
+    ]
+)
 def kernel_case(request: pytest.FixtureRequest) -> KernelCase:
     from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
 
-    size: int = request.param
+    size, low_frequency = request.param
     model = synthetic_model(size)
+    if low_frequency:
+        model = replace(
+            model,
+            energies_ghz=np.arange(size) * 0.4,
+            rates_per_ns=model.rates_per_ns * 1e-3,
+            dephasing_per_ns=model.dephasing_per_ns * 1e-3,
+        )
     source = ModelSource(
         np.eye(size, dtype=np.complex128) / size,
         lambda level: replace(model, level=level, identity=f"model-{level}"),
@@ -36,6 +52,28 @@ def kernel_case(request: pytest.FixtureRequest) -> KernelCase:
         tone_envelope_offset_ns=np.full((count, 1), 7.0),
         envelopes=(EnvelopeSpec("constant"),),
     )
+    if low_frequency:
+        table = replace(
+            table,
+            duration_ns=np.array([0.0, 0.7, 8.7, 8.7, 20.7, 20.7]),
+            tone_frequency_ghz=np.array([0.3, 0.3, 0.3, -0.5, 0.582, 0.582])[:, None],
+        )
+    if low_frequency == "threshold":
+        # Long strong rows exercise the calibrated upper splitting allowance.
+        model = replace(
+            model,
+            rates_per_ns=model.rates_per_ns * 4,
+            dephasing_per_ns=model.dephasing_per_ns * 4,
+        )
+        source = ModelSource(
+            np.eye(size, dtype=np.complex128) / size,
+            lambda level: replace(model, level=level, identity=f"model-{level}"),
+        )
+        table = replace(
+            table,
+            duration_ns=np.array([0.0, 0.7, 80.7, 8.7, 20.7, 20.7]),
+            tone_frequency_ghz=np.array([0.3, 0.3, 0.3, -0.5, 0.582, 0.582])[:, None],
+        )
     vectors = np.exp(1j * np.arange(count)[:, None] * np.arange(size)) / np.sqrt(size)
     states = vectors[:, :, None] * vectors[:, None, :].conj()
     states[-1] = np.eye(size) / size
@@ -82,7 +120,7 @@ def test_guard_rejects_low_carrier_shapes_and_large_split_estimate(
 
     source = NoDensity(case.states[0], case.source.model)
     assert case.kernel.guard(case.table, rows, source, case.budget).all()
-    low = replace(case.table, tone_frequency_ghz=np.full((len(rows), 1), 0.5))
+    low = replace(case.table, tone_frequency_ghz=np.full((len(rows), 1), 0.1))
     assert not case.kernel.guard(low, rows, source, case.budget).any()
     sampled = EnvelopeSpec("sampled", np.ones(2, complex), np.array([0.0, 10.0]))
     shaped = replace(case.table, envelopes=(sampled,))
@@ -136,3 +174,39 @@ def test_engine_dispatches_known_and_unknown_high_carrier_rows(
     else:
         assert result.paths.segments_by_kernel == {"floquet_period": 4}
     assert result.paths.exceeded_by_kernel == {}
+
+
+def test_engine_dispatches_low_carrier_strong_and_unknown_inputs() -> None:
+    from zcu_tools.simulate.evolution import Engine
+
+    from ..test_engine import batch, run, track
+
+    model = synthetic_model(3)
+    model = replace(
+        model,
+        energies_ghz=np.arange(3) * 0.4,
+        rates_per_ns=model.rates_per_ns * 1e-3,
+        dephasing_per_ns=model.dephasing_per_ns * 1e-3,
+    )
+    source = ModelSource(np.diag([1.0, 0.0, 0.0]).astype(complex), lambda level: model)
+    pulse = replace(
+        track(1, EnvelopeSpec("constant"), duration=8.7),
+        frequency_ghz=np.full(1, 0.4),
+        amplitude=np.full(1, 0.15),
+    )
+    later = replace(pulse, start_ns=np.full(1, 8.7), phase_rad=np.full(1, 5.9))
+    result = run(
+        Engine(1, 100000),
+        source,
+        (replace(batch(1, duration=17.4), tracks=(pulse, later)),),
+    )
+    assert result.paths.segments_by_kernel == {"floquet_period": 2}
+    assert result.paths.exceeded_by_kernel == {}
+
+    weak = replace(pulse, amplitude=np.full(1, 1e-7))
+    result = run(
+        Engine(1, 100000),
+        source,
+        (replace(batch(1, duration=8.7), tracks=(weak,)),),
+    )
+    assert result.paths.segments_by_kernel == {"dyson": 1}
