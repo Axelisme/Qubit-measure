@@ -270,12 +270,20 @@ def test_idle_candidate_preserves_complete_exact_secular_cover(scenario):
         engine.close()
 
 
-@pytest.mark.parametrize("revision", ["numeric_revision", "planner_revision", "dependencies"])
-def test_profile_execution_revision_is_checked_before_candidate_guards(scenario, revision):
+@pytest.mark.parametrize(
+    "revision", ["numeric_revision", "planner_revision", "dependencies"]
+)
+def test_profile_execution_revision_is_checked_before_candidate_guards(
+    scenario, revision
+):
     src, b, pending, admitted = scenario
     if revision == "dependencies":
-        estimates = replace(pending.estimates, provenance=replace(
-            pending.estimates.provenance, dependencies=("numpy==0",)))
+        estimates = replace(
+            pending.estimates,
+            provenance=replace(
+                pending.estimates.provenance, dependencies=("numpy==0",)
+            ),
+        )
         pending = replace(pending, estimates=estimates)
         admitted = replace(admitted, estimates=estimates)
     else:
@@ -290,3 +298,27 @@ def test_profile_execution_revision_is_checked_before_candidate_guards(scenario,
             engine.evaluate_constant_profile(src, (b,), profile=pending, cancel=Event())
     finally:
         engine.close()
+
+
+
+def test_planner_does_not_merge_input_bindings_on_different_ports(scenario):
+    from zcu_tools.simulate.evolution import ModelSource
+
+    src, b, pending, _ = scenario
+    model = src.model((0,))
+    model = replace(model, drives=model.drives + (replace(model.drives[0], name="other"),))
+    src = ModelSource(src.initial_density, lambda level: replace(model, level=level))
+    first = replace(b.tracks[0], active=np.array([True, False]))
+    second = replace(b.tracks[0], port="other", active=np.array([False, True]))
+    b = replace(b, tracks=(first, second))
+    estimates = replace(pending.estimates, families=tuple(
+        replace(f, stages=replace(f.stages, bind=1, apply=0 if f.identity.name == "dyson" else 100))
+        for f in pending.estimates.families
+    ))
+    planner = ConstantPlanner()
+    try:
+        pinned = planner.plan(src, (b,), estimates, ShadowRequest(3, 1e-3, 1, 10000000, 288))
+        assert [c.declaration.identity.name for c in pinned.report.selected.cover] == ["dyson", "dyson"]
+        assert len([task for task in pinned.report.selected.tasks if task.stage == "bind"]) == 2
+    finally:
+        planner.close()
