@@ -146,6 +146,7 @@ class GateCacheKernel:
     """
 
     name = "gate_cache"
+    guard_builds = False
 
     def guard(
         self,

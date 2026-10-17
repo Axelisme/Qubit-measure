@@ -727,6 +727,7 @@ class DysonKernel:
     """
 
     name = "dyson"
+    guard_builds = False
 
     def guard(
         self,

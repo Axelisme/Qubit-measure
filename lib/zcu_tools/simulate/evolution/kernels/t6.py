@@ -253,6 +253,7 @@ class T6Kernel:
     """
 
     name = "t6"
+    guard_builds = False
 
     def guard(
         self,

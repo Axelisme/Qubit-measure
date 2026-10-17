@@ -41,6 +41,7 @@ class Selection:
 
     rows: NDArray[np.int64]
     shaped: ShapedPlan | None
+    rejected: Mapping[str, NDArray[np.bool_]]
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,7 @@ class Dispatch:
     preparations: accepted caller guard products, grouped by family.
     deferred: worker-owned row mask, or None when no rows need worker classification.
     shaped: fixed acquire-wide cost plan, or None when no shaped work exists.
+    rejected: caller guard decisions to skip in worker-local fallback chains.
     """
 
     names: NDArray[np.str_]
@@ -63,6 +65,7 @@ class Dispatch:
     )
     deferred: NDArray[np.bool_] | None = None
     shaped: ShapedPlan | None = None
+    rejected: Mapping[str, NDArray[np.bool_]] = field(default_factory=dict)
 
 
 def diagnostics(table: SegmentTable, names: NDArray[np.str_]) -> PathDiagnostics:
@@ -100,6 +103,7 @@ def require(
 @dataclass(frozen=True)
 class _Guarded:
     rows: NDArray[np.int64]
+    rejected: NDArray[np.int64]
     preparations: tuple[GuardPreparation, ...]
 
 
@@ -112,12 +116,14 @@ def _guard_key(
 ) -> _Guarded:
     """Keep the exact guard product whenever any row accepts this key."""
     result = kernel.guard_prepared(table, rows, source, budget)
-    accepted = (
-        kernel.guard(table, rows, source, budget) if result is None else result.accepted
-    )
+    if result is None:
+        raise RuntimeError(
+            f"kernel {kernel.name} declares guard_builds without a handoff"
+        )
+    accepted = result.accepted
     selected = rows[accepted]
-    preparations = result.preparations if result is not None and len(selected) else ()
-    return _Guarded(selected, preparations)
+    preparations = result.preparations if len(selected) else ()
+    return _Guarded(selected, rows[~accepted], preparations)
 
 
 class _Classifier:
@@ -147,36 +153,57 @@ class _Classifier:
             self.scope[selection.rows] = True
         self.shaped = selection.shaped if selection is not None else None
         self.preparations: dict[str, list[GuardPreparation]] = {}
+        self.rejected: dict[str, NDArray[np.bool_]] = {}
 
-    def try_kernel(self, kernel: Kernel, rows: NDArray[np.int64]) -> NDArray[np.int64]:
-        """Resolve shared keys now; move local guard/build/fallback to their worker."""
+    def guard_keys(
+        self, kernel: Kernel, rows: NDArray[np.int64]
+    ) -> Iterable[_Guarded | None]:
+        """Defer local builders; guard shared keys with the existing pool."""
         groups = group_keys(kernel, self.table, rows)
         if self.selection is None:
             local = rows[~groups.shared[groups.inverse]]
             self.deferred[local] = True
-            self.costs[local] = kernel.cost(self.table, local)
+            if len(local):
+                self.costs[local] = kernel.cost(self.table, local)
         selections = (
             selected
             for index, selected in groups.selections()
             if self.selection is not None or groups.shared[index]
         )
-        results: Iterable[_Guarded | None]
         if self.pool is not None and np.count_nonzero(groups.shared) >= 8:
-            results = self.pool(
+            return self.pool(
                 delayed(_guard_key)(
                     kernel, self.table, self.source, self.budget, selected
                 )
                 for selected in selections
             )
+        return (
+            _guard_key(kernel, self.table, self.source, self.budget, selected)
+            for selected in selections
+        )
+
+    def try_kernel(self, kernel: Kernel, rows: NDArray[np.int64]) -> NDArray[np.int64]:
+        """Batch cheap guards in the caller and never retry its rejected rows."""
+        eligible = rows
+        if self.selection is not None:
+            previous = self.selection.rejected.get(kernel.name)
+            if previous is not None:
+                eligible = rows[~previous[rows]]
+        if not len(eligible):
+            return rows
+        if kernel.guard_builds:
+            results = self.guard_keys(kernel, eligible)
         else:
-            results = (
-                _guard_key(kernel, self.table, self.source, self.budget, selected)
-                for selected in selections
-            )
+            accepted = kernel.guard(self.table, eligible, self.source, self.budget)
+            results = (_Guarded(eligible[accepted], eligible[~accepted], ()),)
         for result in results:
             if result is None:
                 raise RuntimeError("guard job returned no decision")
             self.names[result.rows] = kernel.name
+            if len(result.rejected):
+                self.rejected.setdefault(
+                    kernel.name, np.zeros(len(self.names), dtype=bool)
+                )[result.rejected] = True
             if result.preparations:
                 self.preparations.setdefault(kernel.name, []).extend(
                     result.preparations
@@ -261,6 +288,7 @@ class _Classifier:
             {name: tuple(items) for name, items in self.preparations.items()},
             self.deferred,
             self.shaped,
+            self.rejected,
         )
 
 

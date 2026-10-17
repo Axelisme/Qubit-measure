@@ -32,6 +32,7 @@ class _Entries:
     rows: NDArray[np.int64]
     inverse: NDArray[np.int64]
     shared: NDArray[np.bool_]
+    counts: NDArray[np.int64]
 
 
 @dataclass(frozen=True)
@@ -107,6 +108,7 @@ def _deduplicate(
                 rows,
                 groups.inverse,
                 groups.shared,
+                groups.counts,
             )
         )
     return entries
@@ -346,7 +348,7 @@ class Schedule:
             self.kernels,
             self.source,
             self.budget,
-            selection=Selection(rows, self.dispatch.shaped),
+            selection=Selection(rows, self.dispatch.shaped, self.dispatch.rejected),
         )
         bindings: list[_Binding] = []
         for entry in _deduplicate(self.table, dispatch, self.kernels):
@@ -381,16 +383,19 @@ class Schedule:
         if self.cancel.is_set():
             raise Cancelled()
         selected = np.isin(self.table.timeline, points)
-        # A timeline owns every local key until its last row. Stream all such
-        # timelines, independent of family, so payload memory cannot grow with
-        # the frequency/flux grid or the number of same-timeline repeats.
+        # Builders and repeated local keys own whole timelines. Single-use
+        # local keys prepare at their apply wave without breaking shared batches.
         deferred = (
             np.zeros(len(selected), dtype=bool)
             if self.dispatch.deferred is None
             else self.dispatch.deferred & selected
         )
         local_keys = np.any(deferred) or any(
-            np.any(selected[entry.rows] & ~entry.shared[entry.inverse])
+            np.any(
+                selected[entry.rows]
+                & ~entry.shared[entry.inverse]
+                & (entry.counts[entry.inverse] > 1)
+            )
             for entry in entries
         )
         if len(points) > 1 and local_keys:
@@ -412,6 +417,7 @@ class Schedule:
                 selected[entry.rows]
                 & ~entry.shared[entry.inverse]
                 & ~covered[entry.rows]
+                & (entry.counts[entry.inverse] > 1)
             )
             unique = np.unique(entry.inverse[local])
             if len(unique):
@@ -420,7 +426,7 @@ class Schedule:
                 )
                 local_bindings.append(_bind(entry, payload, local))
         bindings = [*shared, *self.bind_inputs(local_bindings)]
-        return _Chunk(self, points, selected, bindings).run()
+        return _Chunk(self, points, selected, bindings, entries).run()
 
 
 class _Chunk:
@@ -430,14 +436,22 @@ class _Chunk:
         points: NDArray[np.int64],
         selected: NDArray[np.bool_],
         bindings: Sequence[_Binding],
+        entries: Sequence[_Entries],
     ):
         self.schedule, self.points = schedule, points
         self.table = schedule.table
-        self.bindings = bindings
+        self.bindings = list(bindings)
+        self.entries = entries
         self.exceeded: Counter[str] = Counter()
         rows = len(self.table.timeline)
         self.binding = np.full(rows, -1, dtype=np.int64)
         self.key = np.zeros(rows, dtype=np.int64)
+        self.local_entry = np.full(rows, -1, dtype=np.int64)
+        self.local_key = np.zeros(rows, dtype=np.int64)
+        for index, entry in enumerate(entries):
+            local = selected[entry.rows] & ~entry.shared[entry.inverse]
+            self.local_entry[entry.rows[local]] = index
+            self.local_key[entry.rows[local]] = entry.inverse[local]
         for index, binding in enumerate(bindings):
             mask = selected[binding.rows]
             self.binding[binding.rows[mask]] = index
@@ -517,12 +531,56 @@ class _Chunk:
         self.level[slots] = self.table.level[rows[last]]
         self.cursor[slots] += lengths
 
+    def _apply_local(self, slot: int) -> None:
+        """Build/apply/release one local wave, preserving direct-solver chains."""
+        row = self.cursor[slot]
+        index = int(self.local_entry[row])
+        if index < 0:
+            raise RuntimeError(f"missing preparation for segment {row}")
+        entry = self.entries[index]
+        rows = np.array([row], dtype=np.int64)
+        if entry.kernel.name in ("dop853", "flux_dop853"):
+            candidates = np.arange(row, self.end[slot], dtype=np.int64)
+            contiguous = (self.local_entry[candidates] == index) & (
+                self.binding[candidates] < 0
+            )
+            previous = candidates[:-1]
+            contiguous[1:] &= self.table.start_ns[candidates[1:]] == (
+                self.table.start_ns[previous] + self.table.duration_ns[previous]
+            )
+            stop = np.flatnonzero(~contiguous)
+            rows = candidates[: int(stop[0]) if len(stop) else len(candidates)]
+        unique = np.unique(self.local_key[rows])
+        payload = _build(
+            entry,
+            unique,
+            self.table,
+            self.schedule.source,
+            self.schedule.budget,
+            self.schedule.cancel,
+        )
+        indices = np.searchsorted(unique, self.local_key[rows])
+        binding = _Binding(entry.kernel, payload, rows, indices)
+        transient = len(self.bindings)
+        self.bindings.append(binding)
+        self.binding[rows], self.key[rows] = transient, indices
+        try:
+            self._apply(transient, np.array([slot], dtype=np.int64))
+        finally:
+            self.binding[rows] = -1
+            self.bindings.pop()
+
     def run(self):
         """Propagate local timelines and convert final densities to DC basis."""
         while np.any(self.cursor < self.end):
             pending = np.flatnonzero(self.cursor < self.end)
             binding_ids = self.binding[self.cursor[pending]]
             for index in np.unique(binding_ids):
-                self._apply(int(index), pending[binding_ids == index])
+                slots = pending[binding_ids == index]
+                if index < 0:
+                    for slot in slots:
+                        self._apply_local(int(slot))
+                else:
+                    self._apply(int(index), slots)
         self._basis(np.arange(len(self.points)), np.zeros_like(self.level))
         return _ChunkResult(self.points, self.states, self.exceeded)

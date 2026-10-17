@@ -130,6 +130,7 @@ class PeriodTableKernel:
     """
 
     name = "period_table"
+    guard_builds = False
 
     def guard(
         self,

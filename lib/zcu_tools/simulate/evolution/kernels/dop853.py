@@ -67,6 +67,7 @@ class DOP853Kernel:
     """
 
     name = "dop853"
+    guard_builds = False
 
     def guard(
         self,

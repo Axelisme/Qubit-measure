@@ -47,6 +47,7 @@ class T4:
     """
 
     name = "t4"
+    guard_builds = False
 
     def guard(
         self,

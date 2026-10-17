@@ -111,6 +111,7 @@ class ShapedSambeKernel:
     """
 
     name = "shaped_sambe"
+    guard_builds = True
 
     def prepare_keys(
         self,

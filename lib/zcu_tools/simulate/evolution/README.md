@@ -26,11 +26,16 @@ at the row's grid level and switches at segment boundaries.
 Other algorithm families plug into the internal registry.
 
 The engine groups opaque prepare keys with `np.unique`. It guards cross-timeline
-candidates before A-stage. It defers keys confined to one timeline, including
-repeated rise/fall keys, to that timeline's worker. The worker runs guard,
+candidates before A-stage when their kernel declares `guard_builds=True`.
+Only these table-building local guards defer to a timeline worker. Kernels with
+`guard_builds=False` run their ordinary guard as a batch in the caller. The worker runs guard,
 fallback and preparation before apply. When a guard builds a table, apply uses
 that same table without another prepare call. Workers process these timelines
-one at a time and release their local payloads after each timeline. This applies to every kernel, not only low-frequency periodic
+one at a time and release their local payloads after each timeline. Repeated
+local keys also keep timeline ownership. Single-use keys without guard tables
+prepare at their apply wave and release immediately; shared apply batches stay
+intact. Direct-solver chains may prepare several singleton keys from the same
+contiguous timeline wave together. This applies to every kernel, not only low-frequency periodic
 propagation. Local preparation memory depends on concurrent timelines rather
 than the frequency/flux grid. Shared preparation memory still grows with the
 number of cross-timeline keys. The LRU charges whole opaque prepared batches;
@@ -53,7 +58,7 @@ and returns the final state to the DC eigenbasis. Cancellation is checked at
 chunk boundaries and raises `Cancelled` without partial results. `close()`
 waits for active work, clears the prepare cache and is safe to repeat. Each
 `evolve` call opens and closes its own joblib threading pool. Classifier guards
-may use that same pool for at least eight shared prepare keys. Smaller shared
+may use that same pool for at least eight shared table-building prepare keys. Smaller shared
 selections stay serial. Local guards run inside the existing timeline workers. Guards must return the same decisions for the
 same model/table inputs regardless of worker width or execution order. No kernel
 opens another numerical pool. The prepare cache persists across `evolve` calls,
@@ -70,11 +75,13 @@ reports rejected row counts in `ValueError`; evolution does not import ADC.
 for checked replay.
 
 The internal `kernel` module defines `SegmentTable`, `Kernel` and the opaque
-`Prepared.nbytes` contract. The optional `guard_prepared` hook returns a
-`GuardResult` containing the ordinary row-local acceptance mask and model-only
+`Prepared.nbytes` contract. Every kernel declares `guard_builds`. False means
+`guard_prepared` returns None and the engine calls its ordinary batched guard.
+True means `guard_prepared` builds the model payload it validates and returns a
+`GuardResult` with its ordinary row-local acceptance mask and model-only
 `GuardPreparation` batches. The engine asks for this handoff only for
-cross-timeline candidates before A-stage. A None result selects the ordinary
-guard. Timeline workers use the same hook for deferred keys and pass accepted
+cross-timeline builder candidates before A-stage. Timeline workers use the
+same hook for deferred keys and pass accepted
 products directly to apply. Rejected keys follow the remaining candidates in
 order. Neither path rebuilds an accepted guard table. Handoffs use the same
 kernel, prepare key, source and budget within this evolve. A shared candidate's
@@ -168,7 +175,8 @@ atol <= 1e-12. Its prepared arrays count toward the period-table cache charge.
 The ordinary shaped cost plan counts all candidate shaped rows, including rows
 later accepted by Sambe. A worker never recomputes reuse from another timeline's
 acceptance outcome. Same-band partial acceptance therefore cannot change the
-fallback cost order during an acquire. Every numerical guard still applies.
+fallback cost order during an acquire. Workers skip families the caller already
+rejected for their rows. Every numerical guard still applies.
 
 Low-reuse spectral ramps use the same immutable polynomial playback as ordinary
 period tables. Playback skips zero Fourier modes and unused negative-amplitude
