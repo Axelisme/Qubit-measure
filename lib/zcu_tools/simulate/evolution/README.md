@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, Dyson-to-periodic constant-tone dispatch, terminal-family coverage, readout trace diagnostics, low-frequency Hilbert propagation, compiled shared Dyson tables and shared driven-prefix inputs
+**Last updated:** 2026-10-17, Dyson-to-periodic constant-tone dispatch, terminal-family coverage, readout trace diagnostics, low-frequency Hilbert propagation, compiled shared Dyson tables, shared driven-prefix inputs, amortized shaped dispatch, model-only shaped guards and port-local period tables
 
 ## Segment engine contracts
 
@@ -109,19 +109,46 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | One constant tone after an identical shared no-drive prefix, r and r₂ pass | Dyson with the actual prefix output. B2 does not apply; post-apply population changes only report. |
 | One constant tone not accepted above, known or unknown input, with abs(f) >= 0.03 GHz and duration*T²*Gamma*V²/m² <= 1.0 for some m in 1..4 | `floquet_period` integrates one Hilbert-space U(T), translates the carrier phase in time, and steps each period with secular Strang dissipation. |
 | Same constant-tone branch, Hilbert period guard fails | T6 periodic propagation accepts every single constant-tone row. |
-| One shaped tone, prepare-key usage >= 10 | Gate cache with four Strang subsegments, closed-system U plus secular dissipation, and 16 carrier-phase Fourier samples. |
-| One shaped tone, prepare-key usage < 10 | Period table with midpoint-frozen envelopes, eight amplitude Chebyshev nodes and 16 phase Fourier samples; integrate the fractional-period tail directly. This branch has no per-segment accuracy guard. |
+| One shaped tone | Order gate cache, period table and DOP853 by amortized preparation plus apply work. Try each numerical guard in that order. There is no fixed gate-key reuse threshold. |
+| Shaped gate cache passes its split guard | Four Strang subsegments, closed-system U plus secular dissipation, and 16 carrier-phase Fourier samples. |
+| Shaped period table passes its envelope-motion, bandwidth and split guards | Midpoint-frozen envelopes, eight amplitude Chebyshev nodes and 16 phase Fourier samples for the actual drive port. Integrate the fractional-period tail directly. |
+| Shaped approximations rejected, or direct integration costs less | DOP853, with no input-state restriction. |
 | Two constant tones with a valid Floquet frame and passing harmonic omission and convergence bounds | Floquet k=0 preparation. Passing probe guards select modal second-order Dyson in H_F + D₀; other probes use periodic propagation in the same accepted frame. |
 | Other two-tone segments, including failed Floquet guards | Sum both drives in batched numba DOP853. |
 | Three or more tones | Sum all drives in batched numba DOP853. |
 
-T4, T6, gate_cache and period_table are terminal families for their dispatched
-rows. Their guards accept every row in those domains, so these branches have no
-DOP853 fallback. Custom kernels replacing these families must cover the same
-domains. A rejecting terminal guard raises `RuntimeError` with `no valid kernel`.
-Preparation or apply failures also raise; they never trigger reclassification.
+T4 and T6 are terminal families for their dispatched rows. Their guards accept
+every row in those domains, so these branches have no DOP853 fallback. Custom
+kernels replacing these families must cover the same domains. A rejecting
+terminal guard raises `RuntimeError` with `no valid kernel`. Shaped families can
+reject rows before preparation and fall back to another shaped family or DOP853.
+Preparation or apply failures still raise; they never trigger reclassification.
 DOP853 remains the fallback for rejected two-tone Floquet frames and the direct
 path for shaped two-tone and three-or-more-tone segments.
+
+Shaped dispatch charges gate preparation per complete gate key and period-table
+preparation per level, port, signed frequency and amplitude band. It counts keys
+across the evolve call, including unknown-input rows. For duration tau in ns,
+carrier magnitude f in GHz, and gate/table key counts qg and qp, its relative
+work scores are:
+
+- DOP853: `tau * (1 + 0.3*f)`.
+- Gate cache: `tau * (60 + 3*f) / qg + 0.04`.
+- Period table: `(150 + 550/f) / qp + c*tau*f + 5*tail*(1 + 0.3*f)`.
+
+Here tail is the fractional-period duration. The coefficient c is 0.008 for real
+envelopes and 0.064 for complex envelopes. DC skips the table score. These scores
+come from single-threaded prepare/apply comparisons on 16-level FTF models over
+50 MHz to 7 GHz, 30 ns to 10 us, and reuse counts 1, 2, 5, 9, 10 and 20. They are
+cost estimates, not timing probes or numerical guards. Short-pulse scans use all
+six reuse counts; long-pulse comparisons use one row. Port-local tables and
+removal of the common energy zero reduce preparation work. Real-envelope apply
+contracts the phase Fourier coefficients once per row for positive and negative
+amplitudes, then evaluates only the amplitude polynomial each period. Complex
+envelopes retain their time-varying phase. Fractional tails and DC reuse the
+compiled DOP853 kernel with model-only prepared data. The tail shifts carrier
+phase and envelope-local time together and retains strict rtol <= 1e-10 and
+atol <= 1e-12. Its prepared arrays count toward the period-table cache charge.
 
 Dyson's B2 guard uses the full known density in the segment model basis. For
 rows starting at zero this is the source initial density. For shared prefixes
@@ -192,8 +219,26 @@ the Hilbert period kernel, then T6.
 Each segment receives a default budget of 1e-3. The end-to-end acceptance
 threshold is a maximum absolute error of 1e-2 in both final readout-basis
 populations and low-four density entries, for experiments up to about 10 us.
-A segment budget is not a runtime guarantee of the total error, especially for
-unguarded period tables. DOP853 defaults to rtol=1e-5, atol=1e-7 and
+A segment budget is not a runtime guarantee of the total error. Shaped guards
+use model and envelope data, never initial or worker densities. Let V be the
+largest spectral norm of the selected drive's two quadratures, Gamma the largest
+outgoing or pure-dephasing rate, A the envelope peak, L its largest sampled
+piecewise-linear slope, and g the signed gain. Period tables require:
+
+- `2*pi*abs(g)*V*L/f**2 <= 0.05` for envelope motion within a period.
+- `2**band*V/f <= 0.5` for amplitude/phase interpolation bandwidth.
+- `tau*Gamma*(abs(g)*A*V)**2/f**2 <= 0.01` for secular splitting.
+
+The band covers peak gain by a power of two. DC and zero gain use direct
+integration inside the period family. Gate cache requires
+`tau**3*Gamma*(abs(g)*A*V)**2/16 <= 0.01` for its four fixed subsegments.
+These are calibrated rejection estimates, not multilevel error proofs. They
+prevent unresolved fast ramps and strong dissipative long gates from silently
+using fixed-order approximations. They can conservatively reject low carriers;
+DOP853 then preserves accuracy at a higher apply cost. Neither shaped family
+performs a density-dependent retry or post-apply correction.
+
+DOP853 defaults to rtol=1e-5, atol=1e-7 and
 max_step=0.1 ns, tightening tolerances for smaller budgets.
 
 Flux-tail truncation uses an absolute flux bound, not elapsed multiples of a

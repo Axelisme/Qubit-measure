@@ -173,32 +173,17 @@ def test_flux_basis_changes_and_readout_truncation():
     assert result.paths.segments_by_kernel == {"t4": 2}
 
 
-@pytest.mark.parametrize(("n", "required"), [(9, "period_table"), (10, "gate_cache")])
-def test_shaped_dedup_threshold(n, required):
-    shaped = EnvelopeSpec(
-        "sampled", np.array([0.0, 1.0, 0.0], complex), np.array([0.0, 1.0, 3.0])
-    )
-    k = RecordingKernel(required)
-    result = run(
-        Engine(2, 1000, kernels=(k,)),
-        source(),
-        (replace(batch(n), tracks=(track(n, shaped),)),),
-    )
-    assert result.paths.segments_by_kernel == {required: n}
-    assert k.preparations == 1
-
-
 def test_flat_top_split_phase_offset_and_small_plateau():
     envelope = EnvelopeSpec(
         "sampled", np.array([0, 1j, 1j, 0], complex), np.array([0.0, 2.0, 12.0, 14.0])
     )
-    period, t6 = RecordingKernel("period_table"), RecordingKernel("t6")
+    direct, t6 = RecordingKernel("dop853"), RecordingKernel("t6")
     result = run(
         Engine(
             1,
             1000,
             kernels=(
-                period,
+                direct,
                 RecordingKernel("dyson", accepts=False),
                 RecordingKernel("floquet_period", accepts=False),
                 t6,
@@ -207,7 +192,7 @@ def test_flat_top_split_phase_offset_and_small_plateau():
         source(),
         (replace(batch(1, duration=14), tracks=(track(1, envelope, duration=14),)),),
     )
-    assert result.paths.segments_by_kernel == {"period_table": 2, "t6": 1}
+    assert result.paths.segments_by_kernel == {"dop853": 2, "t6": 1}
     table, rows, _ = t6.calls[0]
     assert table.start_ns[rows].tolist() == [2.0]
     assert table.duration_ns[rows].tolist() == [10.0]
@@ -215,17 +200,17 @@ def test_flat_top_split_phase_offset_and_small_plateau():
         table.tone_theta_rad[rows, 0], 2 * np.pi * 0.1 * 2 + np.pi / 2
     )
     assert table.envelopes[table.tone_envelope[rows[0], 0]].kind == "constant"
-    assert period.calls[-1][0].tone_envelope_offset_ns[
-        period.calls[-1][1], 0
+    assert direct.calls[-1][0].tone_envelope_offset_ns[
+        direct.calls[-1][1], 0
     ].tolist() == [12.0]
     short = replace(envelope, sample_ns=np.array([0.0, 2.0, 11.0, 14.0]))
-    k = RecordingKernel("period_table")
+    k = RecordingKernel("dop853")
     result = run(
         Engine(1, 0, kernels=(k,)),
         source(),
         (replace(batch(1, duration=14), tracks=(track(1, short, duration=14),)),),
     )
-    assert result.paths.segments_by_kernel == {"period_table": 1}
+    assert result.paths.segments_by_kernel == {"dop853": 1}
 
 
 @pytest.mark.parametrize("expected", ["dyson", "floquet_period", "t6"])
@@ -292,7 +277,7 @@ def test_sideband_selective_constant_tone_uses_periodic_propagation(
 
 @pytest.mark.parametrize(
     ("family", "n"),
-    [("t4", 1), ("t6", 1), ("gate_cache", 10), ("period_table", 1)],
+    [("t4", 1), ("t6", 1)],
 )
 def test_incomplete_terminal_family_fails_instead_of_rerouting(family, n):
     kernels = tuple(
@@ -309,13 +294,7 @@ def test_incomplete_terminal_family_fails_instead_of_rerouting(family, n):
     )
     b = batch(n)
     if family != "t4":
-        envelope = (
-            EnvelopeSpec("constant")
-            if family == "t6"
-            else EnvelopeSpec(
-                "sampled", np.array([0, 1, 0], complex), np.array([0.0, 1.0, 3.0])
-            )
-        )
+        envelope = EnvelopeSpec("constant")
         b = replace(b, tracks=(track(n, envelope),))
     with pytest.raises(RuntimeError, match="no valid kernel for segment"):
         run(Engine(1, 0, kernels=kernels), source(), (b,))
