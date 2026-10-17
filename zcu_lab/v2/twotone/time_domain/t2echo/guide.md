@@ -4,7 +4,9 @@ T2 echo (spin/Hahn echo): a pi/2 – delay – pi – delay – pi/2 sequence wi
 
 ## Expects (parameter context)
 
-Total delay runs 0 to 1.5 * qubit.t2e us over 101 points. Detune ratio is fringes per sweep step; native MHz detune is ratio / step. Relax delay is 5 * qubit.t1 us. Missing calibration leaves the affected fields empty and Invalid; no numeric fallback.
+Total delay runs 0 to 1.5 * qubit.t2e us over 101 points. Detune ratio is fringes per sweep step; native MHz detune is ratio / step. Relax delay is 5 * qubit.t1 us. Other missing required calibration leaves the affected fields empty and Invalid.
+
+T1-derived defaults use the fixed Open/Reset capture. A missing/null T1 or absent capture uses 30 us, so the 5*T1 wait starts at 150 us. Stored invalid T1 leaves derived required fields empty while the Form opens. Alias/path/source failures propagate. Defaults remain editable, are not written back as calibration, and do not shorten automatically for active reset.
 
 ## Expects (ModuleLibrary)
 

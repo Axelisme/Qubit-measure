@@ -6,6 +6,8 @@ JPA flux-device calibration: with the qubit prepared in g and e (a pi pulse togg
 
 Uses the qubit (qubit/*), resonator and jpa (amplifier/jpa) aliases. The flux bounds use `$jpa.flux.` The optional JPA flux device resolves the flux_dev alias once at Open or Reset; an unbound alias leaves bias control disabled. flux_unit starts as A with no conversion. Missing required calibration leaves the form Invalid.
 
+Relax delay starts at 1*T1 from the fixed capture. Valid T1 is a finite positive non-bool real number; missing/null T1 or absent capture uses 30 us. Stored invalid T1 leaves the wait required and empty, while source failures propagate. This editable initial value is not calibration writeback.
+
 ## Expects (ModuleLibrary)
 
 Module slots use `$qubit.module.x180`, `$qubit.module.readout` and optional `$qubit.module.reset.` Missing pi/readout slots fall back to the pi_pulse/readout templates. Inline pulse calibration uses `$qubit.freq` and `$qubit.wiring.ch`; inline readout uses resonator frequency/wiring and `$resonator.ext.time_of_fly` + 0.05. An unset reset slot disables reset. Missing required fallback calibration leaves the form Invalid.

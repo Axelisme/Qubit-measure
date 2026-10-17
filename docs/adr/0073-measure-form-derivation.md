@@ -147,6 +147,15 @@ Flux_unit 獨立保存在 cfg。Recipe 的公開參數與來源政策不變，he
 
 ### Owner 與驗證邊界
 
+單一實驗的初值政策留在該實驗的 form.py。已定案且供多個 Form 共用的初值政策，
+可集中在 zcu_lab 的具名 domain helper，目前包括 T1 時間尺度選源，以及 Rabi 的
+來源、有效性與首次初值。各 Form 仍明確選擇倍率或場景，並組合結構。
+政策不進入 generic framework，不擴及 writeback 或實驗順序。
+這個分工讓同類 Form 使用同一政策，避免改了一個、漏改另一個。
+跨 owner 的依賴方向仍由下述 C15、C16 與 form-adapter-no-host contracts 保護。
+
+使用者 2026-10-17：「同意，這判斷標準沒問題」
+
 `cfg_model` 擁有 Qt-free 節點與 TemplateDef，不依賴 GUI。C11 保護這個方向。
 `gui.form_adapter` 擁有生成器，不 import gui.app 或 zcu_lab，
 由 `form-adapter-no-host` 保護。C15 保護實驗 core 不間接依賴 GUI，C16 禁止框架反向 import zcu_lab。
