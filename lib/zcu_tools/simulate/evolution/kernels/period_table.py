@@ -1,43 +1,23 @@
 """Midpoint-frozen carrier periods, with Chebyshev/Fourier unitary tables."""
 
-from dataclasses import dataclass
-
 import numpy as np
-from numba import njit
 from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 from scipy.linalg import expm
 
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource, SecularDrive, SecularModel
+from ._period_table import (
+    PeriodEntry,
+    PeriodPlayback,
+    PeriodPrepared,
+    SecularMaps,
+    UnitaryTable,
+    envelopes,
+    periods,
+)
 from ._shaped import drive_bounds, envelope_bounds
 from .dop853 import DOP853Kernel
-
-
-@dataclass(frozen=True)
-class _Entry:
-    fallback: Prepared
-    tail_budget: float
-    frequency: float
-    bound: float
-    coefficients: NDArray[np.complex128]
-    populations: NDArray[np.float64]
-    coherences: NDArray[np.float64]
-
-
-@dataclass(frozen=True)
-class _Prepared:
-    entries: tuple[_Entry, ...]
-
-    @property
-    def nbytes(self) -> int:
-        return sum(
-            e.coefficients.nbytes
-            + e.populations.nbytes
-            + e.coherences.nbytes
-            + e.fallback.nbytes
-            for e in self.entries
-        )
 
 
 def _unitary_table(
@@ -92,75 +72,8 @@ def _unitary_table(
     return np.asarray(tables, dtype=np.complex128)
 
 
-@njit(nogil=True, cache=True)
-def _phase_coefficients(coefficients, theta):
-    result = np.zeros_like(coefficients[:, 0])
-    for mode_index in range(16):
-        mode = mode_index if mode_index < 8 else mode_index - 16
-        result += np.exp(1j * mode * theta) * coefficients[:, mode_index]
-    return result
-
-
-@njit(nogil=True, cache=True)
-def _amplitude_unitary(coefficients, x):
-    previous = np.zeros_like(coefficients[0])
-    current = previous.copy()
-    for degree in range(7, 0, -1):
-        updated = 2 * x * current - previous + coefficients[degree]
-        previous, current = current, updated
-    return x * current - previous + coefficients[0]
-
-
-@njit(nogil=True, cache=True)
-def _periods(states, playback, unitary_table, dissipator):
-    """Apply independent rows in one single-threaded, GIL-free batch."""
-    ports, amplitudes, phases, cycles = playback
-    bound, coefficients = unitary_table
-    populations, coherences = dissipator
-    size = states.shape[1]
-    for row in range(len(states)):
-        rho = states[row].copy()
-        real = np.all(amplitudes[row].imag == 0)
-        # Real envelopes only use two phases, including signed gains. Contract
-        # Fourier modes once, rather than sixteen times per carrier cycle.
-        positive = _phase_coefficients(coefficients[ports[row]], phases[row])
-        negative = _phase_coefficients(coefficients[ports[row]], phases[row] + np.pi)
-        for cycle in range(cycles[row]):
-            amplitude = amplitudes[row, cycle]
-            x = 2 * abs(amplitude) / bound - 1
-            if real:
-                phase_coefficients = positive if amplitude.real >= 0 else negative
-            else:
-                phase_coefficients = _phase_coefficients(
-                    coefficients[ports[row]], phases[row] + np.angle(amplitude)
-                )
-            u = _amplitude_unitary(phase_coefficients, x)
-            for half in range(2):
-                diagonal = np.diag(rho).copy()
-                rho *= coherences
-                for i in range(size):
-                    rho[i, i] = 0j
-                    for j in range(size):
-                        rho[i, i] += populations[i, j] * diagonal[j]
-                if half == 0:
-                    rho = u @ rho @ u.conj().T
-        states[row] = rho
-
-
-def _envelopes(
-    table: SegmentTable, rows: NDArray[np.int64], elapsed: NDArray[np.float64]
-) -> NDArray[np.complex128]:
-    """Evaluate playback in a row batch using the common envelope interface."""
-    values = np.empty(elapsed.shape, dtype=np.complex128)
-    for index, envelope in enumerate(table.envelopes):
-        mask = table.tone_envelope[rows, 0] == index
-        local = elapsed[mask] + table.tone_envelope_offset_ns[rows[mask], 0, None]
-        values[mask] = envelope.values(local)
-    return values * table.tone_amplitude[rows, 0, None]
-
-
-def _tail(
-    entry: _Entry,
+def advance_tail(
+    entry: PeriodEntry,
     table: SegmentTable,
     rows: NDArray[np.int64],
     starts: NDArray[np.float64],
@@ -217,6 +130,7 @@ class PeriodTableKernel:
     """
 
     name = "period_table"
+    guard_builds = False
 
     def guard(
         self,
@@ -331,7 +245,7 @@ class PeriodTableKernel:
                 tail_budget,
             )
             entries.append(
-                _Entry(
+                PeriodEntry(
                     tail_data,
                     tail_budget,
                     frequency,
@@ -341,7 +255,7 @@ class PeriodTableKernel:
                     coherences,
                 )
             )
-        return _Prepared(tuple(entries))
+        return PeriodPrepared(tuple(entries))
 
     def guard_prepared(
         self,
@@ -383,7 +297,7 @@ class PeriodTableKernel:
         Return an all-False bool mask aligned with rows; no post-apply check.
         """
         del budget
-        if not isinstance(prepared, _Prepared):
+        if not isinstance(prepared, PeriodPrepared):
             raise ValueError("period_table requires its own prepared payload")
         for index, entry in enumerate(prepared.entries):
             mask = key_index == index
@@ -400,20 +314,28 @@ class PeriodTableKernel:
                     np.broadcast_to(elapsed, (len(selected), elapsed.shape[1])),
                     dtype=np.float64,
                 )
-                amplitudes = _envelopes(table, selected, elapsed)
-                _periods(
+                amplitudes = envelopes(table, selected, elapsed)
+                periods(
                     chunk,
-                    (
+                    PeriodPlayback(
                         np.zeros(len(selected), dtype=np.int64),
                         amplitudes,
                         table.tone_theta_rad[selected, 0],
                         cycles,
                     ),
-                    (entry.bound, entry.coefficients),
-                    (entry.populations, entry.coherences),
+                    UnitaryTable(
+                        entry.bound,
+                        entry.coefficients,
+                        entry.subdivisions,
+                        entry.block_cycles,
+                        entry.project_unitary,
+                        1 if entry.frequency > 0 else -1,
+                        entry.harmonics,
+                    ),
+                    SecularMaps(entry.populations, entry.coherences),
                 )
                 starts = np.asarray(cycles * period, dtype=np.float64)
-            _tail(entry, table, selected, starts, chunk)
+            advance_tail(entry, table, selected, starts, chunk)
             if not np.isfinite(chunk).all():
                 raise RuntimeError(f"period table nonfinite density in rows {selected}")
             states[mask] = chunk

@@ -400,6 +400,7 @@ class FloquetPeriodKernel:
     """
 
     name = "floquet_period"
+    guard_builds = False
 
     def guard(
         self,

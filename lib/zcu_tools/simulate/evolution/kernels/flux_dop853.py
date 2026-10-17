@@ -126,6 +126,7 @@ class FluxDOP853Kernel:
     """
 
     name = "flux_dop853"
+    guard_builds = False
 
     def guard(
         self,

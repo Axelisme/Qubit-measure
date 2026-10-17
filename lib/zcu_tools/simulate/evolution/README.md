@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, Dyson-to-periodic constant-tone dispatch, terminal-family coverage, readout trace diagnostics, low-frequency Hilbert propagation, compiled shared Dyson tables, shared driven-prefix inputs, amortized shaped dispatch, model-only shaped guards, port-local period tables and low-carrier CF4 propagators
+**Last updated:** 2026-10-17, timeline-owned preparation, shared-pool spectral shaped guards, inline single-timeline execution and evolve-wide BLAS limit
 
 ## Segment engine contracts
 
@@ -25,10 +25,21 @@ tails at its absolute threshold and holds the terminal DC sample. The bath stays
 at the row's grid level and switches at segment boundaries.
 Other algorithm families plug into the internal registry.
 
-The engine counts prepare keys with `np.unique`. Repeated keys are prepared
-in the shared A stage. Single-use keys are prepared inside their timeline
-chunk and discarded afterward. The LRU charges whole opaque prepared batches;
-a live acquire can retain evicted payloads until its chunks finish. The cache
+The engine groups opaque prepare keys with `np.unique`. It guards cross-timeline
+candidates before A-stage when their kernel declares `guard_builds=True`.
+Only these table-building local guards defer to a timeline worker. Kernels with
+`guard_builds=False` run their ordinary guard as a batch in the caller. The worker runs guard,
+fallback and preparation before apply. When a guard builds a table, apply uses
+that same table without another prepare call. Workers process these timelines
+one at a time and release their local payloads after each timeline. Repeated
+local keys also keep timeline ownership. Single-use keys without guard tables
+prepare at their apply wave and release immediately; shared apply batches stay
+intact. Direct-solver chains may prepare several singleton keys from the same
+contiguous timeline wave together. This applies to every kernel, not only low-frequency periodic
+propagation. Local preparation memory depends on concurrent timelines rather
+than the frequency/flux grid. Shared preparation memory still grows with the
+number of cross-timeline keys. The LRU charges whole opaque prepared batches;
+a live acquire can retain evicted shared payloads until its chunks finish. The cache
 namespace includes the kernel name, zero-level model identity and budget.
 The zero-level identity must describe the entire source, including all model
 parameters and absolute DC flux. Row keys also include quantized flux levels.
@@ -48,13 +59,17 @@ chunk boundaries and raises `Cancelled` without partial results. `close()`
 waits for active work, clears the prepare cache and is safe to repeat. Each
 `evolve` call with multiple timelines and workers opens and closes its own joblib
 threading pool. Empty evolution work, a single timeline, and one worker run inline
-without a pool. The prepare cache persists across `evolve` calls, but no worker
-resources survive a call. Native BLAS is limited to one thread for the whole
-call, including planning, classification, preparation and apply. A process-level
-reference count coordinates overlapping engines: the first evolve sets the
-limit and the last restores the caller's original limits, including on failure
-or cancellation. External threadpoolctl users must not change limits while an
-evolve is active.
+without a pool. Classifier guards may use the same executor for at least eight
+shared table-building prepare keys. Smaller shared selections stay serial. Local
+guards run inside the existing timeline workers. Guards must return the same
+decisions for the same model/table inputs regardless of worker width or execution
+order. No kernel opens another numerical pool. The prepare cache persists across
+`evolve` calls, but no worker resources survive a call. Native BLAS is limited to
+one thread for the whole call, including planning, classification, preparation
+and apply. A process-level reference count coordinates overlapping engines: the
+first evolve sets the limit and the last restores the caller's original limits,
+including on failure or cancellation. External threadpoolctl users must not
+change limits while an evolve is active.
 `PathDiagnostics.max_trace_error` reports the maximum absolute complex
 trace-minus-one across final readout densities for every evolve call, or zero
 for an empty call. This diagnostic never changes, rejects or retries kernel
@@ -67,19 +82,25 @@ reports rejected row counts in `ValueError`; evolution does not import ADC.
 for checked replay.
 
 The internal `kernel` module defines `SegmentTable`, `Kernel` and the opaque
-`Prepared.nbytes` contract. The optional `guard_prepared` hook returns a
-`GuardResult` containing the ordinary row-local acceptance mask and model-only
-`GuardPreparation` batches. Floquet returns its guard's preparations; other
-kernels return None and the engine calls their ordinary guard. The engine reuses
-payloads only for accepted rows with the same kernel, prepare key, source and
-budget within this evolve. Shared keys follow normal PrepareCache admission;
-singletons bypass the cache. Neither the hook nor the handoff retains kernel
+`Prepared.nbytes` contract. Every kernel declares `guard_builds`. False means
+`guard_prepared` returns None and the engine calls its ordinary batched guard.
+True means `guard_prepared` builds the model payload it validates and returns a
+`GuardResult` with its ordinary row-local acceptance mask and model-only
+`GuardPreparation` batches. The engine asks for this handoff only for
+cross-timeline builder candidates before A-stage. Timeline workers use the
+same hook for deferred keys and pass accepted
+products directly to apply. Rejected keys follow the remaining candidates in
+order. Neither path rebuilds an accepted guard table. Handoffs use the same
+kernel, prepare key, source and budget within this evolve. A shared candidate's
+guard may accept only a subset of its timelines; that subset still reuses its
+guard product. Only keys actually shared by accepted rows enter PrepareCache. Neither the hook nor the handoff retains kernel
 state or creates a separate cross-evolve store. Guard may read the source initial density or a certified, engine-computed
 prefix input, never a worker's evolving density. Guard never evolves density.
 Only apply and `bind_input` receive worker or binding density arguments.
-The hook receives the source initial density or an engine-computed prefix output. For shared prepared batches, the engine
-calls the hook once per prepare key, port and identical input group before
-timeline chunks start. The engine converts that input into the row model basis. A returned opaque
+The hook receives the source initial density or an engine-computed prefix output.
+The engine calls it once per repeated prepare key, port and identical input
+group. It binds shared payloads before timeline chunks start and local payloads
+inside their timeline worker. The engine converts each input into the row model basis. A returned opaque
 payload replaces the prepared argument to apply, with key indices all zero.
 None keeps the ordinary apply path. Input-bound payloads are read-only and
 belong to one evolve call. They never enter PrepareCache or kernel state.
@@ -116,7 +137,8 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | One constant tone after an identical shared no-drive prefix, r and r₂ pass | Dyson with the actual prefix output. B2 does not apply; post-apply population changes only report. |
 | One constant tone not accepted above, known or unknown input, with abs(f) >= 0.03 GHz and duration*T²*Gamma*V²/m² <= 1.0 for some m in 1..64 | `floquet_period` builds one Hilbert-space U(T), translates the carrier phase in time, and steps each period with secular Strang dissipation. |
 | Same constant-tone branch, Hilbert period guard fails | T6 periodic propagation accepts every single constant-tone row. |
-| One shaped tone | Order gate cache, period table and DOP853 by amortized preparation plus apply work. Try each numerical guard in that order. There is no fixed gate-key reuse threshold. |
+| One real shaped tone with at most two uses of its ordinary period-band key and passing spectral guards | `shaped_sambe` builds finite-Hilbert-Fourier subperiods at four or eight amplitude nodes. |
+| Other shaped tone, or rejected spectral key | Compute gate/period/DOP853 amortized cost order once over all shaped rows before any spectral guard. Try each numerical guard in that fixed order. There is no fixed gate-key reuse threshold. |
 | Shaped gate cache passes its split guard | Four Strang subsegments, closed-system U plus secular dissipation, and 16 carrier-phase Fourier samples. |
 | Shaped period table passes its envelope-motion, bandwidth and split guards | Midpoint-frozen envelopes, eight amplitude Chebyshev nodes and 16 phase Fourier samples for the actual drive port. Integrate the fractional-period tail directly. |
 | Shaped approximations rejected, or direct integration costs less | DOP853, with no input-state restriction. |
@@ -158,6 +180,56 @@ envelopes retain their time-varying phase. Fractional tails and DC reuse the
 compiled DOP853 kernel with model-only prepared data. The tail shifts carrier
 phase and envelope-local time together and retains strict rtol <= 1e-10 and
 atol <= 1e-12. Its prepared arrays count toward the period-table cache charge.
+
+The ordinary shaped cost plan counts all candidate shaped rows, including rows
+later accepted by Sambe. A worker never recomputes reuse from another timeline's
+acceptance outcome. Same-band partial acceptance therefore cannot change the
+fallback cost order during an acquire. Workers skip families the caller already
+rejected for their rows. Every numerical guard still applies.
+
+Low-reuse spectral ramps use the same immutable polynomial playback as ordinary
+period tables. Playback skips zero Fourier modes and unused negative-amplitude
+phases. Complex ordinary tables contract their varying phase only when needed. Their preparation keys contain level, port, signed carrier,
+peak absolute gain, gain-weighted envelope slope and duration. The slope and duration determine
+subperiod resolution, so different shapes cannot silently share a split chosen
+for a different row. Preparation diagonalizes the finite Sambe Hilbert matrix,
+with diagonal blocks H0+k*f and adjacent Fourier drive blocks (X-iY)/2. A central
+input block reconstructs the channel's carrier-phase Fourier coefficients.
+Matrix assembly, eigensolve and Fourier reconstruction run in single-threaded
+Numba code without the GIL, so the existing Engine workers can run them concurrently.
+Preparation does not integrate sixteen carrier-phase trajectories or build a Liouville
+channel. The existing two-tone Floquet family instead integrates its periodic
+frame in time and transforms the secular bath; it does not own this matrix build.
+
+Spectral guard preparation compares harmonic cutoffs 2/3 at the peak gain and
+refines to 3/4 when needed. It retains the lower cutoff only when its difference
+to the next cutoff fits budget/4. It starts with four amplitude nodes. A geometric tail
+estimate from the last two polynomial coefficients selects eight nodes if
+needed. The cycle-scaled harmonic and amplitude estimates must fit budget/2.
+The guard never reads a density or evolves a trial input. Cross-timeline keys
+hand accepted, immutable model-only payloads to A-stage. For timeline-local keys,
+the worker runs guard preparation and applies the returned table before releasing
+it. It does not discard the convergence table and rebuild it in prepare. Failed spectral keys retain the old
+amortized gate/period/direct fallback order. Preparation and apply failures
+still raise rather than rerouting.
+
+The spectral route requires a real envelope and abs(f) >= 0.03 GHz. Peak drive
+bandwidth must satisfy gain_peak*V/(m*f) <= 0.5. It chooses m in 1..32 so that
+`2*pi*abs(g)*V*L/(m*f)**2 <= 0.01` and
+`tau*Gamma*(abs(g)*A*V/(m*f))**2 <= 0.01`.
+It also requires envelope motion L/(m*f) <= 2*A. Fractional subperiod tails
+use their own midpoint-frozen Sambe unitary and secular half steps. With m=1,
+integer-period blocks use at most 20 ns and satisfy
+`2*pi*abs(g)*V*L*block_ns**2 <= 0.05`. Binary matrix powers then replace
+thousands of short high-carrier steps. Subdivided periods retain each phase and advance it in the signed carrier
+direction.
+Two Newton polar iterations retract each interpolated U before powering.
+Low-carrier fractional tails use an SVD polar projection. At abs(f) >= 1 GHz,
+sub-ns tails reuse the compiled strict DOP853 path instead of another Sambe
+eigendecomposition. Neither operation normalizes
+density. These motion, splitting and convergence estimates are calibrated
+approximations, not rigorous multilevel error bounds or a guarantee of the
+per-segment budget. Fast, unresolved short ramps still use DOP853.
 
 Dyson's B2 guard uses the full known density in the segment model basis. For
 rows starting at zero this is the source initial density. For shared prefixes

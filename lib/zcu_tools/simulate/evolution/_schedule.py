@@ -9,9 +9,11 @@ import numpy as np
 from joblib import delayed
 from numpy.typing import NDArray
 
-from ._dispatch import Dispatch
+from ._dispatch import Dispatch, Selection, classify
+from ._dispatch import diagnostics as dispatch_diagnostics
 from ._parallel import Executor
 from ._planning import Geometry
+from ._prepare_keys import group_keys
 from .engine import Cancelled, EvolutionResult
 from .kernel import Kernel, Prepared, SegmentTable
 from .secular import ModelSource
@@ -30,6 +32,7 @@ class _Entries:
     representative: NDArray[np.int64]
     rows: NDArray[np.int64]
     inverse: NDArray[np.int64]
+    shared: NDArray[np.bool_]
     counts: NDArray[np.int64]
 
 
@@ -94,24 +97,21 @@ def _deduplicate(
     table: SegmentTable, dispatch: Dispatch, kernels: Mapping[str, Kernel]
 ) -> list[_Entries]:
     entries: list[_Entries] = []
-    for name in np.unique(dispatch.names):
+    for name in np.unique(dispatch.names[dispatch.names != ""]):
         kernel = kernels[str(name)]
         rows = np.flatnonzero(dispatch.names == name)
-        keys, first, inverse, counts = np.unique(
-            kernel.prepare_keys(table, rows),
-            return_index=True,
-            return_inverse=True,
-            return_counts=True,
-        )
-        if kernel.name == "floquet_period":
-            low_shared = (counts >= 2) & (
-                np.abs(table.tone_frequency_ghz[rows[first], 0]) < 0.3
+        groups = group_keys(kernel, table, rows)
+        entries.append(
+            _Entries(
+                kernel,
+                groups.keys,
+                groups.representative,
+                rows,
+                groups.inverse,
+                groups.shared,
+                groups.counts,
             )
-            # Live A-stage bindings outlast LRU eviction. Large low-carrier
-            # sweeps must prepare locally even when their pulse keys repeat.
-            if np.count_nonzero(low_shared) > 4:
-                counts[low_shared] = 1
-        entries.append(_Entries(kernel, keys, rows[first], rows, inverse, counts))
+        )
     return entries
 
 
@@ -134,12 +134,17 @@ def _build(
 
 def _bind(entry: _Entries, payload: _Payload, eligible: NDArray[np.bool_]) -> _Binding:
     positions = {key: i for i, key in enumerate(payload.keys)}
+    chosen = np.flatnonzero(eligible)
+    needed, inverse = np.unique(entry.inverse[chosen], return_inverse=True)
     lookup = np.array(
-        [positions.get(key.tobytes(), -1) for key in entry.keys], dtype=np.int64
+        [positions.get(entry.keys[index].tobytes(), -1) for index in needed],
+        dtype=np.int64,
     )
-    indices = lookup[entry.inverse]
-    select = eligible & (indices >= 0)
-    return _Binding(entry.kernel, payload, entry.rows[select], indices[select])
+    indices = lookup[inverse]
+    present = indices >= 0
+    return _Binding(
+        entry.kernel, payload, entry.rows[chosen[present]], indices[present]
+    )
 
 
 class Schedule:
@@ -173,20 +178,22 @@ class Schedule:
 
         Dispatch belongs to this Schedule's source and budget. Guard payloads
         are eligible only for matching kernel keys selected by that dispatch.
-        Singleton guard payloads bypass the LRU but reach timeline chunks too.
+        Timeline-local candidates defer guard preparation to their worker.
+        Caller products still serve accepted subsets of shared candidates,
+        even if only one timeline remains. No accepted guard product is rebuilt.
         """
         bindings: list[_Binding] = []
         jobs: list[tuple[_Entries, NDArray[np.int64], tuple[str, str, float]]] = []
         dc = self.source.model(tuple(0 for _ in range(self.table.level.shape[1])))
         for entry in entries:
-            shared = entry.counts >= 2
+            shared = entry.shared
             key_set = {key.tobytes() for key in entry.keys[shared]}
             namespace = entry.kernel.name, dc.identity, self.budget
             hits = cache.find(namespace, key_set)
             for payload in hits:
                 bindings.append(_bind(entry, payload, shared[entry.inverse]))
                 key_set.difference_update(payload.keys)
-            available = key_set | {key.tobytes() for key in entry.keys[~shared]}
+            available = {key.tobytes() for key in entry.keys}
             shared_keys = {key.tobytes() for key in entry.keys[shared]}
             for preparation in self.dispatch.preparations.get(entry.kernel.name, ()):
                 payload = _Payload(
@@ -224,13 +231,14 @@ class Schedule:
             if payload is None:
                 raise RuntimeError("prepare job returned no payload")
             cache.add(namespace, payload)
-            bindings.append(_bind(entry, payload, entry.counts[entry.inverse] >= 2))
+            bindings.append(_bind(entry, payload, entry.shared[entry.inverse]))
         return self.bind_inputs(bindings)
 
     def bind_inputs(self, bindings: list[_Binding]) -> list[_Binding]:
         """Add evolve-local input bindings after model-only cache admission.
 
-        Only repeated keys receive the hook; guard-built singletons bypass it.
+        Only repeated keys receive the hook. Shared and timeline-local payloads
+        reach this hook separately, after their respective model-only prepare.
         All eligible rows for a key/port reach one call before chunk partitioning.
         Opaque returned data is
         referenced by the returned list alone, never by Schedule or the cache.
@@ -301,6 +309,7 @@ class Schedule:
         chunks: int,
     ) -> EvolutionResult:
         """Return point-ordered densities and aggregate post-apply diagnostics."""
+        self.kernels = kernels
         entries = _deduplicate(self.table, self.dispatch, kernels)
         shared = self.prepare_shared(entries, cache, pool, chunks)
         count = len(self.geometry.points)
@@ -320,13 +329,50 @@ class Schedule:
             output[result.points] = result.states
             exceeded.update(result.exceeded_by_kernel)
         diagnostics = replace(
-            self.dispatch.diagnostics,
+            dispatch_diagnostics(self.table, self.dispatch.names),
             exceeded_by_kernel=exceeded,
             max_trace_error=float(
                 np.max(np.abs(np.trace(output, axis1=1, axis2=2) - 1))
             ),
         )
         return EvolutionResult(self.geometry.points, output, diagnostics)
+
+    def resolve_deferred(self, rows: NDArray[np.int64]) -> list[_Binding]:
+        """Guard/fall back once inside a timeline and reuse accepted guard data.
+
+        rows belong to this worker's single timeline. Classification receives
+        model/table inputs and the acquire-wide cost plan, never worker density.
+        Returned bindings own the tables only until this timeline finishes.
+        """
+        dispatch = classify(
+            self.geometry,
+            self.kernels,
+            self.source,
+            self.budget,
+            selection=Selection(rows, self.dispatch.shaped, self.dispatch.rejected),
+        )
+        bindings: list[_Binding] = []
+        for entry in _deduplicate(self.table, dispatch, self.kernels):
+            for preparation in dispatch.preparations.get(entry.kernel.name, ()):
+                payload = _Payload(
+                    preparation.prepared,
+                    tuple(key.tobytes() for key in preparation.keys),
+                )
+                bindings.append(
+                    _bind(entry, payload, np.ones(len(entry.rows), dtype=bool))
+                )
+            covered = {int(row) for binding in bindings for row in binding.rows}
+            missing = np.array([int(row) not in covered for row in entry.rows])
+            unique = np.unique(entry.inverse[missing])
+            if len(unique):
+                payload = _build(
+                    entry, unique, self.table, self.source, self.budget, self.cancel
+                )
+                bindings.append(_bind(entry, payload, missing))
+        # Workers write disjoint row slices; only the caller reads all names
+        # after the pool joins. Entries and bindings never read this array.
+        self.dispatch.names[rows] = dispatch.names[rows]
+        return bindings
 
     def chunk(
         self,
@@ -338,19 +384,22 @@ class Schedule:
         if self.cancel.is_set():
             raise Cancelled()
         selected = np.isin(self.table.timeline, points)
-        # Low carriers retain long dense Hilbert trajectories (~80 MB/key).
-        # Stream singleton timelines so a worker never retains a whole sweep's
-        # payloads. Shared keys remain in A-stage and high carriers stay batched.
-        low_singletons = any(
-            entry.kernel.name == "floquet_period"
-            and np.any(
+        # Builders and repeated local keys own whole timelines. Single-use
+        # local keys prepare at their apply wave without breaking shared batches.
+        deferred = (
+            np.zeros(len(selected), dtype=bool)
+            if self.dispatch.deferred is None
+            else self.dispatch.deferred & selected
+        )
+        local_keys = np.any(deferred) or any(
+            np.any(
                 selected[entry.rows]
-                & (entry.counts[entry.inverse] == 1)
-                & (np.abs(self.table.tone_frequency_ghz[entry.rows, 0]) < 0.3)
+                & ~entry.shared[entry.inverse]
+                & (entry.counts[entry.inverse] > 1)
             )
             for entry in entries
         )
-        if len(points) > 1 and low_singletons:
+        if len(points) > 1 and local_keys:
             results = [self.chunk(point[None], entries, shared) for point in points]
             exceeded: Counter[str] = Counter()
             for result in results:
@@ -358,23 +407,27 @@ class Schedule:
             return _ChunkResult(
                 points, np.concatenate([result.states for result in results]), exceeded
             )
-        bindings = list(shared)
+        local_bindings = (
+            self.resolve_deferred(np.flatnonzero(deferred)) if np.any(deferred) else []
+        )
         covered = np.zeros(len(selected), dtype=bool)
-        for binding in shared:
+        for binding in (*shared, *local_bindings):
             covered[binding.rows] = True
         for entry in entries:
             local = (
                 selected[entry.rows]
-                & (entry.counts[entry.inverse] == 1)
+                & ~entry.shared[entry.inverse]
                 & ~covered[entry.rows]
+                & (entry.counts[entry.inverse] > 1)
             )
             unique = np.unique(entry.inverse[local])
             if len(unique):
                 payload = _build(
                     entry, unique, self.table, self.source, self.budget, self.cancel
                 )
-                bindings.append(_bind(entry, payload, local))
-        return _Chunk(self, points, selected, bindings).run()
+                local_bindings.append(_bind(entry, payload, local))
+        bindings = [*shared, *self.bind_inputs(local_bindings)]
+        return _Chunk(self, points, selected, bindings, entries).run()
 
 
 class _Chunk:
@@ -384,14 +437,22 @@ class _Chunk:
         points: NDArray[np.int64],
         selected: NDArray[np.bool_],
         bindings: Sequence[_Binding],
+        entries: Sequence[_Entries],
     ):
         self.schedule, self.points = schedule, points
         self.table = schedule.table
-        self.bindings = bindings
+        self.bindings = list(bindings)
+        self.entries = entries
         self.exceeded: Counter[str] = Counter()
         rows = len(self.table.timeline)
         self.binding = np.full(rows, -1, dtype=np.int64)
         self.key = np.zeros(rows, dtype=np.int64)
+        self.local_entry = np.full(rows, -1, dtype=np.int64)
+        self.local_key = np.zeros(rows, dtype=np.int64)
+        for index, entry in enumerate(entries):
+            local = selected[entry.rows] & ~entry.shared[entry.inverse]
+            self.local_entry[entry.rows[local]] = index
+            self.local_key[entry.rows[local]] = entry.inverse[local]
         for index, binding in enumerate(bindings):
             mask = selected[binding.rows]
             self.binding[binding.rows[mask]] = index
@@ -471,12 +532,56 @@ class _Chunk:
         self.level[slots] = self.table.level[rows[last]]
         self.cursor[slots] += lengths
 
+    def _apply_local(self, slot: int) -> None:
+        """Build/apply/release one local wave, preserving direct-solver chains."""
+        row = self.cursor[slot]
+        index = int(self.local_entry[row])
+        if index < 0:
+            raise RuntimeError(f"missing preparation for segment {row}")
+        entry = self.entries[index]
+        rows = np.array([row], dtype=np.int64)
+        if entry.kernel.name in ("dop853", "flux_dop853"):
+            candidates = np.arange(row, self.end[slot], dtype=np.int64)
+            contiguous = (self.local_entry[candidates] == index) & (
+                self.binding[candidates] < 0
+            )
+            previous = candidates[:-1]
+            contiguous[1:] &= self.table.start_ns[candidates[1:]] == (
+                self.table.start_ns[previous] + self.table.duration_ns[previous]
+            )
+            stop = np.flatnonzero(~contiguous)
+            rows = candidates[: int(stop[0]) if len(stop) else len(candidates)]
+        unique = np.unique(self.local_key[rows])
+        payload = _build(
+            entry,
+            unique,
+            self.table,
+            self.schedule.source,
+            self.schedule.budget,
+            self.schedule.cancel,
+        )
+        indices = np.searchsorted(unique, self.local_key[rows])
+        binding = _Binding(entry.kernel, payload, rows, indices)
+        transient = len(self.bindings)
+        self.bindings.append(binding)
+        self.binding[rows], self.key[rows] = transient, indices
+        try:
+            self._apply(transient, np.array([slot], dtype=np.int64))
+        finally:
+            self.binding[rows] = -1
+            self.bindings.pop()
+
     def run(self):
         """Propagate local timelines and convert final densities to DC basis."""
         while np.any(self.cursor < self.end):
             pending = np.flatnonzero(self.cursor < self.end)
             binding_ids = self.binding[self.cursor[pending]]
             for index in np.unique(binding_ids):
-                self._apply(int(index), pending[binding_ids == index])
+                slots = pending[binding_ids == index]
+                if index < 0:
+                    for slot in slots:
+                        self._apply_local(int(slot))
+                else:
+                    self._apply(int(index), slots)
         self._basis(np.arange(len(self.points)), np.zeros_like(self.level))
         return _ChunkResult(self.points, self.states, self.exceeded)
