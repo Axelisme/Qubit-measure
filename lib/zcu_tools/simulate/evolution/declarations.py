@@ -69,14 +69,7 @@ class Eligibility:
         if self.max_tones is not None:
             accepted &= table.tones[rows] <= self.max_tones
         if self.envelope != "any":
-            constant = np.ones(len(rows), dtype=bool)
-            for slot in range(table.tone_port.shape[1]):
-                playing = table.tones[rows] > slot
-                indices = table.tone_envelope[rows[playing], slot]
-                constant[playing] &= np.array(
-                    [table.envelopes[index].kind == "constant" for index in indices],
-                    dtype=bool,
-                )
+            constant = table.constant_envelopes(rows)
             accepted &= constant if self.envelope == "constant" else ~constant
         return accepted
 

@@ -113,6 +113,23 @@ class SegmentTable:
         self._validate_prefixes(rows)
         self._validate_tones(rows)
 
+    def constant_envelopes(self, rows: NDArray[np.int64]) -> NDArray[np.bool_]:
+        """Return row-aligned bools: every active envelope has kind constant.
+
+        rows contains valid global row indices, in any order or subset, including
+        empty selections. Only slots before tones[row] are active. Padding never
+        affects the result; a zero-tone row is constant. This table-only rule
+        does not validate numerical applicability or inspect envelope samples.
+        """
+        kinds = np.array(
+            [envelope.kind == "constant" for envelope in self.envelopes], dtype=bool
+        )
+        constant = np.ones(len(rows), dtype=bool)
+        for slot in range(self.tone_port.shape[1]):
+            playing = self.tones[rows] > slot
+            constant[playing] &= kinds[self.tone_envelope[rows[playing], slot]]
+        return constant
+
     def _validate_prefixes(self, rows: int) -> None:
         if self.prefix_group is not None:
             groups = tuple(self.prefix_group)

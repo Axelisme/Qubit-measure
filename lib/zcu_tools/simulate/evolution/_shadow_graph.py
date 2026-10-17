@@ -53,6 +53,7 @@ class _Graph:
         self.builds: dict[BuildKey, str] = {}
         self.bindings: dict[tuple[BuildKey, bytes], str] = {}
         self.hits: dict[int, CacheEntry] = {}
+        self.acquisitions: dict[int, str] = {}
         self.resident_bytes = 0
         self.binding_bytes = 0
         self.task_bytes = 0
@@ -105,9 +106,17 @@ class _Graph:
             and candidate.prepare_key in entry.keys
         ]
         seconds = _known(estimate.stages.build)
-        if hits:
-            hit = min(hits, key=lambda entry: (entry.nbytes, entry.allocation_id))
+        hit = min(
+            hits, key=lambda entry: (entry.nbytes, entry.allocation_id), default=None
+        )
+        if hit is not None:
             self.hits[hit.allocation_id] = hit
+            # Acquiring one opaque payload exposes all its keys at one task cost.
+            if hit.allocation_id in self.acquisitions:
+                task_id = self.acquisitions[hit.allocation_id]
+                self._adopt(task_id, candidate)
+                self.builds[key] = task_id
+                return task_id
             seconds = 0.0
         else:
             self.resident_bytes += _bytes(estimate.memory.resident)
@@ -115,6 +124,8 @@ class _Graph:
             "build", str(len(self.builds)), (), seconds, candidate, estimate
         )
         self.builds[key] = task_id
+        if hit is not None:
+            self.acquisitions[hit.allocation_id] = task_id
         return task_id
 
     def bind(

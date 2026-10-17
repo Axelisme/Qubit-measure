@@ -181,7 +181,8 @@ class CacheReservation:
 class PrepareCache:
     """Model-only LRU with independent reservation and consumer lifetimes.
 
-    limit is a nonnegative resident byte budget, zero disables admission. bytes
+    limit is a nonnegative integer resident byte budget (not bool); zero
+    disables admission. Invalid limits raise ValueError. bytes
     counts resident allocations once. live_bytes counts allocations held by the
     explicit handles once, including resident pins, not raw find results or RSS.
     Eviction and clear only drop resident ownership; handles remain usable.
@@ -273,7 +274,7 @@ class PrepareCache:
 
         Oversize and disabled admission do not evict existing residents. The same
         prepared object is charged once, even through another wrapper. Negative or
-        noninteger nbytes, evolve lifetime and conflicting allocation metadata raise
+        noninteger (including bool) nbytes, evolve lifetime and conflicting metadata raise
         ValueError before eviction. Raw caller references survive cache removal.
         """
         allocation = self._allocation(namespace, payload)
@@ -343,6 +344,6 @@ class PrepareCache:
 
 
 def _nonnegative_integer(value: object) -> int:
-    if not isinstance(value, int) or value < 0:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError("cache limit and prepared nbytes must be nonnegative integers")
     return value
