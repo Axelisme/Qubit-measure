@@ -294,7 +294,7 @@ def test_on_post_analyze_failed_resets_state(qapp):
         "tab1", post_analyze_params_instance=object(), plots=_plots()
     )
 
-    failed: list = []
+    failed: list[tuple[str, str]] = []
     on_post_analyze_failed(svc, lambda tid, err: failed.append((tid, err)))
 
     error = RuntimeError("post analysis failed")
@@ -379,7 +379,7 @@ def test_on_post_analyze_finished_post_processing_raise_settles_failed(
     boom = RuntimeError("update boom")
     monkeypatch.setattr(state, "update_tab_post_analyze", MagicMock(side_effect=boom))
 
-    failed: list = []
+    failed: list[tuple[str, str]] = []
     on_post_analyze_failed(svc, lambda tid, err: failed.append((tid, err)))
 
     post_result = object()
