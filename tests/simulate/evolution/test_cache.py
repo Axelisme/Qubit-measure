@@ -34,7 +34,8 @@ def payload(counts: AllocationCounts, size: int, *keys: bytes) -> PreparedPayloa
     return PreparedPayload(CountedPrepared(counts, size), keys)
 
 
-def test_inventory_is_immutable_whole_batch_metadata_without_lru_touch():
+@pytest.mark.parametrize("field_name", ["nbytes", "keys", "revision", "proof"])
+def test_inventory_is_immutable_whole_batch_metadata_without_lru_touch(field_name):
     cache = PrepareCache(20)
     assert cache.inventory() == ()
     counts = AllocationCounts()
@@ -49,7 +50,7 @@ def test_inventory_is_immutable_whole_batch_metadata_without_lru_touch():
     assert snapshot[0].revision == "legacy"
     assert snapshot[0].proof == ()
     with pytest.raises(FrozenInstanceError):
-        setattr(snapshot[0], "nbytes", 1)
+        setattr(snapshot[0], field_name, 1)
     # Merely looking at the first allocation must not protect it from eviction.
     cache.add(SPACE, payload(counts, 10, b"d"))
     assert cache.find(SPACE, {b"a"}) == []

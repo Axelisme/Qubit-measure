@@ -227,7 +227,7 @@ class Schedule:
                     bound.append(
                         _Binding(
                             binding.kernel,
-                            PreparedPayload(payload, ()),
+                            PreparedPayload(payload, (), lifetime="evolve"),
                             rows,
                             np.zeros(len(rows), dtype=np.int64),
                         )

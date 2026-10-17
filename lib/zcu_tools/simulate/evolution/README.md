@@ -572,7 +572,27 @@ returned densities, live chunk references, solver workspaces and ADC preparation
 are separate allocations. Clearing the cache or closing the engine releases
 in-memory preparations without deleting replay inputs.
 
+## Cache inventory and ownership
+
 The `cache` module exposes `PrepareCache` and `PreparedPayload` to numeric
-scheduling collaborators. It owns the shared whole-batch LRU; scheduler and
-prefix resolution use this same cache. Calls require the engine call lock.
-Only model-only payloads belong in it, never input-bound state.
+scheduling collaborators. Scheduler and prefix resolution use this same LRU.
+Calls require the engine call lock or equivalent external serialization.
+`inventory()` returns immutable whole-allocation metadata, including all keys,
+opaque byte charge, algorithm revision and owner-supplied proof identifiers.
+Snapshots do not retain arrays or change recency. Partial key coverage still
+charges the entire batch. A proof or key match never replaces a row's guard.
+
+`reserve()` pins selected resident hits without touching their LRU order.
+Consumers acquire independent references before releasing the reservation.
+Eviction and `clear()` remove resident ownership, not those live references.
+Each handle supports explicit release and context-manager cleanup. Stale inventory
+cannot start a new reservation. Explicit find/add operations retain legacy LRU
+order; future planners must issue them in canonical order.
+
+`bytes` counts resident allocations against the cache budget. `live_bytes` counts
+whole allocations held by explicit reservation/consumer handles, once across all
+handles, including resident pins. It can exceed the resident budget. Neither
+counter measures process RSS or all live work. Ordinary active scheduler
+references returned by `find()` are not tracked handles. Oversized allocations
+can have tracked consumer references but never enter the resident LRU. Only
+model-only preparations may persist; input-bound state stays evolve-local.
