@@ -5,67 +5,75 @@ load_ftf for files or parse_ftf for in-memory documents. Schema defaults and uni
 are documented on the named value types in schema.py.
 """
 
+from collections.abc import Hashable
 from pathlib import Path
 
 import yaml
 from pydantic import ValidationError
+from yaml.constructor import ConstructorError
+from yaml.nodes import MappingNode, ScalarNode
 
 from .schema import FTFSettings
 
 
-def _dc_wiring(config: FTFSettings) -> set[str]:
-    names: set[str] = set()
-    sources = {}
-    for i, source in enumerate(config.devices):
-        if source.name in names:
-            raise ValueError(f"devices.{i}.name: duplicate device binding")
-        names.add(source.name)
-        sources[source.name] = source
-    columns: set[str] = set()
-    for i, column in enumerate(config.dc_mapping.columns):
-        path = f"dc_mapping.columns.{i}"
-        if column.source not in sources:
-            raise ValueError(f"{path}.source: undefined DC source")
-        if column.source in columns:
-            raise ValueError(f"{path}.source: duplicate DC column")
-        columns.add(column.source)
-        if column.unit != f"Phi0/{sources[column.source].unit}":
-            raise ValueError(f"{path}.unit: calibration differs from device unit")
-    return names
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """Reject repeated explicit keys before PyYAML expands merge mappings."""
+
+    def __init__(self, stream: str) -> None:
+        super().__init__(stream)
+        self._checked_mappings: set[MappingNode] = set()
+
+    def flatten_mapping(self, node: MappingNode) -> None:
+        # Aliases can revisit nodes after flattening; merged overrides are valid.
+        if node not in self._checked_mappings:
+            keys: set[Hashable] = set()
+            for key_node, _ in node.value:
+                if isinstance(key_node, ScalarNode) and key_node.tag in (
+                    "tag:yaml.org,2002:merge",
+                    "tag:yaml.org,2002:value",
+                ):
+                    key = key_node.value
+                else:
+                    key = self.construct_object(key_node)
+                if not isinstance(key, Hashable):
+                    raise ConstructorError(
+                        "while constructing a mapping",
+                        node.start_mark,
+                        "found unhashable key",
+                        key_node.start_mark,
+                    )
+                if key in keys:
+                    raise ConstructorError(
+                        "while constructing a mapping",
+                        node.start_mark,
+                        f"duplicate key {key!r}",
+                        key_node.start_mark,
+                    )
+                keys.add(key)
+            self._checked_mappings.add(node)
+        super().flatten_mapping(node)
 
 
 def _wiring(config: FTFSettings) -> None:
-    names = _dc_wiring(config)
-    channels = {config.readout_source.gen_ch}
-    if not 0 <= config.readout_source.gen_ch < config.channels.generators:
-        raise ValueError("readout_source.gen_ch: exceeds generator count")
-    for family, controls in (
-        ("flux_sources", config.flux_sources),
-        ("microwave_sources", config.microwave_sources),
-    ):
-        for i, control in enumerate(controls):
-            if (
-                control.gen_ch in channels
-                or control.gen_ch >= config.channels.generators
-            ):
-                raise ValueError(
-                    f"{family}.{i}.gen_ch: duplicate or out-of-range generator binding"
-                )
-            if control.name in names:
-                raise ValueError(f"{family}.{i}.name: duplicate source name")
-            names.add(control.name)
-            channels.add(control.gen_ch)
-    if config.receiver.ro_ch >= config.channels.readouts:
-        raise ValueError("receiver.ro_ch: exceeds readout count")
-    if not any(r.kappa_external_mhz > 0 for r in config.resonators):
-        raise ValueError("resonators: shared line must have external coupling")
+    names = set(config.dc_bias.sources)
+    channels = {config.readout.drive.gen_ch}
+    for name, control in config.drive_lines.items():
+        if control.gen_ch in channels:
+            raise ValueError(f"drive_lines.{name}.gen_ch: duplicate generator binding")
+        if name in names:
+            raise ValueError(f"drive_lines.{name}: duplicate source name")
+        names.add(name)
+        channels.add(control.gen_ch)
+    pair = config.readout.resonators
+    if not any(r.kappa_external_mhz > 0 for r in (pair.r1, pair.r2)):
+        raise ValueError("readout.resonators: shared line must have external coupling")
 
 
 def parse_ftf(document: object) -> FTFSettings:
     """Validate a decoded YAML document and return an immutable named snapshot.
 
     document is an external value, not a numeric kernel parameter. Unknown fields,
-    dimensions, units, duplicate/unbound sources, source limits and receiver PSD
+    dimensions, units, duplicate sources/generators, source limits and receiver PSD
     errors raise ValueError with a dotted field path. No I/O or resource creation.
     """
     try:
@@ -89,11 +97,13 @@ def load_ftf(path: str | Path) -> FTFSettings:
 
     Relative paths use the caller's cwd. OSError propagates. YAML syntax and
     schema/wiring errors raise ValueError including path and field diagnostics.
+    Repeated explicit YAML keys raise ValueError with the key and YAML location;
+    merge mappings may supply defaults overridden by explicit keys.
     This function never creates devices or compiles a program.
     """
     path = Path(path)
     try:
-        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        document = yaml.load(path.read_text(encoding="utf-8"), Loader=_UniqueKeyLoader)
     except yaml.YAMLError as error:
         raise ValueError(f"{path}: invalid YAML: {error}") from error
     try:

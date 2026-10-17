@@ -24,9 +24,8 @@ def test_template_composition_units_signed_drive_and_dc_readout() -> None:
     from zcu_tools.simulate.ftf import JointModel
 
     settings = parse_ftf(ftf_document())
-    snapshot = EnvironmentSnapshot("ftf-v1", "test", (("bias", 0.2),))
+    snapshot = EnvironmentSnapshot("ftf-v2", "test", (("bias", 0.2),))
     events = (
-        PulseEvent(1, 0.0, 0.5, 0.0, 0.0, 0.4),
         PulseEvent(2, 0.5, 0.5, 20.0, 90.0, -0.2),
         PulseEvent(0, 2.0, 0.5, 6000.0, 90.0, 0.1),
     )
@@ -87,7 +86,7 @@ def test_common_carrier_origin_survives_pulse_start_quantization(
     from zcu_tools.experiment.ftf import plan_template
 
     settings = parse_ftf(ftf_document())
-    snapshot = EnvironmentSnapshot("ftf-v1", "test", (("bias", 0.2),))
+    snapshot = EnvironmentSnapshot("ftf-v2", "test", (("bias", 0.2),))
     window = ReadoutWindow(0, 0, 4, 100.0, (0.1,), (6000.0,), (0.0,), (0,))
     for second_start_us in (0.032, 0.033):
         events = (
@@ -129,28 +128,16 @@ def _readout() -> PulseReadoutCfg:
     )
 
 
-def test_ftf_public_acquire_tau_tail_round_dc_and_same_trace_raw() -> None:
+def test_ftf_public_charge_acquire_round_dc_and_same_trace_raw() -> None:
     from zcu_tools.experiment.ftf import ftf
 
-    settings = parse_ftf(
-        ftf_document()
-        | {
-            "flux_sources": [
-                {
-                    "name": "flux",
-                    "gen_ch": 1,
-                    "coefficients_phi0_per_gain": [0.0, 0.1, 0.0],
-                    "tau_ns": 8.0,
-                }
-            ]
-        }
-    )
+    settings = parse_ftf(ftf_document())
     env = ftf(settings)
     try:
         pulse = PulseCfg(
-            ch=1,
+            ch=2,
             nqz=1,
-            freq=0.0,
+            freq=250.0,
             gain=0.3,
             waveform=ConstWaveformCfg(length=0.016),
             post_delay=0.016,
@@ -158,7 +145,7 @@ def test_ftf_public_acquire_tau_tail_round_dc_and_same_trace_raw() -> None:
         program = ModularProgramV2(
             env.soccfg,
             ProgramV2Cfg(reps=2, rounds=2),
-            modules=[pulse.build("flux"), _readout().build("ro")],
+            modules=[pulse.build("charge"), _readout().build("ro")],
         )
         driver = env.devices.get_device("bias")
         from zcu_tools.device.fake import FakeDevice
@@ -182,7 +169,7 @@ def test_ftf_public_acquire_tau_tail_round_dc_and_same_trace_raw() -> None:
         program2 = ModularProgramV2(
             env.soccfg,
             ProgramV2Cfg(reps=2, rounds=1),
-            modules=[pulse.build("flux2"), _readout().build("ro2")],
+            modules=[pulse.build("charge2"), _readout().build("ro2")],
         )
         trace = np.asarray(program2.acquire_decimated(env.soc, progress=False)[0])
         raw_channels = program2.get_raw()

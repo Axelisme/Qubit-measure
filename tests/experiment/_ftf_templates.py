@@ -61,12 +61,20 @@ def template(*, tones: int = 0) -> TimelineTemplate:
 def settings():
     value = parse_ftf(ftf_document())
     return value.model_copy(
-        update={"model": value.model.model_copy(update={"retained_levels": 2})}
+        update={
+            "numerics": value.numerics.model_copy(
+                update={
+                    "truncation": value.numerics.truncation.model_copy(
+                        update={"retained_levels": 2}
+                    )
+                }
+            )
+        }
     )
 
 
 def snapshot(value: float = 0.2) -> EnvironmentSnapshot:
-    return EnvironmentSnapshot("ftf-v1", "synthetic", (("bias", value),))
+    return EnvironmentSnapshot("ftf-v2", "synthetic", (("bias", value),))
 
 
 def request(mode: AcquisitionMode = "integrated", *, templates=None) -> AcquireRequest:

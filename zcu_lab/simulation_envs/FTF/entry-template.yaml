@@ -5,45 +5,43 @@ format_version: "1.0"
 components:
   Q1:
     kind: qubit/fluxonium
-    EJ: 8.0 # GHz
-    EC: 1.0
-    EL: 0.5
+    EJ: 6.27 # GHz
+    EC: 1.41
+    EL: 0.80
     freq: null # Bias-dependent; not given by the physical settings.
     resonator: R1
     flux_source: f1_bias
-    flux_unit: V
+    flux_unit: A
     wiring:
       ch: 2
   Q2:
     kind: qubit/fluxonium
-    EJ: 8.6 # GHz
-    EC: 0.9
-    EL: 0.55
+    EJ: 5.71 # GHz
+    EC: 1.30
+    EL: 0.59
     freq: null
     resonator: R2
     flux_source: f2_bias
-    flux_unit: V
+    flux_unit: A
     wiring:
-      ch: 2 # Shared microwave line; F2 sees its small crosstalk coefficient.
+      ch: 2 # Shared microwave line; all three loops have real 0.1 GHz/gain.
   coupler:
     kind: qubit/transmon
-    EJmax: 12.0 # GHz
-    EC: 0.3
-    d: 0.15
+    EJmax: 16.4 # GHz
+    EC: 0.32
+    d: 0.58536585
     freq: null
     flux_source: coupler_bias
-    flux_unit: V
-    wiring:
-      lo_flux_ch: 1
+    flux_unit: A
   R1:
     kind: resonator
-    freq: 6000.0 # MHz; model resonator 1 is 6.0 GHz.
+    freq: 7190.0 # MHz; model resonator r1 is 7.19 GHz.
     wiring:
       ch: 0
       ro_ch: 0
   R2:
     kind: resonator
-    freq: 6200.0 # MHz; model resonator 2 is 6.2 GHz.
+    freq: 7080.0 # MHz; model resonator r2 is 7.08 GHz.
     wiring:
       ch: 0
       ro_ch: 0
