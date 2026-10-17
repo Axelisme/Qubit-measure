@@ -238,7 +238,7 @@ def calc_ge_snr(
     f01_over_n = branch_energies[1] - branch_energies[0]
     chi_over_n = (f01_over_n[1:] - f01_over_n[:-1]) / (photons[1:] - photons[:-1])
 
-    def signal_diff(x: NDArray) -> NDArray:
+    def signal_diff(x: np.ndarray) -> np.ndarray:
         return 1 - np.exp(-(x**2) / (2 * rf_w**2))
 
     snrs = np.abs(signal_diff(chi_over_n) * np.sqrt(photons[:-1]))
