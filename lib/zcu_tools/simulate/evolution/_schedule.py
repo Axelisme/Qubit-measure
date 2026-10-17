@@ -217,8 +217,9 @@ class Schedule:
     def bind_inputs(self, bindings: list[_Binding]) -> list[_Binding]:
         """Add evolve-local input bindings after model-only cache admission.
 
-        Only repeated keys are present here. All eligible rows for a key/port
-        reach one hook call, before chunk partitioning. Opaque returned data is
+        Only repeated keys receive the hook; guard-built singletons bypass it.
+        All eligible rows for a key/port reach one call before chunk partitioning.
+        Opaque returned data is
         referenced by the returned list alone, never by Schedule or the cache.
         """
         bound: list[_Binding] = []
@@ -227,6 +228,8 @@ class Schedule:
         for binding in bindings:
             eligible = self.table.start_ns[binding.rows] == 0
             for key in np.unique(binding.indices[eligible]):
+                if np.count_nonzero(binding.indices == key) < 2:
+                    continue
                 candidates = binding.rows[eligible & (binding.indices == key)]
                 ports = (
                     self.table.tone_port[candidates, 0]
