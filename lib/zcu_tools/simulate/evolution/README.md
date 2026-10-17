@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, terminal-family coverage and reachable dispatch fallbacks
+**Last updated:** 2026-10-17, terminal-family coverage, reachable dispatch fallbacks, and readout trace diagnostics
 
 ## Segment engine contracts
 
@@ -48,6 +48,14 @@ chunk boundaries and raises `Cancelled` without partial results. `close()`
 waits for active work, clears the prepare cache and is safe to repeat. Each
 `evolve` call opens and closes its own joblib threading pool. The prepare cache
 persists across `evolve` calls, but no worker resources survive a call.
+`PathDiagnostics.max_trace_error` reports the maximum absolute complex
+trace-minus-one across final readout densities for every evolve call, or zero
+for an empty call. This diagnostic never changes, rejects or retries kernel
+output and does not compare against an ADC tolerance. The environment explicitly
+converts densities to populations and calls ADC's `normalize_populations` once
+before sampling. ADC owns its 1e-6 trace and negative-residual contract and
+reports rejected row counts in `ValueError`; evolution does not import ADC.
+
 `SEGMENT_NUMERIC_VERSION` is `segment-engine-v3` and identifies engine numerics
 for checked replay.
 

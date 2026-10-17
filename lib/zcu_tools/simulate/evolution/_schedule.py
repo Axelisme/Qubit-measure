@@ -339,7 +339,13 @@ class Schedule:
                 raise RuntimeError("timeline job returned no densities")
             output[result.points] = result.states
             exceeded.update(result.exceeded_by_kernel)
-        diagnostics = replace(self.dispatch.diagnostics, exceeded_by_kernel=exceeded)
+        diagnostics = replace(
+            self.dispatch.diagnostics,
+            exceeded_by_kernel=exceeded,
+            max_trace_error=float(
+                np.max(np.abs(np.trace(output, axis1=1, axis2=2) - 1))
+            ),
+        )
         return EvolutionResult(self.geometry.points, output, diagnostics)
 
     def chunk(

@@ -28,6 +28,7 @@ from zcu_tools.simulate.adc import (
     ChannelReadout,
     ConditionalReadout,
     ConditionalSums,
+    normalize_populations,
     round_statistics,
     sample_traces,
 )
@@ -148,6 +149,8 @@ class FTFAcquire:
         evolved = owner.engine.evolve(
             plans[0].source, tuple(plan.batch for plan in plans), cancel=Event()
         )
+        # Retain solve diagnostics even when ADC preparation rejects a row.
+        owner.evaluations = (FTFNumericUse(acquire.sequence, index, evolved.paths),)
         state_count = evolved.densities.shape[-1]
         probabilities = np.empty((prod(acquire.point_dims), state_count))
         dc_model = plans[0].source.model((0,) * plans[0].batch.flux.level.shape[1])
@@ -158,8 +161,8 @@ class FTFAcquire:
             plans[0].readout.model.state_labels,
             dc_model.eigenvectors,
         )
-        probabilities[evolved.points] = batch_populations(
-            evolved.densities, readout_basis, readout_basis
+        probabilities[evolved.points] = normalize_populations(
+            batch_populations(evolved.densities, readout_basis, readout_basis)
         )
         response = ConditionalReadout(
             plans[0].readout.model,
@@ -190,7 +193,6 @@ class FTFAcquire:
             content_index.reshape(acquire.point_dims),
             plans[0].readout.model.receiver,
         )
-        owner.evaluations = (FTFNumericUse(acquire.sequence, index, evolved.paths),)
         return _Prepared(
             probabilities.reshape((*acquire.point_dims, state_count)), (channel,)
         )
