@@ -30,6 +30,39 @@ def test_ftf_loads_detached_named_settings(tmp_path: Path) -> None:
     assert config.chip.coupler.ng == 0
 
 
+@pytest.mark.parametrize(
+    "name,key_line,first_value",
+    [
+        (
+            "bias",
+            "    bias:\n",
+            "{unit: A, limits: [-2, 2], initial: 0.5, ramp_step: 0.2, "
+            "flux_per_unit: {f1: 0, coupler: 0.2, f2: 0}}",
+        ),
+        (
+            "mw",
+            "  mw:\n",
+            "{gen_ch: 3, charge_drive_ghz_per_gain: "
+            "{f1: {real: 0.1, imag: 0}, coupler: {real: 0, imag: 0}, "
+            "f2: {real: 0, imag: 0}}}",
+        ),
+    ],
+)
+def test_duplicate_yaml_keys_are_rejected_before_overwrite(
+    tmp_path: Path, name: str, key_line: str, first_value: str
+) -> None:
+    from zcu_tools.resources.ftf import load_ftf
+
+    text = yaml.safe_dump(ftf_document())
+    text = text.replace(key_line, f"{key_line.rstrip()} {first_value}\n{key_line}")
+    path = tmp_path / "duplicate.yaml"
+    path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=rf"(?s)duplicate.*{name}.*line [0-9]+") as error:
+        load_ftf(path)
+    assert str(path) in str(error.value)
+
+
 def _set_field(document: dict[str, object], path: str, value: object) -> None:
     node = document
     *parents, field = path.split(".")
