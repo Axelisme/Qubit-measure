@@ -27,7 +27,8 @@ from zcu_tools.gui.app.measure.events.tab import (
 )
 from zcu_tools.gui.app.measure.remote import service as app_service_module
 from zcu_tools.gui.app.measure.remote.events import EVENT_SERIALIZERS
-from zcu_tools.gui.event_bus import BaseEventBus, EventMeta
+from zcu_tools.gui.event_bus import BaseEventBus, EventMeta, EventSubscriptions
+from zcu_tools.gui.remote import control_service as control_service_module
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.events import (
     AliasesChangedPayload,
@@ -502,6 +503,7 @@ def test_writer_queue_overflow_eventually_closes_wedged_client(fx, caplog):
 
 
 def test_stop_unsubscribes_event_bus(qapp):
+    bus_subs = EventSubscriptions()
     with (
         patch.object(
             BaseEventBus,
@@ -528,7 +530,11 @@ def test_stop_unsubscribes_event_bus(qapp):
             side_effect=BaseEventBus.unsubscribe_with_meta,
         ) as unsubscribe_meta,
     ):
-        f = Fixture()
+        with patch.object(
+            control_service_module, "EventSubscriptions", return_value=bus_subs
+        ) as factory:
+            f = Fixture()
+        factory.assert_called_once_with()
         try:
             controller_subs = [
                 fullcall
@@ -552,11 +558,11 @@ def test_stop_unsubscribes_event_bus(qapp):
             assert any(
                 fullcall.args[1] is RunFinishedPayload for fullcall in service_subs
             ), "service should have subscribed"
-            assert len(f.service._bus_subs) == len(EVENT_SERIALIZERS)
+            assert len(bus_subs) == len(EVENT_SERIALIZERS)
         finally:
             f.stop()
 
-        assert len(f.service._bus_subs) == 0
+        assert len(bus_subs) == 0
         # Match self, payload, callback and kwargs with multiplicity, not order.
         meta_unsubs = unsubscribe_meta.call_args_list
         assert len(meta_unsubs) == len(service_subs)

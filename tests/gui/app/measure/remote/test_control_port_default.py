@@ -7,6 +7,8 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from zcu_tools.gui.event_bus import EventSubscriptions
+from zcu_tools.gui.remote import control_service as control_service_module
 
 
 def test_remote_control_adapter_start_rolls_back_bind_error(qapp) -> None:
@@ -31,18 +33,26 @@ def test_remote_control_adapter_start_rolls_back_bind_error(qapp) -> None:
 
     opts = ControlOptions(port=0)  # valid opts; we'll patch the underlying endpoint
 
-    adapter = RemoteControlAdapter(
-        controller=ctrl_mock,
-        opts=opts,
-        owner_scheduler=QtOwnerScheduler(),
-        render_view=render_view_mock,
-    )
+    bus_subs = EventSubscriptions()
+    with patch.object(
+        control_service_module, "EventSubscriptions", return_value=bus_subs
+    ) as factory:
+        adapter = RemoteControlAdapter(
+            controller=ctrl_mock,
+            opts=opts,
+            owner_scheduler=QtOwnerScheduler(),
+            render_view=render_view_mock,
+        )
+    factory.assert_called_once_with()
 
     bind_error = RuntimeError(
         "NdjsonRpcEndpoint bind 127.0.0.1:0 failed: [Errno 98] Address already in use"
     )
 
     with (
+        patch.object(
+            bus_subs, "subscribe_with_meta", wraps=bus_subs.subscribe_with_meta
+        ) as group_subscribe,
         patch.object(
             bus, "subscribe_with_meta", wraps=bus.subscribe_with_meta
         ) as meta_subscribe,
@@ -58,7 +68,8 @@ def test_remote_control_adapter_start_rolls_back_bind_error(qapp) -> None:
         adapter.start()
 
     endpoint_stop.assert_not_called()
-    assert len(adapter._bus_subs) == 0
+    assert len(bus_subs) == 0
+    assert group_subscribe.call_count == meta_subscribe.call_count
     assert meta_subscribe.call_count == len(EVENT_SERIALIZERS)
     assert {call.args[0] for call in meta_subscribe.call_args_list} == set(
         EVENT_SERIALIZERS
@@ -104,14 +115,22 @@ def test_remote_control_adapter_start_fails_fast_and_rolls_back_event_subscripti
     bus = FailingEventBus()
     ctrl_mock = MagicMock()
     ctrl_mock.get_bus.return_value = bus
-    adapter = RemoteControlAdapter(
-        controller=ctrl_mock,
-        opts=ControlOptions(port=0),
-        owner_scheduler=QtOwnerScheduler(),
-        render_view=MagicMock(),
-    )
+    bus_subs = EventSubscriptions()
+    with patch.object(
+        control_service_module, "EventSubscriptions", return_value=bus_subs
+    ) as factory:
+        adapter = RemoteControlAdapter(
+            controller=ctrl_mock,
+            opts=ControlOptions(port=0),
+            owner_scheduler=QtOwnerScheduler(),
+            render_view=MagicMock(),
+        )
+    factory.assert_called_once_with()
 
     with (
+        patch.object(
+            bus_subs, "subscribe_with_meta", wraps=bus_subs.subscribe_with_meta
+        ) as group_subscribe,
         patch.object(
             bus, "subscribe_with_meta", wraps=bus.subscribe_with_meta
         ) as meta_subscribe,
@@ -126,7 +145,8 @@ def test_remote_control_adapter_start_fails_fast_and_rolls_back_event_subscripti
         adapter.start()
 
     endpoint_start.assert_not_called()
-    assert len(adapter._bus_subs) == 0
+    assert len(bus_subs) == 0
+    assert group_subscribe.call_count == meta_subscribe.call_count
     assert meta_subscribe.call_count == 2
     assert all(
         call.args[0] in EVENT_SERIALIZERS for call in meta_subscribe.call_args_list
@@ -152,15 +172,23 @@ def test_remote_control_adapter_start_rolls_back_advertise_error(qapp) -> None:
     bus = BaseEventBus()
     ctrl_mock = MagicMock()
     ctrl_mock.get_bus.return_value = bus
-    adapter = RemoteControlAdapter(
-        controller=ctrl_mock,
-        opts=ControlOptions(port=0, app_slug="measure"),
-        owner_scheduler=QtOwnerScheduler(),
-        render_view=MagicMock(),
-    )
+    bus_subs = EventSubscriptions()
+    with patch.object(
+        control_service_module, "EventSubscriptions", return_value=bus_subs
+    ) as factory:
+        adapter = RemoteControlAdapter(
+            controller=ctrl_mock,
+            opts=ControlOptions(port=0, app_slug="measure"),
+            owner_scheduler=QtOwnerScheduler(),
+            render_view=MagicMock(),
+        )
+    factory.assert_called_once_with()
     advertise_error = RuntimeError("discovery write failed")
 
     with (
+        patch.object(
+            bus_subs, "subscribe_with_meta", wraps=bus_subs.subscribe_with_meta
+        ) as group_subscribe,
         patch.object(
             bus, "subscribe_with_meta", wraps=bus.subscribe_with_meta
         ) as meta_subscribe,
@@ -180,7 +208,8 @@ def test_remote_control_adapter_start_rolls_back_advertise_error(qapp) -> None:
         adapter.start()
 
     endpoint_stop.assert_called_once_with()
-    assert len(adapter._bus_subs) == 0
+    assert len(bus_subs) == 0
+    assert group_subscribe.call_count == meta_subscribe.call_count
     assert meta_subscribe.call_count == len(EVENT_SERIALIZERS)
     assert {call.args[0] for call in meta_subscribe.call_args_list} == set(
         EVENT_SERIALIZERS
