@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, constant-tone Hilbert Floquet period propagation
+**Last updated:** 2026-10-17, terminal-family coverage and reachable dispatch fallbacks
 
 ## Segment engine contracts
 
@@ -92,19 +92,27 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | Segment condition | Kernel |
 | --- | --- |
 | Readout start | Stop quantum evolution and hand populations to the ADC tools. FTF readout uses the DC model and ignores residual flux tails and overlapping controls. |
-| Varying flux, no drive | T5 quantizes flux at DAC-interval midpoints to 1e-3 Phi0 subsegments, then uses T4 with basis changes. |
+| Varying flux, no drive | The FTF model owner quantizes flux at DAC-interval midpoints to 1e-3 Phi0 subsegments. This T5 path uses T4 with basis changes, not a separate kernel. |
 | Varying flux with drive | `flux_dop853` integrates continuous flux with the exact Hamiltonian expansion; baths switch at quantized grid boundaries. |
 | Fixed flux, no drive | T4 uses analytic secular propagation. |
 | One constant tone, known input density, r, r₂ and B2 guards pass | T7 second-order Dyson, batched over frequency, gain, duration and phase. |
 | One constant tone after an identical shared no-drive prefix, r and r₂ pass | Dyson with the actual prefix output. B2 does not apply; post-apply population changes only report. |
 | Same constant-tone branch, Dyson fails but r <= 0.2 | Reduced RWA if its omitted-sideband error bound fits the segment budget; otherwise try the Hilbert period kernel. |
 | One constant tone not accepted above, known or unknown input, with abs(f) >= 1 GHz and duration*T²*Gamma*V² <= 1e-2 | `floquet_period` integrates one Hilbert-space U(T), translates the carrier phase in time, and steps each period with secular Strang dissipation. |
-| Same constant-tone branch, Hilbert period guard fails | T6 periodic propagation, then DOP853 if T6 rejects. |
+| Same constant-tone branch, Hilbert period guard fails | T6 periodic propagation accepts every single constant-tone row. |
 | One shaped tone, prepare-key usage >= 10 | Gate cache with four Strang subsegments, closed-system U plus secular dissipation, and 16 carrier-phase Fourier samples. |
 | One shaped tone, prepare-key usage < 10 | Period table with midpoint-frozen envelopes, eight amplitude Chebyshev nodes and 16 phase Fourier samples; integrate the fractional-period tail directly. This branch has no per-segment accuracy guard. |
-| Two constant tones with a weak probe and passing Floquet guards | Floquet k=0 preparation, then modal second-order Dyson in H_F + D₀; a failing probe guard uses periodic T6 propagation in that frame. |
+| Two constant tones with a valid Floquet frame and passing harmonic omission and convergence bounds | Floquet k=0 preparation. Passing probe guards select modal second-order Dyson in H_F + D₀; other probes use periodic propagation in the same accepted frame. |
 | Other two-tone segments, including failed Floquet guards | Sum both drives in batched numba DOP853. |
 | Three or more tones | Sum all drives in batched numba DOP853. |
+
+T4, T6, gate_cache and period_table are terminal families for their dispatched
+rows. Their guards accept every row in those domains, so these branches have no
+DOP853 fallback. Custom kernels replacing these families must cover the same
+domains. A rejecting terminal guard raises `RuntimeError` with `no valid kernel`.
+Preparation or apply failures also raise; they never trigger reclassification.
+DOP853 remains the fallback for rejected two-tone Floquet frames and the direct
+path for shaped two-tone and three-or-more-tone segments.
 
 Dyson's B2 guard uses the full source density in the segment model basis for rows
 starting at zero. It takes actual pair coherence magnitudes and the off-diagonal
@@ -158,7 +166,7 @@ r <= 0.025 and B2 + 0.000125 <= 0.0131. Classification uses this bound to avoid
 large |Δp|. A post-apply |Δp| check only reports excess; it does not correct the
 Dyson result or guarantee exact-dynamics accuracy. Rejected Dyson segments try
 reduced RWA only in the r <= 0.2 branch. RWA segments whose error bound exceeds
-their budget try the Hilbert period kernel, then T6 and DOP853.
+their budget try the Hilbert period kernel, then T6.
 
 Each segment receives a default budget of 1e-3. The end-to-end acceptance
 threshold is a maximum absolute error of 1e-2 in both final readout-basis

@@ -111,7 +111,7 @@ class _Classifier:
     def classify(self) -> Dispatch:
         table = self.table
         rows = np.arange(len(table.timeline), dtype=np.int64)
-        self.accept(rows[table.tones == 0], ("t4", "dop853"))
+        self.accept(rows[table.tones == 0], ("t4",))
         flux = self.geometry.flux_drive & (table.tones > 0)
         self.accept(rows[flux], ("flux_dop853",))
         ordinary = ~flux
@@ -122,10 +122,8 @@ class _Classifier:
             constant[playing] &= kinds[table.tone_envelope[playing, slot]]
         single = ordinary & (table.tones == 1)
         known = single & constant & self.geometry.known_input
-        self.accept(rows[known], ("dyson", "rwa", "floquet_period", "t6", "dop853"))
-        self.accept(
-            rows[single & constant & ~known], ("floquet_period", "t6", "dop853")
-        )
+        self.accept(rows[known], ("dyson", "rwa", "floquet_period", "t6"))
+        self.accept(rows[single & constant & ~known], ("floquet_period", "t6"))
         shaped = rows[single & ~constant]
         gate = self.kernels.get("gate_cache")
         if gate is None:
@@ -139,8 +137,8 @@ class _Classifier:
                 return_counts=True,
             )
             counts = usage[inverse]
-        self.accept(shaped[counts >= 10], ("gate_cache", "dop853"))
-        self.accept(shaped[counts < 10], ("period_table", "dop853"))
+        self.accept(shaped[counts >= 10], ("gate_cache",))
+        self.accept(shaped[counts < 10], ("period_table",))
         self.accept(
             rows[ordinary & (table.tones == 2) & constant], ("floquet", "dop853")
         )
