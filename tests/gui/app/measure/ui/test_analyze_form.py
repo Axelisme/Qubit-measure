@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Annotated, Literal
 
 import pytest
+from qtpy import QtWidgets
 from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
 from zcu_tools.gui.app.measure.adapter import ParamMeta
 from zcu_tools.gui.app.measure.ui.analyze_form import AnalyzeFormWidget
@@ -58,19 +59,45 @@ def test_analyze_form_hydration_does_not_emit_params_changed(qapp):
     assert emitted == []
 
 
+def _form_layout(form: AnalyzeFormWidget) -> QtWidgets.QFormLayout:
+    """Find the form's unique layout through the public Qt object tree."""
+    layout = form.findChild(QtWidgets.QFormLayout)
+    assert layout is not None
+    return layout
+
+
+def _widgets_by_label(form: AnalyzeFormWidget) -> dict[str, QtWidgets.QWidget]:
+    """Observe field widgets by the fixtures' distinct visible row labels."""
+    layout = _form_layout(form)
+    widgets: dict[str, QtWidgets.QWidget] = {}
+    for row in range(layout.rowCount()):
+        label_item = layout.itemAt(row, QtWidgets.QFormLayout.ItemRole.LabelRole)
+        assert label_item is not None
+        label = label_item.widget()
+        assert isinstance(label, QtWidgets.QLabel)
+        field_item = layout.itemAt(row, QtWidgets.QFormLayout.ItemRole.FieldRole)
+        assert field_item is not None
+        widget = field_item.widget()
+        assert widget is not None
+        assert label.text() not in widgets
+        widgets[label.text()] = widget
+    return widgets
+
+
 def test_sync_same_class_preserves_widgets_and_only_hydrates(qapp):
     form = AnalyzeFormWidget()
     emitted: list[object] = []
     form.params_changed.connect(emitted.append)
     form.sync(_TestParams(threshold=0.5, model="a"))
-    widgets = dict(form._widgets)
-    row_count = form._form.rowCount()
+    widgets = _widgets_by_label(form)
+    row_count = _form_layout(form).rowCount()
 
     form.sync(_TestParams(threshold=0.9, model="b"))
 
-    assert form._widgets == widgets
-    assert all(form._widgets[name] is widget for name, widget in widgets.items())
-    assert form._form.rowCount() == row_count
+    current_widgets = _widgets_by_label(form)
+    assert current_widgets == widgets
+    assert all(current_widgets[name] is widget for name, widget in widgets.items())
+    assert _form_layout(form).rowCount() == row_count
     assert form.read_params() == _TestParams(threshold=0.9, model="b")
     assert emitted == []
 
@@ -78,16 +105,17 @@ def test_sync_same_class_preserves_widgets_and_only_hydrates(qapp):
 def test_sync_class_change_rebuilds_and_clear_fast_fails(qapp):
     form = AnalyzeFormWidget()
     form.sync(_TestParams(threshold=0.5, model="a"))
-    old_widgets = tuple(form._widgets.values())
+    old_widgets = tuple(_widgets_by_label(form).values())
 
     form.sync(_OptionalParams(t0=1.0))
 
-    assert all(widget not in form._widgets.values() for widget in old_widgets)
+    current_widgets = _widgets_by_label(form)
+    assert all(widget not in current_widgets.values() for widget in old_widgets)
     assert form.read_params() == _OptionalParams(t0=1.0)
 
     form.clear()
     assert form.has_params() is False
-    assert form._form.rowCount() == 0
+    assert _form_layout(form).rowCount() == 0
     with pytest.raises(RuntimeError, match="not been populated"):
         form.read_params()
 

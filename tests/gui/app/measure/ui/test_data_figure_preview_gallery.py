@@ -357,7 +357,9 @@ def test_gallery_never_retains_figure(qapp):
     g.update_figures(fig, Figure(), None)
     # Gallery should not hold Figure refs beyond call; we cleared held list
     # but verify gallery's cards have no 'figure' attr
-    for card in g._cards.values():
+    for key in ("run", "analysis"):
+        card = g.find_card(key)
+        assert card is not None
         assert not hasattr(card, "figure")
     # Ensure update does not store figure in gallery attribute
     assert not any(
