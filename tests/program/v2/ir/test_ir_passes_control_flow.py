@@ -20,6 +20,7 @@ from zcu_tools.program.v2.ir.node import (
     BlockNode,
     IRBranch,
     IRLoop,
+    IRNode,
 )
 from zcu_tools.program.v2.ir.operands import (
     AluExpr,
@@ -37,6 +38,8 @@ from zcu_tools.program.v2.ir.passes.control_flow import (
 )
 from zcu_tools.program.v2.ir.passes.dataflow import DeadWriteEliminationPass
 from zcu_tools.program.v2.ir.pipeline import (
+    AbsChunkListPass,
+    AbsChunkPass,
     ChunkList,
     PipeLineConfig,
     PipeLineContext,
@@ -47,7 +50,9 @@ def _label(name: str) -> Label:
     return Label(name)
 
 
-def _run_chunk_passes_on_root(root: BlockNode, passes: list) -> BlockNode:
+def _run_chunk_passes_on_root(
+    root: BlockNode, passes: list[AbsChunkPass | AbsChunkListPass]
+) -> BlockNode:
     parser = IRParser()
     chunks = parser.unparse(root)
     ctx = PipeLineContext(config=PipeLineConfig(), pmem_budget=1024)
@@ -334,7 +339,7 @@ def test_block_merge_inside_irloop_body():
             BasicBlockNode(insts=[NopInst()]),  # no labels → should be merged
         ]
     )
-    insts: list = [IRLoop(name="L", counter_reg=Register("c"), body=body, n=4)]
+    insts: list[IRNode] = [IRLoop(name="L", counter_reg=Register("c"), body=body, n=4)]
     root = BlockNode(insts=insts)
 
     out = _run_chunk_passes_on_root(root, [BlockMergePass()])
@@ -356,7 +361,7 @@ def test_block_merge_inside_irbranch_cases():
             BasicBlockNode(insts=[NopInst()]),
         ]
     )
-    insts: list = [IRBranch(name="B", compare_reg=Register("c"), cases=[case])]
+    insts: list[IRNode] = [IRBranch(name="B", compare_reg=Register("c"), cases=[case])]
     root = BlockNode(insts=insts)
 
     out = _run_chunk_passes_on_root(root, [BlockMergePass()])
@@ -384,7 +389,7 @@ def test_branch_elim_inside_irloop_body():
             ),
         ]
     )
-    insts: list = [IRLoop(name="L", counter_reg=Register("c"), body=body, n=4)]
+    insts: list[IRNode] = [IRLoop(name="L", counter_reg=Register("c"), body=body, n=4)]
     root = BlockNode(insts=insts)
 
     out = _run_chunk_passes_on_root(root, [BranchEliminationPass()])
@@ -412,7 +417,7 @@ def test_branch_elim_inside_irbranch_cases():
             ),
         ]
     )
-    insts: list = [IRBranch(name="B", compare_reg=Register("c"), cases=[case])]
+    insts: list[IRNode] = [IRBranch(name="B", compare_reg=Register("c"), cases=[case])]
     root = BlockNode(insts=insts)
 
     out = _run_chunk_passes_on_root(root, [BranchEliminationPass()])
