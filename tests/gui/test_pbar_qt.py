@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.session.ui.progress_bar import LightweightProgressBar
+    from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 
 pytest.importorskip("qtpy")
 
 
 # ---------------------------------------------------------------------------
-# _ProgressStack helpers
+# ProgressStack helpers
 # ---------------------------------------------------------------------------
 
 
@@ -18,6 +22,21 @@ def _make_stack(qapp):
     from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 
     return ProgressStack()
+
+
+def _layout_bars(stack: ProgressStack) -> tuple[LightweightProgressBar, ...]:
+    from zcu_tools.gui.session.ui.progress_bar import LightweightProgressBar
+
+    layout = stack.layout()
+    assert layout is not None
+    bars: list[LightweightProgressBar] = []
+    for index in range(layout.count()):
+        item = layout.itemAt(index)
+        assert item is not None
+        widget = item.widget()
+        assert isinstance(widget, LightweightProgressBar)
+        bars.append(widget)
+    return tuple(bars)
 
 
 def _make_factory(stack, *, operation_id: int = 1, owner_id: str = "owner"):
@@ -71,7 +90,7 @@ def test_factory_push_and_pop_leave_false(qapp):
 
     pbar = factory(desc="test", total=10, leave=False)
     QApplication.processEvents()
-    assert len(stack._active) == 1  # bar was pushed
+    assert len(_layout_bars(stack)) == 1  # bar was pushed
 
     pbar.update(3)
     QApplication.processEvents()
@@ -83,7 +102,7 @@ def test_factory_push_and_pop_leave_false(qapp):
 
     pbar.close()
     QApplication.processEvents()
-    assert len(stack._active) == 0  # bar was popped
+    assert len(_layout_bars(stack)) == 0  # bar was popped
 
 
 def test_reset_all_keeps_removed_bar_as_hidden_child(qapp):
@@ -95,7 +114,7 @@ def test_reset_all_keeps_removed_bar_as_hidden_child(qapp):
     factory = _make_factory(stack)
     factory(desc="test", total=10, leave=True)
     QApplication.processEvents()
-    bar = stack._active[0]
+    bar = _layout_bars(stack)[0]
     assert bar.isVisible() is True
 
     stack.reset_all()
@@ -115,14 +134,14 @@ def test_factory_push_and_pop_leave_true(qapp):
 
     pbar = factory(desc="test", total=10, leave=True)
     QApplication.processEvents()
-    assert len(stack._active) == 1
+    assert len(_layout_bars(stack)) == 1
 
     pbar.close()
     QApplication.processEvents()
-    assert len(stack._active) == 1  # still active (leave=True)
+    assert len(_layout_bars(stack)) == 1  # still active (leave=True)
 
     stack.reset_all()
-    assert len(stack._active) == 0
+    assert len(_layout_bars(stack)) == 0
 
 
 def test_factory_two_layers(qapp):
@@ -136,18 +155,18 @@ def test_factory_two_layers(qapp):
     QApplication.processEvents()
     inner = factory(desc="inner", total=10, leave=False)
     QApplication.processEvents()
-    assert len(stack._active) == 2
+    assert len(_layout_bars(stack)) == 2
 
     inner.close()
     QApplication.processEvents()
-    assert len(stack._active) == 1  # inner popped (leave=False)
+    assert len(_layout_bars(stack)) == 1  # inner popped (leave=False)
 
     outer.close()
     QApplication.processEvents()
-    assert len(stack._active) == 1  # outer stays (leave=True)
+    assert len(_layout_bars(stack)) == 1  # outer stays (leave=True)
 
     stack.reset_all()
-    assert len(stack._active) == 0
+    assert len(_layout_bars(stack)) == 0
 
 
 def test_total_setter(qapp):
@@ -162,18 +181,18 @@ def test_total_setter(qapp):
     # integer total → max == raw value
     pbar = factory(desc="t", total=5, leave=False)
     QApplication.processEvents()
-    assert stack._active[0].maximum() == 5
+    assert _layout_bars(stack)[0].maximum() == 5
 
     # changing to another integer → max updates
     pbar.total = 20
     QApplication.processEvents()
-    assert stack._active[0].maximum() == 20
+    assert _layout_bars(stack)[0].maximum() == 20
     assert pbar.total == 20
 
     # changing to float → scaled max, bar can fill proportionally
     pbar.total = 3.14
     QApplication.processEvents()
-    assert stack._active[0].maximum() == _FLOAT_SCALE
+    assert _layout_bars(stack)[0].maximum() == _FLOAT_SCALE
 
     pbar.close()
     QApplication.processEvents()
@@ -193,7 +212,7 @@ def test_total_change_updates_widget_in_place_no_flicker(qapp):
 
     pbar = factory(desc="rounds", total=10, leave=True)
     QApplication.processEvents()
-    widget = stack._active[0]  # the specific progress widget instance shown
+    widget = _layout_bars(stack)[0]  # the specific progress widget instance shown
 
     # Mutating total many times (simulating per-sweep-point set_pbar_n) keeps the
     # *same* widget object in place — it is never popped back to the pool.
@@ -201,8 +220,8 @@ def test_total_change_updates_widget_in_place_no_flicker(qapp):
         pbar.total = new_total
         pbar.refresh()
         QApplication.processEvents()
-        assert len(stack._active) == 1
-        assert stack._active[0] is widget  # same widget, not rebuilt
+        assert len(_layout_bars(stack)) == 1
+        assert _layout_bars(stack)[0] is widget  # same widget, not rebuilt
         assert widget.maximum() == new_total
 
     pbar.close()
@@ -306,7 +325,7 @@ def test_context_local_factory_routes_nested_progress(qapp):
 
 
 def test_disabled_pbar_does_not_push_to_stack(qapp):
-    """factory(disable=True) must not add any bar to stack._active."""
+    """factory(disable=True) must not add any bar to the stack layout."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 
     stack = _make_stack(qapp)
@@ -314,7 +333,7 @@ def test_disabled_pbar_does_not_push_to_stack(qapp):
 
     factory(desc="hidden", total=10, leave=False, disable=True)
     QApplication.processEvents()
-    assert len(stack._active) == 0
+    assert len(_layout_bars(stack)) == 0
 
 
 def test_disabled_pbar_methods_are_noop_no_exception(qapp):
@@ -331,7 +350,7 @@ def test_disabled_pbar_methods_are_noop_no_exception(qapp):
     pbar.total = 20
     pbar.close()
 
-    assert len(stack._active) == 0
+    assert len(_layout_bars(stack)) == 0
 
 
 def test_disabled_pbar_internal_state_updates(qapp):
@@ -353,7 +372,7 @@ def test_disabled_pbar_internal_state_updates(qapp):
     pbar.set_description("updated")
     assert pbar.desc == "updated"
 
-    assert len(stack._active) == 0
+    assert len(_layout_bars(stack)) == 0
 
 
 def test_disabled_pbar_close_does_not_pop_stack(qapp):
@@ -366,7 +385,7 @@ def test_disabled_pbar_close_does_not_pop_stack(qapp):
     pbar = factory(desc="hidden", total=5, leave=False, disable=True)
     pbar.close()
     QApplication.processEvents()
-    assert len(stack._active) == 0
+    assert len(_layout_bars(stack)) == 0
 
 
 def test_explicit_disable_false_behaves_normally(qapp):
@@ -378,14 +397,14 @@ def test_explicit_disable_false_behaves_normally(qapp):
 
     pbar = factory(desc="normal", total=5, leave=False, disable=False)
     QApplication.processEvents()
-    assert len(stack._active) == 1
+    assert len(_layout_bars(stack)) == 1
 
     pbar.update(2)
     assert pbar.n == 2
 
     pbar.close()
     QApplication.processEvents()
-    assert len(stack._active) == 0
+    assert len(_layout_bars(stack)) == 0
 
 
 def test_disabled_and_enabled_pbars_coexist(qapp):
@@ -400,13 +419,15 @@ def test_disabled_and_enabled_pbars_coexist(qapp):
     disabled = factory(desc="hidden", total=10, leave=False, disable=True)
     QApplication.processEvents()
 
-    assert len(stack._active) == 1
+    assert len(_layout_bars(stack)) == 1
 
     disabled.update(5)
     disabled.close()
     QApplication.processEvents()
-    assert len(stack._active) == 1  # enabled still in stack; disabled close is no-op
+    assert (
+        len(_layout_bars(stack)) == 1
+    )  # enabled still in stack; disabled close is no-op
 
     stack.reset_all()
-    assert len(stack._active) == 0
+    assert len(_layout_bars(stack)) == 0
     del enabled
