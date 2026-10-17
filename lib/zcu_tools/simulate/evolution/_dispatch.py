@@ -47,7 +47,16 @@ class Selection:
 
 @dataclass(frozen=True)
 class Dispatch:
-    """Resolved shared decisions and acquire-local worker work.
+    """Call-local legacy single-interval execution plan, consumed by Schedule.
+
+    Within the classified scope, every pending interval is covered exactly once:
+    all Geometry.pending rows for an acquire, or Selection.rows for one worker.
+    Each has a nonempty family in names, or a True deferred bit with the contingent
+    Selection(rows, shaped, rejected) resolved by its timeline worker. Already
+    adopted prefix intervals are excluded. Schedule owns ordering and coverage;
+    callers must not reclassify accepted rows or reconstruct guard products.
+    This plan belongs to the same geometry, registry, source and budget for one
+    evolve, not to shadow assignment or portable replay.
 
     names: family per global row; empty deferred slices are filled by their worker.
     diagnostics: counts for decisions resolved so far, refreshed after workers join.
