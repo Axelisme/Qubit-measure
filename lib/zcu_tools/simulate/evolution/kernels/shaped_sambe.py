@@ -7,6 +7,13 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
+from ..declarations import (
+    AlgorithmIdentity,
+    Eligibility,
+    GuardDeclaration,
+    KernelDeclaration,
+    ReuseDeclaration,
+)
 from ..kernel import GuardPreparation, GuardResult, Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
 from ._period_table import (
@@ -109,6 +116,15 @@ class ShapedSambeKernel:
     decision order. Apply uses frozen-envelope secular Strang steps, never
     retries, clips or normalizes density. Complex envelopes and DC are rejected.
     """
+
+    declaration = KernelDeclaration(
+        identity=AlgorithmIdentity("shaped_sambe", "legacy-v1"),
+        eligibility=Eligibility(1, 1, "shaped"),
+        guard=GuardDeclaration(("model-build",), builds_model=True),
+        accuracy="guarded-approximation",
+        reuse=ReuseDeclaration("shaped_sambe/legacy-v1/serial"),
+        fallback="legacy-order",
+    )
 
     name = "shaped_sambe"
     guard_builds = True

@@ -7,6 +7,13 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
+from ..declarations import (
+    AlgorithmIdentity,
+    Eligibility,
+    GuardDeclaration,
+    KernelDeclaration,
+    ReuseDeclaration,
+)
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
 from ._dyson_bound import accepts_population_bound
@@ -725,6 +732,15 @@ class DysonKernel:
     accumulate in original order without further row cutoffs. Ordinary apply
     keeps its existing per-batch pruning policy.
     """
+
+    declaration = KernelDeclaration(
+        identity=AlgorithmIdentity("dyson", "legacy-v1"),
+        eligibility=Eligibility(1, 1, "constant"),
+        guard=GuardDeclaration(("no-build", "certified-input")),
+        accuracy="guarded-approximation",
+        reuse=ReuseDeclaration("dyson/legacy-v1/serial"),
+        fallback="legacy-order",
+    )
 
     name = "dyson"
     guard_builds = False

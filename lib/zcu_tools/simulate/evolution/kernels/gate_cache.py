@@ -8,6 +8,13 @@ from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 from scipy.linalg import expm
 
+from ..declarations import (
+    AlgorithmIdentity,
+    Eligibility,
+    GuardDeclaration,
+    KernelDeclaration,
+    ReuseDeclaration,
+)
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
 from ._shaped import drive_bounds, envelope_bounds
@@ -144,6 +151,15 @@ class GateCacheKernel:
     unsupported rows or mismatched representative keys raise ValueError. This
     fixed-order approximation does not certify arbitrary drives against budget.
     """
+
+    declaration = KernelDeclaration(
+        identity=AlgorithmIdentity("gate_cache", "legacy-v1"),
+        eligibility=Eligibility(1, 1, "shaped"),
+        guard=GuardDeclaration(),
+        accuracy="guarded-approximation",
+        reuse=ReuseDeclaration("gate_cache/legacy-v1/serial"),
+        fallback="legacy-order",
+    )
 
     name = "gate_cache"
     guard_builds = False
