@@ -24,8 +24,6 @@ from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.owner import OwnerThreadGuard
 from zcu_tools.gui.project import ProjectInfo
 
-logger = logging.getLogger(__name__)
-
 # VersionTable is the shared optimistic-concurrency mechanism (app-agnostic);
 # re-exported so ``state.VersionTable`` stays resolvable. dispersive's key set
 # (project / onetone / preprocess / fit) is documented beside the *_VERSION_KEY
@@ -33,6 +31,8 @@ logger = logging.getLogger(__name__)
 from zcu_tools.gui.version_table import (
     VersionTable as VersionTable,  # (re-export)
 )
+
+logger = logging.getLogger(__name__)
 
 # Version-table resource keys (see VersionTable docstring for the bump↔drop map).
 PROJECT_VERSION_KEY = "project"
