@@ -74,6 +74,13 @@ def _context(data, row, model):
     return Context(models, segments, row, model)
 
 
+@njit(nogil=True, cache=True)
+def _run(data, row_models, states, controls):
+    # Cache the linked solver behind a callback-free signature. Passing compiled
+    # callables from Python gives Numba process-specific specialization keys.
+    run_chain(_rhs, _context, data, row_models, states, controls)
+
+
 class DOP853Kernel:
     """C5 fallback for all tone counts and complex sampled envelopes.
 
@@ -210,9 +217,7 @@ class DOP853Kernel:
         if np.any(playing & (table.tone_port[rows] >= models.ports[key_index, None])):
             raise ValueError("DOP853 tone port absent from model")
         segments = pack_segments(table)
-        run_chain(
-            _rhs,
-            _context,
+        _run(
             _Data(models, segments),
             (rows, key_index),
             states,

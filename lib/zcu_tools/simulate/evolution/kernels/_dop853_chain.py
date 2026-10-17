@@ -38,8 +38,9 @@ def _sample_ceiling(segments, row):
     return ceiling
 
 
-# Compiled callables specialize this runner for each kernel's context and RHS.
-@njit(nogil=True, cache=True)
+# Inline callback-taking control into the kernel's cached entry point, so no
+# process-specific dispatcher pointer becomes a dynamic global in its cache.
+@njit(nogil=True, cache=True, inline="always")
 def run_chain(
     rhs,
     make_context,

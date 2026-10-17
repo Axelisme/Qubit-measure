@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, opt-in shadow planner and one-core profile contracts
+**Last updated:** 2026-10-18, cross-process DOP853 compilation reuse
 
 ## Segment engine contracts
 
@@ -658,6 +658,15 @@ are separate allocations. Clearing the cache or closing the engine releases
 in-memory preparations without deleting replay inputs.
 
 ## Cache inventory and ownership
+
+DOP853 density chains and dense Hilbert propagation enter Numba through
+callback-free compiled wrappers. The wrappers bind each kernel's RHS and inline
+the callback-taking shared helpers into cacheable compiled code.
+Passing compiled RHS callbacks directly from Python would give the solver
+process-specific specialization keys and repeat compilation after restart.
+The numerical core remains shared by ordinary DOP853, continuous-flux DOP853
+and period-table fractional tails. This compilation cache is independent of
+the engine's prepared-payload LRU.
 
 The `cache` module exposes `PrepareCache` and `PreparedPayload` to numeric
 scheduling collaborators. Scheduler and prefix resolution use this same LRU.
