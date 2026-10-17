@@ -1,6 +1,6 @@
 # FTF YAML values
 
-**Last updated:** 2026-10-17，v2 欄位指南
+**Last updated:** 2026-10-18，receiver delay 與各 resonator mismatch
 
 `load_ftf(path)` 一次讀取 UTF-8 YAML，`parse_ftf(document)` 驗證記憶體中的文件。兩者回傳 immutable `FTFSettings`。本模組擁有 schema、單位與欄位路徑診斷，不依賴 `simulate`、`device` 或 `program`，也不建立裝置或決定物理適用性。
 
@@ -9,6 +9,8 @@
 文件使用 `format: zcu.ftf`、整數 `version: 2`。`chip` 描述物理值，`dc_bias` 合併具名電源與校準，`drive_lines` 綁定 charge microwave lines，`readout` 分開 drive、物理 resonators 與 ADC，`numerics` 集中截斷與 solver。所有迴路 map 必填 `f1`、`coupler`、`f2`，key 指受作用的迴路，不是額外線路。
 
 錯誤包含欄位路徑。未知欄位、重複 source 名稱或 generator 綁定、非 A/V 的電源單位、無效 limits／dimensions，以及非 positive-semidefinite 的 ADC noise PSD 都在建立資源前拒絕。V1 不相容，沒有轉換或 aliases；loader 不改寫本機工作副本與既有 entry。
+
+`readout.adc.time_of_flight_ns` 是有限非負總讀取線延遲，單位 ns。`readout.resonators.r1.mismatch_phase_rad` 與 `r2.mismatch_phase_rad` 分別是有限散射相位，單位 radians。三個欄位省略都為 0，不接受 null 或非有限值。Resources 只驗證這些值；`experiment.ftf` 接到 `simulate.adc` 的數值模型，由 ADC 決定物理延遲、微波 IQ 與散射響應。
 
 FTF 支援 live DC bias、靜態掃描、charge drive 與 readout，不建構 flux lines 或 flux controls。`flux_lines` 即使為空 map 也是未知欄位。未綁定 generator 沿用既有處理，沒有額外 flux-pulse 專用判定或報錯。共享 `simulate` 引擎仍保留 flux-pulse 能力，FTF 不使用。
 

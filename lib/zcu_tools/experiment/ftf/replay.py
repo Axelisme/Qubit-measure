@@ -8,7 +8,7 @@ from zcu_tools.device import DeviceManager
 from zcu_tools.resources.simulation_replay import read_replay
 from zcu_tools.simulate.evolution import SEGMENT_NUMERIC_VERSION
 
-BACKEND_VERSION = "ftf-segment-v4"
+BACKEND_VERSION = "ftf-segment-v5"
 
 
 def replay_versions() -> tuple[tuple[str, str], ...]:

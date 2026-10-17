@@ -87,7 +87,8 @@ class SampleGrid:
         at least one sample. Negative/pre-pulse times model physical lookback.
         No hidden sample-period multiplication occurs in sample sums.
     demodulation_frequency_ghz: absolute oscillator cycles/ns. Rotating output is
-        multiplied by exp(+2πi*(f_demod-f_ref)*t-i*phase_rad), then calibrated.
+        multiplied by exp(+2πi*(f_demod-f_ref)*t-i*phase_rad), then conjugated
+        into microwave I+iQ before receiver gain/phase/offset and added noise.
     phase_rad: demod oscillator phase at absolute origin zero, radians.
     Empty/nonfinite/unordered grids raise ValueError.
     """
@@ -142,9 +143,11 @@ class ConditionalResponse:
 
     state_labels: initial/final state order, matching ReadoutModel.
     traces: owned/read-only float64 (initial_state,sample,2) ADC sample units,
-        last axis [I,Q], after demodulation/gain/phase/offset, without noise.
+        last axis microwave [I,Q], after delay/demodulation/conjugation and
+        gain/phase/offset, without noise.
     final_populations: owned/read-only float64 (initial_state,final_state) at
-        the final sample time. Retains solver output, without probability repair.
+        the final sample's emitted time (ADC time minus time_of_flight_ns),
+        no earlier than readout origin. Retains solver output without repair.
     These are conditional means, not jump-time trajectories or single-shot tails.
     """
 

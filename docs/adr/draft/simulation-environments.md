@@ -213,7 +213,7 @@ Readout 採弱讀出、dispersive、線性 resonator 與能量基底 QND mixture
 
 2026-10-14，使用者提出：「readout_source/receiver一個就好，因為共用傳輸線。」對是否也只用一個 generator 與一個 ADC readout channel 的追問，確認：「是的，只有一個gen_ch與ro_ch」。FTF 的 readout_source 與 receiver 各一個，分別綁定 YAML 指定的 gen_ch 與 ro_ch；不合併 microwave／flux control 的其他 generators。兩 resonators 的分次換頻或同次多頻策略尚待收斂，不因本裁決擴大末端讀出時段的契約。
 
-R1、R2 共用 reciprocal、co-located two-port transmission line，包含 off-diagonal radiative damping，不等同兩條獨立 Lorentzian 相加或僅共用 ADC。Two-port 指物理端口，不代表雙 ADC。單一 receiver 觀測共同線路輸出，接收 noise 的 PSD matrix 定義在 I,Q 空間，為2×2實對稱正半定矩陣。有限 pulse 經 classical field evolution，再依 ADC window demodulate、sample／integrate 並套 receiver 響應。
+R1、R2 共用 reciprocal、co-located two-port transmission line，包含 off-diagonal radiative damping，不等同兩條獨立 Lorentzian 相加或僅共用 ADC。Two-port 指物理端口，不代表雙 ADC。單一 receiver 觀測共同線路輸出，接收 noise 的 PSD matrix 定義在 I,Q 空間，為2×2實對稱正半定矩陣。有限 pulse 經 classical field evolution，ADC 以總讀取線延遲推遲物理輸出，再解調、取共軛成微波 I+iQ，套 receiver gain／phase／offset 並加入 noise。各 resonator 的 mismatch 相位只旋轉其散射項，不改 shared-line 動力學。數值與欄位契約見 [ADC README](../../../lib/zcu_tools/simulate/adc/README.md) 及 [FTF 欄位指南](../../../zcu_lab/simulation_envs/FTF/field-guide.md)。
 
 2026-10-14，使用者對「保留空間內的多能階relaxation＋條件平均讀出，不追逐shot衰減細節」回答「好，同意」。對每個 readout 初始 joint state 計算含既有 directional relaxation／thermal transitions 的條件平均響應，涵蓋矩陣元允許的 cascade、直接跨級、coupler／leakage states 與熱激發，不限0↔1。不新增 readout T1、空間外態或 ground sink。
 
@@ -283,6 +283,6 @@ Lookback／acquire_decimated 使用相同有限 pulse 與條件平均場，輸�
 
 I/Q-only 練習在原版本已跑通 F1、F2，conditional Ramsey 只取得一點。驗收採「能跑起來」，不代表全 16 點完成或原精度達標。歷史正式 workload 的完整 acquire 成本為 cold 平均 2.864 秒／point、warm direct-record 平均 0.457 秒／point，不能稱平均 1 秒已達標。這些數字不能代表現行分段引擎。
 
-現行 FTF backend 是 `ftf-segment-v4`，使用分段引擎與重算式 replay。舊版本 private archive 透過公開 replay 入口明確報版本不符，不靜默升級。原校準、raw、seal 與成本證據維持原版本；此處不把舊證據當作目前版本的科學精度或效能驗收。
+現行 FTF backend 是 `ftf-segment-v5`，使用分段引擎與重算式 replay。舊版本 private archive 透過公開 replay 入口明確報版本不符，不靜默升級。原校準、raw、seal 與成本證據維持原版本；此處不把舊證據當作目前版本的科學精度或效能驗收。
 
 固定 original basis 的內部自洽驗證與跨 basis population 比較仍保留。跨 basis phase／complex 偏差照實保留，不作通過條件。模擬的絕對頻率與相位有 MHz 級 basis 偏差，不適合對照外部能譜或硬體絕對值。這些限制不改變既定物理模型，也不構成 runtime 收斂認證。
