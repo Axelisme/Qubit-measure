@@ -2,7 +2,7 @@
 
 **狀態：** accepted。
 
-**Last updated:** 2026-10-18，補記 device 活動投遞與 run 後 cache 讀回
+**Last updated:** 2026-10-18，device 活動快照與 run 後 cache 讀回
 
 ## 問題與決策
 
@@ -32,7 +32,7 @@ WritebackService 先以分析來源的固定 capture 解析與 lower 全部選�
 
 Shared `gui.session.ui.alias_dialog` 是 Measure 與 workflows 的同一編輯入口，兩者直接 import，不設 app-local wrapper。Apply 保持 dialog 開啟，Cancel 不撤回已 Apply 的表。Tab 不顯示角色列，也不在建立時固定環境。Cfg refresh 使用目前 point／library 和 alias 表；Run admission 才固定 ParameterContext、解析名稱與 storage capability。FIT、interactive、Post、Writeback 和 Save 使用結果的固定來源，不因後來選取而換目的地。Native Load 的來源與保存規則見 [[0063]]，cfg acceptance 見 [[0065]]。
 
-Device 的可觀察狀態在 `SessionState`，`DeviceService` 控制 driver 與 in-flight 工作；remembered device 的磁碟保存由 Persistence owner 從已提交狀態選擇性投影。State 是否供多方觀察與資料是否重啟後保存是兩個問題。Live SoC handle 可屬 session environment 而不落盤，worker、lease 和 driver 的控制權也不因有人需要觀察其狀態而交給 State。
+Device 的連線資訊與 cached DeviceInfo 在 `SessionState`，`DeviceService` 控制 driver 與 in-flight 工作；remembered device 的磁碟保存由 Persistence owner 從已提交狀態選擇性投影。State 是否供多方觀察與資料是否重啟後保存是兩個問題。Live SoC handle 可屬 session environment 而不落盤，worker、lease 和 driver 的控制權也不因有人需要觀察其狀態而交給 State。
 
 RunContext 提供 devices 與 cancel_signal 等執行能力，不提供儀器設定方法。Device 層只提供 current／voltage、frequency／power、output 或 value 等操作，不知道 flux／RF 角色。實驗層 helper 負責把角色用途與明示單位對應到 driver 操作；新增儀器接口不因此擴充 RunContext。這沿既有 C8 分層與 C9 無循環 contracts，experiment 使用 device，而非由 device 反向理解實驗。
 
@@ -44,7 +44,9 @@ Workflow 宿主提供同步 `get_device_cfg` 與完整 cfg 的 `setup_device`，
 
 State 的 cached DeviceInfo 仍供觀察與 cfg defaults 使用，不是 Run 的控制命令或保存 snapshot。GUI Run 框架在 hardware lease 後、adapter.run 前另讀一次全部已連線 device，任一讀取失敗拒絕 Run。這個 acquisition capture 不更新 GUI State。實驗不對未使用的 device 套用舊 setup patch，固定 snapshot 的保存見 [[0063]]。
 
-Run 結束後，host 另在背景讀取一次已連線儀器，由 State owner 更新 cached DeviceInfo。這只更新觀察值，不改寫 run 前固定 snapshot 或已保存 provenance，也不把 cache 變成下一次 Run 的控制命令。Device 活動事件由 device_operation 單一入口發出，host 只做非阻塞 owner-thread 投遞，Device dialog 負責標記與時序。Sink 注入、持鎖投遞與讀回的完整分工見 [[0076]]。
+Run 結束後，host 另在背景讀取一次已連線儀器，由 State owner 更新 cached DeviceInfo。這只更新觀察值，不改寫 run 前固定 snapshot 或已保存 provenance，也不把 cache 變成下一次 Run 的控制命令。
+
+Device 活動狀態由 driver 在 `device_operation` 中記錄，只有是否在操作中與最後結束的 monotonic 時間。GUI 主 thread 定時讀取 `DeviceManager.activity_snapshot()`，初始約每 200 ms。Device dialog 負責標記與時序，初始在操作中或結束後約 1 秒保持標記。不注入 sink，不投遞活動事件，也不提供事件歷史。活動快照、單名稱 registry 與讀回的完整分工見 [[0076]]。
 
 State 提交由單一 owner loop 序列化。Session 的 `OwnerScheduler` 可由 Qt queued signal 或 headless queue 實作；這個規則不等同於要求 core 依賴 Qt 主線程。操作的取消、handle 與 terminal settle 由 Operation owner 決定，本篇不複製生命週期規則。
 
