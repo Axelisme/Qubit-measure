@@ -359,3 +359,54 @@ def test_probe_guard_failure_uses_period_propagation_in_floquet_frame(
     free = reference(without, 0, case.states[0])
     assert np.max(abs(np.diag(expected[0] - free))) > 0.02
     assert_budget(actual, expected, 2e-8)
+
+
+@pytest.mark.parametrize("zero_first", [False, True])
+def test_unused_zero_port_preserves_acceptance_and_density(
+    kernel_case: KernelCase, zero_first: bool
+) -> None:
+    from zcu_tools.simulate.evolution.kernels.floquet import FloquetKernel
+
+    floquet = FloquetKernel()
+    case = kernel_case
+    model = case.source.model((0,))
+    drive = model.drives[0]
+    zero = replace(
+        drive,
+        name="unused",
+        in_phase_ghz=np.zeros_like(drive.in_phase_ghz),
+        quadrature_ghz=np.zeros_like(drive.quadrature_ghz),
+    )
+    drives = (zero, *model.drives) if zero_first else (*model.drives, zero)
+    source = ModelSource(
+        case.states[0], lambda level: replace(model, level=level, drives=drives)
+    )
+    table = replace(case.table, tone_port=case.table.tone_port + int(zero_first))
+    rows = np.arange(len(case.states), dtype=np.int64)
+    for budget in (case.budget, 1e-12):
+        expected = floquet.guard_prepared(case.table, rows, case.source, budget)
+        actual = floquet.guard_prepared(table, rows, source, budget)
+        np.testing.assert_array_equal(actual.accepted, expected.accepted)
+        if budget != case.budget:
+            assert not actual.accepted.all()
+            continue
+        assert actual.accepted.all()
+        keys, first, inverse = np.unique(
+            floquet.prepare_keys(table, rows),
+            return_index=True,
+            return_inverse=True,
+        )
+        prepared = floquet.prepare(keys, table, rows[first], source, budget)
+        baseline = case.states.copy()
+        result = case.states.copy()
+        handed_off = case.states.copy()
+        expected_payload = expected.preparations[0].prepared
+        actual_payload = actual.preparations[0].prepared
+        assert prepared.nbytes == actual_payload.nbytes > expected_payload.nbytes
+        before_bytes = prepared.nbytes
+        floquet.apply(expected_payload, inverse, case.table, rows, baseline, budget)
+        for payload, states in ((prepared, result), (actual_payload, handed_off)):
+            exceeded = floquet.apply(payload, inverse, table, rows, states, budget)
+            assert not exceeded.any()
+            np.testing.assert_allclose(states, baseline, rtol=0, atol=1e-13)
+        assert prepared.nbytes == before_bytes
