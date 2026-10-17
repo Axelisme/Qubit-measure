@@ -1,6 +1,6 @@
 # Device Note for `zcu_tools/device`
 
-**Last updated:** 2026-10-17，固定 FakeDevice V/A/native 座標
+**Last updated:** 2026-10-18，DeviceManager 單名稱登記契約
 
 這份筆記整理 `lib/zcu_tools/device` 的設計：以 VISA（pyvisa）為底層，抽出 `BaseDevice` + `BaseDeviceInfo` 的通用契約，再由 `DeviceManager` 管理 caller 明確建立的 registry。內建裝置包含 `YOKOGS200`（電流/電壓源）、`RohdeSchwarzSGS100A`（微波訊號源）與 `FakeDevice`（mock 測試）。
 
@@ -31,6 +31,12 @@ DeviceInfo = Union[
 ```
 
 ---
+
+## DeviceManager 單名稱登記
+
+同一個 driver 在一個 `DeviceManager` 中只接受一個名字。`register_device` 遇到已用其他名字登記的同一實例時拋出 `ValueError`，registry 保留原狀。同名登記仍發出 warning 並覆寫該名稱，可以登記原 driver 或另一個 driver。不同名稱可以各自登記不同 driver。
+
+Manager close 尚未完成時，`register_device` 拒絕登記該 driver，拋出 `DeviceCloseInProgressError`。即使原名稱已被 drop 或被另一個 driver 覆寫，也不能重新登記正在 close 的 driver。
 
 ## 實驗控制與 acquisition snapshot
 
@@ -122,15 +128,15 @@ predictor device-value flow 把非 numeric input 當作有效硬體值。
 
 | API | 用途 |
 | --- | ---- |
-| `register_device(name, device)` | 註冊 `BaseDevice` 實例；非 `BaseDevice` 入口 `TypeError`，重名會 warn 並覆蓋 |
+| `register_device(name, device)` | 登記 `BaseDevice` 實例；同一 driver 只接受一個名字，拒絕正在 close 的 driver，同名仍 warn 並覆寫 |
 | `drop_device(name, *, ignore_error=False)` | 移除 registry entry（不 close） |
 | `get_device(name)` | 取得；找不到 `ValueError` |
 | `get_all_devices()` | 回傳整個 dict |
 | `setup_devices(dev_cfg: Mapping[str, DeviceInfo], *, progress=True, cancel_signal=None)` | 批次對已註冊裝置呼叫 `setup(cfg)` |
 | `get_info(name)` | 取得單一 device 的 `get_info()` 結果；找不到 `ValueError` |
 | `get_all_info()` | 把每個 device 的 `get_info()` 收成 dict，方便存檔 |
-| `close_device(name, *, ignore_missing=False)` | close 單一 device 並在成功後移除其 stale aliases |
-| `close_all_devices()` | close 所有 registered devices（identity 去重），聚合 named failures |
+| `close_device(name, *, ignore_missing=False)` | close 單一 device，成功後移除仍指向該 driver 的登記 |
+| `close_all_devices()` | close 所有 registered devices，聚合 named failures |
 
 **registry-owned disconnect（`close_device` / `close_all_devices`）**：manager 以
 `id(device)` 為 key 維護 private in-flight close claims（claim 持有 strong reference，防止
@@ -139,16 +145,15 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 
 - 同一 identity 已被任何 manager close API claim 時，第二個呼叫者立即收到
   `DeviceCloseInProgressError`（fail-fast，不等待、不重複 close）。
-- close 成功後移除當下所有仍指向同一 identity 的 aliases（包含 close 進行中新增的同
-  identity alias）；同名不同 replacement（不同 identity）保留，close 後新註冊的不同 device
-  不屬正在進行的 batch。
-- ordinary failure 包裝為 `DeviceCloseFailure(names, cause)`（names 含 batch 中該 identity
-  的所有 aliases），release claim 且保留 entries 供重試；`BaseException` 不包裝、直接傳播，
-  但一樣 release claim。
-- `close_all_devices()` snapshot 後 identity 去重，嘗試 close 所有可 claim identities；
-  ordinary failures 與 in-progress identities 不阻斷其餘 entries，in-progress 以
-  `DeviceCloseInProgressError`（含該 identity 的所有 snapshot aliases）聚合，連同 named
-  failures 一起以 built-in `ExceptionGroup` 拋出；empty registry 是 no-op。
+- close 成功後移除仍指向該 driver 的原名稱登記。同名不同 replacement 保留。
+  Batch 開始後才登記的不同 device 不屬正在進行的 batch。
+- ordinary failure 包裝為 `DeviceCloseFailure(names, cause)`，names 是該筆登記名稱的
+  單元素 tuple。Manager release claim 並保留 entry 供重試。`BaseException` 不包裝，
+  直接傳播，但一樣 release claim。
+- `close_all_devices()` 依 registry snapshot 嘗試 close 所有可 claim drivers。
+  Ordinary failures 與 in-progress drivers 不阻斷其餘 entries，in-progress 以
+  `DeviceCloseInProgressError` 記錄該筆名稱。Manager 將這些錯誤與 named failures
+  一起以 built-in `ExceptionGroup` 拋出。Empty registry 是 no-op。
 - close 只 disconnect session，絕不執行 RF/current/voltage state mutation；也不會取代
   `drop_device()` 或 GUI disconnect 語義。`BaseDevice.close()` 仍按 driver 自己的 `_op_lock` /
   `_io_lock` 同步；registry claim 不取代 driver 鎖。
