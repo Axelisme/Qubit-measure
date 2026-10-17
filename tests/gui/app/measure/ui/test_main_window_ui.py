@@ -964,7 +964,10 @@ def test_main_window_load_data_dialog_shows_user_facing_error(
         window.remove_tab_widget("tab-1")
 
 
-def test_main_window_run_lock_keeps_new_tab_available(control_factory, qapp):
+def test_main_window_run_lock_keeps_new_tab_available(
+    control_factory, qapp, monkeypatch
+):
+    from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = _mock_ctrl(control_factory)
@@ -978,16 +981,25 @@ def test_main_window_run_lock_keeps_new_tab_available(control_factory, qapp):
     )
 
     window = MainWindow(ctrl, templates=lambda: {})
-    tab_one = MagicMock()
-    tab_two = MagicMock()
-    window._tab_widgets["tab-1"] = tab_one
-    window._tab_widgets["tab-2"] = tab_two
+    try:
+        window.add_tab_widget("tab-1", "fake")
+        window.add_tab_widget("tab-2", "fake")
+        tabs = {tab.tab_id: tab for tab in window.findChildren(ExpTabWidget)}
+        tab_one = tabs["tab-1"]
+        tab_two = tabs["tab-2"]
+        tab_one_update = MagicMock(wraps=tab_one.update_interaction_state)
+        tab_two_update = MagicMock(wraps=tab_two.update_interaction_state)
+        monkeypatch.setattr(tab_one, "update_interaction_state", tab_one_update)
+        monkeypatch.setattr(tab_two, "update_interaction_state", tab_two_update)
 
-    window.refresh_run_lock("tab-1")
+        window.refresh_run_lock("tab-1")
 
-    assert _new_tab_button(window).isEnabled() is True
-    tab_one.update_interaction_state.assert_called_once()
-    tab_two.update_interaction_state.assert_called_once()
+        assert _new_tab_button(window).isEnabled() is True
+        tab_one_update.assert_called_once()
+        tab_two_update.assert_called_once()
+    finally:
+        window.remove_tab_widget("tab-1")
+        window.remove_tab_widget("tab-2")
 
 
 def test_main_window_tabs_are_movable_and_close_uses_moved_widget(
