@@ -56,7 +56,7 @@ class TransmissionModel:
         edelay: float,
         bg_amp_slope: float = 0.0,
         bg_phase_curvature: float = 0.0,
-        **kwargs,
+        **_kwargs,
     ) -> NDArray[np.complex128]:
         dx = Ql * (freqs / freq - 1)
         center = a0 / 2
