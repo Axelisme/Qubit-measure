@@ -277,8 +277,10 @@ def test_A6_Analyze_full_width_below_params_before_writeback(
     assert tab.analyze_btn in widgets, (
         "Analyze should be directly in inner layout for 100% width"
     )
-    idx_analyze = widgets.index(tab.analyze_btn)
-    idx_writeback = widgets.index(tab.writeback_section)
+    idx_analyze, idx_writeback = (
+        widgets.index(tab.analyze_btn),
+        widgets.index(tab.writeback_section),
+    )
     assert idx_params < idx_analyze < idx_writeback
 
     # 100% width: sizePolicy Expanding horizontally
@@ -311,6 +313,7 @@ def test_A6_Analyze_full_width_below_params_before_writeback(
     # Availability: when idle with context & run result, enabled
     assert tab.analyze_btn.isEnabled() is True
     # Busy disables
+    assert snap.interaction is not None
     busy = dataclasses.replace(
         snap,
         interaction=dataclasses.replace(snap.interaction, is_analyzing=True),
