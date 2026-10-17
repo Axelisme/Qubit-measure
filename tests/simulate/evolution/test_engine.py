@@ -327,6 +327,30 @@ def test_dop853_adjacent_rows_are_one_chain():
     assert table.timeline[rows].tolist() == [0, 0]
 
 
+def test_gibbs_constant_pulse_at_zero_uses_dyson_for_every_driven_row():
+    model = synthetic_model(3)
+    model = replace(
+        model,
+        rates_per_ns=np.zeros((3, 3)),
+        dephasing_per_ns=np.zeros((3, 3)),
+    )
+    weights = np.exp(-model.energies_ghz / 0.2)
+    weights /= weights.sum()
+    src = ModelSource(
+        np.diag(weights).astype(complex), lambda level: replace(model, level=level)
+    )
+    n = 3
+    pulse = replace(
+        track(n, EnvelopeSpec("constant"), duration=8),
+        frequency_ghz=np.linspace(0.36, 0.44, n),
+        amplitude=np.full(n, 0.002),
+    )
+    b = replace(batch(n, duration=9), tracks=(pulse,))
+    result = run(Engine(1, 100000), src, (b,))
+    assert result.paths.segments_by_kernel == {"dyson": n, "t4": n}
+    assert result.paths.exceeded_by_kernel == {}
+
+
 def test_preceding_idle_flux_uses_arbitrary_input_dyson_bound():
     model = synthetic_model(3)
     x = np.zeros((3, 3), dtype=complex)

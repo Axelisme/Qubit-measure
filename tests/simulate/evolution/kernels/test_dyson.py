@@ -221,9 +221,57 @@ def test_guard_retains_first_order_population_from_coherence(
     assert np.max(abs(exact)) > 0.02
 
 
+@pytest.mark.parametrize("changed_basis", [False, True])
+def test_guard_distinguishes_diagonal_mixture_from_same_population_coherence(
+    kernel_case: KernelCase, changed_basis: bool
+) -> None:
+    case = kernel_case
+    model = case.source.model((0,))
+    size = len(model.energies_ghz)
+    model = replace(
+        model,
+        rates_per_ns=np.zeros((size, size)),
+        dephasing_per_ns=np.zeros((size, size)),
+        drives=(
+            replace(
+                model.drives[0],
+                in_phase_ghz=model.drives[0].in_phase_ghz * 0.02,
+                quadrature_ghz=model.drives[0].quadrature_ghz * 0.02,
+            ),
+        ),
+    )
+    basis = np.eye(size, dtype=complex)
+    basis[:2, :2] = np.array([[1, 1j], [1j, 1]]) / np.sqrt(2)
+    target = replace(model, level=(1,), eigenvectors=basis) if changed_basis else model
+    weights = np.arange(size, 0, -1, dtype=float)
+    weights /= weights.sum()
+    diagonal = np.diag(weights).astype(complex)
+    vector = np.sqrt(weights) * np.exp(1j * np.arange(size))
+    coherent = np.outer(vector, vector.conj())
+    table = replace(
+        case.table,
+        level=np.full((4, 1), int(changed_basis), dtype=np.int64),
+        start_ns=np.zeros(4),
+        duration_ns=np.full(4, 512.0),
+        tone_frequency_ghz=np.full((4, 1), 0.4),
+        tone_amplitude=np.full((4, 1), 0.02),
+    )
+    rows = np.arange(4, dtype=np.int64)
+    overlap = target.eigenvectors.conj().T @ model.eigenvectors
+    for initial, expected in ((diagonal, True), (coherent, False)):
+        # Source is stored in the DC basis; the promised input is in the row basis.
+        dc_initial = overlap.conj().T @ initial @ overlap
+        source = ModelSource(
+            dc_initial, lambda level: model if level == (0,) else target
+        )
+        np.testing.assert_array_equal(
+            case.kernel.guard(table, rows, source, case.budget), np.full(4, expected)
+        )
+
+
 @pytest.mark.parametrize("size", [3, 4])
 @pytest.mark.parametrize("dissipative", [False, True])
-def test_population_bound_is_conservative_for_ground_and_coherent_inputs(
+def test_population_bound_is_conservative_for_ground_mixed_and_coherent_inputs(
     size: int, dissipative: bool, record_property: Callable[[str, object], None]
 ) -> None:
     model = synthetic_model(size)
@@ -264,8 +312,13 @@ def test_population_bound_is_conservative_for_ground_and_coherent_inputs(
     outgoing = model.rates_per_ns.sum(axis=0)
     q = model.rates_per_ns - np.diag(outgoing)
     leaks, extra = 0, 0
-    for vector in (ground, coherent):
-        initial = np.outer(vector, vector.conj())
+    weights = np.arange(size, 0, -1, dtype=float)
+    weights /= weights.sum()
+    for initial in (
+        np.outer(ground, ground.conj()),
+        np.outer(coherent, coherent.conj()),
+        np.diag(weights).astype(complex),
+    ):
         source = ModelSource(initial, lambda level: replace(model, level=level))
         accepted = kernel.guard(table, rows, source, budget)
         keys, first, inverse = np.unique(
@@ -280,7 +333,7 @@ def test_population_bound_is_conservative_for_ground_and_coherent_inputs(
         transfer = np.max(abs(np.diagonal(actual, axis1=1, axis2=2) - free), axis=1)
         leaks += int(np.count_nonzero(accepted & (transfer > threshold)))
         extra += int(np.count_nonzero(~accepted & (transfer <= threshold)))
-    record_property("rows", 2 * n)
+    record_property("rows", 3 * n)
     record_property("leaks", leaks)
     record_property("extra_rejections", extra)
     assert leaks == 0
