@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-17, typed population rejection diagnostics
+**Last updated:** 2026-10-18, microwave IQ, causal line delay and mismatch
 
 ADC consumes explicitly ordered classical populations, not densities. The
 probability tolerance is `POPULATION_TOLERANCE = 1e-6`. This is 1000 times below
@@ -25,8 +25,26 @@ numeric residuals; it does not replace explicit preparation. State ordering must
 match the readout model and conditional responses. No basis inference occurs in
 ADC. Evolution retains its raw densities and reports trace drift separately.
 
+`ConditionalReadout.response` and `responses` return microwave I+iQ. They
+conjugate the demodulated physical field before receiver gain, phase, offset and
+noise. Receiver calibration does not conjugate or rotate the added noise's I/Q
+covariance. Constant and shaped pulses use the same convention.
+
+`Receiver.time_of_flight_ns` is one finite nonnegative total line delay, default
+zero. The solver evaluates the physical output at t−τ and restores the rotating
+frame's exp(+2πi*f_ref*τ) before demodulation at ADC time t. Conjugation then gives
+exp(−2πi*f_abs*τ) at the absolute carrier, without counting τ twice. Onset,
+ringup, ringdown and envelopes all arrive late; offset/noise do not. Pulse phase
+retains its documented rotating-coordinate convention.
+
+`ReadoutModel.mismatch_phase_rad` is a finite two-element array, default zeros.
+Each element multiplies only that resonator's scattered field by exp(−i*phi)
+before conjugation, giving the hanger model's +phi sign in microwave IQ. The
+reciprocal shared-line generator and transition rates are unchanged. This is a
+scattering-phase model, not a full impedance network or a global signal rotation.
+
 `ConditionalReadout` computes state-conditioned responses once per distinct
-content. Round samplers share an initial-state draw across channels and windows,
+content. Its lossless numeric cache key includes delay and both mismatch phases. Round samplers share an initial-state draw across channels and windows,
 then add independent receiver noise. The integrated sampler also accounts for
 nearest-even shot rounding variance. These are conditional moments, not random
 jump trajectories. QICK buffer layout and acquisition averaging belong to the

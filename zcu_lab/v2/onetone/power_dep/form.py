@@ -1,8 +1,9 @@
 """One-tone power map defaults; Run sweeps frequency and pulse gain."""
 
-from zcu_tools.cfg_model import Expr, Hidden, Range, Template
+from zcu_tools.cfg_model import Hidden, Range, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
+from zcu_lab.v2.onetone._shared import initial_ro_length
 from zcu_lab.v2.onetone.power_dep.core import PowerDepCfg
 
 
@@ -16,9 +17,7 @@ def make_form(ctx: FormContext) -> Form[PowerDepCfg]:
                 "reset": Hidden(),
                 "readout": Template(
                     "readout",
-                    set={
-                        "ro_length": Expr("$resonator.ext.default_probe_length - 0.1")
-                    },
+                    set={"ro_length": initial_ro_length()},
                 ),
             },
             "sweep": {

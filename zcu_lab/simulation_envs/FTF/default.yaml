@@ -79,17 +79,20 @@ readout:
       charge_coefficients_ghz: { f1: 0.03, coupler: 0.005, f2: 0.0 }
       kappa_external_mhz: 1.0 # kappa_external/(2*pi), MHz
       kappa_internal_mhz: 0.1
+      mismatch_phase_rad: 0.0 # Scattered field relative to direct transmission.
       thermal_occupation: 0.0 # Omit for Bose(common temperature, bare frequency).
     r2:
       frequency_ghz: 7.08
       charge_coefficients_ghz: { f1: 0.0, coupler: 0.005, f2: 0.03 }
       kappa_external_mhz: 1.0
       kappa_internal_mhz: 0.1
+      mismatch_phase_rad: 0.0
       thermal_occupation: 0.0
   adc:
     ro_ch: 0
     gain: 100.0 # ADC sample units / sqrt(photons/ns)
     phase_deg: 0.0
+    time_of_flight_ns: 0.0 # Total line delay, including electronic-delay phase.
     offset_adc: [0.0, 0.0] # I, Q
     # Two-sided white PSD in ADC^2*ns. Sample covariance = PSD / dt_ns.
     noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]]

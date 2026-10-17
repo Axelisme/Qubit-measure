@@ -1,8 +1,9 @@
 """Starting values and form deviations for onetone/flux_dep; Qt-free data only."""
 
-from zcu_tools.cfg_model import AliasName, Expr, Hidden, Range, Template
+from zcu_tools.cfg_model import AliasName, Hidden, Range, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
+from zcu_lab.v2.onetone._shared import initial_ro_length
 from zcu_lab.v2.onetone.flux_dep.core import FluxDepCfg
 
 
@@ -18,7 +19,7 @@ def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
                     "readout",
                     set={
                         "gain": 0.05,
-                        "ro_length": Expr("$resonator.ext.default_probe_length - 0.1"),
+                        "ro_length": initial_ro_length(),
                     },
                 ),
             },

@@ -220,3 +220,44 @@ def test_v2_requires_every_named_loop(section: str, path: str) -> None:
     del node["f2"]
     with pytest.raises(ValueError, match=(section + "." + path).replace(".", r"\.")):
         parse_ftf(document)
+
+
+def test_receiver_delay_and_independent_mismatch_defaults_and_roundtrip() -> None:
+    defaults = parse_ftf(ftf_document())
+    assert defaults.readout.adc.time_of_flight_ns == 0.0
+    assert defaults.readout.resonators.r1.mismatch_phase_rad == 0.0
+    assert defaults.readout.resonators.r2.mismatch_phase_rad == 0.0
+    document = ftf_document()
+    _set_field(document, "readout.adc.time_of_flight_ns", 400.0)
+    _set_field(document, "readout.resonators.r1.mismatch_phase_rad", 0.6)
+    _set_field(document, "readout.resonators.r2.mismatch_phase_rad", -0.4)
+    configured = parse_ftf(document)
+    restored = parse_ftf(configured.model_dump(mode="json"))
+    assert restored.readout.adc.time_of_flight_ns == 400.0
+    assert restored.readout.resonators.r1.mismatch_phase_rad == 0.6
+    assert restored.readout.resonators.r2.mismatch_phase_rad == -0.4
+
+
+@pytest.mark.parametrize("value", [None, -1.0, float("nan"), float("inf"), "400"])
+def test_receiver_delay_invalid_values_report_field_path(value: object) -> None:
+    # A valid nonzero value must parse before testing rejection diagnostics.
+    document = ftf_document()
+    _set_field(document, "readout.adc.time_of_flight_ns", 400.0)
+    assert parse_ftf(document).readout.adc.time_of_flight_ns == 400.0
+    _set_field(document, "readout.adc.time_of_flight_ns", value)
+    with pytest.raises(ValueError, match=r"readout\.adc\.time_of_flight_ns"):
+        parse_ftf(document)
+
+
+@pytest.mark.parametrize("resonator", ["r1", "r2"])
+@pytest.mark.parametrize("value", [None, float("nan"), float("inf"), "0.2"])
+def test_mismatch_invalid_values_report_resonator_field_path(
+    resonator: str, value: object
+) -> None:
+    document = ftf_document()
+    path = f"readout.resonators.{resonator}.mismatch_phase_rad"
+    _set_field(document, path, -0.4)
+    parse_ftf(document)
+    _set_field(document, path, value)
+    with pytest.raises(ValueError, match=path.replace(".", r"\.")):
+        parse_ftf(document)

@@ -198,11 +198,16 @@ class Receiver(Values):
     offset (default zero). noise_psd_adc2_ns: required symmetric PSD 2x2 spectral
     density ADC²*ns, two-sided white noise convention Cov(sample)=PSD/dt_ns.
     Zero/singular matrices are supported. This is not per-sample covariance.
+    time_of_flight_ns: finite nonnegative total readout-line delay in ns, default
+    zero. Delays the waveform and gives exp(-2πi*f*delay) at absolute frequency f;
+    there is no independent electronic-delay parameter. Calibration/noise follow
+    the demodulated field's conversion to microwave I+iQ by conjugation.
     """
 
     ro_ch: Index
     gain: Finite
     phase_deg: Finite = 0.0
+    time_of_flight_ns: Nonnegative = 0.0
     offset_adc: tuple[Finite, Finite] = (0.0, 0.0)
     noise_psd_adc2_ns: tuple[tuple[Finite, Finite], tuple[Finite, Finite]]
 
@@ -229,6 +234,9 @@ class Resonator(Values):
     nonnegative linewidth kappa/(2*pi) MHz, total positive. thermal_occupation:
     nonnegative residual nth; omitted uses Bose(common Temp,bare f), explicit 0
     disables. Both resonators share one reciprocal co-located two-port line.
+    mismatch_phase_rad: finite phase in radians, default zero (symmetric line).
+    Rotates this resonator's scattering relative to direct transmission, with
+    the hanger model's +phi sign in microwave IQ; linewidth/dynamics stay fixed.
     """
 
     frequency_ghz: Positive
@@ -236,6 +244,7 @@ class Resonator(Values):
     kappa_external_mhz: Nonnegative
     kappa_internal_mhz: Nonnegative
     thermal_occupation: Nonnegative | None = None
+    mismatch_phase_rad: Finite = 0.0
 
     @model_validator(mode="after")
     def linewidth(self) -> Self:

@@ -29,7 +29,7 @@ Script 建立 `result/ftf-demo/setup.yaml`、`aliases.yaml`、第一個 point `i
 
 `entry-template.yaml` 使用 `default.yaml` 的 EJ/EC/EL 與 resonator 頻率。Energies 用 GHz，R1/R2 頻率為 7190/7080 MHz。Qubit 頻率隨 bias 改變，範本保留 null，不推算頻譜。範本提供接線與引用，不提供 module library 或校準完成的量測參數。若修改工作副本的模型或接線，也要調整 entry 範本或已建立的 entry。
 
-初始 alias `qubit` 指向 Q1，`resonator` 與 `flux_dev` 分別讀取其 resonator 與 flux_source。把 `qubit` 改為 Q2 後，兩個連結會跟著切換。`control`、`target` 固定為 Q1、Q2，`coupler` 是普通 alias，指向 qubit/transmon 元件，不是 Notebook role。Inspect > Aliases > Load preset 可選 FTF，再按 Apply 保存。載入 preset 只替換 draft，不會建立元件或 device。
+初始 alias `qubit` 指向 Q1，`resonator` 與 `flux_dev` 分別讀取其 resonator 與 flux_source。把 `qubit` 改為 Q2 後，兩個連結會跟著切換。`qubit1`、`qubit2` 分別指向 Q1、Q2，`coupler` 是普通 alias，指向 qubit/transmon 元件，不是 Notebook role。Inspect > Aliases > Load preset 可選 FTF，再按 Apply 保存。載入 preset 只替換 draft，不會建立元件或 device。
 
 ## 工作副本與調參
 
