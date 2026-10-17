@@ -128,6 +128,7 @@ def test_resume_submission_stop_or_close_keeps_window_locked_until_delivery(
     assert token is not None
 
     def during_submit() -> None:
+        harness.background.on_submit = None
         if action == "close":
             close_results.append(window.close())
         else:
@@ -186,6 +187,7 @@ def test_resume_stop_rejection_unlocks_window_without_a_producer(
     harness.complete_segment()
 
     def during_submit() -> None:
+        harness.background.on_submit = None
         window.stop("reject-window")
 
     harness.background.on_submit = during_submit
@@ -207,6 +209,7 @@ def test_resume_stop_rejection_unlocks_window_without_a_producer(
     assert harness.progress.bars_for_owner("workflow") == ()
     assert not harness.gate.snapshot() and harness.handles.live_count() == 0
     assert not controller.has_pending_segment
+    harness.complete_segment()  # Deliver terminal device readback, not a producer.
     assert harness.background.work is None and attempts == ["step"]
     assert window.close()
 
@@ -218,6 +221,7 @@ def test_paused_window_stop_or_close_ends_run_without_another_worker(
     action: str,
 ) -> None:
     window, harness, entry = run_attachment
+    attempts: list[str] = []
 
     def init(_env: InitEnv[Context], _plan: Plan) -> None:
         return None
@@ -230,6 +234,7 @@ def test_paused_window_stop_or_close_ends_run_without_another_worker(
         state: None,
     ) -> Step[None, int]:
         del plan, tun, state
+        attempts.append("step")
         env.pbar("work", 2).refresh()
         window.pause("paused-stop")
         yield from env.wait_until(env.started_at)
@@ -264,7 +269,8 @@ def test_paused_window_stop_or_close_ends_run_without_another_worker(
     assert controller is not None
     status = controller.status()
     assert status is not None and status.lifecycle == "stopped"
-    assert harness.background.work is None
+    harness.complete_segment()  # Stop schedules device readback, not a new step.
+    assert harness.background.work is None and attempts == ["step"]
     assert not harness.gate.snapshot()
     assert harness.progress.bars_for_owner("workflow") == ()
 
@@ -306,6 +312,7 @@ def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
     journal.mkdir()
 
     def during_submit() -> None:
+        harness.background.on_submit = None
         try:
             window.apply_tunables(
                 "failed-read", {("sample", "value"): 45.0}, actor=Actor("agent", "rpc")
@@ -335,6 +342,7 @@ def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
     assert harness.handles.known_outcome(token) == OperationOutcome(
         "failed", failed.reason
     )
+    harness.complete_segment()  # Deliver readback after the rejected producer.
     assert harness.background.work is None and not harness.gate.snapshot()
     assert not harness.progress.bars_for_owner("workflow")
     assert window.close()
@@ -430,6 +438,7 @@ def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current
     assert isinstance(window.start("run-A"), int)
     window.stop("run-A")
     harness.complete_segment()
+    harness.complete_segment()  # Deliver run-A's device readback before replacement.
     token = window.start("run-B")
     assert isinstance(token, int)
     controller = window.controller

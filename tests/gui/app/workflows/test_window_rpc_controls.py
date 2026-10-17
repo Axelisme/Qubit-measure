@@ -196,6 +196,7 @@ def test_rpc_old_target_does_not_change_current_run(
     assert isinstance(window.start("old"), int)
     window.stop("old")
     harness.complete_segment()
+    harness.complete_segment()  # Deliver the old run's device readback.
     assert isinstance(window.start("current"), int)
     if phase == "paused":
         harness.complete_segment()
@@ -226,6 +227,7 @@ def test_rpc_old_target_does_not_change_current_run(
             isinstance(stopped["status"], dict)
             and stopped["status"]["lifecycle"] == "stopped"
         )
+        harness.complete_segment()  # Deliver readback without another workflow step.
         assert harness.background.work is None
         rejected = rpc("workflow.resume", {"run_id": "current"})
         error = rejected["error"]
