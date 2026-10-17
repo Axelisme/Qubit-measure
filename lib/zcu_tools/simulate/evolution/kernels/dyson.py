@@ -655,8 +655,9 @@ class DysonKernel:
     Guards use r<=min(0.1, 0.25*budget**(1/3)), r2<=0.05 and
     B2+budget/8<=min(0.02, (1.5*budget)**(2/3)). B2 bounds unpruned second-order
     driven-minus-free populations; budget/8 reserves omitted-path error.
-    Rows starting at zero use source populations in the row's model basis,
-    bounding all compatible coherence phases. Later rows use an arbitrary-input
+    Rows starting at zero use the full source density in the row's model basis:
+    populations, actual pair coherence magnitudes and off-diagonal trace norm.
+    Coherence phases are bounded, not evaluated. Later rows use an arbitrary-input
     density bound because preceding idle/flux segments may change the state.
     The r limit follows cubic off-resonant coherence-error scaling; the population
     limit follows the two-level estimate (2/3)*abs(delta_p)**(3/2). Coefficients
@@ -682,8 +683,9 @@ class DysonKernel:
     ) -> NDArray[np.bool_]:
         """Classify rows using r, r2 and B2+budget/8, without path evaluation.
 
-        B2 uses source populations in each model basis only at start_ns==0;
-        later rows use an arbitrary-input density bound. The budget/8 margin
+        At start_ns==0, B2 uses the source density in the row model basis,
+        including exact coherence magnitudes and off-diagonal trace norm.
+        Later rows use an arbitrary-input density bound. The budget/8 margin
         covers pruning. Threshold coefficients are synthetic-scan calibrations,
         not rigorous multilevel error guarantees. Returns a row-aligned mask;
         invalid budgets raise ValueError.
@@ -710,12 +712,11 @@ class DysonKernel:
                 if not np.array_equal(model.eigenvectors, dc_model.eigenvectors):
                     overlap = model.eigenvectors.conj().T @ dc_model.eigenvectors
                     initial = overlap @ initial @ overlap.conj().T
-                populations = np.maximum(np.diag(initial).real, 0.0)
                 bound = population_bound(
                     model,
                     int(port),
                     params,
-                    populations,
+                    initial,
                     table.start_ns[rows[selected]] == 0,
                 )
                 accepted[selected] = bound + budget / 8 <= min(
