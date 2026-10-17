@@ -534,8 +534,8 @@ def test_stop_unsubscribes_event_bus(qapp):
             control_service_module, "EventSubscriptions", return_value=bus_subs
         ) as factory:
             f = Fixture()
-        factory.assert_called_once_with()
         try:
+            factory.assert_called_once_with()
             controller_subs = [
                 fullcall
                 for fullcall in subscribe.call_args_list
