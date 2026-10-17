@@ -180,16 +180,24 @@ def tolerances(budget: float) -> Tolerances:
 
 @njit(nogil=True, cache=True)
 def _trial(rhs, context, state, time, step):
+    """Accumulate nonzero tableau weights in place, reusing one stage buffer."""
     stages = np.empty((12, state.size), dtype=np.complex128)
     stages[0] = rhs(time, state, context)
+    intermediate = np.empty_like(state)
     for stage in range(1, 12):
-        intermediate = state.copy()
+        intermediate[:] = state
         for previous in range(stage):
-            intermediate += step * _A[stage, previous] * stages[previous]
+            weight = step * _A[stage, previous]
+            if weight != 0:
+                for index in range(state.size):
+                    intermediate[index] += weight * stages[previous, index]
         stages[stage] = rhs(time + _C[stage] * step, intermediate, context)
     candidate = state.copy()
     for stage in range(12):
-        candidate += step * _B[stage] * stages[stage]
+        weight = step * _B[stage]
+        if weight != 0:
+            for index in range(state.size):
+                candidate[index] += weight * stages[stage, index]
     return candidate, stages
 
 
@@ -402,6 +410,39 @@ _D = np.array(
 
 
 @njit(nogil=True, cache=True)
+def _dense_step(rhs, context, state, trial, time, step):
+    """Build an accepted step polynomial with fused, nonzero weighted sums."""
+    candidate, stages = trial
+    extended = np.empty((16, state.size), dtype=np.complex128)
+    extended[:12] = stages
+    extended[12] = rhs(time + step, candidate, context)
+    for stage in range(13, 16):
+        intermediate = state.copy()
+        for previous in range(stage):
+            weight = step * _A_EXTRA[stage - 13, previous]
+            if weight != 0:
+                for index in range(state.size):
+                    intermediate[index] += weight * extended[previous, index]
+        extended[stage] = rhs(time + _C_EXTRA[stage - 13] * step, intermediate, context)
+    dense = np.empty((8, state.size), dtype=np.complex128)
+    dense[0] = state
+    delta = candidate - state
+    dense[1] = delta
+    dense[2] = step * extended[0] - delta
+    dense[3] = 2 * delta - step * (extended[12] + extended[0])
+    for degree in range(4):
+        dense[degree + 4] = 0.0
+        for stage in range(16):
+            weight = step * _D[degree, stage]
+            if weight != 0:
+                for index in range(state.size):
+                    dense[degree + 4, index] += weight * extended[stage, index]
+    if not np.isfinite(dense).all():
+        raise RuntimeError("DOP853 dense nonfinite polynomial")
+    return dense
+
+
+@njit(nogil=True, cache=True)
 def integrate_dense(
     rhs: Callable[[float, NDArray[np.complex128], Context], NDArray[np.complex128]],
     context: Context,
@@ -432,30 +473,7 @@ def integrate_dense(
         if not np.isfinite(error) or not np.isfinite(candidate).all():
             raise RuntimeError("DOP853 dense nonfinite solution or error estimate")
         if error <= 1:
-            extended = np.empty((16, state.size), dtype=np.complex128)
-            extended[:12] = stages
-            extended[12] = rhs(time + step, candidate, context)
-            for stage in range(13, 16):
-                intermediate = state.copy()
-                for previous in range(stage):
-                    intermediate += (
-                        step * _A_EXTRA[stage - 13, previous] * extended[previous]
-                    )
-                extended[stage] = rhs(
-                    time + _C_EXTRA[stage - 13] * step, intermediate, context
-                )
-            dense = np.empty((8, state.size), dtype=np.complex128)
-            dense[0] = state
-            delta = candidate - state
-            dense[1] = delta
-            dense[2] = step * extended[0] - delta
-            dense[3] = 2 * delta - step * (extended[12] + extended[0])
-            for degree in range(4):
-                dense[degree + 4] = 0.0
-                for stage in range(16):
-                    dense[degree + 4] += step * _D[degree, stage] * extended[stage]
-            if not np.isfinite(dense).all():
-                raise RuntimeError("DOP853 dense nonfinite polynomial")
+            dense = _dense_step(rhs, context, state, (candidate, stages), time, step)
             coefficients.append(dense)
             time += step
             times.append(time)

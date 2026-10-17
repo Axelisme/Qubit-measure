@@ -207,8 +207,9 @@ Preparation uses tolerance min(1e-10, budget*1e-4) and max_step=T/4. The
 single-threaded nogil DOP853 core builds both integration stages and the
 degree-seven dense extension. It retains U(T) and the native nested polynomial
 coefficients on accepted steps. There are no Python RHS callbacks, dense
-resampling or per-key polynomial-basis solves. Every retained array counts
-against the prepare cache; no solver object is kept.
+resampling or per-key polynomial-basis solves. Stage sums reuse a state buffer
+and skip zero tableau weights instead of allocating weighted-vector temporaries.
+Every retained array counts against the prepare cache; no solver object is kept.
 Polar projection restores unitarity of U(T) and dense fundamental solutions
 before phase translation and fractional-tail composition. It does not normalize
 density. Coherent-input trace drift in the calibration fell from 1.34e-10 to
