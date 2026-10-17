@@ -433,7 +433,9 @@ class TrackerMixin(TypedAcquireMixin):
 
             assert isinstance(ro_chs, dict)
             assert len(self.acc_buf) == len(ro_chs)
-            for d_rep, tracker, ro in zip(self.acc_buf, trackers, ro_chs.values()):
+            for d_rep, tracker, ro in zip(
+                self.acc_buf, trackers, ro_chs.values(), strict=False
+            ):
                 assert self.avg_level is not None
                 d_rep = np.moveaxis(d_rep, [-2, self.avg_level], [0, -2])
 
