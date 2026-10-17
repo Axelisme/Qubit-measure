@@ -42,6 +42,12 @@ class SegmentTable:
     flux_waveform_available: optional bool (timelines,) mask. False marks
         placeholder timelines without continuous samples. None means all
         waveform timelines have samples (or no waveform is supplied).
+    flux_tail_group: optional immutable tuple (rows,) of nonnegative group IDs
+        or None per row. Equal IDs certify identical nonempty no-drive prefixes
+        in this evolve/source, including timing, levels and flux samples. Each
+        group contains at least two rows with identical actual input density.
+        None (the field or a row entry) means no shared prefix is certified.
+        Only the planner assigns groups; kernels must not infer them from level.
     Arrays own read-only copies. Invalid shapes/counts/indices raise ValueError.
     Adjacent rows of one timeline may be merged by DOP853 kernels into a
     multi-interval work item: stop at boundaries and retain the accepted step.
@@ -65,6 +71,7 @@ class SegmentTable:
     envelopes: tuple[EnvelopeSpec, ...]
     flux_waveform: FluxWaveform | None = None
     flux_waveform_available: NDArray[np.bool_] | None = None
+    flux_tail_group: tuple[int | None, ...] | None = None
 
     def __post_init__(self) -> None:
         timeline = integers(self.timeline, "segment timelines")
@@ -95,6 +102,13 @@ class SegmentTable:
             )
             shape(mask, (len(self.flux_waveform.offsets) - 1,), "waveform availability")
             object.__setattr__(self, "flux_waveform_available", mask)
+        if self.flux_tail_group is not None:
+            groups = tuple(self.flux_tail_group)
+            if len(groups) != rows or any(g is not None and g < 0 for g in groups):
+                raise ValueError(
+                    "flux tail groups must align with rows and be nonnegative"
+                )
+            object.__setattr__(self, "flux_tail_group", groups)
         self._validate_tones(rows)
 
     def _validate_tones(self, rows: int) -> None:
@@ -226,14 +240,16 @@ class Kernel(Protocol):
         source_initial: NDArray[np.complex128],
         budget: float,
     ) -> Prepared | None:
-        """Optionally contract source input into an evolve-local read-only payload.
+        """Optionally contract a common input into an evolve-local read-only payload.
 
         Called in A-stage only for shared prepared batches (repeated keys).
-        key_index selects one entry in prepared. rows are all start_ns == 0
-        rows sharing that prepare key and first tone port, in arbitrary order.
-        source_initial is complex128 (M,M), the source's initial density in
-        these rows' model basis, not a worker's evolving density. No input may
-        be modified. budget is the positive absolute per-segment allowance.
+        key_index selects one entry in prepared. rows share that prepare key,
+        first tone port and input density, in arbitrary order. They either all
+        start at zero or belong to one certified flux_tail_group.
+        source_initial is complex128 (M,M) in these rows' model basis: either
+        the source initial density or the engine-computed no-drive prefix output,
+        never a worker's evolving density. No input may be modified. budget is
+        the positive absolute per-segment allowance.
 
         None declines sharing and keeps the ordinary per-batch apply path.
         A returned payload replaces prepared in apply for these rows, with

@@ -27,6 +27,9 @@ class Fallback(T4):
 
     name = "rwa"
 
+    def __init__(self, name="rwa"):
+        self.name = name
+
     def guard(self, table, rows, source, budget):
         return np.ones(len(rows), dtype=bool)
 
@@ -87,7 +90,7 @@ def batch(starts=(7.0, 7.0), *, gain=0.002, frequency=0.4, duration=40.0):
 
 def evolve(src, b):
     with closing(
-        Engine(1, 100000, kernels=(T4(), DysonKernel(), Fallback()))
+        Engine(1, 100000, kernels=(T4(), DysonKernel(), Fallback(), Fallback("t6")))
     ) as engine:
         return engine.evolve(src, (b,), cancel=Event())
 
@@ -103,7 +106,8 @@ def test_only_repeated_no_drive_prefixes_bypass_population_bound():
     assert unequal.paths.segments_by_kernel == {"t4": 4, "rwa": 2}
     earlier = replace(b.tracks[0], start_ns=np.zeros(2), duration_ns=np.ones(2))
     driven = evolve(src, replace(b, tracks=(earlier, *b.tracks)))
-    assert driven.paths.segments_by_kernel.get("dyson", 0) == 0
+    # The two start-zero prefix pulses retain Dyson; the later probes use T6.
+    assert driven.paths.segments_by_kernel == {"dyson": 2, "t4": 4, "t6": 2}
     zero = replace(
         b,
         tracks=(replace(b.tracks[0], start_ns=np.zeros(2)),),
@@ -114,7 +118,7 @@ def test_only_repeated_no_drive_prefixes_bypass_population_bound():
     assert evolve(src, zero).paths.segments_by_kernel == {"dyson": 2}
     strong = evolve(src, batch(gain=0.1))
     assert strong.paths.segments_by_kernel.get("dyson", 0) == 0
-    two_photon = evolve(source((0.0, 0.3, 0.8)), batch(gain=0.002, duration=20000))
+    two_photon = evolve(source((0.0, 0.3, 0.8)), batch(gain=0.002, duration=30000))
     assert two_photon.paths.segments_by_kernel.get("dyson", 0) == 0
 
     # Continuous parameters remain part of identity even when their lattice
@@ -172,7 +176,7 @@ def test_distinct_repeated_tails_use_their_own_actual_input_with_pruning_budget(
     # contracted table. The same engine must not reuse another source's input.
     other = ModelSource(np.diag([0.0, 1.0, 0.0]).astype(complex), src.model)
     with closing(
-        Engine(1, 100000, kernels=(T4(), DysonKernel(), Fallback()))
+        Engine(1, 100000, kernels=(T4(), DysonKernel(), Fallback(), Fallback("t6")))
     ) as engine:
         engine.evolve(src, (b,), cancel=Event())
         changed = engine.evolve(other, (b,), cancel=Event())

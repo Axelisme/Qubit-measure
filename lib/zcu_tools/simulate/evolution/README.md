@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, known-source coherence in Dyson classification and paired shared-path pruning
+**Last updated:** 2026-10-17, actual-input sharing for repeated no-drive flux prefixes
 
 ## Segment engine contracts
 
@@ -53,10 +53,10 @@ for checked replay.
 
 The internal `kernel` module defines `SegmentTable`, `Kernel` and the opaque
 `Prepared.nbytes` contract. Only apply and `bind_input` receive density arrays.
-The hook receives only the source initial density, never worker densities.
-For shared prepared batches, the engine calls the hook once per prepare key
-and port with all rows starting at zero, before timeline chunks start. The
-engine converts the source density into the row model basis. A returned opaque
+The hook receives the source initial density or an engine-computed no-drive
+prefix output, never worker densities. For shared prepared batches, the engine
+calls the hook once per prepare key, port and identical input group before
+timeline chunks start. The engine converts that input into the row model basis. A returned opaque
 payload replaces the prepared argument to apply, with key indices all zero.
 None keeps the ordinary apply path. Input-bound payloads are read-only and
 belong to one evolve call. They never enter PrepareCache or kernel state.
@@ -69,8 +69,10 @@ an independent strict DOP853 reference. It checks guard row locality across
 single-row, unequal and reversed-order split calls, apply row splitting for
 both densities and bool exceedance masks, mask shape and dtype, and preparation
 without density access. The suite also checks that input binding leaves its
-inputs unchanged and that bound and ordinary apply agree within budget across
-repeated, reversed, non-contiguous and empty subsets. The demo kernel stays in
+inputs unchanged for both source and pre-evolved prefix inputs. Bound and
+ordinary apply agree within budget across repeated, reversed, non-contiguous
+and empty subsets. Prefix-bound Dyson results agree within the budget/8
+shared pruning allowance. The demo kernel stays in
 tests.
 
 ## Dispatch
@@ -86,6 +88,7 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | Varying flux with drive | `flux_dop853` integrates continuous flux with the exact Hamiltonian expansion; baths switch at quantized grid boundaries. |
 | Fixed flux, no drive | T4 uses analytic secular propagation. |
 | One constant tone, known input density, r, r₂ and B2 guards pass | T7 second-order Dyson, batched over frequency, gain, duration and phase. |
+| One constant tone after an identical shared no-drive prefix, r and r₂ pass | Dyson with the actual prefix output. B2 does not apply; post-apply population changes only report. |
 | Same constant-tone branch, Dyson fails but r <= 0.2 | Reduced RWA if its omitted-sideband error bound fits the segment budget; otherwise T6. |
 | One constant tone with unknown input density, or outside the weak-drive branch | T6 periodic propagation. |
 | One shaped tone, prepare-key usage >= 10 | Gate cache with four Strang subsegments, closed-system U plus secular dissipation, and 16 carrier-phase Fourier samples. |
@@ -96,17 +99,24 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 
 Dyson's B2 guard uses the full source density in the segment model basis for rows
 starting at zero. It takes actual pair coherence magnitudes and the off-diagonal
-trace norm, so diagonal mixed inputs contribute no coherence terms. After any
-preceding segment, including a no-drive flux segment, it uses an arbitrary-input
-density bound. The planner's known-input eligibility
-does not imply that the source density still describes the segment input.
+trace norm, so diagonal mixed inputs contribute no coherence terms. Other later rows use an arbitrary-input density bound, except certified flux-tail
+rows. A flux-tail group requires a nonempty prefix with no tones and at least two
+identical prefix sequences in the same source/evolve. Identity includes every
+segment's start, duration and level, the target basis and continuous flux samples.
+Different tail lengths never share an input just because their final levels match.
+The planner compares continuous sample records in full, conservatively separating
+prefixes even if only their future samples differ. Prefixes with earlier drives
+or no identical partner retain ordinary dispatch. Source and initial density are
+common to one evolve and no prefix identity persists across calls.
 
 The model supplies the secular form. Missing secular data fails at entry rather
 than selecting another evolution backend.
 
 ### Accuracy and truncation
 
-Dyson requires all three guards:
+Ordinary Dyson rows require all three guards. Certified flux-tail rows require
+only r and r₂, because the long-pulse coherence term in B2 can reject even a
+small actual population change:
 
 - r <= min(0.1, 0.25 * budget^(1/3)).
 - B2 + budget/8 <= min(0.02, (1.5 * budget)^(2/3)).
@@ -163,10 +173,12 @@ input density; apply does. The engine deduplicates prepare keys across the
 acquire. Keys used at least twice are prepared in shared A-stage chunks before
 timeline work starts. Single-use preparations stay inside their timeline chunk
 and are discarded afterward. The input-bound hook is an A-stage exception to
-model-only preparation. It contracts the source initial density once per shared
-key and port, and its payload lives only until this evolve finishes. Single-use
-keys, rows starting after zero and kernels returning None keep the per-batch
-path. Dyson uses the maximum absolute gain and maximum duration of all shared
+model-only preparation. It contracts the source initial density or a shared
+flux-tail prefix output once per shared key, port and input group. A-stage evolves
+one representative of each needed prefix with the ordinary T4 payloads and basis
+changes. The contracted payload lives only until this evolve finishes. Single-use
+keys, later rows without a certified shared prefix and kernels returning None
+keep the per-batch path. Dyson uses the maximum absolute gain and maximum duration of all shared
 rows to build its path superset. The shared table drops conjugate path pairs
 by increasing summed entrywise bound, up to budget/8, matching B2's reserved
 margin. Workers reuse retained paths and factors in original order without
