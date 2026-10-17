@@ -22,27 +22,37 @@ from ._weak import (
 
 
 @njit(nogil=True, cache=True)
-def _first(x: complex, y: complex) -> complex:
+def _first(x: complex, y: complex, exp_x: complex, exp_y: complex) -> complex:
     # exp[x,y], ordered so expm1 never overflows from a positive real gap.
     if y.real > x.real:
         x, y = y, x
+        exp_x, exp_y = exp_y, exp_x
     delta = y - x
     if abs(delta) < 1e-5:
-        return np.exp(x) * (
-            1 + delta / 2 + delta**2 / 6 + delta**3 / 24 + delta**4 / 120
-        )
-    return np.exp(x) * np.expm1(delta) / delta
+        return exp_x * (1 + delta / 2 + delta**2 / 6 + delta**3 / 24 + delta**4 / 120)
+    if abs(delta) > 0.5:
+        return (exp_y - exp_x) / delta
+    return exp_x * np.expm1(delta) / delta
 
 
 @njit(nogil=True, cache=True)
-def _second(x: complex, y: complex, z: complex) -> complex:
+def _second(
+    x: complex,
+    y: complex,
+    z: complex,
+    exp_x: complex,
+    exp_y: complex,
+    exp_z: complex,
+) -> complex:
     # Put the farthest pair at the endpoints to avoid a small denominator.
     if abs(x - y) > max(abs(x - z), abs(y - z)):
         y, z = z, y
+        exp_y, exp_z = exp_z, exp_y
     elif abs(y - z) > abs(x - z):
         x, y = y, x
+        exp_x, exp_y = exp_y, exp_x
     if abs(x - z) >= 0.5:
-        return (_first(x, y) - _first(y, z)) / (x - z)
+        return (_first(x, y, exp_x, exp_y) - _first(y, z, exp_y, exp_z)) / (x - z)
     # Confluent divided difference: exp(mean)*sum h_k(delta)/(k+2)!.
     # This includes repeated eigenvalues, zero duration and exact resonance.
     mean = (x + y + z) / 3
@@ -112,6 +122,53 @@ def _build_paths(
 
 
 @njit(nogil=True, cache=True)
+def _group_first_factors(
+    indices: NDArray[np.int64],
+) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
+    """Index unique (a,b,r) factors, including both edges of second-order paths."""
+    lookup = {}
+    pairs = []
+    path_pairs = np.full((len(indices), 2), -1, dtype=np.int64)
+    for path in range(len(indices)):
+        a, b, c, r, s = indices[path]
+        key = (a, b, r)
+        if key not in lookup:
+            lookup[key] = len(pairs)
+            pairs.append(key)
+        path_pairs[path, 0] = lookup[key]
+        if c != -1:
+            key = (b, c, s)
+            if key not in lookup:
+                lookup[key] = len(pairs)
+                pairs.append(key)
+            path_pairs[path, 1] = lookup[key]
+    return np.array(pairs, dtype=np.int64).reshape((-1, 3)), path_pairs
+
+
+@njit(nogil=True, cache=True)
+def _evaluate_first_factors(
+    scaled: NDArray[np.complex128],
+    exponentials: NDArray[np.complex128],
+    carriers: NDArray[np.complex128],
+    omega_time: float,
+    pairs: NDArray[np.int64],
+) -> NDArray[np.complex128]:
+    """Return exp[scaled[a], scaled[b]+i*r*omega_time] once per unique pair."""
+    factors = np.empty(len(pairs), dtype=np.complex128)
+    for pair in range(len(pairs)):
+        a = int(pairs[pair, 0])
+        b = int(pairs[pair, 1])
+        r = int(pairs[pair, 2])
+        factors[pair] = _first(
+            scaled[a],
+            scaled[b] + 1j * r * omega_time,
+            exponentials[a],
+            exponentials[b] * carriers[r + 2],
+        )
+    return factors
+
+
+@njit(nogil=True, cache=True)
 def _evaluate_paths(
     params: NDArray[np.float64],
     eigenvalues: NDArray[np.complex128],
@@ -124,6 +181,7 @@ def _evaluate_paths(
     dimension = len(modes)
     allowance = pruning[-1] / (8 * (2 * dimension**2 + 4 * dimension**3))
     result = np.empty((len(params), dimension), dtype=np.complex128)
+    pairs, path_pairs = _group_first_factors(indices)
     # With equal |gain| and duration, the table already applied each row's exact
     # bound. Mixed batches still recheck it below, preserving row splitting.
     uniform_bound = np.all(np.abs(params[:, 1]) == abs(params[0, 1])) and np.all(
@@ -132,10 +190,15 @@ def _evaluate_paths(
     for job in range(len(params)):
         frequency, gain, duration, phase = params[job]
         scaled = eigenvalues * duration
-        result[job] = np.exp(scaled) * modes
+        exponentials = np.exp(scaled)
+        result[job] = exponentials * modes
         if gain == 0 or duration == 0:
             continue
         omega_time = 2 * np.pi * frequency * duration
+        carriers = np.exp(1j * np.arange(-2, 3) * omega_time)
+        divided_firsts = _evaluate_first_factors(
+            scaled, exponentials, carriers, omega_time, pairs
+        )
         growth = np.exp(max(0.0, np.max(eigenvalues.real)) * duration)
         first_factors = gain * np.exp(1j * np.array([-1, 1]) * phase)
         second_factors = gain**2 * np.exp(1j * np.array([-2, 0, 2]) * phase)
@@ -153,7 +216,7 @@ def _evaluate_paths(
                         first_factors[(r + 1) // 2]
                         * coefficient
                         * duration
-                        * _first(scaled[a], scaled[b] + 1j * r * omega_time)
+                        * divided_firsts[path_pairs[path, 0]]
                     )
             else:
                 if (
@@ -166,15 +229,28 @@ def _evaluate_paths(
                     * pruning[a]
                     > allowance
                 ):
+                    endpoint_gap = scaled[a] - scaled[c] - 1j * (r + s) * omega_time
+                    if abs(endpoint_gap) >= 0.5:
+                        second = (
+                            divided_firsts[path_pairs[path, 0]]
+                            - carriers[r + 2] * divided_firsts[path_pairs[path, 1]]
+                        ) / endpoint_gap
+                    else:
+                        # Reorder close endpoints; confluent triples keep the
+                        # stable series rather than subtracting nearly equal F.
+                        second = _second(
+                            scaled[a],
+                            scaled[b] + 1j * r * omega_time,
+                            scaled[c] + 1j * (r + s) * omega_time,
+                            exponentials[a],
+                            exponentials[b] * carriers[r + 2],
+                            exponentials[c] * carriers[r + s + 2],
+                        )
                     result[job, a] += (
                         second_factors[(r + s + 2) // 2]
                         * coefficient
                         * duration**2
-                        * _second(
-                            scaled[a],
-                            scaled[b] + 1j * r * omega_time,
-                            scaled[c] + 1j * (r + s) * omega_time,
-                        )
+                        * second
                     )
     return result
 
@@ -322,6 +398,20 @@ def _advance(
     return (evolved @ entry.vectors.T).reshape(states.shape)
 
 
+def _free_populations(
+    entry: _Entry,
+    durations: NDArray[np.float64],
+    states: NDArray[np.complex128],
+) -> NDArray[np.complex128]:
+    """Propagate only the secular population block, without coherence modes."""
+    size = states.shape[-1]
+    populations = np.arange(size) * (size + 1)
+    block = np.ix_(populations, populations)
+    modes = np.diagonal(states, axis1=1, axis2=2) @ entry.inverse[block].T
+    free = np.exp(durations[:, None] * entry.values[populations]) * modes
+    return free @ entry.vectors[block].T
+
+
 class DysonKernel:
     """C5 weak one-tone constant kernel; engine owns known-state eligibility.
 
@@ -430,16 +520,30 @@ class DysonKernel:
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
         budget: float,
-    ) -> None:
-        """Advance states in place; rows/key_index may be non-contiguous or reversed."""
+    ) -> NDArray[np.bool_]:
+        """Advance states in place; return a bool exceedance mask aligned with rows.
+
+        Rows/key_index may be non-contiguous or reversed. Check the maximum
+        absolute output population minus free-evolved input population against
+        min(0.02, (1.5*budget)**(2/3)). Free evolution uses only the secular
+        population block. Exceedance is not failure: retain the uncorrected
+        output without retry. Numerical failure raises RuntimeError.
+        """
         if not np.isfinite(budget) or budget <= 0:
             raise ValueError("Dyson requires positive budget")
         if not isinstance(prepared, _Prepared):
             raise ValueError("Dyson requires its own prepared payload")
+        exceeded = np.zeros(len(rows), dtype=np.bool_)
+        threshold = min(0.02, (1.5 * budget) ** (2 / 3))
         for key in np.unique(key_index):
             positions = np.flatnonzero(key_index == key)
             for port in np.unique(table.tone_port[rows[positions], 0]):
                 selected = positions[table.tone_port[rows[positions], 0] == port]
+                free = _free_populations(
+                    prepared.entries[key],
+                    table.duration_ns[rows[selected]],
+                    states[selected],
+                )
                 result = _advance(
                     prepared.entries[key],
                     int(port),
@@ -451,4 +555,7 @@ class DysonKernel:
                     raise RuntimeError(
                         f"Dyson nonfinite density in segment rows {rows[selected]}"
                     )
+                transfer = np.diagonal(result, axis1=1, axis2=2) - free
+                exceeded[selected] = np.max(abs(transfer), axis=1) > threshold
                 states[selected] = result
+        return exceeded

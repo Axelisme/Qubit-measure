@@ -717,11 +717,13 @@ class FloquetKernel:
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
         budget: float,
-    ) -> None:
+    ) -> NDArray[np.bool_]:
         """Advance arbitrary densities, retaining start and end micromotion.
 
         Rows must already pass guard. Wrong payload raises ValueError; nonfinite
         density or an out-of-budget row raises RuntimeError with its segment.
+
+        Return an all-False bool mask aligned with rows; no post-apply check.
         """
         if not isinstance(prepared, _Prepared):
             raise ValueError("Floquet requires its own prepared payload")
@@ -740,3 +742,4 @@ class FloquetKernel:
                     f"Floquet nonfinite density at segments {rows[positions]}"
                 )
             states[positions] = chunk
+        return np.zeros(len(rows), dtype=np.bool_)

@@ -1,5 +1,6 @@
 """Engine behavior through public batches and injected C5 collaborators."""
 
+import warnings
 from dataclasses import dataclass, replace
 from threading import Event
 
@@ -97,6 +98,7 @@ class RecordingKernel:
         self.calls.append((table, rows.copy(), states.copy()))
         if self.cancel is not None:
             self.cancel.set()
+        return np.zeros(len(rows), dtype=np.bool_)
 
 
 def run(engine: Engine, src: ModelSource, batches: tuple[TimelineBatch, ...]):
@@ -294,6 +296,7 @@ def test_cancel_between_chunks_and_nonfinite_failure():
     class Broken(RecordingKernel):
         def apply(self, prepared, key_index, table, rows, states, budget):
             states[:] = np.nan
+            return np.zeros(len(rows), dtype=np.bool_)
 
     engine = Engine(1, 0, kernels=(Broken("t4"),))
     try:
@@ -359,3 +362,41 @@ def test_preceding_idle_flux_uses_arbitrary_input_dyson_bound():
     )
     direct_result = run(Engine(1, 100000), src, (direct,))
     assert direct_result.paths.segments_by_kernel == {"dyson": 1}
+
+
+@pytest.mark.parametrize("chunks", [1, 4])
+def test_exceeded_counts_warn_once_per_evolve_and_keep_results(chunks: int) -> None:
+    class ReportingKernel(RecordingKernel):
+        report = True
+
+        def apply(self, prepared, key_index, table, rows, states, budget):
+            super().apply(prepared, key_index, table, rows, states, budget)
+            return (table.timeline[rows] % 2 == 0) & self.report
+
+    kernels = (ReportingKernel("dyson"), ReportingKernel("t4"))
+    engine = Engine(1, 1000, kernels=kernels, chunks_per_worker=chunks)
+    src = source()
+    b = replace(batch(6, duration=6), tracks=(track(6, EnvelopeSpec("constant")),))
+    try:
+        for _ in range(2):
+            with pytest.warns(RuntimeWarning) as caught:
+                result = engine.evolve(src, (b,), cancel=Event())
+            assert len(caught) == 1
+            message = str(caught[0].message)
+            assert "6 segments" in message
+            assert "dyson: 3" in message
+            assert "t4: 3" in message
+            assert "results use the uncorrected approximation" in message
+            assert result.paths.exceeded_by_kernel == {"dyson": 3, "t4": 3}
+            np.testing.assert_array_equal(
+                result.densities, np.repeat(src.initial_density[None], 6, axis=0)
+            )
+        for kernel in kernels:
+            kernel.report = False
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = engine.evolve(src, (b,), cancel=Event())
+        assert not caught
+        assert result.paths.exceeded_by_kernel == {}
+    finally:
+        engine.close()

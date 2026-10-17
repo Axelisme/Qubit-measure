@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17
+**Last updated:** 2026-10-17, post-apply accuracy reports
 
 ## Segment engine contracts
 
@@ -34,7 +34,13 @@ The zero-level identity must describe the entire source, including all model
 parameters and absolute DC flux. Row keys also include quantized flux levels.
 
 Chunk-local waves call apply once per group of next rows sharing a kernel and
-prepared batch. Consecutive DOP853 rows form chains only within the same kernel
+prepared batch. Apply advances densities in place and returns a bool accuracy
+exceedance mask aligned with its rows. Kernels without a post-apply check return
+all False. An exceedance is not a numerical failure: the engine keeps the
+uncorrected approximation without retry. `PathDiagnostics.exceeded_by_kernel`
+counts exceeded segments by kernel and omits kernels with no exceedances.
+Each `evolve` call with exceedances emits one `RuntimeWarning`, with the total
+segment count and each kernel's count. Consecutive DOP853 rows form chains only within the same kernel
 and prepared batch, never across `dop853` and `flux_dop853`. Their kernels own
 basis changes inside a chain; the engine changes basis between apply calls
 and returns the final state to the DC eigenbasis. Cancellation is checked at
@@ -51,8 +57,9 @@ contract suite lives in `tests/simulate/evolution/contract/kernel_suite.py`.
 Kernel tests inherit `KernelContract` and provide a `kernel_case` fixture with
 accepted rows, a synthetic model and input densities. The suite compares against
 an independent strict DOP853 reference. It checks guard row locality across
-single-row, unequal and reversed-order split calls, apply row splitting, and
-preparation without density access. The demo kernel stays in tests.
+single-row, unequal and reversed-order split calls, apply row splitting for
+both densities and bool exceedance masks, mask shape and dtype, and preparation
+without density access. The demo kernel stays in tests.
 
 ## Dispatch
 
@@ -98,6 +105,13 @@ all compatible coherence phases for rows starting at zero. Later rows use the
 arbitrary-input version, with population difference at most 1, pair coherence at
 most 1/2 and off-diagonal trace norm at most 2. The budget/8 margin reserves the
 omitted-path allowance.
+
+After apply, Dyson also measures |Δp| from the output populations minus the
+same input's free-evolved populations. Free evolution uses only the secular
+population block, without transforming coherence modes. The threshold remains
+min(0.02, (1.5 * budget)^(2/3)). This check only reports exceedances through
+`PathDiagnostics.exceeded_by_kernel` and the per-evolve warning. It does not
+reject, recompute or correct the output, and does not guarantee accuracy.
 
 The r limit follows cubic off-resonant coherence-error scaling. The population
 limit follows the two-level resonant estimate (2/3)|Δp|^(3/2). Synthetic-model

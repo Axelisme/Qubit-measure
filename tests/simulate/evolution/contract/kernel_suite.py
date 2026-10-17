@@ -259,16 +259,29 @@ class KernelContract:
             keys, case.table, rows[first], case.source, case.budget
         )
         whole = case.states.copy()
-        case.kernel.apply(prepared, inverse, case.table, rows, whole, case.budget)
+        whole_mask = case.kernel.apply(
+            prepared, inverse, case.table, rows, whole, case.budget
+        )
+        assert isinstance(whole_mask, np.ndarray), "apply must return an exceeded mask"
+        assert whole_mask.shape == (len(rows),)
+        assert whole_mask.dtype == np.bool_
+        if case.kernel.name != "dyson":
+            assert not whole_mask.any()
         split = case.states.copy()
+        split_mask = np.empty(len(rows), dtype=np.bool_)
         # Non-contiguous, reversed subsets detect accidental row-position indexing.
         for subset in (rows[::2][::-1], rows[1::2][::-1]):
             chunk = split[subset].copy()
-            case.kernel.apply(
+            mask = case.kernel.apply(
                 prepared, inverse[subset], case.table, subset, chunk, case.budget
             )
+            assert isinstance(mask, np.ndarray), "apply must return an exceeded mask"
+            assert mask.shape == (len(subset),)
+            assert mask.dtype == np.bool_
+            split_mask[subset] = mask
             split[subset] = chunk
         np.testing.assert_allclose(split, whole, rtol=0, atol=1e-12)
+        np.testing.assert_array_equal(split_mask, whole_mask)
 
     def test_prepare_is_density_independent(self, kernel_case: KernelCase) -> None:
         case = kernel_case

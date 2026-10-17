@@ -1,8 +1,8 @@
 """Shared opaque-payload LRU and independent chunk-local apply waves."""
 
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from threading import Event
 
 import numpy as np
@@ -11,7 +11,7 @@ from numpy.typing import NDArray
 
 from ._dispatch import Dispatch
 from ._planning import Geometry
-from .engine import Cancelled
+from .engine import Cancelled, EvolutionResult
 from .kernel import Kernel, Prepared, SegmentTable
 from .secular import ModelSource
 
@@ -38,6 +38,13 @@ class _Binding:
     payload: _Payload
     rows: NDArray[np.int64]
     indices: NDArray[np.int64]
+
+
+@dataclass(frozen=True)
+class _ChunkResult:
+    points: NDArray[np.int64]
+    states: NDArray[np.complex128]
+    exceeded_by_kernel: Counter[str]
 
 
 class PrepareCache:
@@ -190,8 +197,8 @@ class Schedule:
         cache: PrepareCache,
         pool: Parallel,
         chunks: int,
-    ) -> NDArray[np.complex128]:
-        """Return densities in point order, independent of chunk ownership."""
+    ) -> EvolutionResult:
+        """Return point-ordered densities and aggregate post-apply diagnostics."""
         entries = _deduplicate(self.table, self.dispatch, kernels)
         shared = self.prepare_shared(entries, cache, pool, chunks)
         count = len(self.geometry.points)
@@ -204,12 +211,14 @@ class Schedule:
         output = np.empty(
             (count, *self.source.initial_density.shape), dtype=np.complex128
         )
+        exceeded: Counter[str] = Counter()
         for result in results:
             if result is None:
                 raise RuntimeError("timeline job returned no densities")
-            points, states = result
-            output[points] = states
-        return output
+            output[result.points] = result.states
+            exceeded.update(result.exceeded_by_kernel)
+        diagnostics = replace(self.dispatch.diagnostics, exceeded_by_kernel=exceeded)
+        return EvolutionResult(self.geometry.points, output, diagnostics)
 
     def chunk(
         self,
@@ -244,6 +253,7 @@ class _Chunk:
         self.schedule, self.points = schedule, points
         self.table = schedule.table
         self.bindings = bindings
+        self.exceeded: Counter[str] = Counter()
         rows = len(self.table.timeline)
         self.binding = np.full(rows, -1, dtype=np.int64)
         self.key = np.zeros(rows, dtype=np.int64)
@@ -300,7 +310,7 @@ class _Chunk:
         )
         states = self.states[slots[repeated]].copy()
         try:
-            binding.kernel.apply(
+            exceeded = binding.kernel.apply(
                 binding.payload.prepared,
                 self.key[rows],
                 self.table,
@@ -318,6 +328,9 @@ class _Chunk:
             raise RuntimeError(
                 f"nonfinite density at point {self.schedule.geometry.points[self.table.timeline[rows[bad]]]} segment {rows[bad]}"
             )
+        count = int(np.count_nonzero(exceeded))
+        if count:
+            self.exceeded[binding.kernel.name] += count
         last = offsets[1:] - 1
         self.states[slots] = states[last]
         self.level[slots] = self.table.level[rows[last]]
@@ -331,4 +344,4 @@ class _Chunk:
             for index in np.unique(binding_ids):
                 self._apply(int(index), pending[binding_ids == index])
         self._basis(np.arange(len(self.points)), np.zeros_like(self.level))
-        return self.points, self.states
+        return _ChunkResult(self.points, self.states, self.exceeded)

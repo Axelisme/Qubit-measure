@@ -91,13 +91,14 @@ class DemoKernel:
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
         budget: float,
-    ) -> None:
+    ) -> NDArray[np.bool_]:
         if not isinstance(prepared, DemoPrepared):
             raise ValueError("demo requires DemoPrepared")
         for i, key in enumerate(key_index):
             states[i] = (prepared.channels[key] @ states[i].ravel()).reshape(
                 states.shape[-2:]
             )
+        return np.zeros(len(rows), dtype=np.bool_)
 
 
 @pytest.fixture(params=[3, 4])
@@ -155,8 +156,8 @@ def test_suite_detects_incorrect_dynamics(kernel_case: KernelCase) -> None:
             rows: NDArray[np.int64],
             states: NDArray[np.complex128],
             budget: float,
-        ) -> None:
-            pass
+        ) -> NDArray[np.bool_]:
+            return np.zeros(len(rows), dtype=np.bool_)
 
     with pytest.raises(AssertionError):
         KernelContract().test_error_within_budget(
@@ -193,9 +194,10 @@ def test_suite_detects_row_position_dependence(kernel_case: KernelCase) -> None:
             rows: NDArray[np.int64],
             states: NDArray[np.complex128],
             budget: float,
-        ) -> None:
-            super().apply(prepared, key_index, table, rows, states, budget)
+        ) -> NDArray[np.bool_]:
+            mask = super().apply(prepared, key_index, table, rows, states, budget)
             states[:] *= (np.arange(len(rows)) + 1)[:, None, None]
+            return mask
 
     with pytest.raises(AssertionError):
         KernelContract().test_rows_can_be_split(
