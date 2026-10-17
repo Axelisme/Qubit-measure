@@ -103,7 +103,7 @@ def test_any_changed_prefix_parameter_prevents_input_sharing(parameter):
         kernel.inputs.clear()
         pre = b.tracks[0]
         if parameter == "envelope":
-            pre = replace(pre, envelopes=(EnvelopeSpec("constant"), EnvelopeSpec("sampled", np.array([0., 2.]), np.array([1., .9], complex))), envelope_index=np.array([0, 1]))
+            pre = replace(pre, envelopes=(EnvelopeSpec("constant"), EnvelopeSpec("sampled", np.array([1., .9], complex), np.array([0., 2.]))), envelope_index=np.array([0, 1]))
         elif parameter == "level":
             b = replace(b, flux=FluxSchedule(np.array([0, 2, 4]), np.tile([0., 2.], 2), np.array([[0], [0], [1], [0]])))
         else:
@@ -113,3 +113,23 @@ def test_any_changed_prefix_parameter_prevents_input_sharing(parameter):
         b = replace(b, tracks=(pre, b.tracks[1]))
         solver.evolve(src, (b,), cancel=Event())
         assert not any(np.all(starts == 3.) for starts, _ in kernel.inputs)
+
+
+@pytest.mark.parametrize("gain, accepted", [(0.0005, True), (0.002, False)])
+def test_driven_prefix_population_bound_uses_the_actual_coherent_input(gain, accepted):
+    src, b, kernel = source(), batch(), ObservedDyson()
+    b = replace(b, tracks=(b.tracks[0], replace(b.tracks[1], amplitude=np.full(2, gain))))
+    with closing(engine(kernel)) as solver:
+        result = solver.evolve(src, (b,), cancel=Event())
+    assert (result.paths.segments_by_kernel.get("dyson", 0) == 2) == accepted
+    assert any(np.all(starts == 3.) for starts, _ in kernel.inputs) == accepted
+
+
+def test_nested_shared_prefixes_use_their_own_known_input():
+    src, b, kernel = source(), batch(), ObservedDyson()
+    b = replace(b, tracks=(b.tracks[0], replace(b.tracks[1], duration_ns=np.ones(2)), track(4.5, 1.5, .45, 1e-5)))
+    with closing(engine(kernel)) as solver:
+        solver.evolve(src, (b,), cancel=Event())
+    inputs = {float(starts[0]): rho for starts, rho in kernel.inputs}
+    assert 3. in inputs and 4.5 in inputs
+    assert np.max(abs(inputs[3.] - inputs[4.5])) > .1
