@@ -339,6 +339,7 @@ class Engine:
         *,
         budget: float = 1e-3,
         cancel: Event,
+        execution: Literal["legacy", "legacy-plan"] = "legacy",
     ) -> EvolutionResult:
         """Evolve all batches to readout, forwarding per-segment budget to kernels.
 
@@ -352,6 +353,12 @@ class Engine:
         borrow this call's worker pool for eight or more shared prepare keys.
         Local guards run in timeline workers and hand their tables to apply.
         Guard decisions remain independent of worker width and execution order.
+        execution: "legacy" keeps the default dispatch path. "legacy-plan"
+        builds this call's legacy-equivalent single-interval cover and executes
+        it through the same scheduler, including contingent deferred selection.
+        It does not accept shadow plans, arbitrary graphs or portable replay,
+        and does not use declared costs to change numerical assignment.
+        Other execution values raise ValueError, including for empty work.
         Post-apply accuracy
         exceedances stay in the result's paths.exceeded_by_kernel and produce
         exactly one RuntimeWarning per call, without correction or retry.
@@ -364,6 +371,8 @@ class Engine:
         with self._lock, native_limit.acquire():
             if self._closed:
                 raise RuntimeError("engine is closed")
+            if execution not in ("legacy", "legacy-plan"):
+                raise ValueError("execution must be 'legacy' or 'legacy-plan'")
             if not np.isfinite(budget) or budget <= 0:
                 raise ValueError("budget must be finite and positive")
             if cancel.is_set():
@@ -385,8 +394,15 @@ class Engine:
                 geometry = PrefixResolver(
                     geometry, self._kernels, source, budget, cancel
                 ).resolve(self._cache, pool, self._chunks)
-                dispatch = classify(geometry, self._kernels, source, budget, pool=pool)
-                schedule = Schedule(geometry, dispatch, source, budget, cancel)
+                if execution == "legacy-plan":
+                    schedule = Schedule.from_legacy_plan(
+                        geometry, self._kernels, source, budget, cancel, pool
+                    )
+                else:
+                    dispatch = classify(
+                        geometry, self._kernels, source, budget, pool=pool
+                    )
+                    schedule = Schedule(geometry, dispatch, source, budget, cancel)
                 result = schedule.run(self._kernels, self._cache, pool, self._chunks)
             if cancel.is_set():
                 raise Cancelled()

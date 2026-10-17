@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, opt-in shadow planner and one-core profile contracts
+**Last updated:** 2026-10-18, opt-in legacy single-interval plan execution
 
 ## Segment engine contracts
 
@@ -190,6 +190,27 @@ An engine collaborator can instead supply geometry with engine-computed prefix
 certificates. Unknown input remains unknown. `Engine.evolve` remains the
 production entry point and keeps its current dispatch, scheduling, diagnostics
 and numerical behavior.
+
+## Opt-in legacy plan execution
+
+`Engine.evolve(source, batches, cancel=cancel, execution="legacy-plan")` builds
+and executes a call-local legacy-equivalent single-interval cover. Omitting
+`execution`, or passing `"legacy"`, retains the default path. Other values raise
+`ValueError`, including for empty work. This switch is not cost-based assignment,
+shadow graph admission, a caller-supplied arbitrary plan or portable pinned replay.
+
+The engine resolves prefixes once, then the scheduler's legacy-plan adapter
+builds one `Dispatch` execution record. For every pending interval that record
+contains either the selected family or a deferred contingent selection with the
+original acquire-wide shaped order and rejected masks. The existing scheduler
+consumes the record directly. It adopts computed prefixes, prepares shared work,
+resolves deferred rows in timeline workers and applies each remaining interval
+once in timeline order. Accepted guard products pass through without rebuilding.
+Partial acceptance, fallback, required-terminal and missing-registry errors keep
+their legacy semantics. Guard/build/apply exceptions propagate without retry or
+reclassification. Cancellation, cache ownership, trace diagnostics and the one
+uncorrected-output exceedance warning use the same engine lifecycle as default
+execution. No new plan, profile or revision admission is enabled.
 
 ## Shadow planning
 

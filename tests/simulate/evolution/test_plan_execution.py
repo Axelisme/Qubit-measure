@@ -4,10 +4,10 @@ These migration comparisons retire with the legacy adapter. Independent kernel
 and engine contracts remain the authority after legacy dispatch is removed.
 """
 
+import warnings
 from dataclasses import replace
 from threading import Event
 from typing import Literal
-import warnings
 
 import numpy as np
 import pytest
@@ -56,9 +56,7 @@ def test_cover_preserves_all_legacy_domains(execution):
 def test_flux_cover_keeps_basis_boundaries(execution, driven):
     b = replace(
         batch(1),
-        flux=FluxSchedule(
-            np.array([0, 2]), np.array([0.0, 1.0]), np.array([[0], [1]])
-        ),
+        flux=FluxSchedule(np.array([0, 2]), np.array([0.0, 1.0]), np.array([[0], [1]])),
         tracks=(track(1, EnvelopeSpec("constant")),) if driven else (),
     )
     family = "flux_dop853" if driven else "t4"
@@ -229,7 +227,9 @@ def test_cancel_returns_no_partial_result_and_engine_remains_usable(execution):
         assert len(kernel.calls) == 1
         kernel.cancel = None
         cancel.clear()
-        result = engine.evolve(source(), (batch(1),), cancel=cancel, execution=execution)
+        result = engine.evolve(
+            source(), (batch(1),), cancel=cancel, execution=execution
+        )
         np.testing.assert_array_equal(result.densities[0], source().initial_density)
     finally:
         engine.close()
