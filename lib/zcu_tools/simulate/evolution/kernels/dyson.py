@@ -8,6 +8,7 @@ from numpy.typing import NDArray
 
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
+from ._dyson_bound import population_bound
 from ._weak import (
     commutator,
     constant_mask,
@@ -321,44 +322,19 @@ def _advance(
     return (evolved @ entry.vectors.T).reshape(states.shape)
 
 
-def _population_transfer(
-    entry: _Entry,
-    port: int,
-    params: NDArray[np.float64],
-    initial: NDArray[np.complex128],
-    budget: float,
-) -> NDArray[np.float64]:
-    """Compute driven-minus-free populations, including coherent linear terms."""
-    size = len(initial)
-    populations = np.arange(size, dtype=np.int64) * (size + 1)
-    modes = initial.ravel() @ entry.inverse.T
-    pruning = np.r_[np.max(abs(entry.vectors), axis=0), budget]
-    evolved = _evaluate_batch(
-        params,
-        entry.values,
-        np.repeat(modes[None], len(params), axis=0),
-        entry.couplings[port],
-        pruning,
-        populations,
-    )
-    free = np.exp(params[:, 2:3] * entry.values) * modes
-    # Secular population eigenvectors have support only on population indices.
-    # No coherence-output paths can contribute to this projection.
-    transfer = (evolved - free) @ entry.vectors[populations].T
-    return np.max(abs(transfer), axis=1)
-
-
 class DysonKernel:
     """C5 weak one-tone constant kernel; engine owns known-state eligibility.
 
-    Guards use r<=min(0.1, 0.25*budget**(1/3)), r2<=0.05 and the initial-density
-    second-order population change <=min(0.02, (1.5*budget)**(2/3)). The r limit
-    follows far-detuned third-order coherence error proportional to r**3; its
-    coefficient is calibrated on a synthetic scan with margin (r<=0.025 at
-    budget=1e-3). The population limit follows the two-level resonant third-order
-    coherence error approximately (2/3)*abs(delta_p)**(3/2) <= budget (0.0131 at
-    budget=1e-3). Neither threshold is a rigorous multilevel or coherent-input
-    remainder bound. Guard failures follow the engine's reduced RWA/T6 path.
+    Guards use r<=min(0.1, 0.25*budget**(1/3)), r2<=0.05 and
+    B2+budget/8<=min(0.02, (1.5*budget)**(2/3)). B2 bounds unpruned second-order
+    driven-minus-free populations; budget/8 reserves omitted-path error.
+    Rows starting at zero use source populations in the row's model basis,
+    bounding all compatible coherence phases. Later rows use an arbitrary-input
+    density bound because preceding idle/flux segments may change the state.
+    The r limit follows cubic off-resonant coherence-error scaling; the population
+    limit follows the two-level estimate (2/3)*abs(delta_p)**(3/2). Coefficients
+    are calibrated by synthetic scans, not a rigorous multilevel remainder
+    proof. Guard failures follow the engine's reduced RWA/T6 path.
     Prepared modes are shared across frequency, gain, duration, phase and port.
     Preparation never reads a density. apply accepts arbitrary densities, not
     only diagonal or stationary states.
@@ -373,13 +349,20 @@ class DysonKernel:
         source: ModelSource,
         budget: float,
     ) -> NDArray[np.bool_]:
+        """Classify rows using r, r2 and B2+budget/8, without path evaluation.
+
+        B2 uses source populations in each model basis only at start_ns==0;
+        later rows use an arbitrary-input density bound. The budget/8 margin
+        covers pruning. Threshold coefficients are synthetic-scan calibrations,
+        not rigorous multilevel error guarantees. Returns a row-aligned mask;
+        invalid budgets raise ValueError.
+        """
         if not np.isfinite(budget) or budget <= 0:
             raise ValueError("Dyson requires positive budget")
         accepted = constant_mask(table, rows)
         active = np.flatnonzero(accepted)
         for positions, model in model_groups(table, rows[active], source):
             original = active[positions]
-            entry = None
             for port in np.unique(table.tone_port[rows[original], 0]):
                 selected = original[table.tone_port[rows[original], 0] == port]
                 params = parameters(table, rows[selected])
@@ -389,8 +372,6 @@ class DysonKernel:
                 selected, params = selected[eligible], params[eligible]
                 if not len(selected):
                     continue
-                if entry is None:
-                    entry = _prepare_model(model)
                 dc_model = source.model((0,) * len(model.level))
                 initial = source.initial_density
                 # Equal bases are exactly the same coordinates. Multiplying a
@@ -398,10 +379,17 @@ class DysonKernel:
                 if not np.array_equal(model.eigenvectors, dc_model.eigenvectors):
                     overlap = model.eigenvectors.conj().T @ dc_model.eigenvectors
                     initial = overlap @ initial @ overlap.conj().T
-                transfer = _population_transfer(
-                    entry, int(port), params, initial, budget
+                populations = np.maximum(np.diag(initial).real, 0.0)
+                bound = population_bound(
+                    model,
+                    int(port),
+                    params,
+                    populations,
+                    table.start_ns[rows[selected]] == 0,
                 )
-                accepted[selected] = transfer <= min(0.02, (1.5 * budget) ** (2 / 3))
+                accepted[selected] = bound + budget / 8 <= min(
+                    0.02, (1.5 * budget) ** (2 / 3)
+                )
         return accepted
 
     def prepare_keys(
