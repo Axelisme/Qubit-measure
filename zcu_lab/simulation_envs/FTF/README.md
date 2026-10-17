@@ -45,6 +45,8 @@ FTF 不建構 flux lines 或 flux controls，不提供快速 flux pulse；`flux_
 
 ## 演化與重播
 
-FTF 預設使用分段引擎的快速算法。模型與 prepare 快取只保留在記憶體，不需要離線建庫或 GPU，也不保存 exact density records。
+FTF 預設使用分段引擎的快速算法。共用入口以 `os.process_cpu_count()` 取得可用核心數，保留兩核，使用 `max(1, count - 2)` 個 workers。核心數未知時使用 1 個。八核 process 使用 6 個 workers；直接呼叫 `ftf(..., workers=1)` 預設只用 1 個。
+
+整個 evolve 期間 native BLAS 限為 1 個執行緒。重疊的 evolve 共用 process 層級的 reference count，第一個進入時設限，最後一個離開時還原。其他程式碼不要在 evolve 期間自行更改 threadpoolctl 限制。沒有演化工作、只有一條 timeline 或只有 1 個 worker 時，不開 joblib pool。模型與 prepare 快取只保留在記憶體，不需要離線建庫或 GPU，也不保存 exact density records。
 
 Builder 可用 `ftf(..., private_replay=absolute_directory)` 保存私有輸入。`replay_round(round_path)` 在相同數值、RNG 與相依套件版本下重算一個 round，不讀取演化資料庫。私有檔案含模型真值，不放入一般 Run metadata。

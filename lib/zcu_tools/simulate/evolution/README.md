@@ -46,8 +46,15 @@ basis changes inside a chain; the engine changes basis between apply calls
 and returns the final state to the DC eigenbasis. Cancellation is checked at
 chunk boundaries and raises `Cancelled` without partial results. `close()`
 waits for active work, clears the prepare cache and is safe to repeat. Each
-`evolve` call opens and closes its own joblib threading pool. The prepare cache
-persists across `evolve` calls, but no worker resources survive a call.
+`evolve` call with multiple timelines and workers opens and closes its own joblib
+threading pool. Empty evolution work, a single timeline, and one worker run inline
+without a pool. The prepare cache persists across `evolve` calls, but no worker
+resources survive a call. Native BLAS is limited to one thread for the whole
+call, including planning, classification, preparation and apply. A process-level
+reference count coordinates overlapping engines: the first evolve sets the
+limit and the last restores the caller's original limits, including on failure
+or cancellation. External threadpoolctl users must not change limits while an
+evolve is active.
 `PathDiagnostics.max_trace_error` reports the maximum absolute complex
 trace-minus-one across final readout densities for every evolve call, or zero
 for an empty call. This diagnostic never changes, rejects or retries kernel

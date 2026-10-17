@@ -6,10 +6,11 @@ from dataclasses import dataclass, replace
 from threading import Event
 
 import numpy as np
-from joblib import Parallel, delayed
+from joblib import delayed
 from numpy.typing import NDArray
 
 from ._dispatch import Dispatch
+from ._parallel import Executor
 from ._planning import Geometry
 from .engine import Cancelled, EvolutionResult
 from .kernel import Kernel, Prepared, SegmentTable
@@ -166,7 +167,7 @@ class Schedule:
         )
 
     def prepare_shared(
-        self, entries: list[_Entries], cache: PrepareCache, pool: Parallel, chunks: int
+        self, entries: list[_Entries], cache: PrepareCache, pool: Executor, chunks: int
     ) -> list[_Binding]:
         """Reuse guard payloads/LRU hits and prepare missing repeated keys.
 
@@ -296,7 +297,7 @@ class Schedule:
         self,
         kernels: Mapping[str, Kernel],
         cache: PrepareCache,
-        pool: Parallel,
+        pool: Executor,
         chunks: int,
     ) -> EvolutionResult:
         """Return point-ordered densities and aggregate post-apply diagnostics."""

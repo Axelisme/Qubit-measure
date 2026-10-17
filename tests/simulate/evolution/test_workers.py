@@ -32,21 +32,21 @@ def test_overlapping_evolves_hold_blas_one_until_last_exit(failure):
             super().__init__("t4")
             self.index = index
 
-        def guard(self, *args):
+        def guard(self, table, rows, source, budget):
             observations.append(blas_widths())
-            return super().guard(*args)
+            return super().guard(table, rows, source, budget)
 
-        def prepare(self, *args):
+        def prepare(self, keys, table, rows, source, budget):
             observations.append(blas_widths())
-            return super().prepare(*args)
+            return super().prepare(keys, table, rows, source, budget)
 
-        def apply(self, *args):
+        def apply(self, prepared, key_index, table, rows, states, budget):
             observations.append(blas_widths())
             entered[self.index].set()
             assert release[self.index].wait(5), "test failed to release evolve"
             if failure and self.index == 0:
                 raise RuntimeError("injected failure")
-            return super().apply(*args)
+            return super().apply(prepared, key_index, table, rows, states, budget)
 
     def evolve(index):
         engine = Engine(1, 0, kernels=(ObservedKernel(index),))
@@ -62,7 +62,6 @@ def test_overlapping_evolves_hold_blas_one_until_last_exit(failure):
         assert original and set(original.values()) == {2}
         with ThreadPoolExecutor(max_workers=2) as executor:
             first = executor.submit(evolve, 0)
-            second = None
             try:
                 assert entered[0].wait(5)
                 second = executor.submit(evolve, 1)
@@ -77,8 +76,7 @@ def test_overlapping_evolves_hold_blas_one_until_last_exit(failure):
             finally:
                 for event in release:
                     event.set()
-            if second is not None:
-                second.result(timeout=5)
+            second.result(timeout=5)
         assert observations and all(
             set(observation.values()) == {1} for observation in observations
         ), "guard, prepare and apply must all run under BLAS=1"
@@ -97,9 +95,9 @@ def test_serial_fast_path_does_not_open_joblib_pool(case, monkeypatch):
             return super().configure(*args, **kwargs)
 
     class ObservedKernel(RecordingKernel):
-        def apply(self, *args):
+        def apply(self, prepared, key_index, table, rows, states, budget):
             threads.append(current_thread())
-            return super().apply(*args)
+            return super().apply(prepared, key_index, table, rows, states, budget)
 
     batches = {
         "empty": (),
