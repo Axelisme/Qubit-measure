@@ -173,41 +173,65 @@ def test_registry_evicts_gc_collected_figure(qapp):
 
 def test_new_figure_does_not_detach_other_container(qapp):
     """Root fix: attaching a new figure to container B never detaches the canvas
-    of an unrelated container A. After A's figure entry is gone from the registry
-    (weak-evicted), B's attach must leave A's current widget untouched (no
-    placeholder flip from a detach on the wrong container)."""
-    del qapp
+    of an unrelated container A. A ghost figure is publicly attached to A, then
+    detached and released for GC without popping its registry mapping. After
+    restoring A's current canvas and collecting the ghost, B's attach must leave
+    A's current widget untouched (no placeholder flip on the wrong container).
+    """
     import gc
 
     import matplotlib.pyplot as plt
     from matplotlib.figure import Figure
-    from zcu_tools.gui.plotting.host import _fig_container_registry
 
     container_a, stack_a = _make_container()
-    container_b, stack_b = _make_container()
-
-    # A keeps a real, current canvas of its own.
-    fig_a = plt.figure()
-    canvas_a = attach_existing_figure_to_container(fig_a, container_a)
-    assert stack_a.currentWidget() is canvas_a
-
-    # A second figure was once mapped to container_a but its entry then got
-    # weak-evicted (the figure is GC'd). With an id-keyed dict this entry would
-    # linger and a new figure could alias it; weak keys make it vanish.
-    ghost = Figure()
-    _fig_container_registry[ghost] = container_a
-    del ghost
-    gc.collect()
-
-    fig_b = plt.figure()
     try:
-        canvas_b = attach_existing_figure_to_container(fig_b, container_b)
-        # B got its own canvas; A's container is untouched (still showing A).
-        assert stack_b.currentWidget() is canvas_b
-        assert stack_a.currentWidget() is canvas_a
+        container_b, stack_b = _make_container()
+        try:
+            # A keeps a real, current canvas of its own.
+            fig_a = plt.figure()
+            try:
+                canvas_a = attach_existing_figure_to_container(fig_a, container_a)
+                assert stack_a.currentWidget() is canvas_a
+
+                # Public attachment registers the ghost. Detaching and releasing
+                # its Qt parent lets GC collect the figure/canvas cycle without
+                # purging the mapping. Restore A after the ghost's selection.
+                ghost = Figure()
+                canvas_ghost = attach_existing_figure_to_container(ghost, container_a)
+                container_a.detach_canvas(canvas_ghost)
+                canvas_ghost.setParent(None)
+                container_a.set_current_canvas(canvas_a)
+                ghost_ref = weakref.ref(ghost)
+                del canvas_ghost, ghost
+                gc.collect()
+
+                assert ghost_ref() is None, (
+                    "ghost was not GC'd; test requires weak eviction"
+                )
+
+                fig_b = plt.figure()
+                try:
+                    canvas_b = attach_existing_figure_to_container(fig_b, container_b)
+                    # B got its own canvas; A is untouched (still showing A).
+                    assert stack_b.currentWidget() is canvas_b
+                    assert stack_a.currentWidget() is canvas_a
+                finally:
+                    plt.close(fig_b)
+            finally:
+                plt.close(fig_a)
+        finally:
+            try:
+                container_b.clear_dynamic_canvases()
+            finally:
+                stack_b.deleteLater()
     finally:
-        plt.close(fig_b)
-        plt.close(fig_a)
+        try:
+            container_a.clear_dynamic_canvases()
+        finally:
+            try:
+                stack_a.deleteLater()
+            finally:
+                qapp.processEvents()
 
 
 def test_attach_ignores_stale_previous_container_entry(qapp):
