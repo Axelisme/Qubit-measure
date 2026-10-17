@@ -21,7 +21,7 @@ def test_remote_control_adapter_start_rolls_back_bind_error(qapp) -> None:
     from zcu_tools.gui.app.measure.remote import RemoteControlAdapter
     from zcu_tools.gui.app.measure.remote.events import EVENT_SERIALIZERS
     from zcu_tools.gui.event_bus import BaseEventBus
-    from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
+    from zcu_tools.gui.remote.rpc_endpoint import ControlOptions, NdjsonRpcEndpoint
     from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 
     bus = BaseEventBus()
@@ -43,8 +43,8 @@ def test_remote_control_adapter_start_rolls_back_bind_error(qapp) -> None:
     )
 
     with (
-        patch.object(adapter._endpoint, "start", side_effect=bind_error),
-        patch.object(adapter._endpoint, "stop") as endpoint_stop,
+        patch.object(NdjsonRpcEndpoint, "start", side_effect=bind_error),
+        patch.object(NdjsonRpcEndpoint, "stop") as endpoint_stop,
         pytest.raises(RuntimeError, match="bind"),
     ):
         adapter.start()
@@ -63,7 +63,7 @@ def test_remote_control_adapter_start_fails_fast_and_rolls_back_event_subscripti
     from zcu_tools.gui.app.measure.remote import RemoteControlAdapter
     from zcu_tools.gui.app.measure.remote.events import EVENT_SERIALIZERS
     from zcu_tools.gui.event_bus import BaseEventBus, EventMeta
-    from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
+    from zcu_tools.gui.remote.rpc_endpoint import ControlOptions, NdjsonRpcEndpoint
     from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 
     class FailingEventBus(BaseEventBus):
@@ -92,7 +92,7 @@ def test_remote_control_adapter_start_fails_fast_and_rolls_back_event_subscripti
     )
 
     with (
-        patch.object(adapter._endpoint, "start") as endpoint_start,
+        patch.object(NdjsonRpcEndpoint, "start") as endpoint_start,
         pytest.raises(RuntimeError, match="subscribe failed"),
     ):
         adapter.start()
@@ -109,7 +109,7 @@ def test_remote_control_adapter_start_rolls_back_advertise_error(qapp) -> None:
     from zcu_tools.gui.app.measure.remote import RemoteControlAdapter
     from zcu_tools.gui.app.measure.remote.events import EVENT_SERIALIZERS
     from zcu_tools.gui.event_bus import BaseEventBus
-    from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
+    from zcu_tools.gui.remote.rpc_endpoint import ControlOptions, NdjsonRpcEndpoint
     from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 
     bus = BaseEventBus()
@@ -124,9 +124,12 @@ def test_remote_control_adapter_start_rolls_back_advertise_error(qapp) -> None:
     advertise_error = RuntimeError("discovery write failed")
 
     with (
-        patch.object(adapter._endpoint, "start", return_value=12345),
-        patch.object(adapter._endpoint, "stop") as endpoint_stop,
-        patch.object(adapter, "_advertise_session", side_effect=advertise_error),
+        patch.object(NdjsonRpcEndpoint, "start", return_value=12345),
+        patch.object(NdjsonRpcEndpoint, "stop") as endpoint_stop,
+        patch(
+            "zcu_tools.gui.remote.control_service.write_session",
+            side_effect=advertise_error,
+        ),
         pytest.raises(RuntimeError, match="discovery write failed"),
     ):
         adapter.start()
