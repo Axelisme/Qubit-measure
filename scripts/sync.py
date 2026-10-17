@@ -39,7 +39,7 @@ def _is_git_ignored(path: Path) -> bool:
     return result.returncode == 0
 
 
-def _normalize_notebook(nb: dict) -> dict:
+def _normalize_notebook(nb: dict) -> dict[str, object]:
     """Return a deep-copied notebook dict with unstable fields removed."""
     nb_copy = copy.deepcopy(nb)
 
