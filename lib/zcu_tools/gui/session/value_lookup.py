@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Generic, Protocol, TypeAlias, TypeVar, cast
+from typing import Any, Generic, Protocol, TypeAlias, TypeVar, cast
 
 from zcu_tools.gui.expected_error import ExpectedError, ExpectedErrorCategory
 
@@ -226,7 +226,25 @@ class ValueRegistry(ValueLookup):
             if entry is not None and entry.owner == owner:
                 del self._entries[key]
 
-    def replace_owner(self, owner: str, providers: Iterable[ValueProviderSpec]) -> None:
+    def replace_owner(
+        self, owner: str, providers: Iterable[ValueProviderSpec[Any]]
+    ) -> None:
+        """Replace all sources for an owner without evaluating providers.
+
+        ``owner`` must be a non-empty, non-blank string. ``providers`` is an
+        iterable of specs whose owners all equal ``owner``; specs may use
+        different supported scalar types. An empty iterable removes the owner's
+        sources.
+
+        Consume and validate the entire group before removing the old sources
+        and installing replacements. Iteration and entry-construction errors
+        propagate.
+
+        Raises:
+            ValueError: The owner is empty or blank, or a spec's owner differs.
+            DuplicateValueKey: Keys repeat within the group or conflict with
+                sources belonging to another owner.
+        """
         _validate_owner(owner)
         entries = tuple(self._entry_from_spec(spec) for spec in providers)
         new_keys: set[str] = set()
