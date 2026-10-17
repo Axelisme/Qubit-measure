@@ -594,10 +594,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
         self._ensure_active()
         if not self._buffers:
             return
-        if isinstance(owner, ScheduleStep):
-            step = owner
-        else:
-            step = None
+        step = owner if isinstance(owner, ScheduleStep) else None
         for buffer in self._buffers:
             if flush:
                 buffer.trigger_update(step, flush=True)

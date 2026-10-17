@@ -642,21 +642,22 @@ class JPAOptimizer:
             # Check if point is within current bounds
             freq_bounds = self.refinement.current_freq_bounds
             power_bounds = self.refinement.current_power_bounds
-            if freq_bounds and power_bounds:
-                if (
-                    freq_bounds[0] <= freq <= freq_bounds[1]
-                    and power_bounds[0] <= power <= power_bounds[1]
-                ):
-                    # Check if this point was already sampled at this flux
-                    already_sampled = any(
-                        abs(existing_freq - freq) < 1e-6
-                        and abs(existing_power - power) < 1e-6
-                        for existing_freq, existing_power, _ in self.data.flux_data.get(
-                            current_flux, []
-                        )
+            if (
+                freq_bounds
+                and power_bounds
+                and freq_bounds[0] <= freq <= freq_bounds[1]
+                and power_bounds[0] <= power <= power_bounds[1]
+            ):
+                # Check if this point was already sampled at this flux
+                already_sampled = any(
+                    abs(existing_freq - freq) < 1e-6
+                    and abs(existing_power - power) < 1e-6
+                    for existing_freq, existing_power, _ in self.data.flux_data.get(
+                        current_flux, []
                     )
-                    if not already_sampled:
-                        return (current_flux, freq, power)
+                )
+                if not already_sampled:
+                    return (current_flux, freq, power)
 
         # Step 3: Get next point from 2D optimizer
         if self._optimizer_2d is not None:
@@ -788,12 +789,13 @@ class JPAOptimizer:
         if self._phase >= 2 and self._optimizer_2d is not None:
             freq_bounds = self.refinement.current_freq_bounds
             power_bounds = self.refinement.current_power_bounds
-            if freq_bounds and power_bounds:
-                if (
-                    freq_bounds[0] <= freq <= freq_bounds[1]
-                    and power_bounds[0] <= power <= power_bounds[1]
-                ):
-                    self._optimizer_2d.tell([freq, power], -last_snr)
+            if (
+                freq_bounds
+                and power_bounds
+                and freq_bounds[0] <= freq <= freq_bounds[1]
+                and power_bounds[0] <= power <= power_bounds[1]
+            ):
+                self._optimizer_2d.tell([freq, power], -last_snr)
 
     def _get_next_phase1_point(self, i: int) -> Point3D | None:
         """Get the next point during Phase 1."""

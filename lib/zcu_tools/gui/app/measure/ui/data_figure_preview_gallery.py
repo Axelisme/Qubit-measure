@@ -224,12 +224,13 @@ class _PreviewCard(QWidget):
         self._image_label.setPixmap(scaled)
 
     def eventFilter(self, obj, event) -> bool:  # type: ignore[override]
-        if obj is self._image_label and event.type() == QEvent.Type.Resize:
-            if (
-                self._orig_pixmap is not None
-                and self._stack.currentWidget() is self._image_page
-            ):
-                self._apply_scaled()
+        if (
+            obj is self._image_label
+            and event.type() == QEvent.Type.Resize
+            and self._orig_pixmap is not None
+            and self._stack.currentWidget() is self._image_page
+        ):
+            self._apply_scaled()
         return super().eventFilter(obj, event)
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
