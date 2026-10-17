@@ -50,7 +50,7 @@ class DeviceManager:
         self._devices: dict[str, BaseDevice] = {}
         self._lock = threading.RLock()
         # Keep claimed identities alive until their close completes.
-        self._close_claims: dict[int, BaseDevice] = {}
+        self._close_claims: dict[int, object] = {}
 
     def register_device(self, name: str, device: BaseDevice) -> None:
         if not isinstance(device, BaseDevice):
