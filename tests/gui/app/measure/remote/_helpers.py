@@ -292,11 +292,11 @@ def send[K, V](sock: socket.socket, obj: dict[K, V]) -> None:
 # match get parked here so a subsequent ``recv_*`` call can still observe
 # them. Keyed by socket fileno (sockets are not hashable across all qtpy
 # backends but their fileno is stable).
-_INBOX: dict[int, list[dict]] = {}
+_INBOX: dict[int, list[dict[str, object]]] = {}
 _INBOX_BUF: dict[int, bytearray] = {}
 
 
-def _inbox(sock: socket.socket) -> list[dict]:
+def _inbox(sock: socket.socket) -> list[dict[str, object]]:
     return _INBOX.setdefault(sock.fileno(), [])
 
 
