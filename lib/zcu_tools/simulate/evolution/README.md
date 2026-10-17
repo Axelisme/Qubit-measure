@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, known-source coherence in Dyson classification, paired shared-path pruning, Floquet guard preparation handoff, and actual-input sharing for repeated no-drive flux prefixes
+**Last updated:** 2026-10-17, known-source coherence in Dyson classification, paired shared-path pruning, Floquet guard preparation handoff, and prefix-local waveform identity for repeated no-drive flux prefixes
 
 ## Segment engine contracts
 
@@ -112,9 +112,10 @@ rows. A flux-tail group requires a nonempty prefix with no tones and at least tw
 identical prefix sequences in the same source/evolve. Identity includes every
 segment's start, duration and level, the target basis and continuous flux samples.
 Different tail lengths never share an input just because their final levels match.
-The planner compares continuous sample records in full, conservatively separating
-prefixes even if only their future samples differ. Prefixes with earlier drives
-or no identical partner retain ordinary dispatch. Source and initial density are
+The planner compares samples before probe start and the first sample at or after
+it to retain the prefix's interpolation boundary. Later samples do not affect
+prefix identity. Prefixes with earlier drives or no identical partner retain
+ordinary dispatch. Source and initial density are
 common to one evolve and no prefix identity persists across calls.
 
 The model supplies the secular form. Missing secular data fails at entry rather
