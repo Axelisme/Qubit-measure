@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-18, constant-tone Hilbert Floquet period propagation
+**Last updated:** 2026-10-17, constant-tone Hilbert Floquet period propagation
 
 ## Segment engine contracts
 
