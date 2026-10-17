@@ -35,7 +35,7 @@ def preference(
     period = kernels.get("period_table", PeriodTableKernel())
     frequency = np.abs(table.tone_frequency_ghz[rows, 0])
     duration = table.duration_ns[rows]
-    direct = duration * (1 + 0.3 * frequency)
+    direct = 0.8 * duration * (1 + 0.3 * frequency)
     gate_work = duration * (60 + 3 * frequency) / _usage(gate, table, rows) + 0.04
     safe_frequency = np.where(frequency > 0, frequency, 1)
     cycles = duration * frequency
@@ -45,7 +45,7 @@ def preference(
     period_work = (
         (150 + 550 / safe_frequency) / _usage(period, table, rows)
         + np.where(complex_rows, 0.064, 0.008) * cycles
-        + 5 * tail * (1 + 0.3 * frequency)
+        + 4 * tail * (1 + 0.3 * frequency)
     )
     period_work[frequency == 0] = np.inf  # Direct DC has no table benefit.
     return np.argsort(np.column_stack((gate_work, period_work, direct)), axis=1)

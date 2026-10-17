@@ -40,9 +40,19 @@ def _rhs(time, state, context):
     size = context.models.energies.shape[1]
     rho = state.reshape(size, size)
     h = hamiltonian(time, context)
-    derivative = -2j * np.pi * (h @ rho - rho @ h)
-    derivative -= context.models.decay[context.model] * rho
+    # A density and every real-weighted Runge--Kutta stage are Hermitian.
+    # Thus rho @ h = (h @ rho).H; one dense product supplies both terms.
+    product = h @ rho
+    derivative = np.empty_like(rho)
     for target in range(size):
+        for source in range(size):
+            derivative[target, source] = (
+                -2j
+                * np.pi
+                * (product[target, source] - product[source, target].conjugate())
+                - context.models.decay[context.model, target, source]
+                * rho[target, source]
+            )
         for source in range(size):
             derivative[target, target] += (
                 context.models.rates[context.model, target, source]
@@ -91,7 +101,9 @@ class DOP853Kernel:
     def cost(self, table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.float64]:
         """Estimate RHS work from duration and tone count, with no timing probe."""
         return np.asarray(
-            (1.0 + table.tones[rows]) * np.maximum(1.0, table.duration_ns[rows] / 0.1),
+            0.8
+            * (1.0 + table.tones[rows])
+            * np.maximum(1.0, table.duration_ns[rows] / 0.1),
             dtype=np.float64,
         )
 
