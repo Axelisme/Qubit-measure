@@ -291,6 +291,7 @@ def ftf(
     configuration: FTFSettings | str | Path,
     *,
     private_replay: Path | None = None,
+    workers: int = 1,
 ) -> SimulationEnvironment:
     """Build a fixed-profile FTF environment from named values or a YAML path.
 
@@ -301,7 +302,8 @@ def ftf(
     private_replay explicitly enables author-only checked input archives at an
     absolute directory. Replay recomputes with checked numeric and RNG versions;
     no U table or exact density record is consulted. One engine persists across
-    acquires. Worker threads live only during evolve; dropping the environment
+    acquires, using workers (default 1) as its sole parallel width.
+    Worker threads live only during multi-timeline evolve; dropping the environment
     releases its in-memory engine cache. FTFSource.close explicitly clears it.
     """
     settings = (
@@ -324,7 +326,12 @@ def ftf(
                 ),
                 progress=False,
             )
-        coordinator = FTFSource(settings, devices, private_replay=private_replay)
+        coordinator = FTFSource(
+            settings,
+            devices,
+            engine=Engine(workers, 256 * 1024**2),
+            private_replay=private_replay,
+        )
         gens = (
             settings.readout.drive.gen_ch,
             *(s.gen_ch for s in settings.drive_lines.values()),

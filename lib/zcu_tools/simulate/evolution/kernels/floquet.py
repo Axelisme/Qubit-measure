@@ -701,6 +701,7 @@ class FloquetKernel:
     """
 
     name = "floquet"
+    guard_builds = True
 
     def guard(
         self,

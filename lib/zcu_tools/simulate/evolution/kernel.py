@@ -238,11 +238,20 @@ class Kernel(Protocol):
     """One stateless algorithm family; all persistent data lives in Prepared.
 
     name: stable algorithm name for diagnostics and cache partitioning.
+    guard_builds: True when guard_prepared builds and hands off validated model
+        payloads. False families return None and use ordinary batched guards.
+        The engine uses this declaration to defer local table builds; the
+        dispatch planner can account for guard construction without probing.
+        True families return GuardResult, including for rejected/empty rows.
     Multiple numerical families share this seam so the scheduler need not know
     their representation. All index arrays below are int64 vectors.
+    Engine may call guards concurrently on its existing threading pool. Guards
+    must be pure with respect to model/table inputs, with decisions independent
+    of worker width and execution order. Kernels never open a numerical pool.
     """
 
     name: str
+    guard_builds: bool
 
     def guard(
         self,

@@ -4,7 +4,7 @@ import warnings
 import weakref
 from contextlib import closing
 from dataclasses import dataclass, replace
-from threading import Event
+from threading import Event, get_ident
 
 import numpy as np
 import pytest
@@ -69,6 +69,8 @@ class Payload:
 class RecordingKernel:
     """Identity dynamics with public observations at the kernel boundary."""
 
+    guard_builds = False
+
     def __init__(self, name: str, *, accepts: bool = True, cancel: Event | None = None):
         self.name = name
         self.accepts = accepts
@@ -110,6 +112,17 @@ class RecordingKernel:
         if self.cancel is not None:
             self.cancel.set()
         return np.zeros(len(rows), dtype=np.bool_)
+
+
+class TimelineKernel(RecordingKernel):
+    """Conservative timeline keys, optionally shared by equivalent copies."""
+
+    def __init__(self, name, *, copies=1):
+        super().__init__(name)
+        self.copies = copies
+
+    def prepare_keys(self, table, rows):
+        return (table.timeline[rows] // self.copies).copy().view("V8")
 
 
 def run(engine: Engine, src: ModelSource, batches: tuple[TimelineBatch, ...]):
@@ -346,6 +359,294 @@ def test_shared_cache_namespace_budget_eviction_and_singletons():
         engine.evolve(src, (batch(),), cancel=Event())
 
 
+@pytest.mark.parametrize(
+    ("repeated", "name"),
+    [(False, "t4"), (False, "dop853"), (True, "t4"), (True, "flux_dop853")],
+)
+def test_timeline_local_payloads_are_released_before_the_next_timeline(repeated, name):
+    from zcu_tools.simulate.evolution.kernel import GuardPreparation
+
+    class LifetimeKernel(TimelineKernel):
+        guard_builds = True
+
+        def __init__(self):
+            super().__init__(name)
+            self.live = 0
+            self.peak_live = 0
+
+        def release(self, count):
+            self.live -= count
+
+        def prepare(self, keys, table, rows, source, budget):
+            payload = super().prepare(keys, table, rows, source, budget)
+            self.live += len(keys)
+            self.peak_live = max(self.peak_live, self.live)
+            weakref.finalize(payload, self.release, len(keys))
+            return payload
+
+        def guard_prepared(self, table, rows, source, budget):
+            keys, first = np.unique(self.prepare_keys(table, rows), return_index=True)
+            payload = self.prepare(keys, table, rows[first], source, budget)
+            return GuardResult(
+                self.guard(table, rows, source, budget),
+                (GuardPreparation(keys, payload),),
+            )
+
+    n = 8
+    b = batch(n)
+    if repeated:
+        b = replace(
+            b,
+            flux=FluxSchedule(
+                2 * np.arange(n + 1),
+                np.tile([0.0, 1.0], n),
+                np.tile([[0], [1]], (n, 1)),
+            ),
+        )
+    if name != "t4":
+        b = replace(
+            b, tracks=tuple(track(n, EnvelopeSpec("constant")) for _ in range(3))
+        )
+    kernel = LifetimeKernel()
+    src = source()
+    result = run(Engine(1, 0, kernels=(kernel,), chunks_per_worker=1), src, (b,))
+    np.testing.assert_array_equal(
+        result.densities, np.repeat(src.initial_density[None], n, axis=0)
+    )
+    assert kernel.preparations == n, "same-timeline repeats must prepare only once"
+    assert kernel.peak_live == 1, (
+        "local payloads must not accumulate in A-stage or chunks"
+    )
+    assert kernel.live == 0, "the evolve call must release all local payloads"
+
+
+def test_guard_pool_preserves_dispatch_and_density_and_skips_small_key_sets():
+    class ObservingDyson(TimelineKernel):
+        guard_builds = True
+
+        def __init__(self):
+            super().__init__("dyson", copies=2)
+            self.guard_threads: set[int] = set()
+
+        def guard_prepared(self, table, rows, source, budget):
+            from zcu_tools.simulate.evolution.kernel import GuardPreparation
+
+            keys, first = np.unique(self.prepare_keys(table, rows), return_index=True)
+            payload = self.prepare(keys, table, rows[first], source, budget)
+            return GuardResult(
+                self.guard(table, rows, source, budget),
+                (GuardPreparation(keys, payload),),
+            )
+
+        def guard(self, table, rows, source, budget):
+            self.guard_threads.add(get_ident())
+            return table.timeline[rows] % 3 != 0
+
+    caller = get_ident()
+    for count in (7, 16):
+        outputs = []
+        for workers in (1, 2):
+            kernel = ObservingDyson()
+            b = replace(
+                batch(2 * count), tracks=(track(2 * count, EnvelopeSpec("constant")),)
+            )
+            result = run(
+                Engine(workers, 0, kernels=(kernel, RecordingKernel("floquet_period"))),
+                source(),
+                (b,),
+            )
+            outputs.append(result)
+            if workers == 1 or count < 8:
+                assert kernel.guard_threads == {caller}, "small guards must stay serial"
+            else:
+                assert caller not in kernel.guard_threads, (
+                    "guards must reuse Engine's pool"
+                )
+        assert (
+            outputs[0].paths.segments_by_kernel == outputs[1].paths.segments_by_kernel
+        )
+        np.testing.assert_array_equal(outputs[0].densities, outputs[1].densities)
+
+
+@pytest.mark.parametrize(
+    ("duration", "fallback"), [(3, "dop853"), (4000, "period_table")]
+)
+def test_local_guard_tables_build_once_and_match_shared_guard_first_fallback(
+    duration, fallback
+):
+    from zcu_tools.simulate.evolution.kernel import GuardPreparation
+
+    count = 8
+
+    class TableKernel(TimelineKernel):
+        guard_builds = True
+
+        def __init__(self, copies):
+            super().__init__("shaped_sambe", copies=copies)
+            self.builds = np.zeros(count, dtype=np.int64)
+            self.tokens = {}
+            self.used = []
+
+        def prepare(self, keys, table, rows, source, budget):
+            points = keys.view(np.int64)
+            self.builds[points] += 1
+            payload = Payload(len(keys))
+            self.tokens[id(payload)] = self.builds[points].copy()
+            return payload
+
+        def guard_prepared(self, table, rows, source, budget):
+            keys, first = np.unique(self.prepare_keys(table, rows), return_index=True)
+            payload = self.prepare(keys, table, rows[first], source, budget)
+            return GuardResult(
+                (table.timeline[rows] // self.copies) % 2 == 0,
+                (GuardPreparation(keys, payload),),
+            )
+
+        def guard(self, table, rows, source, budget):
+            return self.guard_prepared(table, rows, source, budget).accepted
+
+        def apply(self, prepared, key_index, table, rows, states, budget):
+            self.used.extend(
+                (
+                    int(table.timeline[row] // self.copies),
+                    int(self.tokens[id(prepared)][index]),
+                )
+                for row, index in zip(rows, key_index, strict=True)
+            )
+            return super().apply(prepared, key_index, table, rows, states, budget)
+
+    outputs = []
+    for copies, workers, chunks in ((2, 1, 1), (1, 1, 1), (1, 2, 1), (1, 2, 4)):
+        kernel = TableKernel(copies)
+        total = copies * count
+        b = replace(
+            batch(total),
+            end_ns=np.full(total, duration),
+            tracks=(
+                track(
+                    total,
+                    EnvelopeSpec(
+                        "sampled",
+                        np.array([0, 1, 0], dtype=complex),
+                        np.array([0, duration / 2, duration]),
+                    ),
+                    duration=duration,
+                ),
+            ),
+        )
+        result = run(
+            Engine(
+                workers,
+                0,
+                kernels=(
+                    kernel,
+                    TimelineKernel(
+                        "period_table", copies=2 if duration == 4000 else copies
+                    ),
+                    RecordingKernel("dop853"),
+                ),
+                chunks_per_worker=chunks,
+            ),
+            source(),
+            (b,),
+        )
+        assert result.paths.segments_by_kernel == {
+            "shaped_sambe": total // 2,
+            fallback: total // 2,
+        }
+        np.testing.assert_array_equal(kernel.builds, np.ones(count, dtype=np.int64))
+        assert sorted(kernel.used) == sorted(
+            (point, 1) for point in range(0, count, 2) for _ in range(copies)
+        )
+        outputs.append(result.densities[::copies])
+    for densities in outputs[1:]:
+        np.testing.assert_array_equal(densities, outputs[0])
+
+
+def test_local_singletons_keep_shared_apply_waves_and_release_each_payload():
+    from threading import get_ident
+
+    caller = get_ident()
+    for workers in (1, 2):
+
+        class Idle(TimelineKernel):
+            def __init__(self):
+                super().__init__("t4")
+                self.live = 0
+                self.peak = 0
+                self.guarded = set()
+
+            def guard(self, table, rows, source, budget):
+                self.guarded.add(get_ident())
+                return super().guard(table, rows, source, budget)
+
+            def release(self):
+                self.live -= 1
+
+            def prepare(self, keys, table, rows, source, budget):
+                payload = super().prepare(keys, table, rows, source, budget)
+                self.live += 1
+                self.peak = max(self.peak, self.live)
+                weakref.finalize(payload, self.release)
+                return payload
+
+        idle, driven = Idle(), RecordingKernel("dop853")
+        b = replace(
+            batch(8),
+            tracks=tuple(
+                track(8, EnvelopeSpec("constant"), duration=1) for _ in range(3)
+            ),
+        )
+        result = run(
+            Engine(workers, 0, kernels=(idle, driven), chunks_per_worker=1),
+            source(),
+            (b,),
+        )
+        assert result.paths.segments_by_kernel == {"t4": 8, "dop853": 8}
+        assert idle.guarded == {caller}
+        assert any(len(rows) > 1 for _, rows, _ in driven.calls)
+        assert idle.preparations == 8
+        assert idle.peak <= workers
+        assert idle.live == 0
+
+
+def test_deferred_guards_do_not_retry_caller_rejections():
+    from collections import Counter
+
+    from zcu_tools.simulate.evolution.kernel import GuardPreparation
+
+    for workers in (1, 2):
+
+        class Rejecting(RecordingKernel):
+            def __init__(self):
+                super().__init__("dyson")
+                self.guarded = []
+
+            def guard(self, table, rows, source, budget):
+                self.guarded.extend(table.timeline[rows])
+                return np.zeros(len(rows), dtype=bool)
+
+        class BuildingPeriod(TimelineKernel):
+            guard_builds = True
+
+            def guard_prepared(self, table, rows, source, budget):
+                keys, first = np.unique(
+                    self.prepare_keys(table, rows), return_index=True
+                )
+                payload = self.prepare(keys, table, rows[first], source, budget)
+                return GuardResult(
+                    np.ones(len(rows), dtype=bool), (GuardPreparation(keys, payload),)
+                )
+
+        period = BuildingPeriod("floquet_period")
+        rejecting = Rejecting()
+        b = replace(batch(8), tracks=(track(8, EnvelopeSpec("constant")),))
+        result = run(Engine(workers, 0, kernels=(rejecting, period)), source(), (b,))
+        assert result.paths.segments_by_kernel == {"floquet_period": 8}
+        assert Counter(rejecting.guarded) == Counter(range(8))
+        assert period.preparations == 8
+
+
 def test_cancel_between_chunks_and_nonfinite_failure():
     cancel = Event()
     k = RecordingKernel("t4", cancel=cancel)
@@ -579,6 +880,8 @@ def test_guard_handoff_only_binds_repeated_keys():
     from zcu_tools.simulate.evolution.kernel import GuardPreparation
 
     class GuardBindingKernel(InputBindingKernel):
+        guard_builds = True
+
         def prepare_keys(self, table, rows):
             return table.duration_ns[rows].copy().view("V8")
 

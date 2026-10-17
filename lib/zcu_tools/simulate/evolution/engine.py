@@ -10,8 +10,6 @@ from threading import Event, Lock
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
-from joblib import Parallel
-
 if TYPE_CHECKING:
     from .kernel import Kernel
 
@@ -19,6 +17,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ._envelope import sample_values
+from ._parallel import execution_pool, native_limit
 from ._validation import integers, owned, shape
 from .secular import FluxSchedule, FluxWaveform, ModelSource
 
@@ -278,7 +277,7 @@ class Cancelled(Exception):
 
 
 class Engine:
-    """Segment engine with a per-call threading pool and persistent prepare LRU.
+    """Segment engine with inline or threaded execution and persistent prepare LRU.
 
     workers: positive sole parallel width; kernels remain single-threaded.
     cache_bytes: nonnegative resident-array byte limit, not a process RAM cap.
@@ -297,7 +296,11 @@ class Engine:
     Cache namespaces also include the error budget, so stricter requests cannot
     reuse looser preparations. Calls on one instance serialize; close is
     idempotent and waits for active work before clearing the cache. No worker
-    resource survives an evolve call. The prepare cache persists across evolve\n    calls; each evolve opens and closes its own joblib threading pool.
+    resource survives an evolve call. The prepare cache persists across evolve
+    calls; multi-timeline work opens and closes its own joblib threading pool.
+    Empty work, a single timeline, and workers=1 run inline without a pool.
+    Native BLAS uses one thread throughout evolve, coordinated across engines.
+    The last overlapping evolve restores the original process-wide BLAS limits.
     """
 
     def __init__(
@@ -342,7 +345,11 @@ class Engine:
         when set, raises Cancelled, without returning partial results.
         Model ValueErrors propagate; numerical failure raises RuntimeError
         naming the point and segment. Results do not depend on chunking or
-        worker width except for floating-point rounding. Post-apply accuracy
+        worker width except for floating-point rounding. Classification may
+        borrow this call's worker pool for eight or more shared prepare keys.
+        Local guards run in timeline workers and hand their tables to apply.
+        Guard decisions remain independent of worker width and execution order.
+        Post-apply accuracy
         exceedances stay in the result's paths.exceeded_by_kernel and produce
         exactly one RuntimeWarning per call, without correction or retry.
         """
@@ -351,7 +358,7 @@ class Engine:
         from ._prefix import PrefixResolver
         from ._schedule import Schedule
 
-        with self._lock:
+        with self._lock, native_limit.acquire():
             if self._closed:
                 raise RuntimeError("engine is closed")
             if not np.isfinite(budget) or budget <= 0:
@@ -366,11 +373,16 @@ class Engine:
                     PathDiagnostics(),
                 )
             geometry = plan(source, batches)
-            with Parallel(n_jobs=self._workers, backend="threading") as pool:
+            workers = (
+                self._workers
+                if len(geometry.points) > 1 and len(geometry.table.timeline)
+                else 1
+            )
+            with execution_pool(workers) as pool:
                 geometry = PrefixResolver(
                     geometry, self._kernels, source, budget, cancel
                 ).resolve(self._cache, pool, self._chunks)
-                dispatch = classify(geometry, self._kernels, source, budget)
+                dispatch = classify(geometry, self._kernels, source, budget, pool=pool)
                 schedule = Schedule(geometry, dispatch, source, budget, cancel)
                 result = schedule.run(self._kernels, self._cache, pool, self._chunks)
             if cancel.is_set():
