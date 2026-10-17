@@ -80,3 +80,69 @@ def test_single_use_ramps_use_spectral_periods_and_match_direct_evolution(
     assert actual.paths.segments_by_kernel == {"shaped_sambe": 1, "dop853": 1}
     np.testing.assert_allclose(actual.densities, expected.densities, atol=1e-3, rtol=0)
     assert actual.paths.max_trace_error < 1e-6
+
+
+@pytest.mark.parametrize("frequency", [0.294, -5.0])
+def test_different_duration_ramps_match_independent_preparations(
+    frequency: float,
+) -> None:
+    """Sharing a spectral family must not share duration-dependent playback."""
+    x = np.array([[0, 0.012], [0.012, 0]], dtype=complex)
+    model = SecularModel(
+        (0,),
+        "duration-ramps",
+        np.array([0.0, abs(frequency)]),
+        np.eye(2, dtype=complex),
+        (SecularDrive("drive", x, np.zeros_like(x)),),
+        np.array([[0.0, 1e-5], [0.0, 0.0]]),
+        np.zeros((2, 2)),
+    )
+    source = ModelSource(np.array([[0.6, 0.2j], [-0.2j, 0.4]]), lambda _: model)
+    durations = np.array([100.3, 150.7])
+    envelopes = tuple(
+        EnvelopeSpec(
+            "sampled", np.array([0.0, 1.0], dtype=complex), np.array([0.0, duration])
+        )
+        for duration in durations
+    )
+
+    def batch(indices: np.ndarray) -> TimelineBatch:
+        count = len(indices)
+        track = DriveTrack(
+            "drive",
+            np.zeros(count),
+            durations[indices],
+            np.full(count, frequency),
+            np.full(count, 0.37),
+            np.full(count, 0.3),
+            envelopes,
+            indices,
+            np.ones(count, dtype=bool),
+        )
+        return TimelineBatch(
+            indices,
+            (track,),
+            FluxSchedule(
+                np.arange(count + 1),
+                np.zeros(count),
+                np.zeros((count, 1), dtype=np.int64),
+            ),
+            durations[indices],
+        )
+
+    engine = Engine(1, 0)
+    try:
+        joint = engine.evolve(source, (batch(np.arange(2)),), cancel=Event())
+    finally:
+        engine.close()
+    independent = []
+    for point in range(2):
+        engine = Engine(1, 0)
+        try:
+            result = engine.evolve(source, (batch(np.array([point])),), cancel=Event())
+        finally:
+            engine.close()
+        assert result.paths.segments_by_kernel == {"shaped_sambe": 1}
+        independent.append(result.densities[0])
+    assert joint.paths.segments_by_kernel == {"shaped_sambe": 2}
+    np.testing.assert_allclose(joint.densities, independent, atol=1e-12, rtol=0)
