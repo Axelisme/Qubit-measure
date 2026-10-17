@@ -43,6 +43,14 @@ def test_remote_control_adapter_start_rolls_back_bind_error(qapp) -> None:
     )
 
     with (
+        patch.object(
+            bus, "subscribe_with_meta", wraps=bus.subscribe_with_meta
+        ) as meta_subscribe,
+        patch.object(
+            bus, "unsubscribe_with_meta", wraps=bus.unsubscribe_with_meta
+        ) as meta_unsubscribe,
+        patch.object(bus, "subscribe", wraps=bus.subscribe) as legacy_subscribe,
+        patch.object(bus, "unsubscribe", wraps=bus.unsubscribe) as legacy_unsubscribe,
         patch.object(NdjsonRpcEndpoint, "start", side_effect=bind_error),
         patch.object(NdjsonRpcEndpoint, "stop") as endpoint_stop,
         pytest.raises(RuntimeError, match="bind"),
@@ -51,8 +59,20 @@ def test_remote_control_adapter_start_rolls_back_bind_error(qapp) -> None:
 
     endpoint_stop.assert_not_called()
     assert len(adapter._bus_subs) == 0
-    assert all(not bus._meta_subs.get(event_key) for event_key in EVENT_SERIALIZERS)
-    assert all(not bus._subs.get(event_key) for event_key in EVENT_SERIALIZERS)
+    assert meta_subscribe.call_count == len(EVENT_SERIALIZERS)
+    assert {call.args[0] for call in meta_subscribe.call_args_list} == set(
+        EVENT_SERIALIZERS
+    )
+    assert meta_unsubscribe.call_count == meta_subscribe.call_count
+    for subscribe_call in meta_subscribe.call_args_list:
+        assert meta_unsubscribe.call_args_list.count(
+            subscribe_call
+        ) == meta_subscribe.call_args_list.count(subscribe_call)
+    assert legacy_unsubscribe.call_count == legacy_subscribe.call_count
+    for subscribe_call in legacy_subscribe.call_args_list:
+        assert legacy_unsubscribe.call_args_list.count(
+            subscribe_call
+        ) == legacy_subscribe.call_args_list.count(subscribe_call)
     ctrl_mock.add_diagnostic_sink.assert_called_once_with(adapter)
     ctrl_mock.remove_diagnostic_sink.assert_called_once_with(adapter)
 
@@ -92,6 +112,14 @@ def test_remote_control_adapter_start_fails_fast_and_rolls_back_event_subscripti
     )
 
     with (
+        patch.object(
+            bus, "subscribe_with_meta", wraps=bus.subscribe_with_meta
+        ) as meta_subscribe,
+        patch.object(
+            bus, "unsubscribe_with_meta", wraps=bus.unsubscribe_with_meta
+        ) as meta_unsubscribe,
+        patch.object(bus, "subscribe", wraps=bus.subscribe) as legacy_subscribe,
+        patch.object(bus, "unsubscribe", wraps=bus.unsubscribe) as legacy_unsubscribe,
         patch.object(NdjsonRpcEndpoint, "start") as endpoint_start,
         pytest.raises(RuntimeError, match="subscribe failed"),
     ):
@@ -99,8 +127,17 @@ def test_remote_control_adapter_start_fails_fast_and_rolls_back_event_subscripti
 
     endpoint_start.assert_not_called()
     assert len(adapter._bus_subs) == 0
-    assert all(not bus._meta_subs.get(event_key) for event_key in EVENT_SERIALIZERS)
-    assert all(not bus._subs.get(event_key) for event_key in EVENT_SERIALIZERS)
+    assert meta_subscribe.call_count == 2
+    assert all(
+        call.args[0] in EVENT_SERIALIZERS for call in meta_subscribe.call_args_list
+    )
+    # The second attempt raises before registration; only the first needs cleanup.
+    assert meta_unsubscribe.call_args_list == [meta_subscribe.call_args_list[0]]
+    assert legacy_unsubscribe.call_count == legacy_subscribe.call_count
+    for subscribe_call in legacy_subscribe.call_args_list:
+        assert legacy_unsubscribe.call_args_list.count(
+            subscribe_call
+        ) == legacy_subscribe.call_args_list.count(subscribe_call)
 
 
 def test_remote_control_adapter_start_rolls_back_advertise_error(qapp) -> None:
@@ -124,6 +161,14 @@ def test_remote_control_adapter_start_rolls_back_advertise_error(qapp) -> None:
     advertise_error = RuntimeError("discovery write failed")
 
     with (
+        patch.object(
+            bus, "subscribe_with_meta", wraps=bus.subscribe_with_meta
+        ) as meta_subscribe,
+        patch.object(
+            bus, "unsubscribe_with_meta", wraps=bus.unsubscribe_with_meta
+        ) as meta_unsubscribe,
+        patch.object(bus, "subscribe", wraps=bus.subscribe) as legacy_subscribe,
+        patch.object(bus, "unsubscribe", wraps=bus.unsubscribe) as legacy_unsubscribe,
         patch.object(NdjsonRpcEndpoint, "start", return_value=12345),
         patch.object(NdjsonRpcEndpoint, "stop") as endpoint_stop,
         patch(
@@ -136,7 +181,19 @@ def test_remote_control_adapter_start_rolls_back_advertise_error(qapp) -> None:
 
     endpoint_stop.assert_called_once_with()
     assert len(adapter._bus_subs) == 0
-    assert all(not bus._meta_subs.get(event_key) for event_key in EVENT_SERIALIZERS)
-    assert all(not bus._subs.get(event_key) for event_key in EVENT_SERIALIZERS)
+    assert meta_subscribe.call_count == len(EVENT_SERIALIZERS)
+    assert {call.args[0] for call in meta_subscribe.call_args_list} == set(
+        EVENT_SERIALIZERS
+    )
+    assert meta_unsubscribe.call_count == meta_subscribe.call_count
+    for subscribe_call in meta_subscribe.call_args_list:
+        assert meta_unsubscribe.call_args_list.count(
+            subscribe_call
+        ) == meta_subscribe.call_args_list.count(subscribe_call)
+    assert legacy_unsubscribe.call_count == legacy_subscribe.call_count
+    for subscribe_call in legacy_subscribe.call_args_list:
+        assert legacy_unsubscribe.call_args_list.count(
+            subscribe_call
+        ) == legacy_subscribe.call_args_list.count(subscribe_call)
     ctrl_mock.add_diagnostic_sink.assert_called_once_with(adapter)
     ctrl_mock.remove_diagnostic_sink.assert_called_once_with(adapter)
