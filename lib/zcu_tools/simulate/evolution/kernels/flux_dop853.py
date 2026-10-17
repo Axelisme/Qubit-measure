@@ -119,6 +119,13 @@ def _context(data, row, model):
     return _FluxContext(Context(models, segments, row, model), expansion, waveform)
 
 
+@njit(nogil=True, cache=True)
+def _run(data, row_models, states, controls):
+    # Keep RHS/context dispatchers inside the compiled entry point so its disk
+    # cache key contains only data types, not process-specific callback IDs.
+    run_chain(_rhs, _context, data, row_models, states, controls)
+
+
 class FluxDOP853Kernel:
     """C5 continuous H(flux(t)) with a constant quantized bath per row.
 
@@ -274,5 +281,5 @@ class FluxDOP853Kernel:
             prepared.expansion,
             _Waveform(waveform.offsets, waveform.time_ns, waveform.flux),
         )
-        run_chain(_rhs, _context, data, (rows, inverse), states, controls)
+        _run(data, (rows, inverse), states, controls)
         return np.zeros(len(rows), dtype=np.bool_)

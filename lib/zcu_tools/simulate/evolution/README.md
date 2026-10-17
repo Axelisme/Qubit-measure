@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-18, explicit constant evidence admission and developer acquire evaluation
+**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, compiled gate-cache preparation, driven-input plateau routing, Hilbert endpoints and timeline-owned waves
 
 ## Segment engine contracts
 
@@ -433,7 +433,8 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | Varying flux, no drive | The FTF model owner quantizes flux at DAC-interval midpoints to 1e-3 Phi0 subsegments. This T5 path uses T4 with basis changes, not a separate kernel. |
 | Varying flux with drive | `flux_dop853` integrates continuous flux with the exact Hamiltonian expansion; baths switch at quantized grid boundaries. |
 | Fixed flux, no drive | T4 uses analytic secular propagation. |
-| One constant tone, known or unknown input, r, r₂ and B2 guards pass | T7 second-order Dyson, batched over frequency, gain, duration and phase. |
+| One constant tone after a driven prefix without a shared-input certificate, duration <= 10 us, Hilbert period guard passes | Try `floquet_period` before Dyson. Distinct inputs cannot share Dyson's contracted paths. If the period guard rejects, retain Dyson before T6. |
+| Other single constant tone, r, r₂ and B2 guards pass | T7 second-order Dyson, batched over frequency, gain, duration and phase. |
 | One constant tone after an identical shared driven prefix, r, r₂ and actual-input B2 pass | Dyson with the actual prefix output and a shared contracted table. |
 | One constant tone after an identical shared no-drive prefix, r and r₂ pass | Dyson with the actual prefix output. B2 does not apply; post-apply population changes only report. |
 | One constant tone not accepted above, known or unknown input, with abs(f) >= 0.03 GHz and duration*T²*Gamma*V²/m² <= 1.0 for some m in 1..64 | `floquet_period` builds one Hilbert-space U(T), translates the carrier phase in time, and steps each period with secular Strang dissipation. |
@@ -562,8 +563,11 @@ of the preceding rows. Binding, B2, the probe result, its free baseline and all
 later segments therefore use one numerical input, even when the representative's
 shaped reuse counts differ from the full acquire. Known inputs belong to
 this evolve alone. They never enter PrepareCache. Shared input binding consumes
-the same known input as B2, in the row model basis. All constant single tones
-still enter the ordinary family decision order.
+the same known input as B2, in the row model basis. Source inputs, no-drive
+prefixes and certified shared driven inputs retain Dyson-first ordering.
+Unshared driven-input plateaus up to 10 us try the Hilbert period kernel first.
+Longer plateaus retain Dyson-first ordering. The preference uses timeline
+geometry and certificates, never the evolving worker density.
 
 The model supplies the secular form. Missing secular data fails at entry rather
 than selecting another evolution backend.
@@ -712,10 +716,15 @@ coefficients on accepted steps. There are no Python RHS callbacks, dense
 resampling or per-key polynomial-basis solves. Stage sums reuse a state buffer
 and skip zero tableau weights instead of allocating weighted-vector temporaries.
 Every retained array counts against the prepare cache; no solver object is kept.
-Polar projection restores unitarity of U(T) and dense fundamental solutions
-before phase translation and fractional-tail composition. It does not normalize
-density. Coherent-input trace drift in the calibration fell from 1.34e-10 to
-1.68e-12. Prototype high-carrier S3/S5 population errors were 1.1e-7 and 2.3e-6.
+One compiled Newton polar step restores unitarity of U(T) and fundamental
+solutions before phase translation and fractional-tail composition. Tight
+DOP853 controls and CF4's Hermitian exponentials keep their singular values near
+one, so this correction squares the norm defect without an SVD. Exact period
+boundaries reuse identity or U(T). High-carrier rows without subdivisions keep
+endpoint composition and density stepping in one nogil call, avoiding repeated
+GIL transitions between short numerical operations. These operations do not
+normalize density. Prototype high-carrier S3/S5 population errors were 1.1e-7
+and 2.3e-6.
 Duration, start and theta do not enter keys.
 Time translation handles signed frequency and phase; the fractional tail uses
 the same Hilbert trajectory with a periodic extension across the boundary. Each full
@@ -727,7 +736,16 @@ T6 remains the terminal constant-tone route outside the Hilbert-period domain.
 It uses 1, 4 or 8 steps per carrier period according to r, powers the period
 propagator and adds the fractional-period tail. Carrier phase uses Fourier
 interpolation. Gate-cache Strang splitting and phase Fourier interpolation
-avoid building a full dissipative propagator for every phase.
+avoid building a full dissipative propagator for every phase. Gate preparation
+integrates its sixteen Hilbert phase nodes together through the shared compiled
+DOP853 interval core. Sample knots and the four Strang boundaries restart the
+integration. Single-threaded, nogil preparation lets Engine workers build
+different gate keys concurrently without Python RHS callbacks. Keys, phase
+nodes and the 0.1 ns step ceiling stay unchanged. Unitary integration uses
+rtol=min(1e-8, budget*1e-4) and atol=rtol*0.01. This leaves the segment budget
+for splitting and Fourier interpolation without oversolving high-energy modes.
+An SVD polar projection restores each Hilbert endpoint before the phase Fourier
+transform. It removes accumulated solver norm loss without normalizing density.
 
 ### Chunk scheduling and parallelism
 
@@ -769,8 +787,10 @@ across worker counts and chunk splits.
 
 Timeline chunks interleave estimated costs, with six chunks per worker by
 default. Within a chunk, local waves batch next segments by kernel and prepared
-payload. A timeline preserves apply order, but different chunks do not
-synchronize waves. A-stage completion and final collection are the global
+payload. Timelines with deferred builders or repeated local keys stream
+separately to bound retained payload memory. Other points in the same chunk
+keep their shared apply batches. A timeline preserves apply order, but different
+chunks do not synchronize waves. A-stage completion and final collection are the global
 waiting points. Cancellation is checked between chunks.
 
 Joblib threading is the only parallel layer. Worker numba kernels are
@@ -803,6 +823,15 @@ are separate allocations. Clearing the cache or closing the engine releases
 in-memory preparations without deleting replay inputs.
 
 ## Cache inventory and ownership
+
+DOP853 density chains and dense Hilbert propagation enter Numba through
+callback-free compiled wrappers. The wrappers bind each kernel's RHS and inline
+the callback-taking shared helpers into cacheable compiled code.
+Passing compiled RHS callbacks directly from Python would give the solver
+process-specific specialization keys and repeat compilation after restart.
+The numerical core remains shared by ordinary DOP853, continuous-flux DOP853
+and period-table fractional tails. This compilation cache is independent of
+the engine's prepared-payload LRU.
 
 The `cache` module exposes `PrepareCache` and `PreparedPayload` to numeric
 scheduling collaborators. Scheduler and prefix resolution use this same LRU.

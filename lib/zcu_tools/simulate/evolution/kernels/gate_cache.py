@@ -1,13 +1,14 @@
 """Fourier closed-system gates interleaved with compact secular dissipation."""
 
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import numpy as np
 from numba import njit
 from numpy.typing import NDArray
-from scipy.integrate import solve_ivp
 from scipy.linalg import expm
 
+from .._envelope import sample_value
 from ..declarations import (
     AlgorithmIdentity,
     Eligibility,
@@ -17,6 +18,7 @@ from ..declarations import (
 )
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
+from ._dop853 import Tolerances, integrate
 from ._shaped import drive_bounds, envelope_bounds
 
 _PHASE_COUNT = 16
@@ -42,10 +44,45 @@ def _check_budget(budget: float) -> None:
         raise ValueError("gate cache budget must be finite and positive")
 
 
+class _GateContext(NamedTuple):
+    # Hamiltonian in GHz, envelope-local offset and interval origin in ns.
+    h0: NDArray[np.complex128]
+    x: NDArray[np.complex128]
+    y: NDArray[np.complex128]
+    frequency: float
+    amplitude: float
+    offset: float
+    sample_ns: NDArray[np.float64]
+    samples: NDArray[np.complex128]
+    origin: float
+
+
+@njit(nogil=True, cache=True)
+def _gate_rhs(time, flat, context):
+    time += context.origin
+    envelope = context.amplitude * sample_value(
+        time + context.offset, context.sample_ns, context.samples
+    )
+    size = len(context.h0)
+    states = flat.reshape((_PHASE_COUNT, size, size))
+    result = np.empty_like(states)
+    for phase in range(_PHASE_COUNT):
+        z = envelope * np.exp(
+            1j
+            * (
+                phase * (2 * np.pi / _PHASE_COUNT)
+                + 2 * np.pi * context.frequency * time
+            )
+        )
+        h = context.h0 + z.real * context.x + z.imag * context.y
+        result[phase] = (-2j * np.pi) * (h @ states[phase])
+    return result.ravel()
+
+
 def _unitaries(
     model: SecularModel, table: SegmentTable, row: int, budget: float
 ) -> NDArray[np.complex128]:
-    """Integrate all phase nodes together, restarting at envelope sample knots."""
+    """Integrate phase nodes in compiled DOP853, restarting at sample knots."""
     size = len(model.energies_ghz)
     drive = model.drives[int(table.tone_port[row, 0])]
     envelope = table.envelopes[int(table.tone_envelope[row, 0])]
@@ -53,27 +90,16 @@ def _unitaries(
     frequency = float(table.tone_frequency_ghz[row, 0])
     amplitude = float(table.tone_amplitude[row, 0])
     duration = float(table.duration_ns[row])
-    phases = np.arange(_PHASE_COUNT) * (2 * np.pi / _PHASE_COUNT)
     energies = model.energies_ghz
-    h0 = np.diag(energies - (energies[0] + energies[-1]) / 2)
+    h0 = np.diag(energies - (energies[0] + energies[-1]) / 2).astype(complex)
     identity = np.broadcast_to(np.eye(size, dtype=complex), (_PHASE_COUNT, size, size))
     samples = np.empty((_SUBSEGMENTS, _PHASE_COUNT, size, size), dtype=complex)
-
-    def rhs(time: float, flat: NDArray[np.complex128]) -> NDArray[np.complex128]:
-        z = (
-            amplitude
-            * envelope.values(np.array(time + offset))
-            * np.exp(1j * (phases + 2 * np.pi * frequency * time))
-        )
-        h = (
-            h0[None]
-            + z.real[:, None, None] * drive.in_phase_ghz
-            + z.imag[:, None, None] * drive.quadrature_ghz
-        )
-        return (-2j * np.pi * (h @ flat.reshape(identity.shape))).ravel()
-
-    # Tight U tolerances leave the segment budget to Strang/Fourier errors.
-    tolerance = min(1e-10, budget * 1e-4)
+    # Reserve the segment budget for Strang/Fourier errors. A 1e-8 U tolerance
+    # avoids oversolving high-energy modes while retaining budget scaling.
+    tolerance = min(1e-8, budget * 1e-4)
+    controls = Tolerances(
+        tolerance, tolerance * 0.01, min(0.1, 0.25 / max(abs(frequency), 1e-12))
+    )
     knots = envelope.sample_ns - offset
     for segment in range(_SUBSEGMENTS):
         start, end = (
@@ -87,21 +113,25 @@ def _unitaries(
         for left, right in zip(boundaries[:-1], boundaries[1:], strict=True):
             if right == left:
                 continue
-            solution = solve_ivp(
-                rhs,
-                (left, right),
-                unitary,
-                method="DOP853",
-                rtol=tolerance,
-                atol=tolerance * 0.01,
-                max_step=min(0.1, 0.25 / max(abs(frequency), 1e-12)),
+            context = _GateContext(
+                h0,
+                drive.in_phase_ghz,
+                drive.quadrature_ghz,
+                frequency,
+                amplitude,
+                offset,
+                envelope.sample_ns,
+                envelope.samples,
+                float(left),
             )
-            if not solution.success or not np.isfinite(solution.y[:, -1]).all():
-                raise RuntimeError(
-                    f"gate cache unitary integration failed: {solution.message}"
-                )
-            unitary = solution.y[:, -1]
+            unitary = integrate(
+                _gate_rhs, context, unitary, float(right - left), controls, 0.01
+            )
         samples[segment] = unitary.reshape(identity.shape)
+    # The solver's small norm loss must not accumulate across repeated gates.
+    # Retract the Hilbert endpoints, never the evolving density.
+    left, _, right = np.linalg.svd(samples)
+    samples = left @ right
     return np.fft.fft(samples, axis=1) / _PHASE_COUNT
 
 
@@ -153,11 +183,11 @@ class GateCacheKernel:
     """
 
     declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("gate_cache", "legacy-v1"),
+        identity=AlgorithmIdentity("gate_cache", "compiled-dop853-v2"),
         eligibility=Eligibility(1, 1, "shaped"),
         guard=GuardDeclaration(),
         accuracy="guarded-approximation",
-        reuse=ReuseDeclaration("gate_cache/legacy-v1/serial"),
+        reuse=ReuseDeclaration("gate_cache/compiled-dop853-v2/serial"),
         fallback="legacy-order",
     )
 
