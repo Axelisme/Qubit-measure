@@ -260,12 +260,14 @@ class GateCacheKernel:
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
         budget: float,
-    ) -> None:
+    ) -> NDArray[np.bool_]:
         """Advance aligned densities in place using read-only prepared data.
 
         key_index selects prepared entries; rows selects table theta. Splitting
         or reordering rows does not change their results. The worker loop is
         single-threaded numba and releases the GIL.
+
+        Return an all-False bool mask aligned with rows; no post-apply check.
         """
         _check_budget(budget)
         if not isinstance(prepared, _GatePrepared):
@@ -279,3 +281,4 @@ class GateCacheKernel:
                 table.tone_theta_rad[rows, 0],
                 states,
             )
+        return np.zeros(len(rows), dtype=np.bool_)

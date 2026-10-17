@@ -348,6 +348,20 @@ def _population_transfer(
     return np.max(abs(transfer), axis=1)
 
 
+def _free_populations(
+    entry: _Entry,
+    durations: NDArray[np.float64],
+    states: NDArray[np.complex128],
+) -> NDArray[np.complex128]:
+    """Propagate only the secular population block, without coherence modes."""
+    size = states.shape[-1]
+    populations = np.arange(size) * (size + 1)
+    block = np.ix_(populations, populations)
+    modes = np.diagonal(states, axis1=1, axis2=2) @ entry.inverse[block].T
+    free = np.exp(durations[:, None] * entry.values[populations]) * modes
+    return free @ entry.vectors[block].T
+
+
 class DysonKernel:
     """C5 weak one-tone constant kernel; engine owns known-state eligibility.
 
@@ -442,16 +456,30 @@ class DysonKernel:
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
         budget: float,
-    ) -> None:
-        """Advance states in place; rows/key_index may be non-contiguous or reversed."""
+    ) -> NDArray[np.bool_]:
+        """Advance states in place; return a bool exceedance mask aligned with rows.
+
+        Rows/key_index may be non-contiguous or reversed. Check the maximum
+        absolute output population minus free-evolved input population against
+        min(0.02, (1.5*budget)**(2/3)). Free evolution uses only the secular
+        population block. Exceedance is not failure: retain the uncorrected
+        output without retry. Numerical failure raises RuntimeError.
+        """
         if not np.isfinite(budget) or budget <= 0:
             raise ValueError("Dyson requires positive budget")
         if not isinstance(prepared, _Prepared):
             raise ValueError("Dyson requires its own prepared payload")
+        exceeded = np.zeros(len(rows), dtype=np.bool_)
+        threshold = min(0.02, (1.5 * budget) ** (2 / 3))
         for key in np.unique(key_index):
             positions = np.flatnonzero(key_index == key)
             for port in np.unique(table.tone_port[rows[positions], 0]):
                 selected = positions[table.tone_port[rows[positions], 0] == port]
+                free = _free_populations(
+                    prepared.entries[key],
+                    table.duration_ns[rows[selected]],
+                    states[selected],
+                )
                 result = _advance(
                     prepared.entries[key],
                     int(port),
@@ -463,4 +491,7 @@ class DysonKernel:
                     raise RuntimeError(
                         f"Dyson nonfinite density in segment rows {rows[selected]}"
                     )
+                transfer = np.diagonal(result, axis1=1, axis2=2) - free
+                exceeded[selected] = np.max(abs(transfer), axis=1) > threshold
                 states[selected] = result
+        return exceeded

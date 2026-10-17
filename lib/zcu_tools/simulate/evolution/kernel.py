@@ -222,12 +222,17 @@ class Kernel(Protocol):
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
         budget: float,
-    ) -> None:
+    ) -> NDArray[np.bool_]:
         """Advance complex128 states (len(rows),M,M) in place through rows.
 
         key_index maps each row to its prepared entry. budget is the positive
         absolute per-segment allowance. Called by a joblib worker thread;
         numba implementations must be nogil and single-threaded. Prepared
-        data and table stay unchanged. Numerical failure raises RuntimeError.
+        data and table stay unchanged. Return a bool mask (len(rows),), aligned
+        with rows: True marks a post-apply accuracy threshold exceedance, not
+        a failure. Results are still committed without correction or retry.
+        Kernels without a post-apply check return all False. Masks, like states,
+        retain row order when independent rows are split across calls.
+        Numerical failure raises RuntimeError.
         """
         ...

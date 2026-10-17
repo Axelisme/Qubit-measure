@@ -338,8 +338,11 @@ class T6Kernel:
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
         budget: float,
-    ) -> None:
-        """Evaluate phase Fourier series and advance the aligned densities in place."""
+    ) -> NDArray[np.bool_]:
+        """Evaluate phase Fourier series and advance the aligned densities in place.
+
+        Return an all-False bool mask aligned with rows; no post-apply check.
+        """
         _check_budget(budget)
         if not isinstance(prepared, _T6Prepared):
             raise ValueError("t6: incompatible prepared payload")
@@ -353,6 +356,7 @@ class T6Kernel:
         )
         if not np.isfinite(states).all():
             raise RuntimeError("t6: nonfinite density after channel application")
+        return np.zeros(len(rows), dtype=np.bool_)
 
 
 def _pack(entries: list[NDArray[np.complex128]]) -> _T6Prepared:

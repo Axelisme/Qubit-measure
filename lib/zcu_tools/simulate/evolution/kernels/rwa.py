@@ -245,8 +245,11 @@ class RWAKernel:
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
         budget: float,
-    ) -> None:
-        """Advance arbitrary input densities in place in the lab eigenbasis."""
+    ) -> NDArray[np.bool_]:
+        """Advance arbitrary input densities in place in the lab eigenbasis.
+
+        Return an all-False bool mask aligned with rows; no post-apply check.
+        """
         if not np.isfinite(budget) or budget <= 0:
             raise ValueError("RWA requires positive budget")
         if not isinstance(prepared, _Prepared):
@@ -267,3 +270,4 @@ class RWAKernel:
                         f"RWA nonfinite density in segment rows {rows[selected]}"
                     )
                 states[selected] = result
+        return np.zeros(len(rows), dtype=np.bool_)
