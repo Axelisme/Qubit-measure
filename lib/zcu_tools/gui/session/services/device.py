@@ -303,7 +303,7 @@ class DeviceService:
         prior = current  # capture before any State write (pre-open)
         name = req.name
 
-        def work(factory: Any) -> Any:  # factory is None (wants_progress=False)
+        def work(_factory: Any) -> Any:  # factory is None (wants_progress=False)
             return self._connect(req)
 
         def on_terminal(bg: BgResult, settle: SettleFn) -> None:
@@ -416,7 +416,7 @@ class DeviceService:
         prior = current  # capture before any State write (pre-open)
         name = req.name
 
-        def work(factory: Any) -> Any:  # factory is None (wants_progress=False)
+        def work(_factory: Any) -> Any:  # factory is None (wants_progress=False)
             return self._disconnect(name)
 
         def on_terminal(bg: BgResult, settle: SettleFn) -> None:
