@@ -446,8 +446,28 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | Shaped period table passes its envelope-motion, bandwidth and split guards | Midpoint-frozen envelopes, eight amplitude Chebyshev nodes and 16 phase Fourier samples for the actual drive port. Integrate the fractional-period tail directly. |
 | Shaped approximations rejected, or direct integration costs less | DOP853, with no input-state restriction. |
 | Two constant tones with a valid Floquet frame and passing harmonic omission and convergence bounds | Floquet k=0 preparation. Passing probe guards select modal second-order Dyson in H_F + D₀; other probes use periodic propagation in the same accepted frame. |
+| Two constant tones rejected by the k=0 omission bound, with a valid frame and passing calibrated finite-Fourier bound | Retain near-resonant bath/probe modal edges in a sparse interaction-picture ODE. |
 | Other two-tone segments, including failed Floquet guards | Sum both drives in batched numba DOP853. |
 | Three or more tones | Sum all drives in batched numba DOP853. |
+
+The additional two-tone route is **calibrated finite-Fourier admission**, not a
+per-segment error guarantee. It only runs after the original Duhamel guard
+rejects. Among bath/probe harmonics with |k| <= 4, it retains modal edges whose
+divisor |i*nu-lambda_i+lambda_j| <= 0.1/ns, including exactly resonant edges.
+There is no larger retention window. The remaining candidates use an averaging
+bound; every sampled |k| > 4 coefficient contributes to the direct tail bound.
+A resolvent bound covers each complete 2 MHz probe bin, expanding the retained
+probe window by the bin half-width. Retained-channel norm growth is charged.
+Omission uses 95% of the budget, frame/convergence estimates use 2.5%, and the
+remaining 2.5% is a numerical allowance, not a certified global ODE bound.
+
+Four assumptions remain uncertified: aliasing beyond the Fourier sample grid,
+contractivity of the full finite-Fourier generator, the ODE's global error,
+and directed rounding of norm/eigensystem computations. The finite-Fourier
+omission argument assumes exact coefficients and contractive base/full
+propagators. Strict local ODE tolerances and regression comparisons calibrate
+this route but do not establish those assumptions. It never clips or
+renormalizes density, retries, or reclassifies after apply.
 
 T4 and T6 are terminal families for their dispatched rows. Their guards accept
 every row in those domains, so these branches have no DOP853 fallback. Custom

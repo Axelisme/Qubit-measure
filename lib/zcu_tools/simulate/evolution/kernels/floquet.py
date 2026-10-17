@@ -21,12 +21,20 @@ comparison. Harmonic truncation and quadrature convergence must each fit a third
 of budget. Probe limits or Dyson-remainder failures use a one-period propagator
 of H_F+D0 plus the probe, binary powering, and direct remainder integration. Frames needing more than 4096 phase
 samples (spectral span including drive / Stark frequency > 128) are rejected.
+When the original Duhamel guard rejects, calibrated finite-Fourier admission
+retains bath/probe modal edges with |i*nu-lambda_i+lambda_j| <= 0.1/ns, including
+exact resonance, in a sparse interaction-picture ODE. Other |k|<=4 coefficients
+use an averaging omission bound; every sampled |k|>4 coefficient enters the tail.
+A resolvent bound covers each complete 2 MHz probe bin, not only its center.
+This is not a per-segment error guarantee. Four assumptions remain uncertified:
+sample-grid-external aliasing, full finite-Fourier generator contractivity,
+global ODE error, and directed rounding of norms and eigensystems.
 No density is clipped or renormalized.
 Only Floquet-invalid rows return to the engine; this module never calls
 another kernel.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from numba import njit
@@ -45,6 +53,7 @@ from ..declarations import (
 )
 from ..kernel import GuardPreparation, GuardResult, Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
+from . import _floquet_sidebands as sb
 
 
 @dataclass(frozen=True)
@@ -66,24 +75,37 @@ class _Entry:
     inverse: NDArray[np.complex128]
     couplings: NDArray[np.complex128]
     valid: bool
+    model: SecularModel
+    sidebands: sb.Frame | None = None
 
     @property
     def nbytes(self) -> int:
-        return sum(
-            a.nbytes
-            for a in (
-                self.energies,
-                self.rotations,
-                self.harmonic,
-                self.bath,
-                self.x,
-                self.y,
-                self.omitted,
-                self.strengths,
-                self.lam,
-                self.modes,
-                self.inverse,
-                self.couplings,
+        model_arrays = (
+            self.model.energies_ghz,
+            self.model.eigenvectors,
+            self.model.rates_per_ns,
+            self.model.dephasing_per_ns,
+            *(a for d in self.model.drives for a in (d.in_phase_ghz, d.quadrature_ghz)),
+        )
+        return (
+            (0 if self.sidebands is None else self.sidebands.nbytes)
+            + sum(a.nbytes for a in model_arrays)
+            + sum(
+                a.nbytes
+                for a in (
+                    self.energies,
+                    self.rotations,
+                    self.harmonic,
+                    self.bath,
+                    self.x,
+                    self.y,
+                    self.omitted,
+                    self.strengths,
+                    self.lam,
+                    self.modes,
+                    self.inverse,
+                    self.couplings,
+                )
             )
         )
 
@@ -299,8 +321,8 @@ def _build(
     harmonic = np.asarray(np.fft.fftfreq(count) * count, dtype=np.float64)
     edge = np.abs(harmonic) >= count / 4
     frame_error = float(4 * sum(np.linalg.norm(c, 2) for c in coefficients[edge]))
-    # Keep only k=0, not views retaining the full Fourier sample arrays;
-    # Prepared.nbytes must account for every retained array allocation.
+    # Keep only owned k=0 arrays. Rejected rows reconstruct Fourier samples from
+    # rotations and the immutable model; legacy accepts pay no sideband build.
     bath_zero, x_zero, y_zero = bath[0].copy(), x[0].copy(), y[0].copy()
     arrays = (
         energies,
@@ -336,6 +358,7 @@ def _build(
         inverse,
         couplings,
         bool(valid),
+        model,
     )
 
 
@@ -531,7 +554,27 @@ def _mask(data, bounds, parameters, budget):
     return result
 
 
-def _acceptance(
+def _with_sidebands(entry: _Entry) -> _Entry:
+    """Reconstruct candidates only for rejected k=0 rows, without redoing the frame."""
+    if entry.sidebands is not None:
+        return entry
+    samples = np.fft.ifft(entry.rotations, axis=0) * len(entry.rotations)
+    bath, x, y, _ = _averages(entry.model, samples)
+    return replace(
+        entry,
+        sidebands=sb.build(
+            bath, x, y, entry.frequency, (entry.modes, entry.inverse), _comm
+        ),
+    )
+
+
+def _sideband_plan(entry: _Entry, parameters: NDArray[np.float64]) -> sb.Plan:
+    if entry.sidebands is None:
+        raise RuntimeError("Floquet sideband candidates were not prepared")
+    return sb.plan(entry.sidebands, entry.lam, entry.modes, entry.inverse, parameters)
+
+
+def _legacy_acceptance(
     entry: _Entry, parameters: NDArray[np.float64], budget: float
 ) -> NDArray[np.bool_]:
     return _mask(
@@ -546,6 +589,19 @@ def _acceptance(
         parameters,
         budget,
     )
+
+
+def _acceptance(
+    entry: _Entry, parameters: NDArray[np.float64], budget: float
+) -> NDArray[np.bool_]:
+    accepted = _legacy_acceptance(entry, parameters, budget)
+    for index in np.flatnonzero(~accepted):
+        p = parameters[index]
+        if entry.valid and entry.convergence * p[0] + entry.frame_error <= budget / 40:
+            entry = _with_sidebands(entry)
+            selected = _sideband_plan(entry, p)
+            accepted[index] = selected.bound <= budget * 0.95
+    return accepted
 
 
 @njit(nogil=True, cache=True)
@@ -722,7 +778,14 @@ def _advance(
 
 
 class FloquetKernel:
-    """C5 state-independent Floquet preparation and batched modal Dyson apply.
+    """C5 state-independent Floquet preparation and density evolution.
+
+    Original Duhamel accepts retain modal Dyson/periodic apply. Rejected rows
+    may use calibrated finite-Fourier admission: retain slow bath/probe modal
+    edges within 0.1/ns, average the other |k|<=4 terms and charge all sampled
+    higher harmonics to the tail. Aliasing outside the sample grid, full
+    finite-Fourier contractivity, global ODE error and directed rounding of
+    norms/eigensystems remain uncertified. This is not a budget guarantee.
 
     Methods accept the SegmentTable/ModelSource contract in ns/GHz/rad.
     prepare raises RuntimeError on failed numerical construction; apply
@@ -730,11 +793,11 @@ class FloquetKernel:
     """
 
     declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("floquet", "period-roundoff-v4"),
+        identity=AlgorithmIdentity("floquet", "resonant-sidebands-v5"),
         eligibility=Eligibility(2, 2, "constant"),
         guard=GuardDeclaration(("model-build",), builds_model=True),
         accuracy="guarded-approximation",
-        reuse=ReuseDeclaration("floquet/period-roundoff-v4/serial"),
+        reuse=ReuseDeclaration("floquet/resonant-sidebands-v5/serial"),
         fallback="legacy-order",
     )
 
@@ -758,7 +821,7 @@ class FloquetKernel:
         source: ModelSource,
         budget: float,
     ) -> GuardResult:
-        """Return the unchanged guard mask and evolve-local Floquet preparations.
+        """Return combined k=0/retained-sideband admission and reusable preparations.
 
         Each key's immutable model-only payload can replace prepare for the
         same source and budget. No preparation is retained on this kernel.
@@ -797,10 +860,28 @@ class FloquetKernel:
                 source,
                 budget,
             )
+            members = np.flatnonzero(inverse == key_index)
+            entry = prepared.entries[0]
+            legacy = _legacy_acceptance(entry, params[members], budget)
+            eligible = (~legacy) & (
+                entry.convergence * params[members, 0] + entry.frame_error
+                <= budget / 40
+            )
+            if entry.valid and eligible.any():
+                entry = _with_sidebands(entry)
+                if entry.sidebands is None:
+                    raise RuntimeError("Floquet sideband preparation failed")
+                frame = sb.prepare(
+                    entry.sidebands,
+                    entry.lam,
+                    entry.modes,
+                    entry.inverse,
+                    params[members[eligible]],
+                )
+                prepared = _Prepared((replace(entry, sidebands=frame),))
             preparations.append(
                 GuardPreparation(keys[key_index : key_index + 1], prepared)
             )
-            members = np.flatnonzero(inverse == key_index)
             accepted[positions[members]] = _acceptance(
                 prepared.entries[0], params[members], budget
             )
@@ -893,12 +974,37 @@ class FloquetKernel:
         for key in np.unique(key_index):
             positions = np.flatnonzero(key_index == key)
             entry = prepared.entries[int(key)]
-            mask = _acceptance(entry, parameters[positions], budget)
-            if not mask.all():
-                failed = rows[positions[~mask]]
-                raise RuntimeError(f"Floquet guard failed at segments {failed}")
             chunk = states[positions].copy()
-            _advance(entry, parameters[positions], chunk, budget)
+            old = _legacy_acceptance(entry, parameters[positions], budget)
+            if old.all():
+                # Preserve the incumbent apply batch and its numerical path.
+                _advance(entry, parameters[positions], chunk, budget)
+            else:
+                entry = _with_sidebands(entry)
+                legacy = chunk[old].copy()
+                _advance(entry, parameters[positions][old], legacy, budget)
+                chunk[old] = legacy
+            for local in np.flatnonzero(~old):
+                p = parameters[positions[local]]
+                selected = _sideband_plan(entry, p)
+                if (
+                    not entry.valid
+                    or entry.convergence * p[0] + entry.frame_error > budget / 40
+                    or selected.bound > budget * 0.95
+                ):
+                    raise RuntimeError(
+                        f"Floquet guard failed at segments {rows[positions[local : local + 1]]}"
+                    )
+                start = _rotation(entry.rotations, entry.harmonic, p[1])
+                end = _rotation(entry.rotations, entry.harmonic, p[2])
+                chunk[local] = sb.advance(
+                    selected,
+                    (entry.lam, entry.modes, entry.inverse),
+                    start,
+                    end,
+                    p[0],
+                    chunk[local],
+                )
             if not np.isfinite(chunk).all():
                 raise RuntimeError(
                     f"Floquet nonfinite density at segments {rows[positions]}"
