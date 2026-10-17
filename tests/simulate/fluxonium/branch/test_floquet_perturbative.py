@@ -11,9 +11,12 @@ peaked at the tracked quasi-energy difference, cross-consistency with
 
 from __future__ import annotations
 
+from typing import TypedDict
+
 import numpy as np
 import pytest
 import qutip as qt
+from numpy.typing import NDArray
 from zcu_tools.simulate.fluxonium.branch.floquet import (
     FloquetBranchAnalysis,
     calc_floquet_fourier_melem,
@@ -28,7 +31,26 @@ _QUB_DIM = 8
 _PHOTONS = np.array([0.0, 5.0, 10.0, 20.0])
 
 
-def _build_floquet_setup() -> dict:
+class _FloquetSetup(TypedDict):
+    """Shared no-TLS Floquet data for the perturbative resonance-map tests."""
+
+    fbasis_n: list[qt.FloquetBasis]
+    """Floquet bases in _PHOTONS order, one per photon value."""
+
+    branch_infos: dict[int, list[int]]
+    """Branch label to tracked mode indices, one per photon in _PHOTONS order."""
+
+    branch_energies: dict[int, list[float]]
+    """Quasi-energies at the tracked indices, in the Hamiltonian's energy units."""
+
+    n_op: NDArray[np.complex128]
+    """Dimensionless charge operator with shape (_QUB_DIM, _QUB_DIM)."""
+
+    ts: NDArray[np.float64]
+    """32 equally spaced times over one drive period, excluding its endpoint, in ns."""
+
+
+def _build_floquet_setup() -> _FloquetSetup:
     from scqubits.core.fluxonium import Fluxonium
 
     fluxonium = Fluxonium(*_PARAMS, flux=_FLUX, cutoff=40, truncated_dim=_QUB_DIM)
@@ -54,21 +76,21 @@ def _build_floquet_setup() -> dict:
     branch_infos = fb_analysis.calc_branch_infos(fbasis_n, [0, 1], progress=False)
     branch_energies = fb_analysis.calc_branch_energies(fbasis_n, branch_infos)
     ts = np.linspace(0.0, 2 * np.pi / _R_F, 32, endpoint=False)
-    return dict(
-        fbasis_n=fbasis_n,
-        branch_infos=branch_infos,
-        branch_energies=branch_energies,
-        n_op=n_op,
-        ts=ts,
-    )
+    return {
+        "fbasis_n": fbasis_n,
+        "branch_infos": branch_infos,
+        "branch_energies": branch_energies,
+        "n_op": n_op,
+        "ts": ts,
+    }
 
 
 @pytest.fixture(scope="module")
-def floquet_setup() -> dict:
+def floquet_setup() -> _FloquetSetup:
     return _build_floquet_setup()
 
 
-def test_fourier_melem_hermiticity(floquet_setup: dict) -> None:
+def test_fourier_melem_hermiticity(floquet_setup: _FloquetSetup) -> None:
     # n̂ is hermitian, so M_{i->j}^{(k)} == conj(M_{j->i}^{(-k)}). The relation is
     # exact for a fixed modes evaluation; 1e-8 sits well above qutip solver noise
     # and well below the dominant |M| components (~5e-2 and ~3e-4 here).
@@ -99,7 +121,9 @@ def test_fourier_melem_cold_cache_is_repeatable() -> None:
     np.testing.assert_allclose(first[1], second[1], rtol=0.0, atol=0.0)
 
 
-def test_resonance_map_peaks_at_quasi_energy_difference(floquet_setup: dict) -> None:
+def test_resonance_map_peaks_at_quasi_energy_difference(
+    floquet_setup: _FloquetSetup,
+) -> None:
     # With a single (0,1) pair and k=0, the map along E_tls must peak at the
     # tracked quasi-energy difference dE01(n), within the axis grid step.
     branch_energies = floquet_setup["branch_energies"]
@@ -126,7 +150,7 @@ def test_resonance_map_peaks_at_quasi_energy_difference(floquet_setup: dict) -> 
         assert peak == pytest.approx(dE01[n], abs=step)
 
 
-def test_resonance_map_matches_fourier_melem(floquet_setup: dict) -> None:
+def test_resonance_map_matches_fourier_melem(floquet_setup: _FloquetSetup) -> None:
     # Cross-check: a single-pair single-harmonic map equals the Lorentzian built
     # by hand from calc_floquet_fourier_melem.
     branch_infos = floquet_setup["branch_infos"]
@@ -157,7 +181,7 @@ def test_resonance_map_matches_fourier_melem(floquet_setup: dict) -> None:
         np.testing.assert_allclose(res_map[:, n], expected, rtol=1e-12)
 
 
-def test_fast_fail_validation(floquet_setup: dict) -> None:
+def test_fast_fail_validation(floquet_setup: _FloquetSetup) -> None:
     kwargs: dict = dict(
         branch_pairs=[(0, 1)],
         harmonics=[0],
