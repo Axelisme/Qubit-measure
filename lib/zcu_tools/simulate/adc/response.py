@@ -34,6 +34,7 @@ class ConditionalReadout:
             tuple[object, ...], tuple[tuple[ReadoutPulse, ...], tuple[RealArray, ...]]
         ] = {}
         self._v = np.sqrt(model.kappa_external_per_ns / 2)
+        self._scattering = self._v * np.exp(-1j * model.mismatch_phase_rad)
         self._q = model.rates_per_ns - np.diag(model.rates_per_ns.sum(axis=0))
         detuning = model.frequencies_ghz - model.reference_frequency_ghz
         self._a = np.array(
@@ -63,7 +64,7 @@ class ConditionalReadout:
         contents; ill-conditioned driven blocks use the full matrix exponential.
         Other envelopes use the existing DOP853 moment ODE.
         ConditionalSums.sums has shape (contents, reads, states, 2), after
-        demodulation/gain/phase/offset. Traces have shape
+        physical delay/demodulation/conjugation/gain/phase/offset. Traces have shape
         (contents, reads, states, samples, 2) only if batch.include_traces;
         otherwise traces is None. No initial-state or noise draw occurs.
         Inputs are not mutated; populations are never clipped or normalized.
@@ -121,7 +122,9 @@ class ConditionalReadout:
 
         pulses are finite coherent readout drives in ns/GHz. grid owns physical
         times and demodulation. Return conditional traces and final populations
-        in model.state_labels order, including pre-pulse/ringup/ringdown. No
+        in model.state_labels order, including pre-pulse/ringup/ringdown delayed
+        by receiver.time_of_flight_ns. Final populations refer to the emitted
+        time of the last ADC sample, no earlier than readout origin. No
         initial-state or receiver-noise draws occur. State-conditioned moments
         obey dm_s=ΣQ_st*m_t-A_s*m_s+v*b*p_s, not a mean-frequency field equation.
         ValueError signals invalid input/callbacks; RuntimeError signals failed
@@ -136,6 +139,10 @@ class ConditionalReadout:
         self, pulses: tuple[ReadoutPulse, ...], times: RealArray, *, constant: bool
     ) -> tuple[NDArray[np.complex128], NDArray[np.complex128]]:
         """Solve one physical trajectory on the union of all requested read grids."""
+        # Evaluate the emitted field at retarded time. Restoring the absolute
+        # carrier's frame phase below is necessary even when f_ref == f_drive.
+        delay = self.model.receiver.time_of_flight_ns
+        times = times - delay
         start = min(p.start_ns for p in pulses) if pulses else 0.0
         end = max(start, float(times[-1]))
         points = sorted(
@@ -180,7 +187,8 @@ class ConditionalReadout:
             incident = np.array([self._incident(pulses, t) for t in times])
         self._validate_solution(state)
         moments = outputs[:, :, 1:, :].sum(axis=1)
-        outgoing = incident[:, None] - np.einsum("r,kri->ki", self._v, moments)
+        outgoing = incident[:, None] - np.einsum("r,kri->ki", self._scattering, moments)
+        outgoing *= np.exp(2j * np.pi * self.model.reference_frequency_ghz * delay)
         return outgoing, state
 
     def _incident(self, pulses: tuple[ReadoutPulse, ...], t: float) -> complex:
@@ -287,8 +295,7 @@ class ConditionalReadout:
             - 1j * grid.phase_rad
         )
         signal = (
-            outgoing
-            * oscillator[:, None]
+            np.conj(outgoing * oscillator[:, None])
             * receiver.gain
             * np.exp(1j * receiver.phase_rad)
         )
@@ -397,6 +404,8 @@ def _model_key(model: ReadoutModel) -> tuple[object, ...]:
         model.kappa_internal_per_ns.tobytes(),
         model.kappa_external_per_ns.tobytes(),
         model.rates_per_ns.tobytes(),
+        model.mismatch_phase_rad.tobytes(),
+        receiver.time_of_flight_ns,
         receiver.gain,
         receiver.phase_rad,
         receiver.offset.tobytes(),

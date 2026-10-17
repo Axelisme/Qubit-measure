@@ -33,6 +33,9 @@ _RESONATOR_CH = Expr("{resonator}.wiring.ch")
 _RESONATOR_RO_CH = Expr("{resonator}.wiring.ro_ch")
 _TIME_OF_FLIGHT_PLUS_005_US = Expr("{resonator}.ext.time_of_fly + 0.05")
 
+# Initial pulse duration in us for the readout template and single-tone RO windows.
+READOUT_PULSE_LENGTH_US = 1.0
+
 
 def pulse(
     *,
@@ -118,7 +121,7 @@ TEMPLATES: dict[str, TemplateDef] = {
             "nqz": 2,
             "gain": 0.1,
             "waveform.style": "const",
-            "waveform.length": 1.0,
+            "waveform.length": READOUT_PULSE_LENGTH_US,
         },
         default_name="readout_rf",
     ),

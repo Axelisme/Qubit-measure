@@ -230,11 +230,21 @@ def plan_template(
         float(np.deg2rad(settings.readout.adc.phase_deg)),
         np.array(settings.readout.adc.offset_adc),
         np.array(settings.readout.adc.noise_psd_adc2_ns) / dt,
+        time_of_flight_ns=settings.readout.adc.time_of_flight_ns,
     )
     model = replace(
         readout_model(joint, resonator_pair),
         receiver=receiver,
         reference_frequency_ghz=pulses[0][0].frequency_ghz,
+        mismatch_phase_rad=np.array(
+            [
+                r.mismatch_phase_rad
+                for r in (
+                    settings.readout.resonators.r1,
+                    settings.readout.resonators.r2,
+                )
+            ]
+        ),
     )
     return FTFTemplatePlan(
         source,

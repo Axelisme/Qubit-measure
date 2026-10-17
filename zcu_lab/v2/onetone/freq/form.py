@@ -3,10 +3,11 @@
 from typing import Annotated, Literal
 
 from pydantic import Field, JsonValue
-from zcu_tools.cfg_model import Expr, Hidden, Range, Template
+from zcu_tools.cfg_model import Hidden, Range, Template
 from zcu_tools.gui.form import Display, FormEnv, FormModel
 from zcu_tools.gui.form_adapter import Form, FormContext
 
+from zcu_lab.v2.onetone._shared import initial_ro_length
 from zcu_lab.v2.onetone.freq.core import FreqCfg, HomophasalSamplingCfg
 
 
@@ -78,7 +79,7 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
                     "readout",
                     set={
                         "gain": 0.05,
-                        "ro_length": Expr("$resonator.ext.default_probe_length - 0.1"),
+                        "ro_length": initial_ro_length(),
                     },
                 ),
             },
