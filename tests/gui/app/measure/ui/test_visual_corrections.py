@@ -295,10 +295,14 @@ def test_A6_Analyze_full_width_below_params_before_writeback(
             has_stretch_before = False
             for i in range(parent_layout.count()):
                 item = parent_layout.itemAt(i)
+                assert item is not None
                 if item.widget() is tab.analyze_btn:
                     # check if previous item is spacer
-                    if i > 0 and parent_layout.itemAt(i - 1).spacerItem() is not None:
-                        has_stretch_before = True
+                    if i > 0:
+                        previous_item = parent_layout.itemAt(i - 1)
+                        assert previous_item is not None
+                        if previous_item.spacerItem() is not None:
+                            has_stretch_before = True
                     break
             assert not has_stretch_before, (
                 "Analyze should not have stretch before it (should be 100% width)"

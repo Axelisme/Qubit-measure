@@ -22,6 +22,7 @@ import sys
 import time
 from functools import partial
 from statistics import median
+from typing import TypedDict
 
 import numpy as np
 
@@ -47,7 +48,20 @@ from zcu_tools.notebook.analysis.fluxdep.fitting import (
 from tests.notebook.analysis.fluxdep._synthetic import synth_ABC
 
 
-def _timed(fn, *, repeat=5):
+class _TimingStats(TypedDict):
+    """Timing record shared by the microbenchmarks.
+
+    median: Median elapsed time across all repeats, in seconds.
+    min: Fastest elapsed time across all repeats, in seconds.
+    n: Number of repeats.
+    """
+
+    median: float
+    min: float
+    n: int
+
+
+def _timed(fn, *, repeat=5) -> _TimingStats:
     times = []
     for _ in range(repeat):
         t0 = time.perf_counter()
@@ -74,13 +88,13 @@ def warm_up():
     entry_lower_bound(A, B, C, 0.5, 3.0)
 
 
-def micro_benches(quick: bool) -> dict:
+def micro_benches(quick: bool) -> dict[str, _TimingStats]:
     shapes = [(240, 6), (240, 12), (240, 40)]
     if quick:
         shapes = [(60, 6)]
 
     repeat = 3 if quick else 11
-    out: dict = {}
+    out: dict[str, _TimingStats] = {}
 
     for N, K in shapes:
         A, B, C = synth_ABC(N=N, K=K, a_true=1.5, seed=1)
