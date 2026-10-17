@@ -35,7 +35,7 @@ def preference(
     period = kernels.get("period_table", PeriodTableKernel())
     frequency = np.abs(table.tone_frequency_ghz[rows, 0])
     duration = table.duration_ns[rows]
-    # Ticket 40: budget-scaled controls reduce high-carrier work. Preserve the
+    # Budget-scaled controls reduce high-carrier work. Preserve the
     # low-carrier frequency term, where lab-frame stability limits integration.
     carrier_work = 1 + 0.3 * frequency - 0.07 * np.maximum(0, frequency - 1)
     direct = 0.8 * duration * carrier_work

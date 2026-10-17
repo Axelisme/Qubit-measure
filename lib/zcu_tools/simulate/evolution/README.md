@@ -171,9 +171,9 @@ come from single-threaded prepare/apply comparisons on 16-level FTF models over
 50 MHz to 7 GHz, 30 ns to 10 us, and reuse counts 1, 2, 5, 9, 10 and 20. They are
 cost estimates, not timing probes or numerical guards. The direct coefficient
 and fractional-tail coefficient include the approximately 20% direct integration
-cost reduction from the Hermitian commutator. Ticket 40 reduces the direct
-score's carrier-dependent slope above 1 GHz after removing the fixed step
-ceiling and scaling tolerances to the budget. The frequency term below 1 GHz
+cost reduction from the Hermitian commutator. Without a fixed step ceiling
+and with budget-scaled tolerances, high-carrier DOP853 work falls, so the
+direct score's carrier-dependent slope is lower above 1 GHz. The frequency term below 1 GHz
 stays unchanged because lab-frame stability can still limit steps there.
 Fractional-tail scores stay conservative at their previous calibration.
 Short-pulse scans use all six reuse
