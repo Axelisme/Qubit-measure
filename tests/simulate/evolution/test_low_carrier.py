@@ -115,7 +115,7 @@ def test_many_low_carrier_keys_do_not_all_stay_live():
                 ObservedPeriod(),
             ),
         ),
-        ModelSource(np.eye(3, dtype=complex) / 3, lambda level: synthetic_model(3)),
+        ModelSource((np.eye(3) / 3).astype(complex), lambda level: synthetic_model(3)),
         (timeline,),
     )
     assert result.paths.segments_by_kernel == {"floquet_period": 2 * count}
