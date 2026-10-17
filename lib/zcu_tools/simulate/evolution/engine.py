@@ -10,8 +10,6 @@ from threading import Event, Lock
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
-from joblib import Parallel
-
 if TYPE_CHECKING:
     from .kernel import Kernel
 
@@ -19,11 +17,12 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ._envelope import sample_values
+from ._parallel import execution_pool, native_limit
 from ._validation import integers, owned, shape
 from .secular import FluxSchedule, FluxWaveform, ModelSource
 
 # Replay identity of the segment engine numerical algorithms, independent of records.
-SEGMENT_NUMERIC_VERSION = "segment-engine-v2"
+SEGMENT_NUMERIC_VERSION = "segment-engine-v3"
 
 
 @dataclass(frozen=True)
@@ -201,11 +200,16 @@ class TimelineBatch:
 class PathDiagnostics:
     """Author-only aggregate counts, not acquisition results.
 
-    segments_by_kernel: kernel name -> nonnegative segment count.
+    segments_by_kernel: kernel name -> nonnegative timeline-segment count.
+        A shared prefix segment counts once per adopting timeline under the
+        kernel that computed it. Its exceedances scale by the same rule.
     points_by_class: dispatch path-class name -> nonnegative point count.
     exceeded_by_kernel: kernel name -> post-apply accuracy exceedance segment
         count, with only positive counts retained. Exceeded results remain
         committed without correction or retry; these are not solver failures.
+    max_trace_error: maximum absolute complex trace-minus-one of final
+        readout densities; zero for an empty evolve. Report-only, with no
+        correction, rejection or readout-specific tolerance comparison.
     All mappings default empty, own immutable copies and reject empty names
     or negative counts with ValueError. A point may participate in several
     path classes.
@@ -214,8 +218,11 @@ class PathDiagnostics:
     segments_by_kernel: Mapping[str, int] = field(default_factory=dict)
     points_by_class: Mapping[str, int] = field(default_factory=dict)
     exceeded_by_kernel: Mapping[str, int] = field(default_factory=dict)
+    max_trace_error: float = 0.0
 
     def __post_init__(self) -> None:
+        if not np.isfinite(self.max_trace_error) or self.max_trace_error < 0:
+            raise ValueError("max_trace_error must be finite and nonnegative")
         for name, counts in (
             ("segments_by_kernel", self.segments_by_kernel),
             ("points_by_class", self.points_by_class),
@@ -272,13 +279,19 @@ class Cancelled(Exception):
 
 
 class Engine:
-    """Segment engine with a per-call threading pool and persistent prepare LRU.
+    """Segment engine with inline or threaded execution and persistent prepare LRU.
 
     workers: positive sole parallel width; kernels remain single-threaded.
     cache_bytes: nonnegative resident-array byte limit, not a process RAM cap.
     kernels: optional algorithm collection replacing the production registry;
         each stateless collaborator implements the internal Kernel contract and
         has a unique name. Missing required names raise, never silently reroute.
+        Terminal families must cover their full dispatch domain: t4 handles all
+        no-tone rows and t6 all single constant-tone rows. If either terminal
+        guard rejects a dispatched row, evolve raises RuntimeError with
+        "no valid kernel". Shaped rows try gate_cache, period_table and dop853
+        in amortized-cost order; a guard rejection tries the next candidate.
+        Preparation and apply failures propagate without reclassification.
     chunks_per_worker: positive chunk multiplier; only scheduling, not physics.
 
     The zero-level model identity names the entire ModelSource: all physical
@@ -286,7 +299,11 @@ class Engine:
     Cache namespaces also include the error budget, so stricter requests cannot
     reuse looser preparations. Calls on one instance serialize; close is
     idempotent and waits for active work before clearing the cache. No worker
-    resource survives an evolve call. The prepare cache persists across evolve\n    calls; each evolve opens and closes its own joblib threading pool.
+    resource survives an evolve call. The prepare cache persists across evolve
+    calls; multi-timeline work opens and closes its own joblib threading pool.
+    Empty work, a single timeline, and workers=1 run inline without a pool.
+    Native BLAS uses one thread throughout evolve, coordinated across engines.
+    The last overlapping evolve restores the original process-wide BLAS limits.
     """
 
     def __init__(
@@ -331,15 +348,20 @@ class Engine:
         when set, raises Cancelled, without returning partial results.
         Model ValueErrors propagate; numerical failure raises RuntimeError
         naming the point and segment. Results do not depend on chunking or
-        worker width except for floating-point rounding. Post-apply accuracy
+        worker width except for floating-point rounding. Classification may
+        borrow this call's worker pool for eight or more shared prepare keys.
+        Local guards run in timeline workers and hand their tables to apply.
+        Guard decisions remain independent of worker width and execution order.
+        Post-apply accuracy
         exceedances stay in the result's paths.exceeded_by_kernel and produce
         exactly one RuntimeWarning per call, without correction or retry.
         """
         from ._dispatch import classify
         from ._planning import plan
+        from ._prefix import PrefixResolver
         from ._schedule import Schedule
 
-        with self._lock:
+        with self._lock, native_limit.acquire():
             if self._closed:
                 raise RuntimeError("engine is closed")
             if not np.isfinite(budget) or budget <= 0:
@@ -354,9 +376,17 @@ class Engine:
                     PathDiagnostics(),
                 )
             geometry = plan(source, batches)
-            dispatch = classify(geometry, self._kernels, source, budget)
-            schedule = Schedule(geometry, dispatch, source, budget, cancel)
-            with Parallel(n_jobs=self._workers, backend="threading") as pool:
+            workers = (
+                self._workers
+                if len(geometry.points) > 1 and len(geometry.table.timeline)
+                else 1
+            )
+            with execution_pool(workers) as pool:
+                geometry = PrefixResolver(
+                    geometry, self._kernels, source, budget, cancel
+                ).resolve(self._cache, pool, self._chunks)
+                dispatch = classify(geometry, self._kernels, source, budget, pool=pool)
+                schedule = Schedule(geometry, dispatch, source, budget, cancel)
                 result = schedule.run(self._kernels, self._cache, pool, self._chunks)
             if cancel.is_set():
                 raise Cancelled()

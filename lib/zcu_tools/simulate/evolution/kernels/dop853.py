@@ -40,9 +40,19 @@ def _rhs(time, state, context):
     size = context.models.energies.shape[1]
     rho = state.reshape(size, size)
     h = hamiltonian(time, context)
-    derivative = -2j * np.pi * (h @ rho - rho @ h)
-    derivative -= context.models.decay[context.model] * rho
+    # A density and every real-weighted Runge--Kutta stage are Hermitian.
+    # Thus rho @ h = (h @ rho).H; one dense product supplies both terms.
+    product = h @ rho
+    derivative = np.empty_like(rho)
     for target in range(size):
+        for source in range(size):
+            derivative[target, source] = (
+                -2j
+                * np.pi
+                * (product[target, source] - product[source, target].conjugate())
+                - context.models.decay[context.model, target, source]
+                * rho[target, source]
+            )
         for source in range(size):
             derivative[target, target] += (
                 context.models.rates[context.model, target, source]
@@ -67,6 +77,7 @@ class DOP853Kernel:
     """
 
     name = "dop853"
+    guard_builds = False
 
     def guard(
         self,
@@ -91,7 +102,9 @@ class DOP853Kernel:
     def cost(self, table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.float64]:
         """Estimate RHS work from duration and tone count, with no timing probe."""
         return np.asarray(
-            (1.0 + table.tones[rows]) * np.maximum(1.0, table.duration_ns[rows] / 0.1),
+            0.8
+            * (1.0 + table.tones[rows])
+            * np.maximum(1.0, table.duration_ns[rows] / 0.1),
             dtype=np.float64,
         )
 
@@ -153,7 +166,11 @@ class DOP853Kernel:
         endpoint in its own model eigenbasis. Later input slots are ignored.
         A basis overlap is applied on model changes within a chain. Across
         calls, the engine supplies the next input in the next model's basis.
-        The integrator stops at boundaries and retains its last accepted step.
+        Each row starts from a deterministic 0.1 ns step seed and adapts up to
+        the smallest spacing between envelope knots inside the row's local
+        envelope window. Samples outside that window and all flux waveform
+        samples are ignored. Constant envelopes have no sampling ceiling.
+        No adaptive history carries between rows.
 
         Raises ValueError for incompatible prepared data, state/index shapes or
         nonexistent ports. RuntimeError signals numerical failure; earlier rows

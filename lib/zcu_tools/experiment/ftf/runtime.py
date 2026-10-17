@@ -28,6 +28,8 @@ from zcu_tools.simulate.adc import (
     ChannelReadout,
     ConditionalReadout,
     ConditionalSums,
+    PopulationValidationError,
+    normalize_populations,
     round_statistics,
     sample_traces,
 )
@@ -48,12 +50,15 @@ class FTFNumericUse:
 
     acquire_sequence/round_index identify the solve's sampling scope. paths counts
     actual engine segment paths; it contains no densities or noise realizations.
-    A reused snapshot does not create a new solve or change this record.
+    rejected_rows is zero after successful ADC preparation, or the number of
+    rows ADC rejected under its reported validation rule. The record survives
+    that failure. A reused snapshot does not create a new solve or change it.
     """
 
     acquire_sequence: int
     round_index: int
     paths: PathDiagnostics
+    rejected_rows: int = 0
 
 
 @dataclass(frozen=True)
@@ -148,6 +153,8 @@ class FTFAcquire:
         evolved = owner.engine.evolve(
             plans[0].source, tuple(plan.batch for plan in plans), cancel=Event()
         )
+        # Retain solve diagnostics even when ADC preparation rejects a row.
+        owner.evaluations = (FTFNumericUse(acquire.sequence, index, evolved.paths),)
         state_count = evolved.densities.shape[-1]
         probabilities = np.empty((prod(acquire.point_dims), state_count))
         dc_model = plans[0].source.model((0,) * plans[0].batch.flux.level.shape[1])
@@ -158,9 +165,16 @@ class FTFAcquire:
             plans[0].readout.model.state_labels,
             dc_model.eigenvectors,
         )
-        probabilities[evolved.points] = batch_populations(
-            evolved.densities, readout_basis, readout_basis
-        )
+        populations = batch_populations(evolved.densities, readout_basis, readout_basis)
+        try:
+            probabilities[evolved.points] = normalize_populations(populations)
+        except PopulationValidationError as error:
+            owner.evaluations = (
+                FTFNumericUse(
+                    acquire.sequence, index, evolved.paths, error.rejected_rows
+                ),
+            )
+            raise
         response = ConditionalReadout(
             plans[0].readout.model,
             rtol=owner.settings.numerics.solver.rtol,
@@ -190,7 +204,6 @@ class FTFAcquire:
             content_index.reshape(acquire.point_dims),
             plans[0].readout.model.receiver,
         )
-        owner.evaluations = (FTFNumericUse(acquire.sequence, index, evolved.paths),)
         return _Prepared(
             probabilities.reshape((*acquire.point_dims, state_count)), (channel,)
         )
@@ -289,6 +302,7 @@ def ftf(
     configuration: FTFSettings | str | Path,
     *,
     private_replay: Path | None = None,
+    workers: int = 1,
 ) -> SimulationEnvironment:
     """Build a fixed-profile FTF environment from named values or a YAML path.
 
@@ -299,7 +313,8 @@ def ftf(
     private_replay explicitly enables author-only checked input archives at an
     absolute directory. Replay recomputes with checked numeric and RNG versions;
     no U table or exact density record is consulted. One engine persists across
-    acquires. Worker threads live only during evolve; dropping the environment
+    acquires, using workers (default 1) as its sole parallel width.
+    Worker threads live only during multi-timeline evolve; dropping the environment
     releases its in-memory engine cache. FTFSource.close explicitly clears it.
     """
     settings = (
@@ -322,7 +337,12 @@ def ftf(
                 ),
                 progress=False,
             )
-        coordinator = FTFSource(settings, devices, private_replay=private_replay)
+        coordinator = FTFSource(
+            settings,
+            devices,
+            engine=Engine(workers, 256 * 1024**2),
+            private_replay=private_replay,
+        )
         gens = (
             settings.readout.drive.gen_ch,
             *(s.gen_ch for s in settings.drive_lines.values()),

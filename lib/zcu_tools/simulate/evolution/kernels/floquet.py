@@ -112,6 +112,27 @@ def _fourier_norm(values: NDArray[np.complex128]) -> float:
     return float(sum(np.linalg.norm(a, 2) for a in values[1:]))
 
 
+def _bath_fourier_norm(values: NDArray[np.complex128]) -> float:
+    """Bound every omitted bath harmonic, pairing opposite Fourier modes."""
+    count, dimension, _ = values.shape
+    size = int(np.sqrt(dimension))
+    result = float(np.linalg.norm(values[count // 2], 2))
+    for harmonic in range(1, count // 2):
+        positive = values[harmonic]
+        # Lindblad and frame maps preserve Hermiticity: B[-k] = P conj(B[k]) P.
+        paired = (
+            positive.reshape((size,) * 4)
+            .transpose(1, 0, 3, 2)
+            .conj()
+            .reshape(dimension, dimension)
+        )
+        # The residual also makes this a bound when the identity has roundoff
+        # error: ||B[-k]||_2 <= ||B[k]||_2 + ||B[-k] - paired||_F.
+        residual = np.linalg.norm(values[-harmonic] - paired, "fro")
+        result += 2 * float(np.linalg.norm(positive, 2)) + float(residual)
+    return result
+
+
 def _frame_samples(model: SecularModel, row: tuple[int, float, float], count: int):
     port, frequency, amplitude = row
     size = len(model.energies_ghz)
@@ -161,24 +182,58 @@ def _frame_samples(model: SecularModel, row: tuple[int, float, float], count: in
     return energies, rotations[:-1], residual, overlap
 
 
+def _fourier_averages(samples: NDArray[np.complex128]):
+    """Return all harmonics and the even-sample zero mode, with FFT reductions."""
+    count = len(samples)
+    # Only the coarse zero mode is used. Copy it so the other coarse harmonics
+    # are released before allocating the full spectrum; keep the FFT summation
+    # order used by the convergence check rather than substituting a mean.
+    coarse_zero = np.fft.fft(samples[::2], axis=0)[0].copy()
+    coarse_zero /= count // 2
+    fourier = np.fft.fft(samples, axis=0)
+    fourier /= count
+    return fourier, coarse_zero
+
+
 def _averages(model: SecularModel, rotations: NDArray[np.complex128]):
-    dissipator = _bath(model)
-    baths = []
-    xs = []
-    ys = []
-    for rotation in rotations:
-        transform = np.kron(rotation, rotation.conj())
-        baths.append(transform.conj().T @ dissipator @ transform)
-        xs.append([rotation.conj().T @ d.in_phase_ghz @ rotation for d in model.drives])
-        ys.append(
-            [rotation.conj().T @ d.quadrature_ghz @ rotation for d in model.drives]
+    """Transform each sample once and return full harmonics and convergence."""
+    count, size, _ = rotations.shape
+    dissipator = _bath(model).reshape((size,) * 4)
+    baths = np.empty((count, size * size, size * size), dtype=np.complex128)
+    xs = np.zeros((count, len(model.drives), size, size), dtype=np.complex128)
+    ys = np.zeros_like(xs)
+    active_x = [p for p, d in enumerate(model.drives) if np.any(d.in_phase_ghz)]
+    active_y = [p for p, d in enumerate(model.drives) if np.any(d.quadrature_ghz)]
+    for index, rotation in enumerate(rotations):
+        adjoint = rotation.conj().T
+        # (R x R*)^dagger D (R x R*) in row-major density coordinates.
+        # Contract one Hilbert index at a time: O(size^5), not two dense
+        # Liouville products of O(size^6). Never form the Kronecker transform.
+        baths[index] = np.einsum(
+            "ia,jb,ijkl,kc,ld->abcd",
+            rotation.conj(),
+            rotation,
+            dissipator,
+            rotation,
+            rotation.conj(),
+            optimize=True,
+        ).reshape(size * size, size * size)
+        for port in active_x:
+            xs[index, port] = adjoint @ model.drives[port].in_phase_ghz @ rotation
+        for port in active_y:
+            ys[index, port] = adjoint @ model.drives[port].quadrature_ghz @ rotation
+    bath, coarse_bath = _fourier_averages(baths)
+    del baths
+    x, coarse_x = _fourier_averages(xs)
+    y, coarse_y = _fourier_averages(ys)
+    convergence = float(
+        max(
+            np.linalg.norm(bath[0] - coarse_bath, 2),
+            np.max(abs(x[0] - coarse_x)),
+            np.max(abs(y[0] - coarse_y)),
         )
-    count = len(rotations)
-    return (
-        np.fft.fft(baths, axis=0) / count,
-        np.fft.fft(xs, axis=0) / count,
-        np.fft.fft(ys, axis=0) / count,
     )
+    return bath, x, y, convergence
 
 
 def _sampling_ratio(model: SecularModel, key: np.void) -> float:
@@ -204,15 +259,7 @@ def _build(
     energies, rotations, residual, overlap = _frame_samples(
         model, (port, frequency, amplitude), count
     )
-    bath, x, y = _averages(model, rotations)
-    coarse_bath, coarse_x, coarse_y = _averages(model, rotations[::2])
-    convergence = float(
-        max(
-            np.linalg.norm(bath[0] - coarse_bath[0], 2),
-            np.max(abs(x[0] - coarse_x[0])),
-            np.max(abs(y[0] - coarse_y[0])),
-        )
-    )
+    bath, x, y, convergence = _averages(model, rotations)
     l0 = _comm(np.diag(energies).astype(complex)) + bath[0]
     decomposition = eig(l0)
     lam = np.asarray(decomposition[0], dtype=np.complex128)
@@ -283,7 +330,7 @@ def _build(
         y_zero,
         omitted,
         strengths,
-        _fourier_norm(bath),
+        _bath_fourier_norm(bath),
         convergence,
         frame_error,
         lam,
@@ -654,6 +701,7 @@ class FloquetKernel:
     """
 
     name = "floquet"
+    guard_builds = True
 
     def guard(
         self,

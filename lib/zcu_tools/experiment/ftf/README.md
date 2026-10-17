@@ -1,8 +1,8 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-17，欄位指南導航
+**Last updated:** 2026-10-17, CPU worker selection and retained ADC rejection counts
 
-`ftf(path_or_settings)` builds the same `SimulationEnvironment` for GUI startup
+`ftf(path_or_settings, *, workers=1)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
 `DeviceManager`, applies their initial values once and binds the derived channel
 counts to the fixed mock QICK profile. The returned manager owns cleanup. A
@@ -15,7 +15,15 @@ The executable example is `zcu_lab/simulation_envs/FTF/environment.py` with adja
 limits without restoring startup values. `execute` consumes detached templates.
 The segment engine's fast algorithms are the default numeric path.
 One source owns one `Engine`, whose prepare cache survives across acquires.
-Workers exist only during `evolve`; the engine retains no idle threading pool.
+The keyword `workers` selects the engine's sole parallel width; direct callers
+use one worker by default. GUI and Notebook use the shared FTF environment entry,
+which selects `max(1, (os.cpu_count() or 1) - 2)` workers. Unknown CPU counts
+therefore use one worker. An eight-core host uses six workers. Evolution limits
+native BLAS to one thread for the entire call. Overlapping evolves share a
+process-level reference count: the first sets the limit and the last restores
+it. Do not independently change threadpoolctl limits while an evolve is active.
+Empty work, one timeline, and `workers=1` run serially without a joblib pool.
+Other calls own a threading pool only during `evolve`; no idle pool survives.
 `FTFSource.close()` clears preparations and the engine cache. Dropping the
 environment also releases this in-memory state; no disk cache is involved.
 
@@ -34,7 +42,17 @@ constructs no flux lines or flux controls; shared simulation-engine flux support
 is unchanged. Version 2 settings group physical values, named DC/charge lines,
 readout and numerics. Version 1 is not accepted.
 
-Readout uses the DC model and populations in its energy basis. It ignores charge controls during or after readout. Earlier control portions still evolve
+Readout uses the DC model and populations in its energy basis. FTF explicitly
+calls ADC's `normalize_populations` once after `batch_populations`, before
+conditional responses or sampling. ADC owns the 1e-6 probability tolerance,
+tolerated-negative cleanup and row normalization. Invalid rows fail without
+sampling. ADC raises `PopulationValidationError` with `rejected_rows` for the
+reported validation rule. FTF catches only that type, retains its count in
+`FTFNumericUse.rejected_rows`, then re-raises without sampling. Successful
+preparations retain zero rejected rows. The source retains the latest
+evolve diagnostics even when this preparation fails, including the engine's
+report-only maximum trace error. Raw evolution densities remain unchanged.
+It ignores charge controls during or after readout. Earlier control portions still evolve
 normally. Each point must have exactly one active readout pulse, including when
 several mutually exclusive slots represent that pulse. The environment supports
 one bound ADC with multiple trigger windows. Constant readout envelope values

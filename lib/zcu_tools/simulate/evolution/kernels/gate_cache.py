@@ -10,6 +10,7 @@ from scipy.linalg import expm
 
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
+from ._shaped import drive_bounds, envelope_bounds
 
 _PHASE_COUNT = 16
 _SUBSEGMENTS = 4
@@ -46,6 +47,8 @@ def _unitaries(
     amplitude = float(table.tone_amplitude[row, 0])
     duration = float(table.duration_ns[row])
     phases = np.arange(_PHASE_COUNT) * (2 * np.pi / _PHASE_COUNT)
+    energies = model.energies_ghz
+    h0 = np.diag(energies - (energies[0] + energies[-1]) / 2)
     identity = np.broadcast_to(np.eye(size, dtype=complex), (_PHASE_COUNT, size, size))
     samples = np.empty((_SUBSEGMENTS, _PHASE_COUNT, size, size), dtype=complex)
 
@@ -56,7 +59,7 @@ def _unitaries(
             * np.exp(1j * (phases + 2 * np.pi * frequency * time))
         )
         h = (
-            np.diag(model.energies_ghz)[None]
+            h0[None]
             + z.real[:, None, None] * drive.in_phase_ghz
             + z.imag[:, None, None] * drive.quadrature_ghz
         )
@@ -131,17 +134,19 @@ def _apply_gates(
 class GateCacheKernel:
     """Cache a shaped single-tone segment independently of its start phase.
 
-    The engine owns the repeat-count threshold and namespaces keys by the DC
-    model identity. Keys encode flux level, drive port, envelope content identity,
+    The engine compares amortized preparation/apply work. It namespaces keys by
+    the DC model identity. Keys encode flux level, port, envelope content identity,
     envelope-local offset, frequency, signed amplitude and duration. Absolute
     segment start and carrier theta do not affect preparation. Four closed U
     subsegments use 16 phase nodes each, with half-step secular D on both sides.
-    Numerical build failures raise RuntimeError; invalid budgets, unsupported
-    rows or mismatched representative keys raise ValueError. This fixed-order
-    approximation does not certify arbitrary drives against the supplied budget.
+    A model-only secular split guard rejects long dissipative gates before
+    preparation. Numerical build failures raise RuntimeError; invalid budgets,
+    unsupported rows or mismatched representative keys raise ValueError. This
+    fixed-order approximation does not certify arbitrary drives against budget.
     """
 
     name = "gate_cache"
+    guard_builds = False
 
     def guard(
         self,
@@ -150,8 +155,11 @@ class GateCacheKernel:
         source: ModelSource,
         budget: float,
     ) -> NDArray[np.bool_]:
-        """Accept sampled-envelope single-tone rows; no repetition-count test."""
-        del source  # Applicability depends on the segment shape, not the model.
+        """Accept shaped single tones with a small model-only split estimate.
+
+        Repetition count belongs to the engine. The four-way secular splitting
+        uses duration**3 * Gamma * V**2 / 16 <= 0.01, without reading density.
+        """
         _check_budget(budget)
         accepted = table.tones[rows] == 1
         if table.tone_envelope.shape[1]:
@@ -160,6 +168,19 @@ class GateCacheKernel:
             )
             candidates = np.flatnonzero(accepted)
             accepted[candidates] &= shaped[table.tone_envelope[rows[candidates], 0]]
+        if not np.any(accepted):
+            return accepted
+        selected = rows[accepted]
+        strength, gamma = drive_bounds(table, selected, source)
+        peaks, _ = envelope_bounds(table)
+        peak = peaks[table.tone_envelope[selected, 0]]
+        estimate = (
+            table.duration_ns[selected] ** 3
+            * gamma
+            * (table.tone_amplitude[selected, 0] * peak * strength) ** 2
+            / _SUBSEGMENTS**2
+        )
+        accepted[accepted] = estimate <= 0.01
         return accepted
 
     def prepare_keys(

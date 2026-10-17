@@ -4,7 +4,9 @@ This is deliberately not re-exported by the evolution package. Kernels own
 opaque prepared payloads; the engine only sees their resident array byte size.
 """
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Protocol
 
 import numpy as np
@@ -17,7 +19,7 @@ from .secular import FluxWaveform, ModelSource
 
 @dataclass(frozen=True)
 class SegmentTable:
-    """Structure-of-arrays segment instances; no initial density is stored here.
+    """Structure-of-arrays segments and evolve-local certified prefix inputs.
 
     timeline: nonnegative int64 (rows,), batch-local timeline index.
     start_ns, duration_ns: nonnegative float64 (rows,), segment support.
@@ -42,15 +44,19 @@ class SegmentTable:
     flux_waveform_available: optional bool (timelines,) mask. False marks
         placeholder timelines without continuous samples. None means all
         waveform timelines have samples (or no waveform is supplied).
-    flux_tail_group: optional immutable tuple (rows,) of nonnegative group IDs
-        or None per row. Equal IDs certify identical nonempty no-drive prefixes
-        in this evolve/source, including timing, levels and flux samples. Each
-        group contains at least two rows with identical actual input density.
-        None (the field or a row entry) means no shared prefix is certified.
+    prefix_group: optional immutable tuple (rows,) of nonnegative group IDs
+        or None per row. Equal IDs certify identical nonempty prefixes within
+        one source/evolve, including timing, levels, tones and flux samples.
         Only the planner assigns groups; kernels must not infer them from level.
+    prefix_no_drive: group-aligned tuple. True preserves no-drive B2 exemption.
+    prefix_inputs: immutable group-ID to read-only DC density mapping. The
+        engine computes these known inputs before dependent rows are classified.
+        Workers adopt the latest saved input and skip its preceding rows.
+        These densities never enter model-only preparations or PrepareCache.
+        Absent groups have no known input yet.
     Arrays own read-only copies. Invalid shapes/counts/indices raise ValueError.
     Adjacent rows of one timeline may be merged by DOP853 kernels into a
-    multi-interval work item: stop at boundaries and retain the accepted step.
+    multi-interval work item: stop at boundaries and reset each row's step seed.
 
     Raises:
         ValueError: message names shape for misaligned arrays, tone counts
@@ -71,7 +77,9 @@ class SegmentTable:
     envelopes: tuple[EnvelopeSpec, ...]
     flux_waveform: FluxWaveform | None = None
     flux_waveform_available: NDArray[np.bool_] | None = None
-    flux_tail_group: tuple[int | None, ...] | None = None
+    prefix_group: tuple[int | None, ...] | None = None
+    prefix_no_drive: tuple[bool, ...] = ()
+    prefix_inputs: Mapping[int, NDArray[np.complex128]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         timeline = integers(self.timeline, "segment timelines")
@@ -102,14 +110,29 @@ class SegmentTable:
             )
             shape(mask, (len(self.flux_waveform.offsets) - 1,), "waveform availability")
             object.__setattr__(self, "flux_waveform_available", mask)
-        if self.flux_tail_group is not None:
-            groups = tuple(self.flux_tail_group)
-            if len(groups) != rows or any(g is not None and g < 0 for g in groups):
-                raise ValueError(
-                    "flux tail groups must align with rows and be nonnegative"
-                )
-            object.__setattr__(self, "flux_tail_group", groups)
+        self._validate_prefixes(rows)
         self._validate_tones(rows)
+
+    def _validate_prefixes(self, rows: int) -> None:
+        if self.prefix_group is not None:
+            groups = tuple(self.prefix_group)
+            if len(groups) != rows or any(
+                g is not None and not 0 <= g < len(self.prefix_no_drive) for g in groups
+            ):
+                raise ValueError(
+                    "prefix groups must align with rows and name a valid group"
+                )
+            object.__setattr__(self, "prefix_group", groups)
+        object.__setattr__(self, "prefix_no_drive", tuple(self.prefix_no_drive))
+        inputs = {}
+        for group, initial in self.prefix_inputs.items():
+            if group < 0 or group >= len(self.prefix_no_drive):
+                raise ValueError("prefix input requires a valid group")
+            copied = owned(initial, np.complex128, "prefix input")
+            if copied.ndim != 2 or copied.shape[0] != copied.shape[1]:
+                raise ValueError("prefix input must be a square density")
+            inputs[group] = copied
+        object.__setattr__(self, "prefix_inputs", MappingProxyType(inputs))
 
     def _validate_tones(self, rows: int) -> None:
         tones = integers(self.tones, "tone counts")
@@ -216,11 +239,20 @@ class Kernel(Protocol):
     """One stateless algorithm family; all persistent data lives in Prepared.
 
     name: stable algorithm name for diagnostics and cache partitioning.
+    guard_builds: True when guard_prepared builds and hands off validated model
+        payloads. False families return None and use ordinary batched guards.
+        The engine uses this declaration to defer local table builds; the
+        dispatch planner can account for guard construction without probing.
+        True families return GuardResult, including for rejected/empty rows.
     Multiple numerical families share this seam so the scheduler need not know
     their representation. All index arrays below are int64 vectors.
+    Engine may call guards concurrently on its existing threading pool. Guards
+    must be pure with respect to model/table inputs, with decisions independent
+    of worker width and execution order. Kernels never open a numerical pool.
     """
 
     name: str
+    guard_builds: bool
 
     def guard(
         self,
@@ -237,6 +269,9 @@ class Kernel(Protocol):
         original row order must match a whole call bit for bit, regardless of
         call order.
 
+        Known input means the source initial density or the engine-computed
+        density for this row's certified prefix group. Guard may read that
+        immutable input, but never evolve density or inspect worker states.
         Only algorithm-local guards apply here; the engine owns branch order
         and cross-family rules such as prepare-key usage counts.
         """
@@ -254,7 +289,8 @@ class Kernel(Protocol):
         Called instead of guard during classification. None declines the hook,
         so the engine calls guard unchanged. Floquet supplies GuardResult; all
         other families return None. Acceptance must obey guard's row locality,
-        including empty/reversed subsets. No density is read or mutated.
+        including empty/reversed subsets. Only known inputs may be read; no density
+        is evolved or mutated. Returned preparations remain model-only.
 
         The engine reuses returned preparations only for accepted rows with
         the same kernel, prepare key, source and budget in this evolve. They
@@ -314,9 +350,9 @@ class Kernel(Protocol):
         Called in A-stage only for shared prepared batches (repeated keys).
         key_index selects one entry in prepared. rows share that prepare key,
         first tone port and input density, in arbitrary order. They either all
-        start at zero or belong to one certified flux_tail_group.
+        start at zero or belong to one certified prefix_group.
         source_initial is complex128 (M,M) in these rows' model basis: either
-        the source initial density or the engine-computed no-drive prefix output,
+        the source initial density or the engine-computed prefix output,
         never a worker's evolving density. No input may be modified. budget is
         the positive absolute per-segment allowance.
 

@@ -9,7 +9,8 @@ from numpy.typing import NDArray
 
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
-from ._dyson_bound import population_bound
+from ._dyson_bound import accepts_population_bound
+from ._dyson_paths import build_shared_paths, contractible_modes
 from ._weak import (
     commutator,
     constant_mask,
@@ -77,10 +78,9 @@ def _build_paths(
     modes: NDArray[np.complex128],
     couplings: NDArray[np.complex128],
     pruning: NDArray[np.float64],
-    cutoffs: tuple[float, float] = (1e-16, 1e-12),
 ) -> tuple[NDArray[np.int64], NDArray[np.complex128]]:
-    """Contract paths with (first,second) coefficient cutoffs; shared uses zeros."""
-    first_cutoff, second_cutoff = cutoffs
+    """Contract ordinary per-batch paths with coefficient and bound cutoffs."""
+    first_cutoff, second_cutoff = 1e-16, 1e-12
     dimension = len(modes)
     # Each discarded path gets an equal share of budget/8. The actual modal
     # input and max gain/duration bound every row; thresholds remain unchanged.
@@ -159,27 +159,80 @@ class PrunedDysonPaths(NamedTuple):
     """Sum of omitted path bounds on each reconstructed density entry."""
 
 
+@njit(inline="always")
+def _path_key(a: int, b: int, c: int, r: int, s: int, dimension: int) -> int:
+    """Encode a valid path, including first-order sentinels, in mixed radix."""
+    term = 0 if c == -1 else 1 + ((s + 1) // 2) * dimension + c
+    return ((a * 2 + (r + 1) // 2) * dimension + b) * (2 * dimension + 1) + term
+
+
+@njit(nogil=True, cache=True)
 def _paired_path_groups(
     indices: NDArray[np.int64], conjugates: NDArray[np.int64]
 ) -> NDArray[np.int64]:
-    """Return disjoint conjugate pairs; unmatched paths must remain retained."""
-    lookup = {tuple(int(v) for v in row): i for i, row in enumerate(indices)}
-    if len(lookup) != len(indices):
-        raise ValueError("Dyson path records must be unique")
-    groups = []
-    for path, (a, b, c, r, s) in enumerate(indices):
-        partner = lookup.get(
-            (
-                int(conjugates[a]),
-                int(conjugates[b]),
-                -1 if c == -1 else int(conjugates[c]),
-                -int(r),
-                -int(s),
-            )
+    """Return disjoint conjugate pairs; unmatched paths must remain retained.
+
+    Shared tables can contain hundreds of thousands of records even for seven
+    rows. Use integer keys and a half-full, linearly probed array lookup instead
+    of constructing Python tuples and dict entries. Keep input order so stable
+    bound sorting and pruning stay unchanged.
+    """
+    dimension = len(conjugates)
+    keys = np.empty(len(indices), dtype=np.int64)
+    capacity = 2 * len(indices) + 1
+    slots = np.full(capacity, -1, dtype=np.int64)
+    for path in range(len(indices)):
+        a, b, c, r, s = indices[path]
+        key = _path_key(a, b, c, r, s, dimension)
+        keys[path] = key
+        slot = key % capacity
+        while slots[slot] != -1:
+            if keys[slots[slot]] == key:
+                raise ValueError("Dyson path records must be unique")
+            slot = (slot + 1) % capacity
+        slots[slot] = path
+    groups = np.empty((len(indices), 2), dtype=np.int64)
+    count = 0
+    for path in range(len(indices)):
+        a, b, c, r, s = indices[path]
+        key = _path_key(
+            int(conjugates[a]),
+            int(conjugates[b]),
+            -1 if c == -1 else int(conjugates[c]),
+            -r,
+            -s,
+            dimension,
         )
-        if partner is not None and path <= partner:
-            groups.append((path, partner))
-    return np.array(groups, dtype=np.int64).reshape(-1, 2)
+        slot = key % capacity
+        while slots[slot] != -1 and keys[slots[slot]] != key:
+            slot = (slot + 1) % capacity
+        partner = slots[slot]
+        if partner >= path:
+            groups[count, 0] = path
+            groups[count, 1] = partner
+            count += 1
+    return groups[:count]
+
+
+@njit(nogil=True, cache=True)
+def _pruned_path_mask(
+    groups: NDArray[np.int64],
+    group_bounds: NDArray[np.float64],
+    order: NDArray[np.int64],
+    path_count: int,
+    allowance: float,
+) -> tuple[NDArray[np.bool_], float]:
+    """Spend the allowance in stable bound order with scalar sequential sums."""
+    keep = np.ones(path_count, dtype=np.bool_)
+    discarded = 0.0
+    for group in order:
+        total = discarded + float(group_bounds[group])
+        if total > allowance:
+            break
+        discarded = total
+        keep[groups[group, 0]] = False
+        keep[groups[group, 1]] = False
+    return keep, discarded
 
 
 def prune_dyson_paths(
@@ -269,14 +322,13 @@ def prune_dyson_paths(
     group_bounds = bounds[groups[:, 0]] + np.where(
         groups[:, 0] == groups[:, 1], 0.0, bounds[groups[:, 1]]
     )
-    keep = np.ones(len(indices), dtype=np.bool_)
-    discarded = 0.0
-    for group in np.argsort(group_bounds, kind="stable"):
-        total = discarded + float(group_bounds[group])
-        if total > pruning[-1] / 8:
-            break
-        discarded = total
-        keep[groups[group]] = False
+    keep, discarded = _pruned_path_mask(
+        groups,
+        group_bounds,
+        np.argsort(group_bounds, kind="stable"),
+        len(indices),
+        pruning[-1] / 8,
+    )
     return PrunedDysonPaths(indices[keep], coefficients[keep], discarded)
 
 
@@ -664,7 +716,7 @@ class DysonKernel:
     The r limit follows cubic off-resonant coherence-error scaling; the population
     limit follows the two-level estimate (2/3)*abs(delta_p)**(3/2). Coefficients
     are calibrated by synthetic scans, not a rigorous multilevel remainder
-    proof. Guard failures follow the engine's reduced RWA/T6 path.
+    proof. Guard failures try the engine's Hilbert period kernel, then T6.
     Prepared modes are shared across frequency, gain, duration, phase and port.
     Preparation never reads a density. apply accepts arbitrary densities, not
     only diagonal or stationary states. bind_input greedily prunes the shared
@@ -675,6 +727,7 @@ class DysonKernel:
     """
 
     name = "dyson"
+    guard_builds = False
 
     def guard(
         self,
@@ -687,7 +740,8 @@ class DysonKernel:
 
         At start_ns==0, B2 uses the source density in the row model basis,
         including exact coherence magnitudes and off-diagonal trace norm.
-        Certified flux-tail rows require only r and r2. Other later rows use
+        Certified no-drive prefixes require only r and r2. Driven prefixes
+        use their engine-computed known input. Other later rows use
         an arbitrary-input density bound. The budget/8 margin
         covers pruning. Threshold coefficients are synthetic-scan calibrations,
         not rigorous multilevel error guarantees. Returns a row-aligned mask;
@@ -708,39 +762,13 @@ class DysonKernel:
                 selected, params = selected[eligible], params[eligible]
                 if not len(selected):
                     continue
-                # Certified flux-tail rows have one common actual prefix input.
-                # Their long-pulse coherence bound is too loose; only r and r2
-                # are admission conditions. The population check still reports.
-                groups = table.flux_tail_group
-                tail = np.array(
-                    [
-                        groups is not None
-                        and groups[row] is not None
-                        and table.start_ns[row] > 0
-                        for row in rows[selected]
-                    ],
-                    dtype=bool,
-                )
-                accepted[selected[tail]] = True
-                selected, params = selected[~tail], params[~tail]
-                if not len(selected):
-                    continue
-                dc_model = source.model((0,) * len(model.level))
-                initial = source.initial_density
-                # Equal bases are exactly the same coordinates. Multiplying a
-                # near-identity overlap would introduce spurious coherence.
-                if not np.array_equal(model.eigenvectors, dc_model.eigenvectors):
-                    overlap = model.eigenvectors.conj().T @ dc_model.eigenvectors
-                    initial = overlap @ initial @ overlap.conj().T
-                bound = population_bound(
+                accepted[selected] = accepts_population_bound(
+                    table,
+                    rows[selected],
+                    source,
                     model,
                     int(port),
-                    params,
-                    initial,
-                    table.start_ns[rows[selected]] == 0,
-                )
-                accepted[selected] = bound + budget / 8 <= min(
-                    0.02, (1.5 * budget) ** (2 / 3)
+                    budget,
                 )
         return accepted
 
@@ -813,14 +841,6 @@ class DysonKernel:
         modes = source_initial.ravel() @ entry.inverse.T
         pruning = np.r_[np.max(abs(entry.vectors), axis=0), budget]
         params = parameters(table, rows)
-        indices, coefficients = _build_paths(
-            params,
-            entry.values,
-            modes,
-            entry.couplings[port],
-            pruning,
-            cutoffs=(0.0, 0.0),
-        )
         size = len(source_initial)
         # Adjoint each column of W, then express it in modal coordinates. Unlike
         # nearest-eigenvalue matching, this handles repeated coherence roots and
@@ -829,12 +849,32 @@ class DysonKernel:
         conjugates = np.argmax(
             abs(entry.inverse @ adjoints.reshape(size**2, -1)), axis=0
         )
+        path_modes, spent = modes, 0.0
+        if np.any(source_initial != np.diag(np.diag(source_initial))):
+            # Reserve half the omission budget for modes, half for path pruning.
+            strength = float(np.max(abs(params[:, 1])) * np.max(params[:, 2]))
+            growth = float(
+                np.exp(
+                    max(0.0, float(np.max(entry.values.real))) * np.max(params[:, 2])
+                )
+            )
+            path_modes, spent = contractible_modes(
+                modes,
+                entry.couplings[port],
+                pruning[:-1] * growth,
+                conjugates,
+                strength=strength,
+                allowance=budget / 16,
+            )
+        indices, coefficients = build_shared_paths(path_modes, entry.couplings[port])
+        remaining = pruning.copy()
+        remaining[-1] = budget - 8 * spent
         pruned = prune_dyson_paths(
             indices,
             coefficients,
             entry.values,
             conjugates,
-            pruning,
+            remaining,
             DriveExtent(float(np.max(abs(params[:, 1]))), float(np.max(params[:, 2]))),
         )
         indices, coefficients = pruned.indices, pruned.coefficients

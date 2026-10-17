@@ -3,7 +3,9 @@
 import numpy as np
 from numpy.typing import NDArray
 
-from ..secular import SecularModel
+from ..kernel import SegmentTable
+from ..secular import ModelSource, SecularModel
+from ._weak import parameters
 
 
 def population_bound(
@@ -11,12 +13,12 @@ def population_bound(
     port: int,
     params: NDArray[np.float64],
     initial: NDArray[np.complex128],
-    source_input: NDArray[np.bool_],
+    known_input: NDArray[np.bool_],
 ) -> NDArray[np.float64]:
     """Return B2 for each (frequency GHz, gain, duration ns, phase rad) row.
 
-    initial is the full source density in this model's eigenbasis.
-    source_input marks rows starting at zero; they use actual pair magnitudes
+    initial is the full known density in this model's eigenbasis.
+    known_input marks source or engine-certified prefix inputs; they use actual pair magnitudes
     abs(initial[i,j]) and the off-diagonal trace norm, without zeroing small
     coherence. All other rows use the universal density bound (d0=D=1,
     cij=1/2, c=2). Coherence phases are deliberately unused. The model must
@@ -47,7 +49,7 @@ def population_bound(
             z_minus, z_plus = abs(-1j * omega - decay), abs(1j * omega - decay)
             u_minus = 2 * np.pi * gain * abs(minus[i, j])
             u_plus = 2 * np.pi * gain * abs(plus[i, j])
-            d0 = np.where(source_input, abs(populations[j] - populations[i]), 1.0)
+            d0 = np.where(known_input, abs(populations[j] - populations[i]), 1.0)
             difference = np.minimum(1.0, d0 + q * duration)
             # Near resonance take the finite nonoscillatory S branch. Safe
             # denominators also prevent overflow in the unused refined branch.
@@ -77,9 +79,9 @@ def population_bound(
             )
             simple = (u_minus + u_plus) ** 2 * duration**2 * difference
             diagonal += np.where(resonant, simple, np.minimum(simple, refined))
-            cij = np.where(source_input, abs(initial[i, j]), 0.5)
+            cij = np.where(known_input, abs(initial[i, j]), 0.5)
             linear += 2 * cij * (u_minus * j_minus + u_plus * j_plus)
-    c = np.where(source_input, coherence, 2.0)
+    c = np.where(known_input, coherence, 2.0)
     a = (
         4
         * np.pi
@@ -91,3 +93,43 @@ def population_bound(
         )
     )
     return diagonal + np.minimum(linear, c * a) + c * a**2 / 2
+
+
+def accepts_population_bound(
+    table: SegmentTable,
+    rows: NDArray[np.int64],
+    source: ModelSource,
+    model: SecularModel,
+    port: int,
+    budget: float,
+) -> NDArray[np.bool_]:
+    """Test B2 using only source or engine-certified known inputs, never workers.
+
+    No-drive shared prefixes retain their B2 exemption. Driven groups without
+    a computed input use the arbitrary-input bound until the engine resolves
+    their prefix. Basis conversion and scalar bounds do not evolve density.
+    """
+    params = parameters(table, rows)
+    groups = table.prefix_group
+    selected: dict[int | None, list[int]] = {}
+    for index, row in enumerate(rows):
+        group = groups[row] if groups is not None else None
+        selected.setdefault(group, []).append(index)
+    accepted = np.zeros(len(rows), dtype=bool)
+    dc = source.model((0,) * len(model.level))
+    for group, indices in selected.items():
+        positions = np.array(indices, dtype=np.int64)
+        if group is not None and table.prefix_no_drive[group]:
+            accepted[positions] = True
+            continue
+        initial = table.prefix_inputs.get(group) if group is not None else None
+        known = np.full(len(positions), initial is not None, dtype=bool)
+        known |= table.start_ns[rows[positions]] == 0
+        if initial is None:
+            initial = source.initial_density
+        if not np.array_equal(model.eigenvectors, dc.eigenvectors):
+            overlap = model.eigenvectors.conj().T @ dc.eigenvectors
+            initial = overlap @ initial @ overlap.conj().T
+        bound = population_bound(model, port, params[positions], initial, known)
+        accepted[positions] = bound + budget / 8 <= min(0.02, (1.5 * budget) ** (2 / 3))
+    return accepted

@@ -1,5 +1,6 @@
 """Trusted FTF environment shared by GUI --simulate and Notebook callers."""
 
+import os
 from pathlib import Path
 
 from zcu_tools.experiment.ftf import ftf
@@ -16,4 +17,4 @@ def build_environment() -> SimulationEnvironment:
     # ftf.yaml is the user's ignored working copy of the tracked default.yaml.
     if not path.is_file():
         raise FileNotFoundError(f"{path} is missing; copy default.yaml to ftf.yaml")
-    return ftf(path)
+    return ftf(path, workers=max(1, (os.cpu_count() or 1) - 2))
