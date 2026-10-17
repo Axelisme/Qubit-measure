@@ -4,7 +4,7 @@ Two-tone qubit spectroscopy: drives a qubit probe tone while reading out the res
 
 ## Expects (parameter context)
 
-Opening a tab or Reset evaluates Form starting expressions once against captured parameters into direct input. Range.around seeds 301 points at `$qubit.freq` ± 1.5 * `$qubit.kappa`, in MHz. The fresh probe reads `$qubit.freq` and `$qubit.wiring.ch`; its gain is 0.1 and waveform length is 5.0 us. The inline readout fallback reads `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch` for its tones and channels, and `$resonator.ext.time_of_fly` + 0.05 us for trigger timing. Missing or invalid required expression sources leave the affected fields empty and Invalid. Supply valid calibration or direct values before Run. There is no numeric frequency-survey fallback; for a first qubit search, review the hardware-safe passband and enter a user-approved wide sweep.
+Opening a tab or Reset evaluates Form starting expressions once against captured parameters into direct input. Range.around seeds 301 points at `$qubit.freq` ± 1.5 * `$qubit.kappa`, in MHz. The fresh probe reads `$qubit.freq` and `$qubit.wiring.ch`; its gain is 0.1 and waveform length is 1.0 us, independent of x180/pi_len. The inline readout fallback reads `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch` for its tones and channels, and `$resonator.ext.time_of_fly` + 0.05 us for trigger timing. Missing or invalid required expression sources leave the affected fields empty and Invalid. Supply valid calibration or direct values before Run. There is no numeric frequency-survey fallback; for a first qubit search, review the hardware-safe passband and enter a user-approved wide sweep.
 
 ## Expects (ModuleLibrary)
 
