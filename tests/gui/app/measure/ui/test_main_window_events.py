@@ -446,33 +446,88 @@ def test_run_finished_refreshes_without_focus_or_navigation(
         coordinator.close()
 
 
-def test_run_finished_event_preserves_each_selected_subtab(qapp) -> None:
+def test_run_finished_event_preserves_each_selected_subtab(
+    qapp, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     from qtpy.QtWidgets import QTabWidget
+    from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
+    from zcu_tools.gui.app.measure.adapter.types import AdapterGuide
+    from zcu_tools.gui.app.measure.services import (
+        RunPaneSnapshot,
+        SavePaneSnapshot,
+        TabSnapshot,
+    )
+    from zcu_tools.gui.app.measure.state import TabInteractionState
+    from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+    from zcu_tools.gui.control_identity import ControlIdentity
+
+    from tests.gui.app.measure._form_fakes import configure_form_lookup
+    from tests.gui.app.measure.artifacts._snapshots import with_artifacts
 
     ctrl = MagicMock()
     bus = BaseEventBus()
+    control_identity = ControlIdentity()
+    ctrl.control_identity = control_identity
     ctrl.get_bus.return_value = bus
     ctrl.get_running_tab_id.return_value = None
     ctrl.active_operation_count.return_value = 0
     ctrl.has_tab.return_value = True
-    ctrl.get_tab_snapshot.return_value = _snapshot(has_run_result=True)
+    ctrl.get_tab_snapshot.return_value = with_artifacts(
+        TabSnapshot(
+            adapter_name="fake",
+            cfg_input={},
+            tab_id="tab-1",
+            capabilities=AdapterCapabilities(
+                analysis=AnalysisMode.FIT, post_analysis=True
+            ),
+            interaction=TabInteractionState(
+                global_run_active=False,
+                is_running=False,
+                is_analyzing=False,
+                has_context=True,
+                has_active_context=True,
+                has_soc=True,
+                has_run_result=True,
+                has_analyze_result=False,
+                has_post_analyze_result=False,
+                has_figure=False,
+            ),
+            run=RunPaneSnapshot(result=object(), source_path=None),
+            save=SavePaneSnapshot(),
+        )
+    )
+    configure_form_lookup(ctrl)
+    ctrl.get_left_panel_width.return_value = 500
+    ctrl.get_tab_adapter_name.return_value = "fake"
+    ctrl.get_adapter_guide.return_value = AdapterGuide(markdown="", resource_dir=None)
+    ctrl.progress_control.attach_progress.return_value = lambda: None
+    ctrl.progress_control.progress_bars.return_value = []
     window = MainWindow(ctrl, templates=lambda: {})
-    tab = MagicMock()
-    tab._left_tabs = QTabWidget()
-    for label in ("Run", "Analysis", "Post", "Data", "Guide"):
-        tab._left_tabs.addTab(QWidget(), label)
-    window._tab_widgets["tab-1"] = tab
+    try:
+        window.add_tab_widget("tab-1", "fake")
+        tab = next(
+            tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == "tab-1"
+        )
+        left_tabs = tab.findChild(QTabWidget)
+        assert left_tabs is not None
+        assert left_tabs.count() == 5
+        focus_result_panel = MagicMock(wraps=tab.focus_result_panel)
+        monkeypatch.setattr(tab, "focus_result_panel", focus_result_panel)
 
-    for index in range(tab._left_tabs.count()):
-        tab._left_tabs.setCurrentIndex(index)
-        bus.emit(RunFinishedPayload("tab-1", outcome="finished"))
-        assert tab._left_tabs.currentIndex() == index
+        for index in range(left_tabs.count()):
+            left_tabs.setCurrentIndex(index)
+            bus.emit(RunFinishedPayload("tab-1", outcome="finished"))
+            assert left_tabs.currentIndex() == index
 
-    tab.focus_result_panel.assert_not_called()
-    window.deleteLater()
-    tab._left_tabs.deleteLater()
-    qapp.processEvents()
+        focus_result_panel.assert_not_called()
+        assert all(record.levelno < logging.ERROR for record in caplog.records)
+    finally:
+        try:
+            window.remove_tab_widget("tab-1")
+        finally:
+            window.deleteLater()
+            qapp.processEvents()
 
 
 def test_run_started_refreshes_invalidated_content_once(
