@@ -162,7 +162,7 @@ def apply_round(
     round_type: Literal["none", "time", "freq", "phase", "gain"],
     round_info: dict[str, Any],
 ) -> T_Value:
-    ROUND_FN_MAP: dict[str, Callable] = {
+    ROUND_FN_MAP: dict[str, Callable[..., T_Value]] = {
         "none": lambda v: v,
         "time": round_zcu_time,
         "freq": round_zcu_freq,
