@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import jupytext
+from nbformat import NotebookNode
 
 # ------------------------------
 # Helper utilities
@@ -109,7 +110,7 @@ def sync_files(
             continue
 
         # Pre-convert source to destination format for comparison/writing
-        source_notebook: dict | None = None
+        source_notebook: NotebookNode | None = None
 
         # -------------------------------------------------------------
         # Fast-path: unconditional overwrite requested (e.g. nb2md mode)
