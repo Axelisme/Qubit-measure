@@ -93,8 +93,9 @@ True means `guard_prepared` builds the model payload it validates and returns a
 `GuardResult` with its ordinary row-local acceptance mask and model-only
 `GuardPreparation` batches. The engine asks for this handoff only for
 cross-timeline builder candidates before A-stage. Timeline workers use the
-same hook for deferred keys and pass accepted
-products directly to apply. Rejected keys follow the remaining candidates in
+same hook for deferred rows, batching one timeline's eligible rows for each
+builder kernel into one call. They pass accepted products directly to apply.
+The caller still guards shared prepare keys separately. Rejected keys follow the remaining candidates in
 order. Neither path rebuilds an accepted guard table. Handoffs use the same
 kernel, prepare key, source and budget within this evolve. A shared candidate's
 guard may accept only a subset of its timelines; that subset still reuses its
@@ -513,16 +514,18 @@ refines to 3/4 when needed. It retains the lower cutoff only when its difference
 to the next cutoff fits budget/4. It starts with four amplitude nodes. A geometric tail
 estimate from the last two polynomial coefficients selects eight nodes if
 needed. The cycle-scaled harmonic and amplitude estimates must fit budget/2.
-The guard never reads a density or evolves a trial input. Within one evolve,
-ramps share immutable spectral coefficients by model identity, level, port,
-signed carrier, peak gain, subperiod resolution, harmonic cutoff and amplitude
-node count. Budget and algorithm revision also scope this workspace. A per-family
-lock prevents duplicate worker builds without serializing different carriers.
-Each ramp still selects cutoffs and evaluates admission with its own cycle count;
-duration, slope and direct-tail preparations remain row-specific. The built-in
-kernel releases spectral workspace after evolve. Accepted payloads can retain
-coefficients in the prepare LRU, where each payload conservatively charges the
-full coefficient allocation even when another payload shares it. Cross-timeline keys
+The guard never reads a density or evolves a trial input. Within one guard or
+prepare call, ramps share immutable spectral coefficients by model identity,
+level, port, signed carrier, peak gain, subperiod resolution, harmonic cutoff
+and amplitude node count. Budget and algorithm revision scope the call-local
+workspace. Each ramp selects cutoffs and evaluates admission with its own cycle
+count. Duration, slope and direct-tail preparations remain row-specific.
+The kernel retains no workspace after the call returns. Timeline workers batch
+their local ramps in one guard call, so live workspace follows concurrent
+timelines rather than the frequency grid. Accepted payloads retain coefficients
+until their timeline finishes, or in the prepare LRU for shared keys. Each
+payload conservatively charges the full coefficient allocation even when
+another payload shares it. Cross-timeline keys
 hand accepted, immutable model-only payloads to A-stage. For timeline-local keys,
 the worker runs guard preparation and applies the returned table before releasing
 it. It does not discard the convergence table and rebuild it in prepare. Failed spectral keys retain the old

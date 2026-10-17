@@ -1,7 +1,6 @@
 """Low-reuse real-envelope periods from finite Hilbert Fourier matrices."""
 
 from dataclasses import dataclass
-from threading import Lock
 
 import numpy as np
 from numba import njit
@@ -93,10 +92,9 @@ def _coefficients(
 
 
 class _SpectralFamily:
-    """Serialize lazy, immutable spectral builds for one model/carrier lattice."""
+    """Reuse immutable spectral builds within one guard/prepare call."""
 
     def __init__(self) -> None:
-        self.lock = Lock()
         self.errors: dict[int, float] = {}
         self.polynomials: dict[
             tuple[int, int], tuple[NDArray[np.complex128], float, float]
@@ -111,7 +109,6 @@ class _SpectralFamily:
         step: float,
         modes: int,
     ) -> float:
-        # The caller holds the family lock across admission and interpolation.
         if modes not in self.errors:
             fine = _spectral(model, port, frequency, bound, modes + 1, step)
             coarse = _spectral(model, port, frequency, bound, modes, step)
@@ -166,7 +163,7 @@ class ShapedSambeKernel:
     Comparing
     adjacent harmonic cutoffs (2/3, then 3/4) estimates Fourier truncation.
     Four/eight amplitude nodes control interpolation. Guard preparation is
-    evolve-local and never reads density. Rejections retain the old shaped
+    call-local and never reads density. Rejections retain the old shaped
     decision order. Apply uses frozen-envelope secular Strang steps, never
     retries, clips or normalizes density. Complex envelopes and DC are rejected.
     """
@@ -182,15 +179,6 @@ class ShapedSambeKernel:
 
     name = "shaped_sambe"
     guard_builds = True
-
-    def __init__(self) -> None:
-        # Engine gives the built-in kernel an evolve-local lifetime. This cache
-        # is workspace, not a second persistent prepared-payload LRU.
-        self._families: dict[
-            tuple[str, tuple[int, ...], int, float, float, int, float, str],
-            _SpectralFamily,
-        ] = {}
-        self._families_lock = Lock()
 
     def prepare_keys(
         self,
@@ -288,6 +276,12 @@ class ShapedSambeKernel:
         entries, models, ports, errors = [], [], [], []
         subdivisions = self._subdivisions(table, rows, source)
         fallback = DOP853Kernel()
+        # A timeline's rise/fall ramps arrive together. Only this call owns the
+        # workspace; accepted payloads retain their immutable coefficients.
+        families: dict[
+            tuple[str, tuple[int, ...], int, float, float, int, float, str],
+            _SpectralFamily,
+        ] = {}
         for index, key in enumerate(keys):
             model = source.model(tuple(int(v) for v in key["level"]))
             port, f, bound = (
@@ -315,26 +309,22 @@ class ShapedSambeKernel:
                 budget,
                 self.declaration.identity.revision,
             )
-            with self._families_lock:
-                family = self._families.get(family_key)
-                if family is None:
-                    family = _SpectralFamily()
-                    self._families[family_key] = family
-            # Only equal families serialize. Other workers build independent
-            # carriers concurrently; every ramp still uses its own cycles.
-            with family.lock:
+            family = families.get(family_key)
+            if family is None:
+                family = _SpectralFamily()
+                families[family_key] = family
+            error = family.error(model, port, f, bound, step, modes)
+            if error * cycles > budget / 4:
+                modes = 3
                 error = family.error(model, port, f, bound, step, modes)
-                if error * cycles > budget / 4:
-                    modes = 3
-                    error = family.error(model, port, f, bound, step, modes)
-                coefficients, interpolation, ratio = family.polynomial(
+            coefficients, interpolation, ratio = family.polynomial(
+                model, port, f, bound, step, (nodes, modes)
+            )
+            if ratio > 0.25 or interpolation * cycles > budget / 8:
+                nodes = 8
+                coefficients, interpolation, _ = family.polynomial(
                     model, port, f, bound, step, (nodes, modes)
                 )
-                if ratio > 0.25 or interpolation * cycles > budget / 8:
-                    nodes = 8
-                    coefficients, interpolation, _ = family.polynomial(
-                        model, port, f, bound, step, (nodes, modes)
-                    )
             errors.append((error + interpolation) * cycles)
             outgoing = model.rates_per_ns.sum(axis=0)
             populations = np.asarray(
