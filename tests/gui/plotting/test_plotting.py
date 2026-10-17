@@ -136,32 +136,39 @@ def test_registry_evicts_gc_collected_figure(qapp):
     and CPython id-reuse let a NEW figure hit the stale entry pointing at a
     different container — the intermittent "analyze figure not displayed" bug.
 
-    The figure is registered directly (a bare ``Figure``, no canvas in any stack)
-    so the only strong reference is the local ``fig``; dropping it must let the
-    weak key evict the entry. This isolates weak-eviction from the explicit
-    pop paths (remove_canvas / clear_dynamic_canvases), which are the normal —
-    but not the only — way an entry leaves the registry.
+    Public attachment registers the figure. Detaching the canvas and clearing
+    its Qt parent releases presentation ownership without popping the mapping.
+    Dropping both locals must let GC collect the figure/canvas cycle. The weakref
+    assertion precedes diagnostics, so a strong registry cannot pass by purging
+    the detached entry in dump_plot_state().
     """
-    del qapp
     import gc
 
     from matplotlib.figure import Figure
-    from zcu_tools.gui.plotting.host import _fig_container_registry
 
-    # Bare-figure eviction observes the registry snapshot, not a canvas stack.
-    container, _ = _make_container()
+    container, stack = _make_container()
     fig = Figure()
-    _fig_container_registry[fig] = container
-    assert get_figure_container(fig) is container
+    try:
+        canvas = attach_existing_figure_to_container(fig, container)
+        assert get_figure_container(fig) is container
 
-    figure_id = id(fig)
-    fig_ref = weakref.ref(fig)
-    del fig
-    gc.collect()
+        container.detach_canvas(canvas)
+        canvas.setParent(None)
+        figure_id = id(fig)
+        fig_ref = weakref.ref(fig)
+        del canvas
+        del fig
+        gc.collect()
 
-    assert fig_ref() is None, "figure was not GC'd; test cannot prove weak eviction"
-    # Other weak entries may also expire during GC; only this figure is ours.
-    assert figure_id not in dump_plot_state().attached_figure_ids
+        assert fig_ref() is None, "figure was not GC'd; test cannot prove weak eviction"
+        # Other weak entries may also expire during GC; only this figure is ours.
+        assert figure_id not in dump_plot_state().attached_figure_ids
+    finally:
+        try:
+            container.clear_dynamic_canvases()
+        finally:
+            stack.deleteLater()
+            qapp.processEvents()
 
 
 def test_new_figure_does_not_detach_other_container(qapp):
