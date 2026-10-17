@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, known-source coherence in Dyson classification, paired shared-path pruning, Floquet guard preparation handoff, and prefix-local waveform identity for repeated no-drive flux prefixes
+**Last updated:** 2026-10-17, constant-tone Hilbert Floquet period propagation
 
 ## Segment engine contracts
 
@@ -48,7 +48,7 @@ chunk boundaries and raises `Cancelled` without partial results. `close()`
 waits for active work, clears the prepare cache and is safe to repeat. Each
 `evolve` call opens and closes its own joblib threading pool. The prepare cache
 persists across `evolve` calls, but no worker resources survive a call.
-`SEGMENT_NUMERIC_VERSION` is `segment-engine-v2` and identifies engine numerics
+`SEGMENT_NUMERIC_VERSION` is `segment-engine-v3` and identifies engine numerics
 for checked replay.
 
 The internal `kernel` module defines `SegmentTable`, `Kernel` and the opaque
@@ -97,8 +97,9 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | Fixed flux, no drive | T4 uses analytic secular propagation. |
 | One constant tone, known input density, r, r₂ and B2 guards pass | T7 second-order Dyson, batched over frequency, gain, duration and phase. |
 | One constant tone after an identical shared no-drive prefix, r and r₂ pass | Dyson with the actual prefix output. B2 does not apply; post-apply population changes only report. |
-| Same constant-tone branch, Dyson fails but r <= 0.2 | Reduced RWA if its omitted-sideband error bound fits the segment budget; otherwise T6. |
-| One constant tone with unknown input density, or outside the weak-drive branch | T6 periodic propagation. |
+| Same constant-tone branch, Dyson fails but r <= 0.2 | Reduced RWA if its omitted-sideband error bound fits the segment budget; otherwise try the Hilbert period kernel. |
+| One constant tone not accepted above, known or unknown input, with abs(f) >= 1 GHz and duration*T²*Gamma*V² <= 1e-2 | `floquet_period` integrates one Hilbert-space U(T), translates the carrier phase in time, and steps each period with secular Strang dissipation. |
+| Same constant-tone branch, Hilbert period guard fails | T6 periodic propagation, then DOP853 if T6 rejects. |
 | One shaped tone, prepare-key usage >= 10 | Gate cache with four Strang subsegments, closed-system U plus secular dissipation, and 16 carrier-phase Fourier samples. |
 | One shaped tone, prepare-key usage < 10 | Period table with midpoint-frozen envelopes, eight amplitude Chebyshev nodes and 16 phase Fourier samples; integrate the fractional-period tail directly. This branch has no per-segment accuracy guard. |
 | Two constant tones with a weak probe and passing Floquet guards | Floquet k=0 preparation, then modal second-order Dyson in H_F + D₀; a failing probe guard uses periodic T6 propagation in that frame. |
@@ -157,7 +158,7 @@ r <= 0.025 and B2 + 0.000125 <= 0.0131. Classification uses this bound to avoid
 large |Δp|. A post-apply |Δp| check only reports excess; it does not correct the
 Dyson result or guarantee exact-dynamics accuracy. Rejected Dyson segments try
 reduced RWA only in the r <= 0.2 branch. RWA segments whose error bound exceeds
-their budget use T6.
+their budget try the Hilbert period kernel, then T6 and DOP853.
 
 Each segment receives a default budget of 1e-3. The end-to-end acceptance
 threshold is a maximum absolute error of 1e-2 in both final readout-basis
@@ -169,6 +170,21 @@ max_step=0.1 ns, tightening tolerances for smaller budgets.
 Flux-tail truncation uses an absolute flux bound, not elapsed multiples of a
 filter time constant. FTF sums absolute pulse-tail contributions and truncates
 below 5e-4 Phi0 on every loop.
+
+The Hilbert period kernel uses T=1/|f| and the density-free splitting estimate
+`duration*T²*Gamma*V²`. Here `V=2*pi*|gain|*(||X||₂+||Y||₂)` is an angular
+drive norm bound. `Gamma` is the larger of the population-generator spectral
+norm and the maximum coherence decay rate. The 1 GHz cutoff separates measured
+6.789 GHz builds of about 3 ms/key from 0.4-0.5 GHz builds of about 35 ms/key.
+Prototype S3/S5 population errors against strict DOP853 were 1.1e-7 and 2.3e-6.
+The 1e-2 estimate threshold is heuristic, not a rigorous segment-budget guarantee.
+Preparation retains U(T) and finite degree-seven dense coefficients, with every
+array charged to the prepare cache. Duration, start and theta do not enter keys.
+Time translation handles signed frequency and phase; the fractional tail uses
+the same dense solution with a periodic extension across the boundary. Each full
+period and tail applies D/2, U, D/2 without constructing a Liouville channel.
+Apply does not compare half-period results, normalize, retry or reroute.
+Low-frequency flux-tail probes retain Dyson and two-tone rows retain Floquet.
 
 T6 uses 1, 4 or 8 steps per carrier period according to r, powers the period
 propagator and adds the fractional-period tail. Carrier phase uses Fourier
@@ -220,7 +236,9 @@ There is no database builder or GPU dependency.
 
 `experiment.ftf` owns private replay inputs and composes evolution with readout.
 Replay recomputes a round from its archived model, templates, snapshot and
-sampling identity. It requires matching `SEGMENT_NUMERIC_VERSION`, backend,
+sampling identity. The Hilbert period dispatch and numerics use
+`segment-engine-v3`; earlier numeric versions fail checked replay.
+It requires matching `SEGMENT_NUMERIC_VERSION`, backend,
 model, RNG and dependency versions. No record references pin old densities or
 offline tables. Older exact-record manifests fail explicitly.
 

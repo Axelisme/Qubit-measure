@@ -194,7 +194,11 @@ def test_flat_top_split_phase_offset_and_small_plateau():
     )
     period, t6 = RecordingKernel("period_table"), RecordingKernel("t6")
     result = run(
-        Engine(1, 1000, kernels=(period, t6)),
+        Engine(
+            1,
+            1000,
+            kernels=(period, RecordingKernel("floquet_period", accepts=False), t6),
+        ),
         source(),
         (replace(batch(1, duration=14), tracks=(track(1, envelope, duration=14),)),),
     )
@@ -231,6 +235,7 @@ def test_constant_decision_order_and_sequence_middle(
         for name, accepts in [
             ("dyson", accept_dyson),
             ("rwa", accept_rwa),
+            ("floquet_period", False),
             ("t6", True),
         ]
     )
