@@ -17,13 +17,13 @@ def kernel_case(request: pytest.FixtureRequest) -> KernelCase:
     size: int = request.param
     model = synthetic_model(size)
     source = ModelSource(
-        np.eye(size, dtype=complex) / size,
+        np.eye(size, dtype=np.complex128) / size,
         lambda level: replace(model, level=level, identity=f"model-{level}"),
     )
     count = 6
     table = SegmentTable(
         timeline=np.arange(count),
-        start_ns=np.arange(count) * 3.7,
+        start_ns=np.arange(count, dtype=float) * 3.7,
         duration_ns=np.array([0.0, 0.47, 0.47, 0.39, 0.28, 0.11]),
         level=np.zeros((count, 1), dtype=np.int64),
         tones=np.ones(count, dtype=np.int64),
@@ -51,7 +51,12 @@ def test_key_excludes_apply_only_parameters(kernel_case: KernelCase) -> None:
     rows = np.array([1, 2], dtype=np.int64)
     keys = case.kernel.prepare_keys(case.table, rows)
     assert keys[0] == keys[1]
-    for field in ("duration_ns", "start_ns", "tone_theta_rad", "tone_envelope_offset_ns"):
+    for field in (
+        "duration_ns",
+        "start_ns",
+        "tone_theta_rad",
+        "tone_envelope_offset_ns",
+    ):
         values = getattr(case.table, field).copy()
         values[2] += 0.31
         changed = replace(case.table, **{field: values})
@@ -93,10 +98,15 @@ def test_guard_rejects_low_carrier_shapes_and_large_split_estimate(
     assert not case.kernel.guard(idle, rows, source, case.budget).any()
 
 
-def test_engine_dispatches_known_and_unknown_high_carrier_rows() -> None:
-    from ..test_engine import batch, run, source, track
-
+@pytest.mark.parametrize("real_registry", [False, True])
+def test_engine_dispatches_known_and_unknown_high_carrier_rows(
+    real_registry: bool,
+) -> None:
     from zcu_tools.simulate.evolution import Engine
+    from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
+    from zcu_tools.simulate.evolution.kernels.t6 import T6Kernel
+
+    from ..test_engine import RecordingKernel, batch, run, source, track
 
     pulse = replace(
         track(2, EnvelopeSpec("constant"), duration=0.3),
@@ -105,6 +115,24 @@ def test_engine_dispatches_known_and_unknown_high_carrier_rows() -> None:
     )
     later = replace(pulse, start_ns=np.full(2, 0.3), phase_rad=np.full(2, 0.7))
     timeline = replace(batch(2, duration=0.6), tracks=(pulse, later))
-    result = run(Engine(1, 100000), source(), (timeline,))
-    assert result.paths.segments_by_kernel == {"floquet_period": 4}
+    engine = (
+        Engine(1, 100000)
+        if real_registry
+        else Engine(
+            1,
+            100000,
+            kernels=(
+                RecordingKernel("dyson", accepts=False),
+                RecordingKernel("rwa", accepts=False),
+                FloquetPeriodKernel(),
+                T6Kernel(),
+            ),
+        )
+    )
+    result = run(engine, source(), (timeline,))
+    if real_registry:
+        assert result.paths.segments_by_kernel.get("t6", 0) == 0
+        assert result.paths.segments_by_kernel.get("floquet_period", 0) >= 1
+    else:
+        assert result.paths.segments_by_kernel == {"floquet_period": 4}
     assert result.paths.exceeded_by_kernel == {}
