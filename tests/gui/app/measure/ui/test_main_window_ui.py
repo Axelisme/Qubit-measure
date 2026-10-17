@@ -1768,7 +1768,9 @@ def test_main_window_persists_session_on_close_when_idle(control_factory, qapp):
     ctrl.persist_all.assert_called_once_with()
 
 
-def test_main_window_close_removes_event_bus_subscriptions(control_factory, qapp):
+def test_main_window_close_removes_event_bus_subscriptions(
+    control_factory, qapp, monkeypatch
+):
     from qtpy.QtCore import QCoreApplication
     from qtpy.QtGui import QCloseEvent
     from zcu_tools.gui.app.measure.events.run import (
@@ -1790,6 +1792,10 @@ def test_main_window_close_removes_event_bus_subscriptions(control_factory, qapp
     ctrl = _mock_ctrl(control_factory)
     configure_form_lookup(ctrl)
     bus = EventBus()
+    subscribe_spy = MagicMock(wraps=bus.subscribe)
+    unsubscribe_spy = MagicMock(wraps=bus.unsubscribe)
+    monkeypatch.setattr(bus, "subscribe", subscribe_spy)
+    monkeypatch.setattr(bus, "unsubscribe", unsubscribe_spy)
     ctrl.get_bus.return_value = bus
     ctrl.active_operation_count.return_value = 0
     ctrl.begin_shutdown.side_effect = lambda on_closed: on_closed()
@@ -1806,13 +1812,27 @@ def test_main_window_close_removes_event_bus_subscriptions(control_factory, qapp
         SocChangedPayload,
     )
     for payload_type in payload_types:
-        assert bus._subs.get(payload_type)
+        subscription_calls = [
+            call
+            for call in subscribe_spy.call_args_list
+            if call.args[0] is payload_type
+        ]
+        assert subscription_calls
+    unsubscribe_spy.assert_not_called()
 
     window.closeEvent(QCloseEvent())
     QCoreApplication.processEvents()
 
     for payload_type in payload_types:
-        assert bus._subs.get(payload_type, []) == []
+        subscription_calls = [
+            call
+            for call in subscribe_spy.call_args_list
+            if call.args[0] is payload_type
+        ]
+        for subscription_call in subscription_calls:
+            assert unsubscribe_spy.call_args_list.count(
+                subscription_call
+            ) == subscription_calls.count(subscription_call)
 
 
 def test_new_tab_menu_supports_nested_paths(control_factory, qapp, monkeypatch):
