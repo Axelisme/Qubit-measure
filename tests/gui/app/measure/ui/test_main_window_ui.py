@@ -972,41 +972,35 @@ def test_main_window_run_lock_keeps_new_tab_available(control_factory, qapp):
 def test_main_window_tabs_are_movable_and_close_uses_moved_widget(
     control_factory, qapp
 ):
-    from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = _apply_window_defaults(_editor_wiring_ctrl(control_factory))
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.side_effect = lambda tab_id: tab_id in {"tab-a", "tab-b"}
+    ctrl.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
+        tab_id, has_run_result=False
+    )
     window = MainWindow(ctrl, templates=lambda: {})
-    tab_a = ExpTabWidget(
-        "tab-a",
-        ctrl,
-        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
-    )
-    tab_b = ExpTabWidget(
-        "tab-b",
-        ctrl,
-        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
-    )
-    tab_a.attach(_snapshot("tab-a", has_run_result=False), _RecordingTabActions())
-    tab_b.attach(_snapshot("tab-b", has_run_result=False), _RecordingTabActions())
-    window._tab_widgets["tab-a"] = tab_a
-    window._tab_widgets["tab-b"] = tab_b
-    _experiment_tabs(window).addTab(tab_a, "A")
-    _experiment_tabs(window).addTab(tab_b, "B")
+    try:
+        window.add_tab_widget("tab-a", "A")
+        window.add_tab_widget("tab-b", "B")
+        tab_a = _experiment_tabs(window).widget(0)
+        assert tab_a is not None
 
-    assert _experiment_tabs(window).isMovable() is True
+        assert _experiment_tabs(window).isMovable() is True
 
-    tab_bar = _experiment_tabs(window).tabBar()
-    assert tab_bar is not None
-    tab_bar.moveTab(0, 1)
-    assert _experiment_tabs(window).widget(1) is tab_a
-    ctrl.reorder_tabs.assert_called_once_with(["tab-b", "tab-a"])
+        tab_bar = _experiment_tabs(window).tabBar()
+        assert tab_bar is not None
+        tab_bar.moveTab(0, 1)
+        assert _experiment_tabs(window).widget(1) is tab_a
+        ctrl.reorder_tabs.assert_called_once_with(["tab-b", "tab-a"])
 
-    _experiment_tabs(window).tabCloseRequested.emit(1)
+        _experiment_tabs(window).tabCloseRequested.emit(1)
 
-    ctrl.close_tab.assert_called_once_with("tab-a")
+        ctrl.close_tab.assert_called_once_with("tab-a")
+    finally:
+        window.remove_tab_widget("tab-a")
+        window.remove_tab_widget("tab-b")
 
 
 def test_main_window_soc_changed_refreshes_run_lock(control_factory, qapp):
