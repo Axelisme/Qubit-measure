@@ -546,35 +546,64 @@ def test_B7_reload_failure_reports_reload_failed_not_save_failed(
     assert critical_calls[0][0] == "Reload failed"
 
 
-def test_asset_load_failure_keeps_editor_state(qapp, monkeypatch) -> None:
-    """Selecting an asset whose load fails must not mutate editor state.
-
-    The load runs before _current_data_key / the data_key field are updated, so
-    a failed selection leaves the draft intact — its recipe cannot be saved
-    under the unloadable key (item-3 fail-fast / consistency fix).
-    """
+def test_asset_load_failure_keeps_editor_state(
+    qapp, monkeypatch, preview_clock: PreviewClock
+) -> None:
+    """Failed selection keeps the draft and cannot silently authorize overwrite."""
+    from qtpy.QtWidgets import QMessageBox
     from zcu_tools.resources.waveform_assets import ArbWaveformError
 
     ctrl = _FakeController()
+    ctrl.set_formula(
+        "broken",
+        {"segments": [{"duration": 0.002, "formula": "0.25"}], "normalize": "none"},
+    )
+    original_data = ctrl.assets["broken"]
+    save_observer = MagicMock(wraps=ctrl.set_formula)
+    monkeypatch.setattr(ctrl, "set_formula", save_observer)
+    questions = MagicMock(return_value=QMessageBox.StandardButton.No)
+    errors = MagicMock()
+    monkeypatch.setattr(QMessageBox, "question", questions)
+    monkeypatch.setattr(QMessageBox, "critical", errors)
     dlg = ArbWaveformDialog(ctrl)
     editor = _Editor(dlg)
+    preview_clock.drain()
     draft_key = editor.key.text()
 
-    # Simulate selecting an asset that lists fine but fails to load.
-    monkeypatch.setattr(dlg, "_selected_data_key", lambda: "broken")
+    # The real table lists the asset, but the public load boundary fails.
+    load_calls: list[str] = []
 
     def _raise_load(data_key: str) -> ArbWaveformData:
+        load_calls.append(data_key)
         raise ArbWaveformError("corrupt asset", reason="load_failed")
 
     monkeypatch.setattr(ctrl, "load_data", _raise_load)
+    assert editor.assets.rowCount() == 1
+    asset_item = editor.assets.item(0, 0)
+    assert asset_item is not None
+    assert asset_item.text() == "broken"
+    editor.assets.selectRow(0)
 
-    editor.assets.itemSelectionChanged.emit()
-
+    assert load_calls == ["broken"]
     assert editor.key.text() == draft_key
-    assert dlg._current_data_key is None
     # Warning is shown (the dialog is never .show()n in tests, so check the
     # explicit hidden flag rather than isVisible(), which needs a shown ancestry).
     assert not editor.warning.isHidden()
+    assert "corrupt asset" in editor.warning.text()
+
+    # Remembering the failed selection as the current asset would skip this
+    # confirmation. Check the warning first: editing the key revalidates it.
+    editor.key.setText("broken")
+    editor.save.click()
+    questions.assert_called_once_with(
+        dlg,
+        "Overwrite waveform",
+        "Overwrite existing arbitrary waveform 'broken'?",
+    )
+    save_observer.assert_not_called()
+    assert ctrl.assets["broken"] is original_data
+    assert load_calls == ["broken"]
+    errors.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
