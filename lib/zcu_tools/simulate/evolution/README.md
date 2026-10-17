@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, constant-tone dispatch, terminal-family coverage, readout trace diagnostics, low-frequency Hilbert propagation and compiled shared Dyson tables
+**Last updated:** 2026-10-17, Dyson-to-periodic constant-tone dispatch, terminal-family coverage, readout trace diagnostics, low-frequency Hilbert propagation and compiled shared Dyson tables
 
 ## Segment engine contracts
 
@@ -105,7 +105,6 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | Fixed flux, no drive | T4 uses analytic secular propagation. |
 | One constant tone, known or unknown input, r, r₂ and B2 guards pass | T7 second-order Dyson, batched over frequency, gain, duration and phase. |
 | One constant tone after an identical shared no-drive prefix, r and r₂ pass | Dyson with the actual prefix output. B2 does not apply; post-apply population changes only report. |
-| Same constant-tone branch, Dyson fails but r <= 0.2 | Reduced RWA if its input-independent omitted-sideband error bound fits the segment budget; otherwise try the Hilbert period kernel. |
 | One constant tone not accepted above, known or unknown input, with abs(f) >= 0.3 GHz and duration*T²*Gamma*V² <= 1.0 | `floquet_period` integrates one Hilbert-space U(T), translates the carrier phase in time, and steps each period with secular Strang dissipation. |
 | Same constant-tone branch, Hilbert period guard fails | T6 periodic propagation accepts every single constant-tone row. |
 | One shaped tone, prepare-key usage >= 10 | Gate cache with four Strang subsegments, closed-system U plus secular dissipation, and 16 carrier-phase Fourier samples. |
@@ -132,9 +131,9 @@ Different tail lengths never share an input just because their final levels matc
 The planner compares samples before probe start and the first sample at or after
 it to retain the prefix's interpolation boundary. Later samples do not affect
 prefix identity. Prefixes with earlier drives or no identical partner still try
-Dyson first, using arbitrary-input B2, then RWA, Hilbert period and T6.
+Dyson first, using arbitrary-input B2, then Hilbert period and T6.
 Input knowledge only selects B2's source values and A-stage input contraction;
-it does not restrict Dyson or RWA eligibility. Source and initial density are
+it does not restrict Dyson eligibility. Source and initial density are
 common to one evolve and no prefix identity persists across calls.
 
 The model supplies the secular form. Missing secular data fails at entry rather
@@ -177,8 +176,7 @@ rigorous multilevel error bound. At the default budget of 1e-3, the limits are
 r <= 0.025 and B2 + 0.000125 <= 0.0131. Classification uses this bound to avoid
 large |Δp|. A post-apply |Δp| check only reports excess; it does not correct the
 Dyson result or guarantee exact-dynamics accuracy. Rejected Dyson segments try
-reduced RWA only in the r <= 0.2 branch. RWA segments whose error bound exceeds
-their budget try the Hilbert period kernel, then T6.
+the Hilbert period kernel, then T6.
 
 Each segment receives a default budget of 1e-3. The end-to-end acceptance
 threshold is a maximum absolute error of 1e-2 in both final readout-basis
