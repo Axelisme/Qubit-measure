@@ -767,21 +767,26 @@ def test_main_window_successful_writeback_relies_on_event_owned_projection(
 
     ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     ctrl.get_bus.return_value = EventBus()
+    ctrl.get_tab_snapshot.return_value = _snapshot("tab-1", has_figure=False)
     ctrl.has_tab.return_value = True
     ctrl.apply_writeback_for_pane.return_value = {
         "applied_ids": ["param-1"],
         "written": {"parameter": ["r_f"], "ml_modules": [], "ml_waveforms": []},
     }
     window = MainWindow(ctrl, templates=lambda: {})
-    window._tab_widgets["tab-1"] = MagicMock()
-    window.refresh_tab_writeback = MagicMock()
-    window.show_status_message = MagicMock()
+    window.add_tab_widget("tab-1", "fake")
+    try:
+        assert window.has_tab_widget("tab-1") is True
+        window.refresh_tab_writeback = MagicMock()
+        window.show_status_message = MagicMock()
 
-    window.apply_tab_writeback("tab-1", pane="analysis")
+        window.apply_tab_writeback("tab-1", pane="analysis")
 
-    ctrl.apply_writeback_for_pane.assert_called_once_with("tab-1", "analysis")
-    window.refresh_tab_writeback.assert_not_called()
-    window.show_status_message.assert_called_once_with("Writeback applied: param-1")
+        ctrl.apply_writeback_for_pane.assert_called_once_with("tab-1", "analysis")
+        window.refresh_tab_writeback.assert_not_called()
+        window.show_status_message.assert_called_once_with("Writeback applied: param-1")
+    finally:
+        window.remove_tab_widget("tab-1")
 
 
 def _status_bar_labels(window: MainWindow, text: str) -> list[QLabel]:
