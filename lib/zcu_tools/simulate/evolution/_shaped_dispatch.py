@@ -35,7 +35,10 @@ def preference(
     period = kernels.get("period_table", PeriodTableKernel())
     frequency = np.abs(table.tone_frequency_ghz[rows, 0])
     duration = table.duration_ns[rows]
-    direct = 0.8 * duration * (1 + 0.3 * frequency)
+    # Ticket 40: budget-scaled controls reduce high-carrier work. Preserve the
+    # low-carrier frequency term, where lab-frame stability limits integration.
+    carrier_work = 1 + 0.3 * frequency - 0.07 * np.maximum(0, frequency - 1)
+    direct = 0.8 * duration * carrier_work
     gate_work = duration * (60 + 3 * frequency) / _usage(gate, table, rows) + 0.04
     safe_frequency = np.where(frequency > 0, frequency, 1)
     cycles = duration * frequency
