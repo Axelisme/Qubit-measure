@@ -1,4 +1,4 @@
-"""Low-reuse real-envelope periods from finite Hilbert Fourier matrices."""
+"""Real-envelope periods from shared finite Hilbert Fourier matrices."""
 
 from dataclasses import dataclass
 
@@ -166,7 +166,7 @@ class _Data:
 
 
 class ShapedSambeKernel:
-    """Finite-Fourier real-envelope propagation for low-reuse shaped keys.
+    """Finite-Fourier real-envelope propagation for shaped keys at any reuse.
 
     Keys contain level, port, signed GHz carrier, peak absolute gain,
     duration in ns and gain-weighted envelope slope. They fix subperiod resolution.
@@ -244,25 +244,28 @@ class ShapedSambeKernel:
     ) -> NDArray[np.bool_]:
         """Check density-free bandwidth, motion and split bounds before building."""
         del budget
+        subdivisions = self._subdivisions(table, rows, source)
+        bounded = subdivisions <= 32
+        # Strong, unresolved ramps need no keys or remaining eligibility work.
+        if not np.any(bounded):
+            return bounded
         strength, _ = drive_bounds(table, rows, source)
         keys = self.prepare_keys(table, rows)
         frequency = np.abs(keys["frequency"])
         real = np.array([np.all(e.samples.imag == 0) for e in table.envelopes])
         peaks, slopes = envelope_bounds(table)
         envelope = table.tone_envelope[rows, 0]
-        resolved = slopes[envelope] <= 2 * np.maximum(
-            peaks[envelope], 1e-30
-        ) * frequency * self._subdivisions(table, rows, source)
+        resolved = (
+            slopes[envelope]
+            <= 2 * np.maximum(peaks[envelope], 1e-30) * frequency * subdivisions
+        )
         return (
             (frequency >= 0.03)
             & (keys["bound"] > 0)
             & resolved
             & real[table.tone_envelope[rows, 0]]
-            & (
-                keys["bound"] * strength
-                <= 0.5 * frequency * self._subdivisions(table, rows, source)
-            )
-            & (self._subdivisions(table, rows, source) <= 32)
+            & (keys["bound"] * strength <= 0.5 * frequency * subdivisions)
+            & bounded
         )
 
     def guard(

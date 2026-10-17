@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves and spectral-family reuse
+**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves, spectral-family reuse and reuse-independent Sambe admission
 
 ## Segment engine contracts
 
@@ -440,7 +440,7 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | One constant tone after an identical shared no-drive prefix, r and r₂ pass | Dyson with the actual prefix output. B2 does not apply; post-apply population changes only report. |
 | One constant tone not accepted above, known or unknown input, with abs(f) >= 0.03 GHz and duration*T²*Gamma*V²/m² <= 1.0 for some m in 1..64 | `floquet_period` builds one Hilbert-space U(T), translates the carrier phase in time, and steps each period with secular Strang dissipation. |
 | Same constant-tone branch, Hilbert period guard fails | T6 periodic propagation accepts every single constant-tone row. |
-| One real shaped tone with at most two uses of its ordinary period-band key and passing spectral guards | `shaped_sambe` builds finite-Hilbert-Fourier subperiods at four or eight amplitude nodes. |
+| One real shaped tone passing spectral guards, independent of ordinary period-band key reuse | `shaped_sambe` builds finite-Hilbert-Fourier subperiods at four or eight amplitude nodes. |
 | Other shaped tone, or rejected spectral key | Compute gate/period/DOP853 amortized cost order once over all shaped rows before any spectral guard. Try each numerical guard in that fixed order. There is no fixed gate-key reuse threshold. |
 | Shaped gate cache passes its split guard | Four Strang subsegments, closed-system U plus secular dissipation, and 16 carrier-phase Fourier modes with checked adaptive preparation. |
 | Shaped period table passes its envelope-motion, bandwidth and split guards | Midpoint-frozen envelopes, eight amplitude Chebyshev nodes and 16 phase Fourier samples for the actual drive port. Integrate the fractional-period tail directly. |
@@ -515,8 +515,11 @@ acceptance outcome. Same-band partial acceptance therefore cannot change the
 fallback cost order during an acquire. Workers skip families the caller already
 rejected for their rows. Every numerical guard still applies.
 
-Low-reuse spectral ramps use the same immutable polynomial playback as ordinary
-period tables. Playback skips zero Fourier modes and unused negative-amplitude
+All shaped rows may try the spectral guard, including repeated ordinary
+period-band keys. Shared spectral families amortize their build across ramps;
+ordinary key reuse does not predict that cost. Numerical guards alone admit
+spectral playback. Spectral ramps use the same immutable polynomial playback as
+ordinary period tables. Playback skips zero Fourier modes and unused negative-amplitude
 phases. Complex ordinary tables contract their varying phase only when needed. Their preparation keys contain level, port, signed carrier,
 peak absolute gain, gain-weighted envelope slope and duration. The slope and duration determine
 subperiod resolution, so different shapes cannot silently share a split chosen

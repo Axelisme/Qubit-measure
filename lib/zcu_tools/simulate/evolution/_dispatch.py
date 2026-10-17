@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 from ._parallel import Executor
 from ._planning import Geometry
 from ._prepare_keys import group_keys
-from ._shaped_dispatch import preference, spectral_candidates
+from ._shaped_dispatch import preference
 from .engine import PathDiagnostics
 from .kernel import GuardPreparation, Kernel, SegmentTable
 from .secular import ModelSource
@@ -22,7 +22,7 @@ class ShapedPlan:
 
     rows: all ordinary shaped global rows, in ascending order.
     order: (len(rows), 3) gate/period/direct index permutations.
-    spectral: global rows selected for the low-reuse spectral attempt.
+    spectral: all shaped global rows, eligible for the spectral guard attempt.
     Workers borrow these arrays and never recalculate reuse from their subset.
     """
 
@@ -258,7 +258,7 @@ class _Classifier:
             self.shaped = ShapedPlan(
                 rows,
                 preference(self.table, rows, self.kernels),
-                spectral_candidates(self.table, rows, self.kernels),
+                rows,
             )
         plan = self.shaped
         spectral = self.kernels.get("shaped_sambe")
