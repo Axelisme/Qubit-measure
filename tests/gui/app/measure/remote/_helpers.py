@@ -312,7 +312,12 @@ def dispatch_handler(ctrl: Any, method: str, params: dict) -> Mapping[str, objec
         raise remote_error_from_expected(exc) from exc
 
 
-def send(sock: socket.socket, obj: dict) -> None:
+def send[K, V](sock: socket.socket, obj: dict[K, V]) -> None:
+    """Send obj as one UTF-8 NDJSON frame on a connected stream socket.
+
+    obj must be serializable by json.dumps. Serialization, encoding and socket
+    exceptions propagate unchanged.
+    """
     sock.sendall((json.dumps(obj) + "\n").encode("utf-8"))
 
 
