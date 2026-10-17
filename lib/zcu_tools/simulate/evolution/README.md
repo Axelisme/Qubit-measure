@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-18, experimental constant covers and checked inline replay
+**Last updated:** 2026-10-18, explicit constant evidence admission and developer acquire evaluation
 
 ## Segment engine contracts
 
@@ -127,8 +127,10 @@ tests.
 
 ## Kernel declarations and the legacy provider
 
-Each registered family supplies a typed `declaration` from
-`evolution.declarations`. It records algorithm identity and revision,
+Existing registered families retain typed `declaration` data from
+`evolution.declarations`. The planner directly knows each algorithm's
+eligibility, cost features and large allocations. Adding an algorithm changes
+its planner section, not a generic declaration or memory plugin interface. It records algorithm identity and revision,
 table-only eligibility, guard validation and build handoff, accuracy class,
 representation transition, reuse namespace, coverage and parallel capability.
 `DeclaredKernel` extends the developer contract without changing `Kernel` or
@@ -141,8 +143,11 @@ All built-in cost and memory estimates are currently unknown, represented by
 `None`. Unknown is not zero. Costs are uncalibrated and cannot enter production
 cost competition. `Kernel.cost` remains a relative scheduling weight.
 `Prepared.nbytes` still charges opaque resident arrays, not RSS.
-Memory declarations distinguish resident, build workspace, apply scratch and
-evolve-local input bindings. Reuse contracts require model, budget,
+Memory declaration fields can describe resident, build workspace, apply scratch
+and evolve-local input bindings, but production planning does not require all
+those bounds. Only T6's dominant channel arrays receive a dimension-based
+allowance check. Other unknown allocations retain legacy's unrestricted policy.
+Unknown totals stay `None`; neither native workspace nor RSS is bounded. Reuse contracts require model, budget,
 representation and algorithm namespaces for builds. Binding adds certificates,
 ports and endpoint-affecting parameters. Endpoint reuse also requires complete
 span controls and phase history. These requirements do not change existing
@@ -195,8 +200,9 @@ and numerical behavior.
 
 `Engine.evolve(source, batches, cancel=cancel, execution="legacy-plan")` builds
 and executes a call-local legacy-equivalent single-interval cover. Omitting
-`execution`, or passing `"legacy"`, retains the default path. Other values raise
-`ValueError`, including for empty work. This switch is not cost-based assignment,
+`execution`, or passing `"auto"` with no profile or `"legacy"`, retains the
+default path. Explicit legacy modes ignore profiles. Unknown execution values
+raise `ValueError`, including for empty work. This switch is not cost-based assignment,
 shadow graph admission, a caller-supplied arbitrary plan or portable pinned replay.
 
 The engine resolves prefixes once, then the scheduler's legacy-plan adapter
@@ -210,13 +216,14 @@ Partial acceptance, fallback, required-terminal and missing-registry errors keep
 their legacy semantics. Guard/build/apply exceptions propagate without retry or
 reclassification. Cancellation, cache ownership, trace diagnostics and the one
 uncorrected-output exceedance warning use the same engine lifecycle as default
-execution. No new plan, profile or revision admission is enabled.
+execution. This explicit legacy mode never uses constant profile admission.
 
 ## Experimental constant planning and replay
 
 `evolution.constant.ConstantPlanner` validates and pins a numerical constant
-cover using the existing declarations, bounded shadow search and scheduler.
-This developer seam is not called by Engine, including `legacy-plan`.
+cover using algorithm-specific eligibility, identity data, bounded shadow search
+and the existing scheduler. Engine calls the planner only for explicitly selected
+constant profiles or developer evaluation, never for `legacy-plan`.
 Ownership and admission rules are in [ADR-0076](../../../../docs/adr/0076-numerical-plans-and-replay.md).
 
 Only nonempty acquires with exactly one start-zero, fixed-quantized-flux,
@@ -254,9 +261,10 @@ after their own guards pass; accuracy class does not impose an order.
 Logical workers change graph capacity, not guards or one-core costs. Repeated
 fixed requests produce the same assignment. `pinned.report` remains a shadow
 report with `production_safe=False`. The adapter consumes only its complete,
-accepted numerical cover, not graph task instructions. Binding costs are
-conservatively partitioned by row and full input/control digest. The existing
-scheduler may coalesce identical actual inputs during inline execution.
+accepted numerical cover, not graph task instructions. Bindings partition by
+algorithm/model/port, opaque prepare key and complete certified input/control
+digest. Shared source inputs pay binding once per group. Unknown prefixes never
+count as shared input in this geometry. The scheduler owns actual binding.
 
 The pin retains numerical geometry, full algorithm identities and parameters,
 profile ID/revision, planner/numeric/kernel revisions, certificates and a digest
@@ -278,7 +286,50 @@ revision-mismatch reason when measured and current identities differ. Matching
 identities still return legacy because every current profile is uncalibrated.
 `pinned.admission` records that decision for the candidate set. This decision
 does not execute a fallback. Unsupported pinned replay revisions raise instead.
-Matched calibration and held-out production admission are separate work.
+`OneCoreProfile` alone still cannot authorize production. The separate calibrated
+profile requires the evidence described below.
+
+## Explicit constant profile admission
+
+`Engine.evolve` accepts `execution="auto"` and
+`constant_profile: CalibratedConstantProfile | None`. The default None keeps
+legacy physics. Explicit `legacy` and `legacy-plan` ignore profiles. Domain or
+revision nonadmission takes the legacy branch before candidate guards, without
+retry after numerical failure. Injected kernel collections are outside built-in
+source evidence and cannot use this admission.
+
+`evolution.calibration.CalibratedConstantProfile` contains stage estimates,
+fixed numeric-source closure, planner/numeric revisions, exact workload/resource
+certificates and cold/warm acquire observations. The source commit records where
+calibration ran; unrelated repository commits do not stale the numeric closure.
+Source, dependency or execution revision mismatches prevent admission. Missing
+source cannot count as a match. Certificates include actual model/bath/drive,
+source density, point identities and controls. A dimension/budget match alone
+never admits a workload. Supported actual workers and cache capacity are exact,
+not extrapolated from logical capacity tests.
+
+Every listed workload must have both cold and warm prepare-cache evidence. Its
+whole-acquire wall time must not exceed matched legacy, and population/low-four
+density maxabs must each be <= 1e-2 against an independent full RHS. Stage
+prediction errors remain diagnostics. No built-in profile currently passes all
+these gates, so the package ships no admitted production dataset.
+
+`Engine.evaluate_constant_profile(source, batches, profile=pending, cancel=event)`
+is a developer-only candidate evaluation entry. Only absent acquire evidence may
+be pending. Revision/domain/resource mismatch and failed or partial evidence
+raise before numerical execution. It shares the admitted path's planner,
+pool/cache and Schedule, without timing calls or upgrading the profile. A
+pytest-external harness times the entire call, including checks, planning,
+guards, prepare, bind and apply, and separately checks accuracy. Its numeric
+result has no production-safe or admitted label.
+
+The planner directly models Dyson's dimension, distinct certified input bindings
+and a cheap dense retained-path upper estimate. The path-scan term scales as
+8*d**5 per binding; retained-path evaluation is per row. Coefficients come from
+the matched profile's dimension, not `Kernel.cost()` or historical larger-model
+timings. Unknown prefixes do not count as shared input. Cost estimation never
+builds trial paths or evolves trial densities. Constant profiles remain limited
+to the single start-zero interval geometry above.
 
 ## Shadow planning
 
@@ -286,8 +337,9 @@ Matched calibration and held-out production admission are separate work.
 accepts the complete `SegmentTable`, explicit `ShadowCandidate` options, a
 complete accepted incumbent, a `OneCoreProfile`, an immutable cache inventory
 and a `ShadowRequest`. It never calls numerical guards, prepare, bind or apply.
-It cannot compute a prefix certificate. `Engine.evolve` does not call it.
-Default dispatch, densities, diagnostics and cache recency stay unchanged.
+It cannot compute a prefix certificate. Constant profile planning uses this same
+bounded search after guard validation. Without an admitted opt-in profile,
+default dispatch, densities, diagnostics and cache recency stay unchanged.
 
 Candidates cover one interval each. Their row indexes preserve all original
 controls, basis boundaries and continuous-flux geometry. Give every candidate
@@ -318,8 +370,9 @@ are `None`. All profiles in this slice are explicitly `uncalibrated` and cannot
 enter production cost competition. Use clearly labelled synthetic estimates
 when exploring a graph; historical timing reports are not current-head
 calibration. Profile stages use one-core seconds, with constant per-row costs
-and per-key build/bind costs. Memory estimates use bytes. Missing costs or byte
-charges fail, rather than becoming zero. No acquisition benchmarks the machine.
+and per-key build/bind costs. Memory estimates use bytes. Missing stage costs
+fail. Missing byte charges remain unknown and do not become zero. No acquisition
+benchmarks the machine.
 
 Typical collaborator call, after the numerical owner has supplied candidates
 and a profile:
@@ -355,11 +408,14 @@ nonpreemptive list scheduling scores each whole-acquire graph. The graph lower
 bound is the maximum of work/workers, the longest dependency chain and the
 largest indivisible build. It is not a global bound over unexplored assignments.
 
-Memory admission conservatively retains every selected build, pinned whole
-cache allocation, binding and caller-supplied state byte through acquire end.
-It adds workers times the largest build-workspace or apply-scratch charge.
-This can reject options that streaming execution could fit. The allowance is
-separate from the resident cache limit and does not measure process RSS.
+When every byte charge is explicitly known, shadow scoring retains each build,
+whole cache allocation, binding and state through acquire end, plus workers
+times the largest workspace/scratch charge. This supports synthetic resource
+contracts. With unknown charges, `required_bytes` is `None`. The planner then
+checks only the estimated dominant T6 channel arrays. Other algorithms retain
+legacy's unrestricted policy. `large_allocation_bytes` reports that limited
+estimate. The allowance is separate from the opaque resident cache limit and
+does not bound native workspace or process RSS.
 An infeasible incumbent raises `ValueError`; infeasible moves cannot replace it.
 Reports include estimated wall, lower bound, required bytes, unresolved guards,
 cache allocation IDs, search effort and reasons. Even a fully accepted shadow

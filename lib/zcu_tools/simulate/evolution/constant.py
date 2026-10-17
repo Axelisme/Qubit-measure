@@ -1,13 +1,14 @@
-"""Experimental constant planning and inline pinned numerical replay.
+"""Explicit constant profile planning and inline pinned numerical replay.
 
-This developer seam never changes Engine dispatch or admits production physics.
-Only nonempty acquires with one source-input, fixed-flux, constant zero/one-tone
-interval per timeline are supported. No prefix is inferred or evolved here.
+Bare one-core estimates remain experimental. Engine may select a complete
+constant cover only after calibrated evidence admission or explicit developer
+candidate evaluation. Only nonempty source-input, fixed-flux, constant zero/
+one-tone intervals are supported. No prefix is inferred or evolved here.
 """
 
 import warnings
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from hashlib import sha256
 from threading import Event, Lock
 
@@ -19,6 +20,13 @@ from ._parallel import execution_pool, native_limit
 from ._planning import Geometry
 from ._schedule import Schedule
 from .cache import CacheEntry, PrepareCache
+from .calibration import (
+    CONSTANT_PLANNER_REVISION,
+    CalibratedConstantProfile,
+    ConstantWorkload,
+    constant_dependencies,
+    constant_kernel_revision,
+)
 from .engine import (
     SEGMENT_NUMERIC_VERSION,
     Cancelled,
@@ -29,9 +37,12 @@ from .engine import (
 from .profiles import OneCoreProfile, ProfileAdmission
 from .provider import LegacyKernelAdapter, LegacyProvider, segment
 from .secular import ModelSource
-from .shadow import ShadowCandidate, ShadowPlan, ShadowRequest, shadow_plan
-
-CONSTANT_PLANNER_REVISION = "experimental-constant-v1"
+from .shadow import (
+    ShadowCandidate,
+    ShadowPlan,
+    ShadowRequest,
+    shadow_plan,
+)
 
 
 @dataclass(frozen=True)
@@ -116,78 +127,354 @@ class ConstantPlanner:
         rejected terminal guards raise RuntimeError. Numerical exceptions
         propagate without reassignment or retry.
         """
+        return self.plan_geometry(
+            source,
+            _constant_geometry(source, batches),
+            profile,
+            request,
+            inventory=inventory,
+        )
+
+    def plan_geometry(
+        self,
+        source: ModelSource,
+        geometry: Geometry,
+        profile: OneCoreProfile,
+        request: ShadowRequest,
+        *,
+        inventory: tuple[CacheEntry, ...] = (),
+    ) -> PinnedConstantPlan:
+        """Plan complete already segmented geometry under the same constant contract.
+
+        geometry must be the unmodified output of provider.segment for source.
+        This avoids repeating segmentation in Engine. All guards, actual input
+        certificates, complete incumbent checks and bounded search still run.
+        Unsupported geometry raises ValueError before candidate evaluation.
+        """
         with self._lock, native_limit.acquire():
-            geometry = _constant_geometry(source, batches)
-            if request.dimension != source.initial_density.shape[0]:
-                raise ValueError("request dimension differs from source input")
-            digest = _input_digest(geometry, source)
-            candidates: list[ShadowCandidate] = []
-            certificates: list[RowCertificate] = []
-            rows = np.arange(len(geometry.table.timeline), dtype=np.int64)
-            eligible = self._provider.eligible(geometry.table, rows)
-            dc = source.model(tuple(0 for _ in range(geometry.table.level.shape[1])))
-            for name in ("t4", "dyson", "floquet_period", "t6", "dop853"):
-                if name not in eligible or not len(eligible[name]):
-                    continue
-                entry = self._provider.entry(name)
-                # Current constant families validate without building payloads.
-                # Builder variants need evolve-local handoff ownership, not stored tables.
-                if entry.kernel.guard_builds:
-                    raise ValueError(
-                        "constant planner does not support guard-building variants"
-                    )
-                selected = eligible[name]
-                accepted = entry.kernel.guard(
-                    geometry.table, selected, source, request.budget
-                )
-                keys = entry.kernel.prepare_keys(geometry.table, selected)
-                for row, valid, key in zip(selected, accepted, keys, strict=True):
-                    certificates.append(
-                        RowCertificate(int(row), name, bool(valid), digest)
-                    )
-                    candidates.append(
-                        ShadowCandidate(
-                            f"{name}:{row}",
-                            int(row),
-                            entry.declaration,
-                            (
-                                entry.declaration.reuse.namespace,
-                                dc.identity,
-                                request.budget,
-                            ),
-                            key.tobytes(),
-                            "accepted" if valid else "rejected",
-                            f"{digest}:row:{row}".encode(),
-                        )
-                    )
-            by_id = {candidate.candidate_id: candidate for candidate in candidates}
-            safe = tuple(
-                f"{'t4' if tones == 0 else 't6'}:{row}"
-                for row, tones in enumerate(geometry.table.tones)
-            )
-            for candidate_id in safe:
-                if candidate_id not in by_id:
-                    raise RuntimeError(
-                        f"constant cover requires kernel {candidate_id.split(':')[0]}"
-                    )
-                if by_id[candidate_id].guard != "accepted":
-                    raise RuntimeError(
-                        f"no valid kernel for constant interval {candidate_id}"
-                    )
-            report = shadow_plan(
-                geometry.table, tuple(candidates), safe, profile, inventory, request
-            )
-            assumptions = sha256(repr((request, inventory)).encode()).hexdigest()
-            return PinnedConstantPlan(
-                report,
+            if not _supported_geometry(geometry):
+                raise ValueError("unsupported constant geometry")
+            return self._plan_geometry(
+                source,
                 geometry,
-                tuple(certificates),
-                digest,
-                assumptions,
-                request.budget,
-                profile.production_admission(
-                    tuple(c.declaration.identity for c in candidates)
-                ),
+                profile,
+                request,
+                inventory,
+                _input_digest(geometry, source),
+            )
+
+    def _plan_geometry(
+        self,
+        source: ModelSource,
+        geometry: Geometry,
+        profile: OneCoreProfile,
+        request: ShadowRequest,
+        inventory: tuple[CacheEntry, ...],
+        digest: str,
+    ) -> PinnedConstantPlan:
+        if request.dimension != source.initial_density.shape[0]:
+            raise ValueError("request dimension differs from source input")
+        candidates: list[ShadowCandidate] = []
+        certificates: list[RowCertificate] = []
+        rows = np.arange(len(geometry.table.timeline), dtype=np.int64)
+        # Constant algorithm eligibility belongs here, not to a plugin
+        # declaration. Guards retain the algorithms' numerical authority.
+        tones = geometry.table.tones
+        available = self._provider.eligible(geometry.table, rows)
+        eligible = {
+            # Exact secular T4: model build per key, analytic apply per row.
+            "t4": rows[tones == 0],
+            # Dyson: certified-input binding and retained-path apply below.
+            "dyson": rows[tones == 1],
+            # Hilbert period: frequency-key build and row endpoint apply;
+            # guard owns the carrier floor and splitting subdivision limit.
+            "floquet_period": rows[tones == 1],
+            # T6: full single-tone incumbent, with d**4 channel allowance.
+            "t6": rows[tones == 1],
+            # Direct DOP853: cheap model preparation and row integration.
+            # Fixed controls/duration belong to the exact calibrated domain.
+            "dop853": rows,
+        }
+        dc = source.model(tuple(0 for _ in range(geometry.table.level.shape[1])))
+        for name in ("t4", "dyson", "floquet_period", "t6", "dop853"):
+            if name not in available or not len(eligible[name]):
+                continue
+            entry = self._provider.entry(name)
+            # Current constant families validate without building payloads.
+            # Builder variants need evolve-local handoff ownership, not stored tables.
+            if entry.kernel.guard_builds:
+                raise ValueError(
+                    "constant planner does not support guard-building variants"
+                )
+            selected = eligible[name]
+            accepted = entry.kernel.guard(
+                geometry.table, selected, source, request.budget
+            )
+            keys = entry.kernel.prepare_keys(geometry.table, selected)
+            for row, valid, key in zip(selected, accepted, keys, strict=True):
+                port = int(geometry.table.tone_port[row, 0]) if tones[row] else -1
+                certificates.append(RowCertificate(int(row), name, bool(valid), digest))
+                candidates.append(
+                    ShadowCandidate(
+                        f"{name}:{row}",
+                        int(row),
+                        entry.declaration,
+                        (
+                            name,
+                            dc.identity,
+                            request.budget,
+                        ),
+                        key.tobytes(),
+                        "accepted" if valid else "rejected",
+                        f"{digest}:source-input:port:{port}".encode(),
+                    )
+                )
+        by_id = {candidate.candidate_id: candidate for candidate in candidates}
+        safe = tuple(
+            f"{'t4' if tones == 0 else 't6'}:{row}"
+            for row, tones in enumerate(geometry.table.tones)
+        )
+        for candidate_id in safe:
+            if candidate_id not in by_id:
+                raise RuntimeError(
+                    f"constant cover requires kernel {candidate_id.split(':')[0]}"
+                )
+            if by_id[candidate_id].guard != "accepted":
+                raise RuntimeError(
+                    f"no valid kernel for constant interval {candidate_id}"
+                )
+        report = shadow_plan(
+            geometry.table, tuple(candidates), safe, profile, inventory, request
+        )
+        assumptions = sha256(repr((request, inventory)).encode()).hexdigest()
+        return PinnedConstantPlan(
+            report,
+            geometry,
+            tuple(certificates),
+            digest,
+            assumptions,
+            request.budget,
+            profile.production_admission(
+                tuple(c.declaration.identity for c in candidates)
+            ),
+        )
+
+    def _revision_admission(
+        self, profile: CalibratedConstantProfile
+    ) -> ProfileAdmission:
+        if (
+            profile.planner_revision != CONSTANT_PLANNER_REVISION
+            or profile.numeric_revision != SEGMENT_NUMERIC_VERSION
+        ):
+            return ProfileAdmission(
+                "legacy", False, "unsupported profile execution revision"
+            )
+        dependencies = profile.estimates.provenance.dependencies
+        if dependencies and dependencies != constant_dependencies():
+            return ProfileAdmission(
+                "legacy", False, "numeric dependency revision mismatch"
+            )
+        current = tuple(
+            self._provider.entry(name).declaration.identity
+            for name in ("t4", "dyson", "floquet_period", "t6", "dop853")
+        )
+        revision = profile.estimates.production_admission(current)
+        if not revision.revisions_match:
+            return revision
+        try:
+            source_revision = constant_kernel_revision()
+        except OSError:
+            return ProfileAdmission("legacy", False, "numeric source unavailable")
+        if profile.kernel_source_digest != source_revision:
+            return ProfileAdmission("legacy", False, "numeric source revision mismatch")
+        return revision
+
+    def _admission(
+        self,
+        geometry: Geometry,
+        source: ModelSource,
+        profile: CalibratedConstantProfile,
+        *,
+        request: ShadowRequest,
+        cache_bytes: int,
+    ) -> tuple[ProfileAdmission, str | None]:
+        """Check exact domain/resources/evidence before guards or assignment.
+
+        geometry is the complete segmented acquire. A pending decision is legacy
+        for production and may be evaluated only by Engine's developer entry.
+        Stale source, unsupported geometry/resources, failed or incomplete
+        observations never authorize production. Numeric model failures propagate.
+        """
+        revision = self._revision_admission(profile)
+        if not revision.revisions_match:
+            return revision, None
+        if not _supported_geometry(geometry):
+            return ProfileAdmission(
+                "legacy", True, "unsupported constant geometry"
+            ), None
+        dimension = source.initial_density.shape[0]
+        domain = profile.estimates.domain
+        if not (
+            domain.dimensions[0] <= dimension <= domain.dimensions[1]
+            and domain.budgets[0] <= request.budget <= domain.budgets[1]
+        ):
+            return ProfileAdmission(
+                "legacy", True, "outside calibrated budget/dimension"
+            ), None
+        digest = _input_digest(geometry, source)
+        workload = ConstantWorkload(digest, request.workers, cache_bytes)
+        if workload not in profile.workloads:
+            return ProfileAdmission(
+                "legacy", True, "outside exact workload/resource certificates"
+            ), None
+        # Preserve the complete T6 incumbent, including its dominant d**4
+        # channels, before any numerical candidate guard can run.
+        rows = np.flatnonzero(geometry.table.tones == 1).astype(np.int64)
+        large = 0
+        if len(rows):
+            keys = self._provider.entry("t6").kernel.prepare_keys(geometry.table, rows)
+            large = len(np.unique(keys)) * (4 * 515 + 64) * dimension**4 * 16
+        if large > profile.large_allocation_allowance:
+            return ProfileAdmission(
+                "legacy", True, "T6 channel allocation exceeds allowance"
+            ), None
+        status = profile.acquire_status()
+        return ProfileAdmission(
+            "constant" if status == "validated" else "legacy",
+            True,
+            status + " matched acquire evidence",
+            status == "pending",
+        ), digest
+
+    def _dispatch(
+        self,
+        source: ModelSource,
+        geometry: Geometry,
+        profile: CalibratedConstantProfile,
+        *,
+        request: ShadowRequest,
+        inventory: tuple[CacheEntry, ...],
+        digest: str,
+    ) -> Dispatch:
+        """Plan an already admitted/evaluation-qualified constant workload.
+
+        Engine owns admission, call serialization and execution. This performs
+        all guards and bounded whole-acquire search, but no preparation or apply.
+        It never grants production admission or catches numeric failures.
+        """
+        # Dyson scans about 8*d**5 coupling paths once per distinct certified
+        # input binding, then evaluates retained paths per row. No trial density
+        # or path construction is used for this cost estimate. In this exact
+        # source-input geometry a binding key includes model/port plus the full
+        # input/control certificate; unknown prefixes cannot enter this planner.
+        # A dense cheap bound covers first/second-order modal paths. Coefficients
+        # are normalized only to the measured profile dimension, never to a
+        # historical larger model or Kernel.cost()'s relative weight of one.
+        dimension = request.dimension
+        reference_dimension = profile.estimates.domain.dimensions[0]
+        path_bound = 4 * dimension**6 + 2 * dimension**4
+        reference_paths = 4 * reference_dimension**6 + 2 * reference_dimension**4
+        estimates = replace(
+            profile.estimates,
+            families=tuple(
+                replace(
+                    family,
+                    stages=replace(
+                        family.stages,
+                        bind=float(family.stages.bind or 0)
+                        * (dimension / reference_dimension) ** 5,
+                        apply=float(family.stages.apply or 0)
+                        * path_bound
+                        / reference_paths,
+                    ),
+                )
+                if family.identity.name == "dyson"
+                else family
+                for family in profile.estimates.families
+            ),
+        )
+        pinned = self._plan_geometry(
+            source, geometry, estimates, request, inventory, digest
+        )
+        names = np.full(len(pinned.report.selected.cover), "", dtype="<U32")
+        for candidate in pinned.report.selected.cover:
+            names[candidate.row] = candidate.declaration.identity.name
+        return Dispatch(names, PathDiagnostics(), np.ones(len(names)))
+
+    def production_dispatch(
+        self,
+        source: ModelSource,
+        geometry: Geometry,
+        profile: CalibratedConstantProfile,
+        *,
+        request: ShadowRequest,
+        cache: PrepareCache,
+    ) -> Dispatch | None:
+        """Return a qualified production cover, or None before any guards.
+
+        Checks current source, exact numeric workload/resources and complete
+        cold/warm evidence. Numerical exceptions propagate, never retry legacy.
+        The input snapshot/digest is shared only within this serialized call.
+        """
+        return self._profile_dispatch(
+            source, geometry, profile, request, cache, evaluation=False
+        )
+
+    def evaluation_dispatch(
+        self,
+        source: ModelSource,
+        geometry: Geometry,
+        profile: CalibratedConstantProfile,
+        *,
+        request: ShadowRequest,
+        cache: PrepareCache,
+    ) -> Dispatch:
+        """Return a developer cover with only acquire evidence allowed pending.
+
+        Domain/resource/revision mismatch or failed evidence raises ValueError
+        before guards. No production admission is granted. All actual inputs
+        are certified anew; no digest or evolved state is cached across calls.
+        """
+        dispatch = self._profile_dispatch(
+            source, geometry, profile, request, cache, evaluation=True
+        )
+        if dispatch is None:
+            raise ValueError("constant evaluation has no qualified cover")
+        return dispatch
+
+    def _profile_dispatch(
+        self,
+        source: ModelSource,
+        geometry: Geometry,
+        profile: CalibratedConstantProfile,
+        request: ShadowRequest,
+        cache: PrepareCache,
+        *,
+        evaluation: bool,
+    ) -> Dispatch | None:
+        with self._lock, native_limit.acquire():
+            decision, digest = self._admission(
+                geometry,
+                source,
+                profile,
+                request=request,
+                cache_bytes=cache.limit,
+            )
+            if decision.execution != "constant" and not (
+                evaluation and decision.pending_acquire
+            ):
+                if evaluation:
+                    raise ValueError("constant evaluation rejected: " + decision.reason)
+                return None
+            if digest is None:
+                raise ValueError("qualified constant workload lacks input certificate")
+            return self._dispatch(
+                source,
+                geometry,
+                profile,
+                request=request,
+                inventory=cache.inventory(),
+                digest=digest,
             )
 
     def replay(
@@ -255,8 +542,7 @@ class ConstantPlanner:
                 if (
                     candidate.guard != "accepted"
                     or candidate.prepare_key != key
-                    or candidate.namespace
-                    != (entry.declaration.reuse.namespace, dc.identity, pinned.budget)
+                    or candidate.namespace != (name, dc.identity, pinned.budget)
                 ):
                     raise ValueError("pinned candidate input/key/budget mismatch")
                 names[candidate.row] = name
@@ -292,10 +578,21 @@ def _constant_geometry(
     if not batches or not any(len(batch.points) for batch in batches):
         raise ValueError("constant planner requires a nonempty acquire")
     geometry = segment(source, batches)
+    if not _supported_geometry(geometry):
+        raise ValueError(
+            "constant planner requires one source-input fixed-flux constant interval per timeline"
+        )
+    geometry.points.setflags(write=False)
+    geometry.flux_drive.setflags(write=False)
+    return geometry
+
+
+def _supported_geometry(geometry: Geometry) -> bool:
     table = geometry.table
     rows = np.arange(len(table.timeline), dtype=np.int64)
-    if (
-        len(rows) != len(geometry.points)
+    return not (
+        not len(rows)
+        or len(rows) != len(geometry.points)
         or not np.array_equal(np.sort(table.timeline), np.arange(len(geometry.points)))
         or np.any(table.start_ns != 0)
         or np.any(table.tones > 1)
@@ -303,13 +600,18 @@ def _constant_geometry(
         or table.flux_waveform is not None
         or np.any(geometry.flux_drive)
         or table.prefix_inputs
-    ):
-        raise ValueError(
-            "constant planner requires one source-input fixed-flux constant interval per timeline"
-        )
-    geometry.points.setflags(write=False)
-    geometry.flux_drive.setflags(write=False)
-    return geometry
+    )
+
+
+def constant_workload_certificate(
+    source: ModelSource, batches: Sequence[TimelineBatch]
+) -> str:
+    """Certify exact constant geometry, numeric source, input and full controls.
+
+    This identifies a finite calibration workload, not guard acceptance. Invalid
+    geometry raises ValueError; model errors propagate without fallback.
+    """
+    return _input_digest(_constant_geometry(source, batches), source)
 
 
 def _array_token(array: NDArray[np.generic]) -> bytes:

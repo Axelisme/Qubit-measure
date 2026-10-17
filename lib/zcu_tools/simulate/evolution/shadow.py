@@ -82,8 +82,9 @@ class ShadowRequest:
 
     dimension is a positive Hilbert-space size. budget is the positive finite
     numeric accuracy allowance, not a cost. workers is positive logical one-core
-    capacity and launches no pool. memory_allowance is nonnegative live-work
-    bytes, separate from cache budget. state_bytes is the caller's total
+    capacity and launches no pool. memory_allowance limits explicitly known
+    live-work bytes, or only estimated large T6 arrays when totals are unknown.
+    It is separate from cache budget. state_bytes is the caller's total
     simultaneously live density/state storage for the entire acquire, counted
     once, not per row/worker. Include any retained certified prefix states here.
     limits fixes candidate/beam/round/move bounds, never elapsed time.
@@ -131,8 +132,11 @@ class ShadowScore:
     workers. lower_bound_seconds is max(work/workers, critical path, largest
     indivisible build). required_bytes is conservative live work: whole pinned
     cache allocations, all resident builds/bindings/states, plus workers times
-    max(task workspace, apply scratch). It is not RSS. feasible compares this
-    with the explicit allowance. tentative lists rows without existing accepted
+    max(task workspace, apply scratch), or None if any charge is unknown.
+    large_allocation_bytes estimates T6's dominant channel arrays only. With
+    unknown totals, feasible checks only that limited estimate, not RSS or all
+    workspace. With complete explicit synthetic charges it checks the total.
+    tentative lists rows without existing accepted
     guard results. cache_allocations lists whole allocation IDs charged once.
     """
 
@@ -140,10 +144,11 @@ class ShadowScore:
     tasks: tuple[ShadowTask, ...]
     wall_seconds: float
     lower_bound_seconds: float
-    required_bytes: int
+    required_bytes: int | None
     feasible: bool
     tentative: tuple[str, ...]
     cache_allocations: tuple[int, ...]
+    large_allocation_bytes: int = 0
 
 
 @dataclass(frozen=True)
@@ -222,7 +227,8 @@ def shadow_plan(
         "uncalibrated one-core estimates; logical workers only; not production-safe"
     )
     reasons.add(
-        "conservative memory retains selected resident payloads and bindings through acquire"
+        "known memory retains payloads through acquire; unknown totals stay unknown; "
+        "only estimated T6 channel arrays are limited when totals are unknown"
     )
     if best.tentative:
         reasons.add(
@@ -386,6 +392,7 @@ class _Search:
         from ._shadow_graph import score_cover
 
         scores = []
+        best_wall = current.wall_seconds
         for cover in _moves(current.cover, self.options):
             signature = _signature(cover)
             if signature in self.visited:
@@ -395,16 +402,63 @@ class _Search:
                 break
             self.visited.add(signature)
             self.evaluated += 1
+            if self._work_bound(cover) > best_wall:
+                self.reasons.add(
+                    "dominated work/build lower bounds avoid redundant graph scoring"
+                )
+                continue
             score = score_cover(
                 self.table, cover, self.profile, self.inventory, self.request
             )
             if score.feasible:
                 scores.append(score)
+                best_wall = min(best_wall, score.wall_seconds)
             else:
                 self.reasons.add(
                     "memory-infeasible covers excluded by conservative live-work allowance"
                 )
         return scores
+
+    def _work_bound(self, cover: tuple[ShadowCandidate, ...]) -> float:
+        """Bound remaining work without constructing another dependency graph.
+
+        Full build and binding identities include certificates and controls.
+        Accepted guard work is already sunk. Only matching revisioned whole
+        cache entries can remove a build charge; unknown hits remain misses.
+        This is a bound, not an alternative scheduler or assignment tree.
+        """
+        from ._shadow_graph import build_key
+
+        builds = {}
+        bindings = set()
+        work = 0.0
+        for candidate in cover:
+            estimate = self.profile.family(candidate.declaration.identity)
+            key = build_key(candidate)
+            if key not in builds:
+                hit = any(
+                    entry.namespace == candidate.namespace
+                    and entry.revision == candidate.declaration.identity.revision
+                    and candidate.prepare_key in entry.keys
+                    for entry in self.inventory
+                )
+                builds[key] = 0.0 if hit else float(estimate.stages.build or 0)
+                work += builds[key]
+            binding = (key, candidate.binding_key)
+            if candidate.binding_key is not None and binding not in bindings:
+                work += float(estimate.stages.bind or 0)
+                bindings.add(binding)
+            work += sum(
+                float(value or 0)
+                for value in (
+                    estimate.stages.apply,
+                    estimate.stages.basis_conversion,
+                    estimate.stages.lift,
+                )
+            )
+            if candidate.guard == "tentative":
+                work += float(estimate.stages.guard or 0)
+        return max(work / self.request.workers, max(builds.values(), default=0.0))
 
     def run(self, initial: ShadowScore) -> ShadowScore:
         self.visited.add(_signature(initial.cover))

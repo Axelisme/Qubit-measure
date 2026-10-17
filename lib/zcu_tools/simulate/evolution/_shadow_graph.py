@@ -1,4 +1,4 @@
-"""Pure graph construction and conservative resource scoring for shadow plans."""
+"""Pure graph scoring with known synthetic charges or limited T6 estimates."""
 
 from dataclasses import dataclass
 from heapq import heappop, heappush
@@ -39,12 +39,6 @@ def _known(value: float | None) -> float:
     return value
 
 
-def _bytes(value: int | None) -> int:
-    if value is None:
-        raise ValueError("shadow memory must be known")
-    return value
-
-
 class _Graph:
     def __init__(self, profile: OneCoreProfile, inventory: tuple[CacheEntry, ...]):
         self.profile = profile
@@ -57,6 +51,14 @@ class _Graph:
         self.resident_bytes = 0
         self.binding_bytes = 0
         self.task_bytes = 0
+        self.memory_known = True
+
+    def account(self, value: int | None) -> int:
+        """Accumulate known charges without reporting an unknown total as zero."""
+        if value is None:
+            self.memory_known = False
+            return 0
+        return value
 
     def add(
         self,
@@ -119,7 +121,7 @@ class _Graph:
                 return task_id
             seconds = 0.0
         else:
-            self.resident_bytes += _bytes(estimate.memory.resident)
+            self.resident_bytes += self.account(estimate.memory.resident)
         task_id = self.add(
             "build", str(len(self.builds)), (), seconds, candidate, estimate
         )
@@ -146,7 +148,7 @@ class _Graph:
             estimate,
         )
         self.bindings[key] = task_id
-        self.binding_bytes += _bytes(estimate.memory.input_bound)
+        self.binding_bytes += self.account(estimate.memory.input_bound)
         return task_id
 
     def row(self, candidate: ShadowCandidate, previous: str | None) -> str:
@@ -189,8 +191,8 @@ class _Graph:
         )
         self.task_bytes = max(
             self.task_bytes,
-            _bytes(estimate.memory.build_workspace),
-            _bytes(estimate.memory.apply_scratch),
+            self.account(estimate.memory.build_workspace),
+            self.account(estimate.memory.apply_scratch),
         )
         if estimate.stages.lift:
             return self.add(
@@ -247,9 +249,10 @@ def score_cover(
 ) -> ShadowScore:
     """Construct shared tasks once, preserve timeline dependencies, and score a full cover.
 
-    cover must be validated and in timeline/time order. Memory retains all selected
-    payloads until acquire end, deliberately overestimating streaming lifetimes.
-    No cache handles or numerical kernel methods are used.
+    cover must be validated and in timeline/time order. Known synthetic memory
+    charges retain payloads through acquire end. Unknown totals stay None and
+    only the dominant T6 channel estimate is limited. No cache handles or
+    numerical kernel methods are used.
     """
     graph = _Graph(profile, inventory)
     previous: dict[int, str] = {}
@@ -265,13 +268,23 @@ def score_cover(
         + sum(entry.nbytes for entry in graph.hits.values())
         + request.workers * graph.task_bytes
     )
+    # T6 retains phase-channel samples, Fourier values and coefficients. The
+    # largest phase grid has 512 samples plus three probes. This checks the
+    # dominant d**4 arrays, not SciPy/native workspace or process RSS. Other
+    # unknown allocations retain legacy's unrestricted policy.
+    large = sum(
+        (4 * 515 + 64) * request.dimension**4 * 16
+        for key in graph.builds
+        if key.identity.name == "t6"
+    )
     return ShadowScore(
         cover,
         tasks,
         wall,
         lower,
-        required,
-        required <= request.memory_allowance,
+        required if graph.memory_known else None,
+        (required if graph.memory_known else large) <= request.memory_allowance,
         tuple(c.candidate_id for c in cover if c.guard != "accepted"),
         tuple(sorted(graph.hits)),
+        large,
     )

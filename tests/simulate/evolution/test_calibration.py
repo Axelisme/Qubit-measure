@@ -347,13 +347,17 @@ def test_evolve_rejects_developer_internal_execution_mode(scenario, execution):
     engine = Engine(1, 100000)
     try:
         with pytest.raises(ValueError, match="execution"):
-            engine.evolve(src, (b,), cancel=Event(), execution=execution, constant_profile=pending)
+            engine.evolve(
+                src, (b,), cancel=Event(), execution=execution, constant_profile=pending
+            )
     finally:
         engine.close()
 
 
 @pytest.mark.parametrize("profile", [None])
-def test_developer_evaluation_rejects_missing_candidate_instead_of_measuring_legacy(scenario, profile):
+def test_developer_evaluation_rejects_missing_candidate_instead_of_measuring_legacy(
+    scenario, profile
+):
     src, b, _, _ = scenario
     engine = Engine(1, 100000)
     try:

@@ -65,7 +65,8 @@ class FamilyProfile:
 
     stages uses one-core seconds: guard/apply/basis/lift per row, build per
     distinct build key, bind per distinct binding key, overhead per graph task.
-    memory is in bytes, not RSS. Every stage/byte charge must be known.
+    memory is in bytes, not RSS. Stages must be known; unknown memory remains
+    None. Planner checks only its explicitly estimated large allocations.
     There is no worker scaling or inferred batch speedup in this profile schema.
     """
 
@@ -84,28 +85,27 @@ class FamilyProfile:
                 self.stages.basis_conversion,
                 self.stages.lift,
                 self.stages.task_overhead,
-                self.memory.resident,
-                self.memory.build_workspace,
-                self.memory.apply_scratch,
-                self.memory.input_bound,
             )
         ):
-            raise ValueError("shadow estimates require known costs and memory")
+            raise ValueError("shadow estimates require known costs")
 
 
 @dataclass(frozen=True)
 class ProfileAdmission:
     """Production decision before assignment, never recovery from numerical failure.
 
-    execution is legacy for every currently uncalibrated profile. revisions_match
-    compares full measured algorithm identities (including parameters/variant)
-    with the required current kernels. reason distinguishes stale revisions from
-    missing calibration; matching revisions alone never qualify a profile.
+    execution is legacy for a bare OneCoreProfile, or constant only after the
+    calibrated wrapper qualifies. revisions_match compares complete algorithm,
+    source and execution revisions required by the caller. reason records stale,
+    unsupported or incomplete evidence. pending_acquire is True only when all
+    checks except missing acquire evidence pass; only developer evaluation may
+    consume that state. Matching algorithm identities alone never qualify.
     """
 
-    execution: Literal["legacy"]
+    execution: Literal["legacy", "constant"]
     revisions_match: bool
     reason: str
+    pending_acquire: bool = False
 
 
 @dataclass(frozen=True)
