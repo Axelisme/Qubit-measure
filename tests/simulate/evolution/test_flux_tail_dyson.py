@@ -132,6 +132,35 @@ def test_only_repeated_no_drive_prefixes_bypass_population_bound():
     assert different_flux.paths.segments_by_kernel.get("dyson", 0) == 0
 
 
+def test_flux_tail_identity_ignores_future_samples_but_keeps_prefix_boundary():
+    src, b = source(), batch()
+    waveform = FluxWaveform(
+        np.array([0, 4, 8]),
+        np.tile([0.0, 2.0, 50.0, 60.0], 2),
+        np.array([[1.0], [0], [0], [0], [1.0], [0], [0], [0.01]]),
+    )
+    # The probe runs from 7 to 47 ns. Its prefix needs the 50 ns
+    # interpolation endpoint, but cannot depend on the 60 ns sample.
+    result = evolve(src, replace(b, flux_waveform=waveform))
+    assert result.paths.segments_by_kernel == {"t4": 4, "dyson": 2}
+
+    prefix_flux = waveform.flux.copy()
+    prefix_flux[4, 0] = 1.01
+    unequal_prefix = evolve(
+        src, replace(b, flux_waveform=replace(waveform, flux=prefix_flux))
+    )
+    assert unequal_prefix.paths.segments_by_kernel == {"t4": 4, "rwa": 2}
+
+    # Keep the first sample after probe start in the identity even when
+    # equal endpoint values happen to make the interpolated flux flat.
+    boundary_times = waveform.time_ns.copy()
+    boundary_times[6] = 51.0
+    unequal_boundary = evolve(
+        src, replace(b, flux_waveform=replace(waveform, time_ns=boundary_times))
+    )
+    assert unequal_boundary.paths.segments_by_kernel == {"t4": 4, "rwa": 2}
+
+
 def ordinary_probe(src, b, initial):
     """Evaluate each probe through the model-only public C5 path."""
     track = b.tracks[0]
