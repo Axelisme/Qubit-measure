@@ -12,6 +12,7 @@ or the socket server.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 
 import numpy as np
 from zcu_tools.analysis.fluxdep.models import TransitionDict
@@ -33,7 +34,7 @@ def _adapter() -> _StubAdapter:
     return _StubAdapter(Controller(FluxDepState()))
 
 
-def _call(adapter: _StubAdapter, method: str, raw_params: dict) -> dict:
+def _call(adapter: _StubAdapter, method: str, raw_params: Mapping[str, object]) -> dict:
     """Validate params against the spec (as the service does) then dispatch."""
     spec = METHOD_REGISTRY[method]
     params = validate_params(spec.params, raw_params) if spec.params else raw_params
