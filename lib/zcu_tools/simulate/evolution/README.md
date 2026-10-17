@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves and spectral-family reuse
+**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves and calibrated physical-block carrier interpolation
 
 ## Segment engine contracts
 
@@ -537,13 +537,39 @@ needed. The cycle-scaled harmonic and amplitude estimates must fit budget/2.
 The guard never reads a density or evolves a trial input. Within one guard or
 prepare call, ramps share immutable spectral coefficients by model identity,
 level, port, signed carrier, peak gain, subperiod resolution, harmonic cutoff
-and amplitude node count. Budget and algorithm revision scope the call-local
-workspace. Each ramp selects cutoffs and evaluates admission with its own cycle
-count. Duration, slope and direct-tail preparations remain row-specific.
-The kernel retains no workspace after the call returns. Timeline workers batch
-their local ramps in one guard call, so live workspace follows concurrent
-timelines rather than the frequency grid. Accepted payloads retain coefficients
-until their timeline finishes, or in the prepare LRU for shared keys. Each
+and amplitude node count. Each ramp selects cutoffs and evaluates admission with its own cycle count.
+Duration, slope and direct-tail preparations remain row-specific.
+
+Engine owns a separate physical-block carrier workspace for one evolve. It
+shares that workspace with prefix resolution and timeline workers, never with
+another evolve or budget. This is calibrated physical-block carrier interpolation,
+not eigenvector interpolation and not a rigorous interval bound. It treats peak
+coarse/fine Fourier blocks separately from amplitude-Chebyshev/Fourier coefficients.
+The original float64 signed carrier remains in each prepared key. Evaluation uses
+that exact carrier, not the nearest construction node.
+
+Before building, the kernel groups planned carriers by model identity/level,
+port, peak gain bound and subdivisions. Within each group the workspace admits
+only signed scans with more than nine unique carriers, one sign, and endpoint
+magnitude ratio at most 1.1. Nine is the
+cost of six Chebyshev-Gauss construction nodes plus three independent probes.
+Wider groups and groups with at most nine carriers keep exact per-carrier builds.
+A narrow scan whose carriers all have distinct bounds therefore builds each carrier
+once, without paying for unshared interpolation nodes.
+This conservative choice avoids the many short low-frequency tiles that can cost
+more to validate than independent construction. The admitted tile is clipped to
+the scan endpoints. Its degree-five polynomial must pass probes at normalized
+coordinates -0.83, 0 and 0.61. At each probe the sum of trailing-matrix Frobenius
+differences must be at most 1e-7. Failure bisects the tile up to sixteen levels.
+Children with at most nine planned carriers and depth-limited tiles use exact
+builds. Callback numerical failures still propagate. Harmonic/amplitude guards,
+cycle scaling, secular dissipation, direct tails and polar projection do not change.
+
+Workspace arrays count in PrepareCache.live_bytes while the evolve runs and
+release on success, cancellation or failure. They never enter the persistent LRU.
+Standalone kernel calls without an Engine workspace retain exact builds.
+Accepted payloads retain their evaluated coefficients until their timeline
+finishes, or in the prepare LRU for shared keys. Each
 payload conservatively charges the full coefficient allocation even when
 another payload shares it. Cross-timeline keys
 hand accepted, immutable model-only payloads to A-stage. For timeline-local keys,
@@ -890,7 +916,8 @@ order; future planners must issue them in canonical order.
 
 `bytes` counts resident allocations against the cache budget. `live_bytes` counts
 whole allocations held by explicit reservation/consumer handles, once across all
-handles, including resident pins. It can exceed the resident budget. Neither
+handles, including resident pins. It also charges current numeric-array bytes of
+workspaces registered by Engine with `track_workspace()` for one evolve. It can exceed the resident budget. Neither
 counter measures process RSS or all live work. Ordinary active scheduler
 references returned by `find()` are not tracked handles. Oversized allocations
 can have tracked consumer references but never enter the resident LRU. Only
