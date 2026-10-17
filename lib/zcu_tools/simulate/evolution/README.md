@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-17, terminal-family coverage, reachable dispatch fallbacks, and readout trace diagnostics
+**Last updated:** 2026-10-17, terminal-family coverage, readout trace diagnostics, and low-frequency constant-tone Hilbert propagation
 
 ## Segment engine contracts
 
@@ -106,7 +106,7 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | One constant tone, known input density, r, r₂ and B2 guards pass | T7 second-order Dyson, batched over frequency, gain, duration and phase. |
 | One constant tone after an identical shared no-drive prefix, r and r₂ pass | Dyson with the actual prefix output. B2 does not apply; post-apply population changes only report. |
 | Same constant-tone branch, Dyson fails but r <= 0.2 | Reduced RWA if its omitted-sideband error bound fits the segment budget; otherwise try the Hilbert period kernel. |
-| One constant tone not accepted above, known or unknown input, with abs(f) >= 1 GHz and duration*T²*Gamma*V² <= 1e-2 | `floquet_period` integrates one Hilbert-space U(T), translates the carrier phase in time, and steps each period with secular Strang dissipation. |
+| One constant tone not accepted above, known or unknown input, with abs(f) >= 0.3 GHz and duration*T²*Gamma*V² <= 1.0 | `floquet_period` integrates one Hilbert-space U(T), translates the carrier phase in time, and steps each period with secular Strang dissipation. |
 | Same constant-tone branch, Hilbert period guard fails | T6 periodic propagation accepts every single constant-tone row. |
 | One shaped tone, prepare-key usage >= 10 | Gate cache with four Strang subsegments, closed-system U plus secular dissipation, and 16 carrier-phase Fourier samples. |
 | One shaped tone, prepare-key usage < 10 | Period table with midpoint-frozen envelopes, eight amplitude Chebyshev nodes and 16 phase Fourier samples; integrate the fractional-period tail directly. This branch has no per-segment accuracy guard. |
@@ -190,12 +190,26 @@ below 5e-4 Phi0 on every loop.
 The Hilbert period kernel uses T=1/|f| and the density-free splitting estimate
 `duration*T²*Gamma*V²`. Here `V=2*pi*|gain|*(||X||₂+||Y||₂)` is an angular
 drive norm bound. `Gamma` is the larger of the population-generator spectral
-norm and the maximum coherence decay rate. The 1 GHz cutoff separates measured
-6.789 GHz builds of about 3 ms/key from 0.4-0.5 GHz builds of about 35 ms/key.
-Prototype S3/S5 population errors against strict DOP853 were 1.1e-7 and 2.3e-6.
-The 1e-2 estimate threshold is heuristic, not a rigorous segment-budget guarantee.
-Preparation retains U(T) and finite degree-seven dense coefficients, with every
-array charged to the prepare cache. Duration, start and theta do not enter keys.
+norm and the maximum coherence decay rate. The guard accepts
+abs(f) >= 0.3 GHz and an estimate <= 1.0. Calibration used the 16-level FTF
+model with half-flux Q1 EJ/EC/EL=4/1/1 GHz and dressed f01=0.581742664 GHz.
+The scan covers 0.3-0.6 GHz, gain 0.02-1, duration 8-790 ns, known input and
+coherent unknown input. Estimates reached 0.871443. Against strict DOP853,
+known-input maximum population and low-four errors were 2.55e-6 and 9.62e-6.
+Coherent unknown input gave 1.28e-5 for both, so overall error stayed <= 1.3e-5,
+about two orders below the unchanged 1e-3 budget. Three/four-level synthetic
+scans cover strong drive, mixed/coherent inputs and cross-period tails.
+The 1.0 threshold covers the measured maximum; it is a calibrated heuristic,
+not a universal error bound or segment-budget guarantee. Carriers below
+0.3 GHz and estimates above 1.0 fall through to T6.
+
+Preparation uses tolerance min(1e-10, budget*1e-4), retains U(T) and finite
+degree-seven dense coefficients, and charges every array to the prepare cache.
+Polar projection restores unitarity of U(T) and dense fundamental solutions
+before phase translation and fractional-tail composition. It does not normalize
+density. Low-frequency warm builds averaged 53-57 ms/key, versus 204-300 ms/key
+at tolerance 1e-13. Coherent-input trace drift fell from 1.34e-10 to 1.68e-12.
+Prototype high-carrier S3/S5 population errors were 1.1e-7 and 2.3e-6. Duration, start and theta do not enter keys.
 Time translation handles signed frequency and phase; the fractional tail uses
 the same dense solution with a periodic extension across the boundary. Each full
 period and tail applies D/2, U, D/2 without constructing a Liouville channel.
