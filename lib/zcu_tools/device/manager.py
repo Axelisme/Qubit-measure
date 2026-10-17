@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import warnings
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .base import BaseDevice
 
@@ -47,12 +47,20 @@ class DeviceManager:
     """
 
     def __init__(self) -> None:
-        self._devices: dict[str, BaseDevice] = {}
+        self._devices: dict[str, BaseDevice[Any]] = {}
         self._lock = threading.RLock()
         # Keep claimed identities alive until their close completes.
         self._close_claims: dict[int, object] = {}
 
-    def register_device(self, name: str, device: BaseDevice) -> None:
+    def register_device(self, name: str, device: BaseDevice[Any]) -> None:
+        """Register the same BaseDevice instance under the exact string name.
+
+        Names are used unchanged, including an empty string. Non-BaseDevice
+        objects raise TypeError. An existing name emits a warning and is
+        overwritten without closing the previous driver; other aliases remain.
+        Registration performs no device I/O. The manager coordinates the
+        driver's lifetime; retrieval only borrows the registered object.
+        """
         if not isinstance(device, BaseDevice):
             raise TypeError(
                 f"register_device expected BaseDevice for {name!r}, "
@@ -74,13 +82,25 @@ class DeviceManager:
                 raise ValueError(f"Device {name} not found")
             del self._devices[name]
 
-    def get_device(self, name: str) -> BaseDevice:
+    def get_device(self, name: str) -> BaseDevice[Any]:
+        """Borrow the same registered driver for the exact string name.
+
+        Return the original object without device I/O or transfer of lifecycle
+        ownership. Raise ValueError if name is not registered.
+        """
         with self._lock:
             if name not in self._devices:
                 raise ValueError(f"Device {name} not found")
             return self._devices[name]
 
-    def get_all_devices(self) -> dict[str, BaseDevice]:
+    def get_all_devices(self) -> dict[str, BaseDevice[Any]]:
+        """Return an independent name dictionary sharing the registered drivers.
+
+        Keys retain the exact registered strings, including aliases. Changing
+        this dictionary does not change the registry. Driver references are
+        borrowed, not copied; this performs no device I/O and does not transfer
+        lifecycle ownership.
+        """
         with self._lock:
             return dict(self._devices)
 
@@ -101,7 +121,7 @@ class DeviceManager:
                     raise ValueError(f"Device {name} not found")
             # Snapshot instance references; registry mutations after this point
             # do not affect which instances we are about to configure.
-            snapshot: list[tuple[BaseDevice, DeviceInfo]] = [
+            snapshot: list[tuple[BaseDevice[Any], DeviceInfo]] = [
                 (self._devices[name], cfg) for name, cfg in dev_cfg.items()
             ]
 
@@ -200,12 +220,12 @@ class DeviceManager:
                 return
 
             names_by_identity: dict[int, list[str]] = {}
-            devices_by_identity: dict[int, BaseDevice] = {}
+            devices_by_identity: dict[int, BaseDevice[Any]] = {}
             for alias, dev in snapshot.items():
                 names_by_identity.setdefault(id(dev), []).append(alias)
                 devices_by_identity.setdefault(id(dev), dev)
 
-            claimed: list[tuple[int, BaseDevice]] = []
+            claimed: list[tuple[int, BaseDevice[Any]]] = []
             in_progress: list[DeviceCloseInProgressError] = []
             for identity, aliases in names_by_identity.items():
                 if identity in self._close_claims:
