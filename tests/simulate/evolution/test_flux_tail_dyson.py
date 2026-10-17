@@ -19,6 +19,7 @@ from zcu_tools.simulate.evolution import (
 )
 from zcu_tools.simulate.evolution.kernel import SegmentTable
 from zcu_tools.simulate.evolution.kernels.dyson import DysonKernel
+from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
 from zcu_tools.simulate.evolution.kernels.t4 import T4
 
 
@@ -90,7 +91,17 @@ def batch(starts=(7.0, 7.0), *, gain=0.002, frequency=0.4, duration=40.0):
 
 def evolve(src, b):
     with closing(
-        Engine(1, 100000, kernels=(T4(), DysonKernel(), Fallback(), Fallback("t6")))
+        Engine(
+            1,
+            100000,
+            kernels=(
+                T4(),
+                DysonKernel(),
+                Fallback(),
+                FloquetPeriodKernel(),
+                Fallback("t6"),
+            ),
+        )
     ) as engine:
         return engine.evolve(src, (b,), cancel=Event())
 
