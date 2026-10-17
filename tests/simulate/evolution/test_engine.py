@@ -197,7 +197,13 @@ def test_flat_top_split_phase_offset_and_small_plateau():
         Engine(
             1,
             1000,
-            kernels=(period, RecordingKernel("floquet_period", accepts=False), t6),
+            kernels=(
+                period,
+                RecordingKernel("dyson", accepts=False),
+                RecordingKernel("rwa", accepts=False),
+                RecordingKernel("floquet_period", accepts=False),
+                t6,
+            ),
         ),
         source(),
         (replace(batch(1, duration=14), tracks=(track(1, envelope, duration=14),)),),
@@ -223,21 +229,12 @@ def test_flat_top_split_phase_offset_and_small_plateau():
     assert result.paths.segments_by_kernel == {"period_table": 1}
 
 
-@pytest.mark.parametrize(
-    ("accept_dyson", "accept_rwa", "expected"),
-    [(True, True, "dyson"), (False, True, "rwa"), (False, False, "t6")],
-)
-def test_constant_decision_order_and_sequence_middle(
-    accept_dyson, accept_rwa, expected
-):
+@pytest.mark.parametrize("expected", ["dyson", "rwa", "floquet_period", "t6", "dop853"])
+def test_constant_decision_order_and_sequence_middle(expected):
+    order = ["dyson", "rwa", "floquet_period", "t6", "dop853"]
     kernels = tuple(
-        RecordingKernel(name, accepts=accepts)
-        for name, accepts in [
-            ("dyson", accept_dyson),
-            ("rwa", accept_rwa),
-            ("floquet_period", False),
-            ("t6", True),
-        ]
+        RecordingKernel(name, accepts=order.index(name) >= order.index(expected))
+        for name in order
     )
     b = replace(
         batch(2, duration=6),
@@ -247,9 +244,7 @@ def test_constant_decision_order_and_sequence_middle(
         ),
     )
     result = run(Engine(1, 0, kernels=kernels), source(), (b,))
-    counts = {expected: 2}
-    counts["t6"] = counts.get("t6", 0) + 2
-    assert result.paths.segments_by_kernel == counts
+    assert result.paths.segments_by_kernel == {expected: 4}
 
 
 def test_missing_kernel_names_segment_and_flux_overlap():
@@ -595,3 +590,92 @@ def test_shared_dyson_is_bitwise_chunk_independent_and_source_local():
         np.testing.assert_array_equal(original, outputs[0][0])
         np.testing.assert_array_equal(changed, outputs[0][1])
     assert np.max(abs(outputs[0][0] - outputs[0][1])) > 0.01
+
+
+def test_unknown_input_probe_uses_dyson_without_binding_and_matches_dop853():
+    from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Kernel
+    from zcu_tools.simulate.evolution.kernels.dyson import DysonKernel
+    from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
+    from zcu_tools.simulate.evolution.kernels.rwa import RWAKernel
+    from zcu_tools.simulate.evolution.kernels.t4 import T4
+    from zcu_tools.simulate.evolution.kernels.t6 import T6Kernel
+
+    class ObservedDyson(DysonKernel):
+        """Delegate C5 input binding, recording only its public row inputs."""
+
+        def __init__(self):
+            self.bound_starts = []
+
+        def bind_input(self, prepared, key_index, table, rows, source_initial, budget):
+            self.bound_starts.extend(table.start_ns[rows].tolist())
+            return super().bind_input(
+                prepared, key_index, table, rows, source_initial, budget
+            )
+
+    class ReferenceDrive(DOP853Kernel):
+        """Use full-carrier integration at the first constant-tone candidate."""
+
+        name = "dyson"
+
+    class ReferenceIdle(DOP853Kernel):
+        """Use full Lindblad integration for idle rows too."""
+
+        name = "t4"
+
+    src = source()
+    probe = replace(
+        track(3, EnvelopeSpec("constant"), duration=0.6),
+        # Distinct idle prefixes cannot receive flux-tail certification.
+        start_ns=np.array([1.2, 1.3, 1.4]),
+        frequency_ghz=np.full(3, 1.2),
+        amplitude=np.array([1e-5, 2e-5, 0.3]),
+        phase_rad=np.array([0.2, -0.5, 1.1]),
+    )
+    prefix = replace(
+        track(3, EnvelopeSpec("constant"), duration=0.4),
+        frequency_ghz=np.full(3, 1.2),
+        amplitude=np.full(3, 0.003),
+    )
+    b = replace(
+        batch(3),
+        tracks=(prefix, probe),
+        end_ns=probe.start_ns + probe.duration_ns,
+    )
+    dyson = ObservedDyson()
+    actual = run(
+        Engine(
+            1,
+            100000,
+            kernels=(
+                T4(),
+                dyson,
+                RWAKernel(),
+                FloquetPeriodKernel(),
+                T6Kernel(),
+                DOP853Kernel(),
+            ),
+        ),
+        src,
+        (b,),
+    )
+    # The two weak later probes use arbitrary-input B2. The strong probe
+    # rejects Dyson and reaches a real fallback, rather than retrying at apply.
+    assert actual.paths.segments_by_kernel.get("dyson", 0) == 5
+    assert (
+        sum(
+            count
+            for name, count in actual.paths.segments_by_kernel.items()
+            if name not in ("dyson", "t4")
+        )
+        == 1
+    )
+    assert all(start == 0 for start in dyson.bound_starts)
+    assert dyson.bound_starts
+    expected = run(Engine(1, 0, kernels=(ReferenceDrive(), ReferenceIdle())), src, (b,))
+    np.testing.assert_allclose(actual.densities, expected.densities, rtol=0, atol=1e-3)
+    np.testing.assert_allclose(
+        np.diagonal(actual.densities, axis1=1, axis2=2),
+        np.diagonal(expected.densities, axis1=1, axis2=2),
+        rtol=0,
+        atol=1e-3,
+    )

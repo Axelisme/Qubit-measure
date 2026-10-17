@@ -117,8 +117,9 @@ def test_only_repeated_no_drive_prefixes_bypass_population_bound():
     assert unequal.paths.segments_by_kernel == {"t4": 4, "rwa": 2}
     earlier = replace(b.tracks[0], start_ns=np.zeros(2), duration_ns=np.ones(2))
     driven = evolve(src, replace(b, tracks=(earlier, *b.tracks)))
-    # The two start-zero prefix pulses retain Dyson; the later probes use T6.
-    assert driven.paths.segments_by_kernel == {"dyson": 2, "t4": 4, "t6": 2}
+    # The two start-zero prefix pulses retain Dyson. The later probes fail
+    # arbitrary-input B2 and try RWA next, without shared-prefix admission.
+    assert driven.paths.segments_by_kernel == {"dyson": 2, "t4": 4, "rwa": 2}
     zero = replace(
         b,
         tracks=(replace(b.tracks[0], start_ns=np.zeros(2)),),
