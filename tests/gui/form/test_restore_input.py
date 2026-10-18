@@ -1,0 +1,98 @@
+"""Name-and-shape restoration through the public FormState input boundary."""
+
+from typing import Annotated, Literal
+
+import pytest
+from pydantic import BaseModel, Field
+from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormState
+
+
+class Tone(BaseModel):
+    name: str
+    amount: float = 1
+    phase: float = 9
+
+
+class Ramp(BaseModel):
+    kind: Literal["ramp"] = "ramp"
+    length: float = 2
+    added: int = 7
+
+
+class Flat(BaseModel):
+    kind: Literal["flat"] = "flat"
+    length: float = 3
+
+
+class RestoreForm(FormModel):
+    tones: list[Tone] = Field(default_factory=list)
+    shape: Annotated[Ramp | Flat, Field(discriminator="kind")] = Field(default_factory=Ramp)
+    mode: Literal["keep", "new"] = "new"
+    value: float = 5
+    required: float
+    added: int = 11
+
+
+@pytest.mark.parametrize("saved_length", [0, 1, 3])
+def test_restore_list_keeps_saved_positions_and_length(saved_length: int) -> None:
+    base = FormInput(RestoreForm, {"tones": [{"name": "fresh", "amount": 99}], "added": 11})
+    state = FormState(base)
+    saved = FormInput(RestoreForm, {"tones": [{"name": f"Q{i}", "amount": {"expr": "missing + 1"}, "retired": 6} for i in range(saved_length)]})
+
+    dropped = state.migrate_input(saved, FormEnv())
+
+    assert state.input.data["tones"] == [{"name": f"Q{i}", "amount": {"expr": "missing + 1"}, "phase": 9} for i in range(saved_length)]
+    assert set(dropped) == {("tones", i, "retired") for i in range(saved_length)}
+    assert state.input.data["added"] == 11
+    assert state.base.same_as(base)
+
+
+def test_restore_keeps_invalid_leaf_raw_and_reports_only_shape_or_removed_fields() -> None:
+    state = FormState(RestoreForm.default_input(FormEnv()))
+    saved = FormInput(RestoreForm, {"value": "unfinished", "required": {"expr": "unbound"}, "retired": 1, "shape": [1, 2]})
+
+    dropped = state.migrate_input(saved, FormEnv())
+
+    assert state.input.data["value"] == "unfinished"
+    assert state.input.data["required"] == {"expr": "unbound"}
+    assert state.input.data["shape"] == {"kind": "ramp", "length": 2, "added": 7}
+    assert set(dropped) == {("retired",), ("shape",)}
+
+
+def test_restore_rejects_object_to_scalar_shape_but_keeps_missing_required() -> None:
+    state = FormState(RestoreForm.default_input(FormEnv()))
+    saved = FormInput(RestoreForm, {"value": {"old_field": 3}})
+
+    assert state.migrate_input(saved, FormEnv()) == (("value",),)
+    assert state.input.data["value"] == 5
+    assert "required" not in state.input.data
+
+
+def test_restore_invalid_selection_uses_current_default_and_reports_once() -> None:
+    state = FormState(RestoreForm.default_input(FormEnv()))
+    saved = FormInput(RestoreForm, {"shape": {"kind": "flat", "length": 88}, "mode": "keep"}, selections={("shape",): {"kind": "retired"}, ("mode",): "retired"})
+
+    dropped = state.migrate_input(saved, FormEnv())
+
+    assert state.input.data["shape"] == {"kind": "ramp", "length": 2, "added": 7}
+    assert state.input.data["mode"] == "new"
+    assert state.input.selections == {}
+    assert set(dropped) == {("shape",), ("mode",)}
+
+
+def test_restore_untagged_union_keeps_raw_without_guessing_or_filling_branch() -> None:
+    class Left(BaseModel):
+        left: float
+        added: int = 8
+
+    class Right(BaseModel):
+        right: float
+
+    class Untagged(FormModel):
+        branch: Left | Right
+
+    state = FormState(Untagged.default_input(FormEnv()))
+    saved = FormInput(Untagged, {"branch": {"left": "unfinished", "unknown": 4}})
+
+    assert state.migrate_input(saved, FormEnv()) == ()
+    assert state.input.data == saved.data
