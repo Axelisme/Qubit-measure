@@ -271,8 +271,10 @@ class ArtifactSaveCenter(QWidget):
 
     def _build_output(self) -> _OutputRow:
         container = QFrame(self)
-        container.setFrameShape(QFrame.Shape.Box)
-        container.setForegroundRole(QPalette.ColorRole.Mid)
+        container.setObjectName("saveOutputRow")
+        container.setStyleSheet(
+            "QFrame#saveOutputRow { border: 1px solid palette(highlight); }"
+        )
         layout = QVBoxLayout(container)
         layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(2)

@@ -1,6 +1,6 @@
 # Scripts
 
-**Last updated:** 2026-10-16，明確的模擬環境啟動範例
+**Last updated:** 2026-10-18，量測 GUI 隔離資料 project root
 
 這裡只放使用者自己執行的入口。Agent MCP 組合根在 [mcp_servers/](../mcp_servers/README.md)，repo 品質檢查在 [tools/](../tools/README.md)。
 工作站腳本請使用該 worktree 的 interpreter，例如
@@ -24,6 +24,11 @@
 uv run --directory . --no-sync -- python scripts/run_measure_gui.py \
   --simulate zcu_lab/simulation_envs/FTF/environment.py
 ```
+
+如需隔離資料，先建立目錄，再加上 `--project-root /absolute/existing/directory`。
+指定值必須是絕對路徑且為既存目錄，否則 launcher 在 GUI 組裝前報錯並非零結束。
+省略時仍使用 repo root。Entry owner 按需建立 `result/` 與 `Database/`，不需預建。
+這個選項不改 code、lab catalog、log 或 `--simulate` 路徑的解析。
 
 [FTF 範例環境](../zcu_lab/simulation_envs/FTF/README.md) 與 Notebook 共用 `build_environment()`，相鄰的 `ftf.yaml`（由 `default.yaml` 複製）提供模型與接線參數。環境檔會執行 Python，只載入可信檔案。修改環境或 YAML 後須重啟；載入失敗會中止，不會回退正常模式。
 
