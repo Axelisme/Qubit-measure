@@ -52,6 +52,7 @@ def dynamic_author(
     tab.set(("tones", 0, "drive", "gain"), 0.4)
     result = yield from tab.run_step()
     if result.run is not None:
+        result.run.save_raw()
         yield from result.run.analyze_step("primary")
 
 
