@@ -16,14 +16,11 @@ from zcu_tools.simulate.evolution import (
     TimelineBatch,
 )
 from zcu_tools.simulate.ftf import (
-    FluxTrack,
     JointModel,
-    flux_waveform,
     model_source,
     readout_model,
     schedule,
 )
-from zcu_tools.simulate.lines import FluxLine
 
 from .numeric import dc_flux, drive_sources, joint_parameters, resonators
 
@@ -33,7 +30,7 @@ class FTFTemplatePlan:
     """Detached numeric inputs for all points of one structural template.
 
     source: round-DC secular model source, including the Gibbs initial density.
-    batch: ns/GHz/rad drive and filtered flux tracks, ending at readout start.
+    batch: ns/GHz/rad charge drives at fixed DC flux, ending at readout start.
     readout: distinct pulse/grid contents at DC, indexed in batch point order.
     No propagation, conditional field solve or random draws happen in planning.
     These inputs are author diagnostics, not public measurement metadata.
@@ -82,54 +79,23 @@ def _timeline_batch(
     template: TimelineTemplate,
     end_ns: NDArray[np.float64],
 ) -> TimelineBatch:
-    """Supply both quantized idle flux and continuous driven flux to the engine."""
-    microwave = {s.gen_ch: s.name for s in settings.microwave_sources}
-    flux_ports = {s.gen_ch: s.name for s in settings.flux_sources}
+    """Map charge controls onto the engine's fixed-DC schedule."""
+    microwave = {s.gen_ch: name for name, s in settings.drive_lines.items()}
     drives = []
-    flux = []
     for event in template.events:
-        if event.gen_ch == settings.readout_source.gen_ch:
+        if event.gen_ch == settings.readout.drive.gen_ch:
             continue
-        if event.gen_ch in microwave:
-            drives.append(_track(event, microwave[event.gen_ch]))
-        elif event.gen_ch in flux_ports:
-            track = _track(event, flux_ports[event.gen_ch])
-            flux.append(
-                FluxTrack(
-                    track.port,
-                    track.start_ns,
-                    track.duration_ns,
-                    track.frequency_ghz,
-                    track.phase_rad,
-                    track.amplitude,
-                    track.envelopes,
-                    track.envelope_index,
-                    track.active,
-                )
-            )
-        else:
+        if event.gen_ch not in microwave:
             raise ValueError(f"unbound FTF control generator {event.gen_ch}")
-    lines = tuple(
-        FluxLine(s.name, s.coefficients_phi0_per_gain, s.delay_ns, s.tau_ns)
-        for s in settings.flux_sources
-    )
-    filtered = schedule(
-        tuple(flux),
+        drives.append(_track(event, microwave[event.gen_ch]))
+    fixed_dc = schedule(
+        (),
         dc_flux=joint.dc_flux,
-        lines=lines,
+        lines=(),
         sample_period_ns=2.0,
         points=len(template.points),
     )
-    waveform = flux_waveform(
-        tuple(flux),
-        dc_flux=joint.dc_flux,
-        lines=lines,
-        sample_period_ns=2.0,
-        points=len(template.points),
-    )
-    return TimelineBatch(
-        template.points, tuple(drives), filtered, end_ns, flux_waveform=waveform
-    )
+    return TimelineBatch(template.points, tuple(drives), fixed_dc, end_ns)
 
 
 def _readout_contents(
@@ -143,19 +109,19 @@ def _readout_contents(
 ]:
     """Merge mutually exclusive readout slots, then deduplicate their point rows."""
     slots = tuple(
-        e for e in template.events if e.gen_ch == settings.readout_source.gen_ch
+        e for e in template.events if e.gen_ch == settings.readout.drive.gen_ch
     )
     count = np.sum([e.active for e in slots], axis=0)
     if not slots or np.any(count != 1):
         raise ValueError("FTF requires one terminal readout pulse per point")
     if (
         len(template.readouts) != 1
-        or template.readouts[0].channel != settings.receiver.ro_ch
+        or template.readouts[0].channel != settings.readout.adc.ro_ch
     ):
         raise ValueError("FTF supports its single bound receiver only")
     window = template.readouts[0]
     if not window.trigger_us.shape[1] or np.any(
-        window.generator_channels != settings.readout_source.gen_ch
+        window.generator_channels != settings.readout.drive.gen_ch
     ):
         raise ValueError("FTF requires ADC timing and its bound readout generator")
     fields = ("start_us", "duration_us", "frequency_mhz", "phase_deg", "gain")
@@ -182,7 +148,7 @@ def _readout_contents(
     for index in representatives:
         start, duration, freq, phase, gain, envelope_index = values[index]
         envelope = envelopes[int(envelope_index)]
-        amplitude = complex(settings.readout_source.input_per_gain * gain)
+        amplitude = complex(settings.readout.drive.input_per_gain * gain)
         callback = None
         corners = ()
         if envelope.kind == "sampled":
@@ -241,7 +207,7 @@ def plan_template(
     values, and template has point arrays in us/MHz/degrees. Support rounds to
     nearest 2 ns, ties even, without changing the common carrier origin. The
     single active readout pulse per point ends evolution; overlapping/later
-    controls and flux tails do not affect the DC readout model. Constant complex
+    charge controls do not affect the DC readout model. Constant complex
     readout envelopes fold into amplitude, enabling the exact field solution.
     Missing routes, invalid DC values or multiple/missing readout pulses raise
     ValueError. Loops scale with slots, candidates and unique readout contents,
@@ -251,7 +217,7 @@ def plan_template(
     joint = JointModel(
         joint_parameters(settings),
         dc_flux(settings, snapshot),
-        temperature_k=settings.model.temperature_k,
+        temperature_k=settings.chip.temperature_k,
     )
     resonator_pair = resonators(settings)
     source = model_source(
@@ -260,15 +226,25 @@ def plan_template(
     window = template.readouts[0]
     dt = 1000 / window.sample_rate_mhz
     receiver = Receiver(
-        settings.receiver.gain,
-        float(np.deg2rad(settings.receiver.phase_deg)),
-        np.array(settings.receiver.offset_adc),
-        np.array(settings.receiver.noise_psd_adc2_ns) / dt,
+        settings.readout.adc.gain,
+        float(np.deg2rad(settings.readout.adc.phase_deg)),
+        np.array(settings.readout.adc.offset_adc),
+        np.array(settings.readout.adc.noise_psd_adc2_ns) / dt,
+        time_of_flight_ns=settings.readout.adc.time_of_flight_ns,
     )
     model = replace(
         readout_model(joint, resonator_pair),
         receiver=receiver,
         reference_frequency_ghz=pulses[0][0].frequency_ghz,
+        mismatch_phase_rad=np.array(
+            [
+                r.mismatch_phase_rad
+                for r in (
+                    settings.readout.resonators.r1,
+                    settings.readout.resonators.r2,
+                )
+            ]
+        ),
     )
     return FTFTemplatePlan(
         source,

@@ -213,7 +213,7 @@ Readout 採弱讀出、dispersive、線性 resonator 與能量基底 QND mixture
 
 2026-10-14，使用者提出：「readout_source/receiver一個就好，因為共用傳輸線。」對是否也只用一個 generator 與一個 ADC readout channel 的追問，確認：「是的，只有一個gen_ch與ro_ch」。FTF 的 readout_source 與 receiver 各一個，分別綁定 YAML 指定的 gen_ch 與 ro_ch；不合併 microwave／flux control 的其他 generators。兩 resonators 的分次換頻或同次多頻策略尚待收斂，不因本裁決擴大末端讀出時段的契約。
 
-R1、R2 共用 reciprocal、co-located two-port transmission line，包含 off-diagonal radiative damping，不等同兩條獨立 Lorentzian 相加或僅共用 ADC。Two-port 指物理端口，不代表雙 ADC。單一 receiver 觀測共同線路輸出，接收 noise 的 PSD matrix 定義在 I,Q 空間，為2×2實對稱正半定矩陣。有限 pulse 經 classical field evolution，再依 ADC window demodulate、sample／integrate 並套 receiver 響應。
+R1、R2 共用 reciprocal、co-located two-port transmission line，包含 off-diagonal radiative damping，不等同兩條獨立 Lorentzian 相加或僅共用 ADC。Two-port 指物理端口，不代表雙 ADC。單一 receiver 觀測共同線路輸出，接收 noise 的 PSD matrix 定義在 I,Q 空間，為2×2實對稱正半定矩陣。有限 pulse 經 classical field evolution，ADC 以總讀取線延遲推遲物理輸出，再解調、取共軛成微波 I+iQ，套 receiver gain／phase／offset 並加入 noise。各 resonator 的 mismatch 相位只旋轉其散射項，不改 shared-line 動力學。數值與欄位契約見 [ADC README](../../../lib/zcu_tools/simulate/adc/README.md) 及 [FTF 欄位指南](../../../zcu_lab/simulation_envs/FTF/field-guide.md)。
 
 2026-10-14，使用者對「保留空間內的多能階relaxation＋條件平均讀出，不追逐shot衰減細節」回答「好，同意」。對每個 readout 初始 joint state 計算含既有 directional relaxation／thermal transitions 的條件平均響應，涵蓋矩陣元允許的 cascade、直接跨級、coupler／leakage states 與熱激發，不限0↔1。不新增 readout T1、空間外態或 ground sink。
 
@@ -256,11 +256,11 @@ Lookback／acquire_decimated 使用相同有限 pulse 與條件平均場，輸�
 | 契約 | 生產者 | 消費者與邊界 |
 | --- | --- | --- |
 | C1 模板請求 | `program.v2.simulation` | `experiment.ftf` 消費 `core.simulation` 的模板請求，不把 Module 物件交給數值引擎。 |
-| C2 round 結果 | `experiment.ftf` | program mixin 消費 `core.simulation` 的統計或訊號結果，負責 QICK buffer 轉換。 |
-| C3 引擎 API | `simulate.evolution` | `experiment.ftf` 呼叫演化入口，消費 readout 起點的量子態與路徑診斷。 |
+| C2 round 結果 | `experiment.ftf` | 顯式組合演化、population 轉換與 ADC 的正規化工具，再產生 round 結果。program mixin 消費 `core.simulation` 的統計或訊號結果，負責 QICK buffer 轉換。 |
+| C3 引擎 API | `simulate.evolution` | `experiment.ftf` 呼叫演化入口，消費 readout 起點的量子態與路徑診斷。每次 evolve 回報最終 rows 的最大 trace 誤差，空輸入為零；只報告，不修正或套用 ADC 容差。 |
 | C4 模型 | `simulate.ftf` | `simulate.evolution` 消費模型與 secular 形式，不讀 YAML 或裝置。 |
-| C5 kernel | `simulate.evolution` 內部的引擎排程與各 kernel | 排程提供分段工作與預算，kernel 提供 prepare、evolve-local input-bound payload、guard 交還的 prepared payload 與 apply。Floquet 透過 guard_prepared 交還 row-local acceptance mask 與 model-only preparation，其他 kernel 回傳 None 並沿用 guard。引擎只在單次 evolve 內對同 kernel、同 key、同 source 與同 budget 沿用；shared key 依原有 LRU 規則入 PrepareCache，singleton 不入 cache，kernel 不保留狀態。A-stage 的共用 prepared batch 可透過 bind_input 接收同 key、同 port、同輸入群組的 rows。輸入是 row basis 中的 source 初態，或引擎預演化的相同無 drive flux 前綴輸出。前綴分組比較完整段序列、時間、level，以及 probe 開始之前的 flux samples 和開始時或之後的第一個插值邊界 sample。更晚的 samples 不影響前綴分組。分組只在同一 source 與單次 evolve 內成立。唯讀 payload 只活在單次 evolve，不進 PrepareCache。回傳 None 時保留 per-batch apply。這是引擎內部接縫，不是跨 package API。 |
-| C6 readout 與統計 | `simulate.adc` | `experiment.ftf` 消費條件響應與統計抽樣工具，將 population 組合成 C2 結果。 |
+| C5 kernel | `simulate.evolution` 內部的引擎排程與各 kernel | 排程提供分段工作與預算，kernel 提供 prepare、evolve-local input-bound payload、guard 交還的 prepared payload 與 apply。Floquet 透過 guard_prepared 交還 row-local acceptance mask 與 model-only preparation，其他 kernel 回傳 None 並沿用 guard。引擎只在單次 evolve 內對同 kernel、同 key、同 source 與同 budget 沿用；shared key 依原有 LRU 規則入 PrepareCache，singleton 不入 cache，kernel 不保留狀態。A-stage 的共用 prepared batch 可透過 bind_input 接收同 key、同 port、同輸入群組的 rows。輸入是 row basis 中的 source 初態，或引擎預演化的相同前綴輸出，包含有 drive 的前綴。引擎按時間順序演化每組代表前綴，巢狀前綴沿用已算出的較早輸入，再分類依賴該輸入的 probe rows。guard 可讀這些已知輸入，不讀 worker 的演化中 state，也不演化 density。有 drive 前綴須通過實際輸入的 B2，無 drive 前綴維持免 B2。前綴分組比較完整段序列、時間、level、每個 active tone 的 port、頻率、gain、phase 與 envelope，以及 probe 開始之前的 flux samples 和開始時或之後的第一個插值邊界 sample。更晚的 samples 不影響前綴分組。分組只在同一 source 與單次 evolve 內成立。唯讀 payload 只活在單次 evolve，不進 PrepareCache。回傳 None 時保留 per-batch apply。這是引擎內部接縫，不是跨 package API。 |
+| C6 readout 與統計 | `simulate.adc` | 擁有 1e-6 probability 容差及 `normalize_populations`。FTF 在 population 轉換後顯式呼叫一次：先驗證 finite、row sum 落在 float64 閉區間 [1−1e-6, 1+1e-6]、負值不低於 −1e-6，再將容差內負值歸零並逐 row 除總和。超界以 ValueError 回報拒絕 row 數，不回傳部分結果。sampling 只驗證非負值與相同 trace 容差，不做修補。FTF 消費條件響應與抽樣工具，組合成 C2 結果。 |
 
 ### Secular 形式由模型提供
 
@@ -283,6 +283,6 @@ Lookback／acquire_decimated 使用相同有限 pulse 與條件平均場，輸�
 
 I/Q-only 練習在原版本已跑通 F1、F2，conditional Ramsey 只取得一點。驗收採「能跑起來」，不代表全 16 點完成或原精度達標。歷史正式 workload 的完整 acquire 成本為 cold 平均 2.864 秒／point、warm direct-record 平均 0.457 秒／point，不能稱平均 1 秒已達標。這些數字不能代表現行分段引擎。
 
-現行 FTF backend 是 `ftf-segment-v4`，使用分段引擎與重算式 replay。舊版本 private archive 透過公開 replay 入口明確報版本不符，不靜默升級。原校準、raw、seal 與成本證據維持原版本；此處不把舊證據當作目前版本的科學精度或效能驗收。
+現行 FTF backend 是 `ftf-segment-v5`，使用分段引擎與重算式 replay。舊版本 private archive 透過公開 replay 入口明確報版本不符，不靜默升級。原校準、raw、seal 與成本證據維持原版本；此處不把舊證據當作目前版本的科學精度或效能驗收。
 
 固定 original basis 的內部自洽驗證與跨 basis population 比較仍保留。跨 basis phase／complex 偏差照實保留，不作通過條件。模擬的絕對頻率與相位有 MHz 級 basis 偏差，不適合對照外部能譜或硬體絕對值。這些限制不改變既定物理模型，也不構成 runtime 收斂認證。

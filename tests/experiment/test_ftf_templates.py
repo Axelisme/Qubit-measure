@@ -11,7 +11,6 @@ from zcu_tools.core.simulation import (
     RoundStatistics,
 )
 from zcu_tools.device import DeviceManager
-from zcu_tools.experiment.ftf import FTFTemplatePlan
 from zcu_tools.simulate.evolution import Engine
 
 from tests.experiment._ftf_templates import (
@@ -116,150 +115,15 @@ def test_template_engine_paths_match_strict_secular_reference(
         )
 
 
-def continuous_flux_reference(plan: FTFTemplatePlan, point: int):
-    """Strict fixed-coordinate integration with independently rotated grid baths."""
-    waveform = plan.batch.flux_waveform
-    assert waveform is not None, "FTF planning must supply continuous flux samples"
-    first, last = waveform.offsets[point : point + 2]
-    times = waveform.time_ns[first:last]
-    flux = waveform.flux[first:last]
-    schedule = plan.batch.flux
-    first, last = schedule.offsets[point : point + 2]
-    bath_times = schedule.start_ns[first:last]
-    levels = schedule.level[first:last]
-    expansion = plan.source.flux_expansion()
-    dc = plan.source.model((0, 0, 0))
-    vectors = dc.eigenvectors
-    state = vectors @ plan.source.initial_density @ vectors.conj().T
-    end = plan.batch.end_ns[point]
-    boundaries = np.unique(
-        np.r_[
-            0.0,
-            end,
-            times,
-            bath_times,
-            [t.start_ns[point] for t in plan.batch.tracks],
-            [t.start_ns[point] + t.duration_ns[point] for t in plan.batch.tracks],
-        ]
-    )
-    boundaries = boundaries[(boundaries >= 0) & (boundaries <= end)]
-
-    def rhs(time, flat):
-        rho = flat.reshape(state.shape)
-        value = [np.interp(time, times, flux[:, loop]) for loop in range(3)]
-        h = expansion.static.copy()
-        for term in expansion.terms:
-            angle = np.pi * value[term.loop] * (2 if "2pi" in term.kind else 1)
-            h += (
-                np.cos(angle) if term.kind.startswith("cos") else np.sin(angle)
-            ) * term.matrix
-        for track in plan.batch.tracks:
-            if (
-                track.start_ns[point]
-                <= time
-                < track.start_ns[point] + track.duration_ns[point]
-            ):
-                drive = next(d for d in dc.drives if d.name == track.port)
-                z = track.amplitude[point] * np.exp(
-                    1j
-                    * (
-                        2 * np.pi * track.frequency_ghz[point] * time
-                        + track.phase_rad[point]
-                    )
-                )
-                h += (
-                    vectors
-                    @ (z.real * drive.in_phase_ghz + z.imag * drive.quadrature_ghz)
-                    @ vectors.conj().T
-                )
-        bath_rho = bath.eigenvectors.conj().T @ rho @ bath.eigenvectors
-        loss = bath.rates_per_ns.sum(axis=0)
-        decay = (loss[:, None] + loss[None, :]) / 2 + bath.dephasing_per_ns
-        dissipation = -decay * bath_rho
-        dissipation[np.diag_indices(len(rho))] += (
-            bath.rates_per_ns @ bath_rho.diagonal()
-        )
-        return (
-            -2j * np.pi * (h @ rho - rho @ h)
-            + bath.eigenvectors @ dissipation @ bath.eigenvectors.conj().T
-        ).ravel()
-
-    for left, right in zip(boundaries[:-1], boundaries[1:], strict=True):
-        index = np.searchsorted(bath_times, (left + right) / 2, side="right") - 1
-        bath = plan.source.model(tuple(int(v) for v in levels[index]))
-        solution = solve_ivp(
-            rhs,
-            (left, right),
-            state.ravel(),
-            method="DOP853",
-            rtol=2e-12,
-            atol=2e-14,
-            max_step=0.05,
-        )
-        assert solution.success, solution.message
-        state = solution.y[:, -1].reshape(state.shape)
-    return vectors.conj().T @ state @ vectors
-
-
-def test_template_overlapping_flux_drive_and_idle_match_continuous_reference() -> None:
-    import zcu_tools.experiment.ftf as ftf
-
-    resource = settings()
-    resource = resource.model_copy(
-        update={
-            "flux_sources": (
-                resource.flux_sources[0].model_copy(update={"tau_ns": 4.0}),
-            )
-        }
-    )
-    driven = template(tones=1)
-    drive = replace(
-        driven.events[0], start_us=np.zeros(2), duration_us=np.full(2, 0.006)
-    )
-    flux = replace(
-        drive,
-        gen_ch=1,
-        duration_us=np.full(2, 0.004),
-        frequency_mhz=np.zeros(2),
-        phase_deg=np.zeros(2),
-        gain=np.full(2, 0.2),
-    )
-    engine = Engine(1, 1_000_000)
-    try:
-        for controls, path in (((drive, flux), "flux_dop853"), ((flux,), "t4")):
-            plan = ftf.plan_template(
-                resource,
-                snapshot(),
-                replace(driven, events=(*controls, driven.events[-1])),
-            )
-            assert plan.batch.flux_waveform is not None, (
-                "FTF planning must supply continuous flux samples"
-            )
-            actual = engine.evolve(
-                plan.source, (plan.batch,), budget=1e-3, cancel=Event()
-            )
-            assert actual.paths.segments_by_kernel[path] > 1
-            if path == "t4":
-                assert actual.paths.segments_by_kernel.get("flux_dop853", 0) == 0
-            expected = np.stack([continuous_flux_reference(plan, p) for p in range(2)])
-            error = np.abs(actual.densities - expected)
-            print(
-                f"{path}: population error={np.max(np.abs(np.diagonal(actual.densities - expected, axis1=1, axis2=2))):.6g}, low-four error={np.max(error):.6g}"
-            )
-            np.testing.assert_allclose(actual.densities, expected, atol=1e-3, rtol=0)
-    finally:
-        engine.close()
-
-
 def test_readout_ignores_controls_after_start_and_rejects_multiple_pulses() -> None:
     import zcu_tools.experiment.ftf as ftf
 
     base = template()
-    # Controls beginning after readout must have no effect, even on another port.
+    # Charge controls beginning after readout must have no effect.
     extra = replace(
-        base.events[0], gen_ch=1, start_us=np.full(2, 0.015), gain=np.full(2, 0.5)
+        base.events[0], gen_ch=2, start_us=np.full(2, 0.015), gain=np.full(2, 0.5)
     )
-    overlap = replace(base, events=(*base.events, extra, replace(extra, gen_ch=2)))
+    overlap = replace(base, events=(*base.events, extra))
     plans = [ftf.plan_template(settings(), snapshot(), t) for t in (base, overlap)]
     engine = Engine(1, 1_000_000)
     try:
@@ -309,3 +173,100 @@ def test_round_statistics_reuse_snapshot_and_engine_across_acquires() -> None:
         assert traces.channels[0].iq.shape == (6, 1, 4, 2)
     finally:
         source.close()
+
+
+class ResidualEngine(Engine):
+    """Configured executor supplying controlled densities at the C3 boundary."""
+
+    def __init__(self, populations):
+        super().__init__(1, 0)
+        self.populations = populations
+
+    def evolve(self, source, batches, *, budget=1e-3, cancel):
+        from zcu_tools.simulate.evolution import EvolutionResult, PathDiagnostics
+
+        points = np.concatenate([batch.points for batch in batches])
+        densities = np.repeat(np.diag(self.populations)[None], len(points), axis=0)
+        return EvolutionResult(points, densities, PathDiagnostics())
+
+
+@pytest.mark.parametrize(
+    "populations, normalized",
+    [
+        ([0.25 * (1 + 9e-7), 0.75 * (1 + 9e-7)], [0.25, 0.75]),
+        ([-1e-6, 1.000001], [0, 1]),
+        ([0, 0.999999], [0, 1]),
+    ],
+)
+def test_acquire_explicitly_normalizes_in_budget_evolution(populations, normalized):
+    from zcu_tools.experiment.ftf import FTFSource
+
+    source = FTFSource(settings(), DeviceManager(), engine=ResidualEngine(populations))
+    acquire = replace(request(), reps=1_000_000_000)
+    try:
+        try:
+            result = expect_statistics(
+                source.open_acquire(acquire).sample_round(snapshot(), 0)
+            )
+        except ValueError as error:
+            pytest.fail(f"in-budget evolution must complete acquire: {error}")
+        identity = np.random.SeedSequence((acquire.root_seed, acquire.sequence, 0, 0))
+        rng = np.random.Generator(np.random.PCG64(identity))
+        expected = rng.multinomial(acquire.reps, np.tile(normalized, (2, 1)))
+        np.testing.assert_array_equal(result.state_counts, expected)
+    finally:
+        source.close()
+
+
+@pytest.mark.parametrize("populations", [[0, 1.000002], [-2e-6, 1.000002]])
+def test_acquire_rejects_out_of_budget_evolution_and_retains_diagnostics(populations):
+    from zcu_tools.experiment.ftf import FTFSource
+
+    source = FTFSource(settings(), DeviceManager(), engine=ResidualEngine(populations))
+    try:
+        with pytest.raises(ValueError, match="2 rows") as rejection:
+            source.open_acquire(request()).sample_round(snapshot(), 0)
+        assert len(source.evaluations) == 1
+        assert source.evaluations[0].round_index == 0
+        assert getattr(source.evaluations[0], "rejected_rows", None) == 2
+        assert getattr(rejection.value, "rejected_rows", None) == 2
+    finally:
+        source.close()
+
+
+def test_template_wires_receiver_delay_and_mismatch_without_delaying_evolution() -> (
+    None
+):
+    from zcu_tools.experiment.ftf import plan_template
+
+    base = settings()
+    pair = base.readout.resonators
+    configured = base.model_copy(
+        update={
+            "readout": base.readout.model_copy(
+                update={
+                    "adc": base.readout.adc.model_copy(
+                        update={"time_of_flight_ns": 400.0}
+                    ),
+                    "resonators": pair.model_copy(
+                        update={
+                            "r1": pair.r1.model_copy(
+                                update={"mismatch_phase_rad": 0.6}
+                            ),
+                            "r2": pair.r2.model_copy(
+                                update={"mismatch_phase_rad": -0.4}
+                            ),
+                        }
+                    ),
+                }
+            ),
+        }
+    )
+    plan = plan_template(configured, snapshot(), template())
+    assert getattr(plan.readout.model.receiver, "time_of_flight_ns", None) == 400.0
+    np.testing.assert_array_equal(
+        getattr(plan.readout.model, "mismatch_phase_rad", None), [0.6, -0.4]
+    )
+    np.testing.assert_array_equal(plan.batch.end_ns, [8.0, 10.0])
+    assert plan.readout.pulses[0][0].start_ns == 8.0
+    np.testing.assert_array_equal(plan.readout.grids[0][0].times_ns, [8, 9, 10, 11])

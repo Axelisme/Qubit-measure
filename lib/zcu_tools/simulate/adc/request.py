@@ -9,6 +9,7 @@ from numpy.typing import NDArray
 from zcu_tools.core.simulation import SamplingIdentity
 
 from .model import RealArray, readonly_array
+from .populations import validate_populations
 
 
 @dataclass(frozen=True)
@@ -86,7 +87,8 @@ class SampleGrid:
         at least one sample. Negative/pre-pulse times model physical lookback.
         No hidden sample-period multiplication occurs in sample sums.
     demodulation_frequency_ghz: absolute oscillator cycles/ns. Rotating output is
-        multiplied by exp(+2πi*(f_demod-f_ref)*t-i*phase_rad), then calibrated.
+        multiplied by exp(+2πi*(f_demod-f_ref)*t-i*phase_rad), then conjugated
+        into microwave I+iQ before receiver gain/phase/offset and added noise.
     phase_rad: demod oscillator phase at absolute origin zero, radians.
     Empty/nonfinite/unordered grids raise ValueError.
     """
@@ -110,7 +112,9 @@ class PopulationInput:
 
     state_labels: explicit order matching ReadoutModel.state_labels exactly.
     values: owned/read-only dimensionless (state,) probabilities, nonnegative
-        and summing to one within 1e-10. No clipping or renormalization occurs.
+        and summing to one within 1e-6 (inclusive float64 endpoints).
+        The caller supplies an explicitly normalized distribution; this record
+        only validates and copies it. No clipping or renormalization occurs.
         Convert density explicitly with evolution.populations if appropriate;
         ADC does not infer a basis or turn coherences into probabilities.
         These describe the earliest readout pulse start_ns, or origin zero when
@@ -129,10 +133,7 @@ class PopulationInput:
             or len(set(self.state_labels)) != len(values)
         ):
             raise ValueError("population vector must match unique state labels")
-        if np.any(values < 0):
-            raise ValueError("populations must be nonnegative")
-        if abs(float(values.sum()) - 1) > 1e-10:
-            raise ValueError("populations must sum to one")
+        validate_populations(values)
         object.__setattr__(self, "values", values)
 
 
@@ -142,9 +143,11 @@ class ConditionalResponse:
 
     state_labels: initial/final state order, matching ReadoutModel.
     traces: owned/read-only float64 (initial_state,sample,2) ADC sample units,
-        last axis [I,Q], after demodulation/gain/phase/offset, without noise.
+        last axis microwave [I,Q], after delay/demodulation/conjugation and
+        gain/phase/offset, without noise.
     final_populations: owned/read-only float64 (initial_state,final_state) at
-        the final sample time. Retains solver output, without probability repair.
+        the final sample's emitted time (ADC time minus time_of_flight_ns),
+        no earlier than readout origin. Retains solver output without repair.
     These are conditional means, not jump-time trajectories or single-shot tails.
     """
 

@@ -20,6 +20,7 @@ from zcu_tools.core.simulation import (
 )
 
 from .model import ReadoutModel, RealArray, Receiver, readonly_array
+from .populations import validate_populations
 from .request import ReadoutPulse, SampleGrid
 
 
@@ -177,7 +178,9 @@ def round_statistics(
     """Draw integrated statistics for all ADCs from one joint state-count draw.
 
     populations: finite float64 (*point_dims, states), nonnegative rows summing
-        to one within 1e-10, in conditional state order. No clipping or repair.
+        to one within 1e-6 (inclusive float64 endpoints), in conditional state
+        order. The caller explicitly normalizes before sampling; this function
+        only validates, without clipping, normalization or repair.
     channels: unique ADCs; content_index shape must equal point_dims and each
         conditional state axis must match populations. Reads of one ADC must
         have equal sample_counts; ADCs may have different sample counts.
@@ -276,17 +279,7 @@ def _validate_round_inputs(
     populations: RealArray, channels: tuple[ChannelReadout, ...], reps: int
 ) -> RealArray:
     """Validate the shared probability/layout contract without repairing inputs."""
-    probabilities = np.asarray(populations, dtype=np.float64)
-    if (
-        probabilities.ndim < 1
-        or probabilities.shape[-1] == 0
-        or not np.isfinite(probabilities).all()
-        or np.any(probabilities < 0)
-        or np.any(np.abs(probabilities.sum(axis=-1) - 1) > 1e-10)
-    ):
-        raise ValueError(
-            "populations must be finite nonnegative probabilities summing to one"
-        )
+    probabilities = validate_populations(populations)
     if type(reps) is not int or reps < 0:
         raise ValueError("reps must be a nonnegative integer")
     if len({channel.channel for channel in channels}) != len(channels):

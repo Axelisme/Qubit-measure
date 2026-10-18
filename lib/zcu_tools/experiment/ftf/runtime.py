@@ -28,6 +28,8 @@ from zcu_tools.simulate.adc import (
     ChannelReadout,
     ConditionalReadout,
     ConditionalSums,
+    PopulationValidationError,
+    normalize_populations,
     round_statistics,
     sample_traces,
 )
@@ -48,12 +50,15 @@ class FTFNumericUse:
 
     acquire_sequence/round_index identify the solve's sampling scope. paths counts
     actual engine segment paths; it contains no densities or noise realizations.
-    A reused snapshot does not create a new solve or change this record.
+    rejected_rows is zero after successful ADC preparation, or the number of
+    rows ADC rejected under its reported validation rule. The record survives
+    that failure. A reused snapshot does not create a new solve or change it.
     """
 
     acquire_sequence: int
     round_index: int
     paths: PathDiagnostics
+    rejected_rows: int = 0
 
 
 @dataclass(frozen=True)
@@ -148,6 +153,8 @@ class FTFAcquire:
         evolved = owner.engine.evolve(
             plans[0].source, tuple(plan.batch for plan in plans), cancel=Event()
         )
+        # Retain solve diagnostics even when ADC preparation rejects a row.
+        owner.evaluations = (FTFNumericUse(acquire.sequence, index, evolved.paths),)
         state_count = evolved.densities.shape[-1]
         probabilities = np.empty((prod(acquire.point_dims), state_count))
         dc_model = plans[0].source.model((0,) * plans[0].batch.flux.level.shape[1])
@@ -158,13 +165,20 @@ class FTFAcquire:
             plans[0].readout.model.state_labels,
             dc_model.eigenvectors,
         )
-        probabilities[evolved.points] = batch_populations(
-            evolved.densities, readout_basis, readout_basis
-        )
+        populations = batch_populations(evolved.densities, readout_basis, readout_basis)
+        try:
+            probabilities[evolved.points] = normalize_populations(populations)
+        except PopulationValidationError as error:
+            owner.evaluations = (
+                FTFNumericUse(
+                    acquire.sequence, index, evolved.paths, error.rejected_rows
+                ),
+            )
+            raise
         response = ConditionalReadout(
             plans[0].readout.model,
-            rtol=owner.settings.solver.rtol,
-            atol=owner.settings.solver.atol,
+            rtol=owner.settings.numerics.solver.rtol,
+            atol=owner.settings.numerics.solver.atol,
         )
         conditionals = []
         traces = []
@@ -185,12 +199,11 @@ class FTFAcquire:
             np.concatenate(traces) if traces else None,
         )
         channel = ChannelReadout(
-            owner.settings.receiver.ro_ch,
+            owner.settings.readout.adc.ro_ch,
             conditional,
             content_index.reshape(acquire.point_dims),
             plans[0].readout.model.receiver,
         )
-        owner.evaluations = (FTFNumericUse(acquire.sequence, index, evolved.paths),)
         return _Prepared(
             probabilities.reshape((*acquire.point_dims, state_count)), (channel,)
         )
@@ -234,19 +247,19 @@ class FTFSource:
     def snapshot(self) -> EnvironmentSnapshot:
         """Read fixed-unit live DC values once, rejecting missing/invalid devices."""
         values = []
-        for source in self.settings.devices:
-            info = self.devices.get_info(source.name)
+        for name, source in self.settings.dc_bias.sources.items():
+            info = self.devices.get_info(name)
             if not isinstance(info, FakeDeviceInfo) or info.value_unit != source.unit:
                 raise ValueError(
-                    f"devices.{source.name}.unit: fixed source unit mismatch"
+                    f"dc_bias.sources.{name}.unit: fixed source unit mismatch"
                 )
             if (
                 not np.isfinite(info.value)
                 or not source.limits[0] <= info.value <= source.limits[1]
             ):
-                raise ValueError(f"devices.{source.name}.value: outside source limits")
-            values.append((source.name, info.value))
-        return EnvironmentSnapshot("ftf-v1", self.identity, tuple(values))
+                raise ValueError(f"dc_bias.sources.{name}.value: outside source limits")
+            values.append((name, info.value))
+        return EnvironmentSnapshot("ftf-v2", self.identity, tuple(values))
 
     def open_acquire(self, request: AcquireRequest) -> FTFAcquire:
         """Start a fixed template request, invalidating/releasing the previous session.
@@ -289,6 +302,7 @@ def ftf(
     configuration: FTFSettings | str | Path,
     *,
     private_replay: Path | None = None,
+    workers: int = 1,
 ) -> SimulationEnvironment:
     """Build a fixed-profile FTF environment from named values or a YAML path.
 
@@ -299,7 +313,8 @@ def ftf(
     private_replay explicitly enables author-only checked input archives at an
     absolute directory. Replay recomputes with checked numeric and RNG versions;
     no U table or exact density record is consulted. One engine persists across
-    acquires. Worker threads live only during evolve; dropping the environment
+    acquires, using workers (default 1) as its sole parallel width.
+    Worker threads live only during multi-timeline evolve; dropping the environment
     releases its in-memory engine cache. FTFSource.close explicitly clears it.
     """
     settings = (
@@ -309,38 +324,40 @@ def ftf(
     )
     devices = DeviceManager()
     try:
-        for source in settings.devices:
+        for name, source in settings.dc_bias.sources.items():
             device = FakeDevice(fast_mode=True, value_unit=source.unit)
-            devices.register_device(source.name, device)
+            devices.register_device(name, device)
             device.setup(
                 FakeDeviceInfo(
                     address=device.address,
                     value_unit=source.unit,
                     output="on",
                     value=source.initial,
-                    rampstep=source.rampstep,
+                    rampstep=source.ramp_step,
                 ),
                 progress=False,
             )
-        coordinator = FTFSource(settings, devices, private_replay=private_replay)
-        soccfg = make_mock_soccfg(
-            settings.channels.generators, settings.channels.readouts
+        coordinator = FTFSource(
+            settings,
+            devices,
+            engine=Engine(workers, 256 * 1024**2),
+            private_replay=private_replay,
         )
+        gens = (
+            settings.readout.drive.gen_ch,
+            *(s.gen_ch for s in settings.drive_lines.values()),
+        )
+        soccfg = make_mock_soccfg(max(gens) + 1, settings.readout.adc.ro_ch + 1)
         binding = SimulationBinding(
             coordinator.snapshot,
             coordinator.execute,
             backend_version=BACKEND_VERSION,
-            seed=settings.seed,
-        )
-        gens = (
-            settings.readout_source.gen_ch,
-            *(s.gen_ch for s in settings.flux_sources),
-            *(s.gen_ch for s in settings.microwave_sources),
+            seed=settings.numerics.seed,
         )
         soc = SimulationSoc(
             soccfg,
             binding,
-            routes=tuple((gen, settings.receiver.ro_ch) for gen in gens),
+            routes=tuple((gen, settings.readout.adc.ro_ch) for gen in gens),
         )
         return SimulationEnvironment(
             soc,

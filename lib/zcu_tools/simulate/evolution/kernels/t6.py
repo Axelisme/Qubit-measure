@@ -8,6 +8,13 @@ from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 from scipy.linalg import expm, solve
 
+from ..declarations import (
+    AlgorithmIdentity,
+    Eligibility,
+    GuardDeclaration,
+    KernelDeclaration,
+    ReuseDeclaration,
+)
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
 
@@ -252,7 +259,17 @@ class T6Kernel:
     raises RuntimeError rather than silently selecting another algorithm.
     """
 
+    declaration = KernelDeclaration(
+        identity=AlgorithmIdentity("t6", "legacy-v1"),
+        eligibility=Eligibility(1, 1, "constant"),
+        guard=GuardDeclaration(),
+        accuracy="guarded-approximation",
+        reuse=ReuseDeclaration("t6/legacy-v1/serial"),
+        fallback="terminal-domain",
+    )
+
     name = "t6"
+    guard_builds = False
 
     def guard(
         self,

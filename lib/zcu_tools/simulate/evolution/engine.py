@@ -10,20 +10,22 @@ from threading import Event, Lock
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
-from joblib import Parallel
-
 if TYPE_CHECKING:
+    from ._dispatch import Dispatch
+    from ._planning import Geometry
+    from .calibration import CalibratedConstantProfile
     from .kernel import Kernel
 
 import numpy as np
 from numpy.typing import NDArray
 
 from ._envelope import sample_values
+from ._parallel import execution_pool, native_limit
 from ._validation import integers, owned, shape
 from .secular import FluxSchedule, FluxWaveform, ModelSource
 
 # Replay identity of the segment engine numerical algorithms, independent of records.
-SEGMENT_NUMERIC_VERSION = "segment-engine-v2"
+SEGMENT_NUMERIC_VERSION = "segment-engine-v3"
 
 
 @dataclass(frozen=True)
@@ -201,11 +203,16 @@ class TimelineBatch:
 class PathDiagnostics:
     """Author-only aggregate counts, not acquisition results.
 
-    segments_by_kernel: kernel name -> nonnegative segment count.
+    segments_by_kernel: kernel name -> nonnegative timeline-segment count.
+        A shared prefix segment counts once per adopting timeline under the
+        kernel that computed it. Its exceedances scale by the same rule.
     points_by_class: dispatch path-class name -> nonnegative point count.
     exceeded_by_kernel: kernel name -> post-apply accuracy exceedance segment
         count, with only positive counts retained. Exceeded results remain
         committed without correction or retry; these are not solver failures.
+    max_trace_error: maximum absolute complex trace-minus-one of final
+        readout densities; zero for an empty evolve. Report-only, with no
+        correction, rejection or readout-specific tolerance comparison.
     All mappings default empty, own immutable copies and reject empty names
     or negative counts with ValueError. A point may participate in several
     path classes.
@@ -214,8 +221,11 @@ class PathDiagnostics:
     segments_by_kernel: Mapping[str, int] = field(default_factory=dict)
     points_by_class: Mapping[str, int] = field(default_factory=dict)
     exceeded_by_kernel: Mapping[str, int] = field(default_factory=dict)
+    max_trace_error: float = 0.0
 
     def __post_init__(self) -> None:
+        if not np.isfinite(self.max_trace_error) or self.max_trace_error < 0:
+            raise ValueError("max_trace_error must be finite and nonnegative")
         for name, counts in (
             ("segments_by_kernel", self.segments_by_kernel),
             ("points_by_class", self.points_by_class),
@@ -272,13 +282,19 @@ class Cancelled(Exception):
 
 
 class Engine:
-    """Segment engine with a per-call threading pool and persistent prepare LRU.
+    """Segment engine with inline or threaded execution and persistent prepare LRU.
 
     workers: positive sole parallel width; kernels remain single-threaded.
     cache_bytes: nonnegative resident-array byte limit, not a process RAM cap.
     kernels: optional algorithm collection replacing the production registry;
         each stateless collaborator implements the internal Kernel contract and
         has a unique name. Missing required names raise, never silently reroute.
+        Terminal families must cover their full dispatch domain: t4 handles all
+        no-tone rows and t6 all single constant-tone rows. If either terminal
+        guard rejects a dispatched row, evolve raises RuntimeError with
+        "no valid kernel". Shaped rows try gate_cache, period_table and dop853
+        in amortized-cost order; a guard rejection tries the next candidate.
+        Preparation and apply failures propagate without reclassification.
     chunks_per_worker: positive chunk multiplier; only scheduling, not physics.
 
     The zero-level model identity names the entire ModelSource: all physical
@@ -286,7 +302,11 @@ class Engine:
     Cache namespaces also include the error budget, so stricter requests cannot
     reuse looser preparations. Calls on one instance serialize; close is
     idempotent and waits for active work before clearing the cache. No worker
-    resource survives an evolve call. The prepare cache persists across evolve\n    calls; each evolve opens and closes its own joblib threading pool.
+    resource survives an evolve call. The prepare cache persists across evolve
+    calls; multi-timeline work opens and closes its own joblib threading pool.
+    Empty work, a single timeline, and workers=1 run inline without a pool.
+    Native BLAS uses one thread throughout evolve, coordinated across engines.
+    The last overlapping evolve restores the original process-wide BLAS limits.
     """
 
     def __init__(
@@ -298,7 +318,7 @@ class Engine:
         chunks_per_worker: int = 6,
     ) -> None:
         """Create the prepare cache; reject invalid sizes or duplicate kernel names."""
-        from ._schedule import PrepareCache
+        from .cache import PrepareCache
         from .kernels import REGISTRY
 
         if workers < 1 or cache_bytes < 0 or chunks_per_worker < 1:
@@ -314,6 +334,7 @@ class Engine:
         self._lock = Lock()
         self._closed = False
         self._workers = workers
+        self._builtin_kernels = kernels is None
 
     def evolve(
         self,
@@ -322,6 +343,8 @@ class Engine:
         *,
         budget: float = 1e-3,
         cancel: Event,
+        execution: Literal["auto", "legacy", "legacy-plan"] = "auto",
+        constant_profile: CalibratedConstantProfile | None = None,
     ) -> EvolutionResult:
         """Evolve all batches to readout, forwarding per-segment budget to kernels.
 
@@ -331,22 +354,134 @@ class Engine:
         when set, raises Cancelled, without returning partial results.
         Model ValueErrors propagate; numerical failure raises RuntimeError
         naming the point and segment. Results do not depend on chunking or
-        worker width except for floating-point rounding. Post-apply accuracy
+        worker width except for floating-point rounding. Classification may
+        borrow this call's worker pool for eight or more shared prepare keys.
+        Local guards run in timeline workers and hand their tables to apply.
+        Guard decisions remain independent of worker width and execution order.
+        execution: "auto" with no profile keeps legacy. With an explicitly
+        supplied profile it checks revision, exact workload/resources and cold/
+        warm acquire evidence before selecting constant algorithms. Nonadmission
+        uses legacy before guards, never retry after numeric failure. Injected
+        kernel collections are not covered by built-in source evidence.
+        Explicit "legacy" ignores profiles. "legacy-plan"
+        builds this call's legacy-equivalent single-interval cover and executes
+        it through the same scheduler, including contingent deferred selection.
+        It does not accept shadow plans, arbitrary graphs or portable replay,
+        and does not use declared costs to change numerical assignment.
+        Other execution values raise ValueError, including for empty work.
+        Post-apply accuracy
         exceedances stay in the result's paths.exceeded_by_kernel and produce
         exactly one RuntimeWarning per call, without correction or retry.
         """
+        if execution not in ("auto", "legacy", "legacy-plan"):
+            raise ValueError("execution must be 'auto', 'legacy' or 'legacy-plan'")
+        return self._evolve(
+            source,
+            batches,
+            budget=budget,
+            cancel=cancel,
+            mode=execution,
+            constant_profile=constant_profile,
+        )
+
+    def evaluate_constant_profile(
+        self,
+        source: ModelSource,
+        batches: Sequence[TimelineBatch],
+        *,
+        profile: CalibratedConstantProfile | None,
+        budget: float = 1e-3,
+        cancel: Event,
+    ) -> EvolutionResult:
+        """Evaluate a developer candidate, without granting production admission.
+
+        profile must be supplied; None raises ValueError rather than measuring
+        legacy. Only missing matched acquire evidence may be pending. Stale source,
+        unsupported exact inputs/resources or failed evidence raise ValueError
+        before execution, never silently measure legacy. Uses the same planner,
+        pool/cache and Schedule as admitted evolve. Numeric exceptions and
+        cancellation propagate without retry or partial results. The returned
+        numeric result carries no production-safe/admitted claim. A pytest-external
+        harness must time this entire call and independently validate accuracy;
+        this entry does not benchmark or upgrade the supplied immutable profile.
+        """
+        if profile is None:
+            raise ValueError("constant evaluation requires a profile")
+        return self._evolve(
+            source,
+            batches,
+            budget=budget,
+            cancel=cancel,
+            mode="evaluate-constant",
+            constant_profile=profile,
+        )
+
+    def _constant_dispatch(
+        self,
+        source: ModelSource,
+        geometry: Geometry,
+        profile: CalibratedConstantProfile,
+        *,
+        budget: float,
+        evaluation: bool,
+    ) -> Dispatch | None:
+        from .constant import ConstantPlanner
+        from .shadow import SearchLimits, ShadowRequest
+
+        if not self._builtin_kernels:
+            if evaluation:
+                raise ValueError("constant evidence does not cover injected kernels")
+            return None
+        workers = self._workers if len(geometry.points) > 1 else 1
+        request = ShadowRequest(
+            source.initial_density.shape[0],
+            budget,
+            workers,
+            profile.large_allocation_allowance,
+            len(geometry.points) * source.initial_density.nbytes,
+            SearchLimits(16, 1, 1, 6),
+        )
+        planner = ConstantPlanner()
+        try:
+            dispatch_profile = (
+                planner.evaluation_dispatch
+                if evaluation
+                else planner.production_dispatch
+            )
+            return dispatch_profile(
+                source, geometry, profile, request=request, cache=self._cache
+            )
+        finally:
+            planner.close()
+
+    def _evolve(
+        self,
+        source: ModelSource,
+        batches: Sequence[TimelineBatch],
+        *,
+        budget: float,
+        cancel: Event,
+        mode: Literal["auto", "legacy", "legacy-plan", "evaluate-constant"],
+        constant_profile: CalibratedConstantProfile | None,
+    ) -> EvolutionResult:
         from ._dispatch import classify
         from ._planning import plan
+        from ._prefix import PrefixResolver
         from ._schedule import Schedule
 
-        with self._lock:
+        evaluation = mode == "evaluate-constant"
+        with self._lock, native_limit.acquire():
             if self._closed:
                 raise RuntimeError("engine is closed")
+            if mode not in ("auto", "legacy", "legacy-plan", "evaluate-constant"):
+                raise ValueError("execution must be 'auto', 'legacy' or 'legacy-plan'")
             if not np.isfinite(budget) or budget <= 0:
                 raise ValueError("budget must be finite and positive")
             if cancel.is_set():
                 raise Cancelled()
             if not batches or not any(len(batch.points) for batch in batches):
+                if evaluation:
+                    raise ValueError("constant evaluation requires nonempty work")
                 size = source.initial_density.shape[0]
                 return EvolutionResult(
                     np.empty(0, dtype=np.int64),
@@ -354,9 +489,40 @@ class Engine:
                     PathDiagnostics(),
                 )
             geometry = plan(source, batches)
-            dispatch = classify(geometry, self._kernels, source, budget)
-            schedule = Schedule(geometry, dispatch, source, budget, cancel)
-            with Parallel(n_jobs=self._workers, backend="threading") as pool:
+            workers = (
+                self._workers
+                if len(geometry.points) > 1 and len(geometry.table.timeline)
+                else 1
+            )
+            constant_dispatch = None
+            if mode in ("auto", "evaluate-constant") and constant_profile is not None:
+                constant_dispatch = self._constant_dispatch(
+                    source,
+                    geometry,
+                    constant_profile,
+                    budget=budget,
+                    evaluation=evaluation,
+                )
+            with execution_pool(workers) as pool:
+                if constant_dispatch is not None:
+                    schedule = Schedule(
+                        geometry, constant_dispatch, source, budget, cancel
+                    )
+                elif mode == "legacy-plan":
+                    geometry = PrefixResolver(
+                        geometry, self._kernels, source, budget, cancel
+                    ).resolve(self._cache, pool, self._chunks)
+                    schedule = Schedule.from_legacy_plan(
+                        geometry, self._kernels, source, budget, cancel, pool
+                    )
+                else:
+                    geometry = PrefixResolver(
+                        geometry, self._kernels, source, budget, cancel
+                    ).resolve(self._cache, pool, self._chunks)
+                    dispatch = classify(
+                        geometry, self._kernels, source, budget, pool=pool
+                    )
+                    schedule = Schedule(geometry, dispatch, source, budget, cancel)
                 result = schedule.run(self._kernels, self._cache, pool, self._chunks)
             if cancel.is_set():
                 raise Cancelled()

@@ -67,7 +67,8 @@ def test_shared_line_finite_pulse_ringdown_demodulation_and_receiver():
         if t > 20:
             field = expm(-a * (t - 20)) @ field
         outgoing = (amplitude if 0 <= t < 20 else 0) - v @ field
-        value = gain * np.exp(1j * phase) * outgoing
+        # ADC converts the physical field to microwave IQ before calibration.
+        value = gain * np.exp(1j * phase) * outgoing.conjugate()
         expected.append([value.real + 0.4, value.imag - 0.2])
     assert_allclose(response.traces[0], expected, atol=2e-8)
     assert_allclose(response.traces[1], expected, atol=2e-8)
@@ -124,7 +125,7 @@ def test_state_conditioned_moments_match_independent_block_exponential():
     for t in grid.times_ns:
         evolved = expm(generator * t) @ initial
         out = 1 - evolved[3:].reshape(3, 2).sum(axis=0) @ v
-        expected.append([out.real, out.imag])
+        expected.append([out.real, -out.imag])
     assert_allclose(actual.traces[1], expected, atol=3e-8)
     # Wrong mean-frequency substitution has a visibly different response.
     mean_frequency = np.average(frequencies, axis=0, weights=[0.4, 0.5, 0.1])
@@ -201,7 +202,7 @@ def test_demodulation_carrier_and_finite_complex_envelope():
         ),
         dtype=np.complex128,
     )
-    assert_allclose(actual, np.column_stack((values.real, values.imag)), atol=2e-8)
+    assert_allclose(actual, np.column_stack((values.real, -values.imag)), atol=2e-8)
 
 
 def test_lookback_does_not_move_readout_population_origin():
@@ -239,5 +240,5 @@ def test_invalid_rates_covariance_and_population_are_rejected():
         Receiver(noise_covariance=np.array([[1, 2], [2, 1.0]]))
     with pytest.raises(ValueError, match="nonnegative"):
         signal_model(rates=np.array([[0, -0.1, 0], [0, 0, 0], [0, 0, 0]]))
-    with pytest.raises(ValueError, match="sum"):
+    with pytest.raises(ValueError, match="population trace outside tolerance"):
         PopulationInput(("g", "e"), np.array([0.2, 0.1]))

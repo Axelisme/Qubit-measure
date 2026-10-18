@@ -23,7 +23,12 @@ class Receiver:
 
     gain: finite real amplitude gain, converting outgoing sqrt(photons/ns) to
         ADC sample units. Zero/signed gain is supported; it does not change drive.
-    phase_rad: finite additive receiver phase in radians after demodulation.
+    phase_rad: finite additive receiver phase in radians after demodulation
+        and conversion to microwave I+iQ by conjugating the physical field.
+    time_of_flight_ns: finite nonnegative total line delay in ns, default zero.
+        Delays the physical output before demodulation and calibration, including
+        ringup/ringdown, and gives microwave exp(-2πi*f*delay) at absolute carrier f.
+        Offset and noise remain present before the delayed signal arrives.
     offset: owned read-only (2,) [I,Q] ADC sample units, added once per sample.
     noise_covariance: owned read-only symmetric positive-semidefinite (2,2) I/Q
         covariance in ADC sample units squared, per sample. Degenerate and zero
@@ -38,8 +43,11 @@ class Receiver:
     phase_rad: float = 0.0
     offset: RealArray = field(default_factory=lambda: np.zeros(2))
     noise_covariance: RealArray = field(default_factory=lambda: np.zeros((2, 2)))
+    time_of_flight_ns: float = 0.0
 
     def __post_init__(self) -> None:
+        if not np.isfinite(self.time_of_flight_ns) or self.time_of_flight_ns < 0:
+            raise ValueError("time_of_flight_ns must be finite and nonnegative")
         offset = readonly_array(self.offset, "receiver offset")
         covariance = readonly_array(self.noise_covariance, "noise covariance")
         if not np.isfinite([self.gain, self.phase_rad]).all() or offset.shape != (2,):
@@ -77,7 +85,11 @@ class ReadoutModel:
         in 1/ns, indexed [target,source], with zero diagonal. The tool constructs
         probability generator Q=R-diag(sum(R,axis=0)); up/down/direct/cascade rates
         are independent, not equilibrium rates interpreted as one-way decay.
-    receiver: single output calibration/noise model. No QICK buffer conversion.
+    receiver: single output delay/calibration/noise model. No QICK conversion.
+    mismatch_phase_rad: owned finite (2,) scattering phases in radians, default
+        zeros. Output is b_in-sum(v_r*exp(-i*phi_r)*alpha_r) before conjugation.
+        Each phase rotates only its resonator's scattered field, with +phi in
+        microwave IQ as in the hanger model. It does not change A_s or rates.
     Invalid dimensions, values or rates raise ValueError. Weak dispersive QND
     mixture/Markov first-moment assumptions are not runtime applicability gates.
     """
@@ -90,6 +102,7 @@ class ReadoutModel:
     kappa_external_per_ns: RealArray
     rates_per_ns: RealArray
     receiver: Receiver = field(default_factory=Receiver)
+    mismatch_phase_rad: RealArray = field(default_factory=lambda: np.zeros(2))
 
     def __post_init__(self) -> None:
         n = len(self.state_labels)
@@ -102,6 +115,7 @@ class ReadoutModel:
             ("kappa_internal_per_ns", (2,), True),
             ("kappa_external_per_ns", (2,), True),
             ("rates_per_ns", (n, n), True),
+            ("mismatch_phase_rad", (2,), False),
         )
         for name, shape, nonnegative in specs:
             array = readonly_array(getattr(self, name), name)

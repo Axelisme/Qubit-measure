@@ -63,6 +63,10 @@ def _integrated_orders(
     [
         (0.0, 0.0),  # Three coincident poles, including repeated population modes.
         (0.13, 0.13),  # Exact carrier resonance.
+        # In one apply, diagonal modal endpoints coincide while off-diagonal
+        # gaps exceed 0.5/duration. DC also gives repeated inner poles, so the
+        # independent reference checks both stable branches and dense contraction.
+        (0.13, 0.0),
         ((0.5 - 1e-8) / (2 * np.pi), 0.0),
         ((0.5 + 1e-8) / (2 * np.pi), 0.0),
         ((1e-5 - 1e-8) / (2 * np.pi), 0.0),
@@ -73,6 +77,7 @@ def _integrated_orders(
     ids=[
         "coincident",
         "resonant",
+        "mixed-endpoints-and-inner-poles",
         "endpoint-below",
         "endpoint-above",
         "first-below",

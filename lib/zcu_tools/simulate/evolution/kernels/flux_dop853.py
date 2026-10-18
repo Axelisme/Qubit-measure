@@ -7,6 +7,13 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
+from ..declarations import (
+    AlgorithmIdentity,
+    Eligibility,
+    GuardDeclaration,
+    KernelDeclaration,
+    ReuseDeclaration,
+)
 from ..kernel import Prepared, SegmentTable
 from ..secular import FluxExpansion, ModelSource
 from ._dop853 import tolerances
@@ -112,6 +119,13 @@ def _context(data, row, model):
     return _FluxContext(Context(models, segments, row, model), expansion, waveform)
 
 
+@njit(nogil=True, cache=True)
+def _run(data, row_models, states, controls):
+    # Keep RHS/context dispatchers inside the compiled entry point so its disk
+    # cache key contains only data types, not process-specific callback IDs.
+    run_chain(_rhs, _context, data, row_models, states, controls)
+
+
 class FluxDOP853Kernel:
     """C5 continuous H(flux(t)) with a constant quantized bath per row.
 
@@ -121,11 +135,23 @@ class FluxDOP853Kernel:
     thread-safe model cache, never density. apply packs only unique used bath
     levels; model references/workspaces are outside Prepared.nbytes, as for the
     other kernels. Operators and states use each row's bath eigenbasis. Chained
-    rows switch basis at boundaries and reuse the accepted step of the shared
-    single-threaded, nogil DOP853 core. No flux/DAC midpoint freezing occurs.
+    rows switch basis at boundaries. The shared single-threaded, nogil DOP853
+    core resets a deterministic initial step per row and limits steps by the
+    smallest spacing of envelope/flux knots inside the row's local window.
+    No flux/DAC midpoint freezing occurs.
     """
 
+    declaration = KernelDeclaration(
+        identity=AlgorithmIdentity("flux_dop853", "legacy-v1"),
+        eligibility=Eligibility(min_tones=1),
+        guard=GuardDeclaration(),
+        accuracy="adaptive",
+        reuse=ReuseDeclaration("flux_dop853/legacy-v1/serial"),
+        fallback="terminal-domain",
+    )
+
     name = "flux_dop853"
+    guard_builds = False
 
     def guard(
         self,
@@ -212,7 +238,8 @@ class FluxDOP853Kernel:
         in that row's bath eigenbasis. Later input slots in a chain are ignored.
         Waveforms are indexed by table.timeline and interpolated at absolute ns;
         endpoint samples are held outside their span. Bath levels are table.level.
-        Stops at every row boundary, retaining the last accepted step. Raises
+        Stops at every row boundary. Each row resets a deterministic initial
+        step and limits steps by active sampled-control spacing. Raises
         ValueError for absent samples, incompatible payload/shapes/ports/indices;
         RuntimeError on integration failure, without clipping or renormalizing.
         Earlier rows may already be advanced on numerical failure.
@@ -247,12 +274,12 @@ class FluxDOP853Kernel:
         playing = np.arange(table.tone_port.shape[1])[None, :] < table.tones[rows, None]
         if np.any(playing & (table.tone_port[rows] >= models.ports[inverse, None])):
             raise ValueError("flux DOP853 tone port absent from model")
-        segments = pack_segments(table)
+        segments = pack_segments(table, include_flux=True)
         data = _FluxData(
             models,
             segments,
             prepared.expansion,
             _Waveform(waveform.offsets, waveform.time_ns, waveform.flux),
         )
-        run_chain(_rhs, _context, data, (rows, inverse), states, controls)
+        _run(data, (rows, inverse), states, controls)
         return np.zeros(len(rows), dtype=np.bool_)

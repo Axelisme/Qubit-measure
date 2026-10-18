@@ -5,11 +5,20 @@ from dataclasses import dataclass
 import numpy as np
 from numba import njit
 from numpy.typing import NDArray
-from scipy.integrate import solve_ivp
 from scipy.linalg import expm
 
+from ..declarations import (
+    AlgorithmIdentity,
+    Eligibility,
+    GuardDeclaration,
+    KernelDeclaration,
+    ReuseDeclaration,
+)
 from ..kernel import Prepared, SegmentTable
-from ..secular import ModelSource, SecularModel
+from ..secular import ModelSource
+from . import gate_phase
+from ._gate_endpoints import build_endpoints
+from ._shaped import drive_bounds, envelope_bounds
 
 _PHASE_COUNT = 16
 _SUBSEGMENTS = 4
@@ -32,67 +41,6 @@ class _GatePrepared:
 def _check_budget(budget: float) -> None:
     if not np.isfinite(budget) or budget <= 0:
         raise ValueError("gate cache budget must be finite and positive")
-
-
-def _unitaries(
-    model: SecularModel, table: SegmentTable, row: int, budget: float
-) -> NDArray[np.complex128]:
-    """Integrate all phase nodes together, restarting at envelope sample knots."""
-    size = len(model.energies_ghz)
-    drive = model.drives[int(table.tone_port[row, 0])]
-    envelope = table.envelopes[int(table.tone_envelope[row, 0])]
-    offset = float(table.tone_envelope_offset_ns[row, 0])
-    frequency = float(table.tone_frequency_ghz[row, 0])
-    amplitude = float(table.tone_amplitude[row, 0])
-    duration = float(table.duration_ns[row])
-    phases = np.arange(_PHASE_COUNT) * (2 * np.pi / _PHASE_COUNT)
-    identity = np.broadcast_to(np.eye(size, dtype=complex), (_PHASE_COUNT, size, size))
-    samples = np.empty((_SUBSEGMENTS, _PHASE_COUNT, size, size), dtype=complex)
-
-    def rhs(time: float, flat: NDArray[np.complex128]) -> NDArray[np.complex128]:
-        z = (
-            amplitude
-            * envelope.values(np.array(time + offset))
-            * np.exp(1j * (phases + 2 * np.pi * frequency * time))
-        )
-        h = (
-            np.diag(model.energies_ghz)[None]
-            + z.real[:, None, None] * drive.in_phase_ghz
-            + z.imag[:, None, None] * drive.quadrature_ghz
-        )
-        return (-2j * np.pi * (h @ flat.reshape(identity.shape))).ravel()
-
-    # Tight U tolerances leave the segment budget to Strang/Fourier errors.
-    tolerance = min(1e-10, budget * 1e-4)
-    knots = envelope.sample_ns - offset
-    for segment in range(_SUBSEGMENTS):
-        start, end = (
-            duration * segment / _SUBSEGMENTS,
-            duration * (segment + 1) / _SUBSEGMENTS,
-        )
-        boundaries = np.concatenate(
-            ([start], knots[(knots > start) & (knots < end)], [end])
-        )
-        unitary = identity.copy().ravel()
-        for left, right in zip(boundaries[:-1], boundaries[1:], strict=True):
-            if right == left:
-                continue
-            solution = solve_ivp(
-                rhs,
-                (left, right),
-                unitary,
-                method="DOP853",
-                rtol=tolerance,
-                atol=tolerance * 0.01,
-                max_step=min(0.1, 0.25 / max(abs(frequency), 1e-12)),
-            )
-            if not solution.success or not np.isfinite(solution.y[:, -1]).all():
-                raise RuntimeError(
-                    f"gate cache unitary integration failed: {solution.message}"
-                )
-            unitary = solution.y[:, -1]
-        samples[segment] = unitary.reshape(identity.shape)
-    return np.fft.fft(samples, axis=1) / _PHASE_COUNT
 
 
 @njit(nogil=True, cache=True)
@@ -131,17 +79,30 @@ def _apply_gates(
 class GateCacheKernel:
     """Cache a shaped single-tone segment independently of its start phase.
 
-    The engine owns the repeat-count threshold and namespaces keys by the DC
-    model identity. Keys encode flux level, drive port, envelope content identity,
+    The engine compares amortized preparation/apply work. It namespaces keys by
+    the DC model identity. Keys encode flux level, port, envelope content identity,
     envelope-local offset, frequency, signed amplitude and duration. Absolute
     segment start and carrier theta do not affect preparation. Four closed U
-    subsegments use 16 phase nodes each, with half-step secular D on both sides.
-    Numerical build failures raise RuntimeError; invalid budgets, unsupported
-    rows or mismatched representative keys raise ValueError. This fixed-order
-    approximation does not certify arbitrary drives against the supplied budget.
+    subsegments retain 16 phase modes each, with half-step secular D on both
+    sides. Short gates first try six nodes checked at two independent phases;
+    failed phase convergence uses the original sixteen-node builder.
+    A model-only secular split guard rejects long dissipative gates before
+    preparation. Numerical build failures raise RuntimeError; invalid budgets,
+    unsupported rows or mismatched representative keys raise ValueError. This
+    fixed-order approximation does not certify arbitrary drives against budget.
     """
 
+    declaration = KernelDeclaration(
+        identity=AlgorithmIdentity("gate_cache", "phase-adaptive-dop853-v3"),
+        eligibility=Eligibility(1, 1, "shaped"),
+        guard=GuardDeclaration(),
+        accuracy="guarded-approximation",
+        reuse=ReuseDeclaration("gate_cache/phase-adaptive-dop853-v3/serial"),
+        fallback="legacy-order",
+    )
+
     name = "gate_cache"
+    guard_builds = False
 
     def guard(
         self,
@@ -150,8 +111,11 @@ class GateCacheKernel:
         source: ModelSource,
         budget: float,
     ) -> NDArray[np.bool_]:
-        """Accept sampled-envelope single-tone rows; no repetition-count test."""
-        del source  # Applicability depends on the segment shape, not the model.
+        """Accept shaped single tones with a small model-only split estimate.
+
+        Repetition count belongs to the engine. The four-way secular splitting
+        uses duration**3 * Gamma * V**2 / 16 <= 0.01, without reading density.
+        """
         _check_budget(budget)
         accepted = table.tones[rows] == 1
         if table.tone_envelope.shape[1]:
@@ -160,6 +124,19 @@ class GateCacheKernel:
             )
             candidates = np.flatnonzero(accepted)
             accepted[candidates] &= shaped[table.tone_envelope[rows[candidates], 0]]
+        if not np.any(accepted):
+            return accepted
+        selected = rows[accepted]
+        strength, gamma = drive_bounds(table, selected, source)
+        peaks, _ = envelope_bounds(table)
+        peak = peaks[table.tone_envelope[selected, 0]]
+        estimate = (
+            table.duration_ns[selected] ** 3
+            * gamma
+            * (table.tone_amplitude[selected, 0] * peak * strength) ** 2
+            / _SUBSEGMENTS**2
+        )
+        accepted[accepted] = estimate <= 0.01
         return accepted
 
     def prepare_keys(
@@ -231,7 +208,19 @@ class GateCacheKernel:
                 -half_step
                 * ((outgoing[:, None] + outgoing[None, :]) / 2 + model.dephasing_per_ns)
             )
-            coefficients.append(_unitaries(model, table, int(row), budget))
+            # Keep zero/long-duration keys on the original builder. Routing and
+            # its split guard are deliberately independent of this optimization.
+            coefficient = None
+            if 0 < table.duration_ns[row] <= gate_phase.MAX_DURATION_NS:
+                coefficient = gate_phase.build(model, table, int(row), budget)
+            if coefficient is None:
+                phases = np.asarray(
+                    np.arange(_PHASE_COUNT) * (2 * np.pi / _PHASE_COUNT),
+                    dtype=np.float64,
+                )
+                endpoints = build_endpoints(model, table, int(row), budget, phases)
+                coefficient = np.fft.fft(endpoints, axis=1) / _PHASE_COUNT
+            coefficients.append(coefficient)
             populations.append(population)
             coherences.append(coherence)
         if len(rows):

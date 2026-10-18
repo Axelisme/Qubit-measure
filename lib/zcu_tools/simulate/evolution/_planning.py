@@ -1,22 +1,54 @@
 """Vectorized event geometry for one acquire, without point-wise Python loops."""
 
-from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 
 import numpy as np
 from numpy.typing import NDArray
 
-from .engine import EnvelopeSpec, TimelineBatch
+from .engine import EnvelopeSpec, PathDiagnostics, TimelineBatch
 from .kernel import SegmentTable
 from .secular import FluxWaveform, ModelSource
 
 
 @dataclass(frozen=True)
 class Geometry:
+    """Segmented acquire supplied to the legacy provider and engine scheduler.
+
+    table contains global rows and optional engine-computed prefix certificates.
+    points maps timeline indices to unique caller point IDs.
+    flux_drive is a bool vector per global row, True for continuous flux motion.
+    prefix_paths maps computed prefix IDs to diagnostics adopted by timelines.
+    segment(source, batches) constructs geometry without evolving a density.
+    """
+
     table: SegmentTable
     points: NDArray[np.int64]
     flux_drive: NDArray[np.bool_]
-    known_input: NDArray[np.bool_]
+    prefix_paths: Mapping[int, PathDiagnostics] = field(default_factory=dict)
+
+    @property
+    def resume_rows(self) -> NDArray[np.int64]:
+        """Latest resolved prefix row per timeline, or -1 for source input."""
+        resume = np.full(len(self.points), -1, dtype=np.int64)
+        if self.table.prefix_group is not None:
+            rows = np.array(
+                [
+                    i
+                    for i, group in enumerate(self.table.prefix_group)
+                    if group is not None and group in self.table.prefix_inputs
+                ],
+                dtype=np.int64,
+            )
+            np.maximum.at(resume, self.table.timeline[rows], rows)
+        return resume
+
+    @property
+    def pending(self) -> NDArray[np.bool_]:
+        """Rows after the adopted input, excluding already computed prefixes."""
+        return (
+            np.arange(len(self.table.timeline)) >= self.resume_rows[self.table.timeline]
+        )
 
 
 def _events(timeline, time):
@@ -215,9 +247,7 @@ def _batch_geometry(batch: TimelineBatch, source: ModelSource) -> Geometry:
         envelopes,
         batch.flux_waveform,
     )
-    first_drive = np.full(len(batch.points), np.inf)
-    np.minimum.at(first_drive, point[tones > 0], start[tones > 0])
-    return Geometry(table, batch.points, flux_drive, start == first_drive[point])
+    return Geometry(table, batch.points, flux_drive)
 
 
 def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
@@ -236,7 +266,9 @@ def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
             "envelopes",
             "flux_waveform",
             "flux_waveform_available",
-            "flux_tail_group",
+            "prefix_group",
+            "prefix_no_drive",
+            "prefix_inputs",
         )
     }
     envelopes: list[EnvelopeSpec] = []
@@ -285,63 +317,14 @@ def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
             else None
         ),
     )
-    known = np.concatenate([g.known_input for g in geometries])
-    combined = replace(combined, flux_tail_group=_flux_tail_groups(combined, known))
+    from ._prefix import certify
+
+    combined = certify(combined)
     return Geometry(
         combined,
         points,
         np.concatenate([g.flux_drive for g in geometries]),
-        known,
     )
-
-
-def _flux_tail_groups(
-    table: SegmentTable, known: NDArray[np.bool_]
-) -> tuple[int | None, ...]:
-    """Certify repeated nonempty no-drive prefixes within this source/evolve.
-
-    Compare complete segment sequences, not their final level. Source and
-    initial density are common to the entire plan. Compare continuous samples
-    before probe start and the first sample at or after it, which closes the
-    prefix's final interpolation interval. Later samples cannot affect it.
-    """
-    candidates = np.flatnonzero(known & (table.start_ns > 0) & (table.tones == 1))
-    groups: list[int | None] = [None] * len(table.timeline)
-    if not len(candidates):
-        return tuple(groups)
-    first = np.searchsorted(table.timeline, table.timeline[candidates], side="left")
-    sequences = np.empty(
-        len(table.timeline),
-        dtype=[
-            ("start", "f8"),
-            ("duration", "f8"),
-            ("level", "i8", table.level.shape[1]),
-        ],
-    )
-    sequences["start"] = table.start_ns
-    sequences["duration"] = table.duration_ns
-    sequences["level"] = table.level
-    matches: dict[tuple[bytes, ...], list[int]] = {}
-    waveform = table.flux_waveform
-    for row, begin in zip(candidates, first, strict=True):
-        if np.any(table.tones[begin:row] != 0):
-            continue
-        key = (sequences[begin:row].tobytes(), table.level[row].tobytes())
-        timeline = table.timeline[row]
-        available = table.flux_waveform_available
-        if waveform is not None and (available is None or available[timeline]):
-            a, b = waveform.offsets[timeline : timeline + 2]
-            endpoint = np.searchsorted(
-                waveform.time_ns[a:b], table.start_ns[row], side="left"
-            )
-            b = min(b, a + endpoint + 1)
-            key += (waveform.time_ns[a:b].tobytes(), waveform.flux[a:b].tobytes())
-        matches.setdefault(key, []).append(int(row))
-    for group, rows in enumerate(matches.values()):
-        if len(rows) >= 2:
-            for row in rows:
-                groups[row] = group
-    return tuple(groups)
 
 
 def _combine_waveforms(batches: Sequence[TimelineBatch]) -> FluxWaveform | None:

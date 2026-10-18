@@ -5,17 +5,46 @@ solver accuracy are user choices, not convergence certification. Unknown fields
 and nonfinite numbers fail at this boundary; no expressions or QICK dicts.
 """
 
-from typing import Annotated, Literal, Self
+from collections.abc import Mapping
+from types import MappingProxyType
+from typing import Annotated, Generic, Literal, Self, TypeVar
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    field_validator,
+    model_validator,
+)
 
 Finite = Annotated[float, Field(allow_inf_nan=False, strict=True)]
 Positive = Annotated[Finite, Field(gt=0)]
 Nonnegative = Annotated[Finite, Field(ge=0)]
 Count = Annotated[int, Field(gt=0, strict=True)]
 Index = Annotated[int, Field(ge=0, strict=True)]
-Triple = tuple[Finite, Finite, Finite]
+Name = Annotated[str, Field(min_length=1)]
+LoopValue = TypeVar("LoopValue")
+
+SourceValue = TypeVar("SourceValue")
+
+
+def _immutable_sources(value: Mapping[str, SourceValue]) -> Mapping[str, SourceValue]:
+    return MappingProxyType(dict(value))
+
+
+def _serialize_sources(value: Mapping[str, SourceValue]) -> dict[str, SourceValue]:
+    return dict(value)
+
+
+# Both named source families must stay immutable while retaining JSON replay.
+SourceMap = Annotated[
+    Mapping[Name, SourceValue],
+    AfterValidator(_immutable_sources),
+    PlainSerializer(_serialize_sources),
+]
 
 
 class Values(BaseModel):
@@ -25,10 +54,9 @@ class Values(BaseModel):
 
 
 class Fluxonium(Values):
-    """Fluxonium physical and numeric values.
+    """Fluxonium physical values.
 
-    ej_ghz/ec_ghz/el_ghz: positive GHz. native_cutoff: oscillator dimension >=2;
-    levels: local retained dimension. q_cap/q_ind: positive constant Q, omitted
+    ej_ghz/ec_ghz/el_ghz: positive GHz. q_cap/q_ind: positive constant Q, omitted
     disables. xqp: nonnegative fraction, default 0 (gap 3.4e-4 eV). aphi:
     nonnegative independent-loop Phi0/sqrt(Hz) noise amplitude, default 0.
     """
@@ -36,25 +64,17 @@ class Fluxonium(Values):
     ej_ghz: Positive
     ec_ghz: Positive
     el_ghz: Positive
-    native_cutoff: Annotated[int, Field(ge=2, strict=True)]
-    levels: Count
     q_cap: Positive | None = None
     q_ind: Positive | None = None
     xqp: Nonnegative = 0.0
     aphi: Nonnegative = 0.0
 
-    @model_validator(mode="after")
-    def dimensions(self) -> Self:
-        if self.levels > self.native_cutoff:
-            raise ValueError("levels exceeds native_cutoff")
-        return self
-
 
 class Squid(Values):
     """Fixed-theta SQUID values; no fluxonium inductive/qp mechanism.
 
-    ejmax_ghz/ec_ghz: positive GHz; asymmetry in [0,1]. charge_cutoff: ncut>=1;
-    levels<=2*ncut+1. ng: Cooper-pair offset (default 0). q_cap: optional cap Q.
+    ejmax_ghz/ec_ghz: positive GHz; asymmetry in [0,1]. ng: Cooper-pair
+    offset (default 0). q_cap: optional cap Q.
     resistance_ohm: optional charge-line real impedance. flux_resistance_ohm and
     mutual_phi0_per_a: paired flux-line parameters, default disabled. aphi:
     nonnegative independent-loop Phi0/sqrt(Hz), default 0.
@@ -63,8 +83,6 @@ class Squid(Values):
     ejmax_ghz: Positive
     ec_ghz: Positive
     asymmetry: Annotated[Finite, Field(ge=0, le=1)]
-    charge_cutoff: Count
-    levels: Count
     ng: Finite = 0.0
     q_cap: Positive | None = None
     resistance_ohm: Positive | None = None
@@ -74,57 +92,55 @@ class Squid(Values):
 
     @model_validator(mode="after")
     def consistency(self) -> Self:
-        if self.levels > 2 * self.charge_cutoff + 1:
-            raise ValueError("levels exceeds native charge dimension")
         if (self.flux_resistance_ohm is None) != (self.mutual_phi0_per_a is None):
             raise ValueError("flux_resistance_ohm and mutual_phi0_per_a must be paired")
         return self
 
 
-class Model(Values):
-    """f1/coupler/f2: local circuits; g1c/g2c/g12_ghz: full signed n*n GHz.
+class LoopMap(Values, Generic[LoopValue]):
+    """Required f1/coupler/f2 values, keyed by the affected circuit, not by line.
 
-    retained_levels: M<=local product. temperature_k: common nonnegative Kelvin.
+    The value type defines units; explicit zeros represent an unaffected loop.
+    """
+
+    f1: LoopValue
+    coupler: LoopValue
+    f2: LoopValue
+
+    def as_tuple(self) -> tuple[LoopValue, LoopValue, LoopValue]:
+        """Return fixed F1/coupler/F2 order for numeric boundaries."""
+        return self.f1, self.coupler, self.f2
+
+
+class Chip(Values):
+    """f1/coupler/f2 physical circuits; signed full-charge couplings in GHz.
+
+    g_f1_coupler_ghz/g_f2_coupler_ghz/g_f1_f2_ghz multiply full n*n.
+    temperature_k is common nonnegative Kelvin. Truncations live in numerics.
     """
 
     f1: Fluxonium
     coupler: Squid
     f2: Fluxonium
-    g1c_ghz: Finite
-    g2c_ghz: Finite
-    g12_ghz: Finite
-    retained_levels: Count
+    g_f1_coupler_ghz: Finite
+    g_f2_coupler_ghz: Finite
+    g_f1_f2_ghz: Finite
     temperature_k: Nonnegative
-
-    @model_validator(mode="after")
-    def dimension(self) -> Self:
-        if self.retained_levels > self.f1.levels * self.coupler.levels * self.f2.levels:
-            raise ValueError("retained_levels exceeds local product")
-        return self
-
-
-class Channels(Values):
-    """generators/readouts: positive channel counts in fixed mock QICK profile.
-
-    No clock, DDS, memory, channel type or firmware override is accepted.
-    """
-
-    generators: Count
-    readouts: Count
 
 
 class DCSource(Values):
-    """name: unique live device name. unit: V or A, fixed at construction.
+    """The map key is the live device name. unit: V or A, fixed at construction.
 
     limits: finite ordered inclusive (min,max), in unit. initial: startup-only
-    value inside limits; rampstep: positive increment in the same unit.
+    value inside limits; ramp_step: positive increment in the same unit.
+    flux_per_unit: signed Phi0/V or Phi0/A, matching unit, for all three loops.
     """
 
-    name: Annotated[str, Field(min_length=1)]
     unit: Literal["V", "A"]
     limits: tuple[Finite, Finite]
     initial: Finite
-    rampstep: Positive
+    ramp_step: Positive
+    flux_per_unit: LoopMap[Finite]
 
     @model_validator(mode="after")
     def bounds(self) -> Self:
@@ -135,53 +151,33 @@ class DCSource(Values):
         return self
 
 
-class DCColumn(Values):
-    """source: defined DC device name. unit: explicit Phi0/V or Phi0/A.
+class DCBias(Values):
+    """offset_phi0: reduced-flux offsets. sources: named fixed-unit DC devices.
 
-    coefficients: three signed F1/C/F2 reduced-flux per source-unit coefficients.
+    Each source contributes its live value times its flux_per_unit loop map.
+    Names are nonempty and unique across DC sources and charge drive lines.
     """
 
-    source: str
-    unit: Literal["Phi0/V", "Phi0/A"]
-    coefficients: Triple
+    offset_phi0: LoopMap[Finite]
+    sources: SourceMap[DCSource]
 
 
-class DCMapping(Values):
-    """offset: F1/C/F2 reduced-flux offsets; columns: unique named source columns."""
+class ComplexCoefficient(Values):
+    """Finite signed real/imag GHz per gain multiplying full charge n."""
 
-    offset: Triple
-    columns: tuple[DCColumn, ...]
+    real: Finite
+    imag: Finite
 
 
-class FluxSource(Values):
-    """name: unique pulse source. gen_ch: unique bound generator index.
+class DriveLine(Values):
+    """gen_ch: unique nonnegative generator; charge_drive_ghz_per_gain: loop map.
 
-    coefficients_phi0_per_gain: signed F1/C/F2 pulse calibration, independent of
-    DC. delay_ns/tau_ns: nonnegative source-line delay/first-order lowpass, default
-    zero, applied BEFORE loop mapping. Signed real waveform including carrier
-    drives this line. No per-pulse normalization, no cross-shot filter memory.
+    Uses Re[c*g*w*exp(i carrier)]*n, no hidden n01 normalization or input RWA
+    factor. Every loop requires real and imag; explicit zeros disable coupling.
     """
 
-    name: Annotated[str, Field(min_length=1)]
     gen_ch: Index
-    coefficients_phi0_per_gain: Triple
-    delay_ns: Nonnegative = 0.0
-    tau_ns: Nonnegative = 0.0
-
-
-class MicrowaveSource(Values):
-    """name: unique source; gen_ch: unique generator. coefficients_ghz_per_gain:
-
-    F1/C/F2 (real,imag) complex lab-frame coefficients in GHz per program gain.
-    Explicit zero pairs disable crosstalk. Uses Re[c*g*w*exp(i carrier)]*n, no
-    hidden n01 normalization or extra RWA factor in the input.
-    """
-
-    name: Annotated[str, Field(min_length=1)]
-    gen_ch: Index
-    coefficients_ghz_per_gain: tuple[
-        tuple[Finite, Finite], tuple[Finite, Finite], tuple[Finite, Finite]
-    ]
+    charge_drive_ghz_per_gain: LoopMap[ComplexCoefficient]
 
 
 class ReadoutSource(Values):
@@ -202,11 +198,16 @@ class Receiver(Values):
     offset (default zero). noise_psd_adc2_ns: required symmetric PSD 2x2 spectral
     density ADC²*ns, two-sided white noise convention Cov(sample)=PSD/dt_ns.
     Zero/singular matrices are supported. This is not per-sample covariance.
+    time_of_flight_ns: finite nonnegative total readout-line delay in ns, default
+    zero. Delays the waveform and gives exp(-2πi*f*delay) at absolute frequency f;
+    there is no independent electronic-delay parameter. Calibration/noise follow
+    the demodulated field's conversion to microwave I+iQ by conjugation.
     """
 
     ro_ch: Index
     gain: Finite
     phase_deg: Finite = 0.0
+    time_of_flight_ns: Nonnegative = 0.0
     offset_adc: tuple[Finite, Finite] = (0.0, 0.0)
     noise_psd_adc2_ns: tuple[tuple[Finite, Finite], tuple[Finite, Finite]]
 
@@ -227,19 +228,23 @@ class Receiver(Values):
 
 
 class Resonator(Values):
-    """frequency_ghz: positive bare GHz. charge_coefficients_ghz: F1/C/F2 full n
+    """frequency_ghz: positive bare GHz. charge_coefficients_ghz: named F1/C/F2 full n
 
     coupling GHz, never hidden g01. kappa_external_mhz/kappa_internal_mhz:
     nonnegative linewidth kappa/(2*pi) MHz, total positive. thermal_occupation:
     nonnegative residual nth; omitted uses Bose(common Temp,bare f), explicit 0
     disables. Both resonators share one reciprocal co-located two-port line.
+    mismatch_phase_rad: finite phase in radians, default zero (symmetric line).
+    Rotates this resonator's scattering relative to direct transmission, with
+    the hanger model's +phi sign in microwave IQ; linewidth/dynamics stay fixed.
     """
 
     frequency_ghz: Positive
-    charge_coefficients_ghz: Triple
+    charge_coefficients_ghz: LoopMap[Finite]
     kappa_external_mhz: Nonnegative
     kappa_internal_mhz: Nonnegative
     thermal_occupation: Nonnegative | None = None
+    mismatch_phase_rad: Finite = 0.0
 
     @model_validator(mode="after")
     def linewidth(self) -> Self:
@@ -261,28 +266,102 @@ class Solver(Values):
     bath_segment_ns: Positive
 
 
-class FTFSettings(Values):
-    """Complete trusted FTF parameter snapshot, not a generic environment DSL.
+class Resonators(Values):
+    """r1/r2: exactly two resonators sharing one reciprocal readout line."""
 
-    format='zcu.ftf', version=1. channels selects counts only. model supplies
-    physical/truncation data. devices and dc_mapping supply startup and live DC
-    calibration. flux_sources/microwave_sources bind distinct generators (empty
-    disables that control family). readout_source/receiver serve exactly two
-    resonators. solver controls accuracy. seed: optional nonnegative root seed;
-    None generates once at environment startup. No pulses or model truth are
-    exposed by normal GUI/MCP metadata. Unknown fields are always rejected.
+    r1: Resonator
+    r2: Resonator
+
+
+class Readout(Values):
+    """drive: shared incident field; resonators: physical pair; adc: receiver."""
+
+    drive: ReadoutSource
+    resonators: Resonators
+    adc: Receiver
+
+
+class FluxoniumTruncation(Values):
+    """native_cutoff: oscillator dimension >=2; levels: local retained dimension."""
+
+    native_cutoff: Annotated[int, Field(ge=2, strict=True)]
+    levels: Count
+
+    @model_validator(mode="after")
+    def dimensions(self) -> Self:
+        """Reject local levels larger than the oscillator basis."""
+        if self.levels > self.native_cutoff:
+            raise ValueError("levels exceeds native_cutoff")
+        return self
+
+
+class SquidTruncation(Values):
+    """charge_cutoff: ncut>=1; levels: local dimension <=2*ncut+1."""
+
+    charge_cutoff: Count
+    levels: Count
+
+    @model_validator(mode="after")
+    def dimensions(self) -> Self:
+        """Reject local levels larger than the native charge basis."""
+        if self.levels > 2 * self.charge_cutoff + 1:
+            raise ValueError("levels exceeds native charge dimension")
+        return self
+
+
+class Truncation(Values):
+    """Local bases for f1/coupler/f2; retained_levels: system dimension <=product."""
+
+    f1: FluxoniumTruncation
+    coupler: SquidTruncation
+    f2: FluxoniumTruncation
+    retained_levels: Count
+
+    @model_validator(mode="after")
+    def dimension(self) -> Self:
+        """Reject a system dimension exceeding the product of local levels."""
+        if self.retained_levels > self.f1.levels * self.coupler.levels * self.f2.levels:
+            raise ValueError("retained_levels exceeds local product")
+        return self
+
+
+class Numerics(Values):
+    """truncation: basis sizes; solver: accuracy; seed: nonnegative root RNG seed.
+
+    Omitted/None seed generates once at environment startup, not once per round.
+    """
+
+    truncation: Truncation
+    solver: Solver
+    seed: Index | None = None
+
+
+class FTFSettings(Values):
+    """Complete FTF v2 domain snapshot, not a generic environment DSL.
+
+    format='zcu.ftf', version=2 (integer only). chip supplies physical values;
+    dc_bias supplies startup/live DC calibration; drive_lines binds charge
+    microwave generators (omitted/empty disables). readout serves exactly two
+    resonators with one drive and ADC. numerics supplies truncations/solver/seed.
+    Channel counts derive from maximum configured indices plus one. Unknown
+    fields, including flux-pulse configuration and v1 aliases, are rejected.
+    No model truth enters ordinary GUI/MCP metadata.
     """
 
     format: Literal["zcu.ftf"]
-    version: Literal[1]
-    channels: Channels
-    model: Model
-    devices: tuple[DCSource, ...]
-    dc_mapping: DCMapping
-    flux_sources: tuple[FluxSource, ...] = ()
-    microwave_sources: tuple[MicrowaveSource, ...] = ()
-    readout_source: ReadoutSource
-    receiver: Receiver
-    resonators: tuple[Resonator, Resonator]
-    solver: Solver
-    seed: Index | None = None
+    version: Literal[2]
+    chip: Chip
+    dc_bias: DCBias
+    drive_lines: SourceMap[DriveLine] = Field(
+        default_factory=dict, validate_default=True
+    )
+    readout: Readout
+    numerics: Numerics
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def integer_version(cls, value: object) -> object:
+        """Reject noninteger YAML versions before checking the supported value."""
+        if type(value) is not int:
+            raise ValueError("must be integer 2")
+        return value

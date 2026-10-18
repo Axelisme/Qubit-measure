@@ -359,3 +359,108 @@ def test_probe_guard_failure_uses_period_propagation_in_floquet_frame(
     free = reference(without, 0, case.states[0])
     assert np.max(abs(np.diag(expected[0] - free))) > 0.02
     assert_budget(actual, expected, 2e-8)
+
+
+@pytest.mark.parametrize("zero_first", [False, True])
+def test_unused_zero_port_preserves_acceptance_and_density(
+    kernel_case: KernelCase, zero_first: bool
+) -> None:
+    from zcu_tools.simulate.evolution.kernels.floquet import FloquetKernel
+
+    floquet = FloquetKernel()
+    case = kernel_case
+    model = case.source.model((0,))
+    drive = model.drives[0]
+    zero = replace(
+        drive,
+        name="unused",
+        in_phase_ghz=np.zeros_like(drive.in_phase_ghz),
+        quadrature_ghz=np.zeros_like(drive.quadrature_ghz),
+    )
+    drives = (zero, *model.drives) if zero_first else (*model.drives, zero)
+    source = ModelSource(
+        case.states[0], lambda level: replace(model, level=level, drives=drives)
+    )
+    table = replace(case.table, tone_port=case.table.tone_port + int(zero_first))
+    rows = np.arange(len(case.states), dtype=np.int64)
+    for budget in (case.budget, 1e-12):
+        expected = floquet.guard_prepared(case.table, rows, case.source, budget)
+        actual = floquet.guard_prepared(table, rows, source, budget)
+        np.testing.assert_array_equal(actual.accepted, expected.accepted)
+        if budget != case.budget:
+            assert not actual.accepted.all()
+            continue
+        assert actual.accepted.all()
+        keys, first, inverse = np.unique(
+            floquet.prepare_keys(table, rows),
+            return_index=True,
+            return_inverse=True,
+        )
+        prepared = floquet.prepare(keys, table, rows[first], source, budget)
+        baseline = case.states.copy()
+        result = case.states.copy()
+        handed_off = case.states.copy()
+        expected_payload = expected.preparations[0].prepared
+        actual_payload = actual.preparations[0].prepared
+        assert prepared.nbytes == actual_payload.nbytes > expected_payload.nbytes
+        before_bytes = prepared.nbytes
+        floquet.apply(expected_payload, inverse, case.table, rows, baseline, budget)
+        for payload, states in ((prepared, result), (actual_payload, handed_off)):
+            exceeded = floquet.apply(payload, inverse, table, rows, states, budget)
+            assert not exceeded.any()
+            np.testing.assert_allclose(states, baseline, rtol=0, atol=1e-13)
+        assert prepared.nbytes == before_bytes
+
+
+def test_micromotion_bath_matches_independent_lindblad_jumps(
+    kernel_case: KernelCase,
+) -> None:
+    """A bath-visible response protects the transformed secular dissipator."""
+    case = kernel_case
+    original = case.source.model((0,))
+    model = replace(
+        original,
+        rates_per_ns=original.rates_per_ns * 10,
+        dephasing_per_ns=original.dephasing_per_ns * 10,
+    )
+    source = ModelSource(case.states[0], lambda level: replace(model, level=level))
+    closed_source = ModelSource(
+        case.states[0],
+        lambda level: replace(
+            model,
+            level=level,
+            rates_per_ns=np.zeros_like(model.rates_per_ns),
+            dephasing_per_ns=np.zeros_like(model.dephasing_per_ns),
+        ),
+    )
+    table = replace(
+        case.table,
+        duration_ns=np.array([0.5, 1.0, 1.5, 2.0]),
+        tone_frequency_ghz=np.tile([0.61, 0.13], (4, 1)),
+        tone_amplitude=np.tile([0.3, 0.0], (4, 1)),
+    )
+    case = replace(case, source=source, table=table)
+    rows = np.arange(4, dtype=np.int64)
+    assert case.kernel.guard(table, rows, source, case.budget).all()
+    keys, first, inverse = np.unique(
+        case.kernel.prepare_keys(table, rows),
+        return_index=True,
+        return_inverse=True,
+    )
+    prepared = case.kernel.prepare(keys, table, rows[first], source, case.budget)
+    actual = case.states.copy()
+    case.kernel.apply(prepared, inverse, table, rows, actual, case.budget)
+    expected = np.stack(
+        [reference(case, r, state) for r, state in enumerate(case.states)]
+    )
+    closed = replace(case, source=closed_source)
+    without_bath = np.stack(
+        [reference(closed, r, state) for r, state in enumerate(case.states)]
+    )
+    assert np.max(abs(expected - without_bath)) > 5e-5
+    np.testing.assert_allclose(actual, expected, rtol=0, atol=3e-6)
+
+    # Only the rotating bath harmonics can reject these zero-probe rows.
+    long_table = replace(table, duration_ns=np.full(4, 128.0))
+    assert not case.kernel.guard(long_table, rows, source, case.budget).any()
+    assert case.kernel.guard(long_table, rows, closed_source, case.budget).all()

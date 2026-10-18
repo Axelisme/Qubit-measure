@@ -24,7 +24,7 @@ def test_single_signed_complex_sample_keeps_full_plateau_and_identity():
     window = ReadoutWindow(0, 0, 1, 1000.0, (0.008,), (6000.0,), (0.0,), (0,))
     point = plan_template(
         settings,
-        EnvironmentSnapshot("ftf-v1", "test", (("bias", 0.2),)),
+        EnvironmentSnapshot("ftf-v2", "test", (("bias", 0.2),)),
         single_point_template(PointTimeline((), (pulse, readout), (window,), 0.010)),
     )
     track = point.batch.tracks[0]

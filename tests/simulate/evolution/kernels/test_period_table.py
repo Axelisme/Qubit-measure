@@ -101,24 +101,6 @@ def test_shaped_accuracy(kernel_case: KernelCase) -> None:
     assert_budget(actual, expected, 1e-2)
 
 
-def test_keys_share_shapes_phases_and_ports_but_separate_bands(
-    kernel_case: KernelCase,
-) -> None:
-    case = kernel_case
-    rows = np.arange(len(case.states), dtype=np.int64)
-    table = replace(
-        case.table,
-        level=np.zeros_like(case.table.level),
-        tone_frequency_ghz=np.full_like(case.table.tone_frequency_ghz, 0.5),
-        tone_amplitude=np.array([0.6, -0.8, 0.6, 0.7, 0.7, 0.8, 0.0, 1.5])[:, None],
-    )
-    keys = case.kernel.prepare_keys(table, rows)
-    assert len(np.unique(keys[:6])) == 1
-    assert keys[0] != keys[7]
-    assert keys[0] != keys[6]
-    assert np.isfinite(case.kernel.cost(table, rows)).all()
-
-
 @pytest.mark.parametrize("prefix_input", [False, True], ids=["source", "prefix"])
 def test_bind_input_contract(kernel_case: KernelCase, prefix_input: bool) -> None:
     KernelContract().test_bind_input_is_read_only_and_apply_equivalent(

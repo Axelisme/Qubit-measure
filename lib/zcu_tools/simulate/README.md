@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-10-17，segment engine and shared constant-readout propagation
+**Last updated:** 2026-10-18，microwave receiver IQ, delay and mismatch
 
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
@@ -38,13 +38,18 @@ with exactly the same state order. The ADC does not convert density matrices.
 `ADC.response` solves populations and state-conditioned first field moments for
 all initial joint states together. Two resonators share reciprocal co-located
 two-port radiative damping through `v*v.T`, where `v=sqrt(kappa_external/2)`.
-The outgoing forward field is `b_in-v.T*alpha`. This retains correlations between
+The outgoing forward field is `b_in-sum(v*exp(-i*phi)*alpha)`, with each
+resonator's `mismatch_phase_rad` defaulting to zero. This retains correlations between
 state and field. Substituting a population-averaged frequency does not implement
 this model. Each pulse has finite support, so the same equations cover ringup
 and ringdown. `SampleGrid` supplies physical lookback times and demodulation.
 Populations refer to the earliest readout pulse start, or zero with no pulses.
 Earlier samples have zero physical field and do not advance the initial mixture.
 Receiver offset and noise still apply to those samples.
+`Receiver.time_of_flight_ns` delays the physical output, including its absolute
+carrier phase, before ADC demodulation. The ADC conjugates the demodulated field
+to microwave I+iQ before applying receiver gain, phase, offset and noise. See the
+[ADC contracts](adc/README.md) for delay, mismatch and cache semantics.
 
 For batched constant pulses, population and homogeneous moment exponentials are
 shared across carrier frequencies. A Sylvester solve supplies the driven block

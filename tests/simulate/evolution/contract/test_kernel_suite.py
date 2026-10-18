@@ -32,6 +32,7 @@ class DemoKernel:
     """A deliberately small zero-tone kernel, independent of the ODE oracle."""
 
     name = "demo-static"
+    guard_builds = False
 
     def guard(
         self,

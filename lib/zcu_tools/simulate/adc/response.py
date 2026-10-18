@@ -1,10 +1,12 @@
 """Joint state-conditioned first moments for a shared two-resonator line."""
 
+from collections import Counter
+
 import numpy as np
-import scipy.linalg
 from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 
+from ._constant import ConstantLine
 from .model import ReadoutModel, RealArray, readonly_array
 from .readout_batch import ConditionalSums, ReadoutBatch
 from .request import ConditionalResponse, ReadoutPulse, SampleGrid
@@ -34,6 +36,7 @@ class ConditionalReadout:
             tuple[object, ...], tuple[tuple[ReadoutPulse, ...], tuple[RealArray, ...]]
         ] = {}
         self._v = np.sqrt(model.kappa_external_per_ns / 2)
+        self._scattering = self._v * np.exp(-1j * model.mismatch_phase_rad)
         self._q = model.rates_per_ns - np.diag(model.rates_per_ns.sum(axis=0))
         detuning = model.frequencies_ghz - model.reference_frequency_ghz
         self._a = np.array(
@@ -43,7 +46,7 @@ class ConditionalReadout:
                 for f in detuning
             ]
         )
-        self._constant_line = _ConstantLine(self._q, self._a, self._v)
+        self._constant_line = ConstantLine(self._q, self._a, self._v, self._scattering)
 
     def responses(self, batch: ReadoutBatch) -> ConditionalSums:
         """Return noiseless per-shot sums for each content/read/initial state.
@@ -59,11 +62,12 @@ class ConditionalReadout:
         reuse the cache. Traces are retained internally, so switching include_traces
         does not solve again. Constant pulses (envelope=None) use the closed-form
         matrix exponential in the pulse carrier frame, including detuned carriers.
-        Frequency-independent population and moment propagators are shared across
-        contents; ill-conditioned driven blocks use the full matrix exponential.
+        Frequency-independent Schur bases and sampled scattering projections are
+        shared across contents; ill-conditioned driven blocks use the full matrix
+        exponential.
         Other envelopes use the existing DOP853 moment ODE.
         ConditionalSums.sums has shape (contents, reads, states, 2), after
-        demodulation/gain/phase/offset. Traces have shape
+        physical delay/demodulation/conjugation/gain/phase/offset. Traces have shape
         (contents, reads, states, samples, 2) only if batch.include_traces;
         otherwise traces is None. No initial-state or noise draw occurs.
         Inputs are not mutated; populations are never clipped or normalized.
@@ -86,13 +90,31 @@ class ConditionalReadout:
             if batch.model is self.model
             else ConditionalReadout(batch.model, rtol=self.rtol, atol=self.atol)
         )
+        times_by_content = [
+            np.unique(np.concatenate([g.times_ns for g in grids]))
+            for grids in batch.grids
+        ]
+        relative_keys = [
+            np.maximum(
+                times - batch.model.receiver.time_of_flight_ns - pulses[0].start_ns,
+                0.0,
+            ).tobytes()
+            for pulses, times in zip(batch.pulses, times_by_content, strict=True)
+        ]
+        grid_uses = Counter(relative_keys)
         contents = []
-        for pulses, grids in zip(batch.pulses, batch.grids, strict=True):
+        for pulses, grids, times, relative_key in zip(
+            batch.pulses, batch.grids, times_by_content, relative_keys, strict=True
+        ):
             key = (model_key, _pulse_key(pulses), _grid_key(grids))
             if key not in self._responses:
-                times = np.unique(np.concatenate([g.times_ns for g in grids]))
                 constant = all(p.envelope is None for p in pulses)
-                outgoing, _ = solver._fields(pulses, times, constant=constant)
+                # Building a sampled exponential for every time only pays off
+                # when enough contents reuse that exact relative grid.
+                projected = grid_uses[relative_key] >= len(times)
+                outgoing, _ = solver._fields(
+                    pulses, times, constant=constant, projected=projected
+                )
                 traces = tuple(
                     readonly_array(
                         solver._calibrate(
@@ -121,7 +143,9 @@ class ConditionalReadout:
 
         pulses are finite coherent readout drives in ns/GHz. grid owns physical
         times and demodulation. Return conditional traces and final populations
-        in model.state_labels order, including pre-pulse/ringup/ringdown. No
+        in model.state_labels order, including pre-pulse/ringup/ringdown delayed
+        by receiver.time_of_flight_ns. Final populations refer to the emitted
+        time of the last ADC sample, no earlier than readout origin. No
         initial-state or receiver-noise draws occur. State-conditioned moments
         obey dm_s=ΣQ_st*m_t-A_s*m_s+v*b*p_s, not a mean-frequency field equation.
         ValueError signals invalid input/callbacks; RuntimeError signals failed
@@ -133,11 +157,35 @@ class ConditionalReadout:
         return ConditionalResponse(self.model.state_labels, iq, state[:, 0, :].real.T)
 
     def _fields(
-        self, pulses: tuple[ReadoutPulse, ...], times: RealArray, *, constant: bool
+        self,
+        pulses: tuple[ReadoutPulse, ...],
+        times: RealArray,
+        *,
+        constant: bool,
+        projected: bool = False,
     ) -> tuple[NDArray[np.complex128], NDArray[np.complex128]]:
         """Solve one physical trajectory on the union of all requested read grids."""
+        # Evaluate the emitted field at retarded time. Restoring the absolute
+        # carrier's frame phase below is necessary even when f_ref == f_drive.
+        delay = self.model.receiver.time_of_flight_ns
+        times = times - delay
         start = min(p.start_ns for p in pulses) if pulses else 0.0
         end = max(start, float(times[-1]))
+        if constant and projected:
+            omega = (
+                2
+                * np.pi
+                * (pulses[0].frequency_ghz - self.model.reference_frequency_ghz)
+            )
+            solution = self._constant_line.trajectory(pulses[0], times, omega)
+            if solution is not None:
+                outgoing, state = solution
+                self._validate_solution(state)
+                state[:, 1:, :] *= np.exp(-1j * omega * (end - start))
+                outgoing *= np.exp(
+                    2j * np.pi * self.model.reference_frequency_ghz * delay
+                )
+                return outgoing, state
         points = sorted(
             {start, end}
             | {
@@ -180,7 +228,8 @@ class ConditionalReadout:
             incident = np.array([self._incident(pulses, t) for t in times])
         self._validate_solution(state)
         moments = outputs[:, :, 1:, :].sum(axis=1)
-        outgoing = incident[:, None] - np.einsum("r,kri->ki", self._v, moments)
+        outgoing = incident[:, None] - np.einsum("r,kri->ki", self._scattering, moments)
+        outgoing *= np.exp(2j * np.pi * self.model.reference_frequency_ghz * delay)
         return outgoing, state
 
     def _incident(self, pulses: tuple[ReadoutPulse, ...], t: float) -> complex:
@@ -287,8 +336,7 @@ class ConditionalReadout:
             - 1j * grid.phase_rad
         )
         signal = (
-            outgoing
-            * oscillator[:, None]
+            np.conj(outgoing * oscillator[:, None])
             * receiver.gain
             * np.exp(1j * receiver.phase_rad)
         )
@@ -307,85 +355,6 @@ class ConditionalReadout:
             raise RuntimeError("readout probabilities do not sum to one")
 
 
-class _ConstantLine:
-    """Share homogeneous line propagation while keeping carrier shifts scalar.
-
-    The block generator is [[Q, 0], [b*incident, M+i*omega]]. For a
-    well-separated Sylvester solve (M+i*omega)X-XQ=b, its driven propagator
-    is incident*(exp((M+i*omega)*dt)X-X*exp(Q*dt)). Only X and the scalar
-    carrier phase depend on frequency. No diagonalizability assumption is made.
-    """
-
-    def __init__(self, q: RealArray, a: NDArray[np.complex128], v: RealArray):
-        self._q = q
-        n = len(q)
-        self._m = np.asarray(np.kron(q, np.eye(2)), dtype=np.complex128)
-        self._b = np.zeros((2 * n, n), dtype=np.complex128)
-        for s in range(n):
-            self._m[2 * s : 2 * s + 2, 2 * s : 2 * s + 2] -= a[s]
-            self._b[2 * s : 2 * s + 2, s] = v
-        self._homogeneous: dict[
-            float, tuple[NDArray[np.complex128], NDArray[np.complex128]]
-        ] = {}
-
-    def propagators(self, omega: float, incident: complex, durations: RealArray):
-        """Return population, moment and driven blocks for positive durations.
-
-        Durations are ns, omega is the carrier/reference angular detuning in
-        rad/ns, and incident is the flat drive in its carrier frame. Cache only
-        frequency-independent exponentials, not every carrier's dense matrices.
-        """
-        shifted = self._m + 1j * omega * np.eye(len(self._m))
-        coupling = self._coupling(shifted) if incident else None
-        result = {}
-        for dt in np.unique(durations[durations > 0]):
-            dt = float(dt)
-            if dt not in self._homogeneous:
-                self._homogeneous[dt] = (
-                    np.asarray(scipy.linalg.expm(self._q * dt), dtype=np.complex128),
-                    np.asarray(scipy.linalg.expm(self._m * dt), dtype=np.complex128),
-                )
-            ep, base = self._homogeneous[dt]
-            em = base * np.exp(1j * omega * dt)
-            if not incident:
-                driven = np.zeros_like(self._b)
-            elif coupling is None:
-                result[dt] = self._full_step(shifted, incident, dt)
-                continue
-            else:
-                driven = incident * (em @ coupling - coupling @ ep)
-            result[dt] = (ep, em, driven)
-        return result
-
-    def _coupling(self, shifted):
-        try:
-            coupling = scipy.linalg.solve_sylvester(shifted, -self._q, self._b)
-        except np.linalg.LinAlgError:
-            # A singular driven block still has a valid full exponential.
-            return None
-        # Near coincident spectra can make the difference of two large terms
-        # lose precision. Use the original exponential rather than regularizing
-        # rates, clipping populations or assuming a diagonalizable generator.
-        roundoff = np.finfo(float).eps * np.linalg.norm(coupling, ord=np.inf)
-        residual = shifted @ coupling - coupling @ self._q - self._b
-        if (
-            not np.isfinite(coupling).all()
-            or roundoff > 1e-13
-            or np.linalg.norm(residual, ord=np.inf) > 1e-13
-        ):
-            return None
-        return coupling
-
-    def _full_step(self, shifted, incident, dt):
-        n = len(self._q)
-        generator = np.zeros((3 * n, 3 * n), dtype=np.complex128)
-        generator[:n, :n] = self._q
-        generator[n:, n:] = shifted
-        generator[n:, :n] = self._b * incident
-        step = np.asarray(scipy.linalg.expm(generator * dt), dtype=np.complex128)
-        return step[:n, :n], step[n:, n:], step[n:, :n]
-
-
 def _model_key(model: ReadoutModel) -> tuple[object, ...]:
     """Lossless numeric content key; model identity alone may name many DC points."""
     receiver = model.receiver
@@ -397,6 +366,8 @@ def _model_key(model: ReadoutModel) -> tuple[object, ...]:
         model.kappa_internal_per_ns.tobytes(),
         model.kappa_external_per_ns.tobytes(),
         model.rates_per_ns.tobytes(),
+        model.mismatch_phase_rad.tobytes(),
+        receiver.time_of_flight_ns,
         receiver.gain,
         receiver.phase_rad,
         receiver.offset.tobytes(),

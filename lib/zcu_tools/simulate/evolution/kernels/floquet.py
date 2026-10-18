@@ -14,9 +14,11 @@ An additional exponential-series remainder bounds orders >= 3 by budget.
 Floquet validity requires assigned bare-mode overlap >= .5, modal condition
 <= 1e8, maximum Re(lambda) <= 1e-10/ns, and unitary/periodic residual <= 1e-9.
 The norm sum of *all* omitted harmonics (including k=+/-1) bounds k=0's
-error by Duhamel's formula. This is stricter than a sampled k=0 versus +/-1
-comparison. Harmonic truncation and quadrature convergence must each fit a third of
-budget. Probe limits or Dyson-remainder failures use a one-period propagator
+error by Duhamel's formula. Drive harmonics use spectral norms; bath harmonics
+use sqrt(||B||_1 ||B||_inf), which dominates the spectral norm without an SVD.
+Bounding all omitted harmonics is stricter than a sampled k=0 versus +/-1
+comparison. Harmonic truncation and quadrature convergence must each fit a third
+of budget. Probe limits or Dyson-remainder failures use a one-period propagator
 of H_F+D0 plus the probe, binary powering, and direct remainder integration. Frames needing more than 4096 phase
 samples (spectral span including drive / Stark frequency > 128) are rejected.
 No density is clipped or renormalized.
@@ -29,10 +31,18 @@ from dataclasses import dataclass
 import numpy as np
 from numba import njit
 from numpy.typing import NDArray
+from scipy.fft import fft
 from scipy.integrate import solve_ivp
 from scipy.linalg import eig, schur
 from scipy.optimize import linear_sum_assignment
 
+from ..declarations import (
+    AlgorithmIdentity,
+    Eligibility,
+    GuardDeclaration,
+    KernelDeclaration,
+    ReuseDeclaration,
+)
 from ..kernel import GuardPreparation, GuardResult, Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
 
@@ -92,16 +102,6 @@ def _comm(h: NDArray[np.complex128]) -> NDArray[np.complex128]:
     return -2j * np.pi * (np.kron(h, eye) - np.kron(eye, h.T))
 
 
-def _bath(model: SecularModel) -> NDArray[np.complex128]:
-    size = len(model.energies_ghz)
-    loss = model.rates_per_ns.sum(axis=0)
-    gamma = (loss[:, None] + loss[None, :]) / 2 + model.dephasing_per_ns
-    result = np.diag(-gamma.ravel()).astype(np.complex128)
-    index = np.arange(size) * (size + 1)
-    result[np.ix_(index, index)] = model.rates_per_ns - np.diag(loss)
-    return result
-
-
 def _slots(table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.int64]:
     return np.argmax(np.abs(table.tone_amplitude[rows, :2]), axis=1).astype(np.int64)
 
@@ -110,6 +110,18 @@ def _fourier_norm(values: NDArray[np.complex128]) -> float:
     # Spectral norms in Hilbert-Schmidt coordinates give an input-independent
     # bound, unlike checking a single stationary initial density.
     return float(sum(np.linalg.norm(a, 2) for a in values[1:]))
+
+
+def _bath_fourier_norm(values: NDArray[np.complex128]) -> float:
+    """Bound every omitted bath harmonic with sqrt(||B||_1 ||B||_inf).
+
+    This dominates the spectral norm without a singular-value solve. Summing
+    both signs directly needs no Hermitian pairing or roundoff residual.
+    """
+    magnitudes = np.abs(values[1:])
+    columns = magnitudes.sum(axis=1).max(axis=1)
+    rows = magnitudes.sum(axis=2).max(axis=1)
+    return float(np.sqrt(columns * rows).sum())
 
 
 def _frame_samples(model: SecularModel, row: tuple[int, float, float], count: int):
@@ -161,24 +173,65 @@ def _frame_samples(model: SecularModel, row: tuple[int, float, float], count: in
     return energies, rotations[:-1], residual, overlap
 
 
-def _averages(model: SecularModel, rotations: NDArray[np.complex128]):
-    dissipator = _bath(model)
-    baths = []
-    xs = []
-    ys = []
-    for rotation in rotations:
-        transform = np.kron(rotation, rotation.conj())
-        baths.append(transform.conj().T @ dissipator @ transform)
-        xs.append([rotation.conj().T @ d.in_phase_ghz @ rotation for d in model.drives])
-        ys.append(
-            [rotation.conj().T @ d.quadrature_ghz @ rotation for d in model.drives]
-        )
-    count = len(rotations)
-    return (
-        np.fft.fft(baths, axis=0) / count,
-        np.fft.fft(xs, axis=0) / count,
-        np.fft.fft(ys, axis=0) / count,
+def _fourier_averages(samples: NDArray[np.complex128]):
+    """Return all harmonics and the even-sample zero mode.
+
+    The array is overwritten by its transform; callers must not reuse samples.
+    """
+    count = len(samples)
+    # The coarse zero mode is the mean of every other sample, so it needs no
+    # transform. Compute it before the in-place full transform.
+    coarse_zero = samples[::2].sum(axis=0) / (count // 2)
+    fourier = np.asarray(
+        fft(samples, axis=0, overwrite_x=True, workers=1), dtype=np.complex128
     )
+    fourier /= count
+    return fourier, coarse_zero
+
+
+def _averages(model: SecularModel, rotations: NDArray[np.complex128]):
+    """Transform each sample once and return full harmonics and convergence."""
+    count, size, _ = rotations.shape
+    loss = model.rates_per_ns.sum(axis=0)
+    gamma = (loss[:, None] + loss[None, :]) / 2 + model.dephasing_per_ns
+    # Population rows use the transfer matrix, which already contains -loss.
+    np.fill_diagonal(gamma, loss)
+    baths = np.empty((count, size * size, size * size), dtype=np.complex128)
+    xs = np.zeros((count, len(model.drives), size, size), dtype=np.complex128)
+    ys = np.zeros_like(xs)
+    active_x = [p for p, d in enumerate(model.drives) if np.any(d.in_phase_ghz)]
+    active_y = [p for p, d in enumerate(model.drives) if np.any(d.quadrature_ghz)]
+    for index, rotation in enumerate(rotations):
+        adjoint = rotation.conj().T
+        # The secular bath is diagonal coherence loss plus population transfer.
+        # pairs[i,a,c] = conj(R[i,a])*R[i,c] contracts each part with two
+        # small dense products, without a full Liouville basis transform.
+        # Transfer already has (a,b,c,d) order. Decay starts in (a,c,b,d)
+        # order, so its middle axes must be swapped for row-major rho.
+        pairs = (rotation.conj()[:, :, None] * rotation[:, None, :]).reshape(
+            size, size * size
+        )
+        decay = (pairs.T @ gamma @ pairs.conj()).reshape((size,) * 4)
+        transfer = (pairs.T @ model.rates_per_ns @ pairs.conj()).reshape((size,) * 4)
+        baths[index] = (transfer - decay.transpose(0, 2, 1, 3)).reshape(
+            size * size, size * size
+        )
+        for port in active_x:
+            xs[index, port] = adjoint @ model.drives[port].in_phase_ghz @ rotation
+        for port in active_y:
+            ys[index, port] = adjoint @ model.drives[port].quadrature_ghz @ rotation
+    bath, coarse_bath = _fourier_averages(baths)
+    del baths
+    x, coarse_x = _fourier_averages(xs)
+    y, coarse_y = _fourier_averages(ys)
+    convergence = float(
+        max(
+            np.linalg.norm(bath[0] - coarse_bath, 2),
+            np.max(abs(x[0] - coarse_x)),
+            np.max(abs(y[0] - coarse_y)),
+        )
+    )
+    return bath, x, y, convergence
 
 
 def _sampling_ratio(model: SecularModel, key: np.void) -> float:
@@ -204,15 +257,7 @@ def _build(
     energies, rotations, residual, overlap = _frame_samples(
         model, (port, frequency, amplitude), count
     )
-    bath, x, y = _averages(model, rotations)
-    coarse_bath, coarse_x, coarse_y = _averages(model, rotations[::2])
-    convergence = float(
-        max(
-            np.linalg.norm(bath[0] - coarse_bath[0], 2),
-            np.max(abs(x[0] - coarse_x[0])),
-            np.max(abs(y[0] - coarse_y[0])),
-        )
-    )
+    bath, x, y, convergence = _averages(model, rotations)
     l0 = _comm(np.diag(energies).astype(complex)) + bath[0]
     decomposition = eig(l0)
     lam = np.asarray(decomposition[0], dtype=np.complex128)
@@ -283,7 +328,7 @@ def _build(
         y_zero,
         omitted,
         strengths,
-        _fourier_norm(bath),
+        _bath_fourier_norm(bath),
         convergence,
         frame_error,
         lam,
@@ -356,6 +401,58 @@ def _rotation(entry_coefficients, harmonic, phase):
 
 
 @njit(nogil=True, cache=True)
+def _second_contraction(data, duration, omega, outer, inner):
+    """Contract the middle mode with BLAS, retaining stable close-pole formulas.
+
+    For separated endpoints the second factor is
+    (F_outer[i,j] - carrier_outer * F_inner[j,k]) / gap[i,k].
+    The denominator is independent of j, so two GEMMs give its numerator.
+    Close endpoints and repeated inner poles still use the scalar divided
+    differences; no modes or coupling paths are pruned.
+    """
+    lam, b, factors, carriers = data
+    sign = 2 * outer - 1
+    sign2 = 2 * inner - 1
+    first = b[outer] * factors[outer]
+    second = b[inner] * factors[inner]
+    numerator = first @ b[inner] - carriers[sign + 2] * (b[outer] @ second)
+    result = np.empty_like(numerator)
+    for i in range(len(lam)):
+        for k in range(len(lam)):
+            bb = lam[k] + 1j * (sign + sign2) * omega
+            gap = lam[i] - bb
+            if abs(gap) * duration >= 0.5:
+                result[i, k] = numerator[i, k] / gap
+            else:
+                value = 0.0j
+                for j in range(len(lam)):
+                    product = b[outer, i, j] * b[inner, j, k]
+                    if abs(product) != 0:
+                        a = lam[j] + 1j * sign * omega
+                        value += product * _k(lam[i], bb, a, duration)
+                result[i, k] = value
+    # Preserve the old repeated-inner-pole branch even for separated endpoints.
+    # Its edge list is independent of the outer endpoint, so scan only m^2 edges.
+    for j in range(len(lam)):
+        a = lam[j] + 1j * sign * omega
+        for k in range(len(lam)):
+            bb = lam[k] + 1j * (sign + sign2) * omega
+            if abs(bb - a) * duration >= 1e-6:
+                continue
+            for i in range(len(lam)):
+                gap = lam[i] - bb
+                if abs(gap) * duration < 0.5:
+                    continue
+                product = b[outer, i, j] * b[inner, j, k]
+                if abs(product) != 0:
+                    rational = (
+                        factors[outer, i, j] - carriers[sign + 2] * factors[inner, j, k]
+                    ) / gap
+                    result[i, k] += product * (_k(lam[i], bb, a, duration) - rational)
+    return result
+
+
+@njit(nogil=True, cache=True)
 def _modal(entry_data, parameters, states):
     lam, modes, inverse, coefficients, harmonic, couplings = entry_data
     # This loop runs in one GIL-free chunk; parallelism belongs to the engine.
@@ -367,46 +464,18 @@ def _modal(entry_data, parameters, states):
         end = _rotation(coefficients, harmonic, end_phase)
         density = start.conj().T @ states[row] @ start
         u = inverse @ density.ravel()
-        transformed = np.empty(len(lam), dtype=np.complex128)
-        b = couplings[int(port)] * gain
         omega = 2 * np.pi * frequency
         factors, exponentials, carriers = _first_factors(lam, duration, omega)
         phases = np.exp(1j * np.array([-1, 1]) * theta)
-        for i in range(len(lam)):
-            value = exponentials[i] * u[i]
-            for outer in range(2):
-                sign = 2 * outer - 1
-                phase = phases[outer]
-                for j in range(len(lam)):
-                    first = b[outer, i, j] * phase
-                    if abs(first) == 0:
-                        continue
-                    a = lam[j] + 1j * sign * omega
-                    value += first * u[j] * factors[outer, i, j]
-                    for inner in range(2):
-                        sign2 = 2 * inner - 1
-                        phase2 = phases[inner]
-                        for k in range(len(lam)):
-                            product = first * b[inner, j, k] * phase2 * u[k]
-                            if abs(product) != 0:
-                                bb = lam[k] + 1j * (sign + sign2) * omega
-                                gap = lam[i] - bb
-                                if (
-                                    abs(bb - a) * duration >= 1e-6
-                                    and abs(gap) * duration >= 0.5
-                                ):
-                                    # Shift the second edge's first factor by
-                                    # the outer carrier before differencing.
-                                    second = (
-                                        factors[outer, i, j]
-                                        - carriers[sign + 2] * factors[inner, j, k]
-                                    ) / gap
-                                else:
-                                    # Preserve the existing repeated-pole and
-                                    # close-endpoint formulas without regrouping.
-                                    second = _k(lam[i], bb, a, duration)
-                                value += product * second
-            transformed[i] = value
+        b = couplings[int(port)] * gain
+        transformed = exponentials * u
+        for outer in range(2):
+            transformed += phases[outer] * ((b[outer] * factors[outer]) @ u)
+            for inner in range(2):
+                second = _second_contraction(
+                    (lam, b, factors, carriers), duration, omega, outer, inner
+                )
+                transformed += phases[outer] * phases[inner] * (second @ u)
         density = (modes @ transformed).reshape(states.shape[1:])
         states[row] = end @ density @ end.conj().T
 
@@ -529,10 +598,17 @@ def _integrate_channel(data, tone, duration, tolerance):
         error = np.max(np.abs(halves - whole)) / 15
         if not np.isfinite(error) or time + step == time:
             raise RuntimeError("Floquet period integration failed")
-        if error <= tolerance * step:
+        # Step doubling cannot resolve errors below the channel's roundoff.
+        # Without this floor, a long row's per-ns tolerance can shrink a
+        # rejected step until time + step == time, even for unitary dynamics.
+        allowance = max(
+            tolerance * step,
+            8 * np.finfo(np.float64).eps * max(1.0, np.max(np.abs(channel))),
+        )
+        if error <= allowance:
             channel = halves + (halves - whole) / 15
             time += step
-        factor = 2.0 if error == 0 else 0.9 * (tolerance * step / error) ** 0.2
+        factor = 2.0 if error == 0 else 0.9 * (allowance / error) ** 0.2
         step *= min(2.0, max(0.2, factor))
     raise RuntimeError("Floquet period integration exceeded step limit")
 
@@ -653,7 +729,17 @@ class FloquetKernel:
     requires this kernel's prepared payload and advances states in place.
     """
 
+    declaration = KernelDeclaration(
+        identity=AlgorithmIdentity("floquet", "period-roundoff-v4"),
+        eligibility=Eligibility(2, 2, "constant"),
+        guard=GuardDeclaration(("model-build",), builds_model=True),
+        accuracy="guarded-approximation",
+        reuse=ReuseDeclaration("floquet/period-roundoff-v4/serial"),
+        fallback="legacy-order",
+    )
+
     name = "floquet"
+    guard_builds = True
 
     def guard(
         self,

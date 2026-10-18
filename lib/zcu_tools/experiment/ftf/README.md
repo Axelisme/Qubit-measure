@@ -1,20 +1,29 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-17
+**Last updated:** 2026-10-18, receiver delay/mismatch wiring and numeric replay identity
 
-`ftf(path_or_settings)` builds the same `SimulationEnvironment` for GUI startup
+`ftf(path_or_settings, *, workers=1)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
-`DeviceManager`, applies their initial values once and binds the selected channel
+`DeviceManager`, applies their initial values once and binds the derived channel
 counts to the fixed mock QICK profile. The returned manager owns cleanup. A
 builder failure closes its resources and preserves both startup and close errors.
 The executable example is `zcu_lab/simulation_envs/FTF/environment.py` with adjacent
 `ftf.yaml`, a working copy of the tracked `default.yaml`. The Notebook walkthrough is `notebook_md/single_qubit.md`.
+欄位用途、單位與 entry 接線請讀 [FTF YAML v2 欄位指南](../../../../zcu_lab/simulation_envs/FTF/field-guide.md)。
 
 `FTFSource.snapshot` reads live DC values before each round. It checks units and
 limits without restoring startup values. `execute` consumes detached templates.
 The segment engine's fast algorithms are the default numeric path.
 One source owns one `Engine`, whose prepare cache survives across acquires.
-Workers exist only during `evolve`; the engine retains no idle threading pool.
+The keyword `workers` selects the engine's sole parallel width; direct callers
+use one worker by default. GUI and Notebook use the shared FTF environment entry,
+which selects `max(1, (os.cpu_count() or 1) - 2)` workers. Unknown CPU counts
+therefore use one worker. An eight-core host uses six workers. Evolution limits
+native BLAS to one thread for the entire call. Overlapping evolves share a
+process-level reference count: the first sets the limit and the last restores
+it. Do not independently change threadpoolctl limits while an evolve is active.
+Empty work, one timeline, and `workers=1` run serially without a joblib pool.
+Other calls own a threading pool only during `evolve`; no idle pool survives.
 `FTFSource.close()` clears preparations and the engine cache. Dropping the
 environment also releases this in-memory state; no disk cache is involved.
 
@@ -27,19 +36,34 @@ The binding serializes calls; direct author callers must do the same.
 `plan_template` converts QICK us/MHz/degrees into ns/GHz/radians with point
 arrays. It preserves signed gains, complex sampled envelopes and the common
 carrier origin. Pulse supports use absolute nearest-2-ns rounding, ties even.
-The model owner supplies a DC `ModelSource` and filters flux tracks into a ragged
-lattice schedule and a continuous waveform sampled on the same DAC grid. The
-engine uses the quantized T4 subsegments without a drive and continuous-flux
-DOP853 when flux changes during a drive. It evolves every template together to
-readout start.
+The model owner supplies a fixed-DC `ModelSource` and static schedule for each
+round. Charge microwave controls evolve every template to readout start. FTF
+constructs no flux lines or flux controls; shared simulation-engine flux support
+is unchanged. Version 2 settings group physical values, named DC/charge lines,
+readout and numerics. Version 1 is not accepted.
 
-Readout uses the DC model and populations in its energy basis. It ignores flux
-tails and controls during or after readout. Earlier control portions still evolve
+Readout uses the DC model and populations in its energy basis. FTF explicitly
+calls ADC's `normalize_populations` once after `batch_populations`, before
+conditional responses or sampling. ADC owns the 1e-6 probability tolerance,
+tolerated-negative cleanup and row normalization. Invalid rows fail without
+sampling. ADC raises `PopulationValidationError` with `rejected_rows` for the
+reported validation rule. FTF catches only that type, retains its count in
+`FTFNumericUse.rejected_rows`, then re-raises without sampling. Successful
+preparations retain zero rejected rows. The source retains the latest
+evolve diagnostics even when this preparation fails, including the engine's
+report-only maximum trace error. Raw evolution densities remain unchanged.
+It ignores charge controls during or after readout. Earlier control portions still evolve
 normally. Each point must have exactly one active readout pulse, including when
 several mutually exclusive slots represent that pulse. The environment supports
 one bound ADC with multiple trigger windows. Constant readout envelope values
 fold into amplitude with `envelope=None`, enabling the exact field solution.
 Conditional responses are solved once per distinct content, not per shot.
+
+`plan_template` passes `readout.adc.time_of_flight_ns` to the numeric receiver
+and the ordered r1/r2 `mismatch_phase_rad` values to `ReadoutModel`. All default
+to zero. Delay does not move evolution's endpoint, pulse support or ADC grids.
+ADC owns the causal output shift, absolute carrier delay phase, per-resonator
+scattering phase and conjugation to microwave I+iQ before calibration/noise.
 
 The receiver noise PSD is two-sided, in ADC sample units squared times ns.
 Discrete sample covariance is PSD/dt_ns using the ADC output rate. Receiver gain
@@ -58,7 +82,9 @@ receiver noise and the integrated rounding term.
 `replay_round(round_path)` recomputes one round without drivers, earlier rounds,
 current YAML or numeric records. Backend, engine numeric version, RNG version and
 dependency versions must match. The stream policy is `PCG64/SeedSequence-v2`.
-Old exact-record manifests fail explicitly. Archives contain model truth and
+The backend is `ftf-segment-v5`, which identifies microwave IQ, delay and
+mismatch semantics. Earlier numeric versions and old exact-record manifests
+fail explicitly. Archives contain model truth and
 must not appear in ordinary Run/native/RPC metadata. Normal provenance remains
 the opaque simulation identifier.
 
