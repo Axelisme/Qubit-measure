@@ -51,6 +51,8 @@ Module、seed、Display 與 annotation 翻譯放在私有模組 `_modules.py`、
 
 宣告者另外提供 `Display(element_label=name_field)` 與名稱欄位的 `Display(readonly=True)`。這些是呈現提示，不執行固定政策。名稱若不接受 expression，可用既有 `InputPolicy(expression=False)` 明訂 literal input。
 
+`Form.read_elements(input, path, env)` 以一次 preview 回傳所有原始位置的 authored input、可用 canonical leaf values 與定向錯誤。名稱取自 FixedElements 宣告，普通 model list 則用 description label。未參與元素仍在結果中。Refs 保留欄位值，明確 materialization 使用支援 indexed path 的 `Form.read_module`。Tab resource 提供同名 `read_elements(path)`，不觸發 converter、capture 或 UI focus。
+
 ### Native model lists
 
 `Form` 遞迴生成 `list[ConfigBase]` 的元素 model。起始樹的 list 按位置提供初值，scalar list 也可直接提供初值。省略 list tree 時，生成器把 native defaults 中的 module 與 sweep 投影成可編輯輸入。`to_cfg` 遞迴還原 native model list，不改 participants 順序。

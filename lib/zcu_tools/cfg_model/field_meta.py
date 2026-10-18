@@ -12,7 +12,8 @@ class FieldMeta:
     """Describe a cfg field without changing its validation or serialized value.
 
     Attach with ``Annotated[T, FieldMeta(...)]``. All attributes are optional;
-    None leaves the hint unspecified, except group where it means no group.
+    None leaves a hint unspecified, except group where it means no group.
+    readonly defaults to False and never enforces a write restriction.
 
     Attributes
     ----------

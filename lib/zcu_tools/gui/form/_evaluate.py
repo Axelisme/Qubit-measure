@@ -19,6 +19,7 @@ from ._structure import (
     discriminator,
     expression_allowed,
     leaves,
+    list_model,
     selected,
     unwrap,
 )
@@ -419,7 +420,7 @@ def evaluate_defaults(
 
     data is what model.defaults returned. Each text-field leaf (see
     expression_allowed; a choice leaf included, an explicitly restricted field not) holding
-    exactly {"expr": text}, in model or nested/selected-branch sections, is
+    exactly {"expr": text}, in model, model-list or nested/selected-branch sections, is
     evaluated once with env.parameters and replaced by its JSON value. A leaf
     is removed instead when its expression raises ExpressionError (a missing
     path, an unbound alias, a non-numeric value), when its value is not finite
@@ -460,6 +461,14 @@ def _evaluate_section(
         if info is None or name == tag_key:
             continue
         path = (*prefix, name)
+        element = list_model(info)
+        if element is not None and isinstance(value, list):
+            for index, item in enumerate(value):
+                if isinstance(item, dict):
+                    _evaluate_section(
+                        element, item, env, (*path, index), None, substituted
+                    )
+            continue
         child = selected(info, value)
         if child is not None and isinstance(value, dict):
             _evaluate_section(child, value, env, path, discriminator(info), substituted)

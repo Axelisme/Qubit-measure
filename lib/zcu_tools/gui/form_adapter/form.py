@@ -33,6 +33,7 @@ from zcu_tools.gui.form import (
     FormErrors,
     FormInput,
     FormModel,
+    FormPathError,
     FormState,
     FormWritePath,
     InputConverter,
@@ -56,6 +57,7 @@ from ._seeds import persistent_input, supported_input, template_seed_tree
 from ._seeds import template_input as _template_input
 from ._types import literal_type, union_type
 from ._types import members as _members
+from .elements import ElementObservation, ElementsObservation
 from .fixed_elements import FixedElements, FixedElementsForm
 from .logical import LogicalEdit, LogicalEditCandidate, LogicalFieldObservation
 from .sweep import CenterSpan, LinRange, StepCenter, StepRange
@@ -719,6 +721,69 @@ class Form[C: ConfigBase]:
         self._check_logical_input(input)
         return _logical.read(input, path, env)
 
+    def read_elements(
+        self,
+        input: FormInput[FormModel],
+        path: FormWritePath,
+        env: FormEnv,
+    ) -> ElementsObservation:
+        """Read every model-list element once from one detached input and capture.
+
+        path is a nonempty canonical typed model-list path. Unknown, inactive
+        or non-list targets raise FormPathError preserving the request. Wrong
+        input model raises TypeError. Returns authored inputs, available preview
+        leaves and directed errors in original list order, even for invalid or
+        nonparticipating elements. References are not materialized. No converter,
+        source refresh, mutation, notification or focus occurs.
+        """
+        self._check_logical_input(input)
+        state = FormState(input)
+        target = state.describe(path, env).target
+        if target is None or target.elements is None:
+            raise FormPathError(path, "Aggregate requires a model-list field")
+        preview = state.preview(env)
+        names = None
+        if issubclass(input.model, FixedElementsForm):
+            declaration = next(
+                (item for item in input.model.fixed_elements if item.list_path == path),
+                None,
+            )
+            if declaration is not None:
+                names = declaration.names(input.data)
+        elements: list[ElementObservation] = []
+        for item in target.elements:
+            raw = self._input_at(input.data, item.path)
+            if not isinstance(raw, dict):
+                raise FormPathError(item.path, "Expected an authored model element")
+            name = names[item.index] if names is not None else item.name
+            messages = {
+                key: text
+                for key, text in (
+                    preview.errors.messages.items() if preview.errors else ()
+                )
+                if key[: len(item.path)] == item.path or item.path[: len(key)] == key
+            }
+            elements.append(
+                ElementObservation(
+                    item.index,
+                    name if isinstance(name, str) else item.name,
+                    item.path,
+                    raw,
+                    {
+                        key: value
+                        for key, value in input.selections.items()
+                        if key[: len(item.path)] == item.path
+                    },
+                    {
+                        key: value
+                        for key, value in preview.values.items()
+                        if key[: len(item.path)] == item.path
+                    },
+                    FormErrors(messages) if messages else None,
+                )
+            )
+        return ElementsObservation(path, tuple(elements), preview.errors)
+
     def prepare_logical_edits(
         self, input: FormInput[FormModel], edits: Sequence[LogicalEdit], env: FormEnv
     ) -> LogicalEditCandidate:
@@ -795,25 +860,67 @@ class Form[C: ConfigBase]:
         self._check_logical_input(input)
         return _logical.logical_errors(input, errors, env)
 
-    def _module_field(self, path: tuple[str, ...]) -> ModuleField:
+    def _module_field(
+        self, input: FormInput[FormModel], path: FormWritePath
+    ) -> ModuleField:
         section = self._section
-        if not path or any(not part for part in path):
-            raise ValueError("Module path must contain nonempty field names")
-        for part in path[:-1]:
-            if part not in section.children:
-                raise ValueError(f"Not a core module field: {'.'.join(path)}")
-            section = section.children[part]
-        if path[-1] not in section.modules:
-            raise ValueError(f"Not a core module field: {'.'.join(path)}")
-        return section.modules[path[-1]]
+        raw: JsonValue = input.data
+        remaining = list(path)
+        while remaining:
+            name = remaining.pop(0)
+            if not isinstance(name, str) or not name:
+                break
+            if not remaining:
+                if name in section.modules:
+                    return section.modules[name]
+                if name in section.model.model_fields:
+                    raise ValueError(f"Not a core module field: {path!r}")
+            raw = raw.get(name) if isinstance(raw, dict) else None
+            if name in section.children:
+                if raw is None and type(None) in _members(
+                    section.model.model_fields[name].annotation
+                ):
+                    break
+                section = section.children[name]
+            elif isinstance(section, _Section) and name in section.lists and remaining:
+                index = remaining.pop(0)
+                if (
+                    type(index) is not int
+                    or not isinstance(raw, list)
+                    or not 0 <= index < len(raw)
+                ):
+                    break
+                raw = raw[index]
+                section = section.lists[name]
+            else:
+                break
+        raise FormPathError(path, f"Not an active core module field: {path!r}")
+
+    @staticmethod
+    def _input_at(raw: JsonValue, path: FormWritePath) -> JsonValue:
+        for part in path:
+            current: JsonValue = raw
+            if isinstance(current, dict) and isinstance(part, str):
+                raw = current.get(part)
+            elif (
+                isinstance(current, list)
+                and isinstance(part, int)
+                and not isinstance(part, bool)
+                and 0 <= part < len(current)
+            ):
+                raw = current[part]
+            else:
+                return None
+        return raw
 
     def module_input_kind(
-        self, input: FormInput[FormModel], path: tuple[str, ...]
+        self, input: FormInput[FormModel], path: FormWritePath
     ) -> Literal["ref", "inline"]:
         """Read an authored core module's tag without evaluating its draft.
 
         input must belong to this Form; another model raises TypeError. path
-        contains nonempty core field names, not inline descendants or extras.
+        contains nonempty core field names and int original model-list indexes,
+        not inline descendants or extras.
         Unknown/nonmodule paths raise ValueError, even if their input has a
         kind tag. Return ref or inline from the public tagged input, including
         partial modules and invalid expressions. Disabled, missing or untagged
@@ -822,24 +929,24 @@ class Form[C: ConfigBase]:
         """
         if input.model is not self.model:
             raise TypeError("module_input_kind requires this Form's input")
-        self._module_field(path)
-        raw: JsonValue = input.data
-        for part in path:
-            raw = raw.get(part) if isinstance(raw, dict) else None
+        self._module_field(input, path)
+        raw = self._input_at(input.data, path)
         kind = raw.get("kind") if isinstance(raw, dict) else None
         if kind == "ref":
             return "ref"
         if kind == "inline":
             return "inline"
-        raise ValueError(f"Module input has no ref/inline tag: {'.'.join(path)}")
+        raise ValueError(f"Module input has no ref/inline tag: {path!r}")
 
     def read_module(
-        self, input: FormInput[FormModel], path: tuple[str, ...], env: FormEnv
+        self, input: FormInput[FormModel], path: FormWritePath, env: FormEnv
     ) -> ModuleValues | FormErrors:
         """Read this module field's evaluated value without mutation or refresh.
 
         input must belong to this Form; other models raise TypeError. path uses
-        nonempty core field names; unknown/nonmodule paths raise ValueError.
+        nonempty core field names and int original model-list indexes.
+        Unknown/inactive paths raise FormPathError with the request; a known
+        nonmodule field raises ValueError.
         env is the fixed capture used to evaluate input. Key mode materializes
         its captured library Spec; inline mode evaluates this field's input.
         Other invalid draft fields do not block this read. Only this module's
@@ -849,11 +956,8 @@ class Form[C: ConfigBase]:
         """
         if input.model is not self.model:
             raise TypeError("read_module requires this Form's input")
-        field = self._module_field(path)
-        raw: JsonValue = input.data
-        for part in path:
-            raw = raw.get(part) if isinstance(raw, dict) else None
-        return field.read(raw, env)
+        field = self._module_field(input, path)
+        return field.read(self._input_at(input.data, path), env, path=path)
 
     def template_input(
         self,

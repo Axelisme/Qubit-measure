@@ -791,19 +791,23 @@ class ModuleField:
             selected_model(union_type(self.editable), module), module
         )
 
-    def read(self, raw: JsonValue, env: FormEnv) -> ModuleValues | FormErrors:
+    def read(
+        self, raw: JsonValue, env: FormEnv, *, path: tuple[str | int, ...] | None = None
+    ) -> ModuleValues | FormErrors:
         """Evaluate only this module, then materialize against its fixed capture.
 
-        Failures return directed errors at this field, not unrelated cfg errors.
-        No full-cfg or extras lower hook runs; source and family checks are the
+        path optionally supplies the actual canonical indexed consuming path;
+        omission uses this field's declared path. Failures return directed errors
+        at that path, not unrelated cfg errors. No full-cfg or extras lower hook runs; source and family checks are the
         same ones used for ordinary Form module evaluation and materialization.
         """
+        prefix = self.path if path is None else path
         result = FormState(FormInput(self.value_model, {"value": raw})).result(env)
         if isinstance(result, FormErrors):
             return FormErrors(
                 {
-                    (*self.path, *path[1:]): message
-                    for path, message in result.messages.items()
+                    (*prefix, *error_path[1:]): message
+                    for error_path, message in result.messages.items()
                 }
             )
         item = result.value
@@ -818,12 +822,12 @@ class ModuleField:
         try:
             cfg = ModuleCfgFactory.from_raw(raw_module, context=context)
         except ValueError as exc:
-            return FormErrors({self.path: str(exc)})
+            return FormErrors({prefix: str(exc)})
         mode = "key" if isinstance(item, ModuleRef) else "inline"
         source = (
             f"library:{item.name}"
             if isinstance(item, ModuleRef)
-            else ".".join(self.path)
+            else ".".join(map(str, prefix))
         )
         return ModuleValues(cfg.model_dump(mode="json"), mode, source)
 

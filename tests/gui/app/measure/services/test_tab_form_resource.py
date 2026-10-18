@@ -64,9 +64,16 @@ def test_elements_aggregate_keeps_partial_values_and_errors_without_recapture():
         assert first.values[("tones", 0, "sweep", "start")] == 2
         assert second.values[("tones", 1, "sweep", "start")] == 10
         assert second.errors is None
-        assert hasattr(second, "selections"), "Aggregate must retain authored selection overrides"
+        assert hasattr(second, "selections"), (
+            "Aggregate must retain authored selection overrides"
+        )
         assert second.selections == {("tones", 1, "sweep"): {"kind": "center"}}
-        assert second.input["sweep"] == {"kind": "linrange", "start": 10, "stop": 14, "n": 3}
+        assert second.input["sweep"] == {
+            "kind": "linrange",
+            "start": 10,
+            "stop": 14,
+            "n": 3,
+        }
         first.input["name"] = "detached"
         assert resource.input.same_as(before)
         assert resource.editor_state.base.same_as(base)
