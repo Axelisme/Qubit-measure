@@ -128,13 +128,14 @@ def test_arb_writability_is_applied_when_opened(qapp) -> None:
 
 def test_persistent_predictor_dialog_is_reused_when_hidden(qapp) -> None:
     parent = QWidget()
-    created: list[QDialog] = []
+    created: list[_PersistentDialog] = []
 
     def build_dialog(name: DialogName) -> QDialog:
         assert name is DialogName.PREDICTOR
-        dialog = cast(QDialog, _PersistentDialog())
+        dialog = _PersistentDialog()
         created.append(dialog)
-        return dialog
+        # tolerated(cast): Signal/visibility fake meets the Qt factory boundary.
+        return cast(QDialog, dialog)
 
     registry = _FactoryRegistry(parent, build_dialog)
 
@@ -155,11 +156,12 @@ def test_persistent_predictor_dialog_is_reused_when_hidden(qapp) -> None:
     assert created == [first]
     assert first.isVisible() is True
     assert registry.visible_names() == [DialogName.PREDICTOR]
-    cast(_PersistentDialog, first).destroyed.emit()
+    first.destroyed.emit()
 
 
 def test_nonpersistent_dialog_close_clears_registry(qapp) -> None:
     parent = QWidget()
+    # tolerated(cast): Finished-signal fake drives close without Qt deletion.
     registry = _FactoryRegistry(parent, lambda _name: cast(QDialog, _TransientDialog()))
 
     registry.open(DialogName.SETUP)
@@ -179,6 +181,7 @@ def test_open_setup_again_raises_the_existing_dialog_until_it_closes(qapp) -> No
 
     def build_dialog(name: DialogName) -> QDialog:
         assert name is DialogName.SETUP
+        # tolerated(cast): Fresh finished-signal fake exercises Setup reopen.
         dialog = cast(QDialog, _TransientDialog())
         created.append(dialog)
         return dialog
@@ -209,11 +212,13 @@ def test_open_rebuilds_stale_destroyed_dialog(qapp) -> None:
     created: list[QDialog] = []
 
     def build_dialog(_name: DialogName) -> QDialog:
+        # tolerated(cast): Visibility fake replaces the stale Qt registry entry.
         dialog = cast(QDialog, _TransientDialog())
         created.append(dialog)
         return dialog
 
     registry = _FactoryRegistry(parent, build_dialog)
+    # tolerated(cast): Non-Qt fake deterministically raises the deleted-wrapper error.
     stale = cast(QDialog, _DestroyedDialog())
     registry.refs.retain_named(DialogName.SETUP, stale, on_released=lambda: None)
 
