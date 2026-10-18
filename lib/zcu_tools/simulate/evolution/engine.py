@@ -283,7 +283,8 @@ class Engine:
     """Segment engine with inline or threaded execution and persistent prepare LRU.
 
     workers: positive sole parallel width; kernels remain single-threaded.
-    cache_bytes: nonnegative prepare-resident byte limit, not a process RAM cap.
+    cache_bytes: nonnegative unified resident/pending array byte limit, not a
+        process RAM cap. Active nonretained products and scratch are separate.
         Exact final results use a separate LRU capped at min(64 MiB, cache_bytes),
         including metadata. Zero disables both caches. No ADC/sampling is cached.
     kernels: optional algorithm collection replacing the production registry;
@@ -367,9 +368,10 @@ class Engine:
         exceedances stay in the result's paths.exceeded_by_kernel and produce
         exactly one RuntimeWarning per call, without correction or retry.
         """
-        from ._dispatch import classify, create_work_plan
+        from ._dispatch import classify, create_work_plan, resident_inventory
         from ._planning import plan
         from ._prefix import PrefixResolver
+        from ._resident import ResidentAdmission
         from ._result_memo import input_key
         from ._schedule import Schedule
         from .kernel import KernelContext
@@ -402,21 +404,27 @@ class Engine:
                 if len(geometry.points) > 1 and len(geometry.table.timeline)
                 else 1
             )
-            # Drain workers before releasing evolve-local facts and workspaces.
-            with (
-                closing(create_work_plan(geometry.table, source)) as work_plan,
-                execution_pool(workers) as pool,
-            ):
+            # Drain workers before releasing evolve-local ownership.
+            with closing(create_work_plan(geometry.table, source)) as work_plan:
                 context = KernelContext(source, budget, work_plan)
                 kernels = self._kernels
-                geometry = PrefixResolver(geometry, kernels, context, cancel).resolve(
-                    self._cache, pool, self._chunks
-                )
-                dispatch = classify(
-                    geometry, kernels, context, pool=pool, cache=self._cache
-                )
-                schedule = Schedule(geometry, dispatch, context, cancel)
-                result = schedule.run(kernels, self._cache, pool, self._chunks)
+                inventory = resident_inventory(geometry, kernels, context, self._cache)
+                with (
+                    closing(ResidentAdmission(self._cache, inventory)) as resident,
+                    execution_pool(workers) as pool,
+                ):
+                    geometry = PrefixResolver(
+                        geometry, kernels, context, cancel, resident
+                    ).resolve(self._cache, pool, self._chunks)
+                    dispatch = classify(
+                        geometry,
+                        kernels,
+                        context,
+                        pool=pool,
+                        admission=resident,
+                    )
+                    schedule = Schedule(geometry, dispatch, context, cancel, resident)
+                    result = schedule.run(kernels, self._cache, pool, self._chunks)
             if cancel.is_set():
                 raise Cancelled()
             _warn_exceeded(result)

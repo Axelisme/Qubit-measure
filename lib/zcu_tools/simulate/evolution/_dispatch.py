@@ -14,6 +14,7 @@ from ._gain_plan import plan_gain_groups
 from ._parallel import Executor
 from ._planning import Geometry
 from ._prepare_keys import group_keys
+from ._resident import ResidentAdmission
 from ._shaped_dispatch import preference
 from ._two_tone_dispatch import direct_preferred
 from .cache import PrepareCache, PreparedPayload
@@ -43,6 +44,61 @@ def create_work_plan(table: SegmentTable, source: ModelSource) -> WorkPlan:
     populate_carrier_plan(table, source, plan)
     plan_gain_groups(table, source, plan)
     return plan
+
+
+def resident_inventory(
+    geometry: Geometry,
+    kernels: Mapping[str, Kernel],
+    context: KernelContext,
+    cache: PrepareCache,
+) -> dict[tuple[str, str, float], set[bytes]]:
+    """Find all potentially borrowed resident keys before prefixes or guards.
+
+    Inventory covers every candidate in the complete WorkPlan geometry, not
+    just accepted rows or the current prefix. Only resident families need key
+    computation. Candidate membership never invokes a numerical guard and does
+    not change routing; whole-batch intersections remain eligible for borrowing.
+    """
+    table = geometry.table
+    zero = tuple(0 for _ in range(table.level.shape[1]))
+    identity = context.source.model(zero).identity
+    current = {
+        name
+        for name, model, budget in cache.namespaces
+        if model == identity and budget == context.budget
+    }
+    inventory = {}
+    if current:
+        flux = geometry.flux_drive & (table.tones > 0)
+        ordinary = ~flux
+        constant = table.constant_envelopes(
+            np.arange(len(table.timeline), dtype=np.int64)
+        )
+        single = ordinary & (table.tones == 1)
+        plateau = single & constant
+        shaped = single & ~constant
+        two = ordinary & (table.tones == 2) & constant
+        multiple = ordinary & (((table.tones == 2) & ~constant) | (table.tones >= 3))
+        # Dispatch owns algorithm domains; admission only sees opaque keys.
+        domains = (
+            (table.tones == 0, ("t4",)),
+            (flux, ("flux_dop853",)),
+            (plateau, ("dyson", "floquet_period", "t6")),
+            (shaped, ("shaped_sambe", "gate_cache", "period_table", "dop853")),
+            (two, ("floquet", "dop853")),
+            (multiple, ("multitone_rwa", "dop853")),
+        )
+        for mask, families in domains:
+            rows = np.flatnonzero(mask)
+            if not len(rows):
+                continue
+            for name in families:
+                if name in current:
+                    keys = kernels[name].prepare_keys(table, rows, context)
+                    inventory.setdefault(
+                        (name, identity, context.budget), set()
+                    ).update(key.tobytes() for key in keys)
+    return inventory
 
 
 @dataclass(frozen=True)
@@ -328,9 +384,10 @@ class _Classifier:
         context: KernelContext,
         pool: Executor | None = None,
         selection: Selection | None = None,
-        cache: PrepareCache | None = None,
+        admission: ResidentAdmission | None = None,
     ):
-        self.cache = cache
+        self.admission = admission
+        self.cache = admission.cache if admission is not None else None
         self.cached = (
             {
                 name: hits
@@ -447,7 +504,9 @@ class _Classifier:
                 extended.append(payload)
                 continue
             replacement = PreparedPayload(prepared, payload.keys)
-            self.cache.replace(namespace, payload, replacement)
+            if self.admission is None:
+                raise RuntimeError("Floquet extension requires caller admission")
+            self.admission.replace(namespace, payload, replacement)
             extended.append(replacement)
         return _GuardCacheHits(extended)
 
@@ -635,7 +694,7 @@ def classify(
     pool: Executor | None = None,
     selection: Selection | None = None,
     *,
-    cache: PrepareCache | None = None,
+    admission: ResidentAdmission | None = None,
 ) -> Dispatch:
     """Guard shared candidates now and resolve local candidates in their worker.
 
@@ -643,8 +702,11 @@ def classify(
     Smaller shared selections stay serial. Selection resolves one timeline's
     deferred rows without a nested pool, retaining guard products for apply.
     Both modes use the same acquire-wide cost plan and numerical guards.
-    cache=None means this call does not look up resident payloads. Engine callers
-    supply cache under their call lock; deferred workers borrow strong references
-    through Selection.cached and never access the resident cache themselves.
+    admission=None means this call does not look up resident payloads. Callers
+    supply the evolve-wide admission under their call lock. Deferred workers
+    borrow strong references through Selection.cached and never access the
+    resident cache themselves.
     """
-    return _Classifier(geometry, kernels, context, pool, selection, cache).classify()
+    return _Classifier(
+        geometry, kernels, context, pool, selection, admission
+    ).classify()

@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-18, startup numeric preparation, closed-form flat mux decimated readout, sampled readout, integrated carrier tiles and shared model facts
+**Last updated:** 2026-10-19, unified resident/pending budget, startup numeric preparation, closed-form flat mux decimated readout, sampled readout, integrated carrier tiles and shared model facts
 
 `ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -14,9 +14,9 @@ The executable example is `zcu_lab/simulation_envs/FTF/environment.py` with adja
 `FTFSource.snapshot` reads live DC values before each round. It checks units and
 limits without restoring startup values. `execute` consumes detached templates.
 The segment engine's fast algorithms are the default numeric path.
-One source owns one `Engine`, whose 1.5 GiB resident prepare cache survives across
-acquires. This byte budget counts model-only payload arrays, not total process
-memory; workspaces, active references and ADC allocations remain separate.
+One source owns one `Engine`, whose 2 GiB resident/pending prepare budget survives across
+acquires. This shared byte budget counts retained model-only payload arrays, not total
+process memory; workspaces, active references and ADC allocations remain separate.
 The keyword `workers` selects the engine's sole parallel width; direct callers
 use one worker by default. GUI and Notebook use the shared FTF environment entry,
 which selects `max(1, (os.cpu_count() or 1) - 2)` workers. Unknown CPU counts

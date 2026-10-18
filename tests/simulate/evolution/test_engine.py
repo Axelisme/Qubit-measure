@@ -1359,9 +1359,7 @@ def test_inventory_protects_whole_borrowed_batches_and_bounds_pending():
 def test_prefix_pending_shares_capacity_with_future_suffix_hits():
     idle, driven = InventoryKernel(), InventoryKernel("dyson")
     src = source()
-    with closing(
-        Engine(1, 32, kernels=(idle, driven), chunks_per_worker=1)
-    ) as engine:
+    with closing(Engine(1, 32, kernels=(idle, driven), chunks_per_worker=1)) as engine:
         # This hit belongs to the later suffix, not the representative prefix.
         engine.evolve(src, (batch(2),), cancel=Event())
         suffix = idle.payloads[0]

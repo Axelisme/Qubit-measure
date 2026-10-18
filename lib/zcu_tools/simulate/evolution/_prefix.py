@@ -9,6 +9,7 @@ import numpy as np
 from ._dispatch import classify
 from ._parallel import Executor
 from ._planning import Geometry
+from ._resident import ResidentAdmission
 from ._schedule import Schedule
 from .cache import PrepareCache
 from .engine import Cancelled
@@ -145,11 +146,13 @@ class PrefixResolver:
         kernels: Mapping[str, Kernel],
         context: KernelContext,
         cancel: Event,
+        resident: ResidentAdmission,
     ):
         self.geometry = geometry
         self.kernels = kernels
         self.context = context
         self.cancel = cancel
+        self.resident = resident
 
     def resolve(self, cache: PrepareCache, pool: Executor, chunks: int) -> Geometry:
         """Resolve nested groups in time order, never storing inputs in the LRU."""
@@ -185,8 +188,10 @@ class PrefixResolver:
             table = replace(table, prefix_inputs=inputs)
             geometry = replace(geometry, table=table, prefix_paths=paths)
             prefix = _representative(geometry, first, row)
-            dispatch = classify(prefix, kernels, context, cache=cache)
-            schedule = Schedule(prefix, dispatch, context, cancel, initial)
+            dispatch = classify(prefix, kernels, context, admission=self.resident)
+            schedule = Schedule(
+                prefix, dispatch, context, cancel, self.resident, initial
+            )
             result = schedule.run(kernels, cache, pool, chunks)
             inputs[group] = result.densities[0]
             paths[group] = result.paths
