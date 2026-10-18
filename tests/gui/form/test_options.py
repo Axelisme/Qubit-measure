@@ -90,6 +90,28 @@ def test_saved_unlisted_selection_is_visible_invalid_input_not_a_restore_failure
     assert state.input.same_as(authored)
 
 
+def test_hook_options_do_not_restrict_raw_value_without_selection_override() -> None:
+    class Ref(BaseModel):
+        kind: Literal["ref"] = "ref"
+        name: str
+
+    class RefForm(FormModel):
+        source: Ref
+
+        @classmethod
+        def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[api.Option, ...]]:
+            return {("source",): (api.Option("Listed", {"kind": "ref", "name": "listed"}),)}
+
+    raw: dict[str, JsonValue] = {"source": {"kind": "ref", "name": "unlisted"}}
+    ordinary = FormState(FormInput(RefForm, raw))
+    assert isinstance(ordinary.result(FormEnv()), RefForm)
+    explicit = FormState(FormInput(RefForm, raw, selections={("source",): raw["source"]}))
+    errors = explicit.result(FormEnv())
+    assert isinstance(errors, FormErrors)
+    assert ("source",) in errors.messages
+    assert explicit.input.data == raw
+
+
 def obj(value: JsonValue) -> dict[str, JsonValue]:
     assert isinstance(value, dict)
     return value
