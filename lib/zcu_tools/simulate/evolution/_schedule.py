@@ -115,6 +115,19 @@ def _bind(
     )
 
 
+def _resident_admission(
+    limit: int, cached: Mapping[str, tuple[PreparedPayload, ...]]
+) -> ResidentAdmission:
+    """Protect caller-looked-up guard allocations before any local offers."""
+    resident = ResidentAdmission(limit)
+    # Deferred guards borrow whole allocations before they have entries.
+    # Their row-specific handoffs must not re-admit resident subset metadata.
+    for payloads in cached.values():
+        for payload in payloads:
+            resident.protect(payload)
+    return resident
+
+
 class Schedule:
     """One acquire's grouped prepare stage and independent timeline chunks."""
 
@@ -150,7 +163,7 @@ class Schedule:
         bindings: list[_Binding] = []
         local_products: list[tuple[tuple[str, str, float], PreparedPayload]] = []
         jobs: list[tuple[_Entries, NDArray[np.int64], tuple[str, str, float]]] = []
-        self.resident = ResidentAdmission(cache.limit)
+        self.resident = _resident_admission(cache.limit, self.dispatch.cached)
         dc = self.source.model(tuple(0 for _ in range(self.table.level.shape[1])))
         self.dc_identity = dc.identity
         for entry in entries:
