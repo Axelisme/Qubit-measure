@@ -25,6 +25,26 @@ from .model import (
 from .options import Option
 
 
+def option_errors(
+    model: type[FormModel],
+    data: Mapping[str, JsonValue],
+    env: FormEnv,
+    selections: Mapping[FormWritePath, JsonValue],
+) -> dict[FormPath, str]:
+    """Validate current option membership without changing authored branches.
+
+    Hooks use the normal fixed env. Only explicit overrides are checked;
+    raw branches retain their annotation/value contract. An unavailable choice
+    is a field value error, not a conversion or restoration failure.
+    """
+    errors: dict[FormPath, str] = {}
+    for path in selections:
+        target = resolve(model, data, path, env, selections)
+        if target.options is None or target.selected is None:
+            errors[path] = "Selection is not among current options"
+    return errors
+
+
 def literal_values(annotation: object) -> tuple[JsonValue, ...] | None:
     """Read intrinsic Literal/Enum values in order, including nullable null."""
     result: list[JsonValue] = []

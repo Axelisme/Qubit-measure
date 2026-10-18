@@ -1,6 +1,6 @@
 # gui/form — Qt-free Pydantic input editing
 
-**Last updated:** 2026-10-18，單一欄位 converter 與 selection／branch 分離
+**Last updated:** 2026-10-18，完整草稿 envelope 與不依賴來源的還原
 
 `FormState.describe(path, env)` 直接從 model 宣告與目前 input 回傳 `FormDescription`，不產生 JSON Schema。Root path 是 `()`，其他位置用 model-field tuple。`target` 是指定欄位的 metadata，root 則為 None；`children` 只列下一層 metadata。每個 child 保留完整 path，不攜帶 descendants。選中選項只有一個非 nullable、沒有 options 的普通 model wrapper 時，children 攤平一層，但 wrapper 的完整 path 仍可查詢。
 
@@ -24,7 +24,9 @@ Defaults hook 可以用 `{"expr": ...}` 宣告 scalar 初始值的來源，例�
 
 `InputConverter` 是一個欄位的單一 converter，處理全部目標選項。可在 Annotated metadata 或 `FormModel.converters(env)` 宣告。Local metadata 覆蓋祖先宣告，同一 model 的 hook 再覆蓋自身 metadata。Callable 接收 readonly snapshot、目標 selection 與局部 evaluate context，回 `FormConversionResult(structure, input)`。它與 command 共用原子 installer，Core 不補 defaults。
 
-沒有 converter 時，切換只改 selection，保留原有 branch 和 authored input。`FormInput.selections` 攜帶記憶體選項，`data` 保存實際 child input。`describe.selected` 顯示選項，`describe.branch` 標示實際子表單；兩者可以不同。Partial selector object 在轉換後套用明確提供的 children，tag 葉寫入也走同一個 converter。純讀不執行 converter。預期的缺來源、參與值求值及結構 admission 拒絕使用 `FormConversionError`，保留 cause。任意 callable ValueError 或 provider 故障不轉成正常拒絕。Compatible restore 的保存政策另由持久還原契約處理。
+沒有 converter 時，切換只改 selection，保留原有 branch 和 authored input。`FormInput.selections` 攜帶記憶體選項，`data` 保存實際 child input。`describe.selected` 顯示選項，`describe.branch` 標示實際子表單；兩者可以不同。Partial selector object 在轉換後套用明確提供的 children，tag 葉寫入也走同一個 converter。純讀不執行 converter。預期的缺來源、參與值求值及結構 admission 拒絕使用 `FormConversionError`，保留 cause。任意 callable ValueError 或 provider 故障不轉成正常拒絕。`FormInput.to_json/from_json` 使用完整草稿 envelope，不走 compatible restore。Envelope 保留明確 selections、raw branch、expression、缺席、null 與普通 invalid 值。還原以可信 annotation 的型別 identity 比對，不執行 converter 或宣告 hooks，不補 defaults、不讀 library。具 discriminator 的 branch 與 selection Literal 不符 annotation 時拒絕。未標 tag 的 model-only union 保留原稿，不猜 branch。`write_compatible` 仍是明確的葉投影工具，不是 envelope decoder。
+
+有 env 的一般驗證只對 `FormInput.selections` 明確 overrides 檢查目前 options membership。不在選項中時，result／preview 回該欄位錯誤，保留原稿。沒有 override 的 raw branch 仍使用原有值契約，不把選單當作完整值域。Ref 的存在性與 family 由 adapter 的一般來源／choices 驗證處理，不參與還原 identity。
 
 明確指令用 `OptionCommand(name, label, run)` 或 `InputCommand` 宣告。前者只在目前第一個匹配選項提供指令，後者掛在欄位 metadata 或 active `FormModel.input_commands`。`FormState.run_command(path, name, env)` 只替換掛載欄位與 descendants，不允許葉命令修改 parent。Callable 接收 `FormCommandSnapshot` 和 `FormCommandContext`，回 `FormCommandResult(selection, structure, input)`。Snapshot 的 selection、結構與原始 input 深度唯讀。Context 的 evaluate 使用相對掛載欄位的 path，只求值已填寫的參與欄位，不補缺值。Core 檢查 annotation 允許的結構與作用範圍，再一次安裝與通知。普通值錯誤保存成 invalid draft。
 

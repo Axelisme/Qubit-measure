@@ -96,7 +96,11 @@ def _select(
             selections[target.path] = option.value
         return FormInput(input.model, input.data, selections=selections)
     data = build_candidate(input.model, input.data, {target.path: option.value}, env)
-    return FormInput(input.model, data, selections=input.selections)
+    selections = input.selections
+    if target.path in selections or data != input.data:
+        # Keep a changed explicit choice observable when its menu later changes.
+        selections[target.path] = option.value
+    return FormInput(input.model, data, selections=selections)
 
 
 def _remaining(value: JsonValue, selection: JsonValue) -> dict[str, JsonValue]:

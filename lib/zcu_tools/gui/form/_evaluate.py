@@ -12,6 +12,7 @@ from zcu_tools.core.complex_codec import decode_complex
 from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_expr
 
 from ._json import copy_object, default_json, expr_text
+from ._selection import option_errors
 from ._sources import check_sources, error_path
 from ._structure import (
     alternatives,
@@ -274,19 +275,25 @@ def _active_leaf(value: BaseModel, path: FormPath) -> bool:
 
 
 def result[F: FormModel](
-    model: type[F], data: dict[str, JsonValue], env: FormEnv
+    model: type[F],
+    data: dict[str, JsonValue],
+    env: FormEnv,
+    selections: Mapping[FormWritePath, JsonValue] | None = None,
 ) -> F | FormErrors:
     """Evaluate one detached input and return its model or canonical errors."""
-    decoding = _start(model, data, env)
+    decoding = _start(model, data, env, selections)
     ordinary = _decode_model(model, data, (), decoding)
     return _validate(model, ordinary, decoding)
 
 
 def preview(
-    model: type[FormModel], data: dict[str, JsonValue], env: FormEnv
+    model: type[FormModel],
+    data: dict[str, JsonValue],
+    env: FormEnv,
+    selections: Mapping[FormWritePath, JsonValue] | None = None,
 ) -> FormPreview:
     """Share decoding/validation while retaining non-failing leaves for display."""
-    decoding = _start(model, data, env)
+    decoding = _start(model, data, env, selections)
     ordinary = _decode_model(model, data, (), decoding)
     failed_decoding = tuple(decoding.errors)
     validated = _validate(model, ordinary, decoding)
@@ -342,7 +349,10 @@ def _project_valid_children(
 
 
 def _start(
-    model: type[FormModel], data: dict[str, JsonValue], env: FormEnv
+    model: type[FormModel],
+    data: dict[str, JsonValue],
+    env: FormEnv,
+    selections: Mapping[FormWritePath, JsonValue] | None = None,
 ) -> _Decoding:
     """Check data's captured sources and return a decoding of data in env.
 
@@ -351,7 +361,10 @@ def _start(
     choices. Invalid choice declarations raise ValueError.
     """
     try:
-        return _Decoding(env, check_sources(model, data, env, validate_paths=True))
+        choices = check_sources(model, data, env, validate_paths=True)
+        return _Decoding(
+            env, choices, errors=option_errors(model, data, env, selections or {})
+        )
     except PydanticCustomError as exc:
         return _Decoding(env, {}, (error_path(exc), exc.message()))
 

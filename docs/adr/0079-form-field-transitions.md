@@ -55,9 +55,15 @@ Gauss→FlatTop 不把來源 waveform 放進 raise_waveform。FlatTop 沒有直�
 
 ### 保存與還原
 
-保存內容包括每個欄位的 selection／branch 與原始 input，含 expression 和未完成草稿。還原從可信型別註釋與宣告重建結構，再填回原稿。不執行 converter，不序列化 callable 或動態 class，不另造 schema 語言。
+保存內容包括每個欄位的 selection／branch 與原始 input，含 expression、缺席、null 和普通值錯誤。宿主為兩個 FormInput 各存一份 versioned envelope，包含原稿、明確 selection overrides 與可信 annotation 的型別 identity。還原整份草稿，不逐葉 overlay、不做 legacy 雙讀。任一表單不相容，兩個表單都保持原狀。還原不執行 converter，不序列化 callable、動態 class 或完整 runtime schema。
 
-型別或來源 identity 不相容時明確報錯，不靜默丟葉或把資料配給另一個元素。Library 內容版本變動不等於元素 identity 改變。Ref→inline 後保存的草稿，還原時保留當時 inline branch 與原稿，不從已修改的 library 重新複製。
+還原只檢查不需 env 的 annotation 結構。型別、selection 結構或 Literal、具 discriminator 的 branch tag，以及固定元素名稱、數量或順序不相容時，明確報錯，不丟葉或錯配元素。Annotation 沒有 discriminator 的 model-only union 不猜 branch、不補 tag，原稿保留為該 union 的輸入。這類草稿仍可帶普通值錯誤；union annotation 改變則拒絕還原。
+
+還原不呼叫 options(env)，也不檢查任何 hook 的 membership，完全靜態的 hook 也相同。有 env 時，一般驗證只檢查 FormInput.selections 中的明確 override 是否仍在 options(env) 中。不在選項中的 override 顯示為該欄位的值錯誤，保留草稿並擋 Run。沒有 override 的 raw branch 只遵守 annotation 與原有值契約。Options 描述可選項，不代表完整值域，因此合法的持久 child key 不因選單沒有列出它而失效。
+
+Ref family、ref 是否存在及 library 內容都不參與還原 identity，也不新增宣告 token。Library 可用後，ref 不存在或指向項目的 family 不符現行宣告時，一般驗證在消費欄位顯示錯誤，保留草稿並擋 Run。宣告的 ref_family 改變與 library 項目改變使用同一規則。Library 內容版本改變不等於元素 identity 改變。已 inline 的草稿不要求原 ref 仍存在，還原保留當時原稿，不從新 library 重新複製。
+
+不相容檔案的啟動處理，以及 source reload 遇到宣告變更時的草稿政策，仍待使用者裁決。不得把 defaults 後覆蓋原檔或新的 reload 行為視為本節已批准的策略。
 
 ### 固定具名元素與參與清單
 

@@ -6,7 +6,6 @@ Form paths never interpret dots in a mapping key as separators.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from logging import getLogger
@@ -433,8 +432,8 @@ class FormInput[F: FormModel]:
         """Detached in-memory selections differing from the raw child branch.
 
         Keys are canonical field paths. Values are declared option values.
-        Omitted paths infer selection from raw input. This memory state travels
-        with prepared inputs; persistence is a separate host-owned contract.
+        Omitted paths infer selection from raw input. Prepared inputs and saved
+        envelopes retain these choices; hosts own persistence locations.
         """
         from ._json import copy_json
 
@@ -467,25 +466,32 @@ class FormInput[F: FormModel]:
         return copy_object(self._data)
 
     def to_json(self) -> str:
-        """Encode only input, losslessly retaining missing/null and scalar tags."""
-        return json.dumps(self._data, allow_nan=False)
+        """Encode the full draft with a trusted declaration identity digest.
+
+        Retain independent selections, raw branch tags, missing/null, expressions
+        and ordinary invalid values. No evaluation, converter, callable or model
+        class serialization occurs. Hosts own the destination and save timing.
+        """
+        from ._persistence import encode
+
+        return encode(self._model, self.data, self.selections)
 
     @staticmethod
     def from_json[Model: FormModel](model: type[Model], text: str) -> FormInput[Model]:
-        """Decode saved JSON for model; malformed/non-object/nonfinite JSON raises.
+        """Restore a full draft against the caller's trusted model declaration.
 
-        This static factory's result type follows model, independently of the
-        wrapper's type parameter, keeping immutable FormInput covariant.
-        Model compatibility is deliberately deferred to write_compatible so old
-        field names or changed leaf types can be reported instead of hidden.
+        Malformed/nonfinite envelopes and incompatible type identities raise
+        ValueError. Raw invalid input remains invalid input, never an overlay on
+        defaults. Branches come from model annotations and authored tags, not
+        saved classes. No converter, evaluation, hook or source access occurs.
+        Source availability/family remain ordinary result errors. There is no
+        legacy raw-tree decoder. The result type follows model independently
+        of the wrapper's type parameter, keeping FormInput covariant.
         """
-        from ._json import copy_object
+        from ._persistence import decode
 
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Invalid JSON input: {exc}") from exc
-        return FormInput(model, copy_object(data))
+        data, selections = decode(model, text)
+        return FormInput(model, data, selections=selections)
 
 
 class FormState[F: FormModel]:
@@ -640,8 +646,9 @@ class FormState[F: FormModel]:
         Only text fields evaluate {"expr": text}. An envelope on a choice leaf
         is an error at that leaf; on a Literal, Enum, bool or library-key
         leaf it is ordinary input that Pydantic rejects there. Neither is
-        evaluated. Validate dynamic choices and Pydantic
-        types/ranges/cross-field rules.
+        evaluated. Validate dynamic choices, explicit selection overrides
+        against current options, and Pydantic types/ranges/cross-field rules.
+        Raw branches without an override do not acquire an options constraint.
         Return a model or path-directed errors, including a used missing source;
         ordinary model-wide errors use (). Each call uses the supplied env.
         Input at a field whose union mixes text and picked members raises
@@ -649,7 +656,7 @@ class FormState[F: FormModel]:
         """
         from ._evaluate import result
 
-        return result(self._model, self._data, env)
+        return result(self._model, self._data, env, self._selections)
 
     def preview(self, env: FormEnv) -> FormPreview:
         """Evaluate once for display, preserving partial values on model errors.
@@ -662,7 +669,7 @@ class FormState[F: FormModel]:
         """
         from ._evaluate import preview
 
-        return preview(self._model, self._data, env)
+        return preview(self._model, self._data, env, self._selections)
 
     def changes(self, env: FormEnv) -> tuple[FormChange, ...] | FormErrors:
         """Return changed input leaves and their evaluated values, or errors.

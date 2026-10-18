@@ -144,7 +144,10 @@ def test_saved_selection_and_branch_restore_the_authored_invalid_draft() -> None
     original = FormState(
         FormInput(
             DraftForm,
-            {"shape": {"style": "ramp", "length": {"expr": "unbound + 2"}}, "optional": None},
+            {
+                "shape": {"style": "ramp", "length": {"expr": "unbound + 2"}},
+                "optional": None,
+            },
         )
     )
     original.write({("shape",): {"style": "flat"}}, env)
@@ -211,7 +214,9 @@ def test_saved_draft_rejects_changed_type_identity_before_installation() -> None
     ],
     ids=["branch", "literal-selection", "selection-path"],
 )
-def test_restore_rejects_annotation_incompatible_branch_or_selection(raw, selections) -> None:
+def test_restore_rejects_annotation_incompatible_branch_or_selection(
+    raw, selections
+) -> None:
     saved = FormInput(DraftForm, raw, selections=selections).to_json()
     with pytest.raises(ValueError, match="identity|incompatible"):
         FormInput.from_json(DraftForm, saved)

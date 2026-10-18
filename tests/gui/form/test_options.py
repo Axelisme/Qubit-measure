@@ -127,7 +127,9 @@ def test_reselecting_scalar_replaces_stale_override_and_tracks_new_choice() -> N
             return {("key",): tuple(api.Option(key, key) for key in listed)}
 
     env = FormEnv()
-    state = FormState(FormInput(ChangingChoices, {"key": "A"}, selections={("key",): "C"}))
+    state = FormState(
+        FormInput(ChangingChoices, {"key": "A"}, selections={("key",): "C"})
+    )
     assert isinstance(state.result(env), FormErrors)
     state.write({("key",): "B"}, env)
     assert isinstance(state.result(env), ChangingChoices)
