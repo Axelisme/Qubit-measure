@@ -109,6 +109,53 @@ def test_static_unit_facts_follow_captured_target_and_retarget_without_conversio
             draft.teardown()
 
 
+def test_concrete_destination_with_same_named_alias_reads_fixed_target(session):
+    entry, control, service = session
+
+    class Coupler(ComponentSchema):
+        module: dict[str, str]
+
+    with registered_model("fake/preview-coupler", Coupler) as kind:
+        control.add_component(
+            "coupler", kind, {"module": {"cz_f2": "coupler.pulses.original"}}
+        )
+        control.set_alias_rows((AliasRow("coupler", "coupler"),))
+        captured = control.read_context()
+        draft = service.create_draft(
+            [
+                ParameterWriteback(
+                    "coupler.module.cz_f2",
+                    "Calibrated pulse slot",
+                    proposed_value="coupler.pulses.calibrated",
+                )
+            ],
+            parameters=captured,
+            experiment_name="test/writeback",
+        )
+        try:
+            initial = service.preview_values(draft, session_id="param-1")["param-1"]
+            assert initial.actual_path == "coupler.module.cz_f2"
+            assert initial.current == "coupler.pulses.original"
+            assert initial.proposed == "coupler.pulses.calibrated"
+            control.set_parameter(
+                captured.target, "coupler.module.cz_f2", "coupler.pulses.updated"
+            )
+            entry.new_point("b")
+            control.use_point(PointUseRequest("b"))
+            control.add_component(
+                "other_coupler", kind, {"module": {"cz_f2": "other.pulses.decoy"}}
+            )
+            control.set_alias_rows((AliasRow("coupler", "other_coupler"),))
+            refreshed = service.preview_values(draft)["param-1"]
+            assert refreshed.actual_path == "coupler.module.cz_f2"
+            assert refreshed.current == "coupler.pulses.updated"
+            assert refreshed.proposed == "coupler.pulses.calibrated"
+            assert captured.value("coupler.module.cz_f2") == "coupler.pulses.original"
+            assert control.read_context().target != captured.target
+        finally:
+            draft.teardown()
+
+
 def test_values_follow_fixed_target_retarget_edits_and_actual_current_values(session):
     entry, control, service = session
     target = control.read_context().target
