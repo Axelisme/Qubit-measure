@@ -1,5 +1,6 @@
 """Registered handwritten workflow forms share sweep commands and restored input."""
 
+import json
 from pathlib import Path
 from typing import Annotated
 
@@ -8,6 +9,7 @@ from pydantic import Field
 from zcu_tools.gui.app.workflows.persistence import WorkflowInputSnapshot
 from zcu_tools.gui.form import (
     Display,
+    FormInput,
     FormModel,
 )
 from zcu_tools.gui.form_adapter import LinRange, SweepInput
@@ -29,9 +31,19 @@ def coordinate_window(sweep_window):
 @pytest.fixture
 def restored_coordinate_window(sweep_window):
     saved = WorkflowInputSnapshot(
-        plan={
-            "sweep": {"kind": "center", "center": {"expr": "3 + 4"}, "span": -6, "n": 4}
-        }
+        plan=json.loads(
+            FormInput(
+                SweepPlanForm,
+                {
+                    "sweep": {
+                        "kind": "center",
+                        "center": {"expr": "3 + 4"},
+                        "span": -6,
+                        "n": 4,
+                    }
+                },
+            ).to_json()
+        )
     )
     return ComponentDriver(sweep_window(SweepPlanForm, saved))
 

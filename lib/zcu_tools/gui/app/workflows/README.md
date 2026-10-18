@@ -1,6 +1,6 @@
 # gui/app/workflows — Workflow host
 
-**Last updated:** 2026-10-18，run 終局後 device cache 讀回與 sweep row commands
+**Last updated:** 2026-10-18，完整 FormInput memento 與原子還原
 
 ## 註冊與組裝
 
@@ -34,9 +34,9 @@ Sweep 表單沿用 `gui.form_adapter` 的 Range／Center × Expts／Step input �
 
 Description 的 options 只帶 value／label／commands，selected index 由 core 判定，children 保留完整 path。can_expand 只表示結構可展開，不保證 children 非空。selection_fixed 表示本層只有一個非 null selector 分支，不凍結內層 choices。null 只控制啟停，不算另一個分支，停用時也一樣。fixed／fixed_value 表示完整值固定。Wire 直接投影 core 的這些能力，不重算規則。未知、inactive 或穿入 whole leaf 的 path 以 FormPathError 回報。RPC 將它投影為 invalid_params／form_path，data 帶完整 form_path。其他 ValueError 保留 controller_error。
 
-Memento 2 保存既有 tagged ref／inline input，格式未變。舊版沿既有 codec／caretaker 拒絕，不 migration 或雙讀。`defaults(env)` 只建 fresh 初值，沒有 previous。相容 saved leaves 的 overlay 仍由 host 完成。
+Memento 3 為 plan 與 knobs 各存完整 FormInput envelope，包含 selection、raw branch、型別 identity 與未完成原稿。Restore 先準備兩個候選，再重設兩個 input/base。任一 annotation identity 不相容都不改兩個表單，不逐葉 overlay，也不做舊版雙讀。`defaults(env)` 只在沒有 saved draft 時建 fresh 初值，沒有 previous。
 
-`WorkflowForms` 保留各名稱的 parsed RAM drafts，建好候選 panels 後才發布。Prepare 用新 capture 重建 defaults。`SingleFileCaretaker` 保存 parsed FormInput，包括 expression，不保存 renderer-local 未解析文字、native run 或硬體。從 Start 到 terminal delivery，保存的 knobs 來自 run 的 binding，包括還沒 Apply 的 parsed 編輯；terminal 之後來自 Start knobs。`--clean` 只略過啟動讀取，正常 close 仍保存。啟動時 session 是 EMPTY、沒有 captured library，所以存檔裡的 module ref 名稱會被丟棄，其他相容欄位照常還原，訊息列逐一顯示 `Discarded plan: …` 或 `Discarded knobs: …`。
+`WorkflowForms` 保留各名稱的 parsed RAM drafts，建好候選 panels 後才發布。Prepare 用新 capture 重建 defaults。`SingleFileCaretaker` 保存 parsed FormInput，包括 expression，不保存 renderer-local 未解析文字、native run 或硬體。從 Start 到 terminal delivery，保存的 knobs 來自 run 的 binding，包括還沒 Apply 的 parsed 編輯；terminal 之後來自 Start knobs。`--clean` 只略過啟動讀取，正常 close 仍保存。啟動時 session 是 EMPTY，還原不查 library。存檔裡的 ref 名稱保留，缺 library 或來源錯誤由一般表單驗證呈現，invalid draft 擋 Run。已複製成 inline 的原稿不因 library 更新或原 key 消失而重建。不相容檔案的啟動處理與 source reload 的草稿政策仍待裁決，見 ADR-0079。
 
 Reload 只允許 idle/terminal，保留 session/services/controller、run binding 與既有 captures。相容 input 保留，removed selection 改選清單第一項。Import/panel 失敗保留舊 panels/drafts，但阻擋 Start 直到 retry 成功；fixed-source 改動要求 restart。
 

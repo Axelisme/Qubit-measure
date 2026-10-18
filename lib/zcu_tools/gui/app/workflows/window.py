@@ -463,24 +463,24 @@ class WorkflowWindow[C](QWidget):
         # already reset to the run's accepted input, while remote reads of the
         # run_id still use the run's binding.
         knobs = (
-            binding.state.input.data
+            binding.state.input
             if binding is not None and self._run_view.start_locked
-            else self.tunables_panel.state.input.data
+            else self.tunables_panel.state.input
         )
-        return WorkflowInputSnapshot(plan=self.plan_panel.state.input.data, knobs=knobs)
+        return WorkflowInputSnapshot.capture(self.plan_panel.state.input, knobs)
 
     def restore_persisted_state(
         self, state: WorkflowInputSnapshot
     ) -> WorkflowInputRestoreReport:
-        """Overlay saved state on fresh defaults, resetting both panel bases.
+        """Restore complete saved drafts, resetting both panel bases atomically.
 
         Call on the owner thread after construction, before starting a run.
         Pending/running/paused ownership raises InvalidRunState before edits.
-        FormState owns compatibility and returns discarded model-field paths,
-        including saved leaves whose captured source check fails; expressions
-        remain input even when their result is invalid. Defaults and other source
-        failures propagate without publishing either candidate. Successful
-        restoration refreshes both editors and clears renderer-local text.
+        FormInput checks trusted annotation identity without reading sources or
+        executing converters. Incompatible envelopes raise ValueError before
+        either panel changes. Missing refs and ordinary invalid values remain
+        draft input for general validation. Successful restoration refreshes
+        both editors and clears renderer-local text. No leaves are discarded.
         """
         self._ensure_can_start()
         return self._forms.restore(state)

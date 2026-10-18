@@ -138,18 +138,26 @@ class PersistedDraftForm(FormModel):
     required: float
 
 
-def test_window_memento_restores_separate_selection_and_whole_invalid_draft(sweep_window) -> None:
+def test_window_memento_restores_separate_selection_and_whole_invalid_draft(
+    sweep_window,
+) -> None:
     original = sweep_window(PersistedDraftForm, None)
     original.plan_panel.state.install_input(
         FormInput(
             PersistedDraftForm,
             {
-                "sweep": {"kind": "linrange", "start": {"expr": "missing + 1"}, "stop": "invalid"},
+                "sweep": {
+                    "kind": "linrange",
+                    "start": {"expr": "missing + 1"},
+                    "stop": "invalid",
+                },
                 "optional": None,
             },
         )
     )
-    original.plan_panel.state.write({("sweep",): {"kind": "center"}}, original.plan_panel.env)
+    original.plan_panel.state.write(
+        {("sweep",): {"kind": "center"}}, original.plan_panel.env
+    )
     codec = WorkflowInputCodec()
     snapshot = codec.decode(codec.encode(original.capture_persisted_state()))
     restored = sweep_window(PersistedDraftForm, snapshot)
@@ -158,28 +166,44 @@ def test_window_memento_restores_separate_selection_and_whole_invalid_draft(swee
     assert restored.plan_panel.state.preview(restored.plan_panel.env).errors is not None
 
 
-def test_inline_copy_memento_keeps_original_input_after_library_content_changes(sweep_window) -> None:
+def test_inline_copy_memento_keeps_original_input_after_library_content_changes(
+    sweep_window,
+) -> None:
     form = module_form(PulseSpec)
-    library = LibrarySnapshot(ModuleLibraryDocument(
-        format="zcu.module-library", format_version="2.0",
-        components={"Q": ComponentLibrary(waveforms={
-            "shape": GaussWaveformCfg(length=0.8, sigma=0.2)
-        })},
-    ))
+    library = LibrarySnapshot(
+        ModuleLibraryDocument(
+            format="zcu.module-library",
+            format_version="2.0",
+            components={
+                "Q": ComponentLibrary(
+                    waveforms={"shape": GaussWaveformCfg(length=0.8, sigma=0.2)}
+                )
+            },
+        )
+    )
     env = FormEnv(library=library)
     original = sweep_window(form.model, None)
     state = original.plan_panel.state
-    state.install_input(FormInput(form.model, {"waveform": {"kind": "ref", "name": "Q.waveforms.shape"}}))
+    state.install_input(
+        FormInput(
+            form.model, {"waveform": {"kind": "ref", "name": "Q.waveforms.shape"}}
+        )
+    )
     state.write({("waveform",): {"kind": "inline", "module": {"style": "gauss"}}}, env)
     assert state.input.data["waveform"] == {
-        "kind": "inline", "module": {"style": "gauss", "length": 0.8, "sigma": 0.2}
+        "kind": "inline",
+        "module": {"style": "gauss", "length": 0.8, "sigma": 0.2},
     }
     state.write({("waveform", "module", "sigma"): "unfinished"}, env)
     saved = original.capture_persisted_state()
-    changed = FormEnv(library=library.replaced_waveform(
-        "Q.waveforms.shape", GaussWaveformCfg(length=1.6, sigma=0.4)
-    ))
-    restored = sweep_window(form.model, WorkflowInputCodec().decode(WorkflowInputCodec().encode(saved)))
+    changed = FormEnv(
+        library=library.replaced_waveform(
+            "Q.waveforms.shape", GaussWaveformCfg(length=1.6, sigma=0.4)
+        )
+    )
+    restored = sweep_window(
+        form.model, WorkflowInputCodec().decode(WorkflowInputCodec().encode(saved))
+    )
     assert restored.plan_panel.state.input.same_as(state.input)
     restored.plan_panel.state.preview(changed)
     assert restored.plan_panel.state.input.same_as(state.input)
@@ -202,10 +226,12 @@ def test_open_restore_and_close_flush(qapp: QApplication, tmp_path: Path) -> Non
     path = tmp_path / "t1_workflow_state_v1.json"
     path.write_text(
         json.dumps(
-            WorkflowInputCodec().encode(WorkflowInputSnapshot.capture(
-                FormInput(PlanForm, {"scale": {"expr": "1 / 4"}}),
-                FormInput(TunablesForm, {"sample": {"value": 35.0}}),
-            ))
+            WorkflowInputCodec().encode(
+                WorkflowInputSnapshot.capture(
+                    FormInput(PlanForm, {"scale": {"expr": "1 / 4"}}),
+                    FormInput(TunablesForm, {"sample": {"value": 35.0}}),
+                )
+            )
         )
     )
     app = WorkflowsGuiBehavior(
@@ -216,8 +242,15 @@ def test_open_restore_and_close_flush(qapp: QApplication, tmp_path: Path) -> Non
     )
     app.assemble(None)
     try:
-        assert draft_data(app.window.capture_persisted_state().plan)["scale"] == {"expr": "1 / 4"}
-        assert sample_input(draft_data(app.window.capture_persisted_state().knobs))["value"] == 35.0
+        assert draft_data(app.window.capture_persisted_state().plan)["scale"] == {
+            "expr": "1 / 4"
+        }
+        assert (
+            sample_input(draft_data(app.window.capture_persisted_state().knobs))[
+                "value"
+            ]
+            == 35.0
+        )
         app.window.tunables_panel.state.write(
             {("sample", "value"): {"expr": "9 * 5"}}, app.window.tunables_panel.env
         )
@@ -369,7 +402,8 @@ def test_saved_reference_without_captured_library_survives_reopen_as_invalid_dra
     qapp: QApplication, tmp_path: Path
 ) -> None:
     raw: dict[str, JsonValue] = {
-        "drive": {"kind": "ref", "name": "Q1.pulses.pi"}, "count": 5
+        "drive": {"kind": "ref", "name": "Q1.pulses.pi"},
+        "count": 5,
     }
     for opening in range(2):
         app = WorkflowsGuiBehavior(
@@ -458,7 +492,9 @@ def test_start_tunables_edited_after_terminal_are_saved(
     window.tunables_panel.state.write(
         {("value",): {"expr": "2 + 3"}}, window.tunables_panel.env
     )
-    assert draft_data(window.capture_persisted_state().knobs)["value"] == {"expr": "2 + 3"}
+    assert draft_data(window.capture_persisted_state().knobs)["value"] == {
+        "expr": "2 + 3"
+    }
     caretaker = SingleFileCaretaker(
         window, codec=WorkflowInputCodec(), filename="input.json", cache_dir=tmp_path
     )

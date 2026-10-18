@@ -4,8 +4,7 @@ Controller owns accepted-run knobs and their fixed capture. Window supplies that
 input when switching/reloading; this coordinator never reads Controller, source,
 hardware or storage. It retains inactive parsed drafts in RAM, swaps attachments
 only after both candidate panels build, and delegates compatibility to FormState.
-The existing memento stays a single current plan/knobs snapshot, not a run or a
-new persistence format. Local unparsed renderer text is not an inactive draft.
+The memento stays a single current plan/knobs snapshot, not a run. Local unparsed renderer text is not an inactive draft.
 """
 
 from qtpy.QtWidgets import QWidget
@@ -54,7 +53,7 @@ class WorkflowForms[C]:
     ) -> tuple[
         WorkflowPlanPanel, WorkflowFormPanel[FormModel], WorkflowInputRestoreReport
     ]:
-        """Construct a complete candidate pair, overlaying compatible parsed input.
+        """Construct a complete candidate pair from defaults or whole saved drafts.
 
         env is fixed by Window. snapshot None means fresh defaults. Defaults,
         source and compatibility errors propagate; unpublished panels are closed
@@ -68,10 +67,11 @@ class WorkflowForms[C]:
             knobs = attachment.knobs_panel(state, env, parent)
             report = WorkflowInputRestoreReport((), ())
             if snapshot is not None:
-                report = WorkflowInputRestoreReport(
-                    plan.state.write_compatible(snapshot.plan, env),
-                    knobs.state.write_compatible(snapshot.knobs, env),
+                plan_input, knobs_input = snapshot.inputs(
+                    attachment.plan_model, attachment.knobs_model, env
                 )
+                plan.state.reset(plan_input)
+                knobs.state.reset(knobs_input)
             for panel in (plan, knobs):
                 panel.state.reset(panel.state.input)
                 panel.editor.refresh(env)
@@ -134,24 +134,19 @@ class WorkflowForms[C]:
         return report
 
     def restore(self, snapshot: WorkflowInputSnapshot) -> WorkflowInputRestoreReport:
-        """Overlay the existing current memento atomically on fresh model defaults.
+        """Restore both complete drafts after validating both trusted identities.
 
-        Window checks idle admission. Shared FormState owns compatibility and
-        retains expression input, even if evaluation is invalid. Failures leave
-        current drafts intact. No catalog selection or source capture occurs.
+        Window checks idle admission. Raw expressions, missing/null and invalid
+        ordinary values remain authored input. A malformed or incompatible
+        envelope raises ValueError before either draft changes. No catalog
+        selection, converter, evaluation or source capture occurs.
         """
-        plan = FormState[FormModel](
-            self.attachment.plan_model.default_input(self.plan.env)
+        plan, knobs = snapshot.inputs(
+            self.attachment.plan_model, self.attachment.knobs_model, self.plan.env
         )
-        knobs = FormState[FormModel](
-            self.attachment.knobs_model.default_input(self.knobs.env)
-        )
-        report = WorkflowInputRestoreReport(
-            plan.write_compatible(snapshot.plan, self.plan.env),
-            knobs.write_compatible(snapshot.knobs, self.knobs.env),
-        )
-        self.plan.state.reset(plan.input)
-        self.knobs.state.reset(knobs.input)
+        report = WorkflowInputRestoreReport((), ())
+        self.plan.state.reset(plan)
+        self.knobs.state.reset(knobs)
         for panel in (self.plan, self.knobs):
             panel.editor.refresh(panel.env)
             panel.editor.discard_local_text()
