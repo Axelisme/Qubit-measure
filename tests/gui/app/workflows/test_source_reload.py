@@ -92,11 +92,13 @@ def test_reload_migrates_raw_branch_and_independent_selection_override(
     assert before.selections == {("samples",): {"kind": "linrange"}}
     source.write(2)
     error: CatalogReloadError | None = None
+    report = None
     try:
         report = window.reload_source()
     except CatalogReloadError as exc:
         error = exc
     assert error is None, "Source reload must migrate, not require strict identity"
+    assert report is not None
     assert report.plan_dropped == (("legacy",),)
     assert window.plan_panel.state.input.data["samples"] == before.data["samples"]
     assert window.plan_panel.state.input.selections == before.selections

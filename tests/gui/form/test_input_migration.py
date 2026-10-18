@@ -31,10 +31,12 @@ class MigrationForm(FormModel):
 
     @classmethod
     def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+        del env
         raise AssertionError("Migration must not consult options")
 
     @classmethod
     def converters(cls, env: FormEnv) -> Mapping[FormPath, InputConverter]:
+        del env
         raise AssertionError("Migration must not consult converters")
 
 
