@@ -523,6 +523,79 @@ class MuxReadout(AbsReadout):
         )
         return t + length
 
+    def collect_raw_iq(
+        self,
+        prog: ModularProgramV2,
+        *,
+        read_index: int | None = None,
+    ) -> NDArray[np.float64]:
+        """Return last-round raw IQ in tone order, normalized by ADC length.
+
+        prog must be the program that initialized this module. Call after its
+        integrated acquire(), or in a completed-round hook. This reads get_raw()
+        from that program, never acquires or samples a new round. A simulation
+        getter may materialize retained shots using that round's fixed identity.
+        Multiple rounds are NOT concatenated: get_raw() retains only the last
+        round. Collect in each completed-round hook to retain every round.
+
+        Input buffers must be int64 QICK sums shaped (*prog.loop_dims,reads,2)
+        in actual ADC declaration order. The returned independent float64 array
+        has shape (*prog.loop_dims,reads,N,2), with N in cfg.tones order and the
+        final axis [I,Q]. Every loop axis, including reps at prog.avg_level, keeps
+        its original position and shot order. No preparation meaning is assigned.
+        read_index=None keeps every read; a nonnegative int selects the same read
+        on all tones and returns (*prog.loop_dims,N,2). No shots are averaged.
+
+        Values are ADC units per integration sample: sums divided by each ADC's
+        declared, rounded length in samples. DC offsets remain, unlike QICK's
+        default averaged acquisition. No rotation or classification is applied.
+        Hardware and simulation get_raw() share this normalization contract.
+
+        ValueError names this module for the wrong/uninitialized program, absent
+        raw buffers/channels, count/dtype/loop/read/IQ shape mismatches or invalid
+        read_index. Unrelated channels' shapes are ignored. Getter errors propagate.
+        """
+        if self._program is not prog:
+            raise ValueError(
+                f"{self.name}: use the program that initialized this module"
+            )
+        if read_index is not None and (type(read_index) is not int or read_index < 0):
+            raise ValueError(
+                f"{self.name}: read_index must be None or a nonnegative integer"
+            )
+        positions = {ch: i for i, ch in enumerate(prog.ro_chs)}
+        for i, tone in enumerate(self.cfg.tones):
+            if tone.ro_ch not in positions:
+                raise ValueError(f"{self.name}: tone {i} missing ro_ch {tone.ro_ch}")
+        raw = prog.get_raw()
+        if raw is None:
+            raise ValueError(
+                f"{self.name}: no raw buffers; acquire integrated IQ first"
+            )
+        if len(raw) != len(positions):
+            raise ValueError(
+                f"{self.name}: raw item count {len(raw)} != channels {len(positions)}"
+            )
+        if prog.loop_dims is None:
+            raise ValueError(f"{self.name}: raw loop dimensions are unavailable")
+        reads = prog.ro_chs[self.cfg.tones[0].ro_ch]["trigs"]
+        expected_shape = (*prog.loop_dims, reads, 2)
+        selected: list[NDArray[np.float64]] = []
+        for i, tone in enumerate(self.cfg.tones):
+            pos = positions[tone.ro_ch]
+            array = raw[pos]
+            ro = prog.ro_chs[tone.ro_ch]
+            where = f"{self.name}: tone {i} ro_ch {tone.ro_ch} raw[{pos}]"
+            if array.dtype != np.int64:
+                raise ValueError(f"{where} must be int64 QICK sums")
+            if reads <= 0 or ro["trigs"] != reads or array.shape != expected_shape:
+                raise ValueError(f"{where} shape {array.shape} != {expected_shape}")
+            if read_index is not None and read_index >= reads:
+                raise ValueError(f"{where} read_index {read_index} out of bounds")
+            iq = array.astype(np.float64) / ro["length"]
+            selected.append(iq if read_index is None else iq[..., read_index, :])
+        return np.stack(selected, axis=-2)
+
     def collect_iq(
         self,
         prog: ModularProgramV2,
