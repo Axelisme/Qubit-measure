@@ -11,10 +11,12 @@ from scipy.linalg import expm
 
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..secular import SecularModel
+from ..workplan import WorkPlan
 from . import _period_sambe
 from ._cf4_grid import coarse_count, finer_count, spectral_width
 from ._dop853 import Tolerances, integrate_dense
 from ._secular import secular_operators
+from ._workload_facts import split_rate
 
 _MIN_FREQUENCY_GHZ = 0.03
 _MAX_SPLIT_ESTIMATE = 1.0
@@ -117,22 +119,6 @@ class _Periods:
 def _check_budget(budget: float) -> None:
     if not np.isfinite(budget) or budget <= 0:
         raise ValueError("Floquet period budget must be finite and positive")
-
-
-def _split_rate(model: SecularModel, port: int, frequency: float, gain: float) -> float:
-    generator, decay = secular_operators(model)
-    gamma = max(float(np.linalg.norm(generator, 2)), float(np.max(decay)))
-    drive = model.drives[port]
-    strength = (
-        2
-        * np.pi
-        * abs(gain)
-        * (
-            np.linalg.norm(drive.in_phase_ghz, 2)
-            + np.linalg.norm(drive.quadrature_ghz, 2)
-        )
-    )
-    return float(gamma * (strength / frequency) ** 2)
 
 
 def _subdivisions(estimate: float) -> int:
@@ -256,6 +242,7 @@ def _build(
     budget: float,
     builder: PeriodBuilder,
     *,
+    work_plan: WorkPlan,
     neighbours: list[_Neighbour] | None = None,
 ) -> PeriodData:
     port, frequency, gain = tone
@@ -319,7 +306,7 @@ def _build(
             raise RuntimeError("Floquet period preparation produced nonfinite data")
         array.setflags(write=False)
     return PeriodData(
-        *arrays, _split_rate(model, port, frequency, gain), magnus, spectrum
+        *arrays, split_rate(model, port, frequency, gain, work_plan), magnus, spectrum
     )
 
 
@@ -648,15 +635,16 @@ class FloquetPeriodKernel:
             if table.tones[row] != 1:
                 continue
             envelope = table.envelopes[int(table.tone_envelope[row, 0])]
-            frequency = abs(float(table.tone_frequency_ghz[row, 0]))
-            if envelope.kind != "constant" or frequency < _MIN_FREQUENCY_GHZ:
+            frequency = float(table.tone_frequency_ghz[row, 0])
+            if envelope.kind != "constant" or abs(frequency) < _MIN_FREQUENCY_GHZ:
                 continue
             model = source.model(tuple(int(v) for v in table.level[row]))
-            estimate = table.duration_ns[row] * _split_rate(
+            estimate = table.duration_ns[row] * split_rate(
                 model,
                 int(table.tone_port[row, 0]),
                 frequency,
                 float(table.tone_amplitude[row, 0]),
+                context.work_plan,
             )
             accepted[index] = estimate <= _MAX_SPLIT_ESTIMATE * _MAX_SUBDIVISIONS**2
         return accepted
@@ -743,7 +731,13 @@ class FloquetPeriodKernel:
                 for _, handle in dependencies
             )
             if not reusable:
-                entry = _build(model, _Tone(port, frequency, gain), budget, builder)
+                entry = _build(
+                    model,
+                    _Tone(port, frequency, gain),
+                    budget,
+                    builder,
+                    work_plan=context.work_plan,
+                )
             else:
                 for _, handle in dependencies:
                     if not handle.sealed:
@@ -758,6 +752,7 @@ class FloquetPeriodKernel:
                                 _Tone(port, frequency, a),
                                 budget,
                                 PeriodBuilder("cf4"),
+                                work_plan=context.work_plan,
                             )
                         ),
                     )
@@ -771,6 +766,7 @@ class FloquetPeriodKernel:
                         _Tone(port, frequency, gain),
                         budget,
                         builder,
+                        work_plan=context.work_plan,
                         neighbours=neighbours,
                     )
                 )

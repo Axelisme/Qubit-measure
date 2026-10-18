@@ -107,10 +107,11 @@ class _Entry:
 @dataclass(frozen=True)
 class _Prepared:
     entries: tuple[_Entry, ...]
+    keys: NDArray[np.void]
 
     @property
     def nbytes(self) -> int:
-        return sum(entry.nbytes for entry in self.entries)
+        return self.keys.nbytes + sum(entry.nbytes for entry in self.entries)
 
 
 @dataclass(frozen=True)
@@ -657,6 +658,40 @@ def _admission(
     return legacy, sideband
 
 
+def _entry_admission(
+    entry: _Entry,
+    parameters: NDArray[np.float64],
+    rows: NDArray[np.int64],
+    budget: float,
+) -> tuple[NDArray[np.bool_], dict[int, FloquetAdmission]]:
+    """Compute current-row decisions using already covered model-only data."""
+    accepted, eligible = _admission(entry, parameters, budget)
+    legacy = np.flatnonzero(accepted)
+    modal = _dyson_mask(
+        (entry.energies, entry.bath, entry.x, entry.y),
+        entry.strengths,
+        parameters[legacy],
+        budget,
+    )
+    admissions = {
+        int(rows[member]): FloquetAdmission("modal" if use_modal else "periodic")
+        for member, use_modal in zip(legacy, modal, strict=True)
+    }
+    for local in np.flatnonzero(eligible):
+        selected_plan = _sideband_plan(entry, parameters[local])
+        accepted[local] = selected_plan.bound <= budget * 0.95
+        if accepted[local]:
+            for array in (
+                selected_plan.rows,
+                selected_plan.columns,
+                selected_plan.values,
+                selected_plan.exponents,
+            ):
+                array.setflags(write=False)
+            admissions[int(rows[local])] = FloquetAdmission("sidebands", selected_plan)
+    return accepted, admissions
+
+
 @njit(nogil=True, cache=True)
 def _dyson_mask(data, strengths, parameters, budget):
     result = np.zeros(len(parameters), dtype=np.bool_)
@@ -825,6 +860,24 @@ def _advance(
         states[~dyson] = selected
 
 
+def _candidate_positions(
+    table: SegmentTable, rows: NDArray[np.int64]
+) -> NDArray[np.int64]:
+    """Locate structurally valid constant two-tone rows before frame admission."""
+    if table.tone_port.shape[1] < 2:
+        return np.empty(0, dtype=np.int64)
+    constants = np.array([e.kind == "constant" for e in table.envelopes])
+    envelopes = np.maximum(0, table.tone_envelope[rows, :2])
+    constant = (
+        constants[envelopes].all(axis=1)
+        if len(constants)
+        else np.zeros(len(rows), dtype=bool)
+    )
+    stark = _slots(table, rows)
+    frequency = table.tone_frequency_ghz[rows, stark]
+    return np.flatnonzero((table.tones[rows] == 2) & constant & (frequency > 0))
+
+
 class FloquetKernel:
     """C5 state-independent Floquet preparation and density evolution.
 
@@ -858,9 +911,53 @@ class FloquetKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         context: KernelContext,
-    ) -> None:
-        """Decline cached-domain admission; use the ordinary guard build path."""
-        del prepared, table, rows, context
+    ) -> GuardResult | None:
+        """Readmit current rows only if all needed probe-bin certificates exist.
+
+        A missing frame key or any required (probe port, 2 MHz bin) returns None.
+        Otherwise use only immutable frame data to produce fresh row decisions
+        and plans, including complete rejection. No frame or certificate is built.
+        """
+        if not isinstance(prepared, _Prepared):
+            raise TypeError("Floquet requires its own prepared payload")
+        accepted = np.zeros(len(rows), dtype=bool)
+        positions = _candidate_positions(table, rows)
+        if not len(positions):
+            return GuardResult(accepted)
+        selected = rows[positions]
+        keys = self.prepare_keys(table, selected, context)
+        indices = {key.tobytes(): i for i, key in enumerate(prepared.keys)}
+        if any(key.tobytes() not in indices for key in keys):
+            return None
+        parameters = _parameters(table, selected)
+        admissions: dict[int, FloquetAdmission] = {}
+        for index, entry in enumerate(prepared.entries):
+            members = np.array(
+                [i for i, key in enumerate(keys) if indices[key.tobytes()] == index],
+                dtype=np.int64,
+            )
+            if not len(members):
+                continue
+            _, eligible = _admission(entry, parameters[members], context.budget)
+            if eligible.any():
+                if entry.sidebands is None:
+                    return None
+                bins = {(port, c.center) for port, c in entry.sidebands.certificates}
+                if any(
+                    (int(p[-1]), float(np.round(p[3] / 0.002) * 0.002)) not in bins
+                    for p in parameters[members[eligible]]
+                ):
+                    return None
+            passed, plans = _entry_admission(
+                entry, parameters[members], selected[members], context.budget
+            )
+            accepted[positions[members]] = passed
+            admissions.update(plans)
+        return GuardResult(
+            accepted,
+            (GuardPreparation(prepared.keys, prepared),),
+            FloquetPlan(admissions),
+        )
 
     def guard_prepared(
         self,
@@ -879,19 +976,7 @@ class FloquetKernel:
         preparations: list[GuardPreparation] = []
         admissions: dict[int, FloquetAdmission] = {}
         accepted = np.zeros(len(rows), dtype=bool)
-        if table.tone_port.shape[1] < 2:
-            return GuardResult(accepted)
-        constants = np.array([e.kind == "constant" for e in table.envelopes])
-        playing = table.tones[rows] == 2
-        envelopes = np.maximum(0, table.tone_envelope[rows, :2])
-        constant = (
-            constants[envelopes].all(axis=1)
-            if len(constants)
-            else np.zeros(len(rows), dtype=bool)
-        )
-        stark = _slots(table, rows)
-        frequency = table.tone_frequency_ghz[rows, stark]
-        positions = np.flatnonzero(playing & constant & (frequency > 0))
+        positions = _candidate_positions(table, rows)
         if not len(positions):
             return GuardResult(accepted)
         selected = rows[positions]
@@ -914,18 +999,7 @@ class FloquetKernel:
             )
             members = np.flatnonzero(inverse == key_index)
             entry = prepared.entries[0]
-            legacy, eligible = _admission(entry, params[members], budget)
-            legacy_members = members[legacy]
-            modal = _dyson_mask(
-                (entry.energies, entry.bath, entry.x, entry.y),
-                entry.strengths,
-                params[legacy_members],
-                budget,
-            )
-            for member, use_modal in zip(legacy_members, modal, strict=True):
-                admissions[int(selected[member])] = FloquetAdmission(
-                    "modal" if use_modal else "periodic"
-                )
+            _, eligible = _admission(entry, params[members], budget)
             if eligible.any():
                 entry = _with_sidebands(entry)
                 if entry.sidebands is None:
@@ -937,27 +1011,15 @@ class FloquetKernel:
                     entry.inverse,
                     params[members[eligible]],
                 )
-                prepared = _Prepared((replace(entry, sidebands=frame),))
+                prepared = _Prepared((replace(entry, sidebands=frame),), prepared.keys)
             preparations.append(
                 GuardPreparation(keys[key_index : key_index + 1], prepared)
             )
-            for local in np.flatnonzero(eligible):
-                selected_plan = _sideband_plan(
-                    prepared.entries[0], params[members[local]]
-                )
-                legacy[local] = selected_plan.bound <= budget * 0.95
-                if legacy[local]:
-                    for array in (
-                        selected_plan.rows,
-                        selected_plan.columns,
-                        selected_plan.values,
-                        selected_plan.exponents,
-                    ):
-                        array.setflags(write=False)
-                    admissions[int(selected[members[local]])] = FloquetAdmission(
-                        "sidebands", selected_plan
-                    )
-            accepted[positions[members]] = legacy
+            passed, plans = _entry_admission(
+                prepared.entries[0], params[members], selected[members], budget
+            )
+            accepted[positions[members]] = passed
+            admissions.update(plans)
         return GuardResult(accepted, tuple(preparations), FloquetPlan(admissions))
 
     def prepare_keys(
@@ -1014,7 +1076,9 @@ class FloquetKernel:
                 )
             except np.linalg.LinAlgError as error:
                 raise RuntimeError("Floquet modal construction failed") from error
-        return _Prepared(tuple(entries))
+        owned_keys = keys.copy()
+        owned_keys.setflags(write=False)
+        return _Prepared(tuple(entries), owned_keys)
 
     def bind_input(
         self,

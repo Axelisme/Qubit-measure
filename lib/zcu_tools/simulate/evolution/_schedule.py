@@ -374,6 +374,7 @@ class Schedule:
                 self.dispatch.two_tone_direct,
                 self.dispatch.names,
                 self.dispatch.plans,
+                self.dispatch.cached,
             ),
         )
         bindings: list[_Binding] = []
