@@ -98,6 +98,7 @@ def test_averaged_statistics_preserve_layout_offsets_hooks_and_deferred_raw():
     for ro in prog.soccfg["readouts"]:
         ro["iq_offset"] = 0.25
     averaged = prog.acquire(env.soc, progress=False, round_hook=hook)
+    assert averaged is not None
     expected = np.array(
         [
             [
@@ -150,6 +151,7 @@ def test_shot_processing_uses_materialized_statistics(processing):
     else:
         kwargs = {"trackers": [Tracker(), Tracker()]}
     result = prog.acquire(env.soc, progress=False, **kwargs)
+    assert result is not None
     request = request_of(env)
     raw = raw_of(prog)
     expected_raw = records[0].materialize_raw(request.reps, request.avg_level)

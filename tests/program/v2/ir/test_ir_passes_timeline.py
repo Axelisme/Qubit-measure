@@ -151,10 +151,12 @@ def test_timed_instruction_merge_does_not_cross_block_boundary():
     out = _run_merge(root)
 
     assert len(out.insts) == 3
-    assert isinstance(out.insts[0].insts[0], TimeInst)  # pyright: ignore[reportAttributeAccessIssue]
-    assert str(out.insts[0].insts[0].lit) == "#2"  # pyright: ignore[reportAttributeAccessIssue]
-    assert isinstance(out.insts[2].insts[0], TimeInst)  # pyright: ignore[reportAttributeAccessIssue]
-    assert str(out.insts[2].insts[0].lit) == "#3"  # pyright: ignore[reportAttributeAccessIssue]
+    assert isinstance(out.insts[0], BasicBlockNode)
+    assert isinstance(out.insts[2], BasicBlockNode)
+    assert isinstance(out.insts[0].insts[0], TimeInst)
+    assert str(out.insts[0].insts[0].lit) == "#2"
+    assert isinstance(out.insts[2].insts[0], TimeInst)
+    assert str(out.insts[2].insts[0].lit) == "#3"
 
 
 # ---------------------------------------------------------------------------

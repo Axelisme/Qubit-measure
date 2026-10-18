@@ -45,6 +45,7 @@ class ProgramV2Cfg(ConfigBase):
 
 
 # QICK annotates single ndarrays; our existing mixin returns one array per ADC.
+# tolerated: QICK annotates acquisition buffers as ndarray although its implementations return per-channel lists.
 class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
     SimulationAcquireMixin, ImproveAsmV2, AveragerProgramV2, IRCompileMixin
 ):
@@ -103,9 +104,11 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
         )
 
     def acquire(self, soc, *args, **kwargs):
+        """Return averaged IQ, or None when QICK step_rounds=True prepares only."""
         return super().acquire(soc, *args, rounds=self.cfg_model.rounds, **kwargs)
 
     def acquire_decimated(self, soc, *args, **kwargs):
+        """Return decimated IQ, or None when QICK step_rounds=True prepares only."""
         return super().acquire_decimated(
             soc, *args, rounds=self.cfg_model.rounds, **kwargs
         )

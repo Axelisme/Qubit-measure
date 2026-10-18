@@ -13,6 +13,7 @@ from qick import qick_asm
 from qick.qick_asm import (
     AcquireMixin,
     logger,
+    # tolerated: QICK imports obtain dynamically from optional RPyC or defines its local fallback.
     obtain,  # pyright: ignore[reportAttributeAccessIssue]
 )
 
@@ -84,6 +85,7 @@ class TypedAcquireMixin(AcquireMixin):
     ) -> list[NDArray[np.float64]]:
         return super()._summarize_decimated(rounds_buf)
 
+    # tolerated: QICK annotates acquisition buffers as ndarray although its implementations consume and return per-channel lists.
     def _average_buf(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         d_reps: Sequence[NDArray[np.float64] | NDArray[np.int64]],
@@ -91,26 +93,31 @@ class TypedAcquireMixin(AcquireMixin):
         remove_offset: bool = True,
     ) -> list[NDArray[np.float64]]:
         return super()._average_buf(
+            # tolerated: QICK annotates acquisition buffers as ndarray although its implementations consume and return per-channel lists.
             d_reps,  # pyright: ignore[reportArgumentType, reportReturnType]
             length_norm=length_norm,
             remove_offset=remove_offset,
         )
 
+    # tolerated: QICK annotates acquisition buffers as ndarray although its implementations consume and return per-channel lists.
     def _process_accumulated(  # pyright: ignore[reportIncompatibleMethodOverride]
         self, acc_buf: Sequence[NDArray[np.float64] | NDArray[np.int64]]
     ) -> list[NDArray[np.float64]]:
+        # tolerated: QICK annotates acquisition buffers as ndarray although its implementations consume and return per-channel lists.
         return super()._process_accumulated(acc_buf)  # pyright: ignore[reportReturnType]
 
-    def acquire(self, *args, **kwargs) -> list[NDArray[np.float64]]:
+    def acquire(self, *args, **kwargs) -> list[NDArray[np.float64]] | None:
+        """Return averaged IQ, or None after preparation when step_rounds=True."""
         return self._acquire_configured(*args, **kwargs)
 
-    def _acquire_configured(self, *args, **kwargs) -> list[NDArray[np.float64]]:
+    def _acquire_configured(self, *args, **kwargs) -> list[NDArray[np.float64]] | None:
         # Environment adapters can replace buffer allocation after modifiers
         # have supplied their options through the normal acquire chain.
-        return super().acquire(*args, **kwargs)  # pyright: ignore[reportReturnType]
+        return super().acquire(*args, **kwargs)
 
-    def acquire_decimated(self, *args, **kwargs) -> list[NDArray[np.float64]]:
-        return super().acquire_decimated(*args, **kwargs)  # pyright: ignore[reportReturnType]
+    def acquire_decimated(self, *args, **kwargs) -> list[NDArray[np.float64]] | None:
+        """Return decimated IQ, or None after preparation when step_rounds=True."""
+        return super().acquire_decimated(*args, **kwargs)
 
     def _completed_round_count(self) -> int:
         rounds_buf = self.rounds_buf
@@ -379,11 +386,12 @@ class SingleShotMixin(TypedAcquireMixin):
         *,
         remove_offset: bool,
     ) -> list[NDArray[np.float64]]:
+        assert isinstance(self, qick_asm.AbsQickProgram)
         shots = []
-        for i_ch, (ro_ch, ro) in enumerate(self.ro_chs.items()):  # pyright: ignore[reportAttributeAccessIssue]
+        for i_ch, (ro_ch, ro) in enumerate(self.ro_chs.items()):
             avg = acc_buf[i_ch] / ro["length"]
             if remove_offset:
-                offset = self.soccfg["readouts"][ro_ch]["iq_offset"]  # pyright: ignore[reportAttributeAccessIssue]
+                offset = self.soccfg["readouts"][ro_ch]["iq_offset"]
                 avg -= offset
             g_shot, e_shot, _ = classify_shots(
                 avg.dot([1, 1j]), g_center, e_center, ge_radius
@@ -425,7 +433,8 @@ class TrackerMixin(TypedAcquireMixin):
                     "Tracker is not implemented for thresholded data"
                 )
 
-            ro_chs: dict = self.ro_chs  # pyright: ignore[reportAttributeAccessIssue, reportMissingTypeArgument]
+            assert isinstance(self, qick_asm.AbsQickProgram)
+            ro_chs = self.ro_chs
 
             if len(trackers) != len(self.acc_buf):
                 raise ValueError(
@@ -481,7 +490,8 @@ class RoundHookMixin(TypedAcquireMixin):
             )
             return self._summarize_accumulated(rounds_buf)
 
-        n_ro_chs = len(self.ro_chs)  # pyright: ignore[reportAttributeAccessIssue]
+        assert isinstance(self, qick_asm.AbsQickProgram)
+        n_ro_chs = len(self.ro_chs)
 
         assert self.rounds_buf is not None
         if self._inc_sum_state is None:  # first round

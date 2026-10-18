@@ -107,5 +107,6 @@ def test_acquire_population_matches_offline_classification(
         remove_offset=remove_offset,
         progress=False,
     )
+    assert actual is not None
     np.testing.assert_array_equal(actual[0][0], np.stack(expected[:2], axis=-1))
     assert actual[0].dtype == np.float64

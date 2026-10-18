@@ -75,6 +75,7 @@ class AdditionalMacroMixin(QickProgramV2):
     ):
         if self._delay_disabled:
             raise RuntimeError("Delay macros are currently disabled.")
+        # tolerated: QICK infers t as int from its default; the timing macro accepts float and QickParam microseconds.
         return super().delay_auto(t, gens, ros, tag)  # pyright: ignore[reportArgumentType]
 
     def delay(self, t: float | QickParam, tag: str | None = None):
@@ -277,6 +278,7 @@ class AdditionalMacroMixin(QickProgramV2):
         no_warn: bool = False,
     ) -> None:
         self.meta_macro("DISABLE_OPT_START", "")
+        # tolerated: QICK infers t as int from its default; the timing macro accepts float and QickParam microseconds.
         super().wait_auto(t=t, gens=gens, ros=ros, tag=tag, no_warn=no_warn)  # pyright: ignore[reportArgumentType]
         self.meta_macro("DISABLE_OPT_END", "")
 

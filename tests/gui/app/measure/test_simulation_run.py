@@ -56,9 +56,11 @@ class NoiseAdapter(SavingAdapter):
             ],
             sweep=[("point", 3)],
         )
-        iq = prog.acquire(
+        acquired = prog.acquire(
             context.soc, progress=False, cancel_flag=context.cancel_signal
-        )[0][0]
+        )
+        assert acquired is not None
+        iq = acquired[0][0]
         return RunRecord(
             cfg, SavingResult(np.array([1.0, 2.0, 3.0]), iq[:, 0] + 1j * iq[:, 1])
         )

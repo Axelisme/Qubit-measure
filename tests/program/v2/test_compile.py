@@ -68,6 +68,7 @@ def test_base_custom_program_requires_make_modules():
     cfg = ProgramV2Cfg()
 
     with pytest.raises(TypeError, match="abstract"):
+        # tolerated: This negative fixture verifies that the abstract program rejects construction without make_modules.
         BaseCustomProgramV2(soccfg, cfg)  # pyright: ignore[reportAbstractUsage]
 
 

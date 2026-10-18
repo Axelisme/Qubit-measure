@@ -27,7 +27,9 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
     _simulation_active: bool = False
     _simulation_raw: tuple[RoundStatistics, int, int] | None = None
 
-    def _acquire_configured(self, soc, *args, **kwargs) -> list[NDArray[np.float64]]:
+    def _acquire_configured(
+        self, soc, *args, **kwargs
+    ) -> list[NDArray[np.float64]] | None:
         if not isinstance(soc, SimulationSoc):
             self._simulation_raw = None
             return super()._acquire_configured(soc, *args, **kwargs)
@@ -182,13 +184,17 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
             self.acc_buf = [raw[ch] for ch in self._program().ro_chs]
         return super().get_raw()
 
-    def acquire(self, soc, *args, **kwargs):
+    def acquire(self, soc, *args, **kwargs) -> list[NDArray[np.float64]] | None:
+        """Return averaged IQ; unbound step_rounds=True prepares and returns None."""
         if not isinstance(soc, SimulationSoc):
             return super().acquire(soc, *args, **kwargs)
         with self._simulation_call(soc, "integrated", kwargs):
             return super().acquire(soc, *args, **kwargs)
 
-    def acquire_decimated(self, soc, *args, **kwargs):
+    def acquire_decimated(
+        self, soc, *args, **kwargs
+    ) -> list[NDArray[np.float64]] | None:
+        """Return decimated IQ; unbound step_rounds=True prepares and returns None."""
         if not isinstance(soc, SimulationSoc):
             return super().acquire_decimated(soc, *args, **kwargs)
         with self._simulation_call(soc, "decimated", kwargs):

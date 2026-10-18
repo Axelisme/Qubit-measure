@@ -64,6 +64,7 @@ def test_v2_derives_sparse_channels_and_acquires_with_live_dc() -> None:
         result = program.acquire_decimated(
             env.soc, progress=False, round_hook=change_bias
         )
+        assert result is not None
         assert np.isfinite(result[0]).all()
         assert np.any(np.asarray(result[0]) != 0)
         assert [r.snapshot.values for r in env.soc.binding.rounds] == [

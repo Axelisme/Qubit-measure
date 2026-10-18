@@ -174,7 +174,9 @@ def test_join_emits_interleaved_read_order_and_companion_raw_from_same_realizati
         return RoundSignals((ChannelSignals(0, traces),))
 
     env.soc.binding.execute = execute
-    traces = prog.acquire_decimated(env.soc, progress=False)[0]
+    acquired = prog.acquire_decimated(env.soc, progress=False)
+    assert acquired is not None
+    traces = acquired[0]
     request = seen[0].acquire
     assert [e.source for e in request.materialize_point(0).events] == [
         "first",
