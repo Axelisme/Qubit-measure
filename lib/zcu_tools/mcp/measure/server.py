@@ -92,8 +92,13 @@ results, decode PNG replies, or run the analysis artifact save pipeline.
 
 
 For an authorized offline launch, connect with launch='new' and simulate set to
-an environment Python path. Explicit simulate paths are refused when attaching;
-the existing GUI stays unchanged. Close it before selecting another environment.
+an environment Python path. Add project_root to isolate result/Database data;
+it must be an absolute path to an existing directory. Omit it to use the repo
+root. Code, catalogs and simulation paths keep their existing resolution.
+Explicit simulate or project_root options are refused when attaching; the
+existing GUI stays unchanged. Close it before selecting another environment or
+data root. Open a prebuilt isolated entry with entry.open(name=...), then select
+a point explicitly. Entry names remain single path segments.
 device_setup(name, cfg) accepts a partial Info patch, reads before, merges full
 cfg, submits once and waits at most 300 seconds. It has no timeout argument.
 YOKO value patches require caller-supplied value_unit; output/rampstep-only
