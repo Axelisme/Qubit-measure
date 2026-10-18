@@ -132,7 +132,7 @@ def test_module_key_command_copies_captured_content_in_one_write() -> None:
     assert observed.value["desc"] is None
 
 
-def test_generated_inline_selection_uses_fresh_template_not_the_key_or_previous_draft() -> (
+def test_generated_inline_selection_preserves_same_type_draft_and_copies_fixed_ref() -> (
     None
 ):
     from zcu_tools.cfg_model import Template, TemplateDef
@@ -172,7 +172,7 @@ def test_generated_inline_selection_uses_fresh_template_not_the_key_or_previous_
     state.write({("probe",): inline.value}, env)
     assert (
         expect_object(expect_object(state.input.data["probe"])["module"])["freq"]
-        == 90.0
+        == 100.0
     )
 
 
@@ -246,12 +246,16 @@ def test_template_kind_reselection_at_each_depth_is_fresh(
     assert current()[leaf] == expected
     state.write({(*path, leaf): 1.7 if depth else {"kind": "inline"}}, env)
     choose("Inline: cosine" if depth else "Inline: reset/two_pulse")
-    assert current() == ({"style": "cosine"} if depth else {"type": "reset/two_pulse"})
+    assert current() == (
+        {"style": "cosine", "length": 1.7} if depth else {"type": "reset/two_pulse"}
+    )
     # Another non-template kind also starts at type defaults, never the old draft.
     choose("Inline: gauss" if depth else "Inline: reset/bath")
-    assert current() == ({"style": "gauss"} if depth else {"type": "reset/bath"})
+    assert current() == (
+        {"style": "gauss", "length": 1.7} if depth else {"type": "reset/bath"}
+    )
     choose("Inline: const" if depth else root_label)
-    assert current().get(leaf) == expected
+    assert current().get(leaf) == (1.7 if depth else expected)
 
 
 def module_env() -> FormEnv:
@@ -528,14 +532,10 @@ def test_required_module_branch_switch_uses_blank_defaults(missing: str) -> None
     state = FormState(input)
     notifications: list[str] = []
     state.subscribe(lambda: notifications.append("changed"))
-    state.write({("modules", "probe", "kind"): "inline"}, env)
-    assert notifications == ["changed"]
-    assert input.data == before
-    module = expect_object(expect_object(state.input.data["modules"])["probe"])
-    assert module["kind"] == "inline"
-    assert expect_object(module["module"])["type"] == "pulse"
-    state.write({("modules", "probe", "module", "freq"): 125.0}, env)
-    assert state.preview(env).values[("modules", "probe", "module", "freq")] == 125.0
+    with pytest.raises(ValueError, match="library|Missing|missing|Unknown"):
+        state.write({("modules", "probe", "kind"): "inline"}, env)
+    assert notifications == []
+    assert state.input.data == input.data == before
 
 
 class MuxCore(ConfigBase):

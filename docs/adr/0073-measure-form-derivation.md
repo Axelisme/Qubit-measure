@@ -51,6 +51,8 @@ group 是 MCP 單層欄位描述可用的前端中立分類名稱 hint，因此�
 
 ### Form 的形狀與初值
 
+欄位切換與固定 model list 的新契約見 [[0079]]，已採用但尚待實作。以下切換與還原條款依此描述目標設計。
+
 `gui.form_adapter.Form(core_cfg, tree)` 從 Pydantic 型別推導 FormModel、起始 input
 與輸出轉換。純量、nullable、Literal／enum、巢狀 model 與 module／waveform
 由共用生成器處理。SweepCfg 使用 Range／Center 與 Expts／Step 的四個 tagged branches。Count 葉名為 n，步長葉名為 step。新表單選 Range + Expts。每個分支只保存 active 座標與採樣輸入。Center 的 span 是帶正負號的完整寬度，不保存另一份端點快取。
@@ -81,7 +83,7 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
 
 初值 expression 在建立 fresh input 時求值，成功後保存 direct 值。
 缺來源或求值失敗不補數字 fallback；必要欄位維持未填。
-使用者寫入的 expression 保留原式。普通換分支用 fresh defaults，不繼承 previous input。
+使用者寫入的 expression 保留原式。選項切換由欄位的一個 converter 決定子表單；沒有 converter 時只改 selection，保留原結構與 input，不補 fresh defaults。Inline 的明確繼承政策由 gui.form_adapter 集中宣告，見 [[0079]]。
 Sweep 的顯式指令是保值換算，不套 fresh defaults。座標換算只求值座標，保留 n／step 原稿。
 採樣換算求值座標與採樣欄位，成功原子安裝 direct 數字，失敗保留整組 input。
 未填參與欄位不補數字。非零 span 配 n=1、零 span 配多點都不能藉切換修成其他掃描。
@@ -98,7 +100,7 @@ Module／waveform 使用持久 Spec 與 FieldMeta。硬體專屬的不支援欄�
 Readout 的 `gen_ch` 與 `ro_ch` 必填且可編輯，`freq` 是唯一 generator／ADC 頻率。
 Readout 的 waveform 仍可引用 key，不推導通道或補值，見 [[0074]]。
 例如 `Template("readout", set={"gain": 0.1, "ro_length": 2.0})` 直接覆寫平鋪路徑。
-List 推導與多 qubit 顯示不在本設計內。
+固定具名 model list 的推導、picker 與獨立 participants 清單由 [[0079]] 擴充。Framework 不接管 mux group 關係或 lab runtime 的名稱到原始 index 轉換。
 
 ### 捕捉來源與使用時驗證
 
@@ -109,8 +111,9 @@ Make_form 回 `Form(Cfg, tree)`，不把 ctx 傳進 Form。
 `TabFormResource` 在 Open 與 Reset 捕捉來源，呼叫 make_form，然後綁定並驗證
 Registry 的範本目錄。Register 不執行 factory，也不預檢範本。
 Edit、preview、result 與 Run 使用同一捕捉，不重建 Form 或刷新來源。
-Reset 可以同時換形狀和初值；失敗保留原 Form。Memento 保存 Form input，
-不相容的葉按既有 best-effort 規則丟棄，不加舊版雙讀或 native cfg 反向回填。
+Reset 可以同時換形狀和初值；失敗保留原 Form。Memento 保存 selection／branch 與 Form input，
+由可信宣告重建，還原不執行 converter。型別或來源 identity 不匹配明確報錯，不靜默丟葉，
+不加舊版雙讀或 native cfg 反向回填，見 [[0079]]。
 Load 只載分析／writeback 所需結果，不覆蓋表單。
 
 資源擁有 mutation guard、通知與撤銷。Editor 只讀借用的 state，write 與 run_command
@@ -150,7 +153,8 @@ Flux_unit 獨立保存在 cfg。Recipe 的公開參數與來源政策不變，he
 單一實驗的初值政策留在該實驗的 form.py。已定案且供多個 Form 共用的初值政策，
 可集中在 zcu_lab 的具名 domain helper，目前包括 T1 時間尺度選源，以及 Rabi 的
 來源、有效性與首次初值。各 Form 仍明確選擇倍率或場景，並組合結構。
-政策不進入 generic framework，不擴及 writeback 或實驗順序。
+這些實驗初值政策不進入 generic framework，不擴及 writeback 或實驗順序。
+共用型別間的 inline 繼承則由 gui.form_adapter 擁有，不是實驗初值政策，見 [[0079]]。
 這個分工讓同類 Form 使用同一政策，避免改了一個、漏改另一個。
 跨 owner 的依賴方向仍由下述 C15、C16 與 form-adapter-no-host contracts 保護。
 

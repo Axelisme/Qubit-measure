@@ -54,6 +54,14 @@ _Avoid_: ModuleLibrary Template
 
 ## 量測與保存
 
+**Participants（參與清單）**:
+一次 mux 實驗要執行的有序元素名稱清單。它與完整元素設定分開，順序對應執行與資料欄順序。
+_Avoid_: active checkbox, element settings
+
+**Original tone index（原始 tone 序號）**:
+Tone 在完整 readout 中的位置。選取 subset 或改變參與順序不重新編號。
+_Avoid_: subset index, participant position
+
 **Experiment Run**:
 使用特定 cfg 和硬體狀態執行一次實驗。一次 Run 產生一個 Experiment Result。
 _Avoid_: job, task run, measurement job

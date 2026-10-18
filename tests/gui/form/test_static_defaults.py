@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 from zcu_tools.gui import form as form_api
 from zcu_tools.gui.form import FormEnv, FormState
 
+from tests.gui._form_converters import RebuildingForm
+
 
 class StaticChild(BaseModel):
     """Nullable defaults remain absent, without changing validated values."""
@@ -21,8 +23,10 @@ class OtherChild(BaseModel):
     kind: Literal["other"] = "other"
 
 
-class StaticForm(form_api.FormModel):
+class StaticForm(RebuildingForm):
     """Ordinary tagged model branches use the same static defaults."""
+
+    branch_models = {("child",): (OtherChild, StaticChild)}
 
     child: Annotated[OtherChild | StaticChild, Field(discriminator="kind")] = (
         OtherChild()

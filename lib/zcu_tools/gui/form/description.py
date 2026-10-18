@@ -9,6 +9,7 @@ from .model import FormWritePath
 
 type FormFieldKind = Literal[
     "model",
+    "elements",
     "integer",
     "number",
     "complex",
@@ -75,6 +76,20 @@ class FormOptionDescription:
 
 
 @dataclass(frozen=True)
+class FormElementDescription:
+    """One FixedList element: its original index, captured name and field path.
+
+    name is the raw input's literal string name, or "" while the input holds
+    none. The index is the element's position in the captured list, which
+    never changes during one capture.
+    """
+
+    index: int
+    name: str
+    path: FormWritePath
+
+
+@dataclass(frozen=True)
 class FormFieldDescription:
     """Metadata for one model field, deliberately without child-name hints.
 
@@ -95,8 +110,8 @@ class FormFieldDescription:
     choices is the detached dynamic legal-value list, or None if undeclared;
     an empty tuple allows no value. options is the effective ordered selector
     list, or None for a non-selector; () preserves an explicit empty override.
-    selected is the first option index matching raw input, or None for missing
-    input/no match. No default option is guessed. selection_fixed means the
+    selected is the first option index matching the explicit in-memory selection,
+    or raw input when no override exists. None means missing input/no match. No default option is guessed. selection_fixed means the
     annotation permits one non-null selector branch at this level, without
     freezing nested choices or fields. Null only enables/disables the field;
     it does not count as a branch, even while the field is disabled.
@@ -107,7 +122,14 @@ class FormFieldDescription:
     can be selection_fixed while inner choices keep fixed False. Both flags
     may be True. constraints contains finite leaf hints. commands lists explicit
     field actions with replacement target and participating inputs. selector=False
-    hides the dropdown only, not its options or active structure.
+    hides the dropdown only, not its options or active structure. branch is the
+    detached option value describing actual child structure, independently of
+    selected; None denotes no matched structural option. A selection-only write
+    changes selected without rebuilding branch or its local child drafts.
+    A FixedList field has kind "elements", can_expand and its element models
+    as children; elements lists them by index and name. A child element has
+    path ending in its index and name equal to the element's captured name;
+    its identity field is fixed. elements is None for every other field.
     """
 
     path: FormWritePath
@@ -133,6 +155,8 @@ class FormFieldDescription:
     constraints: FormConstraints
     commands: tuple[FormCommandDescription, ...] = ()
     selector: bool = True
+    branch: JsonValue = None
+    elements: tuple[FormElementDescription, ...] | None = None
 
 
 @dataclass(frozen=True)

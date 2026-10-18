@@ -3,6 +3,7 @@
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import replace
+from functools import partial
 from types import MappingProxyType, new_class
 from typing import Annotated, Literal
 
@@ -27,7 +28,6 @@ from zcu_tools.cfg_model import (
     get_field_meta,
 )
 from zcu_tools.gui.form import (
-    CenterSpan,
     Display,
     FormEnv,
     FormErrors,
@@ -35,10 +35,8 @@ from zcu_tools.gui.form import (
     FormModel,
     FormState,
     FormWritePath,
-    LinRange,
+    InputConverter,
     Option,
-    StepCenter,
-    StepRange,
     static_defaults,
 )
 from zcu_tools.program.v2.base import ProgramV2Cfg
@@ -59,6 +57,7 @@ from ._seeds import template_input as _template_input
 from ._types import literal_type, union_type
 from ._types import members as _members
 from .logical import LogicalEdit, LogicalEditCandidate, LogicalFieldObservation
+from .sweep import CenterSpan, LinRange, StepCenter, StepRange
 
 
 def _sweep_branch(
@@ -207,6 +206,14 @@ class _SpecSection:
         }
 
 
+def _module_converters(
+    fields: Mapping[str, ModuleField],
+    _cls: type[FormModel],
+    env: FormEnv,
+) -> Mapping[tuple[str | int, ...], InputConverter]:
+    return {(name,): field.converter(env) for name, field in fields.items()}
+
+
 class _Section:
     """A derived section owns shape conversion, defaults and field-path errors."""
 
@@ -281,6 +288,7 @@ class _Section:
             return result
 
         namespace.update(
+            converters=classmethod(partial(_module_converters, section.modules)),
             __annotations__=annotations,
             defaults=classmethod(defaults),
             choices=classmethod(choices),

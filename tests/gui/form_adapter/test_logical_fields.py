@@ -19,9 +19,12 @@ from zcu_tools.gui.form import (
     FormErrors,
     FormInput,
     FormModel,
+    FormPath,
     FormPathError,
     FormState,
     FormValue,
+    InputConverter,
+    Option,
 )
 from zcu_tools.program.v2.modules import PulseCfg
 from zcu_tools.resources.context.library import (
@@ -29,6 +32,8 @@ from zcu_tools.resources.context.library import (
     LibrarySnapshot,
     ModuleLibraryDocument,
 )
+
+from tests.gui._form_converters import RebuildingForm
 
 
 class RealLeaf(ConfigBase):
@@ -252,8 +257,17 @@ def test_spec_template_locks_and_handwritten_generated_fields_use_same_mapper() 
     field = adapter.ModuleInputField(PulseSpec)
     from pydantic import create_model
 
+    class CapturedExtras(FormModel):
+        @classmethod
+        def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+            return {("reference",): field.options(env)}
+
+        @classmethod
+        def converters(cls, env: FormEnv) -> Mapping[FormPath, InputConverter]:
+            return {("reference",): field.converter(env)}
+
     extras = create_model(
-        "Extras", __base__=FormModel, reference=(field.annotation, ...)
+        "Extras", __base__=CapturedExtras, reference=(field.annotation, ...)
     )
     form = adapter.Form(LogicalCfg, {}, extras=extras, lower=lambda extras, cfg: cfg)
     env = captured()
@@ -517,7 +531,8 @@ def test_ordinary_union_partial_write_keeps_core_defaults_and_initial_active_str
         start: float = 0.0
         stop: float = 1.0
 
-    class Extras(FormModel):
+    class Extras(RebuildingForm):
+        branch_models = {("shape",): (Flat, Ramp)}
         shape: Annotated[Flat | Ramp, Field(discriminator="kind")]
 
     form = adapter.Form(LogicalCfg, {}, extras=Extras, lower=lambda extras, cfg: cfg)

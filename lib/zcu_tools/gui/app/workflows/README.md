@@ -1,6 +1,6 @@
 # gui/app/workflows — Workflow host
 
-**Last updated:** 2026-10-18，run 終局後 device cache 讀回
+**Last updated:** 2026-10-18，固定元素 typed paths 與 native tunables 提交邊界
 
 ## 註冊與組裝
 
@@ -28,11 +28,13 @@ Pause 保留 operation、RUN lease、progress、plan、input capture 與 Plots�
 
 ## Input 與 reload
 
-Wire 5 的 `workflow.form` 回 input／values／errors 與 native revision，不帶 schema。`workflow.describe_form(form, path, run_id, batch)` 沿同一 target selection 和固定 env，在同一 owner turn 回 candidate observation 與單層 description。Root path 是 `[]`，其他 path 使用 model-field names。Read 納入 local parse errors。Batch preview 只讀 parsed candidate，不提交。
+Wire 5 的 `workflow.form` 回 input／values／errors 與 native revision，不帶 schema。`workflow.describe_form(form, path, run_id, batch)` 沿同一 target selection 和固定 env，在同一 owner turn 回 candidate observation 與單層 description。Root path 是 `[]`，其他 path 使用 str 欄位名與 FixedList 的 int index。Read 納入 local parse errors。Batch preview 只讀 parsed candidate，不提交。
 
-Sweep 表單沿用共用 Range／Center × Expts／Step input 與數值欄位 commands，Qt 只派發 owner 指令。Step 不整除時顯示共用 Form 的有效端點，不自行換算。Memento 保存 active 表示與 expression，Prepare forms 恢復 fresh defaults。Description 的 field commands 保留 target 與參與 inputs；selector 只控制 dropdown 呈現。
+Sweep 表單沿用 `gui.form_adapter` 的 Range／Center × Expts／Step input 與 sweep row commands，Qt 只派發 owner 指令。Step 不整除時顯示共用 Form 的有效端點，不自行換算。Memento 保存 active 表示與 expression，Prepare forms 恢復 fresh defaults。Description 的 field commands 保留 target 與參與 inputs；selector 只控制 dropdown 呈現。
 
 Description 的 options 只帶 value／label／commands，selected index 由 core 判定，children 保留完整 path。can_expand 只表示結構可展開，不保證 children 非空。selection_fixed 表示本層只有一個非 null selector 分支，不凍結內層 choices。null 只控制啟停，不算另一個分支，停用時也一樣。fixed／fixed_value 表示完整值固定。Wire 直接投影 core 的這些能力，不重算規則。未知、inactive 或穿入 whole leaf 的 path 以 FormPathError 回報。RPC 將它投影為 invalid_params／form_path，data 帶完整 form_path。其他 ValueError 保留 controller_error。
+
+FixedList 的 description 直接投影 elements，包含原始 index、captured name 與 typed path。Form 可編輯及預覽 indexed leaves，但 `TunablesHost.apply` 不將它們交給 native Engine。Native tunables 的 dotted path 不支援 list 元素，host 回保留原 typed path 的 `FormErrors`，Engine、draft、base 與 accepted input 都不變。Host 不轉成 whole-list 提交，也不把 index 字串化。見 ADR-0079。
 
 Memento 2 保存既有 tagged ref／inline input，格式未變。舊版沿既有 codec／caretaker 拒絕，不 migration 或雙讀。`defaults(env)` 只建 fresh 初值，沒有 previous。相容 saved leaves 的 overlay 仍由 host 完成。
 

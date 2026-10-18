@@ -33,11 +33,15 @@ from zcu_tools.cfg_model import (
 )
 from zcu_tools.gui.form import (
     Display,
+    FormCommandContext,
+    FormCommandResult,
+    FormCommandSnapshot,
     FormEnv,
     FormErrors,
     FormInput,
     FormModel,
     FormState,
+    InputConverter,
     Option,
     OptionCommand,
     static_defaults,
@@ -45,6 +49,7 @@ from zcu_tools.gui.form import (
 from zcu_tools.program.v2.modules import AbsModuleCfg as NativeModuleBase
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleFactory
 
+from ._converters import module_converter
 from ._display import field_display
 from ._seeds import (
     complete_input,
@@ -166,6 +171,9 @@ def _spec_options(
         specs = _key_specs(info.annotation)
         if not specs:
             continue
+        wrapper = inline_wrapper(info.annotation)
+        if wrapper is None:
+            raise TypeError("Spec options require a tagged inline wrapper")
         key_commands: tuple[tuple[str, OptionCommand], ...] = ()
         if env.library is not None and any(
             isinstance(member, type) and issubclass(member, KeyRef)
@@ -187,6 +195,8 @@ def _spec_options(
                             key,
                             _inline_kinds(spec_annotation(info.annotation)),
                             waveform=waveform,
+                            env=env,
+                            wrapper=wrapper,
                         ),
                     ),
                 )
@@ -194,9 +204,6 @@ def _spec_options(
                 if isinstance(read(key), specs)
             )
         kinds = _inline_kinds(spec_annotation(info.annotation))
-        wrapper = inline_wrapper(info.annotation)
-        if wrapper is None:
-            raise TypeError("Spec options require a tagged inline wrapper")
         kind_fields: list[tuple[type[BaseModel], type[BaseModel]]] = []
         for kind in kinds:
             key = (wrapper, kind)
@@ -214,8 +221,15 @@ def _spec_options(
 
 
 def _copy_spec(
-    key: str, models: tuple[type[BaseModel], ...], env: FormEnv, *, waveform: bool
-) -> dict[str, JsonValue]:
+    key: str,
+    models: tuple[type[BaseModel], ...],
+    _snapshot: FormCommandSnapshot,
+    _context: FormCommandContext,
+    *,
+    env: FormEnv,
+    waveform: bool,
+    wrapper: type[BaseModel],
+) -> FormCommandResult:
     """Copy one captured persistent key into supported detached input.
 
     models are the permitted generated editable branches. No materialization or
@@ -228,12 +242,16 @@ def _copy_spec(
     model = next((model for model in models if issubclass(model, type(spec))), None)
     if model is None:
         raise ValueError(f"Incompatible library family for {key!r}")
-    return {
-        "kind": "inline",
-        "module": supported_input(
-            model, spec.model_dump(mode="json", exclude_none=True)
-        ),
-    }
+    tag, value = _spec_tag(model)
+    return FormCommandResult(
+        selection={"kind": "inline", "module": {tag: value}},
+        structure=wrapper,
+        input={
+            "module": supported_input(
+                model, spec.model_dump(mode="json", exclude_none=True)
+            )
+        },
+    )
 
 
 _UNSUPPORTED_FIELDS = frozenset({"desc"})
@@ -429,6 +447,17 @@ def editable_spec(
         del env
         return supported_input(cls, complete_input(cls, {}))
 
+    def converters(
+        cls: type[FormModel],
+        env: FormEnv,
+    ) -> Mapping[tuple[str | int, ...], InputConverter]:
+        return {
+            (name,): module_converter(info.annotation, env)
+            for name, info in cls.model_fields.items()
+            if inline_wrapper(info.annotation) is not None
+        }
+
+    namespace["converters"] = classmethod(converters)
     namespace["options"] = classmethod(options)
     namespace["defaults"] = classmethod(defaults)
     bases = (model,) if issubclass(model, FormModel) else (FormModel, model)
@@ -630,11 +659,15 @@ class ModuleField:
             raise TypeError("Module value model must implement FormModel")
         self.value_model = value_model
 
+    def converter(self, env: FormEnv) -> InputConverter:
+        """Bind this field's single converter to a fixed host capture."""
+        return module_converter(self.annotation, env)
+
     def options(self, env: FormEnv) -> tuple[Option, ...]:
         """Declare nullable/key/kind selections in the existing module input shape.
 
         Keys are limited to this field's persistent families in the fixed env.
-        Inline values select only kind tags; core supplies fresh branch defaults.
+        Inline values select kind tags; this field's converter supplies input.
         Fields reuse a class per inline wrapper/kind for this field's lifetime,
         describe the selected inline wrapper and omit its structural tags.
         Empty kinds have no editable content and do not get an Inline selection.
@@ -647,7 +680,14 @@ class ModuleField:
                     OptionCommand(
                         "to_inline",
                         "Convert to inline",
-                        partial(_copy_spec, key, self.editable, waveform=False),
+                        partial(
+                            _copy_spec,
+                            key,
+                            self.editable,
+                            waveform=False,
+                            env=env,
+                            wrapper=self.inline,
+                        ),
                     ),
                 )
                 for key in env.library.module_keys()

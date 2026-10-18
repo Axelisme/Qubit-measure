@@ -21,8 +21,8 @@ from zcu_tools.gui.form import (
     FormInput,
     FormModel,
     FormState,
-    LinRange,
 )
+from zcu_tools.gui.form_adapter import LinRange
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._user_input import mouse_click
@@ -66,6 +66,7 @@ def row_names(view: QWidget, path: str) -> list[str]:
         widget.objectName()
         for widget in view.findChildren(QWidget)
         if widget.objectName().endswith(f".{path}")
+        and widget.objectName() != f"form.row.{path}"
     )
 
 

@@ -7,7 +7,7 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
-from ..kernel import ApplyContext, Prepared, SegmentTable
+from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..secular import FluxExpansion, ModelSource
 from ._dop853 import tolerances
 from ._dop853_chain import run_chain
@@ -17,8 +17,8 @@ from ._dop853_data import (
     Segments,
     hamiltonian,
     pack_models,
-    pack_segments,
 )
+from ._workload_facts import packed_segments
 
 
 @dataclass(frozen=True)
@@ -148,10 +148,10 @@ class FluxDOP853Kernel:
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> NDArray[np.bool_]:
         """Accept driven rows with samples; engine owns flux-change routing."""
+        source, budget = context.source, context.budget
         tolerances(budget)
         del source
         available = np.full(len(rows), table.flux_waveform is not None)
@@ -160,9 +160,10 @@ class FluxDOP853Kernel:
         return (table.tones[rows] > 0) & available
 
     def prepare_keys(
-        self, table: SegmentTable, rows: NDArray[np.int64]
+        self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.void]:
         """Return one source-scoped key, excluding every apply-only parameter."""
+        del context
         del table
         return np.zeros(len(rows), dtype=[("source", "i8")])
 
@@ -178,13 +179,13 @@ class FluxDOP853Kernel:
         keys: NDArray[np.void],
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> Prepared:
         """Retain source and exact fixed-coordinate expansion, never density.
 
         Missing expansion or out-of-range loop indices raises ValueError.
         """
+        source, budget = context.source, context.budget
         del keys, rows
         tolerances(budget)
         expansion = source.flux_expansion()
@@ -192,14 +193,24 @@ class FluxDOP853Kernel:
             raise ValueError("flux expansion loop exceeds waveform width")
         return _Prepared(source, _pack_expansion(expansion))
 
+    def admit_prepared(
+        self,
+        prepared: Prepared,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        context: KernelContext,
+    ) -> None:
+        """Decline cached-domain admission; use the ordinary guard build path."""
+        del prepared, table, rows, context
+
     def guard_prepared(
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline guard preparation handoff; the engine calls guard normally."""
+        source, budget = context.source, context.budget
         del table, rows, source, budget
 
     def bind_input(
@@ -209,9 +220,10 @@ class FluxDOP853Kernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         source_initial: NDArray[np.complex128],
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline input binding; apply uses the model-only prepared payload."""
+        budget = context.budget
         del prepared, key_index, table, rows, source_initial, budget
 
     def apply(
@@ -271,7 +283,7 @@ class FluxDOP853Kernel:
         playing = np.arange(table.tone_port.shape[1])[None, :] < table.tones[rows, None]
         if np.any(playing & (table.tone_port[rows] >= models.ports[inverse, None])):
             raise ValueError("flux DOP853 tone port absent from model")
-        segments = pack_segments(table, include_flux=True)
+        segments = packed_segments(table, context.work_plan, include_flux=True)
         data = _FluxData(
             models,
             segments,

@@ -9,6 +9,7 @@ from qtpy.QtWidgets import QApplication, QComboBox, QLineEdit
 from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormState
 from zcu_tools.gui.widgets.form import FormEditor
 
+from tests.gui._form_converters import RebuildingForm
 from tests.gui.widgets.form._text_input import commit_text
 
 
@@ -55,8 +56,10 @@ class ModuleRefChoice(FormModel):
     name: str
 
 
-class ModuleInlineChoice(FormModel):
+class ModuleInlineChoice(RebuildingForm):
     """Inline branch whose module is the nested tagged module union."""
+
+    branch_models = {("module",): (DriveModule, ShortReadoutModule, PulseReadoutModule)}
 
     kind: Literal["inline"] = "inline"
     module: AnyModule
@@ -67,8 +70,13 @@ type ModuleChoice = Annotated[
 ]
 
 
-class InlineModuleForm(FormModel):
+class InlineModuleForm(RebuildingForm):
     """Drive and readout selections shaped like workflow module inputs."""
+
+    branch_models = {
+        ("qub_pulse",): (ModuleRefChoice, ModuleInlineChoice),
+        ("readout",): (ModuleRefChoice, ModuleInlineChoice),
+    }
 
     qub_pulse: ModuleChoice
     readout: ModuleChoice

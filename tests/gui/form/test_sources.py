@@ -23,11 +23,15 @@ from zcu_tools.resources.context.library import (
     ModuleLibraryDocument,
 )
 
+from tests.gui._form_converters import RebuildingForm
+
 from ._module_models import KeyPulseSpec, SyntheticModuleInline, SyntheticModuleInput
 
 
-class ModuleForm(FormModel):
+class ModuleForm(RebuildingForm):
     """A generic library reference, unrelated to a particular workflow role."""
+
+    branch_models = {("drive",): (ModuleRef, SyntheticModuleInline)}
 
     drive: SyntheticModuleInput = Field(
         default_factory=lambda: ModuleRef(name="Q1.pulses.pi")
@@ -120,8 +124,10 @@ def library(gain: float = 0.25) -> LibrarySnapshot:
     )
 
 
-class NullableModuleForm(FormModel):
+class NullableModuleForm(RebuildingForm):
     """Keep the public alias metadata inside a nullable field annotation."""
+
+    branch_models = {("drive",): (ModuleRef, SyntheticModuleInline)}
 
     drive: SyntheticModuleInput | None = Field(
         default_factory=lambda: ModuleRef(name="Q1.pulses.pi")

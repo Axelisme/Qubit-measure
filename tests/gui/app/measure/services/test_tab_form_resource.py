@@ -439,6 +439,46 @@ def test_duplicate_create_does_not_replace_existing_resource() -> None:
     assert first.result() == ScalarCore(amount=4.0)
 
 
+def test_fixed_elements_open_edit_observe_and_run_admission() -> None:
+    from pydantic import create_model
+
+    from tests.gui.form._fixed_models import named_form, named_input
+
+    model = named_form()
+    core = create_model(
+        "NamedCore",
+        __base__=ConfigBase,
+        tones=(
+            model.model_fields["tones"].rebuild_annotation(),
+            named_input(model).data["tones"],
+        ),
+        participants=(model.model_fields["participants"].rebuild_annotation(), ["B"]),
+    )
+    resource = resource_api.TabFormResource(
+        lambda _ctx: Form(core, {}),
+        capture=lambda _aliases: resource_api.TabFormSources(env=FormEnv()),
+        mutation_allowed=lambda: True,
+    )
+    assert resource.accept().values["participants"] == ["B"]
+    target = resource.describe(("tones", 1, "gain")).target
+    assert target is not None
+    assert target.path == ("tones", 1, "gain")
+    resource.write({("tones", 0, "gain"): -2})
+    result = resource.result()
+    assert isinstance(result, FormErrors)
+    assert ("tones", 0, "gain") in result.messages
+    with pytest.raises(CfgPreconditionError) as caught:
+        resource.accept()
+    assert caught.value.reason is CfgPreconditionReason.NOT_VALID
+    resource.write({("tones", 0, "gain"): 5, ("participants",): ["B", "A"]})
+    assert resource.accept().values["participants"] == ["B", "A"]
+    assert resource.preview().values[("tones", 0, "gain")] == 5
+    before = resource.input
+    with pytest.raises(ValueError, match="identity"):
+        resource.write({("tones",): []})
+    assert resource.input.same_as(before)
+
+
 def test_failed_creation_does_not_reserve_tab_identity() -> None:
     """A source failure before publication leaves the identity available."""
     pool = resource_api.TabFormResources(mutation_allowed=lambda _tab: True)

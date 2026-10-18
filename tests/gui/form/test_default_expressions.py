@@ -16,6 +16,8 @@ from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
+from tests.gui._form_converters import RebuildingForm
+
 SEEDED_EXPRESSIONS: dict[str, JsonValue] = {
     "device": {"expr": "$device"},
     "level": {"expr": "general.ext.seed"},
@@ -71,8 +73,10 @@ class Derived(FormModel):
         return data
 
 
-class Switching(FormModel):
+class Switching(RebuildingForm):
     """Switch between the branches above."""
+
+    branch_models = {("branch",): (Manual, Derived)}
 
     branch: Annotated[Manual | Derived, Field(discriminator="kind")] = Field(
         default_factory=Manual

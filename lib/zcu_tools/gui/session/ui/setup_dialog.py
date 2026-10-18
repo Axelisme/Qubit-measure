@@ -139,6 +139,8 @@ class SetupDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self._ctrl = controller
+        self._read_only = False
+        self._connecting = False
         self.setWindowTitle("Setup")
         self.resize(900, 680)
 
@@ -216,12 +218,12 @@ class SetupDialog(QDialog):
         entry_form.addRow("Entry:", entry_row)
 
         entry_actions = QHBoxLayout()
-        new_entry_btn = QPushButton("New entry…")
-        new_entry_btn.clicked.connect(self._on_new_entry_clicked)
-        entry_actions.addWidget(new_entry_btn)
-        open_entry_btn = QPushButton("Open")
-        open_entry_btn.clicked.connect(self._on_open_entry_clicked)
-        entry_actions.addWidget(open_entry_btn)
+        self._new_entry_btn = QPushButton("New entry…")
+        self._new_entry_btn.clicked.connect(self._on_new_entry_clicked)
+        entry_actions.addWidget(self._new_entry_btn)
+        self._open_entry_btn = QPushButton("Open")
+        self._open_entry_btn.clicked.connect(self._on_open_entry_clicked)
+        entry_actions.addWidget(self._open_entry_btn)
         entry_form.addRow("", entry_actions)
         self._result_path = _ElidedPathLabel("result_path")
         self._result_open = self._open_folder_button(self._result_path)
@@ -336,6 +338,30 @@ class SetupDialog(QDialog):
         right_layout.addStretch()
         return right_widget
 
+    def set_read_only(self, *, read_only: bool) -> None:
+        """Gate entry/point/connection edits while preserving browsing and Close.
+
+        The host owns this policy. Event refreshes and connection completion keep
+        it applied; returning writable does not enable an in-flight Connect.
+        """
+        self._read_only = read_only
+        for button in (
+            self._new_entry_btn,
+            self._open_entry_btn,
+            self._new_ctx_btn,
+            self._switch_btn,
+        ):
+            button.setEnabled(not read_only)
+        for field in (self._label_edit, self._description_edit, self._ip_edit):
+            field.setReadOnly(read_only)
+        self._port_spin.setReadOnly(read_only)
+        for combo in (self._entry_combo, self._device_combo, self._clone_combo):
+            combo.setEnabled(not read_only)
+        self._refresh_connect_enabled()
+
+    def _refresh_connect_enabled(self) -> None:
+        self._connect_btn.setEnabled(not self._read_only and not self._connecting)
+
     def _cleanup_bus_subscriptions(self, *_args: object) -> None:
         if not self._bus_subs_active:
             logger.debug("_cleanup_bus_subscriptions called but already inactive")
@@ -385,7 +411,7 @@ class SetupDialog(QDialog):
     def _on_bus_soc_changed(self, payload: object) -> None:
         from zcu_tools.gui.session.events import SocChangedPayload
 
-        self._connect_btn.setEnabled(True)
+        self._refresh_connect_enabled()
         if isinstance(payload, SocChangedPayload) and payload.soc is not None:
             self._set_conn_status("Connected", error=False)
             self._maybe_show_current_cfg()
@@ -501,6 +527,8 @@ class SetupDialog(QDialog):
         self._label_edit.setText(f"{value}{unit}")
 
     def _on_new_entry_clicked(self) -> None:
+        if self._read_only:
+            return
         name, accepted = QInputDialog.getText(self, "New entry", "Entry name:")
         if not accepted:
             return
@@ -514,6 +542,8 @@ class SetupDialog(QDialog):
         self._entry_installed(info)
 
     def _on_open_entry_clicked(self) -> None:
+        if self._read_only:
+            return
         name = self._entry_combo.currentText()
         if not name:
             self._set_project_status("Select an entry first", error=True)
@@ -535,6 +565,8 @@ class SetupDialog(QDialog):
         self._set_project_status(f"Opened entry: {info.name}")
 
     def _on_switch_clicked(self) -> None:
+        if self._read_only:
+            return
         item = self._ctx_list.currentItem()
         if item is None:
             self._set_project_status("Select a working point first", error=True)
@@ -553,6 +585,8 @@ class SetupDialog(QDialog):
         self._set_project_status(f"Switched to working point: {label}")
 
     def _on_new_ctx_clicked(self) -> None:
+        if self._read_only:
+            return
         request = PointCreateRequest(
             label=self._label_edit.text(),
             description=self._description_edit.text(),
@@ -656,6 +690,8 @@ class SetupDialog(QDialog):
             self._set_conn_status("Currently connected", error=False)
 
     def _on_connect_clicked(self) -> None:
+        if self._read_only or self._connecting:
+            return
         from zcu_tools.gui.session.services.connection import ConnectRemoteRequest
 
         self._ctrl.bind_connection_outcome(
@@ -666,7 +702,8 @@ class SetupDialog(QDialog):
                 ip=self._ip_edit.text().strip(), port=self._port_spin.value()
             )
         )
-        self._connect_btn.setEnabled(False)
+        self._connecting = True
+        self._refresh_connect_enabled()
         self._set_conn_status("Connecting…", error=False)
         try:
             self._ctrl.start_connect(
@@ -678,14 +715,16 @@ class SetupDialog(QDialog):
             self._on_connect_failed(str(exc))
 
     def _on_connect_finished(self) -> None:
-        self._connect_btn.setEnabled(True)
+        self._connecting = False
+        self._refresh_connect_enabled()
         self._set_conn_status("Connected", error=False)
         soccfg = self._ctrl.get_soccfg()
         if isinstance(soccfg, SocConfigProtocol):
             self._show_cfg(describe_soc(soccfg))
 
     def _on_connect_failed(self, message: str) -> None:
-        self._connect_btn.setEnabled(True)
+        self._connecting = False
+        self._refresh_connect_enabled()
         self._set_conn_status(message, error=True)
 
     def _show_cfg(self, text: str) -> None:

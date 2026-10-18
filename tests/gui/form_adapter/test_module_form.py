@@ -183,7 +183,7 @@ def test_waveform_key_command_copies_once_and_disconnects_from_later_sources() -
     }
     cfg = result_spec(form, state, waveform_env(0.9))
     assert isinstance(cfg.waveform, ConstWaveformCfg) and cfg.waveform.length == 0.1
-    with pytest.raises(ValueError, match="Unavailable option command"):
+    with pytest.raises(ValueError, match="Unavailable field command"):
         state.run_command(("waveform",), "to_inline", env)
     assert notifications == ["changed"]
 
@@ -213,7 +213,7 @@ def test_waveform_command_source_failure_keeps_input_and_emits_nothing() -> None
     before = state.input.data
 
     with pytest.raises(OSError, match="Cannot read captured waveform"):
-        key.commands[0].run(broken)
+        state.run_command(("waveform",), "to_inline", broken)
     with pytest.raises(OSError, match="Cannot read captured waveform"):
         state.run_command(("waveform",), "to_inline", broken)
 
@@ -775,12 +775,12 @@ def test_template_input_nested_kind_reselection_uses_authored_defaults(
     choose(other_kind)
     assert expect_object(state.input.data[child]) == {
         "kind": "inline",
-        "module": {"style": other_kind},
+        "module": {"style": other_kind, "length": 1.7},
     }
     choose(authored_kind)
     assert (
         expect_object(expect_object(state.input.data[child])["module"]).get("length")
-        == length
+        == 1.7
     )
 
 

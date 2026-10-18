@@ -3,16 +3,14 @@
 import numpy as np
 from numpy.typing import NDArray
 
-from .kernel import SegmentTable
+from .kernel import KernelContext, SegmentTable
 from .kernels.floquet import FloquetKernel
-from .secular import ModelSource
 
 
 def direct_preferred(
     table: SegmentTable,
     rows: NDArray[np.int64],
-    source: ModelSource,
-    budget: float,
+    context: KernelContext,
 ) -> NDArray[np.bool_]:
     """Return cheapest-first choices for all constant two-tone candidate rows.
 
@@ -31,10 +29,11 @@ def direct_preferred(
     rejection tries the other family. Input rows must include the acquire-wide
     candidate set, never a worker subset. Return a bool array aligned with rows.
     """
+    source, budget = context.source, context.budget
     preferred = np.zeros(len(rows), dtype=bool)
     if not len(rows):
         return preferred
-    keys = FloquetKernel().prepare_keys(table, rows)
+    keys = FloquetKernel().prepare_keys(table, rows, context)
     _, inverse = np.unique(keys, return_inverse=True)
     for group in range(int(inverse.max()) + 1):
         positions = np.flatnonzero(inverse == group)

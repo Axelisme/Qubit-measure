@@ -13,8 +13,8 @@ from zcu_tools.gui.form import (
     FormModel,
     FormPath,
     FormState,
-    LinRange,
 )
+from zcu_tools.gui.form_adapter import LinRange
 
 from tests.gui._form_context import captured_ext_env
 

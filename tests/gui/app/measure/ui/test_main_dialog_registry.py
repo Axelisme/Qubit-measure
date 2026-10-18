@@ -58,38 +58,11 @@ class _DestroyedDialog:
         raise RuntimeError("wrapped C/C++ object has been deleted")
 
 
-class _PersistentDialog:
-    def __init__(self) -> None:
-        self.finished = _Signal()
-        self.destroyed = _Signal()
-        self.visible = False
-
-    def open(self) -> None:
-        self.visible = True
+class _PersistentDialog(QDialog):
+    """A real persistent Qt window whose public reject only hides it."""
 
     def reject(self) -> None:
-        self.visible = False
-
-    def raise_(self) -> None:
-        pass
-
-    def activateWindow(self) -> None:
-        pass
-
-    def isVisible(self) -> bool:
-        return self.visible
-
-    def show(self) -> None:
-        self.visible = True
-
-
-class _TransientDialog(_PersistentDialog):
-    def setAttribute(self, _attribute: object) -> None:
-        pass
-
-    def reject(self) -> None:
-        self.visible = False
-        self.finished.emit(0)
+        self.hide()
 
 
 def test_arb_writability_is_applied_when_opened(qapp) -> None:
@@ -132,7 +105,7 @@ def test_persistent_predictor_dialog_is_reused_when_hidden(qapp) -> None:
 
     def build_dialog(name: DialogName) -> QDialog:
         assert name is DialogName.PREDICTOR
-        dialog = cast(QDialog, _PersistentDialog())
+        dialog = _PersistentDialog(parent)
         created.append(dialog)
         return dialog
 
@@ -155,12 +128,14 @@ def test_persistent_predictor_dialog_is_reused_when_hidden(qapp) -> None:
     assert created == [first]
     assert first.isVisible() is True
     assert registry.visible_names() == [DialogName.PREDICTOR]
-    cast(_PersistentDialog, first).destroyed.emit()
+    first.deleteLater()
+    parent.deleteLater()
+    qapp.processEvents()
 
 
 def test_nonpersistent_dialog_close_clears_registry(qapp) -> None:
     parent = QWidget()
-    registry = _FactoryRegistry(parent, lambda _name: cast(QDialog, _TransientDialog()))
+    registry = _FactoryRegistry(parent, lambda _name: QDialog(parent))
 
     registry.open(DialogName.SETUP)
     qapp.processEvents()
@@ -179,7 +154,7 @@ def test_open_setup_again_raises_the_existing_dialog_until_it_closes(qapp) -> No
 
     def build_dialog(name: DialogName) -> QDialog:
         assert name is DialogName.SETUP
-        dialog = cast(QDialog, _TransientDialog())
+        dialog = QDialog(parent)
         created.append(dialog)
         return dialog
 
@@ -209,7 +184,7 @@ def test_open_rebuilds_stale_destroyed_dialog(qapp) -> None:
     created: list[QDialog] = []
 
     def build_dialog(_name: DialogName) -> QDialog:
-        dialog = cast(QDialog, _TransientDialog())
+        dialog = QDialog(parent)
         created.append(dialog)
         return dialog
 

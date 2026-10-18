@@ -9,6 +9,7 @@ from qtpy.QtCore import QObject
 from qtpy.QtGui import QAction
 from qtpy.QtWidgets import QApplication, QComboBox, QLineEdit
 from zcu_tools.gui.form import (
+    FormCommandResult,
     FormEnv,
     FormModel,
     FormPath,
@@ -22,6 +23,7 @@ from zcu_tools.gui.form import (
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._form_context import captured_ext_env
+from tests.gui._form_converters import RebuildingForm
 
 
 class First(FormModel):
@@ -34,7 +36,9 @@ class Second(FormModel):
     value: float = 2.0
 
 
-class CapturedForm(FormModel):
+class CapturedForm(RebuildingForm):
+    branch_models = {("branch",): (First, Second)}
+
     amount: float = 1.0
     choice: str = "alpha"
     branch: Annotated[First | Second, Field(discriminator="kind")] = Field(
@@ -59,7 +63,11 @@ class CapturedForm(FormModel):
                     fields=First,
                     commands=(
                         OptionCommand(
-                            "advance", "Advance", lambda env: {"kind": "second"}
+                            "advance",
+                            "Advance",
+                            lambda _old, _context: FormCommandResult(
+                                {"kind": "second"}, Second, {"value": 2.0}
+                            ),
                         ),
                     ),
                 ),

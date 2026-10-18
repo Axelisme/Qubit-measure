@@ -18,7 +18,8 @@ import zcu_tools.simulate.evolution as evolution
 from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 from zcu_tools.simulate.evolution._dop853_dispatch import direct_plans
-from zcu_tools.simulate.evolution.kernel import ApplyContext
+from zcu_tools.simulate.evolution.kernel import ApplyContext, KernelContext
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 if TYPE_CHECKING:
     from zcu_tools.simulate.evolution import kernel
@@ -73,7 +74,9 @@ class KernelCase:
 
     def context(self, rows: NDArray[np.int64]) -> ApplyContext:
         """Guard rows once and retain any family plan for repeated apply calls."""
-        result = self.kernel.guard_prepared(self.table, rows, self.source, self.budget)
+        result = self.kernel.guard_prepared(
+            self.table, rows, KernelContext(self.source, self.budget, WorkPlan())
+        )
         if result is not None:
             assert result.accepted.all()
         if result is not None and result.plan is not None:
@@ -232,14 +235,21 @@ class KernelContract:
     def test_error_within_budget(self, kernel_case: KernelCase) -> None:
         case = kernel_case
         rows = np.arange(len(case.states), dtype=np.int64)
-        assert case.kernel.guard(case.table, rows, case.source, case.budget).all()
+        assert case.kernel.guard(
+            case.table, rows, KernelContext(case.source, case.budget, WorkPlan())
+        ).all()
         keys, first, inverse = np.unique(
-            case.kernel.prepare_keys(case.table, rows),
+            case.kernel.prepare_keys(
+                case.table, rows, KernelContext(case.source, case.budget, WorkPlan())
+            ),
             return_index=True,
             return_inverse=True,
         )
         prepared = case.kernel.prepare(
-            keys, case.table, rows[first], case.source, case.budget
+            keys,
+            case.table,
+            rows[first],
+            KernelContext(case.source, case.budget, WorkPlan()),
         )
         assert prepared.nbytes >= 0
         actual = case.states.copy()
@@ -254,7 +264,9 @@ class KernelContract:
     def test_guard_is_row_local(self, kernel_case: KernelCase) -> None:
         case = kernel_case
         rows = np.arange(len(case.table.timeline), dtype=np.int64)
-        whole = case.kernel.guard(case.table, rows, case.source, case.budget)
+        whole = case.kernel.guard(
+            case.table, rows, KernelContext(case.source, case.budget, WorkPlan())
+        )
         partitions = (
             tuple(rows[i : i + 1] for i in range(len(rows))),
             (rows[:1], rows[1:]),
@@ -266,7 +278,9 @@ class KernelContract:
             split = np.empty_like(whole)
             for subset in subsets:
                 split[subset] = case.kernel.guard(
-                    case.table, subset, case.source, case.budget
+                    case.table,
+                    subset,
+                    KernelContext(case.source, case.budget, WorkPlan()),
                 )
             np.testing.assert_array_equal(split, whole)
 
@@ -277,17 +291,23 @@ class KernelContract:
         hook = getattr(case.kernel, "guard_prepared", None)
         assert callable(hook), "every C5 kernel must offer guard_prepared"
         rows = np.arange(len(case.states), dtype=np.int64)
-        expected_mask = case.kernel.guard(case.table, rows, case.source, case.budget)
+        expected_mask = case.kernel.guard(
+            case.table, rows, KernelContext(case.source, case.budget, WorkPlan())
+        )
         for subset in (rows, rows[::-1], rows[::2], rows[:0]):
             result = case.kernel.guard_prepared(
-                case.table, subset, case.source, case.budget
+                case.table, subset, KernelContext(case.source, case.budget, WorkPlan())
             )
             if result is None:
                 continue
             np.testing.assert_array_equal(result.accepted, expected_mask[subset])
             assert result.accepted.dtype == np.bool_
             for item in result.preparations:
-                keys = case.kernel.prepare_keys(case.table, subset)
+                keys = case.kernel.prepare_keys(
+                    case.table,
+                    subset,
+                    KernelContext(case.source, case.budget, WorkPlan()),
+                )
                 positions = {key.tobytes(): i for i, key in enumerate(item.keys)}
                 selected = np.array(
                     [i for i, key in enumerate(keys) if key.tobytes() in positions],
@@ -311,7 +331,10 @@ class KernelContract:
                     keys[selected], return_index=True, return_inverse=True
                 )
                 fresh = case.kernel.prepare(
-                    fresh_keys, case.table, chosen[first], case.source, case.budget
+                    fresh_keys,
+                    case.table,
+                    chosen[first],
+                    KernelContext(case.source, case.budget, WorkPlan()),
                 )
                 expected = case.states[chosen].copy()
                 case.kernel.apply(
@@ -328,12 +351,17 @@ class KernelContract:
         case = kernel_case
         rows = np.arange(len(case.states), dtype=np.int64)
         keys, first, inverse = np.unique(
-            case.kernel.prepare_keys(case.table, rows),
+            case.kernel.prepare_keys(
+                case.table, rows, KernelContext(case.source, case.budget, WorkPlan())
+            ),
             return_index=True,
             return_inverse=True,
         )
         prepared = case.kernel.prepare(
-            keys, case.table, rows[first], case.source, case.budget
+            keys,
+            case.table,
+            rows[first],
+            KernelContext(case.source, case.budget, WorkPlan()),
         )
         context = case.context(rows)
         whole = case.states.copy()
@@ -370,7 +398,11 @@ class KernelContract:
         case = kernel_case
         rows = np.arange(len(case.states), dtype=np.int64)
         keys, first, inverse = np.unique(
-            case.kernel.prepare_keys(case.table, rows),
+            case.kernel.prepare_keys(
+                case.table,
+                rows,
+                KernelContext(case.source, case.budget, WorkPlan()),
+            ),
             return_index=True,
             return_inverse=True,
         )
@@ -389,7 +421,10 @@ class KernelContract:
             return NoDensity(case.states[0], case.source.model, expansion)
 
         prepared = case.kernel.prepare(
-            keys, case.table, rows[first], no_density_source(), case.budget
+            keys,
+            case.table,
+            rows[first],
+            KernelContext(no_density_source(), case.budget, WorkPlan()),
         )
         context = case.context(rows)
         for states in (
@@ -424,12 +459,17 @@ class KernelContract:
         )
         rows = np.arange(len(case.states), dtype=np.int64)
         keys, first, inverse = np.unique(
-            case.kernel.prepare_keys(table, rows),
+            case.kernel.prepare_keys(
+                table, rows, KernelContext(case.source, case.budget, WorkPlan())
+            ),
             return_index=True,
             return_inverse=True,
         )
         prepared = case.kernel.prepare(
-            keys, table, rows[first], case.source, case.budget
+            keys,
+            table,
+            rows[first],
+            KernelContext(case.source, case.budget, WorkPlan()),
         )
         context = replace(case, table=table).context(rows)
         initial = case.states[0].copy()
@@ -459,7 +499,12 @@ class KernelContract:
                 selected = candidates[ports == port][::-1]
                 saved_rows = selected.copy()
                 bound = case.kernel.bind_input(
-                    prepared, key, table, selected, initial, case.budget
+                    prepared,
+                    key,
+                    table,
+                    selected,
+                    initial,
+                    KernelContext(case.source, case.budget, WorkPlan()),
                 )
                 np.testing.assert_array_equal(initial, before)
                 np.testing.assert_array_equal(selected, saved_rows)

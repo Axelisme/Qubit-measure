@@ -26,6 +26,71 @@ from ._synthetic import Context, PlanForm, TunablesForm, context_seed, sample_st
 from ._window_support import RpcRequest
 
 
+def test_fixed_element_form_rpc_keeps_indexes_in_descriptions_and_preview(
+    attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
+    catalog_source: InjectedCatalog,
+    rpc: RpcRequest,
+) -> None:
+    from pydantic import create_model
+
+    from tests.gui.form._fixed_models import named_form, named_input
+
+    window, _harness, _entry = attachment
+    model = named_form()
+    plan = create_model(
+        "FixedElementPlan",
+        __base__=PlanForm,
+        tones=(
+            model.model_fields["tones"].rebuild_annotation(),
+            named_input(model).data["tones"],
+        ),
+        participants=(model.model_fields["participants"].rebuild_annotation(), ["B"]),
+    )
+    catalog_source.catalog = WorkflowCatalog(
+        (
+            WorkflowAttachment(
+                step=sample_step,
+                plan_model=plan,
+                knobs_model=TunablesForm,
+                plan_to_cfg=plan.to_cfg,
+                knobs_to_cfg=TunablesForm.to_cfg,
+                seed=context_seed,
+            ),
+        )
+    )
+    window.reload_source()
+    reply = rpc("workflow.describe_form", {"form": "plan", "path": ["tones"]})
+    assert reply["ok"], reply
+    result = reply["result"]
+    assert isinstance(result, dict)
+    target = result["description"]["target"]
+    assert "elements" in target, (
+        "Fixed-list description must expose original positions and names"
+    )
+    assert target["elements"] == [
+        {"index": 0, "name": "A", "path": ["tones", 0]},
+        {"index": 1, "name": "B", "path": ["tones", 1]},
+    ]
+    reply = rpc(
+        "workflow.describe_form",
+        {
+            "form": "plan",
+            "path": ["tones", 1, "gain"],
+            "batch": [{"path": ["tones", 1, "gain"], "value": {"expr": "3 * 2"}}],
+        },
+    )
+    assert reply["ok"], reply
+    result = reply["result"]
+    assert isinstance(result, dict)
+    assert result["description"]["target"]["path"] == ["tones", 1, "gain"]
+    assert {tuple(item["path"]): item["value"] for item in result["values"]}[
+        ("tones", 1, "gain")
+    ] == 6
+    assert (
+        window.plan_panel.state.input.data["tones"] == named_input(model).data["tones"]
+    )
+
+
 def test_form_inspection_rpc_reads_constructor_drafts(
     attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
     rpc: RpcRequest,
@@ -95,18 +160,23 @@ def test_form_inspection_rpc_preserves_complex_tag_on_invalid_numeric_candidate(
     assert any(e["path"] == ["sample", "value"] for e in result["errors"])
 
 
-def test_form_inspection_rpc_plan_branch_batch_does_not_change_gui(
+def test_form_inspection_rpc_plan_batch_does_not_change_gui(
     attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
     rpc: RpcRequest,
 ) -> None:
+    from zcu_tools.gui.form import FormInput
+
     window, _harness, _entry = attachment
-    before = window.plan_panel.state.input.data, window.plan_panel.state.base.data
+    state = window.plan_panel.state
+    data = state.input.data
+    data["samples"] = {"kind": "linrange", "start": 0.0, "stop": 1.0, "n": 3}
+    state.reset(FormInput(PlanForm, data))
+    before = state.input.data, state.base.data
     reply = rpc(
         "workflow.form",
         {
             "form": "plan",
             "batch": [
-                {"path": ["samples", "kind"], "value": "linrange"},
                 {"path": ["samples", "start"], "value": {"expr": "1 / 2"}},
                 {"path": ["samples", "stop"], "value": 1.0},
                 {"path": ["samples", "n"], "value": 3},
@@ -250,13 +320,18 @@ def test_form_inspection_rpc_requires_accepted_explicit_target(
 
 
 @pytest.mark.parametrize("path", [[], ["samples"], ["samples", "start"]])
-def test_describe_form_rpc_uses_call_local_branch(
+def test_describe_form_rpc_uses_call_local_edits(
     attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
     rpc: RpcRequest,
     path: list[str],
 ) -> None:
+    from zcu_tools.gui.form import FormInput
+
     window, _harness, _entry = attachment
     state = window.plan_panel.state
+    data = state.input.data
+    data["samples"] = {"kind": "linrange", "start": 0.0, "stop": 1.0, "n": 3}
+    state.reset(FormInput(PlanForm, data))
     before = state.input.data, state.base.data
     reply = rpc(
         "workflow.describe_form",
@@ -264,7 +339,6 @@ def test_describe_form_rpc_uses_call_local_branch(
             "form": "plan",
             "path": path,
             "batch": [
-                {"path": ["samples", "kind"], "value": "linrange"},
                 {"path": ["samples", "start"], "value": {"expr": "1 / 2"}},
                 {"path": ["samples", "n"], "value": 0},
             ],

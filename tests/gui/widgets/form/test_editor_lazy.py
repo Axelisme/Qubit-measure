@@ -21,6 +21,7 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.widgets.form import FormEditor
 
+from tests.gui._form_converters import RebuildingForm
 from tests.gui._user_input import mouse_click, type_text
 
 
@@ -38,7 +39,9 @@ class Second(FormModel):
     two: float = 2.0
 
 
-class LazyForm(FormModel):
+class LazyForm(RebuildingForm):
+    branch_models = {("branch",): (First, Second)}
+
     stable: float = 5.0
     folded: Annotated[Inner, Display(collapsed=True)] = Field(default_factory=Inner)
     advanced: Annotated[float, Display(group="Advanced")] = 3.0

@@ -7,6 +7,7 @@ from pydantic import JsonValue
 
 from zcu_tools.gui.form import (
     FormCommandDescription,
+    FormElementDescription,
     FormFieldDescription,
     FormOptionDescription,
     FormPreview,
@@ -15,7 +16,15 @@ from zcu_tools.gui.form import (
 )
 
 type _Kind = Literal[
-    "text", "integer", "number", "complex", "boolean", "json", "model", "choice"
+    "text",
+    "integer",
+    "number",
+    "complex",
+    "boolean",
+    "json",
+    "model",
+    "choice",
+    "elements",
 ]
 
 
@@ -29,11 +38,13 @@ class FieldView:
     can_expand is the core's active child capability, controlling fold titles.
     expression permits explicit Expr input. options/selected are the core's
     detached selector list and matching index (None for no list/no match).
+    branch identifies the actual child structure independently of selection.
     raw/present describe authored input; a missing fixed leaf displays its
     fixed value without writing it. value/has_value identify a preview leaf.
     decimals rounds display only. fixed marks a declaration-fixed scalar or
     option value, not read-only children or commands. group is the same-level
-    display group name, or None for an ungrouped row.
+    display group name, or None for an ungrouped row. elements lists a
+    FixedList row's picker entries by original index and name, else None.
     """
 
     path: FormWritePath
@@ -49,6 +60,7 @@ class FieldView:
     expression: bool
     options: tuple[FormOptionDescription, ...] | None
     selected: int | None
+    branch: JsonValue
     raw: JsonValue
     present: bool
     value: FormValue
@@ -57,6 +69,7 @@ class FieldView:
     fixed: bool
     group: str | None
     commands: tuple[FormCommandDescription, ...]
+    elements: tuple[FormElementDescription, ...] | None = None
 
 
 def _control_presentation(
@@ -68,6 +81,8 @@ def _control_presentation(
     explicit commands. Only a fixed scalar without actions is plain text.
     No branch matching or annotation interpretation occurs here.
     """
+    if field.kind == "elements":
+        return "elements", None
     options = field.options if field.selector else None
     if (
         field.fixed
@@ -100,11 +115,19 @@ def project_field(
     current: JsonValue = data
     present = True
     for name in field.path:
-        if not isinstance(current, dict) or name not in current:
+        if isinstance(current, dict) and isinstance(name, str) and name in current:
+            value = current.get(name)
+        elif (
+            isinstance(current, list)
+            and isinstance(name, int)
+            and 0 <= name < len(current)
+        ):
+            value = current[name]
+        else:
             current = None
             present = False
             break
-        current = current[name]
+        current = value
     kind, options = _control_presentation(field)
     return FieldView(
         path=field.path,
@@ -120,6 +143,7 @@ def project_field(
         expression=field.expression and not field.fixed,
         options=options,
         selected=field.selected,
+        branch=field.branch,
         raw=current if present or not field.fixed else field.fixed_value,
         present=present,
         value=preview.values.get(field.path),
@@ -128,4 +152,5 @@ def project_field(
         fixed=field.fixed,
         group=field.group,
         commands=field.commands,
+        elements=field.elements,
     )

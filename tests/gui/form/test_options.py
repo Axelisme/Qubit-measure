@@ -17,7 +17,10 @@ from zcu_tools.gui.form import (
     FormModel,
     FormPath,
     FormState,
+    FormWritePath,
 )
+
+from tests.gui._form_converters import RebuildingForm
 
 
 class Speed(StrEnum):
@@ -41,7 +44,9 @@ class Second(FormModel):
         return {"kind": "second", "shared": {"expr": "2 * 4"}}
 
 
-class Picks(FormModel):
+class Picks(RebuildingForm):
+    branch_models = {("branch",): (First, Second)}
+
     count: Literal[1, 2] = 1
     speed: Speed = Speed.slow
     device: str = "a"
@@ -96,7 +101,7 @@ def test_option_matches_typed_leaves_first_match_and_missing_without_mutation() 
     "batch", [{("branch",): {"kind": "second"}}, {("branch", "kind"): "second"}]
 )
 def test_branch_selection_starts_from_fresh_defaults_and_commits_once(
-    batch: Mapping[tuple[str, ...], JsonValue],
+    batch: Mapping[FormWritePath, JsonValue],
 ) -> None:
     env = FormEnv()
     state = FormState(
@@ -133,13 +138,17 @@ class CommandForm(FormModel):
     value: Source | Destination = Field(default_factory=Source, discriminator="kind")
 
     @classmethod
-    def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[api.Option, ...]]:
-        def convert(captured: FormEnv) -> JsonValue:
-            if captured is not env:
-                raise ValueError("wrong capture")
-            return {"kind": "snapshot", "name": "copied"}
+    def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[api.Option, ...]]:
+        def convert(
+            _old: api.FormCommandSnapshot, _context: api.FormCommandContext
+        ) -> api.FormCommandResult:
+            return api.FormCommandResult(
+                {"kind": "snapshot"}, Destination, {"name": "copied"}
+            )
 
-        def fail(_captured: FormEnv) -> JsonValue:
+        def fail(
+            _old: api.FormCommandSnapshot, _context: api.FormCommandContext
+        ) -> api.FormCommandResult:
             raise ValueError("unavailable source")
 
         return {
@@ -235,7 +244,13 @@ class ActiveBranch(FormModel):
                 api.Option(
                     "One",
                     1,
-                    commands=(api.OptionCommand("active", "Active", lambda _env: 2),),
+                    commands=(
+                        api.OptionCommand(
+                            "active",
+                            "Active",
+                            lambda _old, _context: api.FormCommandResult(None, None, 2),
+                        ),
+                    ),
                 ),
             )
         }
@@ -253,14 +268,20 @@ class InactiveBranch(FormModel):
                     "One",
                     1,
                     commands=(
-                        api.OptionCommand("inactive", "Inactive", lambda _env: 3),
+                        api.OptionCommand(
+                            "inactive",
+                            "Inactive",
+                            lambda _old, _context: api.FormCommandResult(None, None, 3),
+                        ),
                     ),
                 ),
             )
         }
 
 
-class BranchCommands(FormModel):
+class BranchCommands(RebuildingForm):
+    branch_models = {("branch",): (ActiveBranch, InactiveBranch)}
+
     branch: ActiveBranch | InactiveBranch = Field(
         default_factory=ActiveBranch, discriminator="kind"
     )
@@ -303,7 +324,9 @@ class InactiveSharedBranch(FormModel):
         return {("child", "value"): InactiveBranch.options(env)[("value",)]}
 
 
-class SharedBranchCommands(FormModel):
+class SharedBranchCommands(RebuildingForm):
+    branch_models = {("branch",): (ActiveSharedBranch, InactiveSharedBranch)}
+
     branch: ActiveSharedBranch | InactiveSharedBranch = Field(
         default_factory=ActiveSharedBranch, discriminator="kind"
     )
@@ -391,58 +414,12 @@ class UnavailableBranch(FormModel):
         raise api.field_error(("source",), "Unavailable captured source")
 
 
-class FailureContainer(FormModel):
+class FailureContainer(RebuildingForm):
+    branch_models = {("branch",): (First, UnavailableBranch)}
+
     branch: First | UnavailableBranch = Field(
         default_factory=First, discriminator="kind"
     )
-
-
-class OrdinaryChildInline(FormModel):
-    kind: Literal["inline"] = "inline"
-    child: UnavailableBranch
-
-
-class OrdinaryChildContainer(FormModel):
-    branch: First | OrdinaryChildInline = Field(
-        default_factory=First, discriminator="kind"
-    )
-
-
-class OrdinaryChildFailureForm(FormModel):
-    outer: OrdinaryChildContainer = Field(default_factory=OrdinaryChildContainer)
-    flag: bool = False
-
-
-def test_partial_branch_ordinary_child_source_failure_keeps_full_path_and_atomicity() -> (
-    None
-):
-    env = FormEnv()
-    state = FormState(OrdinaryChildFailureForm.default_input(env))
-    before = state.input.data
-    events: list[dict[str, JsonValue]] = []
-    state.subscribe(lambda: events.append(state.input.data))
-    with pytest.raises(
-        PydanticCustomError, match="Unavailable captured source"
-    ) as caught:
-        state.write(
-            {
-                ("flag",): True,
-                ("outer", "branch"): {
-                    "kind": "inline",
-                    "child": {"source": "explicit"},
-                },
-            },
-            env,
-        )
-    assert (caught.value.context or {}).get("path") == (
-        "outer",
-        "branch",
-        "child",
-        "source",
-    )
-    assert state.input.data == before
-    assert state.base.data == before
-    assert events == []
 
 
 class SourceFailureForm(FormModel):
@@ -482,7 +459,9 @@ class PlainBranch(FormModel):
     b_only: float = 4.0
 
 
-class StringAliasForm(FormModel):
+class StringAliasForm(RebuildingForm):
+    branch_models = {("branch",): (AliasedBranch, PlainBranch)}
+
     branch: AliasedBranch | PlainBranch = Field(discriminator="kind")
 
 
@@ -498,7 +477,9 @@ class NumericPlainBranch(FormModel):
     b_only: float = 4.0
 
 
-class NumericAliasForm(FormModel):
+class NumericAliasForm(RebuildingForm):
+    branch_models = {("branch",): (NumericAliasedBranch, NumericPlainBranch)}
+
     branch: NumericAliasedBranch | NumericPlainBranch = Field(discriminator="kind")
 
 

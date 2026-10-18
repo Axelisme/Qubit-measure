@@ -1,10 +1,16 @@
 """Public measure wire types for one current, single-layer Form observation."""
 
+from collections.abc import Mapping
 from typing import Literal, TypedDict
 
 from pydantic import JsonValue
 
-from zcu_tools.gui.form import FormDescription, FormFieldDescription
+from zcu_tools.gui.form import (
+    FormDescription,
+    FormFieldDescription,
+    FormValue,
+    FormWritePath,
+)
 from zcu_tools.gui.form_adapter import LogicalFieldObservation
 
 from ..services.tab_form import TabFormResource
@@ -38,8 +44,8 @@ class FormCommandWire(TypedDict):
 class FormInputCommandWire(FormCommandWire):
     """target is the replaced model path; inputs are participating field paths."""
 
-    target: list[str]
-    inputs: list[list[str]]
+    target: list[str | int]
+    inputs: list[list[str | int]]
 
 
 class FormOptionWire(TypedDict):
@@ -54,10 +60,20 @@ class FormOptionWire(TypedDict):
     commands: list[FormCommandWire]
 
 
+class FormElementWire(TypedDict):
+    """One fixed element: original index, captured name and canonical typed path."""
+
+    index: int
+    name: str
+    path: list[str | int]
+
+
 class FormFieldWire(TypedDict):
     """Single field metadata, without recursive children or validation branches.
 
-    path is the full model-field path; name is its final segment. kind names
+    path is the full typed field/index path. name is the field name, or a
+    FixedList element's captured name. elements lists original indexes, names
+    and paths for kind="elements", otherwise None. kind names
     the control category. title is display text; description/unit/placeholder
     are optional text. decimals is display precision, not rounding input.
     hidden omits a UI row, group names a same-level UI group, collapsed is an
@@ -77,10 +93,11 @@ class FormFieldWire(TypedDict):
     retaining options and active structure.
     """
 
-    path: list[str]
+    path: list[str | int]
     name: str
     kind: Literal[
         "model",
+        "elements",
         "integer",
         "number",
         "complex",
@@ -113,6 +130,7 @@ class FormFieldWire(TypedDict):
     constraints: FormConstraintsWire
     commands: list[FormInputCommandWire]
     selector: bool
+    elements: list[FormElementWire] | None
 
 
 class FormDescriptionWire(TypedDict):
@@ -123,7 +141,7 @@ class FormDescriptionWire(TypedDict):
     wrappers. Leaves, refs, disabled models and unmatched selectors have none.
     """
 
-    path: list[str]
+    path: list[str | int]
     target: FormFieldWire | None
     children: list[FormFieldWire]
 
@@ -166,6 +184,12 @@ def _field_wire(field: FormFieldDescription) -> FormFieldWire:
         "path": list(field.path),
         "name": field.name,
         "kind": field.kind,
+        "elements": None
+        if field.elements is None
+        else [
+            {"index": item.index, "name": item.name, "path": list(item.path)}
+            for item in field.elements
+        ],
         "title": field.title,
         "description": field.description,
         "unit": field.unit,
@@ -218,11 +242,12 @@ def _field_wire(field: FormFieldDescription) -> FormFieldWire:
 
 
 def describe_form(
-    resource: TabFormResource, path: tuple[str, ...]
+    resource: TabFormResource, path: FormWritePath
 ) -> FormFieldObservation:
     """Read description and local values in this owner turn using fixed sources.
 
-    resource must be live; path is canonical model-field names, () for root.
+    resource must be live; path is canonical model-field names and FixedList
+    indexes, () for root.
     Unknown/inactive/whole-leaf descendants raise FormPathError from core;
     other declaration failures retain their exception types. Revoked resources
     raise RESOURCE_GONE. Busy/notification/observer reads are allowed.
@@ -235,26 +260,21 @@ def describe_form(
     raw: JsonValue = resource.input.data
     present = True
     for part in path:
-        present = isinstance(raw, dict) and part in raw
-        raw = raw.get(part) if isinstance(raw, dict) else None
-    value: JsonValue = None
-    subtree: dict[str, JsonValue] = {}
-    for leaf_path, leaf_value in preview.values.items():
-        segments = list(leaf_path)
-        if tuple(segments) == path:
-            value = context_wire_value(leaf_value)
+        if isinstance(raw, dict) and isinstance(part, str) and part in raw:
+            child = raw.get(part)
+        elif isinstance(raw, list) and isinstance(part, int) and 0 <= part < len(raw):
+            child = raw[part]
+        else:
+            present, raw = False, None
             break
-        if tuple(segments[: len(path)]) != path:
-            continue
-        parent = subtree
-        for name in segments[len(path) : -1]:
-            child = parent.setdefault(name, {})
-            if not isinstance(child, dict):
-                raise RuntimeError("Conflicting Form preview paths")
-            parent = child
-        parent[segments[-1]] = context_wire_value(leaf_value)
-    else:
-        value = subtree or None
+        raw = child
+    value = _preview_subtree(
+        {
+            leaf[len(path) :]: value
+            for leaf, value in preview.values.items()
+            if leaf[: len(path)] == path
+        }
+    )
     return {
         "description": description_wire(description),
         "input_present": present,
@@ -267,6 +287,37 @@ def describe_form(
             )
             if not error_path or error_path[: len(path)] == path
         ],
+    }
+
+
+def _preview_subtree(values: Mapping[FormWritePath, FormValue]) -> JsonValue:
+    """Reassemble relative preview leaves without converting indexes to keys.
+
+    Unavailable leaves are absent. Missing list positions remain null, so a
+    later element keeps its original index. Conflicting object/list paths are
+    an owner programming error, not a user draft error.
+    """
+    if () in values:
+        return context_wire_value(values[()])
+    grouped: dict[str | int, dict[FormWritePath, FormValue]] = {}
+    for path, value in values.items():
+        grouped.setdefault(path[0], {})[path[1:]] = value
+    if not grouped:
+        return None
+    if all(isinstance(name, int) for name in grouped):
+        positions = {
+            name: value for name, value in grouped.items() if isinstance(name, int)
+        }
+        return [
+            _preview_subtree(positions.get(index, {}))
+            for index in range(max(positions) + 1)
+        ]
+    if any(not isinstance(name, str) for name in grouped):
+        raise RuntimeError("Conflicting Form preview object/list paths")
+    return {
+        name: _preview_subtree(children)
+        for name, children in grouped.items()
+        if isinstance(name, str)
     }
 
 
@@ -291,10 +342,10 @@ class RecipeSourceWire(TypedDict):
     field path from that Spec root (empty for the selector itself).
     """
 
-    selector_path: list[str]
+    selector_path: list[str | int]
     key: str
     source_kind: Literal["module", "waveform"]
-    spec_path: list[str]
+    spec_path: list[str | int]
 
 
 class RecipeFieldObservation(FormFieldObservation):

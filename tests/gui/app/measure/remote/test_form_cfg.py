@@ -50,6 +50,75 @@ class ExtrasAdapter(SampleAdapter):
         )
 
 
+def test_fixed_element_rpc_describes_names_and_edits_typed_positions(form_rpc) -> None:
+    from pydantic import create_model
+
+    from tests.gui.form._fixed_models import named_form, named_input
+
+    model = named_form()
+    core = create_model(
+        "FixedRpcCfg",
+        __base__=SampleCfg,
+        tones=(
+            model.model_fields["tones"].rebuild_annotation(),
+            named_input(model).data["tones"],
+        ),
+        participants=(model.model_fields["participants"].rebuild_annotation(), ["B"]),
+    )
+
+    class FixedAdapter(SampleAdapter):
+        @staticmethod
+        def make_form(ctx: FormContext):
+            del ctx
+            return Form(core, {"sweep": Range.between(1.0, 2.0, expts=3)})
+
+    fixture, _, rpc = form_rpc
+    fixture.registry.register("fixed-elements", FixedAdapter)
+    tab = fixture.ctrl.new_tab("fixed-elements")
+    try:
+        reply = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["tones"]})
+        assert reply["ok"], reply
+        local = reply["result"]
+        target = local["description"]["target"]
+        assert "elements" in target, (
+            "Fixed-list description must expose original positions and names"
+        )
+        assert target["elements"] == [
+            {"index": 0, "name": "A", "path": ["tones", 0]},
+            {"index": 1, "name": "B", "path": ["tones", 1]},
+        ]
+        assert local["value"] == [{"label": "A", "gain": 1}, {"label": "B", "gain": 2}]
+        reply = rpc.call(
+            "tab.edit_cfg",
+            {
+                "tab_id": tab,
+                "edits": [{"path": ["tones", 1, "gain"], "value": {"expr": "3 * 2"}}],
+            },
+        )
+        assert reply["ok"], reply
+        local = rpc.call(
+            "tab.describe_cfg", {"tab_id": tab, "path": ["tones", 1, "gain"]}
+        )
+        assert local["ok"], local
+        assert local["result"]["description"]["path"] == ["tones", 1, "gain"]
+        assert local["result"]["input_present"] is True
+        assert local["result"]["input"] == {"expr": "3 * 2"}
+        assert local["result"]["value"] == 6
+        for path in [
+            ["tones", "1", "gain"],
+            ["tones", -1],
+            ["tones", 2],
+            ["tones", True],
+        ]:
+            invalid = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": path})
+            assert not invalid["ok"], invalid
+            assert invalid["error"]["code"] == "invalid_params"
+            assert invalid["error"]["reason"] == "form_path"
+            assert invalid["error"]["data"]["form_path"] == path
+    finally:
+        fixture.ctrl.tab_control.close_tab(tab)
+
+
 def test_get_cfg_returns_authored_input_and_ordinary_leaf_values(form_rpc) -> None:
     fixture, tab, rpc = form_rpc
     owner = fixture.ctrl.cfg_resources.lookup(tab)
@@ -714,17 +783,17 @@ def test_headless_sampling_commands_project_actual_values_and_reset(form_rpc):
     fixture, tab, rpc = form_rpc
     owner = fixture.ctrl.cfg_resources.lookup(tab)
     owner.write({("sweep", "start"): 0, ("sweep", "stop"): 1, ("sweep", "n"): 5})
-    described = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["sweep", "n"]})
+    described = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["sweep"]})
     commands = described["result"]["description"]["target"].get("commands", [])
-    assert commands, "Expts must expose sampling commands through RPC"
-    assert commands[0]["inputs"] == [
+    command = next(item for item in commands if item["name"] == "to_step")
+    assert command["inputs"] == [
         ["sweep", "start"],
         ["sweep", "stop"],
         ["sweep", "n"],
     ]
     reply = rpc.call(
         "tab.run_cfg_command",
-        {"tab_id": tab, "path": ["sweep", "n"], "name": commands[0]["name"]},
+        {"tab_id": tab, "path": ["sweep"], "name": command["name"]},
     )
     assert reply["ok"], reply
     owner.write({("sweep", "step"): 0.3})
@@ -747,18 +816,16 @@ def test_headless_coordinate_command_observation_and_active_paths(form_rpc):
     fixture, tab, rpc = form_rpc
     owner = fixture.ctrl.cfg_resources.lookup(tab)
     owner.write({("sweep", "start"): 10, ("sweep", "stop"): 4, ("sweep", "n"): 4})
-    described = rpc.call(
-        "tab.describe_cfg", {"tab_id": tab, "path": ["sweep", "start"]}
-    )
+    described = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["sweep"]})
     assert described["ok"], described
     commands = described["result"]["description"]["target"].get("commands", [])
-    assert commands, "Numeric fields must expose coordinate commands"
+    assert commands, "Sweep row must expose coordinate commands"
     command = commands[0]
     assert command["inputs"] == [["sweep", "start"], ["sweep", "stop"]]
     assert command["target"] == ["sweep"]
     changed = rpc.call(
         "tab.run_cfg_command",
-        {"tab_id": tab, "path": ["sweep", "start"], "name": command["name"]},
+        {"tab_id": tab, "path": ["sweep"], "name": command["name"]},
     )
     assert changed["ok"], changed
     assert changed["result"]["input"]["sweep"] == {
@@ -766,6 +833,12 @@ def test_headless_coordinate_command_observation_and_active_paths(form_rpc):
         "center": 7.0,
         "span": -6.0,
         "n": 4,
+    }
+    assert owner.accept().values["sweep"] == {
+        "start": 10.0,
+        "stop": 4.0,
+        "expts": 4,
+        "step": -2.0,
     }
     inactive = rpc.call(
         "tab.run_cfg_command",
@@ -776,20 +849,23 @@ def test_headless_coordinate_command_observation_and_active_paths(form_rpc):
     before = owner.input.to_json()
     unknown = rpc.call(
         "tab.run_cfg_command",
-        {"tab_id": tab, "path": ["sweep", "center"], "name": "not-a-command"},
+        {"tab_id": tab, "path": ["sweep"], "name": "not-a-command"},
     )
     assert not unknown["ok"]
     assert owner.input.to_json() == before
     owner.write({("sweep", "center"): {"expr": "1 / 0"}})
-    desc = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["sweep", "center"]})
+    desc = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["sweep"]})
     back = desc["result"]["description"]["target"]["commands"][0]["name"]
     before = owner.input.to_json()
     rejected = rpc.call(
         "tab.run_cfg_command",
-        {"tab_id": tab, "path": ["sweep", "center"], "name": back},
+        {"tab_id": tab, "path": ["sweep"], "name": back},
     )
     assert not rejected["ok"]
     assert owner.input.to_json() == before
+    with pytest.raises(CfgPreconditionError) as invalid:
+        owner.accept()
+    assert invalid.value.reason is CfgPreconditionReason.NOT_VALID
 
 
 @pytest.mark.parametrize("guard", ["busy", "holder"])
@@ -804,7 +880,7 @@ def test_coordinate_rpc_retains_host_guards(form_rpc, guard):
     try:
         reply = rpc.call(
             "tab.run_cfg_command",
-            {"tab_id": tab, "path": ["sweep", "start"], "name": "to_center"},
+            {"tab_id": tab, "path": ["sweep"], "name": "to_center"},
         )
         assert not reply["ok"]
         assert reply["error"].get("reason") == (
