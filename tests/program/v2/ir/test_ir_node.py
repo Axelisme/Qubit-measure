@@ -59,7 +59,7 @@ def test_basic_block_leaf_api_string_and_validation():
         BasicBlockNode(insts=[LabelInst(name=Label("bad"))])  # type: ignore[list-item]
 
     with pytest.raises(ValueError, match="JumpInst"):
-        BasicBlockNode(insts=[JumpInst(label=LabelRef(Label("bad")))])  # type: ignore[list-item]
+        BasicBlockNode(insts=[JumpInst(label=LabelRef(Label("bad")))])
 
 
 def test_block_node_mutation_and_string():

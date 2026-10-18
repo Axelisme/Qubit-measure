@@ -400,7 +400,7 @@ def test_soc_changed_subscriber_failure_releases_connection_lease(qapp):
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
     fake_bg = _FakeBg()
-    runner = OperationRunner(gate, handles, progress, fake_bg, bus)  # type: ignore[arg-type]
+    runner = OperationRunner(gate, handles, progress, fake_bg, bus)
     svc = SoCConnectionService(state, bus, gate, handles, runner)
 
     # start_connect registers the exclusion lease and submits to fake_bg

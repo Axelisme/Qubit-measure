@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QApplication,
     QMessageBox,
     QWidget,

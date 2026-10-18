@@ -168,14 +168,14 @@ class DeviceManager:
         # Resolve the instance under the registry lock; call get_info() outside
         # it so a long-running setup() on another device cannot block this read.
         device = self.get_device(name)
-        return device.get_info()  # type: ignore[return-value]
+        return device.get_info()
 
     def get_all_info(self) -> dict[str, DeviceInfo]:
         # Snapshot the registry under the lock, then query each device outside
         # it so concurrent setup() calls on individual devices do not block
         # the whole registry for the duration of their I/O.
         snapshot = self.get_all_devices()
-        return {name: device.get_info() for name, device in snapshot.items()}  # type: ignore[return-value]
+        return {name: device.get_info() for name, device in snapshot.items()}
 
     # ------------------------------------------------------------------
     # Registry-owned disconnect

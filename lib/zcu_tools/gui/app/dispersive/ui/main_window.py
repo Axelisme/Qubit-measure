@@ -7,8 +7,8 @@ collection). The panel owns the pipeline; the window just frames it.
 
 from __future__ import annotations
 
-from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
-from qtpy.QtWidgets import QMainWindow, QWidget  # type: ignore[attr-defined]
+from qtpy.QtGui import QCloseEvent
+from qtpy.QtWidgets import QMainWindow, QWidget
 
 from zcu_tools.gui.app.dispersive.controller import Controller
 

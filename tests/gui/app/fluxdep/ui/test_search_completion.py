@@ -6,8 +6,8 @@ from io import BytesIO
 
 import numpy as np
 import pytest
-from qtpy.QtCore import QThread  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtCore import QThread
+from qtpy.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,

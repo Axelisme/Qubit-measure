@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtWidgets import QLabel  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QLabel
 from zcu_tools.gui.widgets import widget_to_png_bytes
 
 

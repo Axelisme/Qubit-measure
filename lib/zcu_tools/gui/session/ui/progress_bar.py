@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from qtpy.QtCore import QRectF, QSize, Qt  # type: ignore[attr-defined]
-from qtpy.QtGui import QColor, QPainter, QPen  # type: ignore[attr-defined]
-from qtpy.QtWidgets import QSizePolicy, QWidget  # type: ignore[attr-defined]
+from qtpy.QtCore import QRectF, QSize, Qt
+from qtpy.QtGui import QColor, QPainter, QPen
+from qtpy.QtWidgets import QSizePolicy, QWidget
 
 
 class LightweightProgressBar(QWidget):

@@ -107,7 +107,7 @@ def test_lightweight_progress_bar_format_and_value(
 
 def test_factory_push_and_pop_leave_false(qapp):
     """leave=False: close() pops the bar immediately."""
-    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QApplication
 
     stack = _make_stack(qapp)
     factory = _make_factory(stack)
@@ -131,7 +131,7 @@ def test_factory_push_and_pop_leave_false(qapp):
 
 def test_reset_all_keeps_removed_bar_as_hidden_child(qapp):
     """Clearing a visible bar must not turn it into a top-level window."""
-    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QApplication
 
     stack = _make_stack(qapp)
     stack.show()
@@ -151,7 +151,7 @@ def test_reset_all_keeps_removed_bar_as_hidden_child(qapp):
 
 def test_factory_push_and_pop_leave_true(qapp):
     """leave=True: close() leaves bar visible; reset_all() clears it."""
-    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QApplication
 
     stack = _make_stack(qapp)
     factory = _make_factory(stack)
@@ -170,7 +170,7 @@ def test_factory_push_and_pop_leave_true(qapp):
 
 def test_factory_two_layers(qapp):
     """Two nested pbars (leave=False): inner pops on close, outer stays until reset."""
-    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QApplication
 
     stack = _make_stack(qapp)
     factory = _make_factory(stack)
@@ -195,7 +195,7 @@ def test_factory_two_layers(qapp):
 
 def test_total_setter(qapp):
     """Integer totals use raw value as max; float totals use _FLOAT_SCALE for proportional fill."""
-    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QApplication
 
     stack = _make_stack(qapp)
     factory = _make_factory(stack)
@@ -229,7 +229,7 @@ def test_total_change_updates_widget_in_place_no_flicker(qapp):
     and made render_models reset_all() the stack — the bar flickered out of view
     on every sweep point.
     """
-    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QApplication
 
     stack = _make_stack(qapp)
     factory = _make_factory(stack)
@@ -381,7 +381,7 @@ def test_context_local_factory_routes_nested_progress(qapp):
 
 def test_disabled_pbar_does_not_push_to_stack(qapp):
     """factory(disable=True) must not add any bar to the stack layout."""
-    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QApplication
 
     stack = _make_stack(qapp)
     factory = _make_factory(stack)
@@ -432,7 +432,7 @@ def test_disabled_pbar_internal_state_updates(qapp):
 
 def test_disabled_pbar_close_does_not_pop_stack(qapp):
     """close() on a disabled pbar (leave=False) must not affect the stack."""
-    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QApplication
 
     stack = _make_stack(qapp)
     factory = _make_factory(stack)
@@ -445,7 +445,7 @@ def test_disabled_pbar_close_does_not_pop_stack(qapp):
 
 def test_explicit_disable_false_behaves_normally(qapp):
     """Explicitly passing disable=False must behave identically to the default."""
-    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QApplication
 
     stack = _make_stack(qapp)
     factory = _make_factory(stack)
@@ -464,7 +464,7 @@ def test_explicit_disable_false_behaves_normally(qapp):
 
 def test_disabled_and_enabled_pbars_coexist(qapp):
     """A disabled pbar alongside an enabled one must not interfere with the stack."""
-    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QApplication
 
     stack = _make_stack(qapp)
     factory = _make_factory(stack)

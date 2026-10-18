@@ -4,7 +4,7 @@ from collections.abc import Callable
 from typing import cast
 
 import pytest
-from qtpy.QtWidgets import QDialog  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QDialog
 from zcu_tools.gui.widgets.dialog_lifecycle import DialogRefStore
 
 

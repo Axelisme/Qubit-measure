@@ -218,7 +218,7 @@ def _default_driver_factory(type_name: str, address: str) -> DeviceProtocol:
     module_path, cls_name = class_path.rsplit(".", 1)
     cls = getattr(importlib.import_module(module_path), cls_name)
     if requires_address:
-        import pyvisa  # type: ignore[import-untyped]
+        import pyvisa
 
         return cast(DeviceProtocol, cls(address, pyvisa.ResourceManager()))
     return cast(DeviceProtocol, cls())

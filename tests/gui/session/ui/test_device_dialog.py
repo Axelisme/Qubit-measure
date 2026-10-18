@@ -554,7 +554,7 @@ def test_device_dialog_restores_background_setup_and_stops_it(qapp):
         type_name="FakeDevice",
         address="none",
         status=state["status"],
-        info=info,  # type: ignore[arg-type]
+        info=info,
     )
 
     dialog = _make_dialog(ctrl)

@@ -216,7 +216,7 @@ class EarlyStopMixin(TypedAcquireMixin):
                             count * nreads : (count + new_points) * nreads
                         ] = data[ii]
                     count += new_points
-                    self.stats.append(stats)  # type: ignore[attr-defined]
+                    self.stats.append(stats)
                     reps_pbar.update(new_points)
 
                 if count < total_count and cancel_flag.is_set():
@@ -233,9 +233,7 @@ class EarlyStopMixin(TypedAcquireMixin):
 
         assert self.rounds_buf is not None
         assert self.acc_buf is not None
-        self.rounds_buf.append(
-            self._process_accumulated(self.acc_buf)  # type: ignore[arg-type]
-        )
+        self.rounds_buf.append(self._process_accumulated(self.acc_buf))
 
         soc.cleanup_round()
         if self.rounds_pbar is not None:

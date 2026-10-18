@@ -11,7 +11,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from qtpy.QtCore import Qt, Signal  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,

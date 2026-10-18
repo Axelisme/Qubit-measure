@@ -250,7 +250,7 @@ def build_database(
     else:
         from joblib import Parallel, delayed
 
-        energies = Parallel(n_jobs=n_jobs, backend="loky")(  # type: ignore[assignment]
+        energies = Parallel(n_jobs=n_jobs, backend="loky")(
             delayed(energy_fn)(p) for p in rows
         )
 

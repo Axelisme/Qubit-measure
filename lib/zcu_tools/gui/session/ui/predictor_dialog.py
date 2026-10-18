@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Literal
 import numpy as np
 from matplotlib.backends.backend_qt import NavigationToolbar2QT
 from qtpy.QtCore import QTimer, Signal  # type: ignore[attr-defined]
-from qtpy.QtGui import QCloseEvent, QShowEvent  # type: ignore[attr-defined]
+from qtpy.QtGui import QCloseEvent, QShowEvent
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QCheckBox,

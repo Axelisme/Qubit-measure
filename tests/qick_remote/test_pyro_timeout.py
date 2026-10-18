@@ -95,9 +95,9 @@ def test_make_soc_proxy_restores_timeout_after_success(monkeypatch):
     assert seen["timeout_at_get_cfg"] == 1.0, "get_cfg must run under the 1s cap"
 
     # (b) The process-global is restored so that future proxy constructions are not capped.
-    assert (
-        initial_timeout == Pyro4.config.COMMTIMEOUT  # type: ignore[attr-defined]
-    ), "process-global COMMTIMEOUT must be restored after make_soc_proxy returns"
+    assert initial_timeout == Pyro4.config.COMMTIMEOUT, (
+        "process-global COMMTIMEOUT must be restored after make_soc_proxy returns"
+    )
 
     # (c) CRITICAL: the returned proxy itself must NOT retain the 1s cap — without
     #     the explicit soc._pyroTimeout reset in make_soc_proxy, this would be 1.0

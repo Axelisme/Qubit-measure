@@ -96,7 +96,7 @@ def _hook_close(
             raise KeyboardInterrupt("probe base abort after release")
         original()
 
-    device.close = hooked  # type: ignore[method-assign]
+    device.close = hooked
     return _CloseProbe(calls, entered, release)
 
 

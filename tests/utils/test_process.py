@@ -196,7 +196,7 @@ class TestMinusMedian:
 
     def test_invalid_axis_raises(self) -> None:
         with pytest.raises(ValueError, match="Invalid axis"):
-            minus_median(np.array([[1.0, 2.0]]), axis=[0, 1])  # type: ignore[arg-type]
+            minus_median(np.array([[1.0, 2.0]]), axis=[0, 1])
 
 
 class TestMinusMean:
@@ -231,7 +231,7 @@ class TestMinusMean:
 
     def test_invalid_axis_raises(self) -> None:
         with pytest.raises(ValueError, match="Invalid axis"):
-            minus_mean(np.array([[1.0, 2.0]]), axis="bad")  # type: ignore[arg-type]
+            minus_mean(np.array([[1.0, 2.0]]), axis="bad")
 
 
 # ===========================================================================

@@ -217,7 +217,7 @@ def macro_benches(
         print(f"[skip macro] DB not found: {db_path}")
         return {}
 
-    transitions: TransitionDict = {"transitions": [(0, 1), (0, 2), (1, 2)]}  # type: ignore[typeddict-unknown-key]
+    transitions: TransitionDict = {"transitions": [(0, 1), (0, 2), (1, 2)]}
     if n_fluxs is None:
         n_fluxs = 30 if quick else 128
     fluxs, freqs, true_params = _synth_observation(

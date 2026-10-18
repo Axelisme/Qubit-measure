@@ -145,13 +145,11 @@ def test_capture_and_encode_failures_are_typed(tmp_path: Path, failure: str) -> 
     originator = _Originator()
     codec = _Codec()
     if failure == "capture":
-        originator.capture_persisted_state = lambda: (_ for _ in ()).throw(  # type: ignore[method-assign]
+        originator.capture_persisted_state = lambda: (_ for _ in ()).throw(
             RuntimeError("capture failed")
         )
     else:
-        codec.encode = lambda state: (_ for _ in ()).throw(  # type: ignore[method-assign]
-            TypeError("encode failed")
-        )
+        codec.encode = lambda state: (_ for _ in ()).throw(TypeError("encode failed"))
     caretaker = SingleFileCaretaker(
         originator, codec=codec, filename="state.json", cache_dir=tmp_path
     )
@@ -165,9 +163,7 @@ def test_capture_and_encode_failures_are_typed(tmp_path: Path, failure: str) -> 
 def test_restore_exception_propagates_unchanged(tmp_path: Path) -> None:
     originator = _Originator()
     expected = RuntimeError("restore failed")
-    originator.restore_persisted_state = lambda state: (_ for _ in ()).throw(  # type: ignore[method-assign]
-        expected
-    )
+    originator.restore_persisted_state = lambda state: (_ for _ in ()).throw(expected)
 
     with pytest.raises(RuntimeError) as raised:
         _caretaker(originator, tmp_path).restore_all()

@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Literal
 
-from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QWidget
 
 DialogKind = Literal[
     "information",

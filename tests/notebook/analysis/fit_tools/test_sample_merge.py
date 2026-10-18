@@ -195,7 +195,7 @@ def test_merge_requires_exactly_one_target_identity(tmp_path: Path) -> None:
     with pytest.raises(TypeError):
         merge_sample_sources(sources=sources)  # type: ignore[call-arg]
     with pytest.raises(TypeError):
-        merge_sample_sources(  # type: ignore[call-arg]
+        merge_sample_sources(
             target_result_dir=target_dir,  # type: ignore[call-arg]
             sources=sources,
             target_frame=_target_frame(),

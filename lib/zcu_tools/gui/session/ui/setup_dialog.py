@@ -539,7 +539,7 @@ class SetupDialog(QDialog):
         if item is None:
             self._set_project_status("Select a working point first", error=True)
             return
-        label = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+        label = item.data(Qt.ItemDataRole.UserRole)
         try:
             self._ctrl.use_point(PointUseRequest(label))
         except Exception as exc:

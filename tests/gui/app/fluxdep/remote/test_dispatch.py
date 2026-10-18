@@ -64,7 +64,7 @@ def _call(
     """Validate params against the spec (as the service does) then dispatch."""
     spec = METHOD_REGISTRY[method]
     params = validate_params(spec.params, raw_params) if spec.params else raw_params
-    return dict(spec.handler(adapter, params))  # type: ignore[arg-type]
+    return dict(spec.handler(adapter, params))
 
 
 # ---------------------------------------------------------------------------

@@ -29,7 +29,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from typing import Any
 
-from qtpy.QtCore import (  # type: ignore[attr-defined]
+from qtpy.QtCore import (
     QCoreApplication,
     QObject,
     QRunnable,

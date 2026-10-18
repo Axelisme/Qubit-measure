@@ -173,9 +173,7 @@ def _attach_figure_canvas(
     # it would crash at the first C++ call (e.g. stack.indexOf). Treat a deleted
     # wrapper as "no usable canvas" and rebuild a fresh one. This keeps the system
     # self-healing even if some path deletes a canvas out from under its figure.
-    if (
-        not isinstance(canvas, FigureCanvasQTAgg) or sip.isdeleted(canvas)  # type: ignore[attr-defined]
-    ):
+    if not isinstance(canvas, FigureCanvasQTAgg) or sip.isdeleted(canvas):
         canvas = FigureCanvasQTAgg(fig)
 
     previous_container = _fig_container_registry.get(fig)
