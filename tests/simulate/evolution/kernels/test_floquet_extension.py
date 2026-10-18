@@ -179,7 +179,7 @@ def test_concurrent_extensions_share_complete_union_and_preserve_certificates():
 
         def run():
             barrier.wait(timeout=10)
-            return extend(original, changed, context)
+            return solver.extend_prepared(original, changed, context)
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             a, b = list(pool.map(lambda _: run(), range(2)))
@@ -200,7 +200,10 @@ def test_concurrent_extensions_share_complete_union_and_preserve_certificates():
                 assert any(
                     p == port and c is certificate for p, c in frame.certificates
                 )
-            expected_frame = cold.preparations[0].prepared.entries[0].sidebands
+            expected_prepared = solver.extend_prepared(
+                cold.preparations[0].prepared, changed, context
+            )
+            expected_frame = expected_prepared.entries[0].sidebands
             assert expected_frame is not None
             for port, expected in expected_frame.certificates:
                 actual = next(
@@ -246,10 +249,9 @@ def test_concurrent_extensions_share_complete_union_and_preserve_certificates():
             )
             np.testing.assert_array_equal(states, expected_states)
         # New certificate publications are single-flight, not duplicate builds.
-        assert (
-            a.entries[0].sidebands.certificates[-1][1]
-            is b.entries[0].sidebands.certificates[-1][1]
-        )
+        frame_a, frame_b = a.entries[0].sidebands, b.entries[0].sidebands
+        assert frame_a is not None and frame_b is not None
+        assert frame_a.certificates[-1][1] is frame_b.certificates[-1][1]
         assert len(before.certificates) == 3, (
             "the original payload must remain immutable"
         )

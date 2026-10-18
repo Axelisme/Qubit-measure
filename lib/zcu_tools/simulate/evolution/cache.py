@@ -141,6 +141,49 @@ class PrepareCache:
             self._rejected[identity] = None
         self._bytes += size
 
+    def replace(
+        self,
+        namespace: CacheNamespace,
+        previous: PreparedPayload,
+        payload: PreparedPayload,
+    ) -> None:
+        """Replace an immutable whole allocation with its owner's exact extension.
+
+        The numerical owner guarantees unchanged old data and a superset domain.
+        Both payloads must be model-only with identical whole-batch keys. An
+        absent predecessor is a no-op; oversize replacements retain the old
+        allocation. Rejected predecessors remain low priority and may grow only
+        into idle capacity. Validation failures raise ValueError before removal.
+        Existing strong references remain valid. Requires the Engine caller lock.
+        """
+        size = _nonnegative_integer(payload.prepared.nbytes)
+        if (
+            previous.lifetime != "model-only"
+            or payload.lifetime != "model-only"
+            or previous.keys != payload.keys
+        ):
+            raise ValueError("replacement requires identical model-only whole keys")
+        identity = id(previous.prepared)
+        existing = self._resident.get(identity)
+        if existing is None:
+            return
+        if existing.namespace != namespace or existing.payload.keys != previous.keys:
+            raise ValueError("conflicting replacement namespace or keys")
+        if payload.prepared is previous.prepared:
+            self.add(namespace, payload, rejected=self.is_rejected(previous))
+            return
+        if id(payload.prepared) in self._resident:
+            raise ValueError("replacement allocation is already resident")
+        rejected = self.is_rejected(previous)
+        if size > self.limit or (
+            rejected and self._bytes - existing.nbytes + size > self.limit
+        ):
+            return
+        del self._resident[identity]
+        self._rejected.pop(identity, None)
+        self._bytes -= existing.nbytes
+        self.add(namespace, payload, rejected=rejected)
+
     def clear(self) -> None:
         """Release all residents without invalidating caller-held references."""
         self._resident.clear()
