@@ -380,6 +380,114 @@ def test_mixed_integrated_contents_preserve_each_physical_response():
     np.testing.assert_array_equal(result.sums[1:], field.sums[1:])
 
 
+@pytest.mark.parametrize("tones", [2, 4])
+@pytest.mark.parametrize("guard", ["direct", "defective", "singular", "nonuniform"])
+def test_flat_mux_integrates_carriers_without_ode_and_keeps_guard_fallback(
+    tones, guard, monkeypatch
+):
+    from zcu_tools.simulate.adc import response
+
+    m = model()
+    m = replace(
+        m,
+        receiver=replace(
+            m.receiver,
+            time_of_flight_ns=1.7,
+            noise_covariance=np.array([[1.0, 0.2], [0.2, 1.0]]),
+        ),
+        mismatch_phase_rad=np.array([0.2, -0.1]),
+    )
+    if guard == "defective":
+        m = replace(
+            m,
+            rates_per_ns=np.array(
+                [[0.0, 0.03, 0.0], [0.0, 0.0, 0.03], [0.0, 0.0, 0.0]]
+            ),
+        )
+    elif guard == "singular":
+        # The first carrier coincides with an undamped dark mode. It must use
+        # full block expm, while detuned carriers can still use direct sums.
+        m = replace(
+            m,
+            frequencies_ghz=np.full((3, 2), 6.0),
+            kappa_internal_per_ns=np.zeros(2),
+            kappa_external_per_ns=np.full(2, 0.08),
+        )
+    pulses = tuple(
+        adc.ReadoutPulse(
+            -2.3,
+            17.7 - i,
+            (1.2 + 0.3j) / (i + 1),
+            6.0 + 0.018 * i,
+            phase_rad=0.2 - 0.3 * i,
+        )
+        for i in range(tones)
+    )
+    times = np.arange(-5.0, 40.0, 0.5)
+    if guard == "nonuniform":
+        times = times + 0.01 * np.sin(times)
+    grids = (
+        adc.SampleGrid(times, 6.005, 0.31),
+        adc.SampleGrid(times[::2] + 0.13, 5.996, -0.23),
+    )
+    inputs = adc.ReadoutBatch(m, (pulses,), (grids,), np.array([0], dtype=np.int64))
+    oracle = adc.ConditionalReadout(m, rtol=1e-12, atol=1e-14)
+    expected = np.stack([oracle.response(pulses, g).traces.sum(axis=-2) for g in grids])
+    ode_calls, exponential_sizes = [], []
+    solve_ivp, expm = response.solve_ivp, scipy.linalg.expm
+
+    def observe_ode(*args, **kwargs):
+        ode_calls.append(1)
+        return solve_ivp(*args, **kwargs)
+
+    def observe_expm(matrix):
+        exponential_sizes.append(len(matrix))
+        return expm(matrix)
+
+    monkeypatch.setattr(response, "solve_ivp", observe_ode)
+    monkeypatch.setattr(scipy.linalg, "expm", observe_expm)
+    reader = adc.ConditionalReadout(m)
+    result = reader.responses(inputs)
+    assert not ode_calls, (
+        "flat common-start mux must integrate each carrier without ODE"
+    )
+    if guard == "direct":
+        assert not exponential_sizes, (
+            "uniform well-conditioned mux must use discrete sums"
+        )
+    else:
+        assert exponential_sizes, "rejected sums must retain constant-field propagation"
+    if guard == "singular":
+        assert 3 * len(m.state_labels) in exponential_sizes, (
+            "singular coupling needs full block expm"
+        )
+    counts = np.array([len(g.times_ns) for g in grids])
+    noise_sd = np.sqrt(counts[:, None, None] * np.diag(m.receiver.noise_covariance))
+    assert np.max(abs(result.sums[0] - expected) / noise_sd) < 1e-7
+    np.testing.assert_allclose(result.sums[0], expected, atol=2e-8, rtol=0)
+    np.testing.assert_array_equal(result.sample_counts, counts)
+    assert result.traces is None
+    repeated = reader.responses(
+        replace(inputs, pulses=(pulses, pulses), grids=(grids, grids))
+    )
+    np.testing.assert_array_equal(repeated.sums, np.repeat(result.sums, 2, axis=0))
+    # A prior integrated cache must not suppress later ODE traces, or change
+    # shaped/staggered contents into flat common-start fields.
+    for changed in (
+        pulses,
+        (replace(pulses[0], envelope=lambda t: 1 + 0.1 * np.sin(t)), *pulses[1:]),
+        (replace(pulses[0], start_ns=-3.0), *pulses[1:]),
+    ):
+        one = replace(
+            inputs, pulses=(changed,), grids=((grids[0],),), include_traces=True
+        )
+        before = len(ode_calls)
+        traced = reader.responses(one)
+        assert len(ode_calls) > before
+        reference = oracle.response(changed, grids[0]).traces.sum(axis=-2)[None]
+        np.testing.assert_allclose(traced.sums[0], reference, atol=2e-8, rtol=0)
+
+
 @pytest.mark.parametrize("include_traces", [False, True])
 def test_multi_carrier_batch_matches_joint_field_and_adds_offset_once(include_traces):
     m = model()
