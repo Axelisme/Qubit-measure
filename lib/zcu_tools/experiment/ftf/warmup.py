@@ -131,6 +131,10 @@ def _prepare(name: str) -> None:
     if name.startswith("multitone_"):
         _multitone(name)
         return
+    _single_track(name)
+
+
+def _single_track(name: str) -> None:
     duration = 20.3
     envelope = EnvelopeSpec("constant")
     frequencies = np.array([5.0])
