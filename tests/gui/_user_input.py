@@ -744,14 +744,16 @@ class ComponentDriver:
         value: str = "",
         *,
         object_name: str | None = None,
+        commit: bool = True,
     ) -> None:
-        """Replace a line edit using its visible form label/name, then press Enter."""
+        """Replace a visible line edit; commit with Enter unless commit=False."""
         widget = self._find(text, object_name, editable=True)
         if self._can_interact(widget):
             mouse_click(widget, widget.rect().center())
             key_click(widget, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
             type_text(widget, value)
-            key_click(widget, Qt.Key.Key_Return)
+            if commit:
+                key_click(widget, Qt.Key.Key_Return)
         QApplication.processEvents()
 
     def select_combo(self, value: str, *, object_name: str) -> None:
