@@ -10,7 +10,7 @@ from scipy.linalg import expm
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from . import gate_phase
 from ._gate_endpoints import build_endpoints
-from ._secular import coherence_decay, population_generator
+from ._secular import coherence_decay, population_generator, split_step
 from ._shaped import drive_bounds
 from ._workload_facts import envelope_bounds
 
@@ -57,16 +57,7 @@ def _apply_gates(
                     np.exp(1j * _MODES[mode] * phases[row])
                     * coefficients[key, segment, mode]
                 )
-            for half in range(2):
-                diagonal = np.empty(size, dtype=np.complex128)
-                for i in range(size):
-                    diagonal[i] = rho[i, i]
-                updated = populations[key].astype(np.complex128) @ diagonal
-                rho *= coherences[key]
-                for i in range(size):
-                    rho[i, i] = updated[i]
-                if half == 0:
-                    rho = unitary @ rho @ unitary.conj().T
+            rho = split_step(rho, unitary, populations[key], coherences[key])
         states[row] = rho
 
 

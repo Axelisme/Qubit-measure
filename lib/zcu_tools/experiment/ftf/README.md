@@ -67,7 +67,7 @@ around an immediately invoked blocking acquire necessarily includes its wait.
 No frontend timer or status display is installed by this backend API.
 
 The coverage manifest in `warmup.py` covers shaped carrier families (>9 carriers),
-shaped direct integration, Dyson gain batches, dense Floquet periods, t4 and ADC
+shaped direct integration, covariant simultaneous gate playback, Dyson gain batches, dense Floquet periods, t4 and ADC
 integrated/decimated/mux responses. It does not promise every possible signature
 or kernel. New routes require updating the representative inputs and checking
 real acquire compile events with an empty scratch `NUMBA_CACHE_DIR`.
