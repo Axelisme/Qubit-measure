@@ -1,16 +1,15 @@
-"""Typed author carriers at the recording GUI wire, not indexed owner traversal.
-
-Real indexed logical installation is owned by the later owner integration. The
-original owner scenario remains in commit 393b89c71 for that acceptance seam.
-"""
+"""Typed author paths at the wire and real indexed Form owner seams."""
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import pytest
 from pydantic import JsonValue
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.remote.form_description import recipe_field_wire
+from zcu_tools.gui.form import Display
+from zcu_tools.gui.form_adapter import FixedElements, Form
 from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import RecipeFieldEdit, RecipeSession
 
@@ -57,7 +56,7 @@ def test_read_module_forwards_str_segments_and_rejects_unsupported_indexes(
         assert client.transport.sent[before:] == []
 
 
-def test_indexed_batch_read_and_run_capture_keep_original_position(
+def test_indexed_wire_batch_read_and_run_capture_keep_original_position(
     tmp_path: Path,
 ) -> None:
     with recipe_client(tmp_path, CarrierGui()) as client:
@@ -113,6 +112,81 @@ def test_indexed_batch_read_and_run_capture_keep_original_position(
         assert isinstance(previous.value, list)
         previous.value.append(99)
         assert tab.read_field(("tones", 1, "drive", "samples")).value == [3, 4]
+        captured = tab.run().snapshot()
+        assert captured is not None
+        assert captured.actual["fields"] == {
+            "q2_gain": {"value": 0.75, "source": "derived"}
+        }
+        tab.set(("tones", 1, "drive", "gain"), 0.9)
+        assert captured.actual["fields"]["q2_gain"]["value"] == 0.75
+
+
+class Drive(ConfigBase):
+    gain: float
+    samples: list[int]
+
+
+class Tone(ConfigBase):
+    name: Annotated[str, Display(readonly=True)]
+    drive: Drive
+
+
+class IndexedControls(ConfigBase):
+    tones: Annotated[list[Tone], Display(element_label="name")] = [
+        Tone(name="Q1", drive=Drive(gain=0.1, samples=[1, 2])),
+        Tone(name="Q2", drive=Drive(gain=0.2, samples=[3, 4])),
+    ]
+    participants: list[str] = ["Q2"]
+
+
+class IndexedGui(LookbackGui):
+    def make_form(self):
+        return Form(
+            IndexedControls,
+            {},
+            fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
+        )
+
+
+def test_indexed_batch_read_and_run_capture_keep_original_position(
+    tmp_path: Path,
+) -> None:
+    gui = IndexedGui()
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(
+            client.context,
+            summary_parameters=(
+                SummaryParameter("q2_gain", ("tones", 1, "drive", "gain")),
+            ),
+        ).open_tab("lookback")
+        before = len(client.transport.sent)
+        try:
+            tab.set_fields(
+                (
+                    RecipeFieldEdit(("tones", 0, "drive", "gain"), None),
+                    RecipeFieldEdit(
+                        ("tones", 1, "drive", "gain"), {"expr": "0.75"}, "derived"
+                    ),
+                )
+            )
+            previous = tab.read_field(("tones", 1, "drive", "samples"))
+            tab.set(("tones", 1, "drive", "samples"), [7, 8])
+        except (AttributeError, TypeError, ValueError) as error:
+            pytest.fail(
+                f"Typed str/int author paths must reach the owner unchanged: {error}"
+            )
+        assert client.transport.sent[before] == (
+            "tab.edit_recipe_fields",
+            {
+                "tab_id": "t",
+                "edits": [
+                    {"path": ["tones", 1, "drive", "gain"], "value": {"expr": "0.75"}}
+                ],
+            },
+        )
+        assert previous.value == [3, 4]
+        assert tab.read_field(("tones", 1, "drive", "samples")).value == [7, 8]
+        assert tab.read_field(("tones", 0, "drive", "gain")).value == 0.1
         captured = tab.run().snapshot()
         assert captured is not None
         assert captured.actual["fields"] == {
