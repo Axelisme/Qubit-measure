@@ -2,6 +2,11 @@
 
 ## Sequence and coordinates
 
+The complete `tones` list retains capture-generated `name` values and original
+readout positions. `participants` is a nonempty, unique list of existing names.
+Q3/Q1 selects original indices `[2, 0]`, retaining that execution/data order.
+Every element requires valid drives, including nonparticipants.
+
 `MuxT1Exp` excites active qubits with fixed pi pulses on independent drive generators.
 It uses the existing `Join` to start all pulses together. Each shorter branch waits
 for the longest branch to finish. One common `Delay` follows the Join, then one
@@ -35,15 +40,16 @@ from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 # env is a caller-owned compatible hardware or simulation environment.
-# full_readout is MuxReadoutCfg; pi_0/pi_2 are fixed PulseCfg values.
+# full_readout is MuxReadoutCfg; pi_0/pi_1/pi_2 are fixed PulseCfg values.
 # Their generators must be independent of each other and readout.gen_ch.
 cfg = MuxT1Cfg(
     modules=MuxDriveModuleCfg(readout=full_readout),
     tones=[
-        MuxT1ToneCfg(active=True, drive=pi_0),
-        MuxT1ToneCfg(active=False, drive=None),
-        MuxT1ToneCfg(active=True, drive=pi_2),
+        MuxT1ToneCfg(name="Q1", drive=pi_0),
+        MuxT1ToneCfg(name="Q2", drive=pi_1),
+        MuxT1ToneCfg(name="Q3", drive=pi_2),
     ],
+    participants=["Q3", "Q1"],
     delays=[0.0, 0.2, 0.5, 1.0, 2.0, 4.0, 8.0],
     reps=128,
     rounds=2,
@@ -71,8 +77,9 @@ finally:
 # The environment owner closes its devices after all operations finish.
 ```
 
-The full ordered tone list must match the full readout count. Only active tones
-require a drive. Runtime lowers active flags once, preserving original indices;
+The full ordered tone list must match the full readout count. Every tone requires
+a valid drive, including nonparticipants. The nonempty, unique participants name
+list selects original indices in its own order;
 ADC channel order and duplicate labels do not change identity. Cfg validation
 rejects missing drives, shared generators, invalid counts and invalid delay axes.
 Native pulse and readout owners reject unsupported hardware settings.

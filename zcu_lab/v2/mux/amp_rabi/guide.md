@@ -4,9 +4,11 @@
 
 ## 輸入與排程
 
-`MuxAmpRabiCfg.modules` 包含共同 reset 與完整 `MuxReadoutCfg`。完整 `tones` 每個元素包含 active、drive 及 sweep，順序就是原始 tone index。只有 active tone 必須提供 drive。Active drives 使用獨立 generator，不能占用 readout generator。
+`participants: list[str]` 是非空、不重複的參與名稱清單，名稱必須存在於完整 tones。完整 Q1／Q2／Q3 搭配 participants Q3／Q1 時，執行與資料原始 indices 為 `[2, 0]`，不排序或重新編號。未參與元素保留設定並使用同一驗證規則。
 
-每個 active sweep 的 start/stop 是 normalized gain，必須在 `[-1,1]`。範圍可以不同，點數必須相同。第 p 點同時使用每個 active tone 的第 p 個 gain，不作 Cartesian product。Inactive tone 的 sweep 不限制點數。Core 驗證 numeric cfg，完整 qubit/resonator 綁定由呼叫端負責。
+`MuxAmpRabiCfg.modules` 包含共同 reset 與完整 `MuxReadoutCfg`。完整 `tones` 每個元素包含固定的 `name`、必填 `drive` 及 `sweep`，順序就是原始 tone index。所有 drive 都必須有效，使用獨立 generator，不能占用 readout generator。
+
+每個 tone 的 sweep 的 start/stop 是 normalized gain，必須在 `[-1,1]`。範圍可以不同，點數必須相同。第 p 點同時使用每個 active tone 的第 p 個 gain，不作 Cartesian product。未參與 tone 同樣驗證，掃描點數也必須相同。Core 驗證 numeric cfg，完整 qubit/resonator 綁定由呼叫端負責。
 
 每點 compile 一次，依序執行共同 reset、Join 內的獨立 drive pulses、共同 mux readout。Branches 同時開始，短 pulse 完成後等待長 pulse。Core 不做末端 padding，不改 drive pre/post delay。所有 qubits 共用 reps、rounds、initial_delay 及 relax_delay。Native conversion 留在 program。
 

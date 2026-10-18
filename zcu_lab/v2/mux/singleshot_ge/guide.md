@@ -2,6 +2,11 @@
 
 ## Acquisition
 
+The complete `tones` list retains capture-generated `name` values and original
+readout positions. `participants` is a nonempty, unique list of existing names.
+Q3/Q1 selects original indices `[2, 0]`, retaining that execution/data order.
+Every element requires valid drives, including nonparticipants.
+
 `MuxGEExp.run(config, *, context)` acquires probe-off and probe-on raw IQ for
 all active qubits in the same two programs. It does not simulate each qubit
 separately or assemble unrelated shots. This core has no Form, catalog entry,
@@ -9,10 +14,10 @@ recipe or calibration proposals.
 
 `MuxGECfg.modules` contains the common optional reset and the complete ordered
 mux readout. `tones: list[MuxGEToneCfg]` has one element per full readout tone.
-Each element contains `active`, the probe `drive`, and optional `init_pulse`.
-Only active elements require a drive. Active generators must be independent and
+Each element contains fixed `name`, required probe `drive`, and optional `init_pulse`.
+All drives must be valid. All generators must be independent and
 must differ from the readout generator. An initial pulse uses its tone's drive
-generator. Inactive settings stay in cfg but do not run.
+generator. Nonparticipant settings stay validated in cfg but do not run.
 
 Each preparation runs common reset, then an existing `Join` of the active
 branches, then one mux readout. A branch contains its optional initial pulse

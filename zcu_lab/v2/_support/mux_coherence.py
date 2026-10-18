@@ -7,7 +7,6 @@ from functools import partial
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import StrictBool
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
@@ -25,19 +24,24 @@ from zcu_tools.program.v2.modules import Join, Module, MuxReadout
 
 from zcu_lab.v2.twotone.time_domain.detune import actual_detune
 
-from .mux_sweep_cfg import MuxDriveModuleCfg, MuxToneCfg, validate_mux_scan
+from .mux_sweep_cfg import (
+    MuxDriveModuleCfg,
+    MuxToneCfg,
+    validate_mux_scan,
+)
 
 
 class MuxCoherenceToneCfg(ConfigBase):
-    """One full-readout tone: strict active flag, optional x90 drive, MHz detune.
+    """One named original tone's required x90 drive and MHz detune.
 
-    Only active tones require drive. Drive is the source pi/2 pulse, with fixed
-    numeric parameters; detune controls the final pi/2 phase ramp, not its carrier.
-    Full-list admission is performed by the experiment cfg, including channels.
+    name is its nonempty capture-generated qubit identity. drive is the fixed
+    pi/2 source pulse. detune ramps the final pi/2 phase, not its carrier.
+    Full-list admission validates every pulse, detune and independent channel,
+    including nonparticipants, and rejects duplicate names.
     """
 
-    active: StrictBool
-    drive: PulseCfg | None
+    name: str
+    drive: PulseCfg
     detune: float = 0.0
 
 
@@ -46,6 +50,7 @@ def validate_coherence_scan(
     modules: MuxDriveModuleCfg,
     tones: Sequence[MuxCoherenceToneCfg],
     delay: SweepCfg,
+    participants: Sequence[str],
 ) -> None:
     """Reject invalid full tones, fixed pulses, channels or common delay (us).
 
@@ -63,7 +68,8 @@ def validate_coherence_scan(
     validate_mux_scan(
         cfg,
         modules,
-        [MuxToneCfg(active=t.active, drive=t.drive, sweep=delay) for t in tones],
+        [MuxToneCfg(name=t.name, drive=t.drive, sweep=delay) for t in tones],
+        participants,
     )
 
 
@@ -151,7 +157,7 @@ def _averaged_signal(
 def acquire_coherence(
     cfg: ProgramV2Cfg,
     modules: MuxDriveModuleCfg,
-    tones: Sequence[MuxCoherenceToneCfg],
+    indexed_tones: Sequence[tuple[int, MuxCoherenceToneCfg]],
     delay: SweepCfg,
     *,
     context: RunContext,
@@ -160,7 +166,8 @@ def acquire_coherence(
     """Acquire admitted full tones using stage-wide Join and one hardware sweep.
 
     cfg supplies shared reps/rounds/initial/relax delays (us); modules includes
-    full mux readout and optional reset. tones/delay must pass leaf cfg admission.
+    full mux readout and optional reset. indexed_tones contains admitted selected
+    (original index, tone) pairs in participant order; delay passes leaf admission.
     pi_pulses=None selects Ramsey; otherwise it is a full-list Echo pi-pulse
     sequence, same independent channels as x90 drives. Inputs remain unchanged.
     Every x90 stage starts together. Echo additionally joins the pi stage between
@@ -169,18 +176,17 @@ def acquire_coherence(
     parameter. Public program/sweep owners quantize time, phase and pulses.
 
     Return requested delay, actual MHz detunes/source frequencies and average IQ
-    (K,P), lowering active indices once. Publish measurement_i magnitude figures.
+    (K,P), retaining supplied original index order. Publish measurement_i figures.
     Completed-round averages survive cancellation, no-data slots stay NaN. Errors
     remain on context.cancel_signal; caller must raise_if_error before success.
     Build/conversion failures propagate. context owns hardware, fresh StopSignal
     and Plots; caller finishes/releases plots and cleans up devices. No I/O/save.
     """
-    indices = [index for index, tone in enumerate(tones) if tone.active]
+    tones = dict(indexed_tones)
+    indices = list(tones)
     drives: list[PulseCfg] = []
     for index in indices:
         drive = tones[index].drive
-        if drive is None:
-            raise ValueError(f"tones[{index}].drive is required")
         drives.append(drive)
     scaler = 1.0 if pi_pulses is None else 0.5
     times = sweep2array(delay, "none")

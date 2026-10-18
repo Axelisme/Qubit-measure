@@ -24,60 +24,58 @@ from zcu_lab.v2._support.mux_coherence_analysis import (
     analyze_coherence,
 )
 from zcu_lab.v2._support.mux_coherence_persistence import coherence_spec
-from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg
+from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg, participant_indices
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoAnalyzeOptions
 
 
 class MuxEchoToneCfg(MuxCoherenceToneCfg):
-    """One full tone's x90 drive, MHz detune and optional Echo x180 pi_pulse.
+    """One named full tone's x90 drive, MHz detune and required Echo x180.
 
-    pi_pulse is required only for active tones and must use the same independent
-    generator as that tone's drive. Both pulses have fixed finite parameters;
-    frequency/gain/phase/waveform may otherwise differ. Inactive pulses may be None.
+    pi_pulse must use drive's independent generator. Both pulses are required
+    and validated for nonparticipants too. Their fixed frequency, gain, phase
+    and waveform may otherwise differ; inherited name is the capture identity.
     """
 
-    pi_pulse: PulseCfg | None
+    pi_pulse: PulseCfg
 
 
 class MuxT2EchoCfg(ProgramV2Cfg, ExpCfgModel):
-    """Full ordered tones and one requested total-delay sweep in us.
+    """Complete named tones, ordered participants and shared acquisition controls.
 
-    tones matches the full mux readout; active elements need x90 drive/x180
-    pi_pulse on the same generator, independent across tones and from readout.
-    Each detune is MHz and ramps final x90 phase with total requested delay.
-    delay is finite nonnegative us, split into two common native half waits.
-    modules supplies optional reset and full mux readout. Shared reps/rounds are
-    positive; inherited initial_delay/relax_delay are finite nonnegative us.
-    No per-tone acquisition controls, bindings or GUI state are stored.
+    modules holds optional reset and complete mux readout. tones contains one
+    MuxEchoToneCfg per original readout position, with unique nonempty names.
+    participants is a nonempty, duplicate-free list of those names; its order
+    determines execution/data rows (Q3/Q1 maps to original indices 2/0).
+    Every drive is required/validated, including nonparticipants, on independent
+    generators distinct from readout. delay is the common finite nonnegative total requested-us SweepCfg, split
+    into two native half waits. Each MHz detune ramps the final x90 phase.
+    Inherited reps/rounds are positive; initial_delay/relax_delay are finite
+    nonnegative us. No capture, bindings or writeback destinations are stored.
     """
 
     modules: MuxDriveModuleCfg
     tones: list[MuxEchoToneCfg]
+    participants: list[str]
     delay: SweepCfg
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxT2EchoCfg:
         """Reject missing active pulses, swept values, shared channels or bad delays."""
-        validate_coherence_scan(self, self.modules, self.tones, self.delay)
-        for index, tone in enumerate(self.tones):
-            if tone.active and tone.pi_pulse is None:
-                raise ValueError(f"tones[{index}].pi_pulse is required")
+        validate_coherence_scan(
+            self, self.modules, self.tones, self.delay, self.participants
+        )
         validate_coherence_scan(
             self,
             self.modules,
             [
-                MuxCoherenceToneCfg(active=t.active, drive=t.pi_pulse, detune=t.detune)
+                MuxCoherenceToneCfg(name=t.name, drive=t.pi_pulse, detune=t.detune)
                 for t in self.tones
             ],
             self.delay,
+            self.participants,
         )
         for index, tone in enumerate(self.tones):
-            if (
-                tone.active
-                and tone.drive is not None
-                and tone.pi_pulse is not None
-                and tone.drive.ch != tone.pi_pulse.ch
-            ):
+            if tone.drive.ch != tone.pi_pulse.ch:
                 raise ValueError(f"tones[{index}].pi_pulse.ch must equal drive.ch")
         return self
 
@@ -105,7 +103,12 @@ class MuxT2EchoExp(PersistableExperiment[MuxCoherenceResult, MuxT2EchoCfg]):
         return acquire_coherence(
             cfg,
             cfg.modules,
-            cfg.tones,
+            [
+                (i, cfg.tones[i])
+                for i in participant_indices(
+                    [tone.name for tone in cfg.tones], cfg.participants
+                )
+            ],
             cfg.delay,
             context=context,
             pi_pulses=[tone.pi_pulse for tone in cfg.tones],

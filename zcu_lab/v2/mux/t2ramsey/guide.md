@@ -6,17 +6,22 @@ catalog registration or writeback proposal.
 
 ## Configuration and timing
 
+`participants` is a nonempty, unique list of names in the complete `tones` list.
+Q3/Q1 selects original indices `[2, 0]`, retaining that execution/data order.
+Every element requires valid drives on independent generators, even when not
+participating. Names, count and order match the fixed capture.
+
 Import `MuxT2RamseyCfg`, `MuxT2RamseyExp` and `MuxCoherenceToneCfg` from
 `zcu_lab.v2.mux.t2ramsey`. The cfg contains:
 
 - `modules: MuxDriveModuleCfg`, with optional common reset and full mux readout.
 - `tones: list[MuxCoherenceToneCfg]`, one element per original readout tone.
-  Each element has strict `active`, optional `drive` and `detune` in MHz.
-  `drive` is the source x90 pulse, not x180. Only active drives are required.
+  Each element has a fixed `name`, required `drive` and `detune` in MHz.
+  `drive` is the source x90 pulse, not x180. All drives are required, even for nonparticipants.
 - `delay: SweepCfg`, one common requested free-evolution delay in us.
 - Shared `reps`, `rounds`, `initial_delay` and `relax_delay`, with times in us.
 
-At least one tone must be active. Active drives must use independent generators,
+Participants must be nonempty. All drives must use independent generators,
 different from the readout generator. Pulse parameters must be fixed and finite.
 The delay bounds must be finite and nonnegative. Numeric cfg validation does not
 resolve component identities; the caller supplies valid tone/qubit bindings.

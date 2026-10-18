@@ -1,6 +1,6 @@
 # v2 experiments
 
-**Last updated:** 2026-10-18，mux public run、common-start Join 與來源保存
+**Last updated:** 2026-10-19，mux 具名 tones／participants 與全元素驗證
 
 ZigZag 的 Run 與離線編譯共用 `build_zigzag_modules`，使用 register loop。
 `reset_phase_cycle` 可在偶數 averaging sweeps 間交替最後 reset qubit pulse 的 0/180°
@@ -38,15 +38,17 @@ Library 的 `readout/mux:blank` 只給 scalar 編輯初值，作者必須填 ton
 Form／recipe／adapter／catalog／writeback／UI 接線另批交付，等待 fixed-list Form Base。
 這些 core 入口不註冊 catalog。
 
-`MuxFreqCfg`／`MuxAmpRabiCfg` 使用完整 `tones: list[MuxToneCfg]`，元素內有
-`active`、`drive` 與 `sweep`。長度固定等於完整 readout tone 數。
-`MuxToneCfg` 與 `MuxDriveModuleCfg` 位於 `_support.mux_sweep_cfg`。
-只要求 active drive，所有 active drive channel 必須獨立且不能等於 readout generator。
-Active sweep 點數相同，inactive 不參與點數比較。共用 reps／rounds／reset／delays。
-完整 component identity 的驗證仍由固定 capture 的 lab Form／adapter 負責。
+七個 mux qubit cfg 使用完整固定 `tones` 與獨立 `participants: list[str]`。
+每個元素有固定 qubit `name` 與必填 drive；pulse sweep 類另有自己的 sweep，
+T1／Ramsey／Echo 使用共用 requested-delay 軸。所有元素都驗證，未參與者也必須有
+有效 drive、獨立 generator；pulse sweep 點數全部相同。Len Rabi 全部元素只接受
+const／flat_top，不伸縮或裁切 arb asset。
+Participants 非空、不重複，名稱必須存在。Runtime 按名稱順序查完整原始位置，
+例如 Q3／Q1 對應 `[2, 0]`。GE raw、analysis 與 native persistence 同樣保留該順序。
+RunRecord 保存完整具名 cfg 與 participants，不另保存目的地或 group snapshot。
 
 `prepare_frequency_scan(cfg, soccfg=...)` 與 `prepare_amplitude_scan(cfg, soccfg=...)`
-各自 lower 一次 active flag，回傳 `_support.mux.MuxPulseScan`。
+各自按 participants 查出原始 indices，回傳 `_support.mux.MuxPulseScan`。
 其 `indices` 保留原始序號，`coordinates` 是各自硬體 grid 的 `(K,P)` 浮點陣列，
 `point_pulses` 是 `(P,K)` 固定 numeric pulse cfg，不展開 Cartesian product。
 這些入口只準備資料，不 acquire；public run 將其交給上述 common-start zip 排程。

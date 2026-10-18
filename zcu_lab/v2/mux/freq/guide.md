@@ -4,9 +4,11 @@
 
 ## 輸入與排程
 
-`MuxFreqCfg.modules` 包含共同 reset 與完整 `MuxReadoutCfg`。`tones` 長度等於完整 readout tone 數，順序就是原始 tone index。每個 `MuxToneCfg` 有 active、drive 及 sweep。只有 active tone 必須有 drive。每個 active drive 使用不同 generator，且不能占用 readout generator。
+`participants: list[str]` 是非空、不重複的參與名稱清單，名稱必須存在於完整 tones。完整 Q1／Q2／Q3 搭配 participants Q3／Q1 時，執行與資料原始 indices 為 `[2, 0]`，不排序或重新編號。未參與元素保留設定並使用同一驗證規則。
 
-每個 active sweep 的 start/stop 是 MHz。範圍可以不同，點數必須相同。第 p 點使用所有 active tones 各自的第 p 個頻率，不作 Cartesian product。Core 在 Run 前驗證 numeric cfg，不解析 MuxGroup 或 qubit 名稱。呼叫端負責完整 qubit/resonator 綁定。
+`MuxFreqCfg.modules` 包含共同 reset 與完整 `MuxReadoutCfg`。`tones` 長度等於完整 readout tone 數，順序就是原始 tone index。每個 `MuxToneCfg` 有固定的 `name`、必填 `drive` 及 `sweep`。所有 drive 都必須有效，使用不同 generator，且不能占用 readout generator。
+
+每個 tone 的 sweep 的 start/stop 是 MHz。範圍可以不同，點數必須相同。第 p 點使用所有 active tones 各自的第 p 個頻率，不作 Cartesian product。Core 在 Run 前驗證 cfg，依 participants 名稱解析原始位置，不讀 MuxGroup。呼叫端負責完整 qubit/resonator 綁定。
 
 每點建立一個 program，依序執行共同 reset、Join 內的獨立 drive pulses、共同 mux readout。Join 讓 branches 同時開始，短 pulse 完成後等待長 pulse。Core 不補齊末端，不改 drive pre/post delay。Reps、rounds、initial_delay 與 relax_delay 來自同一份 cfg。Program 負責 native 量化與平均。
 

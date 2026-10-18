@@ -4,13 +4,13 @@
 
 ## 輸入與長度
 
-`MuxLenRabiCfg.modules` 包含共同 reset 及完整 `MuxReadoutCfg`。`tones: list[MuxToneCfg]` 長度等於完整 readout tone 數，順序就是原始 tone index。每個元素有 active、drive 與 sweep。只有 active tone 必須提供 drive。Active drives 使用不同 generator，不能占用 readout generator。完整 qubit/resonator 綁定由呼叫端驗證，core 只接 numeric cfg。
+`MuxLenRabiCfg.modules` 包含共同 reset 及完整 `MuxReadoutCfg`。`tones: list[MuxToneCfg]` 長度等於完整 readout tone 數，順序就是原始 tone index。每個元素有固定的 `name`、必填 `drive` 與 `sweep`。所有 drive 都必須有效，使用不同 generator，不能占用 readout generator。完整 qubit/resonator 綁定由呼叫端驗證，core 只接 numeric cfg。
 
-Active sweep 的 start/stop 是正的微秒長度。範圍可不同，點數必須相同。第 p 點使用所有 active tones 各自的第 p 個 length，不展開 Cartesian product。Inactive sweep 不限制點數。
+每個 tone 的 sweep 的 start/stop 是正的微秒長度。範圍可不同，點數必須相同。第 p 點使用所有 active tones 各自的第 p 個 length，不展開 Cartesian product。未參與 tone 的掃描點數也必須相同。
 
-本批支援 const 與 flat_top。Const length 是整個 pulse 的長度。Flat_top length 是包含 raise_waveform 的總 requested length，waveform owner 從中扣除 ramp，決定 plateau。Core 不改 ramp、gain、frequency 或 phase。Arb 長度由 asset 決定，既有 owner 沒有公開 length sweep 操作，因此 cfg 與 Run 入口明確拒絕 active arb。Inactive arb 不因此被拒絕。Core 不伸縮或裁切 asset。
+本批支援 const 與 flat_top。Const length 是整個 pulse 的長度。Flat_top length 是包含 raise_waveform 的總 requested length，waveform owner 從中扣除 ramp，決定 plateau。Core 不改 ramp、gain、frequency 或 phase。Arb 長度由 asset 決定，既有 owner 沒有公開 length sweep 操作，因此 cfg 與 Run 入口對全部元素拒絕 arb，未參與元素也不例外。Core 不伸縮或裁切 asset。
 
-`prepare_length_scan(cfg, soccfg=...)` 複製 cfg，再一次選出 active 原始 indices。它以公開 `sweep2array(..., "time", gen_ch=...)` 產生每個 drive 的量化 requested length 軸，交給 pulse 的 `set_param("length", ...)`。每條軸保留自己的硬體格點，不排序、去重或縮減點數。量化後非正或相鄰點重疊會拒絕。這些座標不是 compiled hardware trace，flat_top ramp 與 native clock rounding 可讓總播放時間差數個 ticks。Ramp 與最少 cycle 等硬體限制由既有 waveform/compiler owner 拒絕，錯誤直接傳出。
+`prepare_length_scan(cfg, soccfg=...)` 複製 cfg，按 participants 順序查出原始 indices。它以公開 `sweep2array(..., "time", gen_ch=...)` 產生每個 drive 的量化 requested length 軸，交給 pulse 的 `set_param("length", ...)`。每條軸保留自己的硬體格點，不排序、去重或縮減點數。量化後非正或相鄰點重疊會拒絕。這些座標不是 compiled hardware trace，flat_top ramp 與 native clock rounding 可讓總播放時間差數個 ticks。Ramp 與最少 cycle 等硬體限制由既有 waveform/compiler owner 拒絕，錯誤直接傳出。
 
 ## 排程與結果
 

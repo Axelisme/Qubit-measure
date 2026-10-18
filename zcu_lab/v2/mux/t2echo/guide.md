@@ -6,12 +6,17 @@ a Form, recipe, catalog entry or writeback proposal.
 
 ## Configuration and timing
 
+`participants` is a nonempty, unique list of names in the complete `tones` list.
+Q3/Q1 selects original indices `[2, 0]`, retaining that execution/data order.
+Every element requires valid drives on independent generators, even when not
+participating. Names, count and order match the fixed capture.
+
 Import `MuxT2EchoCfg`, `MuxT2EchoExp` and `MuxEchoToneCfg` from
 `zcu_lab.v2.mux.t2echo`. Supply common `MuxDriveModuleCfg` with optional reset
 and full readout, a full ordered `tones` list, and `delay: SweepCfg` in us.
 
-Each tone contains strict `active`, optional `drive` for x90, optional `pi_pulse`
-for x180, and `detune` in MHz. Both pulses are required only for active tones.
+Each tone contains fixed `name`, required `drive` for x90, required `pi_pulse`
+for x180, and `detune` in MHz. Both pulses are validated for nonparticipants too.
 A tone's two pulses use the same generator, but may have different waveform,
 carrier, gain and phase. Active tones use independent generators, distinct from
 readout. All pulse parameters must be fixed and finite. Delay bounds must be

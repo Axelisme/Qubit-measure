@@ -11,7 +11,7 @@ from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import StrictBool, StrictInt, model_validator
+from pydantic import StrictInt, model_validator
 from qick.asm_v2 import QickParam
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AxesSpec, Axis, PersistableExperiment, RunRecord, ZSpec
@@ -29,7 +29,7 @@ from zcu_tools.program.v2.modules import (
 )
 
 from zcu_lab.v2._support.mux import MuxFitFailure
-from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg
+from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg, participant_indices
 
 from .analysis import (
     MuxGEAnalysis,
@@ -55,45 +55,46 @@ def _validate_fixed_pulse(pulse: PulseCfg) -> None:
 
 
 class MuxGEToneCfg(ConfigBase):
-    """One original tone: active flag, probe drive and optional initial pulse.
+    """One named original tone's required probe drive and optional init pulse.
 
-    Only active tones require drive. drive is the probe-on pulse; init_pulse,
-    when present, runs before it in both preparations on the same generator.
-    Pulses are fixed native PulseCfg (MHz, us, degrees, normalized gain), not
-    sweeps. Inactive pulse settings are retained but do not run.
+    name is the nonempty capture-generated qubit identity. drive is probe-on;
+    init_pulse, when present, runs before it in both preparations on the same
+    generator. All pulses are fixed native PulseCfg (MHz, us, degrees, gain),
+    validated even for nonparticipants. Nonparticipant settings do not run.
     """
 
-    active: StrictBool
-    drive: PulseCfg | None
+    name: str
+    drive: PulseCfg
     init_pulse: PulseCfg | None = None
 
     @model_validator(mode="after")
     def validate_pulses(self) -> MuxGEToneCfg:
-        """Reject missing active drives, swept values or shared-branch generators."""
-        if self.active:
-            if self.drive is None:
-                raise ValueError("active tone requires drive")
-            _validate_fixed_pulse(self.drive)
-            if self.init_pulse is not None:
-                _validate_fixed_pulse(self.init_pulse)
-                if self.init_pulse.ch != self.drive.ch:
-                    raise ValueError("init_pulse must use the tone's drive generator")
+        """Reject swept values or shared-branch generators for every element."""
+        _validate_fixed_pulse(self.drive)
+        if self.init_pulse is not None:
+            _validate_fixed_pulse(self.init_pulse)
+            if self.init_pulse.ch != self.drive.ch:
+                raise ValueError("init_pulse must use the tone's drive generator")
         return self
 
 
 class MuxGECfg(ProgramV2Cfg, ExpCfgModel):
-    """Full readout, ordered tones and shared single-round GE controls.
+    """Complete named tones, ordered participants and shared acquisition controls.
 
-    modules contains common optional reset and complete mux readout (us/MHz).
-    tones must match the full readout count with at least one active; active
-    drives use independent generators distinct from readout. shots is positive.
-    Run copies cfg, warns and forces rounds=1 and reps=shots, following GE.
-    Original requested reps/rounds remain in RunRecord.cfg; they are not the
-    acquired shot count. initial_delay/relax_delay are finite nonnegative us.
+    modules holds optional reset and complete mux readout. tones contains one
+    MuxGEToneCfg per original readout position, with unique nonempty names.
+    participants is a nonempty, duplicate-free list of those names; its order
+    determines execution/data rows (Q3/Q1 maps to original indices 2/0).
+    Every drive is required/validated, including nonparticipants, on independent
+    generators distinct from readout. shots is positive. Run warns and forces rounds=1 and reps=shots; the
+    original requested reps/rounds remain in RunRecord.cfg.
+    Inherited reps/rounds are positive; initial_delay/relax_delay are finite
+    nonnegative us. No capture, bindings or writeback destinations are stored.
     """
 
     modules: MuxDriveModuleCfg
     tones: list[MuxGEToneCfg]
+    participants: list[str]
     shots: StrictInt
 
     @model_validator(mode="after")
@@ -110,12 +111,9 @@ class MuxGECfg(ProgramV2Cfg, ExpCfgModel):
             )
         if len(self.tones) != len(self.modules.readout.tones):
             raise ValueError("tones must match the complete readout tone count")
+        participant_indices([tone.name for tone in self.tones], self.participants)
         channels: set[int] = set()
         for index, tone in enumerate(self.tones):
-            if not tone.active:
-                continue
-            if tone.drive is None:
-                raise ValueError(f"tones[{index}].drive is required")
             if (
                 tone.drive.ch in channels
                 or tone.drive.ch == self.modules.readout.gen_ch
@@ -124,8 +122,6 @@ class MuxGECfg(ProgramV2Cfg, ExpCfgModel):
                     f"tones[{index}].drive requires an independent generator"
                 )
             channels.add(tone.drive.ch)
-        if not channels:
-            raise ValueError("at least one tone must be active")
         return self
 
 
@@ -154,7 +150,7 @@ class MuxGEResult:
 def validate_ge_result(result: MuxGEResult) -> None:
     """Reject malformed source axes/dtypes or broken cross-tone shot availability.
 
-    Require (K,2,S) complex128, K,S>0, unique ascending original nonnegative
+    Require (K,2,S) complex128, K,S>0, unique original nonnegative
     int64 indices, [0,1] preparations and arange(S) shots. Missing preparation
     rows must be wholly NaN across all tones/shots; finite rows stay unfiltered.
     Raises ValueError; no cfg, fitting, mutation or hardware access occurs.
@@ -165,9 +161,11 @@ def validate_ge_result(result: MuxGEResult) -> None:
         or indices.dtype != np.int64
         or not indices.size
         or np.any(indices < 0)
-        or np.any(np.diff(indices) <= 0)
+        or len(np.unique(indices)) != len(indices)
     ):
-        raise ValueError("tone_indices must be ascending unique nonnegative int64")
+        raise ValueError(
+            "tone_indices must be unique nonnegative int64 in participant order"
+        )
     signals = result.signals
     if (
         signals.dtype != np.complex128
@@ -204,7 +202,9 @@ def _validate_source(source: RunRecord[MuxGECfg, MuxGEResult]) -> None:
     validate_ge_result(source.result)
     if source.cfg is not None:
         cfg = MuxGECfg.model_validate(source.cfg.model_dump())
-        indices = [i for i, tone in enumerate(cfg.tones) if tone.active]
+        indices = participant_indices(
+            [tone.name for tone in cfg.tones], cfg.participants
+        )
         if not np.array_equal(indices, source.result.tone_indices) or cfg.shots != len(
             source.result.shot_indices
         ):
@@ -298,7 +298,9 @@ class MuxGEExp(PersistableExperiment[MuxGEResult, MuxGECfg]):
             )
         cfg.rounds = 1
         cfg.reps = cfg.shots
-        indices = [i for i, tone in enumerate(cfg.tones) if tone.active]
+        indices = participant_indices(
+            [tone.name for tone in cfg.tones], cfg.participants
+        )
         readout = cfg.modules.readout.with_updates(
             tones=[cfg.modules.readout.tones[i] for i in indices]
         )
