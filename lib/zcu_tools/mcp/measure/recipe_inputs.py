@@ -35,10 +35,12 @@ def _validate_property(
     if not types or not set(types) <= _SCALAR_TYPES | {"array", "object"}:
         raise ValueError(f"Invalid recipe schema for {name}: unsupported types")
     items = schema.get("items")
-    if items is not None and (
-        not _types(items) or not set(_types(items)) <= _SCALAR_TYPES
-    ):
-        raise ValueError(f"Invalid recipe schema for {name}: items must be scalars")
+    if items is not None:
+        if "array" in _types(items):
+            raise ValueError(
+                f"Invalid recipe schema for {name}: items must be scalars or objects"
+            )
+        _validate_property(items, f"{name}[]")
     if "object" not in types:
         return
     additional = schema.get("additionalProperties")
@@ -130,8 +132,14 @@ def _input_value(
         return copied
     if isinstance(value, list):
         items = schema.get("items") if schema is not None else None
+        if items is None:
+            # Undeclared array elements retain the flat scalar boundary.
+            return [
+                _scalar(element, f"{name}[{index}]", None)
+                for index, element in enumerate(value)
+            ]
         return [
-            _scalar(element, f"{name}[{index}]", items)
+            _input_value(element, f"{name}[{index}]", items)
             for index, element in enumerate(value)
         ]
     return _scalar(value, name, schema)
@@ -140,10 +148,11 @@ def _input_value(
 class RecipeInputs:
     """One definition's detached handwritten schema and keyword-input codec.
 
-    schema uses Draft 7 validation with scalar, scalar-array and explicitly
-    declared nested object properties. Invalid schemas, unsupported types and
-    undeclared required names raise ValueError at construction. The schema is copied, so
-    later author mutations do not change the admitted input contract.
+    schema uses Draft 7 validation with scalars, explicitly declared nested
+    objects and arrays of scalars or declared objects. Direct arrays of arrays,
+    invalid schemas, unsupported types and undeclared required names raise
+    ValueError at construction. The schema is copied, so later author mutations
+    do not change the admitted input contract.
 
     normalize validates the schema's constraints, rejects non-finite numbers,
     preserves integer inputs and normalizes number inputs/elements to float.
@@ -168,7 +177,9 @@ class RecipeInputs:
         arguments contains the caller's explicit tool keywords. Omitted optional
         keys stay omitted; explicit null stays None. Unknown keys follow the
         authored additionalProperties policy. Nested objects require a declared
-        object schema; undeclared extras remain scalar/scalar-array only. All
+        object schema, including array items; undeclared extras remain
+        scalar/scalar-array only. Paths are ordinary declared data: string
+        segments stay strings and integer segments stay ints. All
         numbers must be finite and integer fields require Python ints, excluding
         bool. Errors name the rejected path or rule. Neither arguments nor any
         nested container is mutated or retained.

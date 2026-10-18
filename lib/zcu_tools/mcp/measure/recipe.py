@@ -55,8 +55,10 @@ if TYPE_CHECKING:
 
 RecipeScalar = str | int | float | bool | None
 RecipeParameter = RecipeScalar | list[RecipeScalar]
-# Nested objects are recipe invocation inputs, not scalar edits or analysis updates.
-type RecipeInputValue = RecipeParameter | dict[str, RecipeInputValue]
+# Declared containers are invocation inputs, not scalar edits or analysis updates.
+type RecipeInputValue = (
+    RecipeScalar | list[RecipeInputValue] | dict[str, RecipeInputValue]
+)
 StepStatus = Literal["completed", "finished_early", "cancelled"]
 WritebackDecision = Literal["accepted", "skipped"]
 AnalysisStage = Literal["primary", "post"]
@@ -98,11 +100,12 @@ class RecipeDeviceState:
 
 
 class RecipePropertySchema(TypedDict):
-    """Handwritten schema for a scalar, scalar array or declared nested object.
+    """Handwritten schema for scalars, declared objects and arrays of either.
 
     type lists accepted JSON types, including null for nullable inputs. minLength
-    constrains strings; items describes scalar array elements; minItems/maxItems
-    bound array length. properties declares object fields; required lists mandatory
+    constrains strings; items describes scalar or declared object array elements
+    (not direct arrays of arrays); minItems/maxItems bound array length.
+    properties declares object fields; required lists mandatory
     declared fields. additionalProperties rejects unknown fields when false, allows
     scalar/array extras when true or omitted, or declares a schema for name-keyed
     object entries. Objects need properties or a schema-valued additionalProperties.
