@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves, spectral-family reuse, reuse-independent Sambe admission and calibrated physical-block carrier interpolation
+**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves, spectral-family reuse, reuse-independent Sambe admission, calibrated physical-block carrier interpolation and evolve-local period gain continuation
 
 ## Segment engine contracts
 
@@ -543,9 +543,17 @@ level, port, signed carrier, peak gain, subperiod resolution, harmonic cutoff
 and amplitude node count. Each ramp selects cutoffs and evaluates admission with its own cycle count.
 Duration, slope and direct-tail preparations remain row-specific.
 
-Engine owns a separate physical-block carrier workspace for one evolve. It
-shares that workspace with prefix resolution and timeline workers, never with
-another evolve or budget. This is calibrated physical-block carrier interpolation,
+Kernels may implement the optional `EvolveScopedKernel.evolve_scope` factory.
+Engine invokes it once per evolve and uses the returned kernel for both prefix
+resolution and timeline workers. Engine does not recognize individual numeric
+families. It registers each returned workspace with `PrepareCache.track_workspace`
+and releases registration on success, cancellation or failure. Registry kernels
+and the persistent prepare LRU never retain these scopes. `shaped_sambe` uses
+this mechanism for physical-block carrier interpolation. `floquet_period` uses
+it for bounded gain history. Concurrent evolves have separate workspaces.
+
+The physical-block carrier workspace belongs to one evolve. Prefix resolution
+and timeline workers share it, never with another evolve or budget. This is calibrated physical-block carrier interpolation,
 not eigenvector interpolation and not a rigorous interval bound. It treats peak
 coarse/fine Fourier blocks separately from amplitude-Chebyshev/Fourier coefficients.
 The original float64 signed carrier remains in each prepared key. Evaluation uses
@@ -770,6 +778,33 @@ population-error bound. Prefix unitaries and the three Hamiltonian matrices
 are immutable and charged to the cache. Arbitrary phase, subperiod and tail
 endpoints use a fractional CF4 step from the preceding prefix, not interpolation.
 No density enters preparation or the step selection.
+
+For planned low-carrier groups with multiple gains, the evolve-local workspace
+can replace the fine CF4 grid with a gain predictor. It retains at most four
+recent tables per worker, without serializing numerical builds. Only the same
+model object, port, signed carrier and budget can share history. Carrier
+continuation stays disabled. Two previous tables give linear Lagrange
+extrapolation; three or four give quadratic or cubic extrapolation. The
+predictor operates on interaction-picture uniform prefixes, then restores the
+new key's analytic H0 phase. The candidate retains the new key's Hamiltonian,
+frequency, bath and split rate. Standalone preparation keeps independent builds.
+
+The kernel independently constructs the new key's original coarse grid. The
+candidate must have at least the original first fine-grid count and match the
+coarse trajectory at eight phase intervals, including U(T). The maximum
+Frobenius defect must be <= min(1e-4, budget*0.1). Failure reuses the coarse grid
+in the original coarse/fine loop, with its unchanged twelve-refinement limit.
+Grid-count mismatch, repeated gain coordinates or a last gain-gap ratio above
+two skip prediction. Retained history arrays count as live prepared data until
+evolve ends, conservatively including arrays also referenced by active payloads.
+They do not enter the persistent LRU.
+
+This is calibrated trajectory comparison, not a rigorous bound. The eight
+phase probes do not establish an error bound between probes. Continued prefixes
+are not products of unitary exponentials, and their closeness to unitary for
+the Newton polar step remains unproven. Smoothness across nearby gains and
+conditioning of the Lagrange weights also remain assumptions. Nonadjacent
+scheduler order can lower hit rates. Model/drive immutability is assumed.
 
 At higher carriers, preparation keeps tolerance min(1e-10, budget*1e-4) and
 max_step=T/4. The single-threaded nogil DOP853 core builds integration stages and the

@@ -228,6 +228,17 @@ class ShapedSambeKernel:
         """
         self._workspace = workspace
 
+    def evolve_scope(
+        self, table: SegmentTable, source: ModelSource
+    ) -> tuple["ShapedSambeKernel", Prepared]:
+        """Return a fresh kernel/workspace for this scan, never retaining either.
+
+        Engine shares the returned kernel with prefix and timeline workers and
+        charges the workspace's current numeric bytes until this evolve ends.
+        """
+        workspace = self.carrier_workspace(table, source)
+        return ShapedSambeKernel(workspace), workspace
+
     def carrier_workspace(
         self, table: SegmentTable, source: ModelSource
     ) -> CarrierWorkspace:

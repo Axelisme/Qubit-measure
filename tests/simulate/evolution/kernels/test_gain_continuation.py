@@ -40,13 +40,13 @@ def source():
         dephasing_per_ns=model.dephasing_per_ns * 1e-3,
         drives=(model.drives[0], replace(model.drives[0], name="other")),
     )
-    return ModelSource(np.ones((3, 3), dtype=complex) / 3, lambda level: model)
+    return ModelSource(np.ones((3, 3), dtype=np.complex128) / 3, lambda level: model)
 
 
 def scoped(table, source):
     factory = getattr(FloquetPeriodKernel(), "evolve_scope", None)
     assert callable(factory), "period preparation needs an evolve-local scope"
-    return factory(table, source)
+    return FloquetPeriodKernel().evolve_scope(table, source)
 
 
 def prepare(kernel, table, source, budget=1e-3):

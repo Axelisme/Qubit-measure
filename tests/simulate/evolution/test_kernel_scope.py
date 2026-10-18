@@ -41,12 +41,12 @@ class ScopedKernel(RecordingKernel):
         scoped.workspace = workspace
         return scoped, workspace
 
-    def apply(self, *args):
+    def apply(self, prepared, key_index, table, rows, states, budget):
         if self.barrier is not None:
             self.barrier.wait(timeout=10)
         if self.fail:
             raise RuntimeError("synthetic numeric failure")
-        return super().apply(*args)
+        return super().apply(prepared, key_index, table, rows, states, budget)
 
 
 @pytest.mark.parametrize("fail", [False, True])

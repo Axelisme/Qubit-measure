@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Mapping, Sequence
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from hashlib import sha256
 from threading import Event, Lock
@@ -15,7 +16,6 @@ if TYPE_CHECKING:
     from ._planning import Geometry
     from .calibration import CalibratedConstantProfile
     from .kernel import Kernel, SegmentTable
-    from .kernels._carrier_reuse import CarrierWorkspace
 
 import numpy as np
 from numpy.typing import NDArray
@@ -455,20 +455,19 @@ class Engine:
         finally:
             planner.close()
 
-    def _carrier_kernels(
-        self, table: SegmentTable, source: ModelSource
-    ) -> tuple[dict[str, Kernel], CarrierWorkspace]:
-        """Scope physical-block reuse to this source/budget's segmented scan."""
-        from .kernels._carrier_reuse import CarrierWorkspace
-        from .kernels.shaped_sambe import ShapedSambeKernel
+    def _scoped_kernels(
+        self, table: SegmentTable, source: ModelSource, scopes: ExitStack
+    ) -> dict[str, Kernel]:
+        """Register optional per-evolve reuse without knowing numeric families."""
+        from .kernel import EvolveScopedKernel
 
-        workspace = CarrierWorkspace(np.empty(0))
         kernels = dict(self._kernels)
-        kernel = kernels.get("shaped_sambe")
-        if type(kernel) is ShapedSambeKernel:
-            workspace = kernel.carrier_workspace(table, source)
-            kernels["shaped_sambe"] = ShapedSambeKernel(workspace)
-        return kernels, workspace
+        for name, kernel in kernels.items():
+            if isinstance(kernel, EvolveScopedKernel):
+                scoped, workspace = kernel.evolve_scope(table, source)
+                scopes.enter_context(self._cache.track_workspace(workspace))
+                kernels[name] = scoped
+        return kernels
 
     def _evolve(
         self,
@@ -519,13 +518,10 @@ class Engine:
                     budget=budget,
                     evaluation=evaluation,
                 )
-            # One workspace belongs to this source/budget/evolve, not the registry
-            # or prepare LRU. Prefix and timeline workers share physical blocks.
-            kernels, workspace = self._carrier_kernels(geometry.table, source)
-            with (
-                self._cache.track_workspace(workspace),
-                execution_pool(workers) as pool,
-            ):
+            # Reuse belongs to this evolve, not the registry or prepare LRU.
+            # ExitStack also releases earlier scopes if a later factory fails.
+            with ExitStack() as scopes, execution_pool(workers) as pool:
+                kernels = self._scoped_kernels(geometry.table, source, scopes)
                 if constant_dispatch is not None:
                     schedule = Schedule(
                         geometry, constant_dispatch, source, budget, cancel
