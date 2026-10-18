@@ -1,5 +1,6 @@
 """Whole native model updates through the public Engine and journal seams."""
 
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -50,7 +51,7 @@ def rig(tmp_path: Path) -> Rig:
     ) -> Step[State, int]:
         if state.index == plan.count:
             return Done()
-        yield from env.wait_until(env.started_at)
+        yield from env.wait_until(env.started_at + timedelta(seconds=1))
         state.index += 1
         return Next(tun.reps, state)
 
