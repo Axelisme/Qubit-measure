@@ -102,7 +102,8 @@ class FigureCollection(Mapping[str, Figure]):
         **figure_kwargs: Any,
     ) -> tuple[Figure, Axes | NDArray[np.object_]]: ...
 
-    def subplots(  # noqa: PLR0913 - preserve native Matplotlib subplot options
+    # tolerated: Keep native Matplotlib shape, sharing and layout options explicit.
+    def subplots(  # noqa: PLR0913
         self,
         name: str,
         *,
