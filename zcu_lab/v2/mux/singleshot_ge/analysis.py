@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from zcu_tools.experiment import RunRecord
+from zcu_tools.experiment.utils.single_shot.ge import GENumericalError
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.mux import MuxFitFailure
@@ -97,8 +98,9 @@ def analyze_ge(
     cfg=None is supported. Validate option keys before fitting; invalid options
     raise. Each original index gets fit_i and either existing GE calibration /
     quality or a numerical/missing-preparation failure reason. No calibration
-    is invented for partial data. Caller owns plots finish/release. No hardware,
-    current cfg, component binding or proposal access occurs.
+    is invented for partial data. Only the GE owner's GENumericalError is
+    isolated; plotting and other errors propagate unchanged. Caller owns plots
+    finish/release. No hardware, current cfg, binding or proposal access occurs.
     """
     indices = [int(i) for i in source.result.tone_indices]
     if any(type(i) is not int or i not in indices for i in options.overrides):
@@ -121,21 +123,17 @@ def analyze_ge(
     outcomes: list[MuxGEAnalysis | MuxFitFailure] = []
     for row, (index, option) in enumerate(zip(indices, selected, strict=True)):
         name = f"fit_{index}"
+        if not np.isfinite(source.result.signals[row]).all():
+            reason = "GE fit requires both complete probe-off/on preparations"
+            _failure_plot(plots, name, reason)
+            outcomes.append(MuxFitFailure(index, reason))
+            continue
         try:
-            if not np.isfinite(source.result.signals[row]).all():
-                raise ValueError(
-                    "GE fit requires both complete probe-off/on preparations"
-                )
             primary = GE_Exp().analyze(
                 _tone_source(source.result, row), option, plots=plots, figure_name=name
             )
             outcomes.append(MuxGEAnalysis(index, primary))
-        except (
-            ValueError,
-            RuntimeError,
-            ArithmeticError,
-            np.linalg.LinAlgError,
-        ) as exc:
+        except GENumericalError as exc:
             _failure_plot(plots, name, str(exc))
             outcomes.append(MuxFitFailure(index, str(exc)))
     return tuple(outcomes)
@@ -155,7 +153,9 @@ def post_analyze_ge(
     Invalid keys/radii or index mismatch raise before diagnostics. Publish post_i;
     retain primary failures and per-tone numerical failures without fabricating a
     calibration. Values are existing GE 3x3 diagnostics, not four-state assignment
-    matrices. Caller finishes/releases plots; no hardware or live source is read.
+    matrices. Only the GE owner's GENumericalError is isolated; plotting and
+    other errors propagate unchanged. Caller finishes/releases plots; no hardware
+    or live source is read.
     """
     indices = [int(i) for i in source.result.tone_indices]
     if [item.index for item in primary] != indices:
@@ -177,11 +177,12 @@ def post_analyze_ge(
             _failure_plot(plots, name, item.reason)
             outcomes.append(item)
             continue
+        if not np.isfinite(source.result.signals[row]).all():
+            reason = "GE post requires both complete probe-off/on preparations"
+            _failure_plot(plots, name, reason)
+            outcomes.append(MuxFitFailure(item.index, reason))
+            continue
         try:
-            if not np.isfinite(source.result.signals[row]).all():
-                raise ValueError(
-                    "GE post requires both complete probe-off/on preparations"
-                )
             post = GE_Exp().post_analyze(
                 _tone_source(source.result, row),
                 item.primary,
@@ -190,12 +191,7 @@ def post_analyze_ge(
                 figure_name=name,
             )
             outcomes.append(MuxGEPostAnalysis(item.index, post))
-        except (
-            ValueError,
-            RuntimeError,
-            ArithmeticError,
-            np.linalg.LinAlgError,
-        ) as exc:
+        except GENumericalError as exc:
             _failure_plot(plots, name, str(exc))
             outcomes.append(MuxFitFailure(item.index, str(exc)))
     return tuple(outcomes)

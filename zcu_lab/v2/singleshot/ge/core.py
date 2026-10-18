@@ -22,7 +22,10 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.utils.single_shot.ge import singleshot_ge_analysis
+from zcu_tools.experiment.utils.single_shot.ge import (
+    GENumericalError,
+    singleshot_ge_analysis,
+)
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.plotting.singleshot import plot_with_classified
@@ -360,7 +363,11 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
 
         options maps rows to physical g/e and controls the existing fit policy.
         Publish figure_name (default fit) to caller-owned plots; caller finishes
-        and releases it. Empty/conflicting names and numerical errors propagate.
+        and releases it. Rotation/classification, histogram fitting, fitted
+        population/center validation and fidelity calculations translate
+        ValueError, RuntimeError, ArithmeticError and numpy.linalg.LinAlgError
+        into GENumericalError, retaining __cause__. Plotting, invalid backend /
+        initial_state and final calibration validation errors propagate unchanged.
         cfg=None is supported. No hardware, ambient source or GUI is accessed.
         """
         # Acquisition order is always probe off/on; fit in physical g/e order.
@@ -405,7 +412,11 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         Source IQ and radius use normalized ADC units. primary supplies the
         physical g/e mapping and calibration; options selects radius policy.
         Publish figure_name (default post) to caller-owned plots; caller finishes
-        and releases it. Invalid calibration, numerical and name conflicts raise.
+        and releases it. Radius optimization, classification and confusion-matrix
+        solving translate ValueError, RuntimeError, ArithmeticError and
+        numpy.linalg.LinAlgError into GENumericalError, retaining __cause__.
+        Primary validation, row mapping and plotting (including name conflicts)
+        are outside that boundary and their errors propagate unchanged.
         Accept cfg=None; no hardware, ambient source or GUI is accessed.
         """
         primary.validate_calibration()
@@ -413,7 +424,15 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
             source.result.signals, primary.initial_state
         )
         signals = (g_signals, e_signals)
-        confusion = self._calc_confusion_matrix(signals, primary, options)
+        try:
+            confusion = self._calc_confusion_matrix(signals, primary, options)
+        except (
+            ValueError,
+            RuntimeError,
+            ArithmeticError,
+            np.linalg.LinAlgError,
+        ) as exc:
+            raise GENumericalError(str(exc)) from exc
         self._plot_confusion_matrix(confusion, signals, primary, plots, figure_name)
         return GEPostAnalysis(confusion=confusion)
 
