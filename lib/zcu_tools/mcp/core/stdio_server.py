@@ -237,7 +237,8 @@ def run_stdio_loop(
             if resp is not None:
                 outgoing.write(json.dumps(resp) + "\n")
                 outgoing.flush()
-        except Exception as e:  # noqa: BLE001 — loop isolation keeps the server alive
+        # tolerated: Any per-request failure is reported with its traceback so later requests can still run.
+        except Exception as e:  # noqa: BLE001
             if hooks.on_error is not None:
                 hooks.on_error("MCP loop exception")
             sys.stderr.write(f"MCP Loop Exception: {e}\n{traceback.format_exc()}\n")
@@ -327,7 +328,8 @@ def _call_tool(
             )
         if hooks.on_each_reply is not None:
             content.extend(hooks.on_each_reply())
-    except Exception as e:  # noqa: BLE001 — tool isolation returns an isError reply
+    # tolerated: Arbitrary handler or reply-building failures must become isError replies, not end the loop.
+    except Exception as e:  # noqa: BLE001
         if hooks.on_error is not None:
             hooks.on_error(f"MCP tool {name!r} dispatch failed")
         content = [{"type": "text", "text": _tool_error_text(name, e)}]
