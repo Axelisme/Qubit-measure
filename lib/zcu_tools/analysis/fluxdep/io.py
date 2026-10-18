@@ -46,7 +46,8 @@ def load_spectrums(path: str) -> dict[str, SpectrumResult]:
     """
     spectrums = dict[str, SpectrumResult]()
     with h5.File(path, "r") as f:
-        for name in f.keys():
+        # tolerated: h5py's direct iterator has nullable names; keys() avoids new type errors.
+        for name in f.keys():  # noqa: SIM118
             grp = f[name]
             assert isinstance(grp, h5.Group)
             spect_grp = grp["spectrum"]

@@ -1072,7 +1072,10 @@ def _all_log_refs(f: h5py.File) -> list[Any]:
     if "Data" in f:
         refs.append(f)
     log_ns = sorted(
-        int(k[4:]) for k in f.keys() if k.startswith("Log_") and k[4:].isdigit()
+        int(k[4:])
+        # tolerated: h5py's direct iterator has nullable names; keys() avoids new type errors.
+        for k in f.keys()  # noqa: SIM118
+        if k.startswith("Log_") and k[4:].isdigit()
     )
     for n in log_ns:
         g = f["Log_%d" % n]
