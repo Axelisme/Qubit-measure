@@ -66,6 +66,7 @@ def row_names(view: QWidget, path: str) -> list[str]:
         widget.objectName()
         for widget in view.findChildren(QWidget)
         if widget.objectName().endswith(f".{path}")
+        and widget.objectName() != f"form.row.{path}"
     )
 
 

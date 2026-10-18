@@ -233,7 +233,7 @@ def test_option_command_rejection_is_atomic(path: tuple[str, ...], name: str) ->
             resource.run_command(path, name)
         assert invalid_path.value.path == path
     else:
-        with pytest.raises(ValueError, match="Unavailable option command"):
+        with pytest.raises(ValueError, match="Unavailable field command"):
             resource.run_command(path, name)
     assert resource.input.data == before
     assert notifications == []
