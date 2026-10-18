@@ -13,7 +13,6 @@ a wire result (ADR-0066):
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -36,7 +35,7 @@ from tests.gui.app.measure.services._operation_owner_fakes import (
 
 def _HANDLER(ctrl, params):
     # Generic operation handlers must not require the giant ctrl surface.
-    adapter = cast(Any, SimpleNamespace(operation_control=ctrl))
+    adapter = SimpleNamespace(operation_control=ctrl)
     return METHOD_REGISTRY["operation.await"].handler(adapter, params)
 
 
