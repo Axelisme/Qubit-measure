@@ -710,8 +710,10 @@ playback remain unchanged. The solver need not stop exactly at interior knots.
 
 Each row starts from a deterministic 0.1 ns seed, capped by its sample spacing.
 The seed is not an accepted-step ceiling. No adaptive history carries between
-rows, so splitting a chain across apply calls preserves its numerical path.
-Row boundaries still stop integration exactly and switch models or baths.
+rows. Splitting independent rows across apply calls preserves their numerical
+paths. Splitting a chain can change its frame as described above, with results
+agreeing within budget. Row boundaries still stop integration exactly and
+switch models or baths.
 
 Joint ceiling/tolerance measurements on 16-level FTF rows found that high-carrier
 work falls as tolerances relax. Low-carrier lab-frame work can remain
