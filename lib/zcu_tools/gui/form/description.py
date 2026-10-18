@@ -9,6 +9,7 @@ from .model import FormWritePath
 
 type FormFieldKind = Literal[
     "model",
+    "elements",
     "integer",
     "number",
     "complex",
@@ -75,6 +76,20 @@ class FormOptionDescription:
 
 
 @dataclass(frozen=True)
+class FormElementDescription:
+    """One FixedList element: its original index, captured name and field path.
+
+    name is the raw input's literal string name, or "" while the input holds
+    none. The index is the element's position in the captured list, which
+    never changes during one capture.
+    """
+
+    index: int
+    name: str
+    path: FormWritePath
+
+
+@dataclass(frozen=True)
 class FormFieldDescription:
     """Metadata for one model field, deliberately without child-name hints.
 
@@ -111,6 +126,10 @@ class FormFieldDescription:
     detached option value describing actual child structure, independently of
     selected; None denotes no matched structural option. A selection-only write
     changes selected without rebuilding branch or its local child drafts.
+    A FixedList field has kind "elements", can_expand and its element models
+    as children; elements lists them by index and name. A child element has
+    path ending in its index and name equal to the element's captured name;
+    its identity field is fixed. elements is None for every other field.
     """
 
     path: FormWritePath
@@ -137,6 +156,7 @@ class FormFieldDescription:
     commands: tuple[FormCommandDescription, ...] = ()
     selector: bool = True
     branch: JsonValue = None
+    elements: tuple[FormElementDescription, ...] | None = None
 
 
 @dataclass(frozen=True)

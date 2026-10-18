@@ -102,7 +102,11 @@ class TunablesHost[F: FormModel, C]:
         """Submit complete current ordinary values, not a draft diff.
 
         local_errors block submission even when state retains valid values.
-        Preview/model errors return FormErrors. Otherwise convert complete
+        Preview/model errors return FormErrors. Indexed leaves also return
+        FormErrors at their original paths: native tunables accept field-name
+        paths only, not list elements. Neither refusal changes Engine, draft,
+        base or accepted input. No index stringification or whole-list
+        conversion occurs. Otherwise convert complete
         preview leaves (including defaults) to JSON and submit using Engine's
         current revision, read immediately before its atomic update. GUI/RPC
         callers supply no expected revision. Tuples become JSON lists; complex
@@ -118,9 +122,22 @@ class TunablesHost[F: FormModel, C]:
         preview = self.state.preview(self._env)
         if preview.errors is not None:
             return preview.errors
+        native_values: dict[str, FormValue] = {}
+        unsupported: dict[FormWritePath, str] = {}
+        for path, value in preview.values.items():
+            names: list[str] = []
+            for part in path:
+                if not isinstance(part, str):
+                    unsupported[path] = "Native tunables do not support list elements"
+                    break
+                names.append(part)
+            else:
+                native_values[".".join(names)] = value
+        if unsupported:
+            return FormErrors(unsupported)
         changes = tuple(
-            TunableChange(".".join(path), self._json_value(value))
-            for path, value in preview.values.items()
+            TunableChange(path, self._json_value(value))
+            for path, value in native_values.items()
         )
         revision = engine.tunables(self._run_id).revision
         snapshot = engine.update_tunables(

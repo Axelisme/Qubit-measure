@@ -7,6 +7,7 @@ from pydantic import JsonValue
 
 from zcu_tools.gui.form import (
     FormCommandDescription,
+    FormElementDescription,
     FormFieldDescription,
     FormOptionDescription,
     FormPreview,
@@ -15,7 +16,15 @@ from zcu_tools.gui.form import (
 )
 
 type _Kind = Literal[
-    "text", "integer", "number", "complex", "boolean", "json", "model", "choice"
+    "text",
+    "integer",
+    "number",
+    "complex",
+    "boolean",
+    "json",
+    "model",
+    "choice",
+    "elements",
 ]
 
 
@@ -34,7 +43,8 @@ class FieldView:
     fixed value without writing it. value/has_value identify a preview leaf.
     decimals rounds display only. fixed marks a declaration-fixed scalar or
     option value, not read-only children or commands. group is the same-level
-    display group name, or None for an ungrouped row.
+    display group name, or None for an ungrouped row. elements lists a
+    FixedList row's picker entries by original index and name, else None.
     """
 
     path: FormWritePath
@@ -59,6 +69,7 @@ class FieldView:
     fixed: bool
     group: str | None
     commands: tuple[FormCommandDescription, ...]
+    elements: tuple[FormElementDescription, ...] | None = None
 
 
 def _control_presentation(
@@ -70,6 +81,8 @@ def _control_presentation(
     explicit commands. Only a fixed scalar without actions is plain text.
     No branch matching or annotation interpretation occurs here.
     """
+    if field.kind == "elements":
+        return "elements", None
     options = field.options if field.selector else None
     if (
         field.fixed
@@ -102,11 +115,19 @@ def project_field(
     current: JsonValue = data
     present = True
     for name in field.path:
-        if not isinstance(current, dict) or name not in current:
+        if isinstance(current, dict) and isinstance(name, str) and name in current:
+            value = current.get(name)
+        elif (
+            isinstance(current, list)
+            and isinstance(name, int)
+            and 0 <= name < len(current)
+        ):
+            value = current[name]
+        else:
             current = None
             present = False
             break
-        current = current[name]
+        current = value
     kind, options = _control_presentation(field)
     return FieldView(
         path=field.path,
@@ -131,4 +152,5 @@ def project_field(
         fixed=field.fixed,
         group=field.group,
         commands=field.commands,
+        elements=field.elements,
     )

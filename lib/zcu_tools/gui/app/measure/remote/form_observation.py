@@ -19,9 +19,9 @@ from .handlers._wire_values import context_wire_value
 
 
 class FormWrite(TypedDict):
-    """One ordinary leaf: path contains model field names; value is encoded JSON."""
+    """One ordinary leaf: path has field names/FixedList indexes; value is JSON."""
 
-    path: list[str]
+    path: list[str | int]
     value: JsonValue
 
 
@@ -120,11 +120,14 @@ def form_writes(raw: object) -> Mapping[FormWritePath, JsonValue]:
         raw_path = edit["path"]
         if not isinstance(raw_path, list) or not raw_path:
             raise RemoteError(ErrorCode.INVALID_PARAMS, "path must be a nonempty array")
-        segments: list[str] = []
+        segments: list[str | int] = []
         for segment in raw_path:
-            if not isinstance(segment, str) or not segment:
+            if not isinstance(segment, (str, int)) or (
+                isinstance(segment, str) and not segment
+            ):
                 raise RemoteError(
-                    ErrorCode.INVALID_PARAMS, "path segments must be nonempty strings"
+                    ErrorCode.INVALID_PARAMS,
+                    "path segments must be field names or integer indexes",
                 )
             segments.append(segment)
         path = tuple(segments)

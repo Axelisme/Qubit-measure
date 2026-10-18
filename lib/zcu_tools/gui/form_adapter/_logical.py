@@ -105,7 +105,7 @@ def _selector(target: Field, marker: ModuleSelector, env: FormEnv) -> LogicalSel
         )
     if target.name not in target.level.data:
         return LogicalSelector("missing", None, keys)
-    raw = target.level.data[target.name]
+    raw = target.level.value(target.name)
     if raw is None:
         return LogicalSelector("disabled", None, keys)
     if isinstance(raw, dict):
@@ -266,7 +266,7 @@ def _shell(target: Field) -> tuple[type[FormModel], dict[str, JsonValue]]:
         value=(target.info.annotation, deepcopy(target.info)),
     )
     data = (
-        {"value": target.level.data[target.name]}
+        {"value": target.level.value(target.name)}
         if target.name in target.level.data
         else {}
     )
@@ -329,13 +329,22 @@ def _local_value(
     for key, value in values.items():
         current = subtree
         for part in key[1:-1]:
+            if not isinstance(part, str):
+                raise FormPathError(
+                    position.path, "Logical subtree requires model-field names"
+                )
             child = current.get(part)
             if not isinstance(child, dict):
                 child = {}
                 current[part] = child
             current = child
         if len(key) > 1:
-            current[key[-1]] = value
+            name = key[-1]
+            if not isinstance(name, str):
+                raise FormPathError(
+                    position.path, "Logical subtree requires model-field names"
+                )
+            current[name] = value
     return bool(subtree), subtree or None, errors
 
 
@@ -384,7 +393,7 @@ def _read_reference(
     target = position.target
     readonly = position.source is not None
     input_present = not readonly and target.name in target.level.data
-    raw = target.level.data.get(target.name) if input_present else None
+    raw = target.level.value(target.name) if input_present else None
     try:
         level, source = _content(position, env, path, writing=False)
     except LogicalSourceError as exc:
@@ -448,7 +457,7 @@ def read(
     selector = _selector(target, marker, env) if marker is not None else None
     authored = position.source is None
     input_present = authored and target.name in target.level.data
-    raw = target.level.data.get(target.name) if input_present else None
+    raw = target.level.value(target.name) if input_present else None
     source = position.source
     if selector is not None and selector.mode == "key":
         observed = _read_reference(position, selector, metadata, env, root)

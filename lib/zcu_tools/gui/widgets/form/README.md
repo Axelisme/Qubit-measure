@@ -1,6 +1,6 @@
 # gui/widgets/form — Form draft view
 
-**Last updated:** 2026-10-18，selection／branch 分離與子欄位草稿保留
+**Last updated:** 2026-10-18，固定具名元素 picker 與逐元素草稿保留
 
 `FormEditor` 借用 caller-owned `FormState` 與 host 捕捉的 `FormEnv`。Editor 直接讀 `state.describe(path, env)` 與完整 `preview`，不產生 JSON Schema，也不解析 annotation、union 或選項匹配。Core 擁有 choices、active option、固定欄位與 lone ordinary wrapper 攤平規則。攤平只改版面，controls 的完整 path 仍含 wrapper。
 
@@ -9,6 +9,8 @@ Editor 初次只建立可見層與初始展開的 model rows。Group 預設折�
 文字欄位在 Enter 或一般 focus loss 提交，typing 本身不改 state。折疊與移除舊分支引起的 focus loss 不提交，重新展開後的一般 focus loss 仍提交保留文字。Expression action、dropdown、checkbox 與 Enabled 立即提交。未解析或 host 拒絕的輸入保留在 view，`local_parse_errors()` 讓 host 阻止提交。`discard_local_text()` 只丟掉 view-local 輸入，不重設 FormState。外部 publication 仍以 state 的輸入更新已建 controls。完整 preview 與 local errors 決定 validity，折疊、hidden 或尚未建立的 child 不會隱藏錯誤；錯誤標示落在可見祖先或 group 標題。
 
 Host 可訂閱 `errors_changed`，在 `errors()` 結果改變時取得新的 `FormErrors`，全部有效時取得 `None`。本地 parse／拒絕錯誤與 state publication 都會觸發比較；錯誤集合相同時不重送，detach 後不再發出。`validity_changed` 仍只在有效與無效之間切換時發出 bool。
+
+FixedList 的 `form.picker.<path>` 依 Core 的 elements 列出「index: name」。Picker 只控制哪個元素可見，不寫 FormState、不改 participants，也不抓取來源。切走保留該元素的 controls、未提交文字及 parse errors；切回能繼續修正。隱藏元素的錯誤標在 list 標題，row tooltip 指出元素名稱與欄位。Participants 使用獨立 JSON 清單輸入。唯讀模式仍可切 picker、展開與複製，不能編輯值。
 
 `selection_fixed` 不鎖內層選項。`fixed` option.value 也不凍結 children 或移除 commands；只有固定 scalar 且沒有 command 時畫成唯讀文字。
 

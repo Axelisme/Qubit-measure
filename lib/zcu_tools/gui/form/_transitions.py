@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from pydantic import JsonValue
 
 from ._commands import install_field, observation
+from ._fixed import require_same_identity
 from ._selection import Field, resolve
 from ._sources import check_sources
 from ._structure import StructureError, build_candidate, model_types
@@ -130,7 +131,7 @@ def _write_one(
         if (
             len(path) > len(target.path)
             and target.name in target.level.data
-            and target.level.data[target.name] is None
+            and target.level.value(target.name) is None
         ):
             raise StructureError(
                 f"Activate null section before child write: {path!r}", path=path
@@ -206,5 +207,6 @@ def prepare_write[F: FormModel](
         except StructureError as exc:
             exc.path = path
             raise
+    require_same_identity(input.model, input.data, candidate.data)
     check_sources(input.model, candidate.data, env)
     return FormInput(input.model, candidate.data, selections=candidate.selections)

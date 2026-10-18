@@ -316,6 +316,7 @@ class FieldRow:
         self._commands: list[QAction] = []
         self._field_actions: list[QAction] = []
         self._displaying = False
+        self._picked: Callable[[], None] = lambda: None
         # The view-local input this row shows instead of state's, if any.
         self._local: LocalText | None = None
         self._error = ""
@@ -327,6 +328,7 @@ class FieldRow:
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(_HEADER_SPACING)
         self.input: QWidget | None = None
+        self.picker: QComboBox | None = None
         self.mode: QAction | None = None
         self.enabled: QCheckBox | None = None
         self.group: QGroupBox | None = None
@@ -335,16 +337,7 @@ class FieldRow:
         self.layout.addLayout(header)
         self.label = self._build_label(header)
         self._sync_field_commands(editable=True)
-        if field.options is not None:
-            self._build_options(header)
-        elif field.kind == "model":
-            # A nullable option row lists None instead of an Enabled box.
-            if field.nullable:
-                self._build_enabled(header)
-        elif field.fixed:
-            self._build_fixed(header)
-        else:
-            self._build_input(header)
+        self._build_control(header)
         if field.unit:
             header.addWidget(_tight_label(field.unit, self.widget))
         self.value = QLabel(self.widget)
@@ -352,7 +345,7 @@ class FieldRow:
         self.value.setObjectName(self._name("value"))
         self.value.hide()
         header.addWidget(self.value)
-        if field.kind == "model" and field.options is None:
+        if field.kind in ("model", "elements") and field.options is None:
             # Keep the Enabled box and unit beside the title instead of
             # stretching them.
             header.addStretch()
@@ -376,6 +369,18 @@ class FieldRow:
         """
         if isinstance(self.label, FoldTitle):
             self.label.fold_changed.connect(callback)
+
+    def connect_pick(self, callback: Callable[[], None]) -> None:
+        """Call callback after the user picks another element, if this is a picker row.
+
+        The callback takes no arguments and runs on the GUI thread; connecting
+        never calls it. Display refreshes never call it.
+        """
+        self._picked = callback
+
+    def picked(self) -> int:
+        """Return the picked element index, or -1 on a row without a picker."""
+        return -1 if self.picker is None else self.picker.currentIndex()
 
     def set_children_available(self, *, available: bool) -> None:
         """Hide an empty model body's fold marker, or restore it for children.
@@ -462,7 +467,7 @@ class FieldRow:
         self.value.hide()
 
     def _name(self, kind: str) -> str:
-        return f"form.{kind}." + ".".join(self.field.path)
+        return f"form.{kind}." + ".".join(str(part) for part in self.field.path)
 
     def _build_label(self, header: QHBoxLayout) -> QLabel:
         """Add the row's name label to header and return it.
@@ -509,6 +514,22 @@ class FieldRow:
         for action in self._field_actions:
             action.setEnabled(editable)
 
+    def _build_control(self, header: QHBoxLayout) -> None:
+        """Build the input or navigation control selected by this row's metadata."""
+        field = self.field
+        if field.options is not None:
+            self._build_options(header)
+        elif field.kind == "elements":
+            self._build_picker(header)
+        elif field.kind == "model":
+            # A nullable option row lists None instead of an Enabled box.
+            if field.nullable:
+                self._build_enabled(header)
+        elif field.fixed:
+            self._build_fixed(header)
+        else:
+            self._build_input(header)
+
     def _build_enabled(self, header: QHBoxLayout) -> None:
         self.enabled = QCheckBox("Enabled", self.widget)
         self.enabled.setObjectName(self._name("enabled"))
@@ -529,6 +550,32 @@ class FieldRow:
         widget.currentIndexChanged.connect(self._option_chosen)
         self.input = widget
         header.addWidget(widget)
+
+    def _build_picker(self, header: QHBoxLayout) -> None:
+        # Navigation only: choosing an element writes nothing and never reads
+        # the picked element's text, so it stays usable on a read-only row.
+        widget = QComboBox(self.widget)
+        widget.setObjectName(self._name("picker"))
+        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        widget.currentIndexChanged.connect(self._pick_changed)
+        self.picker = widget
+        header.addWidget(widget)
+
+    def _pick_changed(self) -> None:
+        if not self._displaying:
+            self._picked()
+
+    def _display_picker(self) -> None:
+        """Show each element as "index: name", keeping the user's pick."""
+        widget = self.picker
+        if widget is None:
+            return
+        labels = [f"{item.index}: {item.name}" for item in self.field.elements or ()]
+        if [widget.itemText(i) for i in range(widget.count())] != labels:
+            previous = max(widget.currentIndex(), 0)
+            widget.clear()
+            widget.addItems(labels)
+            widget.setCurrentIndex(min(previous, len(labels) - 1))
 
     def _build_fixed(self, header: QHBoxLayout) -> None:
         # One legal value: nothing to choose or compute, so no mode and no
@@ -719,6 +766,7 @@ class FieldRow:
         self._displaying = True
         try:
             self._display_input(local, editable=editable)
+            self._display_picker()
             shown = ""
             effective = (
                 field.kind in ("integer", "number", "complex")
@@ -845,7 +893,9 @@ class GroupBlock:
         """
         self.members = members
         self.widget = QWidget(parent)
-        self.widget.setObjectName("form.group." + ".".join((*path, name)))
+        self.widget.setObjectName(
+            "form.group." + ".".join(str(part) for part in (*path, name))
+        )
         layout = QVBoxLayout(self.widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(_HEADER_SPACING)
@@ -856,7 +906,7 @@ class GroupBlock:
             folds,
             (path, name),
             label=name,
-            name="form.fold.group." + ".".join((*path, name)),
+            name="form.fold.group." + ".".join(str(part) for part in (*path, name)),
             expanded=False,
         )
         self.label.fold_changed.connect(toggled)
