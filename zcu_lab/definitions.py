@@ -9,6 +9,7 @@ from zcu_lab.v2.ftf.conditional_phase.gui import ConditionalPhaseAdapter
 from zcu_lab.v2.ftf.conditional_spectroscopy.gui import SpectroscopyAdapter
 from zcu_lab.v2.ftf.idle_zz.gui import IdleZZAdapter
 from zcu_lab.v2.ftf.joint_readout.gui import JointReadoutAdapter
+from zcu_lab.v2.ftf.local_z.gui import LocalZAdapter
 from zcu_lab.v2.jpa.auto_optimize.gui import JpaAutoOptimizeAdapter
 from zcu_lab.v2.jpa.check.gui import JpaCheckAdapter
 from zcu_lab.v2.jpa.flux.gui import JpaFluxAdapter
@@ -72,6 +73,7 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "ftf/idle_zz": IdleZZAdapter,
     "ftf/conditional_spectroscopy": SpectroscopyAdapter,
     "ftf/conditional_phase": ConditionalPhaseAdapter,
+    "ftf/local_z": LocalZAdapter,
     "lookback": LookbackAdapter,
     "onetone/freq": OneToneFreqAdapter,
     "onetone/power_dep": OneTonePowerDepAdapter,

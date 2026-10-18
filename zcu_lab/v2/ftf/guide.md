@@ -84,7 +84,7 @@ F1 的 tone 是 `$f1` component 在固定 capture 的 `$mux.qubits` 中的位置
 | 3b. Rabi chevron | 固定 relative phase 與兩線 gain，掃 common frequency × duration。看 chevron 與回返曲線。 | 人工選 CZ width 與 frequency 窗口。單一 population 谷值不是高 fidelity gate 的證據。兩線同頻、同 duration、同時間原點，waveforms 由 cfg 明示；cosine 包絡只是起點。 |
 | 4. CZ amplitude | `B(11)` 後播雙線 CZ，再做雙 Xπ 對比與 mux readout。掃共同 gain scale，保持已選 gain 比例、relative phase 與 waveform。 | 看 joint 分類／IQ 回返與可辨識的完整週期。有效 amplitude 結果可提兩線 pulse proposals。回返只是 leakage proxy，不是完整高階態 population 量測。 |
 | 5. [Conditional phase／frequency](conditional_phase/guide.md) | Spectator 做 I／Xπ，target 做 π/2，接 n 次 CZ 與 X/Y projection。掃共同 frequency 與 n，起點可用 n=1、3、5。 | 看 quadratures、contrast、conditional phase 與奇數 n 交點。X/Y 是獨立 acquisitions，不是同 shot 連續測量。核對 phase wrapping 與 branch 標記。只以 n=1 相鄰點 unwrap 後線性內插的唯一 π 交點提 frequency；缺失、無交點、多交點或退化時不提案，n=3/5 僅診斷。兩線 pulse 與 slots 各自 preview／selected Apply。 |
-| 6. Local Z | 幅度與頻率選定後，從 `B(00)` 分別量 F1/F2 的 π/2、n 次 CZ、X/Y projection，另一 qubit 不做準備翻轉。掃 n，看兩個 phase slopes。 | 兩個分量都可辨識時才提 local-Z pair。熱態成分仍在數據內，不能把 slope 稱為已純化分支真值，也不能把缺失 correction 填 0。 |
+| 6. [Local Z](local_z/guide.md) | 幅度與頻率選定後，從 `B(00)` 分別量 F1/F2 的 π/2、n 次 CZ、X/Y projection，另一 qubit 不做準備翻轉。掃至少三個連續非負 n，整列完整 X/Y 才相鄰 unwrap，再做含 intercept 的 OLS，看兩個 phase slopes。 | Correction=-slope，不再 wrap，兩個分量都可辨識時才提一筆具 component 名稱的 local-Z pair。採樣假設為相鄰真實增量小於180°，每 gate 額外360°不可辨認。不加自動統計門檻，沿 fit_quality 看線性模型與 uncertainty。熱態成分仍在數據內，不能把 slope 稱為已純化分支真值，也不能把缺失 correction 填 0。 |
 
 Joint matrix 的圖意是「名目準備→觀測結果，含熱 population」。它包含準備及讀出效果，不是 pure-state assignment matrix。不要設 matrix 對角值門檻、用 inverse 修正後續 population，或由它推 gate fidelity。最近中心二分類不以 radius 丟掉 Other shots，因此也不聲稱能辨認 leakage。缺失、非有限或重合的 GE 中心須明示無效。
 
