@@ -5,7 +5,7 @@ from abc import ABC
 from collections.abc import Callable, Sequence
 from inspect import signature
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal
 
 from zcu_tools.datafile import AnalysisDocument, StoredRun
 from zcu_tools.experiment.context import RunContext
@@ -464,7 +464,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         Core execution failures propagate to the operation owner.
         """
         del req
-        return cast(T_Result, self.exp_cls().run(cfg, context=context))
+        return self.exp_cls().run(cfg, context=context)
 
     def restore(self, stored: StoredRun) -> RestoredRun[T_Result]:
         """Restore already-read native data through the core's from_stored contract.
