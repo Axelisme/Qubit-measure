@@ -138,6 +138,8 @@ def _run_interaction(data, row_models, states, controls):
 
 
 def _interaction_mask(segments: Segments, rows: NDArray[np.int64]) -> NDArray[np.bool_]:
+    if segments.gain.shape[1] == 0:
+        return np.zeros(len(rows), dtype=np.bool_)
     eligible = (segments.tones[rows] == 1) & (segments.gain[rows, 0] != 0)
     previous, following = rows[:-1], rows[1:]
     touching = (segments.timeline[previous] == segments.timeline[following]) & (
