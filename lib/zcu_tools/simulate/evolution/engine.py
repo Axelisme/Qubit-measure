@@ -14,7 +14,8 @@ if TYPE_CHECKING:
     from ._dispatch import Dispatch
     from ._planning import Geometry
     from .calibration import CalibratedConstantProfile
-    from .kernel import Kernel
+    from .kernel import Kernel, SegmentTable
+    from .kernels._carrier_reuse import CarrierWorkspace
 
 import numpy as np
 from numpy.typing import NDArray
@@ -454,6 +455,21 @@ class Engine:
         finally:
             planner.close()
 
+    def _carrier_kernels(
+        self, table: SegmentTable, source: ModelSource
+    ) -> tuple[dict[str, Kernel], CarrierWorkspace]:
+        """Scope physical-block reuse to this source/budget's segmented scan."""
+        from .kernels._carrier_reuse import CarrierWorkspace
+        from .kernels.shaped_sambe import ShapedSambeKernel
+
+        workspace = CarrierWorkspace(np.empty(0))
+        kernels = dict(self._kernels)
+        kernel = kernels.get("shaped_sambe")
+        if type(kernel) is ShapedSambeKernel:
+            workspace = kernel.carrier_workspace(table, source)
+            kernels["shaped_sambe"] = ShapedSambeKernel(workspace)
+        return kernels, workspace
+
     def _evolve(
         self,
         source: ModelSource,
@@ -503,27 +519,31 @@ class Engine:
                     budget=budget,
                     evaluation=evaluation,
                 )
-            with execution_pool(workers) as pool:
+            # One workspace belongs to this source/budget/evolve, not the registry
+            # or prepare LRU. Prefix and timeline workers share physical blocks.
+            kernels, workspace = self._carrier_kernels(geometry.table, source)
+            with (
+                self._cache.track_workspace(workspace),
+                execution_pool(workers) as pool,
+            ):
                 if constant_dispatch is not None:
                     schedule = Schedule(
                         geometry, constant_dispatch, source, budget, cancel
                     )
                 elif mode == "legacy-plan":
                     geometry = PrefixResolver(
-                        geometry, self._kernels, source, budget, cancel
+                        geometry, kernels, source, budget, cancel
                     ).resolve(self._cache, pool, self._chunks)
                     schedule = Schedule.from_legacy_plan(
-                        geometry, self._kernels, source, budget, cancel, pool
+                        geometry, kernels, source, budget, cancel, pool
                     )
                 else:
                     geometry = PrefixResolver(
-                        geometry, self._kernels, source, budget, cancel
+                        geometry, kernels, source, budget, cancel
                     ).resolve(self._cache, pool, self._chunks)
-                    dispatch = classify(
-                        geometry, self._kernels, source, budget, pool=pool
-                    )
+                    dispatch = classify(geometry, kernels, source, budget, pool=pool)
                     schedule = Schedule(geometry, dispatch, source, budget, cancel)
-                result = schedule.run(self._kernels, self._cache, pool, self._chunks)
+                result = schedule.run(kernels, self._cache, pool, self._chunks)
             if cancel.is_set():
                 raise Cancelled()
             exceeded = result.paths.exceeded_by_kernel

@@ -9,7 +9,8 @@ never replaces the current row's guard.
 """
 
 from collections import OrderedDict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Generator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Literal
 
@@ -184,7 +185,8 @@ class PrepareCache:
     limit is a nonnegative integer resident byte budget (not bool); zero
     disables admission. Invalid limits raise ValueError. bytes
     counts resident allocations once. live_bytes counts allocations held by the
-    explicit handles once, including resident pins, not raw find results or RSS.
+    explicit handles once, including resident pins, plus registered evolve-local
+    workspaces at their current size, not raw find results or RSS.
     Eviction and clear only drop resident ownership; handles remain usable.
     Reusing one prepared object requires identical namespace and whole-batch
     metadata. It never splits an opaque batch or charges one allocation twice.
@@ -196,6 +198,7 @@ class PrepareCache:
         self._resident: OrderedDict[int, _Allocation] = OrderedDict()
         self._allocations: dict[int, _Allocation] = {}
         self._next_id = 0
+        self._workspaces: list[Prepared] = []
 
     @property
     def bytes(self) -> int:
@@ -206,6 +209,7 @@ class PrepareCache:
     def live_bytes(self) -> int:
         """Whole bytes pinned by reservations/consumers, deduplicated across both.
 
+        Registered evolve-local workspaces add their current numeric-array bytes.
         This can exceed limit and is not total live work or process RSS. Ordinary
         find results and caller-copied Python references are not tracked handles.
         """
@@ -213,7 +217,33 @@ class PrepareCache:
             allocation.entry.nbytes
             for allocation in self._allocations.values()
             if allocation.holders
+        ) + sum(
+            _nonnegative_integer(workspace.nbytes) for workspace in self._workspaces
         )
+
+    @contextmanager
+    def track_workspace(self, workspace: Prepared) -> Generator[None]:
+        """Charge growing evolve-local prepared arrays until scope exit.
+
+        workspace supplies current nonnegative integer nbytes, including only
+        arrays it owns. The Engine registers it under its call lock before
+        workers start; workers may grow it with synchronized nbytes reads.
+        live_bytes includes its current charge, independent of resident bytes
+        and the LRU limit. It never enters inventory, find, or persistent reuse.
+        Scope exit releases ownership even on cancellation or numerical failure.
+        Register a given workspace only once per scope. Invalid initial charges
+        or duplicate registration raise ValueError.
+        """
+        _nonnegative_integer(workspace.nbytes)
+        if any(item is workspace for item in self._workspaces):
+            raise ValueError("workspace is already tracked")
+        self._workspaces.append(workspace)
+        try:
+            yield
+        finally:
+            self._workspaces = [
+                item for item in self._workspaces if item is not workspace
+            ]
 
     def inventory(self) -> tuple[CacheEntry, ...]:
         """Snapshot resident whole-batch metadata in LRU order without touching.
