@@ -203,12 +203,9 @@ def collect_upload_tasks(
         relative_dir = os.path.relpath(dirpath, local_folder_path)
 
         # Determine the Drive folder ID for the current local directory
-        if relative_dir == ".":
-            current_parent_id = parent_folder_id
-        else:
-            parent_rel = os.path.dirname(relative_dir)
-            if parent_rel == "":
-                parent_rel = "."
+        current_parent_id = parent_folder_id
+        if relative_dir != ".":
+            parent_rel = os.path.dirname(relative_dir) or "."
 
             parent_id = folder_id_cache.get(parent_rel)
 
@@ -221,13 +218,13 @@ def collect_upload_tasks(
             folder_name = os.path.basename(relative_dir)
             current_parent_id = find_or_create_folder(service, folder_name, parent_id)
 
-            if current_parent_id:
-                folder_id_cache[relative_dir] = current_parent_id
-            else:
+            if not current_parent_id:
                 print(
                     f"Could not create/find folder '{folder_name}'. Skipping files in it."
                 )
                 continue
+
+            folder_id_cache[relative_dir] = current_parent_id
 
         # Get existing files in the target Drive folder
         existing_files = list_files_in_folder(service, current_parent_id)

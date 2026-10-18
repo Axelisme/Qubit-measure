@@ -84,7 +84,45 @@ def _normalize_notebook(
 # ------------------------------
 
 
-def sync_files(
+def _notebook_contents_match(
+    generated_content: str, on_disk_content: str, dest_file: Path, dest_ext: str
+) -> bool:
+    """Compare converted and on-disk content, ignoring unstable notebook fields.
+
+    ``dest_ext`` selects JSON comparison for ``.ipynb``; other formats are
+    parsed with Jupytext, rereading ``dest_file``. JSON decode/key
+    failures fall back to unnormalized JSON; Jupytext/normalization failures
+    fall back to the supplied raw text. Other errors propagate to the caller.
+    No content is written.
+    """
+    if dest_ext == ".ipynb":
+        try:
+            generated_json = json.loads(generated_content)
+            on_disk_json = json.loads(on_disk_content)
+
+            generated_clean = _normalize_notebook(generated_json)
+            on_disk_clean = _normalize_notebook(on_disk_json)
+
+            return generated_clean == on_disk_clean
+        except (json.JSONDecodeError, KeyError):
+            return json.loads(generated_content) == json.loads(on_disk_content)
+
+    try:
+        generated_nb = jupytext.reads(generated_content, fmt=dest_ext.strip("."))
+        on_disk_nb = jupytext.read(dest_file)
+
+        generated_clean = _normalize_notebook(generated_nb)
+        on_disk_clean = _normalize_notebook(on_disk_nb)
+
+        return generated_clean == on_disk_clean
+    # tolerated: Jupytext codec/deepcopy failures fall back to raw-text comparison.
+    except Exception:  # noqa: BLE001
+        return generated_content == on_disk_content
+
+
+# tolerated: Keep ordered ignore/create/overwrite/prompt decisions and counters in one loop;
+# further extraction would export partially read notebook and all_in_sync state.
+def sync_files(  # noqa: C901, PLR0912, PLR0915
     source_dir: str,
     dest_dir: str,
     source_ext: str,
@@ -139,8 +177,7 @@ def sync_files(
         # Fast-path: unconditional overwrite requested (e.g. nb2md mode)
         # -------------------------------------------------------------
         if always_overwrite:
-            if source_notebook is None:
-                source_notebook = jupytext.read(source_file)
+            source_notebook = jupytext.read(source_file)
 
             if not dest_file.exists():
                 dest_file.parent.mkdir(parents=True, exist_ok=True)
@@ -173,85 +210,48 @@ def sync_files(
             )
             print("   ✅ 已建立。")
             synced_count += 1
+            continue
+
+        # Compare in memory, retaining the parsed source for a possible overwrite.
+        try:
+            source_notebook = jupytext.read(source_file)
+            generated_dest_content = jupytext.writes(
+                source_notebook, fmt=dest_ext.strip(".")
+            )
+            on_disk_dest_content = dest_file.read_text(encoding="utf-8")
+            are_synced = _notebook_contents_match(
+                generated_dest_content, on_disk_dest_content, dest_file, dest_ext
+            )
+        # tolerated: Any read/codec/comparison failure must mark this pair out of sync.
+        except Exception:  # noqa: BLE001
+            are_synced = False
+
+        if are_synced:
+            print(f"✅ 已同步: {source_file.name}")
+            continue
+
+        all_in_sync = False
+        print(f"❌ 不同步: {source_file.name} -> {dest_file.name}")
+
+        if dest_file.stat().st_mtime > source_file.stat().st_mtime:
+            print(f"   ⚠️  警告: 目標檔案 {dest_file.name} 較新，覆寫將會遺失其變更。")
+
+        overwrite = True  # non-interactive path
+        if prompt:
+            default_prompt = "Y/n" if default_yes else "y/N"
+            choice = input(
+                f"   您要用 {source_ext} 的內容覆寫 {dest_ext} 嗎？ ({default_prompt}): "
+            ).lower()
+            overwrite = (
+                choice not in ["n", "no"] if default_yes else choice in ["y", "yes"]
+            )
+
+        if overwrite:
+            jupytext.write(source_notebook, dest_file)
+            print(f"   🔄 已同步: {dest_file.name}")
+            synced_count += 1
         else:
-            # Replace the CLI diff check with a more robust in-memory comparison
-            # using the jupytext library directly.
-            try:
-                # Read the source file and convert it to the destination format in memory
-                source_notebook = jupytext.read(source_file)
-                generated_dest_content = jupytext.writes(
-                    source_notebook, fmt=dest_ext.strip(".")
-                )
-
-                # Read the actual content of the destination file from disk
-                on_disk_dest_content = dest_file.read_text(encoding="utf-8")
-
-                # 使用全域 _normalize_notebook 進行比較
-                if dest_ext == ".ipynb":
-                    try:
-                        generated_json = json.loads(generated_dest_content)
-                        on_disk_json = json.loads(on_disk_dest_content)
-
-                        generated_clean = _normalize_notebook(generated_json)
-                        on_disk_clean = _normalize_notebook(on_disk_json)
-
-                        are_synced = generated_clean == on_disk_clean
-                    except (json.JSONDecodeError, KeyError):
-                        are_synced = json.loads(generated_dest_content) == json.loads(
-                            on_disk_dest_content
-                        )
-                else:
-                    try:
-                        generated_nb = jupytext.reads(
-                            generated_dest_content, fmt=dest_ext.strip(".")
-                        )
-                        on_disk_nb = jupytext.read(dest_file)
-
-                        generated_clean = _normalize_notebook(generated_nb)
-                        on_disk_clean = _normalize_notebook(on_disk_nb)
-
-                        are_synced = generated_clean == on_disk_clean
-                    # tolerated: Jupytext codec/deepcopy failures fall back to raw-text comparison.
-                    except Exception:  # noqa: BLE001
-                        are_synced = generated_dest_content == on_disk_dest_content
-
-            # tolerated: Any read/codec/comparison failure must mark this pair out of sync.
-            except Exception:  # noqa: BLE001
-                # If any error occurs during parsing or comparison, assume not synced
-                are_synced = False
-
-            if are_synced:
-                print(f"✅ 已同步: {source_file.name}")
-            else:
-                all_in_sync = False
-                print(f"❌ 不同步: {source_file.name} -> {dest_file.name}")
-
-                if dest_file.stat().st_mtime > source_file.stat().st_mtime:
-                    print(
-                        f"   ⚠️  警告: 目標檔案 {dest_file.name} 較新，覆寫將會遺失其變更。"
-                    )
-
-                if prompt:
-                    default_prompt = "Y/n" if default_yes else "y/N"
-                    choice = input(
-                        f"   您要用 {source_ext} 的內容覆寫 {dest_ext} 嗎？ ({default_prompt}): "
-                    ).lower()
-
-                    overwrite = False
-                    if default_yes:
-                        overwrite = choice not in ["n", "no"]
-                    else:
-                        overwrite = choice in ["y", "yes"]
-                else:
-                    overwrite = True  # non-interactive path
-
-                if overwrite:
-                    # Use jupytext library to perform the conversion
-                    jupytext.write(source_notebook, dest_file)
-                    print(f"   🔄 已同步: {dest_file.name}")
-                    synced_count += 1
-                else:
-                    print("   ⏩ 已跳過")
+            print("   ⏩ 已跳過")
 
     print("\n---\n✨ 檢查完成！")
     if all_in_sync:
