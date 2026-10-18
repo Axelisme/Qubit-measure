@@ -7,7 +7,7 @@ original owner scenario remains in commit 393b89c71 for that acceptance seam.
 from copy import deepcopy
 from pathlib import Path
 
-rom typing import Any
+from typing import Any
 
 import pytest
 from pydantic import JsonValue

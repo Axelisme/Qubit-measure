@@ -194,7 +194,7 @@ def test_batch_preflight_rejects_all_before_first_edit(
                 "form_path": list(bad_field),
                 "edit_index": 1,
             }
-        elif bad_field == "modules.readout":
+        elif bad_field == ("modules", "readout"):
             assert isinstance(caught.value, GuiRpcError)
             assert caught.value.reason == "module_selector"
         else:
