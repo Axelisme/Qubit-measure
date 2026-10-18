@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-19, WorkPlan ownership, joint-basis multi-tone RWA, simultaneous gate reuse with shared virtual shifts, unified resident/pending budget and long-period playback
+**Last updated:** 2026-10-19, WorkPlan ownership, joint-basis multi-tone RWA, simultaneous gate reuse with shared virtual shifts, unified resident/pending budget, long-period playback and guarded CF4 carrier anchors
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -75,7 +75,7 @@ application and certificates that require their intermediate data.
 
 | Family | Decision and certificate handoff |
 | --- | --- |
-| `floquet_period` | The period guard admits a single constant tone at `abs(f) >= 0.03 GHz` when its secular split bound passes. Dispatch selects dense Hilbert DOP853 at `abs(f) >= 1 GHz`. Below that, it compares Sambe work with CF4 coarse/fine work. A declined Sambe certificate uses standalone CF4, not gain anchors. For CF4 keys, dispatch fixes gain anchors from the complete gain group; the kernel checks interpolation and refines or builds independently when needed. |
+| `floquet_period` | The period guard admits a single constant tone at `abs(f) >= 0.03 GHz` when its secular split bound passes. Dispatch selects dense Hilbert DOP853 at `abs(f) >= 1 GHz`. Below that, it compares Sambe work with CF4 coarse/fine work. A declined Sambe certificate uses standalone CF4, not gain anchors. For CF4 keys, dispatch fixes gain anchors from the complete gain group. Constant-CF4 inventories with at least sixteen same-sign carriers and a magnitude ratio at most 1.01 can instead use four real carrier anchors at fixed gain. Gain groups take precedence, so a key never expands both axes. Carrier prediction interpolates interaction-picture prefixes, restores the target carrier's lab frame and checks the original nine coarse-grid probes. Rejection refines the already-built coarse grid; incompatible anchor grids build independently. Prepare keys and row admission do not change. |
 | `gate_cache` | Dispatch sends a key-aligned builder mask. Positive durations up to 30 ns first try six phase nodes with two independent probes; failed convergence uses sixteen nodes. Other keys directly use sixteen nodes. Both builders produce four closed-system subsegments with secular Strang dissipation and the same phase-Fourier representation. |
 | `period_table` and `shaped_sambe` | Ordinary period tables integrate frozen-envelope Hilbert periods; shaped Sambe uses finite-Hilbert-Fourier subperiods for smooth real or complex envelopes. Complex playback interpolates magnitude and adds the envelope angle to the advancing carrier phase. It uses a tighter envelope-motion bound; unresolved ramps and failed certificates retain fallback. Each family owns its guards and build. They share period playback and direct fractional tails. |
 | `floquet` | The guard builds a Stark frame and returns row admissions. Passing k=0 omission/convergence bounds selects modal second-order Dyson when probe limits pass, otherwise periodic k=0 propagation. After k=0 omission rejection, a passing calibrated finite-Fourier certificate selects retained-sideband integration. A cached sideband frame extends to missing probe bins without rebuilding the frame or existing certificates. Dispatch merges current-row admissions into one family plan. Apply does not repeat admission or construct sparse equations. |
@@ -267,7 +267,9 @@ The planner publishes immutable algorithm-named records from the complete
 candidate inventory, before numerical admission:
 
 - `GainGroupPlan` and `GainBuildPlan` fix period builders, work limits and gain
-  anchors. Cache warmth and rejected rows do not change anchor coordinates.
+  anchors. `CF4CarrierGroupPlan` fixes narrow constant-CF4 carrier inventories and
+  four carrier anchors. Cache warmth and rejected rows do not change either
+  axis's anchor coordinates.
 - `CarrierFamilyPlan` fixes physical carrier groups. More than nine unique,
   nonzero, same-sign carriers qualify when the largest magnitude is at most
   1.1 times the smallest.
@@ -280,7 +282,9 @@ actual key builds. Gain anchors use single-flight immutable resources. Cache
 hits and rejected rows are not actual consumers. Caller-only groups seal before
 building; the last actual handoff then releases the product. Groups with deferred
 consumers stay open until WorkPlan closes. Prefix preparation cannot seal a
-group needed by later timeline work.
+group needed by later timeline work. Gain and constant-CF4 carrier anchors share
+this admission and handoff mechanism. Carrier interaction-picture prefixes belong
+only to the evolve-local anchor resource, not to resident period payloads.
 
 Carrier interpolation uses a mutable `CarrierWorkspace`, separate from immutable
 facts and resource products. WorkPlan creates it lazily from published carrier
