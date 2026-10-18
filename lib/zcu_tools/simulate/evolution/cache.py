@@ -1,4 +1,4 @@
-"""Model-only whole-payload LRU and evolve-local workspace accounting.
+"""Model-only whole-payload LRU.
 
 Calls require the owning Engine call lock or equivalent external serialization.
 Find/add operations touch/admit in caller order. Only model-only prepare/guard
@@ -7,8 +7,6 @@ one evolve call. A matching key never replaces the current row's guard.
 """
 
 from collections import OrderedDict
-from collections.abc import Generator
-from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Literal
 
@@ -45,12 +43,11 @@ class _Allocation:
 
 
 class PrepareCache:
-    """Model-only LRU with separate evolve-local workspace accounting.
+    """Model-only whole-allocation LRU.
 
     limit is a nonnegative integer resident byte budget (not bool); zero
     disables admission. Invalid limits raise ValueError. bytes counts resident
-    allocations once. live_bytes counts registered evolve-local workspaces at
-    their current size, not active scheduler references or RSS. Reusing one
+    allocations once, not active scheduler references or RSS. Reusing one
     prepared object requires identical namespace and whole-batch metadata.
     Eviction and clear release only cache ownership, not caller references.
     """
@@ -59,47 +56,11 @@ class PrepareCache:
         self.limit = _nonnegative_integer(limit)
         self._bytes = 0
         self._resident: OrderedDict[int, _Allocation] = OrderedDict()
-        self._workspaces: list[Prepared] = []
 
     @property
     def bytes(self) -> int:
         """Resident whole-allocation array bytes, bounded by limit."""
         return self._bytes
-
-    @property
-    def live_bytes(self) -> int:
-        """Current numeric-array bytes of registered evolve-local workspaces.
-
-        This can exceed limit and is not total live work or process RSS. Raw
-        find results and caller-copied Python references are not accounted here.
-        """
-        return sum(
-            _nonnegative_integer(workspace.nbytes) for workspace in self._workspaces
-        )
-
-    @contextmanager
-    def track_workspace(self, workspace: Prepared) -> Generator[None]:
-        """Charge growing evolve-local prepared arrays until scope exit.
-
-        workspace supplies current nonnegative integer nbytes, including only
-        arrays it owns. The Engine registers it under its call lock before
-        workers start; workers may grow it with synchronized nbytes reads.
-        live_bytes includes its current charge, independent of resident bytes
-        and the LRU limit. It never enters find or persistent reuse.
-        Scope exit releases ownership even on cancellation or numerical failure.
-        Register a given workspace only once per scope. Invalid initial charges
-        or duplicate registration raise ValueError.
-        """
-        _nonnegative_integer(workspace.nbytes)
-        if any(item is workspace for item in self._workspaces):
-            raise ValueError("workspace is already tracked")
-        self._workspaces.append(workspace)
-        try:
-            yield
-        finally:
-            self._workspaces = [
-                item for item in self._workspaces if item is not workspace
-            ]
 
     def find(
         self, namespace: CacheNamespace, keys: set[CacheKey]

@@ -17,7 +17,7 @@ from zcu_tools.simulate.evolution import (
     ModelSource,
     SecularModel,
 )
-from zcu_tools.simulate.evolution.kernel import ApplyContext, GuardResult
+from zcu_tools.simulate.evolution.kernel import ApplyContext, GuardResult, KernelContext
 
 from ._engine import Payload, RecordingKernel, batch, run, source, track
 from .contract.kernel_suite import synthetic_model
@@ -30,7 +30,7 @@ class TimelineKernel(RecordingKernel):
         super().__init__(name)
         self.copies = copies
 
-    def prepare_keys(self, table, rows):
+    def prepare_keys(self, table, rows, context: KernelContext):
         return (table.timeline[rows] // self.copies).copy().view("V8")
 
 
@@ -351,12 +351,71 @@ def test_shared_cache_namespace_budget_eviction_and_singletons():
         assert k.preparations == 5
         for _ in range(2):
             engine.evolve(src, (batch(1, duration=8),), cancel=Event())
-        assert k.preparations == 7
+        assert k.preparations == 6, "the second singleton evolve must reuse its payload"
     finally:
         engine.close()
         engine.close()
     with pytest.raises(RuntimeError, match="closed"):
         engine.evolve(src, (batch(),), cancel=Event())
+
+
+@pytest.mark.parametrize("workers", [1, 2])
+def test_singleton_residents_reuse_payloads_across_evolves(workers):
+    kernel = TimelineKernel("t4")
+    src = source()
+    with closing(Engine(workers, 128, kernels=(kernel,))) as engine:
+        first = engine.evolve(src, (batch(8),), cancel=Event())
+        assert kernel.preparations == 8
+        second = engine.evolve(src, (batch(8),), cancel=Event())
+        assert kernel.preparations == 8, "resident singletons must not rebuild"
+        np.testing.assert_array_equal(second.densities, first.densities)
+        assert second.paths == first.paths
+
+
+def test_oversize_local_payload_does_not_evict_fitting_singleton():
+    class SizedKernel(RecordingKernel):
+        def prepare(self, keys, table, rows, context: KernelContext):
+            super().prepare(keys, table, rows, context)
+            return Payload(2 if table.duration_ns[rows[0]] == 4 else 1)
+
+    kernel = SizedKernel("t4")
+    src = source()
+    with closing(Engine(1, 16, kernels=(kernel,))) as engine:
+        engine.evolve(src, (batch(1),), cancel=Event())
+        for _ in range(2):
+            engine.evolve(src, (batch(1, duration=4),), cancel=Event())
+        engine.evolve(src, (batch(1),), cancel=Event())
+        assert kernel.preparations == 3, (
+            "oversize products must stream without eviction"
+        )
+
+
+def test_singleton_stream_preserves_current_shared_hit_and_fills_only_spare_bytes():
+    kernel = RecordingKernel("t4")
+    src = source()
+    shared = batch(2)
+    stream = replace(batch(3), points=np.arange(2, 5), end_ns=np.array([4.0, 5.0, 6.0]))
+    with closing(Engine(1, 32, kernels=(kernel,), chunks_per_worker=1)) as engine:
+        engine.evolve(src, (shared,), cancel=Event())
+        engine.evolve(src, (shared, stream), cancel=Event())
+        assert kernel.preparations == 4
+        engine.evolve(src, (shared,), cancel=Event())
+        assert kernel.preparations == 4, "streaming misses must not evict shared hits"
+        engine.evolve(src, (batch(1, duration=4),), cancel=Event())
+        assert kernel.preparations == 4, "the fitting local product must persist"
+
+
+def test_new_source_singleton_replaces_previous_source_resident():
+    kernel = RecordingKernel("t4")
+    src = source()
+    other = ModelSource(
+        src.initial_density,
+        lambda level: replace(src.model(level), identity="next-flux"),
+    )
+    with closing(Engine(1, 16, kernels=(kernel,))) as engine:
+        for current in (src, src, other, other, src):
+            engine.evolve(current, (batch(1),), cancel=Event())
+        assert kernel.preparations == 3, "old flux residents must yield to new ones"
 
 
 @pytest.mark.parametrize(
@@ -377,18 +436,20 @@ def test_timeline_local_payloads_are_released_before_the_next_timeline(repeated,
         def release(self, count):
             self.live -= count
 
-        def prepare(self, keys, table, rows, source, budget):
-            payload = super().prepare(keys, table, rows, source, budget)
+        def prepare(self, keys, table, rows, context: KernelContext):
+            payload = super().prepare(keys, table, rows, context)
             self.live += len(keys)
             self.peak_live = max(self.peak_live, self.live)
             weakref.finalize(payload, self.release, len(keys))
             return payload
 
-        def guard_prepared(self, table, rows, source, budget):
-            keys, first = np.unique(self.prepare_keys(table, rows), return_index=True)
-            payload = self.prepare(keys, table, rows[first], source, budget)
+        def guard_prepared(self, table, rows, context: KernelContext):
+            keys, first = np.unique(
+                self.prepare_keys(table, rows, context), return_index=True
+            )
+            payload = self.prepare(keys, table, rows[first], context)
             return GuardResult(
-                self.guard(table, rows, source, budget),
+                self.guard(table, rows, context),
                 (GuardPreparation(keys, payload),),
             )
 
@@ -428,17 +489,19 @@ def test_guard_pool_preserves_dispatch_and_density_and_skips_small_key_sets():
             super().__init__("dyson", copies=2)
             self.guard_threads: set[int] = set()
 
-        def guard_prepared(self, table, rows, source, budget):
+        def guard_prepared(self, table, rows, context: KernelContext):
             from zcu_tools.simulate.evolution.kernel import GuardPreparation
 
-            keys, first = np.unique(self.prepare_keys(table, rows), return_index=True)
-            payload = self.prepare(keys, table, rows[first], source, budget)
+            keys, first = np.unique(
+                self.prepare_keys(table, rows, context), return_index=True
+            )
+            payload = self.prepare(keys, table, rows[first], context)
             return GuardResult(
-                self.guard(table, rows, source, budget),
+                self.guard(table, rows, context),
                 (GuardPreparation(keys, payload),),
             )
 
-        def guard(self, table, rows, source, budget):
+        def guard(self, table, rows, context: KernelContext):
             self.guard_threads.add(get_ident())
             return table.timeline[rows] % 3 != 0
 
@@ -487,23 +550,25 @@ def test_local_guard_tables_build_once_and_match_shared_guard_first_fallback(
             self.tokens = {}
             self.used = []
 
-        def prepare(self, keys, table, rows, source, budget):
+        def prepare(self, keys, table, rows, context: KernelContext):
             points = keys.view(np.int64)
             self.builds[points] += 1
             payload = Payload(len(keys))
             self.tokens[id(payload)] = self.builds[points].copy()
             return payload
 
-        def guard_prepared(self, table, rows, source, budget):
-            keys, first = np.unique(self.prepare_keys(table, rows), return_index=True)
-            payload = self.prepare(keys, table, rows[first], source, budget)
+        def guard_prepared(self, table, rows, context: KernelContext):
+            keys, first = np.unique(
+                self.prepare_keys(table, rows, context), return_index=True
+            )
+            payload = self.prepare(keys, table, rows[first], context)
             return GuardResult(
                 (table.timeline[rows] // self.copies) % 2 == 0,
                 (GuardPreparation(keys, payload),),
             )
 
-        def guard(self, table, rows, source, budget):
-            return self.guard_prepared(table, rows, source, budget).accepted
+        def guard(self, table, rows, context: KernelContext):
+            return self.guard_prepared(table, rows, context).accepted
 
         def apply(
             self, prepared, key_index, table, rows, states, context: ApplyContext
@@ -578,15 +643,15 @@ def test_local_singletons_keep_shared_apply_waves_and_release_each_payload():
                 self.peak = 0
                 self.guarded = set()
 
-            def guard(self, table, rows, source, budget):
+            def guard(self, table, rows, context: KernelContext):
                 self.guarded.add(get_ident())
-                return super().guard(table, rows, source, budget)
+                return super().guard(table, rows, context)
 
             def release(self):
                 self.live -= 1
 
-            def prepare(self, keys, table, rows, source, budget):
-                payload = super().prepare(keys, table, rows, source, budget)
+            def prepare(self, keys, table, rows, context: KernelContext):
+                payload = super().prepare(keys, table, rows, context)
                 self.live += 1
                 self.peak = max(self.peak, self.live)
                 weakref.finalize(payload, self.release)
@@ -624,18 +689,18 @@ def test_deferred_guards_do_not_retry_caller_rejections():
                 super().__init__("dyson")
                 self.guarded = []
 
-            def guard(self, table, rows, source, budget):
+            def guard(self, table, rows, context: KernelContext):
                 self.guarded.extend(table.timeline[rows])
                 return np.zeros(len(rows), dtype=bool)
 
         class BuildingPeriod(TimelineKernel):
             guard_builds = True
 
-            def guard_prepared(self, table, rows, source, budget):
+            def guard_prepared(self, table, rows, context: KernelContext):
                 keys, first = np.unique(
-                    self.prepare_keys(table, rows), return_index=True
+                    self.prepare_keys(table, rows, context), return_index=True
                 )
-                payload = self.prepare(keys, table, rows[first], source, budget)
+                payload = self.prepare(keys, table, rows[first], context)
                 return GuardResult(
                     np.ones(len(rows), dtype=bool), (GuardPreparation(keys, payload),)
                 )
@@ -817,10 +882,12 @@ class InputBindingKernel(RecordingKernel):
         self.bound_rows: list[int] = []
         self.unbound_rows: list[int] = []
 
-    def prepare_keys(self, table, rows):
+    def prepare_keys(self, table, rows, context: KernelContext):
         return np.zeros(len(rows), dtype="V8")
 
-    def bind_input(self, prepared, key_index, table, rows, source_initial, budget):
+    def bind_input(
+        self, prepared, key_index, table, rows, source_initial, context: KernelContext
+    ):
         assert np.all(table.start_ns[rows] == 0)
         assert len(np.unique(table.tone_port[rows, 0])) == 1
         assert not source_initial.flags.writeable
@@ -888,14 +955,16 @@ def test_guard_handoff_only_binds_repeated_keys():
     class GuardBindingKernel(InputBindingKernel):
         guard_builds = True
 
-        def prepare_keys(self, table, rows):
+        def prepare_keys(self, table, rows, context: KernelContext):
             return table.duration_ns[rows].copy().view("V8")
 
-        def guard_prepared(self, table, rows, source, budget):
-            keys, first = np.unique(self.prepare_keys(table, rows), return_index=True)
-            prepared = self.prepare(keys, table, rows[first], source, budget)
+        def guard_prepared(self, table, rows, context: KernelContext):
+            keys, first = np.unique(
+                self.prepare_keys(table, rows, context), return_index=True
+            )
+            prepared = self.prepare(keys, table, rows[first], context)
             return GuardResult(
-                self.guard(table, rows, source, budget),
+                self.guard(table, rows, context),
                 (GuardPreparation(keys, prepared),),
             )
 
@@ -989,10 +1058,18 @@ def test_unknown_input_probe_uses_dyson_without_binding_and_matches_dop853():
         def __init__(self):
             self.bound_starts = []
 
-        def bind_input(self, prepared, key_index, table, rows, source_initial, budget):
+        def bind_input(
+            self,
+            prepared,
+            key_index,
+            table,
+            rows,
+            source_initial,
+            context: KernelContext,
+        ):
             self.bound_starts.extend(table.start_ns[rows].tolist())
             return super().bind_input(
-                prepared, key_index, table, rows, source_initial, budget
+                prepared, key_index, table, rows, source_initial, context
             )
 
     class ReferenceDirect(DOP853Kernel):
@@ -1105,7 +1182,15 @@ def test_shared_shaped_prefix_supplies_one_input_to_probe_and_later_segments(bin
             super().__init__("dyson")
             self.known_inputs = []
 
-        def bind_input(self, prepared, key_index, table, rows, source_initial, budget):
+        def bind_input(
+            self,
+            prepared,
+            key_index,
+            table,
+            rows,
+            source_initial,
+            context: KernelContext,
+        ):
             self.known_inputs.append(source_initial.copy())
             return BoundPayload(source_initial) if bind else None
 
@@ -1153,9 +1238,9 @@ def test_shared_prefix_paths_and_exceedances_count_each_adopting_timeline():
             super().__init__("dop853", accepts=False)
             self.guarded_rows = 0
 
-        def guard(self, table, rows, source, budget):
+        def guard(self, table, rows, context: KernelContext):
             self.guarded_rows += len(rows)
-            return super().guard(table, rows, source, budget)
+            return super().guard(table, rows, context)
 
     spectral = ExceededPrefix("shaped_sambe")
     direct = RejectedDirect()

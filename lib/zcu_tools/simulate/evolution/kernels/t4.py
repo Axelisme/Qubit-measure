@@ -7,8 +7,7 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
-from ..kernel import ApplyContext, Prepared, SegmentTable
-from ..secular import ModelSource
+from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ._secular import coherence_decay, population_generator
 
 
@@ -54,17 +53,18 @@ class T4:
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> NDArray[np.bool_]:
         """Accept precisely rows without playing tones."""
+        source, budget = context.source, context.budget
         del source, budget
         return table.tones[rows] == 0
 
     def prepare_keys(
-        self, table: SegmentTable, rows: NDArray[np.int64]
+        self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.void]:
         """Encode flux level and duration, excluding absolute start time."""
+        del context
         keys = np.empty(
             len(rows),
             dtype=[("level", "<i8", table.level.shape[1]), ("duration", "<f8")],
@@ -83,10 +83,10 @@ class T4:
         keys: NDArray[np.void],
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> Prepared:
         """Build immutable population matrices and coherence factors per key."""
+        source, budget = context.source, context.budget
         del table, rows, budget
         populations, coherences = [], []
         for key in keys:
@@ -109,14 +109,24 @@ class T4:
         coherence.setflags(write=False)
         return _Static(population, coherence)
 
+    def admit_prepared(
+        self,
+        prepared: Prepared,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        context: KernelContext,
+    ) -> None:
+        """Decline cached-domain admission; use the ordinary guard build path."""
+        del prepared, table, rows, context
+
     def guard_prepared(
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline guard preparation handoff; the engine calls guard normally."""
+        source, budget = context.source, context.budget
         del table, rows, source, budget
 
     def bind_input(
@@ -126,9 +136,10 @@ class T4:
         table: SegmentTable,
         rows: NDArray[np.int64],
         source_initial: NDArray[np.complex128],
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline input binding; apply uses the model-only prepared payload."""
+        budget = context.budget
         del prepared, key_index, table, rows, source_initial, budget
 
     def apply(

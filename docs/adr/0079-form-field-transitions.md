@@ -49,17 +49,17 @@ Sweep 只填 start／stop、尚未填 n 時仍可切座標，因為該換算不�
 
 ### 共用 inline 政策
 
-`gui.form_adapter` 集中宣告來源型別到目標型別的繼承欄位清單。Ref→inline 與 inline→inline 使用同一組明確政策，各實驗不重寫。Core 不推斷「所有同名且相容的欄位」。
+`gui.form_adapter` 共用一條同名同型別繼承規則，不維護來源／目標配對表，各實驗不重寫。新型別的每個欄位若在舊型別有同名且同型別的欄位，就沿用原始輸入；否則用目標初值。Waveform、Pulse、PulseReadout、MuxReadout 與各 Reset 都用這條規則，巢狀欄位逐層比較。Core 不加入 domain 規則，也不補 defaults；converter 提供完整目標 input。
 
-同一持久型別→同型別保留全部可編輯欄位，包含 ref→inline 與 inline→inline。Ref 讀固定 Spec；inline 保留原始 expression、缺席與 invalid 值。
+型別指生成後的可編輯 Form 型別，沿 adapter 既有去除 QickParam 的規則。各次生成的同一持久 model 不因動態 class identity 不同而變成不同型別。欄位名必須完全相同，不做 rename。PulseSpec.ch 與 PulseReadoutSpec.gen_ch 不同名，不帶過；freq、gain、waveform 等實際同名同型別欄位則沿用。
 
-跨型別只在 Const、Cosine、Gauss、Drag 四種 waveform 間繼承 length，Gauss→Drag 與 Drag→Gauss 另繼承 sigma。Drag 的 delta、alpha 不帶到 Gauss。其他跨型別一律不繼承，由 converter 給目標型別初值，Core 不補 defaults。這包含涉及 Arb／FlatTop，以及 Pulse、PulseReadout、MuxReadout、各 Reset 之間的切換。
+沿用的是原始 expression、缺席與 invalid 值，不依 raw 值是否有效決定繼承，不求值或自動修正。超出目標限制時，由一般驗證顯示錯誤。同型別 ref→inline 與 inline→inline 自然保留全部可編輯欄位。Ref 讀固定 Spec，inline 不重新讀 library。
 
-Gauss→FlatTop 不把來源 waveform 放進 raise_waveform。FlatTop 沒有直接 sigma 欄位，length 與 raise_waveform 的組合也不同於四種 waveform 的整段 pulse 長度，因此不沿用先前例子。
+Gauss length=0.8、sigma=0.2 切 Drag 時保留 length／sigma，delta／alpha 用初值。切 FlatTop 時保留 length，raise_waveform 用初值，不把舊 waveform 包進新的巢狀欄位。切 Arb 時全用初值。FlatTop 的 length 與 raise_waveform 共同決定形狀，因此沿用 length 可能不符合使用者對平台長度的預期。表單顯示原值，由使用者修改，不加配對例外。
 
-上述配對由顧問於2026-10-18依使用者的代裁授權採用，待使用者覆核。新增配對時先提出具體案例，不自動擴充欄位清單。
+使用者於2026-10-18裁決：「我認為Module間切換也可以採用類似的行為，這樣才一直，我甚至認為就單純的比對欄位名與形態來決定是否繼承值就好」。確認規則與例子後答「可以」。此規則取代先前配對政策。顧問同日釐清比較可編輯 Form 型別，並確認 ch／gen_ch 不搬移。
 
-明確的 Convert to inline 保留，表示從固定來源複製內容。選項切換表示按目標型別及繼承宣告產生子表單。兩者意圖不同，允許產生相同結果，不為了區別入口而改值。
+明確的 Convert to inline 保留，表示從固定來源複製內容。選項切換依目標型別及共用繼承規則產生子表單。兩個入口可以產生相同結果，不為了區別入口而改值。
 
 ### 保存與還原
 

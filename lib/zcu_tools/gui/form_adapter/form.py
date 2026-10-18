@@ -605,9 +605,10 @@ class Form[C: ConfigBase]:
         source admission reject the entire batch with LogicalEditError and the
         original edit index. Whole replacement is also rejected when any declared
         branch, nested model or container item contains a generated selector. Use
-        reachable logical children and dedicated selector operations instead;
-        sequence/mapping items do not gain writable paths. Ordinary nullable,
-        union and container fields without selectors keep core write semantics.
+        reachable logical children and dedicated selector operations instead.
+        Model-list items expose indexed logical paths; other sequence/mapping
+        items remain whole leaves. Ordinary nullable, union and container fields
+        without selectors keep core write semantics.
         Ordinary invalid values and Expr remain drafts.
         No live state is installed, captured or published. Use the candidate only
         within the same guarded owner turn/input/env, without await/reset. Wrong

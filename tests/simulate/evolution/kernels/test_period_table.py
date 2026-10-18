@@ -5,7 +5,12 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource, SecularDrive
-from zcu_tools.simulate.evolution.kernel import ApplyContext, SegmentTable
+from zcu_tools.simulate.evolution.kernel import (
+    ApplyContext,
+    KernelContext,
+    SegmentTable,
+)
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from ..contract.kernel_suite import (
     KernelCase,
@@ -85,14 +90,21 @@ def test_prepare_is_density_independent(kernel_case: KernelCase) -> None:
 def test_shaped_accuracy(kernel_case: KernelCase) -> None:
     case = kernel_case
     rows = np.arange(len(case.states), dtype=np.int64)
-    assert case.kernel.guard(case.table, rows, case.source, 1e-3).all()
+    assert case.kernel.guard(
+        case.table, rows, KernelContext(case.source, 0.001, WorkPlan())
+    ).all()
     keys, representatives, inverse = np.unique(
-        case.kernel.prepare_keys(case.table, rows),
+        case.kernel.prepare_keys(
+            case.table, rows, KernelContext(case.source, 0.001, WorkPlan())
+        ),
         return_index=True,
         return_inverse=True,
     )
     prepared = case.kernel.prepare(
-        keys, case.table, rows[representatives], case.source, 1e-3
+        keys,
+        case.table,
+        rows[representatives],
+        KernelContext(case.source, 0.001, WorkPlan()),
     )
     assert prepared.nbytes > 0
     actual = case.states.copy()
@@ -106,3 +118,37 @@ def test_bind_input_contract(kernel_case: KernelCase, prefix_input: bool) -> Non
     KernelContract().test_bind_input_is_read_only_and_apply_equivalent(
         kernel_case, prefix_input
     )
+
+
+@pytest.mark.parametrize("frequency", [0.0, 1e-20], ids=["dc", "near-dc"])
+def test_ramp_inventory_has_positive_subdivisions_for_rejected_candidates(
+    kernel_case: KernelCase, frequency: float
+) -> None:
+    from zcu_tools.simulate.evolution._carrier_plan import plan_ramp_families
+
+    frequencies = kernel_case.table.tone_frequency_ghz.copy()
+    frequencies[[5, 6], 0] = frequency
+    table = replace(kernel_case.table, tone_frequency_ghz=frequencies)
+    families = plan_ramp_families(table, kernel_case.source, WorkPlan())
+    counts = {row: family.subdivisions for family in families for row in family.rows}
+
+    assert set(counts) == set(range(len(table.tones)))
+    assert all(np.isfinite(count) and count > 0 for count in counts.values())
+    assert counts[5] > 32, "unresolved driven DC ramps cannot be admitted"
+    assert counts[6] == 1, "zero gain needs no subperiod refinement, even at DC"
+
+
+def test_shaped_sambe_cached_convergence_admission(kernel_case: KernelCase) -> None:
+    from zcu_tools.simulate.evolution.kernels.shaped_sambe import ShapedSambeKernel
+
+    solver = ShapedSambeKernel()
+    case = kernel_case
+    rows = np.array([0, 1, 4])
+    context = KernelContext(case.source, case.budget, WorkPlan())
+    built = solver.guard_prepared(case.table, rows, context)
+    prepared = built.preparations[0].prepared
+    admitted = solver.admit_prepared(prepared, case.table, rows[::-1], context)
+    assert admitted is not None, "covered spectral periods must reuse convergence"
+    np.testing.assert_array_equal(admitted.accepted, built.accepted[::-1])
+    changed = replace(case.table, duration_ns=case.table.duration_ns + 1)
+    assert solver.admit_prepared(prepared, changed, rows, context) is None
