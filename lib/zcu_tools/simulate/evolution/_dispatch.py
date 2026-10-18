@@ -7,6 +7,7 @@ import numpy as np
 from joblib import delayed
 from numpy.typing import NDArray
 
+from ._carrier_plan import populate_carrier_plan
 from ._dop853_dispatch import direct_plans
 from ._parallel import Executor
 from ._planning import Geometry
@@ -40,8 +41,10 @@ def create_work_plan(
     planners populate this plan before workers start; no numerical routing or
     expensive candidate graph is constructed here.
     """
-    del table, source, budget
-    return WorkPlan()
+    del budget
+    plan = WorkPlan()
+    populate_carrier_plan(table, source, plan)
+    return plan
 
 
 def period_builder(
