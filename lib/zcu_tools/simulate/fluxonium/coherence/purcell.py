@@ -31,7 +31,8 @@ if TYPE_CHECKING:
 # -----------------------------
 
 
-def purcell(
+# tolerated: One sweep callback swaps state groups; bath/subsystems stay explicit.
+def purcell(  # noqa: PLR0913
     Egn: NDArray[np.float64],
     Vec_gn: NDArray[np.object_],
     Een: NDArray[np.float64],
@@ -138,7 +139,8 @@ def purcell(
     return np.asarray(np.inf if escape_rate == 0 else 1 / escape_rate, dtype=np.float64)
 
 
-def calculate_purcell_t1_vs_flux(
+# tolerated: Cached notebook caller varies linewidth, coupling and Temp separately.
+def calculate_purcell_t1_vs_flux(  # noqa: PLR0913
     fluxs: NDArray[np.float64],
     bare_rf: float,
     kappa: float,

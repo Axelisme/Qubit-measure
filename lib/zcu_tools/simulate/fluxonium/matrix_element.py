@@ -84,7 +84,8 @@ def calculate_n_oper_vs_flux(
     return spectrum_data, matrix_elements[:, :return_dim, :return_dim]
 
 
-def calculate_system_n_oper_vs_flux(
+# tolerated: Public sweep reuse and output size are independent of model inputs.
+def calculate_system_n_oper_vs_flux(  # noqa: PLR0913
     params: tuple[float, float, float],
     fluxs: NDArray[np.float64],
     bare_rf: float,
