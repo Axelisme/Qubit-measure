@@ -1279,3 +1279,99 @@ def test_shared_prefix_paths_and_exceedances_count_each_adopting_timeline():
     assert "3 segments (shaped_sambe: 3)" in str(caught[0].message)
     assert direct.guarded_rows == 0, "adopted prefix rows must not be reclassified"
     assert not gate.preparations, "adopted prefix rows must not be prepared again"
+
+
+class InventoryKernel(RecordingKernel):
+    """Observe whole-allocation ownership without retaining numerical payloads."""
+
+    def __init__(self, name="t4"):
+        super().__init__(name)
+        self.payloads: list[weakref.ReferenceType[Payload]] = []
+        self.live_before_build: list[int] = []
+
+    @property
+    def live_bytes(self):
+        return sum(payload.nbytes for ref in self.payloads if (payload := ref()))
+
+    def prepare(self, keys, table, rows, context: KernelContext):
+        self.live_before_build.append(self.live_bytes)
+        payload = super().prepare(keys, table, rows, context)
+        self.payloads.append(weakref.ref(payload))
+        return payload
+
+
+@pytest.mark.parametrize("changed_model", [False, True])
+def test_complete_inventory_releases_stale_on_offer_before_next_build(changed_model):
+    kernel = InventoryKernel()
+    src = source()
+    other = (
+        ModelSource(
+            src.initial_density,
+            lambda level: replace(src.model(level), identity="adjacent-flux"),
+        )
+        if changed_model
+        else src
+    )
+    with closing(Engine(1, 32, kernels=(kernel,), chunks_per_worker=2)) as engine:
+        seed = replace(batch(4), end_ns=np.array([3.0, 3.0, 7.0, 7.0]))
+        engine.evolve(src, (seed,), cancel=Event())
+        assert kernel.live_bytes == 32
+        misses = replace(batch(3), end_ns=np.array([4.0, 5.0, 6.0]))
+        engine.evolve(other, (misses,), cancel=Event())
+        # One inline worker may own a 16-byte active build above the account.
+        # Once offered, it must release stale before the next build starts.
+        assert kernel.live_before_build[2:] == [32, 32, 32], (
+            "resident plus pending must fit after every offer"
+        )
+        assert kernel.live_bytes <= 32
+
+
+def test_inventory_keeps_unused_residents_when_new_products_fit():
+    kernel = InventoryKernel()
+    src = source()
+    with closing(Engine(1, 64, kernels=(kernel,))) as engine:
+        engine.evolve(src, (batch(2),), cancel=Event())
+        unused = kernel.payloads[0]
+        engine.evolve(src, (batch(2, duration=4),), cancel=Event())
+        assert unused() is not None, "spare capacity must preserve stale reuse"
+        again = replace(batch(2), points=np.arange(2) + 10)
+        engine.evolve(src, (again,), cancel=Event())
+        assert kernel.preparations == 2
+
+
+def test_inventory_protects_whole_borrowed_batches_and_bounds_pending():
+    kernel = InventoryKernel()
+    src = source()
+    with closing(Engine(1, 48, kernels=(kernel,), chunks_per_worker=2)) as engine:
+        # One indivisible allocation owns both keys, even when only 3 ns is used.
+        seed = replace(batch(6), end_ns=np.array([3.0, 3.0, 7.0, 7.0, 8.0, 8.0]))
+        engine.evolve(src, (seed,), cancel=Event())
+        borrowed = kernel.payloads[0]
+        assert borrowed() is not None
+        mixed = replace(batch(4), end_ns=np.array([3.0, 4.0, 5.0, 6.0]))
+        engine.evolve(src, (mixed,), cancel=Event())
+        assert borrowed() is not None, "a partial hit must keep its entire batch"
+        assert kernel.preparations == 6, "borrowed keys must not rebuild"
+        assert kernel.live_bytes <= 48, "resident plus pending share one budget"
+        assert max(kernel.live_before_build) <= 48
+
+
+def test_prefix_pending_shares_capacity_with_future_suffix_hits():
+    idle, driven = InventoryKernel(), InventoryKernel("dyson")
+    src = source()
+    with closing(Engine(1, 32, kernels=(idle, driven), chunks_per_worker=1)) as engine:
+        # This hit belongs to the later suffix, not the representative prefix.
+        engine.evolve(src, (batch(2),), cancel=Event())
+        suffix = idle.payloads[0]
+        pulses = tuple(
+            track(2, EnvelopeSpec("constant"), start=start, duration=1)
+            for start in (1, 2)
+        )
+        timeline = replace(batch(2, duration=6), tracks=pulses)
+        result = engine.evolve(src, (timeline,), cancel=Event())
+        assert result.paths.segments_by_kernel == {"t4": 4, "dyson": 4}
+        assert suffix() is not None, "prefix work must protect later suffix hits"
+        assert idle.preparations == 2, "prefix work must not evict suffix keys"
+        assert idle.live_bytes + driven.live_bytes <= 32, (
+            "prefix products, suffix residents and worker offers share capacity"
+        )

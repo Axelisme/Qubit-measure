@@ -7,6 +7,7 @@ and leave time steps, Hamiltonian phases and frames to their callers.
 """
 
 import numpy as np
+from numba import njit
 from numpy.typing import NDArray
 
 from ..secular import SecularModel
@@ -37,3 +38,23 @@ def secular_operators(
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Return Q and total coherence loss for a model, both in inverse ns."""
     return population_generator(model.rates_per_ns), coherence_decay(model)
+
+
+@njit(nogil=True, cache=True)
+def split_step(rho, unitary, populations, coherences):
+    """Return one secular half-D/U/half-D step on a joint density matrix.
+
+    populations and coherences are real half-step maps, not generators.
+    Diagonal population transfer replaces diagonal coherence damping. Inputs
+    remain untouched; the returned matrix is newly owned, without normalization.
+    """
+    result = rho.copy()
+    for half in range(2):
+        diagonal = np.diag(result).copy()
+        updated = populations.astype(np.complex128) @ diagonal
+        result *= coherences
+        for i in range(len(result)):
+            result[i, i] = updated[i]
+        if half == 0:
+            result = unitary @ result @ unitary.conj().T
+    return result

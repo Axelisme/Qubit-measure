@@ -5,6 +5,7 @@ models deterministic state-conditioned moments, initial joint-state draws and
 receiver noise; QICK representation/normalization belongs to the adapter.
 """
 
+from .cache import ReadoutCache
 from .model import ReadoutModel, Receiver
 from .populations import (
     POPULATION_TOLERANCE,

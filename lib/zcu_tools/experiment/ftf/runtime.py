@@ -26,9 +26,9 @@ from zcu_tools.resources.ftf import FTFSettings, load_ftf, parse_ftf
 from zcu_tools.resources.simulation_replay import ReplayAcquire, save_replay
 from zcu_tools.simulate.adc import (
     ChannelReadout,
-    ConditionalReadout,
     ConditionalSums,
     PopulationValidationError,
+    ReadoutCache,
     normalize_populations,
     round_statistics,
     sample_traces,
@@ -181,19 +181,16 @@ class FTFAcquire:
             raise
         channels = []
         for channel_index, first in enumerate(plans[0].readouts):
-            response = ConditionalReadout(
-                first.batch.model,
-                rtol=owner.settings.numerics.solver.rtol,
-                atol=owner.settings.numerics.solver.atol,
-            )
             conditionals = []
             traces = []
             content_index = np.empty(prod(acquire.point_dims), dtype=np.int64)
             offset = 0
             for plan in plans:
                 readout = plan.readouts[channel_index].batch
-                conditional = response.responses(
-                    replace(readout, include_traces=acquire.mode == "decimated")
+                conditional = owner.readout_cache.responses(
+                    replace(readout, include_traces=acquire.mode == "decimated"),
+                    rtol=owner.settings.numerics.solver.rtol,
+                    atol=owner.settings.numerics.solver.atol,
                 )
                 conditionals.append(conditional)
                 if conditional.traces is not None:
@@ -224,7 +221,7 @@ class FTFSource:
     settings is a validated immutable FTF resource; devices supplies live DC
     readbacks to snapshot. engine optionally supplies a configured numerical
     executor; this source takes ownership, including close(). Without it, use
-    workers=1 and a 1.5 GiB prepare cache. private_replay is an optional absolute
+    workers=1 and a 2 GiB prepare cache. private_replay is an optional absolute
     author-only input archive directory; None performs no replay I/O. readout
     optionally supplies detached author capabilities, otherwise adapts settings.
     Replay rejects overrides that cannot be reconstructed from those settings.
@@ -234,7 +231,12 @@ class FTFSource:
     across equal-snapshot rounds. The engine/cache survives across acquires.
     At most one complete snapshot's physical model survives across acquires;
     full settings and numeric revisions also participate in its exact key.
-    close releases physical facts, invalidates the session and closes the engine.
+    readout_cache owns at most 8 MiB of physical ADC solvers and exact conditional
+    contents across acquires, never noisy IQ. Its cumulative builds/hits and
+    resident_bytes are author diagnostics. Full model/receiver/tolerance content
+    selects solvers; physical-facts generation changes clear all readout residents.
+    close releases physical facts/readout residents, invalidates the session and
+    closes the engine.
     Calls are synchronous, serialized by SimulationBinding, not thread-safe.
     """
 
@@ -260,10 +262,11 @@ class FTFSource:
         self.devices = devices
         self.identity = sha256(settings.model_dump_json().encode()).hexdigest()
         self.private_replay = private_replay
-        self.engine = Engine(1, 3 * 1024**3 // 2) if engine is None else engine
+        self.engine = Engine(1, 2 * 1024**3) if engine is None else engine
         self.evaluations: tuple[FTFNumericUse, ...] = ()
         self._session: FTFAcquire | None = None
         self._facts: FTFModelFacts | None = None
+        self.readout_cache = ReadoutCache(8 * 1024**2)
         self._closed = False
 
     def model_facts(self, snapshot: EnvironmentSnapshot) -> FTFModelFacts:
@@ -276,6 +279,7 @@ class FTFSource:
         if self._closed:
             raise RuntimeError("FTF source is closed")
         if self._facts is None or not self._facts.matches(self.settings, snapshot):
+            self.readout_cache.clear()
             self._facts = None
             self._facts = FTFModelFacts(self.settings, snapshot)
         return self._facts
@@ -331,6 +335,7 @@ class FTFSource:
             self._session.invalidate()
             self._session = None
         self._facts = None
+        self.readout_cache.clear()
         self._closed = True
         self.engine.close()
 
@@ -384,7 +389,7 @@ def ftf(
         coordinator = FTFSource(
             settings,
             devices,
-            engine=Engine(workers, 3 * 1024**3 // 2),
+            engine=Engine(workers, 2 * 1024**3),
             private_replay=private_replay,
         )
         gens = (

@@ -115,20 +115,6 @@ def _bind(
     )
 
 
-def _resident_admission(
-    cache: PrepareCache, cached: Mapping[str, tuple[PreparedPayload, ...]]
-) -> ResidentAdmission:
-    """Protect caller-looked-up guard allocations before any local offers."""
-    resident = ResidentAdmission(cache.limit)
-    # Deferred guards borrow whole allocations before they have entries.
-    # Their row-specific handoffs must not re-admit resident subset metadata.
-    for payloads in cached.values():
-        for payload in payloads:
-            if not cache.is_rejected(payload):
-                resident.protect(payload)
-    return resident
-
-
 class Schedule:
     """One acquire's grouped prepare stage and independent timeline chunks."""
 
@@ -138,10 +124,12 @@ class Schedule:
         dispatch: Dispatch,
         context: KernelContext,
         cancel: Event,
+        resident: ResidentAdmission,
         initial_density: NDArray[np.complex128] | None = None,
     ):
         self.geometry, self.dispatch, self.cancel = geometry, dispatch, cancel
         self.context = context
+        self.resident = resident
         self.source, self.budget = context.source, context.budget
         self.table = geometry.table
         self.initial_density = (
@@ -164,7 +152,6 @@ class Schedule:
         bindings: list[_Binding] = []
         local_products: list[tuple[tuple[str, str, float], PreparedPayload]] = []
         jobs: list[tuple[_Entries, NDArray[np.int64], tuple[str, str, float]]] = []
-        self.resident = _resident_admission(cache, self.dispatch.cached)
         dc = self.source.model(tuple(0 for _ in range(self.table.level.shape[1])))
         self.dc_identity = dc.identity
         for entry in entries:
@@ -176,7 +163,6 @@ class Schedule:
             for payload in cache.find(namespace, available):
                 if cache.is_rejected(payload):
                     cache.add(namespace, payload)
-                self.resident.protect(payload)
                 bindings.append(self._bind_hit(entry, payload, key_positions))
                 key_set.difference_update(payload.keys)
                 available.difference_update(payload.keys)
@@ -196,8 +182,7 @@ class Schedule:
                     _bind(entry, payload, eligible[entry.inverse], self.dispatch)
                 )
                 if shared_keys.intersection(payload.keys):
-                    cache.add(namespace, payload)
-                    self.resident.protect(payload)
+                    self.resident.retain_shared(namespace, payload)
                 else:
                     local_products.append((namespace, payload))
                 key_set.difference_update(payload.keys)
@@ -221,8 +206,7 @@ class Schedule:
         for (entry, _, namespace), payload in zip(jobs, built, strict=True):
             if payload is None:
                 raise RuntimeError("prepare job returned no payload")
-            cache.add(namespace, payload)
-            self.resident.protect(payload)
+            self.resident.retain_shared(namespace, payload)
             bindings.append(
                 _bind(entry, payload, entry.shared[entry.inverse], self.dispatch)
             )

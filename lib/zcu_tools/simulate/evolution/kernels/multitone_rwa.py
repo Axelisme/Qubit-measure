@@ -31,7 +31,7 @@ _MAX_SLOPE = 0.025
 _MAX_CURVATURE = 0.003
 # Integer 256 ns gain sweep exceeded 1e-2 at gain 0.4184, proxy 0.063 rad.
 _MAX_PHASE_RAD = 0.06
-_POLICY = (
+RWA_POLICY = (
     _REVISION,
     _EDGE_GHZ,
     _STEP_NS,
@@ -43,12 +43,28 @@ _POLICY = (
 )
 
 
+class RWACoefficients(NamedTuple):
+    """Joint RWA coefficients supplied by the single Hamiltonian owner.
+
+    positive/negative: (tones,M,M) GHz/gain Fourier operators, mutual adjoints.
+    diagonal: (tones,M) GHz/gain² phase-independent virtual diagonal terms,
+        multiplied by abs(gain*envelope)**2. Contains window-excluded single-tone
+        second-order shifts; retained edges are not counted twice.
+    All consumers, including the gate cache, assemble through
+    interaction_hamiltonian. They must not implement a separate drive RHS.
+    """
+
+    positive: NDArray[np.complex128]
+    negative: NDArray[np.complex128]
+    diagonal: NDArray[np.float64]
+
+
 class _Context(NamedTuple):
     models: Models
     segments: Segments
     positive: NDArray[np.complex128]
     negative: NDArray[np.complex128]
-    shifts: NDArray[np.float64]
+    diagonal: NDArray[np.float64]
     row: int
     model: int
 
@@ -60,14 +76,14 @@ class RWAPrepared:
     models: packed joint energies, drive quadratures, bases and secular rates.
     positive, negative: (keys,tones,M,M) coefficients multiplying z and conj(z),
         respectively, after the 50 MHz Fourier-edge selection.
-    shifts: (keys,max_active_tones,M) window-excluded diagonal shifts in GHz
-        per squared gain/envelope amplitude; independent of carrier phase.
+    diagonal: (keys,max_active_tones,M) GHz/gain² diagonal terms from
+        RWACoefficients, independent of carrier phase.
     """
 
     models: Models
     positive: NDArray[np.complex128]
     negative: NDArray[np.complex128]
-    shifts: NDArray[np.float64]
+    diagonal: NDArray[np.float64]
 
     @property
     def nbytes(self) -> int:
@@ -75,20 +91,20 @@ class RWAPrepared:
             sum(a.nbytes for a in self.models)
             + self.positive.nbytes
             + self.negative.nbytes
-            + self.shifts.nbytes
+            + self.diagonal.nbytes
         )
 
 
 @njit(nogil=True, cache=True)
 def _coefficients(models, ports, frequencies, tones):
-    """Build retained edges and compact per-tone shifts from the same window."""
+    """Build retained edges and compact per-tone diagonal from the same window."""
     size = models.energies.shape[1]
     positive = np.zeros((len(tones), ports.shape[1], size, size), np.complex128)
     negative = np.zeros_like(positive)
     max_tones = 0
     for count in tones:
         max_tones = max(max_tones, count)
-    shifts = np.zeros((len(tones), max_tones, size), np.float64)
+    diagonal = np.zeros((len(tones), max_tones, size), np.float64)
     for key in range(len(tones)):
         for tone in range(tones[key]):
             port, frequency = ports[key, tone], frequencies[key, tone]
@@ -107,17 +123,48 @@ def _coefficients(models, ports, frequencies, tones):
                         else:
                             # Exact resonances evolve explicitly above; no
                             # denominator regularization or double counting.
-                            shifts[key, tone, i] += abs(coefficient) ** 2 / detuning
-    return positive, negative, shifts
+                            diagonal[key, tone, i] += abs(coefficient) ** 2 / detuning
+    return positive, negative, diagonal
+
+
+@njit(nogil=True, cache=True)
+def interaction_hamiltonian(time, energies, coefficients, amplitudes):
+    """Assemble the joint RWA interaction Hamiltonian, in GHz.
+
+    time is row-local ns. energies is the static interaction-picture diagonal,
+    either the joint energies for ordinary RWA or E+q@f for a covariant gate.
+    coefficients is RWACoefficients and owns EVERY driven term, including
+    phase-independent diagonal terms. amplitudes contains gain*envelope*phase
+    for every active tone. Diagonal terms come from the coefficient record;
+    the gate cache must not assemble its own RHS or add a separate shift.
+    Returns a new Hermitian matrix; input arrays remain unchanged. Restoring
+    the static picture at endpoints remains the integrator's responsibility.
+    """
+    size = len(energies)
+    h = np.zeros((size, size), dtype=np.complex128)
+    phases = np.exp(2j * np.pi * energies * time)
+    for tone in range(len(amplitudes)):
+        z = amplitudes[tone]
+        for i in range(size):
+            for j in range(size):
+                h[i, j] += (
+                    (
+                        coefficients.positive[tone, i, j] * z
+                        + coefficients.negative[tone, i, j] * z.conjugate()
+                    )
+                    * phases[i]
+                    * phases[j].conjugate()
+                )
+            h[i, i] += coefficients.diagonal[tone, i] * abs(z) ** 2
+    return h
 
 
 @njit(nogil=True, cache=True)
 def _rhs(time, state, context):
-    models, segments, positive, negative, shifts, row, model = context
+    models, segments, positive, negative, diagonal, row, model = context
     size = models.energies.shape[1]
     rho = state.reshape(size, size)
-    h = np.zeros((size, size), dtype=np.complex128)
-    phases = np.exp(2j * np.pi * models.energies[model] * time)
+    amplitudes = np.empty(segments.tones[row], dtype=np.complex128)
     for tone in range(segments.tones[row]):
         env = segments.envelope[row, tone]
         begin, end = segments.sample_offsets[env : env + 2]
@@ -129,19 +176,13 @@ def _rhs(time, state, context):
         phase = (
             segments.theta[row, tone] + 2 * np.pi * segments.frequency[row, tone] * time
         )
-        z = segments.gain[row, tone] * amplitude * np.exp(1j * phase)
-        intensity = (segments.gain[row, tone] * abs(amplitude)) ** 2
-        for i in range(size):
-            h[i, i] += intensity * shifts[model, tone, i]
-            for j in range(size):
-                h[i, j] += (
-                    (
-                        positive[model, tone, i, j] * z
-                        + negative[model, tone, i, j] * z.conjugate()
-                    )
-                    * phases[i]
-                    * phases[j].conjugate()
-                )
+        amplitudes[tone] = segments.gain[row, tone] * amplitude * np.exp(1j * phase)
+    h = interaction_hamiltonian(
+        time,
+        models.energies[model],
+        RWACoefficients(positive[model], negative[model], diagonal[model]),
+        amplitudes,
+    )
     product = h @ rho
     derivative = np.empty_like(rho)
     for i in range(size):
@@ -157,11 +198,11 @@ def _rhs(time, state, context):
 
 @njit(nogil=True, cache=True)
 def _run(data, row_models, states, controls):
-    models, segments, positive, negative, shifts = data
+    models, segments, positive, negative, diagonal = data
     rows, indices = row_models
     for index in range(len(rows)):
         row, model = rows[index], indices[index]
-        context = _Context(models, segments, positive, negative, shifts, row, model)
+        context = _Context(models, segments, positive, negative, diagonal, row, model)
         result = integrate(
             _rhs,
             context,
@@ -196,7 +237,7 @@ def _smooth(table: SegmentTable, envelope: int, context: KernelContext) -> bool:
         )
 
     return context.work_plan.fact(
-        FactKey(("multitone-rwa-smooth", _POLICY, spec.identity), bool), build
+        FactKey(("multitone-rwa-smooth", RWA_POLICY, spec.identity), bool), build
     )
 
 
@@ -227,7 +268,7 @@ def _retained_norm(
     key = FactKey(
         (
             "multitone-rwa-retained-norm",
-            _POLICY,
+            RWA_POLICY,
             model.identity,
             model.level,
             port,
@@ -237,14 +278,106 @@ def _retained_norm(
     )
 
     def build() -> float:
-        drive = model.drives[port]
-        gaps = model.energies_ghz[:, None] - model.energies_ghz[None, :]
-        coupling = (drive.in_phase_ghz - 1j * drive.quadrature_ghz) / 2
-        return float(
-            np.linalg.norm(coupling * (np.abs(gaps + frequency) < _EDGE_GHZ), 2)
-        )
+        return float(np.linalg.norm(retained_edges(model, port, frequency), 2))
 
     return context.work_plan.fact(key, build)
+
+
+def admit_rows(
+    table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
+) -> NDArray[np.bool_]:
+    """Admit joint RWA rows under the single shared calibrated policy.
+
+    Reads model-only facts, never density; splitting rows preserves decisions.
+    Invalid budgets raise ValueError through the common solver controls.
+    """
+    tolerances(context.budget)
+    bounds = envelope_bounds(table, context.work_plan)
+    accepted = np.zeros(len(rows), dtype=np.bool_)
+    for index, row in enumerate(rows):
+        count = table.tones[row]
+        if (
+            context.budget < _MIN_BUDGET
+            or count < 2
+            or not _fixed_flux(table, int(row))
+        ):
+            continue
+        envs = table.tone_envelope[row, :count]
+        if all(table.envelopes[e].kind == "constant" for e in envs) or not all(
+            _smooth(table, int(e), context) for e in envs
+        ):
+            continue
+        frequencies = np.abs(table.tone_frequency_ghz[row, :count])
+        if np.min(frequencies) < _EDGE_GHZ or np.any(
+            np.diff(np.sort(frequencies)) < 2 * _EDGE_GHZ
+        ):
+            continue
+        model = context.source.model(tuple(int(v) for v in table.level[row]))
+        ratio = 0.0
+        phase = 0.0
+        for tone, env in enumerate(envs):
+            port = int(table.tone_port[row, tone])
+            drive = model.drives[port]
+            retained = _retained_norm(
+                model, port, float(table.tone_frequency_ghz[row, tone]), context
+            )
+            phase += (
+                table.tone_amplitude[row, tone] * bounds.peaks[env] * retained
+            ) ** 2 / frequencies[tone]
+            ratio += (
+                abs(table.tone_amplitude[row, tone])
+                * bounds.peaks[env]
+                * (
+                    np.linalg.norm(drive.in_phase_ghz, 2)
+                    + np.linalg.norm(drive.quadrature_ghz, 2)
+                )
+                / frequencies[tone]
+            )
+        accepted[index] = (
+            ratio <= _MAX_RATIO
+            and 2 * np.pi * table.duration_ns[row] * phase <= _MAX_PHASE_RAD
+        )
+    return accepted
+
+
+def retained_edges(
+    model: SecularModel, port: int, frequency: float
+) -> NDArray[np.complex128]:
+    """Return the positive-carrier joint operator in GHz/gain.
+
+    The negative-carrier operator is its adjoint. Both RWA integrators and
+    covariant gate construction use this same 50 MHz retained-edge policy.
+    The caller owns the returned mutable matrix.
+    """
+    drive = model.drives[port]
+    gaps = model.energies_ghz[:, None] - model.energies_ghz[None, :]
+    coupling = (drive.in_phase_ghz - 1j * drive.quadrature_ghz) / 2
+    return coupling * (np.abs(gaps + frequency) < _EDGE_GHZ)
+
+
+def rwa_coefficients(
+    model: SecularModel, ports: tuple[int, ...], frequencies: tuple[float, ...]
+) -> RWACoefficients:
+    """Build all joint drive coefficients for ordered signed carriers.
+
+    This is the shared coefficient owner for ordinary RWA and covariant gates.
+    Each tone contributes sum_j,s |C_s[i,j]|²/(Ei-Ej+s*f) to the diagonal
+    in GHz/gain², restricted to abs(Ei-Ej+s*f)>=0.05 GHz. Retained edges
+    evolve explicitly, with no zero division or double counting. The common
+    compiled builder also serves batched ordinary RWA preparation.
+    Graph pruning may replace the Fourier operators but retains the diagonal.
+    Returned arrays are owned and mutable. Misaligned/empty carriers raise
+    ValueError; ports must index the supplied model's validated drives.
+    """
+    if not ports or len(ports) != len(frequencies):
+        raise ValueError("RWA coefficients require aligned nonempty carriers")
+    positive, negative, diagonal = _coefficients(
+        pack_models([model]),
+        np.array([ports], dtype=np.int64),
+        np.array([frequencies], dtype=np.float64),
+        np.array([len(ports)], dtype=np.int64),
+    )
+    return RWACoefficients(positive[0], negative[0], diagonal[0])
 
 
 class MultitoneRWAKernel:
@@ -268,53 +401,7 @@ class MultitoneRWAKernel:
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.bool_]:
         """Return row-local admission under the explicit calibrated policy above."""
-        tolerances(context.budget)
-        bounds = envelope_bounds(table, context.work_plan)
-        accepted = np.zeros(len(rows), dtype=np.bool_)
-        for index, row in enumerate(rows):
-            count = table.tones[row]
-            if (
-                context.budget < _MIN_BUDGET
-                or count < 2
-                or not _fixed_flux(table, int(row))
-            ):
-                continue
-            envs = table.tone_envelope[row, :count]
-            if all(table.envelopes[e].kind == "constant" for e in envs) or not all(
-                _smooth(table, int(e), context) for e in envs
-            ):
-                continue
-            frequencies = np.abs(table.tone_frequency_ghz[row, :count])
-            if np.min(frequencies) < _EDGE_GHZ or np.any(
-                np.diff(np.sort(frequencies)) < 2 * _EDGE_GHZ
-            ):
-                continue
-            model = context.source.model(tuple(int(v) for v in table.level[row]))
-            ratio = 0.0
-            phase = 0.0
-            for tone, env in enumerate(envs):
-                port = int(table.tone_port[row, tone])
-                drive = model.drives[port]
-                retained = _retained_norm(
-                    model, port, float(table.tone_frequency_ghz[row, tone]), context
-                )
-                phase += (
-                    table.tone_amplitude[row, tone] * bounds.peaks[env] * retained
-                ) ** 2 / frequencies[tone]
-                ratio += (
-                    abs(table.tone_amplitude[row, tone])
-                    * bounds.peaks[env]
-                    * (
-                        np.linalg.norm(drive.in_phase_ghz, 2)
-                        + np.linalg.norm(drive.quadrature_ghz, 2)
-                    )
-                    / frequencies[tone]
-                )
-            accepted[index] = (
-                ratio <= _MAX_RATIO
-                and 2 * np.pi * table.duration_ns[row] * phase <= _MAX_PHASE_RAD
-            )
-        return accepted
+        return admit_rows(table, rows, context)
 
     def prepare_keys(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
@@ -323,7 +410,7 @@ class MultitoneRWAKernel:
         keys = np.empty(len(rows), dtype="V32")
         for index, row in enumerate(rows):
             count = table.tones[row]
-            digest = sha256(repr((_POLICY, context.budget)).encode("ascii"))
+            digest = sha256(repr((RWA_POLICY, context.budget)).encode("ascii"))
             digest.update(table.level[row].astype("<i8").tobytes())
             digest.update(
                 np.array(
@@ -358,11 +445,10 @@ class MultitoneRWAKernel:
         rows: NDArray[np.int64],
         context: KernelContext,
     ) -> Prepared:
-        """Build retained edges and omitted-edge shifts for key-aligned rows.
+        """Build retained Fourier edges and omitted-edge shifts for key-aligned rows.
 
-        Each tone contributes sum_j,s |C_s[i,j]|²/(Ei-Ej+s*f) to the diagonal,
-        excluding edges inside the retained window to avoid double counting.
-        Apply scales these coefficients by the actual squared gain/envelope.
+        Uses the same compiled coefficient owner as rwa_coefficients. Apply
+        scales its diagonal by the actual squared gain/envelope amplitude.
         """
         tolerances(context.budget)
         if len(keys) != len(rows):
@@ -373,7 +459,7 @@ class MultitoneRWAKernel:
                 for row in rows
             ]
         )
-        positive, negative, shifts = _coefficients(
+        positive, negative, diagonal = _coefficients(
             models,
             table.tone_port[rows],
             table.tone_frequency_ghz[rows],
@@ -381,8 +467,8 @@ class MultitoneRWAKernel:
         )
         positive.setflags(write=False)
         negative.setflags(write=False)
-        shifts.setflags(write=False)
-        return RWAPrepared(models, positive, negative, shifts)
+        diagonal.setflags(write=False)
+        return RWAPrepared(models, positive, negative, diagonal)
 
     def admit_prepared(
         self,
@@ -424,8 +510,8 @@ class MultitoneRWAKernel:
         """Advance independent rows in place and return an all-False exceedance mask.
 
         Every row starts in its joint eigenbasis, integrates all retained tones
-        and the envelope-squared omitted-edge diagonal shifts in a row-local
-        interaction picture, then restores Schrödinger coordinates.
+        and envelope-squared omitted-edge shifts through interaction_hamiltonian
+        in a row-local interaction picture, then restores Schrödinger coordinates.
         theta is the phase at row start; offsets preserve pulse-local envelopes.
         Adaptive integration uses the ordinary budget tolerance and 0.1 ns seed,
         capped at 4 ns rather than sampled knots. This is not a certified bound
@@ -447,7 +533,7 @@ class MultitoneRWAKernel:
                 packed_segments(table, context.work_plan),
                 prepared.positive,
                 prepared.negative,
-                prepared.shifts,
+                prepared.diagonal,
             ),
             (rows, key_index),
             states,
