@@ -49,6 +49,7 @@ def test_elements_aggregate_keeps_partial_values_and_errors_without_recapture():
         resource.write(
             {("tones", 0, "phase"): {"expr": "1 / 0"}, ("participants",): ["B"]}
         )
+        resource.select(("tones", 1, "sweep"), {"kind": "center"})
         before, base = resource.input, resource.editor_state.base
         observed = resource.read_elements(("tones",))
         assert [(item.index, item.name, item.path) for item in observed.elements] == [
@@ -63,10 +64,13 @@ def test_elements_aggregate_keeps_partial_values_and_errors_without_recapture():
         assert first.values[("tones", 0, "sweep", "start")] == 2
         assert second.values[("tones", 1, "sweep", "start")] == 10
         assert second.errors is None
+        assert hasattr(second, "selections"), "Aggregate must retain authored selection overrides"
+        assert second.selections == {("tones", 1, "sweep"): {"kind": "center"}}
+        assert second.input["sweep"] == {"kind": "linrange", "start": 10, "stop": 14, "n": 3}
         first.input["name"] = "detached"
         assert resource.input.same_as(before)
         assert resource.editor_state.base.same_as(base)
-        assert captures == ["capture"] and events == ["changed"]
+        assert captures == ["capture"] and events == ["changed", "changed"]
         with pytest.raises(CfgPreconditionError, match="not valid"):
             resource.accept()
     finally:
