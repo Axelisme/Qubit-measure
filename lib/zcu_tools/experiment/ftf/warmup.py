@@ -42,6 +42,7 @@ COVERAGE = (
     "multitone_rwa",
     "multitone_direct",
     "multitone_gate",
+    "single_tone_gate",
     "floquet_probe_windows",
     "dyson_gain_batch",
     "floquet_period",
@@ -145,6 +146,14 @@ def _single_track(name: str) -> None:
         envelope = EnvelopeSpec(
             "sampled", np.array([0.0, 1.0], complex), np.array([0.0, duration])
         )
+    elif name == "single_tone_gate":
+        duration = 128.0
+        times = np.linspace(0.0, duration, 129)
+        envelope = EnvelopeSpec(
+            "sampled", np.exp(-0.5 * ((times - 64) / 32) ** 2).astype(complex), times
+        )
+        frequencies = np.full(1024, 5.0)
+        gains = np.full(1024, 0.08)
     elif name == "shaped_direct":
         envelope = EnvelopeSpec(
             "sampled",
