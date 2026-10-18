@@ -5,6 +5,7 @@ from zcu_tools.experiment.v2.runtime.result_tree import (
     ResultUpdateEvent,
 )
 from zcu_tools.experiment.v2.runtime.schedule import (
+    AcquireOptions,
     BufferProtocol,
     ProgramBuilder,
     RunStatus,
@@ -17,6 +18,7 @@ from zcu_tools.experiment.v2.runtime.schedule import (
 )
 
 __all__ = [
+    "AcquireOptions",
     "BufferProtocol",
     "ProgramBuilder",
     "ResultNode",

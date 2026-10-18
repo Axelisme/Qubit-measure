@@ -3,7 +3,10 @@
 import numpy as np
 import pytest
 from zcu_tools.analysis.fitting.singleshot import calc_population_pdf
-from zcu_tools.experiment.utils.single_shot.ge.base import fitting_ge_and_plot
+from zcu_tools.experiment.utils.single_shot.ge.base import (
+    GEFitOptions,
+    fitting_ge_and_plot,
+)
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 
@@ -27,13 +30,15 @@ def test_histogram_calibration_retains_centers_populations_and_diagnostics(
     fidelity, populations, result = fitting_ge_and_plot(
         signals,
         lambda *_: {"theta": 0.0},
-        numbins=80,
-        length_ratio=length_ratio,
-        init_p0_g=1.0,
-        init_p0_e=0.0,
-        avg_p=0.5,
-        align_t1=align_t1,
-        logscale=logscale,
+        options=GEFitOptions(
+            numbins=80,
+            length_ratio=length_ratio,
+            init_p0_g=1.0,
+            init_p0_e=0.0,
+            avg_p=0.5,
+            align_t1=align_t1,
+            logscale=logscale,
+        ),
         plots=plots,
     )
     figures = plots.finish(present=False)

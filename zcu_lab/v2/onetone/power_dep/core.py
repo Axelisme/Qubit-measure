@@ -17,7 +17,11 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime.schedule import (
+    AcquireOptions,
+    Schedule,
+    SignalBuffer,
+)
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.program.v2 import (
@@ -132,11 +136,13 @@ class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
                     .add(PulseReadout("readout", modules.readout))
                     .declare_sweep("freq", freq_sweep)
                     .build_and_acquire(
-                        stop_condition=snr_checker(
-                            signals_buffer[step],
-                            cfg.earlystop_snr,
-                            gaindep_signal2real,
-                            after_check=update_snr,
+                        options=AcquireOptions(
+                            stop_condition=snr_checker(
+                                signals_buffer[step],
+                                cfg.earlystop_snr,
+                                gaindep_signal2real,
+                                after_check=update_snr,
+                            )
                         ),
                     )
                 )

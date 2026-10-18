@@ -5,7 +5,11 @@ from typing import Any
 import numpy as np
 import pytest
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
-from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime.schedule import (
+    AcquireOptions,
+    Schedule,
+    SignalBuffer,
+)
 from zcu_tools.program.v2 import Module
 
 from tests.experiment.v2.runtime._flow_cfg import FlowCfg
@@ -32,7 +36,7 @@ def test_build_and_acquire_stop_condition_stops_program_without_schedule_stop():
             .add(FakeModule("readout"))
             .build_and_acquire(
                 raw2signal_fn=identity_array,
-                stop_condition=lambda: True,
+                options=AcquireOptions(stop_condition=lambda: True),
             )
         )
         assert sched.outcome.status == "completed"
@@ -54,7 +58,9 @@ def test_build_and_acquire_rebuilds_program_on_retry():
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=FlakyBuildProgram)
             .add(FakeModule("readout"))
-            .build_and_acquire(raw2signal_fn=identity_array, retry=1)
+            .build_and_acquire(
+                raw2signal_fn=identity_array, options=AcquireOptions(retry=1)
+            )
         )
         assert sched.outcome.status == "completed"
 
@@ -76,7 +82,9 @@ def test_build_and_acquire_retry_clears_shared_failure_cause():
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=FlakyBuildProgram)
             .add(FakeModule("readout"))
-            .build_and_acquire(raw2signal_fn=identity_array, retry=1)
+            .build_and_acquire(
+                raw2signal_fn=identity_array, options=AcquireOptions(retry=1)
+            )
         )
         assert sched.outcome.status == "completed"
         assert run_stop.error is None
@@ -94,7 +102,9 @@ def test_build_and_acquire_returns_partial_on_keyboard_interrupt_without_retryin
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=InterruptingProgram)
             .add(FakeModule("readout"))
-            .build_and_acquire(raw2signal_fn=identity_array, retry=3)
+            .build_and_acquire(
+                raw2signal_fn=identity_array, options=AcquireOptions(retry=3)
+            )
         )
         assert sched.is_stop() is True
         assert sched.outcome.status == "interrupted"
@@ -117,7 +127,9 @@ def test_build_and_acquire_first_round_stop_returns_nan_partial(
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=StopBeforeDataProgram)
             .add(FakeModule("readout"))
-            .build_and_acquire(raw2signal_fn=identity_array, retry=3)
+            .build_and_acquire(
+                raw2signal_fn=identity_array, options=AcquireOptions(retry=3)
+            )
         )
         assert sched.is_stop() is True
         assert sched.outcome.status == "stopped"
@@ -139,7 +151,9 @@ def test_build_and_acquire_returns_last_partial_after_retry_exhaustion():
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=AlwaysFailingProgram)
             .add(FakeModule("readout"))
-            .build_and_acquire(raw2signal_fn=identity_array, retry=1)
+            .build_and_acquire(
+                raw2signal_fn=identity_array, options=AcquireOptions(retry=1)
+            )
         )
         assert sched.is_stop() is True
         assert sched.outcome.status == "failed"
@@ -164,7 +178,9 @@ def test_build_and_acquire_records_failed_outcome_on_run_stop_signal():
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=AlwaysFailingProgram)
             .add(FakeModule("readout"))
-            .build_and_acquire(raw2signal_fn=identity_array, retry=1)
+            .build_and_acquire(
+                raw2signal_fn=identity_array, options=AcquireOptions(retry=1)
+            )
         )
         assert sched.outcome.status == "failed"
         assert run_stop.error is not None
@@ -220,7 +236,9 @@ def test_build_and_acquire_does_not_retry_when_stop_set_after_failed_attempt():
                 program_cls=StopAfterFailedAcquireProgram,
             )
             .add(FakeModule("readout"))
-            .build_and_acquire(raw2signal_fn=identity_array, retry=3)
+            .build_and_acquire(
+                raw2signal_fn=identity_array, options=AcquireOptions(retry=3)
+            )
         )
         assert sched.outcome.exception is cause
         assert sched.outcome.status == "stopped"
@@ -271,7 +289,9 @@ def test_build_program_failure_does_not_retry_when_stop_requested():
                 program_cls=StopAfterBuildFailureProgram,
             )
             .add(FakeModule("readout"))
-            .build_and_acquire(raw2signal_fn=identity_array, retry=3)
+            .build_and_acquire(
+                raw2signal_fn=identity_array, options=AcquireOptions(retry=3)
+            )
         )
         assert sched.outcome.exception is cause
         assert sched.outcome.status == "stopped"

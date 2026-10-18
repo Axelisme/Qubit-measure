@@ -798,6 +798,24 @@ class ModuleFacade(ABC):
         return self.add(Readout(name, cfg))
 
 
+@dataclass(frozen=True)
+class AcquireOptions:
+    """Policy shared by integrated and decimated program acquisition.
+
+    retry defaults to zero extra attempts. progress defaults to hiding native
+    acquisition progress. progress_label names the rounds bar (default "rounds");
+    progress_leave=None retains it at the root and closes it for a host step.
+    stop_condition=None disables data-driven early stop; otherwise the callback
+    runs after each completed round is converted and written to the buffer.
+    """
+
+    retry: int = 0
+    progress: bool = False
+    progress_label: str = "rounds"
+    progress_leave: bool | None = None
+    stop_condition: StopCondition | None = None
+
+
 class ProgramBuilder(ModuleFacade, Generic[T_Program]):
     """Build and acquire a single QICK program within a Schedule scope."""
 
@@ -847,11 +865,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         self,
         *,
         raw2signal_fn: Callable[[Any], SignalArray] | None = None,
-        retry: int = 0,
-        progress: bool = False,
-        progress_label: str = "rounds",
-        progress_leave: bool | None = None,
-        stop_condition: StopCondition | None = None,
+        options: AcquireOptions | None = None,
         **acquire_kwargs: object,
     ) -> SignalArray:
         self._schedule._ensure_active()
@@ -859,11 +873,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         return self._build_and_run(
             runner=self.run_program,
             raw2signal_fn=raw2signal_fn,
-            retry=retry,
-            progress=progress,
-            progress_label=progress_label,
-            progress_leave=progress_leave,
-            stop_condition=stop_condition,
+            options=AcquireOptions() if options is None else options,
             acquire_kwargs=acquire_kwargs,
         )
 
@@ -871,11 +881,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         self,
         *,
         raw2signal_fn: Callable[[Any], SignalArray] | None = None,
-        retry: int = 0,
-        progress: bool = False,
-        progress_label: str = "rounds",
-        progress_leave: bool | None = None,
-        stop_condition: StopCondition | None = None,
+        options: AcquireOptions | None = None,
         **acquire_kwargs: object,
     ) -> SignalArray:
         self._schedule._ensure_active()
@@ -883,11 +889,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         return self._build_and_run(
             runner=self.run_program_decimated,
             raw2signal_fn=raw2signal_fn,
-            retry=retry,
-            progress=progress,
-            progress_label=progress_label,
-            progress_leave=progress_leave,
-            stop_condition=stop_condition,
+            options=AcquireOptions() if options is None else options,
             acquire_kwargs=acquire_kwargs,
         )
 
@@ -896,11 +898,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         program: ProgramProtocol[T_Raw, object],
         *,
         raw2signal_fn: Callable[[T_Raw], SignalArray] | None = None,
-        retry: int = 0,
-        progress: bool = False,
-        progress_label: str = "rounds",
-        progress_leave: bool | None = None,
-        stop_condition: StopCondition | None = None,
+        options: AcquireOptions | None = None,
         **acquire_kwargs: object,
     ) -> SignalArray:
         return self._run_program(
@@ -908,11 +906,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
             rounds=self._rounds_from(program),
             raw2signal_fn=raw2signal_fn,
             default_raw2signal_fn=default_raw2signal_fn,
-            retry=retry,
-            progress=progress,
-            progress_label=progress_label,
-            progress_leave=progress_leave,
-            stop_condition=stop_condition,
+            options=AcquireOptions() if options is None else options,
             acquire_kwargs=acquire_kwargs,
         )
 
@@ -921,11 +915,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         program: ProgramProtocol[object, T_Raw],
         *,
         raw2signal_fn: Callable[[T_Raw], SignalArray] | None = None,
-        retry: int = 0,
-        progress: bool = False,
-        progress_label: str = "rounds",
-        progress_leave: bool | None = None,
-        stop_condition: StopCondition | None = None,
+        options: AcquireOptions | None = None,
         **acquire_kwargs: object,
     ) -> SignalArray:
         return self._run_program(
@@ -933,11 +923,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
             rounds=self._rounds_from(program),
             raw2signal_fn=raw2signal_fn,
             default_raw2signal_fn=default_decimated_raw2signal_fn,
-            retry=retry,
-            progress=progress,
-            progress_label=progress_label,
-            progress_leave=progress_leave,
-            stop_condition=stop_condition,
+            options=AcquireOptions() if options is None else options,
             acquire_kwargs=acquire_kwargs,
         )
 
@@ -946,13 +932,10 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         *,
         runner: Callable[..., SignalArray],
         raw2signal_fn: Callable[[Any], SignalArray] | None,
-        retry: int,
-        progress: bool,
-        progress_label: str,
-        progress_leave: bool | None,
-        stop_condition: StopCondition | None,
+        options: AcquireOptions,
         acquire_kwargs: dict[str, object],
     ) -> SignalArray:
+        retry = options.retry
         if retry < 0:
             raise ValueError("retry must be non-negative")
 
@@ -977,11 +960,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
             result = runner(
                 program,
                 raw2signal_fn=raw2signal_fn,
-                retry=0,
-                progress=progress,
-                progress_label=progress_label,
-                progress_leave=progress_leave,
-                stop_condition=stop_condition,
+                options=replace(options, retry=0),
                 **acquire_kwargs,
             )
             if self._schedule._should_retry_after_failed_attempt(attempt, retry):
@@ -997,13 +976,10 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         rounds: int,
         raw2signal_fn: Callable[[T_Raw], SignalArray] | None,
         default_raw2signal_fn: Callable[[Any], SignalArray],
-        retry: int,
-        progress: bool,
-        progress_label: str,
-        progress_leave: bool | None,
-        stop_condition: StopCondition | None,
+        options: AcquireOptions,
         acquire_kwargs: dict[str, object],
     ) -> SignalArray:
+        retry = options.retry
         if retry < 0:
             raise ValueError("retry must be non-negative")
         self._schedule._ensure_active()
@@ -1014,8 +990,8 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         pbar = make_pbar(
             total=rounds,
             smoothing=0,
-            desc=progress_label,
-            leave=self._resolve_progress_leave(progress_leave=progress_leave),
+            desc=options.progress_label,
+            leave=self._resolve_progress_leave(progress_leave=options.progress_leave),
             disable=rounds == 1,
         )
         try:
@@ -1026,9 +1002,8 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
                 try:
                     raw = self._acquire_once(
                         acquire=acquire,
-                        progress=progress,
+                        options=options,
                         acquire_kwargs=acquire_kwargs,
-                        stop_condition=stop_condition,
                         signal_fn=signal_fn,
                         slot=slot,
                         pbar=pbar,
@@ -1097,9 +1072,8 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         self,
         *,
         acquire: Callable[..., T_Raw],
-        progress: bool,
+        options: AcquireOptions,
         acquire_kwargs: dict[str, object],
-        stop_condition: StopCondition | None,
         signal_fn: Callable[[T_Raw], SignalArray],
         slot: SignalSlot,
         pbar: BaseProgressBar,
@@ -1109,12 +1083,12 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         def update_hook(ir: int, raw: T_Raw, cancel_flag: CancelFlagProtocol) -> None:
             pbar.set_progress(ir)
             slot.set(signal_fn(raw))
-            if stop_condition is not None and stop_condition():
+            if options.stop_condition is not None and options.stop_condition():
                 cancel_flag.set()
 
         return acquire(
             self._soc,
-            progress=progress,
+            progress=options.progress,
             round_hook=update_hook,
             cancel_flag=acquire_cancel_flag,
             **dict(acquire_kwargs),
