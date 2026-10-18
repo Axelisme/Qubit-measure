@@ -80,6 +80,30 @@ def test_reload_replaces_declarations_and_preserves_compatible_drafts(
     )
 
 
+def test_reload_migrates_raw_branch_and_independent_selection_override(
+    source: ReloadSource,
+) -> None:
+    window = source.open(StartHarness())
+    window.plan_panel.state.write(
+        {("scale",): {"expr": "1 / 4"}, ("samples",): {"kind": "linrange"}},
+        window.plan_panel.env,
+    )
+    before = window.plan_panel.state.input
+    assert before.selections == {("samples",): {"kind": "linrange"}}
+    source.write(2)
+    error: CatalogReloadError | None = None
+    try:
+        report = window.reload_source()
+    except CatalogReloadError as exc:
+        error = exc
+    assert error is None, "Source reload must migrate, not require strict identity"
+    assert report.plan_dropped == (("legacy",),)
+    assert window.plan_panel.state.input.data["samples"] == before.data["samples"]
+    assert window.plan_panel.state.input.selections == before.selections
+    assert window.plan_panel.state.input.data["new_field"] == 9
+    assert window.plan_panel.state.base.same_as(window.plan_panel.state.input)
+
+
 @pytest.mark.parametrize("version", [1, 2])
 def test_reload_removed_selection_uses_new_default_and_reports_both_names(
     source: ReloadSource, version: int

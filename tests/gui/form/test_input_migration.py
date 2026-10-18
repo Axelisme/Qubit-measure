@@ -61,3 +61,53 @@ def test_migration_keeps_separate_override_and_raw_while_filling_new_defaults() 
     assert state.base.same_as(base)
     assert saved.data == {"branch": {"kind": "a", "amount": {"expr": "missing + 1"}}}
     assert notifications == [True]
+
+
+class OldDraftForm(FormModel):
+    branch: Annotated[BranchA | BranchB, Field(discriminator="kind")]
+    retired: int = 1
+    mode: Literal["old", "keep"] = "keep"
+    quantity: str = "old"
+
+
+class NewDraftForm(FormModel):
+    branch: BranchA
+    mode: Literal["keep"] = "keep"
+    quantity: int = 3
+    added: int = 7
+
+
+def test_migration_reports_removed_raw_and_inapplicable_overrides_once() -> None:
+    saved = FormInput(
+        OldDraftForm,
+        {
+            "branch": {"kind": "a", "amount": -5},
+            "retired": 9,
+            "mode": "keep",
+            "quantity": "incompatible",
+        },
+        selections={
+            ("branch",): {"kind": "b"},
+            ("retired",): 9,
+            ("mode",): "old",
+            ("quantity",): "incompatible",
+        },
+    )
+    base = FormInput(
+        NewDraftForm,
+        {"branch": {"kind": "a", "amount": 1}, "mode": "keep", "quantity": 3, "added": 7},
+    )
+    state = FormState(base)
+
+    dropped = state.migrate_input(saved, FormEnv())
+
+    assert set(dropped) == {("branch",), ("retired",), ("mode",), ("quantity",)}
+    assert len(dropped) == 4
+    assert state.input.data == {
+        "branch": {"kind": "a", "amount": -5},
+        "mode": "keep",
+        "quantity": 3,
+        "added": 7,
+    }
+    assert state.input.selections == {}
+    assert state.base.same_as(base)
