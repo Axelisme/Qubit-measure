@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import Field, JsonValue
 from qtpy.QtWidgets import QApplication, QLabel
-from zcu_tools.cfg_model import PulseSpec
+from zcu_tools.cfg_model import GaussWaveformCfg, PulseSpec
 from zcu_tools.datafile import RunSnapshot
 from zcu_tools.experiment.workflows import (
     Done,
@@ -39,8 +39,14 @@ from zcu_tools.gui.form_adapter import (
     ModuleInputField,
     ModuleRef,
     SweepInput,
+    module_form,
 )
 from zcu_tools.gui.session.persistence import SingleFileCaretaker
+from zcu_tools.resources.context.library import (
+    ComponentLibrary,
+    LibrarySnapshot,
+    ModuleLibraryDocument,
+)
 
 from tests.experiment.workflows._engine_fakes import Plan, State, Tunables
 from tests.gui.app.workflows._start_fakes import StartHarness
@@ -150,6 +156,33 @@ def test_window_memento_restores_separate_selection_and_whole_invalid_draft(swee
     assert restored.plan_panel.state.input.same_as(original.plan_panel.state.input)
     assert restored.plan_panel.state.base.same_as(original.plan_panel.state.input)
     assert restored.plan_panel.state.preview(restored.plan_panel.env).errors is not None
+
+
+def test_inline_copy_memento_keeps_original_input_after_library_content_changes(sweep_window) -> None:
+    form = module_form(PulseSpec)
+    library = LibrarySnapshot(ModuleLibraryDocument(
+        format="zcu.module-library", format_version="2.0",
+        components={"Q": ComponentLibrary(waveforms={
+            "shape": GaussWaveformCfg(length=0.8, sigma=0.2)
+        })},
+    ))
+    env = FormEnv(library=library)
+    original = sweep_window(form.model, None)
+    state = original.plan_panel.state
+    state.install_input(FormInput(form.model, {"waveform": {"kind": "ref", "name": "Q.waveforms.shape"}}))
+    state.write({("waveform",): {"kind": "inline", "module": {"style": "gauss"}}}, env)
+    assert state.input.data["waveform"] == {
+        "kind": "inline", "module": {"style": "gauss", "length": 0.8, "sigma": 0.2}
+    }
+    state.write({("waveform", "module", "sigma"): "unfinished"}, env)
+    saved = original.capture_persisted_state()
+    changed = FormEnv(library=library.replaced_waveform(
+        "Q.waveforms.shape", GaussWaveformCfg(length=1.6, sigma=0.4)
+    ))
+    restored = sweep_window(form.model, WorkflowInputCodec().decode(WorkflowInputCodec().encode(saved)))
+    assert restored.plan_panel.state.input.same_as(state.input)
+    restored.plan_panel.state.preview(changed)
+    assert restored.plan_panel.state.input.same_as(state.input)
 
 
 def test_incompatible_knobs_identity_preserves_both_window_drafts(window) -> None:
