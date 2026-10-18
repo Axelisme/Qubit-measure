@@ -13,9 +13,12 @@ from ._period_table import (
     PeriodPrepared,
     SecularMaps,
     UnitaryTable,
+    advance_tail,
+    band_keys,
     envelopes,
     periods,
 )
+from ._secular import coherence_decay, population_generator
 from ._shaped import drive_bounds, envelope_bounds
 from .dop853 import DOP853Kernel
 
@@ -72,52 +75,6 @@ def _unitary_table(
     return np.asarray(tables, dtype=np.complex128)
 
 
-def advance_tail(
-    entry: PeriodEntry,
-    table: SegmentTable,
-    rows: NDArray[np.int64],
-    starts: NDArray[np.float64],
-    states: NDArray[np.complex128],
-) -> None:
-    """Advance residual intervals with the existing compiled strict DOP853.
-
-    Shift carrier phase and envelope-local time together. Tail rows are
-    independent even when the caller supplies touching same-timeline segments.
-    """
-    durations = table.duration_ns[rows] - starts
-    selected = np.flatnonzero(durations > 0)
-    if not len(selected):
-        return
-    active = rows[selected]
-    elapsed = starts[selected, None]
-    local_rows = np.arange(len(active), dtype=np.int64)
-    tail_table = SegmentTable(
-        timeline=local_rows,
-        start_ns=np.zeros(len(active)),
-        duration_ns=durations[selected],
-        level=table.level[active],
-        tones=table.tones[active],
-        tone_port=table.tone_port[active],
-        tone_frequency_ghz=table.tone_frequency_ghz[active],
-        tone_amplitude=table.tone_amplitude[active],
-        tone_theta_rad=table.tone_theta_rad[active]
-        + 2 * np.pi * table.tone_frequency_ghz[active] * elapsed,
-        tone_envelope=table.tone_envelope[active],
-        tone_envelope_offset_ns=table.tone_envelope_offset_ns[active] + elapsed,
-        envelopes=table.envelopes,
-    )
-    chunk = states[selected].copy()
-    DOP853Kernel().apply(
-        entry.fallback,
-        np.zeros(len(active), dtype=np.int64),
-        tail_table,
-        local_rows,
-        chunk,
-        entry.tail_budget,
-    )
-    states[selected] = chunk
-
-
 class PeriodTableKernel:
     """Shaped one-tone kernel; the engine owns amortized preparation dispatch.
 
@@ -170,25 +127,7 @@ class PeriodTableKernel:
         self, table: SegmentTable, rows: NDArray[np.int64]
     ) -> NDArray[np.void]:
         """Share a port's band table across shape, duration and phase changes."""
-        peaks, _ = envelope_bounds(table)
-        maximum = (
-            np.abs(table.tone_amplitude[rows, 0]) * peaks[table.tone_envelope[rows, 0]]
-        )
-        band = np.ceil(np.log2(np.where(maximum > 0, maximum, 1))).astype(np.int64)
-        keys = np.zeros(
-            len(rows),
-            dtype=[
-                ("level", "i8", (table.level.shape[1],)),
-                ("port", "i8"),
-                ("frequency", "f8"),
-                ("band", "i8"),
-            ],
-        )
-        keys["level"] = table.level[rows]
-        keys["port"] = table.tone_port[rows, 0]
-        keys["frequency"] = np.where(maximum > 0, table.tone_frequency_ghz[rows, 0], 0)
-        keys["band"] = band
-        return keys
+        return band_keys(table, rows)
 
     def cost(self, table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.float64]:
         """Estimate period count, using direct-solver steps for DC rows."""
@@ -221,18 +160,11 @@ class PeriodTableKernel:
             coefficients = np.empty((0, 8, 16, size, size), dtype=np.complex128)
             if frequency != 0:
                 half = 0.5 / abs(frequency)
-                outgoing = model.rates_per_ns.sum(axis=0)
                 populations = np.asarray(
-                    expm(half * (model.rates_per_ns - np.diag(outgoing))),
+                    expm(half * population_generator(model.rates_per_ns)),
                     dtype=np.float64,
                 )
-                coherences = np.exp(
-                    -half
-                    * (
-                        (outgoing[:, None] + outgoing[None, :]) / 2
-                        + model.dephasing_per_ns
-                    )
-                )
+                coherences = np.exp(-half * coherence_decay(model))
                 coefficients = _unitary_table(model, int(key["port"]), frequency, bound)
             for array in (coefficients, populations, coherences):
                 array.setflags(write=False)

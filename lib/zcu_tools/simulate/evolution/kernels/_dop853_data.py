@@ -9,6 +9,7 @@ from numpy.typing import NDArray
 from .._envelope import sample_value
 from ..kernel import SegmentTable
 from ..secular import SecularModel
+from ._secular import coherence_decay
 
 
 class Models(NamedTuple):
@@ -84,10 +85,7 @@ def pack_models(models: list[SecularModel]) -> Models:
     for index, model in enumerate(models):
         energies[index] = model.energies_ghz
         rates[index] = model.rates_per_ns
-        outgoing = model.rates_per_ns.sum(axis=0)
-        decay[index] = (
-            outgoing[:, None] + outgoing[None, :]
-        ) / 2 + model.dephasing_per_ns
+        decay[index] = coherence_decay(model)
         basis[index] = model.eigenvectors
         ports[index] = len(model.drives)
         for port, drive in enumerate(model.drives):

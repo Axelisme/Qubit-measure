@@ -11,6 +11,7 @@ from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource
 from . import gate_phase
 from ._gate_endpoints import build_endpoints
+from ._secular import coherence_decay, population_generator
 from ._shaped import drive_bounds, envelope_bounds
 
 _PHASE_COUNT = 16
@@ -198,12 +199,8 @@ class GateCacheKernel:
         for row, adaptive in zip(rows, phase_adaptive, strict=True):
             model = source.model(tuple(int(v) for v in table.level[row]))
             half_step = float(table.duration_ns[row]) / (2 * _SUBSEGMENTS)
-            outgoing = model.rates_per_ns.sum(axis=0)
-            population = expm(half_step * (model.rates_per_ns - np.diag(outgoing)))
-            coherence = np.exp(
-                -half_step
-                * ((outgoing[:, None] + outgoing[None, :]) / 2 + model.dephasing_per_ns)
-            )
+            population = expm(half_step * population_generator(model.rates_per_ns))
+            coherence = np.exp(-half_step * coherence_decay(model))
             coefficient = None
             if adaptive:
                 coefficient = gate_phase.build(model, table, int(row), budget)
