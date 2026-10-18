@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile, gettempdir
 from typing import Generic, Protocol, TypeVar
@@ -111,17 +112,42 @@ class SingleFileCaretaker(Generic[StateT, ReportT]):
         try:
             if not self._path.exists():
                 return self._codec.default(), None
-            raw = json.loads(self._path.read_text(encoding="utf-8"))
-            return self._codec.decode(raw), None
-        except Exception as exc:
-            logger.warning(
-                "persistence load failed (%s); using defaults",
-                self._path,
-                exc_info=exc,
-            )
+            text = self._path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            return self._codec.default(), self._backup_incompatible(exc)
+        except OSError as exc:
+            logger.warning("persistence read failed: %s", self._path, exc_info=exc)
             return self._codec.default(), PersistenceError(
                 f"Failed to read GUI state ({exc}); using defaults"
             )
+        try:
+            return self._codec.decode(json.loads(text)), None
+        except ValueError as exc:
+            return self._codec.default(), self._backup_incompatible(exc)
+
+    def _backup_incompatible(self, cause: Exception) -> PersistenceError:
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
+        backup: Path | None = None
+        try:
+            # Reserve a unique sibling before rename; never overwrite an old backup.
+            with NamedTemporaryFile(
+                dir=self._path.parent,
+                prefix=f"{self._path.name}.incompatible-{timestamp}-",
+                delete=False,
+            ) as file:
+                backup = Path(file.name)
+            self._path.replace(backup)
+        except OSError as exc:
+            if backup is not None:
+                backup.unlink(missing_ok=True)
+            raise PersistenceError(
+                f"Failed to back up incompatible GUI state {self._path}: {exc}"
+            ) from exc
+        error = PersistenceError(
+            f"Incompatible GUI state ({cause}); backed up to {backup}; using defaults"
+        )
+        logger.warning("%s", error)
+        return error
 
 
 __all__ = [
