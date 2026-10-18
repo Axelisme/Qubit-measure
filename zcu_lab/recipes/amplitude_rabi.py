@@ -87,53 +87,53 @@ def amplitude_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool i
         reuse=reuse_tab_id,
     )
     if use_reset is None:
-        tab.disable_library("modules.reset")
+        tab.disable_library(("modules", "reset"))
     else:
-        tab.use_library("modules.reset", use_reset)
-    tab.use_library("modules.readout", readout_ref)
-    tab.use_library("modules.qub_pulse", drive_ref)
+        tab.use_library(("modules", "reset"), use_reset)
+    tab.use_library(("modules", "readout"), readout_ref)
+    tab.use_library(("modules", "qub_pulse"), drive_ref)
 
     # Preserve the complete missing-source list rather than failing on its first item.
     missing: list[MissingParameter] = []
     frequency = choose_frequency(
         tab,
-        "modules.qub_pulse.freq",
+        ("modules", "qub_pulse", "freq"),
         frequency_mhz,
         calibration="$qubit.freq",
         required="frequency_mhz",
     )
     missing.extend(frequency.missing)
     if frequency.edit is not None:
-        tab.use_inline("modules.qub_pulse")
+        tab.use_inline(("modules", "qub_pulse"))
         apply_frequency(tab, frequency.edit)
     frequency = choose_frequency(
         tab,
-        "modules.readout.freq",
+        ("modules", "readout", "freq"),
         calibration="$resonator.freq",
         required="readout_ref",
     )
     missing.extend(frequency.missing)
     if frequency.edit is not None:
-        tab.use_inline("modules.readout")
+        tab.use_inline(("modules", "readout"))
         apply_frequency(tab, frequency.edit)
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
 
     tab.set_sweep(
-        "sweep.gain",
+        ("sweep", "gain"),
         start=gain_range[0] if gain_range is not None else None,
         stop=gain_range[1] if gain_range is not None else None,
         expts=points,
         sources={"start": "explicit", "stop": "explicit", "expts": "explicit"},
     )
     if pulse_length_us is not None:
-        tab.use_inline("modules.qub_pulse")
-        tab.use_inline("modules.qub_pulse.waveform")
-        tab.set("modules.qub_pulse.waveform.length", pulse_length_us)
+        tab.use_inline(("modules", "qub_pulse"))
+        tab.use_inline(("modules", "qub_pulse", "waveform"))
+        tab.set(("modules", "qub_pulse", "waveform", "length"), pulse_length_us)
     else:
-        retain_scalar(tab, "modules.qub_pulse.waveform.length")
-    tab.set("reps", reps, source="explicit")
-    tab.set("rounds", rounds, source="explicit")
+        retain_scalar(tab, ("modules", "qub_pulse", "waveform", "length"))
+    tab.set(("reps",), reps, source="explicit")
+    tab.set(("rounds",), rounds, source="explicit")
 
     result = yield from tab.run_step()
     run = result.run
@@ -183,20 +183,22 @@ DEFINITION = RecipeDefinition(
     summary_parameters=(
         SummaryParameter(
             "readout_frequency_mhz",
-            "modules.readout.freq",
+            ("modules", "readout", "freq"),
             "MHz",
         ),
-        SummaryParameter("readout_ref", "modules.readout"),
-        SummaryParameter("use_reset", "modules.reset"),
-        SummaryParameter("reps", "reps"),
-        SummaryParameter("rounds", "rounds"),
-        SummaryParameter("frequency_mhz", "modules.qub_pulse.freq", "MHz"),
-        SummaryParameter("drive_ref", "modules.qub_pulse"),
-        SummaryParameter("pulse_length_us", "modules.qub_pulse.waveform.length", "us"),
-        SummaryParameter("gain_sweep", "sweep.gain"),
+        SummaryParameter("readout_ref", ("modules", "readout")),
+        SummaryParameter("use_reset", ("modules", "reset")),
+        SummaryParameter("reps", ("reps",)),
+        SummaryParameter("rounds", ("rounds",)),
+        SummaryParameter("frequency_mhz", ("modules", "qub_pulse", "freq"), "MHz"),
+        SummaryParameter("drive_ref", ("modules", "qub_pulse")),
+        SummaryParameter(
+            "pulse_length_us", ("modules", "qub_pulse", "waveform", "length"), "us"
+        ),
+        SummaryParameter("gain_sweep", ("sweep", "gain")),
     ),
     summary_estimates=(
-        SummaryEstimate("pi_gain", "pi_gain", "pi_gain_err"),
-        SummaryEstimate("pi2_gain", "pi2_gain", "pi2_gain_err"),
+        SummaryEstimate("pi_gain", ("pi_gain",), ("pi_gain_err",)),
+        SummaryEstimate("pi2_gain", ("pi2_gain",), ("pi2_gain_err",)),
     ),
 )
