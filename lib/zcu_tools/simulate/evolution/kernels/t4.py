@@ -16,6 +16,7 @@ from ..declarations import (
 )
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource
+from ._secular import coherence_decay, population_generator
 
 
 @dataclass(frozen=True)
@@ -107,11 +108,10 @@ class T4:
         for key in keys:
             model = source.model(tuple(int(v) for v in key["level"]))
             duration = float(key["duration"])
-            outgoing = model.rates_per_ns.sum(axis=0)
             populations.append(
-                expm(duration * (model.rates_per_ns - np.diag(outgoing)))
+                expm(duration * population_generator(model.rates_per_ns))
             )
-            gamma = (outgoing[:, None] + outgoing[None, :]) / 2 + model.dephasing_per_ns
+            gamma = coherence_decay(model)
             energy = model.energies_ghz
             coherences.append(
                 np.exp(

@@ -17,8 +17,7 @@ from ..declarations import (
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
 from ._dyson_bound import accepts_population_bound
-from ._dyson_paths import build_shared_paths, contractible_modes
-from ._weak import (
+from ._dyson_model import (
     commutator,
     constant_mask,
     drive_ratios,
@@ -28,6 +27,7 @@ from ._weak import (
     model_keys,
     parameters,
 )
+from ._dyson_paths import build_shared_paths, contractible_modes
 
 
 @njit(nogil=True, cache=True)
