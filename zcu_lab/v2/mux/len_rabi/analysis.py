@@ -80,16 +80,8 @@ def analyze_length(
                 {name: float(value) for name, value in zip(names, params, strict=True)},
                 covariance,
             )
-            ax.plot(xs, real, "o", label="measured")
-            ax.plot(xs, fitted, label="fit")
-            for value, error, label in ((pi, pierr, "pi"), (pi2, pi2err, "pi/2")):
-                ax.axvline(
-                    value, ls="--", label=f"{label}={value:.4g} ± {error:.2g} us"
-                )
-                ax.axvspan(value - error, value + error, alpha=0.2, color="red")
-            ax.set_title(f"Rabi f={freq:.4g} ± {freqerr:.2g} MHz")
-            outcomes.append(
-                MuxLenRabiFit(index, pi, pierr, pi2, pi2err, freq, freqerr, quality)
+            outcome = MuxLenRabiFit(
+                index, pi, pierr, pi2, pi2err, freq, freqerr, quality
             )
         except (
             ValueError,
@@ -100,6 +92,16 @@ def analyze_length(
             ax.plot(xs, np.abs(signal), "o", label="acquired magnitude")
             ax.text(0.02, 0.98, str(exc), transform=ax.transAxes, va="top", wrap=True)
             outcomes.append(MuxFitFailure(index, str(exc)))
+        else:
+            ax.plot(xs, real, "o", label="measured")
+            ax.plot(xs, fitted, label="fit")
+            for value, error, label in ((pi, pierr, "pi"), (pi2, pi2err, "pi/2")):
+                ax.axvline(
+                    value, ls="--", label=f"{label}={value:.4g} ± {error:.2g} us"
+                )
+                ax.axvspan(value - error, value + error, alpha=0.2, color="red")
+            ax.set_title(f"Rabi f={freq:.4g} ± {freqerr:.2g} MHz")
+            outcomes.append(outcome)
         ax.legend()
         ax.grid(True)
         fig.tight_layout()
