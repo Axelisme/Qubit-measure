@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import RoundSignals, RoundStatistics
+from zcu_tools.core.simulation import RoundStatistics
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment import ftf as ftf_module
 from zcu_tools.simulate.adc import ConditionalReadout, ConditionalSums
@@ -122,11 +122,9 @@ def test_mux_ftf_channels_decode_to_the_same_joint_state_per_shot(mode, monkeypa
             raw = result.materialize_raw(acquire.reps, acquire.avg_level)
             first = raw[4].reshape(-1, 2)[:, 0] / 40
             second = raw[1].reshape(-1, 2)[:, 0] / 300
-        elif isinstance(result, RoundSignals):
+        else:
             first = result.channels[0].iq[:, 0, 0, 0] / 10
             second = result.channels[1].iq[:, 0, 0, 0] / 100
-        else:
-            raise AssertionError("FTF must return a joint round")
         assert tuple(ch.channel for ch in result.channels) == (4, 1)
         assert set(first) == {1, 2}, "the test must exercise both joint states"
         np.testing.assert_array_equal(first, second)
