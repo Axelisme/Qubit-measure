@@ -45,7 +45,7 @@ def test_default_version():
 def test_frozen():
     s = PersistedStartup()
     with pytest.raises(ValidationError):
-        s.ip = "x"  # type: ignore[misc]
+        s.ip = "x"
 
 
 def test_persisted_tab_does_not_carry_save_paths_override():

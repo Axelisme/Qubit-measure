@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
-from qtpy.QtCore import (  # type: ignore[attr-defined]
+from qtpy.QtCore import (
     QBuffer,
     QByteArray,
     QCoreApplication,
@@ -18,7 +18,7 @@ from qtpy.QtCore import (  # type: ignore[attr-defined]
     QRect,
     QSize,
 )
-from qtpy.QtGui import QColor, QPixmap  # type: ignore[attr-defined]
+from qtpy.QtGui import QColor, QPixmap
 from qtpy.QtWidgets import (
     QApplication,
     QLabel,
@@ -70,7 +70,7 @@ def _make_png_bytes(width: int, height: int, color: str = "#286ac7") -> bytes:
     ba = QByteArray()
     buf = QBuffer(ba)
     buf.open(QIODevice.WriteOnly)  # type: ignore[attr-defined]
-    pix.save(buf, "PNG")  # type: ignore[attr-defined]
+    pix.save(buf, "PNG")
     buf.close()
     return bytes(ba)  # type: ignore[arg-type]
 
@@ -163,7 +163,7 @@ def make_snapshot(tab_id: str, *, analysis=AnalysisMode.FIT, post=False, load=Fa
         SavePaneSnapshot,
     )
 
-    caps = AdapterCapabilities(analysis=analysis, post_analysis=post, load_data=load)  # type: ignore[call-arg]
+    caps = AdapterCapabilities(analysis=analysis, post_analysis=post, load_data=load)
     run_snap = RunPaneSnapshot(result=object(), source_path=None)
     analysis_snap = AnalysisPaneSnapshot(
         params=DummyParams() if analysis is not AnalysisMode.NONE else None,
@@ -242,18 +242,18 @@ def exp_tab_widget(qapp, monkeypatch, make_ctrl):
 
 
 def test_gallery_capability_driven_cards(qapp):
-    caps_none = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)  # type: ignore[call-arg]
+    caps_none = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)
     g_none = DataFigurePreviewGallery(caps_none, renderer=_fake_renderer)
     assert g_none.has_card("run")
     assert not g_none.has_card("analysis")
     assert not g_none.has_card("post_analysis")
     assert g_none.card_count() == 1
     # Find via objectName
-    assert g_none.findChild(QWidget, "previewCard_run") is not None  # type: ignore[attr-defined]
-    assert g_none.findChild(QWidget, "previewCard_analysis") is None  # type: ignore[attr-defined]
+    assert g_none.findChild(QWidget, "previewCard_run") is not None
+    assert g_none.findChild(QWidget, "previewCard_analysis") is None
 
     # Run + Analysis
-    caps_a = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False)  # type: ignore[call-arg]
+    caps_a = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False)
     g_a = DataFigurePreviewGallery(caps_a, renderer=_fake_renderer)
     assert g_a.has_card("run")
     assert g_a.has_card("analysis")
@@ -261,7 +261,7 @@ def test_gallery_capability_driven_cards(qapp):
     assert g_a.card_count() == 2
 
     # All three
-    caps_both = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
+    caps_both = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
     g_both = DataFigurePreviewGallery(caps_both, renderer=_fake_renderer)
     assert g_both.has_card("run")
     assert g_both.has_card("analysis")
@@ -274,7 +274,7 @@ def test_gallery_capability_driven_cards(qapp):
 
 
 def test_gallery_supported_but_empty_shows_named_empty_state(qapp):
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
+    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
     g = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
     # Initially empty for all
     assert g.card_state("run") == "empty"
@@ -294,7 +294,7 @@ def test_gallery_supported_but_empty_shows_named_empty_state(qapp):
 
 
 def test_gallery_raster_preview_via_injected_renderer(qapp):
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
+    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
     g = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
     fig_run = Figure()
     fig_a = Figure()
@@ -315,7 +315,7 @@ def test_gallery_raster_preview_via_injected_renderer(qapp):
 
 
 def test_gallery_single_failure_isolated(qapp):
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
+    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
     fig_run = Figure()
     fig_a = Figure()
     fig_p = Figure()
@@ -345,7 +345,7 @@ def test_gallery_single_failure_isolated(qapp):
 
 
 def test_gallery_never_retains_figure(qapp):
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False)  # type: ignore[call-arg]
+    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False)
     held = []
 
     def capturing_renderer(fig):
@@ -377,7 +377,7 @@ def test_gallery_never_retains_figure(qapp):
 def test_exp_data_subtab_shows_gallery_run_always(qapp, exp_tab_widget, make_ctrl):
     ctrl = make_ctrl()
     # NONE
-    caps_none = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)  # type: ignore[call-arg]
+    caps_none = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)
     snap_none = make_snapshot("t1", analysis=AnalysisMode.NONE, post=False)
     tab_none = exp_tab_widget("t1", ctrl, caps_none)
     tab_none.attach(snap_none, MagicMock())
@@ -401,7 +401,7 @@ def test_exp_data_subtab_shows_gallery_run_always(qapp, exp_tab_widget, make_ctr
     tab_none.detach()
 
     # FIT + post
-    caps_both = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
+    caps_both = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
     snap_both = make_snapshot("t2", analysis=AnalysisMode.FIT, post=True)
     tab_both = exp_tab_widget("t2", ctrl, caps_both)
     tab_both.attach(snap_both, MagicMock())
@@ -419,7 +419,7 @@ def test_exp_data_subtab_shows_gallery_run_always(qapp, exp_tab_widget, make_ctr
 
 def test_exp_data_routing_a4(qapp, exp_tab_widget, make_ctrl):
     ctrl = make_ctrl()
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
+    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
     snap = make_snapshot("t1", analysis=AnalysisMode.FIT, post=True)
     tab = exp_tab_widget("t1", ctrl, caps)
     tab.attach(snap, MagicMock())
@@ -458,7 +458,7 @@ def test_exp_data_activation_refreshes_and_lifecycle_sync(
 ):
     ctrl = make_ctrl()
     # Use fake renderer so we can assert raster not empty after show
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
+    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
     tab = exp_tab_widget("t1", ctrl, caps, preview_renderer=_fake_renderer)
     snap = make_snapshot("t1", analysis=AnalysisMode.FIT, post=True)
     tab.attach(snap, MagicMock())
@@ -530,7 +530,7 @@ def test_exp_data_invisible_defers_render(qapp, exp_tab_widget, make_ctrl):
         call_log.append("render")
         return bytes(_FAKE_PNG_BYTES)
 
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False)  # type: ignore[call-arg]
+    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False)
     tab = exp_tab_widget("t1", ctrl, caps, preview_renderer=counting_renderer)
     snap = make_snapshot("t1", analysis=AnalysisMode.FIT, post=False)
     tab.attach(snap, MagicMock())
@@ -560,7 +560,7 @@ def test_exp_production_reachability_data_gallery_is_active_right_widget(
     qapp, exp_tab_widget, make_ctrl
 ):
     ctrl = make_ctrl()
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
+    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
     tab = exp_tab_widget("reach", ctrl, caps)
     snap = make_snapshot("reach", analysis=AnalysisMode.FIT, post=True)
     actions = MagicMock()
@@ -592,7 +592,7 @@ def test_exp_gallery_failure_isolated_and_save_controls_remain_usable(
     qapp, exp_tab_widget, make_ctrl
 ):
     ctrl = make_ctrl()
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
+    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
     fig_run = Figure()
     fig_a = Figure()
     fig_p = Figure()
@@ -658,7 +658,7 @@ def test_gallery_aspect_fit_regression_640x480_in_narrow_viewport(qapp):
     and remain correct after resize (S3). This test would fail on the
     pre-fix code that stored the raw 640x480 pixmap directly.
     """
-    caps = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)  # type: ignore[call-arg]
+    caps = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)
     g = DataFigurePreviewGallery(caps, renderer=_renderer_640x480)
     # Show gallery at size that reproducibly yields ~396x120 image viewport.
     # 434x200 was determined to produce 396x120 label viewport with 160x120 display
@@ -718,7 +718,7 @@ def test_gallery_aspect_fit_preserved_after_multiple_resizes_via_exp_tab(
 ):
     """Via shipped ExpTabWidget Data path, verify bounds and ratio before/after resize."""
     ctrl = make_ctrl()
-    caps = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)  # type: ignore[call-arg]
+    caps = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)
     tab = exp_tab_widget("t-aspect", ctrl, caps, preview_renderer=_renderer_640x480)
     snap = make_snapshot("t-aspect", analysis=AnalysisMode.NONE, post=False)
     tab.attach(snap, MagicMock())
@@ -767,13 +767,13 @@ def _gallery_geometry_cards(g: DataFigurePreviewGallery) -> dict[str, QRect]:
     for key in ["run", "analysis", "post_analysis"]:
         c = g.find_card(key)
         if c is not None:
-            geoms[key] = c.geometry()  # type: ignore[attr-defined]
+            geoms[key] = c.geometry()
     return geoms
 
 
 def test_gallery_narrow_single_column_three_cards(qapp):
     """Narrow viewport (< threshold) must show three cards in one vertical column (S1)."""
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
+    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
     g = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
     g.setFixedSize(360, 700)  # narrow: viewport ~348 < 450
     g.show()
@@ -797,7 +797,7 @@ def test_gallery_narrow_single_column_three_cards(qapp):
 
 def test_gallery_wide_three_card_mosaic_run_left_spanning(qapp):
     """Wide + 3 cards: Run left spanning two rows, Analysis/Post right (S1/S4)."""
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
+    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
     g = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
     g.setFixedSize(750, 700)  # wide: viewport ~738 > 450
     g.show()
@@ -829,7 +829,7 @@ def test_gallery_wide_three_card_mosaic_run_left_spanning(qapp):
 
 def test_gallery_wide_two_card_side_by_side(qapp):
     """Wide + 2 cards: Run and Analysis side-by-side (S4)."""
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False)  # type: ignore[call-arg]
+    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False)
     g = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
     g.setFixedSize(750, 400)
     g.show()
@@ -854,7 +854,7 @@ def test_gallery_wide_two_card_side_by_side(qapp):
 
 def test_gallery_wide_single_full_width(qapp):
     """Single card (Run only) occupies full width in both narrow and wide (S4)."""
-    caps = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)  # type: ignore[call-arg]
+    caps = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)
     # Narrow
     g_n = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
     g_n.setFixedSize(360, 400)
@@ -978,11 +978,11 @@ def test_gallery_narrow_vs_wide_via_exp_tab_shipped_path(
         QApplication.processEvents()
 
     # 1 card: Run only
-    caps1 = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)  # type: ignore[call-arg]
+    caps1 = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)
     _check_one(caps1, 1)
     # 2 cards: Run + Analysis
-    caps2 = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False)  # type: ignore[call-arg]
+    caps2 = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False)
     _check_one(caps2, 2)
     # 3 cards: Run + Analysis + Post
-    caps3 = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
+    caps3 = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
     _check_one(caps3, 3)

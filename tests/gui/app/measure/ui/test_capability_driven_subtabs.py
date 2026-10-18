@@ -428,7 +428,7 @@ def test_figure_containers_remain_stable_across_tab_switch_and_busy(
     adapter = MagicMock()
     adapter.capabilities = AdapterCapabilities(
         analysis=AnalysisMode.FIT, post_analysis=True
-    )  # type: ignore[call-arg]
+    )
     state.add_tab(
         "tab-1",
         Session(
@@ -807,7 +807,7 @@ def test_render_host_routes_to_correct_pane_container(qapp):
         post_analyze=post_svc,
         render_host=lambda: host,
         owner_scheduler=ManualOwnerScheduler(),
-    )  # type: ignore[arg-type]
+    )
     facet.start_run("tab-1")
     assert log[-1] == "run"
     facet.analyze("tab-1", MagicMock())

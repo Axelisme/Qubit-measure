@@ -53,12 +53,12 @@ def _is_matrix_value(value: Any) -> bool:
         return False
     if not all(isinstance(row, (list, tuple)) for row in value):
         return False
-    first_len = len(value[0])  # type: ignore[arg-type]
+    first_len = len(value[0])
     if first_len == 0:
         return False
-    if not all(len(row) == first_len for row in value):  # type: ignore[arg-type]
+    if not all(len(row) == first_len for row in value):
         return False
-    for row in value:  # type: ignore[assignment]
+    for row in value:
         for cell in row:
             if isinstance(cell, (list, tuple, dict)):
                 return False
@@ -68,14 +68,14 @@ def _is_matrix_value(value: Any) -> bool:
 def _should_show_table(value: Any) -> bool:
     if not _is_matrix_value(value):
         return False
-    rows = len(value)  # type: ignore[arg-type]
-    cols = len(value[0])  # type: ignore[arg-type]
+    rows = len(value)
+    cols = len(value[0])
     return rows <= 5 and cols <= 5
 
 
 def _bounded_summary(value: Any) -> str:
     if _is_matrix_value(value):
-        return f"{len(value)} \u00d7 {len(value[0])} matrix"  # type: ignore[arg-type]
+        return f"{len(value)} \u00d7 {len(value[0])} matrix"
     if isinstance(value, (list, tuple)):
         return f"list[{len(value)}]"
     if isinstance(value, dict):
@@ -93,28 +93,28 @@ def _make_matrix_table(matrix: Sequence[Sequence[Any]]) -> QTableWidget:
     table.setObjectName("writebackProposedMatrixTable")
     table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
     table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-    table.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # type: ignore[attr-defined]
-    table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # type: ignore[attr-defined]
-    table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # type: ignore[attr-defined]
+    table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     vertical_header = table.verticalHeader()
     if vertical_header is not None:
         vertical_header.setVisible(False)
-        vertical_header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)  # type: ignore[attr-defined]
+        vertical_header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         vertical_header.setDefaultSectionSize(22)
     horizontal_header = table.horizontalHeader()
     if horizontal_header is not None:
         horizontal_header.setVisible(False)
-        horizontal_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)  # type: ignore[attr-defined]
+        horizontal_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
     for row in range(rows):
         for column in range(cols):
             value = matrix[row][column]
             text = f"{value:.4f}" if isinstance(value, float) else str(value)
             item = QTableWidgetItem(text)
-            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)  # type: ignore[attr-defined]
-            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # type: ignore[attr-defined]
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(row, column, item)
     table.setFixedHeight(rows * 22 + 4)
-    table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)  # type: ignore[attr-defined]
+    table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     table.setMinimumWidth(120)
     return table
 
@@ -317,7 +317,7 @@ class WritebackWidget(QWidget):
         self._hint.setWordWrap(True)
         self._hint.setSizePolicy(
             QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Maximum,  # type: ignore[attr-defined]
+            QSizePolicy.Policy.Maximum,
         )
         layout.addWidget(self._hint)
 
@@ -335,15 +335,15 @@ class WritebackWidget(QWidget):
 
         self._rows_container = QFrame()
         self._rows_container.setObjectName("writebackPanel")
-        self._rows_container.setFrameShape(QFrame.Shape.NoFrame)  # type: ignore[attr-defined]
+        self._rows_container.setFrameShape(QFrame.Shape.NoFrame)
         self._rows_container.setSizePolicy(
             QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Maximum,  # type: ignore[attr-defined]
+            QSizePolicy.Policy.Maximum,
         )
         self._rows_layout = QVBoxLayout(self._rows_container)
         self._rows_layout.setContentsMargins(0, 0, 0, 0)
         self._rows_layout.setSpacing(0)
-        self._rows_layout.setAlignment(Qt.AlignmentFlag.AlignTop)  # type: ignore[attr-defined]
+        self._rows_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         layout.addWidget(self._rows_container)
         layout.addStretch(1)
 

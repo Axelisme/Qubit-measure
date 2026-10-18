@@ -10,7 +10,7 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal
 
 from qtpy.QtCore import Qt, QTimer
-from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
+from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import (
     QApplication,
     QDialog,

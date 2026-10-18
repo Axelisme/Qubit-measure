@@ -8,9 +8,9 @@ import numpy as np
 import pytest
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from qtpy.QtCore import QEventLoop, QPoint, Qt, QTimer  # type: ignore[attr-defined]
-from qtpy.QtTest import QTest  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtCore import QEventLoop, QPoint, Qt, QTimer
+from qtpy.QtTest import QTest
+from qtpy.QtWidgets import (
     QCheckBox,
     QLabel,
     QPushButton,

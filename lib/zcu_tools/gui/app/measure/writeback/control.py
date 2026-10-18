@@ -122,11 +122,11 @@ class WritebackControlFacet:
             raise FailedPreconditionError(
                 f"No {'post ' if pane == 'post_analysis' else ''}writeback draft for tab {tab_id!r}"
             )
-        if not getattr(draft, "is_active", False):  # type: ignore[attr-defined]
+        if not getattr(draft, "is_active", False):
             raise FailedPreconditionError(
                 f"Writeback draft for tab {tab_id!r} pane {pane!r} has been torn down"
             )
-        return draft  # type: ignore[return-value]
+        return draft
 
     def get_writeback_item_form_for_pane(
         self, tab_id: str, pane: WritebackPane, session_id: str

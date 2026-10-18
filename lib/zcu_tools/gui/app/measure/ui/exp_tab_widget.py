@@ -6,14 +6,14 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
-from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
-from qtpy.QtGui import (  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt, QTimer
+from qtpy.QtGui import (
     QColor,
     QPainter,
     QPainterPath,
     QPen,
 )
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QComboBox,
     QFrame,
     QHBoxLayout,
@@ -384,7 +384,7 @@ class ExpTabWidget(QWidget):
         # lets Stop fill the row. Presentation changes do not alter commands.
         self._run_action_bar = QFrame()
         self._run_action_bar.setObjectName("runActionBar")
-        self._run_action_bar.setFrameShape(QFrame.Shape.StyledPanel)  # type: ignore[attr-defined]
+        self._run_action_bar.setFrameShape(QFrame.Shape.StyledPanel)
         bar_layout = QHBoxLayout(self._run_action_bar)
         self._run_action_layout = bar_layout
         bar_layout.setContentsMargins(8, 6, 8, 6)
@@ -395,14 +395,14 @@ class ExpTabWidget(QWidget):
         self.reset_btn.setFixedHeight(30)
         self.reset_btn.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )  # type: ignore[attr-defined]
+        )
         bar_layout.addWidget(self.reset_btn, stretch=20)
         self.run_btn = QPushButton("Run")
         self.run_btn.setObjectName("primaryButton")
         self.run_btn.setFixedHeight(30)
         self.run_btn.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )  # type: ignore[attr-defined]
+        )
         self.run_btn.setStyleSheet(_BLUE_PRIMARY_STYLESHEET)
         bar_layout.addWidget(self.run_btn, stretch=80)
         run_layout.addWidget(self._run_action_bar)
@@ -567,7 +567,7 @@ class ExpTabWidget(QWidget):
         # Data preview gallery — Variant A stacked rail (S1, S3)
         self._data_gallery = DataFigurePreviewGallery(
             self._capabilities,
-            renderer=self._preview_renderer,  # type: ignore[arg-type]
+            renderer=self._preview_renderer,
         )
 
         # Placeholder for Guide (no figure) — Data now shows gallery (S4)
@@ -895,12 +895,12 @@ class ExpTabWidget(QWidget):
             placeholder = self._run_placeholder
         elif pane == "analysis":
             self._require_analysis()
-            stack = self._analysis_stack  # type: ignore[attr-defined]
-            placeholder = self._analysis_placeholder  # type: ignore[attr-defined]
+            stack = self._analysis_stack
+            placeholder = self._analysis_placeholder
         elif pane == "post_analysis":
             self._require_post()
-            stack = self._post_stack  # type: ignore[attr-defined]
-            placeholder = self._post_placeholder  # type: ignore[attr-defined]
+            stack = self._post_stack
+            placeholder = self._post_placeholder
         else:
             raise ValueError(f"unknown pane {pane!r}")
         canvas = stack.currentWidget()

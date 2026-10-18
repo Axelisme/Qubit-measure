@@ -8,7 +8,7 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QWidget
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.measure.events.tab import (
     TabAddedPayload,

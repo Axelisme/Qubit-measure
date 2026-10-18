@@ -328,7 +328,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         del result, ctx
         params_cls = type(self).analyze_params_cls()
         if _can_construct_without_args(params_cls):
-            return params_cls()  # type: ignore[return-value]
+            return params_cls()
         raise NotImplementedError(
             f"{type(self).__name__} declares analysis with params "
             f"{params_cls.__name__} that need values, but does not override "

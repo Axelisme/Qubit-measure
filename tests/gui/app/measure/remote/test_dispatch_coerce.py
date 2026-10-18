@@ -208,13 +208,13 @@ def test_field_type_choices_pep604_optional_unwraps():
     import types  # noqa: F401 — ensure types.UnionType is available
 
     # Construct the PEP 604 union at runtime (not via annotation string eval).
-    annotation = float | None  # type: ignore[operator]
+    annotation = float | None
     result = _setup_field_result(annotation)
     assert result == ("float", None)
 
 
 def test_field_type_choices_pep604_optional_int_unwraps():
     """PEP 604: int | None must also be unwrapped to ('int', None)."""
-    annotation = int | None  # type: ignore[operator]
+    annotation = int | None
     result = _setup_field_result(annotation)
     assert result == ("int", None)

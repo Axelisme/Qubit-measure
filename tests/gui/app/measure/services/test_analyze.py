@@ -162,7 +162,7 @@ def _make_service(
     progress = ProgressService(DirectProgressTransport())
     writeback = writeback if writeback is not None else MagicMock()
     writeback.create_draft.return_value = None
-    runner = OperationRunner(MagicMock(), handles, progress, bg, bus)  # type: ignore[arg-type]
+    runner = OperationRunner(MagicMock(), handles, progress, bg, bus)
     svc = AnalyzeService(state, runner, bus, writeback, handles)
     return svc, bg
 

@@ -55,7 +55,7 @@ def _make_state(*, load_data: bool = True) -> tuple[State, str, MagicMock]:
 def _service(state: State) -> tuple[LoadService, MagicMock, MagicMock]:
     bus = EventBus()
     emit = MagicMock()
-    bus.emit = emit  # type: ignore[method-assign]
+    bus.emit = emit
     writeback = MagicMock()
     context = MagicMock()
     context.read_context.side_effect = lambda: state.session_env.parameters

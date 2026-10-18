@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 
 import pytest
 from qtpy import QtWidgets
-from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QLineEdit
 from zcu_tools.gui.app.measure.adapter import ParamMeta
 from zcu_tools.gui.app.measure.ui.analyze_form import AnalyzeFormWidget
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
