@@ -304,7 +304,10 @@ def test_validate_empty_table_modes() -> None:
 def test_sample_flux_frame_rejects_invalid_frames() -> None:
     with pytest.raises(SampleTableV2Error) as exc:
         SampleFluxFrame(
-            dev_unit=cast(DeviceValueUnit, "mA"), flux_int=0.0, flux_period=1.0
+            # tolerated(cast): Bypass A/V/native typing to test runtime rejection of mA.
+            dev_unit=cast(DeviceValueUnit, "mA"),
+            flux_int=0.0,
+            flux_period=1.0,
         )
     _assert_reason(exc.value, "invalid_unit")
     with pytest.raises(SampleTableV2Error) as exc:
@@ -347,6 +350,7 @@ def test_sample_flux_frame_rejects_non_real_scalar_conversion_input(
     value: object,
 ) -> None:
     frame = SampleFluxFrame(dev_unit="A", flux_int=0.0, flux_period=1.0)
+    # tolerated(cast): Numeric overloads exclude these datetime/timedelta/bool/complex scalars.
     invalid = cast(float, value)
     for convert in (frame.flux_from_dev_value, frame.dev_value_from_flux):
         with pytest.raises(SampleTableV2Error) as exc:
@@ -368,6 +372,7 @@ def test_sample_flux_frame_rejects_non_real_array_conversion_input(
     values: object,
 ) -> None:
     frame = SampleFluxFrame(dev_unit="A", flux_int=0.0, flux_period=1.0)
+    # tolerated(cast): Float64 overloads exclude these datetime/timedelta/bool/complex arrays.
     invalid = cast(NDArray[np.float64], values)
     for convert in (frame.flux_from_dev_value, frame.dev_value_from_flux):
         with pytest.raises(SampleTableV2Error) as exc:
@@ -378,6 +383,7 @@ def test_sample_flux_frame_rejects_non_real_array_conversion_input(
 def test_legacy_sample_flux_frame_rejects_invalid_frames() -> None:
     with pytest.raises(SampleTableV2Error) as exc:
         LegacySampleFluxFrame(
+            # tolerated(cast): Bypass A/mA/V/mV typing to test runtime rejection of kV.
             dev_unit=cast(LegacyDeviceValueUnit, "kV"),
             flux_int=0.0,
             flux_period=1.0,
@@ -401,6 +407,7 @@ def test_legacy_sample_flux_frame_rejects_invalid_frames() -> None:
     ],
 )
 def test_flux_frames_reject_non_real_numeric_values(value: object) -> None:
+    # tolerated(cast): Float frame fields exclude these timestamp/timedelta/bool/complex values.
     invalid = cast(float, value)
     with pytest.raises(SampleTableV2Error) as exc:
         SampleFluxFrame(dev_unit="A", flux_int=invalid, flux_period=1.0)
