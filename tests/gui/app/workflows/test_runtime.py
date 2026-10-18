@@ -17,6 +17,7 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
 )
 from zcu_tools.gui.app.workflows.runtime import SessionDevices
+from zcu_tools.gui.session.operation_runner import OperationInfrastructure
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest, DeviceService
 
 from tests.experiment.workflows._engine_fakes import (
@@ -82,10 +83,12 @@ def connected() -> tuple[StartHarness, DeviceService, RecordingDriver, SessionDe
     service = DeviceService(
         harness.bus,
         harness.state,
-        harness.gate,
-        harness.background,
-        harness.runner,
-        harness.handles,
+        OperationInfrastructure(
+            gate=harness.gate,
+            background=harness.background,
+            runner=harness.runner,
+            handles=harness.handles,
+        ),
         driver_factory=lambda type_name, address: driver,
     )
     service.start_connect_device(

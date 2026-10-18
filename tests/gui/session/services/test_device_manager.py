@@ -21,7 +21,10 @@ from zcu_tools.gui.session.events import (
     DeviceSetupStartedPayload,
 )
 from zcu_tools.gui.session.operation_handles import OperationHandles
-from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.operation_runner import (
+    OperationInfrastructure,
+    OperationRunner,
+)
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
     DeviceRegistrationError,
@@ -71,10 +74,12 @@ def _make_svc(
     svc = DeviceService(
         bus,
         State(MagicMock()),
-        gate,
-        bg,
-        runner,
-        handles,
+        OperationInfrastructure(
+            gate=gate,
+            background=bg,
+            runner=runner,
+            handles=handles,
+        ),
         driver_factory=lambda type_name, address: device,
         device_registry=FakeDeviceRegistry(),
     )
@@ -175,10 +180,12 @@ def _make_real_svc(
     svc = DeviceService(
         bus,
         State(MagicMock()),
-        gate,
-        bg,
-        runner,
-        handles,
+        OperationInfrastructure(
+            gate=gate,
+            background=bg,
+            runner=runner,
+            handles=handles,
+        ),
         driver_factory=lambda type_name, address: fake_device,
     )
     return svc, fake_device
@@ -302,10 +309,12 @@ def test_direct_poll_skips_terminal_admission_without_reading_driver(qapp) -> No
     svc = DeviceService(
         bus,
         state,
-        gate,
-        bg,
-        runner,
-        handles,
+        OperationInfrastructure(
+            gate=gate,
+            background=bg,
+            runner=runner,
+            handles=handles,
+        ),
         driver_factory=lambda type_name, address: driver,
         device_registry=FakeDeviceRegistry(),
     )

@@ -94,6 +94,7 @@ def test_session_core_connects_and_cancels_on_owner_thread(  # noqa: PLR0915
     from zcu_tools.gui.session.operation_runner import (
         BgResult,
         ExclusionRequest,
+        OperationInfrastructure,
         OperationRunner,
         OperationSpec,
         SettleFn,
@@ -156,11 +157,13 @@ def test_session_core_connects_and_cancels_on_owner_thread(  # noqa: PLR0915
     session = build_session_services(
         state=state,
         bus=bus,
-        gate=gate,
-        handles=handles,
-        background=background,
+        operations=OperationInfrastructure(
+            gate=gate,
+            background=background,
+            runner=runner,
+            handles=handles,
+        ),
         progress=progress,
-        runner=runner,
         driver_factory=unexpected_driver_factory,
         device_registry=registry,
         bind_assets=ArbWaveformDatabase.info_at,

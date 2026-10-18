@@ -23,21 +23,19 @@ from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
 )
-from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
+from zcu_tools.gui.session.operation_handles import OperationOutcome
 from zcu_tools.gui.session.operation_runner import (
     BgResult,
     ExclusionRequest,
-    OperationRunner,
+    OperationInfrastructure,
     OperationSpec,
     SettleFn,
 )
 from zcu_tools.gui.session.ports import (
     BackgroundAdmissionClosedError,
-    BackgroundExecutor,
     DeviceMemoryInfo,
     DeviceRegistryPort,
     DriverFactoryPort,
-    ExclusionGate,
     OperationConflictError,
     OperationKind,
 )
@@ -230,14 +228,17 @@ class DeviceService:
         self,
         bus: BaseEventBus,
         state: SessionState,
-        gate: ExclusionGate,
-        bg: BackgroundExecutor,
-        runner: OperationRunner,
-        handles: OperationHandles,
+        operations: OperationInfrastructure,
         *,
         driver_factory: DriverFactoryPort | None = None,
         device_registry: DeviceRegistryPort | None = None,
     ) -> None:
+        """Use state/bus on their owner thread with shared operation owners.
+
+        ``operations`` forwards the same gate, executor, runner and handles used
+        by the app composition. The optional factory creates drivers; an omitted
+        registry creates a session-owned DeviceManager, never a global registry.
+        """
         self._bus = bus
         self._state = state
         # Device composes both leaves (ADR-0066): Exclusion (device mutation vs
@@ -245,12 +246,12 @@ class DeviceService:
         # await + cancel for setup). OperationRunner owns the mechanism (ADR-0066);
         # gate is kept directly for is_device_mutating / _reject_mutating_read;
         # bg is kept directly for poll_device_info (best-effort read, not a runner op).
-        self._gate = gate
-        self._bg = bg
-        self._runner = runner
+        self._gate = operations.gate
+        self._bg = operations.background
+        self._runner = operations.runner
         # handles is kept for cancel_device_operation (handles.cancel) — the same
         # instance that runner holds internally.
-        self._handles = handles
+        self._handles = operations.handles
         self._driver_factory = driver_factory or _default_driver_factory
         from zcu_tools.device import DeviceManager
 

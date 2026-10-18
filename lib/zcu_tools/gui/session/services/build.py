@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.device_control import DeviceControlFacet
+from zcu_tools.gui.session.operation_runner import OperationInfrastructure
 from zcu_tools.gui.session.predictor_control import PredictorControlFacet
 from zcu_tools.gui.session.progress_control import ProgressControlFacet
 from zcu_tools.gui.session.services.arb_waveform import ArbWaveformService
@@ -37,13 +38,10 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.aliases import AliasRow
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
-    from zcu_tools.gui.session.operation_handles import OperationHandles
     from zcu_tools.gui.session.operation_runner import OperationRunner
     from zcu_tools.gui.session.ports import (
-        BackgroundExecutor,
         DeviceRegistryPort,
         DriverFactoryPort,
-        ExclusionGate,
     )
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
@@ -77,7 +75,7 @@ class SessionServices:
         arb_waveform: Qubit-scoped arbitrary waveform assets of the session
             database, shared by every host's Inspect and ARB dialog.
 
-    ``runner`` and ``progress`` are the exact instances supplied to
+    ``runner`` and ``progress`` are the exact instances supplied through
     ``build_session_services``; this bundle does not create or replace them.
     """
 
@@ -98,15 +96,13 @@ class SessionServices:
     arb_waveform: ArbWaveformService
 
 
-def build_session_services(
+# tolerated: Asset binding, entry defaults and optional driver/predictor ports have no shared caller-owned record.
+def build_session_services(  # noqa: PLR0913
     *,
     state: SessionState,
     bus: BaseEventBus,
-    gate: ExclusionGate,
-    handles: OperationHandles,
-    background: BackgroundExecutor,
+    operations: OperationInfrastructure,
     progress: ProgressService,
-    runner: OperationRunner,
     bind_assets: Callable[[Path], WaveformAssetInfo],
     project_root: str = "",
     driver_factory: DriverFactoryPort | None = None,
@@ -116,14 +112,15 @@ def build_session_services(
 ) -> SessionServices:
     """Construct the session services from the app-provided infrastructure.
 
-    ``gate`` / ``background`` are the app's concrete exclusion gate and off-main
-    executor (injected via their session ports); ``progress`` is the shared
-    ProgressService used by operation clients and the device-control facet;
+    ``operations`` forwards the app's same exclusion gate, off-main executor,
+    runner and handles (with driven adapters injected via session ports).
+    ``progress`` is the shared ProgressService used by operation clients and the
+    device-control facet;
     ``bind_assets`` binds each entry's explicit waveform asset directory without
-    a global Database selection. ``runner`` is the shared
+    a global Database selection. ``operations.runner`` is the shared
     OperationRunner (ADR-0066) used by DeviceService for operation lifecycle;
     ``project_root`` anchors generated result/database paths and result-scope
-    discovery. The returned bundle retains the exact ``runner`` and ``progress``
+    discovery. The returned bundle retains the exact runner and ``progress``
     instances so app-specific operation clients can use the same infrastructure;
     ``driver_factory`` defaults to the device service's built-in hardware factory
     when omitted; ``device_registry`` defaults to a new session-owned
@@ -141,14 +138,13 @@ def build_session_services(
     device = DeviceService(
         bus,
         state,
-        gate,
-        background,
-        runner,
-        handles,
+        operations,
         driver_factory=driver_factory,
         device_registry=device_registry,
     )
-    soc_connection = SoCConnectionService(state, bus, gate, handles, runner)
+    soc_connection = SoCConnectionService(
+        state, bus, operations.gate, operations.handles, operations.runner
+    )
     progress_control = ProgressControlFacet(progress)
     context = ContextService(
         state,
@@ -179,7 +175,7 @@ def build_session_services(
         device=device_control,
     )
     return SessionServices(
-        runner=runner,
+        runner=operations.runner,
         progress=progress,
         soc_connection=soc_connection,
         predictor=predictor,
