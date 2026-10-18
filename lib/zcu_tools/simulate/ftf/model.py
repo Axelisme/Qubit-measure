@@ -165,6 +165,21 @@ class JointModel:
             raise ValueError("subsystem must be F1=0, C=1 or F2=2")
         return self._project(self._charges[subsystem])
 
+    def flux_operator(self, subsystem: int) -> Matrix:
+        """Return d(H/h)/df at DC in retained coordinates, in GHz/Phi0.
+
+        f = Phi/Phi0 is external reduced flux; subsystem is F1=0, C=1 or F2=2.
+        Uses the analytic derivative of this model's fixed-coordinate Hamiltonian,
+        projected through the DC local and joint bases, without rediagonalizing.
+        This is a fixed-DC small-signal operator, not H(Phi(t)) for fast flux.
+        An index outside 0..2 raises ValueError.
+        """
+        if subsystem not in (0, 1, 2):
+            raise ValueError("subsystem must be F1=0, C=1 or F2=2")
+        local = self._locals[subsystem]
+        derivative = local.derivative(float(self.dc_flux[subsystem]))
+        return self._project(self._lift(derivative, subsystem))
+
     def charge_squared_operator(self, subsystem: int) -> Matrix:
         """Return dimensionless native n² projected local then joint, not (P n P)².
 
