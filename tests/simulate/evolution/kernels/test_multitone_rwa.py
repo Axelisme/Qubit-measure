@@ -212,3 +212,23 @@ def test_third_carrier_changes_joint_density_within_lab_budget(kernel_case: Kern
         assert_budget(actual[0], expected, case.budget)
         states.append(actual[0])
     assert np.max(np.abs(states[1] - states[0])) > 0.01
+
+
+def test_continuous_flux_motion_declines_even_at_one_quantized_level(
+    kernel_case: KernelCase,
+):
+    from zcu_tools.simulate.evolution import FluxWaveform
+
+    case = kernel_case
+    # The interior excursion returns to its original flux. Endpoint-only
+    # inspection would incorrectly admit it while every level is still zero.
+    waveform = FluxWaveform(
+        np.array([0, 3, 6, 9]),
+        np.tile([0.0, 10.0, 40.0], 3),
+        np.tile([[0.2], [0.201], [0.2]], (3, 1)),
+    )
+    table = replace(case.table, flux_waveform=waveform)
+    context = KernelContext(case.source, case.budget, WorkPlan())
+    assert not case.kernel.guard(table, np.arange(3), context).any()
+    fixed = replace(table, flux_waveform=replace(waveform, flux=np.full((9, 1), 0.2)))
+    assert case.kernel.guard(fixed, np.arange(3), context).all()
