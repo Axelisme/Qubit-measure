@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves, spectral-family reuse, reuse-independent Sambe admission and calibrated physical-block carrier interpolation
+**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves, spectral-family reuse, reuse-independent Sambe admission, calibrated physical-block carrier interpolation and interaction-picture independent densities
 
 ## Segment engine contracts
 
@@ -694,12 +694,34 @@ using fixed-order approximations. They can conservatively reject low carriers;
 DOP853 then preserves accuracy at a higher apply cost. Neither shaped family
 performs a density-dependent retry or post-apply correction.
 
-DOP853 integrates the density in the lab frame. Its Hermitian Hamiltonian and
-density require only one dense product per RHS evaluation. With `P = H @ rho`,
-the commutator is `P - P.conj().T`. Real Runge--Kutta weights preserve this
-Hermitian structure through the intermediate stages. The RHS fuses the
-commutator and secular coherence loss into one elementwise loop, then adds
-population transfer. It does not normalize or clip the density.
+For independent single-tone rows, DOP853 integrates the exact H0 interaction
+frame: `sigma(t) = exp(+i*2*pi*H0*t) rho(t) exp(-i*2*pi*H0*t)`. It retains the
+full transformed drive and unchanged phase-invariant secular dissipator, then
+returns endpoints in the model eigenbasis. This removes the diagonal H0 phases
+from explicit integration without RWA, drive truncation or splitting. Each RHS
+computes one phase per energy level and forms pair phases by multiplication.
+
+Each row keeps its own adaptive step controller and deterministic seed. Rows do
+not share stages or a gain-group controller. The original DOP853 eighth-order
+tableau and fifth/third-order normalized RMS estimator apply to each row on its
+own. Weak rows cannot dilute a strong row through a pooled RMS. Tolerances,
+the 0.1 ns seed and the active-knot ceiling remain unchanged. This preserves the
+local control strength, not an end-to-end error bound. Independent rows keep
+the same numerical path under row reordering, apply partition or worker-width
+changes, including calls mixing IP-eligible and lab-frame rows.
+
+Zero-gain and non-single-tone rows retain the original lab-frame runner, as does
+every row in a touching chain. A chain is recognized only between adjacent,
+same-timeline rows within an apply call whose supports touch within 1e-9 ns.
+It is not inferred from the complete segment table. Chain endpoints within that
+call remain bitwise identical to the original runner. Splitting a chain across
+calls restarts integration and can change its frame, so that comparison retains
+the original within-budget contract rather than bitwise equality.
+`flux_dop853` also retains its original numerical path. Both frames use Hermitian Hamiltonians and densities, requiring only one
+dense product per row per RHS. With `P = H @ rho`, the commutator is
+`P - P.conj().T`. Real Runge--Kutta weights preserve Hermitian intermediate stages.
+The RHS fuses the commutator and secular coherence loss, then adds population
+transfer. It does not normalize or clip density.
 
 DOP853 uses rtol=min(1e-4, 0.03*budget) and
 atol=min(1e-6, 0.0003*budget). Both tolerances scale with the same calibrated
@@ -717,14 +739,17 @@ playback remain unchanged. The solver need not stop exactly at interior knots.
 
 Each row starts from a deterministic 0.1 ns seed, capped by its sample spacing.
 The seed is not an accepted-step ceiling. No adaptive history carries between
-rows, so splitting a chain across apply calls preserves its numerical path.
-Row boundaries still stop integration exactly and switch models or baths.
+rows. Splitting independent rows across apply calls preserves their numerical
+paths. Splitting a chain can change its frame as described above, with results
+agreeing within budget. Row boundaries still stop integration exactly and
+switch models or baths.
 
 Joint ceiling/tolerance measurements on 16-level FTF rows found that high-carrier
-work falls as tolerances relax. Low-carrier work can remain stability-limited
-even when population errors are far below budget. The H0 interaction picture
-with loose controls reduced short-row cost but exceeded the 1e-2 population
-allowance at 10 us, so the lab-frame representation is retained.
+work falls as tolerances relax. Low-carrier lab-frame work can remain
+stability-limited even when population errors are far below budget. The
+interaction-frame path retains the same budget-scaled local controls; it does
+not use the looser controls that previously exceeded the 1e-2 population
+allowance at 10 us.
 
 Flux-tail truncation uses an absolute flux bound, not elapsed multiples of a
 filter time constant. FTF sums absolute pulse-tail contributions and truncates

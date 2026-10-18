@@ -7,6 +7,7 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
+from .._envelope import sample_value
 from ..declarations import (
     AlgorithmIdentity,
     Eligibility,
@@ -81,6 +82,80 @@ def _run(data, row_models, states, controls):
     run_chain(_rhs, _context, data, row_models, states, controls)
 
 
+@njit(nogil=True, cache=True)
+def _interaction_rhs(time, state, context):
+    models, segments, row, model = context
+    size = models.energies.shape[1]
+    rho = state.reshape(size, size)
+    envelope = segments.envelope[row, 0]
+    begin, end = segments.sample_offsets[envelope : envelope + 2]
+    amplitude = sample_value(
+        time + segments.offset[row, 0],
+        segments.sample_time[begin:end],
+        segments.samples[begin:end],
+    )
+    phase = segments.theta[row, 0] + 2 * np.pi * segments.frequency[row, 0] * time
+    z = segments.gain[row, 0] * amplitude * np.exp(1j * phase)
+    port = segments.port[row, 0]
+    # Build the drive directly: subtracting H0 from a full Hamiltonian would
+    # lose small diagonal drive terms to cancellation at weak gains.
+    h = z.real * models.x[model, port] + z.imag * models.y[model, port]
+    phases = np.exp(2j * np.pi * models.energies[model] * time)
+    for i in range(size):
+        for j in range(size):
+            h[i, j] *= phases[i] * phases[j].conjugate()
+    product = h @ rho
+    derivative = np.empty_like(rho)
+    for target in range(size):
+        for source in range(size):
+            derivative[target, source] = (
+                -2j
+                * np.pi
+                * (product[target, source] - product[source, target].conjugate())
+                - models.decay[model, target, source] * rho[target, source]
+            )
+        for source in range(size):
+            derivative[target, target] += (
+                models.rates[model, target, source] * rho[source, source]
+            )
+    return derivative.ravel()
+
+
+@njit(nogil=True, cache=True)
+def _run_interaction(data, row_models, states, controls):
+    # Only independent rows enter: each starts at sigma(0)=rho(0), with its own
+    # controller and seed. The callback-free entry point has a stable disk key.
+    run_chain(_interaction_rhs, _context, data, row_models, states, controls)
+    rows, model_index = row_models
+    for index in range(len(rows)):
+        row, model = rows[index], model_index[index]
+        phases = np.exp(
+            -2j * np.pi * data.models.energies[model] * data.segments.duration[row]
+        )
+        for i in range(len(phases)):
+            for j in range(len(phases)):
+                states[index, i, j] *= phases[i] * phases[j].conjugate()
+
+
+def _interaction_mask(segments: Segments, rows: NDArray[np.int64]) -> NDArray[np.bool_]:
+    if segments.gain.shape[1] == 0:
+        return np.zeros(len(rows), dtype=np.bool_)
+    eligible = (segments.tones[rows] == 1) & (segments.gain[rows, 0] != 0)
+    previous, following = rows[:-1], rows[1:]
+    touching = (segments.timeline[previous] == segments.timeline[following]) & (
+        np.abs(
+            segments.start[following]
+            - segments.start[previous]
+            - segments.duration[previous]
+        )
+        <= 1e-9
+    )
+    # Both endpoints of each touching edge belong to the lab-frame chain.
+    eligible[:-1] &= ~touching
+    eligible[1:] &= ~touching
+    return eligible
+
+
 class DOP853Kernel:
     """C5 fallback for all tone counts and complex sampled envelopes.
 
@@ -91,11 +166,11 @@ class DOP853Kernel:
     """
 
     declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("dop853", "legacy-v1"),
+        identity=AlgorithmIdentity("dop853", "interaction-v2"),
         eligibility=Eligibility(min_tones=1),
         guard=GuardDeclaration(),
         accuracy="adaptive",
-        reuse=ReuseDeclaration("dop853/legacy-v1/serial"),
+        reuse=ReuseDeclaration("dop853/interaction-v2/independent"),
         fallback="terminal-domain",
     )
 
@@ -193,7 +268,21 @@ class DOP853Kernel:
         the smallest spacing between envelope knots inside the row's local
         envelope window. Samples outside that window and all flux waveform
         samples are ignored. Constant envelopes have no sampling ceiling.
-        No adaptive history carries between rows.
+        Independent single-tone rows use sigma(t)=exp(+i*2*pi*H0*t) rho(t)
+        exp(-i*2*pi*H0*t), integrating the full transformed drive and unchanged
+        secular dissipator, then return to model eigenbasis. Each row keeps its
+        own adaptive step controller and original normalized RMS error norm,
+        independent of the other rows in the call. There is no gain grouping or
+        pooled RMS. Tolerances, seed and active-knot ceiling are unchanged. This
+        is local control, not a new end-to-end error bound. No adaptive history
+        carries between rows or calls, so row order and worker/apply partition
+        do not change an independent row's numerical path, including mixed
+        IP/lab calls. Zero-gain and non-single-tone rows, and every row in a
+        touching chain, retain the unchanged lab-frame runner. Chains are
+        recognized only between adjacent rows in this apply call, not in the
+        complete table. Splitting a chain across calls can change its frame;
+        such restarts preserve results within budget, not bitwise. No RWA,
+        drive truncation, splitting, routing or envelope changes are made.
 
         Raises ValueError for incompatible prepared data, state/index shapes or
         nonexistent ports. RuntimeError signals numerical failure; earlier rows
@@ -217,10 +306,18 @@ class DOP853Kernel:
         if np.any(playing & (table.tone_port[rows] >= models.ports[key_index, None])):
             raise ValueError("DOP853 tone port absent from model")
         segments = pack_segments(table)
-        _run(
-            _Data(models, segments),
-            (rows, key_index),
-            states,
-            controls,
-        )
+        interaction = _interaction_mask(segments, rows)
+        boundaries = np.r_[
+            0, np.flatnonzero(interaction[1:] != interaction[:-1]) + 1, len(rows)
+        ]
+        # Keep contiguous runs: gathering all lab rows could accidentally join
+        # chains separated by an independent row in the caller's ordering.
+        for begin, end in zip(boundaries[:-1], boundaries[1:], strict=True):
+            runner = _run_interaction if interaction[begin] else _run
+            runner(
+                _Data(models, segments),
+                (rows[begin:end], key_index[begin:end]),
+                states[begin:end],
+                controls,
+            )
         return np.zeros(len(rows), dtype=np.bool_)
