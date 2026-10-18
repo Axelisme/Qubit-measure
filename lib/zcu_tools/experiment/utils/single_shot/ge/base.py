@@ -100,11 +100,25 @@ def hist(
     ng = ng / np.sum(ng)
     ne = ne / np.sum(ne)
     if ax is not None:
-        plt_params = dict(
-            x=0.5 * (bins[1:] + bins[:-1]), bins=bins, range=xlims, alpha=0.5
+        xs = 0.5 * (bins[1:] + bins[:-1])
+        ax.hist(
+            xs,
+            bins=bins.tolist(),
+            range=xlims,
+            alpha=0.5,
+            color="b",
+            weights=ng,
+            label="g",
         )
-        ax.hist(color="b", weights=ng, label="g", **plt_params)  # pyright: ignore[reportArgumentType]
-        ax.hist(color="r", weights=ne, label="e", **plt_params)  # pyright: ignore[reportArgumentType]
+        ax.hist(
+            xs,
+            bins=bins.tolist(),
+            range=xlims,
+            alpha=0.5,
+            color="r",
+            weights=ne,
+            label="e",
+        )
         ax.set_ylabel("Counts", fontsize=14)
         ax.set_xlabel("I [ADC levels]", fontsize=14)
         ax.legend(loc="upper right")
