@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from .kernel import Kernel, SegmentTable
+from .kernel import Kernel, KernelContext, SegmentTable
 
 
 @dataclass(frozen=True)
@@ -41,11 +41,11 @@ class KeyGroups:
 
 
 def group_keys(
-    kernel: Kernel, table: SegmentTable, rows: NDArray[np.int64]
+    kernel: Kernel, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
 ) -> KeyGroups:
     """Group model-only keys and distinguish cross-timeline sharing from repeats."""
     keys, first, inverse, counts = np.unique(
-        kernel.prepare_keys(table, rows),
+        kernel.prepare_keys(table, rows, context),
         return_index=True,
         return_inverse=True,
         return_counts=True,

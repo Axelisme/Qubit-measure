@@ -1,15 +1,12 @@
-"""Explicit persistent-type inheritance for every generated module selector."""
+"""Shared name-and-editable-type raw inheritance for generated selectors."""
 
 from collections.abc import Mapping
 from functools import partial
+from typing import get_args, get_origin
 
 from pydantic import BaseModel, JsonValue
 
 from zcu_tools.cfg_model import (
-    ConstWaveformCfg,
-    CosineWaveformCfg,
-    DragWaveformCfg,
-    GaussWaveformCfg,
     ModuleSpec,
     WaveformSpec,
 )
@@ -35,25 +32,6 @@ _PERSISTENT = tuple(
     for item in members(alias)
     if isinstance(item, type) and issubclass(item, BaseModel)
 )
-# These are semantic policies, not a same-name/type compatibility heuristic.
-_LENGTH_PAIRS = {
-    (ConstWaveformCfg, CosineWaveformCfg),
-    (ConstWaveformCfg, GaussWaveformCfg),
-    (ConstWaveformCfg, DragWaveformCfg),
-    (CosineWaveformCfg, ConstWaveformCfg),
-    (CosineWaveformCfg, GaussWaveformCfg),
-    (CosineWaveformCfg, DragWaveformCfg),
-    (GaussWaveformCfg, ConstWaveformCfg),
-    (GaussWaveformCfg, CosineWaveformCfg),
-    (GaussWaveformCfg, DragWaveformCfg),
-    (DragWaveformCfg, ConstWaveformCfg),
-    (DragWaveformCfg, CosineWaveformCfg),
-    (DragWaveformCfg, GaussWaveformCfg),
-}
-_SIGMA_PAIRS = {
-    (GaussWaveformCfg, DragWaveformCfg),
-    (DragWaveformCfg, GaussWaveformCfg),
-}
 
 
 def _persistent(model: type[BaseModel]) -> type[BaseModel]:
@@ -88,7 +66,7 @@ def _source(
         if model is None:
             # A ref family can be narrower than inline families, but never outside them.
             raise FormConversionError(f"Incompatible library family for {key!r}")
-        return type(spec), supported_input(
+        return model, supported_input(
             model, spec.model_dump(mode="json", exclude_none=True)
         )
     module = raw.get("module")
@@ -100,8 +78,90 @@ def _source(
             if old.structure is not None
             else selected_model(models[0], module)
         )
-        return _persistent(model), module
+        return model, module
     return None
+
+
+def _editable_type(annotation: object) -> object:
+    """Compare generated declarations without their per-occurrence class identity."""
+    alternatives = members(annotation)
+    if alternatives != (annotation,):
+        if len(alternatives) == 1:
+            return _editable_type(alternatives[0])
+        return frozenset(_editable_type(item) for item in alternatives)
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        # Generated Spec subclasses share a nominal persistent base. Pure tagged
+        # wrappers have no such base, so their declared fields define their type.
+        persistent = next(
+            (
+                base
+                for base in annotation.__mro__
+                if issubclass(base, BaseModel) and not issubclass(base, FormModel)
+            ),
+            BaseModel,
+        )
+        if persistent is not BaseModel:
+            return persistent
+        return tuple(
+            (name, _editable_type(info.annotation))
+            for name, info in annotation.model_fields.items()
+        )
+    origin = get_origin(annotation)
+    if origin is not None:
+        return origin, tuple(_editable_type(arg) for arg in get_args(annotation))
+    return annotation
+
+
+# Traverse the input tree through annotations so nested defaults never fill
+# authored missing leaves, while newly declared fields still get initial input.
+def _inherit_value(
+    source: object, target: object, raw: JsonValue, env: FormEnv
+) -> JsonValue:
+    if isinstance(raw, list) and get_origin(target) is list:
+        return [
+            _inherit_value(get_args(source)[0], get_args(target)[0], item, env)
+            for item in raw
+        ]
+    if not isinstance(raw, dict) or "expr" in raw:
+        return raw
+    if not any(
+        isinstance(item, type) and issubclass(item, BaseModel)
+        for item in members(target)
+    ):
+        return raw
+    try:
+        old_model = selected_model(source, raw)
+        new_model = selected_model(target, raw)
+    except ValueError:
+        # Invalid discriminators are authored input, not permission to repair it.
+        return raw
+    return _inherit(old_model, new_model, raw, env)
+
+
+def _inherit(
+    source: type[BaseModel],
+    target: type[BaseModel],
+    raw: Mapping[str, JsonValue],
+    env: FormEnv,
+) -> dict[str, JsonValue]:
+    result = (
+        target.defaults(env)
+        if issubclass(target, FormModel)
+        else static_defaults(target)
+    )
+    for name, info in target.model_fields.items():
+        old_info = source.model_fields.get(name)
+        if old_info is None or _editable_type(old_info.annotation) != _editable_type(
+            info.annotation
+        ):
+            continue
+        if name not in raw:
+            result.pop(name, None)
+        else:
+            result[name] = _inherit_value(
+                old_info.annotation, info.annotation, raw[name], env
+            )
+    return result
 
 
 def _convert(
@@ -140,22 +200,13 @@ def _convert(
     source = _source(
         old, models, env, waveform=_persistent(target) in members(WaveformSpec)
     )
-    if source is not None and source[0] is _persistent(target):
-        module = source[1]
-    else:
-        module = (
-            target.defaults(env)
-            if issubclass(target, FormModel)
-            else static_defaults(target)
-        )
-        if source is not None:
-            pair = (source[0], _persistent(target))
-            for name in ("length", "sigma"):
-                permitted = pair in (
-                    _LENGTH_PAIRS if name == "length" else _SIGMA_PAIRS
-                )
-                if permitted and name in source[1]:
-                    module[name] = source[1][name]
+    module = (
+        _inherit(source[0], target, source[1], env)
+        if source is not None
+        else target.defaults(env)
+        if issubclass(target, FormModel)
+        else static_defaults(target)
+    )
     return FormConversionResult(wrapper, {"kind": "inline", "module": module})
 
 
@@ -164,7 +215,10 @@ def module_converter(annotation: object, env: FormEnv) -> InputConverter:
 
     annotation is the generated ref/inline field type. No library is read here;
     the returned converter reads it only during a guarded selection write.
-    It retains raw same-type drafts, uses the explicit waveform pair allowlist,
-    and otherwise asks the target model for fresh input. No asset is read.
+    Each target field inherits raw input (including missing or invalid drafts)
+    only from an identically named field with the same editable Form type.
+    Generated Spec classes compare by their persistent base, not per-occurrence
+    identity; nested content follows the same rule at each level. Other fields
+    use target initial input. No expression is evaluated or asset read.
     """
     return InputConverter(partial(_convert, annotation=annotation, env=env))

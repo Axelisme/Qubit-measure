@@ -1,6 +1,6 @@
 # gui/form_adapter — 從 core cfg 生成 Form
 
-**Last updated:** 2026-10-18，集中 inline converter 與明列繼承政策
+**Last updated:** 2026-10-18，同名同型別 raw 繼承
 
 本 package 是 GUI 的 Qt-free 前端框架。它把 core cfg 宣告與作者寫的起始樹翻譯成 `gui.form` 的 `FormModel`，再把表單結果轉回驗證過的 core cfg。它供 measure、workflows、library 與 writeback 的表單定義共用。Measure 的註冊、protocol 與分頁 Form resource 使用 `Form`，workflows 的手寫 plan 表單使用 `ModuleInputField`。
 
@@ -21,7 +21,9 @@
 - `FieldMeta` 的 label、unit、decimals、description、group 轉成 `Display`，core 欄位與 module 欄位共用同一個翻譯。被鎖定的欄位是單值 Literal，不帶 decimals。Sweep 的 decimals 傳到 start／stop、center／span 與 step float 欄位，不套外層 model 或 n。
 - 生成 module 欄位時，選填的 `desc` 不在 model、input、description 與寫入路徑。`to_cfg` 驗證成 Spec 時由 Spec 預設補回。從 library 複製成 inline 或 `input_from_spec` 時，原 description 被丟棄，所以編輯後會變回預設。Readout 的必填通道照常可編輯；Pulse cfg 不保存 `ro_ch`、`mux_*`、`mask` 或 `outsel`。範本 seed 屏蔽欄位時，註冊入口拒絕，訊息寫出 template id 與 seed 路徑；`to_cfg` 只由 Spec 預設補回。其他欄位的字串 seed 照舊是字面值。目前沒有露出覆寫機制。
 
-生成的 `options(env)` 宣告可留空欄位的 None、依持久 Spec family 篩選的 captured library keys，以及每個可編輯 Inline kind。只有結構 tag 的 kind 不列為 Inline。對明確預設為 None 的 nullable module，生成器補入停用值，讓選單顯示 None 而非空白。只允許 None、卻沒有 None 預設的 required 欄位不自動停用。通用 Form 的 static defaults 仍省略 None，不影響 validator 推導值。所有 key input 使用 `{"kind": "ref", "name": key}`，inline 使用 `{"kind": "inline", "module": content}`，可留空時也接受 null。Options 的 value 只帶 key 或所選 kind 的 tag。fields 指向該 kind 的 wrapper 子表單，describe 所選欄位才列 children，不重複固定 tag。Ref 選項不帶 fields，也不顯示 entry 內容。切換由 `_converters.py` 集中處理。相同持久型別保留全部可編輯欄位，ref 讀固定 Spec，inline 保留 raw expression、缺席與 invalid 值。Const、Cosine、Gauss、Drag 互轉只繼承 length，Gauss 與 Drag 互轉另繼承 sigma。其他跨型別用目標初值，包含涉及 Arb、FlatTop 與不同 module family 的切換。Arb 與 FlatTop 同型別仍全保留。Gauss 到 FlatTop 不包裝 raise_waveform。Core 不依欄位同名推論繼承。
+生成的 `options(env)` 宣告可留空欄位的 None、依持久 Spec family 篩選的 captured library keys，以及每個可編輯 Inline kind。只有結構 tag 的 kind 不列為 Inline。對明確預設為 None 的 nullable module，生成器補入停用值，讓選單顯示 None 而非空白。只允許 None、卻沒有 None 預設的 required 欄位不自動停用。通用 Form 的 static defaults 仍省略 None，不影響 validator 推導值。所有 key input 使用 `{"kind": "ref", "name": key}`，inline 使用 `{"kind": "inline", "module": content}`，可留空時也接受 null。Options 的 value 只帶 key 或所選 kind 的 tag。fields 指向該 kind 的 wrapper 子表單，describe 所選欄位才列 children，不重複固定 tag。Ref 選項不帶 fields，也不顯示 entry 內容。切換由 `_converters.py` 集中處理，依 [ADR-0079](../../../../docs/adr/0079-form-field-transitions.md#共用-inline-政策) 共用同名同型別的 raw 繼承。
+
+新型別的每個欄位若在舊型別有同名且相同的可編輯 Form 型別，就沿用原始輸入；否則用目標初值。比較沿生成器去除 QickParam 的規則，不依 raw 值的 Python 型別或有效性判斷。各次生成的同一持久 model 視為同型，巢狀逐層套用。Waveform 與 Pulse、PulseReadout、MuxReadout、各 Reset 都用這條規則。Expression、缺席與 invalid 值原樣保留，超出目標限制由一般驗證報錯，不求值或修正。同型 ref→inline 與 inline→inline 保留全部可編輯欄位，ref 讀固定 Spec，inline 不重新讀來源。Gauss 切 FlatTop 保留 length，raise_waveform 用初值，不把舊 waveform 包進去。Pulse 切 PulseReadout 保留 freq／gain／waveform，但 ch 與 gen_ch 不同名，不搬移。Core 不加入 domain 規則或補 defaults，converter 提供完整目標 input。
 
 每個 key 選項帶 `to_inline` 指令，label 是 Convert to inline。`FormState.run_command` 用固定 FormEnv 的 library 複製持久 Spec，保留 child key、丟棄屏蔽欄位，以一次原子安裝提交快照。來源失敗不改 input。明確複製使用 `to_inline` 指令或 `Form.prepare_inline_copy`，普通 defaults 只建 fresh 範本／型別初值，不提供隱含複製或缺來源 fallback。
 

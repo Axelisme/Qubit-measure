@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-18, carrier-wise mux integrated readout
+**Last updated:** 2026-10-18, mux carrier phase-origin conversion
 
 `ftf(path_or_settings, *, workers=1)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -14,7 +14,9 @@ The executable example is `zcu_lab/simulation_envs/FTF/environment.py` with adja
 `FTFSource.snapshot` reads live DC values before each round. It checks units and
 limits without restoring startup values. `execute` consumes detached templates.
 The segment engine's fast algorithms are the default numeric path.
-One source owns one `Engine`, whose prepare cache survives across acquires.
+One source owns one `Engine`, whose 1.5 GiB resident prepare cache survives across
+acquires. This byte budget counts model-only payload arrays, not total process
+memory; workspaces, active references and ADC allocations remain separate.
 The keyword `workers` selects the engine's sole parallel width; direct callers
 use one worker by default. GUI and Notebook use the shared FTF environment entry,
 which selects `max(1, (os.cpu_count() or 1) - 2)` workers. Unknown CPU counts
@@ -35,7 +37,15 @@ The binding serializes calls; direct author callers must do the same.
 
 `plan_template` converts QICK us/MHz/degrees into ns/GHz/radians with point
 arrays. It preserves signed gains, complex sampled envelopes and the common
-carrier origin. Pulse supports use absolute nearest-2-ns rounding, ties even.
+carrier origin for evolution. Readout converts the program's common-origin
+phase to ADC's pulse-local phase by subtracting
+`2*pi*(f-f_ref)*pulse_start_ns`, with frequencies in GHz. The model reference
+is the first carrier; that carrier's phase stays unchanged. The existing
+`phase_reference_us` contribution stays part of the common-origin phase.
+ADC demodulation keeps its absolute-time grid. An isolated addressed carrier's
+conditional IQ center is therefore invariant under a common pulse/grid time
+shift. With multiple nonzero carriers, finite-window cross-tone leakage can
+still depend on the readout start. Pulse supports use absolute nearest-2-ns rounding, ties even.
 The model owner supplies a fixed-DC `ModelSource` and static schedule for each
 round. Charge and small-signal flux controls evolve every template to readout
 start. Each drive line selects full charge n or the derivative of the existing
@@ -111,10 +121,11 @@ receiver noise and the integrated rounding term.
 `replay_round(round_path)` recomputes one round without drivers, earlier rounds,
 current YAML or numeric records. Backend, engine numeric version, RNG version and
 dependency versions must match. The stream policy is `PCG64/SeedSequence-v2`.
-The backend is `ftf-segment-v7`, which additionally identifies carrier-wise
-integrated mux sums. This readout change can alter the last bits relative to the
-multi-carrier ODE, so archives from `ftf-segment-v6` and earlier backends fail
-explicitly. Evolution's numeric version and single-carrier results are unchanged.
+The backend is `ftf-segment-v8`, which identifies common-origin to pulse-local
+mux phase conversion in both integrated and general ODE readout. Archives from
+`ftf-segment-v7` and earlier backends fail explicitly because mux IQ values
+change. Evolution's numeric version and single-carrier results at `f=f_ref`
+are unchanged.
 Old exact-record manifests also fail explicitly. Archives contain model truth and
 must not appear in ordinary Run/native/RPC metadata. Normal provenance remains
 the opaque simulation identifier.

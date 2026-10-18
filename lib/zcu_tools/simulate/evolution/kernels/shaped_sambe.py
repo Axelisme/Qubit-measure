@@ -1,6 +1,5 @@
 """Real-envelope periods from shared finite Hilbert Fourier matrices."""
 
-from copy import copy
 from dataclasses import dataclass
 
 import numpy as np
@@ -8,8 +7,19 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
-from ..kernel import ApplyContext, GuardPreparation, GuardResult, Prepared, SegmentTable
-from ..secular import ModelSource, SecularModel
+from .._carrier_plan import ramp_families_for_rows
+from .._carrier_plan import subdivisions as ramp_subdivisions
+from ..kernel import (
+    ApplyContext,
+    GuardPreparation,
+    GuardResult,
+    KernelContext,
+    Prepared,
+    SegmentTable,
+    prepared_key_indices,
+)
+from ..secular import SecularModel
+from ..workplan import RampFamilyPlan
 from ._carrier_reuse import CarrierWorkspace
 from ._period_table import (
     PeriodEntry,
@@ -24,7 +34,8 @@ from ._period_table import (
 )
 from ._sambe import eigensystem
 from ._secular import coherence_decay, population_generator
-from ._shaped import drive_bounds, envelope_bounds
+from ._shaped import drive_bounds
+from ._workload_facts import envelope_bounds
 from .dop853 import prepare_models
 
 
@@ -174,11 +185,13 @@ class _Data:
     periods: PeriodPrepared
     models: tuple[SecularModel, ...]
     ports: tuple[int, ...]
+    keys: NDArray[np.void]
+    errors: NDArray[np.float64]
 
     @property
     def nbytes(self) -> int:
         # Models belong to ModelSource; only newly owned arrays are charged.
-        return self.periods.nbytes
+        return self.periods.nbytes + self.keys.nbytes + self.errors.nbytes
 
 
 class ShapedSambeKernel:
@@ -198,68 +211,14 @@ class ShapedSambeKernel:
     name = "shaped_sambe"
     guard_builds = True
 
-    def __init__(self, workspace: CarrierWorkspace | None = None) -> None:
-        """Use Engine's evolve-local physical-block workspace, or exact builds.
-
-        Standalone calls default to independent per-carrier preparation. A supplied
-        workspace must belong to one source/budget/evolve only. Its calibrated
-        carrier probes are not a rigorous interval bound; harmonic/amplitude
-        guards, cycle scaling, dissipation, tails and projection are unchanged.
-        """
-        self._workspace = workspace
-
-    def evolve_scope(
-        self, table: SegmentTable, source: ModelSource
-    ) -> tuple["ShapedSambeKernel", Prepared]:
-        """Return a fresh kernel/workspace for this scan, never retaining either.
-
-        Engine shares the returned kernel with prefix and timeline workers and
-        charges the workspace's current numeric bytes until this evolve ends.
-        """
-        workspace = self.carrier_workspace(table, source)
-        # Keep injected subclass hooks; only this clone receives the workspace.
-        scoped = copy(self)
-        scoped._workspace = workspace
-        return scoped, workspace
-
-    def carrier_workspace(
-        self, table: SegmentTable, source: ModelSource
-    ) -> CarrierWorkspace:
-        """Plan carrier reuse by fixed physical inputs before any spectral builds.
-
-        table contains this evolve's complete scan; source owns its models. Each
-        group fixes model identity/level, port, peak gain bound and subdivisions.
-        Harmonic cutoffs, amplitude nodes and peak/polynomial representation
-        partition evaluated families within those planned groups. Guards still
-        decide each row's eligibility, resolution and cycle-scaled acceptance.
-        """
-        rows = np.flatnonzero(table.tones == 1)
-        rows = rows[~table.constant_envelopes(rows)]
-        if not len(rows):
-            return CarrierWorkspace(np.empty(0))
-        keys = self.prepare_keys(table, rows)
-        subdivisions = self._subdivisions(table, rows, source)
-        groups = []
-        for key, count in zip(keys, subdivisions, strict=True):
-            model = source.model(tuple(int(v) for v in key["level"]))
-            groups.append(
-                (
-                    model.identity,
-                    model.level,
-                    int(key["port"]),
-                    float(key["bound"]),
-                    int(count),
-                )
-            )
-        return CarrierWorkspace(keys["frequency"], groups=groups)
-
     def prepare_keys(
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
+        context: KernelContext,
     ) -> NDArray[np.void]:
         """Key peak gain, weighted slope and duration to fix subperiod resolution."""
-        base = band_keys(table, rows)
+        base = band_keys(table, rows, context.work_plan)
         keys = np.empty(
             len(rows),
             dtype=base.dtype.descr
@@ -267,7 +226,8 @@ class ShapedSambeKernel:
         )
         for name in base.dtype.names or ():
             keys[name] = base[name]
-        peaks, slopes = envelope_bounds(table)
+        bounds = envelope_bounds(table, context.work_plan)
+        peaks, slopes = bounds.peaks, bounds.slopes
         keys["slope"] = (
             np.abs(table.tone_amplitude[rows, 0]) * slopes[table.tone_envelope[rows, 0]]
         )
@@ -277,46 +237,25 @@ class ShapedSambeKernel:
         keys["duration"] = table.duration_ns[rows]
         return keys
 
-    def _subdivisions(
-        self,
-        table: SegmentTable,
-        rows: NDArray[np.int64],
-        source: ModelSource,
-    ) -> NDArray[np.int64]:
-        strength, gamma = drive_bounds(table, rows, source)
-        peaks, slopes = envelope_bounds(table)
-        envelope = table.tone_envelope[rows, 0]
-        gain = np.abs(table.tone_amplitude[rows, 0])
-        frequency = np.maximum(np.abs(table.tone_frequency_ghz[rows, 0]), 1e-20)
-        motion = 2 * np.pi * gain * strength * slopes[envelope] / frequency**2
-        split = (
-            table.duration_ns[rows]
-            * gamma
-            * (gain * peaks[envelope] * strength / frequency) ** 2
-        )
-        return np.maximum(
-            1, np.ceil(np.sqrt(np.maximum(motion / 0.01, split / 0.01)))
-        ).astype(np.int64)
-
     def _eligible(
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> NDArray[np.bool_]:
         """Check density-free bandwidth, motion and split bounds before building."""
-        del budget
-        subdivisions = self._subdivisions(table, rows, source)
+        source = context.source
+        subdivisions = ramp_subdivisions(table, rows, source, context.work_plan)
         bounded = subdivisions <= 32
         # Strong, unresolved ramps need no keys or remaining eligibility work.
         if not np.any(bounded):
             return bounded
         strength, _ = drive_bounds(table, rows, source)
-        keys = self.prepare_keys(table, rows)
+        keys = self.prepare_keys(table, rows, context)
         frequency = np.abs(keys["frequency"])
-        real = np.array([np.all(e.samples.imag == 0) for e in table.envelopes])
-        peaks, slopes = envelope_bounds(table)
+        bounds = envelope_bounds(table, context.work_plan)
+        real = bounds.real
+        peaks, slopes = bounds.peaks, bounds.slopes
         envelope = table.tone_envelope[rows, 0]
         resolved = (
             slopes[envelope]
@@ -335,28 +274,24 @@ class ShapedSambeKernel:
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> NDArray[np.bool_]:
         """Return the same model-only convergence mask as guard_prepared."""
-        return self.guard_prepared(table, rows, source, budget).accepted
+        return self.guard_prepared(table, rows, context).accepted
 
     def _build(
         self,
         keys: NDArray[np.void],
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> tuple[_Data, NDArray[np.float64]]:
+        source, budget = context.source, context.budget
         entries, models, ports, errors = [], [], [], []
-        subdivisions = self._subdivisions(table, rows, source)
-        # A timeline's rise/fall ramps arrive together. Only this call owns the
-        # workspace; accepted payloads retain their immutable coefficients.
-        families: dict[
-            tuple[str, tuple[int, ...], int, float, float, int, float, str],
-            _SpectralFamily,
-        ] = {}
+        planned = ramp_families_for_rows(table, rows, context)
+        # Spectral products remain call-local; only the family inventory moved
+        # to the planner. Accepted payloads retain immutable coefficient arrays.
+        families: dict[RampFamilyPlan, _SpectralFamily] = {}
         for index, key in enumerate(keys):
             model = source.model(tuple(int(v) for v in key["level"]))
             port, f, bound = (
@@ -364,7 +299,8 @@ class ShapedSambeKernel:
                 float(key["frequency"]),
                 float(key["bound"]),
             )
-            m = int(subdivisions[index])
+            family_plan = planned[index]
+            m = family_plan.subdivisions
             step = 1 / (abs(f) * m)
             # Start with a cubic amplitude polynomial; refine its estimated
             # omitted tail before accepting a key.
@@ -374,20 +310,12 @@ class ShapedSambeKernel:
             # Compare the limiting amplitude, not 128 carrier-phase ODEs.
             # The bandwidth guard and the retained polynomial's last degree
             # accompany this calibrated (not rigorous) convergence estimate.
-            family_key = (
-                model.identity,
-                model.level,
-                port,
-                f,
-                bound,
-                m,
-                budget,
-                self.revision,
-            )
-            family = families.get(family_key)
+            family = families.get(family_plan)
             if family is None:
-                family = _SpectralFamily(model, port, f, bound, step, self._workspace)
-                families[family_key] = family
+                family = _SpectralFamily(
+                    model, port, f, bound, step, context.work_plan.carrier_workspace()
+                )
+                families[family_plan] = family
             error = family.error(modes)
             if error * cycles > budget / 4:
                 modes = 3
@@ -433,29 +361,61 @@ class ShapedSambeKernel:
             )
             models.append(model)
             ports.append(port)
+        owned_keys = keys.copy()
+        convergence = np.asarray(errors)
+        owned_keys.setflags(write=False)
+        convergence.setflags(write=False)
         return _Data(
-            PeriodPrepared(tuple(entries)), tuple(models), tuple(ports)
-        ), np.asarray(errors)
+            PeriodPrepared(tuple(entries)),
+            tuple(models),
+            tuple(ports),
+            owned_keys,
+            convergence,
+        ), convergence
+
+    def admit_prepared(
+        self,
+        prepared: Prepared,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        context: KernelContext,
+    ) -> GuardResult | None:
+        """Reuse key-covered convergence data and recheck current row eligibility.
+
+        Keys include duration, envelope bound and slope, so their stored errors
+        cover the complete spectral domain. Missing keys return None; eligibility
+        rejection returns a decision without rebuilding periods.
+        """
+        if not isinstance(prepared, _Data):
+            raise TypeError("shaped_sambe requires its own prepared payload")
+        keys = self.prepare_keys(table, rows, context)
+        indices = prepared_key_indices(prepared.keys, keys)
+        if indices is None:
+            return None
+        inverse = np.array([indices[key.tobytes()] for key in keys], dtype=np.int64)
+        accepted = self._eligible(table, rows, context)
+        accepted &= prepared.errors[inverse] <= context.budget / 2
+        return GuardResult(accepted, (GuardPreparation(prepared.keys, prepared),))
 
     def guard_prepared(
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> GuardResult:
         """Build eligible keys once, hand accepted model-only periods to Engine."""
-        accepted = self._eligible(table, rows, source, budget)
+        budget = context.budget
+        accepted = self._eligible(table, rows, context)
         selected = rows[accepted]
         preparations = []
         if len(selected):
             keys, representatives, inverse = np.unique(
-                self.prepare_keys(table, selected),
+                self.prepare_keys(table, selected, context),
                 return_index=True,
                 return_inverse=True,
             )
             prepared, errors = self._build(
-                keys, table, selected[representatives], source, budget
+                keys, table, selected[representatives], context
             )
             passed = errors[inverse] <= budget / 2
             accepted[np.flatnonzero(accepted)] = passed
@@ -467,11 +427,10 @@ class ShapedSambeKernel:
         keys: NDArray[np.void],
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> Prepared:
         """Build immutable spectral periods from aligned representative rows."""
-        return self._build(keys, table, rows, source, budget)[0]
+        return self._build(keys, table, rows, context)[0]
 
     def cost(
         self,
@@ -488,9 +447,10 @@ class ShapedSambeKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         source_initial: NDArray[np.complex128],
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline input binding; every prepared array is model-only."""
+        budget = context.budget
         del prepared, key_index, table, rows, source_initial, budget
 
     def apply(

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
 
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QDialog, QWidget  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
@@ -40,8 +41,8 @@ def _visible_dialog_names(
 class MainDialogRegistry:
     """Retain the named dialogs exposed through ``MainWindow``.
 
-    Keep each dialog's modal presentation. Inspect, Device and ARB receive a static
-    read-only mode from the main window when opened for Remote viewing.
+    Named windows are non-modal. The host pushes writability to new and retained
+    Setup, Inspect, Device and ARB windows; dialogs never observe authority.
     """
 
     def __init__(
@@ -58,11 +59,13 @@ class MainDialogRegistry:
 
         templates returns the composition's current template catalog; it is
         read each time Inspect opens, so a reloaded catalog reaches the next
-        Inspect. dialog_presenter shows Inspect's questions and failures.
+        Inspect. dialog_presenter shows Inspect's questions and failures and
+        ARB's failure notifications.
         alias_presets is the composition's named alias catalog every Inspect
         offers through Load preset; None means no catalog.
         """
         self._ctrl = ctrl
+        self._writable = True
         self._parent = parent
         self._dialog_refs = dialog_refs
         self._templates = templates
@@ -90,10 +93,12 @@ class MainDialogRegistry:
         if name is DialogName.SETUP:
             from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 
-            return SetupDialog(
+            dialog = SetupDialog(
                 self._ctrl.setup_control,
                 parent=self._parent,
             )
+            dialog.set_read_only(read_only=not writable)
+            return dialog
         if name is DialogName.DEVICE:
             from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 
@@ -126,9 +131,9 @@ class MainDialogRegistry:
                 templates=self._templates(),
                 arb_waveforms=self._ctrl.arb_waveforms,
                 # The named entry keeps the ARB dialog visible to screenshots.
-                # ARB opened from this Inspect follows the same writability.
+                # Read current host writability, not the opening-time snapshot.
                 open_arb_waveforms=lambda: self.open(
-                    DialogName.ARB_WAVEFORM, writable=writable
+                    DialogName.ARB_WAVEFORM, writable=self._writable
                 ),
                 dialog_presenter=self._dialog_presenter,
                 alias_presets=self._alias_presets,
@@ -142,25 +147,43 @@ class MainDialogRegistry:
             dialog = ArbWaveformDialog(
                 self._ctrl.arb_waveforms,
                 parent=self._parent,
+                dialog_presenter=self._dialog_presenter,
             )
             dialog.set_read_only(read_only=not writable)
             return dialog
         raise ValueError(f"Unknown DialogName: {name!r}")  # pragma: no cover
 
+    def set_writable(self, *, writable: bool) -> None:
+        """Push host edit availability to all retained session editors."""
+        from zcu_tools.gui.session.ui.arb_waveform_dialog import ArbWaveformDialog
+        from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
+        from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
+        from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
+
+        self._writable = writable
+        for name in tuple(self._dialog_names):
+            dialog = self._dialog(name)
+            if isinstance(
+                dialog, (SetupDialog, DeviceDialog, InspectDialog, ArbWaveformDialog)
+            ):
+                dialog.set_read_only(read_only=not writable)
+
     def open(self, name: DialogName, *, writable: bool = True) -> None:
-        """Open with the existing modal policy, or raise a retained instance."""
+        """Show a non-modal named window, or focus its retained instance."""
+        self.set_writable(writable=writable)
         existing = self._dialog(name)
         if existing is not None:
             try:
                 existing.raise_()
                 existing.activateWindow()
                 if not existing.isVisible():
-                    existing.open()
+                    existing.show()
                 return
             except RuntimeError:
                 self._forget(name)
 
         dialog = self._build_dialog(name, writable=writable)
+        dialog.setWindowModality(Qt.WindowModality.NonModal)
         self._dialog_names[name] = None
         if name in _PERSISTENT_DIALOGS:
             self._dialog_refs.retain_named(
@@ -168,12 +191,13 @@ class MainDialogRegistry:
                 dialog,
                 on_released=lambda n=name: self._dialog_names.pop(n, None),
             )
-            dialog.open()
+            dialog.show()
         else:
             self._dialog_refs.open_named(
                 name,
                 dialog,
                 on_released=lambda n=name: self._dialog_names.pop(n, None),
+                modal=False,
             )
 
     def close(self, name: DialogName) -> None:

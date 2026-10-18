@@ -7,8 +7,13 @@ import numpy as np
 import pytest
 from scipy.linalg import expm
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource
-from zcu_tools.simulate.evolution.kernel import ApplyContext, SegmentTable
+from zcu_tools.simulate.evolution.kernel import (
+    ApplyContext,
+    KernelContext,
+    SegmentTable,
+)
 from zcu_tools.simulate.evolution.kernels.dyson import DysonKernel
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from ..contract.kernel_suite import (
     KernelCase,
@@ -58,10 +63,21 @@ class TestDysonKernel(KernelContract):
 def test_preparation_shared_over_all_sweep_axes(kernel_case: KernelCase) -> None:
     case = kernel_case
     rows = np.arange(4, dtype=np.int64)
-    keys = case.kernel.prepare_keys(case.table, rows)
+    keys = case.kernel.prepare_keys(
+        case.table, rows, KernelContext(case.source, case.budget, WorkPlan())
+    )
     assert len(np.unique(keys)) == 1
     changed = replace(case.table, level=np.array([[0], [1], [0], [1]]))
-    assert len(np.unique(case.kernel.prepare_keys(changed, rows))) == 2
+    assert (
+        len(
+            np.unique(
+                case.kernel.prepare_keys(
+                    changed, rows, KernelContext(case.source, case.budget, WorkPlan())
+                )
+            )
+        )
+        == 2
+    )
     assert np.isfinite(case.kernel.cost(case.table, rows)).all()
     assert (case.kernel.cost(case.table, rows) >= 0).all()
 
@@ -72,7 +88,9 @@ def test_guard_rejects_only_local_invalidity(kernel_case: KernelCase) -> None:
     strong = replace(
         case.table, tone_amplitude=np.full((4, 1), 0.3), duration_ns=np.full(4, 20.0)
     )
-    assert not case.kernel.guard(strong, rows, case.source, case.budget).any()
+    assert not case.kernel.guard(
+        strong, rows, KernelContext(case.source, case.budget, WorkPlan())
+    ).any()
     shaped = replace(
         case.table,
         envelopes=(
@@ -81,7 +99,9 @@ def test_guard_rejects_only_local_invalidity(kernel_case: KernelCase) -> None:
             ),
         ),
     )
-    assert not case.kernel.guard(shaped, rows, case.source, case.budget).any()
+    assert not case.kernel.guard(
+        shaped, rows, KernelContext(case.source, case.budget, WorkPlan())
+    ).any()
 
 
 def test_full_carrier_and_tight_budget(kernel_case: KernelCase) -> None:
@@ -105,9 +125,15 @@ def test_full_carrier_and_tight_budget(kernel_case: KernelCase) -> None:
     case = replace(case, table=table, source=source, budget=1e-11)
     rows = np.arange(4, dtype=np.int64)
     keys, first, inverse = np.unique(
-        case.kernel.prepare_keys(table, rows), return_index=True, return_inverse=True
+        case.kernel.prepare_keys(
+            table, rows, KernelContext(source, case.budget, WorkPlan())
+        ),
+        return_index=True,
+        return_inverse=True,
     )
-    prepared = case.kernel.prepare(keys, table, rows[first], source, case.budget)
+    prepared = case.kernel.prepare(
+        keys, table, rows[first], KernelContext(source, case.budget, WorkPlan())
+    )
     before = prepared.nbytes
     actual = case.states.copy()
     case.kernel.apply(prepared, inverse, table, rows, actual, ApplyContext(case.budget))
@@ -134,9 +160,15 @@ def test_batch_of_distinct_coherent_inputs(kernel_case: KernelCase) -> None:
     case = replace(case, table=table, states=states, budget=1e-9)
     rows = np.arange(4, dtype=np.int64)
     keys, first, inverse = np.unique(
-        case.kernel.prepare_keys(table, rows), return_index=True, return_inverse=True
+        case.kernel.prepare_keys(
+            table, rows, KernelContext(case.source, case.budget, WorkPlan())
+        ),
+        return_index=True,
+        return_inverse=True,
     )
-    prepared = case.kernel.prepare(keys, table, rows[first], case.source, case.budget)
+    prepared = case.kernel.prepare(
+        keys, table, rows[first], KernelContext(case.source, case.budget, WorkPlan())
+    )
     actual = states.copy()
     case.kernel.apply(prepared, inverse, table, rows, actual, ApplyContext(case.budget))
     expected = np.stack(
@@ -180,9 +212,15 @@ def test_resonant_repeated_and_nearby_modes(
     case = replace(case, source=source, table=table, budget=1e-10)
     rows = np.arange(4, dtype=np.int64)
     keys, first, inverse = np.unique(
-        case.kernel.prepare_keys(table, rows), return_index=True, return_inverse=True
+        case.kernel.prepare_keys(
+            table, rows, KernelContext(source, case.budget, WorkPlan())
+        ),
+        return_index=True,
+        return_inverse=True,
     )
-    prepared = case.kernel.prepare(keys, table, rows[first], source, case.budget)
+    prepared = case.kernel.prepare(
+        keys, table, rows[first], KernelContext(source, case.budget, WorkPlan())
+    )
     for distinct in (False, True):
         states = case.states.copy()
         if distinct:
@@ -246,7 +284,8 @@ def test_guard_retains_first_order_population_from_coherence(
     # vanishes. The linear term is +/-2*pi*g*t and crosses .02 only in row 1.
     rows = np.arange(4, dtype=np.int64)
     np.testing.assert_array_equal(
-        case.kernel.guard(table, rows, source, case.budget), [True, False, False, True]
+        case.kernel.guard(table, rows, KernelContext(source, case.budget, WorkPlan())),
+        [True, False, False, True],
     )
     case = replace(case, source=source, table=table)
     exact = np.diag(reference(case, 1, coherent) - coherent)
@@ -297,7 +336,10 @@ def test_guard_distinguishes_diagonal_mixture_from_same_population_coherence(
             dc_initial, lambda level: model if level == (0,) else target
         )
         np.testing.assert_array_equal(
-            case.kernel.guard(table, rows, source, case.budget), np.full(4, expected)
+            case.kernel.guard(
+                table, rows, KernelContext(source, case.budget, WorkPlan())
+            ),
+            np.full(4, expected),
         )
 
 
@@ -352,11 +394,15 @@ def test_population_bound_is_conservative_for_ground_mixed_and_coherent_inputs(
         np.diag(weights).astype(complex),
     ):
         source = ModelSource(initial, lambda level: replace(model, level=level))
-        accepted = kernel.guard(table, rows, source, budget)
+        accepted = kernel.guard(table, rows, KernelContext(source, budget, WorkPlan()))
         keys, first, inverse = np.unique(
-            kernel.prepare_keys(table, rows), return_index=True, return_inverse=True
+            kernel.prepare_keys(table, rows, KernelContext(source, budget, WorkPlan())),
+            return_index=True,
+            return_inverse=True,
         )
-        prepared = kernel.prepare(keys, table, rows[first], source, budget)
+        prepared = kernel.prepare(
+            keys, table, rows[first], KernelContext(source, budget, WorkPlan())
+        )
         actual = np.repeat(initial[None], n, axis=0)
         kernel.apply(prepared, inverse, table, rows, actual, ApplyContext(budget))
         free = np.stack(
@@ -406,7 +452,8 @@ def test_population_guard_reserves_pruning_margin(kernel_case: KernelCase) -> No
     )
     rows = np.arange(2, dtype=np.int64)
     np.testing.assert_array_equal(
-        case.kernel.guard(table, rows, source, case.budget), [True, False]
+        case.kernel.guard(table, rows, KernelContext(source, case.budget, WorkPlan())),
+        [True, False],
     )
 
 
@@ -443,7 +490,8 @@ def test_guard_bounds_unknown_coherence_phase_and_prior_history(size: int) -> No
     # Near-ground DC populations give negligible transfer on this edge.
     # Only the first row is allowed to rely on them.
     np.testing.assert_array_equal(
-        kernel.guard(table, rows, source, 1e-3), [True, False]
+        kernel.guard(table, rows, KernelContext(source, 0.001, WorkPlan())),
+        [True, False],
     )
     vector = np.zeros(size, dtype=complex)
     vector[1:3] = 1 / np.sqrt(2)
@@ -451,7 +499,9 @@ def test_guard_bounds_unknown_coherence_phase_and_prior_history(size: int) -> No
     coherent_source = ModelSource(stationary, lambda level: replace(model, level=level))
     # The actual real coherence commutes with X. B2 must nevertheless account
     # for every coherence phase consistent with these populations.
-    assert not kernel.guard(table, rows[:1], coherent_source, 1e-3)[0]
+    assert not kernel.guard(
+        table, rows[:1], KernelContext(coherent_source, 0.001, WorkPlan())
+    )[0]
 
 
 @pytest.mark.parametrize("budget", [1e-3, 1.0])
@@ -483,9 +533,13 @@ def test_apply_reports_population_transfer_without_correcting_output(
     )
     rows = np.array([2, 0, 3, 1], dtype=np.int64)
     keys, first, inverse = np.unique(
-        case.kernel.prepare_keys(table, rows), return_index=True, return_inverse=True
+        case.kernel.prepare_keys(table, rows, KernelContext(src, budget, WorkPlan())),
+        return_index=True,
+        return_inverse=True,
     )
-    prepared = case.kernel.prepare(keys, table, rows[first], src, budget)
+    prepared = case.kernel.prepare(
+        keys, table, rows[first], KernelContext(src, budget, WorkPlan())
+    )
     actual = np.repeat(coherent[None], 4, axis=0)
     mask = case.kernel.apply(
         prepared, inverse, table, rows, actual, ApplyContext(budget)
@@ -528,9 +582,15 @@ def test_apply_population_check_subtracts_free_decay(kernel_case: KernelCase) ->
         case.table, tone_amplitude=np.zeros((4, 1)), duration_ns=np.full(4, 20.0)
     )
     keys, first, inverse = np.unique(
-        case.kernel.prepare_keys(table, rows), return_index=True, return_inverse=True
+        case.kernel.prepare_keys(
+            table, rows, KernelContext(case.source, case.budget, WorkPlan())
+        ),
+        return_index=True,
+        return_inverse=True,
     )
-    prepared = case.kernel.prepare(keys, table, rows[first], case.source, case.budget)
+    prepared = case.kernel.prepare(
+        keys, table, rows[first], KernelContext(case.source, case.budget, WorkPlan())
+    )
     actual = case.states.copy()
     mask = case.kernel.apply(
         prepared, inverse, table, rows, actual, ApplyContext(case.budget)
@@ -570,11 +630,22 @@ def test_input_bound_paths_match_reference_at_modal_boundaries(
     )
     case = replace(case, source=source, table=table, budget=1e-9)
     rows = np.arange(4, dtype=np.int64)
-    keys = np.unique(case.kernel.prepare_keys(table, rows))
-    prepared = case.kernel.prepare(keys, table, rows[:1], source, case.budget)
+    keys = np.unique(
+        case.kernel.prepare_keys(
+            table, rows, KernelContext(source, case.budget, WorkPlan())
+        )
+    )
+    prepared = case.kernel.prepare(
+        keys, table, rows[:1], KernelContext(source, case.budget, WorkPlan())
+    )
     for initial in (case.states[0], source.initial_density):
         bound = case.kernel.bind_input(
-            prepared, 0, table, rows[::-1], initial, case.budget
+            prepared,
+            0,
+            table,
+            rows[::-1],
+            initial,
+            KernelContext(source, case.budget, WorkPlan()),
         )
         assert bound is not None
         actual = np.repeat(initial[None], 4, axis=0)

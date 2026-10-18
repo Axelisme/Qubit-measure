@@ -151,7 +151,8 @@ def _readout_contents(
     for event, rank in zip(slots, ranks, strict=True):
         for col, name in enumerate(fields):
             values[rows, rank, col] += np.where(event.active, getattr(event, name), 0)
-        # ReadoutPulse's phase is at pulse start, with a negative local carrier.
+        # Retain the program's common-origin phase until the model reference
+        # frequency is known; ADC pulse-local conversion happens below.
         values[rows, rank, 3] -= np.where(
             event.active, 360 * event.frequency_mhz * event.phase_reference_us, 0
         )
@@ -224,6 +225,31 @@ def _readout_pulse(
     )
 
 
+def _local_readout_pulses(
+    contents: tuple[tuple[ReadoutPulse, ...], ...], reference_frequency_ghz: float
+) -> tuple[tuple[ReadoutPulse, ...], ...]:
+    """Convert common-origin phases to ADC's negative pulse-local carrier.
+
+    Demodulation keeps absolute time, so the incident field needs the phase
+    accumulated from zero to pulse start in the model's rotating frame.
+    Leave the reference carrier untouched to retain single-tone output bits.
+    """
+    local_contents = []
+    for pulses in contents:
+        local_pulses = []
+        for pulse in pulses:
+            detuning_ghz = pulse.frequency_ghz - reference_frequency_ghz
+            if detuning_ghz != 0:
+                pulse = replace(
+                    pulse,
+                    phase_rad=pulse.phase_rad
+                    - 2 * np.pi * detuning_ghz * pulse.start_ns,
+                )
+            local_pulses.append(pulse)
+        local_contents.append(tuple(local_pulses))
+    return tuple(local_contents)
+
+
 def _envelope_value(envelope: EnvelopeSpec, local_ns: float) -> complex:
     return complex(envelope.values(np.array(local_ns)))
 
@@ -244,7 +270,9 @@ def plan_template(
     drive-line controls do not affect the DC readout model. Constant complex
     readout envelopes fold into amplitude, enabling the exact field solution.
     readout supplies detached author capabilities; None adapts current settings.
-    Mux permits simultaneous coherent tones with independent ADC grids.
+    Mux permits simultaneous coherent tones with independent ADC grids. Program
+    common-origin carrier phases convert to pulse-local phases in the first
+    carrier's model reference frame; ADC demodulation remains absolute-time.
     Missing routes, invalid DC values or invalid readout pulse blocks raise
     ValueError. Loops scale with slots, candidates and unique readout contents,
     not with points or reps. No old per-point planner is called.
@@ -271,6 +299,7 @@ def plan_template(
         joint, drive_sources(settings, joint), resonators=resonator_pair
     )
     physical = readout_model(joint, resonator_pair)
+    reference_frequency_ghz = contents[0][1][0][0].frequency_ghz
     readouts = []
     for window, (_, pulses, grids, inverse) in zip(
         template.readouts, contents, strict=True
@@ -287,7 +316,7 @@ def plan_template(
         model = replace(
             physical,
             receiver=receiver,
-            reference_frequency_ghz=contents[0][1][0][0].frequency_ghz,
+            reference_frequency_ghz=reference_frequency_ghz,
             mismatch_phase_rad=np.array(
                 [
                     r.mismatch_phase_rad
@@ -299,7 +328,15 @@ def plan_template(
             ),
         )
         readouts.append(
-            FTFReadoutPlan(window.channel, ReadoutBatch(model, pulses, grids, inverse))
+            FTFReadoutPlan(
+                window.channel,
+                ReadoutBatch(
+                    model,
+                    _local_readout_pulses(pulses, reference_frequency_ghz),
+                    grids,
+                    inverse,
+                ),
+            )
         )
     return FTFTemplatePlan(
         source, _timeline_batch(settings, joint, template, end_ns), tuple(readouts)

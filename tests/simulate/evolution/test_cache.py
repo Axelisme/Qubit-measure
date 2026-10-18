@@ -1,9 +1,11 @@
-"""Whole-payload LRU admission and evolve-local workspace accounting."""
+"""Whole-payload LRU admission."""
 
 from dataclasses import dataclass
 
 import pytest
 from zcu_tools.simulate.evolution.cache import PrepareCache, PreparedPayload
+
+from ._engine import Payload
 
 SPACE = ("synthetic", "source", 1e-4)
 OTHER_SPACE = ("synthetic", "other-source", 1e-4)
@@ -35,7 +37,6 @@ def payload(counts: AllocationCounts, size: int, *keys: bytes) -> PreparedPayloa
 
 def test_repeated_admission_and_oversize_preserve_resident_budget():
     cache = PrepareCache(10)
-    assert cache.live_bytes == 0
     counts = AllocationCounts()
     shared = payload(counts, 10, b"a", b"b")
     cache.add(SPACE, shared)
@@ -86,7 +87,6 @@ def test_invalid_byte_charges_preserve_resident_ownership(value):
         cache.add(SPACE, invalid)
     assert cache.find(SPACE, {b"resident"}) == before
     assert cache.bytes == 10
-    assert cache.live_bytes == 0
 
 
 def test_invalid_charges_and_conflicting_allocation_metadata_fail_before_eviction():
@@ -105,25 +105,17 @@ def test_invalid_charges_and_conflicting_allocation_metadata_fail_before_evictio
     assert cache.bytes == 10
 
 
-def test_evolve_workspace_charge_tracks_growth_and_releases_on_failure():
-    cache = PrepareCache(10)
-    counts = AllocationCounts()
-    workspace = CountedPrepared(counts, 0)
-    resident = payload(counts, 10, b"resident")
-    cache.add(SPACE, resident)
-
-    def cancelled_evolve():
-        with cache.track_workspace(workspace):
-            assert cache.live_bytes == 0
-            workspace.nbytes = 120
-            assert cache.live_bytes == 120
-            # Evolve-local arrays are live preparation, never persistent hits.
-            assert cache.bytes == 10
-            assert cache.find(SPACE, {b"resident"}) == [resident]
-            cache.clear()
-            assert cache.live_bytes == 120
-            raise RuntimeError("cancelled")
-
-    with pytest.raises(RuntimeError, match="cancelled"):
-        cancelled_evolve()
-    assert cache.live_bytes == 0
+def test_cache_admits_singleton_whole_allocation_and_preserves_active_reference():
+    cache = PrepareCache(32)
+    namespace = ("synthetic", "source", 0.001)
+    singleton = PreparedPayload(Payload(2), (b"one",))
+    cache.add(namespace, singleton)
+    active = cache.find(namespace, {b"one"})
+    assert active == [singleton]
+    assert cache.bytes == 32
+    cache.add(namespace, PreparedPayload(Payload(3), (b"oversize",)))
+    assert cache.bytes == 32
+    assert cache.find(namespace, {b"one"}) == [singleton]
+    cache.add(namespace, PreparedPayload(Payload(1), (b"replacement",)))
+    assert cache.find(namespace, {b"one"}) == []
+    assert active[0].prepared.nbytes == 32

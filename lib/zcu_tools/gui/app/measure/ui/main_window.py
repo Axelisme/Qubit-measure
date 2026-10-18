@@ -136,7 +136,7 @@ class MainWindow(QMainWindow):
         self._tab_actions: TabActions = _MainWindowTabActions(self)
         self._dialog_refs = DialogRefStore()
         self._dialog_presenter = dialog_presenter or QtDialogPresenter(
-            self._dialog_refs
+            self._dialog_refs, non_modal_notifications=True
         )
         self._dialog_registry = MainDialogRegistry(
             self._ctrl,
@@ -249,6 +249,7 @@ class MainWindow(QMainWindow):
         """Project Local write availability to this window and all mounted views."""
         self._writable = writable
         self._toolbar.set_writable(writable=writable)
+        self._dialog_registry.set_writable(writable=writable)
         self._tabs.setTabsClosable(writable)
         self._tabs.setMovable(writable)
         for tab in self._tab_widgets.values():
@@ -641,7 +642,7 @@ class MainWindow(QMainWindow):
 
     def notify_diagnostic(self, severity: str, title: str, message: str) -> None:
         """DiagnosticSink impl (ADR-0068): render a Controller diagnostic the Qt
-        way — error pops a modal dialog, info goes to the status bar."""
+        way — error shows a non-modal report, info goes to the status bar."""
         if severity == "error":
             self.show_error_dialog(title or "Error", message)
         else:
@@ -1013,12 +1014,17 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def open_dialog(self, name: DialogName) -> None:
-        """Open the named modal dialog, or raise it if already open.
+        """Open the named non-modal dialog, or raise it if already open.
 
         Idempotent: a second ``open_dialog(name)`` while the dialog exists
         raises it if visible, or shows a hidden persistent instance.
         """
-        if not self._writable and name not in (DialogName.INSPECT, DialogName.DEVICE):
+        if not self._writable and name not in (
+            DialogName.SETUP,
+            DialogName.INSPECT,
+            DialogName.DEVICE,
+            DialogName.ARB_WAVEFORM,
+        ):
             return
         self._dialog_registry.open(name, writable=self._writable)
 
