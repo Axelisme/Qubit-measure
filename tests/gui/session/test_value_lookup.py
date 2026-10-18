@@ -34,6 +34,18 @@ def test_name_from_type_rejects_unsupported_type() -> None:
         name_from_type(bytes)  # pyright: ignore[reportArgumentType]
 
 
+def test_value_key_rejects_type_that_only_compares_equal_to_scalar() -> None:
+    class IntEqualMeta(type):
+        def __eq__(cls, other: object) -> bool:
+            return other is int
+
+    class NotScalar(metaclass=IntEqualMeta):
+        pass
+
+    with pytest.raises(ValueTypeError, match="only int, float, str, and bool"):
+        ValueKey("source.invalid", NotScalar)
+
+
 def test_register_get_and_describe_value_source() -> None:
     registry = ValueRegistry()
 
