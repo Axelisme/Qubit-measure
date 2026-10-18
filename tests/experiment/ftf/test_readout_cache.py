@@ -2,7 +2,6 @@
 
 from dataclasses import replace
 
-import numpy as np
 import pytest
 import scipy.linalg
 from zcu_tools.device import DeviceManager
@@ -45,6 +44,36 @@ def test_acquires_share_solver_and_exact_sums_but_not_sampling(monkeypatch):
             == second.channels[0].conditional_sums.tobytes()
         )
         assert first.channels[0].sums.tobytes() != second.channels[0].sums.tobytes()
+    finally:
+        source.close()
+
+
+def test_receiver_configuration_restored_to_exact_content_hits_old_solver():
+    source = FTFSource(settings(), DeviceManager())
+    try:
+        first = expect_statistics(
+            source.open_acquire(request()).sample_round(snapshot(), 0)
+        )
+        assert hasattr(source, "readout_cache"), (
+            "source must retain exact receiver products"
+        )
+        original = source.readout
+        source.readout = replace(
+            original,
+            receivers=tuple(replace(r, gain=2 * r.gain) for r in original.receivers),
+        )
+        source.open_acquire(request()).sample_round(snapshot(), 0)
+        assert source.readout_cache.builds == 2
+        source.readout = original
+        restored = expect_statistics(
+            source.open_acquire(request()).sample_round(snapshot(), 0)
+        )
+        assert source.readout_cache.builds == 2
+        assert source.readout_cache.hits == 1
+        assert (
+            first.channels[0].conditional_sums.tobytes()
+            == restored.channels[0].conditional_sums.tobytes()
+        )
     finally:
         source.close()
 
