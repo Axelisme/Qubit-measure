@@ -5,6 +5,7 @@ from threading import Event
 
 import numpy as np
 from zcu_tools.simulate.evolution import Engine, EnvelopeSpec, FluxSchedule
+from zcu_tools.simulate.evolution.kernel import ApplyContext
 from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Kernel
 from zcu_tools.simulate.evolution.kernels.t4 import T4
 
@@ -17,7 +18,8 @@ class ObservedDOP853(DOP853Kernel):
     def __init__(self):
         self.decisions = []
 
-    def apply(self, prepared, key_index, table, rows, states, budget, plan=None):
+    def apply(self, prepared, key_index, table, rows, states, context: ApplyContext):
+        plan = context.plan
         assert plan is not None, "dispatch must supply timeline-owned DOP853 decisions"
         self.decisions.extend(
             (
@@ -28,7 +30,7 @@ class ObservedDOP853(DOP853Kernel):
             )
             for row in rows
         )
-        return super().apply(prepared, key_index, table, rows, states, budget, plan)
+        return super().apply(prepared, key_index, table, rows, states, context)
 
 
 def test_mixed_frames_follow_timeline_not_workers_or_chunks():
@@ -36,25 +38,25 @@ def test_mixed_frames_follow_timeline_not_workers_or_chunks():
     shaped = EnvelopeSpec(
         "sampled",
         np.array([0.2 + 0.1j, 1.0, 0.4 - 0.2j]),
-        np.array([0.0, 0.4, 0.8]),
+        np.array([0.0, 0.375, 0.75]),
     )
     # The first pair touches across a flux-level boundary. The next pulse is
     # isolated, then the final two overlapping tracks require the lab frame.
     # Shared and timeline-local level keys split the first pair's preparation.
     flux = FluxSchedule(
         np.arange(0, 2 * n + 1, 2),
-        np.tile([0.0, 0.8], n),
+        np.tile([0.0, 0.75], n),
         np.array([[0], [1], [0], [1], [0], [2], [0], [3]]),
     )
     timeline = replace(
         batch(n, duration=4.0),
         flux=flux,
         tracks=(
-            track(n, shaped, duration=0.8),
-            track(n, shaped, start=0.8, duration=0.8),
-            track(n, shaped, start=2.0, duration=0.8),
-            track(n, shaped, start=3.2, duration=0.8),
-            track(n, shaped, start=3.2, duration=0.8),
+            track(n, shaped, duration=0.75),
+            track(n, shaped, start=0.75, duration=0.75),
+            track(n, shaped, start=2.0, duration=0.75),
+            track(n, shaped, start=3.25, duration=0.75),
+            track(n, shaped, start=3.25, duration=0.75),
         ),
     )
     outputs = []
@@ -75,9 +77,9 @@ def test_mixed_frames_follow_timeline_not_workers_or_chunks():
             )
             assert [item[:2] for item in decisions] == [
                 (0.0, "lab"),
-                (0.8, "lab"),
+                (0.75, "lab"),
                 (2.0, "interaction"),
-                (3.2, "lab"),
+                (3.25, "lab"),
             ]
             chain = [item[2] for item in decisions]
             assert chain[0] == chain[1] and chain[0] >= 0
