@@ -5,7 +5,7 @@ from typing import Annotated
 
 import pytest
 from pydantic import Field, JsonValue, create_model
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, Hidden, Locked, Slot, Template
 from zcu_tools.gui import form as core
 from zcu_tools.gui import form_adapter as adapter
 from zcu_tools.gui.app.measure.services.form_contracts import (
@@ -90,6 +90,20 @@ def test_native_field_meta_exposes_readonly_names_and_picker_labels():
     assert [(item.index, item.name) for item in target.elements] == [(0, "A"), (1, "B")]
     name = state.describe(("tones", 0, "name"), env).target
     assert name is not None and name.readonly
+
+
+@pytest.mark.parametrize("node", [
+    Locked(1), Hidden(),
+    Slot("Q.pulses.drive", lock={"ch": 0}), Template("pulse", lock={"ch": 0}),
+])
+def test_native_position_seeds_reject_declaration_changes_at_typed_position(node):
+    from tests.gui.form_adapter._indexed_models import NativeGroup, indexed_tree
+
+    tree = indexed_tree()
+    tree["tones"][1]["drive"] = node
+    with pytest.raises(ValueError, match="position.*declaration") as caught:
+        adapter.Form(NativeGroup, tree)
+    assert "('tones', 1, 'drive')" in str(caught.value)
 
 
 def owner_model(*, duplicate: bool = False) -> type[core.FormModel]:
