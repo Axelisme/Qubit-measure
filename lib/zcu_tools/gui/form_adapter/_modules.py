@@ -777,6 +777,15 @@ class ModuleField:
             "module": supported_input(selected, complete_input(selected, module)),
         }
 
+    def native_input(self, data: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+        """Project a native module default to detached editable inline input.
+
+        data is the JSON dump of this field's native family. Unsupported fields
+        are omitted just as for captured Specs; child values receive generated
+        wrappers. No sources, defaults, converters or materialization run.
+        """
+        return {"kind": "inline", "module": self._project(data)}
+
     def _project(self, module: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
         return supported_input(
             selected_model(union_type(self.editable), module), module

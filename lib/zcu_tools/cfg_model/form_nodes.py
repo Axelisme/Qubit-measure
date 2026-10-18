@@ -94,4 +94,5 @@ type FormNode = (
     | Locked
     | Hidden
     | Mapping[str, FormNode]
+    | list[FormNode]
 )

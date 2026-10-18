@@ -51,6 +51,35 @@ Module、seed、Display 與 annotation 翻譯放在私有模組 `_modules.py`、
 
 宣告者另外提供 `Display(element_label=name_field)` 與名稱欄位的 `Display(readonly=True)`。這些是呈現提示，不執行固定政策。名稱若不接受 expression，可用既有 `InputPolicy(expression=False)` 明訂 literal input。
 
+### Native model lists
+
+`Form` 遞迴生成 `list[ConfigBase]` 的元素 model。起始樹的 list 按位置提供初值，scalar list 也可直接提供初值。省略 list tree 時，生成器把 native defaults 中的 module 與 sweep 投影成可編輯輸入。`to_cfg` 遞迴還原 native model list，不改 participants 順序。
+
+所有位置共用元素宣告。位置 tree 中的 `Locked`、`Hidden`、非空 `Slot.lock` 或 `Template.lock` 在建立 Form 時拒絕，錯誤指出 typed 位置。共用限制放在元素型別的宣告，位置 tree 只給初值。Native 欄位用 `FieldMeta(readonly=True)` 與 `FieldMeta(element_label="name")` 提供呈現提示，不需 import GUI metadata。
+
+```python
+from typing import Annotated
+from zcu_tools.cfg_model import ConfigBase, FieldMeta, PulseCfg, Range, Slot
+from zcu_tools.gui.form_adapter import FixedElements, Form
+from zcu_tools.program.v2.sweep import SweepCfg
+
+class Tone(ConfigBase):
+    name: Annotated[str, FieldMeta(readonly=True)]
+    drive: PulseCfg
+    sweep: SweepCfg
+
+class Group(ConfigBase):
+    tones: Annotated[list[Tone], FieldMeta(element_label="name")]
+    participants: list[str]
+
+form = Form(Group, {
+    "tones": [{"name": "Q1", "drive": Slot("Q1.pulses.drive"),
+               "sweep": Range.between(4000, 4100, expts=3)}],
+    "participants": ["Q1"],
+}, fixed_elements=(FixedElements(("tones",), "name", ("participants",)),))
+# form.default_input(env) uses the caller's fixed capture containing the slot.
+```
+
 ## Sweep 表示
 
 SweepCfg 生成 Range／Center × Expts／Step 四個 tagged branches，各自只保存 active 座標與 n 或 step。Fresh input 選 Range + Expts。Range 的 None 端點與求值失敗的 Expr 初始端點保持未填且必填，缺少 input key 也不補 0／1。`gui.form_adapter.sweep` 擁有四種數值 model 與換算。指令掛在 sweep row，以共用 Form 的 readonly snapshot、局部 evaluate 與原子安裝執行，不由葉欄位修改 parent。Step 的有效端點與 floor count 由這些 model 的驗證產生，`to_cfg` 使用這份結果與原 step，不另算步長或截短。既有 SweepCfg 仍驗證單點與點數一致性。Memento 保存 FormInput，因此模式與新 expression 不依賴 Qt view，read／preview／result 不暗改原稿。

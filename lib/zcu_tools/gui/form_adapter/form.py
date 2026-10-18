@@ -5,7 +5,7 @@ from copy import deepcopy
 from dataclasses import replace
 from functools import partial
 from types import MappingProxyType, new_class
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args, get_origin
 
 from pydantic import BaseModel, Field, JsonValue, ValidationError
 from pydantic.fields import FieldInfo
@@ -130,6 +130,8 @@ def _section_type(annotation: object) -> type[BaseModel] | None:
 
 
 def _seed_json(seed: FormNode) -> JsonValue:
+    if isinstance(seed, list):
+        return [_seed_json(item) for item in seed]
     if isinstance(seed, Expr):
         return {"expr": seed.text}
     if isinstance(seed, complex):
@@ -137,6 +139,23 @@ def _seed_json(seed: FormNode) -> JsonValue:
     if seed is None or isinstance(seed, (str, int, float, bool)):
         return seed
     raise TypeError(f"Not a scalar form seed: {seed!r}")
+
+
+def _check_position_seed(node: FormNode, path: FormWritePath) -> None:
+    """Position trees supply values, never alter the shared element declaration."""
+    if isinstance(node, (Locked, Hidden)) or (
+        isinstance(node, (Slot, Template)) and node.lock
+    ):
+        raise ValueError(
+            f"{path!r}: position seed cannot change the shared element declaration "
+            f"with {type(node).__name__}; declare shared constraints on the element type"
+        )
+    if isinstance(node, Mapping):
+        for name, child in node.items():
+            _check_position_seed(child, (*path, name))
+    elif isinstance(node, list):
+        for index, child in enumerate(node):
+            _check_position_seed(child, (*path, index))
 
 
 def _alias_name(node: AliasName, env: FormEnv) -> str | None:
@@ -230,6 +249,8 @@ class _Section:
         self.tree = dict(tree)
         self.path = path
         self.children: dict[str, _Section] = {}
+        self.lists: dict[str, _Section] = {}
+        self.element_seeds: dict[str, tuple[_Section, ...]] = {}
         self.modules: dict[str, ModuleField] = {}
         namespace: dict[str, object] = {"__module__": __name__}
         annotations: dict[str, object] = {}
@@ -341,6 +362,26 @@ class _Section:
             )
         if SweepCfg in _members(info.annotation):
             return _sweep_model(node, info)
+        if get_origin(info.annotation) is list:
+            element_type = get_args(info.annotation)[0]
+            if isinstance(element_type, type) and issubclass(element_type, ConfigBase):
+                child = _Section(element_type, {}, (*self.path, name))
+                self.lists[name] = child
+                if node is not None:
+                    if not isinstance(node, list) or any(
+                        not isinstance(item, Mapping) for item in node
+                    ):
+                        raise TypeError(
+                            f"{(*self.path, name)!r}: expected a list of element trees"
+                        )
+                    for index, item in enumerate(node):
+                        _check_position_seed(item, (*self.path, name, index))
+                    self.element_seeds[name] = tuple(
+                        _Section(element_type, item, (*self.path, name))
+                        for item in node
+                        if isinstance(item, Mapping)
+                    )
+                return list[child.model]
         child_core = _section_type(info.annotation)
         if child_core is None:
             return info.annotation
@@ -361,12 +402,28 @@ class _Section:
             if name in self.model.model_fields and SweepCfg in _members(info.annotation)
         }
 
+    def _list_defaults(self, data: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+        result: dict[str, JsonValue] = {}
+        for name, child in self.lists.items():
+            native = data.get(name)
+            if isinstance(native, list):
+                result[name] = [
+                    child.native_data(item) if isinstance(item, dict) else item
+                    for item in native
+                ]
+        return result
+
     def default_data(self, env: FormEnv) -> dict[str, JsonValue]:
         data = {**self._sweep_defaults(), **static_defaults(self.model)}
+        data.update(self._list_defaults(data))
         for name, node in self.tree.items():
             if isinstance(node, Hidden):
                 continue
-            if name in self.children:
+            if name in self.element_seeds:
+                data[name] = [
+                    child.default_data(env) for child in self.element_seeds[name]
+                ]
+            elif name in self.children:
                 data[name] = self.children[name].default_data(env)
             elif name in self.modules:
                 data.pop(name, None)
@@ -394,10 +451,46 @@ class _Section:
             for name in self.modules
             if self.core.model_fields[name].default is None
         } | data
-        for name, child in self.children.items():
-            if name not in data and self.core.model_fields[name].is_required():
-                data[name] = child.default_data(env)
+        data.update(self._required_children(data, env))
         return data
+
+    def _required_children(
+        self, data: Mapping[str, JsonValue], env: FormEnv
+    ) -> dict[str, JsonValue]:
+        return {
+            name: child.default_data(env)
+            for name, child in self.children.items()
+            if name not in data and self.core.model_fields[name].is_required()
+        }
+
+    def native_data(self, data: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+        """Project a native element default recursively, without reading sources."""
+        result = dict(data)
+        for name, field in self.modules.items():
+            item = result.get(name)
+            if isinstance(item, dict):
+                result[name] = field.native_input(item)
+        for name, child in self.children.items():
+            item = result.get(name)
+            if isinstance(item, dict):
+                result[name] = child.native_data(item)
+        for name, child in self.lists.items():
+            items = result.get(name)
+            if isinstance(items, list):
+                result[name] = [
+                    child.native_data(item) if isinstance(item, dict) else item
+                    for item in items
+                ]
+        for name, info in self.core.model_fields.items():
+            item = result.get(name)
+            if SweepCfg in _members(info.annotation) and isinstance(item, dict):
+                result[name] = {
+                    "kind": "linrange",
+                    "start": item.get("start"),
+                    "stop": item.get("stop"),
+                    "n": item.get("expts"),
+                }
+        return result
 
     def bind_templates(self, catalog: Mapping[str, TemplateDef], adapter: str) -> None:
         for field in self.modules.values():
@@ -407,20 +500,51 @@ class _Section:
                 raise ValueError(
                     f"Adapter {adapter!r}, {'.'.join(field.path)}: {exc}"
                 ) from exc
-        for child in self.children.values():
+        for child in (*self.children.values(), *self.lists.values()):
             child.bind_templates(catalog, adapter)
+        for seeds in self.element_seeds.values():
+            for seed in seeds:
+                seed.bind_templates(catalog, adapter)
         for field in self.modules.values():
             field.catalog = catalog
         self.model.model_rebuild(force=True)
 
-    def to_raw(
-        self, value: BaseModel, env: FormEnv, errors: dict[tuple[str | int, ...], str]
+    def _list_raw(
+        self,
+        value: BaseModel,
+        env: FormEnv,
+        errors: dict[FormWritePath, str],
+        prefix: FormWritePath,
     ) -> dict[str, CfgInputValue]:
+        raw: dict[str, CfgInputValue] = {}
+        for name, child in self.lists.items():
+            items: object = getattr(value, name)
+            if not isinstance(items, list) or any(
+                not isinstance(item, BaseModel) for item in items
+            ):
+                raise TypeError(
+                    f"{(*prefix, name)!r}: expected validated model elements"
+                )
+            raw[name] = [
+                child.to_raw(item, env, errors, (*prefix, name, index))
+                for index, item in enumerate(items)
+            ]
+        return raw
+
+    def to_raw(
+        self,
+        value: BaseModel,
+        env: FormEnv,
+        errors: dict[tuple[str | int, ...], str],
+        path: FormWritePath | None = None,
+    ) -> dict[str, CfgInputValue]:
+        prefix = self.path if path is None else path
         raw: dict[str, CfgInputValue] = value.model_dump(mode="python")
+        raw.update(self._list_raw(value, env, errors, prefix))
         for name, child in self.children.items():
             item: object = getattr(value, name)
             if isinstance(item, BaseModel):
-                raw[name] = child.to_raw(item, env, errors)
+                raw[name] = child.to_raw(item, env, errors, (*prefix, name))
         for name, field in self.modules.items():
             item: object = getattr(value, name)
             if item is None:
@@ -429,7 +553,7 @@ class _Section:
                 try:
                     raw[name] = field.materialize(item, env)
                 except (ValueError, TypeError) as exc:
-                    errors[(*self.path, name)] = str(exc)
+                    errors[(*prefix, name)] = str(exc)
         for name in self.core.model_fields:
             if name not in value.__class__.model_fields:
                 continue
@@ -447,7 +571,7 @@ class _Section:
                         else 0,
                     )
                 except ValidationError as exc:
-                    errors[(*self.path, name)] = str(exc)
+                    errors[(*prefix, name)] = str(exc)
                 else:
                     raw[name] = sweep.model_dump(mode="json")
         return raw

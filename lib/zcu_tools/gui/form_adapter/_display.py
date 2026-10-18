@@ -23,4 +23,6 @@ def field_display(info: FieldInfo, *, locked: bool) -> Display | None:
         decimals=None if locked else meta.decimals,
         description=meta.description,
         group=meta.group,
+        readonly=meta.readonly,
+        element_label=meta.element_label,
     )
