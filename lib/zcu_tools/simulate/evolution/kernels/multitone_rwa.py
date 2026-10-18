@@ -22,7 +22,7 @@ from ._workload_facts import envelope_bounds, packed_segments
 # summed full-operator/carrier ratio 0.217, sampled normalized slope 0.0192/ns
 # and curvature 0.00231/ns² (including DAC quantization). Admission allows
 # margins up to 0.25, 0.025/ns and 0.003/ns². These are not rigorous bounds.
-_REVISION = "joint-rwa-v1"
+_REVISION = "joint-rwa-v2"
 _EDGE_GHZ = 0.05
 _STEP_NS = 4.0
 _MIN_BUDGET = 1e-3
@@ -48,6 +48,7 @@ class _Context(NamedTuple):
     segments: Segments
     positive: NDArray[np.complex128]
     negative: NDArray[np.complex128]
+    shifts: NDArray[np.float64]
     row: int
     model: int
 
@@ -59,11 +60,14 @@ class RWAPrepared:
     models: packed joint energies, drive quadratures, bases and secular rates.
     positive, negative: (keys,tones,M,M) coefficients multiplying z and conj(z),
         respectively, after the 50 MHz Fourier-edge selection.
+    shifts: (keys,max_active_tones,M) window-excluded diagonal shifts in GHz
+        per squared gain/envelope amplitude; independent of carrier phase.
     """
 
     models: Models
     positive: NDArray[np.complex128]
     negative: NDArray[np.complex128]
+    shifts: NDArray[np.float64]
 
     @property
     def nbytes(self) -> int:
@@ -71,12 +75,45 @@ class RWAPrepared:
             sum(a.nbytes for a in self.models)
             + self.positive.nbytes
             + self.negative.nbytes
+            + self.shifts.nbytes
         )
 
 
 @njit(nogil=True, cache=True)
+def _coefficients(models, ports, frequencies, tones):
+    """Build retained edges and compact per-tone shifts from the same window."""
+    size = models.energies.shape[1]
+    positive = np.zeros((len(tones), ports.shape[1], size, size), np.complex128)
+    negative = np.zeros_like(positive)
+    max_tones = 0
+    for count in tones:
+        max_tones = max(max_tones, count)
+    shifts = np.zeros((len(tones), max_tones, size), np.float64)
+    for key in range(len(tones)):
+        for tone in range(tones[key]):
+            port, frequency = ports[key, tone], frequencies[key, tone]
+            for i in range(size):
+                for j in range(size):
+                    gap = models.energies[key, i] - models.energies[key, j]
+                    x, y = models.x[key, port, i, j], models.y[key, port, i, j]
+                    for sign in (1, -1):
+                        coefficient = (x - sign * 1j * y) / 2
+                        detuning = gap + sign * frequency
+                        if abs(detuning) < _EDGE_GHZ:
+                            if sign == 1:
+                                positive[key, tone, i, j] = coefficient
+                            else:
+                                negative[key, tone, i, j] = coefficient
+                        else:
+                            # Exact resonances evolve explicitly above; no
+                            # denominator regularization or double counting.
+                            shifts[key, tone, i] += abs(coefficient) ** 2 / detuning
+    return positive, negative, shifts
+
+
+@njit(nogil=True, cache=True)
 def _rhs(time, state, context):
-    models, segments, positive, negative, row, model = context
+    models, segments, positive, negative, shifts, row, model = context
     size = models.energies.shape[1]
     rho = state.reshape(size, size)
     h = np.zeros((size, size), dtype=np.complex128)
@@ -93,7 +130,9 @@ def _rhs(time, state, context):
             segments.theta[row, tone] + 2 * np.pi * segments.frequency[row, tone] * time
         )
         z = segments.gain[row, tone] * amplitude * np.exp(1j * phase)
+        intensity = (segments.gain[row, tone] * abs(amplitude)) ** 2
         for i in range(size):
+            h[i, i] += intensity * shifts[model, tone, i]
             for j in range(size):
                 h[i, j] += (
                     (
@@ -118,11 +157,11 @@ def _rhs(time, state, context):
 
 @njit(nogil=True, cache=True)
 def _run(data, row_models, states, controls):
-    models, segments, positive, negative = data
+    models, segments, positive, negative, shifts = data
     rows, indices = row_models
     for index in range(len(rows)):
         row, model = rows[index], indices[index]
-        context = _Context(models, segments, positive, negative, row, model)
+        context = _Context(models, segments, positive, negative, shifts, row, model)
         result = integrate(
             _rhs,
             context,
@@ -209,7 +248,7 @@ def _retained_norm(
 
 
 class MultitoneRWAKernel:
-    """Approximate C5 family, revision joint-rwa-v1; never a DOP853 frame flag.
+    """Approximate C5 family, revision joint-rwa-v2; never a DOP853 frame flag.
 
     Admission requires >=2 tones, at least one sampled envelope, fixed flux,
     real envelopes with peak-normalized slope <=0.025/ns and curvature
@@ -319,7 +358,12 @@ class MultitoneRWAKernel:
         rows: NDArray[np.int64],
         context: KernelContext,
     ) -> Prepared:
-        """Build model-only retained Fourier edges for key-aligned representative rows."""
+        """Build retained edges and omitted-edge shifts for key-aligned rows.
+
+        Each tone contributes sum_j,s |C_s[i,j]|²/(Ei-Ej+s*f) to the diagonal,
+        excluding edges inside the retained window to avoid double counting.
+        Apply scales these coefficients by the actual squared gain/envelope.
+        """
         tolerances(context.budget)
         if len(keys) != len(rows):
             raise ValueError("RWA keys and representative rows must align")
@@ -329,26 +373,16 @@ class MultitoneRWAKernel:
                 for row in rows
             ]
         )
-        size = models.energies.shape[1]
-        positive = np.zeros((len(rows), table.tone_port.shape[1], size, size), complex)
-        negative = np.zeros_like(positive)
-        for index, row in enumerate(rows):
-            gaps = models.energies[index, :, None] - models.energies[index, None, :]
-            for tone in range(table.tones[row]):
-                port, frequency = (
-                    table.tone_port[row, tone],
-                    table.tone_frequency_ghz[row, tone],
-                )
-                coupling = (models.x[index, port] - 1j * models.y[index, port]) / 2
-                positive[index, tone] = coupling * (
-                    np.abs(gaps + frequency) < _EDGE_GHZ
-                )
-                negative[index, tone] = coupling.conj().T * (
-                    np.abs(gaps - frequency) < _EDGE_GHZ
-                )
+        positive, negative, shifts = _coefficients(
+            models,
+            table.tone_port[rows],
+            table.tone_frequency_ghz[rows],
+            table.tones[rows],
+        )
         positive.setflags(write=False)
         negative.setflags(write=False)
-        return RWAPrepared(models, positive, negative)
+        shifts.setflags(write=False)
+        return RWAPrepared(models, positive, negative, shifts)
 
     def admit_prepared(
         self,
@@ -390,7 +424,8 @@ class MultitoneRWAKernel:
         """Advance independent rows in place and return an all-False exceedance mask.
 
         Every row starts in its joint eigenbasis, integrates all retained tones
-        in a row-local interaction picture, then restores Schrödinger coordinates.
+        and the envelope-squared omitted-edge diagonal shifts in a row-local
+        interaction picture, then restores Schrödinger coordinates.
         theta is the phase at row start; offsets preserve pulse-local envelopes.
         Adaptive integration uses the ordinary budget tolerance and 0.1 ns seed,
         capped at 4 ns rather than sampled knots. This is not a certified bound
@@ -412,6 +447,7 @@ class MultitoneRWAKernel:
                 packed_segments(table, context.work_plan),
                 prepared.positive,
                 prepared.negative,
+                prepared.shifts,
             ),
             (rows, key_index),
             states,
