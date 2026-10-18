@@ -9,7 +9,7 @@ from zcu_tools.gui.form import FormEnv, FormState
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._user_input import ComponentDriver
-from tests.gui.form._fixed_models import named_form, named_input
+from tests.gui.form_adapter._fixed_models import named_form, named_input
 
 
 def test_picker_keeps_uncommitted_text_errors_and_participants(

@@ -33,7 +33,7 @@ def test_fixed_element_form_rpc_keeps_indexes_in_descriptions_and_preview(
 ) -> None:
     from pydantic import create_model
 
-    from tests.gui.form._fixed_models import named_form, named_input
+    from tests.gui.form_adapter._fixed_models import named_form, named_input
 
     window, _harness, _entry = attachment
     model = named_form()

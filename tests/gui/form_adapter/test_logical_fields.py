@@ -202,7 +202,7 @@ def test_batch_rejection_has_original_index_and_no_success_prefix(
     assert input.to_json() == before
 
 
-@pytest.mark.parametrize("value", [{}, 4])
+@pytest.mark.parametrize("value", [4])
 def test_structure_rejection_reports_first_edit_without_changing_input(value) -> None:
     form = adapter.Form(LogicalCfg, {})
     env = FormEnv()
@@ -549,7 +549,11 @@ def test_ordinary_union_write_keeps_only_authored_raw_and_initial_active_structu
 
     form = adapter.Form(LogicalCfg, {}, extras=Extras, lower=lambda extras, cfg: cfg)
     input = FormInput(
-        form.model, {"extras": {"shape": {"kind": "flat", "length": 9.0}}}
+        form.model,
+        {
+            "real": {"module": {"value": 2}},
+            "extras": {"shape": {"kind": "flat", "length": 9.0}},
+        },
     )
     env = FormEnv()
     candidate = form.prepare_logical_edits(

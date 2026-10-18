@@ -50,7 +50,7 @@ def host(tmp_path: Path) -> tuple[TunablesHost[ValueForm, int], Rig]:
 def test_indexed_apply_returns_directed_errors_without_changing_native_or_draft(
     tmp_path: Path,
 ) -> None:
-    from tests.gui.form._fixed_models import named_form, named_input
+    from tests.gui.form_adapter._fixed_models import named_form, named_input
 
     rig = Rig(tmp_path)
     model = named_form()

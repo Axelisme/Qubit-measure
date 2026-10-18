@@ -442,7 +442,7 @@ def test_duplicate_create_does_not_replace_existing_resource() -> None:
 def test_fixed_elements_open_edit_observe_and_run_admission() -> None:
     from pydantic import create_model
 
-    from tests.gui.form._fixed_models import named_form, named_input
+    from tests.gui.form_adapter._fixed_models import named_form, named_input
 
     model = named_form()
     core = create_model(
@@ -455,7 +455,7 @@ def test_fixed_elements_open_edit_observe_and_run_admission() -> None:
         participants=(model.model_fields["participants"].rebuild_annotation(), ["B"]),
     )
     resource = resource_api.TabFormResource(
-        lambda _ctx: Form(core, {}),
+        lambda _ctx: Form(core, {}, fixed_elements=model.fixed_elements),
         capture=lambda _aliases: resource_api.TabFormSources(env=FormEnv()),
         mutation_allowed=lambda: True,
     )

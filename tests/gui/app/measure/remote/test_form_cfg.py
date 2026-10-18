@@ -53,7 +53,7 @@ class ExtrasAdapter(SampleAdapter):
 def test_fixed_element_rpc_describes_names_and_edits_typed_positions(form_rpc) -> None:
     from pydantic import create_model
 
-    from tests.gui.form._fixed_models import named_form, named_input
+    from tests.gui.form_adapter._fixed_models import named_form, named_input
 
     model = named_form()
     core = create_model(
@@ -70,7 +70,11 @@ def test_fixed_element_rpc_describes_names_and_edits_typed_positions(form_rpc) -
         @staticmethod
         def make_form(ctx: FormContext):
             del ctx
-            return Form(core, {"sweep": Range.between(1.0, 2.0, expts=3)})
+            return Form(
+                core,
+                {"sweep": Range.between(1.0, 2.0, expts=3)},
+                fixed_elements=model.fixed_elements,
+            )
 
     fixture, _, rpc = form_rpc
     fixture.registry.register("fixed-elements", FixedAdapter)
