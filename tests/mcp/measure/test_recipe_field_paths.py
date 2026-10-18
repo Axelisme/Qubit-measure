@@ -1,9 +1,11 @@
 """Typed author paths retain original list positions through the owner wire."""
 
 from pathlib import Path
+from typing import Annotated
 
 import pytest
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.gui.form import FixedList
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import RecipeFieldEdit, RecipeSession
@@ -22,7 +24,7 @@ class Tone(ConfigBase):
 
 
 class IndexedControls(ConfigBase):
-    tones: list[Tone] = [
+    tones: Annotated[list[Tone], FixedList(name_field="name")] = [
         Tone(name="Q1", drive=Drive(gain=0.1, samples=[1, 2])),
         Tone(name="Q2", drive=Drive(gain=0.2, samples=[3, 4])),
     ]
