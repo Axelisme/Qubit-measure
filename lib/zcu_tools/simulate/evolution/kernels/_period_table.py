@@ -287,7 +287,11 @@ def periods(
             else:
                 phase_coefficients = _phase_coefficients(
                     coefficients[ports[row]],
-                    phases[row] + np.angle(amplitude),
+                    phases[row]
+                    + 2 * np.pi * (cycle % subdivisions) * direction / subdivisions
+                    # Phase is arbitrary at zero magnitude. Do not unwrap or
+                    # differentiate its angle: signed zero must not add a drive.
+                    + (np.angle(amplitude) if amplitude != 0 else 0.0),
                     harmonics,
                 )
             u = _amplitude_unitary(phase_coefficients, x)
