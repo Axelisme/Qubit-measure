@@ -21,6 +21,13 @@ from ._dop853_data import (
 )
 
 
+@dataclass(frozen=True)
+class FluxDOP853Plan:
+    """Global-row chain IDs fixed by dispatch for this evolve."""
+
+    chain: NDArray[np.int64]
+
+
 class _Expansion(NamedTuple):
     static: NDArray[np.complex128]
     matrices: NDArray[np.complex128]
@@ -230,8 +237,11 @@ class FluxDOP853Kernel:
 
         Return an all-False bool mask aligned with rows; no post-apply check.
         """
-        if context.plan is not None:
-            raise ValueError("this kernel does not accept a row plan")
+        plan = context.plan
+        if plan is None:
+            raise ValueError("flux DOP853 requires a row plan")
+        if not isinstance(plan, FluxDOP853Plan):
+            raise TypeError("flux DOP853 requires its own row plan")
         budget = context.budget
         controls = tolerances(budget)
         if not isinstance(prepared, _Prepared):
@@ -268,5 +278,5 @@ class FluxDOP853Kernel:
             prepared.expansion,
             _Waveform(waveform.offsets, waveform.time_ns, waveform.flux),
         )
-        _run(data, (rows, inverse), states, controls)
+        _run(data, (rows, inverse, plan.chain), states, controls)
         return np.zeros(len(rows), dtype=np.bool_)

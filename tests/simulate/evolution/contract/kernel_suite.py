@@ -17,10 +17,20 @@ import pytest
 import zcu_tools.simulate.evolution as evolution
 from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
+from zcu_tools.simulate.evolution._dop853_dispatch import direct_plans
 from zcu_tools.simulate.evolution.kernel import ApplyContext
 
 if TYPE_CHECKING:
     from zcu_tools.simulate.evolution import kernel
+
+
+def kernel_context(
+    family: str, table: kernel.SegmentTable, budget: float
+) -> ApplyContext:
+    """Use the production timeline planner when invoking a direct solver seam."""
+    names = np.full(len(table.timeline), family)
+    plans, _ = direct_plans(table, names)
+    return ApplyContext(budget, plans.get(family))
 
 
 def synthetic_model(size: int = 3) -> evolution.SecularModel:
@@ -225,7 +235,12 @@ class KernelContract:
         assert prepared.nbytes >= 0
         actual = case.states.copy()
         case.kernel.apply(
-            prepared, inverse, case.table, rows, actual, ApplyContext(case.budget)
+            prepared,
+            inverse,
+            case.table,
+            rows,
+            actual,
+            kernel_context(case.kernel.name, case.table, case.budget),
         )
         expected = np.stack(
             [reference(case, row, state) for row, state in enumerate(case.states)]
@@ -286,7 +301,7 @@ class KernelContract:
                     case.table,
                     chosen,
                     actual,
-                    ApplyContext(case.budget),
+                    kernel_context(case.kernel.name, case.table, case.budget),
                 )
                 fresh_keys, first, inverse = np.unique(
                     keys[selected], return_index=True, return_inverse=True
@@ -301,7 +316,7 @@ class KernelContract:
                     case.table,
                     chosen,
                     expected,
-                    ApplyContext(case.budget),
+                    kernel_context(case.kernel.name, case.table, case.budget),
                 )
                 np.testing.assert_array_equal(actual, expected)
 
@@ -318,7 +333,12 @@ class KernelContract:
         )
         whole = case.states.copy()
         whole_mask = case.kernel.apply(
-            prepared, inverse, case.table, rows, whole, ApplyContext(case.budget)
+            prepared,
+            inverse,
+            case.table,
+            rows,
+            whole,
+            kernel_context(case.kernel.name, case.table, case.budget),
         )
         assert isinstance(whole_mask, np.ndarray), "apply must return an exceeded mask"
         assert whole_mask.shape == (len(rows),)
@@ -336,7 +356,7 @@ class KernelContract:
                 case.table,
                 subset,
                 chunk,
-                ApplyContext(case.budget),
+                kernel_context(case.kernel.name, case.table, case.budget),
             )
             assert isinstance(mask, np.ndarray), "apply must return an exceeded mask"
             assert mask.shape == (len(subset),)
@@ -383,7 +403,12 @@ class KernelContract:
         ):
             actual = states.copy()
             case.kernel.apply(
-                prepared, inverse, case.table, rows, actual, ApplyContext(case.budget)
+                prepared,
+                inverse,
+                case.table,
+                rows,
+                actual,
+                kernel_context(case.kernel.name, case.table, case.budget),
             )
             expected = np.stack(
                 [reference(case, row, state) for row, state in enumerate(states)]
@@ -455,7 +480,7 @@ class KernelContract:
                     table,
                     selected,
                     expected,
-                    ApplyContext(case.budget),
+                    kernel_context(case.kernel.name, case.table, case.budget),
                 )
                 # Repeated reversed/non-contiguous applies may not consume or mutate
                 # the payload. Empty batches must also be harmless.
@@ -471,7 +496,7 @@ class KernelContract:
                         table,
                         selected[subset],
                         actual,
-                        ApplyContext(case.budget),
+                        kernel_context(case.kernel.name, case.table, case.budget),
                     )
                     if len(subset):
                         allowance = (

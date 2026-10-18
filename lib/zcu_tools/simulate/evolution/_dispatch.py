@@ -7,6 +7,7 @@ import numpy as np
 from joblib import delayed
 from numpy.typing import NDArray
 
+from ._dop853_dispatch import direct_plans
 from ._parallel import Executor
 from ._planning import Geometry
 from ._prepare_keys import group_keys
@@ -38,6 +39,7 @@ class Selection:
     rows: global rows owned by this worker's timeline.
     shaped: acquire-wide cost plan, or None if no selected row is shaped.
     two_tone_direct: acquire-wide global-row preference, or None without two tones.
+    names: caller-accepted family context for timeline-local frame planning.
     A selection disables further deferral and retains accepted guard products.
     """
 
@@ -45,6 +47,7 @@ class Selection:
     shaped: ShapedPlan | None
     rejected: Mapping[str, NDArray[np.bool_]]
     two_tone_direct: NDArray[np.bool_] | None = None
+    names: NDArray[np.str_] | None = None
 
 
 @dataclass(frozen=True)
@@ -69,6 +72,9 @@ class Dispatch:
     rejected: caller guard decisions to skip in worker-local fallback chains.
     two_tone_direct: global-row cost preference fixed before either two-tone guard;
         None when no constant two-tone candidates exist.
+    plans: immutable family-owned global-row decisions passed unchanged to apply.
+    chain: global-row chain IDs; -1 for independent rows. A timeline worker
+        replaces provisional decisions locally after its deferred guards finish.
     """
 
     names: NDArray[np.str_]
@@ -82,6 +88,9 @@ class Dispatch:
     rejected: Mapping[str, NDArray[np.bool_]] = field(default_factory=dict)
     two_tone_direct: NDArray[np.bool_] | None = None
     plans: Mapping[str, RowPlan] = field(default_factory=dict)
+    chain: NDArray[np.int64] = field(
+        default_factory=lambda: np.empty(0, dtype=np.int64)
+    )
 
 
 def diagnostics(table: SegmentTable, names: NDArray[np.str_]) -> PathDiagnostics:
@@ -363,6 +372,12 @@ class _Classifier:
             self.costs[rows] = self.kernels[str(name)].cost(self.table, rows)
         if not np.isfinite(self.costs).all() or np.any(self.costs < 0):
             raise ValueError("kernel costs must be finite and nonnegative")
+        context = self.names.copy()
+        if self.selection is not None and self.selection.names is not None:
+            unresolved = context == ""
+            context[unresolved] = self.selection.names[unresolved]
+        context[~self.geometry.pending] = ""
+        plans, chain = direct_plans(self.table, context)
         return Dispatch(
             self.names,
             diagnostics(self.table, self.names),
@@ -372,6 +387,8 @@ class _Classifier:
             self.shaped,
             self.rejected,
             self.two_tone_direct,
+            plans,
+            chain,
         )
 
 

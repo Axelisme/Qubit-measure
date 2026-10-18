@@ -7,12 +7,13 @@ from typing import Literal
 import numpy as np
 import pytest
 import zcu_tools.simulate.evolution as evolution
-from zcu_tools.simulate.evolution.kernel import ApplyContext, SegmentTable
+from zcu_tools.simulate.evolution.kernel import SegmentTable
 
 from tests.simulate.evolution.contract.kernel_suite import (
     KernelCase,
     KernelContract,
     assert_budget,
+    kernel_context,
     reference,
     synthetic_model,
 )
@@ -162,7 +163,12 @@ def test_chained_bath_changes_and_split_restart(kernel_case: KernelCase):
     actual = case.states.copy()
     actual[1:] = 0
     case.kernel.apply(
-        prepared, inverse, case.table, np.arange(3), actual, ApplyContext(case.budget)
+        prepared,
+        inverse,
+        case.table,
+        np.arange(3),
+        actual,
+        kernel_context(case.kernel.name, case.table, case.budget),
     )
     expected = []
     previous = case.source.model(tuple(case.table.level[0]))
@@ -181,7 +187,7 @@ def test_chained_bath_changes_and_split_restart(kernel_case: KernelCase):
         case.table,
         np.array([0]),
         split[:1],
-        ApplyContext(case.budget),
+        kernel_context(case.kernel.name, case.table, case.budget),
     )
     left, right = (case.source.model(tuple(case.table.level[i])) for i in (0, 1))
     overlap = right.eigenvectors.conj().T @ left.eigenvectors
@@ -192,7 +198,7 @@ def test_chained_bath_changes_and_split_restart(kernel_case: KernelCase):
         case.table,
         np.array([1, 2]),
         split[1:],
-        ApplyContext(case.budget),
+        kernel_context(case.kernel.name, case.table, case.budget),
     )
     assert_budget(actual, split, 1e-8)
 
@@ -215,7 +221,7 @@ def test_missing_waveform_and_expansion_fail_explicitly():
             replace(case.table, flux_waveform=None),
             np.arange(3),
             case.states.copy(),
-            ApplyContext(case.budget),
+            kernel_context(case.kernel.name, case.table, case.budget),
         )
 
 

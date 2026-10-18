@@ -25,7 +25,7 @@ from ._period_table import (
 from ._sambe import eigensystem
 from ._secular import coherence_decay, population_generator
 from ._shaped import drive_bounds, envelope_bounds
-from .dop853 import DOP853Kernel
+from .dop853 import prepare_models
 
 
 def _spectral(
@@ -351,7 +351,6 @@ class ShapedSambeKernel:
     ) -> tuple[_Data, NDArray[np.float64]]:
         entries, models, ports, errors = [], [], [], []
         subdivisions = self._subdivisions(table, rows, source)
-        fallback = DOP853Kernel()
         # A timeline's rise/fall ramps arrive together. Only this call owns the
         # workspace; accepted payloads retain their immutable coefficients.
         families: dict[
@@ -404,14 +403,7 @@ class ShapedSambeKernel:
             coherences = np.exp(-step / 2 * coherence_decay(model))
             for array in (coefficients, populations, coherences):
                 array.setflags(write=False)
-            representative = rows[index : index + 1]
-            direct = fallback.prepare(
-                fallback.prepare_keys(table, representative),
-                table,
-                representative,
-                source,
-                min(budget, 1e-8),
-            )
+            direct = prepare_models([model])
             # Integer-period blocks avoid thousands of tiny matrix products on
             # long high-carrier ramps. Subperiod playback retains every phase.
             drive = model.drives[port]

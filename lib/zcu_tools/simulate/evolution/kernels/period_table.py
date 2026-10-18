@@ -20,7 +20,7 @@ from ._period_table import (
 )
 from ._secular import coherence_decay, population_generator
 from ._shaped import drive_bounds, envelope_bounds
-from .dop853 import DOP853Kernel
+from .dop853 import prepare_models
 
 
 def _unitary_table(
@@ -73,7 +73,6 @@ def _unitary_table(
             np.einsum("ab,bkij->akij", transform, np.fft.fft(values, axis=1) / 16)
         )
     return np.asarray(tables, dtype=np.complex128)
-
 
 
 class PeriodTableKernel:
@@ -148,10 +147,10 @@ class PeriodTableKernel:
         rows are representative table rows aligned with keys; numerical solver
         failure raises RuntimeError. DC entries retain only model data.
         """
+        del table, rows
         tail_budget = min(budget, 1e-8)
-        fallback = DOP853Kernel()
         entries = []
-        for index, key in enumerate(keys):
+        for key in keys:
             model = source.model(tuple(int(v) for v in key["level"]))
             frequency = float(key["frequency"])
             bound = float(2.0 ** int(key["band"]))
@@ -169,14 +168,7 @@ class PeriodTableKernel:
                 coefficients = _unitary_table(model, int(key["port"]), frequency, bound)
             for array in (coefficients, populations, coherences):
                 array.setflags(write=False)
-            representative = rows[index : index + 1]
-            tail_data = fallback.prepare(
-                fallback.prepare_keys(table, representative),
-                table,
-                representative,
-                source,
-                tail_budget,
-            )
+            tail_data = prepare_models([model])
             entries.append(
                 PeriodEntry(
                     tail_data,

@@ -7,9 +7,10 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
-from ..kernel import ApplyContext, Prepared, SegmentTable
+from ..kernel import SegmentTable
+from ._dop853_data import pack_segments
 from ._shaped import envelope_bounds
-from .dop853 import DOP853Kernel
+from .dop853 import DOP853Plan, DOP853Prepared, advance_endpoints
 
 
 class PeriodPlayback(NamedTuple):
@@ -75,7 +76,7 @@ class PeriodEntry:
     All retained arrays are read-only. No field depends on input density.
     """
 
-    fallback: Prepared
+    fallback: DOP853Prepared
     tail_budget: float
     frequency: float
     bound: float
@@ -304,12 +305,18 @@ def advance_tail(
         envelopes=table.envelopes,
     )
     chunk = states[selected].copy()
-    DOP853Kernel().apply(
-        entry.fallback,
-        np.zeros(len(active), dtype=np.int64),
-        tail_table,
-        local_rows,
+    frame = np.where(
+        (tail_table.tones == 1) & (tail_table.tone_amplitude[:, 0] != 0),
+        "interaction",
+        "lab",
+    )
+    plan = DOP853Plan(frame, np.full(len(active), -1, dtype=np.int64))
+    advance_endpoints(
+        entry.fallback.models,
+        pack_segments(tail_table),
+        (local_rows, np.zeros(len(active), dtype=np.int64)),
         chunk,
-        ApplyContext(entry.tail_budget),
+        entry.tail_budget,
+        plan,
     )
     states[selected] = chunk
