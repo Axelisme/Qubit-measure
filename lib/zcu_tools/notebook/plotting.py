@@ -68,8 +68,9 @@ class NotebookPlotHost:
         manager = self._managers.get(figure)
         if manager is None:
             return
-        # Matplotlib types only the base of this concrete ipympl canvas.
         try:
+            # tolerated(cast): FigureManager.canvas is typed as FigureCanvasBase, but
+            # present() installs ipympl Canvas; release needs its widget layout/toolbar.
             _release_canvas(cast("Canvas", manager.canvas))
         finally:
             del self._managers[figure]
