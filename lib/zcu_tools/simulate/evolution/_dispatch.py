@@ -28,6 +28,7 @@ from .kernel import (
 )
 from .kernels.floquet import FloquetPlan
 from .kernels.gate_cache import GateCacheKernel
+from .kernels.multitone_gate import populate_gate_inventory
 from .secular import ModelSource
 from .workplan import WorkPlan
 
@@ -42,6 +43,7 @@ def create_work_plan(table: SegmentTable, source: ModelSource) -> WorkPlan:
     plan = WorkPlan()
     populate_carrier_plan(table, source, plan)
     plan_gain_groups(table, source, plan)
+    populate_gate_inventory(table, source, plan)
     return plan
 
 
@@ -520,7 +522,12 @@ class _Classifier:
         # A calibrated approximation has its own visible family. Custom
         # registries can omit this optional fast path, like shaped_sambe.
         if "multitone_rwa" in self.kernels:
-            self.accept(multiple, ("multitone_rwa", "dop853"))
+            candidates = tuple(
+                name
+                for name in ("multitone_gate", "multitone_rwa", "dop853")
+                if name in self.kernels
+            )
+            self.accept(multiple, candidates)
         else:
             self.accept(multiple, ("dop853",))
         return self._result()

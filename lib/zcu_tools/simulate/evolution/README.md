@@ -60,11 +60,11 @@ tries the next candidate in the following graph.
 | Other single constant tone | `dyson` → `floquet_period` → `t6`. Dyson checks perturbative ratios and an analytic B2 bound, except that certified no-drive prefixes need no B2 check. Source and shared-prefix densities supply known inputs; other later rows use an arbitrary-input bound. |
 | One shaped tone | Try `shaped_sambe` on every eligible row, without a reuse threshold. Remaining rows try `gate_cache`, `period_table` and `dop853` in acquire-wide amortized-cost order. |
 | Two constant tones | Compare acquire-wide DOP853 and Floquet costs before either guard. Try the cheaper family first, then the other if rejected. |
-| Shaped two-tone or three-or-more-tone row | `multitone_rwa` → `dop853`. RWA admits only fixed-flux, separated weak carriers with smooth real envelopes and at least one sampled envelope. Other rows retain the full-drive fallback. |
+| Shaped two-tone or three-or-more-tone row | `multitone_gate` → `multitone_rwa` → `dop853`. RWA admits only fixed-flux, separated weak carriers with smooth real envelopes and at least one sampled envelope. Other rows retain the full-drive fallback. |
 
 `t4` and `t6` are terminal in their domains. They must accept every dispatched
 no-tone or single constant-tone row respectively. They have no DOP853 fallback.
-The internal [registry](kernels/__init__.py) contains eleven families. T7 is the
+The internal [registry](kernels/__init__.py) contains twelve families. T7 is the
 single-tone `dyson` family; the two-tone `floquet` family has its own modal
 second-order Dyson implementation.
 
@@ -79,6 +79,7 @@ application and certificates that require their intermediate data.
 | `gate_cache` | Dispatch sends a key-aligned builder mask. Positive durations up to 30 ns first try six phase nodes with two independent probes; failed convergence uses sixteen nodes. Other keys directly use sixteen nodes. Both builders produce four closed-system subsegments with secular Strang dissipation and the same phase-Fourier representation. |
 | `period_table` and `shaped_sambe` | Ordinary period tables integrate frozen-envelope Hilbert periods; shaped Sambe uses finite-Hilbert-Fourier subperiods for smooth real or complex envelopes. Complex playback interpolates magnitude and adds the envelope angle to the advancing carrier phase. It uses a tighter envelope-motion bound; unresolved ramps and failed certificates retain fallback. Each family owns its guards and build. They share period playback and direct fractional tails. |
 | `floquet` | The guard builds a Stark frame and returns row admissions. Passing k=0 omission/convergence bounds selects modal second-order Dyson when probe limits pass, otherwise periodic k=0 propagation. After k=0 omission rejection, a passing calibrated finite-Fourier certificate selects retained-sideband integration. Dispatch merges these admissions into one family plan. Apply does not repeat admission or construct sparse equations. |
+| `multitone_gate` | Complete-inventory canonical reuse of at least 20 rows, shared RWA admission, coextensive real sampled support, compatible dressed phase charges (or explicitly admitted weak-cycle pruning), and a four-way secular split proxy at most 0.01. Builds four joint Hilbert propagators, plays D-U-D, and restores the lab/DC endpoint frame. Rejection retains ordinary RWA. |
 | `multitone_rwa` | Revision `joint-rwa-v1` retains joint-basis Fourier edges with `abs(Ei-Ej±f) < 0.05 GHz`, sums every tone, and integrates in a row-local interaction picture with a 4 ns adaptive ceiling. It restores Schrödinger coordinates at every endpoint. It keeps joint rates, dephasing and state ordering. This calibrated approximation does not certify exact RB fidelity. |
 | `dop853` and `flux_dop853` | Dispatch resolves complete chronological timeline routing, then assigns chain IDs to adjacent touching rows of the same direct family. Ordinary DOP853 uses the interaction picture only for independent, single-tone, nonzero-gain rows. Chains and other ordinary rows use the lab frame. Flux DOP853 has its own chain plan. |
 
@@ -122,6 +123,44 @@ fidelity. Full policy revision, budget, level, timing, every active carrier,
 port, gain, phase and envelope content enter RWA prepare keys. Tone phase
 origins retain the ordinary SegmentTable contract.
 
+### Covariant simultaneous gates
+
+The named `multitone_gate` approximation shares RWA admission and the
+`RWACoefficients` builder with `multitone_rwa`. Both integrators call the same
+`interaction_hamiltonian` assembly. All driven diagonal terms come from that
+coefficient record; the gate cache does not assemble a separate drive RHS. It does not multiply independent qubit maps.
+The model-only [phase graph](kernels/_rwa_graph.py) publishes integer dressed
+charges satisfying `q[i]-q[j]=e[k]` for every retained edge of tone k. It orders
+constraints by decreasing coefficient magnitude, with deterministic index ties.
+Inconsistent cycles and coefficients at or below `1e-12 GHz/gain` are explicit
+omissions. Their positive-operator spectral norms remain in the fact.
+
+The named pruning policy admits only
+`4*pi*duration*sum(abs(gain)*envelope_peak*omitted_norm) <= min(budget,1e-3)`.
+This state-independent Duhamel/trace-distance bound controls the additional
+edge removal relative to ordinary RWA for one row. It does not certify a whole
+RB sequence or the RWA-vs-lab approximation. Strong incompatible cycles fall
+back to ordinary RWA. Shared `phase_graph`, `pruning_bound` and
+`pruning_admitted` are also available to constant-frame algorithms.
+
+The first gate release requires every active envelope to be sampled and to
+cover the same complete row support. Complex, partially overlapping and sliced
+supports retain fallback. The four-way secular split uses the existing gate
+proxy `duration**3*Gamma*V**2/16 <= 0.01`, with V the sum of retained joint
+operator peak strengths. This is calibrated admission, not a strict splitting
+certificate. Each quarter integrates a joint Hilbert propagator at
+`rtol=1e-9`, `atol=1e-11`, with a 4 ns ceiling, in an interaction picture.
+Population rates and pure dephasing remain joint and unchanged.
+
+Keys include source/model identity, level, bath arrays, signed ordered carriers,
+ports, gains, envelope identities, offsets, duration, graph policy, budget and
+numerical controls. Only guard-admitted covariance permits reuse without theta
+or absolute start. Playback uses actual row-start theta and both frame boundary
+rotations. Four U, half-step secular maps and charges are read-only owned arrays
+charged to the existing resident budget. There is no phase grid or global memo.
+Whole-acquire reuse is fixed before guards; warm cache, worker width and chunking
+do not change the threshold of 20, above the measured 3–19-row break-even range.
+
 [DOP853 planning](_dop853_dispatch.py) operates across prepared-payload
 boundaries. The scheduler groups chain members by ID in chronological order;
 it does not recognize direct-solver family names. A chain never crosses a
@@ -147,7 +186,7 @@ additional package integration entry points.
   calls with one evolve owner. `ApplyContext(budget, plan, work_plan)` supplies the finite positive per-segment allowance
   and the family's plan. Floquet and both direct solvers require their own plan;
   a missing plan raises `ValueError`, and a wrong family type raises `TypeError`.
-  Families without plans, including multi-tone RWA, reject a non-`None` plan with `ValueError`.
+  Families without plans, including both multi-tone families, reject a non-`None` plan with `ValueError`.
 
 Dispatch returns at most one plan per family and a separate global-row chain
 array. [Scheduling](_schedule.py) keeps the originating plan through preparation

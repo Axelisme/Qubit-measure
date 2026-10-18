@@ -37,6 +37,7 @@ from zcu_tools.simulate.evolution import (
 COVERAGE = (
     "shaped_carrier_family",
     "shaped_direct",
+    "multitone_gate",
     "dyson_gain_batch",
     "floquet_period",
     "t4",
@@ -111,6 +112,9 @@ def _prepare(name: str) -> None:
     if name.startswith("readout_"):
         _readout(name)
         return
+    if name == "multitone_gate":
+        _joint_gate()
+        return
     duration = 20.3
     envelope = EnvelopeSpec("constant")
     frequencies = np.array([5.0])
@@ -176,3 +180,25 @@ def _readout(name: str) -> None:
                 include_traces=traces,
             )
         )
+
+
+def _joint_gate() -> None:
+    duration = 128.0
+    envelope = EnvelopeSpec(
+        "sampled",
+        np.array([0.5, 1.0, 0.5], dtype=complex),
+        np.array([0.0, 64.0, duration]),
+    )
+    batch = _batch(np.full(24, 5.0), np.full(24, 0.01), envelope, duration)
+    companion = replace(
+        batch.tracks[0], frequency_ghz=np.full(24, 2.0), phase_rad=np.full(24, 0.71)
+    )
+    engine = Engine(1, 0)
+    try:
+        engine.evolve(
+            _source(),
+            (replace(batch, tracks=(*batch.tracks, companion)),),
+            cancel=Event(),
+        )
+    finally:
+        engine.close()
