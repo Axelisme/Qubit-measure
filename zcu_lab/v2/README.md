@@ -1,6 +1,6 @@
 # v2 experiments
 
-**Last updated:** 2026-10-18，mux 共用綁定驗證入口
+**Last updated:** 2026-10-18，mux typed tones、數值掃描與分析保存
 
 ZigZag 的 Run 與離線編譯共用 `build_zigzag_modules`，使用 register loop。
 `reset_phase_cycle` 可在偶數 averaging sweeps 間交替最後 reset qubit pulse 的 0/180°
@@ -28,6 +28,37 @@ MuxGroup 可不填 qubits 做 resonator bring-up，保留手填 readout，不增
 [Measure support](_support/measure/README.md#mux-綁定驗證)。
 Module 可整組引用或 inline 編輯，tones 使用單行 JSON。
 Library 的 `readout/mux:blank` 只給 scalar 編輯初值，作者必須填 tones 並確認接線；範本不是硬體安全預設。
+
+## Mux qubit numeric cores
+
+`mux/freq` 與 `mux/amp_rabi` 提供可 import 的 typed cfg、純分析與 native persistence。
+這兩個 core 尚無 `run`。Acquisition 等待 program owner 的公開 end-alignment 契約，
+Form／recipe 等待獨立 fixed-list framework，不在 catalog 註冊未完成的實驗。
+
+`MuxFreqCfg`／`MuxAmpRabiCfg` 使用完整 `tones: list[MuxToneCfg]`，元素內有
+`active`、`drive` 與 `sweep`。長度固定等於完整 readout tone 數。
+`MuxToneCfg` 與 `MuxDriveModuleCfg` 位於 `_support.mux_sweep_cfg`。
+只要求 active drive，所有 active drive channel 必須獨立且不能等於 readout generator。
+Active sweep 點數相同，inactive 不參與點數比較。共用 reps／rounds／reset／delays。
+完整 component identity 的驗證仍由固定 capture 的 lab Form／adapter 負責。
+
+`prepare_frequency_scan(cfg, soccfg=...)` 與 `prepare_amplitude_scan(cfg, soccfg=...)`
+各自 lower 一次 active flag，回傳 `_support.mux.MuxPulseScan`。
+其 `indices` 保留原始序號，`coordinates` 是各自硬體 grid 的 `(K,P)` 浮點陣列，
+`point_pulses` 是 `(P,K)` 固定 numeric pulse cfg，不展開 Cartesian product。
+這個入口只準備資料，不 acquire，也不承諾尚待裁決的排程策略。
+Frequency／gain conversion 分別沿既有 `round_zcu_freq`／`round_zcu_gain`。
+
+`MuxSweepResult` 保存原始 `tone_indices`、各自量化的 `coordinates` 及平均 complex IQ `signals`。
+兩個矩陣都是 `(K,P)`。NaN IQ 表示未取得的 partial data，不表示成功。
+各 core 的 `analyze(source, options, plots=...)` 使用 explicit RunRecord，允許 cfg=None。
+每個原始序號各有 `fit_i` 圖、校準值／誤差／quality，或保留原因的 `MuxFitFailure`。
+Freq 沿用單 qubit 的 magnitude/background transform 與 linewidth fitter；Amp 沿用零 gain phase、無衰減 fit。
+
+Native mapping 使用 `coordinates`／`signals` 兩個 variables，共享 Point／Tone axes。
+Frequency 座標在磁碟上是 Hz，在記憶體是 MHz。Gain 不縮放。
+Save／Load 保留完整 tones cfg 與獨立數值座標，不讀目前 Form 或 library。
+Numeric core 不保存 writeback destination，也不發 proposal。
 
 ## Layout
 
