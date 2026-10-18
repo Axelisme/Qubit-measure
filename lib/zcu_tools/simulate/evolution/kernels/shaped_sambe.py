@@ -8,13 +8,6 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
-from ..declarations import (
-    AlgorithmIdentity,
-    Eligibility,
-    GuardDeclaration,
-    KernelDeclaration,
-    ReuseDeclaration,
-)
 from ..kernel import GuardPreparation, GuardResult, Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
 from ._carrier_reuse import CarrierWorkspace
@@ -201,15 +194,7 @@ class ShapedSambeKernel:
     retries, clips or normalizes density. Complex envelopes and DC are rejected.
     """
 
-    declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("shaped_sambe", "carrier-physical-v3"),
-        eligibility=Eligibility(1, 1, "shaped"),
-        guard=GuardDeclaration(("model-build",), builds_model=True),
-        accuracy="guarded-approximation",
-        reuse=ReuseDeclaration("shaped_sambe/carrier-physical-v3/serial"),
-        fallback="legacy-order",
-    )
-
+    revision = "carrier-physical-v3"
     name = "shaped_sambe"
     guard_builds = True
 
@@ -398,7 +383,7 @@ class ShapedSambeKernel:
                 bound,
                 m,
                 budget,
-                self.declaration.identity.revision,
+                self.revision,
             )
             family = families.get(family_key)
             if family is None:

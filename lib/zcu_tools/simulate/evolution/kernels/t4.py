@@ -7,13 +7,6 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
-from ..declarations import (
-    AlgorithmIdentity,
-    Eligibility,
-    GuardDeclaration,
-    KernelDeclaration,
-    ReuseDeclaration,
-)
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource
 from ._secular import coherence_decay, population_generator
@@ -53,15 +46,6 @@ class T4:
     Population propagation is exp(Q*t). Each off-diagonal element acquires
     its exact energy phase and secular decay. No density is read in prepare.
     """
-
-    declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("t4", "legacy-v1"),
-        eligibility=Eligibility(max_tones=0),
-        guard=GuardDeclaration(),
-        accuracy="exact-secular",
-        reuse=ReuseDeclaration("t4/legacy-v1/serial"),
-        fallback="terminal-domain",
-    )
 
     name = "t4"
     guard_builds = False

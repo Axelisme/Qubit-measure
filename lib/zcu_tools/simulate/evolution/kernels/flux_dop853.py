@@ -7,13 +7,6 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
-from ..declarations import (
-    AlgorithmIdentity,
-    Eligibility,
-    GuardDeclaration,
-    KernelDeclaration,
-    ReuseDeclaration,
-)
 from ..kernel import Prepared, SegmentTable
 from ..secular import FluxExpansion, ModelSource
 from ._dop853 import tolerances
@@ -140,15 +133,6 @@ class FluxDOP853Kernel:
     smallest spacing of envelope/flux knots inside the row's local window.
     No flux/DAC midpoint freezing occurs.
     """
-
-    declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("flux_dop853", "legacy-v1"),
-        eligibility=Eligibility(min_tones=1),
-        guard=GuardDeclaration(),
-        accuracy="adaptive",
-        reuse=ReuseDeclaration("flux_dop853/legacy-v1/serial"),
-        fallback="terminal-domain",
-    )
 
     name = "flux_dop853"
     guard_builds = False

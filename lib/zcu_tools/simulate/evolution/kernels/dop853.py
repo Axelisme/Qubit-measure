@@ -8,13 +8,6 @@ from numba import njit
 from numpy.typing import NDArray
 
 from .._envelope import sample_value
-from ..declarations import (
-    AlgorithmIdentity,
-    Eligibility,
-    GuardDeclaration,
-    KernelDeclaration,
-    ReuseDeclaration,
-)
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource
 from ._dop853 import tolerances
@@ -157,15 +150,6 @@ class DOP853Kernel:
     operators, never a density. All row iteration/integration releases the GIL
     in single-threaded numba code. Input ports must exist in each row's model.
     """
-
-    declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("dop853", "interaction-v2"),
-        eligibility=Eligibility(min_tones=1),
-        guard=GuardDeclaration(),
-        accuracy="adaptive",
-        reuse=ReuseDeclaration("dop853/interaction-v2/independent"),
-        fallback="terminal-domain",
-    )
 
     name = "dop853"
     guard_builds = False
