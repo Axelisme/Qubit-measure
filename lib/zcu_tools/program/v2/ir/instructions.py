@@ -366,7 +366,8 @@ class BaseInst(Instruction):
         lbl = self.need_label
         return frozenset({lbl}) if lbl is not None else frozenset()
 
-    def remap_labels(self, remap: dict[str, Label]) -> BaseInst:
+    # tolerated: No-label instructions share the remap signature with label-bearing overrides.
+    def remap_labels(self, remap: dict[str, Label]) -> BaseInst:  # noqa: ARG002
         """Return a copy with LabelRef targets remapped via ``remap``.
 
         Default implementation returns ``self`` unchanged; override in any

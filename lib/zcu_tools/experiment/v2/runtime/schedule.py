@@ -145,7 +145,11 @@ class SignalBuffer:
         self.trigger_update()
 
     def trigger_update(
-        self, step: ScheduleStep[Any, Any, Any] | None = None, *, flush: bool = False
+        self,
+        # tolerated: BufferProtocol requires step; this buffer always notifies with the full array.
+        step: ScheduleStep[Any, Any, Any] | None = None,  # noqa: ARG002
+        *,
+        flush: bool = False,
     ) -> None:
         if self._throttled_update is not None:
             if flush and isinstance(self._throttled_update, MinIntervalFunc):
