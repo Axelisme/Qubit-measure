@@ -485,17 +485,17 @@ def h_tab_use_inline(
     return dict(observe_form(resource))
 
 
-def _recipe_path(raw: object, *, root: bool = False) -> tuple[str, ...]:
+def _recipe_path(raw: object, *, root: bool = False) -> tuple[str | int, ...]:
     if not isinstance(raw, list) or (not raw and not root):
         raise RemoteError(
             ErrorCode.INVALID_PARAMS, "path must be a field array", reason="form_errors"
         )
-    parts: list[str] = []
+    parts: list[str | int] = []
     for part in raw:
-        if not isinstance(part, str) or not part:
+        if (not isinstance(part, str) or not part) and type(part) is not int:
             raise RemoteError(
                 ErrorCode.INVALID_PARAMS,
-                "path requires nonempty strings",
+                "path requires nonempty names or integer indexes",
                 reason="form_errors",
             )
         parts.append(part)
@@ -507,7 +507,7 @@ def h_tab_read_recipe_field(
 ) -> Mapping[str, object]:
     """Read logical metadata/authored input/value/errors in one fixed-source turn.
 
-    path is a string array, [] for root. Readonly refs do not materialize drafts
+    path contains str field names and int original list indexes, [] for root. Readonly refs do not materialize drafts
     or grant write authority. Expected failures keep directed logical details.
     """
     from ..form_description import recipe_field_wire
