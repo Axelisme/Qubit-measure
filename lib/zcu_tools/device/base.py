@@ -227,6 +227,8 @@ class BaseDevice(ABC, Generic[T_DeviceInfo]):
         import pyvisa as visa
 
         try:
+            # PyVISA selects the message-based class dynamically from the address.
+            # tolerated(cast): Its Resource return type lacks I/O and termination members.
             return cast(_DeviceSession, rm.open_resource(self.address))
         except visa.Error:
             self._logger.exception("could not connect to %s", self.address)
