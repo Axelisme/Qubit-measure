@@ -136,13 +136,15 @@ def test_nested_recipe_tool_delivers_detached_typed_overrides_to_author(tmp_path
     assert received == [original]
     # JSON spelling alone cannot distinguish 1 from 1.0; the author must get floats.
     q1 = received[0]["overrides"]["Q1"]
-    drive = q1["drive"]
-    assert drive is not None and type(drive["gain"]) is float
-    assert type(q1["sweep"]["start"]) is float
-    assert type(q1["sweep"]["points"]) is int
-    assert all(type(value) is float for value in q1["sweep"]["values"])
+    drive = q1.get("drive")
+    assert drive is not None and type(drive.get("gain")) is float
+    sweep = q1.get("sweep")
+    assert sweep is not None and type(sweep.get("start")) is float
+    assert type(sweep.get("points")) is int
+    values = sweep.get("values")
+    assert values is not None and all(type(value) is float for value in values)
     received[0]["participants"].append("later")
-    q1["sweep"]["values"].append(103.0)
+    values.append(103.0)
     assert arguments == original
 
 
