@@ -66,6 +66,27 @@ Interface 有下列限制時，在其文件集中說明，不要求每個函式�
 - 執行緒要求、呼叫順序、資源所有權與釋放責任。
 - 失敗、取消、部分完成的結果，以及呼叫者需要區分的例外。
 
+### 既有容忍項先嘗試修除，理由留在原地
+
+新程式碼不新增 `cast` 或 suppression，不放寬型別配合錯誤。以下例外只適用於已明確授權清洗的既有項目，不能推廣到新程式碼。
+
+既有未處置的 Ruff／Pyright 診斷先逐位置嘗試修除，確定保留後才加指定實際 rule 的 suppression：
+
+- Ruff 用 `# noqa: PLR0913  # tolerated: <reason>`。
+- Pyright 用 `# pyright: ignore[reportPrivateUsage]  # tolerated: <reason>`。
+
+Suppression 留在診斷行。理由寫同行，放不下時放正上方的 `# tolerated: <reason>`。
+禁止無 rule 的 noqa、type ignore 或 pyright ignore。理由說明該位置保留的具體限制，不能只寫「既有問題」。
+既有 suppression 按 noqa、type ignore、pyright ignore 分組抽樣試清。整組必要時可整組保留並改成上述格式，有可清者再逐條展開。
+
+既有 `cast` 與設定項也先嘗試清除。保留時分別用 `# tolerated(cast): <reason>` 與
+`# tolerated(config): <reason>`，放原行行尾或正上方。保留設定值不變，不新增 `cast`，不新增或放寬設定。
+File-size／radon／capability 保留項用 `# tolerated(<metric>): <reason>`，放相關行或檔案開頭。
+理由只寫原地，不交容忍名冊。Review 逐項確認嘗試證據、指定標記與理由。
+
+Ruff 的 RUF100 與 Pyright 的 reportUnnecessaryTypeIgnoreComment 檢查過期 suppression。
+過期項要移除或收窄，不能關閉檢查或新增 suppression 掩蓋。
+
 ### 測試證明行為，而非陪伴實作
 
 在模組接縫與對外契約驗證框架的可觀察行為。Notebook helper 與共用分析工具可測其公開契約，不以 caller 數量或目錄層級判定可測性。保留介面後方的內部實作自由，不直接測私有函式。
