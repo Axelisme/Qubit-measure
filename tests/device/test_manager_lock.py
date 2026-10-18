@@ -498,7 +498,7 @@ def test_concurrent_same_identity_close_device_follower_fast_fails(
     def leader() -> None:
         try:
             manager.close_device("A")
-        except BaseException as exc:  # pragma: no cover - assertion below
+        except DeviceCloseFailure as exc:  # pragma: no cover - assertion below
             leader_errors.append(exc)
 
     t_leader = workers.thread(release=probe.release, target=leader)
@@ -612,7 +612,7 @@ def test_close_device_follower_fast_fails_while_leader_fails_ordinarily(
     def leader() -> None:
         try:
             manager.close_device("A")
-        except BaseException as exc:  # pragma: no cover - asserted below
+        except DeviceCloseFailure as exc:  # pragma: no cover - asserted below
             leader_errors.append(exc)
 
     t_leader = workers.thread(release=probe.release, target=leader)
@@ -656,7 +656,7 @@ def test_close_device_follower_fast_fails_while_leader_aborts(
     def leader() -> None:
         try:
             manager.close_device("A")
-        except BaseException as exc:  # pragma: no cover - asserted below
+        except KeyboardInterrupt as exc:  # pragma: no cover - asserted below
             leader_errors.append(exc)
 
     t_leader = workers.thread(release=probe.release, target=leader)
@@ -809,7 +809,7 @@ def test_close_all_follower_close_device_fast_fails_while_leader_fails_ordinaril
     def leader() -> None:
         try:
             manager.close_all_devices()
-        except BaseException as exc:  # pragma: no cover - asserted below
+        except ExceptionGroup as exc:  # pragma: no cover - asserted below
             leader_errors.append(exc)
 
     t_leader = workers.thread(release=probe.release, target=leader)
@@ -857,7 +857,7 @@ def test_close_all_base_exception_cleans_successes_and_releases_claims(
     def leader() -> None:
         try:
             manager.close_all_devices()
-        except BaseException as exc:  # pragma: no cover - asserted below
+        except KeyboardInterrupt as exc:  # pragma: no cover - asserted below
             leader_errors.append(exc)
 
     t_leader = workers.thread(release=probe_bad.release, target=leader)

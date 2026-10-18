@@ -258,7 +258,8 @@ class DeviceManager:
             for name, device in claimed.items():
                 try:
                     device.close()
-                except Exception as exc:
+                # tolerated: Drivers may raise any ordinary error; aggregate it and close the rest.
+                except Exception as exc:  # noqa: BLE001
                     failures.append(DeviceCloseFailure((name,), exc))
                 else:
                     succeeded.append((name, id(device)))
