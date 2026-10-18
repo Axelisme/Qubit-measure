@@ -897,12 +897,27 @@ def test_unknown_input_probe_uses_dyson_without_binding_and_matches_dop853():
                 prepared, key_index, table, rows, source_initial, budget
             )
 
-    class ReferenceDrive(DOP853Kernel):
+    class ReferenceDirect(DOP853Kernel):
+        def apply(
+            self, prepared, key_index, table, rows, states, context: ApplyContext
+        ):
+            from .contract.kernel_suite import kernel_context
+
+            return super().apply(
+                prepared,
+                key_index,
+                table,
+                rows,
+                states,
+                kernel_context("dop853", table, context.budget),
+            )
+
+    class ReferenceDrive(ReferenceDirect):
         """Use full-carrier integration at the first constant-tone candidate."""
 
         name = "dyson"
 
-    class ReferenceIdle(DOP853Kernel):
+    class ReferenceIdle(ReferenceDirect):
         """Use full Lindblad integration for idle rows too."""
 
         name = "t4"

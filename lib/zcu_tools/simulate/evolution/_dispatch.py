@@ -372,12 +372,20 @@ class _Classifier:
             self.costs[rows] = self.kernels[str(name)].cost(self.table, rows)
         if not np.isfinite(self.costs).all() or np.any(self.costs < 0):
             raise ValueError("kernel costs must be finite and nonnegative")
-        context = self.names.copy()
         if self.selection is not None and self.selection.names is not None:
+            point = int(self.table.timeline[self.selection.rows[0]])
+            first, stop = (
+                np.searchsorted(self.table.timeline, point, side="left"),
+                np.searchsorted(self.table.timeline, point, side="right"),
+            )
+            context_rows = np.arange(first, stop, dtype=np.int64)
+            context = self.names[context_rows].copy()
             unresolved = context == ""
-            context[unresolved] = self.selection.names[unresolved]
-        context[~self.geometry.pending] = ""
-        plans, chain = direct_plans(self.table, context)
+            context[unresolved] = self.selection.names[context_rows[unresolved]]
+            context[~self.geometry.pending[context_rows]] = ""
+            plans, chain = direct_plans(self.table, context, context_rows)
+        else:
+            plans, chain = direct_plans(self.table, self.names)
         return Dispatch(
             self.names,
             diagnostics(self.table, self.names),
