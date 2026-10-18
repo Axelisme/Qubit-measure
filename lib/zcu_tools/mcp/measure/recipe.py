@@ -40,14 +40,14 @@ from zcu_tools.mcp.measure.recipe_capture import (
     capture_actual,
 )
 from zcu_tools.mcp.measure.recipe_form import (
+    RecipeFieldPath,
     RecipeFormField,
     RecipeModuleValues,
     directed_errors,
     field_observation,
+    field_path,
     read_form_field,
     read_module_values,
-    RecipeFieldPath,
-    field_path,
 )
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
@@ -1025,7 +1025,9 @@ class RecipeTab:
             raise GuiRpcError(f"Invalid {field} reference", reason="invalid_cfg")
         if name is None and required is not None and not valid:
             return MissingParameter(required, f"Provide a valid {field} library key")
-        self._binding.origins[field_path(field)] = "explicit" if name is not None else "gui_default"
+        self._binding.origins[field_path(field)] = (
+            "explicit" if name is not None else "gui_default"
+        )
         return None
 
     def _select_module(
@@ -1079,7 +1081,8 @@ class RecipeTab:
             raise ValueError("read_module supports str fields only, not list indexes")
         return read_module_values(
             self._binding.tools.send_gui_rpc(
-                "tab.read_module", {"tab_id": self._binding.tab, "field": list(field_path(field))}
+                "tab.read_module",
+                {"tab_id": self._binding.tab, "field": list(field_path(field))},
             )
         )
 
@@ -1096,7 +1099,11 @@ class RecipeTab:
         self._select_module(field, "use_inline")
 
     def retain_module_source(
-        self, field: RecipeFieldPath, *, summary_field: RecipeFieldPath, value_path: RecipeFieldPath
+        self,
+        field: RecipeFieldPath,
+        *,
+        summary_field: RecipeFieldPath,
+        value_path: RecipeFieldPath,
     ) -> None:
         """Retain provenance for one logical scalar without materializing a module.
 
@@ -1164,7 +1171,10 @@ class RecipeTab:
             _check_edit_value(edit.value)
             if edit.value is not None:
                 wire.append(
-                    {"path": list(field_path(edit.field)), "value": deepcopy(edit.value)}
+                    {
+                        "path": list(field_path(edit.field)),
+                        "value": deepcopy(edit.value),
+                    }
                 )
         reply = self._edit(wire)
         for edit in planned:
@@ -1289,7 +1299,9 @@ class RecipeTab:
             if key not in values:
                 captured_sources[key] = "gui_default"
             model_field = "n" if key == "expts" else key
-            self._binding.origins[(*field_path(field), model_field)] = captured_sources[key]
+            self._binding.origins[(*field_path(field), model_field)] = captured_sources[
+                key
+            ]
         self._binding.origins[field_path(field)] = captured_sources
 
     def run_step(self) -> Generator[RecipeStep, None, RunStepResult]:
@@ -1372,7 +1384,9 @@ class RecipeTab:
         )
         return operation
 
-    def _capture_cfg_field(self, name: RecipeFieldPath, source: str | SweepSources) -> ActualField:
+    def _capture_cfg_field(
+        self, name: RecipeFieldPath, source: str | SweepSources
+    ) -> ActualField:
         node = self._node(name)
         if node.value_status != "available" or node.errors:
             raise GuiRpcError(f"Unavailable {name} summary value", reason="invalid_cfg")

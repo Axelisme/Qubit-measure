@@ -1,11 +1,14 @@
 """Captured native analysis values selected by typed original-position paths."""
 
 from dataclasses import replace
-
 from typing import Any
 
 import pytest
-from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParameter, project_execution
+from zcu_tools.mcp.measure.execution_reply import (
+    SummaryEstimate,
+    SummaryParameter,
+    project_execution,
+)
 
 from ._recipe_execution_support import definition
 
@@ -16,12 +19,22 @@ def unused_recipe(_session):
 
 def analysis_snapshot() -> dict[str, Any]:
     return {
-        "execution": "a", "stage": "primary", "tab": "t", "op": 1,
-        "status": "finished", "phase": "finished", "cancel_requested": False,
-        "writeback": None, "error": None,
-        "operation_outcome": {"status": "finished"}, "save_status": "not_started",
+        "execution": "a",
+        "stage": "primary",
+        "tab": "t",
+        "op": 1,
+        "status": "finished",
+        "phase": "finished",
+        "cancel_requested": False,
+        "writeback": None,
+        "error": None,
+        "operation_outcome": {"status": "finished"},
+        "save_status": "not_started",
         "result": {
-            "summary": {"tones": [{"fit": 1.0}, {"fit": 2.5, "err": None}], "0": {"fit": 7}},
+            "summary": {
+                "tones": [{"fit": 1.0}, {"fit": 2.5, "err": None}],
+                "0": {"fit": 7},
+            },
             "invalid": [{"path": ["tones", 1, "err"], "reason": "non_finite"}],
         },
     }
@@ -53,11 +66,23 @@ def test_summary_looks_up_indexed_and_literal_numeric_name_without_reordering():
     assert pane["summary"] == snapshot["result"]["summary"]
     assert pane["invalid"] == snapshot["result"]["invalid"]
     pane["summary"]["tones"][1]["fit"] = 999
-    assert project_execution(snapshot, recipes=(recipe,))["analysis"]["primary"]["estimates"]["Q2"]["value"] == 2.5
+    assert (
+        project_execution(snapshot, recipes=(recipe,))["analysis"]["primary"][
+            "estimates"
+        ]["Q2"]["value"]
+        == 2.5
+    )
 
 
 def test_analysis_only_conflicts_are_checked_at_present_typed_path():
-    first = replace(definition(unused_recipe), summary_estimates=(SummaryEstimate("Q2", ("tones", 1, "fit")),))
-    conflict = replace(first, name="other", summary_estimates=(SummaryEstimate("other", ("tones", 1, "fit")),))
+    first = replace(
+        definition(unused_recipe),
+        summary_estimates=(SummaryEstimate("Q2", ("tones", 1, "fit")),),
+    )
+    conflict = replace(
+        first,
+        name="other",
+        summary_estimates=(SummaryEstimate("other", ("tones", 1, "fit")),),
+    )
     with pytest.raises(ValueError, match="Ambiguous analysis estimate"):
         project_execution(analysis_snapshot(), recipes=(first, conflict))

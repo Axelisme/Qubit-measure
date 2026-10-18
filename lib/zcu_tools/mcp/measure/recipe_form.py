@@ -18,7 +18,6 @@ from zcu_tools.gui.app.measure.remote.form_description import (
 )
 from zcu_tools.mcp.measure.session import GuiRpcError
 
-
 type RecipeFieldPath = tuple[str | int, ...]
 """Logical field names and original list indexes; numeric strings stay names."""
 
@@ -99,8 +98,8 @@ class RecipeModuleValues:
 
     value contains materialized module fields in their declared units. It is not
     the full native cfg after to_cfg and excludes extras lowering. mode is key
-    or inline. source is library:<actual-key> for key mode, or the dotted Form
-    module field for inline. Other invalid draft fields do not block this view;
+    or inline. source is the owner's display label: library:<actual-key> for
+    key mode or its inline module label. It is not a parsed field locator. Other invalid draft fields do not block this view;
     invalid module fields raise instead of returning unavailable/empty values.
     All containers are detached from input, library and retained observations.
     """

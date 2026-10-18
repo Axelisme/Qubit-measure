@@ -499,10 +499,10 @@ def test_recipe_with_real_form_and_adapter_preserves_acquisition_result(
     client = make_client(tmp_path, respond)
     with closing(client.context.session):
         session = RecipeSession(
-            client.context, summary_parameters=(SummaryParameter("gain", ('gain',)),)
+            client.context, summary_parameters=(SummaryParameter("gain", ("gain",)),)
         )
         prepared = session.open_tab("fake", reuse=tab)
-        prepared.set(('gain',), 0.75)
+        prepared.set(("gain",), 0.75)
         operation = prepared.run()
         fixture.ctrl.close()
         completed, status = operation.complete_in_current_worker()
@@ -571,7 +571,7 @@ def test_existing_inline_draft_is_a_guarded_noop(
         version = fixture.state.version.get(version_key)
         notifications: list[str] = []
         owner.subscribe(lambda: notifications.append("changed"))
-        reply = rpc.call("tab.use_inline", {"tab_id": tab, "field": ['pulse']})
+        reply = rpc.call("tab.use_inline", {"tab_id": tab, "field": ["pulse"]})
         assert reply["ok"], reply
         assert reply["result"]["input"] == before
         assert reply["result"]["errors"]
@@ -616,7 +616,7 @@ def test_use_inline_rejects_tagged_nonmodule_input(
         version = fixture.state.version.get(version_key)
         notifications: list[str] = []
         owner.subscribe(lambda: notifications.append("changed"))
-        reply = rpc.call("tab.use_inline", {"tab_id": tab, "field": ['extras']})
+        reply = rpc.call("tab.use_inline", {"tab_id": tab, "field": ["extras"]})
         assert not reply["ok"], reply
         assert reply["error"]["code"] == "invalid_params"
         assert reply["error"]["reason"] == "form_errors"
@@ -654,22 +654,22 @@ def test_module_rpc_conversion_values_errors_and_readonly_admission(form_rpc) ->
             }
         )
         before = owner.input.data
-        read = rpc.call("tab.read_module", {"tab_id": tab, "field": ['pulse']})
+        read = rpc.call("tab.read_module", {"tab_id": tab, "field": ["pulse"]})
         assert read["ok"], read
         assert read["result"]["value"]["freq"] == 100.0
         assert read["result"]["mode"] == "inline"
         assert read["result"]["source"] == "pulse"
         assert owner.input.data == before
         changed = len(notifications)
-        assert rpc.call("tab.use_inline", {"tab_id": tab, "field": ['pulse']})["ok"]
+        assert rpc.call("tab.use_inline", {"tab_id": tab, "field": ["pulse"]})["ok"]
         assert len(notifications) == changed
         fixture.ctrl.control_identity.reclaim_local()
-        assert rpc.call("tab.read_module", {"tab_id": tab, "field": ['pulse']})["ok"]
-        denied = rpc.call("tab.use_inline", {"tab_id": tab, "field": ['pulse']})
+        assert rpc.call("tab.read_module", {"tab_id": tab, "field": ["pulse"]})["ok"]
+        denied = rpc.call("tab.use_inline", {"tab_id": tab, "field": ["pulse"]})
         assert not denied["ok"]
         assert denied["error"]["reason"] == "not_holder"
         owner.write({("pulse", "module", "freq"): {"expr": "1 / 0"}})
-        invalid = rpc.call("tab.read_module", {"tab_id": tab, "field": ['pulse']})
+        invalid = rpc.call("tab.read_module", {"tab_id": tab, "field": ["pulse"]})
         assert not invalid["ok"]
         assert invalid["error"]["reason"] == "not_valid"
         assert len(notifications) == changed + 1
@@ -702,7 +702,7 @@ def test_use_inline_rejects_disabled_module_without_fallback(form_rpc) -> None:
         before = owner.input.data
         notifications: list[str] = []
         owner.subscribe(lambda: notifications.append("changed"))
-        reply = rpc.call("tab.use_inline", {"tab_id": tab, "field": ['pulse']})
+        reply = rpc.call("tab.use_inline", {"tab_id": tab, "field": ["pulse"]})
         assert not reply["ok"], "Disabled module must not silently become blank inline"
         assert reply["error"]["reason"] == "form_errors"
         assert reply["error"]["code"] == "invalid_params"
@@ -745,7 +745,7 @@ def test_inline_noop_takes_busy_reentry_and_lifetime_guards(
         version = fixture.state.version.get(version_key)
         notifications: list[str] = []
         owner.subscribe(lambda: notifications.append("changed"))
-        successful = rpc.call("tab.use_inline", {"tab_id": tab, "field": ['pulse']})
+        successful = rpc.call("tab.use_inline", {"tab_id": tab, "field": ["pulse"]})
         assert successful["ok"], successful
         assert owner.input.data == before
         assert fixture.state.version.get(version_key) == version
@@ -753,7 +753,7 @@ def test_inline_noop_takes_busy_reentry_and_lifetime_guards(
 
         fixture.state.set_tab_running(tab, running=True)
         try:
-            busy = rpc.call("tab.use_inline", {"tab_id": tab, "field": ['pulse']})
+            busy = rpc.call("tab.use_inline", {"tab_id": tab, "field": ["pulse"]})
             assert not busy["ok"]
             assert busy["error"]["reason"] == "mutation_blocked"
         finally:
@@ -761,7 +761,7 @@ def test_inline_noop_takes_busy_reentry_and_lifetime_guards(
         reentrant: list[str] = []
 
         def during_notification() -> None:
-            rejected = rpc.call("tab.use_inline", {"tab_id": tab, "field": ['pulse']})
+            rejected = rpc.call("tab.use_inline", {"tab_id": tab, "field": ["pulse"]})
             assert not rejected["ok"]
             reentrant.append(rejected["error"]["reason"])
 
