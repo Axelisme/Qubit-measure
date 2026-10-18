@@ -97,6 +97,14 @@ caller does not duplicate its fitter, layout or quality policy. Missing pairs
 cannot fit, and numerical failures do not become zero-valued calibrations.
 Inspect the returned quality before treating finite values as useful calibration.
 
+This experiment isolates missing preparations and the GE owner's
+`GENumericalError` per tone. The owner wraps numerical fitting or classification
+failures and retains the original exception in `__cause__`. Mux reports its
+reason as `MuxFitFailure` and continues with the remaining tones. Plotting and
+other errors propagate unchanged, so a broken diagnostic plot is not reported
+as a failed calibration fit. This is this experiment's error policy; it does
+not require other experiments to isolate the same failures.
+
 Post-analysis uses the adopted same-source primary without refitting. Caller
 must retain that source association; passing another record's primary with the
 same indices is not detectable. `MuxGEExp.PostOptions` has a common `default`
