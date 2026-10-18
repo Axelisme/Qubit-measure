@@ -455,10 +455,7 @@ class TimelineInterpreter:
                 self.prog.soccfg,
                 gen_word,
                 ro_word,
-                gen_ch=cfg.gen_ch,
-                ro_ch=cfg.ro_ch,
-                mixer_freq=cfg.mixer_freq,
-                nqz=cfg.nqz,
+                cfg=cfg,
             )
             return gen, gen
         if gen_word is not None:
@@ -466,10 +463,7 @@ class TimelineInterpreter:
                 self.prog.soccfg,
                 gen_word,
                 kind="gen",
-                gen_ch=cfg.gen_ch,
-                ro_ch=cfg.ro_ch,
-                mixer_freq=cfg.mixer_freq,
-                nqz=cfg.nqz,
+                cfg=cfg,
             )
         if ro_word is not None:
             ro = readout_freq_from_word(
@@ -477,10 +471,7 @@ class TimelineInterpreter:
                 ro_word,
                 kind="ro",
                 reference_freq_mhz=gen,
-                gen_ch=cfg.gen_ch,
-                ro_ch=cfg.ro_ch,
-                mixer_freq=cfg.mixer_freq,
-                nqz=cfg.nqz,
+                cfg=cfg,
             )
         return gen, ro
 

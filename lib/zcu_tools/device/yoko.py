@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Literal, Self
 
 from pydantic import Field, field_validator, model_validator
 
-from ._ramp import ramp_linear
+from ._ramp import RampProgress, ramp_linear
 from .base import BaseDevice, BaseDeviceInfo, device_operation
 
 if TYPE_CHECKING:
@@ -196,10 +196,9 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
             target=voltage,
             step=self._rampstep,
             apply_value=self._set_voltage_direct,
-            progress=progress,
-            desc="Ramp voltage",
-            unit="V",
-            progress_decimals=2,
+            progress=RampProgress(
+                enabled=progress, desc="Ramp voltage", unit="V", decimals=2
+            ),
             stop_event=stop_event,
             include_start=True,
         )
@@ -252,11 +251,9 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
             target=current,
             step=self._rampstep,
             apply_value=self._set_current_direct,
-            progress=progress,
-            desc="Ramp current",
-            unit="mA",
-            progress_scale=1e3,
-            progress_decimals=2,
+            progress=RampProgress(
+                enabled=progress, desc="Ramp current", unit="mA", scale=1e3, decimals=2
+            ),
             stop_event=stop_event,
             include_start=True,
         )

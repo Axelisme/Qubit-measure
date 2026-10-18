@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import numpy as np
 from zcu_tools.experiment.stop_signal import StopSignal
-from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime.schedule import (
+    AcquireOptions,
+    Schedule,
+    SignalBuffer,
+)
 from zcu_tools.progress_bar import use_pbar_factory
 
 from tests.experiment.v2.runtime._flow_cfg import make_flow_cfg as _cfg
@@ -36,7 +40,7 @@ def test_build_and_acquire_builds_program_and_updates_buffer():
             .build_and_acquire(
                 raw2signal_fn=identity_array,
                 tag="x",
-                stop_condition=lambda: False,
+                options=AcquireOptions(stop_condition=lambda: False),
             )
         )
         assert sched.cfg.reps == 4
@@ -79,7 +83,7 @@ def test_program_builder_progress_leave_defaults_root_and_can_be_overridden():
             else:
                 builder.build_and_acquire(
                     raw2signal_fn=identity_array,
-                    progress_leave=progress_leave,
+                    options=AcquireOptions(progress_leave=progress_leave),
                 )
 
     with use_pbar_factory(recording_pbar_factory(progress_bars)):
@@ -136,7 +140,7 @@ def test_build_and_acquire_decimated_uses_decimated_method_and_default_conversio
             .add(FakeModule("readout"))
             .build_and_acquire_decimated(
                 tag="trace",
-                stop_condition=lambda: False,
+                options=AcquireOptions(stop_condition=lambda: False),
             )
         )
 

@@ -62,6 +62,13 @@ The IR is divided into three layers to decouple high-level program structure fro
 - **`IRLinker.link()`**: Takes a flattened instruction stream, assigns physical addresses (`P_ADDR`) to each instruction based on `addr_inc`, and resolves label addresses. **Note: `ADDR_INC` is used only during linking and is NOT emitted in the final dictionary to maintain QICK compatibility.**
 - **`IRLinker.unlink()`**: Reconstructs the logical instruction stream (including label markers and meta structural markers) from QICK's flattened `prog_list`.
 
+## Frequency word decoding
+
+The scalar, paired and array decoders in `utils` take `cfg=PulseReadoutCfg`.
+They borrow its generator/ADC channels, mixer frequency and Nyquist zone directly;
+they do not change the cfg or use its waveform, gain or readout-window settings.
+Encoding with `readout_freq_words` still takes those four explicit settings.
+
 ## Architecture
 
 - `IRCompileMixin.optimize_asm()` runs the default IR pipeline (`make_default_pipeline`); the concrete pass set lives in `ir/passes/` and is documented in `ir/README.md`.

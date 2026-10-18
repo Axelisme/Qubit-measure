@@ -122,8 +122,10 @@ with Schedule(cfg, signals_buffer) as sched:
   conversion；integrated acquire 預設使用 `default_raw2signal_fn`，decimated acquire
   預設使用 `default_decimated_raw2signal_fn`。
 - `program_cls=` 是測試 seam；常規實驗不傳，預設使用 `ModularProgramV2`。
-- `progress_label=` 可覆寫 acquire rounds progress bar label；`progress_leave=` 可覆寫
-  root-vs-step 預設 close/retain policy。
+- 四個 build/run acquire 方法共用 `options=AcquireOptions(...)`。省略時 retry=0、
+  progress=False、progress_label="rounds"、progress_leave=None、stop_condition=None。
+  `progress_label` 覆寫 rounds bar label；`progress_leave=None` 保留 root-vs-step 的
+  close/retain policy。`progress` 控制 native acquisition progress，不控制 rounds bar。
 
 ---
 
@@ -138,7 +140,7 @@ with Schedule(cfg, signals_buffer) as sched:
   stop，但 `round_hook` 內的 data stop 只停止目前 program acquire，不會污染 `Schedule.outcome`。
   `StopSignal` 對外只暴露 external cancel flag contract：`is_set()` / `set()`；retry reset
   仍使用 `clear_stop()` 清除 stop flag 與 transient error cause。
-- `ProgramBuilder` 的 data-driven early stop 走 `stop_condition=`：internal
+- `ProgramBuilder` 的 data-driven early stop 走 `AcquireOptions(stop_condition=...)`：internal
   round hook 先把 completed round 寫入 buffer，再執行 condition；命中時呼叫
   acquire-local `cancel_flag.set()`，保留該 completed round 並停止下一 round；`Schedule.outcome`
   仍是 `completed`。
@@ -152,8 +154,8 @@ with Schedule(cfg, signals_buffer) as sched:
   measure-gui run policy）在 experiment adapter 回傳後呼叫 `raise_if_error()`，把
   runner 內部錯誤轉成 operation failure。`stopped` 不記錄 error cause；retry reset 會同時
   清掉 stop flag 與 transient error cause。
-- `ProgramBuilder.build_and_acquire(..., retry=N)` /
-  `run_program(..., retry=N)` 是單次 program acquire retry；`Schedule.batch(...)` 不提供
+- `ProgramBuilder.build_and_acquire(..., options=AcquireOptions(retry=N))` /
+  `run_program(..., options=AcquireOptions(retry=N))` 是單次 program acquire retry；`Schedule.batch(...)` 不提供
   per-child retry。
 - Program build/acquire 在每次 attempt 前與 failed attempt retry 前都重新檢查
   `StopSignal`；stop / interrupted outcome 不會被 retry，也不會被 retry reset 清掉。

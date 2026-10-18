@@ -6,7 +6,7 @@ from typing import Literal, override
 
 from pydantic import Field, field_validator
 
-from ._ramp import ramp_linear
+from ._ramp import RampProgress, ramp_linear
 from .base import BaseDevice, BaseDeviceInfo, device_operation
 
 DEFAULT_RAMPSTEP = 0.01
@@ -116,9 +116,7 @@ class FakeDevice(BaseDevice[FakeDeviceInfo]):
             target=value,
             step=self._rampstep,
             apply_value=apply_value,
-            progress=progress,
-            desc="Ramp value",
-            progress_decimals=6,
+            progress=RampProgress(enabled=progress, desc="Ramp value", decimals=6),
             stop_event=stop_event,
             include_start=False,
         )
