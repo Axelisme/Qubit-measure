@@ -69,6 +69,7 @@ class BlockChunkPass(AbsChunkPass, ABC):
     def process(
         self,
         chunks: ChunkList,
+        # tolerated: AbsChunkPass.process requires ctx; block transforms are local.
         ctx: PipeLineContext,  # noqa: ARG002
     ) -> tuple[ChunkList, bool]:
         changed = False
