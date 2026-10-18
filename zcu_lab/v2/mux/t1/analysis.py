@@ -42,8 +42,9 @@ def analyze_t1(
     NaN IQ is allowed for partial acquisition. Invalid sources and negative or
     noninteger skip raise ValueError before fitting. Existing single/dual decay
     fitters and quality consume only acquired points. Numeric failures return
-    indexed MuxFitFailure reasons. plots owns fit_i, independent of duplicate
-    readout labels; caller finishes/releases figures. No cfg or hardware is read.
+    indexed MuxFitFailure reasons; plotting and resource errors propagate.
+    plots owns fit_i, independent of duplicate readout labels; caller
+    finishes/releases figures. No cfg or hardware is read.
     """
     times, indices, signals = result.times, result.tone_indices, result.signals
     if (
@@ -99,11 +100,7 @@ def analyze_t1(
                 covariance,
             )
             fit = T1Analysis(float(t1), float(err), t1b, errb, {"fit": quality})
-            outcomes.append(MuxT1Fit(index, fit))
-            ax.plot(xs, real, "o", label="measured")
-            ax.plot(xs, fitted, label=f"T1={t1:.4g} ± {err:.2g} us")
-            if options.dual_exp:
-                ax.set_title(f"Second decay: {t1b:.4g} ± {errb:.2g} us")
+            outcome = MuxT1Fit(index, fit)
         except (
             ValueError,
             RuntimeError,
@@ -113,6 +110,12 @@ def analyze_t1(
             outcomes.append(MuxFitFailure(index, str(exc)))
             ax.plot(xs, np.abs(signal), "o", label="acquired magnitude")
             ax.text(0.02, 0.98, str(exc), transform=ax.transAxes, va="top", wrap=True)
+        else:
+            outcomes.append(outcome)
+            ax.plot(xs, real, "o", label="measured")
+            ax.plot(xs, fitted, label=f"T1={t1:.4g} ± {err:.2g} us")
+            if options.dual_exp:
+                ax.set_title(f"Second decay: {t1b:.4g} ± {errb:.2g} us")
         ax.legend()
         ax.grid(True)
         fig.tight_layout()
