@@ -16,7 +16,7 @@ from ._dop853_data import (
     Context,
     Models,
     Segments,
-    hamiltonian,
+    fill_hamiltonian,
     pack_models,
 )
 from ._workload_facts import packed_segments
@@ -35,6 +35,14 @@ class _Data(NamedTuple):
     segments: Segments
 
 
+class _LabContext(NamedTuple):
+    # Mutable scratch belongs to one row, not to the model-only preparation.
+    drive: Context
+    hamiltonian: NDArray[np.complex128]
+    product: NDArray[np.complex128]
+    derivative: NDArray[np.complex128]
+
+
 @dataclass(frozen=True)
 class DOP853Prepared:
     models: Models
@@ -46,26 +54,24 @@ class DOP853Prepared:
 
 @njit(nogil=True, cache=True)
 def _rhs(time, state, context):
-    size = context.models.energies.shape[1]
+    drive, h, product, derivative = context
+    size = drive.models.energies.shape[1]
     rho = state.reshape(size, size)
-    h = hamiltonian(time, context)
+    fill_hamiltonian(time, drive, h)
     # A density and every real-weighted Runge--Kutta stage are Hermitian.
     # Thus rho @ h = (h @ rho).H; one dense product supplies both terms.
-    product = h @ rho
-    derivative = np.empty_like(rho)
+    np.dot(h, rho, product)
     for target in range(size):
         for source in range(size):
             derivative[target, source] = (
                 -2j
                 * np.pi
                 * (product[target, source] - product[source, target].conjugate())
-                - context.models.decay[context.model, target, source]
-                * rho[target, source]
+                - drive.models.decay[drive.model, target, source] * rho[target, source]
             )
         for source in range(size):
             derivative[target, target] += (
-                context.models.rates[context.model, target, source]
-                * rho[source, source]
+                drive.models.rates[drive.model, target, source] * rho[source, source]
             )
     return derivative.ravel()
 
@@ -77,10 +83,19 @@ def _context(data, row, model):
 
 
 @njit(nogil=True, cache=True)
+def _lab_context(data, row, model):
+    size = data.models.energies.shape[1]
+    h = np.empty((size, size), dtype=np.complex128)
+    return _LabContext(
+        _context(data, row, model), h, np.empty_like(h), np.empty_like(h)
+    )
+
+
+@njit(nogil=True, cache=True)
 def _run(data, row_models, states, controls):
     # Cache the linked solver behind a callback-free signature. Passing compiled
     # callables from Python gives Numba process-specific specialization keys.
-    run_chain(_rhs, _context, data, row_models, states, controls)
+    run_chain(_rhs, _lab_context, data, row_models, states, controls)
 
 
 @njit(nogil=True, cache=True)

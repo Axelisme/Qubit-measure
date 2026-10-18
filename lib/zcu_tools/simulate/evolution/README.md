@@ -183,12 +183,16 @@ The registry kernels retain no evolve-local data.
 
 WorkPlan publishes each lazy fact once, including concurrent requests for the
 same key. WorkPlan copies builder results and publishes read-only arrays. The
-shared facts are envelope peak/slope/real flags, period split rates and packed
-DOP853 samples. Model facts
-include the full physical coordinates in their identity. Table-indexed facts
+shared facts include envelope peak/slope/real flags, period split rates, packed
+DOP853 samples and compact two-tone Floquet frames. Floquet consumes full Fourier
+averages during frame construction; facts and residents retain only compact
+frame data and optional sideband candidates. Model facts include the full
+physical coordinates in their identity. Table-indexed facts
 also include table identity, so renumbered prefix representatives cannot alias
 the complete table. DOP853 packing also distinguishes flux-inclusive samples.
-Densities and adaptive solver history are not facts.
+Densities and adaptive solver history are not facts. Lab-frame DOP853 gives each
+row its own Hamiltonian, matrix-product and derivative buffers. These mutable
+buffers never enter shared preparations or WorkPlan facts.
 
 The planner publishes immutable algorithm-named records from the complete
 candidate inventory, before numerical admission:
