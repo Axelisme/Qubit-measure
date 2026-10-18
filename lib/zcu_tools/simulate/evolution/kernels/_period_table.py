@@ -1,5 +1,6 @@
 """Shared immutable period tables and single-threaded envelope playback."""
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import NamedTuple
 
@@ -63,12 +64,61 @@ class SecularMaps(NamedTuple):
 
 
 @dataclass(frozen=True)
+class CompactPolynomial:
+    """Lossless storage of byte-nonzero planes of a complex polynomial.
+
+    shape is the original (P, degrees, modes, M, M) dense shape. indices holds
+    flattened leading-axis plane positions in ascending order. values owns the
+    corresponding (planes, M, M) complex128 bytes, read-only. Omitted planes
+    contain only zero bytes; signed zeros and arbitrarily small values remain.
+    """
+
+    shape: tuple[int, ...]
+    indices: tuple[int, ...]
+    values: NDArray[np.complex128]
+
+    @classmethod
+    def from_dense(cls, coefficients: NDArray[np.complex128]) -> "CompactPolynomial":
+        """Copy a (P,degrees,modes,M,M) complex128 array into owned storage.
+
+        Positive dimensions and square trailing matrices are required; invalid
+        shape or dtype raises ValueError. The input may be strided or writable.
+        """
+        if (
+            coefficients.dtype != np.complex128
+            or coefficients.ndim != 5
+            or min(coefficients.shape) <= 0
+            or coefficients.shape[-2] != coefficients.shape[-1]
+        ):
+            raise ValueError(
+                "polynomial requires nonempty (P,degrees,modes,M,M) complex128"
+            )
+        planes = np.ascontiguousarray(coefficients).reshape(
+            (-1, *coefficients.shape[-2:])
+        )
+        # Test every bit, in machine words rather than eight separate bytes.
+        nonzero = np.any(planes.view(np.uint64).reshape(len(planes), -1), axis=1)
+        indices = tuple(int(index) for index in np.flatnonzero(nonzero))
+        values = planes[nonzero].copy()
+        values.setflags(write=False)
+        return cls(coefficients.shape, indices, values)
+
+    def expand(self) -> NDArray[np.complex128]:
+        """Return a fresh read-only dense array with the original exact bytes."""
+        result = np.zeros(self.shape, dtype=np.complex128)
+        planes = result.reshape((-1, *self.shape[-2:]))
+        planes[list(self.indices)] = self.values
+        result.setflags(write=False)
+        return result
+
+
+@dataclass(frozen=True)
 class PeriodEntry:
     """One carrier/band channel shared by the two shaped period families.
 
     fallback/tail_budget: direct solver payload and allowance for ordinary tables.
     frequency: signed carrier in GHz. bound: maximum absolute gain.
-    coefficients: (1,8,16,M,M) amplitude/phase polynomial for one subperiod.
+    coefficients: dense (1,8,16,M,M) or losslessly compact subperiod polynomial.
     populations/coherences: half-subperiod secular maps, (M,M).
     subdivisions: positive subperiods per carrier period, at most 32.
     block_cycles: positive maximum integer-subperiod block, one when subdivided.
@@ -81,7 +131,7 @@ class PeriodEntry:
     tail_budget: float
     frequency: float
     bound: float
-    coefficients: NDArray[np.complex128]
+    coefficients: NDArray[np.complex128] | CompactPolynomial
     populations: NDArray[np.float64]
     coherences: NDArray[np.float64]
     subdivisions: int = 1
@@ -89,22 +139,46 @@ class PeriodEntry:
     project_unitary: bool = False
     harmonics: int = 8
 
+    def expanded_coefficients(self) -> NDArray[np.complex128]:
+        """Borrow dense coefficients, or expand compact storage for this playback."""
+        if isinstance(self.coefficients, CompactPolynomial):
+            return self.coefficients.expand()
+        return self.coefficients
+
+
+def _allocation_bytes(arrays: Iterable[NDArray[np.generic]]) -> int:
+    """Charge each retained ndarray owner once, including bases behind views."""
+    owners: dict[int, NDArray[np.generic]] = {}
+    for array in arrays:
+        while isinstance(array.base, np.ndarray):
+            array = array.base
+        owners[id(array)] = array
+    return sum(array.nbytes for array in owners.values())
+
 
 @dataclass(frozen=True)
 class PeriodPrepared:
-    """Immutable entries aligned with unique preparation keys, with owned bytes."""
+    """Immutable entries aligned with unique preparation keys.
+
+    entries borrow only read-only arrays. nbytes charges each retained ndarray
+    base allocation once across the entire batch, including fallback packing.
+    """
 
     entries: tuple[PeriodEntry, ...]
 
     @property
     def nbytes(self) -> int:
-        return sum(
-            e.coefficients.nbytes
-            + e.populations.nbytes
-            + e.coherences.nbytes
-            + e.fallback.nbytes
-            for e in self.entries
-        )
+        """Unique retained array bytes, excluding logical compact padding and RSS."""
+        arrays = []
+        for entry in self.entries:
+            coefficients = entry.coefficients
+            arrays.append(
+                coefficients.values
+                if isinstance(coefficients, CompactPolynomial)
+                else coefficients
+            )
+            arrays.extend((entry.populations, entry.coherences, *entry.fallback.models))
+        return _allocation_bytes(arrays)
 
 
 @njit(nogil=True, cache=True)
