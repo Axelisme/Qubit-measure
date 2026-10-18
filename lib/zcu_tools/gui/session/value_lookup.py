@@ -318,10 +318,7 @@ class ValueRegistry(ValueLookup):
             )
         if entry.key.type_ is not requested.type_:
             registered_type = entry.key.type_
-            requested_type = cast(
-                ScalarType,
-                _ensure_supported_type(requested.path, requested.type_),
-            )
+            requested_type = _ensure_supported_type(requested.path, requested.type_)
             raise ValueTypeError(
                 requested.path,
                 f"Value source {requested.path!r} has type "
@@ -339,6 +336,7 @@ class ValueRegistry(ValueLookup):
         return _coerce_value(entry.key.path, value, requested.type_)
 
     def _entry_from_spec(self, spec: ValueProviderSpec[T]) -> _Entry[ScalarValue]:
+        # tolerated(cast): Validated scalar keys cross the invariant _Entry[T] registry boundary.
         return cast(
             _Entry[ScalarValue],
             _Entry(
@@ -402,8 +400,13 @@ def _validate_owner(owner: str) -> None:
         raise ValueError("Value source owner must be a non-empty string")
 
 
-def _ensure_supported_type(key: str, type_: type[T]) -> type[T]:
-    if type_ not in (int, float, str, bool):
+def _ensure_supported_type(key: str, type_: type[T]) -> ScalarType:
+    if (
+        type_ is not int
+        and type_ is not float
+        and type_ is not str
+        and type_ is not bool
+    ):
         raise ValueTypeError(
             key,
             f"Value source {key!r} uses unsupported type {type_.__name__!r}; "
@@ -417,18 +420,22 @@ def _coerce_value(key: str, value: object, type_: type[T]) -> T:
     if type_ is bool:
         if type(value) is not bool:
             raise ValueTypeError(key, f"Value source {key!r} did not return a bool")
+        # tolerated(cast): Exact bool validation cannot narrow the unconstrained requested T.
         return cast(T, value)
     if type_ is int:
         if type(value) is not int:
             raise ValueTypeError(key, f"Value source {key!r} did not return an int")
+        # tolerated(cast): Exact int validation cannot narrow the unconstrained requested T.
         return cast(T, value)
     if type_ is float:
-        if type(value) in (int, float):
-            return cast(T, float(cast(int | float, value)))
+        if type(value) is int or type(value) is float:
+            # tolerated(cast): Native float conversion cannot narrow the unconstrained requested T.
+            return cast(T, float(value))
         raise ValueTypeError(key, f"Value source {key!r} did not return a float")
     if type_ is str:
         if type(value) is not str:
             raise ValueTypeError(key, f"Value source {key!r} did not return a str")
+        # tolerated(cast): Exact str validation cannot narrow the unconstrained requested T.
         return cast(T, value)
     raise AssertionError(f"Unsupported type {type_!r}")
 
