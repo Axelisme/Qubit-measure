@@ -103,7 +103,7 @@ def test_variable_elements_capture_all_leaves_and_project_native_row_identity(
         expected_estimates[f"tones/{len(participants)}/freq"] = {"value": None, "stderr": None, "unit": "MHz"}
         assert reply["analysis"]["primary"]["estimates"] == expected_estimates
         aggregates = [params for method, params in client.transport.sent if method == "tab.read_elements"]
-        assert aggregates == [{"tab_id": "tab-1", "path": ["tones"], "fields": [["drive", "gain"], ["sweep", "start"]]}]
+        assert aggregates == [{"tab_id": "t", "path": ["tones"], "fields": [["drive", "gain"], ["sweep", "start"]]}]
         # Capture is detached: all subsequent views must avoid live GUI reads.
         gui.names = ["later"]
         gui.native_summary.clear()
