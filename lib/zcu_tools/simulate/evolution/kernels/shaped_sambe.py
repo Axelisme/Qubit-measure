@@ -1,4 +1,4 @@
-"""Real-envelope periods from shared finite Hilbert Fourier matrices."""
+"""Smooth-envelope periods from shared finite Hilbert Fourier matrices."""
 
 from dataclasses import dataclass
 
@@ -195,16 +195,18 @@ class _Data:
 
 
 class ShapedSambeKernel:
-    """Finite-Fourier real-envelope propagation for shaped keys at any reuse.
+    """Finite-Fourier smooth-envelope propagation for shaped keys at any reuse.
 
     Keys contain level, port, signed GHz carrier, peak absolute gain,
-    duration in ns and gain-weighted envelope slope. They fix subperiod resolution.
+    duration in ns, gain-weighted slope and a complex-envelope flag.
+    They fix subperiod resolution, including the tighter complex motion limit.
     Comparing
     adjacent harmonic cutoffs (2/3, then 3/4) estimates Fourier truncation.
     Four/eight amplitude nodes control interpolation. Guard preparation is
     call-local and never reads density. Rejections retain the old shaped
     decision order. Apply uses frozen-envelope secular Strang steps, never
-    retries, clips or normalizes density. Complex envelopes and DC are rejected.
+    retries, clips or normalizes density. Complex amplitudes use their magnitude
+    polynomial and add their angle to carrier phase. DC is rejected.
     """
 
     revision = "carrier-physical-v3"
@@ -217,12 +219,12 @@ class ShapedSambeKernel:
         rows: NDArray[np.int64],
         context: KernelContext,
     ) -> NDArray[np.void]:
-        """Key peak gain, weighted slope and duration to fix subperiod resolution."""
+        """Key peak, slope, duration and complex motion class to fix resolution."""
         base = band_keys(table, rows, context.work_plan)
         keys = np.empty(
             len(rows),
             dtype=base.dtype.descr
-            + [("duration", "f8"), ("bound", "f8"), ("slope", "f8")],
+            + [("duration", "f8"), ("bound", "f8"), ("slope", "f8"), ("complex", "?")],
         )
         for name in base.dtype.names or ():
             keys[name] = base[name]
@@ -235,6 +237,7 @@ class ShapedSambeKernel:
             np.abs(table.tone_amplitude[rows, 0]) * peaks[table.tone_envelope[rows, 0]]
         )
         keys["duration"] = table.duration_ns[rows]
+        keys["complex"] = ~bounds.real[table.tone_envelope[rows, 0]]
         return keys
 
     def _eligible(
@@ -254,7 +257,6 @@ class ShapedSambeKernel:
         keys = self.prepare_keys(table, rows, context)
         frequency = np.abs(keys["frequency"])
         bounds = envelope_bounds(table, context.work_plan)
-        real = bounds.real
         peaks, slopes = bounds.peaks, bounds.slopes
         envelope = table.tone_envelope[rows, 0]
         resolved = (
@@ -265,7 +267,6 @@ class ShapedSambeKernel:
             (frequency >= 0.03)
             & (keys["bound"] > 0)
             & resolved
-            & real[table.tone_envelope[rows, 0]]
             & (keys["bound"] * strength <= 0.5 * frequency * subdivisions)
             & bounded
         )
@@ -382,7 +383,7 @@ class ShapedSambeKernel:
     ) -> GuardResult | None:
         """Reuse key-covered convergence data and recheck current row eligibility.
 
-        Keys include duration, envelope bound and slope, so their stored errors
+        Keys include duration, bound, slope and complex motion class; stored errors
         cover the complete spectral domain. Missing keys return None; eligibility
         rejection returns a decision without rebuilding periods.
         """
@@ -462,7 +463,7 @@ class ShapedSambeKernel:
         states: NDArray[np.complex128],
         context: ApplyContext,
     ) -> NDArray[np.bool_]:
-        """Advance real envelopes; fractional steps use frozen spectral tails.
+        """Advance smooth envelopes; fractional steps use frozen spectral tails.
 
         Incompatible payloads raise ValueError; nonfinite output raises
         RuntimeError. Return an all-False accuracy-exceedance mask.
@@ -521,15 +522,19 @@ class ShapedSambeKernel:
                 tail = table.duration_ns[row] - start
                 if tail <= 1e-10:
                     continue
-                amp = float(
-                    envelopes(table, np.array([row]), np.array([[start + tail / 2]]))[
-                        0, 0
-                    ].real
-                )
-                blocks = _spectral(model, port, entry.frequency, amp, 3, tail)
+                amplitude = envelopes(
+                    table, np.array([row]), np.array([[start + tail / 2]])
+                )[0, 0]
                 theta = (
                     table.tone_theta_rad[row, 0] + 2 * np.pi * entry.frequency * start
                 )
+                if amplitude.imag == 0:
+                    # Keep the signed-real spectral path numerically unchanged.
+                    amp = float(amplitude.real)
+                else:
+                    amp = float(abs(amplitude))
+                    theta += float(np.angle(amplitude))
+                blocks = _spectral(model, port, entry.frequency, amp, 3, tail)
                 harmonics = np.fft.fftfreq(16) * 16
                 u = np.einsum("k,kij->ij", np.exp(1j * harmonics * theta), blocks)
                 # Polar projection changes U, not density or populations.
