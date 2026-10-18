@@ -218,3 +218,88 @@ def test_engine_dispatches_low_carrier_strong_and_unknown_inputs() -> None:
         (replace(batch(1, duration=8.7), tracks=(weak,)),),
     )
     assert result.paths.segments_by_kernel == {"dyson": 1}
+
+
+@pytest.mark.parametrize(
+    ("size", "periods", "frequency"),
+    [
+        (16, 4095, 8.0),
+        (16, 4096, 8.0),
+        (16, 7431, -8.0),
+        (16, 4096, 0.5),
+        (4, 7431, 8.0),
+    ],
+)
+def test_long_playback_matches_repeated_periods(size, periods, frequency) -> None:
+    from zcu_tools.simulate.evolution.kernel import ApplyContext
+    from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
+
+    model = synthetic_model(size)
+    model = replace(
+        model,
+        rates_per_ns=model.rates_per_ns * 1e-6,
+        dephasing_per_ns=model.dephasing_per_ns * 1e-6,
+    )
+    source = ModelSource(np.eye(size, dtype=complex) / size, lambda level: model)
+    period = 1 / abs(frequency)
+    table = SegmentTable(
+        timeline=np.arange(3),
+        start_ns=np.array([0.0, 1.1, 4.7]),
+        duration_ns=np.full(3, (periods + 0.25) * period),
+        level=np.zeros((3, 1), dtype=np.int64),
+        tones=np.ones(3, dtype=np.int64),
+        tone_port=np.zeros((3, 1), dtype=np.int64),
+        tone_frequency_ghz=np.full((3, 1), frequency),
+        tone_amplitude=np.full((3, 1), 0.15),
+        tone_theta_rad=np.array([0.0, 0.7, -2.3])[:, None],
+        tone_envelope=np.zeros((3, 1), dtype=np.int64),
+        tone_envelope_offset_ns=np.zeros((3, 1)),
+        envelopes=(EnvelopeSpec("constant"),),
+    )
+    vector = np.exp(0.3j * np.arange(size)) / np.sqrt(size)
+    coherent = vector[:, None] * vector.conj()[None, :]
+    states = np.array([coherent, np.eye(size) / size, 0.9 * coherent])
+    # Apply accepts arbitrary inputs. Preserve both the trace defect and an
+    # anti-Hermitian residual rather than projecting back onto physical states.
+    states[2, 0, 1] += 1e-9j
+    states[2, 0, 0] += 2e-9j
+    kernel = FloquetPeriodKernel()
+    rows = np.arange(3, dtype=np.int64)
+    work = WorkPlan()
+    try:
+        context = KernelContext(source, 1e-3, work)
+        assert kernel.guard(table, rows, context).all()
+        keys = kernel.prepare_keys(table, rows, context)
+        prepared = kernel.prepare(keys[:1], table, rows[:1], context)
+    finally:
+        work.close()
+    key_index = np.zeros(3, dtype=np.int64)
+    apply_context = ApplyContext(1e-3)
+    expected = states.copy()
+    single = replace(table, duration_ns=np.full(3, period))
+    for _ in range(periods):
+        kernel.apply(prepared, key_index, single, rows, expected, apply_context)
+    tail = replace(table, duration_ns=np.full(3, period / 4))
+    kernel.apply(prepared, key_index, tail, rows, expected, apply_context)
+    actual = states.copy()
+    assert not kernel.apply(
+        prepared, key_index, table, rows, actual, apply_context
+    ).any()
+    if size == 16 and periods >= 4096:
+        np.testing.assert_allclose(actual, expected, atol=1e-10, rtol=0)
+    else:
+        np.testing.assert_array_equal(actual, expected)
+    assert abs(np.trace(actual[2]).real - 0.9) < 1e-10
+    assert np.max(np.abs(actual[2] - actual[2].conj().T)) > 1e-10
+    # Reusing the same prepared payload cannot depend on batch order or slicing.
+    reordered = states[::-1].copy()
+    for index in range(3):
+        kernel.apply(
+            prepared,
+            key_index[index : index + 1],
+            table,
+            rows[2 - index : 3 - index],
+            reordered[index : index + 1],
+            apply_context,
+        )
+    np.testing.assert_array_equal(reordered[::-1], actual)
