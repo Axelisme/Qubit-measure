@@ -22,7 +22,7 @@ from ._workload_facts import envelope_bounds, packed_segments
 # summed full-operator/carrier ratio 0.217, sampled normalized slope 0.0192/ns
 # and curvature 0.00231/ns² (including DAC quantization). Admission allows
 # margins up to 0.25, 0.025/ns and 0.003/ns². These are not rigorous bounds.
-_REVISION = "joint-rwa-v1"
+_REVISION = "joint-rwa-v2"
 _EDGE_GHZ = 0.05
 _STEP_NS = 4.0
 _MIN_BUDGET = 1e-3
@@ -48,8 +48,8 @@ class RWACoefficients(NamedTuple):
 
     positive/negative: (tones,M,M) GHz/gain Fourier operators, mutual adjoints.
     diagonal: (tones,M) GHz/gain² phase-independent virtual diagonal terms,
-        multiplied by abs(gain*envelope)**2. Currently zero; virtual-shift
-        policies belong in rwa_coefficients, not in individual integrators.
+        multiplied by abs(gain*envelope)**2. Contains window-excluded single-tone
+        second-order shifts; retained edges are not counted twice.
     All consumers, including the gate cache, assemble through
     interaction_hamiltonian. They must not implement a separate drive RHS.
     """
@@ -76,7 +76,8 @@ class RWAPrepared:
     models: packed joint energies, drive quadratures, bases and secular rates.
     positive, negative: (keys,tones,M,M) coefficients multiplying z and conj(z),
         respectively, after the 50 MHz Fourier-edge selection.
-    diagonal: (keys,tones,M) gain-squared diagonal terms from RWACoefficients.
+    diagonal: (keys,max_active_tones,M) GHz/gain² diagonal terms from
+        RWACoefficients, independent of carrier phase.
     """
 
     models: Models
@@ -92,6 +93,38 @@ class RWAPrepared:
             + self.negative.nbytes
             + self.diagonal.nbytes
         )
+
+
+@njit(nogil=True, cache=True)
+def _coefficients(models, ports, frequencies, tones):
+    """Build retained edges and compact per-tone diagonal from the same window."""
+    size = models.energies.shape[1]
+    positive = np.zeros((len(tones), ports.shape[1], size, size), np.complex128)
+    negative = np.zeros_like(positive)
+    max_tones = 0
+    for count in tones:
+        max_tones = max(max_tones, count)
+    diagonal = np.zeros((len(tones), max_tones, size), np.float64)
+    for key in range(len(tones)):
+        for tone in range(tones[key]):
+            port, frequency = ports[key, tone], frequencies[key, tone]
+            for i in range(size):
+                for j in range(size):
+                    gap = models.energies[key, i] - models.energies[key, j]
+                    x, y = models.x[key, port, i, j], models.y[key, port, i, j]
+                    for sign in (1, -1):
+                        coefficient = (x - sign * 1j * y) / 2
+                        detuning = gap + sign * frequency
+                        if abs(detuning) < _EDGE_GHZ:
+                            if sign == 1:
+                                positive[key, tone, i, j] = coefficient
+                            else:
+                                negative[key, tone, i, j] = coefficient
+                        else:
+                            # Exact resonances evolve explicitly above; no
+                            # denominator regularization or double counting.
+                            diagonal[key, tone, i] += abs(coefficient) ** 2 / detuning
+    return positive, negative, diagonal
 
 
 @njit(nogil=True, cache=True)
@@ -328,25 +361,27 @@ def rwa_coefficients(
     """Build all joint drive coefficients for ordered signed carriers.
 
     This is the shared coefficient owner for ordinary RWA and covariant gates.
-    Diagonal virtual terms are currently zero. A future virtual-shift policy
-    changes this builder and its policy identity, never a gate-specific RHS.
+    Each tone contributes sum_j,s |C_s[i,j]|²/(Ei-Ej+s*f) to the diagonal
+    in GHz/gain², restricted to abs(Ei-Ej+s*f)>=0.05 GHz. Retained edges
+    evolve explicitly, with no zero division or double counting. The common
+    compiled builder also serves batched ordinary RWA preparation.
     Graph pruning may replace the Fourier operators but retains the diagonal.
     Returned arrays are owned and mutable. Misaligned/empty carriers raise
     ValueError; ports must index the supplied model's validated drives.
     """
     if not ports or len(ports) != len(frequencies):
         raise ValueError("RWA coefficients require aligned nonempty carriers")
-    positive = np.array(
-        [retained_edges(model, p, f) for p, f in zip(ports, frequencies, strict=True)]
+    positive, negative, diagonal = _coefficients(
+        pack_models([model]),
+        np.array([ports], dtype=np.int64),
+        np.array([frequencies], dtype=np.float64),
+        np.array([len(ports)], dtype=np.int64),
     )
-    negative = np.ascontiguousarray(positive.conj().transpose(0, 2, 1))
-    return RWACoefficients(
-        positive, negative, np.zeros((len(ports), len(model.energies_ghz)))
-    )
+    return RWACoefficients(positive[0], negative[0], diagonal[0])
 
 
 class MultitoneRWAKernel:
-    """Approximate C5 family, revision joint-rwa-v1; never a DOP853 frame flag.
+    """Approximate C5 family, revision joint-rwa-v2; never a DOP853 frame flag.
 
     Admission requires >=2 tones, at least one sampled envelope, fixed flux,
     real envelopes with peak-normalized slope <=0.025/ns and curvature
@@ -410,7 +445,11 @@ class MultitoneRWAKernel:
         rows: NDArray[np.int64],
         context: KernelContext,
     ) -> Prepared:
-        """Build model-only retained Fourier edges for key-aligned representative rows."""
+        """Build retained Fourier edges and omitted-edge shifts for key-aligned rows.
+
+        Uses the same compiled coefficient owner as rwa_coefficients. Apply
+        scales its diagonal by the actual squared gain/envelope amplitude.
+        """
         tolerances(context.budget)
         if len(keys) != len(rows):
             raise ValueError("RWA keys and representative rows must align")
@@ -420,21 +459,12 @@ class MultitoneRWAKernel:
                 for row in rows
             ]
         )
-        size = models.energies.shape[1]
-        positive = np.zeros((len(rows), table.tone_port.shape[1], size, size), complex)
-        negative = np.zeros_like(positive)
-        diagonal = np.zeros((len(rows), table.tone_port.shape[1], size))
-        for index, row in enumerate(rows):
-            model = context.source.model(tuple(int(v) for v in table.level[row]))
-            count = table.tones[row]
-            coefficients = rwa_coefficients(
-                model,
-                tuple(int(v) for v in table.tone_port[row, :count]),
-                tuple(float(v) for v in table.tone_frequency_ghz[row, :count]),
-            )
-            positive[index, :count] = coefficients.positive
-            negative[index, :count] = coefficients.negative
-            diagonal[index, :count] = coefficients.diagonal
+        positive, negative, diagonal = _coefficients(
+            models,
+            table.tone_port[rows],
+            table.tone_frequency_ghz[rows],
+            table.tones[rows],
+        )
         positive.setflags(write=False)
         negative.setflags(write=False)
         diagonal.setflags(write=False)
@@ -480,6 +510,7 @@ class MultitoneRWAKernel:
         """Advance independent rows in place and return an all-False exceedance mask.
 
         Every row starts in its joint eigenbasis, integrates all retained tones
+        and envelope-squared omitted-edge shifts through interaction_hamiltonian
         in a row-local interaction picture, then restores Schrödinger coordinates.
         theta is the phase at row start; offsets preserve pulse-local envelopes.
         Adaptive integration uses the ordinary budget tolerance and 0.1 ns seed,

@@ -139,6 +139,8 @@ def _admitted(
             float(np.max(coherence_decay(model))),
             float(np.max(model.rates_per_ns.sum(axis=0))),
         )
+        # Diagonal shifts commute with secular D; only off-diagonal drive
+        # contributes to this D-U-D splitting proxy.
         strength = sum(
             amplitudes[k] * 2 * np.linalg.norm(graph.positive[k], 2)
             for k in range(count)

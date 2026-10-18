@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-19, WorkPlan ownership, joint-basis multi-tone RWA, simultaneous gate reuse and unified resident/pending budget
+**Last updated:** 2026-10-19, WorkPlan ownership, joint-basis multi-tone RWA, simultaneous gate reuse with shared virtual shifts and unified resident/pending budget
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -79,8 +79,8 @@ application and certificates that require their intermediate data.
 | `gate_cache` | Dispatch sends a key-aligned builder mask. Positive durations up to 30 ns first try six phase nodes with two independent probes; failed convergence uses sixteen nodes. Other keys directly use sixteen nodes. Both builders produce four closed-system subsegments with secular Strang dissipation and the same phase-Fourier representation. |
 | `period_table` and `shaped_sambe` | Ordinary period tables integrate frozen-envelope Hilbert periods; shaped Sambe uses finite-Hilbert-Fourier subperiods for smooth real or complex envelopes. Complex playback interpolates magnitude and adds the envelope angle to the advancing carrier phase. It uses a tighter envelope-motion bound; unresolved ramps and failed certificates retain fallback. Each family owns its guards and build. They share period playback and direct fractional tails. |
 | `floquet` | The guard builds a Stark frame and returns row admissions. Passing k=0 omission/convergence bounds selects modal second-order Dyson when probe limits pass, otherwise periodic k=0 propagation. After k=0 omission rejection, a passing calibrated finite-Fourier certificate selects retained-sideband integration. A cached sideband frame extends to missing probe bins without rebuilding the frame or existing certificates. Dispatch merges current-row admissions into one family plan. Apply does not repeat admission or construct sparse equations. |
-| `multitone_gate` | Complete-inventory canonical reuse of at least 20 rows, shared RWA admission, coextensive real sampled support, compatible dressed phase charges (or explicitly admitted weak-cycle pruning), and a four-way secular split proxy at most 0.01. Builds four joint Hilbert propagators, plays D-U-D, and restores the lab/DC endpoint frame. Rejection retains ordinary RWA. |
-| `multitone_rwa` | Revision `joint-rwa-v1` retains joint-basis Fourier edges with `abs(Ei-Ej±f) < 0.05 GHz`, sums every tone, and integrates in a row-local interaction picture with a 4 ns adaptive ceiling. It restores Schrödinger coordinates at every endpoint. It keeps joint rates, dephasing and state ordering. This calibrated approximation does not certify exact RB fidelity. |
+| `multitone_gate` | Complete-inventory canonical reuse of at least 20 rows, shared RWA admission, coextensive real sampled support, compatible dressed phase charges (or explicitly admitted weak-cycle pruning), and a four-way secular split proxy at most 0.01. Builds four joint Hilbert propagators using the same `RWACoefficients.diagonal` window-excluded shifts and `interaction_hamiltonian` as ordinary RWA, plays D-U-D, and restores the lab/DC endpoint frame. Rejection retains ordinary RWA. |
+| `multitone_rwa` | Revision `joint-rwa-v2` retains joint-basis Fourier edges with `abs(Ei-Ej±f) < 0.05 GHz`, obtains window-excluded single-tone second-order shifts from `RWACoefficients.diagonal` and assembles them through `interaction_hamiltonian`, and integrates every tone in a row-local interaction picture with a 4 ns adaptive ceiling. It restores Schrödinger coordinates at every endpoint. It keeps joint rates, dephasing and state ordering. This calibrated approximation does not certify exact RB fidelity. |
 | `dop853` and `flux_dop853` | Dispatch resolves complete chronological timeline routing, then assigns chain IDs to adjacent touching rows of the same direct family. Ordinary DOP853 uses the interaction picture only for independent, single-tone, nonzero-gain rows. Chains and other ordinary rows use the lab frame. Flux DOP853 has its own chain plan. |
 
 For the same whole source, budget and Stark key, moving a probe window reuses
@@ -113,9 +113,9 @@ constant companion envelopes pass the smoothness check. At least one envelope
 must be sampled. Continuous flux must be constant over the complete row.
 Budgets below 1e-3 decline this approximation. Admission also requires
 `2*pi*duration*sum((peak*gain*norm(V_ret,2))**2/abs(f)) <= 0.06 rad`, where
-`V_ret = (X-iY)/2` after the positive-frequency edge mask. This cumulative
+`V_ret = (X-iY)/2` after the positive-frequency edge mask. This row-local
 counter-rotating phase proxy accounts for long pulses even at small
-strength/carrier ratios. In the integer 256 ns amplitude sweep, gain 0.4184
+strength/carrier ratios; it does not bound accumulated sequence error. In the integer 256 ns amplitude sweep, gain 0.4184
 had proxy 0.063 rad and population error above 1e-2. The 0.06 rad limit
 returns those high-gain rows to lab DOP853. This proxy is calibrated, not a
 rigorous Stark-shift bound. Its limit enters the policy identity and keys.
@@ -129,8 +129,18 @@ and curvature 0.00231/ns², including DAC quantization. Admission uses 0.25,
 0.025/ns and 0.003/ns² to leave margin around those measured pulses, rather
 than treating arbitrary samples as smooth. The strength and carrier-separation
 limits restrict use to weak, spectrally separated drives. They are admission limits, not rigorous omission-error
-bounds. Stark and Bloch–Siegert shifts can still change Ramsey phase and gate
-fidelity. Full policy revision, budget, level, timing, every active carrier,
+bounds. Preparation also computes one float64 coefficient per key, tone and
+joint state: `sum(j,s, abs(C_s[i,j])**2/(Ei-Ej+s*f))`, restricted to
+`abs(Ei-Ej+s*f) >= 0.05 GHz`, with `C_+=(X-iY)/2` and `C_-=C_+†`.
+The Hamiltonian multiplies this diagonal shift by the actual
+`gain**2 * abs(envelope(t))**2`, including ramps and envelope offsets.
+Retained edges are excluded before division, so exact resonances are not
+divided by zero or counted twice. The shift is phase independent and applies
+to every joint state. It preserves phase covariance and adds no density,
+rate or state-space reduction. Mixed-tone terms, micromotion and higher orders
+remain omitted. The existing admission limits remain necessary; the diagonal
+correction does not repair integer strong-drive plateaus.
+Full policy revision, budget, level, timing, every active carrier,
 port, gain, phase and envelope content enter RWA prepare keys. Tone phase
 origins retain the ordinary SegmentTable contract.
 
@@ -158,7 +168,8 @@ The first gate release requires every active envelope to be sampled and to
 cover the same complete row support. Complex, partially overlapping and sliced
 supports retain fallback. The four-way secular split uses the existing gate
 proxy `duration**3*Gamma*V**2/16 <= 0.01`, with V the sum of retained joint
-operator peak strengths. This is calibrated admission, not a strict splitting
+operator peak strengths. Diagonal shifts commute with the secular dissipator
+and do not enter V. This is calibrated admission, not a strict splitting
 certificate. Each quarter integrates a joint Hilbert propagator at
 `rtol=1e-9`, `atol=1e-11`, with a 4 ns ceiling, in an interaction picture.
 Population rates and pure dephasing remain joint and unchanged.
