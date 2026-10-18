@@ -4,8 +4,8 @@ from enum import StrEnum
 from typing import Annotated, Literal
 
 import pytest
-from pydantic import BaseModel, Field
-from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormState
+from pydantic import BaseModel, Field, JsonValue
+from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormPath, FormState
 
 
 class Tone(BaseModel):
@@ -72,6 +72,37 @@ def test_restore_list_uses_captured_defaults_at_the_saved_position() -> None:
 
     assert state.restore_input(saved, FormEnv()) == ()
     assert state.input.data["tones"] == [{"name": "Q1", "amount": 17, "phase": 123}]
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected", "dropped"),
+    [
+        (None, None, ()),
+        ([], [], ()),
+        (
+            [{"x": "unfinished", "removed": 4}],
+            [{"x": "unfinished", "added": 7}],
+            (("items", 0, "removed"),),
+        ),
+    ],
+)
+def test_restore_nullable_list_recurses_its_only_non_null_branch(
+    raw: JsonValue, expected: JsonValue, dropped: tuple[FormPath, ...]
+) -> None:
+    class Item(BaseModel):
+        x: int = 1
+        added: int = 7
+
+    class NullableList(FormModel):
+        items: list[Item] | None = None
+
+    state = FormState(FormInput(NullableList, {"items": None}))
+    saved = FormInput(NullableList, {"items": raw})
+
+    actual_dropped = state.restore_input(saved, FormEnv())
+
+    assert state.input.data == {"items": expected}
+    assert actual_dropped == dropped
 
 
 def test_restore_keeps_invalid_leaf_raw_and_reports_only_shape_or_removed_fields() -> (
