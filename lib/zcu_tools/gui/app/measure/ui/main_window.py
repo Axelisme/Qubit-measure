@@ -930,10 +930,13 @@ class MainWindow(QMainWindow):
     def apply_tab_writeback(
         self, tab_id: str, pane: WritebackPane = "analysis"
     ) -> None:
-        """Apply this pane's draft, presenting ExpectedError without discarding it.
+        """Apply this pane's draft, presenting failures without escaping Qt.
 
-        An unknown tab is ignored. Expected guard/input refusals use the existing
-        error presenter; the draft stays editable. Other failures propagate.
+        An unknown tab is ignored. Guard/input refusals and unexpected Apply
+        exceptions use the error presenter; unexpected failures are also logged
+        with their traceback. A failed item stays selected and editable. Accepted
+        evidence and any successful prefix remain under the writeback policy;
+        this boundary neither rolls them back nor reports failure as success.
         """
         logger.info("apply_tab_writeback: tab_id=%r pane=%r", tab_id, pane)
         if not self._ctrl.has_tab(tab_id):
@@ -942,6 +945,10 @@ class MainWindow(QMainWindow):
         try:
             result = self._ctrl.apply_writeback_for_pane(tab_id, pane)
         except ExpectedError as error:
+            self.show_error_dialog("Writeback failed", str(error))
+            return
+        except Exception as error:
+            logger.exception("Writeback failed: tab_id=%r pane=%r", tab_id, pane)
             self.show_error_dialog("Writeback failed", str(error))
             return
         applied_ids = result.get("applied_ids", [])
