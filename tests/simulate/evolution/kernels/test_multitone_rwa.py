@@ -232,3 +232,31 @@ def test_continuous_flux_motion_declines_even_at_one_quantized_level(
     assert not case.kernel.guard(table, np.arange(3), context).any()
     fixed = replace(table, flux_waveform=replace(waveform, flux=np.full((9, 1), 0.2)))
     assert case.kernel.guard(fixed, np.arange(3), context).all()
+
+
+def test_accumulated_counter_rotating_phase_rejects_long_weak_pulses(
+    kernel_case: KernelCase,
+):
+    case = kernel_case
+    model = case.source.model((0,))
+    model = replace(
+        model,
+        energies_ghz=model.energies_ghz * 10,
+        drives=tuple(
+            replace(
+                drive,
+                in_phase_ghz=(drive.in_phase_ghz * 100).astype(np.complex128),
+                quadrature_ghz=(drive.quadrature_ghz * 100).astype(np.complex128),
+            )
+            for drive in model.drives
+        ),
+    )
+    source = ModelSource(
+        case.source.initial_density, lambda level: replace(model, level=level)
+    )
+    table = replace(case.table, tone_frequency_ghz=case.table.tone_frequency_ghz * 10)
+    context = KernelContext(source, case.budget, WorkPlan())
+    rows = np.arange(3)
+    assert case.kernel.guard(table, rows, context).all()
+    long = replace(table, duration_ns=np.full(3, 1280.0))
+    assert not case.kernel.guard(long, rows, context).any()
