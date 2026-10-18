@@ -90,7 +90,13 @@ def test_command_reads_only_participants_and_publishes_complete_invalid_draft():
     assert events == [(state.input.data, 1)]
     errors = state.result(env)
     assert isinstance(errors, api.FormErrors)
-    assert set(errors.messages) == {("value", "amount"), ("other",)}
+    assert ("other",) in errors.messages
+    state.write({("other",): 1}, env)
+    errors = state.result(env)
+    assert isinstance(errors, api.FormErrors)
+    assert set(errors.messages) == {("value", "amount")}
+    assert state.input.data["value"] == {"kind": "new", "amount": -3}
+    assert len(events) == 2
 
 
 @pytest.mark.parametrize(
