@@ -97,7 +97,12 @@ def test_migration_reports_removed_raw_and_inapplicable_overrides_once() -> None
     )
     base = FormInput(
         NewDraftForm,
-        {"branch": {"kind": "a", "amount": 1}, "mode": "keep", "quantity": 3, "added": 7},
+        {
+            "branch": {"kind": "a", "amount": 1},
+            "mode": "keep",
+            "quantity": 3,
+            "added": 7,
+        },
     )
     state = FormState(base)
 

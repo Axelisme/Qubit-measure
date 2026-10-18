@@ -338,8 +338,7 @@ def test_incompatible_identity_startup_preserves_file_and_opens_defaults(
             TunablesForm.default_input(app.window.tunables_panel.env)
         )
         assert any(
-            str(backups[0]) in label.text()
-            for label in app.window.findChildren(QLabel)
+            str(backups[0]) in label.text() for label in app.window.findChildren(QLabel)
         )
         assert app.window.close()
         assert WorkflowInputCodec().decode(json.loads(path.read_text())) == (
