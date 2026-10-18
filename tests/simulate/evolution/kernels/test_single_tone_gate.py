@@ -12,6 +12,7 @@ from zcu_tools.simulate.evolution import (
     Engine,
     EnvelopeSpec,
     FluxSchedule,
+    FluxWaveform,
     ModelSource,
     SecularDrive,
     SecularModel,
@@ -156,3 +157,115 @@ def test_covariance_preserves_complex_density_for_sliced_support_and_key_domains
         changed = kernel.prepare_keys(replace(table, **{field: values}), rows, context)
         assert changed[0] != keys[0]
     assert not kernel.guard(table, rows, replace(context, budget=1e-4)).any()
+
+
+@pytest.mark.parametrize("frequency", [0.6, -0.6])
+def test_admission_keeps_row_flux_and_budget_outside_covariant_equivalence(frequency):
+    kernel = next(k for k in REGISTRY if k.name == "single_tone_gate")
+    # All rows share a playback key, but only timelines 0 and 2 have fixed flux.
+    table = SegmentTable(
+        np.arange(3),
+        np.array([0.0, 3.125, 71.0]),
+        np.full(3, 126.0),
+        np.zeros((3, 1), dtype=np.int64),
+        np.ones(3, dtype=np.int64),
+        np.zeros((3, 1), dtype=np.int64),
+        np.full((3, 1), frequency),
+        np.full((3, 1), 0.08),
+        np.array([[0.0], [0.713], [-1.2]]),
+        np.zeros((3, 1), dtype=np.int64),
+        np.full((3, 1), 4.0),
+        (envelope(),),
+        FluxWaveform(
+            np.arange(0, 7, 2),
+            np.array([0.0, 200.0] * 3),
+            np.array([[0.0], [0.0], [0.0], [0.001], [0.2], [0.2]]),
+        ),
+    )
+    with closing(WorkPlan()) as plan:
+        context = KernelContext(source(), 1e-3, plan)
+        assert len(np.unique(kernel.prepare_keys(table, np.arange(3), context))) == 1
+        for rows in (np.array([0, 1, 2]), np.array([1, 2, 0]), np.array([2, 0, 1])):
+            np.testing.assert_array_equal(
+                kernel.guard(table, rows, context), np.array([True, False, True])[rows]
+            )
+            assert not kernel.guard(table, rows, replace(context, budget=1e-4)).any()
+        # A long support fails splitting even though its envelope holds DC.
+        long = replace(table, duration_ns=np.full(3, 100_000.0))
+        assert not kernel.guard(long, np.arange(3), context).any()
+        shifted = replace(table, tone_envelope_offset_ns=np.full((3, 1), 8.0))
+        assert np.all(
+            kernel.prepare_keys(shifted, np.arange(3), context)
+            != kernel.prepare_keys(table, np.arange(3), context)
+        )
+
+
+def test_admission_uses_sum_of_quadrature_norms_not_their_maximum():
+    src = source()
+    model = src.model((0,))
+    drive = model.drives[0]
+    # Off-resonant edges eliminate the phase proxy, isolating the full norm ratio.
+    model = replace(
+        model,
+        identity="two-quadrature-admission",
+        energies_ghz=np.array([0.0, 0.9, 1.8]),
+        drives=(replace(drive, quadrature_ghz=drive.in_phase_ghz),),
+    )
+    src = ModelSource(src.initial_density, lambda level: replace(model, level=level))
+    b = batch(1)
+    table = SegmentTable(
+        np.array([0]),
+        np.array([0.0]),
+        np.array([128.0]),
+        np.zeros((1, 1), dtype=np.int64),
+        np.ones(1, dtype=np.int64),
+        np.zeros((1, 1), dtype=np.int64),
+        np.array([[0.6]]),
+        np.array([[40.0]]),
+        np.zeros((1, 1)),
+        np.zeros((1, 1), dtype=np.int64),
+        np.zeros((1, 1)),
+        b.tracks[0].envelopes,
+    )
+    kernel = next(k for k in REGISTRY if k.name == "single_tone_gate")
+    with closing(WorkPlan()) as plan:
+        assert not kernel.guard(table, np.array([0]), KernelContext(src, 1e-3, plan))[0]
+
+
+@pytest.mark.parametrize("workers", [1, 2])
+def test_engine_covariant_density_is_bitwise_stable_under_point_permutation(workers):
+    original = batch(1024)
+    order = np.arange(1023, -1, -1)
+    t = original.tracks[0]
+    permuted = replace(
+        original,
+        points=original.points[order],
+        tracks=(
+            replace(
+                t,
+                **{
+                    name: getattr(t, name)[order]
+                    for name in (
+                        "start_ns",
+                        "duration_ns",
+                        "frequency_ghz",
+                        "phase_rad",
+                        "amplitude",
+                        "envelope_index",
+                        "active",
+                    )
+                },
+            ),
+        ),
+        end_ns=original.end_ns[order],
+    )
+    with closing(Engine(1, 0, chunks_per_worker=1)) as reference:
+        expected = reference.evolve(source(), (original,), cancel=Event())
+    with closing(Engine(workers, 0, chunks_per_worker=7)) as engine:
+        actual = engine.evolve(source(), (permuted,), cancel=Event())
+    assert actual.paths.segments_by_kernel == expected.paths.segments_by_kernel
+    assert actual.paths.segments_by_kernel["single_tone_gate"] == 1024
+    np.testing.assert_array_equal(
+        actual.densities[np.argsort(actual.points)],
+        expected.densities[np.argsort(expected.points)],
+    )
