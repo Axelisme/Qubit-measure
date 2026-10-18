@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-19, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives, simultaneous and single-tone covariant gate reuse, unified resident/pending budget, long-period playback and guarded CF4 carrier anchors
+**Last updated:** 2026-10-19, WorkPlan ownership, recalibrated dual constant phase admission, simultaneous and single-tone covariant gate reuse, unified resident/pending budget, long-period playback and guarded CF4 carrier anchors
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -124,13 +124,19 @@ ports. Same-port constant Stark/probe spectra retain Floquet/DOP853 because
 small population errors can still shift a narrow resonance peak. Continuous
 flux must be constant over the complete row.
 Budgets below 1e-3 decline this approximation. Admission also requires
-`2*pi*duration*sum((peak*gain*norm(V_ret,2))**2/abs(f)) <= 0.06 rad`, where
-`V_ret = (X-iY)/2` after the positive-frequency edge mask. This row-local
+`2*pi*duration*sum((peak*gain*norm(V_ret,2))**2/abs(f)) <= phase_limit`, where
+`V_ret = (X-iY)/2` after the positive-frequency edge mask. Sampled rows retain
+`phase_limit = 0.06 rad`. Distinct-port dual constant rows use `0.16 rad`,
+calibrated against strict lab populations with a twofold safety margin from
+the smallest failing proxy in a 96-point flux/phase/gain/duration scan.
+The kernel docstring records the grid and errors. This row-local
 counter-rotating phase proxy accounts for long pulses even at small
-strength/carrier ratios; it does not bound accumulated sequence error. In the integer 256 ns amplitude sweep, gain 0.4184
-had proxy 0.063 rad and population error above 1e-2. The 0.06 rad limit
-returns those high-gain rows to lab DOP853. This proxy is calibrated, not a
-rigorous Stark-shift bound. Its limit enters the policy identity and keys.
+strength/carrier ratios; it does not bound accumulated sequence error. In the
+integer 256 ns sampled amplitude sweep, gain 0.4184 had proxy 0.063 rad and
+population error above 1e-2. Those sampled rows still return to lab DOP853.
+This proxy is calibrated, not a rigorous Stark-shift bound. The constant cap
+enters only constant-row prepare keys; sampled and gate policy identities
+remain unchanged.
 
 Dual constant rows also check every signed carrier sum and difference against
 all dressed energy gaps, which include conditional ZZ shifts. The shared Fourier
@@ -153,7 +159,7 @@ does not bypass it. Shaped rows do not use this additional check.
 Dual constant integration retains the adaptive solver and its error estimator,
 with a 16 ns ceiling. Constant envelopes have no sampled internal features.
 The larger ceiling reduces work after the fast carrier phase has been removed;
-it does not relax the 0.06 rad phase limit or drop the joint dissipator.
+it is independent of phase admission and does not drop the joint dissipator.
 
 The 50 MHz edge window and 4 ns ceiling come from simultaneous 128–512 ns
 Gaussian gate measurements on a 16-level joint model. The prototype's maximum
