@@ -73,16 +73,14 @@ class FTFReadoutConfig:
 
 
 def readout_configuration(settings: FTFSettings) -> FTFReadoutConfig:
-    """Adapt current single-ADC FTF settings without changing values or defaults.
+    """Adapt validated pulse/mux FTF settings without changing numeric values.
 
-    Mux settings are deliberately not parsed here until their YAML shape is
-    decided. Author callers may supply FTFReadoutConfig directly to planning
-    and FTFSource without adding persisted fields.
+    The only settings-shape adapter below resource parsing. Explicit author
+    configurations use the same detached values without persisted-field access.
     """
-    adc = settings.readout.adc
     return FTFReadoutConfig(
-        "pulse",
-        (
+        settings.readout.drive.kind,
+        tuple(
             FTFReceiverConfig(
                 adc.ro_ch,
                 adc.gain,
@@ -90,6 +88,7 @@ def readout_configuration(settings: FTFSettings) -> FTFReadoutConfig:
                 adc.phase_deg,
                 adc.offset_adc,
                 adc.time_of_flight_ns,
-            ),
+            )
+            for adc in settings.readout.receivers
         ),
     )

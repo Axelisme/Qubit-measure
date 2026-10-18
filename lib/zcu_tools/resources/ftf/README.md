@@ -14,6 +14,13 @@
 
 FTF 支援 live DC bias、靜態掃描、charge drive 與 readout，不建構 flux lines 或 flux controls。`flux_lines` 即使為空 map 也是未知欄位。未綁定 generator 沿用既有處理，沒有額外 flux-pulse 專用判定或報錯。共享 `simulate` 引擎仍保留 flux-pulse 能力，FTF 不使用。
 
-Generator 數量是 charge/readout 最大 generator index 加一，ADC 數量是 `ro_ch` 加一。索引空洞不是已綁定的線路。微波係數與 resonator coupling 乘 full charge operator，不隱藏 n01 正規化。ADC noise 採 two-sided white PSD，sample covariance 為 PSD/dt_ns，receiver gain 不縮放 noise。這些設定與固定 QICK profile 的對照見欄位指南。
+`readout.drive.kind` 省略或填 `pulse` 時，`readout.adc` 是既有的一個 receiver object。
+填 `mux` 時，`adc` 必須是 1 至 8 個 receiver 的 list，`ro_ch` 不可重複。
+這包含只有一個 tone 的 mux，不依 receiver 數量推斷 compile profile。
+Program 提供 tones 的頻率、gain、phase 與順序，YAML 只綁定 receiver 校準。
+所有 tone 共用同一 drive 與兩個物理 resonator，不新增 tone-to-qubit mapping。
+預設 pulse kind 不加入序列化結果，既有 pulse settings 與 replay identity 保持不變。
+
+Generator 數量是 charge/readout 最大 generator index 加一，ADC 數量是所有 `ro_ch` 最大值加一。索引空洞不是已綁定的線路。微波係數與 resonator coupling 乘 full charge operator，不隱藏 n01 正規化。ADC noise 採 two-sided white PSD，sample covariance 為 PSD/dt_ns，receiver gain 不縮放 noise。這些設定與固定 QICK profile 的對照見欄位指南。
 
 [default.yaml](../../../../zcu_lab/simulation_envs/FTF/default.yaml) 的 circuit energies、couplings 與 resonator frequencies 採 Device A，其餘包含本機手動設定。它不是通用校準結果，也不保證截斷或 solver 收斂。

@@ -69,7 +69,10 @@ ADC owns the causal output shift, absolute carrier delay phase, per-resonator
 scattering phase and conjugation to microwave I+iQ before calibration/noise.
 
 `FTFReadoutConfig(kind, receivers)` is the detached author configuration below
-settings. `readout_configuration` is its settings adapter. `plan_template` and
+settings. `readout_configuration` is its settings adapter. The default
+`readout.drive.kind: pulse` retains the single ADC object; `kind: mux` requires
+an ADC receiver list with 1..8 unique `ro_ch` values. The builder selects a fixed
+mixmux8/PFBv4 compile profile only for mux. `plan_template` and
 `FTFSource` accept an explicit `readout=` override; private replay rejects an
 override that cannot be reconstructed from captured settings. Plans expose
 `readouts`, an ordered tuple of `FTFReadoutPlan(channel, batch)`, not a singleton.

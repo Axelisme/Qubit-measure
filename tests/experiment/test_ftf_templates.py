@@ -248,7 +248,7 @@ def test_template_wires_receiver_delay_and_mismatch_without_delaying_evolution()
         update={
             "readout": base.readout.model_copy(
                 update={
-                    "adc": base.readout.adc.model_copy(
+                    "adc": base.readout.receivers[0].model_copy(
                         update={"time_of_flight_ns": 400.0}
                     ),
                     "resonators": pair.model_copy(
