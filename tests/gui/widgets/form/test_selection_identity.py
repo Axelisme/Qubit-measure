@@ -120,7 +120,7 @@ def test_converter_rejection_restores_selector_and_preserves_visible_drafts(
         assert driver.observe(object_name="form.input.branch").text == "first"
         assert (
             "Cannot convert missing participating value"
-            in driver.observe(object_name="form.input.branch").tooltip
+            in driver.observe(object_name="form.row.branch").tooltip
         )
         assert driver.observe(object_name="form.input.branch.amount").text == "broken"
         assert state.input.data == {"branch": {"kind": "first", "amount": 2}}
