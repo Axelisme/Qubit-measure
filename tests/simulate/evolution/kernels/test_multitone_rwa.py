@@ -260,3 +260,72 @@ def test_accumulated_counter_rotating_phase_rejects_long_weak_pulses(
     assert case.kernel.guard(table, rows, context).all()
     long = replace(table, duration_ns=np.full(3, 1280.0))
     assert not case.kernel.guard(long, rows, context).any()
+
+
+@pytest.mark.parametrize("frequency", [0.3, -0.3])
+@pytest.mark.parametrize("scale", [0.5, 1.0])
+def test_window_excluded_edges_accumulate_envelope_squared_phase(frequency, scale):
+    from zcu_tools.simulate.evolution.kernel import ApplyContext
+    from zcu_tools.simulate.evolution.kernels.multitone_rwa import MultitoneRWAKernel
+
+    # Circular quadratures leave only the upper-triangular positive Fourier
+    # edge and its conjugate. Both tones are outside the retained window.
+    x_a = np.zeros((3, 3), dtype=np.complex128)
+    x_b = np.zeros_like(x_a)
+    x_a[0, 1] = x_a[1, 0] = 0.02
+    x_b[1, 2] = x_b[2, 1] = 0.015
+    y_a = 1j * (np.triu(x_a) - np.tril(x_a))
+    y_b = 1j * (np.triu(x_b) - np.tril(x_b))
+    energies = np.array([0.0, 0.5, 0.9])
+    model = SecularModel(
+        (0,),
+        "virtual-phase",
+        energies,
+        np.eye(3, dtype=np.complex128),
+        (SecularDrive("a", x_a, y_a), SecularDrive("b", x_b, y_b)),
+        np.zeros((3, 3)),
+        np.zeros((3, 3)),
+    )
+    initial = np.full((3, 3), 1 / 3, dtype=np.complex128)
+    source = ModelSource(initial, lambda level: replace(model, level=level))
+    times = np.arange(161, dtype=np.float64)
+    samples = scale * (0.2 + 0.8 * times / times[-1])
+    env = EnvelopeSpec("sampled", samples.astype(np.complex128), times)
+    table = SegmentTable(
+        timeline=np.array([0]),
+        start_ns=np.array([27.0]),
+        duration_ns=np.array([128.0]),
+        level=np.zeros((1, 1), dtype=np.int64),
+        tones=np.array([2]),
+        tone_port=np.array([[0, 1]]),
+        tone_frequency_ghz=np.array([[frequency, -0.9]]),
+        tone_amplitude=np.array([[0.3, -0.4]]),
+        tone_theta_rad=np.array([[0.7, -1.2]]),
+        tone_envelope=np.array([[0, 0]]),
+        tone_envelope_offset_ns=np.array([[0.0, 16.0]]),
+        envelopes=(env,),
+    )
+    kernel = MultitoneRWAKernel()
+    rows = np.array([0])
+    context = KernelContext(source, 1e-3, WorkPlan())
+    assert kernel.guard(table, rows, context).all()
+    keys = kernel.prepare_keys(table, rows, context)
+    prepared = kernel.prepare(keys, table, rows, context)
+    actual = initial[None].copy()
+    kernel.apply(prepared, rows, table, rows, actual, ApplyContext(1e-3))
+
+    # Integrate the square of each piecewise-linear playback exactly, not
+    # the square of its area or just its peak/plateau. The spectator state
+    # makes both tones' individual diagonal shifts observable.
+    areas = []
+    for offset in (0, 16):
+        values = samples[offset : offset + 129]
+        areas.append(
+            np.sum((values[:-1] ** 2 + values[:-1] * values[1:] + values[1:] ** 2) / 3)
+        )
+    phase_a = 0.3**2 * 0.02**2 / (frequency - 0.5) * areas[0]
+    phase_b = (-0.4) ** 2 * 0.015**2 / (-0.9 - 0.4) * areas[1]
+    integrated_shift = np.array([phase_a, -phase_a + phase_b, -phase_b])
+    phases = np.exp(-2j * np.pi * (energies * 128 + integrated_shift))
+    expected = initial * phases[:, None] * phases.conj()[None, :]
+    np.testing.assert_allclose(actual[0], expected, atol=2e-7, rtol=0)
