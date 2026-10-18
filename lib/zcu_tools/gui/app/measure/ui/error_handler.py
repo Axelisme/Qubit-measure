@@ -6,6 +6,7 @@ import logging
 import traceback
 from types import TracebackType
 
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QMessageBox
 
 from zcu_tools.gui.widgets import DialogRefStore
@@ -20,10 +21,12 @@ def show_error_dialog(
     exc_value: BaseException,
     exc_traceback: TracebackType | None,
 ) -> None:
-    """Retain a non-modal owner-thread report with the complete traceback."""
+    """Retain a non-modal owner-thread traceback report without delaying Qt exit."""
     logger.error("Unhandled exception", exc_info=(exc_type, exc_value, exc_traceback))
     tb_text = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
     msg_box = QMessageBox()
+    # Error reports are auxiliary windows, not a reason to keep the app running.
+    msg_box.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
     msg_box.setIcon(QMessageBox.Icon.Critical)
     msg_box.setWindowTitle("Unhandled Exception")
     msg_box.setText(f"{exc_type.__name__}: {exc_value}")
