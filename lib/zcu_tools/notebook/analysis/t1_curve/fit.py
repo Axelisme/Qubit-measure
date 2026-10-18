@@ -83,7 +83,8 @@ class T1FitResult:
     flux_weights: FluxResidualWeights = field(default_factory=_default_flux_weights)
 
 
-def fit_t1_noise_params(
+# tolerated: Public fit keywords separate whitelist init, error policy and solver controls.
+def fit_t1_noise_params(  # noqa: PLR0913
     fluxs: NDArray[np.float64],
     T1s: NDArray[np.float64],
     params: tuple[float, float, float],

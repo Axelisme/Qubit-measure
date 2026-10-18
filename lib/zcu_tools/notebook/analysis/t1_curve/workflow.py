@@ -136,6 +136,34 @@ class PurcellEffectParams:
 
 
 @dataclass(frozen=True, slots=True)
+class T1MechanismOptions:
+    """Shared controls for pointwise loss extraction and a single-mechanism probe.
+
+    Temp is the evaluation temperature in K, or the initial temperature when
+    fit_temperature=True searches for the least dispersed Q values.
+    purcell optionally supplies positive GHz resonator parameters; its rate is
+    subtracted from measured relaxation before intrinsic Q is extracted.
+    omega_range selects the Q-fit window in rad/ns; either None endpoint is open.
+    Temp_bounds limits the temperature search in K; a None lower endpoint uses
+    the default positive lower bound.
+    fit_constant=True fits a constant Q, while False fits a power law in omega.
+    statistic selects median, mean, min, max, p10 or p90 of fitted Q values for
+    the suggested parameter value.
+    parameter_init overrides that suggestion with a positive finite value:
+    dimensionless Q_cap/Q_ind, or the quasiparticle fraction x_qp.
+    """
+
+    Temp: float
+    purcell: PurcellEffectParams | None = None
+    omega_range: tuple[float | None, float | None] = (None, None)
+    fit_temperature: bool = False
+    Temp_bounds: TempBounds = (DEFAULT_TEMP_LOWER_BOUND, DEFAULT_TEMP_UPPER_BOUND)
+    fit_constant: bool = True
+    statistic: ProbeStatistic = "median"
+    parameter_init: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class T1CurveAnalysisConfig:
     result_dir: str
     analysis_flux_range: tuple[float, float] = (0.0, 1.0)
@@ -711,7 +739,8 @@ def subtract_relaxation_limit(
     )
 
 
-def analyze_t1_capacitive_limit(
+# tolerated: Notebook keywords expose the capacitive window, temperature search and Q estimate.
+def analyze_t1_capacitive_limit(  # noqa: PLR0913
     data: T1PreparedData,
     *,
     Temp: float,
@@ -726,18 +755,21 @@ def analyze_t1_capacitive_limit(
     return analyze_t1_mechanism_limit(
         data,
         mechanism="capacitive",
-        Temp=Temp,
-        purcell=purcell,
-        omega_range=omega_range,
-        fit_temperature=fit_temperature,
-        Temp_bounds=Temp_bounds,
-        fit_constant=fit_constant,
-        statistic=statistic,
-        parameter_init=parameter_init,
+        options=T1MechanismOptions(
+            Temp=Temp,
+            purcell=purcell,
+            omega_range=omega_range,
+            fit_temperature=fit_temperature,
+            Temp_bounds=Temp_bounds,
+            fit_constant=fit_constant,
+            statistic=statistic,
+            parameter_init=parameter_init,
+        ),
     )
 
 
-def analyze_t1_quasiparticle_limit(
+# tolerated: Notebook keywords retain the quasiparticle window and reciprocal-Q estimate controls.
+def analyze_t1_quasiparticle_limit(  # noqa: PLR0913
     data: T1PreparedData,
     *,
     Temp: float,
@@ -752,18 +784,21 @@ def analyze_t1_quasiparticle_limit(
     return analyze_t1_mechanism_limit(
         data,
         mechanism="quasiparticle",
-        Temp=Temp,
-        purcell=purcell,
-        omega_range=omega_range,
-        fit_temperature=fit_temperature,
-        Temp_bounds=Temp_bounds,
-        fit_constant=fit_constant,
-        statistic=statistic,
-        parameter_init=parameter_init,
+        options=T1MechanismOptions(
+            Temp=Temp,
+            purcell=purcell,
+            omega_range=omega_range,
+            fit_temperature=fit_temperature,
+            Temp_bounds=Temp_bounds,
+            fit_constant=fit_constant,
+            statistic=statistic,
+            parameter_init=parameter_init,
+        ),
     )
 
 
-def analyze_t1_inductive_limit(
+# tolerated: Notebook keywords expose the inductive window, temperature search and Q estimate.
+def analyze_t1_inductive_limit(  # noqa: PLR0913
     data: T1PreparedData,
     *,
     Temp: float,
@@ -778,14 +813,16 @@ def analyze_t1_inductive_limit(
     return analyze_t1_mechanism_limit(
         data,
         mechanism="inductive",
-        Temp=Temp,
-        purcell=purcell,
-        omega_range=omega_range,
-        fit_temperature=fit_temperature,
-        Temp_bounds=Temp_bounds,
-        fit_constant=fit_constant,
-        statistic=statistic,
-        parameter_init=parameter_init,
+        options=T1MechanismOptions(
+            Temp=Temp,
+            purcell=purcell,
+            omega_range=omega_range,
+            fit_temperature=fit_temperature,
+            Temp_bounds=Temp_bounds,
+            fit_constant=fit_constant,
+            statistic=statistic,
+            parameter_init=parameter_init,
+        ),
     )
 
 
@@ -793,15 +830,24 @@ def analyze_t1_mechanism_limit(
     data: T1PreparedData,
     *,
     mechanism: MechanismName,
-    Temp: float,
-    purcell: PurcellEffectParams | None = None,
-    omega_range: tuple[float | None, float | None] = (None, None),
-    fit_temperature: bool = False,
-    Temp_bounds: TempBounds = (DEFAULT_TEMP_LOWER_BOUND, DEFAULT_TEMP_UPPER_BOUND),
-    fit_constant: bool = True,
-    statistic: ProbeStatistic = "median",
-    parameter_init: float | None = None,
+    options: T1MechanismOptions,
 ) -> T1MechanismProbe:
+    """Extract intrinsic Q and suggest a parameter for the selected mechanism.
+
+    Prepared T1/T1err data stay in ns; options select temperature, optional
+    Purcell rate subtraction and the rad/ns Q-fit window. Return pointwise
+    arrays, fitted Q values, parameter bounds and diagnostic tables without
+    saving or writing back. Raise ValueError for an unknown mechanism, an empty
+    positive-Q window, invalid temperature-search bounds or an invalid override.
+    """
+    Temp = options.Temp
+    purcell = options.purcell
+    omega_range = options.omega_range
+    fit_temperature = options.fit_temperature
+    Temp_bounds = options.Temp_bounds
+    fit_constant = options.fit_constant
+    statistic = options.statistic
+    parameter_init = options.parameter_init
     _validate_mechanisms((mechanism,))
     temp = (
         _fit_mechanism_temperature(
@@ -919,7 +965,8 @@ def analyze_t1_mechanism_limit(
     )
 
 
-def make_t1_fit_init(
+# tolerated: Notebook keywords select active channels, probe fallbacks and explicit value overrides.
+def make_t1_fit_init(  # noqa: PLR0913
     *,
     active_mechanisms: tuple[MechanismName, ...],
     Temp: float,
@@ -976,7 +1023,8 @@ def mechanisms_to_fixed_params(
     return tuple(fixed)
 
 
-def make_t1_fit_bounds(
+# tolerated: Notebook keywords control Q and x_qp limits separately from temperature and span.
+def make_t1_fit_bounds(  # noqa: PLR0913
     init: T1FitParams,
     *,
     factor: float = 100.0,
@@ -1023,7 +1071,8 @@ def _normalize_t1_fit_bounds(
     return normalized
 
 
-def fit_t1_curve(
+# tolerated: Notebook fit keywords keep init/fixed/bounds, error weighting and optimizer controls.
+def fit_t1_curve(  # noqa: PLR0913
     data: T1PreparedData,
     *,
     init: T1FitParams,
@@ -1170,7 +1219,8 @@ def build_t1_channel_curves(
     )
 
 
-def collect_t1_curve_result(
+# tolerated: Notebook callers explicitly collect stage records and saved paths by keyword.
+def collect_t1_curve_result(  # noqa: PLR0913
     *,
     context: T1CurveContext,
     calibration: T1FluxCalibration,
@@ -1525,7 +1575,8 @@ def plot_t1_channel_analysis(
     return fig, ax
 
 
-def save_t1_curve_figure(
+# tolerated: Notebook save calls keep figure/context/name positional and rendering controls optional.
+def save_t1_curve_figure(  # noqa: PLR0913
     fig: Figure,
     context: T1CurveContext,
     filename: str,
@@ -2332,7 +2383,8 @@ def _error_fill_summary(result: ErrorResolutionResult | None) -> str:
     )
 
 
-def _prepared_summary_table(
+# tolerated: One preparation caller supplies stage arrays and filter metadata; no reused option group.
+def _prepared_summary_table(  # noqa: PLR0913
     *,
     calibration: T1FluxCalibration,
     sample: T1CurveData,
@@ -2460,6 +2512,7 @@ __all__ = [
     "T1CurveContext",
     "T1CurveData",
     "T1FluxCalibration",
+    "T1MechanismOptions",
     "T1MechanismProbe",
     "T1PreparedData",
     "analyze_t1_capacitive_limit",

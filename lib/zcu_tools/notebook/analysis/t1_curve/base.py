@@ -183,7 +183,8 @@ def plot_t1_vs_elements(
     return fig, ax
 
 
-def plot_sample_t1(
+# tolerated: The sample plot keeps device calibration and axis controls in its documented API.
+def plot_sample_t1(  # noqa: PLR0913
     s_dev_values: NDArray[np.float64],
     s_T1s: NDArray[np.float64],
     s_T1errs: NDArray[np.float64],
@@ -220,7 +221,8 @@ def plot_sample_t1(
     return fig, ax
 
 
-def plot_t1_with_sample(
+# tolerated: The documented positional sample API and per-channel noise controls remain separate.
+def plot_t1_with_sample(  # noqa: PLR0913
     s_dev_values: NDArray[np.float64],
     s_T1s: NDArray[np.float64],
     s_T1errs: NDArray[np.float64],
@@ -290,7 +292,8 @@ def plot_t1_with_sample(
     return fig, ax
 
 
-def plot_eff_t1_with_sample(
+# tolerated: Notebook and test callers use positional samples and separate component/axis keywords.
+def plot_eff_t1_with_sample(  # noqa: PLR0913
     s_dev_values: NDArray[np.float64],
     s_T1s: NDArray[np.float64],
     s_T1errs: NDArray[np.float64],

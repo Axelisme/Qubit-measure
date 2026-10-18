@@ -132,7 +132,8 @@ def calc_Qqp_vs_omega(
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]: ...
 
 
-def calc_Qqp_vs_omega(
+# tolerated: Positional loss-extraction API separates measured arrays, temperature and gap.
+def calc_Qqp_vs_omega(  # noqa: PLR0913
     params: tuple[float, float, float],
     omegas: NDArray[np.float64],
     T1s: NDArray[np.float64],
