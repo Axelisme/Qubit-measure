@@ -375,7 +375,8 @@ def _validate_stages(
 ) -> tuple[ThermalAttenuatorStage, ...]:
     normalized: list[ThermalAttenuatorStage] = []
     for index, stage in enumerate(stages):
-        if not isinstance(stage.name, str) or stage.name == "":
+        # tolerated: Untyped notebook callers still need non-string names rejected here.
+        if not isinstance(stage.name, str) or stage.name == "":  # pyright: ignore[reportUnnecessaryIsInstance]
             raise ValueError(f"stages[{index}].name must be a non-empty string")
         Temp_K = _validate_positive_scalar(f"stages[{index}].Temp_K", stage.Temp_K)
         attenuation_db = float(stage.attenuation_db)
