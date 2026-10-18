@@ -1,5 +1,7 @@
 """Independent ns/GHz evolution, explicit bases and population conversion.
 
+Engine consumes ModelSource and TimelineBatch and returns EvolutionResult.
+NumericModel is a separate fixed-coordinate record, not an Engine input.
 No QICK, environment, device, resource or YAML dependencies. Import public
 records and tools here. Kernel, dispatch, scheduler and cache modules are internal
 implementation details, not a second integration interface.
@@ -16,7 +18,7 @@ from .engine import (
     PathDiagnostics,
     TimelineBatch,
 )
-from .model import DriveSource, NumericModel, SolverSettings
+from .model import DriveSource, NumericModel
 from .secular import (
     FluxExpansion,
     FluxLevel,

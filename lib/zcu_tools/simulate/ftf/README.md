@@ -1,6 +1,6 @@
 # Fixed-coordinate FTF numerics
 
-**Last updated:** 2026-10-17
+**Last updated:** 2026-10-18
 
 `JointParameters` supplies F1/C/F2 numeric circuits and signed full-charge
 couplings in GHz. `JointModel` selects fixed local levels at DC, forms their
@@ -31,18 +31,15 @@ charge/flux line losses require explicit impedance/mutual data. No fluxonium
 inductive/qp formula is applied to the SQUID. Active exactly degenerate secular
 transitions raise; near-degeneracy validity remains a model assumption.
 
-`numeric_model` returns an independent `NumericModel` with continuous H(flux(t))
-and piecewise instantaneous baths in the same fixed coordinates. Bath updates use
-segment-start flux. Explicit flux callback events, including delayed pulse
-support and envelope/phase changes, also refresh the baths and partition the
-continuous Hamiltonian. The requested segment length rounds to the nearest 2 ns,
-with a minimum of one tick. Evolution unions these model events with source
-boundaries. It owns integration and never resets the density at a bath update.
-`fixed_numeric_model` supplies the same Hamiltonian and full baths at an explicit
-constant reduced flux, without callbacks or bath-update boundaries. It is not
-valid for a driven flux source or passive tail. `FluxDynamics` keeps the callback's actual event coordinates and optional
-stable dependency identity together. This callback description does not create
-persistent density records.
+`numeric_model` returns an independent `NumericModel` containing the static DC
+Hamiltonian, supplied drive sources and event metadata, without collapse
+operators. Regular event spacing rounds to the nearest 2 ns, with a minimum of
+one tick. Quantized `FluxDynamics` events in the requested window join those
+ticks and zero. Its optional identity remains caller metadata.
+`fixed_numeric_model` supplies a static Hamiltonian and full baths at an explicit
+constant reduced flux, without event metadata. It is not valid for a driven
+flux source or passive tail. Neither record performs evolution. Engine consumes
+`ModelSource` from `model_source`, not `NumericModel`.
 
 `collapse_operators` combines multilevel relaxation with CP flux/residual-photon
 pure dephasing. Slopes/pulls use rad/us in the pure-rate formulas, then rates

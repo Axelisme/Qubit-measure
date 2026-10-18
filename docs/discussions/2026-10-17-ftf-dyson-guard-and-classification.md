@@ -3,6 +3,9 @@ date: 2026-10-17
 status: active
 superseded_by: null
 related:
+  - docs/discussions/2026-10-18-dyson-input-reuse.md
+  - docs/discussions/2026-10-18-shaped-period-and-gates.md
+  - docs/discussions/2026-10-18-two-tone-floquet.md
   - docs/discussions/2026-10-16-ftf-simulation-speedup.md
   - docs/adr/draft/simulation-environments.md
   - lib/zcu_tools/simulate/evolution/README.md
@@ -83,3 +86,11 @@ basis:
 ## 依據
 
 量測數字來自 sim-speed 的票 19 驗收、land review 掃描與 sim-classify-speed 的可行性 prototype。原始報告在本機工作目錄，未入庫。已落地的門檻與流程以 `lib/zcu_tools/simulate/evolution/README.md` 為準。
+
+## 後記，2026-10-18
+
+上文的 371 s 分類成本、待確認 spec 與 RWA → T6 次序，是 2026-10-17 的狀態，不代表 main `f152eff67` 的完整決策圖。
+
+後續採用了不演化 density 的解析 B2、實際共同前綴輸入與 contracted paths。不共用輸入的短 plateau 則比較 period 成本，詳見 [Dyson input reuse](2026-10-18-dyson-input-reuse.md)。apply 後 |Δp| 仍只報告，不重算。
+
+「分類要保持輕量」不能解讀成所有 family 都不准 build-handoff。[Shaped preparation](2026-10-18-shaped-period-and-gates.md)與 [two-tone Floquet](2026-10-18-two-tone-floquet.md)記錄 guard 需要中間數值資料的原因，以及已建 payload 共用如何避免算兩次。那些 guards 的校準與未認證限制各自列出，沒有借用本文的 Dyson 門檻宣稱更強保證。
