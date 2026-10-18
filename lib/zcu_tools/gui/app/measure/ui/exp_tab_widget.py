@@ -1053,6 +1053,7 @@ class ExpTabWidget(QWidget):
             state,
             self._cfg.env,
             write=self._cfg.write,
+            select=self._cfg.select,
             run_command=self._cfg.run_command,
         )
         editor.setContentsMargins(4, 4, 4, 4)

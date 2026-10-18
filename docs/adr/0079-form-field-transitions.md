@@ -25,6 +25,14 @@ Command 掛在欄位上，只能替換這個欄位及 descendants。它可以回
 
 使用者於 2026-10-18 裁定：「我認為沒給converter就與new = old一樣」，並確認是選項更新、子表單不變。作用範圍裁定為「command應該只能改自己以及子欄位」。
 
+### 值寫入與選項切換
+
+`FormState.write(batch, env)` 一律覆寫每個 typed path 上的完整 raw 子樹，清除該 path 及其下的 selection overrides，由新值決定 branch。它不合併、不補 defaults、不執行 converter。單欄修改使用完整欄位 path。Model result 可以依預設補值，但不回填 raw。
+
+`select(path, selection, env)` 是明確的選項切換，只有這條路徑執行 converter。`prepare_write` 與 `prepare_selection` 分別提供未安裝的候選，host 必須在同一 guard 與 current input 下使用。寫入仍遵守 annotation、來源與 owner admission、initial-active path 解析及批次原子性。Generated selectors 保留專用操作。
+
+使用者於 2026-10-19 問「為什麼不是總是覆寫path位置的值？」，並對統一覆寫、converter 僅用於選項切換的方案回答「同意」。因此不另提供 replacement operation 或 operation 欄位。
+
 ### 原始草稿、求值與失敗
 
 Callable 接收具名唯讀 old snapshot，包含 selection、子表單結構與原始 input。它不要求整份 Form 有效。具名 context 提供 `evaluate(path)`，只求值 callable 所需欄位。宣告者在宣告時綁定來源讀取能力，宿主管理其生命週期，Core 不接管 library 或 group。
@@ -41,31 +49,35 @@ Sweep 只填 start／stop、尚未填 n 時仍可切座標，因為該換算不�
 
 ### 共用 inline 政策
 
-`gui.form_adapter` 集中宣告來源型別到目標型別的繼承欄位清單。Ref→inline 與 inline→inline 使用同一組明確政策，各實驗不重寫。Core 不推斷「所有同名且相容的欄位」。
+`gui.form_adapter` 共用一條同名同型別繼承規則，不維護來源／目標配對表，各實驗不重寫。新型別的每個欄位若在舊型別有同名且同型別的欄位，就沿用原始輸入；否則用目標初值。Waveform、Pulse、PulseReadout、MuxReadout 與各 Reset 都用這條規則，巢狀欄位逐層比較。Core 不加入 domain 規則，也不補 defaults；converter 提供完整目標 input。
 
-同一持久型別→同型別保留全部可編輯欄位，包含 ref→inline 與 inline→inline。Ref 讀固定 Spec；inline 保留原始 expression、缺席與 invalid 值。
+型別指生成後的可編輯 Form 型別，沿 adapter 既有去除 QickParam 的規則。各次生成的同一持久 model 不因動態 class identity 不同而變成不同型別。欄位名必須完全相同，不做 rename。PulseSpec.ch 與 PulseReadoutSpec.gen_ch 不同名，不帶過；freq、gain、waveform 等實際同名同型別欄位則沿用。
 
-跨型別只在 Const、Cosine、Gauss、Drag 四種 waveform 間繼承 length，Gauss→Drag 與 Drag→Gauss 另繼承 sigma。Drag 的 delta、alpha 不帶到 Gauss。其他跨型別一律不繼承，由 converter 給目標型別初值，Core 不補 defaults。這包含涉及 Arb／FlatTop，以及 Pulse、PulseReadout、MuxReadout、各 Reset 之間的切換。
+沿用的是原始 expression、缺席與 invalid 值，不依 raw 值是否有效決定繼承，不求值或自動修正。超出目標限制時，由一般驗證顯示錯誤。同型別 ref→inline 與 inline→inline 自然保留全部可編輯欄位。Ref 讀固定 Spec，inline 不重新讀 library。
 
-Gauss→FlatTop 不把來源 waveform 放進 raise_waveform。FlatTop 沒有直接 sigma 欄位，length 與 raise_waveform 的組合也不同於四種 waveform 的整段 pulse 長度，因此不沿用先前例子。
+Gauss length=0.8、sigma=0.2 切 Drag 時保留 length／sigma，delta／alpha 用初值。切 FlatTop 時保留 length，raise_waveform 用初值，不把舊 waveform 包進新的巢狀欄位。切 Arb 時全用初值。FlatTop 的 length 與 raise_waveform 共同決定形狀，因此沿用 length 可能不符合使用者對平台長度的預期。表單顯示原值，由使用者修改，不加配對例外。
 
-上述配對由顧問於2026-10-18依使用者的代裁授權採用，待使用者覆核。新增配對時先提出具體案例，不自動擴充欄位清單。
+使用者於2026-10-18裁決：「我認為Module間切換也可以採用類似的行為，這樣才一直，我甚至認為就單純的比對欄位名與形態來決定是否繼承值就好」。確認規則與例子後答「可以」。此規則取代先前配對政策。顧問同日釐清比較可編輯 Form 型別，並確認 ch／gen_ch 不搬移。
 
-明確的 Convert to inline 保留，表示從固定來源複製內容。選項切換表示按目標型別及繼承宣告產生子表單。兩者意圖不同，允許產生相同結果，不為了區別入口而改值。
+明確的 Convert to inline 保留，表示從固定來源複製內容。選項切換依目標型別及共用繼承規則產生子表單。兩個入口可以產生相同結果，不為了區別入口而改值。
 
 ### 保存與還原
 
 保存內容包括每個欄位的 selection／branch 與原始 input，含 expression 和未完成草稿。還原從可信型別註釋與宣告重建結構，再填回原稿。不執行 converter，不序列化 callable 或動態 class，不另造 schema 語言。
 
-型別或來源 identity 不相容時明確報錯，不靜默丟葉或把資料配給另一個元素。Library 內容版本變動不等於元素 identity 改變。Ref→inline 後保存的草稿，還原時保留當時 inline branch 與原稿，不從已修改的 library 重新複製。
+還原依現行 annotation 與存檔的名稱、形狀遞迴；list 長度與位置沿存檔，不比固定 identity。不相符欄位列入 dropped。使用者於 2026-10-18 要求「還有版本？太複雜了。我需要更簡單的機制」，看過遞迴規則後確認「好，可以」。Ref→inline 後保存的草稿，還原時保留當時 inline branch 與原稿，不從已修改的 library 重新複製。
 
 ### 固定具名元素與參與清單
 
-Form 提供固定 model list 的共用描述、picker 與 indexed editing。元素共用欄位規則，初值及 label 可以不同。元素名稱、數量與順序由宣告和來源 capture 決定，不提供增刪、重排或改名。Participants 是獨立的名稱清單輸入，不是元素的 active checkbox，也不控制元素是否驗證。
+Core 對普通 `list[Model]` 提供中性描述、picker 與 indexed editing，不辨識固定元素或 participants。`Display` 只提供元素 label 與 readonly 呈現提示。固定政策集中在 `gui.form_adapter`，宣告 owner 列出 list path、名稱欄位及 participants path。新建與 Reset 從 capture 建表，重開及還原沿存檔的長度、位置與名稱，不與新 capture 比 identity。
 
-需要名稱定位的表單在建立時拒絕重複元素名，錯誤指名重複名稱與原始 indices。Framework 只檢查宣告名稱的唯一性，不解讀 resonator，不改 [[0072]] 的 group schema。元素名取法歸實驗定義者；若實驗需要重複 resonator，可以宣告 R1#0、R1#1 等不同名稱，framework 不自行加後綴。這項限制由顧問於 2026-10-18 確認，避免 participants 與 recipe overrides 無法唯一定位。
+`FormModel.check_input_change(before, after)` 在普通 mutation 的完整候選安裝前執行宣告檢查，兩棵輸入都是複本。改名、增刪或重排以具名、帶原 typed path 的拒絕原子失敗，input、base、selections 與通知都不變。Widget 與 RPC 顯示可恢復錯誤。還原及 Reset 不經此檢查。Participants 非法值仍存成 invalid draft，由一般驗證報錯並擋 Run。
 
-Workflow 的 `TunablesHost.apply` 在 native update 邊界拒絕含 int index 的 Form leaf，回 `FormErrors` 並保留原 typed path，說明 native tunables 不支援 list 元素。Engine、draft、base 與 accepted input 都不變。Native `TunableChange.path` 只接受 model-field dotted path，雖可替換完整 list，但不接受元素 index。Host 不把 index 字串化、不擴 native grammar，也不將 indexed leaves 改成 whole-list 提交。目前 workflow tunables 沒有固定 list；通用 Form 的 indexed editing 不等於 native tunables 已有相同的提交能力。這個明確拒絕邊界由顧問於 2026-10-18 依使用者的代裁授權採用。
+使用者於 2026-10-18 看過傳複本與宣告檢查方案後裁定：「可以」。這個檢查集中普通 mutation 的 admission，不把固定 identity 政策放回 Core。
+
+需要名稱定位的表單在建立時拒絕重複元素名，錯誤指名重複名稱與原始 indices。宣告 owner 只檢查名稱的唯一性，不解讀 resonator，不改 [[0072]] 的 group schema。元素名取法歸實驗定義者；若實驗需要重複 resonator，可以宣告 R1#0、R1#1 等不同名稱，framework 不自行加後綴。這項限制由顧問於 2026-10-18 確認，避免 participants 與 recipe overrides 無法唯一定位。
+
+Workflow 的 Apply 以宣告的 Form.to_cfg() 轉成完整 native tunables model，再由 Engine 依 workflow 型別驗證、整體替換並增加 revision。List 與固定 list 隨完整 model 提交，不攤平 preview leaves，也不建立 native index path grammar。每次 Apply 的 journal 記 actor、revision_before／after 與完整新 tunables JSON。Append 成功後才發布值與 revision，宿主才接受 input／base。使用者於 2026-10-18 確認完整 model 直接套用、不比對差異，並在日誌寫法中確認「甲乙都可以」。採完整快照，不維護逐葉差異或舊格式相容層。當前 step capture 與 iteration record.json 格式不變，見 [[0062]]。
 
 Mux 的 lab cfg 使用完整有序 `tones: list[ToneCfg]`。每個元素的 `name` 由 capture 產生且不可編輯。Drive 類實驗以 qubit 名稱識別，onetone 以 resonator 名稱識別。每個元素都有必填 drive，有掃描的實驗另有 sweep。未參與元素保留設定，適用同一驗證規則，無效時也擋 Run。
 
@@ -81,7 +93,11 @@ Model-field path 使用 typed segments：欄位名為 str，list index 為 int�
 
 一次讀全部元素由 owner 在單一 readonly 呼叫產生。MCP 不逐元素發出 N 次讀取再拼成假快照，不持有平行的名稱排序表。完整讀取保留每個元素的 authored input、可用值與定向錯誤，不因一個元素無效而隱藏其他元素。
 
-Recipe 輸入包含 participants，以及以元素 name 為 key 的逐元素 overrides。Owner 在 Run 前解析 name 到位置，沿相同 Form 操作套用，不在 MCP／recipe 重做 converter。每個葉欄位保留 explicit／default／derived 來源。Actual、estimates 與 writeback candidates 逐元素標示 name，取當次 Run／Load 的事實，不用後來的 Reset 或當前 alias 改寫已完成回報。顯示元素名不授權寫回，目的地與 Apply 仍歸既有 writeback owner。
+Recipe 輸入包含以元素 name 表示的 participants，以及與 MCP 相同的 typed path overrides。例如 `[{"path": ["tones", 0, "drive", "gain"], "value": 0.3}]` 直接定位完整原始 list 的第 0 個元素。Overrides 不以元素 name 為 key，owner 不做 name→位置轉換。Owner 在 Run 前沿相同 Form 操作套用 overrides，不在 MCP／recipe 重做 converter，也不另建排序表。
+
+每個葉欄位保留 explicit／default／derived 來源。Actual、estimates 與 writeback candidates 以完整原始 list 的位置標示，並附元素 name 供閱讀，不依 participants 順序重新編號。這些內容取當次 Run／Load 的事實，不用後來的 Reset 或當前 alias 改寫已完成回報。顯示位置與元素名不授權寫回，目的地與 Apply 仍歸既有 writeback owner。
+
+使用者於 2026-10-18 指出 recipe 名稱定位與核心 index 不一致，裁定：「既然核心是用index，那就用適合核心的方案，不要加一堆難維護的轉換邏輯」。因此 overrides 與 MCP 共用 typed paths；participants 仍以名稱表達此次參與順序。
 
 ### 模組分工與可執行依賴規則
 

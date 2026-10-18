@@ -26,10 +26,7 @@ class Plain(api.FormModel):
     unrelated: float = 1
 
 
-@pytest.mark.parametrize(
-    "batch", [{("value",): {"kind": "second"}}, {("value", "kind"): "second"}]
-)
-def test_selection_without_converter_preserves_branch_and_authored_children(batch):
+def test_selection_without_converter_preserves_branch_and_authored_children():
     env = api.FormEnv()
     raw: dict[str, JsonValue] = {
         "value": {"kind": "first", "amount": {"expr": "6 / 2"}, "samples": [1]}
@@ -37,7 +34,7 @@ def test_selection_without_converter_preserves_branch_and_authored_children(batc
     state = api.FormState(api.FormInput(Plain, raw))
     events = []
     state.subscribe(lambda: events.append(state.describe(("value",), env)))
-    state.write(batch, env)
+    state.select(("value",), {"kind": "second"}, env)
     assert state.input.data == raw, "A selection must not rebuild child defaults"
     description = state.describe(("value",), env)
     assert description.target is not None and description.target.selected == 1
@@ -106,7 +103,7 @@ def test_one_converter_receives_readonly_snapshot_target_and_local_evaluation():
     state.subscribe(
         lambda: observed.append((state.input.data, state.describe(("value",), env)))
     )
-    state.write({("value",): {"kind": "second"}}, env)
+    state.select(("value",), {"kind": "second"}, env)
     assert state.input.data["value"] == {"kind": "second", "amount": -3}
     assert len(calls) == len(observed) == 1
     errors = state.result(env)
@@ -148,7 +145,7 @@ def test_converter_failure_keeps_selection_structure_input_and_notifications(def
     events = []
     state.subscribe(lambda: events.append(state.input.data))
     with pytest.raises(ValueError, match=".+"):
-        state.write({("value",): {"kind": "second"}}, env)
+        state.select(("value",), {"kind": "second"}, env)
     assert state.input.data == raw
     assert state.describe(("value",), env) == before
     assert events == []
@@ -170,9 +167,9 @@ def test_expected_refusal_is_named_and_unexpected_callable_value_error_propagate
         api.FormInput(model, {"value": {"kind": "first", "amount": {"expr": "1 / 0"}}})
     )
     with pytest.raises(api.FormConversionError, match="participating"):
-        state.write({("value",): {"kind": "second"}}, api.FormEnv())
+        state.select(("value",), {"kind": "second"}, api.FormEnv())
     with pytest.raises(ValueError, match="provider failure") as caught:
-        state.write({("value",): {"kind": "first"}}, api.FormEnv())
+        state.select(("value",), {"kind": "first"}, api.FormEnv())
     assert caught.value is expected
     assert state.input.data == {"value": {"kind": "first", "amount": {"expr": "1 / 0"}}}
 
@@ -207,7 +204,7 @@ def test_local_converter_hook_overrides_inherited_hook_and_field_metadata():
     state = api.FormState(
         api.FormInput(Parent, {"child": {"value": {"kind": "first", "amount": 1}}})
     )
-    state.write({("child", "value"): {"kind": "second"}}, api.FormEnv())
+    state.select(("child", "value"), {"kind": "second"}, api.FormEnv())
     assert state.input.data == {"child": {"value": {"kind": "second", "amount": 7}}}
     assert events == [{"kind": "second"}]
 
@@ -227,8 +224,8 @@ def test_converter_handles_every_scalar_selection_and_rejects_duplicate_declarat
 
     env = api.FormEnv()
     state = api.FormState(Scalar.default_input(env))
-    state.write({("mode",): "b"}, env)
-    state.write({("mode",): "c"}, env)
+    state.select(("mode",), "b", env)
+    state.select(("mode",), "c", env)
     assert calls == [("a", "b"), ("b", "c")]
     duplicate = create_model(
         "Duplicate",

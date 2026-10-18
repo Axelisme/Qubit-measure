@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-18，隔離資料 project 啟動
+**Last updated:** 2026-10-19，Recipe 與 summary typed paths
 
 # `zcu_tools/mcp/measure/`
 
@@ -59,7 +59,7 @@ Recipe helper 分成「工作步驟」與「交還控制權」。工作步驟以
 
 需要交還控制權做寫回判斷時，作者用 `decision = yield from ask(run.propose_writeback())`，回傳 `WritebackResult`。`decision.status` 為 completed 時，`decision.decision` 是 accepted 或 skipped；cancelled 時為 None。`ask` 只接受已捕捉的 WritebackQuestion，不寫入資料。Opaque operation 不可迭代，也不能直接 yield；driver 會拒絕並提示 helper 寫法。Driver 將具名結果放在 operation.delivery，以 None 推進 generator，原有 completion failure 仍 throw 到作者的 helper 呼叫處。
 
-`RecipeTab` 的欄位、origins 與 summary 宣告使用 logical paths。例如 `modules.readout.freq`、`modules.qub_pulse.waveform.length`。Adapter 只隱藏生成器加入的 wrapper，真實名為 module 的欄位仍保留。Range count 是 n，`set_sweep` 的公開 expts 參數送出時轉為 n。完整 start／stop／expts 以一次 container edit 選 Range + Expts，可覆蓋無效 Center／Step draft；部分設定只編輯 active leaves，不在 caller 換算座標或採樣。細部切換先讀 `tab.describe_cfg` 的 active 數值欄位 commands，再由 `rpc_call` 呼叫 `tab.run_cfg_command`，沒有額外高階 tool。Step 的 input 是 authored 原稿，value／values 明示有效端點，讀取不改 input。
+`RecipeTab` 的欄位、origins 與 summary 宣告使用 typed logical paths。作者傳非空 tuple，例如 `("modules", "readout", "freq")` 或 `("tones", 1, "drive", "gain")`。Str 是原始欄位名，int 是完整 list 的原始位置。數字字串仍是欄位名，不拆 dotted string，不以元素 name 或 participants 順序解讀位置。Adapter 只隱藏生成器加入的 wrapper，真實名為 module 的欄位仍保留。Range count 是 n，`set_sweep` 的公開 expts 參數送出時轉為 n。完整 start／stop／expts 以一次 container edit 選 Range + Expts，可覆蓋無效 Center／Step draft；部分設定只編輯 active leaves，不在 caller 換算座標或採樣。細部切換先讀 `tab.describe_cfg` 的 active 數值欄位 commands，再由 `rpc_call` 呼叫 `tab.run_cfg_command`，沒有額外高階 tool。Step 的 input 是 authored 原稿，value／values 明示有效端點，讀取不改 input。
 
 `read_field` 每次送一次 `tab.read_recipe_field`。同一 owner turn 回傳 metadata、authored input、ordinary value、value_status、selector/source、readonly 與局部 logical errors。Input_present 區分未填與 null。Value_status 區分 available、missing 與 unavailable；available 的 null 是有效觀察。Value 與局部 errors 不證明整份 cfg 有效，get_cfg 與 Run admission 仍檢查 cfg。
 
@@ -71,7 +71,7 @@ Mode/key 只來自 owner 的 selector。普通 scalar 不繼承祖先 mode，lib
 
 `set`、`set_fields` 與 `set_sweep` 把 supplied logical edits 一次送 `tab.edit_recipe_fields`，不預讀 canonical mapping。None 保留 input 並記 gui_default，全 None 或空批次不送 mutation。Expression 原文保持不變。Owner 在同一 turn 解析全部 paths、檢查 admission 並提交，結構、來源或 ref 祖先拒絕不留成功前綴。一般 invalid draft 仍會安裝；MCP 回 invalid_cfg 時保留 owner draft，且不記成功 provenance。
 
-`RecipeTab.read_module(field)` 保留明確 materialization 的用途，回 detached module values、mode 與 source。它不實作 read_field 或 summary scalar。`retain_module_source(field, summary_field=..., value_path=...)` 要求 summary_field 與 field 加 value_path 指向同一 logical scalar，透過 logical read 記來源，不拆 wrapper 或 materialize。Caller 也可讀 source.key，再用 `retain_source` 記 `library:<key>`。這些 labels 只影響呈現，不改值或寫入權限。
+`RecipeTab.read_module(field)` 保留明確 materialization 的用途，回 detached module values、mode 與 source。這個 owner 目前只支援 str segments，因此 field 是非空 str tuple；int 在派送前明確拒絕，不改成 dotted string。Wire 的 `tab.read_module` 與專用 `tab.use_inline` 同樣收 str array。它不實作 read_field 或 summary scalar。`retain_module_source(field, summary_field=..., value_path=...)` 要求 summary_field 與 field 加 value_path 指向同一 logical scalar，透過 logical read 記來源，不拆 wrapper 或 materialize。Caller 也可讀 source.key，再用 `retain_source` 記 `library:<key>`。這些 labels 只影響呈現，不改值或寫入權限。
 
 Run 前仍走 get_cfg 與原有 admission，再 fresh capture summary_parameters 指名的 logical fields。Scalar 使用 ordinary value，selector 摘要才使用 actual key。Missing、unavailable 或有相關 errors 的值不當成成功 null。當次 facts 已 detached，後來 Edit、Reset 或 library 更新不改舊 Run 摘要。
 
@@ -116,7 +116,9 @@ Execution 保存同一份投影，recipe、`status(execution)` 與 `wait(executi
 
 Framework 原樣傳遞 native analysis summary 與 invalid 路徑，不特別解讀 fit_quality、不重算品質或設定寫回門檻。有擬合的 summary 附 fit_quality 是實驗定義者的約定，見 zcu_lab README。
 
-Analysis-only 沒有 recipe 身分。摘要使用注入 definitions 已宣告的 scalar value_key，完全相同的 name/error_key/unit 宣告可合併。Present key 的宣告衝突直接 ValueError，不猜實驗身分，不新增 tab.snapshot 讀取。每個 pane 保留完整原生 summary 與 invalid；scalar estimates 不抽掉 summary 的欄位，framework 不投影 quality。
+`SummaryParameter.field`、`SummaryEstimate.value_key` 與 `error_key` 使用同一 typed tuple，公開 name 只作回報 key。Estimate lookup 沿 native dict 的 str key 與 list 的 int 原始位置讀值，不把數字字串當 index。Missing path 不產生 estimate，present null 與 invalid 原樣保留，error_key=None 表示未宣告 uncertainty。
+
+Analysis-only 沒有 recipe 身分。摘要使用注入 definitions 已宣告的 value_key typed path，完全相同的 name/error_key/unit 宣告可合併。Present path 的宣告衝突直接 ValueError，不猜實驗身分，不新增 tab.snapshot 讀取。每個 pane 保留完整原生 summary 與 invalid；scalar estimates 不抽掉 summary 的欄位，framework 不投影 quality。
 
 `tab_interact` 省略 payload 時讀 committed state、commands、info、preview_active 與 figure，不改焦點。帶 payload 時 GUI 驗證命令並跟隨 Analysis pane。`done` 接住原 analysis operation，然後加入其 execution 的完成讀取與保存。此 method 的純讀與 command 都要求 holder，已接受的 owner-loop commit 依序生效。沒有來源鎖或自動重試。
 

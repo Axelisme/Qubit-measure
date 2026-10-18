@@ -44,10 +44,15 @@ class ValueForm(FormModel):
 
     value: int = 1
 
+    def to_cfg(self) -> Tunables:
+        return Tunables(value=self.value)
+
 
 def create_binding(run_id: str = "run") -> TunablesHost[ValueForm, int]:
     env = FormEnv()
-    return TunablesHost(FormState(ValueForm.default_input(env)), env, run_id)
+    return TunablesHost(
+        FormState(ValueForm.default_input(env)), env, run_id, to_cfg=ValueForm.to_cfg
+    )
 
 
 def create_controller(

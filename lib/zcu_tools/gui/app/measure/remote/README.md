@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-18，固定元素 indexed describe／edit 與 typed wire paths
+**Last updated:** 2026-10-19，Recipe 與 module RPC typed path carriers
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -52,7 +52,7 @@ router scaffolding. Typed envelopes live in [`gui.remote.wire`](../../../remote/
 
 ## Recipe 欄位
 
-`tab.read_recipe_field`、`tab.edit_recipe_fields` 與 `tab.select_recipe_module` 明確使用 logical paths。`form_description.py` 擁有 RecipeFieldObservation、RecipeEditResult 與 RecipeSelectionResult。所有 description、errors 與 source paths 都是 logical。通用 describe_cfg/edit_cfg/get_cfg/reset_cfg 保持 canonical 契約，read_module 保留明確 materialization。
+`tab.read_recipe_field`、`tab.edit_recipe_fields` 與 `tab.select_recipe_module` 明確使用 typed logical path arrays，str 保留欄位名，int 保留完整 list 的原始位置。數字字串不轉 index，名稱不作位置查找。Handler 只解碼 carrier，由 owner 決定路徑是否可達。`form_description.py` 擁有 RecipeFieldObservation、RecipeEditResult 與 RecipeSelectionResult。所有 description、errors 與 source paths 都是 logical。通用 describe_cfg/edit_cfg/get_cfg/reset_cfg 保持 canonical 契約。`tab.read_module` 保留明確 materialization，與專用 `tab.use_inline` 的 field 都使用非空 str-segment array。這兩個 core module owner 不支援 int index，入口明確拒絕，不保留 dotted-string reader。
 
 Read 使用一次 owner turn 的目前 input 與固定 capture。Value_status 區分 available、missing 與 unavailable，input_present/input 只觀察 authored draft。Selector 描述目標本身，source 識別最近 captured ref；readonly 表示穿過 ref 祖先，不代表 declaration lock。讀取不改 input、base、cfg version 或通知，也不授權寫入。
 

@@ -53,7 +53,7 @@ class ExtrasAdapter(SampleAdapter):
 def test_fixed_element_rpc_describes_names_and_edits_typed_positions(form_rpc) -> None:
     from pydantic import create_model
 
-    from tests.gui.form._fixed_models import named_form, named_input
+    from tests.gui.form_adapter._fixed_models import named_form, named_input
 
     model = named_form()
     core = create_model(
@@ -70,7 +70,11 @@ def test_fixed_element_rpc_describes_names_and_edits_typed_positions(form_rpc) -
         @staticmethod
         def make_form(ctx: FormContext):
             del ctx
-            return Form(core, {"sweep": Range.between(1.0, 2.0, expts=3)})
+            return Form(
+                core,
+                {"sweep": Range.between(1.0, 2.0, expts=3)},
+                fixed_elements=model.fixed_elements,
+            )
 
     fixture, _, rpc = form_rpc
     fixture.registry.register("fixed-elements", FixedAdapter)
@@ -104,6 +108,18 @@ def test_fixed_element_rpc_describes_names_and_edits_typed_positions(form_rpc) -
         assert local["result"]["input_present"] is True
         assert local["result"]["input"] == {"expr": "3 * 2"}
         assert local["result"]["value"] == 6
+        refused = rpc.call(
+            "tab.edit_cfg",
+            {"tab_id": tab, "edits": [{"path": ["tones", 0, "label"], "value": "C"}]},
+        )
+        assert not refused["ok"], refused
+        assert refused["error"]["reason"] == "form_input_rejected"
+        assert refused["error"]["data"]["form_path"] == ["tones", 0, "label"]
+        unchanged = rpc.call(
+            "tab.describe_cfg", {"tab_id": tab, "path": ["tones", 0, "label"]}
+        )
+        assert unchanged["ok"], unchanged
+        assert unchanged["result"]["input"] == "A"
         for path in [
             ["tones", "1", "gain"],
             ["tones", -1],
@@ -499,10 +515,10 @@ def test_recipe_with_real_form_and_adapter_preserves_acquisition_result(
     client = make_client(tmp_path, respond)
     with closing(client.context.session):
         session = RecipeSession(
-            client.context, summary_parameters=(SummaryParameter("gain", "gain"),)
+            client.context, summary_parameters=(SummaryParameter("gain", ("gain",)),)
         )
         prepared = session.open_tab("fake", reuse=tab)
-        prepared.set("gain", 0.75)
+        prepared.set(("gain",), 0.75)
         operation = prepared.run()
         fixture.ctrl.close()
         completed, status = operation.complete_in_current_worker()
@@ -553,7 +569,7 @@ def test_existing_inline_draft_is_a_guarded_noop(
     tab = fixture.ctrl.new_tab("module-rpc")
     try:
         owner = fixture.ctrl.cfg_resources.lookup(tab)
-        owner.write({("pulse",): {"kind": "inline"}})
+        owner.select(("pulse",), {"kind": "inline", "module": {"type": "pulse"}})
         if draft == "invalid-expression":
             owner.write(
                 {
@@ -561,9 +577,10 @@ def test_existing_inline_draft_is_a_guarded_noop(
                     ("pulse", "module", "nqz"): 1,
                     ("pulse", "module", "freq"): {"expr": "1 / 0"},
                     ("pulse", "module", "gain"): 0.2,
-                    ("pulse", "module", "waveform", "kind"): "inline",
-                    ("pulse", "module", "waveform", "module", "style"): "const",
-                    ("pulse", "module", "waveform", "module", "length"): 0.1,
+                    ("pulse", "module", "waveform"): {
+                        "kind": "inline",
+                        "module": {"style": "const", "length": 0.1},
+                    },
                 }
             )
         before = owner.input.data
@@ -571,7 +588,7 @@ def test_existing_inline_draft_is_a_guarded_noop(
         version = fixture.state.version.get(version_key)
         notifications: list[str] = []
         owner.subscribe(lambda: notifications.append("changed"))
-        reply = rpc.call("tab.use_inline", {"tab_id": tab, "field": "pulse"})
+        reply = rpc.call("tab.use_inline", {"tab_id": tab, "field": ["pulse"]})
         assert reply["ok"], reply
         assert reply["result"]["input"] == before
         assert reply["result"]["errors"]
@@ -616,7 +633,7 @@ def test_use_inline_rejects_tagged_nonmodule_input(
         version = fixture.state.version.get(version_key)
         notifications: list[str] = []
         owner.subscribe(lambda: notifications.append("changed"))
-        reply = rpc.call("tab.use_inline", {"tab_id": tab, "field": "extras"})
+        reply = rpc.call("tab.use_inline", {"tab_id": tab, "field": ["extras"]})
         assert not reply["ok"], reply
         assert reply["error"]["code"] == "invalid_params"
         assert reply["error"]["reason"] == "form_errors"
@@ -638,7 +655,7 @@ def test_module_rpc_conversion_values_errors_and_readonly_admission(form_rpc) ->
         notifications: list[str] = []
         owner.subscribe(lambda: notifications.append("changed"))
         # Selecting Inline uses ordinary type defaults, not hidden fallback.
-        owner.write({("pulse",): {"kind": "inline"}})
+        owner.select(("pulse",), {"kind": "inline", "module": {"type": "pulse"}})
         assert owner.input.data["pulse"]["kind"] == "inline"
         assert notifications == ["changed"]
         owner.write(
@@ -647,29 +664,30 @@ def test_module_rpc_conversion_values_errors_and_readonly_admission(form_rpc) ->
                 ("pulse", "module", "nqz"): 1,
                 ("pulse", "module", "freq"): {"expr": "50 * 2"},
                 ("pulse", "module", "gain"): 0.2,
-                ("pulse", "module", "waveform", "kind"): "inline",
-                ("pulse", "module", "waveform", "module", "style"): "const",
-                ("pulse", "module", "waveform", "module", "length"): 0.1,
+                ("pulse", "module", "waveform"): {
+                    "kind": "inline",
+                    "module": {"style": "const", "length": 0.1},
+                },
                 ("gain",): {"expr": "1 / 0"},
             }
         )
         before = owner.input.data
-        read = rpc.call("tab.read_module", {"tab_id": tab, "field": "pulse"})
+        read = rpc.call("tab.read_module", {"tab_id": tab, "field": ["pulse"]})
         assert read["ok"], read
         assert read["result"]["value"]["freq"] == 100.0
         assert read["result"]["mode"] == "inline"
         assert read["result"]["source"] == "pulse"
         assert owner.input.data == before
         changed = len(notifications)
-        assert rpc.call("tab.use_inline", {"tab_id": tab, "field": "pulse"})["ok"]
+        assert rpc.call("tab.use_inline", {"tab_id": tab, "field": ["pulse"]})["ok"]
         assert len(notifications) == changed
         fixture.ctrl.control_identity.reclaim_local()
-        assert rpc.call("tab.read_module", {"tab_id": tab, "field": "pulse"})["ok"]
-        denied = rpc.call("tab.use_inline", {"tab_id": tab, "field": "pulse"})
+        assert rpc.call("tab.read_module", {"tab_id": tab, "field": ["pulse"]})["ok"]
+        denied = rpc.call("tab.use_inline", {"tab_id": tab, "field": ["pulse"]})
         assert not denied["ok"]
         assert denied["error"]["reason"] == "not_holder"
         owner.write({("pulse", "module", "freq"): {"expr": "1 / 0"}})
-        invalid = rpc.call("tab.read_module", {"tab_id": tab, "field": "pulse"})
+        invalid = rpc.call("tab.read_module", {"tab_id": tab, "field": ["pulse"]})
         assert not invalid["ok"]
         assert invalid["error"]["reason"] == "not_valid"
         assert len(notifications) == changed + 1
@@ -678,10 +696,10 @@ def test_module_rpc_conversion_values_errors_and_readonly_admission(form_rpc) ->
 
 
 @pytest.mark.parametrize(
-    "field", ["gain", "missing", "pulse.module.freq", "pulse..freq"]
+    "field", [["gain"], ["missing"], ["pulse", "module", "freq"], ["pulse", "", "freq"]]
 )
 def test_module_rpc_rejects_nonmodule_paths_without_mutation(
-    form_rpc, field: str
+    form_rpc, field: list[str]
 ) -> None:
     fixture, tab, rpc = form_rpc
     owner = fixture.ctrl.cfg_resources.lookup(tab)
@@ -702,7 +720,7 @@ def test_use_inline_rejects_disabled_module_without_fallback(form_rpc) -> None:
         before = owner.input.data
         notifications: list[str] = []
         owner.subscribe(lambda: notifications.append("changed"))
-        reply = rpc.call("tab.use_inline", {"tab_id": tab, "field": "pulse"})
+        reply = rpc.call("tab.use_inline", {"tab_id": tab, "field": ["pulse"]})
         assert not reply["ok"], "Disabled module must not silently become blank inline"
         assert reply["error"]["reason"] == "form_errors"
         assert reply["error"]["code"] == "invalid_params"
@@ -745,7 +763,7 @@ def test_inline_noop_takes_busy_reentry_and_lifetime_guards(
         version = fixture.state.version.get(version_key)
         notifications: list[str] = []
         owner.subscribe(lambda: notifications.append("changed"))
-        successful = rpc.call("tab.use_inline", {"tab_id": tab, "field": "pulse"})
+        successful = rpc.call("tab.use_inline", {"tab_id": tab, "field": ["pulse"]})
         assert successful["ok"], successful
         assert owner.input.data == before
         assert fixture.state.version.get(version_key) == version
@@ -753,7 +771,7 @@ def test_inline_noop_takes_busy_reentry_and_lifetime_guards(
 
         fixture.state.set_tab_running(tab, running=True)
         try:
-            busy = rpc.call("tab.use_inline", {"tab_id": tab, "field": "pulse"})
+            busy = rpc.call("tab.use_inline", {"tab_id": tab, "field": ["pulse"]})
             assert not busy["ok"]
             assert busy["error"]["reason"] == "mutation_blocked"
         finally:
@@ -761,7 +779,7 @@ def test_inline_noop_takes_busy_reentry_and_lifetime_guards(
         reentrant: list[str] = []
 
         def during_notification() -> None:
-            rejected = rpc.call("tab.use_inline", {"tab_id": tab, "field": "pulse"})
+            rejected = rpc.call("tab.use_inline", {"tab_id": tab, "field": ["pulse"]})
             assert not rejected["ok"]
             reentrant.append(rejected["error"]["reason"])
 

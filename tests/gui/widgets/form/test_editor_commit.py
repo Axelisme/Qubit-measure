@@ -60,10 +60,17 @@ def build(qapp: QApplication) -> Iterator[Build]:
             batches.append(dict(batch))
             state.write(batch, env)
 
+        def select(path: FormWritePath, selection: JsonValue) -> None:
+            if check is not None:
+                check({path: selection})
+            state.select(path, selection, env)
+
         def run_command(path: FormWritePath, name: str) -> None:
             state.run_command(path, name, env)
 
-        editor = FormEditor(state, env, write=write, run_command=run_command)
+        editor = FormEditor(
+            state, env, write=write, select=select, run_command=run_command
+        )
         editors.append(editor)
         editor.show()
         editor.activateWindow()

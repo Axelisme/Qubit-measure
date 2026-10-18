@@ -11,7 +11,6 @@ from pydantic_core import PydanticCustomError
 from zcu_tools.core.complex_codec import decode_complex
 from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_expr
 
-from ._fixed import fixed_errors
 from ._json import copy_object, default_json, expr_text
 from ._sources import check_sources, error_path
 from ._structure import (
@@ -280,7 +279,7 @@ def result[F: FormModel](
     """Evaluate one detached input and return its model or canonical errors."""
     decoding = _start(model, data, env)
     ordinary = _decode_model(model, data, (), decoding)
-    return _validate(model, ordinary, decoding, data)
+    return _validate(model, ordinary, decoding)
 
 
 def preview(
@@ -290,7 +289,7 @@ def preview(
     decoding = _start(model, data, env)
     ordinary = _decode_model(model, data, (), decoding)
     failed_decoding = tuple(decoding.errors)
-    validated = _validate(model, ordinary, decoding, data)
+    validated = _validate(model, ordinary, decoding)
     if not isinstance(validated, FormErrors):
         complete = {
             key: default_json(getattr(validated, key)) for key in model.model_fields
@@ -361,16 +360,9 @@ def _validate[F: FormModel](
     model: type[F],
     ordinary: dict[str, FormValue],
     decoding: _Decoding,
-    data: Mapping[str, JsonValue],
 ) -> F | FormErrors:
-    """Validate the model, adding fixed-element and participant errors from data."""
-    checked = _validate_model(model, ordinary, decoding)
-    fixed = fixed_errors(model, data)
-    if not fixed:
-        return checked
-    if isinstance(checked, FormErrors):
-        return FormErrors({**fixed, **checked.messages})
-    return FormErrors(fixed)
+    """Validate ordinary values through the declaring model."""
+    return _validate_model(model, ordinary, decoding)
 
 
 def _validate_model[F: FormModel](

@@ -187,10 +187,16 @@ def test_local_error_recovery_and_external_publication_keep_single_evaluation(
             raise WriteRejected("Host refused")
         state.write(batch, env)
 
+    def select(path: FormWritePath, selection: JsonValue) -> None:
+        if reject:
+            raise WriteRejected("Host refused")
+        state.select(path, selection, env)
+
     editor = FormEditor(
         state,
         env,
         write=write,
+        select=select,
         run_command=lambda path, name: state.run_command(path, name, env),
     )
     try:

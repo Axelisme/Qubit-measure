@@ -82,7 +82,7 @@ class CapabilityForm(FormModel):
         ("selection", {"selection": {"kind": "empty"}}, True, False),
         ("selection", {"selection": {"kind": "tag-only"}}, True, False),
         ("scalar", {}, False, False),
-        ("sequence", {"sequence": [{"value": 1}]}, False, False),
+        ("sequence", {"sequence": [{"value": 1}]}, True, True),
         ("mapping", {"mapping": {"key": {"value": 1}}}, False, False),
     ],
 )

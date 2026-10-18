@@ -211,6 +211,16 @@ class TabFormResource:
             self._state.write(batch, self._sources.env)
             self._notify()
 
+    def select(self, path: FormWritePath, selection: JsonValue) -> None:
+        """Select one listed option under the same busy/lifetime/publication guard.
+
+        Only this operation executes the declaring converter. Value writes
+        remain exact raw replacements. Failure installs/publishes nothing.
+        """
+        with self._mutation():
+            self._state.select(path, selection, self._sources.env)
+            self._notify()
+
     def read_recipe_field(self, path: FormWritePath) -> LogicalFieldObservation:
         """Read one logical field using current input and the fixed capture.
 

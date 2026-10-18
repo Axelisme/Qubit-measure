@@ -150,6 +150,10 @@ def test_converter_rejection_restores_selector_and_preserves_visible_drafts(
         calls.append(batch)
         state.write(batch, env)
 
+    def select(path, selection):
+        calls.append((path, selection))
+        state.select(path, selection, env)
+
     def command(path, name):
         state.run_command(path, name, env)
 
@@ -157,6 +161,7 @@ def test_converter_rejection_restores_selector_and_preserves_visible_drafts(
         state,
         env,
         write=write if guarded else None,
+        select=select if guarded else None,
         run_command=command if guarded else None,
     )
     editor.resize(620, 300)
