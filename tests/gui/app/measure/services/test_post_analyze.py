@@ -94,10 +94,11 @@ def _make_service(
     bus: EventBus,
     *,
     fail_submit: bool = False,
+    handles: OperationHandles | None = None,
     writeback: MagicMock | None = None,
 ) -> tuple[PostAnalyzeService, _FakeBg]:
     bg = _FakeBg(fail_submit=fail_submit)
-    handles = OperationHandles()
+    handles = handles if handles is not None else OperationHandles()
     progress = ProgressService(DirectProgressTransport())
     runner = OperationRunner(MagicMock(), handles, progress, bg, bus)
     writeback = writeback if writeback is not None else MagicMock()
@@ -240,7 +241,8 @@ def test_on_post_analyze_finished_updates_state(qapp):
     bus = EventBus()
     received: list[TabInteractionFact] = []
     bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
-    svc, bg = _make_service(state, bus)
+    handles = OperationHandles()
+    svc, bg = _make_service(state, bus, handles=handles)
 
     figure = Figure()
     plots = _plots(figure)
@@ -250,7 +252,7 @@ def test_on_post_analyze_finished_updates_state(qapp):
 
     post_result = object()
 
-    finished: list = []
+    finished: list[tuple[str, object]] = []
     bus.subscribe(
         TabInteractionChangedPayload,
         lambda payload: (
@@ -273,7 +275,7 @@ def test_on_post_analyze_finished_updates_state(qapp):
     assert tab.post_analysis.plots["fit"] is figure
     assert tab.is_analyzing is False
     assert finished == [("tab1", post_result)]
-    outcome = svc._handles.poll(token)
+    outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "finished"
     assert received == [
         TabInteractionFact.POST_ANALYZE_STARTED,
@@ -288,7 +290,8 @@ def test_on_post_analyze_failed_resets_state(qapp):
     bus = EventBus()
     received: list[TabInteractionFact] = []
     bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
-    svc, bg = _make_service(state, bus)
+    handles = OperationHandles()
+    svc, bg = _make_service(state, bus, handles=handles)
 
     token = svc.start_post_analyze(
         "tab1", post_analyze_params_instance=object(), plots=_plots()
@@ -305,7 +308,7 @@ def test_on_post_analyze_failed_resets_state(qapp):
     assert state.get_tab("tab1").post_analysis.result is previous
     assert state.get_tab("tab1").post_analysis.source_operation_id == 900
     assert len(failed) == 1
-    outcome = svc._handles.poll(token)
+    outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "failed"
     assert received == [
         TabInteractionFact.POST_ANALYZE_STARTED,
@@ -320,8 +323,8 @@ def test_on_post_analyze_failed_resets_state(qapp):
 
 def test_two_tabs_settle_their_own_tokens(qapp):
     state = _make_two_tab_state()
-    svc, bg = _make_service(state, EventBus())
-    handles = svc._handles
+    handles = OperationHandles()
+    svc, bg = _make_service(state, EventBus(), handles=handles)
 
     token1 = svc.start_post_analyze(
         "tab1", post_analyze_params_instance=object(), plots=_plots()
@@ -356,7 +359,7 @@ def test_two_tabs_settle_their_own_tokens(qapp):
     outcome2 = handles.poll(token2)
     assert outcome2 is not None and outcome2.status == "finished"
     assert handles.live_count() == 0
-    assert "tab2" not in svc._active_tokens
+    assert "tab2" not in dict(svc.active_operations())
 
 
 # ---------------------------------------------------------------------------
@@ -368,8 +371,8 @@ def test_on_post_analyze_finished_post_processing_raise_settles_failed(
     qapp, monkeypatch
 ):
     state = _make_state()
-    svc, bg = _make_service(state, EventBus())
-    handles = svc._handles
+    handles = OperationHandles()
+    svc, bg = _make_service(state, EventBus(), handles=handles)
 
     token = svc.start_post_analyze(
         "tab1", post_analyze_params_instance=object(), plots=_plots()

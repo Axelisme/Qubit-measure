@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 from qick.asm_v2 import AsmV2, ConfigReadout, QickParam
 
@@ -206,11 +206,12 @@ class AdditionalMacroMixin(AsmV2):
         self,
         type: str,
         name: str,
-        info: dict | None = None,
+        info: dict[str, Any] | None = None,
         regs: dict[str, str] | None = None,
     ) -> None:
         """Insert a meta macro that emits a meta instruction for the IR builder.
 
+        info maps string keys to arbitrary metadata values passed to MetaMacro.
         regs maps info keys to register names resolved via prog._get_reg() at
         translate time.  Use this when the register is known only by a logical
         name (e.g. a loop name) rather than a bare ASM address.

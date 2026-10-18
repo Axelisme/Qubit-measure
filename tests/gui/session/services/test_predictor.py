@@ -13,6 +13,7 @@ import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
+from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import CommandOrigin, PointCreateRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.predictor import (
@@ -86,7 +87,7 @@ def context(tmp_path: Path) -> Generator[ContextService]:
 def test_qubit_params_use_concrete_current_point_not_alias(
     context: ContextService,
 ) -> None:
-    svc = PredictorService(context, components.params_for)
+    svc = PredictorService(ContextControlFacet(context=context), components.params_for)
     initial_params = svc.params_for_qubit("Q1")
     assert isinstance(initial_params, predict.FluxoniumParams)
     assert initial_params.EJ == 5.0
@@ -104,7 +105,7 @@ def test_qubit_params_use_concrete_current_point_not_alias(
 
 
 def test_parameter_queries_do_not_change_source(context: ContextService) -> None:
-    svc = PredictorService(context, components.params_for)
+    svc = PredictorService(ContextControlFacet(context=context), components.params_for)
     params = svc.params_for_qubit("Q1")
     before = context.read_context().document()
     freq = svc.predict_freq(params, PredictFreqRequest(value=0.1, transition=(0, 1)))
@@ -124,14 +125,14 @@ def test_parameter_queries_do_not_change_source(context: ContextService) -> None
 
 
 def test_calibrate_flux_bias_invalid_transition_raises(context: ContextService) -> None:
-    svc = PredictorService(context, components.params_for)
+    svc = PredictorService(ContextControlFacet(context=context), components.params_for)
     params = svc.params_for_qubit("Q1")
     with pytest.raises(InvalidInputError, match="from-level"):
         svc.calibrate_flux_bias(params, CalibrateFluxBiasRequest(0.25, 4567.0, (1, 1)))
 
 
 def test_partial_qubit_params_refuse_calculation(context: ContextService) -> None:
-    svc = PredictorService(context, components.params_for)
+    svc = PredictorService(ContextControlFacet(context=context), components.params_for)
     params = svc.params_for_qubit("Q2")
     with pytest.raises(ValueError, match="EL"):
         svc.predict_freq(params, PredictFreqRequest(1.8, (0, 1)))
@@ -142,7 +143,7 @@ def test_partial_qubit_params_refuse_calculation(context: ContextService) -> Non
 def test_predict_freq_curve_shape_labels_and_single_point(
     context: ContextService,
 ) -> None:
-    svc = PredictorService(context, components.params_for)
+    svc = PredictorService(ContextControlFacet(context=context), components.params_for)
     params = svc.params_for_qubit("Q1")
     values = np.array([0.1, 0.2, 0.1])
     result = svc.predict_freq_curve(
@@ -160,7 +161,7 @@ def test_predict_freq_curve_shape_labels_and_single_point(
 
 @pytest.mark.parametrize("operator", ["n", "phi"])
 def test_matrix_curves_support_high_levels(context: ContextService, operator) -> None:
-    svc = PredictorService(context, components.params_for)
+    svc = PredictorService(ContextControlFacet(context=context), components.params_for)
     params = svc.params_for_qubit("Q1")
     result = svc.predict_matrix_element_curve(
         params,
@@ -175,7 +176,7 @@ def test_matrix_curves_support_high_levels(context: ContextService, operator) ->
 def test_curve_rejects_invalid_transitions(
     context: ContextService, transitions
 ) -> None:
-    svc = PredictorService(context, components.params_for)
+    svc = PredictorService(ContextControlFacet(context=context), components.params_for)
     params = svc.params_for_qubit("Q1")
     with pytest.raises(ValueError, match="transitions|Transition"):
         svc.predict_freq_curve(

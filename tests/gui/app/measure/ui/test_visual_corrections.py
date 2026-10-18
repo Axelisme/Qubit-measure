@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Callable, Iterator
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
@@ -29,6 +30,9 @@ from zcu_tools.gui.control_identity import ControlIdentity
 from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.app.measure._form_fakes import configure_form_lookup
 from tests.gui.app.measure.artifacts._snapshots import ready_figures, with_artifacts
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 
 
 @pytest.fixture
@@ -115,21 +119,9 @@ def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
 
 
 @pytest.fixture
-def exp_tab_widget(qapp, monkeypatch, make_ctrl):
+def exp_tab_widget(qapp, make_ctrl):
     import zcu_tools.gui.app.measure.ui.exp_tab_widget as mod
 
-    orig_attach = mod.attach_existing_figure_to_container
-
-    def mock_attach(fig, container):
-        from qtpy.QtWidgets import QWidget
-
-        w = QWidget()
-        w.figure = fig
-        container.attach_canvas(w)
-        w.draw = lambda: None
-        return w
-
-    monkeypatch.setattr(mod, "attach_existing_figure_to_container", mock_attach)
     owned_tabs: list[mod.ExpTabWidget] = []
 
     def create_tab(
@@ -145,7 +137,22 @@ def exp_tab_widget(qapp, monkeypatch, make_ctrl):
         for tab in owned_tabs:
             tab.deleteLater()
         owned_tabs.clear()
-        monkeypatch.setattr(mod, "attach_existing_figure_to_container", orig_attach)
+
+
+def _assert_action_button_stretches(
+    layout: QHBoxLayout,
+    tab: ExpTabWidget,
+    reset_stretch: int,
+    run_stretch: int,
+) -> None:
+    """Check the action row's button stretches at the current interaction phase."""
+    for i in range(layout.count()):
+        item = layout.itemAt(i)
+        assert item is not None
+        if item.widget() is tab.reset_btn:
+            assert layout.stretch(i) == reset_stretch
+        if item.widget() is tab.run_btn:
+            assert layout.stretch(i) == run_stretch
 
 
 def test_A5_Run_action_row_status_free_and_20_80_proportions(
@@ -214,13 +221,7 @@ def test_A5_Run_action_row_status_free_and_20_80_proportions(
     # style should have changed (Stop vs Run)
     assert tab.run_btn.styleSheet() != idle_style
     assert tab.reset_btn.isHidden()
-    for i in range(layout.count()):
-        item = layout.itemAt(i)
-        assert item is not None
-        if item.widget() is tab.reset_btn:
-            assert layout.stretch(i) == 0
-        if item.widget() is tab.run_btn:
-            assert layout.stretch(i) == 100
+    _assert_action_button_stretches(layout, tab, 0, 100)
 
     # back to idle restores primary and 20/80 geometry
     tab.update_interaction_state(snap)
@@ -228,13 +229,7 @@ def test_A5_Run_action_row_status_free_and_20_80_proportions(
     assert not tab.reset_btn.isHidden()
     assert tab.run_btn.text() == "Run"
     assert tab.run_btn.objectName() == "primaryButton"
-    for i in range(layout.count()):
-        item = layout.itemAt(i)
-        assert item is not None
-        if item.widget() is tab.reset_btn:
-            assert layout.stretch(i) == 20
-        if item.widget() is tab.run_btn:
-            assert layout.stretch(i) == 80
+    _assert_action_button_stretches(layout, tab, 20, 80)
     tab.detach()
 
 
@@ -277,8 +272,10 @@ def test_A6_Analyze_full_width_below_params_before_writeback(
     assert tab.analyze_btn in widgets, (
         "Analyze should be directly in inner layout for 100% width"
     )
-    idx_analyze = widgets.index(tab.analyze_btn)
-    idx_writeback = widgets.index(tab.writeback_section)
+    idx_analyze, idx_writeback = (
+        widgets.index(tab.analyze_btn),
+        widgets.index(tab.writeback_section),
+    )
     assert idx_params < idx_analyze < idx_writeback
 
     # 100% width: sizePolicy Expanding horizontally
@@ -295,10 +292,14 @@ def test_A6_Analyze_full_width_below_params_before_writeback(
             has_stretch_before = False
             for i in range(parent_layout.count()):
                 item = parent_layout.itemAt(i)
+                assert item is not None
                 if item.widget() is tab.analyze_btn:
                     # check if previous item is spacer
-                    if i > 0 and parent_layout.itemAt(i - 1).spacerItem() is not None:
-                        has_stretch_before = True
+                    if i > 0:
+                        previous_item = parent_layout.itemAt(i - 1)
+                        assert previous_item is not None
+                        if previous_item.spacerItem() is not None:
+                            has_stretch_before = True
                     break
             assert not has_stretch_before, (
                 "Analyze should not have stretch before it (should be 100% width)"
@@ -307,6 +308,7 @@ def test_A6_Analyze_full_width_below_params_before_writeback(
     # Availability: when idle with context & run result, enabled
     assert tab.analyze_btn.isEnabled() is True
     # Busy disables
+    assert snap.interaction is not None
     busy = dataclasses.replace(
         snap,
         interaction=dataclasses.replace(snap.interaction, is_analyzing=True),

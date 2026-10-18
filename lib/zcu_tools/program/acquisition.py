@@ -167,9 +167,9 @@ class EarlyStopMixin(TypedAcquireMixin):
         # Mirrors the "accumulated" branch of qick's AcquireMixin.finish_round
         # (qick 0.2.418, qick/qick_asm.py) with cancel_flag checks injected.
         # qick's loop has no early-exit seam (its `while` only checks
-        # `count < total_count`), so the copy is deliberate. The mirrored
-        # upstream source is pinned by tests/program/test_acquire_qick_drift.py;
-        # when that test fails, re-port the upstream change here.
+        # `count < total_count`), so the copy is deliberate. On QICK upgrades,
+        # manually compare AcquireMixin.finish_round and port relevant changes.
+        # Validate acquisition and early-stop behavior with existing public-interface tests.
         assert self.acquire_params is not None
         soc = self.acquire_params["soc"]
         total_count = functools.reduce(operator.mul, self.loop_dims)  # type: ignore[arg-type]

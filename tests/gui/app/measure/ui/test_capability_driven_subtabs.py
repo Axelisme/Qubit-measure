@@ -488,14 +488,16 @@ def test_primary_analysis_lifecycle_clears_only_its_pane_and_restores_on_failure
         "POST_ANALYZE_START_REJECTED",
     ],
 )
+@pytest.mark.usefixtures("exp_tab_widget")
 def test_analysis_terminal_restores_retained_figures_via_coordinator(
-    qapp, exp_tab_widget, monkeypatch, fact_name, make_ctrl
+    qapp, fact_name, make_ctrl
 ):
     """Terminal reactions restore retained primary then post figures."""
     from zcu_tools.gui.app.measure.events.tab import (
         TabInteractionChangedPayload,
         TabInteractionFact,
     )
+    from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
@@ -515,19 +517,12 @@ def test_analysis_terminal_restores_retained_figures_via_coordinator(
     )
     window = MainWindow(ctrl, templates=lambda: {})
     try:
-        # Tab must be constructed with the same capabilities as the snapshot the window will fetch
-        # The mock's get_tab_snapshot returns a FIT+post snapshot; reuse those caps
-        _tmp_snap = make_snapshot(
-            "tab-1",
-            analysis=AnalysisMode.FIT,
-            post=True,
-            has_post_result=True,
-            analysis_figure=Figure(),
-            post_analysis_figure=Figure(),
+        window.add_tab_widget("tab-1", "fake")
+        tab = next(
+            widget
+            for widget in window.findChildren(ExpTabWidget)
+            if widget.tab_id == "tab-1"
         )
-        tab = exp_tab_widget("tab-1", ctrl, _tmp_snap.capabilities)
-        tab.attach(ctrl.get_tab_snapshot.return_value, MagicMock())
-        window._tab_widgets["tab-1"] = tab
         # Seed figures
         fig_a = Figure()
         fig_p = Figure()
@@ -545,9 +540,12 @@ def test_analysis_terminal_restores_retained_figures_via_coordinator(
         )
         assert tab.get_current_figure_for_pane("analysis") is fig_a_retained
         assert tab.get_current_figure_for_pane("post_analysis") is fig_p_retained
-        tab.detach()
     finally:
-        window.deleteLater()
+        try:
+            window.remove_tab_widget("tab-1")
+        finally:
+            window.deleteLater()
+            qapp.processEvents()
 
 
 def test_save_and_image_paths_follow_artifact_keys_and_pane_routing(

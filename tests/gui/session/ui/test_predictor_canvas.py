@@ -2,10 +2,37 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import TypedDict
+
 import numpy as np
 import pytest
 from matplotlib.backend_bases import Event, MouseButton, MouseEvent
 from matplotlib.backends.backend_qt import NavigationToolbar2QT
+from numpy.typing import NDArray
+
+
+class _RenderKwargs(TypedDict):
+    """Fixed keyword contract shared by render_curves test callers."""
+
+    values: NDArray[np.float64]
+    """Device-value axis of shape (n_values,), in device units."""
+    labels: tuple[str, ...]
+    """Legend labels for the n_transitions rows of series."""
+    series: NDArray[np.float64]
+    """Transition frequencies in MHz, shape (n_transitions, n_values)."""
+    ylabel: str
+    """Frequency-axis label, including its MHz unit."""
+    highlights: tuple[tuple[int, int], ...]
+    """From/to level-index pairs to highlight; an empty tuple highlights none."""
+    marker_value: float
+    """Marker position on the device-value axis, in device units."""
+    flux_window: tuple[float, float]
+    """Displayed reduced-flux interval (lower, upper), in units of Phi/Phi0."""
+    value_to_flux: Callable[[float], float]
+    """Affine map from device units to reduced flux Phi/Phi0."""
+    flux_to_value: Callable[[float], float]
+    """Inverse affine map from reduced flux Phi/Phi0 to device units."""
 
 
 def _value_to_flux(v: float) -> float:
@@ -30,22 +57,22 @@ def canvas(qapp):
     return PredictorCurveCanvas(figsize=(4.0, 3.0))
 
 
-def _make_render_kwargs(n_transitions: int = 4, n: int = 20) -> dict:
+def _make_render_kwargs(n_transitions: int = 4, n: int = 20) -> _RenderKwargs:
     """Build keyword args for the decoupled render_curves API."""
     values = np.linspace(0.0, 1.0, n)
     labels = tuple(f"0→{i + 1}" for i in range(n_transitions))
     series = np.random.default_rng(42).uniform(100, 5000, size=(n_transitions, n))
-    return dict(
-        values=values,
-        labels=labels,
-        series=series,
-        ylabel="Frequency (MHz)",
-        highlights=((0, 1),),
-        marker_value=0.5,
-        flux_window=(0.4, 1.1),
-        value_to_flux=_value_to_flux,
-        flux_to_value=_flux_to_value,
-    )
+    return {
+        "values": values,
+        "labels": labels,
+        "series": series,
+        "ylabel": "Frequency (MHz)",
+        "highlights": ((0, 1),),
+        "marker_value": 0.5,
+        "flux_window": (0.4, 1.1),
+        "value_to_flux": _value_to_flux,
+        "flux_to_value": _flux_to_value,
+    }
 
 
 def test_canvas_render_curves_no_error(canvas):

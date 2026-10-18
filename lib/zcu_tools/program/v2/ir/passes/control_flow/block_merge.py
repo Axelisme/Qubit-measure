@@ -47,6 +47,8 @@ invocation rather than requiring O(n) pipeline iterations.
 
 from __future__ import annotations
 
+from typing import override
+
 from ...analysis import collect_referenced_labels
 from ...labels import Label
 from ...node import BasicBlockNode
@@ -61,6 +63,7 @@ class BlockMergePass(AbsChunkListPass):
       - Block B has no alive labels (not a jump target).
     """
 
+    @override
     def process(
         self, chunks: ChunkList, ctx: PipeLineContext
     ) -> tuple[ChunkList, bool]:

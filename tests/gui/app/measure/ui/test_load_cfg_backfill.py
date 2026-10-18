@@ -11,8 +11,8 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
+    SessionEnv,
 )
-from zcu_tools.gui.app.measure.app import _make_empty_ctx
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
@@ -73,7 +73,7 @@ def app(qapp, tmp_path, monkeypatch):
     write_native_file(tmp_path / "result.hdf5")
     write_native_file(tmp_path / "missing.hdf5", gain=2.0)
     write_native_file(tmp_path / "bad.hdf5")
-    state = State(_make_empty_ctx())
+    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     registry = Registry()
     registry.register("demo", LoadAdapter)
     ctrl = Controller(

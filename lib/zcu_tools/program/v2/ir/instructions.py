@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Literal, TypeGuard
+from typing import Any, Literal, TypeGuard, override
 
 from .hw_semantics import ADDR_REG, STATUS_REG, TIMED_BASE_REG, USR_TIME_REG
 from .labels import Label, LabelRef
@@ -751,6 +751,7 @@ class NopInst(BaseInst):
     """NOP instruction: no operation."""
 
     @classmethod
+    @override
     def from_dict(cls, d: dict[str, Any]) -> NopInst:
         return cls()
 
@@ -1127,6 +1128,7 @@ class RetInst(BaseInst):
     """RET instruction: return from a subroutine call."""
 
     @classmethod
+    @override
     def from_dict(cls, d: dict[str, Any]) -> RetInst:
         return cls()
 

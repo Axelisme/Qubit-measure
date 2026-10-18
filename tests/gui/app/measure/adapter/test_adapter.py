@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.cfg_model import PulseSpec
+from zcu_tools.cfg_model import ConfigBase, PulseSpec
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
+    ExpAdapterProtocol,
     ModuleWriteback,
     NoAnalysisResult,
     ParameterWriteback,
@@ -45,11 +47,13 @@ def test_module_writeback_valid():
     assert item.session_id == ""
 
 
-def _make_concrete_adapter() -> BaseAdapter:
+def _make_concrete_adapter() -> ExpAdapterProtocol:
     """Create a minimal concrete no-analysis adapter for shared-method tests."""
 
-    class _FakeAdapter(BaseAdapter):
-        capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)
+    class _FakeAdapter(BaseAdapter[ConfigBase, MagicMock]):
+        capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
+            analysis=AnalysisMode.NONE
+        )
         exp_cls = MagicMock()
 
     return _FakeAdapter()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
@@ -263,19 +264,27 @@ def test_reaction_matrix_validator_rejects_missing_and_extra_keys() -> None:
     ],
 )
 def test_interaction_fact_reaction_matrix(
-    fact: TabInteractionFact, reaction_names: list[str]
+    fact: TabInteractionFact,
+    reaction_names: list[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     snapshot = _snapshot(has_analyze_result=True, has_post_analyze_result=True)
     coordinator, log, _ctrl, _host = _coordinator(snapshot)
+    bus = BaseEventBus()
 
-    coordinator._on_tab_interaction_changed(TabInteractionChangedPayload("tab-1", fact))
+    try:
+        coordinator.bind(bus)
+        bus.emit(TabInteractionChangedPayload("tab-1", fact))
 
-    assert log.calls[0:2] == [
-        call("host", "has_tab_widget", "tab-1"),
-        call("ctrl", "get_tab_snapshot", "tab-1"),
-    ]
-    assert [entry.method for entry in log.calls[2:]] == reaction_names
-    assert sum(entry.method == "get_tab_snapshot" for entry in log.calls) == 1
+        assert log.calls[0:2] == [
+            call("host", "has_tab_widget", "tab-1"),
+            call("ctrl", "get_tab_snapshot", "tab-1"),
+        ]
+        assert [entry.method for entry in log.calls[2:]] == reaction_names
+        assert sum(entry.method == "get_tab_snapshot" for entry in log.calls) == 1
+        assert all(record.levelno < logging.ERROR for record in caplog.records)
+    finally:
+        coordinator.close()
 
 
 @pytest.mark.parametrize(
@@ -286,12 +295,20 @@ def test_interaction_fact_reaction_matrix(
         TabInteractionFact.SAVE_PATHS_CHANGED,
     ],
 )
-def test_local_edit_facts_have_zero_qt_reaction(fact: TabInteractionFact) -> None:
+def test_local_edit_facts_have_zero_qt_reaction(
+    fact: TabInteractionFact, caplog: pytest.LogCaptureFixture
+) -> None:
     coordinator, log, _ctrl, _host = _coordinator()
+    bus = BaseEventBus()
 
-    coordinator._on_tab_interaction_changed(TabInteractionChangedPayload("tab-1", fact))
+    try:
+        coordinator.bind(bus)
+        bus.emit(TabInteractionChangedPayload("tab-1", fact))
 
-    assert log.calls == []
+        assert log.calls == []
+        assert all(record.levelno < logging.ERROR for record in caplog.records)
+    finally:
+        coordinator.close()
 
 
 @pytest.mark.parametrize(
@@ -338,32 +355,46 @@ def test_local_edit_facts_have_zero_qt_reaction(fact: TabInteractionFact) -> Non
     ],
 )
 def test_content_fact_reaction_matrix(
-    fact: TabContentFact, reaction_names: list[str]
+    fact: TabContentFact,
+    reaction_names: list[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     snapshot = _snapshot()
     coordinator, log, _ctrl, _host = _coordinator(snapshot)
+    bus = BaseEventBus()
 
-    coordinator._on_tab_content_changed(TabContentChangedPayload("tab-1", fact))
+    try:
+        coordinator.bind(bus)
+        bus.emit(TabContentChangedPayload("tab-1", fact))
 
-    assert log.calls[0:2] == [
-        call("host", "has_tab_widget", "tab-1"),
-        call("ctrl", "get_tab_snapshot", "tab-1"),
-    ]
-    assert [entry.method for entry in log.calls[2:]] == reaction_names
-    assert sum(entry.method == "get_tab_snapshot" for entry in log.calls) == 1
+        assert log.calls[0:2] == [
+            call("host", "has_tab_widget", "tab-1"),
+            call("ctrl", "get_tab_snapshot", "tab-1"),
+        ]
+        assert [entry.method for entry in log.calls[2:]] == reaction_names
+        assert sum(entry.method == "get_tab_snapshot" for entry in log.calls) == 1
+        assert all(record.levelno < logging.ERROR for record in caplog.records)
+    finally:
+        coordinator.close()
 
 
-def test_tab_content_changed_ignores_missing_view_tab() -> None:
+def test_tab_content_changed_ignores_missing_view_tab(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     coordinator, log, _ctrl, host = _coordinator()
     host.tab_ids = []
+    bus = BaseEventBus()
 
-    coordinator._on_tab_content_changed(
-        TabContentChangedPayload("tab-1", TabContentFact.RUN_RESULT_COMMITTED)
-    )
+    try:
+        coordinator.bind(bus)
+        bus.emit(TabContentChangedPayload("tab-1", TabContentFact.RUN_RESULT_COMMITTED))
 
-    assert log.calls == [
-        call("host", "has_tab_widget", "tab-1"),
-    ]
+        assert log.calls == [
+            call("host", "has_tab_widget", "tab-1"),
+        ]
+        assert all(record.levelno < logging.ERROR for record in caplog.records)
+    finally:
+        coordinator.close()
 
 
 def test_bind_routes_events_and_close_unsubscribes() -> None:
@@ -380,81 +411,153 @@ def test_bind_routes_events_and_close_unsubscribes() -> None:
     ]
 
 
-def test_run_finished_refreshes_without_focus_or_navigation() -> None:
+def test_run_finished_refreshes_without_focus_or_navigation(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     snapshot = _snapshot()
     coordinator, log, ctrl, _host = _coordinator(snapshot)
+    bus = BaseEventBus()
 
-    # Terminal events are interpreted against the State-owned running identity,
-    # not against a cached/payload-derived marker value. Neither outcome may
-    # trigger a pane-selection reaction.
-    ctrl.running_tab_id = None
-    coordinator._on_run_finished(RunFinishedPayload("tab-1", outcome="cancelled"))
-    ctrl.running_tab_id = None
-    coordinator._on_run_finished(RunFinishedPayload("tab-1", outcome="finished"))
+    try:
+        coordinator.bind(bus)
+        # Terminal events are interpreted against the State-owned running identity,
+        # not against a cached/payload-derived marker value. Neither outcome may
+        # trigger a pane-selection reaction.
+        ctrl.running_tab_id = None
+        bus.emit(RunFinishedPayload("tab-1", outcome="cancelled"))
+        ctrl.running_tab_id = None
+        bus.emit(RunFinishedPayload("tab-1", outcome="finished"))
 
-    assert log.calls == [
-        call("host", "has_tab_widget", "tab-1"),
-        call("ctrl", "get_tab_snapshot", "tab-1"),
-        call("host", "refresh_tab_interaction", "tab-1", snapshot),
-        call("ctrl", "get_running_tab_id"),
-        call("host", "refresh_run_lock", None),
-        call("host", "has_tab_widget", "tab-1"),
-        call("ctrl", "get_tab_snapshot", "tab-1"),
-        call("host", "refresh_tab_interaction", "tab-1", snapshot),
-        call("ctrl", "get_running_tab_id"),
-        call("host", "refresh_run_lock", None),
-    ]
-    assert all(entry.method != "focus_run_result_panel" for entry in log.calls)
+        assert log.calls == [
+            call("host", "has_tab_widget", "tab-1"),
+            call("ctrl", "get_tab_snapshot", "tab-1"),
+            call("host", "refresh_tab_interaction", "tab-1", snapshot),
+            call("ctrl", "get_running_tab_id"),
+            call("host", "refresh_run_lock", None),
+            call("host", "has_tab_widget", "tab-1"),
+            call("ctrl", "get_tab_snapshot", "tab-1"),
+            call("host", "refresh_tab_interaction", "tab-1", snapshot),
+            call("ctrl", "get_running_tab_id"),
+            call("host", "refresh_run_lock", None),
+        ]
+        assert all(entry.method != "focus_run_result_panel" for entry in log.calls)
+        assert all(record.levelno < logging.ERROR for record in caplog.records)
+    finally:
+        coordinator.close()
 
 
-def test_run_finished_event_preserves_each_selected_subtab(qapp) -> None:
+def test_run_finished_event_preserves_each_selected_subtab(
+    qapp, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     from qtpy.QtWidgets import QTabWidget
+    from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
+    from zcu_tools.gui.app.measure.adapter.types import AdapterGuide
+    from zcu_tools.gui.app.measure.services import (
+        RunPaneSnapshot,
+        SavePaneSnapshot,
+        TabSnapshot,
+    )
+    from zcu_tools.gui.app.measure.state import TabInteractionState
+    from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+    from zcu_tools.gui.control_identity import ControlIdentity
+
+    from tests.gui.app.measure._form_fakes import configure_form_lookup
+    from tests.gui.app.measure.artifacts._snapshots import with_artifacts
 
     ctrl = MagicMock()
     bus = BaseEventBus()
+    control_identity = ControlIdentity()
+    ctrl.control_identity = control_identity
     ctrl.get_bus.return_value = bus
     ctrl.get_running_tab_id.return_value = None
     ctrl.active_operation_count.return_value = 0
     ctrl.has_tab.return_value = True
-    ctrl.get_tab_snapshot.return_value = _snapshot(has_run_result=True)
+    ctrl.get_tab_snapshot.return_value = with_artifacts(
+        TabSnapshot(
+            adapter_name="fake",
+            cfg_input={},
+            tab_id="tab-1",
+            capabilities=AdapterCapabilities(
+                analysis=AnalysisMode.FIT, post_analysis=True
+            ),
+            interaction=TabInteractionState(
+                global_run_active=False,
+                is_running=False,
+                is_analyzing=False,
+                has_context=True,
+                has_active_context=True,
+                has_soc=True,
+                has_run_result=True,
+                has_analyze_result=False,
+                has_post_analyze_result=False,
+                has_figure=False,
+            ),
+            run=RunPaneSnapshot(result=object(), source_path=None),
+            save=SavePaneSnapshot(),
+        )
+    )
+    configure_form_lookup(ctrl)
+    ctrl.get_left_panel_width.return_value = 500
+    ctrl.get_tab_adapter_name.return_value = "fake"
+    ctrl.get_adapter_guide.return_value = AdapterGuide(markdown="", resource_dir=None)
+    ctrl.progress_control.attach_progress.return_value = lambda: None
+    ctrl.progress_control.progress_bars.return_value = []
     window = MainWindow(ctrl, templates=lambda: {})
-    tab = MagicMock()
-    tab._left_tabs = QTabWidget()
-    for label in ("Run", "Analysis", "Post", "Data", "Guide"):
-        tab._left_tabs.addTab(QWidget(), label)
-    window._tab_widgets["tab-1"] = tab
+    try:
+        window.add_tab_widget("tab-1", "fake")
+        tab = next(
+            tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == "tab-1"
+        )
+        left_tabs = tab.findChild(QTabWidget)
+        assert left_tabs is not None
+        assert left_tabs.count() == 5
+        focus_result_panel = MagicMock(wraps=tab.focus_result_panel)
+        monkeypatch.setattr(tab, "focus_result_panel", focus_result_panel)
 
-    for index in range(tab._left_tabs.count()):
-        tab._left_tabs.setCurrentIndex(index)
-        bus.emit(RunFinishedPayload("tab-1", outcome="finished"))
-        assert tab._left_tabs.currentIndex() == index
+        for index in range(left_tabs.count()):
+            left_tabs.setCurrentIndex(index)
+            bus.emit(RunFinishedPayload("tab-1", outcome="finished"))
+            assert left_tabs.currentIndex() == index
 
-    tab.focus_result_panel.assert_not_called()
-    window.deleteLater()
-    tab._left_tabs.deleteLater()
-    qapp.processEvents()
+        focus_result_panel.assert_not_called()
+        assert all(record.levelno < logging.ERROR for record in caplog.records)
+    finally:
+        try:
+            window.remove_tab_widget("tab-1")
+        finally:
+            window.deleteLater()
+            qapp.processEvents()
 
 
-def test_run_started_refreshes_invalidated_content_once() -> None:
+def test_run_started_refreshes_invalidated_content_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     snapshot = _snapshot(is_running=True)
     coordinator, log, _ctrl, _host = _coordinator(snapshot)
+    bus = BaseEventBus()
 
-    coordinator._on_run_started(RunStartedPayload("tab-1"))
+    try:
+        coordinator.bind(bus)
+        bus.emit(RunStartedPayload("tab-1"))
 
-    assert log.calls == [
-        call("host", "has_tab_widget", "tab-1"),
-        call("ctrl", "get_tab_snapshot", "tab-1"),
-        call("host", "refresh_tab_analyze_form", "tab-1", snapshot),
-        call("host", "refresh_tab_post_analyze_form", "tab-1", snapshot),
-        call("host", "refresh_tab_writeback", "tab-1", snapshot),
-        call("host", "refresh_tab_interaction", "tab-1", snapshot),
-        call("ctrl", "get_running_tab_id"),
-        call("host", "refresh_run_lock", "running-tab"),
-    ]
+        assert log.calls == [
+            call("host", "has_tab_widget", "tab-1"),
+            call("ctrl", "get_tab_snapshot", "tab-1"),
+            call("host", "refresh_tab_analyze_form", "tab-1", snapshot),
+            call("host", "refresh_tab_post_analyze_form", "tab-1", snapshot),
+            call("host", "refresh_tab_writeback", "tab-1", snapshot),
+            call("host", "refresh_tab_interaction", "tab-1", snapshot),
+            call("ctrl", "get_running_tab_id"),
+            call("host", "refresh_run_lock", "running-tab"),
+        ]
+        assert all(record.levelno < logging.ERROR for record in caplog.records)
+    finally:
+        coordinator.close()
 
 
 def test_main_window_run_marker_tracks_state_and_clears(qapp) -> None:
+    from qtpy.QtWidgets import QTabWidget
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = MagicMock()
@@ -473,23 +576,25 @@ def test_main_window_run_marker_tracks_state_and_clears(qapp) -> None:
     tab_b = _TabStub()
     window._tab_widgets["tab-a"] = tab_a  # type: ignore[assignment]
     window._tab_widgets["tab-b"] = tab_b  # type: ignore[assignment]
-    window._tabs.addTab(tab_a, "A")
-    window._tabs.addTab(tab_b, "B")
+    tabs = window.findChild(QTabWidget)
+    assert tabs is not None
+    tabs.addTab(tab_a, "A")
+    tabs.addTab(tab_b, "B")
 
     window.refresh_run_lock(ctrl.get_running_tab_id.return_value)
 
-    tab_bar = window._tabs.tabBar()
+    tab_bar = tabs.tabBar()
     assert tab_bar is not None
-    assert window._tabs.tabText(0) == "● A"
-    assert window._tabs.tabText(1) == "B"
+    assert tabs.tabText(0) == "● A"
+    assert tabs.tabText(1) == "B"
     assert tab_bar.tabTextColor(0).name() == "#286ac7"
     assert tab_bar.tabToolTip(0) == "A — Run in progress"
 
     ctrl.get_running_tab_id.return_value = None
     window.refresh_run_lock(ctrl.get_running_tab_id.return_value)
 
-    assert window._tabs.tabText(0) == "A"
-    assert window._tabs.tabText(1) == "B"
+    assert tabs.tabText(0) == "A"
+    assert tabs.tabText(1) == "B"
     assert tab_bar.tabToolTip(0) == "A"
 
 

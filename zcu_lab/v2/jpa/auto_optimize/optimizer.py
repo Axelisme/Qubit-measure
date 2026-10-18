@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 from math import ceil
 
 import numpy as np
-from numpy.typing import NDArray
 from scipy.stats import qmc
 from skopt import Optimizer
 from zcu_tools.program.v2 import SweepCfg
@@ -55,7 +54,7 @@ class BudgetConfig:
 class Phase1State:
     """State tracking for Phase 1 (LHS exploration)."""
 
-    flux_grid: NDArray
+    flux_grid: np.ndarray
     flux_interval: float
     current_flux_idx: int = 0
     current_slice_iter: int = 0
@@ -822,7 +821,7 @@ class JPAOptimizer:
         self._iter_count += 1
         return point
 
-    def _get_next_phaseN_point(self, i: int) -> Point3D | None:
+    def _get_next_phaseN_point(self, _i: int) -> Point3D | None:
         """Get the next point during Phase 2+."""
         point = self._get_phaseN_point()
 

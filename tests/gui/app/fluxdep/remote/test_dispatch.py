@@ -12,11 +12,14 @@ or the socket server.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
+from typing import Literal, overload
 
 import numpy as np
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.remote.dispatch import METHOD_REGISTRY
+from zcu_tools.gui.app.fluxdep.remote.dto import PointcloudReply, SpectrumListReply
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.gui.remote.param_spec import validate_params
@@ -33,7 +36,31 @@ def _adapter() -> _StubAdapter:
     return _StubAdapter(Controller(FluxDepState()))
 
 
-def _call(adapter: _StubAdapter, method: str, raw_params: dict) -> dict:
+@overload
+def _call(
+    adapter: _StubAdapter,
+    method: Literal["spectrum.list"],
+    raw_params: Mapping[str, object],
+) -> SpectrumListReply: ...
+
+
+@overload
+def _call(
+    adapter: _StubAdapter,
+    method: Literal["selection.pointcloud"],
+    raw_params: Mapping[str, object],
+) -> PointcloudReply: ...
+
+
+@overload
+def _call(
+    adapter: _StubAdapter, method: str, raw_params: Mapping[str, object]
+) -> Mapping[str, object]: ...
+
+
+def _call(
+    adapter: _StubAdapter, method: str, raw_params: Mapping[str, object]
+) -> Mapping[str, object]:
     """Validate params against the spec (as the service does) then dispatch."""
     spec = METHOD_REGISTRY[method]
     params = validate_params(spec.params, raw_params) if spec.params else raw_params

@@ -20,8 +20,10 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Mapping
 from functools import partial
 from statistics import median
+from typing import Literal, NotRequired, ReadOnly, TypedDict
 
 import numpy as np
 
@@ -47,7 +49,83 @@ from zcu_tools.notebook.analysis.fluxdep.fitting import (
 from tests.notebook.analysis.fluxdep._synthetic import synth_ABC
 
 
-def _timed(fn, *, repeat=5):
+class _TimingStats(TypedDict):
+    """Timing record shared by the microbenchmarks.
+
+    median: Median elapsed time across all repeats, in seconds.
+    min: Fastest elapsed time across all repeats, in seconds.
+    n: Number of repeats.
+    """
+
+    median: float
+    min: float
+    n: int
+
+
+class _MacroCaseStats(TypedDict):
+    """Result shared by the search and spectrum-fit benchmark cases.
+
+    time: Elapsed time for the case, in seconds.
+    best: Best EJ, EC, EL parameters, in the database's original units.
+    max_rel_err: Maximum dimensionless relative error against true_params.
+    """
+
+    time: float
+    best: list[float]
+    max_rel_err: float
+
+
+class _MacroReport(TypedDict, total=False):
+    """Sparse macrobenchmark report; all fields are absent if the DB is missing.
+
+    true_params: Synthetic observation's reference parameter tuple, in the
+        database's original units; present when the DB exists.
+    search_njobs1: Search result with one worker; present when the DB exists.
+    search_njobsN: Search result with all workers; present when the DB exists.
+    fit_spectrum: Spectrum-fit result; absent in quick mode or if the DB is missing.
+    """
+
+    true_params: tuple[float, ...]
+    search_njobs1: _MacroCaseStats
+    search_njobsN: _MacroCaseStats
+    fit_spectrum: _MacroCaseStats
+
+
+class _RunReport(TypedDict):
+    """Report produced by run for summary, comparison, and JSON output.
+
+    git_sha: Current revision string, or "unknown" if git lookup fails.
+    quick: Original args.quick value, preserved without conversion or validation.
+    micro: Case names mapped to elapsed-time statistics in seconds and repeat
+        counts; always present.
+    macro: Sparse macrobenchmark results, with case times in seconds; absent
+        unless args.db is truthy. An unavailable DB produces an empty section.
+    """
+
+    git_sha: str
+    quick: object
+    micro: dict[str, _TimingStats]
+    macro: NotRequired[_MacroReport]
+
+
+class _ComparisonReport(TypedDict, total=False):
+    """Shared section projection for a current run and historical JSON baseline.
+
+    micro: Optional mapping from microbenchmark case names to arbitrary payloads;
+        timing payloads conventionally contain elapsed seconds.
+    macro: Optional mapping from macrobenchmark entry names to arbitrary payloads;
+        timing payloads conventionally contain elapsed seconds.
+
+    Neither entry fields nor extra top-level keys are restricted here. ReadOnly
+    permits the producer's more specific sections without freezing or copying
+    the underlying dictionaries; the comparison reader does not assign them.
+    """
+
+    micro: ReadOnly[Mapping[str, object]]
+    macro: ReadOnly[Mapping[str, object]]
+
+
+def _timed(fn, *, repeat=5) -> _TimingStats:
     times = []
     for _ in range(repeat):
         t0 = time.perf_counter()
@@ -74,13 +152,13 @@ def warm_up():
     entry_lower_bound(A, B, C, 0.5, 3.0)
 
 
-def micro_benches(quick: bool) -> dict:
+def micro_benches(quick: bool) -> dict[str, _TimingStats]:
     shapes = [(240, 6), (240, 12), (240, 40)]
     if quick:
         shapes = [(60, 6)]
 
     repeat = 3 if quick else 11
-    out: dict = {}
+    out: dict[str, _TimingStats] = {}
 
     for N, K in shapes:
         A, B, C = synth_ABC(N=N, K=K, a_true=1.5, seed=1)
@@ -132,7 +210,9 @@ def _synth_observation(db_path: str, idx: int, n_fluxs: int, transitions):
     return fluxs, freqs, params
 
 
-def macro_benches(db_path: str, quick: bool, n_fluxs: int | None = None) -> dict:
+def macro_benches(
+    db_path: str, quick: bool, n_fluxs: int | None = None
+) -> _MacroReport:
     if not os.path.exists(db_path):
         print(f"[skip macro] DB not found: {db_path}")
         return {}
@@ -148,14 +228,14 @@ def macro_benches(db_path: str, quick: bool, n_fluxs: int | None = None) -> dict
     ECb = (0.2, 2.0)
     ELb = (0.5, 2.0)
 
-    out: dict = {"true_params": true_params}
+    out: _MacroReport = {"true_params": true_params}
 
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    cases: list[tuple[str, int]] = [
+    cases: list[tuple[Literal["search_njobs1", "search_njobsN"], int]] = [
         ("search_njobs1", 1),
         ("search_njobsN", -1),
     ]
@@ -199,9 +279,20 @@ def macro_benches(db_path: str, quick: bool, n_fluxs: int | None = None) -> dict
     return out
 
 
-def run(args) -> dict:
+def run(args) -> _RunReport:
+    """Warm up and run benchmarks using attributes of args.
+
+    args.quick can be any value: its truthiness selects reduced workloads,
+    and its original value is retained without conversion. args.db is the
+    macro database path, passed through unchanged; a falsey value disables
+    macrobenchmarks. args.n_fluxs is an integer count of observed flux points,
+    or None to use 30 points for quick workloads and 128 otherwise.
+
+    Return the original report data for printing and JSON output. Benchmark
+    failures propagate to the caller.
+    """
     warm_up()
-    results = {
+    results: _RunReport = {
         "git_sha": _git_sha(),
         "quick": args.quick,
         "micro": micro_benches(args.quick),
@@ -211,7 +302,12 @@ def run(args) -> dict:
     return results
 
 
-def print_summary(r: dict) -> None:
+def print_summary(r: _RunReport) -> None:
+    """Print a run's timings in milliseconds (micro) and seconds (macro).
+
+    Print other macro entries unchanged. Missing timing fields and incompatible
+    arithmetic or formatting values raise their original errors.
+    """
     print(f"git: {r.get('git_sha')}  quick={r.get('quick')}")
     print("-- micro (median seconds) --")
     for k, v in sorted(r.get("micro", {}).items()):
@@ -225,8 +321,15 @@ def print_summary(r: dict) -> None:
                 print(f"  {k}: {v}")
 
 
-def print_compare(cur: dict, base: dict) -> None:
+def print_compare(cur: _ComparisonReport, base: _ComparisonReport) -> None:
+    """Print current versus baseline timings and percentage changes.
+
+    Sections may be absent and entry payloads remain unrestricted. Skip non-dict
+    entries and None timings; prefer median over time without validating values.
+    Incompatible arithmetic or formatting and a zero baseline still raise.
+    """
     print("-- compare vs baseline (neg = faster) --")
+    section: Literal["micro", "macro"]
     for section in ("micro", "macro"):
         for k, v in cur.get(section, {}).items():
             if not isinstance(v, dict):
