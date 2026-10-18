@@ -7,8 +7,9 @@ from threading import Event
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import Engine, EnvelopeSpec, ModelSource
-from zcu_tools.simulate.evolution.kernel import SegmentTable
+from zcu_tools.simulate.evolution.kernel import KernelContext, SegmentTable
 from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Kernel
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from tests.simulate.evolution._engine import batch, track
 from tests.simulate.evolution.contract.kernel_suite import (
@@ -54,12 +55,17 @@ def common_controls() -> KernelCase:
 
 def evolve_rows(case: KernelCase, rows: np.ndarray) -> np.ndarray:
     keys, first, inverse = np.unique(
-        case.kernel.prepare_keys(case.table, rows),
+        case.kernel.prepare_keys(
+            case.table, rows, KernelContext(case.source, case.budget, WorkPlan())
+        ),
         return_index=True,
         return_inverse=True,
     )
     prepared = case.kernel.prepare(
-        keys, case.table, rows[first], case.source, case.budget
+        keys,
+        case.table,
+        rows[first],
+        KernelContext(case.source, case.budget, WorkPlan()),
     )
     actual = case.states[rows].copy()
     mask = case.kernel.apply(

@@ -8,8 +8,8 @@ from numba import njit
 from numpy.typing import NDArray
 
 from .._envelope import sample_value
-from ..kernel import ApplyContext, Prepared, SegmentTable
-from ..secular import ModelSource, SecularModel
+from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
+from ..secular import SecularModel
 from ._dop853 import tolerances
 from ._dop853_chain import run_chain
 from ._dop853_data import (
@@ -18,8 +18,8 @@ from ._dop853_data import (
     Segments,
     hamiltonian,
     pack_models,
-    pack_segments,
 )
+from ._workload_facts import packed_segments
 
 
 @dataclass(frozen=True)
@@ -154,18 +154,19 @@ class DOP853Kernel:
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> NDArray[np.bool_]:
         """Accept every valid row; no fast-path approximation guard applies."""
+        source, budget = context.source, context.budget
         del table, source
         tolerances(budget)
         return np.ones(len(rows), dtype=np.bool_)
 
     def prepare_keys(
-        self, table: SegmentTable, rows: NDArray[np.int64]
+        self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.void]:
         """Return fixed-width level keys, excluding every apply-only parameter."""
+        del context
         keys = np.empty(len(rows), dtype=[("level", "<i8", (table.level.shape[1],))])
         keys["level"] = table.level[rows]
         return keys
@@ -184,14 +185,14 @@ class DOP853Kernel:
         keys: NDArray[np.void],
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> Prepared:
         """Copy each key's secular operators; table/rows are C5 representatives.
 
         Raises ValueError for an invalid budget or inconsistent model dimensions.
         ModelSource lookup errors propagate, without reading initial_density.
         """
+        source, budget = context.source, context.budget
         del table, rows
         tolerances(budget)
         models = [
@@ -199,14 +200,24 @@ class DOP853Kernel:
         ]
         return prepare_models(models)
 
+    def admit_prepared(
+        self,
+        prepared: Prepared,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        context: KernelContext,
+    ) -> None:
+        """Decline cached-domain admission; use the ordinary guard build path."""
+        del prepared, table, rows, context
+
     def guard_prepared(
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline guard preparation handoff; the engine calls guard normally."""
+        source, budget = context.source, context.budget
         del table, rows, source, budget
 
     def bind_input(
@@ -216,9 +227,10 @@ class DOP853Kernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         source_initial: NDArray[np.complex128],
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline input binding; apply uses the model-only prepared payload."""
+        budget = context.budget
         del prepared, key_index, table, rows, source_initial, budget
 
     def apply(
@@ -285,7 +297,7 @@ class DOP853Kernel:
             raise ValueError("DOP853 tone port absent from model")
         advance_endpoints(
             prepared.models,
-            pack_segments(table),
+            packed_segments(table, context.work_plan),
             (rows, key_index),
             states,
             budget,

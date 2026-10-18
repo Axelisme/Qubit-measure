@@ -5,7 +5,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import Engine, EnvelopeSpec, ModelSource
-from zcu_tools.simulate.evolution.kernel import GuardResult
+from zcu_tools.simulate.evolution.kernel import GuardResult, KernelContext
 from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Plan
 from zcu_tools.simulate.evolution.kernels.floquet import FloquetAdmission, FloquetPlan
 
@@ -20,9 +20,9 @@ class GuardRecorder(RecordingKernel):
         super().__init__(name, accepts=accepts)
         self.attempts = attempts
 
-    def guard(self, table, rows, source, budget):
+    def guard(self, table, rows, context: KernelContext):
         self.attempts.extend((self.name, float(table.duration_ns[r])) for r in rows)
-        return super().guard(table, rows, source, budget)
+        return super().guard(table, rows, context)
 
 
 def two_tone_batch(duration, gain, point):
@@ -60,7 +60,7 @@ class PlannedFloquet(RecordingKernel):
         super().__init__("floquet")
         self.admissions = {}
 
-    def guard_prepared(self, table, rows, source, budget):
+    def guard_prepared(self, table, rows, context: KernelContext):
         admissions = {int(row): FloquetAdmission("modal") for row in rows}
         self.admissions.update(admissions)
         return GuardResult(np.ones(len(rows), dtype=bool), plan=FloquetPlan(admissions))

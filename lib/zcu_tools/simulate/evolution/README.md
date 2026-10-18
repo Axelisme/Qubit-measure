@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-18, workspace accounting
+**Last updated:** 2026-10-18, WorkPlan and cache ownership
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -109,7 +109,8 @@ additional package integration entry points.
   one family in one evolve. Floquet stores admissions and retained equations;
   the direct solvers store frame or chain decisions. Plans never enter
   `PrepareCache` or persistent kernel state.
-- `ApplyContext(budget, plan)` supplies the finite positive per-segment allowance
+- `KernelContext(source, budget, work_plan)` supplies preparation, key and guard
+  calls with one evolve owner. `ApplyContext(budget, plan, work_plan)` supplies the finite positive per-segment allowance
   and the family's plan. Floquet and both direct solvers require their own plan;
   a missing plan raises `ValueError`, and a wrong family type raises `TypeError`.
   Families without plans reject a non-`None` plan with `ValueError`.
@@ -136,6 +137,87 @@ nested and driven prefixes. Bound payloads never enter the prepare cache.
 Returning `None` retains ordinary per-batch apply. Apply advances worker
 densities in place and returns a row-aligned boolean exceedance mask.
 
+## WorkPlan and cache ownership
+
+[Dispatch](_dispatch.py) creates one [WorkPlan](workplan.py) from the complete
+evolve table before workers start. Prefix representatives, caller classification
+and timeline workers share it through `KernelContext` and `ApplyContext`. Engine
+drains its pool before closing the plan on success, cancellation or failure.
+The registry kernels retain no evolve-local data.
+
+### Facts and algorithm groups
+
+WorkPlan publishes each lazy fact once, including concurrent requests for the
+same key. WorkPlan copies builder results and publishes read-only arrays. The
+shared facts are envelope peak/slope/real flags, period split rates and packed
+DOP853 samples. Model facts
+include the full physical coordinates in their identity. Table-indexed facts
+also include table identity, so renumbered prefix representatives cannot alias
+the complete table. DOP853 packing also distinguishes flux-inclusive samples.
+Densities and adaptive solver history are not facts.
+
+The planner publishes immutable algorithm-named records from the complete
+candidate inventory, before numerical admission:
+
+- `GainGroupPlan` and `GainBuildPlan` fix period builders, work limits and gain
+  anchors. Cache warmth and rejected rows do not change anchor coordinates.
+- `CarrierFamilyPlan` fixes physical carrier groups. More than nine unique,
+  nonzero, same-sign carriers qualify when the largest magnitude is at most
+  1.1 times the smallest.
+- `RampFamilyPlan` groups rise/fall candidates by physical spectral inputs.
+  Duration, slope and prepare key can differ within a group. Kernels still own
+  harmonic cutoffs, amplitude nodes, spectral products and convergence tests.
+
+Resource handles distinguish planned inventory from incrementally admitted
+actual key builds. Gain anchors use single-flight immutable resources. Cache
+hits and rejected rows are not actual consumers. Caller-only groups seal before
+building; the last actual handoff then releases the product. Groups with deferred
+consumers stay open until WorkPlan closes. Prefix preparation cannot seal a
+group needed by later timeline work.
+
+Carrier interpolation uses a mutable `CarrierWorkspace`, separate from immutable
+facts and resource products. WorkPlan creates it lazily from published carrier
+records under its inventory lock. Prefix and timeline consumers share that one
+workspace; its own lock serializes tile construction. WorkPlan drops ownership
+at close, after workers drain. A closed plan rejects further workspace requests.
+Neither the kernel registry nor the resident cache retains this workspace.
+
+### Cache-first and singleton admission
+
+`admit_prepared` returns current row decisions and a row plan without construction
+when the cached payload domain covers all required products. `None` means domain
+miss and retains the ordinary build path. Dispatch looks up resident guard
+products in the caller and passes strong references to deferred workers.
+Floquet reuses frames only when all needed probe bins are present. Shaped Sambe
+reuses key-covered convergence data. Both hooks recheck current rows without
+building numerical products. Rejection of every row is not a domain miss.
+
+The engine deduplicates prepare keys across an evolve. Keys used by distinct
+timelines enter shared preparation. Local builders and repeated local keys stream
+one timeline at a time; single-use ordinary keys prepare at their apply wave.
+All classified keys, including singletons, can reuse the persistent LRU.
+Accepted guard products are reused even when only a subset of timelines accepts.
+
+The caller protects current cache hits and new shared payloads by their whole
+allocation sizes. Workers submit model-only local products to a thread-safe
+collector bounded by the remaining resident budget. After workers join, the
+caller admits these products through the LRU. This can evict old workloads, but
+streaming singletons cannot displace this evolve's protected allocations.
+Oversize products stream without admission. Pending products and old residents
+can coexist until the join; the resident limit is not a bound on that peak.
+
+[PrepareCache](cache.py) namespaces whole model-only payload batches by family,
+whole-source model identity and budget. The zero-level identity must describe the
+entire source, including absolute DC flux and model parameters; row keys also
+include quantized levels. A cache hit never replaces the row's guard. Eviction
+releases cache ownership, not references already held by active work.
+
+FTF production uses a 1.5 GiB resident budget. The resident-byte limit is not a
+process RAM cap. Models, output densities, solver scratch, WorkPlan products,
+active payload references and ADC preparations are separate allocations. The
+process peak acceptance limit is 3.8 billion bytes, leaving 5% below the decimal
+4 GB ceiling. Numba's compilation cache is independent of the prepare LRU.
+
 ## Algorithm ownership and reuse
 
 Each family owns its build, apply and numerical certificates. Shared numerical
@@ -151,25 +233,6 @@ class's methods.
 | Gate Hilbert endpoint integration | [kernels/_gate_endpoints.py](kernels/_gate_endpoints.py), shared by sixteen-node and [adaptive phase](kernels/gate_phase.py) builders. |
 | Constant-tone Hilbert period build and playback | [kernels/floquet_period.py](kernels/floquet_period.py), with [CF4 grid](kernels/_cf4_grid.py) and [Sambe](kernels/_period_sambe.py) helpers. Separate from two-tone Floquet frames. |
 | Two-tone retained-sideband certificates and equations | [kernels/_floquet_sidebands.py](kernels/_floquet_sidebands.py), used by [floquet](kernels/floquet.py) guard admission and apply. |
-
-The engine deduplicates prepare keys across an evolve. Only keys used by distinct
-timelines enter shared preparation and the persistent LRU. Repeated keys within
-one timeline remain local. Local builders and repeated local keys stream one
-timeline at a time; single-use ordinary keys prepare at their apply wave.
-Accepted guard products are reused even when only a subset of timelines accepts.
-
-[PrepareCache](cache.py) namespaces whole model-only payload batches by family,
-whole-source model identity and budget. The zero-level identity must describe the
-entire source, including absolute DC flux and model parameters; row keys also
-include quantized levels. A cache hit never replaces the row's guard. Eviction
-releases cache ownership, not references already held by active work.
-
-The resident-byte limit is not a process RAM cap. `live_bytes` counts only
-registered evolve-scoped workspaces at their current size, not active payload
-references or total live memory. Models, output densities, solver workspaces
-and ADC preparations are separate allocations. Carrier
-interpolation and gain-anchor workspaces belong to one evolve and are released
-when it ends. Numba's compilation cache is independent of this prepare LRU.
 
 ## Accuracy, failures and lifecycle
 
