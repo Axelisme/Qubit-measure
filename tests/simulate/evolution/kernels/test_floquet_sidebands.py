@@ -30,7 +30,7 @@ def test_certificate_bins_preserve_omission_data_and_plans() -> None:
     )
     lam = np.array([0.0, -0.004, -0.002 + 0.13j, -0.002 - 0.13j])
     modes = np.eye(4, dtype=complex) + np.triu(np.full((4, 4), 0.1 + 0.02j), 1)
-    inverse = np.linalg.inv(modes)
+    inverse = np.linalg.inv(modes).astype(np.complex128)
     parameters = np.array(
         [
             [1.0, 0.2, 0.4, 0.019, 0.01, 0.3, 0],
