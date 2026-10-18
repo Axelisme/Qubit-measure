@@ -5,7 +5,7 @@ from operator import setitem
 from typing import Annotated, Literal
 
 import pytest
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, Field, JsonValue, create_model
 from zcu_tools.gui import form as api
 
 
@@ -31,7 +31,9 @@ class Plain(api.FormModel):
 )
 def test_selection_without_converter_preserves_branch_and_authored_children(batch):
     env = api.FormEnv()
-    raw = {"value": {"kind": "first", "amount": {"expr": "6 / 2"}, "samples": [1]}}
+    raw: dict[str, JsonValue] = {
+        "value": {"kind": "first", "amount": {"expr": "6 / 2"}, "samples": [1]}
+    }
     state = api.FormState(api.FormInput(Plain, raw))
     events = []
     state.subscribe(lambda: events.append(state.describe(("value",), env)))
@@ -46,7 +48,8 @@ def test_selection_without_converter_preserves_branch_and_authored_children(batc
     detached = api.FormState(state.input)
     assert detached.describe(("value",), env).target == description.target
     state.reset(state.base)
-    assert state.describe(("value",), env).target.selected == 0
+    restored = state.describe(("value",), env).target
+    assert restored is not None and restored.selected == 0
 
 
 def converted_model(run):

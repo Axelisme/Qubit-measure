@@ -35,7 +35,9 @@ def obj(value: JsonValue) -> dict[str, JsonValue]:
     return value
 
 
-def choose(state: FormState[FormModel], path: tuple[str, ...], label: str, env: FormEnv) -> None:
+def choose[F: FormModel](
+    state: FormState[F], path: tuple[str, ...], label: str, env: FormEnv
+) -> None:
     target = state.describe(path, env).target
     assert target is not None and target.options is not None
     state.write(
@@ -141,7 +143,9 @@ def test_two_fixed_captures_do_not_share_converter_sources():
             "Q.waveforms.shape", GaussWaveformCfg(length=1.6, sigma=0.4)
         )
     )
-    raw = {"waveform": {"kind": "ref", "name": "Q.waveforms.shape"}}
+    raw: dict[str, JsonValue] = {
+        "waveform": {"kind": "ref", "name": "Q.waveforms.shape"}
+    }
     first = FormState(FormInput(form.model, raw))
     second = FormState(FormInput(form.model, raw))
     choose(first, ("waveform",), "Inline: gauss", first_env)
