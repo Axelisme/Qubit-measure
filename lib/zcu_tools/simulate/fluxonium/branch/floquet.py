@@ -126,7 +126,8 @@ class _BaseFloquetBranchAnalysis:
 
 
 class FloquetBranchAnalysis(_BaseFloquetBranchAnalysis):
-    def __init__(
+    # tolerated: Overlay uses positional model/drive inputs; esys and solver stay optional.
+    def __init__(  # noqa: PLR0913
         self,
         params: tuple[float, float, float],
         r_f: float,
@@ -155,7 +156,8 @@ class FloquetBranchAnalysis(_BaseFloquetBranchAnalysis):
         return {"amp": 2 * self.g * np.sqrt(photon)}
 
 
-def calc_branch_infos(
+# tolerated: SNR callers select photon/time grids, eigenpair reuse and solver separately.
+def calc_branch_infos(  # noqa: PLR0913
     branchs: list[int],
     *,
     params: tuple[float, float, float],
@@ -198,7 +200,8 @@ def calc_branch_infos(
     return branch_infos, fbasis_n
 
 
-def calc_ge_snr(
+# tolerated: Search controls linewidth/photon sampling separately from model and esys.
+def calc_ge_snr(  # noqa: PLR0913
     params: tuple[float, float, float],
     flux: float,
     r_f: float,
@@ -248,7 +251,8 @@ def calc_ge_snr(
 
 
 class FloquetWithTLSBranchAnalysis(_BaseFloquetBranchAnalysis):
-    def __init__(
+    # tolerated: TLS energy/coupling, drive and truncation are independent model controls.
+    def __init__(  # noqa: PLR0913
         self,
         params: tuple[float, float, float],
         r_f: float,
@@ -305,7 +309,8 @@ class FloquetWithTLSBranchAnalysis(_BaseFloquetBranchAnalysis):
         )
 
 
-def calc_branch_infos_with_tls(
+# tolerated: TLS scan keeps energy/coupling, photon/time grids and strict solver separate.
+def calc_branch_infos_with_tls(  # noqa: PLR0913
     branchs: list[int],
     *,
     params: tuple[float, float, float],
@@ -353,7 +358,8 @@ def calc_branch_infos_with_tls(
     return branch_infos, fbasis_n
 
 
-def calc_floquet_fourier_melem(
+# tolerated: Directional mode indices, harmonics and period sampling are separate inputs.
+def calc_floquet_fourier_melem(  # noqa: PLR0913
     fbasis: qt.FloquetBasis,
     n_op: NDArray[np.complex128],
     i_from: int,
@@ -410,7 +416,8 @@ def _sample_floquet_modes(
     return np.stack([fbasis.mode(t=float(t), data=True).to_array() for t in ts])
 
 
-def calc_tls_resonance_map(
+# tolerated: Reused branch data, TLS axis/scale, linewidth and harmonics vary independently.
+def calc_tls_resonance_map(  # noqa: PLR0913
     fbasis_n: Sequence[qt.FloquetBasis],
     branch_energies: dict[int, list[float]],
     branch_infos: dict[int, list[int]],
@@ -480,7 +487,8 @@ def calc_tls_resonance_map(
 
 
 class FloquetDualCouplingBranchAnalysis(_BaseFloquetBranchAnalysis):
-    def __init__(
+    # tolerated: Charge/phase drive couplings, truncation and eigenpair reuse are separate.
+    def __init__(  # noqa: PLR0913
         self,
         params: tuple[float, float, float],
         r_f: float,
