@@ -249,7 +249,8 @@ def _get_host() -> Any:
                     result = payload["result"]
 
                     result.append(_attach_figure_canvas(container, fig))
-                except BaseException as exc:
+                # tolerated: Transport all canvas/container failures, including interrupts, to the waiter.
+                except BaseException as exc:  # noqa: BLE001
                     payload["errors"].append(exc)
                 finally:
                     payload["done"].set()
@@ -259,7 +260,8 @@ def _get_host() -> Any:
                     canvas = payload["canvas"]
                     _remove_canvas_impl(canvas)
                     canvas.deleteLater()
-                except BaseException as exc:
+                # tolerated: Removal failures, including interrupts, must reach the waiter, not Qt.
+                except BaseException as exc:  # noqa: BLE001
                     payload["errors"].append(exc)
                 finally:
                     payload["done"].set()

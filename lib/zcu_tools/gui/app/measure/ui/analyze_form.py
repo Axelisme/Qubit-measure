@@ -169,7 +169,8 @@ class AnalyzeFormWidget(QWidget):
             return False
         try:
             self.read_params()
-        except Exception:
+        # tolerated: User dataclass constructors may raise any error; project it as an invalid form.
+        except Exception:  # noqa: BLE001
             return False
         return True
 

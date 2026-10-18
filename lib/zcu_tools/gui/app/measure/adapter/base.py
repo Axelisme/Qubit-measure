@@ -384,7 +384,8 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
 
         try:
             hints = typing.get_type_hints(cls.get_post_analyze_params)
-        except Exception:
+        # tolerated: Adapter annotation evaluation can raise any error; keep the empty post schema.
+        except Exception:  # noqa: BLE001
             return NoAnalyzeParams
         return hints.get("return", NoAnalyzeParams)
 
@@ -441,7 +442,8 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
 
         try:
             hints = typing.get_type_hints(cls.get_analyze_params)
-        except Exception:
+        # tolerated: Adapter annotations execute arbitrary code; recover the declared generic schema.
+        except Exception:  # noqa: BLE001
             return _analyze_params_generic_arg(cls)
         ret = hints.get("return", T_AnalyzeParams)
         if isinstance(ret, typing.TypeVar):
