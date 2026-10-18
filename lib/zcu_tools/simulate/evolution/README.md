@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-18
+**Last updated:** 2026-10-18, workspace accounting
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -164,9 +164,10 @@ entire source, including absolute DC flux and model parameters; row keys also
 include quantized levels. A cache hit never replaces the row's guard. Eviction
 releases cache ownership, not references already held by active work.
 
-The resident-byte limit is not a process RAM cap. `live_bytes` also tracks live
-payload references and evolve-scoped workspaces. Models, output densities,
-solver workspaces and ADC preparations are separate allocations. Carrier
+The resident-byte limit is not a process RAM cap. `live_bytes` counts only
+registered evolve-scoped workspaces at their current size, not active payload
+references or total live memory. Models, output densities, solver workspaces
+and ADC preparations are separate allocations. Carrier
 interpolation and gain-anchor workspaces belong to one evolve and are released
 when it ends. Numba's compilation cache is independent of this prepare LRU.
 

@@ -1,6 +1,6 @@
 # Fixed-coordinate FTF numerics
 
-**Last updated:** 2026-10-18
+**Last updated:** 2026-10-18, readout solver routing
 
 `JointParameters` supplies F1/C/F2 numeric circuits and signed full-charge
 couplings in GHz. `JointModel` selects fixed local levels at DC, forms their
@@ -88,10 +88,11 @@ zero reference frequency and neutral receiver for composition to calibrate.
 ## Readout and Floquet paths
 
 FTF passes readout populations and the DC readout model to `simulate.adc`.
-For constant readout pulses, `envelope=None`, the batch response uses the exact
-matrix exponential in the carrier frame, even when the carrier differs from
-the model reference. Only nonconstant readout envelopes use the DOP853 moment
-ODE on this acquisition path.
+For a single readout pulse with `envelope=None`, the batch response uses the
+exact matrix exponential in the carrier frame, even when the carrier differs
+from the model reference. Pulses with envelopes and multi-tone readout use the
+general DOP853 moment ODE on this acquisition path. Flat mux multi-tone pulses
+also use this ODE.
 
 Two constant microwave tones can use evolution's Floquet k=0 path when one is a
 weak probe and the Floquet guards pass. The strong tone defines the effective
