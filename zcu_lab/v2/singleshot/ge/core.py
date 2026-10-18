@@ -4,7 +4,7 @@ import warnings
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, ClassVar, Literal, cast
+from typing import Annotated, ClassVar, Literal, NamedTuple, cast
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -69,24 +69,25 @@ def make_init_matrix(init_pops: NDArray[np.float64]) -> NDArray[np.float64]:
     )
 
 
+class GEClassification(NamedTuple):
+    """One prepared state's fractions classified as ground, excited and other."""
+
+    ground: float
+    excited: float
+    other: float
+
+
 def make_result_matrix(
-    n_gg: float,
-    n_ge: float,
-    n_go: float,
-    n_eg: float,
-    n_ee: float,
-    n_eo: float,
-    n_og: float = 0.0,
-    n_oe: float = 0.0,
-    n_oo: float = 1.0,  # Other-state classification is modeled as perfectly isolated.
+    ground: GEClassification,
+    excited: GEClassification,
+    other: GEClassification = GEClassification(0.0, 0.0, 1.0),
 ) -> NDArray[np.float64]:
-    return np.array(
-        [
-            [n_gg, n_ge, n_go],
-            [n_eg, n_ee, n_eo],
-            [n_og, n_oe, n_oo],
-        ]
-    )
+    """Stack ground/excited/other preparation rows into a 3x3 result matrix.
+
+    Columns follow GEClassification order. The default other-state row models
+    perfectly isolated classification. Values are preserved without normalization.
+    """
+    return np.array([ground, excited, other])
 
 
 def solve_confusion_matrix(
@@ -100,7 +101,8 @@ def solve_confusion_matrix(
     return confusion_matrix
 
 
-def optimize_ge_radius(
+# tolerated: One caller supplies shot arrays, fit calibration and the other-state penalty switch.
+def optimize_ge_radius(  # noqa: PLR0913
     g_signals: NDArray[np.complex128],
     e_signals: NDArray[np.complex128],
     g_center: complex,
@@ -147,7 +149,11 @@ def optimize_ge_radius(
         n_oe = n_og
         n_oo = 1.0 - n_og - n_oe
 
-        Q = make_result_matrix(n_gg, n_ge, n_go, n_eg, n_ee, n_eo, n_og, n_oe, n_oo)
+        Q = make_result_matrix(
+            GEClassification(n_gg, n_ge, n_go),
+            GEClassification(n_eg, n_ee, n_eo),
+            GEClassification(n_og, n_oe, n_oo),
+        )
         confusion_matrix = solve_confusion_matrix(A_init, Q)
 
         # calculate condision number of confusion matrix as loss
@@ -251,8 +257,8 @@ class GEConfusionResult:
     radius: float
     matrix: NDArray[np.float64]
     init_matrix: NDArray[np.float64]
-    g_classification: tuple[float, float, float]
-    e_classification: tuple[float, float, float]
+    g_classification: GEClassification
+    e_classification: GEClassification
     condition_number: float
 
 
@@ -426,7 +432,7 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         gg_mask, ge_mask, go_mask = classify_result(
             g_signals, g_center, e_center, radius
         )
-        g_classification = (
+        g_classification = GEClassification(
             float(gg_mask.mean()),
             float(ge_mask.mean()),
             float(go_mask.mean()),
@@ -435,7 +441,7 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         eg_mask, ee_mask, eo_mask = classify_result(
             e_signals, g_center, e_center, radius
         )
-        e_classification = (
+        e_classification = GEClassification(
             float(eg_mask.mean()),
             float(ee_mask.mean()),
             float(eo_mask.mean()),
@@ -443,7 +449,7 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
 
         matrix = solve_confusion_matrix(
             init_matrix,
-            make_result_matrix(*g_classification, *e_classification),
+            make_result_matrix(g_classification, e_classification),
         )
         return GEConfusionResult(
             radius=radius,

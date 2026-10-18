@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
 
@@ -120,26 +121,39 @@ def _notebook_contents_match(
         return generated_content == on_disk_content
 
 
+@dataclass(frozen=True)
+class SyncDirection:
+    """Paths and Jupytext formats for one notebook synchronization direction.
+
+    source_dir and dest_dir are directory paths relative to the working directory.
+    source_ext and dest_ext include the leading dot and select files and output
+    suffixes. to_format is the Jupytext target format for initial file creation.
+    """
+
+    source_dir: str
+    dest_dir: str
+    source_ext: str
+    dest_ext: str
+    to_format: str
+
+
 # tolerated: Keep ordered ignore/create/overwrite/prompt decisions and counters in one loop;
 # further extraction would export partially read notebook and all_in_sync state.
 def sync_files(  # noqa: C901, PLR0912, PLR0915
-    source_dir: str,
-    dest_dir: str,
-    source_ext: str,
-    dest_ext: str,
-    to_format: str,
+    direction: SyncDirection,
     *,
     always_overwrite: bool = False,
     prompt: bool = True,
     default_yes: bool = False,
 ) -> None:
-    """Synchronize ``source_ext`` files in *source_dir* to ``dest_ext`` files in *dest_dir*.
+    """Synchronize files using direction's paths, suffixes and Jupytext format.
 
     Differences are displayed and the user is asked whether to overwrite when content
     is not in sync.
     """
-    source_path = Path(source_dir)
-    dest_path = Path(dest_dir)
+    source_path = Path(direction.source_dir)
+    dest_path = Path(direction.dest_dir)
+    source_ext, dest_ext = direction.source_ext, direction.dest_ext
 
     if not source_path.is_dir():
         print(f"❌ 錯誤: 找不到來源目錄 '{source_path}'。")
@@ -201,7 +215,7 @@ def sync_files(  # noqa: C901, PLR0912, PLR0915
                 [
                     "jupytext",
                     "--to",
-                    to_format,
+                    direction.to_format,
                     str(source_file),
                     "--output",
                     str(dest_file),
@@ -275,22 +289,26 @@ def main() -> None:
     if direction == "md2nb":
         print("=== Interactive Sync: Markdown to Notebooks (.md -> .ipynb) ===")
         sync_files(
-            "notebook_md",
-            "notebook",
-            ".md",
-            ".ipynb",
-            "ipynb",
+            SyncDirection(
+                source_dir="notebook_md",
+                dest_dir="notebook",
+                source_ext=".md",
+                dest_ext=".ipynb",
+                to_format="ipynb",
+            ),
             prompt=True,
             default_yes=True,
         )
     elif direction == "nb2md":
         print("=== Interactive Sync: Notebooks to Markdown (.ipynb -> .md) ===")
         sync_files(
-            "notebook",
-            "notebook_md",
-            ".ipynb",
-            ".md",
-            "md",
+            SyncDirection(
+                source_dir="notebook",
+                dest_dir="notebook_md",
+                source_ext=".ipynb",
+                dest_ext=".md",
+                to_format="md",
+            ),
             always_overwrite=True,
             prompt=False,
         )

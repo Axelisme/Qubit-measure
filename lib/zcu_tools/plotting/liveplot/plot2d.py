@@ -43,7 +43,8 @@ class LivePlot2D(BaseSegmentLivePlot, Generic[Seg2D_T]):
         disable: bool = ...,
     ) -> None: ...
 
-    def __init__(
+    # tolerated: Only a basic README caller exists; no shared group of segment/lifecycle options.
+    def __init__(  # noqa: PLR0913
         self,
         xlabel: str,
         ylabel: str,
@@ -127,7 +128,8 @@ class LivePlot2DwithLine(BaseSegmentLivePlot, Generic[Seg2D_T]):
         **kwargs,
     ) -> None: ...
 
-    def __init__(
+    # tolerated: No construction callers share the scan-line, segment-style and lifecycle options.
+    def __init__(  # noqa: PLR0913
         self,
         xlabel: str,
         ylabel: str,
