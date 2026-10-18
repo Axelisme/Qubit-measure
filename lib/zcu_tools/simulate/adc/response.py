@@ -35,6 +35,9 @@ class ConditionalReadout:
         self._responses: dict[
             tuple[object, ...], tuple[tuple[ReadoutPulse, ...], tuple[RealArray, ...]]
         ] = {}
+        self._sums: dict[
+            tuple[object, ...], tuple[tuple[ReadoutPulse, ...], RealArray]
+        ] = {}
         self._v = np.sqrt(model.kappa_external_per_ns / 2)
         self._scattering = self._v * np.exp(-1j * model.mismatch_phase_rad)
         self._q = model.rates_per_ns - np.diag(model.rates_per_ns.sum(axis=0))
@@ -59,12 +62,15 @@ class ConditionalReadout:
         pulse parameters and exact grid times/demodulation. Arbitrary envelope
         callbacks are held alive and keyed by callable identity; callers must
         keep them deterministic. Equivalent separately constructed numeric inputs
-        reuse the cache. Traces are retained internally, so switching include_traces
-        does not solve again. Constant pulses (envelope=None) use the closed-form
-        matrix exponential in the pulse carrier frame, including detuned carriers.
-        Frequency-independent Schur bases and sampled scattering projections are
-        shared across contents; ill-conditioned driven blocks use the full matrix
-        exponential.
+        reuse the cache. Integrated flat pulses on uniform grids use guarded
+        eigenbasis geometric sums, cached once per content without traces.
+        Unsupported contents fall back individually to the field route. Trace
+        requests always use the field route and retain their own cache, so an
+        integrated-only result does not avoid a later trace solve. Constant
+        fields use the closed-form matrix exponential in the pulse carrier frame,
+        including detuned carriers. Frequency-independent Schur bases and sampled
+        scattering projections are shared across contents; ill-conditioned
+        driven blocks use the full matrix exponential.
         Other envelopes use the existing DOP853 moment ODE.
         ConditionalSums.sums has shape (contents, reads, states, 2), after
         physical delay/demodulation/conjugation/gain/phase/offset. Traces have shape
@@ -103,10 +109,25 @@ class ConditionalReadout:
         ]
         grid_uses = Counter(relative_keys)
         contents = []
+        summed = []
         for pulses, grids, times, relative_key in zip(
             batch.pulses, batch.grids, times_by_content, relative_keys, strict=True
         ):
             key = (model_key, _pulse_key(pulses), _grid_key(grids))
+            if not batch.include_traces:
+                if key in self._sums:
+                    summed.append(self._sums[key][1])
+                    continue
+                if key not in self._responses and pulses[0].envelope is None:
+                    direct = solver._constant_line.integrated_sums(
+                        batch.model, pulses[0], grids
+                    )
+                    if direct is not None:
+                        sums, populations = direct
+                        solver._validate_solution(populations[:, None, :])
+                        self._sums[key] = (pulses, sums)
+                        summed.append(sums)
+                        continue
             if key not in self._responses:
                 constant = all(p.envelope is None for p in pulses)
                 # Building a sampled exponential for every time only pays off
@@ -125,10 +146,10 @@ class ConditionalReadout:
                     for g in grids
                 )
                 self._responses[key] = (pulses, traces)
-            contents.append(self._responses[key][1])
-        sums = np.stack(
-            [np.stack([trace.sum(axis=-2) for trace in traces]) for traces in contents]
-        )
+            traces = self._responses[key][1]
+            contents.append(traces)
+            summed.append(np.stack([trace.sum(axis=-2) for trace in traces]))
+        sums = np.stack(summed)
         dense = (
             np.stack([np.stack(traces) for traces in contents])
             if batch.include_traces
