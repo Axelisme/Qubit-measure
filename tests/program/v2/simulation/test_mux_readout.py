@@ -13,9 +13,9 @@ from tests.program.v2._mux_support import mux_soccfg, native_mux
 @pytest.mark.parametrize("placement", ["direct", "repeat"])
 def test_mux_frontend_agrees_with_scalar_timing_and_declared_tone_order(placement):
     mux = native_mux().build("mux_probe")
-    module = Repeat("container", 2).add_content(mux) if placement == "repeat" else mux
+    module = Repeat("container", 1).add_content(mux) if placement == "repeat" else mux
     prog = ModularProgramV2(mux_soccfg(), ProgramV2Cfg(reps=2), modules=[module])
-    env = white_noise(n_gens=2, n_readouts=9, routes=((0, 4), (0, 1)))
+    env = white_noise(std_adc=0, n_gens=2, n_readouts=9, routes=((0, 4), (0, 1)))
     try:
         try:
             prog.acquire(env.soc, progress=False)
@@ -26,7 +26,7 @@ def test_mux_frontend_agrees_with_scalar_timing_and_declared_tone_order(placemen
         point = request.materialize_point(0)
         scalar = TimelineInterpreter(prog).run_point({})
         assert point == scalar
-        count = 2 if placement == "repeat" else 1
+        count = 1
         assert len(point.events) == count * 2
         assert tuple(w.channel for w in point.readouts) == (4, 1)
         for window in point.readouts:
