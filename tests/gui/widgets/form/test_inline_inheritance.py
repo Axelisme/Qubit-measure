@@ -136,8 +136,8 @@ def test_module_and_nested_waveform_switch_show_inherited_values(
     before = state.input
     for mode in ("Readonly", "Busy"):
         driver.click(mode)
-        driver.choose_option(object_name="form.input.selection", value="Inline: pulse")
-        driver.choose_option(object_name=waveform, value="Inline: gauss")
+        driver.click(object_name="form.input.selection")
+        driver.click(object_name=waveform)
         snapshot(driver, tmp_path, "07-" + mode.lower())
         assert driver.observe(object_name="synthetic.status").text == mode
         assert driver.observe(object_name="form.input.selection").text == "Inline: readout/pulse"
