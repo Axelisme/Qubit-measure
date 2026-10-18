@@ -286,6 +286,8 @@ class FluxPickFrontend(InteractiveFrontend):
             if a1.type() == QEvent.Type.FocusOut:
                 self.cancel_preview()
             elif a1.type() == QEvent.Type.KeyPress:
+                # tolerated(cast): Qt sends QKeyEvent for KeyPress, but the stubs
+                # cannot narrow QEvent by type() while preserving the override signature.
                 key_event = cast(QKeyEvent, a1)
                 if key_event.key() == Qt.Key.Key_Escape:
                     self.cancel_preview()
