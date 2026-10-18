@@ -9,6 +9,7 @@ from threading import Barrier, Event
 
 import pytest
 from zcu_tools.simulate.evolution import Engine
+from zcu_tools.simulate.evolution.kernel import ApplyContext
 
 from ._engine import RecordingKernel, batch, source
 
@@ -41,12 +42,12 @@ class ScopedKernel(RecordingKernel):
         scoped.workspace = workspace
         return scoped, workspace
 
-    def apply(self, prepared, key_index, table, rows, states, budget):
+    def apply(self, prepared, key_index, table, rows, states, context: ApplyContext):
         if self.barrier is not None:
             self.barrier.wait(timeout=10)
         if self.fail:
             raise RuntimeError("synthetic numeric failure")
-        return super().apply(prepared, key_index, table, rows, states, budget)
+        return super().apply(prepared, key_index, table, rows, states, context)
 
 
 @pytest.mark.parametrize("fail", [False, True])

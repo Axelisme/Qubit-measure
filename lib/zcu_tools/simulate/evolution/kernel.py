@@ -208,6 +208,37 @@ class Prepared(Protocol):
         ...
 
 
+class RowPlan(Protocol):
+    """Read-only per-row decisions dispatch made for one kernel family in one evolve.
+
+    Indexed by SegmentTable row. Only the kernel family that produced it reads
+    it. It lives for one evolve and never enters PrepareCache or kernel state.
+    """
+
+
+@dataclass(frozen=True)
+class ApplyContext:
+    """Evolve-level inputs that every apply call of one kernel family shares.
+
+    budget: positive absolute per-segment allowance.
+    plan: this family's RowPlan from dispatch, or None when dispatch made none.
+        Kernels that never receive a plan raise ValueError for a non-None plan;
+        kernels that need one raise ValueError for None.
+    """
+
+    budget: float
+    plan: RowPlan | None = None
+
+    def __post_init__(self) -> None:
+        if not np.isfinite(self.budget) or self.budget <= 0:
+            raise ValueError("apply budget must be finite and positive")
+
+    def require_no_plan(self) -> None:
+        """Raise ValueError if a plan is supplied to a family that accepts none."""
+        if self.plan is not None:
+            raise ValueError("this kernel does not accept a row plan")
+
+
 @dataclass(frozen=True)
 class GuardPreparation:
     """Model-only preparation returned by a guard for this evolve's source/budget.
@@ -238,11 +269,15 @@ class GuardResult:
     preparations: disjoint key batches constructed with that call's source and
         budget. Empty means no handoff. Records live only within this evolve;
         shared keys may enter PrepareCache under its ordinary admission rules.
+    plan: optional kernel-defined per-row numerical decisions for this call's
+        accepted rows. Dispatch merges them into the family plan for apply.
+        They live only within this evolve and never enter PrepareCache.
     Owns a read-only mask copy; a non-vector/non-bool mask raises ValueError.
     """
 
     accepted: NDArray[np.bool_]
     preparations: tuple[GuardPreparation, ...] = ()
+    plan: RowPlan | None = None
 
     def __post_init__(self) -> None:
         if self.accepted.ndim != 1 or self.accepted.dtype != np.bool_:
@@ -389,14 +424,14 @@ class Kernel(Protocol):
         table: SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
         """Advance complex128 states (len(rows),M,M) in place through rows.
 
         prepared is either model-only prepare data or a bind_input payload;
         the latter requires the same input density supplied to bind_input.
-        key_index maps each row to its prepared entry. budget is the positive
-        absolute per-segment allowance. Called by a joblib worker thread;
+        key_index maps each row to its prepared entry. context supplies the
+        per-segment allowance and this family's optional dispatch plan. Called by a joblib worker thread;
         numba implementations must be nogil and single-threaded. Prepared
         data and table stay unchanged. Return a bool mask (len(rows),), aligned
         with rows: True marks a post-apply accuracy threshold exceedance, not

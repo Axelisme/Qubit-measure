@@ -58,7 +58,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Analysis / Simulation / Waveform
 
-- [0077 — Numerical candidates、plan ownership 與 checked replay](0077-numerical-plans-and-replay.md)：constant cover ownership、逐算法成本與有限大型配置估算、明確選用的 evidence admission、developer acquire evaluation 與 inline pinned replay，預設 Engine 不變。
+- [0078 — Evolution 黑盒邊界與算法內聚](0078-evolution-module-boundary.md)：對外只用 package root，內部允許實質耦合；dispatch 擁有分類、builder 與 frame 決策，kernel 擁有數值 certificate 與 apply，共用數值由單一模組擁有。依賴方向沿用 C8、C9、C12。
+- [0077 — Numerical candidates、plan ownership 與 checked replay](0077-numerical-plans-and-replay.md)：superseded。實驗 planner 與 checked plan replay 已移除，現行分工由 [[0078]] 接替；正文保留歷史設計。
 
 - [0071 — Coherence 頻率與時間單位](0071-coherence-units.md)：energy/h=GHz、physical ns、標準 loss parameters 與 spectral-rate 換算；T1／pointwise Q 與 Purcell 的實作契約、獨立物理驗證及歷史 2π 修改證據。
 
@@ -74,7 +75,7 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 
 ## Draft
 
-- [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：已交付明確環境、white_noise、Module 控制、FTF 快速分段引擎與重算式單 round 重播。離線 U 表與持久 exact records 已移除。Prepare 快取預算不是 process RAM 上限。Python environment 固定啟動，FTF 用具名 YAML 調參。F1／F2 與 conditional Ramsey 的歷史證據不代表現行 `ftf-segment-v4` 的精度或效能。
+- [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：已交付明確環境、white_noise、Module 控制、FTF 快速分段引擎與重算式單 round 重播。離線 U 表與持久 exact records 已移除。Prepare 快取預算不是 process RAM 上限。Python environment 固定啟動，FTF 用具名 YAML 調參。現行 backend 為 `ftf-segment-v6`，支援 pulse／mux readout。F1／F2 與 conditional Ramsey 的歷史證據不代表現行版本的精度或效能。
 
 - [GUI 事件收合](draft/remote-event-coalescing.md)：GUI 訂閱端依 payload type 與 tab 的 per-tick 收合尚未落實；cfg 表單 snapshot 收合已實作。
 - [GUI adapter capability 入口檢查](draft/gui-adapter-capability-guards.md)：analysis／post-analysis application 入口的完整拒絕尚待實作。

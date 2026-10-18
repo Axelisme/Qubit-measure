@@ -7,7 +7,10 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
-from ..kernel import Prepared, SegmentTable
+from ..kernel import SegmentTable
+from ._dop853_data import pack_segments
+from ._shaped import envelope_bounds
+from .dop853 import DOP853Plan, DOP853Prepared, advance_endpoints
 
 
 class PeriodPlayback(NamedTuple):
@@ -73,7 +76,7 @@ class PeriodEntry:
     All retained arrays are read-only. No field depends on input density.
     """
 
-    fallback: Prepared
+    fallback: DOP853Prepared
     tail_budget: float
     frequency: float
     bound: float
@@ -238,3 +241,82 @@ def envelopes(
         local = elapsed[mask] + table.tone_envelope_offset_ns[rows[mask], 0, None]
         values[mask] = envelope.values(local)
     return values * table.tone_amplitude[rows, 0, None]
+
+
+def band_keys(table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.void]:
+    """Encode level, port, signed carrier and power-of-two peak-gain band.
+
+    Shape, duration and phase do not enter this ordinary preparation identity.
+    Zero peak gain uses the DC key, independent of its requested carrier.
+    """
+    peaks, _ = envelope_bounds(table)
+    maximum = (
+        np.abs(table.tone_amplitude[rows, 0]) * peaks[table.tone_envelope[rows, 0]]
+    )
+    band = np.ceil(np.log2(np.where(maximum > 0, maximum, 1))).astype(np.int64)
+    keys = np.zeros(
+        len(rows),
+        dtype=[
+            ("level", "i8", (table.level.shape[1],)),
+            ("port", "i8"),
+            ("frequency", "f8"),
+            ("band", "i8"),
+        ],
+    )
+    keys["level"] = table.level[rows]
+    keys["port"] = table.tone_port[rows, 0]
+    keys["frequency"] = np.where(maximum > 0, table.tone_frequency_ghz[rows, 0], 0)
+    keys["band"] = band
+    return keys
+
+
+def advance_tail(
+    entry: PeriodEntry,
+    table: SegmentTable,
+    rows: NDArray[np.int64],
+    starts: NDArray[np.float64],
+    states: NDArray[np.complex128],
+) -> None:
+    """Advance residual intervals with the existing compiled strict DOP853.
+
+    Shift carrier phase and envelope-local time together. Tail rows are
+    independent even when the caller supplies touching same-timeline segments.
+    """
+    durations = table.duration_ns[rows] - starts
+    selected = np.flatnonzero(durations > 0)
+    if not len(selected):
+        return
+    active = rows[selected]
+    elapsed = starts[selected, None]
+    local_rows = np.arange(len(active), dtype=np.int64)
+    tail_table = SegmentTable(
+        timeline=local_rows,
+        start_ns=np.zeros(len(active)),
+        duration_ns=durations[selected],
+        level=table.level[active],
+        tones=table.tones[active],
+        tone_port=table.tone_port[active],
+        tone_frequency_ghz=table.tone_frequency_ghz[active],
+        tone_amplitude=table.tone_amplitude[active],
+        tone_theta_rad=table.tone_theta_rad[active]
+        + 2 * np.pi * table.tone_frequency_ghz[active] * elapsed,
+        tone_envelope=table.tone_envelope[active],
+        tone_envelope_offset_ns=table.tone_envelope_offset_ns[active] + elapsed,
+        envelopes=table.envelopes,
+    )
+    chunk = states[selected].copy()
+    frame = np.where(
+        (tail_table.tones == 1) & (tail_table.tone_amplitude[:, 0] != 0),
+        "interaction",
+        "lab",
+    )
+    plan = DOP853Plan(frame, np.full(len(active), -1, dtype=np.int64))
+    advance_endpoints(
+        entry.fallback.models,
+        pack_segments(tail_table),
+        (local_rows, np.zeros(len(active), dtype=np.int64)),
+        chunk,
+        entry.tail_budget,
+        plan,
+    )
+    states[selected] = chunk

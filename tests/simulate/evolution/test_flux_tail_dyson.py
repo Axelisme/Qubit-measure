@@ -17,7 +17,7 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     TimelineBatch,
 )
-from zcu_tools.simulate.evolution.kernel import SegmentTable
+from zcu_tools.simulate.evolution.kernel import ApplyContext, SegmentTable
 from zcu_tools.simulate.evolution.kernels.dyson import DysonKernel
 from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
 from zcu_tools.simulate.evolution.kernels.t4 import T4
@@ -31,7 +31,7 @@ class Fallback(T4):
     def guard(self, table, rows, source, budget):
         return np.ones(len(rows), dtype=bool)
 
-    def apply(self, prepared, key_index, table, rows, states, budget):
+    def apply(self, prepared, key_index, table, rows, states, context: ApplyContext):
         return np.zeros(len(rows), dtype=bool)
 
 
@@ -156,7 +156,7 @@ def ordinary_probe(src, b, initial):
     )
     prepared = kernel.prepare(keys, table, first, src, 1e-3)
     expected = initial.copy()
-    mask = kernel.apply(prepared, inverse, table, rows, expected, 1e-3)
+    mask = kernel.apply(prepared, inverse, table, rows, expected, ApplyContext(1e-3))
     return expected, mask
 
 

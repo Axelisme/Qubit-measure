@@ -61,12 +61,21 @@ dc_bias:
 
 
 drive_lines:
-  microwave:
+  # Illustrative simulation assumptions, not measured line calibrations.
+  f1_charge:
     gen_ch: 2
+    operator: charge
     # GHz/gain multiplying full charge n, not normalized n01.
     charge_drive_ghz_per_gain:
       f1: { real: 0.1, imag: 0.0 }
-      coupler: { real: 0.1, imag: 0.0 }
+      coupler: { real: 0.01, imag: 0.0 }
+      f2: { real: 0.0, imag: 0.0 }
+  f2_charge:
+    gen_ch: 3
+    operator: charge
+    charge_drive_ghz_per_gain:
+      f1: { real: 0.0, imag: 0.0 }
+      coupler: { real: 0.01, imag: 0.0 }
       f2: { real: 0.1, imag: 0.0 }
 
 readout:

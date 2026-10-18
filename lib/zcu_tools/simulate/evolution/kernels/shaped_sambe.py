@@ -8,14 +8,7 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
-from ..declarations import (
-    AlgorithmIdentity,
-    Eligibility,
-    GuardDeclaration,
-    KernelDeclaration,
-    ReuseDeclaration,
-)
-from ..kernel import GuardPreparation, GuardResult, Prepared, SegmentTable
+from ..kernel import ApplyContext, GuardPreparation, GuardResult, Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
 from ._carrier_reuse import CarrierWorkspace
 from ._period_table import (
@@ -24,13 +17,15 @@ from ._period_table import (
     PeriodPrepared,
     SecularMaps,
     UnitaryTable,
+    advance_tail,
+    band_keys,
     envelopes,
     periods,
 )
 from ._sambe import eigensystem
+from ._secular import coherence_decay, population_generator
 from ._shaped import drive_bounds, envelope_bounds
-from .dop853 import DOP853Kernel
-from .period_table import PeriodTableKernel, advance_tail
+from .dop853 import prepare_models
 
 
 def _spectral(
@@ -199,15 +194,7 @@ class ShapedSambeKernel:
     retries, clips or normalizes density. Complex envelopes and DC are rejected.
     """
 
-    declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("shaped_sambe", "carrier-physical-v3"),
-        eligibility=Eligibility(1, 1, "shaped"),
-        guard=GuardDeclaration(("model-build",), builds_model=True),
-        accuracy="guarded-approximation",
-        reuse=ReuseDeclaration("shaped_sambe/carrier-physical-v3/serial"),
-        fallback="legacy-order",
-    )
-
+    revision = "carrier-physical-v3"
     name = "shaped_sambe"
     guard_builds = True
 
@@ -272,7 +259,7 @@ class ShapedSambeKernel:
         rows: NDArray[np.int64],
     ) -> NDArray[np.void]:
         """Key peak gain, weighted slope and duration to fix subperiod resolution."""
-        base = PeriodTableKernel().prepare_keys(table, rows)
+        base = band_keys(table, rows)
         keys = np.empty(
             len(rows),
             dtype=base.dtype.descr
@@ -364,7 +351,6 @@ class ShapedSambeKernel:
     ) -> tuple[_Data, NDArray[np.float64]]:
         entries, models, ports, errors = [], [], [], []
         subdivisions = self._subdivisions(table, rows, source)
-        fallback = DOP853Kernel()
         # A timeline's rise/fall ramps arrive together. Only this call owns the
         # workspace; accepted payloads retain their immutable coefficients.
         families: dict[
@@ -396,7 +382,7 @@ class ShapedSambeKernel:
                 bound,
                 m,
                 budget,
-                self.declaration.identity.revision,
+                self.revision,
             )
             family = families.get(family_key)
             if family is None:
@@ -411,25 +397,13 @@ class ShapedSambeKernel:
                 nodes = 8
                 coefficients, interpolation, _ = family.polynomial((nodes, modes))
             errors.append((error + interpolation) * cycles)
-            outgoing = model.rates_per_ns.sum(axis=0)
             populations = np.asarray(
-                expm(step / 2 * (model.rates_per_ns - np.diag(outgoing))), dtype=float
+                expm(step / 2 * population_generator(model.rates_per_ns)), dtype=float
             )
-            coherences = np.exp(
-                -step
-                / 2
-                * ((outgoing[:, None] + outgoing[None, :]) / 2 + model.dephasing_per_ns)
-            )
+            coherences = np.exp(-step / 2 * coherence_decay(model))
             for array in (coefficients, populations, coherences):
                 array.setflags(write=False)
-            representative = rows[index : index + 1]
-            direct = fallback.prepare(
-                fallback.prepare_keys(table, representative),
-                table,
-                representative,
-                source,
-                min(budget, 1e-8),
-            )
+            direct = prepare_models([model])
             # Integer-period blocks avoid thousands of tiny matrix products on
             # long high-carrier ramps. Subperiod playback retains every phase.
             drive = model.drives[port]
@@ -526,13 +500,15 @@ class ShapedSambeKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
         """Advance real envelopes; fractional steps use frozen spectral tails.
 
         Incompatible payloads raise ValueError; nonfinite output raises
         RuntimeError. Return an all-False accuracy-exceedance mask.
         """
+        context.require_no_plan()
+        budget = context.budget
         del budget
         if not isinstance(prepared, _Data):
             raise ValueError("shaped_sambe requires its own prepared payload")
@@ -601,11 +577,7 @@ class ShapedSambeKernel:
                 u = left @ right
                 ratio = tail / step
                 population = np.asarray(
-                    expm(
-                        tail
-                        / 2
-                        * (model.rates_per_ns - np.diag(model.rates_per_ns.sum(axis=0)))
-                    ),
+                    expm(tail / 2 * population_generator(model.rates_per_ns)),
                     dtype=complex,
                 )
                 coherence = entry.coherences**ratio

@@ -1,6 +1,6 @@
 """Internal algorithm registry, resolved by stable Kernel.name."""
 
-from ..declarations import DeclaredKernel
+from ..kernel import Kernel
 from .dop853 import DOP853Kernel
 from .dyson import DysonKernel
 from .floquet import FloquetKernel
@@ -12,7 +12,7 @@ from .shaped_sambe import ShapedSambeKernel
 from .t4 import T4
 from .t6 import T6Kernel
 
-REGISTRY: tuple[DeclaredKernel, ...] = (
+REGISTRY: tuple[Kernel, ...] = (
     T4(),
     T6Kernel(),
     FloquetPeriodKernel(),

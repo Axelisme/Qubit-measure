@@ -7,7 +7,6 @@ from numba import njit
 from numpy.typing import NDArray
 
 from ..secular import SecularModel
-from ._cf4_grid import coarse_count, finer_count, spectral_width
 from ._sambe import eigensystem
 
 
@@ -28,30 +27,6 @@ class Spectrum(NamedTuple):
     @property
     def nbytes(self) -> int:
         return self.values.nbytes + self.vectors.nbytes + self.central.nbytes
-
-
-def work_limit(model: SecularModel, port: int, frequency: float, gain: float) -> float:
-    """Return calibrated CF4 coarse/first-fine work in units of N-cubed.
-
-    The common N-cubed factor cancels against Sambe's matrix-size estimate.
-    This is a model/key-only estimate, not a runtime timing measurement.
-    """
-    drive = model.drives[port]
-    width = spectral_width(
-        model.energies_ghz, drive.in_phase_ghz, drive.quadrature_ghz, gain
-    )
-    coarse = coarse_count(1.5 * width / abs(frequency))
-    return float(coarse + finer_count(coarse))
-
-
-def preferred(model: SecularModel, port: int, frequency: float, gain: float) -> bool:
-    """Choose Sambe only below 1 GHz when two cutoff solves beat estimated CF4.
-
-    Single-threaded 16-level calibration assigns an eigensolve of dimension
-    k*N half of k**3 CF4 work units. Starting cutoffs 2/3 cost 234 units.
-    No scan geometry, worker count, density or execution history is consulted.
-    """
-    return abs(frequency) < 1.0 and work_limit(model, port, frequency, gain) > 234.0
 
 
 @njit(nogil=True, cache=True)
@@ -79,13 +54,19 @@ def _probes(spectrum):
 
 
 def build(
-    model: SecularModel, port: int, frequency: float, gain: float, budget: float
+    model: SecularModel,
+    port: int,
+    frequency: float,
+    gain: float,
+    budget: float,
+    work_limit: float,
 ) -> tuple[Spectrum, NDArray[np.complex128]] | None:
     """Return a converged spectrum/U(T), or None for independent CF4 fallback.
 
     Compare adjacent cutoffs at q=0,1/8,...,1 with Frobenius defect no larger
     than min(1e-4,budget*0.1), retaining the finer cutoff. Cumulative eigensolve
-    work cannot exceed the original CF4 estimate, with an absolute cutoff of 12.
+    work cannot exceed dispatch's supplied CF4 work_limit (N-cubed units),
+    with an absolute cutoff of 12.
     Nonfinite or non-near-unitary probes and failed eigensolves decline too.
     This calibrated nine-point check assumes cutoff convergence and that samples
     represent between-node error; it is not an all-time operator error bound.
@@ -93,12 +74,11 @@ def build(
     drive = model.drives[port]
     coupling = gain * (drive.in_phase_ghz - 1j * drive.quadrature_ghz) / 2
     energies = model.energies_ghz - model.energies_ghz[0]
-    limit = work_limit(model, port, frequency, gain)
     spent = 0.0
     previous = None
     for modes in range(2, 13):
         spent += 0.5 * (2 * modes + 1) ** 3
-        if spent > limit:
+        if spent > work_limit:
             break
         try:
             values, vectors, central = eigensystem(energies, coupling, frequency, modes)
