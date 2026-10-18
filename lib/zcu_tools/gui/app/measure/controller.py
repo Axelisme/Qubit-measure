@@ -267,7 +267,8 @@ class Controller(SessionControllerMixin):
     instead of this facade.
     """
 
-    def __init__(
+    # tolerated: View/state wiring and storage, reload, predictor and device injections have distinct owners; no shared input bundle.
+    def __init__(  # noqa: PLR0913
         self,
         state: State,
         registry: Registry,
