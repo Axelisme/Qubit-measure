@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-18，device 活動觀察與 run 後讀回
+**Last updated:** 2026-10-19，operation infrastructure 注入組
 
 # gui/session/ — 量測 session core
 

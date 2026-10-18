@@ -1,6 +1,6 @@
 # `zcu_tools.gui.remote` — shared remote adapter
 
-**Last updated:** 2026-10-16，optional parameter omission
+**Last updated:** 2026-10-19，app dispatch declarations
 
 This package owns NDJSON framing, typed envelopes, authentication, socket queues,
 owner-scheduler dispatch and lazy event delivery. Apps supply methods, serializers
