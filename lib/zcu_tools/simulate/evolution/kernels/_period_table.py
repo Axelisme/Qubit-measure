@@ -382,6 +382,14 @@ def advance_tail(
     active = rows[selected]
     elapsed = starts[selected, None]
     local_rows = np.arange(len(active), dtype=np.int64)
+    # Pack only these tails' samples, not the complete acquire inventory.
+    # Keep -1 padding and physical ports independent of envelope renumbering.
+    envelope_ids = table.tone_envelope[active]
+    playing = np.arange(envelope_ids.shape[1])[None, :] < table.tones[active, None]
+    used = np.unique(envelope_ids[playing])
+    tail_envelopes = tuple(table.envelopes[int(index)] for index in used)
+    tail_ids = np.full_like(envelope_ids, -1)
+    tail_ids[playing] = np.searchsorted(used, envelope_ids[playing])
     tail_table = SegmentTable(
         timeline=local_rows,
         start_ns=np.zeros(len(active)),
@@ -393,9 +401,9 @@ def advance_tail(
         tone_amplitude=table.tone_amplitude[active],
         tone_theta_rad=table.tone_theta_rad[active]
         + 2 * np.pi * table.tone_frequency_ghz[active] * elapsed,
-        tone_envelope=table.tone_envelope[active],
+        tone_envelope=tail_ids,
         tone_envelope_offset_ns=table.tone_envelope_offset_ns[active] + elapsed,
-        envelopes=table.envelopes,
+        envelopes=tail_envelopes,
     )
     chunk = states[selected].copy()
     frame = np.where(
