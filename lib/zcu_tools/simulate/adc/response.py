@@ -74,7 +74,9 @@ class ConditionalReadout:
         including detuned carriers. Frequency-independent Schur bases and sampled
         scattering projections are shared across contents; ill-conditioned
         driven blocks use the full matrix exponential.
-        Other envelopes use the existing DOP853 moment ODE.
+        Common-start flat mux traces superpose vacuum-start carrier fields
+        through the same ConstantLine before calibrating once. Other envelopes
+        and different-start multi-pulse contents use the DOP853 moment ODE.
         ConditionalSums.sums has shape (contents, reads, states, 2), after
         physical delay/demodulation/conjugation/gain/phase/offset. Traces have shape
         (contents, reads, states, samples, 2) only if batch.include_traces;
@@ -117,16 +119,16 @@ class ConditionalReadout:
             batch.pulses, batch.grids, times_by_content, relative_keys, strict=True
         ):
             key = (model_key, _pulse_key(pulses), _grid_key(grids))
+            flat_mux = (
+                len(pulses) > 1
+                and all(p.envelope is None for p in pulses)
+                and all(p.start_ns == pulses[0].start_ns for p in pulses)
+            )
             if not batch.include_traces:
                 if key in self._sums:
                     summed.append(self._sums[key][1])
                     continue
-                if (
-                    key not in self._responses
-                    and len(pulses) > 1
-                    and all(p.envelope is None for p in pulses)
-                    and all(p.start_ns == pulses[0].start_ns for p in pulses)
-                ):
+                if key not in self._responses and flat_mux:
                     sums = solver._mux_integrated_sums(pulses, grids, times, counts)
                     self._sums[key] = (pulses, sums)
                     summed.append(sums)
@@ -150,9 +152,12 @@ class ConditionalReadout:
                 # Building a sampled exponential for every time only pays off
                 # when enough contents reuse that exact relative grid.
                 projected = grid_uses[relative_key] >= len(times)
-                outgoing, _ = solver._fields(
-                    pulses, times, constant=constant, projected=projected
-                )
+                if flat_mux:
+                    outgoing = solver._mux_fields(pulses, times)
+                else:
+                    outgoing, _ = solver._fields(
+                        pulses, times, constant=constant, projected=projected
+                    )
                 traces = tuple(
                     readonly_array(
                         solver._calibrate(
@@ -173,6 +178,24 @@ class ConditionalReadout:
             else None
         )
         return ConditionalSums(sums, counts, dense)
+
+    def _mux_fields(
+        self, pulses: tuple[ReadoutPulse, ...], times: RealArray
+    ) -> NDArray[np.complex128]:
+        """Superpose vacuum-start flat carriers before receiver calibration.
+
+        Common starts give every carrier the same field-independent population
+        trajectory. Homogeneous projections are shared by ConstantLine; only one
+        carrier's temporary fields/moments are needed at a time. Its Sylvester
+        guard retains full block exponential fallback, never a field ODE.
+        """
+        outgoing = np.zeros(
+            (len(times), len(self.model.state_labels)), dtype=np.complex128
+        )
+        for pulse in pulses:
+            part, _ = self._fields((pulse,), times, constant=True, projected=True)
+            outgoing += part
+        return outgoing
 
     def _mux_integrated_sums(
         self,

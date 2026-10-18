@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-18, observable startup numeric preparation
+**Last updated:** 2026-10-18, observable startup numeric preparation and closed-form flat mux decimated readout
 
 `ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -136,8 +136,9 @@ Each batch contains every incident tone and that ADC's grids. Integrated flat,
 common-start mux batches use ADC's carrier-wise linear sums. Each carrier keeps
 the guarded direct-sum or constant-field/full-exponential route. Delay, mismatch,
 ringdown and per-receiver offset remain part of ADC's response contract. Shaped
-and decimated mux batches retain the general multi-carrier field solver.
-Single-carrier fast paths and evolution are unchanged.
+mux batches retain the general multi-carrier field solver. Flat common-start
+decimated batches superpose vacuum-start carrier fields through the same line,
+then calibrate once per receiver. Single-carrier fast paths and evolution are unchanged.
 
 The receiver noise PSD is two-sided, in ADC sample units squared times ns.
 Discrete sample covariance is PSD/dt_ns using the ADC output rate. Receiver gain
@@ -159,11 +160,11 @@ receiver noise and the integrated rounding term.
 `replay_round(round_path)` recomputes one round without drivers, earlier rounds,
 current YAML or numeric records. Backend, engine numeric version, RNG version and
 dependency versions must match. The stream policy is `PCG64/SeedSequence-v2`.
-The backend is `ftf-segment-v8`, which identifies common-origin to pulse-local
-mux phase conversion in both integrated and general ODE readout. Archives from
-`ftf-segment-v7` and earlier backends fail explicitly because mux IQ values
-change. Evolution's numeric version and single-carrier results at `f=f_ref`
-are unchanged.
+The backend is `ftf-segment-v9`, which identifies closed-form carrier-wise flat
+mux traces, retaining the common-origin to pulse-local phase conversion.
+Archives from `ftf-segment-v8` and earlier backends fail explicitly because mux
+IQ values change. Evolution's numeric version and single-carrier results are
+unchanged.
 Old exact-record manifests also fail explicitly. Archives contain model truth and
 must not appear in ordinary Run/native/RPC metadata. Normal provenance remains
 the opaque simulation identifier.
