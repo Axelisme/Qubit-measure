@@ -54,9 +54,7 @@ def choose[F: FormModel](
 @pytest.mark.parametrize(
     "source,target", list(permutations(("const", "cosine", "gauss", "drag"), 2))
 )
-def test_waveform_switch_preserves_shared_length_and_sigma(
-    source, target
-):
+def test_waveform_switch_preserves_shared_length_and_sigma(source, target):
     form = module_form(PulseSpec)
     env = FormEnv()
     draft: dict[str, JsonValue] = {"style": source, "length": {"expr": "4 / 5"}}

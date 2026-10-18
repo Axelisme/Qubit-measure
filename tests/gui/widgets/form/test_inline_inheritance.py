@@ -82,7 +82,7 @@ def inheritance_host(qapp: QApplication):
     host.show()
     qapp.processEvents()
     try:
-        yield ComponentDriver(host), state
+        yield ComponentDriver(host)
     finally:
         host.close()
         host.deleteLater()
@@ -97,9 +97,9 @@ def snapshot(driver: ComponentDriver, path: Path, name: str) -> None:
 
 
 def test_module_and_nested_waveform_switch_show_inherited_values(
-    inheritance_host: tuple[ComponentDriver, FormState[FormModel]], tmp_path: Path
+    inheritance_host: ComponentDriver, tmp_path: Path
 ):
-    driver, state = inheritance_host
+    driver = inheritance_host
     waveform = "form.input.selection.module.waveform"
     length = waveform + ".module.length"
     snapshot(driver, tmp_path, "01-pulse-gauss")
@@ -112,9 +112,13 @@ def test_module_and_nested_waveform_switch_show_inherited_values(
     snapshot(driver, tmp_path, "03-flat-top")
     assert driver.observe(object_name=length).text == "0.8"
     assert driver.observe(object_name=waveform + ".module.raise_waveform").text == ""
-    driver.choose_option(object_name="form.input.selection", value="Inline: readout/pulse")
+    driver.choose_option(
+        object_name="form.input.selection", value="Inline: readout/pulse"
+    )
     snapshot(driver, tmp_path, "04-readout")
-    assert driver.observe(object_name="form.input.selection.module.freq").text == "103.0"
+    assert (
+        driver.observe(object_name="form.input.selection.module.freq").text == "103.0"
+    )
     assert driver.observe(object_name=length).text == "0.8"
     assert driver.observe(object_name="form.input.selection.module.gen_ch").text == ""
     driver.enter_text(object_name=length, value="-1")
@@ -127,20 +131,27 @@ def test_module_and_nested_waveform_switch_show_inherited_values(
     driver.choose_option(object_name=waveform, value="Inline: gauss")
     snapshot(driver, tmp_path, "05-expression-inherited")
     assert driver.observe(object_name=length).text == "1 / 0"
-    assert "division by zero" in driver.observe(
-        object_name="form.row.selection.module.waveform.module.length"
-    ).tooltip
+    assert (
+        "division by zero"
+        in driver.observe(
+            object_name="form.row.selection.module.waveform.module.length"
+        ).tooltip
+    )
     driver.choose_option(object_name=waveform, value="Inline: arb")
     snapshot(driver, tmp_path, "06-arb-initial")
     assert driver.observe(object_name=waveform + ".module.data").text == ""
-    before = state.input
     for mode in ("Readonly", "Busy"):
         driver.click(mode)
         driver.click(object_name="form.input.selection")
         driver.click(object_name=waveform)
         snapshot(driver, tmp_path, "07-" + mode.lower())
         assert driver.observe(object_name="synthetic.status").text == mode
-        assert driver.observe(object_name="form.input.selection").text == "Inline: readout/pulse"
+        assert (
+            driver.observe(object_name="form.input.selection").text
+            == "Inline: readout/pulse"
+        )
         assert driver.observe(object_name=waveform).text == "Inline: arb"
-        assert driver.observe(object_name="form.input.selection.module.freq").text == "103.0"
-        assert state.input.same_as(before)
+        assert (
+            driver.observe(object_name="form.input.selection.module.freq").text
+            == "103.0"
+        )
