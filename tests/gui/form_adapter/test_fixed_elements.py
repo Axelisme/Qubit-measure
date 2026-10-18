@@ -34,7 +34,8 @@ def owner_model(*, duplicate: bool = False) -> type[core.FormModel]:
         participants: list[str]
 
         @classmethod
-        def defaults(cls, _env: core.FormEnv) -> dict[str, JsonValue]:
+        def defaults(cls, env: core.FormEnv) -> dict[str, JsonValue]:
+            del env
             return {
                 "tones": [
                     {"label": "A", "gain": 1},

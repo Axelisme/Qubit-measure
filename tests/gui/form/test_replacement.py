@@ -61,9 +61,8 @@ def test_exact_replacement_clears_only_target_selections_without_old_evaluation(
     errors = state.result(api.FormEnv())
     assert isinstance(errors, api.FormErrors)
     assert ("branch", "amount") in errors.messages
-    assert state.describe(("branch",), api.FormEnv()).target.branch == {
-        "kind": "second"
-    }
+    target = state.describe(("branch",), api.FormEnv()).target
+    assert target is not None and target.branch == {"kind": "second"}
 
 
 def test_partial_selection_still_preserves_old_branch_and_raw_input():
