@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from copy import deepcopy
 from typing import NotRequired, TypedDict
 
+from zcu_tools.core.element import ElementIdentity
+
 
 class SweepSources(TypedDict):
     """Provenance labels for a sweep's three public inputs.
@@ -27,12 +29,14 @@ class ActualField(TypedDict):
     source is the caller's captured parameter/calibration/library/default label,
     or SweepSources for individually labeled sweep inputs. None or omission
     means no source was declared. unit is an asserted native unit,
-    never a request to convert value.
+    never a request to convert value. element, when present, is the declaring
+    owner\'s original index/name captured with this value, not a destination.
     """
 
     value: object
     source: NotRequired[str | SweepSources | None]
     unit: NotRequired[str | None]
+    element: NotRequired[ElementIdentity]
 
 
 class RecipeActual(TypedDict):

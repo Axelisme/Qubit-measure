@@ -1,10 +1,11 @@
 """Public measure wire types for one current, single-layer Form observation."""
 
 from collections.abc import Mapping
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from pydantic import JsonValue
 
+from zcu_tools.core.element import ElementIdentity
 from zcu_tools.gui.form import (
     FormDescription,
     FormFieldDescription,
@@ -359,12 +360,15 @@ class RecipeFieldObservation(FormFieldObservation):
     selectors, source identifies the nearest supplying ref or None. readonly
     means a ref ancestor was traversed, not declaration-fixed or write authority.
     Root has target/selector/source=None and an ordinary logical subtree value.
+    element, when present, is the FixedElements owner\'s same-read original
+    index/name. Fields outside declared elements omit it.
     """
 
     value_status: Literal["available", "missing", "unavailable"]
     selector: RecipeSelectorWire | None
     source: RecipeSourceWire | None
     readonly: bool
+    element: NotRequired[ElementIdentity]
 
 
 class RecipeEditResult(TypedDict):
@@ -397,7 +401,7 @@ def recipe_field_wire(observation: LogicalFieldObservation) -> RecipeFieldObserv
     """
     selector = observation.selector
     source = observation.source
-    return {
+    result: RecipeFieldObservation = {
         "description": description_wire(observation.description),
         "input_present": observation.input_present,
         "input": observation.input,
@@ -426,3 +430,6 @@ def recipe_field_wire(observation: LogicalFieldObservation) -> RecipeFieldObserv
         else None,
         "readonly": observation.readonly,
     }
+    if observation.element is not None:
+        result["element"] = observation.element.copy()
+    return result

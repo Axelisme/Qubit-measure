@@ -717,9 +717,22 @@ class Form[C: ConfigBase]:
         Authored input remains separate from source values. No defaults, capture,
         state mutation, publication or materialization occurs. Wrong input model
         raises TypeError; template subclasses preserve locks and requiredness.
+        Declared fixed-list descendants include the deepest matching
+        FixedElements identity from this same input, never from participants.
         """
         self._check_logical_input(input)
-        return _logical.read(input, path, env)
+        observation = _logical.read(input, path, env)
+        if issubclass(input.model, FixedElementsForm):
+            # The deepest matching declaration owns a nested fixed-list field.
+            for declaration in sorted(
+                input.model.fixed_elements,
+                key=lambda item: len(item.list_path),
+                reverse=True,
+            ):
+                element = declaration.identify(input.data, path)
+                if element is not None:
+                    return replace(observation, element=element)
+        return observation
 
     def read_elements(
         self,

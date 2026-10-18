@@ -1396,7 +1396,10 @@ class RecipeTab:
                 "stop": value["stop"],
                 "expts": value["n"],
             }
-        return {"value": value, "source": source}
+        fact = ActualField(value=value, source=source)
+        if node.element is not None:
+            fact["element"] = node.element
+        return fact
 
     def _actual_fields(self) -> dict[str, ActualField]:
         fields: dict[str, ActualField] = {}

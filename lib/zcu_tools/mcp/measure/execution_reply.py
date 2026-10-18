@@ -7,6 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
+from zcu_tools.core.element import ElementIdentity
 from zcu_tools.mcp.measure.recipe_capture import RecipeActual
 from zcu_tools.mcp.measure.recipe_form import RecipeFieldPath, field_path
 
@@ -42,18 +43,23 @@ class SummaryEstimate:
     tuples of str field names and int original list indexes into native summary.
     Numeric strings stay names. Missing paths are omitted; present null stays null.
     error_key=None means no uncertainty field. unit labels the native value, or
-    None when the recipe declares no unit. No conversion occurs.
+    None when the recipe declares no unit. No conversion occurs. element_key
+    optionally selects an author-provided ElementIdentity in that same native
+    summary. Missing identity is omitted, never inferred from value_key or name.
     """
 
     name: str
     value_key: RecipeFieldPath
     error_key: RecipeFieldPath | None = None
     unit: str | None = None
+    element_key: RecipeFieldPath | None = None
 
     def __post_init__(self) -> None:
         field_path(self.value_key)
         if self.error_key is not None:
             field_path(self.error_key)
+        if self.element_key is not None:
+            field_path(self.element_key)
 
 
 class StepReply(TypedDict):
@@ -65,6 +71,7 @@ class ParameterReply(TypedDict):
     value: Any
     source: Any
     unit: NotRequired[str]
+    element: NotRequired[ElementIdentity]
 
 
 class EstimateReply(TypedDict):
@@ -104,15 +111,12 @@ def _actual(
         if fact is None:
             continue
         source = fact.get("source")
-        if source == "explicit" or (
-            isinstance(source, dict)
-            and all(source.get(key) == "explicit" for key in ("start", "stop", "expts"))
-        ):
-            continue
         projected: ParameterReply = {
             "value": deepcopy(fact["value"]),
             "source": deepcopy(source),
         }
+        if "element" in fact:
+            projected["element"] = deepcopy(fact["element"])
         unit = fact.get("unit", parameter.unit)
         if unit is not None:
             projected["unit"] = unit
@@ -346,9 +350,9 @@ def project_execution(
     definition selects one recipe's actual/estimate fields; None means standalone
     analysis. Conflicting present estimate keys raise ValueError. detail selects
     the operator summary or detached native detail. Both expose recipe actual as
-    a flat summary-name mapping of value/source/unit, omitting scalar explicit
-    values and sweeps whose three sources are explicit. Mixed sweeps remain
-    complete. Internal cfg refs never appear in actual or candidates. Each analysis pane
+    a flat summary-name mapping of value/source/unit, including explicit inputs
+    and individually labeled sweep components. Internal cfg refs never appear
+    in actual or candidates. Each analysis pane
     exposes params, declared scalar estimates, unchanged native summary and
     unchanged native invalid entries. No fit_quality interpretation occurs.
     artifacts preserves each captured native Save report's section/member/output

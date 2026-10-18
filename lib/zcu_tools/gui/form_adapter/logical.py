@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import JsonValue
 
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.core.element import ElementIdentity
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.form import (
     FormDescription,
@@ -99,7 +100,9 @@ class LogicalFieldObservation:
     selector describes only a generated target. source identifies the nearest
     supplying captured ref, or None. readonly means a ref ancestor was crossed,
     without altering declaration fixed/selection_fixed metadata. errors contains
-    only relevant directed errors and root/ancestor failures, or None.
+    only relevant directed errors and root/ancestor failures, or None. element
+    is the declaring FixedElements identity from this same input, or None for
+    fields outside a declared element. It is not inferred from labels or refs.
     """
 
     description: FormDescription
@@ -111,6 +114,7 @@ class LogicalFieldObservation:
     source: LogicalSource | None
     readonly: bool
     errors: FormErrors | None
+    element: ElementIdentity | None = None
 
 
 type LogicalEditReason = Literal[
