@@ -88,6 +88,7 @@ def test_missing_unavailable_type_and_provider_errors_are_distinct() -> None:
     registry = ValueRegistry()
     registry.register(
         ValueKey("source.float", float),
+        # tolerated(cast): Inject str into a float provider to test runtime validation.
         lambda: cast(float, "bad"),
         owner="source",
     )
