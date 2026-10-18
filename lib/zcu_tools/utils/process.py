@@ -401,7 +401,7 @@ def smooth_signal1d(
 ) -> NDArray[Any]:
     """Smooth traces along one axis with a shared method knob."""
     if method == "gaussian":
-        return cast(NDArray[Any], gaussian_filter1d(signals, sigma=sigma, axis=axis))
+        return gaussian_filter1d(signals, sigma=sigma, axis=axis)
     if method == "wavelet":
         return wavelet_denoise1d(
             signals,
@@ -428,10 +428,8 @@ def smooth_signal_nd(
     """Smooth an N-D signal; wavelet mode applies separable 1D denoise per axis."""
     if method == "gaussian":
         if axes is None:
-            return cast(NDArray[Any], gaussian_filter(signals, sigma=sigma))
-        return cast(
-            NDArray[Any], gaussian_filter(signals, sigma=sigma, axes=tuple(axes))
-        )
+            return gaussian_filter(signals, sigma=sigma)
+        return gaussian_filter(signals, sigma=sigma, axes=tuple(axes))
     if method == "wavelet":
         out = np.asarray(signals)
         for axis in _normalize_axes(axes, out.ndim):
@@ -469,6 +467,7 @@ def calculate_noise(signals: NDArray[T_dtype]) -> tuple[float, NDArray[T_dtype]]
         The smoothed signals obtained by applying Gaussian filtering.
     """
     m_signals = gaussian_filter1d(signals, sigma=1)
+    # tolerated(cast): SciPy's default output keeps input dtype; its inferred type loses T_dtype.
     m_signals = cast(NDArray[T_dtype], m_signals)
 
     return np.abs(np.subtract(signals, m_signals)).mean(), m_signals
