@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-19, WorkPlan ownership, joint-basis multi-tone RWA, simultaneous gate reuse with shared virtual shifts and unified resident/pending budget
+**Last updated:** 2026-10-19, WorkPlan ownership, joint-basis multi-tone RWA, simultaneous gate reuse with shared virtual shifts, unified resident/pending budget and long-period playback
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -93,6 +93,14 @@ active references to the old payload remain valid. Current phases, gains and
 durations still receive fresh admission and sparse plans. A legacy-only frame
 without Fourier candidates uses the ordinary rebuild if sidebands become needed,
 so no FFT reconstruction or approximate frame reuse changes rounding.
+
+Constant-tone period playback uses real-matrix binary powering of the complete
+secular `D/2 → UρU† → D/2` channel for unsubdivided 16-level rows with at least
+4096 complete periods. It preserves the existing splitting and complex density
+residuals, but changes floating-point rounding. Shorter rows, other dimensions
+and subdivided playback retain sequential updates with reusable buffers.
+Fractional tails keep their existing endpoint and bath steps. Power matrices
+are worker-local scratch, not retained prepare-cache products.
 
 The shaped and two-tone cost estimates are fixed before numerical guards.
 Timeline workers borrow them without recounting subset reuse. Cache warmth,
