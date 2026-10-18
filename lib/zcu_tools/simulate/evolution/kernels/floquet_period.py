@@ -144,7 +144,7 @@ def _integrate_dense(context, state, duration, controls):
 @njit(nogil=True, cache=True)
 def _unitary(matrix: NDArray[np.complex128]) -> NDArray[np.complex128]:
     """Retract a near-unitary Hilbert endpoint with one Newton polar step."""
-    # DOP853's <= 1e-10 controls and CF4's Hermitian exponentials keep the
+    # DOP853's <= 1e-8 controls and CF4's Hermitian exponentials keep the
     # singular values near one. Newton squares that norm defect without an SVD.
     return 0.5 * (3 * matrix - matrix @ (matrix.conj().T @ matrix))
 
@@ -283,7 +283,9 @@ def _build(
         for array in (h0, x, y):
             array.setflags(write=False)
     else:
-        tolerance = min(1e-10, budget * 1e-4)
+        # Keep budget scaling for tighter requests. The cap is calibrated for
+        # population and coherent-projection playback through 10 us.
+        tolerance = min(1e-8, budget * 1e-4)
         times, coefficients, final = _integrate_dense(
             (h0, x, y, frequency),
             np.eye(size, dtype=complex).ravel(),
@@ -611,7 +613,8 @@ class FloquetPeriodKernel:
 
     Non-spectral low carriers retain CF4 and scoped gain anchors, as in the README.
 
-    Higher carriers retain DOP853 with min(1e-10,budget*1e-4), max_step=T/4.
+    Higher carriers use DOP853 with min(1e-8,budget*1e-4), max_step=T/4.
+    This cap is calibrated through 10 us, not an arbitrary-duration error bound.
     One Newton polar step corrects endpoints before translation and composition.
     Invalid budgets/representatives/payloads raise ValueError; integration or
     nonfinite output raises RuntimeError without rerouting. nbytes charges all
