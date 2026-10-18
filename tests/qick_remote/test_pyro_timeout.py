@@ -18,7 +18,8 @@ import pytest
 
 Pyro4 = pytest.importorskip("Pyro4")
 
-from zcu_tools.qick_remote.pyro import make_soc_proxy
+# tolerated: The client imports Pyro4, so missing extras must skip before loading it.
+from zcu_tools.qick_remote.pyro import make_soc_proxy  # noqa: E402
 
 
 def test_make_soc_proxy_sets_commtimeout_before_locate_ns(monkeypatch):
