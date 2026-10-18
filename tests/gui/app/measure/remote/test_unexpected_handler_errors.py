@@ -45,6 +45,7 @@ def test_run_and_analyze_runtime_errors_escape_handlers_unchanged() -> None:
     run_control.start_run.side_effect = run_error
     _assert_escapes_unchanged(
         lambda: h_tab_run_start(
+            # tolerated(cast): Run's nominal RemoteControlAdapter needs only run control and render_view here.
             cast(
                 Any, SimpleNamespace(run_analyze_control=run_control, render_view=None)
             ),
@@ -65,6 +66,7 @@ def test_run_and_analyze_runtime_errors_escape_handlers_unchanged() -> None:
     analyze_control.analyze.side_effect = analyze_error
     _assert_escapes_unchanged(
         lambda: h_tab_analyze(
+            # tolerated(cast): Analyze's nominal RemoteControlAdapter needs only analysis control and render_view here.
             cast(
                 Any,
                 SimpleNamespace(run_analyze_control=analyze_control, render_view=None),
@@ -81,6 +83,7 @@ def test_device_runtime_error_escapes_handler_unchanged() -> None:
     control.start_connect_device.side_effect = error
     _assert_escapes_unchanged(
         lambda: h_device_connect(
+            # tolerated(cast): Device connect requires RemoteControlAdapter but this failure uses only device_control.
             cast(Any, SimpleNamespace(device_control=control)),
             {
                 "type_name": "fake",
@@ -99,6 +102,7 @@ def test_provider_error_escapes_value_handler_unchanged() -> None:
     control.read_value_source.side_effect = error
     _assert_escapes_unchanged(
         lambda: h_value_read(
+            # tolerated(cast): Value read requires RemoteControlAdapter but this provider failure uses only context_control.
             cast(Any, SimpleNamespace(context_control=control)),
             {"key": "ctx.value", "type": None},
         ),
@@ -113,6 +117,7 @@ def test_load_and_save_runtime_errors_escape_handlers_unchanged() -> None:
     load_control.load_tab_result.side_effect = load_error
     _assert_escapes_unchanged(
         lambda: h_tab_load_data(
+            # tolerated(cast): Load requires RemoteControlAdapter but this failure uses only run_analyze_control.
             cast(Any, SimpleNamespace(run_analyze_control=load_control)),
             {"tab_id": "t1", "data_path": "result.hdf5"},
         ),
@@ -124,6 +129,7 @@ def test_load_and_save_runtime_errors_escape_handlers_unchanged() -> None:
     save_control.save_data.side_effect = save_error
     _assert_escapes_unchanged(
         lambda: h_tab_save_data(
+            # tolerated(cast): Save requires RemoteControlAdapter but this I/O failure uses only save_control.
             cast(Any, SimpleNamespace(save_control=save_control)),
             {
                 "tab_id": "t1",
@@ -144,6 +150,7 @@ def test_figure_runtime_error_escapes_handler_unchanged() -> None:
     tab_control.has_tab.return_value = True
     _assert_escapes_unchanged(
         lambda: h_tab_get_figure(
+            # tolerated(cast): Figure capture requires RemoteControlAdapter; this fake supplies tab_control and render_view.
             cast(
                 Any, SimpleNamespace(render_view=render_view, tab_control=tab_control)
             ),
@@ -165,6 +172,7 @@ def test_writeback_runtime_errors_escape_handlers_unchanged(
 
         def call() -> object:
             return h_tab_writeback_set(
+                # tolerated(cast): Writeback set requires RemoteControlAdapter but this failure uses only writeback_control.
                 cast(Any, SimpleNamespace(writeback_control=control)),
                 {
                     "tab_id": "t1",
@@ -181,6 +189,7 @@ def test_writeback_runtime_errors_escape_handlers_unchanged(
 
         def call() -> object:
             return h_tab_writeback_apply(
+                # tolerated(cast): Writeback apply requires RemoteControlAdapter but this failure uses only writeback_control.
                 cast(Any, SimpleNamespace(writeback_control=control)),
                 {"tab_id": "t1", "subtab_id": "analysis"},
             )
@@ -194,6 +203,7 @@ def test_soc_connect_runtime_error_escapes_handler_unchanged() -> None:
     ctrl.connect_sync.side_effect = error
     _assert_escapes_unchanged(
         lambda: h_soc_connect(
+            # tolerated(cast): SoC connect requires RemoteControlAdapter but this failure uses only ctrl.connect_sync.
             cast(Any, SimpleNamespace(ctrl=ctrl)),
             {"kind": "remote", "ip": "192.0.2.1", "port": 8888},
         ),
