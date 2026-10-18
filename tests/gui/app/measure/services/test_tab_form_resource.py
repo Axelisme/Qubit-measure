@@ -448,10 +448,13 @@ def test_fixed_elements_open_edit_observe_and_run_admission() -> None:
     core = create_model(
         "NamedCore",
         __base__=ConfigBase,
-        **{name: (info.rebuild_annotation(), ...) for name, info in model.model_fields.items()},
+        **{
+            name: (info.rebuild_annotation(), named_input(model).data[name])
+            for name, info in model.model_fields.items()
+        },
     )
     resource = resource_api.TabFormResource(
-        lambda _ctx: Form(core, named_input(model).data),
+        lambda _ctx: Form(core, {}),
         capture=lambda _aliases: resource_api.TabFormSources(env=FormEnv()),
         mutation_allowed=lambda: True,
     )
