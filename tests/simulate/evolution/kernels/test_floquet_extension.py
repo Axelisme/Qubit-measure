@@ -1,0 +1,255 @@
+"""Probe-window changes reuse exact model-only Floquet frames through Engine."""
+
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
+from dataclasses import replace
+from threading import Barrier, Event
+
+import numpy as np
+import pytest
+from zcu_tools.simulate.evolution import (
+    DriveTrack,
+    Engine,
+    EnvelopeSpec,
+    FluxSchedule,
+    ModelSource,
+    SecularDrive,
+    SecularModel,
+    TimelineBatch,
+)
+from zcu_tools.simulate.evolution.kernel import ApplyContext, KernelContext
+from zcu_tools.simulate.evolution.kernels.floquet import FloquetKernel
+from zcu_tools.simulate.evolution.workplan import WorkPlan
+
+from .._engine import RecordingKernel
+
+
+class CountingFloquet(FloquetKernel):
+    """Observe public construction/admission seams without replacing numerics."""
+
+    def __init__(self):
+        self.builds = 0
+        self.sizes: list[int] = []
+        self.guards = []
+
+    def prepare(self, keys, table, rows, context):
+        self.builds += len(keys)
+        return super().prepare(keys, table, rows, context)
+
+    def guard_prepared(self, table, rows, context):
+        result = super().guard_prepared(table, rows, context)
+        self.sizes.extend(p.prepared.nbytes for p in result.preparations)
+        self.guards.append((table, rows, result))
+        return result
+
+
+def source() -> ModelSource:
+    zero = np.zeros((2, 2), complex)
+    drive = np.array([[0.0, 0.02], [0.02, 0.0]], complex)
+    model = SecularModel(
+        (0,),
+        "certificate-extension",
+        np.array([0.0, 0.13]),
+        np.eye(2, dtype=complex),
+        (SecularDrive("stark", drive, zero), SecularDrive("probe", drive, zero)),
+        np.array([[0.0, 0.001], [0.0, 0.0]]),
+        np.zeros((2, 2)),
+    )
+    vector = np.array([1.0, 1j]) / np.sqrt(2)
+    return ModelSource(
+        np.outer(vector, vector.conj()), lambda level: replace(model, level=level)
+    )
+
+
+def window(frequencies, *, point=0, gain=0.2, phase=0.3, duration=16.0):
+    count = len(frequencies)
+    tracks = tuple(
+        DriveTrack(
+            port,
+            np.zeros(count),
+            np.full(count, duration),
+            np.broadcast_to(frequency, (count,)).copy(),
+            np.full(count, phase),
+            np.full(count, amplitude),
+            (EnvelopeSpec("constant"),),
+            np.zeros(count, dtype=np.int64),
+            np.ones(count, dtype=bool),
+        )
+        for port, frequency, amplitude in (
+            ("stark", 0.13, gain),
+            ("probe", frequencies, 0.0001),
+        )
+    )
+    return TimelineBatch(
+        np.arange(count) + point,
+        tracks,
+        FluxSchedule(np.arange(count + 1), np.zeros(count), np.zeros((count, 1), int)),
+        np.full(count, duration),
+    )
+
+
+def acquire(engine, src, batch):
+    result = engine.evolve(src, (batch,), cancel=Event())
+    assert result.paths.segments_by_kernel == {"floquet": len(batch.points)}
+    return result.densities
+
+
+@pytest.mark.parametrize("count", [1, 3])
+def test_shifted_probe_window_extends_union_without_rebuilding_frame(count):
+    solver = CountingFloquet()
+    src = source()
+    direct = RecordingKernel("dop853", accepts=False)
+    with (
+        closing(Engine(1, 1_000_000, kernels=(solver, direct))) as engine,
+        closing(Engine(1, 0, kernels=(FloquetKernel(), direct))) as reference,
+    ):
+        initial = window(np.arange(count) * 0.004)
+        acquire(engine, src, initial)
+        assert solver.builds == 1
+        shifted = window(
+            np.arange(count) * 0.004 + 0.004, point=10, phase=0.8, duration=8.0
+        )
+        actual = acquire(engine, src, shifted)
+        expected = acquire(reference, src, shifted)
+        np.testing.assert_array_equal(actual, expected)
+        assert solver.builds == 1, "new probe bins must extend the cached frame"
+        # Both the old and the new bins remain resident, with fresh row decisions.
+        for batch in (
+            replace(initial, points=initial.points + 20),
+            replace(shifted, points=shifted.points + 30),
+        ):
+            np.testing.assert_array_equal(
+                acquire(engine, src, batch), acquire(reference, src, batch)
+            )
+        assert solver.builds == 1, "extension must retain the complete bin union"
+
+
+def test_parallel_windows_replace_cache_charge_instead_of_accumulating_frames():
+    src = source()
+    direct = RecordingKernel("dop853", accepts=False)
+    # Measure the opaque allocation at the kernel seam. Allow two full frames
+    # and several small certificates, but not a third charge for the same frame.
+    probe = CountingFloquet()
+    with closing(Engine(1, 0, kernels=(probe, direct))) as sizing:
+        acquire(sizing, src, window([0.0]))
+    limit = 2 * probe.sizes[0] + 8_000
+    solver = CountingFloquet()
+    with (
+        closing(Engine(2, limit, kernels=(solver, direct))) as engine,
+        closing(Engine(1, 0, kernels=(FloquetKernel(), direct))) as reference,
+    ):
+        acquire(engine, src, window([0.0], gain=0.19))
+        acquire(engine, src, window([0.0], point=10))
+        assert solver.builds == 2
+        # Distinct bins share one cached frame while apply uses two workers.
+        shifted = window([0.004, 0.008], point=20, phase=1.2)
+        np.testing.assert_array_equal(
+            acquire(engine, src, shifted), acquire(reference, src, shifted)
+        )
+        assert solver.builds == 2, "parallel new bins must reuse the cached frame"
+        for batch in (
+            window([0.0], point=30, gain=0.19),
+            window([0.0, 0.008], point=40),
+        ):
+            np.testing.assert_array_equal(
+                acquire(engine, src, batch), acquire(reference, src, batch)
+            )
+        assert solver.builds == 2, (
+            "replacement must neither evict the other frame nor lose old bins"
+        )
+
+
+def test_concurrent_extensions_share_complete_union_and_preserve_certificates():
+    solver = CountingFloquet()
+    src = source()
+    with closing(
+        Engine(1, 0, kernels=(solver, RecordingKernel("dop853", accepts=False)))
+    ) as engine:
+        acquire(engine, src, window([0.0, 0.004, 0.008]))
+    table, rows, initial = solver.guards[-1]
+    original = initial.preparations[0].prepared
+    changed = replace(table, tone_frequency_ghz=table.tone_frequency_ghz + [0.0, 0.004])
+    extend = getattr(solver, "extend_prepared", None)
+    assert callable(extend), (
+        "Floquet must support immutable certificate-domain extension"
+    )
+    barrier = Barrier(2)
+    with closing(WorkPlan()) as plan:
+        context = KernelContext(src, 1e-3, plan)
+
+        def run():
+            barrier.wait(timeout=10)
+            return extend(original, changed, context)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            a, b = list(pool.map(lambda _: run(), range(2)))
+        # Every caller sees the full table, not a completion-order-dependent bin.
+        cold = solver.guard_prepared(
+            changed, rows, KernelContext(src, 1e-3, WorkPlan())
+        )
+        before = original.entries[0].sidebands
+        assert before is not None
+        for prepared in (a, b):
+            entry = prepared.entries[0]
+            frame = entry.sidebands
+            assert frame is not None
+            assert entry.rotations is original.entries[0].rotations
+            assert frame.coefficients is before.coefficients
+            assert len(frame.certificates) == 4
+            for port, certificate in before.certificates:
+                assert any(
+                    p == port and c is certificate for p, c in frame.certificates
+                )
+            expected_frame = cold.preparations[0].prepared.entries[0].sidebands
+            assert expected_frame is not None
+            for port, expected in expected_frame.certificates:
+                actual = next(
+                    c
+                    for p, c in frame.certificates
+                    if p == port and c.center == expected.center
+                )
+                for field in (
+                    "rows",
+                    "columns",
+                    "values",
+                    "frequencies",
+                    "signs",
+                    "q",
+                    "r",
+                    "e",
+                    "tail",
+                ):
+                    np.testing.assert_array_equal(
+                        getattr(actual, field), getattr(expected, field)
+                    )
+            admitted = solver.admit_prepared(prepared, changed, rows, context)
+            assert admitted is not None
+            np.testing.assert_array_equal(admitted.accepted, cold.accepted)
+            states = np.repeat(src.initial_density[None], len(rows), axis=0)
+            expected_states = states.copy()
+            indices = np.zeros(len(rows), dtype=np.int64)
+            solver.apply(
+                prepared,
+                indices,
+                changed,
+                rows,
+                states,
+                ApplyContext(1e-3, admitted.plan),
+            )
+            solver.apply(
+                cold.preparations[0].prepared,
+                indices,
+                changed,
+                rows,
+                expected_states,
+                ApplyContext(1e-3, cold.plan),
+            )
+            np.testing.assert_array_equal(states, expected_states)
+        # New certificate publications are single-flight, not duplicate builds.
+        assert (
+            a.entries[0].sidebands.certificates[-1][1]
+            is b.entries[0].sidebands.certificates[-1][1]
+        )
+        assert len(before.certificates) == 3, (
+            "the original payload must remain immutable"
+        )
