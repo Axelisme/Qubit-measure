@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 from pathlib import Path
+from threading import RLock
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -16,6 +17,8 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
     workflow,
 )
+from zcu_tools.experiment.workflows.journal import TunablesChanged
+from zcu_tools.experiment.workflows.tunables import TunableValues
 
 from ._engine_fakes import Plan, Rig, State
 
@@ -208,3 +211,95 @@ def test_current_step_keeps_capture_and_next_step_uses_whole_replacement(
     ] == [(0, 2), (1, 8)]
     first = (rig.paths.data_root / "iter/000001/record.json").read_text()
     assert '"reps":2' in first.replace(" ", "")
+
+
+def start_native[T: BaseModel](rig: Rig, model_type: type[T], values: T) -> None:
+    """Start a native declaration without converting or trusting its model."""
+
+    @workflow("startup", plan=Plan, tunables=model_type, init=rig.init)
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: T, state: State
+    ) -> Step[State, int]:
+        del env, plan, tun, state
+        yield from ()
+        return Done()
+
+    rig.engine.start(
+        step,
+        plan=Plan(),
+        tunables=values,
+        paths=rig.paths,
+        identity=RunIdentity(
+            "run",
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
+    )
+
+
+def test_start_revalidates_constructed_tunables_before_creating_paths(
+    tmp_path: Path,
+) -> None:
+    rig = Rig(tmp_path)
+    with pytest.raises(ValidationError) as caught:
+        start_native(rig, Tunables, Tunables.model_construct(reps=0))
+    assert caught.value.errors()[0]["loc"] == ("reps",)
+    assert rig.engine.status() is None
+    assert not rig.paths.metadata_root.exists()
+    assert not rig.paths.data_root.exists()
+
+
+def test_start_nonfinite_tunables_are_not_coerced_to_missing(tmp_path: Path) -> None:
+    rig = Rig(tmp_path)
+    with pytest.raises(ValidationError) as caught:
+        start_native(rig, Tunables, Tunables(points=(float("inf"),)))
+    assert caught.value.errors()[0]["loc"] == ("points", 0)
+    assert rig.engine.status() is None
+    assert not rig.paths.metadata_root.exists()
+    assert not rig.paths.data_root.exists()
+
+
+def test_alias_model_snapshot_uses_complete_native_field_names(tmp_path: Path) -> None:
+    class Aliased(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        repetitions: int = Field(default=2, alias="reps")
+
+    rig = Rig(tmp_path)
+    start_native(rig, Aliased, Aliased(reps=2))
+    snapshot = rig.engine.update_tunables(
+        "run", Aliased(reps=4), expected_revision=0, actor=Actor("user", "owner")
+    )
+    assert snapshot.values == {"repetitions": 4}
+    assert rig.events()[-1]["tunables"] == {"repetitions": 4}
+    assert snapshot.revision == 1
+
+
+def test_revision_and_values_are_published_only_after_append_returns() -> None:
+    seen: list[tuple[int, int]] = []
+    events: list[TunablesChanged] = []
+    values: TunableValues[Tunables]
+
+    def append(event: TunablesChanged) -> None:
+        captured = values.capture()
+        seen.append((captured.revision, captured.model.reps))
+        assert values.snapshot().values == Tunables().model_dump(mode="json")
+        events.append(event)
+
+    values = TunableValues(Tunables, Tunables(), RLock(), append)
+    after = values.update(
+        Tunables(reps=4), expected_revision=0, actor=Actor("agent", "planner")
+    )
+    assert seen == [(0, 2)]
+    assert after.revision == 1
+    assert after.values == Tunables(reps=4).model_dump(mode="json")
+    assert values.capture().model.reps == 4
+    assert len(events) == 1
+    assert events[0].actor == Actor("agent", "planner")
+    assert (events[0].revision_before, events[0].revision_after) == (0, 1)
+    assert events[0].tunables == Tunables(reps=4).model_dump(mode="json")
