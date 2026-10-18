@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from zcu_tools.device import DeviceActivity
     from zcu_tools.device.base import BaseDeviceInfo
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
+    from zcu_tools.gui.session.progress_control import OwnerProgressPort
     from zcu_tools.gui.session.services.device import (
         ActiveDeviceOperation,
         ConnectDeviceRequest,
@@ -25,7 +26,6 @@ if TYPE_CHECKING:
         DisconnectDeviceRequest,
         SetupDeviceRequest,
     )
-    from zcu_tools.gui.session.services.progress import ProgressService
 
 
 class DeviceControlPort(Protocol):
@@ -84,7 +84,7 @@ class DeviceControlFacet:
         *,
         bus: BaseEventBus,
         device: DeviceService,
-        progress: ProgressService,
+        progress: OwnerProgressPort,
     ) -> None:
         self._bus = bus
         self._device = device
