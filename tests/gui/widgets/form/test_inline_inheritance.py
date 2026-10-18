@@ -121,7 +121,15 @@ def test_module_and_nested_waveform_switch_show_inherited_values(
     driver.choose_option(object_name=waveform, value="Inline: gauss")
     snapshot(driver, tmp_path, "05-invalid-inherited")
     assert driver.observe(object_name=length).text == "-1.0"
-    assert driver.observe(object_name=length).tooltip
+    driver.choose_option(object_name=waveform, value="Inline: flat_top")
+    driver.invoke_context_action(object_name=length, action="Expression")
+    driver.enter_text(object_name=length, value="1 / 0")
+    driver.choose_option(object_name=waveform, value="Inline: gauss")
+    snapshot(driver, tmp_path, "05-expression-inherited")
+    assert driver.observe(object_name=length).text == "1 / 0"
+    assert "division by zero" in driver.observe(
+        object_name="form.row.selection.module.waveform.module.length"
+    ).tooltip
     driver.choose_option(object_name=waveform, value="Inline: arb")
     snapshot(driver, tmp_path, "06-arb-initial")
     assert driver.observe(object_name=waveform + ".module.data").text == ""
