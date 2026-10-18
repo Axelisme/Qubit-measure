@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-18, closed-form flat mux decimated readout
+**Last updated:** 2026-10-18, sampled readout and integrated carrier tiles
 
 `ftf(path_or_settings, *, workers=1)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -78,7 +78,9 @@ is unchanged; tones are not assigned to individual resonators. Controls evolve
 to the common readout start only. Separate readout blocks are not supported.
 Constant readout envelope values
 fold into amplitude with `envelope=None`, enabling the exact field solution.
-Conditional responses are solved once per distinct content, not per shot.
+Nonconstant samples become ADC `PiecewiseLinearEnvelope` inputs without changing
+knots, interpolation, final-value hold, gain or phase. Conditional responses are
+solved once per distinct content, not per shot.
 
 `plan_template` passes `readout.adc.time_of_flight_ns` to the numeric receiver
 and the ordered r1/r2 `mismatch_phase_rad` values to `ReadoutModel`. All default
@@ -98,7 +100,8 @@ Each batch contains every incident tone and that ADC's grids. Integrated flat,
 common-start mux batches use ADC's carrier-wise linear sums. Each carrier keeps
 the guarded direct-sum or constant-field/full-exponential route. Delay, mismatch,
 ringdown and per-receiver offset remain part of ADC's response contract. Shaped
-mux batches retain the general multi-carrier field solver. Flat common-start
+mux batches use ADC affine-input convolution propagation for known numeric
+envelopes. Opaque callbacks and unsupported timing retain the field solver. Flat common-start
 decimated batches superpose vacuum-start carrier fields through the same line,
 then calibrate once per receiver. Single-carrier fast paths and evolution are unchanged.
 
@@ -122,11 +125,11 @@ receiver noise and the integrated rounding term.
 `replay_round(round_path)` recomputes one round without drivers, earlier rounds,
 current YAML or numeric records. Backend, engine numeric version, RNG version and
 dependency versions must match. The stream policy is `PCG64/SeedSequence-v2`.
-The backend is `ftf-segment-v9`, which identifies closed-form carrier-wise flat
-mux traces, retaining the common-origin to pulse-local phase conversion.
-Archives from `ftf-segment-v8` and earlier backends fail explicitly because mux
-IQ values change. Evolution's numeric version and single-carrier results are
-unchanged.
+The backend is `ftf-segment-v10`, which identifies closed-form sampled-envelope
+readout and tiled flat integrated sums, retaining common-origin phase conversion.
+Archives from `ftf-segment-v9` and earlier backends fail explicitly because
+readout floating-point results change. Evolution's numeric version and RNG
+sampling contract are unchanged.
 Old exact-record manifests also fail explicitly. Archives contain model truth and
 must not appear in ordinary Run/native/RPC metadata. Normal provenance remains
 the opaque simulation identifier.

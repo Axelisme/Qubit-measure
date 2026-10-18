@@ -21,6 +21,7 @@ from .readout_batch import (
 from .request import (
     ADCSamples,
     ConditionalResponse,
+    PiecewiseLinearEnvelope,
     PopulationInput,
     ReadoutPulse,
     SampleGrid,

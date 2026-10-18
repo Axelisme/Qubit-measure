@@ -640,6 +640,7 @@ def test_sampled_envelope_propagates_without_field_ode(
         result.sums[0], expected.sum(axis=-2), rtol=1e-6, atol=2e-9
     )
     if include_traces:
+        assert result.traces is not None
         np.testing.assert_allclose(result.traces[0], expected, rtol=1e-6, atol=2e-9)
     # Numeric copies are the same content, unlike opaque callbacks.
     copied = adc.PiecewiseLinearEnvelope(knots.copy(), values.copy())
