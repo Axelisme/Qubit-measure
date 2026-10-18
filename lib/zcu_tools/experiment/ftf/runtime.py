@@ -42,7 +42,7 @@ from zcu_tools.simulate.evolution import (
 
 from .readout import FTFReadoutConfig, readout_configuration
 from .replay import BACKEND_VERSION, replay_versions
-from .template import plan_template
+from .template import FTFModelFacts, plan_template
 
 
 @dataclass(frozen=True)
@@ -147,8 +147,11 @@ class FTFAcquire:
     def _prepare(self, snapshot: EnvironmentSnapshot, index: int) -> _Prepared:
         acquire = self.request
         owner = self._source
+        facts = owner.model_facts(snapshot)
         plans = tuple(
-            plan_template(owner.settings, snapshot, template, readout=owner.readout)
+            plan_template(
+                owner.settings, snapshot, template, readout=owner.readout, facts=facts
+            )
             for template in acquire.templates
         )
         evolved = owner.engine.evolve(
@@ -229,7 +232,9 @@ class FTFSource:
     open_acquire drops the previous session's density/conditional arrays. execute
     opens a session only when its request object changes, preserving preparation
     across equal-snapshot rounds. The engine/cache survives across acquires.
-    close invalidates the current session and closes the engine idempotently.
+    At most one complete snapshot's physical model survives across acquires;
+    full settings and numeric revisions also participate in its exact key.
+    close releases physical facts, invalidates the session and closes the engine.
     Calls are synchronous, serialized by SimulationBinding, not thread-safe.
     """
 
@@ -258,7 +263,22 @@ class FTFSource:
         self.engine = Engine(1, 3 * 1024**3 // 2) if engine is None else engine
         self.evaluations: tuple[FTFNumericUse, ...] = ()
         self._session: FTFAcquire | None = None
+        self._facts: FTFModelFacts | None = None
         self._closed = False
+
+    def model_facts(self, snapshot: EnvironmentSnapshot) -> FTFModelFacts:
+        """Return physical inputs for this full snapshot/settings/numeric key.
+
+        Retains only the latest key, dropping the previous model before building
+        a replacement. No pulse/content/receiver results or evolved densities are
+        cached here. Invalid numeric inputs propagate; a closed source raises.
+        """
+        if self._closed:
+            raise RuntimeError("FTF source is closed")
+        if self._facts is None or not self._facts.matches(self.settings, snapshot):
+            self._facts = None
+            self._facts = FTFModelFacts(self.settings, snapshot)
+        return self._facts
 
     def snapshot(self) -> EnvironmentSnapshot:
         """Read fixed-unit live DC values once, rejecting missing/invalid devices."""
@@ -310,6 +330,7 @@ class FTFSource:
         if self._session is not None:
             self._session.invalidate()
             self._session = None
+        self._facts = None
         self._closed = True
         self.engine.close()
 

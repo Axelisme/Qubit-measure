@@ -75,6 +75,8 @@ class JointModel:
     coordinates into the fixed local product space for author diagnostics.
     energies_ghz and local_energies_ghz are DC spectra in GHz. These author-only
     numeric objects must not be included in ordinary GUI/MCP Run metadata.
+    Circuit parameters, temperature and fixed-DC projection must remain unchanged
+    for this model's lifetime; exact memo results are read-only.
     """
 
     def __init__(
@@ -109,6 +111,12 @@ class JointModel:
             tuple(f"joint-{i}" for i in range(m)),
             np.eye(m, dtype=complex),
         )
+        # Each cache holds only a few exact points in this fixed projection.
+        self._eigensystems: dict[bytes, tuple[RealArray, Matrix]] = {}
+        self._rates: dict[tuple[bytes, bytes, bytes], RealArray] = {}
+        self.dc_flux.setflags(write=False)
+        self.energies_ghz.setflags(write=False)
+        self.parent_vectors.setflags(write=False)
 
     def native_embedding(self) -> Matrix:
         """Return an owned dimensionless map from M to physical native coordinates.
@@ -205,12 +213,28 @@ class JointModel:
         )
 
     def eigensystem(self, flux: RealArray) -> tuple[RealArray, Matrix]:
-        """Return energies GHz and energy columns in the fixed M basis at flux (3,)."""
-        return np.linalg.eigh(self.hamiltonian(flux))
+        """Return read-only energies GHz and energy columns at finite flux (3,).
+
+        Exact float64 flux bytes reuse results within this joint's fixed projection.
+        At most eight eigensystems are retained; callers must not mutate results.
+        """
+        flux = self._flux(flux)
+        key = flux.tobytes()
+        if key not in self._eigensystems:
+            energies, vectors = np.linalg.eigh(self.hamiltonian(flux))
+            energies.setflags(write=False)
+            vectors.setflags(write=False)
+            if len(self._eigensystems) == 8:
+                self._eigensystems.pop(next(iter(self._eigensystems)))
+            self._eigensystems[key] = energies, vectors
+        return self._eigensystems[key]
 
     def _bath_rates(
         self, flux: RealArray, energies: RealArray, vectors: Matrix
     ) -> RealArray:
+        key = (flux.tobytes(), energies.tobytes(), vectors.tobytes())
+        if key in self._rates:
+            return self._rates[key]
         rates = np.zeros((len(energies), len(energies)))
         for i, local in enumerate(self._locals):
             p = local.parameters
@@ -238,6 +262,10 @@ class JointModel:
                 rates += directional_rates(
                     energies, joint, channel, temperature_k=self.temperature_k
                 )
+        rates.setflags(write=False)
+        if len(self._rates) == 8:
+            self._rates.pop(next(iter(self._rates)))
+        self._rates[key] = rates
         return rates
 
     @staticmethod
@@ -252,7 +280,9 @@ class JointModel:
         return channels
 
     def rates(self, flux: RealArray) -> RealArray:
-        """Return all directional rates [target,source] in 1/ns in H(flux) order.
+        """Return read-only directional rates [target,source] in 1/ns in H(flux) order.
+
+        Up to eight exact flux/eigensystem inputs reuse rates within this joint.
 
         Bath eigensystem includes g12 but no microwave. Uses instantaneous dressed
         matrix elements for every retained multilevel transition; exact active

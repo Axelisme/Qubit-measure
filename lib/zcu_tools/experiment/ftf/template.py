@@ -32,8 +32,46 @@ from zcu_tools.simulate.ftf import (
     schedule,
 )
 
+from . import replay
 from .numeric import dc_flux, drive_sources, joint_parameters, resonators
 from .readout import FTFReadoutConfig, readout_configuration
+
+
+class FTFModelFacts:
+    """Physical inputs for one complete settings/snapshot/numeric revision.
+
+    settings is a validated FTF resource and snapshot supplies live DC values.
+    joint owns the fixed-DC projection and its bounded eigen/bath memo. source
+    owns Gibbs density, drive quadratures, flux expansion and secular models.
+    readout is the neutral DC ADC model, without pulse or receiver calibration.
+    These objects must remain unchanged for their lifetime. Invalid DC or bath
+    inputs propagate their numeric errors. No density evolution or sampling runs.
+    Used by FTFSource across acquires and by standalone plan_template calls.
+    """
+
+    def __init__(self, settings: FTFSettings, snapshot: EnvironmentSnapshot) -> None:
+        self._settings_json = settings.model_dump_json()
+        self._snapshot = snapshot
+        self._revision = (replay.BACKEND_VERSION, replay.SEGMENT_NUMERIC_VERSION)
+        self.joint = JointModel(
+            joint_parameters(settings),
+            dc_flux(settings, snapshot),
+            temperature_k=settings.chip.temperature_k,
+        )
+        resonator_pair = resonators(settings)
+        self.source = model_source(
+            self.joint, drive_sources(settings, self.joint), resonators=resonator_pair
+        )
+        self.readout = readout_model(self.joint, resonator_pair)
+
+    def matches(self, settings: FTFSettings, snapshot: EnvironmentSnapshot) -> bool:
+        """Whether the complete settings, snapshot and current revisions are equal."""
+        return (
+            self._snapshot == snapshot
+            and self._revision
+            == (replay.BACKEND_VERSION, replay.SEGMENT_NUMERIC_VERSION)
+            and self._settings_json == settings.model_dump_json()
+        )
 
 
 @dataclass(frozen=True)
@@ -261,6 +299,7 @@ def plan_template(
     template: TimelineTemplate,
     *,
     readout: FTFReadoutConfig | None = None,
+    facts: FTFModelFacts | None = None,
 ) -> FTFTemplatePlan:
     """Convert one C1 template to C3 evolution and C6 readout inputs.
 
@@ -271,6 +310,10 @@ def plan_template(
     drive-line controls do not affect the DC readout model. Constant complex
     readout envelopes fold into amplitude, enabling the exact field solution.
     readout supplies detached author capabilities; None adapts current settings.
+    facts optionally shares physical inputs across templates/acquires. It must
+    match the complete settings, snapshot and numeric revision or raises ValueError.
+    None builds physical inputs for this call. Receiver/carrier/content data are
+    always constructed from the current template and readout configuration.
     Mux permits simultaneous coherent tones with independent ADC grids. Program
     common-origin carrier phases convert to pulse-local phases in the first
     carrier's model reference frame; ADC demodulation remains absolute-time.
@@ -290,16 +333,11 @@ def plan_template(
             raise ValueError(f"unbound FTF receiver {window.channel}")
         contents.append(_readout_contents(settings, template, config, window))
     end_ns = contents[0][0]
-    joint = JointModel(
-        joint_parameters(settings),
-        dc_flux(settings, snapshot),
-        temperature_k=settings.chip.temperature_k,
-    )
-    resonator_pair = resonators(settings)
-    source = model_source(
-        joint, drive_sources(settings, joint), resonators=resonator_pair
-    )
-    physical = readout_model(joint, resonator_pair)
+    if facts is None:
+        facts = FTFModelFacts(settings, snapshot)
+    elif not facts.matches(settings, snapshot):
+        raise ValueError("FTF physical facts do not match settings/snapshot/revision")
+    joint, source, physical = facts.joint, facts.source, facts.readout
     reference_frequency_ghz = contents[0][1][0][0].frequency_ghz
     readouts = []
     for window, (_, pulses, grids, inverse) in zip(
