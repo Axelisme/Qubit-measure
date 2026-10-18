@@ -714,17 +714,17 @@ def test_headless_sampling_commands_project_actual_values_and_reset(form_rpc):
     fixture, tab, rpc = form_rpc
     owner = fixture.ctrl.cfg_resources.lookup(tab)
     owner.write({("sweep", "start"): 0, ("sweep", "stop"): 1, ("sweep", "n"): 5})
-    described = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["sweep", "n"]})
+    described = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["sweep"]})
     commands = described["result"]["description"]["target"].get("commands", [])
-    assert commands, "Expts must expose sampling commands through RPC"
-    assert commands[0]["inputs"] == [
+    command = next(item for item in commands if item["name"] == "to_step")
+    assert command["inputs"] == [
         ["sweep", "start"],
         ["sweep", "stop"],
         ["sweep", "n"],
     ]
     reply = rpc.call(
         "tab.run_cfg_command",
-        {"tab_id": tab, "path": ["sweep", "n"], "name": commands[0]["name"]},
+        {"tab_id": tab, "path": ["sweep"], "name": command["name"]},
     )
     assert reply["ok"], reply
     owner.write({("sweep", "step"): 0.3})
@@ -747,18 +747,16 @@ def test_headless_coordinate_command_observation_and_active_paths(form_rpc):
     fixture, tab, rpc = form_rpc
     owner = fixture.ctrl.cfg_resources.lookup(tab)
     owner.write({("sweep", "start"): 10, ("sweep", "stop"): 4, ("sweep", "n"): 4})
-    described = rpc.call(
-        "tab.describe_cfg", {"tab_id": tab, "path": ["sweep", "start"]}
-    )
+    described = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["sweep"]})
     assert described["ok"], described
     commands = described["result"]["description"]["target"].get("commands", [])
-    assert commands, "Numeric fields must expose coordinate commands"
+    assert commands, "Sweep row must expose coordinate commands"
     command = commands[0]
     assert command["inputs"] == [["sweep", "start"], ["sweep", "stop"]]
     assert command["target"] == ["sweep"]
     changed = rpc.call(
         "tab.run_cfg_command",
-        {"tab_id": tab, "path": ["sweep", "start"], "name": command["name"]},
+        {"tab_id": tab, "path": ["sweep"], "name": command["name"]},
     )
     assert changed["ok"], changed
     assert changed["result"]["input"]["sweep"] == {
@@ -766,6 +764,12 @@ def test_headless_coordinate_command_observation_and_active_paths(form_rpc):
         "center": 7.0,
         "span": -6.0,
         "n": 4,
+    }
+    assert owner.accept().values["sweep"] == {
+        "start": 10.0,
+        "stop": 4.0,
+        "expts": 4,
+        "step": -2.0,
     }
     inactive = rpc.call(
         "tab.run_cfg_command",
@@ -776,20 +780,23 @@ def test_headless_coordinate_command_observation_and_active_paths(form_rpc):
     before = owner.input.to_json()
     unknown = rpc.call(
         "tab.run_cfg_command",
-        {"tab_id": tab, "path": ["sweep", "center"], "name": "not-a-command"},
+        {"tab_id": tab, "path": ["sweep"], "name": "not-a-command"},
     )
     assert not unknown["ok"]
     assert owner.input.to_json() == before
     owner.write({("sweep", "center"): {"expr": "1 / 0"}})
-    desc = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["sweep", "center"]})
+    desc = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["sweep"]})
     back = desc["result"]["description"]["target"]["commands"][0]["name"]
     before = owner.input.to_json()
     rejected = rpc.call(
         "tab.run_cfg_command",
-        {"tab_id": tab, "path": ["sweep", "center"], "name": back},
+        {"tab_id": tab, "path": ["sweep"], "name": back},
     )
     assert not rejected["ok"]
     assert owner.input.to_json() == before
+    with pytest.raises(CfgPreconditionError) as invalid:
+        owner.accept()
+    assert invalid.value.reason is CfgPreconditionReason.NOT_VALID
 
 
 @pytest.mark.parametrize("guard", ["busy", "holder"])
@@ -804,7 +811,7 @@ def test_coordinate_rpc_retains_host_guards(form_rpc, guard):
     try:
         reply = rpc.call(
             "tab.run_cfg_command",
-            {"tab_id": tab, "path": ["sweep", "start"], "name": "to_center"},
+            {"tab_id": tab, "path": ["sweep"], "name": "to_center"},
         )
         assert not reply["ok"]
         assert reply["error"].get("reason") == (

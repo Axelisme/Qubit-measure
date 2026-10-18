@@ -5,14 +5,13 @@ from typing import Annotated
 import pytest
 from pydantic import Field
 from zcu_tools.gui.form import (
-    CenterSpan,
     FormCommandError,
     FormEnv,
     FormErrors,
     FormModel,
     FormState,
-    LinRange,
 )
+from zcu_tools.gui.form_adapter import CenterSpan, LinRange
 
 
 class FixedSweepForm(FormModel):
@@ -25,32 +24,30 @@ class CoordinateSweepForm(FormModel):
     )
 
 
-@pytest.mark.parametrize(
-    ("field", "command"), [("start", "to_center"), ("n", "to_step")]
-)
-def test_single_branch_sweep_does_not_offer_or_install_other_kinds(field, command):
+@pytest.mark.parametrize("command", ["to_center", "to_step"])
+def test_single_branch_sweep_does_not_offer_or_install_other_kinds(command):
     env = FormEnv()
     state = FormState(FixedSweepForm.default_input(env))
     before = state.input.to_json()
-    description = state.describe(("sweep", field), env).target
+    description = state.describe(("sweep",), env).target
     assert description is not None
     assert description.commands == (), "A fixed LinRange cannot accept another kind"
     with pytest.raises(FormCommandError):
-        state.run_command(("sweep", field), command, env)
+        state.run_command(("sweep",), command, env)
     assert state.input.to_json() == before
 
 
 def test_coordinate_only_union_does_not_offer_sampling_conversion():
     env = FormEnv()
     state = FormState(CoordinateSweepForm.default_input(env))
-    description = state.describe(("sweep", "n"), env).target
+    description = state.describe(("sweep",), env).target
     assert description is not None
-    assert description.commands == (), "Expts-only annotations cannot accept Step"
+    assert [command.name for command in description.commands] == ["to_center"]
     before = state.input.to_json()
     with pytest.raises(FormCommandError):
-        state.run_command(("sweep", "n"), "to_step", env)
+        state.run_command(("sweep",), "to_step", env)
     assert state.input.to_json() == before
-    state.run_command(("sweep", "start"), "to_center", env)
+    state.run_command(("sweep",), "to_center", env)
     assert [child.name for child in state.describe(("sweep",), env).children] == [
         "center",
         "span",
@@ -62,6 +59,6 @@ def test_coordinate_only_union_does_not_offer_sampling_conversion():
         "span": 1.0,
         "n": 3,
     }
-    state.run_command(("sweep", "center"), "to_range", env)
+    state.run_command(("sweep",), "to_range", env)
     assert not isinstance(state.result(env), FormErrors)
     assert state.input.to_json() == before

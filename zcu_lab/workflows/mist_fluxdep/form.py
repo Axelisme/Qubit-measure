@@ -15,9 +15,9 @@ from zcu_tools.gui.form import (
     FormModel,
     FormPath,
     Option,
-    SweepInput,
     field_error,
 )
+from zcu_tools.gui.form_adapter import SweepInput
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory
 from zcu_tools.program.v2.modules import PulseCfg
 from zcu_tools.program.v2.modules.reset import (

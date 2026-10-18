@@ -166,16 +166,22 @@ class Field:
 
     @property
     def input_commands(self) -> tuple[InputCommand, ...]:
-        """Actions whose declared result branch the enclosing annotation accepts."""
+        """Mounted actions whose result branch the field annotation accepts."""
+        model = self.active_model
+        declared = (
+            model.input_commands
+            if model is not None and issubclass(model, FormModel)
+            else ()
+        )
         return tuple(
             item
-            for item in self.info.metadata
+            for item in (*self.info.metadata, *declared)
             if isinstance(item, InputCommand)
             and (
                 item.result_tag is None
                 or any(
                     item.result_tag[1] in intrinsic_tags(model, item.result_tag[0])
-                    for model in self.level.variants
+                    for model in model_types(self.info.annotation)
                 )
             )
         )

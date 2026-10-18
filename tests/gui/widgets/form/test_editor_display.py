@@ -21,8 +21,8 @@ from zcu_tools.gui.form import (
     FormInput,
     FormModel,
     FormState,
-    LinRange,
 )
+from zcu_tools.gui.form_adapter import LinRange
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._user_input import mouse_click

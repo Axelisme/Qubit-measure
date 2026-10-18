@@ -9,6 +9,7 @@ from qtpy.QtCore import QObject
 from qtpy.QtGui import QAction
 from qtpy.QtWidgets import QApplication, QComboBox, QLineEdit
 from zcu_tools.gui.form import (
+    FormCommandResult,
     FormEnv,
     FormModel,
     FormPath,
@@ -59,7 +60,11 @@ class CapturedForm(FormModel):
                     fields=First,
                     commands=(
                         OptionCommand(
-                            "advance", "Advance", lambda env: {"kind": "second"}
+                            "advance",
+                            "Advance",
+                            lambda _old, _context: FormCommandResult(
+                                {"kind": "second"}, Second, {"value": 2.0}
+                            ),
                         ),
                     ),
                 ),

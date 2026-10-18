@@ -27,7 +27,6 @@ from zcu_tools.cfg_model import (
     get_field_meta,
 )
 from zcu_tools.gui.form import (
-    CenterSpan,
     Display,
     FormEnv,
     FormErrors,
@@ -35,10 +34,7 @@ from zcu_tools.gui.form import (
     FormModel,
     FormState,
     FormWritePath,
-    LinRange,
     Option,
-    StepCenter,
-    StepRange,
     static_defaults,
 )
 from zcu_tools.program.v2.base import ProgramV2Cfg
@@ -59,6 +55,7 @@ from ._seeds import template_input as _template_input
 from ._types import literal_type, union_type
 from ._types import members as _members
 from .logical import LogicalEdit, LogicalEditCandidate, LogicalFieldObservation
+from .sweep import CenterSpan, LinRange, StepCenter, StepRange
 
 
 def _sweep_branch(

@@ -14,9 +14,9 @@ from zcu_tools.gui.form import (
     FormState,
     FormValue,
     FormWritePath,
-    LinRange,
     field_error,
 )
+from zcu_tools.gui.form_adapter import LinRange
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument

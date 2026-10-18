@@ -29,11 +29,15 @@ from zcu_tools.gui.form import (
     FormInput,
     FormModel,
     FormPath,
-    LinRange,
     Option,
+)
+from zcu_tools.gui.form_adapter import (
+    LinRange,
+    ModuleInline,
+    ModuleInputField,
+    ModuleRef,
     SweepInput,
 )
-from zcu_tools.gui.form_adapter import ModuleInline, ModuleInputField, ModuleRef
 from zcu_tools.gui.session.persistence import SingleFileCaretaker
 
 from tests.experiment.workflows._engine_fakes import Plan, State, Tunables

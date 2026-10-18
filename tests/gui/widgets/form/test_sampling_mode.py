@@ -38,9 +38,7 @@ def test_sampling_context_menu_and_visible_effective_coordinates(
 ):
     _, driver = sampling_editor
     driver.screenshot(tmp_path / "01-range-expts.png")
-    driver.invoke_context_action(
-        object_name="form.input.sweep.n", action="Switch to Step"
-    )
+    driver.invoke_context_action(object_name="form.fold.sweep", action="Switch to Step")
     driver.screenshot(tmp_path / "02-range-step.png")
     assert float(driver.observe(object_name="form.input.sweep.step").text) == 0.25
     driver.enter_text(object_name="form.input.sweep.step", value="0.3")
@@ -50,7 +48,7 @@ def test_sampling_context_menu_and_visible_effective_coordinates(
         driver.observe(object_name="form.value.sweep.stop").text.split(": ")[-1]
     ) == pytest.approx(0.9)
     driver.invoke_context_action(
-        object_name="form.input.sweep.start", action="Switch to Center / Span"
+        object_name="form.fold.sweep", action="Switch to Center / Span"
     )
     driver.screenshot(tmp_path / "04-center-step.png")
     assert float(
@@ -66,7 +64,7 @@ def test_sampling_context_menu_and_visible_effective_coordinates(
     driver.enter_text(object_name="form.input.other", value="unfinished")
     driver.screenshot(tmp_path / "05-expression-unrelated-error.png")
     driver.invoke_context_action(
-        object_name="form.input.sweep.step", action="Switch to Expts"
+        object_name="form.fold.sweep", action="Switch to Expts"
     )
     driver.screenshot(tmp_path / "06-center-expts.png")
     assert float(
@@ -75,13 +73,11 @@ def test_sampling_context_menu_and_visible_effective_coordinates(
     assert driver.observe(object_name="form.input.sweep.n").text == "4"
     assert driver.observe(object_name="form.input.other").text == "unfinished"
     driver.invoke_context_action(
-        object_name="form.input.sweep.center", action="Switch to Range"
+        object_name="form.fold.sweep", action="Switch to Range"
     )
     driver.enter_text(object_name="form.input.sweep.start", value="1")
     driver.enter_text(object_name="form.input.sweep.stop", value="0")
-    driver.invoke_context_action(
-        object_name="form.input.sweep.n", action="Switch to Step"
-    )
+    driver.invoke_context_action(object_name="form.fold.sweep", action="Switch to Step")
     driver.enter_text(object_name="form.input.sweep.step", value="-0.3")
     driver.screenshot(tmp_path / "07-descending.png")
     assert float(
@@ -92,13 +88,13 @@ def test_sampling_context_menu_and_visible_effective_coordinates(
     )
     driver.enter_text(object_name="form.input.sweep.step", value="1 / 0")
     driver.invoke_context_action(
-        object_name="form.input.sweep.step", action="Switch to Expts"
+        object_name="form.fold.sweep", action="Switch to Expts"
     )
     driver.screenshot(tmp_path / "08-rejected-expression.png")
     assert driver.observe(object_name="form.input.sweep.step").text == "1 / 0"
     driver.enter_text(object_name="form.input.sweep.step", value="unfinished")
     driver.invoke_context_action(
-        object_name="form.input.sweep.step", action="Switch to Expts"
+        object_name="form.fold.sweep", action="Switch to Expts"
     )
     driver.screenshot(tmp_path / "09-rejected-local-text.png")
     assert driver.observe(object_name="form.input.sweep.step").text == "unfinished"
@@ -107,9 +103,7 @@ def test_sampling_context_menu_and_visible_effective_coordinates(
 @pytest.fixture
 def readonly_valid_sampling_editor(sampling_editor):
     editor, driver = sampling_editor
-    driver.invoke_context_action(
-        object_name="form.input.sweep.n", action="Switch to Step"
-    )
+    driver.invoke_context_action(object_name="form.fold.sweep", action="Switch to Step")
     editor.set_editing_enabled(enabled=False)
     return driver
 
@@ -120,7 +114,7 @@ def test_readonly_sampling_command_cannot_convert_valid_step(
     driver = readonly_valid_sampling_editor
     driver.screenshot(tmp_path / "01-readonly-valid-step.png")
     driver.invoke_context_action(
-        object_name="form.input.sweep.step", action="Switch to Expts"
+        object_name="form.fold.sweep", action="Switch to Expts"
     )
     driver.screenshot(tmp_path / "02-readonly-command.png")
     assert float(driver.observe(object_name="form.input.sweep.step").text) == 0.25
@@ -129,9 +123,7 @@ def test_readonly_sampling_command_cannot_convert_valid_step(
 @pytest.fixture
 def readonly_sampling_editor(sampling_editor):
     editor, driver = sampling_editor
-    driver.invoke_context_action(
-        object_name="form.input.sweep.n", action="Switch to Step"
-    )
+    driver.invoke_context_action(object_name="form.fold.sweep", action="Switch to Step")
     driver.enter_text(object_name="form.input.sweep.step", value="unfinished")
     editor.set_editing_enabled(enabled=False)
     return driver
@@ -143,7 +135,7 @@ def test_readonly_sampling_command_cannot_replace_local_text(
     driver = readonly_sampling_editor
     driver.screenshot(tmp_path / "01-readonly-step.png")
     driver.invoke_context_action(
-        object_name="form.input.sweep.step", action="Switch to Expts"
+        object_name="form.fold.sweep", action="Switch to Expts"
     )
     driver.screenshot(tmp_path / "02-readonly-command.png")
     assert driver.observe(object_name="form.input.sweep.step").text == "unfinished"

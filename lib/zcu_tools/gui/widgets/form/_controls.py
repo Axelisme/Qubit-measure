@@ -314,6 +314,7 @@ class FieldRow:
         self._command = command
         # The selected option's command actions on the dropdown, in order.
         self._commands: list[QAction] = []
+        self._field_actions: list[QAction] = []
         self._displaying = False
         # The view-local input this row shows instead of state's, if any.
         self._local: LocalText | None = None
@@ -332,6 +333,7 @@ class FieldRow:
         header = QHBoxLayout()
         self.layout.addLayout(header)
         self.label = self._build_label(header)
+        self._sync_field_commands(editable=True)
         if field.options is not None:
             self._build_options(header)
         elif field.kind == "model":
@@ -484,6 +486,28 @@ class FieldRow:
         self.layout.addWidget(self.group)
         return title
 
+    def _sync_field_commands(self, *, editable: bool) -> None:
+        """Keep the mounted row's context actions aligned with its description."""
+        listed = self.field.commands
+        if [(a.objectName(), a.text()) for a in self._field_actions] != [
+            (f"{self._name('command')}.{item.name}", item.label) for item in listed
+        ]:
+            for action in self._field_actions:
+                self.label.removeAction(action)
+                action.setObjectName("")
+                action.deleteLater()
+            self._field_actions = []
+            for item in listed:
+                action = QAction(item.label, self.label)
+                action.setObjectName(f"{self._name('command')}.{item.name}")
+                action.triggered.connect(partial(self._command_triggered, item.name))
+                self.label.addAction(action)
+                self._field_actions.append(action)
+        if listed:
+            self.label.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
+        for action in self._field_actions:
+            action.setEnabled(editable)
+
     def _build_enabled(self, header: QHBoxLayout) -> None:
         self.enabled = QCheckBox("Enabled", self.widget)
         self.enabled.setObjectName(self._name("enabled"))
@@ -552,12 +576,6 @@ class FieldRow:
         header.addWidget(widget)
         if self.field.expression and isinstance(widget, QLineEdit):
             self.mode = self._build_mode(widget)
-            for item in self.field.commands:
-                action = QAction(item.label, widget)
-                action.setObjectName(f"{self._name('command')}.{item.name}")
-                action.triggered.connect(partial(self._command_triggered, item.name))
-                widget.addAction(action)
-                self._commands.append(action)
         # Text commits on Enter or focus loss, not per keystroke; a checkbox
         # commits each toggle.
         connect_committed_value_widget(widget, self._input_changed)
@@ -693,6 +711,7 @@ class FieldRow:
         fold stays as built or as the user last set it.
         """
         self.field = field
+        self._sync_field_commands(editable=editable)
         for action in self._commands:
             action.setEnabled(editable)
         self._local = local

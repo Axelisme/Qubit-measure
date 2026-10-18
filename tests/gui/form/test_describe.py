@@ -8,17 +8,19 @@ import pytest
 from pydantic import BaseModel, Field, JsonValue
 from zcu_tools.gui.form import (
     Display,
+    FormCommandContext,
+    FormCommandResult,
+    FormCommandSnapshot,
     FormConstraints,
     FormEnv,
     FormInput,
     FormModel,
     FormPath,
     FormState,
-    LinRange,
     Option,
     OptionCommand,
 )
-from zcu_tools.gui.form_adapter import KeyRef
+from zcu_tools.gui.form_adapter import KeyRef, LinRange
 
 
 class Speed(StrEnum):
@@ -117,10 +119,13 @@ class DescribeForm(FormModel):
         raise AssertionError("description must not request defaults")
 
     @classmethod
-    def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
-        def convert(captured: FormEnv) -> JsonValue:
-            assert captured is env
-            return {"kind": "inline", "module": {"frequency": 4, "label": "new"}}
+    def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+        def convert(
+            _old: FormCommandSnapshot, _context: FormCommandContext
+        ) -> FormCommandResult:
+            return FormCommandResult(
+                {"kind": "inline"}, Inline, {"module": {"frequency": 4, "label": "new"}}
+            )
 
         return {
             ("selection",): (

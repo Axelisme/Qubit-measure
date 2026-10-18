@@ -183,7 +183,7 @@ def test_waveform_key_command_copies_once_and_disconnects_from_later_sources() -
     }
     cfg = result_spec(form, state, waveform_env(0.9))
     assert isinstance(cfg.waveform, ConstWaveformCfg) and cfg.waveform.length == 0.1
-    with pytest.raises(ValueError, match="Unavailable option command"):
+    with pytest.raises(ValueError, match="Unavailable field command"):
         state.run_command(("waveform",), "to_inline", env)
     assert notifications == ["changed"]
 
@@ -213,7 +213,7 @@ def test_waveform_command_source_failure_keeps_input_and_emits_nothing() -> None
     before = state.input.data
 
     with pytest.raises(OSError, match="Cannot read captured waveform"):
-        key.commands[0].run(broken)
+        state.run_command(("waveform",), "to_inline", broken)
     with pytest.raises(OSError, match="Cannot read captured waveform"):
         state.run_command(("waveform",), "to_inline", broken)
 

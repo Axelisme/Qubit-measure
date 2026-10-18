@@ -33,6 +33,9 @@ from zcu_tools.cfg_model import (
 )
 from zcu_tools.gui.form import (
     Display,
+    FormCommandContext,
+    FormCommandResult,
+    FormCommandSnapshot,
     FormEnv,
     FormErrors,
     FormInput,
@@ -166,6 +169,9 @@ def _spec_options(
         specs = _key_specs(info.annotation)
         if not specs:
             continue
+        wrapper = inline_wrapper(info.annotation)
+        if wrapper is None:
+            raise TypeError("Spec options require a tagged inline wrapper")
         key_commands: tuple[tuple[str, OptionCommand], ...] = ()
         if env.library is not None and any(
             isinstance(member, type) and issubclass(member, KeyRef)
@@ -187,6 +193,8 @@ def _spec_options(
                             key,
                             _inline_kinds(spec_annotation(info.annotation)),
                             waveform=waveform,
+                            env=env,
+                            wrapper=wrapper,
                         ),
                     ),
                 )
@@ -194,9 +202,6 @@ def _spec_options(
                 if isinstance(read(key), specs)
             )
         kinds = _inline_kinds(spec_annotation(info.annotation))
-        wrapper = inline_wrapper(info.annotation)
-        if wrapper is None:
-            raise TypeError("Spec options require a tagged inline wrapper")
         kind_fields: list[tuple[type[BaseModel], type[BaseModel]]] = []
         for kind in kinds:
             key = (wrapper, kind)
@@ -214,8 +219,15 @@ def _spec_options(
 
 
 def _copy_spec(
-    key: str, models: tuple[type[BaseModel], ...], env: FormEnv, *, waveform: bool
-) -> dict[str, JsonValue]:
+    key: str,
+    models: tuple[type[BaseModel], ...],
+    _snapshot: FormCommandSnapshot,
+    _context: FormCommandContext,
+    *,
+    env: FormEnv,
+    waveform: bool,
+    wrapper: type[BaseModel],
+) -> FormCommandResult:
     """Copy one captured persistent key into supported detached input.
 
     models are the permitted generated editable branches. No materialization or
@@ -228,12 +240,16 @@ def _copy_spec(
     model = next((model for model in models if issubclass(model, type(spec))), None)
     if model is None:
         raise ValueError(f"Incompatible library family for {key!r}")
-    return {
-        "kind": "inline",
-        "module": supported_input(
-            model, spec.model_dump(mode="json", exclude_none=True)
-        ),
-    }
+    tag, value = _spec_tag(model)
+    return FormCommandResult(
+        selection={"kind": "inline", "module": {tag: value}},
+        structure=wrapper,
+        input={
+            "module": supported_input(
+                model, spec.model_dump(mode="json", exclude_none=True)
+            )
+        },
+    )
 
 
 _UNSUPPORTED_FIELDS = frozenset({"desc"})
@@ -647,7 +663,14 @@ class ModuleField:
                     OptionCommand(
                         "to_inline",
                         "Convert to inline",
-                        partial(_copy_spec, key, self.editable, waveform=False),
+                        partial(
+                            _copy_spec,
+                            key,
+                            self.editable,
+                            waveform=False,
+                            env=env,
+                            wrapper=self.inline,
+                        ),
                     ),
                 )
                 for key in env.library.module_keys()

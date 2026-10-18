@@ -10,7 +10,7 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from logging import getLogger
-from typing import TYPE_CHECKING, Self, final
+from typing import TYPE_CHECKING, ClassVar, Self, final
 
 from pydantic import BaseModel, ConfigDict, JsonValue
 from pydantic_core import PydanticCustomError
@@ -20,6 +20,7 @@ from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot
 
 if TYPE_CHECKING:
+    from .commands import FormCommandContext, FormCommandResult, FormCommandSnapshot
     from .description import FormDescription
     from .options import Option
 
@@ -67,21 +68,20 @@ class FormPathError(ValueError):
 
 @dataclass(frozen=True)
 class InputCommand:
-    """A field action replacing its parent model without installing defaults.
+    """A mounted-field action replacing only that field and descendants.
 
-    name/label identify the action. inputs names participating direct siblings;
-    views reject local parse errors only on those paths. run receives detached
-    parent input and fixed env, returns the complete replacement parent object,
-    and must not mutate sources. ValueError rejects conversion atomically.
-    result_tag optionally identifies the replacement branch as (field, literal
-    value). Such actions are available only when the enclosing annotation accepts
-    that tag. Declarations belong in field Annotated metadata, not view state.
+    name/label identify the action. inputs names participating relative paths;
+    views reject local parse errors only on those paths. run receives a readonly
+    field snapshot and local evaluate context, and returns a complete named
+    replacement. It must not mutate sources, state or UI. result_tag limits
+    availability to annotations accepting that (field, literal value) branch.
+    Declare in field metadata or on an active FormModel.input_commands tuple.
     """
 
     name: str
     label: str
-    inputs: tuple[str, ...]
-    run: Callable[[Mapping[str, JsonValue], FormEnv], dict[str, JsonValue]]
+    inputs: tuple[FormWritePath, ...]
+    run: Callable[[FormCommandSnapshot, FormCommandContext], FormCommandResult]
     result_tag: tuple[str, str] | None = None
 
 
@@ -247,6 +247,8 @@ class FormModel(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    input_commands: ClassVar[tuple[InputCommand, ...]] = ()
+    """Actions mounted on occurrences of this active model, not its parent."""
 
     @classmethod
     @final
@@ -507,40 +509,24 @@ class FormState[F: FormModel]:
         """Execute a declared field action or a selected option's named action.
 
         path addresses an active field; name comes from its commands or the
-        selected option's commands. InputCommand replaces the parent model with
-        no fresh defaults, evaluates only its declared inputs and preserves
-        nonparticipants. FormCommandError rejects unavailable or unconvertible
-        actions atomically. OptionCommand retains ordinary partial-write rules.
+        selected option's commands. Both replace only the mounted field, with
+        no fresh defaults. Callables receive a readonly snapshot and a context
+        that evaluates only requested participants. FormCommandError rejects
+        unavailable actions, failed participants and illegal structure atomically.
         Resolve declarations with the same fixed env used by the host for writes
         and sources. Unknown paths, inactive
         descendants and whole-leaf traversal raise FormPathError with the full
         requested path. Missing current input, no matching option or unavailable
         commands raise ValueError, never silently do nothing. Other failures
-        keep their original exception types. The callable returns partial
-        input for path; install it through one atomic write and notify once.
+        keep their original exception types. The callable returns a complete
+        replacement for path; install it atomically and notify once.
         Callable/source/structural failures leave state unchanged; ordinary
         validation failures remain drafts for result/preview. No refresh,
         library semantics, I/O policy or separate state is introduced.
         """
-        from ._commands import run_input_command
-        from ._selection import resolve
+        from ._commands import prepare_command
 
-        target = resolve(self._model, self._data, path, env)
-        if run_input_command(self, target, name, env):
-            return
-        option = (
-            target.options[target.selected]
-            if target.options is not None and target.selected is not None
-            else None
-        )
-        command = (
-            next((item for item in option.commands if item.name == name), None)
-            if option is not None
-            else None
-        )
-        if command is None:
-            raise FormCommandError(f"Unavailable option command {name!r} at {path!r}")
-        self.write({path: command.run(env)}, env)
+        self.install_input(prepare_command(self.input, path, name, env))
 
     def _install(self, candidate: dict[str, JsonValue]) -> None:
         if candidate == self._data:

@@ -521,26 +521,30 @@ class ComponentDriver:
         action: str = "",
         *,
         object_name: str | None = None,
+        evidence: Path | None = None,
     ) -> None:
         """Open a control's context menu and click an exact visible action caption.
 
         Supply exactly one exact text/form-label or object_name selector. Missing/
-        ambiguous captions raise LookupError; non-combo/non-line-edit targets raise
-        TypeError. Unavailable widgets and disabled actions are no-ops. Hidden
+        ambiguous captions raise LookupError. Unavailable widgets and disabled actions are no-ops. Hidden
         actions are not selected. Real context-menu/mouse events are delivered;
         actions and product handlers are never called directly. A scheduled menu
         delivery has a 30-second watchdog; all popup/callback failures are returned
         to the caller after closing the menu, never left in Qt's event loop.
+        evidence optionally captures the visible popup before selecting the action.
         """
         widget = self._field_control(text, object_name)
-        if not isinstance(widget, (QComboBox, QLineEdit)):
-            raise TypeError("Context action requires QComboBox or QLineEdit")
         if not self._can_interact(widget):
             return
         errors: list[Exception] = []
 
         def choose() -> None:
             try:
+                if evidence is not None:
+                    menu = QApplication.activePopupWidget()
+                    if not isinstance(menu, QMenu):
+                        raise LookupError("No visible context menu")
+                    ComponentDriver(menu).screenshot(evidence)
                 self._select_menu_path((action,))
             except (LookupError, RuntimeError, ValueError, TypeError) as error:
                 errors.append(error)

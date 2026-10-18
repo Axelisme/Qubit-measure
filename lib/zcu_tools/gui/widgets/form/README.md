@@ -1,6 +1,6 @@
 # gui/widgets/form — Form draft view
 
-**Last updated:** 2026-10-17，採樣 command 與有效端點顯示
+**Last updated:** 2026-10-18，掛載 row 的 scoped command 右鍵選單
 
 `FormEditor` 借用 caller-owned `FormState` 與 host 捕捉的 `FormEnv`。Editor 直接讀 `state.describe(path, env)` 與完整 `preview`，不產生 JSON Schema，也不解析 annotation、union 或選項匹配。Core 擁有 choices、active option、固定欄位與 lone ordinary wrapper 攤平規則。攤平只改版面，controls 的完整 path 仍含 wrapper。
 
@@ -20,6 +20,6 @@ Host 可成對傳入 `write=` 與 `run_command=`，使每批 parsed input 與選
 
 Measure Run panel 使用 tab resource 的 guarded callbacks。Workflows 使用自己的 FormState 與 Apply／Discard／Start policy。Inspect、New Entry 與 writeback 編輯器沿用各自的 entry capture、Apply／Cancel 與 destination guard。共用 editor 不接管這些 lifetime 或提交政策。公開 control object names、keyboard 與 Expression 細節見 `FormEditor` docstring。
 
-數值欄位的右鍵選單保留標準文字操作與 Expression，並附上 owner description 的 field commands。折疊標題不加 command。Editor 不換算座標，只檢查 command.inputs 上的 local parse errors，再送既有 guarded run_command。換分支後保留不參與換算的 local 原文，包括未解析的 n／step。唯讀時 command actions 停用，晚建立的欄位也相同。Selector 是否畫成 dropdown 由 description.selector 決定，不由 Qt 猜 sweep 型別。
+文字欄位的右鍵選單保留標準文字操作與 Expression。Owner description 的 field commands 顯示在掛載 row 的標題右鍵選單，包括 sweep 的折疊標題。Editor 不換算座標，只檢查 command.inputs 上的 local parse errors，再送既有 guarded run_command。換分支後保留不參與換算的 local 原文，包括未解析的 n／step。唯讀時 command actions 停用，晚建立的欄位也相同。Selector 是否畫成 dropdown 由 description.selector 決定，不由 Qt 猜 sweep 型別。
 
 共用 scalar 控制項 helpers 位於 `value_widgets.py`，analysis forms 直接重用。Library／Inspect 與 module writeback 不保留第二套 cfg widget。宿主提交邊界見 ADR-0008、ADR-0065。

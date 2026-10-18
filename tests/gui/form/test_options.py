@@ -133,13 +133,17 @@ class CommandForm(FormModel):
     value: Source | Destination = Field(default_factory=Source, discriminator="kind")
 
     @classmethod
-    def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[api.Option, ...]]:
-        def convert(captured: FormEnv) -> JsonValue:
-            if captured is not env:
-                raise ValueError("wrong capture")
-            return {"kind": "snapshot", "name": "copied"}
+    def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[api.Option, ...]]:
+        def convert(
+            _old: api.FormCommandSnapshot, _context: api.FormCommandContext
+        ) -> api.FormCommandResult:
+            return api.FormCommandResult(
+                {"kind": "snapshot"}, Destination, {"name": "copied"}
+            )
 
-        def fail(_captured: FormEnv) -> JsonValue:
+        def fail(
+            _old: api.FormCommandSnapshot, _context: api.FormCommandContext
+        ) -> api.FormCommandResult:
             raise ValueError("unavailable source")
 
         return {
@@ -235,7 +239,13 @@ class ActiveBranch(FormModel):
                 api.Option(
                     "One",
                     1,
-                    commands=(api.OptionCommand("active", "Active", lambda _env: 2),),
+                    commands=(
+                        api.OptionCommand(
+                            "active",
+                            "Active",
+                            lambda _old, _context: api.FormCommandResult(None, None, 2),
+                        ),
+                    ),
                 ),
             )
         }
@@ -253,7 +263,11 @@ class InactiveBranch(FormModel):
                     "One",
                     1,
                     commands=(
-                        api.OptionCommand("inactive", "Inactive", lambda _env: 3),
+                        api.OptionCommand(
+                            "inactive",
+                            "Inactive",
+                            lambda _old, _context: api.FormCommandResult(None, None, 3),
+                        ),
                     ),
                 ),
             )

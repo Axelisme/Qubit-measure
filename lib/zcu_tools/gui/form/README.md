@@ -1,6 +1,6 @@
 # gui/form — Qt-free Pydantic input editing
 
-**Last updated:** 2026-10-17，座標／採樣模式與有效端點
+**Last updated:** 2026-10-18，欄位 scoped command 與唯讀求值契約
 
 `FormState.describe(path, env)` 直接從 model 宣告與目前 input 回傳 `FormDescription`，不產生 JSON Schema。Root path 是 `()`，其他位置用 model-field tuple。`target` 是指定欄位的 metadata，root 則為 None；`children` 只列下一層 metadata。每個 child 保留完整 path，不攜帶 descendants。選中選項只有一個非 nullable、沒有 options 的普通 model wrapper 時，children 攤平一層，但 wrapper 的完整 path 仍可查詢。
 
@@ -20,11 +20,17 @@ Defaults hook 可以用 `{"expr": ...}` 宣告 scalar 初始值的來源，例�
 
 `Option` 宣告 label、部分 JSON input value、可選 BaseModel fields 與 commands。`options(env)` 是宣告 hook，consumer 讀 description 的 options 有效清單。Core 自動產生 Literal、Enum、choices 與 tagged union 選項。最深 local 宣告優先，包含表示無選項的空清單，非重疊 parent 宣告保留。Bool 與一般 nullable model 照舊用 checkbox 與 Enabled。Fields 只在 describe 該 active path 時列直接 children，不顯示 value 已決定的 tag。比對只看 value 的每個葉，JSON 型別與值相同即符合，第一項匹配優先。無匹配時 consumer 顯示目前值加 `(missing)`，不寫 state。
 
-Union 位置的 partial object 是選分支加寫入內容，與 tag 葉切換共用新分支 defaults。不繼承舊值，defaults 只收到固定 env。非換分支的 leaf write 與 compatible restore 規則不變。明確指令用 `OptionCommand(name, label, run)` 宣告，description 只列 name 與 label。`FormState.run_command(path, name, env)` 只找目前 active branch 第一個匹配選項的指令。Run callable 讀同一份固定 env，回傳該欄位的部分 input，core 用一次 write 提交。未知或不適用指令、來源與結構失敗不寫入，不建立第二份 state。`defaults(env)` 只依型別與固定來源產生新 input，沒有 previous 參數或隱含 ref 複製。
+Union 位置的 partial object 是選分支加寫入內容，與 tag 葉切換共用新分支 defaults。不繼承舊值，defaults 只收到固定 env。非換分支的 leaf write 與 compatible restore 規則不變。
+
+明確指令用 `OptionCommand(name, label, run)` 或 `InputCommand` 宣告。前者只在目前第一個匹配選項提供指令，後者掛在欄位 metadata 或 active `FormModel.input_commands`。`FormState.run_command(path, name, env)` 只替換掛載欄位與 descendants，不允許葉命令修改 parent。Callable 接收 `FormCommandSnapshot` 和 `FormCommandContext`，回 `FormCommandResult(selection, structure, input)`。Snapshot 的 selection、結構與原始 input 深度唯讀。Context 的 evaluate 使用相對掛載欄位的 path，只求值已填寫的參與欄位，不補缺值。Core 檢查 annotation 允許的結構與作用範圍，再一次安裝與通知。普通值錯誤保存成 invalid draft。
+
+未知或不適用指令、來源與結構失敗不寫入，不建立第二份 state。`defaults(env)` 只依型別與固定來源產生新 input，沒有 previous 參數或隱含 ref 複製。
 
 每個 intrinsic tag 都有一個普通 Option。多個 tag 指向同一 model 時，各選項共用 branch fields，保留 tag 的 JSON 型別與宣告順序。Core 從 annotation 讀取 tag，不從動態 choices 或 consumer 標記推導身分。Model 欄位可達的每個 branch 都是一個具體 model，同一 tag key 的具名 union 展開成各成員。Choices 仍限制當次可接受的 leaf 值，不改目前 input 的 branch。
 
 `FormModel.default_input` 與 `FormInput` 在入口拒絕未標 tag 的 `str | Model` 欄位。ValueError 指出欄位路徑與不支援的形狀。檢查走過 nullable、alias 與所有 model branches，包含未啟用的分支；它不讀 captured sources。Key-or-inline input 必須使用明確的 tagged ref／inline union，不能靠 JSON 字串或物件型別選分支。持久 Spec 的 `str | Spec` 不改，生成器在 input 邊界投影成 tagged wrappers。
+
+Sweep 的四種數值 model、座標／採樣換算與 row command 宣告由 `gui.form_adapter.sweep` 擁有。Core 不辨識 sweep 型別或其 tag。
 
 Module／library 的 tagged input、literal key 與 family 政策由 `gui.form_adapter` 擁有。Core 只讀普通 annotation、`Option` 與 `InputPolicy`，不以領域 subclass 判定行為。`InputPolicy(expression=False)` 放在 field 的 Annotated metadata，關閉 describe、decode/result、defaults evaluation 與 compatible restore 的 expression 能力。True 不會替 Literal、enum、bool、choices 或混合 union 開啟原本不支援的能力。Write 仍保存普通 invalid draft，由 result 回報。
 
@@ -46,12 +52,6 @@ FormState.preview 提供隔離的 ordinary leaf values 與完整 errors，供 vi
 
 WriteRejected 是 host 寫入入口拒絕一批輸入時 raise 的具名例外，message 由 host 寫給使用者看。Host 在寫入任何內容前 raise，FormState 維持原狀；model 會拒絕的值仍寫進 state，由 result 回報。Core 自己不 raise 它。Editor 收到時保留該欄輸入並顯示 message，其他例外照常拋出。
 
-Display 只承載欄位呈現資訊。順序沿欄位宣告，段落沿 nested model；collapsed 只用於子 model。`group` 是同層畫面群組名稱，空字串在建構時報錯。`decimals` 是 float 顯示精度，非 float 宣告在 describe 報錯，不改 input。`hidden=True` 不畫 controls，但值、預設與驗證保留。Nested model 沒有 label 時，title 是欄位名，底線換空白且只有首字母大寫。普通 model 的單值結構 tag 標 hidden；branch 身分從 annotation 判斷，含其子類別與 LinRange.kind。Union 位置的 tag 仍是 selector。Editor、host 與 MCP 共用 description，但不反向成為 core dependency。
-
-掃描使用 tagged `SweepInput`。`LinRange`／`CenterSpan` 保存座標與 n，`StepRange`／`StepCenter` 保存座標與 step。Span 是帶方向的完整寬度。生成表單預設 Range + Expts，手寫表單可使用同一個 SweepInput。Step 驗證保留 start 與 step，以 floor count 投影實際 stop／center／span。接近整數的商使用 1e-9 相對容差，不普遍 round。步長大於非零區間、零步長或方向錯誤保留錯誤草稿，不能縮成單點。Input 保存原稿，preview／result 提供有效端點，不回寫 input。不提供 explicit-list 分支。
-
-數值欄位的 `InputCommand` metadata 宣告 name、label、參與 sibling names 與完整 parent replacement callable。`result_tag` 宣告換算後的 branch；description 與 execution 只提供 enclosing annotation 接受的目標。單一 LinRange 不提供換成其他 kind 的指令，手寫表單使用 SweepInput 接入四種表示。Description 將 target 與參與 inputs 投影成完整 canonical paths。`run_command` 在固定 env 中求值參與欄位，原子替換 parent，不套普通分支 defaults。座標指令不要求 n／step 有效，採樣指令要求座標與目前採樣值有效；無關欄位錯誤不阻擋。未參與的 input 保留原文與缺席狀態。缺座標、expression 或換算失敗 raise `FormCommandError(ValueError)`，不安裝部分結果。普通 OptionCommand 與 union selector 仍使用 fresh defaults。
-
-Range／Center 的右鍵指令只在成功時把座標 expression 改成 direct 數字。Expts／Step 指令也求值座標，成功後將全部參與欄位換成 direct 數字。之後的新 expression 照常保存。Input、preview 與 result 的讀取不正規化原稿，也不保留舊模式快取。`Display(selector=False)` 隱藏 dropdown，但保留 selector metadata 與 active branch；數值欄位的 commands 提供顯式操作。
+Display 只承載欄位呈現資訊。順序沿欄位宣告，段落沿 nested model；collapsed 只用於子 model。`group` 是同層畫面群組名稱，空字串在建構時報錯。`decimals` 是 float 顯示精度，非 float 宣告在 describe 報錯，不改 input。`hidden=True` 不畫 controls，但值、預設與驗證保留。Nested model 沒有 label 時，title 是欄位名，底線換空白且只有首字母大寫。普通 model 的單值結構 tag 標 hidden；branch 身分從 annotation 判斷，包含其子類別。Union 位置的 tag 仍是 selector。`Display(selector=False)` 只隱藏 dropdown，仍保留 selector metadata 與 active branch。Editor、host 與 MCP 共用 description，但不反向成為 core dependency。
 
 跨模組契約見 ADR-0065、ADR-0062 與 ADR-0008。Measure、Library／Inspect、writeback 與 workflows 共用本核心，各宿主持有 state 並決定 capture、Apply 與保存。Core cfg 推導與持久 Spec 投影由上層 `gui.form_adapter` 組合，不放進本 package。Complex codec 直接使用 `core.complex_codec`，不經舊 cfg owner。

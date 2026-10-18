@@ -24,6 +24,7 @@ from zcu_tools.cfg_model import (
 )
 from zcu_tools.gui import form_adapter
 from zcu_tools.gui.form import (
+    FormCommandResult,
     FormEnv,
     FormErrors,
     FormInput,
@@ -648,7 +649,9 @@ class FixedShapeForm(FormModel):
                         OptionCommand(
                             "lengthen",
                             "Lengthen",
-                            lambda _env: {"kind": "flat", "length": 8.0},
+                            lambda _old, _context: FormCommandResult(
+                                {"kind": "flat"}, Flat, {"length": 8.0}
+                            ),
                         ),
                     ),
                 ),

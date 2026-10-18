@@ -14,9 +14,9 @@ from zcu_tools.gui.form import (
     FormModel,
     FormPath,
     Option,
-    SweepInput,
     field_error,
 )
+from zcu_tools.gui.form_adapter import SweepInput
 from zcu_tools.resources.entry import RoleResolutionError
 
 from zcu_lab.workflows.coherence_fluxdep.t1_form import T1TunablesForm

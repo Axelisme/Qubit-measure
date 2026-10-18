@@ -49,7 +49,9 @@ class CommandForm(api.FormModel):
     other: float
 
     @classmethod
-    def options(cls, _env: api.FormEnv) -> Mapping[api.FormPath, tuple[api.Option, ...]]:
+    def options(
+        cls, _env: api.FormEnv
+    ) -> Mapping[api.FormPath, tuple[api.Option, ...]]:
         return {
             ("value",): (
                 api.Option(
