@@ -3,7 +3,7 @@
 The two tones may use different ports. The larger absolute gain is the Stark
 slot (ties choose the first slot). ModelSource identity namespaces engine
 caches; keys additionally encode flux level, Stark port, frequency and gain.
-All probe parameters and both start phases remain apply-only parameters.
+All probe parameters and both start phases remain excluded from frame keys.
 
 P8 probe limits are r <= .1, population transfer <= .02 and r2 <= .05
 (the two-photon check is enabled for |probe gain| >= .1). The linewidth is
@@ -34,7 +34,10 @@ Only Floquet-invalid rows return to the engine; this module never calls
 another kernel.
 """
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
+from types import MappingProxyType
+from typing import Literal
 
 import numpy as np
 from numba import njit
@@ -44,7 +47,7 @@ from scipy.integrate import solve_ivp
 from scipy.linalg import eig, schur
 from scipy.optimize import linear_sum_assignment
 
-from ..kernel import GuardPreparation, GuardResult, Prepared, SegmentTable
+from ..kernel import GuardPreparation, GuardResult, Prepared, RowPlan, SegmentTable
 from ..secular import ModelSource, SecularModel
 from . import _floquet_sidebands as sb
 
@@ -99,6 +102,65 @@ class _Prepared:
     @property
     def nbytes(self) -> int:
         return sum(entry.nbytes for entry in self.entries)
+
+
+@dataclass(frozen=True)
+class FloquetAdmission:
+    """One accepted row's numerical route and optional retained-sideband plan.
+
+    variant: modal second-order Dyson, periodic k=0, or retained sidebands.
+    plan: the guard's phase/gain-specific sparse equation for sidebands only.
+    """
+
+    variant: Literal["modal", "periodic", "sidebands"]
+    plan: sb.Plan | None = None
+
+
+@dataclass(frozen=True)
+class FloquetPlan:
+    """Immutable global-row admission map from one guard call.
+
+    admissions contains accepted rows only, with their modal/periodic choice
+    or retained-sideband plan. It belongs to the same table/source/budget and
+    expires with this evolve; it is independent of density and frame LRU keys.
+    """
+
+    admissions: Mapping[int, FloquetAdmission]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "admissions", MappingProxyType(dict(self.admissions)))
+
+    @property
+    def nbytes(self) -> int:
+        """Array bytes in row plans, separate from model-only frame storage."""
+        return sum(
+            array.nbytes
+            for admission in self.admissions.values()
+            if admission.plan is not None
+            for array in (
+                admission.plan.rows,
+                admission.plan.columns,
+                admission.plan.values,
+                admission.plan.exponents,
+            )
+        )
+
+    @classmethod
+    def merge(cls, plans: Iterable[RowPlan]) -> "FloquetPlan":
+        """Combine disjoint guard-call decisions into one family plan.
+
+        Empty input gives an empty plan. Raises TypeError for another family's
+        plan and ValueError for overlapping global rows. No numerical work is
+        repeated and the sparse equations retain their immutable arrays.
+        """
+        admissions: dict[int, FloquetAdmission] = {}
+        for plan in plans:
+            if not isinstance(plan, cls):
+                raise TypeError("Floquet requires its own row plan")
+            if admissions.keys() & plan.admissions.keys():
+                raise ValueError("Floquet guard plans must cover disjoint rows")
+            admissions.update(plan.admissions)
+        return cls(admissions)
 
 
 def _comm(h: NDArray[np.complex128]) -> NDArray[np.complex128]:
@@ -719,14 +781,9 @@ def _advance(
     parameters: NDArray[np.float64],
     states: NDArray[np.complex128],
     budget: float,
+    dyson: NDArray[np.bool_],
 ) -> None:
-    """Dispatch two batches, never one Python call per probe point."""
-    dyson = _dyson_mask(
-        (entry.energies, entry.bath, entry.x, entry.y),
-        entry.strengths,
-        parameters,
-        budget,
-    )
+    """Play the guard's two k=0 batches, preserving their numerical path."""
     selected = states[dyson].copy()
     if len(selected):
         _modal(
@@ -797,9 +854,12 @@ class FloquetKernel:
         """Return combined k=0/retained-sideband admission and reusable preparations.
 
         Each key's immutable model-only payload can replace prepare for the
-        same source and budget. No preparation is retained on this kernel.
+        same source and budget. plan retains each accepted global row's
+        modal/periodic choice or sideband equation separately from cacheable
+        frames. No preparation or decision is retained on this kernel.
         """
         preparations: list[GuardPreparation] = []
+        admissions: dict[int, FloquetAdmission] = {}
         accepted = np.zeros(len(rows), dtype=bool)
         if table.tone_port.shape[1] < 2:
             return GuardResult(accepted)
@@ -836,6 +896,17 @@ class FloquetKernel:
             members = np.flatnonzero(inverse == key_index)
             entry = prepared.entries[0]
             legacy, eligible = _admission(entry, params[members], budget)
+            legacy_members = members[legacy]
+            modal = _dyson_mask(
+                (entry.energies, entry.bath, entry.x, entry.y),
+                entry.strengths,
+                params[legacy_members],
+                budget,
+            )
+            for member, use_modal in zip(legacy_members, modal, strict=True):
+                admissions[int(selected[member])] = FloquetAdmission(
+                    "modal" if use_modal else "periodic"
+                )
             if eligible.any():
                 entry = _with_sidebands(entry)
                 if entry.sidebands is None:
@@ -856,8 +927,14 @@ class FloquetKernel:
                     prepared.entries[0], params[members[local]]
                 )
                 legacy[local] = selected_plan.bound <= budget * 0.95
+                if legacy[local]:
+                    for array in (selected_plan.values, selected_plan.exponents):
+                        array.setflags(write=False)
+                    admissions[int(selected[members[local]])] = FloquetAdmission(
+                        "sidebands", selected_plan
+                    )
             accepted[positions[members]] = legacy
-        return GuardResult(accepted, tuple(preparations))
+        return GuardResult(accepted, tuple(preparations), FloquetPlan(admissions))
 
     def prepare_keys(
         self, table: SegmentTable, rows: NDArray[np.int64]
@@ -932,37 +1009,50 @@ class FloquetKernel:
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
         budget: float,
+        *,
+        plan: RowPlan | None = None,
     ) -> NDArray[np.bool_]:
         """Advance arbitrary densities, retaining start and end micromotion.
 
-        Rows must already pass guard. Wrong payload raises ValueError; nonfinite
-        density or an out-of-budget row raises RuntimeError with its segment.
+        plan must be this family's merged guard_prepared plan for the same
+        table/source/budget. No admission or sparse equation is recomputed here.
+        Missing plan or wrong payload raises ValueError; another plan type raises
+        TypeError. Missing row admission or nonfinite density raises RuntimeError
+        with its segment.
 
         Return an all-False bool mask aligned with rows; no post-apply check.
         """
         if not isinstance(prepared, _Prepared):
             raise ValueError("Floquet requires its own prepared payload")
+        if plan is None:
+            raise ValueError("Floquet requires a row plan")
+        if not isinstance(plan, FloquetPlan):
+            raise TypeError("Floquet requires its own row plan")
         parameters = _parameters(table, rows)
         for key in np.unique(key_index):
             positions = np.flatnonzero(key_index == key)
             entry = prepared.entries[int(key)]
+            decisions = []
+            for row in rows[positions]:
+                decision = plan.admissions.get(int(row))
+                if decision is None:
+                    raise RuntimeError(f"Floquet guard failed at segments {[int(row)]}")
+                decisions.append(decision)
             chunk = states[positions].copy()
-            old, eligible = _admission(entry, parameters[positions], budget)
+            old = np.array([d.variant != "sidebands" for d in decisions], dtype=bool)
+            modal = np.array([d.variant == "modal" for d in decisions], dtype=bool)
             if old.all():
                 # Preserve the incumbent apply batch and its numerical path.
-                _advance(entry, parameters[positions], chunk, budget)
+                _advance(entry, parameters[positions], chunk, budget, modal)
             else:
-                entry = _with_sidebands(entry)
                 legacy = chunk[old].copy()
-                _advance(entry, parameters[positions][old], legacy, budget)
+                _advance(entry, parameters[positions][old], legacy, budget, modal[old])
                 chunk[old] = legacy
             for local in np.flatnonzero(~old):
                 p = parameters[positions[local]]
-                selected = _sideband_plan(entry, p)
-                if not eligible[local] or selected.bound > budget * 0.95:
-                    raise RuntimeError(
-                        f"Floquet guard failed at segments {rows[positions[local : local + 1]]}"
-                    )
+                selected = decisions[local].plan
+                if selected is None:
+                    raise RuntimeError("Floquet sideband admission requires a plan")
                 start = _rotation(entry.rotations, entry.harmonic, p[1])
                 end = _rotation(entry.rotations, entry.harmonic, p[2])
                 chunk[local] = sb.advance(

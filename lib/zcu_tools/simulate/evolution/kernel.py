@@ -208,6 +208,14 @@ class Prepared(Protocol):
         ...
 
 
+class RowPlan(Protocol):
+    """Read-only per-row decisions dispatch made for one kernel family in one evolve.
+
+    Indexed by SegmentTable row. Only the kernel family that produced it reads
+    it. It lives for one evolve and never enters PrepareCache or kernel state.
+    """
+
+
 @dataclass(frozen=True)
 class GuardPreparation:
     """Model-only preparation returned by a guard for this evolve's source/budget.
@@ -238,11 +246,15 @@ class GuardResult:
     preparations: disjoint key batches constructed with that call's source and
         budget. Empty means no handoff. Records live only within this evolve;
         shared keys may enter PrepareCache under its ordinary admission rules.
+    plan: optional kernel-defined per-row numerical decisions for this call's
+        accepted rows. Dispatch merges them into the family plan for apply.
+        They live only within this evolve and never enter PrepareCache.
     Owns a read-only mask copy; a non-vector/non-bool mask raises ValueError.
     """
 
     accepted: NDArray[np.bool_]
     preparations: tuple[GuardPreparation, ...] = ()
+    plan: RowPlan | None = None
 
     def __post_init__(self) -> None:
         if self.accepted.ndim != 1 or self.accepted.dtype != np.bool_:

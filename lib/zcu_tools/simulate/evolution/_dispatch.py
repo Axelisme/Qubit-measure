@@ -13,7 +13,8 @@ from ._prepare_keys import group_keys
 from ._shaped_dispatch import preference
 from ._two_tone_dispatch import direct_preferred
 from .engine import PathDiagnostics
-from .kernel import GuardPreparation, Kernel, SegmentTable
+from .kernel import GuardPreparation, Kernel, RowPlan, SegmentTable
+from .kernels.floquet import FloquetPlan
 from .secular import ModelSource
 
 
@@ -68,6 +69,8 @@ class Dispatch:
     rejected: caller guard decisions to skip in worker-local fallback chains.
     two_tone_direct: global-row cost preference fixed before either two-tone guard;
         None when no constant two-tone candidates exist.
+    plans: family-specific per-row decisions, borrowed unchanged by apply;
+        these evolve-local plans never enter the model-only prepare cache.
     """
 
     names: NDArray[np.str_]
@@ -80,6 +83,7 @@ class Dispatch:
     shaped: ShapedPlan | None = None
     rejected: Mapping[str, NDArray[np.bool_]] = field(default_factory=dict)
     two_tone_direct: NDArray[np.bool_] | None = None
+    plans: Mapping[str, RowPlan] = field(default_factory=dict)
 
 
 def diagnostics(table: SegmentTable, names: NDArray[np.str_]) -> PathDiagnostics:
@@ -119,6 +123,7 @@ class _Guarded:
     rows: NDArray[np.int64]
     rejected: NDArray[np.int64]
     preparations: tuple[GuardPreparation, ...]
+    plan: RowPlan | None = None
 
 
 def _guard_key(
@@ -137,7 +142,7 @@ def _guard_key(
     accepted = result.accepted
     selected = rows[accepted]
     preparations = result.preparations if len(selected) else ()
-    return _Guarded(selected, rows[~accepted], preparations)
+    return _Guarded(selected, rows[~accepted], preparations, result.plan)
 
 
 def _unshared_driven_input(table: SegmentTable) -> NDArray[np.bool_]:
@@ -193,6 +198,8 @@ class _Classifier:
         )
         self.preparations: dict[str, list[GuardPreparation]] = {}
         self.rejected: dict[str, NDArray[np.bool_]] = {}
+        self.guard_plans: dict[str, list[RowPlan]] = {}
+        self.plans: dict[str, RowPlan] = {}
 
     def guard_keys(
         self, kernel: Kernel, rows: NDArray[np.int64]
@@ -244,6 +251,8 @@ class _Classifier:
                 self.rejected.setdefault(
                     kernel.name, np.zeros(len(self.names), dtype=bool)
                 )[result.rejected] = True
+            if result.plan is not None:
+                self.guard_plans.setdefault(kernel.name, []).append(result.plan)
             if result.preparations:
                 self.preparations.setdefault(kernel.name, []).extend(
                     result.preparations
@@ -329,6 +338,8 @@ class _Classifier:
         direct = self.two_tone_direct[selected]
         self.accept(selected[direct], ("dop853", "floquet"))
         self.accept(selected[~direct], ("floquet", "dop853"))
+        if self.guard_plans.get("floquet"):
+            self.plans["floquet"] = FloquetPlan.merge(self.guard_plans["floquet"])
 
     def _result(self) -> Dispatch:
         for name in np.unique(self.names[self.names != ""]):
@@ -345,6 +356,7 @@ class _Classifier:
             self.shaped,
             self.rejected,
             self.two_tone_direct,
+            self.plans,
         )
 
 
