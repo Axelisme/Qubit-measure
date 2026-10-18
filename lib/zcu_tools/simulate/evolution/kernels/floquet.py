@@ -80,32 +80,21 @@ class _Entry:
 
     @property
     def nbytes(self) -> int:
-        model_arrays = (
-            self.model.energies_ghz,
-            self.model.eigenvectors,
-            self.model.rates_per_ns,
-            self.model.dephasing_per_ns,
-            *(a for d in self.model.drives for a in (d.in_phase_ghz, d.quadrature_ghz)),
-        )
-        return (
-            (0 if self.sidebands is None else self.sidebands.nbytes)
-            + sum(a.nbytes for a in model_arrays)
-            + sum(
-                a.nbytes
-                for a in (
-                    self.energies,
-                    self.rotations,
-                    self.harmonic,
-                    self.bath,
-                    self.x,
-                    self.y,
-                    self.omitted,
-                    self.strengths,
-                    self.lam,
-                    self.modes,
-                    self.inverse,
-                    self.couplings,
-                )
+        return (0 if self.sidebands is None else self.sidebands.nbytes) + sum(
+            a.nbytes
+            for a in (
+                self.energies,
+                self.rotations,
+                self.harmonic,
+                self.bath,
+                self.x,
+                self.y,
+                self.omitted,
+                self.strengths,
+                self.lam,
+                self.modes,
+                self.inverse,
+                self.couplings,
             )
         )
 
