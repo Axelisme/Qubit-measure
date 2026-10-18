@@ -8,6 +8,8 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
+from .._carrier_plan import ramp_families_for_rows
+from .._carrier_plan import subdivisions as ramp_subdivisions
 from ..kernel import (
     ApplyContext,
     GuardPreparation,
@@ -17,6 +19,7 @@ from ..kernel import (
     SegmentTable,
 )
 from ..secular import SecularModel
+from ..workplan import RampFamilyPlan
 from ._carrier_reuse import CarrierWorkspace
 from ._period_table import (
     PeriodEntry,
@@ -235,33 +238,13 @@ class ShapedSambeKernel:
     def carrier_workspace(
         self, table: SegmentTable, context: KernelContext
     ) -> CarrierWorkspace:
-        """Plan carrier reuse by fixed physical inputs before any spectral builds.
+        """Build a workspace from the complete planner-owned carrier inventory.
 
-        table contains this evolve's complete scan; source owns its models. Each
-        group fixes model identity/level, port, peak gain bound and subdivisions.
-        Harmonic cutoffs, amplitude nodes and peak/polynomial representation
-        partition evaluated families within those planned groups. Guards still
-        decide each row's eligibility, resolution and cycle-scaled acceptance.
+        No grouping or profitability decision belongs to this kernel. The full
+        records are shared with prefix and timeline consumers for this evolve.
         """
-        rows = np.flatnonzero(table.tones == 1)
-        rows = rows[~table.constant_envelopes(rows)]
-        if not len(rows):
-            return CarrierWorkspace(np.empty(0))
-        keys = self.prepare_keys(table, rows, context)
-        subdivisions = self._subdivisions(table, rows, context)
-        groups = []
-        for key, count in zip(keys, subdivisions, strict=True):
-            model = context.source.model(tuple(int(v) for v in key["level"]))
-            groups.append(
-                (
-                    model.identity,
-                    model.level,
-                    int(key["port"]),
-                    float(key["bound"]),
-                    int(count),
-                )
-            )
-        return CarrierWorkspace(keys["frequency"], groups=groups)
+        del table
+        return CarrierWorkspace(context.work_plan.carrier_families)
 
     def prepare_keys(
         self,
@@ -289,28 +272,6 @@ class ShapedSambeKernel:
         keys["duration"] = table.duration_ns[rows]
         return keys
 
-    def _subdivisions(
-        self,
-        table: SegmentTable,
-        rows: NDArray[np.int64],
-        context: KernelContext,
-    ) -> NDArray[np.int64]:
-        strength, gamma = drive_bounds(table, rows, context.source)
-        bounds = envelope_bounds(table, context.work_plan)
-        peaks, slopes = bounds.peaks, bounds.slopes
-        envelope = table.tone_envelope[rows, 0]
-        gain = np.abs(table.tone_amplitude[rows, 0])
-        frequency = np.maximum(np.abs(table.tone_frequency_ghz[rows, 0]), 1e-20)
-        motion = 2 * np.pi * gain * strength * slopes[envelope] / frequency**2
-        split = (
-            table.duration_ns[rows]
-            * gamma
-            * (gain * peaks[envelope] * strength / frequency) ** 2
-        )
-        return np.maximum(
-            1, np.ceil(np.sqrt(np.maximum(motion / 0.01, split / 0.01)))
-        ).astype(np.int64)
-
     def _eligible(
         self,
         table: SegmentTable,
@@ -319,7 +280,7 @@ class ShapedSambeKernel:
     ) -> NDArray[np.bool_]:
         """Check density-free bandwidth, motion and split bounds before building."""
         source = context.source
-        subdivisions = self._subdivisions(table, rows, context)
+        subdivisions = ramp_subdivisions(table, rows, source, context.work_plan)
         bounded = subdivisions <= 32
         # Strong, unresolved ramps need no keys or remaining eligibility work.
         if not np.any(bounded):
@@ -362,13 +323,10 @@ class ShapedSambeKernel:
     ) -> tuple[_Data, NDArray[np.float64]]:
         source, budget = context.source, context.budget
         entries, models, ports, errors = [], [], [], []
-        subdivisions = self._subdivisions(table, rows, context)
-        # A timeline's rise/fall ramps arrive together. Only this call owns the
-        # workspace; accepted payloads retain their immutable coefficients.
-        families: dict[
-            tuple[str, tuple[int, ...], int, float, float, int, float, str],
-            _SpectralFamily,
-        ] = {}
+        planned = ramp_families_for_rows(table, rows, context)
+        # Spectral products remain call-local; only the family inventory moved
+        # to the planner. Accepted payloads retain immutable coefficient arrays.
+        families: dict[RampFamilyPlan, _SpectralFamily] = {}
         for index, key in enumerate(keys):
             model = source.model(tuple(int(v) for v in key["level"]))
             port, f, bound = (
@@ -376,7 +334,8 @@ class ShapedSambeKernel:
                 float(key["frequency"]),
                 float(key["bound"]),
             )
-            m = int(subdivisions[index])
+            family_plan = planned[index]
+            m = family_plan.subdivisions
             step = 1 / (abs(f) * m)
             # Start with a cubic amplitude polynomial; refine its estimated
             # omitted tail before accepting a key.
@@ -386,20 +345,10 @@ class ShapedSambeKernel:
             # Compare the limiting amplitude, not 128 carrier-phase ODEs.
             # The bandwidth guard and the retained polynomial's last degree
             # accompany this calibrated (not rigorous) convergence estimate.
-            family_key = (
-                model.identity,
-                model.level,
-                port,
-                f,
-                bound,
-                m,
-                budget,
-                self.revision,
-            )
-            family = families.get(family_key)
+            family = families.get(family_plan)
             if family is None:
                 family = _SpectralFamily(model, port, f, bound, step, self._workspace)
-                families[family_key] = family
+                families[family_plan] = family
             error = family.error(modes)
             if error * cycles > budget / 4:
                 modes = 3

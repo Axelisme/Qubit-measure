@@ -7,6 +7,7 @@ import numpy as np
 from joblib import delayed
 from numpy.typing import NDArray
 
+from ._carrier_plan import populate_carrier_plan
 from ._dop853_dispatch import direct_plans
 from ._gain_plan import plan_gain_groups
 from ._parallel import Executor
@@ -42,6 +43,7 @@ def create_work_plan(
     """
     del budget
     plan = WorkPlan()
+    populate_carrier_plan(table, source, plan)
     plan_gain_groups(table, source, plan)
     return plan
 

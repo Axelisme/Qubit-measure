@@ -120,6 +120,24 @@ def test_bind_input_contract(kernel_case: KernelCase, prefix_input: bool) -> Non
     )
 
 
+@pytest.mark.parametrize("frequency", [0.0, 1e-20], ids=["dc", "near-dc"])
+def test_ramp_inventory_has_positive_subdivisions_for_rejected_candidates(
+    kernel_case: KernelCase, frequency: float
+) -> None:
+    from zcu_tools.simulate.evolution._carrier_plan import plan_ramp_families
+
+    frequencies = kernel_case.table.tone_frequency_ghz.copy()
+    frequencies[[5, 6], 0] = frequency
+    table = replace(kernel_case.table, tone_frequency_ghz=frequencies)
+    families = plan_ramp_families(table, kernel_case.source, WorkPlan())
+    counts = {row: family.subdivisions for family in families for row in family.rows}
+
+    assert set(counts) == set(range(len(table.tones)))
+    assert all(np.isfinite(count) and count > 0 for count in counts.values())
+    assert counts[5] > 32, "unresolved driven DC ramps cannot be admitted"
+    assert counts[6] == 1, "zero gain needs no subperiod refinement, even at DC"
+
+
 def test_shaped_sambe_cached_convergence_admission(kernel_case: KernelCase) -> None:
     from zcu_tools.simulate.evolution.kernels.shaped_sambe import ShapedSambeKernel
 
