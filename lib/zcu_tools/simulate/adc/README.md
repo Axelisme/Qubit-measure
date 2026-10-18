@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-18, carrier-wise mux discrete sums
+**Last updated:** 2026-10-18, carrier-wise mux traces and discrete sums
 
 ADC consumes explicitly ordered classical populations, not densities. The
 probability tolerance is `POPULATION_TOLERANCE = 1e-6`. This is 1000 times below
@@ -56,8 +56,12 @@ guard rejects the projected solution. Guards are not relaxed and one rejection
 does not send other carriers to the ODE. Calibration includes receiver offset
 only once per sample after superposition. The workspace stays local to the
 `ConditionalReadout` instance, not shared globally or across receivers.
-Trace/decimated, shaped and different-start multi-pulse contents retain the
-general field ODE. Single-pulse numeric paths are unchanged.
+Flat common-start trace/decimated contents also superpose vacuum-start carrier
+fields through the same `ConstantLine`. Homogeneous propagators and sampled
+scattering projections are shared across carriers, with the existing full block
+exponential fallback for ill-conditioned coupling. Calibration adds receiver
+offset once after field superposition. Shaped and different-start multi-pulse
+contents retain the general field ODE. Single-pulse numeric paths are unchanged.
 Integrated single flat pulses also use the guarded direct discrete sums. The constant moment solution
 comes from `(M+iω)X−XQ=B`. In the eigenbases of M and Q, its coefficients are
 `Y_ab=(Um⁻¹ B Uq)_ab/(μ_a+iω−λ_b)`. Each demodulated exponential sums to
@@ -77,8 +81,8 @@ Single samples are uniform. Direct sums reuse the exact-content cache across
 contents and batches. Trace requests retain a separate field cache.
 
 Unsupported direct sums fall back individually, including nonuniform grids
-and defective generators. Shaped contents and all trace/decimated requests
-retain their original field route. Flat fields share frequency-independent Schur bases and sampled output
+and defective generators. Single-pulse trace requests retain their original
+field route. Shaped contents retain the ODE. Flat fields share frequency-independent Schur bases and sampled output
 projections when enough contents reuse the same relative grid to amortize their
 construction. These grids evaluate scattered fields directly without advancing
 a dense moment tensor at every sample. Other grids retain step propagation with
