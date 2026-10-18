@@ -582,3 +582,114 @@ def test_multi_carrier_batch_matches_joint_field_and_adds_offset_once(include_tr
     if include_traces:
         assert actual.traces is not None
         np.testing.assert_allclose(actual.traces[0, 0], expected, atol=2e-8)
+
+
+@pytest.mark.parametrize("tones", [1, 2])
+@pytest.mark.parametrize("include_traces", [False, True])
+def test_sampled_envelope_propagates_without_field_ode(
+    tones, include_traces, monkeypatch
+):
+    from zcu_tools.simulate.adc import response
+
+    assert hasattr(adc, "PiecewiseLinearEnvelope"), (
+        "ADC needs content-defined sampled envelopes"
+    )
+    m = model()
+    m = replace(
+        m,
+        receiver=replace(m.receiver, time_of_flight_ns=1.7),
+        mismatch_phase_rad=np.array([0.2, -0.1]),
+    )
+    knots = np.array([0.0, 1.3, 4.7, 9.0, 16.0])
+    values = np.array([0.1, 0.8 + 0.1j, 1.1 - 0.2j, 0.7, 0.05], dtype=complex)
+    envelope = adc.PiecewiseLinearEnvelope(knots, values)
+    pulses = tuple(
+        adc.ReadoutPulse(
+            -2.3,
+            17.7 - i,
+            (1.2 + 0.3j) / (i + 1),
+            6.0 + 0.018 * i,
+            phase_rad=0.23 - 0.4 * i,
+            envelope=envelope,
+            breakpoints_ns=tuple(-2.3 + knots[1:]),
+        )
+        for i in range(tones)
+    )
+    times = np.array([-5.0, -0.6, 0.0, 3.7, 11.2, 16.4, 17.4, 18.4, 19.4, 35.0])
+    grids = (
+        adc.SampleGrid(times, 6.005, 0.31),
+        adc.SampleGrid(times + 0.13, 5.996, -0.23),
+    )
+    inputs = adc.ReadoutBatch(
+        m, (pulses,), (grids,), np.array([0], dtype=np.int64), include_traces
+    )
+    oracle = adc.ConditionalReadout(m, rtol=1e-12, atol=1e-14)
+    expected = np.stack([oracle.response(pulses, g).traces for g in grids])
+    calls = []
+    solve = response.solve_ivp
+
+    def observe(*args, **kwargs):
+        calls.append(1)
+        return solve(*args, **kwargs)
+
+    monkeypatch.setattr(response, "solve_ivp", observe)
+    reader = adc.ConditionalReadout(m)
+    result = reader.responses(inputs)
+    assert not calls, "known sampled carriers must not solve a field ODE"
+    np.testing.assert_allclose(
+        result.sums[0], expected.sum(axis=-2), rtol=1e-6, atol=2e-9
+    )
+    if include_traces:
+        np.testing.assert_allclose(result.traces[0], expected, rtol=1e-6, atol=2e-9)
+    # Numeric copies are the same content, unlike opaque callbacks.
+    copied = adc.PiecewiseLinearEnvelope(knots.copy(), values.copy())
+    repeated = reader.responses(
+        replace(inputs, pulses=(tuple(replace(p, envelope=copied) for p in pulses),))
+    )
+    np.testing.assert_array_equal(result.sums, repeated.sums)
+    opaque = tuple(replace(p, envelope=lambda t: envelope(t)) for p in pulses)
+    fallback = reader.responses(replace(inputs, pulses=(opaque,)))
+    assert calls, "opaque callbacks must retain the general ODE"
+    np.testing.assert_allclose(fallback.sums, result.sums, rtol=1e-6, atol=2e-9)
+
+
+def test_flat_integrated_contents_use_a_carrier_axis_and_preserve_fallback(monkeypatch):
+    m = model()
+    frequencies = np.linspace(5.98, 6.02, 70)
+    pulses = tuple(
+        (adc.ReadoutPulse(-2.3, 17.7, 1.2 + 0.3j, f, phase_rad=0.2),)
+        for f in frequencies
+    )
+    times = np.arange(-5.0, 40.0, 0.5)
+    grids = tuple((adc.SampleGrid(times, f + 0.002, 0.31),) for f in frequencies)
+    # A nonuniform content cannot enter the spectral tile.
+    grids = (
+        *grids[:-1],
+        (replace(grids[-1][0], times_ns=times + 0.01 * np.sin(times)),),
+    )
+    inputs = adc.ReadoutBatch(m, pulses, grids, np.arange(70, dtype=np.int64))
+    individual = [
+        adc.ConditionalReadout(m)
+        .responses(adc.ReadoutBatch(m, (p,), (g,), np.array([0], dtype=np.int64)))
+        .sums[0]
+        for p, g in zip(pulses, grids, strict=True)
+    ]
+    contractions = []
+    einsum = np.einsum
+
+    def observe(subscripts, *operands, **kwargs):
+        if any(
+            np.ndim(a) == 3
+            and np.shape(a)[0] > 1
+            and np.shape(a)[1:] == (2 * len(m.state_labels), len(m.state_labels))
+            for a in operands
+        ):
+            contractions.append(True)
+        return einsum(subscripts, *operands, **kwargs)
+
+    monkeypatch.setattr(np, "einsum", observe)
+    result = adc.ConditionalReadout(m).responses(inputs)
+    assert contractions, (
+        "multiple contents must share a contraction, not loop over sums"
+    )
+    np.testing.assert_allclose(result.sums, individual, rtol=1e-10, atol=1e-9)
