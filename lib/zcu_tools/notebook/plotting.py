@@ -54,7 +54,8 @@ class NotebookPlotHost:
         self,
         figure: Figure,
         *,
-        final: bool = False,  # noqa: ARG002 - Both PlotHost modes render synchronously.
+        # tolerated: PlotHost requires this keyword; both modes draw synchronously.
+        final: bool = False,  # noqa: ARG002
     ) -> None:
         manager = self._managers.get(figure)
         if manager is None:
@@ -83,7 +84,8 @@ def finish_failed_plots(
             plots.finish(present=False)
         finally:
             plots.release()
-    except BaseException as cleanup_error:  # noqa: BLE001 - preserve producer and cleanup failures
+    # tolerated: Retain producer and cleanup failures, including interrupts.
+    except BaseException as cleanup_error:  # noqa: BLE001
         raise BaseExceptionGroup(
             f"{operation} and plot cleanup failed", [error, cleanup_error]
         ) from None
@@ -97,9 +99,8 @@ def _initialize_canvas(canvas: "Canvas") -> None:
     canvas.footer_visible = False
     canvas.layout.width = f"{int(width * canvas.figure.dpi)}px"
     canvas.layout.height = f"{int(height * canvas.figure.dpi)}px"
-    # This third-party protocol is the verified legacy Notebook initialization.
-    # Keep it at the widget adapter, without importing the retiring routing backend.
     for message_type in ("refresh", "draw", "send_image_mode", "initialized"):
+        # tolerated: ipympl exposes its pre-publication handshake only via this hook.
         canvas._handle_message(canvas, {"type": message_type}, [])  # pyright: ignore[reportPrivateUsage]
 
 
@@ -112,12 +113,14 @@ def _release_canvas(canvas: "Canvas") -> None:
     def close(widget: Widget) -> None:
         try:
             widget.close()
-        except Exception as exc:  # noqa: BLE001 - finish cleanup and report failures
+        # tolerated: Finish releasing all widgets and report each close failure.
+        except Exception as exc:  # noqa: BLE001
             errors.append(exc)
             # Close the comm even if a widget's specialized close failed first.
             try:
                 Widget.close(widget)
-            except Exception as cleanup_exc:  # noqa: BLE001 - retain both errors
+            # tolerated: Retain fallback comm-close failure alongside widget-close error.
+            except Exception as cleanup_exc:  # noqa: BLE001
                 errors.append(cleanup_exc)
 
     # A failed manager constructor may not have installed a widget toolbar yet.

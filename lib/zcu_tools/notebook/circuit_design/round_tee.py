@@ -14,7 +14,10 @@
 """Tee-shaped coupler with fillet for Q components."""
 
 try:
+    # tolerated: Qiskit Metal needs Python 3.12's design extra, absent in dev+quality.
     from qiskit_metal import Dict, draw  # pyright: ignore[reportMissingImports]
+
+    # tolerated: Qiskit Metal needs Python 3.12's design extra, absent in dev+quality.
     from qiskit_metal.qlibrary.core.base import (  # pyright: ignore[reportMissingImports]
         QComponent,
     )
