@@ -211,3 +211,35 @@ def test_engine_worker_and_chunk_partition_preserve_independent_density(
     for result in results:
         assert result.paths.segments_by_kernel == {"dop853": n}
         np.testing.assert_array_equal(result.densities, results[0].densities)
+
+
+def test_zero_tone_table_without_drive_slots_matches_lab_reference() -> None:
+    case = common_controls()
+    table = case.table
+    controls = {
+        name: getattr(table, name)[:, :0]
+        for name in (
+            "tone_port",
+            "tone_frequency_ghz",
+            "tone_amplitude",
+            "tone_theta_rad",
+            "tone_envelope",
+            "tone_envelope_offset_ns",
+        )
+    }
+    case = replace(
+        case,
+        budget=1e-5,
+        table=replace(
+            table,
+            duration_ns=np.full(len(case.states), 0.4),
+            tones=np.zeros(len(case.states), dtype=np.int64),
+            envelopes=(),
+            **controls,
+        ),
+    )
+    actual = evolve_rows(case, np.arange(len(case.states)))
+    expected = np.stack(
+        [reference(case, row, state) for row, state in enumerate(case.states)]
+    )
+    np.testing.assert_allclose(actual, expected, atol=case.budget, rtol=0)
