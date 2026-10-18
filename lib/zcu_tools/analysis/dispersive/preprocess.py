@@ -12,7 +12,7 @@ from zcu_tools.analysis.fitting.resonance import (
     fit_circle_params,
     remove_edelay,
 )
-from zcu_tools.utils.process import SmoothMethod, smooth_signal1d
+from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal1d
 
 # Smoothing divisors (the notebook's hard-coded factors): the per-row smooth
 # strength is ``n_freq // EDELAY_SMOOTH_DIV`` before the circle fit, and
@@ -38,8 +38,10 @@ def _smooth_freq_axis[T: (np.float64, np.complex128)](
 ) -> NDArray[T]:
     return smooth_signal1d(
         signals,
-        method=PREPROCESS_SMOOTH_METHOD,
-        sigma=float(_smooth_sigma(int(signals.shape[1]), divisor)),
+        options=SmoothingOptions(
+            method=PREPROCESS_SMOOTH_METHOD,
+            sigma=float(_smooth_sigma(int(signals.shape[1]), divisor)),
+        ),
         axis=1,
     )
 

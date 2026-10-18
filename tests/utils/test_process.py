@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 from zcu_tools.utils.process import (
+    SmoothingOptions,
     find_rotate_angle,
     minus_background,
     minus_mean,
@@ -416,7 +417,9 @@ class TestWaveletSmoothing:
         data = np.vstack([np.sin(x), np.cos(x)]).astype(np.float64)
         data[1, 7] = np.nan
 
-        out = smooth_signal1d(data, method="wavelet", sigma=1.0, axis=1)
+        out = smooth_signal1d(
+            data, options=SmoothingOptions(method="wavelet", sigma=1.0), axis=1
+        )
 
         assert out.shape == data.shape
         assert np.isnan(out[1, 7])
@@ -427,7 +430,9 @@ class TestWaveletSmoothing:
         real = np.vstack([np.sin(x), np.cos(x)])
         data = (real + 0.25j * real).astype(np.complex128)
 
-        out = smooth_signal_nd(data, method="wavelet", sigma=1.0, axes=(1,))
+        out = smooth_signal_nd(
+            data, options=SmoothingOptions(method="wavelet", sigma=1.0), axes=(1,)
+        )
 
         assert out.shape == data.shape
         assert np.iscomplexobj(out)
@@ -438,12 +443,17 @@ class TestWaveletSmoothing:
         from scipy.ndimage import gaussian_filter1d
 
         data = RNG.random((4, 20))
-        out = smooth_signal1d(data, method="gaussian", sigma=1.5, axis=1)
+        out = smooth_signal1d(
+            data, options=SmoothingOptions(method="gaussian", sigma=1.5), axis=1
+        )
         expected = gaussian_filter1d(data, sigma=1.5, axis=1)
 
         assert_allclose(out, expected)
 
     def test_invalid_smooth_method_raises(self) -> None:
         with pytest.raises(ValueError, match="Invalid smoothing method"):
-            # tolerated: Verify unsupported smoothing methods fail.
-            smooth_signal1d(np.arange(8.0), method="median")  # pyright: ignore[reportArgumentType]
+            smooth_signal1d(
+                np.arange(8.0),
+                # tolerated: Verify unsupported smoothing methods fail.
+                options=SmoothingOptions(method="median"),  # pyright: ignore[reportArgumentType]
+            )

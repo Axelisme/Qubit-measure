@@ -9,7 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.signal import find_peaks
 
-from zcu_tools.utils.process import SmoothMethod, smooth_signal1d
+from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal1d
 
 
 def _require_1d_axis(axis: NDArray[np.float64], name: str) -> None:
@@ -51,7 +51,11 @@ def cast2real_and_norm(
 
     if use_phase:
         centered = signals - np.ma.mean(signals, axis=1, keepdims=True)
-        smoothed = smooth_signal1d(centered, method=smooth_method, sigma=sigma, axis=1)
+        smoothed = smooth_signal1d(
+            centered,
+            options=SmoothingOptions(method=smooth_method, sigma=sigma),
+            axis=1,
+        )
         real_signals = np.abs(smoothed)
         std = np.ma.std(real_signals, axis=1, keepdims=True)
         # Constant rows carry no spectral feature. Keeping their divisor at 1.0
@@ -61,7 +65,9 @@ def cast2real_and_norm(
     else:
         real_signals = np.abs(signals)
         real_signals = smooth_signal1d(
-            real_signals, method=smooth_method, sigma=sigma, axis=1
+            real_signals,
+            options=SmoothingOptions(method=smooth_method, sigma=sigma),
+            axis=1,
         )
 
     return real_signals
