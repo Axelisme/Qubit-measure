@@ -16,6 +16,7 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     kernel,
 )
+from zcu_tools.simulate.evolution.kernel import ApplyContext
 from zcu_tools.simulate.evolution.kernels.floquet import FloquetKernel
 
 
@@ -131,7 +132,7 @@ def test_modal_apply_matches_independent_dyson_orders(
     )
     prepared = floquet.prepare(keys, table, rows[representatives], source, 1e-3)
     actual = states.copy()
-    exceeded = floquet.apply(prepared, inverse, table, rows, actual, 1e-3)
+    exceeded = floquet.apply(prepared, inverse, table, rows, actual, ApplyContext(1e-3))
     expected = np.stack(
         [
             _integrated_orders(

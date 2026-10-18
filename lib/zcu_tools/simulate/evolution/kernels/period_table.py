@@ -5,7 +5,7 @@ from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 from scipy.linalg import expm
 
-from ..kernel import Prepared, SegmentTable
+from ..kernel import ApplyContext, Prepared, SegmentTable
 from ..secular import ModelSource, SecularDrive, SecularModel
 from ._period_table import (
     PeriodEntry,
@@ -113,7 +113,7 @@ def advance_tail(
         tail_table,
         local_rows,
         chunk,
-        entry.tail_budget,
+        ApplyContext(entry.tail_budget),
     )
     states[selected] = chunk
 
@@ -286,7 +286,7 @@ class PeriodTableKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
         """Advance rows in place with per-period Strang and directly solved tails.
 
@@ -296,6 +296,9 @@ class PeriodTableKernel:
 
         Return an all-False bool mask aligned with rows; no post-apply check.
         """
+        if context.plan is not None:
+            raise ValueError("this kernel does not accept a row plan")
+        budget = context.budget
         del budget
         if not isinstance(prepared, PeriodPrepared):
             raise ValueError("period_table requires its own prepared payload")

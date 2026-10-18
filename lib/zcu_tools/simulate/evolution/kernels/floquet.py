@@ -47,7 +47,14 @@ from scipy.integrate import solve_ivp
 from scipy.linalg import eig, schur
 from scipy.optimize import linear_sum_assignment
 
-from ..kernel import GuardPreparation, GuardResult, Prepared, RowPlan, SegmentTable
+from ..kernel import (
+    ApplyContext,
+    GuardPreparation,
+    GuardResult,
+    Prepared,
+    RowPlan,
+    SegmentTable,
+)
 from ..secular import ModelSource, SecularModel
 from . import _floquet_sidebands as sb
 
@@ -1008,13 +1015,11 @@ class FloquetKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
-        *,
-        plan: RowPlan | None = None,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
         """Advance arbitrary densities, retaining start and end micromotion.
 
-        plan must be this family's merged guard_prepared plan for the same
+        context.plan must be this family's merged guard_prepared plan for the same
         table/source/budget. No admission or sparse equation is recomputed here.
         Missing plan or wrong payload raises ValueError; another plan type raises
         TypeError. Missing row admission or nonfinite density raises RuntimeError
@@ -1022,6 +1027,7 @@ class FloquetKernel:
 
         Return an all-False bool mask aligned with rows; no post-apply check.
         """
+        budget, plan = context.budget, context.plan
         if not isinstance(prepared, _Prepared):
             raise ValueError("Floquet requires its own prepared payload")
         if plan is None:

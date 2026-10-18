@@ -5,7 +5,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource
-from zcu_tools.simulate.evolution.kernel import SegmentTable
+from zcu_tools.simulate.evolution.kernel import ApplyContext, SegmentTable
 
 from tests.simulate.evolution.contract.kernel_suite import (
     KernelCase,
@@ -127,7 +127,9 @@ def test_chains_stop_at_boundaries_and_can_restart(kernel_case: KernelCase) -> N
     actual = case.states.copy()
     # Later slots are outputs only, not fresh inputs to the same timeline.
     actual[1:] = 0
-    case.kernel.apply(prepared, inverse, case.table, np.arange(4), actual, case.budget)
+    case.kernel.apply(
+        prepared, inverse, case.table, np.arange(4), actual, ApplyContext(case.budget)
+    )
     expected = []
     state = case.states[0]
     previous = case.source.model((0,))
@@ -141,14 +143,24 @@ def test_chains_stop_at_boundaries_and_can_restart(kernel_case: KernelCase) -> N
 
     split = case.states.copy()
     case.kernel.apply(
-        prepared, inverse[:2], case.table, np.arange(2), split[:2], case.budget
+        prepared,
+        inverse[:2],
+        case.table,
+        np.arange(2),
+        split[:2],
+        ApplyContext(case.budget),
     )
     # Engine owns basis conversion between calls, not inside one chain.
     left, right = case.source.model((1,)), case.source.model((0,))
     overlap = right.eigenvectors.conj().T @ left.eigenvectors
     split[2] = overlap @ split[1] @ overlap.conj().T
     case.kernel.apply(
-        prepared, inverse[2:], case.table, np.arange(2, 4), split[2:], case.budget
+        prepared,
+        inverse[2:],
+        case.table,
+        np.arange(2, 4),
+        split[2:],
+        ApplyContext(case.budget),
     )
     assert_budget(actual, split, case.budget)
 
@@ -162,7 +174,9 @@ def test_noncontiguous_rows_of_same_timeline_are_independent(
     )
     prepared, inverse = prepare(case)
     actual = case.states.copy()
-    case.kernel.apply(prepared, inverse, case.table, np.arange(4), actual, case.budget)
+    case.kernel.apply(
+        prepared, inverse, case.table, np.arange(4), actual, ApplyContext(case.budget)
+    )
     expected = np.stack(
         [reference(case, row, state) for row, state in enumerate(case.states)]
     )
@@ -173,7 +187,9 @@ def test_tight_budget_preserves_complex_density(kernel_case: KernelCase) -> None
     case = replace(kernel_case, budget=1e-8)
     prepared, inverse = prepare(case)
     actual = case.states.copy()
-    case.kernel.apply(prepared, inverse, case.table, np.arange(4), actual, case.budget)
+    case.kernel.apply(
+        prepared, inverse, case.table, np.arange(4), actual, ApplyContext(case.budget)
+    )
     expected = np.stack(
         [reference(case, row, state) for row, state in enumerate(case.states)]
     )

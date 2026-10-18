@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource
 from zcu_tools.simulate.evolution.cache import PrepareCache
-from zcu_tools.simulate.evolution.kernel import SegmentTable
+from zcu_tools.simulate.evolution.kernel import ApplyContext, SegmentTable
 from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
 
 from ..contract.kernel_suite import synthetic_model
@@ -58,7 +58,9 @@ def playback(kernel, prepared, table, source, budget=1e-3, *, rows=None):
     if rows is None:
         rows = np.arange(len(table.timeline), dtype=np.int64)
     states = np.repeat(source.initial_density[None], len(rows), axis=0)
-    kernel.apply(prepared, np.arange(len(rows)), table, rows, states, budget)
+    kernel.apply(
+        prepared, np.arange(len(rows)), table, rows, states, ApplyContext(budget)
+    )
     return states
 
 
@@ -110,7 +112,9 @@ def test_scoped_preparation_is_bitwise_invariant_to_worker_and_key_order(source,
             kernel.prepare_keys(table, rows), table, rows, source, 1e-3
         )
         states = np.repeat(source.initial_density[None], len(rows), axis=0)
-        kernel.apply(prepared, np.arange(len(rows)), table, rows, states, 1e-3)
+        kernel.apply(
+            prepared, np.arange(len(rows)), table, rows, states, ApplyContext(1e-3)
+        )
         actual[rows] = states
 
     if order == "thread-handoff":

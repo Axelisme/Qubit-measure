@@ -17,6 +17,7 @@ import pytest
 import zcu_tools.simulate.evolution as evolution
 from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
+from zcu_tools.simulate.evolution.kernel import ApplyContext
 
 if TYPE_CHECKING:
     from zcu_tools.simulate.evolution import kernel
@@ -223,7 +224,9 @@ class KernelContract:
         )
         assert prepared.nbytes >= 0
         actual = case.states.copy()
-        case.kernel.apply(prepared, inverse, case.table, rows, actual, case.budget)
+        case.kernel.apply(
+            prepared, inverse, case.table, rows, actual, ApplyContext(case.budget)
+        )
         expected = np.stack(
             [reference(case, row, state) for row, state in enumerate(case.states)]
         )
@@ -278,7 +281,12 @@ class KernelContract:
                 chosen = subset[selected]
                 actual = case.states[chosen].copy()
                 case.kernel.apply(
-                    item.prepared, indices, case.table, chosen, actual, case.budget
+                    item.prepared,
+                    indices,
+                    case.table,
+                    chosen,
+                    actual,
+                    ApplyContext(case.budget),
                 )
                 fresh_keys, first, inverse = np.unique(
                     keys[selected], return_index=True, return_inverse=True
@@ -288,7 +296,12 @@ class KernelContract:
                 )
                 expected = case.states[chosen].copy()
                 case.kernel.apply(
-                    fresh, inverse, case.table, chosen, expected, case.budget
+                    fresh,
+                    inverse,
+                    case.table,
+                    chosen,
+                    expected,
+                    ApplyContext(case.budget),
                 )
                 np.testing.assert_array_equal(actual, expected)
 
@@ -305,7 +318,7 @@ class KernelContract:
         )
         whole = case.states.copy()
         whole_mask = case.kernel.apply(
-            prepared, inverse, case.table, rows, whole, case.budget
+            prepared, inverse, case.table, rows, whole, ApplyContext(case.budget)
         )
         assert isinstance(whole_mask, np.ndarray), "apply must return an exceeded mask"
         assert whole_mask.shape == (len(rows),)
@@ -318,7 +331,12 @@ class KernelContract:
         for subset in (rows[::2][::-1], rows[1::2][::-1]):
             chunk = split[subset].copy()
             mask = case.kernel.apply(
-                prepared, inverse[subset], case.table, subset, chunk, case.budget
+                prepared,
+                inverse[subset],
+                case.table,
+                subset,
+                chunk,
+                ApplyContext(case.budget),
             )
             assert isinstance(mask, np.ndarray), "apply must return an exceeded mask"
             assert mask.shape == (len(subset),)
@@ -364,7 +382,9 @@ class KernelContract:
             ),
         ):
             actual = states.copy()
-            case.kernel.apply(prepared, inverse, case.table, rows, actual, case.budget)
+            case.kernel.apply(
+                prepared, inverse, case.table, rows, actual, ApplyContext(case.budget)
+            )
             expected = np.stack(
                 [reference(case, row, state) for row, state in enumerate(states)]
             )
@@ -435,7 +455,7 @@ class KernelContract:
                     table,
                     selected,
                     expected,
-                    case.budget,
+                    ApplyContext(case.budget),
                 )
                 # Repeated reversed/non-contiguous applies may not consume or mutate
                 # the payload. Empty batches must also be harmless.
@@ -451,7 +471,7 @@ class KernelContract:
                         table,
                         selected[subset],
                         actual,
-                        case.budget,
+                        ApplyContext(case.budget),
                     )
                     if len(subset):
                         allowance = (

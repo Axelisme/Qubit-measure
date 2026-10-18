@@ -7,7 +7,7 @@ from typing import Literal
 import numpy as np
 import pytest
 import zcu_tools.simulate.evolution as evolution
-from zcu_tools.simulate.evolution.kernel import SegmentTable
+from zcu_tools.simulate.evolution.kernel import ApplyContext, SegmentTable
 
 from tests.simulate.evolution.contract.kernel_suite import (
     KernelCase,
@@ -161,7 +161,9 @@ def test_chained_bath_changes_and_split_restart(kernel_case: KernelCase):
     prepared, inverse = prepare(case)
     actual = case.states.copy()
     actual[1:] = 0
-    case.kernel.apply(prepared, inverse, case.table, np.arange(3), actual, case.budget)
+    case.kernel.apply(
+        prepared, inverse, case.table, np.arange(3), actual, ApplyContext(case.budget)
+    )
     expected = []
     previous = case.source.model(tuple(case.table.level[0]))
     state = case.states[0]
@@ -174,13 +176,23 @@ def test_chained_bath_changes_and_split_restart(kernel_case: KernelCase):
     assert_budget(actual, np.stack(expected), case.budget)
     split = case.states.copy()
     case.kernel.apply(
-        prepared, inverse[:1], case.table, np.array([0]), split[:1], case.budget
+        prepared,
+        inverse[:1],
+        case.table,
+        np.array([0]),
+        split[:1],
+        ApplyContext(case.budget),
     )
     left, right = (case.source.model(tuple(case.table.level[i])) for i in (0, 1))
     overlap = right.eigenvectors.conj().T @ left.eigenvectors
     split[1] = overlap @ split[0] @ overlap.conj().T
     case.kernel.apply(
-        prepared, inverse[1:], case.table, np.array([1, 2]), split[1:], case.budget
+        prepared,
+        inverse[1:],
+        case.table,
+        np.array([1, 2]),
+        split[1:],
+        ApplyContext(case.budget),
     )
     assert_budget(actual, split, 1e-8)
 
@@ -203,7 +215,7 @@ def test_missing_waveform_and_expansion_fail_explicitly():
             replace(case.table, flux_waveform=None),
             np.arange(3),
             case.states.copy(),
-            case.budget,
+            ApplyContext(case.budget),
         )
 
 

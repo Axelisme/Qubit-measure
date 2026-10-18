@@ -7,7 +7,7 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
-from ..kernel import Prepared, SegmentTable
+from ..kernel import ApplyContext, Prepared, SegmentTable
 from ..secular import ModelSource
 from . import gate_phase
 from ._gate_endpoints import build_endpoints
@@ -254,7 +254,7 @@ class GateCacheKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
         """Advance aligned densities in place using read-only prepared data.
 
@@ -264,6 +264,9 @@ class GateCacheKernel:
 
         Return an all-False bool mask aligned with rows; no post-apply check.
         """
+        if context.plan is not None:
+            raise ValueError("this kernel does not accept a row plan")
+        budget = context.budget
         _check_budget(budget)
         if not isinstance(prepared, _GatePrepared):
             raise ValueError("gate cache requires its own prepared payload")

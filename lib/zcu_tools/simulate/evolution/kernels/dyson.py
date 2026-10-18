@@ -7,7 +7,7 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
-from ..kernel import Prepared, SegmentTable
+from ..kernel import ApplyContext, Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
 from ._dyson_bound import accepts_population_bound
 from ._dyson_paths import build_shared_paths, contractible_modes
@@ -899,7 +899,7 @@ class DysonKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
         """Advance states in place; return a bool exceedance mask aligned with rows.
 
@@ -909,6 +909,9 @@ class DysonKernel:
         population block. Exceedance is not failure: retain the uncorrected
         output without retry. Numerical failure raises RuntimeError.
         """
+        if context.plan is not None:
+            raise ValueError("this kernel does not accept a row plan")
+        budget = context.budget
         if not np.isfinite(budget) or budget <= 0:
             raise ValueError("Dyson requires positive budget")
         if not isinstance(prepared, (_Prepared, _BoundInput)):

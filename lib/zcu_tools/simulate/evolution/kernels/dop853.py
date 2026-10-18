@@ -8,7 +8,7 @@ from numba import njit
 from numpy.typing import NDArray
 
 from .._envelope import sample_value
-from ..kernel import Prepared, SegmentTable
+from ..kernel import ApplyContext, Prepared, SegmentTable
 from ..secular import ModelSource
 from ._dop853 import tolerances
 from ._dop853_chain import run_chain, touching
@@ -232,7 +232,7 @@ class DOP853Kernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
         """Advance independent rows or consecutive same-timeline intervals.
 
@@ -267,6 +267,9 @@ class DOP853Kernel:
 
         Return an all-False bool mask aligned with rows; no post-apply check.
         """
+        if context.plan is not None:
+            raise ValueError("this kernel does not accept a row plan")
+        budget = context.budget
         controls = tolerances(budget)
         if not isinstance(prepared, _Prepared):
             raise ValueError("DOP853 requires its own prepared data")

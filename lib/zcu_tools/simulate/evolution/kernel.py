@@ -217,6 +217,24 @@ class RowPlan(Protocol):
 
 
 @dataclass(frozen=True)
+class ApplyContext:
+    """Evolve-level inputs that every apply call of one kernel family shares.
+
+    budget: positive absolute per-segment allowance.
+    plan: this family's RowPlan from dispatch, or None when dispatch made none.
+        Kernels that never receive a plan raise ValueError for a non-None plan;
+        kernels that need one raise ValueError for None.
+    """
+
+    budget: float
+    plan: RowPlan | None = None
+
+    def __post_init__(self) -> None:
+        if not np.isfinite(self.budget) or self.budget <= 0:
+            raise ValueError("apply budget must be finite and positive")
+
+
+@dataclass(frozen=True)
 class GuardPreparation:
     """Model-only preparation returned by a guard for this evolve's source/budget.
 
@@ -401,14 +419,14 @@ class Kernel(Protocol):
         table: SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
         """Advance complex128 states (len(rows),M,M) in place through rows.
 
         prepared is either model-only prepare data or a bind_input payload;
         the latter requires the same input density supplied to bind_input.
-        key_index maps each row to its prepared entry. budget is the positive
-        absolute per-segment allowance. Called by a joblib worker thread;
+        key_index maps each row to its prepared entry. context supplies the
+        per-segment allowance and this family's optional dispatch plan. Called by a joblib worker thread;
         numba implementations must be nogil and single-threaded. Prepared
         data and table stay unchanged. Return a bool mask (len(rows),), aligned
         with rows: True marks a post-apply accuracy threshold exceedance, not

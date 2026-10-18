@@ -9,6 +9,7 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     kernel,
 )
+from zcu_tools.simulate.evolution.kernel import ApplyContext
 from zcu_tools.simulate.evolution.kernels.floquet import FloquetKernel
 
 
@@ -51,7 +52,7 @@ def test_long_periodic_frame_preserves_analytic_coherence(duration: float) -> No
     )
     actual = initial[None].copy()
     try:
-        floquet.apply(prepared, rows, table, rows, actual, 1e-3)
+        floquet.apply(prepared, rows, table, rows, actual, ApplyContext(1e-3))
     except RuntimeError as error:
         raise AssertionError(
             "Accepted long frame must integrate above roundoff"

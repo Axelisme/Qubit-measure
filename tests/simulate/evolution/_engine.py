@@ -13,7 +13,12 @@ from zcu_tools.simulate.evolution import (
     ModelSource,
     TimelineBatch,
 )
-from zcu_tools.simulate.evolution.kernel import GuardResult, Prepared, SegmentTable
+from zcu_tools.simulate.evolution.kernel import (
+    ApplyContext,
+    GuardResult,
+    Prepared,
+    SegmentTable,
+)
 
 from .contract.kernel_suite import synthetic_model
 
@@ -101,7 +106,9 @@ class RecordingKernel:
     ) -> Prepared | None:
         return None
 
-    def apply(self, prepared: Prepared, key_index, table, rows, states, budget):
+    def apply(
+        self, prepared: Prepared, key_index, table, rows, states, context: ApplyContext
+    ):
         self.calls.append((table, rows.copy(), states.copy()))
         if self.cancel is not None:
             self.cancel.set()

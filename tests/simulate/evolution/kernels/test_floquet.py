@@ -5,6 +5,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource, kernel
+from zcu_tools.simulate.evolution.kernel import ApplyContext
 
 from .._engine import RecordingKernel
 from ..contract.kernel_suite import (
@@ -128,7 +129,9 @@ def test_engine_reuses_guard_preparations_once_per_key(
         case.budget,
     )
     expected = case.source.initial_density[None].copy()
-    case.kernel.apply(prepared, rows, case.table, rows, expected, case.budget)
+    case.kernel.apply(
+        prepared, rows, case.table, rows, expected, ApplyContext(case.budget)
+    )
     np.testing.assert_allclose(
         actual.densities, np.repeat(expected, count, axis=0), atol=1e-13
     )
@@ -224,7 +227,7 @@ def test_full_micromotion_with_arbitrary_start_phase(kernel_case: KernelCase) ->
         keys, table, rows[representatives], source, case.budget
     )
     actual = case.states.copy()
-    case.kernel.apply(prepared, inverse, table, rows, actual, case.budget)
+    case.kernel.apply(prepared, inverse, table, rows, actual, ApplyContext(case.budget))
     expected = np.stack(
         [reference(case, r, state) for r, state in enumerate(case.states)]
     )
@@ -280,7 +283,9 @@ def test_probe_changes_coherent_state_and_matches_strict_reference(
         keys, case.table, rows[representatives], case.source, case.budget
     )
     actual = case.states.copy()
-    case.kernel.apply(prepared, inverse, case.table, rows, actual, case.budget)
+    case.kernel.apply(
+        prepared, inverse, case.table, rows, actual, ApplyContext(case.budget)
+    )
     expected = np.stack(
         [reference(case, r, state) for r, state in enumerate(case.states)]
     )
@@ -352,7 +357,7 @@ def test_probe_guard_failure_uses_period_propagation_in_floquet_frame(
         keys, table, rows[representatives], source, case.budget
     )
     actual = case.states.copy()
-    case.kernel.apply(prepared, inverse, table, rows, actual, case.budget)
+    case.kernel.apply(prepared, inverse, table, rows, actual, ApplyContext(case.budget))
     expected = np.stack(
         [reference(case, r, state) for r, state in enumerate(case.states)]
     )
@@ -407,9 +412,13 @@ def test_unused_zero_port_preserves_acceptance_and_density(
         actual_payload = actual.preparations[0].prepared
         assert prepared.nbytes == actual_payload.nbytes > expected_payload.nbytes
         before_bytes = prepared.nbytes
-        floquet.apply(expected_payload, inverse, case.table, rows, baseline, budget)
+        floquet.apply(
+            expected_payload, inverse, case.table, rows, baseline, ApplyContext(budget)
+        )
         for payload, states in ((prepared, result), (actual_payload, handed_off)):
-            exceeded = floquet.apply(payload, inverse, table, rows, states, budget)
+            exceeded = floquet.apply(
+                payload, inverse, table, rows, states, ApplyContext(budget)
+            )
             assert not exceeded.any()
             np.testing.assert_allclose(states, baseline, rtol=0, atol=1e-13)
         assert prepared.nbytes == before_bytes
@@ -452,7 +461,7 @@ def test_micromotion_bath_matches_independent_lindblad_jumps(
     )
     prepared = case.kernel.prepare(keys, table, rows[first], source, case.budget)
     actual = case.states.copy()
-    case.kernel.apply(prepared, inverse, table, rows, actual, case.budget)
+    case.kernel.apply(prepared, inverse, table, rows, actual, ApplyContext(case.budget))
     expected = np.stack(
         [reference(case, r, state) for r, state in enumerate(case.states)]
     )
@@ -469,7 +478,9 @@ def test_micromotion_bath_matches_independent_lindblad_jumps(
     long_case = replace(case, table=long_table)
     prepared = case.kernel.prepare(keys, long_table, rows[first], source, case.budget)
     actual = case.states.copy()
-    case.kernel.apply(prepared, inverse, long_table, rows, actual, case.budget)
+    case.kernel.apply(
+        prepared, inverse, long_table, rows, actual, ApplyContext(case.budget)
+    )
     expected = np.stack(
         [reference(long_case, r, state) for r, state in enumerate(case.states)]
     )
