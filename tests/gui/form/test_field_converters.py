@@ -154,6 +154,29 @@ def test_converter_failure_keeps_selection_structure_input_and_notifications(def
     assert events == []
 
 
+def test_expected_refusal_is_named_and_unexpected_callable_value_error_propagates():
+    assert hasattr(api, "FormConversionError"), (
+        "Expected selection refusals need a named boundary"
+    )
+    expected = ValueError("provider failure")
+
+    def convert(old, selection, context):
+        if selection == {"kind": "second"}:
+            context.evaluate(("amount",))
+        raise expected
+
+    model = converted_model(convert)
+    state = api.FormState(
+        api.FormInput(model, {"value": {"kind": "first", "amount": {"expr": "1 / 0"}}})
+    )
+    with pytest.raises(api.FormConversionError, match="participating"):
+        state.write({("value",): {"kind": "second"}}, api.FormEnv())
+    with pytest.raises(ValueError, match="provider failure") as caught:
+        state.write({("value",): {"kind": "first"}}, api.FormEnv())
+    assert caught.value is expected
+    assert state.input.data == {"value": {"kind": "first", "amount": {"expr": "1 / 0"}}}
+
+
 def test_local_converter_hook_overrides_inherited_hook_and_field_metadata():
     assert hasattr(api, "InputConverter"), "Fields need a single local converter"
     events = []
