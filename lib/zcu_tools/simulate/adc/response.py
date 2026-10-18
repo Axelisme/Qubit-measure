@@ -7,7 +7,7 @@ from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 
 from ._constant import ConstantLine
-from .model import ReadoutModel, RealArray, readonly_array
+from .model import ReadoutModel, RealArray, readonly_array, readout_model_key
 from .readout_batch import ConditionalSums, ReadoutBatch
 from .request import (
     ConditionalResponse,
@@ -105,7 +105,7 @@ class ConditionalReadout:
             raise ValueError("sample counts must match across grid contents")
         if batch.include_traces and np.any(counts != counts[0]):
             raise ValueError("dense traces require equal sample counts across reads")
-        model_key = _model_key(batch.model)
+        model_key = readout_model_key(batch.model)
         solver = (
             self
             if batch.model is self.model
@@ -553,26 +553,6 @@ class ConditionalReadout:
             raise RuntimeError("readout produced invalid probabilities")
         if not np.allclose(probabilities.sum(axis=0), 1, rtol=0, atol=1e-8):
             raise RuntimeError("readout probabilities do not sum to one")
-
-
-def _model_key(model: ReadoutModel) -> tuple[object, ...]:
-    """Lossless numeric content key; model identity alone may name many DC points."""
-    receiver = model.receiver
-    return (
-        model.identity,
-        model.state_labels,
-        model.reference_frequency_ghz,
-        model.frequencies_ghz.tobytes(),
-        model.kappa_internal_per_ns.tobytes(),
-        model.kappa_external_per_ns.tobytes(),
-        model.rates_per_ns.tobytes(),
-        model.mismatch_phase_rad.tobytes(),
-        receiver.time_of_flight_ns,
-        receiver.gain,
-        receiver.phase_rad,
-        receiver.offset.tobytes(),
-        receiver.noise_covariance.tobytes(),
-    )
 
 
 def _pulse_key(pulses: tuple[ReadoutPulse, ...]) -> tuple[object, ...]:
