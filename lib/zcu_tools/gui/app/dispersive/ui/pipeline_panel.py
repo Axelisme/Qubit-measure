@@ -372,7 +372,8 @@ class PipelinePanelWidget(QWidget):
             return
         try:
             self._ctrl.load_fit_inputs(path)
-        except Exception as exc:  # noqa: BLE001 — surface to the panel
+        # tolerated: Keep arbitrary params I/O failures inside the Qt callback.
+        except Exception as exc:  # noqa: BLE001
             self._warn("Load inputs failed", friendly_io_message("Load", path, exc))
             return
         inputs = self._ctrl.state.fit_inputs
@@ -408,7 +409,8 @@ class PipelinePanelWidget(QWidget):
                 name = self._ctrl.load_onetone(
                     req.filepath, transpose_axes=req.transpose_axes
                 )
-            except Exception as exc:  # noqa: BLE001 — surface to the panel
+            # tolerated: Isolate arbitrary loader/provider failures from Qt.
+            except Exception as exc:  # noqa: BLE001
                 self._warn(
                     "Load one-tone failed",
                     friendly_io_message("Load", req.filepath, exc),
@@ -758,6 +760,7 @@ class PipelinePanelWidget(QWidget):
     def _on_export(self) -> None:
         try:
             path = self._ctrl.export_params()
+        # tolerated: Keep arbitrary params write failures inside the Qt callback.
         except Exception as exc:  # noqa: BLE001
             self._warn(
                 "Export failed", friendly_io_message("Export", "params.json", exc)

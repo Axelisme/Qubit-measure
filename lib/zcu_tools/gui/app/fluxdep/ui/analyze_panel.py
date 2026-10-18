@@ -857,7 +857,8 @@ class AnalyzePanelWidget(QWidget):
     def _on_export(self) -> None:
         try:
             path = self._ctrl.export_params()
-        except Exception as exc:  # noqa: BLE001 — surface to the panel
+        # tolerated: Isolate arbitrary export failures and show failed Qt status.
+        except Exception as exc:  # noqa: BLE001
             self._status.setText("Export failed.")
             self._status.setToolTip("")
             self._show_message("Export failed", friendly_fit_message("Export", exc))
