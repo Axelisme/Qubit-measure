@@ -4,9 +4,10 @@ Controller owns accepted-run knobs and their fixed capture. Window supplies that
 input when switching/reloading; this coordinator never reads Controller, source,
 hardware or storage. It retains inactive parsed drafts in RAM, swaps attachments
 only after both candidate panels build, and delegates compatibility to FormState.
-The existing memento stays a single current plan/knobs snapshot, not a run or a
-new persistence format. Local unparsed renderer text is not an inactive draft.
+The memento stays a single current plan/knobs snapshot, not a run. Local unparsed renderer text is not an inactive draft.
 """
+
+from dataclasses import dataclass
 
 from qtpy.QtWidgets import QWidget
 
@@ -15,10 +16,23 @@ from zcu_tools.gui.app.workflows.persistence import (
     WorkflowInputRestoreReport,
     WorkflowInputSnapshot,
 )
-from zcu_tools.gui.form import FormEnv, FormModel, FormState
+from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormState
 
 from .attachment import Attachment
 from .catalog import WorkflowCatalog
+
+
+@dataclass(frozen=True)
+class WorkflowDraft:
+    """Detached parsed drafts restored by the same rules as persistent input.
+
+    plan and knobs are authored FormInputs with their original declarations and
+    independent selection overrides. Reload/switching may migrate their leaves
+    to new declarations and report discarded paths. No renderer text is saved.
+    """
+
+    plan: FormInput[FormModel]
+    knobs: FormInput[FormModel]
 
 
 class WorkflowForms[C]:
@@ -42,7 +56,7 @@ class WorkflowForms[C]:
         """
         self.catalog = catalog
         self.attachment = catalog.select()
-        self._drafts: dict[str, WorkflowInputSnapshot] = {}
+        self._drafts: dict[str, WorkflowDraft] = {}
         self.plan, self.knobs, _ = self.build_panels(self.attachment, env, parent)
 
     def build_panels(
@@ -50,11 +64,14 @@ class WorkflowForms[C]:
         attachment: Attachment[C],
         env: FormEnv,
         parent: QWidget,
-        snapshot: WorkflowInputSnapshot | None = None,
+        snapshot: WorkflowDraft | None = None,
     ) -> tuple[
         WorkflowPlanPanel, WorkflowFormPanel[FormModel], WorkflowInputRestoreReport
     ]:
-        """Construct a complete candidate pair, overlaying compatible parsed input.
+        """Construct candidate defaults and migrate compatible RAM draft leaves.
+
+        Declaration changes may discard raw leaves or selection overrides;
+        return all discarded paths without running converters or options hooks.
 
         env is fixed by Window. snapshot None means fresh defaults. Defaults,
         source and compatibility errors propagate; unpublished panels are closed
@@ -69,8 +86,8 @@ class WorkflowForms[C]:
             report = WorkflowInputRestoreReport((), ())
             if snapshot is not None:
                 report = WorkflowInputRestoreReport(
-                    plan.state.write_compatible(snapshot.plan, env),
-                    knobs.state.write_compatible(snapshot.knobs, env),
+                    plan.state.restore_input(snapshot.plan, env),
+                    knobs.state.restore_input(snapshot.knobs, env),
                 )
             for panel in (plan, knobs):
                 panel.state.reset(panel.state.input)
@@ -85,22 +102,24 @@ class WorkflowForms[C]:
             raise
 
     def select(
-        self, name: str, snapshot: WorkflowInputSnapshot, parent: QWidget
-    ) -> None:
+        self, name: str, snapshot: WorkflowDraft, parent: QWidget
+    ) -> WorkflowInputRestoreReport:
         """Save current parsed drafts and select name with the same fixed capture.
 
         Window checks idle admission and supplies its authoritative current knobs
         input in snapshot. Unknown names raise before mutation. Inactive drafts
-        restore by current models; candidate errors leave current panels intact.
+        migrate by current models, returning discarded leaves/overrides for
+        display. Candidate errors leave current panels intact.
         Window owns removal/close of the old views after this succeeds.
         """
         attachment = self.catalog.select(name)
-        plan, knobs, _ = self.build_panels(
+        plan, knobs, report = self.build_panels(
             attachment, self.plan.env, parent, self._drafts.get(name)
         )
         self._drafts[self.attachment.name] = snapshot
         self.attachment = attachment
         self.plan, self.knobs = plan, knobs
+        return report
 
     def prepare(self, env: FormEnv, parent: QWidget) -> None:
         """Replace selected drafts with fresh defaults in Window's explicit capture.
@@ -114,7 +133,7 @@ class WorkflowForms[C]:
     def reload(
         self,
         catalog: WorkflowCatalog[C],
-        snapshot: WorkflowInputSnapshot,
+        snapshot: WorkflowDraft,
         parent: QWidget,
     ) -> WorkflowInputRestoreReport:
         """Replace current models with compatible drafts, retaining fixed capture.
@@ -122,7 +141,9 @@ class WorkflowForms[C]:
         Window owns source loading, admission and failed-reload Start blocking.
         Retain a still-declared name; otherwise select the new catalog's default.
         Build both panels before publication; candidate failures keep old drafts.
-        Inactive RAM drafts restore lazily against new models when selected.
+        Removed/incompatible leaves and overrides may be discarded and are
+        returned for display. Inactive RAM drafts migrate lazily against new
+        models when selected. No converter or options hook runs in migration.
         """
         name = self.attachment.name if self.attachment.name in catalog.names else None
         attachment = catalog.select(name)
@@ -134,24 +155,25 @@ class WorkflowForms[C]:
         return report
 
     def restore(self, snapshot: WorkflowInputSnapshot) -> WorkflowInputRestoreReport:
-        """Overlay the existing current memento atomically on fresh model defaults.
+        """Restore both drafts recursively against fresh current defaults.
 
-        Window checks idle admission. Shared FormState owns compatibility and
-        retains expression input, even if evaluation is invalid. Failures leave
-        current drafts intact. No catalog selection or source capture occurs.
+        Window checks idle admission. Build both candidates and dropped reports
+        before publishing either. Wire/defaults/provider failures leave both
+        panels untouched. No converter or source capture runs here.
         """
-        plan = FormState[FormModel](
-            self.attachment.plan_model.default_input(self.plan.env)
+        plan, knobs = snapshot.inputs(
+            self.attachment.plan_model, self.attachment.knobs_model, self.plan.env
         )
-        knobs = FormState[FormModel](
+        plan_state = FormState(self.attachment.plan_model.default_input(self.plan.env))
+        knobs_state = FormState(
             self.attachment.knobs_model.default_input(self.knobs.env)
         )
         report = WorkflowInputRestoreReport(
-            plan.write_compatible(snapshot.plan, self.plan.env),
-            knobs.write_compatible(snapshot.knobs, self.knobs.env),
+            plan_state.restore_input(plan, self.plan.env),
+            knobs_state.restore_input(knobs, self.knobs.env),
         )
-        self.plan.state.reset(plan.input)
-        self.knobs.state.reset(knobs.input)
+        self.plan.state.reset(plan_state.input)
+        self.knobs.state.reset(knobs_state.input)
         for panel in (self.plan, self.knobs):
             panel.editor.refresh(panel.env)
             panel.editor.discard_local_text()

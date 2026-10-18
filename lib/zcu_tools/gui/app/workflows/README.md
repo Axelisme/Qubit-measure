@@ -1,6 +1,6 @@
 # gui/app/workflows — Workflow host
 
-**Last updated:** 2026-10-19，完整 native tunables Apply
+**Last updated:** 2026-10-19，共用遞迴還原、FormInput JSON 與完整 native tunables Apply
 
 ## 註冊與組裝
 
@@ -28,19 +28,19 @@ Pause 保留 operation、RUN lease、progress、plan、input capture 與 Plots�
 
 ## Input 與 reload
 
-Wire 5 的 `workflow.form` 回 input／values／errors 與 native revision，不帶 schema。`workflow.describe_form(form, path, run_id, batch)` 沿同一 target selection 和固定 env，在同一 owner turn 回 candidate observation 與單層 description。Root path 是 `[]`，其他 path 使用 str 欄位名與 FixedList 的 int index。Read 納入 local parse errors。Batch preview 只讀 parsed candidate，不提交。
+Wire 5 的 `workflow.form` 回 input／values／errors 與 native revision，不帶 schema。`workflow.describe_form(form, path, run_id, batch)` 沿同一 target selection 和固定 env，在同一 owner turn 回 candidate observation 與單層 description。Root path 是 `[]`，其他 path 使用 str 欄位名與 model-list 的 int index。Read 納入 local parse errors。Batch preview 只讀 parsed candidate，不提交。
 
 Sweep 表單沿用 `gui.form_adapter` 的 Range／Center × Expts／Step input 與 sweep row commands，Qt 只派發 owner 指令。Step 不整除時顯示共用 Form 的有效端點，不自行換算。Memento 保存 active 表示與 expression，Prepare forms 恢復 fresh defaults。Description 的 field commands 保留 target 與參與 inputs；selector 只控制 dropdown 呈現。
 
 Description 的 options 只帶 value／label／commands，selected index 由 core 判定，children 保留完整 path。can_expand 只表示結構可展開，不保證 children 非空。selection_fixed 表示本層只有一個非 null selector 分支，不凍結內層 choices。null 只控制啟停，不算另一個分支，停用時也一樣。fixed／fixed_value 表示完整值固定。Wire 直接投影 core 的這些能力，不重算規則。未知、inactive 或穿入 whole leaf 的 path 以 FormPathError 回報。RPC 將它投影為 invalid_params／form_path，data 帶完整 form_path。其他 ValueError 保留 controller_error。
 
-FixedList 的 description 直接投影 elements，包含原始 index、captured name 與 typed path。GUI／RPC 繼續用 typed paths 編輯共同草稿。Apply 轉換完整 native model，list 隨 model 提交，不攤平 preview leaves、不字串化 index。Engine 驗證完整宣告型別並整體替換，每次成功都增加 revision，同值也一樣。Journal append 成功後才發布值，再接受草稿與 base。當前 step capture 不變。見 ADR-0062、ADR-0079。
+Model-list 的 description 直接投影 elements，包含原始 index、captured name 與 typed path。GUI／RPC 繼續用 typed paths 編輯共同草稿。Apply 轉換完整 native model，list 隨 model 提交，不攤平 preview leaves、不字串化 index。Engine 驗證完整宣告型別並整體替換，每次成功都增加 revision，同值也一樣。Journal append 成功後才發布值，再接受草稿與 base。當前 step capture 不變。見 ADR-0062、ADR-0079。
 
-Memento 2 保存既有 tagged ref／inline input，格式未變。舊版沿既有 codec／caretaker 拒絕，不 migration 或雙讀。`defaults(env)` 只建 fresh 初值，沒有 previous。相容 saved leaves 的 overlay 仍由 host 完成。
+Memento 只保留 plan 與 knobs，各欄直接使用固定 FormInput `{data,selections}` JSON。Restore 先依現行 defaults 建立兩個候選，再以 Core 的 `restore_input` 遞迴還原。兩個候選都成功後才重設 input/base。沒有版本或型別 identity，不雙讀舊格式。新欄位用 defaults，移除欄位、形狀不符與非法 selection 列 dropped 並顯示。壞 JSON 或格式不符時，共用 caretaker 顯錯並以 defaults 開啟，不備份。Provider／restore 故障仍傳播。
 
-`WorkflowForms` 保留各名稱的 parsed RAM drafts，建好候選 panels 後才發布。Prepare 用新 capture 重建 defaults。`SingleFileCaretaker` 保存 parsed FormInput，包括 expression，不保存 renderer-local 未解析文字、native run 或硬體。從 Start 到 terminal delivery，保存的 knobs 來自 run 的 binding，包括還沒 Apply 的 parsed 編輯；terminal 之後來自 Start knobs。`--clean` 只略過啟動讀取，正常 close 仍保存。啟動時 session 是 EMPTY、沒有 captured library，所以存檔裡的 module ref 名稱會被丟棄，其他相容欄位照常還原，訊息列逐一顯示 `Discarded plan: …` 或 `Discarded knobs: …`。
+`WorkflowForms` 用 `WorkflowDraft` 保留各名稱的 parsed RAM FormInputs。Switch/reload 與啟動共用 Core 還原，不呼叫 converter 或 options hook。兩個 candidate panels 建好後才發布。Prepare 用新 capture 重建 defaults。Caretaker 不保存 renderer-local 未解析文字、native run 或硬體。從 Start 到 terminal delivery，保存的 knobs 來自 run binding，包括尚未 Apply 的 parsed 編輯；terminal 之後來自 Start knobs。`--clean` 只略過啟動讀取，正常 close 仍保存。啟動 session 是 EMPTY，還原不查 library。Ref 名稱保留，缺 library 或來源錯誤由一般驗證呈現並擋 Run。已 inline 的原稿不從改過的 library 重建。
 
-Reload 只允許 idle/terminal，保留 session/services/controller、run binding 與既有 captures。相容 input 保留，removed selection 改選清單第一項。Import/panel 失敗保留舊 panels/drafts，但阻擋 Start 直到 retry 成功；fixed-source 改動要求 restart。
+Reload 只允許 idle/terminal，保留 session/services/controller、run binding 與既有 captures。相容 input 保留，無效 selection 改用現行 defaults 並列入 dropped。Import/panel 失敗保留舊 panels/drafts，但阻擋 Start 直到 retry 成功；fixed-source 改動要求 restart。
 
 ## Plots 與 remote
 

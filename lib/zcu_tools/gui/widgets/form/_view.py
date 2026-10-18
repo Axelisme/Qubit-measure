@@ -1,5 +1,6 @@
 """Convert core metadata and preview values to one layer of Qt row data."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -39,6 +40,8 @@ class FieldView:
     expression permits explicit Expr input. options/selected are the core's
     detached selector list and matching index (None for no list/no match).
     branch identifies the actual child structure independently of selection.
+    selection/selection_present describe the explicit selector override, falling
+    back to raw input only when no override exists.
     raw/present describe authored input; a missing fixed leaf displays its
     fixed value without writing it. value/has_value identify a preview leaf.
     decimals rounds display only. fixed marks a declaration-fixed scalar or
@@ -60,6 +63,8 @@ class FieldView:
     expression: bool
     options: tuple[FormOptionDescription, ...] | None
     selected: int | None
+    selection: JsonValue
+    selection_present: bool
     branch: JsonValue
     raw: JsonValue
     present: bool
@@ -103,11 +108,16 @@ def _control_presentation(
 
 
 def project_field(
-    field: FormFieldDescription, data: dict[str, JsonValue], preview: FormPreview
+    field: FormFieldDescription,
+    data: dict[str, JsonValue],
+    preview: FormPreview,
+    selections: Mapping[FormWritePath, JsonValue],
 ) -> FieldView:
     """Translate field's core metadata to controls using current data and preview.
 
-    data is the full detached input tree, preview the owner's full evaluation.
+    data is the full detached input tree, preview the owner's full evaluation,
+    and selections the detached explicit selector overrides. Unmatched selectors
+    display the override rather than the independently preserved raw child input.
     No validation, option matching, annotation resolution or defaulting occurs.
     Hidden metadata must be filtered by the caller. Only display categories
     are translated; the core decides active children and selected options.
@@ -143,6 +153,8 @@ def project_field(
         expression=field.expression and not (field.fixed or field.readonly),
         options=options,
         selected=field.selected,
+        selection=selections.get(field.path, current),
+        selection_present=field.path in selections or present,
         branch=field.branch,
         raw=current if present or not field.fixed else field.fixed_value,
         present=present,

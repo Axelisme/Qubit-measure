@@ -18,6 +18,7 @@ from zcu_tools.gui.session.types import ParameterContext
 
 from ..adapter import AdapterGuide, AnalysisMode
 from ..writeback import WritebackDraft
+from .persistence_types import PersistedTab
 from .plot_lifecycle import release_retired_plots
 from .ports import (
     AnalysisPaneSnapshot,
@@ -117,8 +118,8 @@ class TabService:
 
     def get_snapshot(self, tab_id: str) -> TabSnapshot:
         """Build the immutable full render model for one tab (all live fields
-        populated). The persist/restore form of ``TabSnapshot`` is produced
-        elsewhere (codec / restore) with the live fields left empty."""
+        populated). cfg_input is raw live data. Persistence/restore uses the
+        separate PersistedTab FormInput JSON contract."""
         tab = self._state.get_tab(tab_id)
         ctx = self._state.session_env
         is_running = self._state.is_tab_running(tab_id)
@@ -195,13 +196,13 @@ class TabService:
     def new_tab(
         self,
         adapter_name: str,
-        from_dict: TabSnapshot | None = None,
+        from_dict: PersistedTab | None = None,
     ) -> str:
         """Create a tab form with one fixed source snapshot and fresh defaults.
 
         Defaults use current global aliases. Unresolved consumed fields may make
         the form Invalid without blocking tab creation. from_dict optionally
-        supplies detached cfg_input JSON to overlay via write_compatible; dropped
+        supplies PersistedTab shared FormInput JSON for recursive restore; dropped
         paths are available through dropped_input_paths. Source captures and pane
         results are not restored. Failed preparation publishes no partial tab.
         """
@@ -223,7 +224,7 @@ class TabService:
             tab_id,
             make_form,
             capture=self._form_sources,
-            initial=from_dict.cfg_input if from_dict is not None else None,
+            initial=from_dict.form_input if from_dict is not None else None,
         )
         self._state.add_tab(
             tab_id,

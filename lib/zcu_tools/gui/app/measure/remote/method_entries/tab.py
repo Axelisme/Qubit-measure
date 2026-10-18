@@ -258,11 +258,27 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         ),
     ),
     method_entry(
+        "tab.read_elements",
+        "tab:h_tab_read_elements",
+        MethodSpec(
+            5.0,
+            "Read every model-list element in one owner turn: original index, name, "
+            "authored input, available canonical preview leaves and directed errors. "
+            "Invalid elements never hide siblings. Independent of participants/picker; "
+            "no converter, source refresh, cfg lowering or UI focus. Readonly and busy-safe.",
+            (
+                required_string("tab_id"),
+                required_json("path", "Nonempty typed model-list path"),
+            ),
+            readonly=True,
+        ),
+    ),
+    method_entry(
         "tab.read_module",
         "tab:h_tab_read_module",
         MethodSpec(
             5.0,
-            "Read {value, mode, source} for one str-segment core module path from fixed "
+            "Read {value, mode, source} for one typed core module path from fixed "
             "Open/Reset sources. Key mode reads the captured library; inline mode "
             "evaluates only this module. Other invalid fields do not block reads. "
             "No native cfg or extras lowering, mutation or source refresh occurs. "
@@ -272,7 +288,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ParamSpec(
                     "field",
                     JsonType.ARRAY,
-                    description="Nonempty str names; int indexes unsupported",
+                    description="Nonempty str field names and int model-list indexes",
                 ),
             ),
             readonly=True,
@@ -283,7 +299,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:h_tab_use_inline",
         MethodSpec(
             5.0,
-            "Convert one str-segment core module path to inline input through guarded "
+            "Convert one typed core module path to inline input through guarded "
             "option command. Copy a key from the fixed captured library. Preserve "
             "locks. Existing inline is a guarded no-op. Disabled or unresolved "
             "modules fail; select an Inline option to use template/type defaults. "
@@ -295,7 +311,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ParamSpec(
                     "field",
                     JsonType.ARRAY,
-                    description="Nonempty str names; int indexes unsupported",
+                    description="Nonempty str field names and int model-list indexes",
                 ),
             ),
         ),

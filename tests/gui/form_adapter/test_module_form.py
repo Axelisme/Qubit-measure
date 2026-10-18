@@ -367,8 +367,12 @@ def test_tagged_waveform_name_is_key_only_in_description_result_defaults_and_res
     assert isinstance(errors, FormErrors)
     assert errors.messages == {("waveform", "name"): "Input should be a valid string"}
     restored = FormState(form.input_from_spec(spec, env))
-    assert restored.write_compatible(state.input.data, env) == (("waveform", "name"),)
-    assert result_spec(form, restored, env).waveform == "$missing.value"
+    assert (
+        restored.restore_input(FormInput(restored.input.model, state.input.data), env)
+        == ()
+    )
+    assert restored.input.data == state.input.data
+    assert isinstance(restored.result(env), FormErrors)
 
 
 @pytest.mark.parametrize("missing", ["gen_ch", "ro_ch"])

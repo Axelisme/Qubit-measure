@@ -799,8 +799,8 @@ class FieldRow:
     ) -> None:
         """Show options and select the input's; list its commands as actions.
 
-        A present input that matches no option gets a selected missing item;
-        an unfilled one selects nothing.
+        A present selection that matches no option gets a selected missing
+        item; an unfilled one selects nothing. Raw child input is independent.
         """
         widget = self.input
         if not isinstance(widget, QComboBox):
@@ -810,8 +810,8 @@ class FieldRow:
             (option.label, option.value) for option in options
         ]
         selected = -1 if field.selected is None else field.selected
-        if field.selected is None and field.present:
-            items.append((_missing_text(field.raw), field.raw))
+        if field.selected is None and field.selection_present:
+            items.append((_missing_text(field.selection), field.selection))
             selected = len(items) - 1
         shown = [
             (widget.itemText(i), widget.itemData(i)) for i in range(widget.count())

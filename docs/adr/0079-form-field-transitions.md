@@ -63,9 +63,15 @@ Gauss length=0.8、sigma=0.2 切 Drag 時保留 length／sigma，delta／alpha �
 
 ### 保存與還原
 
-保存內容包括每個欄位的 selection／branch 與原始 input，含 expression 和未完成草稿。還原從可信型別註釋與宣告重建結構，再填回原稿。不執行 converter，不序列化 callable 或動態 class，不另造 schema 語言。
+FormInput 的 JSON 固定為 `{data, selections}`。data 保存 raw input，selections 是 `[{path, value}]`，path 保留字串與整數。沒有 override 時仍寫空 list。真實表單欄位在 data 內，不與兩個外層名稱衝突。不保存版本、型別 identity、domain metadata、callable 或動態 class。Host 只保留必要的表單容器，不再包一層版本。舊 raw-only 或 versioned 格式不雙讀。
 
-還原依現行 annotation 與存檔的名稱、形狀遞迴；list 長度與位置沿存檔，不比固定 identity。不相符欄位列入 dropped。使用者於 2026-10-18 要求「還有版本？太複雜了。我需要更簡單的機制」，看過遞迴規則後確認「好，可以」。Ref→inline 後保存的草稿，還原時保留當時 inline branch 與原稿，不從已修改的 library 重新複製。
+啟動讀檔、source reload 與 RAM switching 共用 `FormState.restore_input`。Model 按現行同名欄位遞迴，缺值用 defaults，多出欄位列 dropped。List 按位置遞迴，長度照存檔。Union／Literal 的 selection 仍為 annotation 接受的選項就保留，否則用 defaults 並列 dropped。沒有 discriminator 的 union 不猜 branch，raw 照搬。葉欄位保留 expression、缺席與 invalid raw，交一般驗證處理。形狀不符的內容丟棄並列 dropped，host 將清單顯示給使用者。還原與 Reset 不走普通 mutation 的 owner input-change 檢查。
+
+還原不執行 converter 或 options hook，也不讀 library。一般驗證檢查明確 selection override 的當前 hook membership。沒有 override 的 raw branch 不因選單未列出它而失效。Ref 不存在或 family 不符時，adapter 的一般驗證在欄位顯示錯誤，保留草稿並擋 Run。已 inline 的原稿不要求原 ref 仍存在，也不從改過的 library 重新複製。
+
+JSON 損壞或不符固定 FormInput 格式時，共用 caretaker 顯示錯誤並以 defaults 開啟，不備份。之後依原有時機正常保存。Provider 與其他 restore 故障仍傳播，read I/O 故障沿既有 error outcome，不轉譯成 JSON 格式錯誤。見 [[0063]]。
+
+使用者於 2026-10-18 要求簡化保存還原：「還有版本？太複雜了。我需要更簡單的機制」。看過依名與形狀的遞迴規則後回覆「好，可以」，並選擇固定 data／selections 兩欄的 JSON 方案。
 
 ### 固定具名元素與參與清單
 

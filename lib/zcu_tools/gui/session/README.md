@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-18，Inspect 完整表單草稿的 unsaved 判斷
+**Last updated:** 2026-10-18，共用 codec 格式錯誤與 defaults 啟動
 
 # gui/session/ — 量測 session core
 
@@ -34,6 +34,10 @@ DeviceState.info 與 ValueSourceBinder 的 device sources 是已發布 cache，�
 
 `persistence.py` 是 app-neutral、強型別的 single-file caretaker；app 注入 codec 並保留
 schema/version/trigger policy，shared 層不依賴 Pydantic、Qt、cfg 或 app module。
+JSON／UTF-8 或 codec 格式錯誤時，caretaker 以 defaults 開啟，透過
+`RestoreOutcome.load_error` 交給 host 顯示。載入不改寫或備份原檔，正常保存時機不變。
+Provider 和其他 restore 故障仍傳播。FormInput 的啟動、RAM 與 source reload
+使用同一遞迴還原，見 ADR-0063、ADR-0079。
 
 ```
 session/

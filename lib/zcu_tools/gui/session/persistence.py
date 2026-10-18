@@ -23,7 +23,11 @@ class PersistenceError(RuntimeError):
 
 
 class SnapshotCodec(Protocol[StateT]):
-    """App-owned snapshot schema boundary."""
+    """App-owned snapshot schema boundary.
+
+    decode raises ValueError for incompatible persisted data. Unexpected provider
+    or programming failures must use other exception types and propagate.
+    """
 
     def default(self) -> StateT: ...
     def decode(self, raw: object) -> StateT: ...
@@ -39,6 +43,13 @@ class SnapshotOriginator(Protocol[StateT, ReportT_co]):
 
 @dataclass(frozen=True)
 class RestoreOutcome(Generic[ReportT]):
+    """Completed originator restore and any recoverable startup failure.
+
+    report is the app-owned result of the installed state. load_error is None on
+    clean/missing/successful reads, otherwise the error the host must display;
+    invalid persisted data opens defaults without changing the original file.
+    """
+
     report: ReportT
     load_error: PersistenceError | None
 
@@ -51,7 +62,13 @@ def _safe_cache_root() -> Path:
 
 
 class SingleFileCaretaker(Generic[StateT, ReportT]):
-    """Load and atomically replace one JSON snapshot file."""
+    """Load and atomically replace one JSON snapshot file.
+
+    Invalid JSON/UTF-8 and codec ValueError open defaults with a visible error.
+    Loading never renames or rewrites the original file. Other provider/restore
+    failures propagate. Hosts display RestoreOutcome.load_error and own save
+    timing; recovered startup does not disable later flush.
+    """
 
     def __init__(
         self,
@@ -73,6 +90,13 @@ class SingleFileCaretaker(Generic[StateT, ReportT]):
         return self._path
 
     def restore_all(self, *, load: bool = True) -> RestoreOutcome[ReportT]:
+        """Restore persisted state or defaults and return the host display report.
+
+        load=False skips reading an existing file. Invalid persisted data opens
+        defaults without writing. Read I/O errors retain the existing
+        default/error policy.
+        Unclassified provider or originator failures propagate unchanged.
+        """
         logger.info("persistence restore: load=%s path=%s", load, self._path)
         if load:
             state, load_error = self._load()
@@ -111,17 +135,23 @@ class SingleFileCaretaker(Generic[StateT, ReportT]):
         try:
             if not self._path.exists():
                 return self._codec.default(), None
-            raw = json.loads(self._path.read_text(encoding="utf-8"))
-            return self._codec.decode(raw), None
-        except Exception as exc:
-            logger.warning(
-                "persistence load failed (%s); using defaults",
-                self._path,
-                exc_info=exc,
-            )
+            text = self._path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            return self._codec.default(), self._load_error(exc)
+        except OSError as exc:
+            logger.warning("persistence read failed: %s", self._path, exc_info=exc)
             return self._codec.default(), PersistenceError(
                 f"Failed to read GUI state ({exc}); using defaults"
             )
+        try:
+            return self._codec.decode(json.loads(text)), None
+        except ValueError as exc:
+            return self._codec.default(), self._load_error(exc)
+
+    def _load_error(self, cause: Exception) -> PersistenceError:
+        error = PersistenceError(f"Failed to read GUI state ({cause}); using defaults")
+        logger.warning("%s", error)
+        return error
 
 
 __all__ = [

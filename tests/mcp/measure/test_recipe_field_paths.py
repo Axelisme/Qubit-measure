@@ -39,7 +39,7 @@ class CarrierGui(LookbackGui):
         return super().__call__(method, params)
 
 
-def test_read_module_forwards_str_segments_and_rejects_unsupported_indexes(
+def test_read_module_forwards_typed_segments_without_name_or_dotted_conversion(
     tmp_path: Path,
 ) -> None:
     with recipe_client(tmp_path, CarrierGui()) as client:
@@ -51,9 +51,14 @@ def test_read_module_forwards_str_segments_and_rejects_unsupported_indexes(
             ("tab.read_module", {"tab_id": "t", "field": ["0"]})
         ]
         before = len(client.transport.sent)
-        with pytest.raises(ValueError, match="str|index"):
-            tab.read_module(("tones", 1))
-        assert client.transport.sent[before:] == []
+        try:
+            observed = tab.read_module(("tones", 1, "drive"))
+        except ValueError as exc:
+            pytest.fail(f"Indexed materialization paths must reach the owner: {exc}")
+        assert observed.value == {"gain": 0.5}
+        assert client.transport.sent[before:] == [
+            ("tab.read_module", {"tab_id": "t", "field": ["tones", 1, "drive"]})
+        ]
 
 
 def test_indexed_wire_batch_read_and_run_capture_keep_original_position(

@@ -21,6 +21,10 @@ class ValueForm(api.FormModel):
     branch: First | Second = Field(discriminator="kind")
     sibling: float
 
+    @classmethod
+    def options(cls, _env: api.FormEnv) -> dict[api.FormPath, tuple[api.Option, ...]]:
+        return {("sibling",): (api.Option("Seven", 7),)}
+
 
 def test_value_write_replaces_raw_and_clears_only_target_selection_overrides():
     state = api.FormState(
