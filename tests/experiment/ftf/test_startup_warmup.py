@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Event, Thread
 
 import pytest
+from tqdm.auto import tqdm
 from zcu_tools.experiment import simulation
 from zcu_tools.experiment.ftf import ftf
 from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
@@ -144,6 +145,8 @@ def test_worker_start_failure_is_terminal_and_allows_on_demand(monkeypatch):
         raise RuntimeError("cannot start synthetic thread")
 
     with monkeypatch.context() as patch:
+        # A global Thread.start failure would also make tqdm disable its monitor globally.
+        patch.setattr(tqdm, "monitor_interval", 0)
         patch.setattr(Thread, "start", unavailable_thread)
         try:
             env = ftf(parse_ftf(ftf_document()), warmup=warmup)

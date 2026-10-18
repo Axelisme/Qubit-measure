@@ -33,7 +33,8 @@ class EnvironmentWarmup:
     """Run named zero-argument numeric preparation items on one background thread.
 
     items must have unique nonempty names. Callables must own disposable resources
-    and release them even on failure. They must not sample or change live devices.
+    and release them even on failure. They must not sample, change live devices,
+    or wait on this controller (including acquiring from a binding that waits on it).
     start is thread-safe and always returns the same non-cancellable Future.
     Its result is the terminal WarmupStatus, including failures, not an exception.
     Future callbacks execute on the completing thread (or immediately if done);
@@ -60,17 +61,29 @@ class EnvironmentWarmup:
     def start(self) -> Future[WarmupStatus]:
         """Start once and return the shared future; concurrent calls never duplicate work."""
         with self._lock:
-            if self._future is None:
-                self._future = Future()
-                self._future.set_running_or_notify_cancel()
-                self._status = WarmupStatus("running", (), None, len(self._items))
-                Thread(
-                    target=self._run,
-                    args=(self._future,),
-                    name="simulation-warmup",
-                    daemon=False,
-                ).start()
-            return self._future
+            if self._future is not None:
+                return self._future
+            future: Future[WarmupStatus] = Future()
+            future.set_running_or_notify_cancel()
+            self._future = future
+            self._status = WarmupStatus("running", (), None, len(self._items))
+        try:
+            Thread(
+                target=self._run,
+                args=(future,),
+                name="simulation-warmup",
+                daemon=False,
+            ).start()
+        except RuntimeError as error:
+            # Thread creation can fail before the worker can publish its result.
+            _logger.exception("Simulation startup worker could not start")
+            status = WarmupStatus(
+                "failed", (), None, len(self._items), f"{type(error).__name__}: {error}"
+            )
+            with self._lock:
+                self._status = status
+            future.set_result(status)
+        return future
 
     def wait_ready(self, timeout: float | None = None) -> WarmupStatus:
         """Start if needed and wait for success/failure; timeout raises TimeoutError.
