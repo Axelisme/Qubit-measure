@@ -55,6 +55,8 @@ if TYPE_CHECKING:
 
 RecipeScalar = str | int | float | bool | None
 RecipeParameter = RecipeScalar | list[RecipeScalar]
+# Nested objects are recipe invocation inputs, not scalar edits or analysis updates.
+type RecipeInputValue = RecipeParameter | dict[str, RecipeInputValue]
 StepStatus = Literal["completed", "finished_early", "cancelled"]
 WritebackDecision = Literal["accepted", "skipped"]
 AnalysisStage = Literal["primary", "post"]
@@ -96,12 +98,15 @@ class RecipeDeviceState:
 
 
 class RecipePropertySchema(TypedDict):
-    """Handwritten JSON Schema for an existing scalar or array recipe parameter.
+    """Handwritten schema for a scalar, scalar array or declared nested object.
 
-    type lists the accepted JSON types, including null when optional. minLength
-    constrains strings; items describes array elements; minItems/maxItems bound
-    the array length. description is operator-facing parameter documentation.
-    No annotations-to-schema generation takes place.
+    type lists accepted JSON types, including null for nullable inputs. minLength
+    constrains strings; items describes scalar array elements; minItems/maxItems
+    bound array length. properties declares object fields; required lists mandatory
+    declared fields. additionalProperties rejects unknown fields when false, allows
+    scalar/array extras when true or omitted, or declares a schema for name-keyed
+    object entries. Objects need properties or a schema-valued additionalProperties.
+    description is operator-facing documentation. No schema generation takes place.
     """
 
     type: str | list[str]
@@ -110,6 +115,9 @@ class RecipePropertySchema(TypedDict):
     minItems: NotRequired[int]
     maxItems: NotRequired[int]
     description: NotRequired[str]
+    properties: NotRequired[dict[str, RecipePropertySchema]]
+    required: NotRequired[list[str]]
+    additionalProperties: NotRequired[bool | RecipePropertySchema]
 
 
 class RecipeInputSchema(TypedDict):
