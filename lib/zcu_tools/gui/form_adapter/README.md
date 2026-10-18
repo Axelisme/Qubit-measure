@@ -1,6 +1,6 @@
 # gui/form_adapter — 從 core cfg 生成 Form
 
-**Last updated:** 2026-10-18，宣告 owner 的固定元素政策與同名同型別 raw 繼承
+**Last updated:** 2026-10-19，遞迴 section 生成與公開 Form 操作分工
 
 本 package 是 GUI 的 Qt-free 前端框架。它把 core cfg 宣告與作者寫的起始樹翻譯成 `gui.form` 的 `FormModel`，再把表單結果轉回驗證過的 core cfg。它供 measure、workflows、library 與 writeback 的表單定義共用。Measure 的註冊、protocol 與分頁 Form resource 使用 `Form`，workflows 的手寫 plan 表單使用 `ModuleInputField`。
 
@@ -41,7 +41,7 @@ Spec Form 的 `template_input(Template(id), catalog, env)` 直接建立範本的
 
 回傳的 `input.model` 可以是 `Form.model` 的專用 subclass，讓不同範本的 required 欄位與 lock 互不影響。用回傳 input 建新 `FormState`。同一範本重算初值用 `input.model.default_input(env)`，換範本則建新 state。原 Form.model、範本目錄與 captured sources 不變。
 
-Module、seed、Display 與 annotation 翻譯放在私有模組 `_modules.py`、`_seeds.py`、`_display.py`、`_types.py`，由 `form.py` 與公開欄位入口 `module_input.py` 組合。
+Module、seed、Display 與 annotation 翻譯放在私有模組 `_modules.py`、`_seeds.py`、`_display.py`、`_types.py`。`_sections.py` 集中遞迴 model 生成、defaults 與 native 值投影；`form.py` 提供公開 Form 操作，`module_input.py` 提供手寫欄位入口。
 
 ## 固定元素宣告
 
