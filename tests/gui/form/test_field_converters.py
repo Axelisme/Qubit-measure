@@ -141,7 +141,7 @@ def test_converter_failure_keeps_selection_structure_input_and_notifications(def
     raw = state.input.data
     events = []
     state.subscribe(lambda: events.append(state.input.data))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=".+"):
         state.write({("value",): {"kind": "second"}}, env)
     assert state.input.data == raw
     assert state.describe(("value",), env) == before
@@ -166,17 +166,17 @@ def test_converter_handles_every_scalar_selection_and_rejects_duplicate_declarat
     state.write({("mode",): "b"}, env)
     state.write({("mode",): "c"}, env)
     assert calls == [("a", "b"), ("b", "c")]
+    duplicate = create_model(
+        "Duplicate",
+        __base__=api.FormModel,
+        mode=(
+            Annotated[
+                Literal["a", "b"],
+                api.InputConverter(convert),
+                api.InputConverter(convert),
+            ],
+            "a",
+        ),
+    )
     with pytest.raises(ValueError, match="one converter"):
-        duplicate = create_model(
-            "Duplicate",
-            __base__=api.FormModel,
-            mode=(
-                Annotated[
-                    Literal["a", "b"],
-                    api.InputConverter(convert),
-                    api.InputConverter(convert),
-                ],
-                "a",
-            ),
-        )
-        api.FormState(duplicate.default_input(env))
+        duplicate.default_input(env)
