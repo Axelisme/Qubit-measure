@@ -35,18 +35,24 @@ if _LIB not in sys.path:
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from zcu_tools.analysis.fluxdep.models import TransitionDict
-from zcu_tools.analysis.fluxdep.search_njit import (
+# tolerated: Standalone execution needs repo/lib on sys.path for TransitionDict.
+from zcu_tools.analysis.fluxdep.models import TransitionDict  # noqa: E402
+
+# tolerated: Standalone execution needs repo/lib on sys.path for search kernels.
+from zcu_tools.analysis.fluxdep.search_njit import (  # noqa: E402
     candidate_breakpoint_search,
     entry_lower_bound,
     eval_dist_bounded,
 )
-from zcu_tools.notebook.analysis.fluxdep.fitting import (
+
+# tolerated: Standalone execution needs repo/lib on sys.path for fitting helpers.
+from zcu_tools.notebook.analysis.fluxdep.fitting import (  # noqa: E402
     fit_spectrum,
     search_in_database,
 )
 
-from tests.notebook.analysis.fluxdep._synthetic import synth_ABC
+# tolerated: Standalone execution needs the repo root on sys.path for test helpers.
+from tests.notebook.analysis.fluxdep._synthetic import synth_ABC  # noqa: E402
 
 
 class _TimingStats(TypedDict):
