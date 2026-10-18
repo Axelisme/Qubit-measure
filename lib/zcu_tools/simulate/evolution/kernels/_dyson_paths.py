@@ -6,23 +6,48 @@ from numpy.typing import NDArray
 
 
 @njit(nogil=True, cache=True)
-def _shared_path_capacity(
+def _shared_path_inventory(
     modes: NDArray[np.complex128], couplings: NDArray[np.complex128]
-) -> int:
-    """Count nonzero coupling/input combinations before coefficient underflow."""
+) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
+    """Pack ascending exact-nonzero c indices per inner sign and b."""
     dimension = len(modes)
-    inner_counts = np.zeros(dimension, dtype=np.int64)
-    for b in range(dimension):
-        for inner in range(2):
-            for c in range(dimension):
-                if couplings[inner, b, c] != 0 and modes[c] != 0:
-                    inner_counts[b] += 1
+    active = np.flatnonzero(modes != 0)
+    offsets = np.empty((2, dimension + 1), dtype=np.int64)
+    count = 0
+    for inner in range(2):
+        offsets[inner, 0] = count
+        for b in range(dimension):
+            for c in active:
+                if couplings[inner, b, c] != 0:
+                    count += 1
+            offsets[inner, b + 1] = count
+    inventory = np.empty(count, dtype=np.int64)
+    count = 0
+    for inner in range(2):
+        for b in range(dimension):
+            for c in active:
+                if couplings[inner, b, c] != 0:
+                    inventory[count] = c
+                    count += 1
+    return offsets, inventory
+
+
+@njit(nogil=True, cache=True)
+def _shared_path_capacity(
+    modes: NDArray[np.complex128],
+    couplings: NDArray[np.complex128],
+    offsets: NDArray[np.int64],
+) -> int:
+    """Count nonzero paths from the packed inventory before product underflow."""
+    dimension = len(modes)
     capacity = 0
     for a in range(dimension):
         for outer in range(2):
             for b in range(dimension):
                 if couplings[outer, a, b] != 0:
-                    capacity += int(inner_counts[b]) + int(modes[b] != 0)
+                    capacity += int(modes[b] != 0)
+                    for inner in range(2):
+                        capacity += offsets[inner, b + 1] - offsets[inner, b]
     return capacity
 
 
@@ -46,10 +71,13 @@ def build_shared_paths(
     Shared pruning needs zero coefficient cutoffs, so gain, duration and the
     budget cannot remove a nonzero candidate here. Count an upper bound before
     filling arrays to avoid a large intermediate list of five-int tuples.
-    Products that underflow to zero leave unused capacity at the end.
+    Products that underflow to zero leave unused capacity at the end. A packed
+    exact-nonzero c inventory skips zero products without changing enumeration
+    or multiplication order. Its temporary storage scales with nonzero entries.
     """
     dimension = len(modes)
-    capacity = _shared_path_capacity(modes, couplings)
+    offsets, inventory = _shared_path_inventory(modes, couplings)
+    capacity = _shared_path_capacity(modes, couplings, offsets)
     indices = np.empty((capacity, 5), dtype=np.int64)
     coefficients = np.empty(capacity, dtype=np.complex128)
     count = 0
@@ -67,7 +95,8 @@ def build_shared_paths(
                     count += 1
                 for inner in range(2):
                     s = 2 * inner - 1
-                    for c in range(dimension):
+                    for position in range(offsets[inner, b], offsets[inner, b + 1]):
+                        c = inventory[position]
                         second = coefficient * couplings[inner, b, c] * modes[c]
                         if abs(second) > 0:
                             indices[count] = (a, b, c, r, s)
