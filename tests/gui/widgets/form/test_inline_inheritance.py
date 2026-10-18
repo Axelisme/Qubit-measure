@@ -82,7 +82,7 @@ def inheritance_host(qapp: QApplication):
     host.show()
     qapp.processEvents()
     try:
-        yield ComponentDriver(host)
+        yield ComponentDriver(host), state
     finally:
         host.close()
         host.deleteLater()
@@ -97,9 +97,9 @@ def snapshot(driver: ComponentDriver, path: Path, name: str) -> None:
 
 
 def test_module_and_nested_waveform_switch_show_inherited_values(
-    inheritance_host: ComponentDriver, tmp_path: Path
+    inheritance_host: tuple[ComponentDriver, FormState[FormModel]], tmp_path: Path
 ):
-    driver = inheritance_host
+    driver, state = inheritance_host
     waveform = "form.input.selection.module.waveform"
     length = waveform + ".module.length"
     snapshot(driver, tmp_path, "01-pulse-gauss")
@@ -133,11 +133,14 @@ def test_module_and_nested_waveform_switch_show_inherited_values(
     driver.choose_option(object_name=waveform, value="Inline: arb")
     snapshot(driver, tmp_path, "06-arb-initial")
     assert driver.observe(object_name=waveform + ".module.data").text == ""
-    driver.click("Readonly")
-    snapshot(driver, tmp_path, "07-readonly")
-    assert driver.observe(object_name="form.input.selection").enabled is False
-    assert driver.observe(object_name=waveform).enabled is False
-    driver.click("Busy")
-    snapshot(driver, tmp_path, "08-busy")
-    assert driver.observe(object_name="synthetic.status").text == "Busy"
-    assert driver.observe(object_name=waveform).enabled is False
+    before = state.input
+    for mode in ("Readonly", "Busy"):
+        driver.click(mode)
+        driver.choose_option(object_name="form.input.selection", value="Inline: pulse")
+        driver.choose_option(object_name=waveform, value="Inline: gauss")
+        snapshot(driver, tmp_path, "07-" + mode.lower())
+        assert driver.observe(object_name="synthetic.status").text == mode
+        assert driver.observe(object_name="form.input.selection").text == "Inline: readout/pulse"
+        assert driver.observe(object_name=waveform).text == "Inline: arb"
+        assert driver.observe(object_name="form.input.selection.module.freq").text == "103.0"
+        assert state.input.same_as(before)
