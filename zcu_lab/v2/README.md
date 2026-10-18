@@ -1,6 +1,6 @@
 # v2 experiments
 
-**Last updated:** 2026-10-18，mux typed tones、數值掃描與分析保存、共用綁定驗證與 FTF bring-up 指南
+**Last updated:** 2026-10-18，mux public run、common-start Join 與來源保存
 
 ZigZag 的 Run 與離線編譯共用 `build_zigzag_modules`，使用 register loop。
 `reset_phase_cycle` 可在偶數 averaging sweeps 間交替最後 reset qubit pulse 的 0/180°
@@ -31,9 +31,12 @@ Library 的 `readout/mux:blank` 只給 scalar 編輯初值，作者必須填 ton
 
 ## Mux qubit numeric cores
 
-`mux/freq` 與 `mux/amp_rabi` 提供可 import 的 typed cfg、純分析與 native persistence。
-這兩個 core 尚無 `run`。Acquisition 等待 program owner 的公開 end-alignment 契約，
-Form／recipe 等待獨立 fixed-list framework，不在 catalog 註冊未完成的實驗。
+`mux/freq` 與 `mux/amp_rabi` 提供可 import 的 typed cfg、public `run`、分析與 native persistence。
+兩個 run 共用 `_support.mux_acquisition.acquire_mux_scan`，每點 compile 一次。
+共同 reset 後，既有 Join 讓 drives 同時起跑，短 branch 完成後等待當點最長 branch，
+再做共同 mux readout。不補齊末端，不以全 sweep 最大長度 padding。
+Form／recipe／adapter／catalog／writeback／UI 接線另批交付，等待 fixed-list Form Base。
+這些 core 入口不註冊 catalog。
 
 `MuxFreqCfg`／`MuxAmpRabiCfg` 使用完整 `tones: list[MuxToneCfg]`，元素內有
 `active`、`drive` 與 `sweep`。長度固定等於完整 readout tone 數。
@@ -46,7 +49,7 @@ Active sweep 點數相同，inactive 不參與點數比較。共用 reps／round
 各自 lower 一次 active flag，回傳 `_support.mux.MuxPulseScan`。
 其 `indices` 保留原始序號，`coordinates` 是各自硬體 grid 的 `(K,P)` 浮點陣列，
 `point_pulses` 是 `(P,K)` 固定 numeric pulse cfg，不展開 Cartesian product。
-這個入口只準備資料，不 acquire，也不承諾尚待裁決的排程策略。
+這些入口只準備資料，不 acquire；public run 將其交給上述 common-start zip 排程。
 Frequency／gain conversion 分別沿既有 `round_zcu_freq`／`round_zcu_gain`。
 
 `MuxSweepResult` 保存原始 `tone_indices`、各自量化的 `coordinates` 及平均 complex IQ `signals`。
@@ -57,7 +60,9 @@ Freq 沿用單 qubit 的 magnitude/background transform 與 linewidth fitter；A
 
 Native mapping 使用 `coordinates`／`signals` 兩個 variables，共享 Point／Tone axes。
 Frequency 座標在磁碟上是 Hz，在記憶體是 MHz。Gain 不縮放。
-Save／Load 保留完整 tones cfg 與獨立數值座標，不讀目前 Form 或 library。
+Analyze／Save 使用 explicit RunRecord；Load 還原同次完整 tones cfg、原始 indices、獨立數值座標與 IQ。
+它們不讀目前 Form 或 library。取消保留已完成點與當點 completed-round 平均，未寫入 IQ 維持 NaN。
+Caller 先呼叫 RunContext.cancel_signal.raise_if_error()，不把 failure 的 partial data 報為成功。
 Numeric core 不保存 writeback destination，也不發 proposal。
 
 ## Layout
