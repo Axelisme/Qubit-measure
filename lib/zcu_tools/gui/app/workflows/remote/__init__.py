@@ -19,6 +19,7 @@ from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.form import FormErrors, FormPathError, FormWritePath
 from zcu_tools.gui.remote.control_service import (
     ControlOptions,
+    RemoteAppSpec,
     RemoteControlServiceBase,
 )
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
@@ -289,44 +290,50 @@ class WorkflowRemoteControlAdapter[C](RemoteControlServiceBase):
         super().__init__(
             window,
             opts,
+            app=RemoteAppSpec(
+                wire_version=WIRE_VERSION,
+                gui_version=GUI_VERSION,
+                # Preserve the published server identity across the host relocation.
+                server_name="T1WorkflowRemoteServer",
+                method_registry={
+                    "workflow.start": BoundMethod(
+                        self._start, METHOD_SPECS["workflow.start"]
+                    ),
+                    "workflow.tunables": BoundMethod(
+                        self._tunables, METHOD_SPECS["workflow.tunables"]
+                    ),
+                    "workflow.form": BoundMethod(
+                        self._form, METHOD_SPECS["workflow.form"]
+                    ),
+                    "workflow.describe_form": BoundMethod(
+                        self._describe_form, METHOD_SPECS["workflow.describe_form"]
+                    ),
+                    "workflow.status": BoundMethod(
+                        self._status, METHOD_SPECS["workflow.status"]
+                    ),
+                    "workflow.records": BoundMethod(
+                        self._records, METHOD_SPECS["workflow.records"]
+                    ),
+                    "workflow.figures": BoundMethod(
+                        self._figures, METHOD_SPECS["workflow.figures"]
+                    ),
+                    "workflow.figure": BoundMethod(
+                        self._figure, METHOD_SPECS["workflow.figure"]
+                    ),
+                    "workflow.pause": BoundMethod(
+                        self._pause, METHOD_SPECS["workflow.pause"]
+                    ),
+                    "workflow.resume": BoundMethod(
+                        self._resume, METHOD_SPECS["workflow.resume"]
+                    ),
+                    "workflow.stop": BoundMethod(
+                        self._stop, METHOD_SPECS["workflow.stop"]
+                    ),
+                },
+                event_serializers={},
+                wire_event_name=str,
+            ),
             owner_scheduler=owner_scheduler,
-            wire_version=WIRE_VERSION,
-            gui_version=GUI_VERSION,
-            # Preserve the published server identity across the host relocation.
-            server_name="T1WorkflowRemoteServer",
-            method_registry={
-                "workflow.start": BoundMethod(
-                    self._start, METHOD_SPECS["workflow.start"]
-                ),
-                "workflow.tunables": BoundMethod(
-                    self._tunables, METHOD_SPECS["workflow.tunables"]
-                ),
-                "workflow.form": BoundMethod(self._form, METHOD_SPECS["workflow.form"]),
-                "workflow.describe_form": BoundMethod(
-                    self._describe_form, METHOD_SPECS["workflow.describe_form"]
-                ),
-                "workflow.status": BoundMethod(
-                    self._status, METHOD_SPECS["workflow.status"]
-                ),
-                "workflow.records": BoundMethod(
-                    self._records, METHOD_SPECS["workflow.records"]
-                ),
-                "workflow.figures": BoundMethod(
-                    self._figures, METHOD_SPECS["workflow.figures"]
-                ),
-                "workflow.figure": BoundMethod(
-                    self._figure, METHOD_SPECS["workflow.figure"]
-                ),
-                "workflow.pause": BoundMethod(
-                    self._pause, METHOD_SPECS["workflow.pause"]
-                ),
-                "workflow.resume": BoundMethod(
-                    self._resume, METHOD_SPECS["workflow.resume"]
-                ),
-                "workflow.stop": BoundMethod(self._stop, METHOD_SPECS["workflow.stop"]),
-            },
-            event_serializers={},
-            wire_event_name=str,
         )
 
     def _get_bus(self) -> BaseEventBus:

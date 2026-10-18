@@ -48,7 +48,7 @@ from zcu_tools.gui.session.ui.predictor_cache import (
     PredictorSnapshot,
     PredictorSnapshotCodec,
 )
-from zcu_tools.gui.session.ui.predictor_canvas import PredictorCurveCanvas
+from zcu_tools.gui.session.ui.predictor_canvas import CurveView, PredictorCurveCanvas
 from zcu_tools.gui.widgets import error_colour, set_foreground, success_colour
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.gui.widgets.spinbox import FiniteFloatSpinBox, TrimDoubleSpinBox
@@ -1361,6 +1361,13 @@ class PredictorDialog(QDialog):
 
         highlights = self._selected_highlights()
         marker_value = self._predict_value_spin.value()
+        view = CurveView(
+            highlights=highlights,
+            marker_value=marker_value,
+            flux_window=_DEFAULT_FLUX_WINDOW,
+            value_to_flux=value_to_flux,
+            flux_to_value=flux_to_value,
+        )
 
         # ── Frequency curves ──────────────────────────────────────────────
         try:
@@ -1374,11 +1381,7 @@ class PredictorDialog(QDialog):
                 labels=freq_result.labels,
                 series=freq_result.freqs_mhz,
                 ylabel="Frequency (MHz)",
-                highlights=highlights,
-                marker_value=marker_value,
-                flux_window=_DEFAULT_FLUX_WINDOW,
-                value_to_flux=value_to_flux,
-                flux_to_value=flux_to_value,
+                view=view,
             )
         except (FailedPreconditionError, PredictorInputError) as exc:
             self._set_status(str(exc), error=True)
@@ -1401,10 +1404,7 @@ class PredictorDialog(QDialog):
                 operator,
                 canvas,
                 grid,
-                highlights,
-                marker_value,
-                flux_to_value,
-                value_to_flux,
+                view,
             )
             for operator, canvas in matrix_canvases
         ):
@@ -1434,10 +1434,7 @@ class PredictorDialog(QDialog):
         operator: Literal["n", "phi"],
         canvas: PredictorCurveCanvas,
         grid: np.ndarray,
-        highlights: tuple[tuple[int, int], ...],
-        marker_value: float,
-        flux_to_value: Callable[[float], float],
-        value_to_flux: Callable[[float], float],
+        view: CurveView,
     ) -> bool:
         """Compute+render one operator's matrix-element curve onto ``canvas``.
 
@@ -1476,11 +1473,7 @@ class PredictorDialog(QDialog):
             labels=mat_result.labels,
             series=mat_result.mags,
             ylabel=f"|<i|{operator}|j>|",
-            highlights=highlights,
-            marker_value=marker_value,
-            flux_window=_DEFAULT_FLUX_WINDOW,
-            value_to_flux=value_to_flux,
-            flux_to_value=flux_to_value,
+            view=view,
         )
         return True
 

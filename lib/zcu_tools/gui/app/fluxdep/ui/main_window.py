@@ -83,7 +83,11 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.project import DEFAULT_CHIP, DEFAULT_QUBIT
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.widgets.control_indicator import ControlIndicator
-from zcu_tools.gui.widgets.dialog_presenter import DialogPresenter, QtDialogPresenter
+from zcu_tools.gui.widgets.dialog_presenter import (
+    DestructiveConfirmation,
+    DialogPresenter,
+    QtDialogPresenter,
+)
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 logger = logging.getLogger(__name__)
@@ -636,10 +640,12 @@ class MainWindow(QMainWindow):
         other = "sample" if stage == "align" else "align"
         self._dialogs.destructive_confirm(
             self,
-            f"Discard the {other} draft?",
-            f"{name} has an unfinished {other} draft. "
-            f"Opening {stage} discards it; the published spectrum stays as it is.",
-            action_text=f"Discard and {stage}",
+            DestructiveConfirmation(
+                title=f"Discard the {other} draft?",
+                message=f"{name} has an unfinished {other} draft. "
+                f"Opening {stage} discards it; the published spectrum stays as it is.",
+                action_text=f"Discard and {stage}",
+            ),
             on_decision=lambda confirmed: self._on_discard_decision(
                 name, stage, draft.context_id, confirmed=confirmed
             ),

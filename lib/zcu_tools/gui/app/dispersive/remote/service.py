@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.gui.remote.control_service import (
     ControlOptions,
+    RemoteAppSpec,
     RemoteControlServiceBase,
 )
 
@@ -49,13 +50,15 @@ class RemoteControlAdapter(RemoteControlServiceBase):
         super().__init__(
             controller,
             opts,
+            app=RemoteAppSpec(
+                wire_version=WIRE_VERSION,
+                gui_version=GUI_VERSION,
+                server_name="DispersiveRemoteServer",
+                method_registry=METHOD_REGISTRY,
+                event_serializers=EVENT_SERIALIZERS,
+                wire_event_name=wire_event_name,
+            ),
             owner_scheduler=owner_scheduler,
-            wire_version=WIRE_VERSION,
-            gui_version=GUI_VERSION,
-            server_name="DispersiveRemoteServer",
-            method_registry=METHOD_REGISTRY,
-            event_serializers=EVENT_SERIALIZERS,
-            wire_event_name=wire_event_name,
         )
 
 

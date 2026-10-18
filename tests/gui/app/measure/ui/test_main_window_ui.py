@@ -50,6 +50,7 @@ from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.events import SocChangedPayload
 from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.gui.widgets.dialog_presenter import DestructiveConfirmation
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import (
     RoleResolutionError,
@@ -2083,23 +2084,15 @@ class _DeferredClosePresenter(RecordingDialogPresenter):
     def destructive_confirm(
         self,
         parent: Any,
-        title: str,
-        message: str,
+        confirmation: DestructiveConfirmation,
         *,
-        action_text: str,
         on_decision: Callable[[bool], None],
-        default: bool = False,
-        cancel_text: str = "Cancel",
     ) -> None:
         """Retain the decision callback while recording both button labels."""
         super().destructive_confirm(
             parent,
-            title,
-            message,
-            action_text=action_text,
+            confirmation,
             on_decision=lambda _confirmed: None,
-            default=default,
-            cancel_text=cancel_text,
         )
         self.destructive_decisions.append(on_decision)
 
@@ -2307,23 +2300,15 @@ def test_tab_moved_while_confirmation_pending_closes_captured_widget(
         def destructive_confirm(
             self,
             parent: Any,
-            title: str,
-            message: str,
+            confirmation: DestructiveConfirmation,
             *,
-            action_text: str,
             on_decision: Callable[[bool], None],
-            default: bool = False,
-            cancel_text: str = "Cancel",
         ) -> None:
             """Retain the decision and preserve the alternative button label."""
             super().destructive_confirm(
                 parent,
-                title,
-                message,
-                action_text=action_text,
+                confirmation,
                 on_decision=lambda _: None,
-                default=default,
-                cancel_text=cancel_text,
             )
             decision_cb.append(on_decision)
 
@@ -2360,23 +2345,15 @@ def test_tab_close_suppresses_duplicate_prompt_while_decision_pending(
         def destructive_confirm(
             self,
             parent: Any,
-            title: str,
-            message: str,
+            confirmation: DestructiveConfirmation,
             *,
-            action_text: str,
             on_decision: Callable[[bool], None],
-            default: bool = False,
-            cancel_text: str = "Cancel",
         ) -> None:
             """Retain the decision and preserve the alternative button label."""
             super().destructive_confirm(
                 parent,
-                title,
-                message,
-                action_text=action_text,
+                confirmation,
                 on_decision=lambda _: None,
-                default=default,
-                cancel_text=cancel_text,
             )
             decision_cb.append(on_decision)
 
@@ -2561,23 +2538,15 @@ def test_app_close_suppresses_duplicate_prompt_while_decision_pending(
         def destructive_confirm(
             self,
             parent: Any,
-            title: str,
-            message: str,
+            confirmation: DestructiveConfirmation,
             *,
-            action_text: str,
             on_decision: Callable[[bool], None],
-            default: bool = False,
-            cancel_text: str = "Cancel",
         ) -> None:
             """Retain the decision and preserve the alternative button label."""
             super().destructive_confirm(
                 parent,
-                title,
-                message,
-                action_text=action_text,
+                confirmation,
                 on_decision=lambda _: None,
-                default=default,
-                cancel_text=cancel_text,
             )
             decision_cb.append(on_decision)
 
