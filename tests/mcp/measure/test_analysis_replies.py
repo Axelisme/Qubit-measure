@@ -77,7 +77,7 @@ def forbidden_recipe(_session: RecipeSession) -> RecipeGenerator:
 
 T1_DEFINITION = replace(
     definition(forbidden_recipe),
-    summary_estimates=(SummaryEstimate("t1", "t1", "t1_err", "us"),),
+    summary_estimates=(SummaryEstimate("t1", ('t1',), ('t1_err',), "us"),),
 )
 
 
@@ -186,9 +186,9 @@ def test_analysis_captures_all_owner_writeback_without_live_queries(
 @pytest.mark.parametrize(
     "declaration",
     [
-        SummaryEstimate("other", "t1", "t1_err", "us"),
-        SummaryEstimate("t1", "t1", "other_err", "us"),
-        SummaryEstimate("t1", "t1", "t1_err", "ns"),
+        SummaryEstimate("other", ('t1',), ('t1_err',), "us"),
+        SummaryEstimate("t1", ('t1',), ('other_err',), "us"),
+        SummaryEstimate("t1", ('t1',), ('t1_err',), "ns"),
     ],
 )
 def test_analysis_only_rejects_conflicting_estimate_declarations(

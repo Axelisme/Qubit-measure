@@ -46,7 +46,7 @@ SAMPLE = replace(
         "properties": {"post": {"type": "boolean"}, "write": {"type": "boolean"}},
         "additionalProperties": False,
     },
-    summary_estimates=(SummaryEstimate("frequency", "frequency", unit="MHz"),),
+    summary_estimates=(SummaryEstimate("frequency", ('frequency',), unit="MHz"),),
 )
 
 

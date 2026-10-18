@@ -117,9 +117,9 @@ def test_read_field_retains_range_input_and_directed_errors(tmp_path: Path) -> N
     with recipe_client(tmp_path, LookbackGui()) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         with pytest.raises(GuiRpcError, match="Invalid"):
-            tab.set_sweep("range", start={"expr": "1 / 0"})
+            tab.set_sweep(('range',), start={"expr": "1 / 0"})
         before = len(client.transport.sent)
-        state = tab.read_field("range")
+        state = tab.read_field(('range',))
         if not isinstance(state.input, dict) or not isinstance(state.value, dict):
             raise TypeError("Expected range input/values")
         assert state.input["start"] == {"expr": "1 / 0"}
@@ -139,17 +139,17 @@ def test_read_field_observes_current_input_and_propagates_failed_edits(
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         before = len(client.transport.sent)
-        old = tab.read_field("rounds")
+        old = tab.read_field(('rounds',))
         assert old.input == old.value == 3
-        assert tab.read_field("fixed").value == 2
-        ref = tab.read_field("modules.readout")
+        assert tab.read_field(('fixed',)).value == 2
+        ref = tab.read_field(('modules', 'readout'))
         assert ref.mode == "inline"
         assert ref.key is None
         assert "freq" in ref.fields
-        assert tab.read_field("modules").fields == ("reset", "init_pulse", "readout")
+        assert tab.read_field(('modules',)).fields == ("reset", "init_pulse", "readout")
         assert len(client.transport.sent) == before + 4
-        tab.set("rounds", 7)
-        current = tab.read_field("rounds")
+        tab.set(('rounds',), 7)
+        current = tab.read_field(('rounds',))
         assert current.input == current.value == 7
         assert old.input == old.value == 3
         client.transport.replies["tab.edit_recipe_fields"] = {
@@ -162,8 +162,8 @@ def test_read_field_observes_current_input_and_propagates_failed_edits(
         }
         before = len(client.transport.sent)
         with pytest.raises(GuiRpcError, match="stale cfg"):
-            tab.set("rounds", 9)
-        assert tab.read_field("rounds") == current
+            tab.set(('rounds',), 9)
+        assert tab.read_field(('rounds',)) == current
         assert [
             method
             for method, _ in client.transport.sent[before:]
@@ -189,7 +189,7 @@ def test_read_field_rejects_malformed_paths_locally_and_unknown_paths_at_owner(
             assert caught.value.reason == "form_path"
             assert caught.value.data == {"form_path": field.split(".")}
             assert len(client.transport.sent) == before + 1
-            assert tab.read_field("rounds").input_present
+            assert tab.read_field(('rounds',)).input_present
 
 
 def test_read_field_rejects_malformed_wire_without_retry(tmp_path: Path) -> None:
@@ -205,7 +205,7 @@ def test_read_field_rejects_malformed_wire_without_retry(tmp_path: Path) -> None
         }
         before = len(client.transport.sent)
         with pytest.raises(GuiRpcError) as failure:
-            tab.read_field("rounds")
+            tab.read_field(('rounds',))
         assert failure.value.reason == "incompatible_wire"
         assert client.transport.sent[before:] == [
             ("tab.read_recipe_field", {"tab_id": "t", "path": ["rounds"]})

@@ -27,7 +27,7 @@ def targeted(
     )
     tab.read_value("$resonator.freq")
     tab.set(
-        "modules.readout.freq", {"expr": "$resonator.freq"}, source="$resonator.freq"
+        ('modules', 'readout', 'freq'), {"expr": "$resonator.freq"}, source="$resonator.freq"
     )
     yield from tab.run_step()
 
@@ -48,7 +48,7 @@ _TARGETED_DEFINITION = definition(
 TARGETED = replace(
     _TARGETED_DEFINITION,
     summary_parameters=(
-        SummaryParameter("frequency_mhz", "modules.readout.freq", "MHz"),
+        SummaryParameter("frequency_mhz", ('modules', 'readout', 'freq'), "MHz"),
     ),
 )
 
@@ -78,7 +78,7 @@ def test_open_tab_preserves_named_aliases_for_new_and_reused_recipe_runs(
     def recipe(session: RecipeSession) -> RecipeGenerator:
         tab = session.open_tab("lookback", aliases=aliases, reuse=reuse)
         aliases["resonator"] = "missing"
-        tab.use_library("modules.readout", None, required="readout_ref")
+        tab.use_library(('modules', 'readout'), None, required="readout_ref")
         tab.read_value("$resonator.freq")
         yield from tab.run_step()
 
@@ -125,8 +125,8 @@ def required_library(
 ) -> RecipeGenerator:
     """Require a readout from the captured role/slot library lookup."""
     tab = session.open_tab("lookback")
-    tab.use_library("modules.readout", "R2.readout.main")
-    tab.use_library("modules.readout", reference, required="readout_ref")
+    tab.use_library(('modules', 'readout'), "R2.readout.main")
+    tab.use_library(('modules', 'readout'), reference, required="readout_ref")
     yield from tab.run_step()
 
 

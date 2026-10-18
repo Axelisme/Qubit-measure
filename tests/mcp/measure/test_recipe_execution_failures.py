@@ -63,7 +63,7 @@ def test_unyielded_run_start_failure_retains_fixed_conditions(tmp_path, uncertai
     def sample(session: RecipeSession) -> RecipeGenerator:
         try:
             tab = session.open_tab("lookback")
-            tab.set("rounds", 8)
+            tab.set(('rounds',), 8)
             yield from tab.run_step()
         finally:
             finally_calls.append("closed")

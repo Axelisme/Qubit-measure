@@ -101,7 +101,7 @@ def test_snapshot_returns_complete_native_documents_without_materializing_assets
     )
     point = entry.new_point("base", description="native snapshot")
     with point.edit() as draft:
-        draft.set("general.ext.nested", {"trace": [1.0, 2.0], "unset": None})
+        draft.set(('general', 'ext', 'nested'), {"trace": [1.0, 2.0], "unset": None})
         draft.set_meta("general.ext.nested.trace", {"stderr": [0.1, 0.2]})
     library = entry.module_library("base")
     with library.edit() as draft:

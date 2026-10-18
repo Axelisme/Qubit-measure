@@ -20,13 +20,13 @@ def test_run_starts_immediately_with_detached_conditions(tmp_path):
         tab = RecipeSession(
             client.context,
             summary_parameters=(
-                SummaryParameter("rounds", "rounds"),
-                SummaryParameter("reset", "modules.reset"),
-                SummaryParameter("frequency", "modules.readout.freq"),
+                SummaryParameter("rounds", ('rounds',)),
+                SummaryParameter("reset", ('modules', 'reset')),
+                SummaryParameter("frequency", ('modules', 'readout', 'freq')),
             ),
         ).open_tab("lookback")
-        tab.set("rounds", 7)
-        tab.disable_library("modules.reset")
+        tab.set(('rounds',), 7)
+        tab.disable_library(('modules', 'reset'))
         tab.read_value("$resonator.freq")
         for path in ("modules.readout.freq",):
             tab.set(path, {"expr": "$resonator.freq"}, source="$resonator.freq")
@@ -49,7 +49,7 @@ def test_run_starts_immediately_with_detached_conditions(tmp_path):
             "value": 6100.0,
             "source": "$resonator.freq",
         }
-        tab.set("rounds", 11)
+        tab.set(('rounds',), 11)
         before.actual["fields"]["rounds"]["value"] = -1
         run, status = operation.complete_in_current_worker()
         assert isinstance(run, RecipeRun) and status == "completed"
@@ -183,10 +183,10 @@ def test_between_yield_cancel_suppresses_only_one_start_not_fast_edits(tmp_path)
         tab = RecipeSession(
             client.context,
             consume_cancel=consume_cancel,
-            summary_parameters=(SummaryParameter("rounds", "rounds"),),
+            summary_parameters=(SummaryParameter("rounds", ('rounds',)),),
         ).open_tab("lookback")
         pending.set()
-        tab.set("rounds", 8)
+        tab.set(('rounds',), 8)
         assert pending.is_set()
         suppressed = tab.run()
         assert suppressed.complete_in_current_worker() == (None, "cancelled")
@@ -227,10 +227,10 @@ def test_start_rejection_retains_the_attempted_cfg_without_retry(tmp_path):
     with recipe_client(tmp_path, gui) as client:
         recipe = RecipeSession(
             client.context,
-            summary_parameters=(SummaryParameter("rounds", "rounds"),),
+            summary_parameters=(SummaryParameter("rounds", ('rounds',)),),
         )
         tab = recipe.open_tab("lookback")
-        tab.set("rounds", 6)
+        tab.set(('rounds',), 6)
         client.transport.replies["tab.run_start"] = {
             "ok": False,
             "error": {
