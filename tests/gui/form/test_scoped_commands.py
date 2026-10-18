@@ -151,3 +151,47 @@ def test_command_rejects_bad_structure_scope_and_required_evaluation_atomically(
         state.run_command(("value",), "reject", env)
     assert state.input.to_json() == before
     assert events == []
+
+
+def test_command_cannot_remove_nonnullable_model_structure():
+    class Required(api.FormModel):
+        value: Original | Converted = Field(discriminator="kind")
+
+        @classmethod
+        def options(
+            cls, _env: api.FormEnv
+        ) -> Mapping[api.FormPath, tuple[api.Option, ...]]:
+            return {
+                ("value",): (
+                    api.Option(
+                        "Old",
+                        {"kind": "old"},
+                        Original,
+                        (
+                            api.OptionCommand(
+                                "remove",
+                                "Remove",
+                                lambda _old, _context: api.FormCommandResult(
+                                    None, None, None
+                                ),
+                            ),
+                        ),
+                    ),
+                    api.Option("New", {"kind": "new"}, Converted),
+                )
+            }
+
+    env = api.FormEnv()
+    state = api.FormState(
+        api.FormInput(Required, {"value": {"kind": "old", "amount": 3, "samples": [1]}})
+    )
+    before = state.input.to_json()
+    notifications = []
+    state.subscribe(lambda: notifications.append(state.input.data))
+    with pytest.raises(api.FormCommandError):
+        state.run_command(("value",), "remove", env)
+    assert state.input.to_json() == before
+    target = state.describe(("value",), env).target
+    assert target is not None
+    assert target.selected == 0
+    assert notifications == []
