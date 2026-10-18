@@ -22,7 +22,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.fluxdep.models import PointsData, TransitionDict
-from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult
+from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult, ParamBounds
 from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.owner import OwnerThreadGuard
@@ -556,9 +556,7 @@ class FluxDepState:
     def set_fit_params(
         self,
         search_db: str,
-        EJb: tuple[float, float],
-        ECb: tuple[float, float],
-        ELb: tuple[float, float],
+        bounds: ParamBounds,
         transitions: TransitionDict,
         r_f: float | None,
         sample_f: float | None,
@@ -572,9 +570,9 @@ class FluxDepState:
         self._assert_owner()
         self.fit = FitState(
             search_db=search_db,
-            EJb=EJb,
-            ECb=ECb,
-            ELb=ELb,
+            EJb=bounds.EJ,
+            ECb=bounds.EC,
+            ELb=bounds.EL,
             transitions=transitions,
             r_f=r_f,
             sample_f=sample_f,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from zcu_tools.analysis.fluxdep.search import ParamBounds
 from pathlib import Path
 
 import numpy as np
@@ -171,7 +172,7 @@ def test_params_export_merges_sections_and_uses_first_aligned_even_if_empty(
     state.put_spectrum(_entry("first-aligned", empty=True))
     state.put_spectrum(_entry("later-aligned"))
     state.set_fit_params(
-        "db", (1, 2), (2, 3), (3, 4), {"transitions1": [(0, 1)], "r_f": 6.2}, None, None
+        "db", ParamBounds(EJ=(1, 2), EC=(2, 3), EL=(3, 4)), {"transitions1": [(0, 1)], "r_f": 6.2}, None, None
     )
     state.set_fit_result((5.123456789, 1, 0.5))
     path = (tmp_path / "custom" if custom_path else result_dir) / "params.json"

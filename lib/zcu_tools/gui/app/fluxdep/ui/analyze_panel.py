@@ -32,6 +32,7 @@ navigation ``fluxdep.show.toolbar``.
 
 from __future__ import annotations
 
+from zcu_tools.analysis.fluxdep.search import ParamBounds
 import logging
 import os
 from collections.abc import Mapping
@@ -649,9 +650,7 @@ class AnalyzePanelWidget(QWidget):
         sample_f = self._sample_f.value()
         self._ctrl.set_fit_params(
             search_db=self._db_edit.text().strip(),
-            EJb=(self._ej_lo.value(), self._ej_hi.value()),
-            ECb=(self._ec_lo.value(), self._ec_hi.value()),
-            ELb=(self._el_lo.value(), self._el_hi.value()),
+            bounds=ParamBounds(EJ=(self._ej_lo.value(), self._ej_hi.value()), EC=(self._ec_lo.value(), self._ec_hi.value()), EL=(self._el_lo.value(), self._el_hi.value())),
             transitions=transitions,
             r_f=r_f,
             sample_f=sample_f,

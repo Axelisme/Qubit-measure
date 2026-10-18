@@ -165,7 +165,7 @@ def test_removed_last_spectrum_has_empty_cloud_and_no_selected_points(tiny_datab
     st = _state_with_points()
     SelectionService(st).set_selection(np.array([True, False, True, False]))
     svc = FitService(st)
-    svc.set_params(tiny_database[0], *_WIDE, TransitionDict({}), 0.0, 0.0)
+    svc.set_params(tiny_database[0], ParamBounds(*_WIDE), TransitionDict({}), 0.0, 0.0)
     st.remove_spectrum("s1")
     before = st.version.snapshot()
     fluxs, freqs = svc.selected_pointcloud()
@@ -185,7 +185,7 @@ def test_empty_collection_without_stale_selection(
     if publish_empty_selection:
         SelectionService(st).set_selection(np.empty(0, dtype=np.bool_))
     svc = FitService(st)
-    svc.set_params(tiny_database[0], *_WIDE, TransitionDict({}), 0.0, 0.0)
+    svc.set_params(tiny_database[0], ParamBounds(*_WIDE), TransitionDict({}), 0.0, 0.0)
     before = st.version.snapshot()
 
     fluxs, freqs = svc.selected_pointcloud()
@@ -204,7 +204,7 @@ def test_compute_search_does_not_touch_state(tiny_database):
     svc = FitService(st)
     svc.set_params(
         db_path,
-        *_WIDE,
+        ParamBounds(*_WIDE),
         TransitionDict({"transitions": [(0, 1), (0, 2)]}),
         0.0,
         0.0,
@@ -226,7 +226,7 @@ def test_controller_cancelled_search_keeps_published_fit(tiny_database, synchron
     ctrl = Controller(st)
     ctrl.set_fit_params(
         tiny_database[0],
-        *_WIDE,
+        ParamBounds(*_WIDE),
         TransitionDict({"transitions": [(0, 1), (0, 2)]}),
         0.0,
         0.0,
@@ -257,7 +257,7 @@ def test_headless_publication_keeps_captured_unwrapped_coordinates_and_attributi
     state = FluxDepState()
     state.put_spectrum(_aligned_entry_with_points("source", source_fluxs, source_freqs))
     state.set_fit_params(
-        "synthetic.h5", *_WIDE, {"transitions": [(0, 1), (0, 2)]}, None, None
+        "synthetic.h5", ParamBounds(*_WIDE), {"transitions": [(0, 1), (0, 2)]}, None, None
     )
     numerical = DatabaseSearchResult(
         params=(3.0, 0.8, 0.5),
@@ -332,7 +332,7 @@ def test_record_result_writes_state(tiny_database):
     svc = FitService(st)
     svc.set_params(
         db_path,
-        *_WIDE,
+        ParamBounds(*_WIDE),
         TransitionDict({"transitions": [(0, 1), (0, 2)]}),
         0.0,
         0.0,
@@ -361,7 +361,7 @@ def test_capture_search_fast_fails_without_points(tiny_database):
     st.put_spectrum(_aligned_entry_with_points("noise", [], []))
     assert st.spectrums["noise"].points_completed
     svc = FitService(st)
-    svc.set_params(db_path, *_WIDE, TransitionDict({}), 0.0, 0.0)
+    svc.set_params(db_path, ParamBounds(*_WIDE), TransitionDict({}), 0.0, 0.0)
     before = st.version.snapshot()
     with pytest.raises(FailedPreconditionError) as caught:
         svc.capture_search()
@@ -422,7 +422,7 @@ def test_show_keeps_search_capture_frame_after_alignment_and_source_publication(
 
     try:
         ctrl.set_alignment(entry.name, 0.6, -0.4)
-        state.set_fit_params("synthetic", *_WIDE, {"transitions": [(0, 1)]}, None, None)
+        state.set_fit_params("synthetic", ParamBounds(*_WIDE), {"transitions": [(0, 1)]}, None, None)
         record()
         assert "Outdated" not in expect_frame([0.2, 0.3], 0.25, [0.0, 0.2], [3.0, 4.0])
         ctrl.set_alignment(entry.name, 0.6 + shift, -0.4 + shift)

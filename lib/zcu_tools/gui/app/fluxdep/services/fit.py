@@ -113,9 +113,7 @@ class FitService:
     def set_params(
         self,
         search_db: str,
-        EJb: tuple[float, float],
-        ECb: tuple[float, float],
-        ELb: tuple[float, float],
+        bounds: ParamBounds,
         transitions: TransitionDict,
         r_f: float | None,
         sample_f: float | None,
@@ -137,7 +135,7 @@ class FitService:
                 validate_transition_levels(transitions, levels)
             except ValueError as exc:
                 raise InvalidInputError(str(exc)) from exc
-        self._state.set_fit_params(search_db, EJb, ECb, ELb, transitions, r_f, sample_f)
+        self._state.set_fit_params(search_db, bounds, transitions, r_f, sample_f)
 
     # --- derived ---------------------------------------------------------
 

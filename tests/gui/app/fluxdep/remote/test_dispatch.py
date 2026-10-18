@@ -11,6 +11,7 @@ or the socket server.
 
 from __future__ import annotations
 
+from zcu_tools.analysis.fluxdep.search import ParamBounds
 import os
 from collections.abc import Mapping
 from typing import Literal, overload
@@ -219,9 +220,7 @@ def test_fit_result_reports_inputs_and_result(search_database_hdf5):
     adapter = _adapter()
     adapter.ctrl.set_fit_params(
         search_database_hdf5,
-        (1.0, 12.0),
-        (0.5, 3.0),
-        (0.1, 2.0),
+        ParamBounds(EJ=(1.0, 12.0), EC=(0.5, 3.0), EL=(0.1, 2.0)),
         TransitionDict({"transitions": [(0, 1)]}),
         None,
         None,

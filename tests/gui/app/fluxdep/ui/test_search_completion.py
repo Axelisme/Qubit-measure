@@ -52,9 +52,7 @@ def search_input(qapp, search_database_hdf5, spectrum_hdf5, failure):
     bounds = ParamBounds(EJ=(2.0, 15.0), EC=(0.2, 2.0), EL=(0.1, 2.0))
     ctrl.set_fit_params(
         search_database_hdf5,
-        bounds.EJ,
-        bounds.EC,
-        bounds.EL,
+        bounds,
         TransitionDict({"transitions": [(0, 1)]}),
         None,
         None,

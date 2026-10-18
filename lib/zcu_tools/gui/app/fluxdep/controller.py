@@ -22,7 +22,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict
-from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult
+from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult, ParamBounds
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
     EventBus,
@@ -360,9 +360,7 @@ class Controller(BaseController[FluxDepState, EventBus]):
     def set_fit_params(
         self,
         search_db: str,
-        EJb: tuple[float, float],
-        ECb: tuple[float, float],
-        ELb: tuple[float, float],
+        bounds: ParamBounds,
         transitions: TransitionDict,
         r_f: float | None,
         sample_f: float | None,
@@ -370,7 +368,7 @@ class Controller(BaseController[FluxDepState, EventBus]):
         """Replace search inputs and clear any result; emit FitChanged once.
 
         Owner-thread command. search_db is the search database file, not
-        the project's raw-data directory. EJb/ECb/ELb are lower/upper bounds
+        the project's raw-data directory. bounds holds EJ/EC/EL lower/upper limits
         in GHz. transitions holds native integer level-pair categories and
         optional r_f/sample_f values in GHz; separate frequencies are injected
         by the search kernel according to transitions_with_freqs. None clears
@@ -380,7 +378,7 @@ class Controller(BaseController[FluxDepState, EventBus]):
         I/O errors propagate before publication. Frequency/bounds validation
         remains search-owned. This command does not start a search.
         """
-        self._fit.set_params(search_db, EJb, ECb, ELb, transitions, r_f, sample_f)
+        self._fit.set_params(search_db, bounds, transitions, r_f, sample_f)
         self._emit(FitChangedPayload(has_result=self._state.fit.has_result))
 
     def selected_pointcloud(

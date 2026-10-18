@@ -44,9 +44,7 @@ from tests.gui.app.fluxdep._window import (
 def _record_fit(ctrl: Controller, search_db: str) -> None:
     ctrl.set_fit_params(
         search_db,
-        (3.0, 12.0),
-        (0.3, 1.5),
-        (0.2, 1.2),
+        ParamBounds(EJ=(3.0, 12.0), EC=(0.3, 1.5), EL=(0.2, 1.2)),
         TransitionDict({"transitions": [(0, 1)]}),
         None,
         None,
