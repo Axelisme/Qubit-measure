@@ -74,6 +74,7 @@ from .attachment import Attachment
 from .catalog import WorkflowCatalog
 from .figures import WorkflowFigureViews
 from .forms import WorkflowDraft, WorkflowForms
+from .input_restore_message import WorkflowInputRestoreMessage
 from .run_view import WorkflowRunView
 
 if TYPE_CHECKING:
@@ -135,7 +136,6 @@ class WorkflowWindow[C](QWidget):
         self._loader = loader
         self._thread = get_ident()
         self._catalog_error: CatalogReloadError | None = None
-        self._input_restore_message = ""
         self._state = state
         self._services = services
         self._templates = templates
@@ -163,6 +163,9 @@ class WorkflowWindow[C](QWidget):
             self._figure_area,
             self.plan_panel,
             self.tunables_panel,
+        )
+        self._input_restore_message = WorkflowInputRestoreMessage(
+            self._controls.message
         )
         self._dialogs = DialogRefStore()
         self._controls.selector.addItems(list(current.names))
@@ -504,19 +507,7 @@ class WorkflowWindow[C](QWidget):
         clear only a previous restore message, never unrelated run diagnostics.
         Call only on the GUI owner thread.
         """
-        messages = [str(load_error)] if load_error is not None else []
-        for form, paths in (
-            ("plan", report.plan_dropped),
-            ("knobs", report.knobs_dropped),
-        ):
-            messages.extend(
-                f"Discarded {form}: {'.'.join(str(part) for part in path)}"
-                for path in paths
-            )
-        text = "; ".join(messages)
-        if text or self._controls.message.text() == self._input_restore_message:
-            self._controls.message.setText(text)
-        self._input_restore_message = text
+        self._input_restore_message.show(report, load_error)
 
     def _capture_env(self, devices: Mapping[str, DeviceInfo]) -> FormEnv:
         context = self._services.context
