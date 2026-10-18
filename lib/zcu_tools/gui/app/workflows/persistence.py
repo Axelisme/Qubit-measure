@@ -9,6 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter
 
 from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormPath
+from zcu_tools.gui.session.persistence import SnapshotIdentityError
 
 
 class WorkflowInputSnapshot(BaseModel):
@@ -43,18 +44,27 @@ class WorkflowInputSnapshot(BaseModel):
         """Prepare both trusted drafts before either host state is changed.
 
         Saved envelopes restore whole input, never defaults overlays. Annotation
-        identity mismatch raises ValueError. Missing sources and current option
+        identity mismatch raises SnapshotIdentityError before host mutation. Missing sources and current option
         membership are ordinary result errors, not restoration failures. env is
         used only for fresh defaults when an envelope is absent.
         """
         return (
             plan.default_input(env)
             if self.plan is None
-            else FormInput.from_json(plan, json.dumps(self.plan)),
+            else _restore_envelope(plan, self.plan),
             knobs.default_input(env)
             if self.knobs is None
-            else FormInput.from_json(knobs, json.dumps(self.knobs)),
+            else _restore_envelope(knobs, self.knobs),
         )
+
+
+def _restore_envelope(
+    model: type[FormModel], envelope: dict[str, JsonValue]
+) -> FormInput[FormModel]:
+    try:
+        return FormInput.from_json(model, json.dumps(envelope))
+    except ValueError as exc:
+        raise SnapshotIdentityError(str(exc)) from exc
 
 
 @dataclass(frozen=True)

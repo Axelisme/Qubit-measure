@@ -23,8 +23,21 @@ class PersistenceError(RuntimeError):
     """Expected failure while loading or saving a GUI snapshot."""
 
 
+class SnapshotIdentityError(ValueError):
+    """Saved identity is incompatible; originator has not changed any state.
+
+    Originators raise this only for trusted snapshot identity checks, never for
+    provider, validation or rendering failures. The caretaker backs up the file
+    before restoring defaults. Other restore exceptions propagate unchanged.
+    """
+
+
 class SnapshotCodec(Protocol[StateT]):
-    """App-owned snapshot schema boundary."""
+    """App-owned snapshot schema boundary.
+
+    decode raises ValueError for incompatible persisted data. Unexpected provider
+    or programming failures must use other exception types and propagate.
+    """
 
     def default(self) -> StateT: ...
     def decode(self, raw: object) -> StateT: ...
@@ -79,7 +92,13 @@ class SingleFileCaretaker(Generic[StateT, ReportT]):
             state, load_error = self._load()
         else:
             state, load_error = self._codec.default(), None
-        report = self._originator.restore_persisted_state(state)
+        try:
+            report = self._originator.restore_persisted_state(state)
+        except SnapshotIdentityError as exc:
+            if not load or load_error is not None:
+                raise
+            load_error = self._backup_incompatible(exc)
+            report = self._originator.restore_persisted_state(self._codec.default())
         return RestoreOutcome(report=report, load_error=load_error)
 
     def flush(self) -> None:
@@ -144,7 +163,7 @@ class SingleFileCaretaker(Generic[StateT, ReportT]):
                 f"Failed to back up incompatible GUI state {self._path}: {exc}"
             ) from exc
         error = PersistenceError(
-            f"Incompatible GUI state ({cause}); backed up to {backup}; using defaults"
+            f"Failed to read GUI state ({cause}); backed up to {backup}; using defaults"
         )
         logger.warning("%s", error)
         return error
@@ -155,5 +174,6 @@ __all__ = [
     "RestoreOutcome",
     "SingleFileCaretaker",
     "SnapshotCodec",
+    "SnapshotIdentityError",
     "SnapshotOriginator",
 ]
