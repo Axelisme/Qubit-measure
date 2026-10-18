@@ -279,6 +279,7 @@ class RecordingRenderHost:
         self._log.add("host", "mount_interactive_analysis", tab_id, frontend_factory)
         if self._mount_error is not None:
             raise self._mount_error
+        # tolerated(cast): This token lacks run_background; RecordingAdapter only logs it.
         self.frontend = frontend_factory(cast(InteractiveFrontendEnv, object()))
 
     def unmount_interactive_analysis(
@@ -299,13 +300,21 @@ def _facet(
     host = RecordingRenderHost(log, mount_error=mount_error)
     return (
         RunAnalyzeControlFacet(
+            # tolerated(cast): RecordingState logs tab access; State is concrete.
             state=cast(Any, state),
+            # tolerated(cast): RecordingBus logs payloads; EventBus is concrete.
             bus=cast(Any, bus),
+            # tolerated(cast): RecordingGuard logs checks; GuardService is concrete.
             guard=cast(Any, RecordingGuard(log)),
+            # tolerated(cast): RecordingTab logs preparation; TabService is concrete.
             tab=cast(Any, RecordingTab(log)),
+            # tolerated(cast): RecordingLoad logs result loading; LoadService is concrete.
             load=cast(Any, RecordingLoad(log)),
+            # tolerated(cast): RecordingRun logs run delegation; RunService is concrete.
             run=cast(Any, RecordingRun(log)),
+            # tolerated(cast): RecordingAnalyze logs stages; AnalyzeService is concrete.
             analyze=cast(Any, RecordingAnalyze(log)),
+            # tolerated(cast): RecordingPostAnalyze logs stages; PostAnalyzeService is concrete.
             post_analyze=cast(Any, RecordingPostAnalyze(log)),
             render_host=lambda: host,
             owner_scheduler=ManualOwnerScheduler(),
