@@ -7,7 +7,8 @@ from typing import Literal
 import numpy as np
 import pytest
 import zcu_tools.simulate.evolution as evolution
-from zcu_tools.simulate.evolution.kernel import SegmentTable
+from zcu_tools.simulate.evolution.kernel import KernelContext, SegmentTable
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from tests.simulate.evolution.contract.kernel_suite import (
     KernelCase,
@@ -135,17 +136,26 @@ class TestFluxDOP853(KernelContract):
 def prepare(case: KernelCase):
     rows = np.arange(len(case.states))
     keys, first, inverse = np.unique(
-        case.kernel.prepare_keys(case.table, rows),
+        case.kernel.prepare_keys(
+            case.table, rows, KernelContext(case.source, case.budget, WorkPlan())
+        ),
         return_index=True,
         return_inverse=True,
     )
     return case.kernel.prepare(
-        keys, case.table, rows[first], case.source, case.budget
+        keys,
+        case.table,
+        rows[first],
+        KernelContext(case.source, case.budget, WorkPlan()),
     ), inverse
 
 
 def test_source_keys_share_across_baths_and_apply_parameters(kernel_case: KernelCase):
-    keys = kernel_case.kernel.prepare_keys(kernel_case.table, np.arange(3))
+    keys = kernel_case.kernel.prepare_keys(
+        kernel_case.table,
+        np.arange(3),
+        KernelContext(kernel_case.source, kernel_case.budget, WorkPlan()),
+    )
     assert len(np.unique(keys)) == 1
 
 
@@ -207,11 +217,22 @@ def test_missing_waveform_and_expansion_fail_explicitly():
     case = flux_case()
     with pytest.raises(ValueError, match="expansion"):
         case.kernel.prepare(
-            case.kernel.prepare_keys(case.table, np.array([0])),
+            case.kernel.prepare_keys(
+                case.table,
+                np.array([0]),
+                KernelContext(
+                    evolution.ModelSource(case.states[0], case.source.model),
+                    case.budget,
+                    WorkPlan(),
+                ),
+            ),
             case.table,
             np.array([0]),
-            evolution.ModelSource(case.states[0], case.source.model),
-            case.budget,
+            KernelContext(
+                evolution.ModelSource(case.states[0], case.source.model),
+                case.budget,
+                WorkPlan(),
+            ),
         )
     prepared, inverse = prepare(case)
     with pytest.raises(ValueError, match="waveform"):

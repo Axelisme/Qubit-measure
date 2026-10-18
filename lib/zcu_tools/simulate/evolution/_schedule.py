@@ -11,13 +11,14 @@ from numpy.typing import NDArray
 
 from ._dispatch import Dispatch, Selection, classify, prepare
 from ._dispatch import diagnostics as dispatch_diagnostics
+from ._gain_plan import admit_shared_builds
 from ._parallel import Executor
 from ._planning import Geometry
 from ._prepare_keys import group_keys
+from ._resident import ResidentAdmission
 from .cache import PrepareCache, PreparedPayload
 from .engine import Cancelled, EvolutionResult, PathDiagnostics
-from .kernel import ApplyContext, Kernel, RowPlan, SegmentTable
-from .secular import ModelSource
+from .kernel import ApplyContext, Kernel, KernelContext, RowPlan, SegmentTable
 
 
 @dataclass(frozen=True)
@@ -49,13 +50,16 @@ class _ChunkResult:
 
 
 def _deduplicate(
-    table: SegmentTable, dispatch: Dispatch, kernels: Mapping[str, Kernel]
+    table: SegmentTable,
+    dispatch: Dispatch,
+    kernels: Mapping[str, Kernel],
+    context: KernelContext,
 ) -> list[_Entries]:
     entries: list[_Entries] = []
     for name in np.unique(dispatch.names[dispatch.names != ""]):
         kernel = kernels[str(name)]
         rows = np.flatnonzero(dispatch.names == name)
-        groups = group_keys(kernel, table, rows)
+        groups = group_keys(kernel, table, rows, context)
         entries.append(
             _Entries(
                 kernel,
@@ -74,15 +78,14 @@ def _build(
     entry: _Entries,
     selection: NDArray[np.int64],
     table: SegmentTable,
-    source: ModelSource,
-    budget: float,
+    context: KernelContext,
     cancel: Event,
 ) -> PreparedPayload:
     if cancel.is_set():
         raise Cancelled()
     keys = entry.keys[selection]
     prepared = prepare(
-        entry.kernel, keys, table, entry.representative[selection], source, budget
+        entry.kernel, keys, table, entry.representative[selection], context
     )
     return PreparedPayload(prepared, tuple(key.tobytes() for key in keys))
 
@@ -112,6 +115,19 @@ def _bind(
     )
 
 
+def _resident_admission(
+    limit: int, cached: Mapping[str, tuple[PreparedPayload, ...]]
+) -> ResidentAdmission:
+    """Protect caller-looked-up guard allocations before any local offers."""
+    resident = ResidentAdmission(limit)
+    # Deferred guards borrow whole allocations before they have entries.
+    # Their row-specific handoffs must not re-admit resident subset metadata.
+    for payloads in cached.values():
+        for payload in payloads:
+            resident.protect(payload)
+    return resident
+
+
 class Schedule:
     """One acquire's grouped prepare stage and independent timeline chunks."""
 
@@ -119,21 +135,18 @@ class Schedule:
         self,
         geometry: Geometry,
         dispatch: Dispatch,
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
         cancel: Event,
         initial_density: NDArray[np.complex128] | None = None,
     ):
-        self.geometry, self.dispatch, self.source, self.budget, self.cancel = (
-            geometry,
-            dispatch,
-            source,
-            budget,
-            cancel,
-        )
+        self.geometry, self.dispatch, self.cancel = geometry, dispatch, cancel
+        self.context = context
+        self.source, self.budget = context.source, context.budget
         self.table = geometry.table
         self.initial_density = (
-            source.initial_density if initial_density is None else initial_density
+            context.source.initial_density
+            if initial_density is None
+            else initial_density
         )
 
     def prepare_shared(
@@ -148,19 +161,22 @@ class Schedule:
         even if only one timeline remains. No accepted guard product is rebuilt.
         """
         bindings: list[_Binding] = []
+        local_products: list[tuple[tuple[str, str, float], PreparedPayload]] = []
         jobs: list[tuple[_Entries, NDArray[np.int64], tuple[str, str, float]]] = []
+        self.resident = _resident_admission(cache.limit, self.dispatch.cached)
         dc = self.source.model(tuple(0 for _ in range(self.table.level.shape[1])))
+        self.dc_identity = dc.identity
         for entry in entries:
             shared = entry.shared
+            key_positions = {key.tobytes(): i for i, key in enumerate(entry.keys)}
+            available = set(key_positions)
             key_set = {key.tobytes() for key in entry.keys[shared]}
             namespace = entry.kernel.name, dc.identity, self.budget
-            hits = cache.find(namespace, key_set)
-            for payload in hits:
-                bindings.append(
-                    _bind(entry, payload, shared[entry.inverse], self.dispatch)
-                )
+            for payload in cache.find(namespace, available):
+                self.resident.protect(payload)
+                bindings.append(self._bind_hit(entry, payload, key_positions))
                 key_set.difference_update(payload.keys)
-            available = {key.tobytes() for key in entry.keys}
+                available.difference_update(payload.keys)
             shared_keys = {key.tobytes() for key in entry.keys[shared]}
             for preparation in self.dispatch.preparations.get(entry.kernel.name, ()):
                 payload = PreparedPayload(
@@ -176,8 +192,11 @@ class Schedule:
                 bindings.append(
                     _bind(entry, payload, eligible[entry.inverse], self.dispatch)
                 )
-                if set(payload.keys).issubset(shared_keys):
+                if shared_keys.intersection(payload.keys):
                     cache.add(namespace, payload)
+                    self.resident.protect(payload)
+                else:
+                    local_products.append((namespace, payload))
                 key_set.difference_update(payload.keys)
                 available.difference_update(payload.keys)
             missing = np.array(
@@ -189,21 +208,67 @@ class Schedule:
                     (entry, selected, namespace)
                     for selected in np.array_split(missing, min(chunks, len(missing)))
                 )
+        if self.context.work_plan.gain_groups:
+            self._admit_gain_builds(entries, jobs)
         # Coarse key chunks, grouped by kernel; prepare never receives density.
         built = pool(
-            delayed(_build)(
-                entry, selected, self.table, self.source, self.budget, self.cancel
-            )
+            delayed(_build)(entry, selected, self.table, self.context, self.cancel)
             for entry, selected, _ in jobs
         )
         for (entry, _, namespace), payload in zip(jobs, built, strict=True):
             if payload is None:
                 raise RuntimeError("prepare job returned no payload")
             cache.add(namespace, payload)
+            self.resident.protect(payload)
             bindings.append(
                 _bind(entry, payload, entry.shared[entry.inverse], self.dispatch)
             )
+        for namespace, payload in local_products:
+            self.resident.offer(namespace, payload)
         return self.bind_inputs(bindings)
+
+    def _bind_hit(
+        self, entry: _Entries, payload: PreparedPayload, key_positions: dict[bytes, int]
+    ) -> _Binding:
+        """Bind a resident hit to the rows whose keys it covers."""
+        eligible = np.zeros(len(entry.keys), dtype=bool)
+        for key in payload.keys:
+            if key in key_positions:
+                eligible[key_positions[key]] = True
+        return _bind(entry, payload, eligible[entry.inverse], self.dispatch)
+
+    def _admit_gain_builds(
+        self,
+        entries: list[_Entries],
+        jobs: list[tuple[_Entries, NDArray[np.int64], tuple[str, str, float]]],
+    ) -> None:
+        """Admit caller-built gain rows; local and deferred rows keep groups open."""
+        pending_gain_rows = [
+            entry.representative[selected]
+            for entry, selected, _ in jobs
+            if entry.kernel.name == "floquet_period"
+        ]
+        open_gain_rows = [
+            entry.rows[~entry.shared[entry.inverse]]
+            for entry in entries
+            if entry.kernel.name == "floquet_period"
+        ]
+        if self.dispatch.deferred is not None:
+            open_gain_rows.append(np.flatnonzero(self.dispatch.deferred))
+        admit_shared_builds(
+            self.context,
+            self.table,
+            np.concatenate(pending_gain_rows)
+            if pending_gain_rows
+            else np.empty(0, dtype=np.int64),
+            np.concatenate(open_gain_rows)
+            if open_gain_rows
+            else np.empty(0, dtype=np.int64),
+        )
+
+    def retain_local(self, kernel: Kernel, payload: PreparedPayload) -> None:
+        """Submit model-only worker products without touching the caller's LRU."""
+        self.resident.offer((kernel.name, self.dc_identity, self.budget), payload)
 
     def bind_inputs(self, bindings: list[_Binding]) -> list[_Binding]:
         """Add evolve-local input bindings after model-only cache admission.
@@ -235,7 +300,7 @@ class Schedule:
                     self.table,
                     rows,
                     initial,
-                    self.budget,
+                    self.context,
                 )
                 if payload is not None:
                     bound.append(
@@ -283,7 +348,7 @@ class Schedule:
     ) -> EvolutionResult:
         """Return point-ordered densities and aggregate post-apply diagnostics."""
         self.kernels = kernels
-        entries = _deduplicate(self.table, self.dispatch, kernels)
+        entries = _deduplicate(self.table, self.dispatch, kernels, self.context)
         shared = self.prepare_shared(entries, cache, pool, chunks)
         count = len(self.geometry.points)
         cost = np.bincount(
@@ -292,6 +357,7 @@ class Schedule:
         ordered = np.argsort(-cost, kind="stable")
         work = [ordered[i :: min(chunks, count)] for i in range(min(chunks, count))]
         results = pool(delayed(self.chunk)(points, entries, shared) for points in work)
+        self.resident.commit(cache)
         output = np.empty(
             (count, *self.source.initial_density.shape), dtype=np.complex128
         )
@@ -346,8 +412,7 @@ class Schedule:
         dispatch = classify(
             self.geometry,
             self.kernels,
-            self.source,
-            self.budget,
+            self.context,
             selection=Selection(
                 rows,
                 self.dispatch.shaped,
@@ -355,15 +420,17 @@ class Schedule:
                 self.dispatch.two_tone_direct,
                 self.dispatch.names,
                 self.dispatch.plans,
+                self.dispatch.cached,
             ),
         )
         bindings: list[_Binding] = []
-        for entry in _deduplicate(self.table, dispatch, self.kernels):
+        for entry in _deduplicate(self.table, dispatch, self.kernels, self.context):
             for preparation in dispatch.preparations.get(entry.kernel.name, ()):
                 payload = PreparedPayload(
                     preparation.prepared,
                     tuple(key.tobytes() for key in preparation.keys),
                 )
+                self.retain_local(entry.kernel, payload)
                 bindings.append(
                     _bind(
                         entry, payload, np.ones(len(entry.rows), dtype=bool), dispatch
@@ -373,9 +440,8 @@ class Schedule:
             missing = np.array([int(row) not in covered for row in entry.rows])
             unique = np.unique(entry.inverse[missing])
             if len(unique):
-                payload = _build(
-                    entry, unique, self.table, self.source, self.budget, self.cancel
-                )
+                payload = _build(entry, unique, self.table, self.context, self.cancel)
+                self.retain_local(entry.kernel, payload)
                 bindings.append(_bind(entry, payload, missing, dispatch))
         # Workers write disjoint row slices; only the caller reads all names
         # after the pool joins. Entries and bindings never read this array.
@@ -449,9 +515,8 @@ class Schedule:
             )
             unique = np.unique(entry.inverse[local])
             if len(unique):
-                payload = _build(
-                    entry, unique, self.table, self.source, self.budget, self.cancel
-                )
+                payload = _build(entry, unique, self.table, self.context, self.cancel)
+                self.retain_local(entry.kernel, payload)
                 local_bindings.append(_bind(entry, payload, local, local_dispatch))
         bindings = [*shared, *self.bind_inputs(local_bindings)]
         return _Chunk(self, points, selected, bindings, entries, local_dispatch).run()
@@ -562,7 +627,9 @@ class _Chunk:
                 self.table,
                 rows,
                 states,
-                ApplyContext(self.schedule.budget, binding.plan),
+                ApplyContext(
+                    self.schedule.budget, binding.plan, self.schedule.context.work_plan
+                ),
             )
         except RuntimeError as error:
             raise RuntimeError(
@@ -604,10 +671,10 @@ class _Chunk:
             entry,
             unique,
             self.table,
-            self.schedule.source,
-            self.schedule.budget,
+            self.schedule.context,
             self.schedule.cancel,
         )
+        self.schedule.retain_local(entry.kernel, payload)
         indices = (
             np.searchsorted(unique, self.local_key[rows])
             if chainable

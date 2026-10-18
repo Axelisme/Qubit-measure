@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Mapping, Sequence
-from contextlib import ExitStack
+from contextlib import closing
 from dataclasses import dataclass, field
 from hashlib import sha256
 from threading import Event, Lock
@@ -12,7 +12,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from .kernel import Kernel, SegmentTable
+    from .kernel import Kernel
 
 import numpy as np
 from numpy.typing import NDArray
@@ -357,10 +357,11 @@ class Engine:
         exceedances stay in the result's paths.exceeded_by_kernel and produce
         exactly one RuntimeWarning per call, without correction or retry.
         """
-        from ._dispatch import classify
+        from ._dispatch import classify, create_work_plan
         from ._planning import plan
         from ._prefix import PrefixResolver
         from ._schedule import Schedule
+        from .kernel import KernelContext
 
         with self._lock, native_limit.acquire():
             if self._closed:
@@ -382,15 +383,20 @@ class Engine:
                 if len(geometry.points) > 1 and len(geometry.table.timeline)
                 else 1
             )
-            # Reuse belongs to this evolve, not the registry or prepare LRU.
-            # ExitStack also releases earlier scopes if a later factory fails.
-            with ExitStack() as scopes, execution_pool(workers) as pool:
-                kernels = self._scoped_kernels(geometry.table, source, scopes)
-                geometry = PrefixResolver(
-                    geometry, kernels, source, budget, cancel
-                ).resolve(self._cache, pool, self._chunks)
-                dispatch = classify(geometry, kernels, source, budget, pool=pool)
-                schedule = Schedule(geometry, dispatch, source, budget, cancel)
+            # Drain workers before releasing evolve-local facts and workspaces.
+            with (
+                closing(create_work_plan(geometry.table, source)) as work_plan,
+                execution_pool(workers) as pool,
+            ):
+                context = KernelContext(source, budget, work_plan)
+                kernels = self._kernels
+                geometry = PrefixResolver(geometry, kernels, context, cancel).resolve(
+                    self._cache, pool, self._chunks
+                )
+                dispatch = classify(
+                    geometry, kernels, context, pool=pool, cache=self._cache
+                )
+                schedule = Schedule(geometry, dispatch, context, cancel)
                 result = schedule.run(kernels, self._cache, pool, self._chunks)
             if cancel.is_set():
                 raise Cancelled()
@@ -406,20 +412,6 @@ class Engine:
                     stacklevel=2,
                 )
             return result
-
-    def _scoped_kernels(
-        self, table: SegmentTable, source: ModelSource, scopes: ExitStack
-    ) -> dict[str, Kernel]:
-        """Register optional per-evolve reuse without knowing numeric families."""
-        from .kernel import EvolveScopedKernel
-
-        kernels = dict(self._kernels)
-        for name, kernel in kernels.items():
-            if isinstance(kernel, EvolveScopedKernel):
-                scoped, workspace = kernel.evolve_scope(table, source)
-                scopes.enter_context(self._cache.track_workspace(workspace))
-                kernels[name] = scoped
-        return kernels
 
     def close(self) -> None:
         """Wait for active work, clear the cache and reject later evolve calls; idempotent."""

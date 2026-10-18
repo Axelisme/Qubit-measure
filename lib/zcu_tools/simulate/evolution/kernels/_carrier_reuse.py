@@ -1,11 +1,13 @@
 """Evolve-local calibrated interpolation of physical arrays, never eigenvectors."""
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
 from threading import RLock
 
 import numpy as np
 from numpy.typing import NDArray
+
+from ..workplan import CarrierFamilyPlan
 
 
 @dataclass(frozen=True)
@@ -19,13 +21,10 @@ class _Tile:
 class CarrierWorkspace:
     """Thread-safe physical-block carrier interpolation for one evolve.
 
-    frequencies is the finite signed GHz scan, including every planned carrier.
-    groups optionally supplies aligned hashable noncarrier physical-input keys.
-    The Sambe caller groups by model identity/level, port, peak bound and
-    subdivisions; absent groups means one group (). The cost rule applies to
-    each group separately, before any construction.
-    Interpolation is enabled only for >9 distinct, nonzero, same-sign carriers
-    with max(abs(f))/min(abs(f)) <= 1.1. Nine is the build cost: six degree-five
+    families is the planner's profitable physical-group inventory. Each record
+    fixes model identity/level, port, peak bound and subdivisions. The planner
+    alone applies the >9 same-sign carriers and <=1.1 magnitude-ratio policy.
+    Nine is the build cost: six degree-five
     Chebyshev-Gauss nodes plus three independent probes. Wider scans use exact
     builds, avoiding low-frequency phase turns and retained failed-parent data.
     This conservative policy admits at most one 1.1-ratio tile, clipped to the
@@ -36,35 +35,21 @@ class CarrierWorkspace:
     where >9 planned carriers remain; other children and depth-limited tiles
     use exact builds. This is calibrated, not a rigorous interval bound.
     Callback errors propagate. No density, eigenvector gauge, or global state
-    enters the workspace. The Engine owns it only until this evolve finishes.
-    nbytes charges all retained numeric arrays as live prepared data.
+    enters the workspace. WorkPlan owns it only until this evolve finishes.
+    nbytes reports retained numeric arrays, independently of the resident cache.
     """
 
-    def __init__(
-        self,
-        frequencies: NDArray[np.float64],
-        *,
-        groups: Sequence[tuple[object, ...]] | None = None,
-    ) -> None:
-        if frequencies.ndim != 1 or not np.all(np.isfinite(frequencies)):
-            raise ValueError("carriers must be a finite one-dimensional GHz scan")
-        if groups is None:
-            groups = [()] * len(frequencies)
-        if len(groups) != len(frequencies):
-            raise ValueError("groups must align with carriers")
-        planned: dict[tuple[object, ...], list[float]] = {}
-        for group, frequency in zip(groups, frequencies, strict=True):
-            planned.setdefault(group, []).append(float(frequency))
+    def __init__(self, families: tuple[CarrierFamilyPlan, ...]) -> None:
         self._grids: dict[tuple[object, ...], NDArray[np.float64]] = {}
-        for group, carriers in planned.items():
-            grid = np.unique(carriers)
-            magnitudes = np.abs(grid)
-            if (
-                len(grid) > 9
-                and np.all(grid * grid[0] > 0)
-                and magnitudes.max() <= 1.1 * magnitudes.min()
-            ):
-                self._grids[group] = grid
+        for family in families:
+            group = (
+                family.model_identity,
+                family.level,
+                family.port,
+                family.bound,
+                family.subdivisions,
+            )
+            self._grids[group] = np.asarray(family.carriers_ghz, dtype=np.float64)
         self._tiles: dict[
             tuple[tuple[object, ...], tuple[object, ...]], list[_Tile]
         ] = {}
@@ -87,11 +72,11 @@ class CarrierWorkspace:
         frequency: float,
         build: Callable[[float], NDArray[np.complex128]],
         *,
-        group: tuple[object, ...] = (),
+        group: tuple[object, ...],
     ) -> NDArray[np.complex128]:
         """Return an owned array at this exact signed carrier, not a nearest node.
 
-        group selects a preplanned physical-input grid, default (). Unknown or
+        group selects a preplanned physical-input grid. Unknown or
         unprofitable groups use exact builds. identity is a hashable family key
         fixing every physical input except
         carrier: model identity/level, port, peak gain, subdivision count, harmonic
