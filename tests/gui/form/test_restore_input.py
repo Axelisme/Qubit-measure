@@ -26,7 +26,9 @@ class Flat(BaseModel):
 
 class RestoreForm(FormModel):
     tones: list[Tone] = Field(default_factory=list)
-    shape: Annotated[Ramp | Flat, Field(discriminator="kind")] = Field(default_factory=Ramp)
+    shape: Annotated[Ramp | Flat, Field(discriminator="kind")] = Field(
+        default_factory=Ramp
+    )
     mode: Literal["keep", "new"] = "new"
     value: float = 5
     required: float
@@ -35,21 +37,44 @@ class RestoreForm(FormModel):
 
 @pytest.mark.parametrize("saved_length", [0, 1, 3])
 def test_restore_list_keeps_saved_positions_and_length(saved_length: int) -> None:
-    base = FormInput(RestoreForm, {"tones": [{"name": "fresh", "amount": 99}], "added": 11})
+    base = FormInput(
+        RestoreForm, {"tones": [{"name": "fresh", "amount": 99}], "added": 11}
+    )
     state = FormState(base)
-    saved = FormInput(RestoreForm, {"tones": [{"name": f"Q{i}", "amount": {"expr": "missing + 1"}, "retired": 6} for i in range(saved_length)]})
+    saved = FormInput(
+        RestoreForm,
+        {
+            "tones": [
+                {"name": f"Q{i}", "amount": {"expr": "missing + 1"}, "retired": 6}
+                for i in range(saved_length)
+            ]
+        },
+    )
 
     dropped = state.migrate_input(saved, FormEnv())
 
-    assert state.input.data["tones"] == [{"name": f"Q{i}", "amount": {"expr": "missing + 1"}, "phase": 9} for i in range(saved_length)]
+    assert state.input.data["tones"] == [
+        {"name": f"Q{i}", "amount": {"expr": "missing + 1"}, "phase": 9}
+        for i in range(saved_length)
+    ]
     assert set(dropped) == {("tones", i, "retired") for i in range(saved_length)}
     assert state.input.data["added"] == 11
     assert state.base.same_as(base)
 
 
-def test_restore_keeps_invalid_leaf_raw_and_reports_only_shape_or_removed_fields() -> None:
+def test_restore_keeps_invalid_leaf_raw_and_reports_only_shape_or_removed_fields() -> (
+    None
+):
     state = FormState(RestoreForm.default_input(FormEnv()))
-    saved = FormInput(RestoreForm, {"value": "unfinished", "required": {"expr": "unbound"}, "retired": 1, "shape": [1, 2]})
+    saved = FormInput(
+        RestoreForm,
+        {
+            "value": "unfinished",
+            "required": {"expr": "unbound"},
+            "retired": 1,
+            "shape": [1, 2],
+        },
+    )
 
     dropped = state.migrate_input(saved, FormEnv())
 
@@ -70,7 +95,11 @@ def test_restore_rejects_object_to_scalar_shape_but_keeps_missing_required() -> 
 
 def test_restore_invalid_selection_uses_current_default_and_reports_once() -> None:
     state = FormState(RestoreForm.default_input(FormEnv()))
-    saved = FormInput(RestoreForm, {"shape": {"kind": "flat", "length": 88}, "mode": "keep"}, selections={("shape",): {"kind": "retired"}, ("mode",): "retired"})
+    saved = FormInput(
+        RestoreForm,
+        {"shape": {"kind": "flat", "length": 88}, "mode": "keep"},
+        selections={("shape",): {"kind": "retired"}, ("mode",): "retired"},
+    )
 
     dropped = state.migrate_input(saved, FormEnv())
 
