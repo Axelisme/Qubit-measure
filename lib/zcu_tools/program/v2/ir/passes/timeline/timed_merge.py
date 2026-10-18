@@ -141,7 +141,8 @@ def _fold_anchored_time(
         result.append(inst)
         return pending_lit
 
-    time = getattr(inst, "time")
+    # tolerated: BaseInst lacks time; caller dynamically guards TimeOffset fields.
+    time = getattr(inst, "time")  # noqa: B009
     assert isinstance(time, TimeOffset)
     if pending_lit > 0:
         if time.value + pending_lit > TIMED_LIT_MAX:
