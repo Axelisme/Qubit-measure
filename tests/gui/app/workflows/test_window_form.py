@@ -160,18 +160,23 @@ def test_form_inspection_rpc_preserves_complex_tag_on_invalid_numeric_candidate(
     assert any(e["path"] == ["sample", "value"] for e in result["errors"])
 
 
-def test_form_inspection_rpc_plan_branch_batch_does_not_change_gui(
+def test_form_inspection_rpc_plan_batch_does_not_change_gui(
     attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
     rpc: RpcRequest,
 ) -> None:
+    from zcu_tools.gui.form import FormInput
+
     window, _harness, _entry = attachment
-    before = window.plan_panel.state.input.data, window.plan_panel.state.base.data
+    state = window.plan_panel.state
+    data = state.input.data
+    data["samples"] = {"kind": "linrange", "start": 0.0, "stop": 1.0, "n": 3}
+    state.reset(FormInput(PlanForm, data))
+    before = state.input.data, state.base.data
     reply = rpc(
         "workflow.form",
         {
             "form": "plan",
             "batch": [
-                {"path": ["samples", "kind"], "value": "linrange"},
                 {"path": ["samples", "start"], "value": {"expr": "1 / 2"}},
                 {"path": ["samples", "stop"], "value": 1.0},
                 {"path": ["samples", "n"], "value": 3},
@@ -315,13 +320,18 @@ def test_form_inspection_rpc_requires_accepted_explicit_target(
 
 
 @pytest.mark.parametrize("path", [[], ["samples"], ["samples", "start"]])
-def test_describe_form_rpc_uses_call_local_branch(
+def test_describe_form_rpc_uses_call_local_edits(
     attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
     rpc: RpcRequest,
     path: list[str],
 ) -> None:
+    from zcu_tools.gui.form import FormInput
+
     window, _harness, _entry = attachment
     state = window.plan_panel.state
+    data = state.input.data
+    data["samples"] = {"kind": "linrange", "start": 0.0, "stop": 1.0, "n": 3}
+    state.reset(FormInput(PlanForm, data))
     before = state.input.data, state.base.data
     reply = rpc(
         "workflow.describe_form",
@@ -329,7 +339,6 @@ def test_describe_form_rpc_uses_call_local_branch(
             "form": "plan",
             "path": path,
             "batch": [
-                {"path": ["samples", "kind"], "value": "linrange"},
                 {"path": ["samples", "start"], "value": {"expr": "1 / 2"}},
                 {"path": ["samples", "n"], "value": 0},
             ],
