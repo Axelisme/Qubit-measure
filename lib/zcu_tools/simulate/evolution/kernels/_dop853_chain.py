@@ -8,6 +8,15 @@ from ._dop853 import Tolerances, integrate
 
 
 @njit(nogil=True, cache=True)
+def touching(segments, previous, following):
+    """Identify same-timeline edges within 1e-9 ns, for scalar or array rows."""
+    boundary = segments.start[previous] + segments.duration[previous]
+    return (segments.timeline[following] == segments.timeline[previous]) & (
+        np.abs(segments.start[following] - boundary) <= 1e-9
+    )
+
+
+@njit(nogil=True, cache=True)
 def _sample_ceiling(segments, row):
     ceiling = np.inf
     for tone in range(segments.tones[row]):
@@ -69,11 +78,7 @@ def run_chain(
         state = states[index].copy()
         if index > 0:
             previous = rows[index - 1]
-            boundary = segments.start[previous] + segments.duration[previous]
-            if (
-                segments.timeline[row] == segments.timeline[previous]
-                and abs(segments.start[row] - boundary) <= 1e-9
-            ):
+            if touching(segments, previous, row):
                 previous_model = model_index[index - 1]
                 state = states[index - 1].copy()
                 if previous_model != model:

@@ -293,3 +293,88 @@ def test_response_rejects_content_dependent_sample_counts_and_ragged_traces():
         reader.responses(ragged)
     sums_only = reader.responses(replace(ragged, include_traces=False))
     np.testing.assert_array_equal(sums_only.sample_counts, [2, 7])
+
+
+@pytest.mark.parametrize("grid_kind", ["uniform", "one-sample", "alias", "late-origin"])
+def test_integrated_sums_preserve_calibrated_discrete_field_sum(grid_kind):
+    """The trace route is an independent oracle for discrete, not time, sums."""
+    m = model()
+    m = replace(
+        m,
+        receiver=replace(m.receiver, time_of_flight_ns=1.7),
+        mismatch_phase_rad=np.array([0.2, -0.1]),
+    )
+    pulse = adc.ReadoutPulse(3.0, 23.0, 1.2 + 0.3j, 6.008, phase_rad=0.73)
+    grid = adc.SampleGrid(np.arange(-5.0, 60.0, 0.5), 5.996, 0.3)
+    if grid_kind == "one-sample":
+        grid = replace(grid, times_ns=np.array([12.0]))
+    elif grid_kind == "alias":
+        grid = replace(grid, demodulation_frequency_ghz=8.008)
+    elif grid_kind == "late-origin":
+        # Decimal steps at late origins have nonidentical float64 differences.
+        pulse = replace(pulse, start_ns=100003.0, end_ns=100023.0)
+        grid = replace(grid, times_ns=99995.0 + np.arange(650) * 0.1)
+    inputs = adc.ReadoutBatch(m, ((pulse,),), ((grid,),), np.array([0], dtype=np.int64))
+    reader = adc.ConditionalReadout(m)
+    result = reader.responses(inputs)
+    field = adc.ConditionalReadout(m).responses(replace(inputs, include_traces=True))
+    assert result.traces is None
+    assert field.traces is not None
+    actual = result.sums[..., 0] + 1j * result.sums[..., 1]
+    expected = field.sums[..., 0] + 1j * field.sums[..., 1]
+    np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=0)
+    # Equal content is stable across repeated contents, batches and trace requests.
+    copied = replace(
+        inputs, model=replace(m), pulses=inputs.pulses * 2, grids=inputs.grids * 2
+    )
+    repeated = reader.responses(copied)
+    np.testing.assert_array_equal(repeated.sums[0], result.sums[0])
+    np.testing.assert_array_equal(repeated.sums[1], result.sums[0])
+    traced = reader.responses(replace(inputs, include_traces=True))
+    np.testing.assert_array_equal(traced.traces, field.traces)
+
+
+@pytest.mark.parametrize("unsupported", ["nonuniform", "shaped", "defective"])
+def test_integrated_fallback_preserves_field_values(unsupported):
+    m = model()
+    pulse = adc.ReadoutPulse(3.0, 23.0, 1.2 + 0.3j, 6.008)
+    grid = adc.SampleGrid(np.arange(-5.0, 60.0, 0.5), 5.996, 0.3)
+    if unsupported == "nonuniform":
+        grid = replace(grid, times_ns=np.array([-5.0, 2.0, 5.1, 23.0, 43.0]))
+    elif unsupported == "shaped":
+        pulse = replace(pulse, envelope=lambda t: 1.0 + 0.1 * np.sin(t))
+    else:
+        m = replace(
+            m,
+            rates_per_ns=np.array(
+                [[0.0, 0.03, 0.0], [0.0, 0.0, 0.03], [0.0, 0.0, 0.0]]
+            ),
+        )
+    inputs = adc.ReadoutBatch(m, ((pulse,),), ((grid,),), np.array([0], dtype=np.int64))
+    result = adc.ConditionalReadout(m).responses(inputs)
+    decimated = adc.ConditionalReadout(m).responses(
+        replace(inputs, include_traces=True)
+    )
+    np.testing.assert_array_equal(result.sums, decimated.sums)
+    assert decimated.traces is not None
+    np.testing.assert_array_equal(decimated.sums, decimated.traces.sum(axis=-2))
+
+
+def test_mixed_integrated_contents_preserve_each_physical_response():
+    m = model()
+    pulse = adc.ReadoutPulse(3.0, 23.0, 1.2 + 0.3j, 6.008)
+    shaped = replace(pulse, envelope=lambda t: 1.0 + 0.1 * np.sin(t))
+    uniform = adc.SampleGrid(np.arange(-5.0, 60.0, 0.5), 5.996, 0.3)
+    nonuniform = replace(
+        uniform, times_ns=uniform.times_ns + 0.01 * np.sin(uniform.times_ns)
+    )
+    inputs = adc.ReadoutBatch(
+        m,
+        ((pulse,), (shaped,), (pulse,)),
+        ((uniform,), (uniform,), (nonuniform,)),
+        np.array([2, 0, 1, 0], dtype=np.int64),
+    )
+    result = adc.ConditionalReadout(m).responses(inputs)
+    field = adc.ConditionalReadout(m).responses(replace(inputs, include_traces=True))
+    np.testing.assert_allclose(result.sums[0], field.sums[0], rtol=1e-10, atol=0)
+    np.testing.assert_array_equal(result.sums[1:], field.sums[1:])

@@ -7,7 +7,7 @@ opaque prepared payloads; the engine only sees their resident array byte size.
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -405,4 +405,24 @@ class Kernel(Protocol):
         retain row order when independent rows are split across calls.
         Numerical failure raises RuntimeError.
         """
+        ...
+
+
+@runtime_checkable
+class EvolveScopedKernel(Protocol):
+    """Optional factory for the two families with evolve-local numeric reuse.
+
+    Engine calls this once after segment geometry exists, before prefix/worker
+    preparation. The returned kernel implements the ordinary Kernel seam and
+    owns a fresh workspace shared by this call's prefix and timeline workers.
+    The second return value exposes current retained-array nbytes; Engine tracks
+    it as live prepared data until success, cancellation or failure. Neither the
+    registry kernel nor persistent LRU may retain the workspace. Concurrent
+    evolves must receive disjoint scopes. Standalone kernels remain usable.
+    """
+
+    def evolve_scope(
+        self, table: SegmentTable, source: ModelSource
+    ) -> tuple[Kernel, Prepared]:
+        """Scope reuse to table's complete scan and source, without reading density."""
         ...

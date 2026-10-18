@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Mapping, Sequence
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from hashlib import sha256
 from threading import Event, Lock
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
     from ._dispatch import Dispatch
     from ._planning import Geometry
     from .calibration import CalibratedConstantProfile
-    from .kernel import Kernel
+    from .kernel import Kernel, SegmentTable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -454,6 +455,20 @@ class Engine:
         finally:
             planner.close()
 
+    def _scoped_kernels(
+        self, table: SegmentTable, source: ModelSource, scopes: ExitStack
+    ) -> dict[str, Kernel]:
+        """Register optional per-evolve reuse without knowing numeric families."""
+        from .kernel import EvolveScopedKernel
+
+        kernels = dict(self._kernels)
+        for name, kernel in kernels.items():
+            if isinstance(kernel, EvolveScopedKernel):
+                scoped, workspace = kernel.evolve_scope(table, source)
+                scopes.enter_context(self._cache.track_workspace(workspace))
+                kernels[name] = scoped
+        return kernels
+
     def _evolve(
         self,
         source: ModelSource,
@@ -503,27 +518,28 @@ class Engine:
                     budget=budget,
                     evaluation=evaluation,
                 )
-            with execution_pool(workers) as pool:
+            # Reuse belongs to this evolve, not the registry or prepare LRU.
+            # ExitStack also releases earlier scopes if a later factory fails.
+            with ExitStack() as scopes, execution_pool(workers) as pool:
+                kernels = self._scoped_kernels(geometry.table, source, scopes)
                 if constant_dispatch is not None:
                     schedule = Schedule(
                         geometry, constant_dispatch, source, budget, cancel
                     )
                 elif mode == "legacy-plan":
                     geometry = PrefixResolver(
-                        geometry, self._kernels, source, budget, cancel
+                        geometry, kernels, source, budget, cancel
                     ).resolve(self._cache, pool, self._chunks)
                     schedule = Schedule.from_legacy_plan(
-                        geometry, self._kernels, source, budget, cancel, pool
+                        geometry, kernels, source, budget, cancel, pool
                     )
                 else:
                     geometry = PrefixResolver(
-                        geometry, self._kernels, source, budget, cancel
+                        geometry, kernels, source, budget, cancel
                     ).resolve(self._cache, pool, self._chunks)
-                    dispatch = classify(
-                        geometry, self._kernels, source, budget, pool=pool
-                    )
+                    dispatch = classify(geometry, kernels, source, budget, pool=pool)
                     schedule = Schedule(geometry, dispatch, source, budget, cancel)
-                result = schedule.run(self._kernels, self._cache, pool, self._chunks)
+                result = schedule.run(kernels, self._cache, pool, self._chunks)
             if cancel.is_set():
                 raise Cancelled()
             exceeded = result.paths.exceeded_by_kernel

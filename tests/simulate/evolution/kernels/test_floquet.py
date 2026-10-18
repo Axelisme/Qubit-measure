@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource, kernel
 
+from .._engine import RecordingKernel
 from ..contract.kernel_suite import (
     KernelCase,
     KernelContract,
@@ -68,6 +69,7 @@ class TestFloquetContract(KernelContract):
 def test_engine_reuses_guard_preparations_once_per_key(
     kernel_case: KernelCase, count: int
 ) -> None:
+    """DOP853 rejection falls back to Floquet without rebuilding guard products."""
     from contextlib import closing
     from threading import Event
 
@@ -109,7 +111,8 @@ def test_engine_reuses_guard_preparations_once_per_key(
         np.full(count, 1.1),
     )
     counted = CountingFloquet()
-    with closing(Engine(1, 0, kernels=(counted,))) as engine:
+    rejected_direct = RecordingKernel("dop853", accepts=False)
+    with closing(Engine(1, 0, kernels=(counted, rejected_direct))) as engine:
         actual = engine.evolve(case.source, (batch,), cancel=Event())
         assert actual.paths.segments_by_kernel == {"floquet": count}
         assert len(counted.prepared_keys) == len(set(counted.prepared_keys)) == 1
@@ -460,7 +463,55 @@ def test_micromotion_bath_matches_independent_lindblad_jumps(
     assert np.max(abs(expected - without_bath)) > 5e-5
     np.testing.assert_allclose(actual, expected, rtol=0, atol=3e-6)
 
-    # Only the rotating bath harmonics can reject these zero-probe rows.
+    # Retaining the rotating bath extends admission without dropping its effect.
     long_table = replace(table, duration_ns=np.full(4, 128.0))
-    assert not case.kernel.guard(long_table, rows, source, case.budget).any()
+    assert case.kernel.guard(long_table, rows, source, case.budget).all()
+    long_case = replace(case, table=long_table)
+    prepared = case.kernel.prepare(keys, long_table, rows[first], source, case.budget)
+    actual = case.states.copy()
+    case.kernel.apply(prepared, inverse, long_table, rows, actual, case.budget)
+    expected = np.stack(
+        [reference(long_case, r, state) for r, state in enumerate(case.states)]
+    )
+    np.testing.assert_allclose(actual, expected, rtol=0, atol=3e-6)
     assert case.kernel.guard(long_table, rows, closed_source, case.budget).all()
+
+
+def test_prepared_bytes_exclude_shared_models(kernel_case: KernelCase) -> None:
+    import gc
+    import tracemalloc
+
+    case = kernel_case
+    model = case.source.model((0,))
+    # Several ports make repeated model charges larger than Python bookkeeping.
+    model = replace(
+        model,
+        drives=tuple(replace(model.drives[0], name=f"port-{p}") for p in range(24)),
+    )
+    source = ModelSource(case.states[0], lambda _: model)
+    gains = case.table.tone_amplitude.copy()
+    gains[:, 0] = [0.10, 0.11, 0.12, 0.13]
+    table = replace(case.table, tone_amplitude=gains)
+    rows = np.arange(len(case.states))
+    keys = case.kernel.prepare_keys(table, rows)
+    # Warm imports and solver/library caches using a different set of frames.
+    case.kernel.prepare(
+        case.kernel.prepare_keys(case.table, rows[:1]),
+        case.table,
+        rows[:1],
+        source,
+        case.budget,
+    )
+    gc.collect()
+    tracemalloc.start()
+    try:
+        before = tracemalloc.take_snapshot()
+        prepared = case.kernel.prepare(keys, table, rows, source, case.budget)
+        gc.collect()
+        after = tracemalloc.take_snapshot()
+        retained = sum(stat.size_diff for stat in after.compare_to(before, "traceback"))
+        # NumPy reports its allocations to tracemalloc. Retained memory includes
+        # Python overhead too, so it is an upper bound on owned array bytes.
+        assert prepared.nbytes <= retained
+    finally:
+        tracemalloc.stop()

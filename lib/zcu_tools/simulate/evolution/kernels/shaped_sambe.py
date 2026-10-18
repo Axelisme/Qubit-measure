@@ -1,5 +1,6 @@
-"""Low-reuse real-envelope periods from finite Hilbert Fourier matrices."""
+"""Real-envelope periods from shared finite Hilbert Fourier matrices."""
 
+from copy import copy
 from dataclasses import dataclass
 
 import numpy as np
@@ -16,6 +17,7 @@ from ..declarations import (
 )
 from ..kernel import GuardPreparation, GuardResult, Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
+from ._carrier_reuse import CarrierWorkspace
 from ._period_table import (
     PeriodEntry,
     PeriodPlayback,
@@ -25,6 +27,7 @@ from ._period_table import (
     envelopes,
     periods,
 )
+from ._sambe import eigensystem
 from ._shaped import drive_bounds, envelope_bounds
 from .dop853 import DOP853Kernel
 from .period_table import PeriodTableKernel, advance_tail
@@ -49,16 +52,7 @@ def _spectral_blocks(energies, coupling, frequency, modes, duration):
     """Run matrix assembly, eigensolve and reconstruction without the GIL."""
     size = len(energies)
     count = 2 * modes + 1
-    matrix = np.zeros((count * size, count * size), dtype=np.complex128)
-    for k in range(count):
-        block = slice(k * size, (k + 1) * size)
-        matrix[block, block] = np.diag(energies + (k - modes) * frequency)
-        if k:
-            previous = slice((k - 1) * size, k * size)
-            matrix[block, previous] = coupling
-            matrix[previous, block] = coupling.conj().T
-    values, vectors = np.linalg.eigh(matrix)
-    central = np.ascontiguousarray(vectors[modes * size : (modes + 1) * size])
+    values, vectors, central = eigensystem(energies, coupling, frequency, modes)
     evolved = (vectors * np.exp(-2j * np.pi * values * duration)) @ central.conj().T
     result = np.zeros((16, size, size), dtype=np.complex128)
     for index in range(count):
@@ -106,7 +100,9 @@ class _SpectralFamily:
         frequency: float,
         bound: float,
         step: float,
+        workspace: CarrierWorkspace | None,
     ) -> None:
+        self.workspace = workspace
         self.model = model
         self.port = port
         self.frequency = frequency
@@ -117,14 +113,41 @@ class _SpectralFamily:
             tuple[int, int], tuple[NDArray[np.complex128], float, float]
         ] = {}
 
+    def _physical(self, kind: str, orders: tuple[int, int]) -> NDArray[np.complex128]:
+        """Build or interpolate physical arrays with all noncarrier inputs fixed."""
+        subdivisions = int(round(1 / (abs(self.frequency) * self.step)))
+
+        def build(frequency: float) -> NDArray[np.complex128]:
+            step = 1 / (abs(frequency) * subdivisions)
+            if kind == "peak":
+                modes = orders[1]
+                return np.array(
+                    [
+                        _spectral(self.model, self.port, frequency, self.bound, k, step)
+                        for k in (modes, modes + 1)
+                    ]
+                )
+            return _coefficients(
+                self.model, self.port, frequency, self.bound, step, orders
+            )
+
+        workspace = self.workspace
+        if workspace is None:
+            return build(self.frequency)
+        identity = (
+            self.model.identity,
+            self.model.level,
+            self.port,
+            self.bound,
+            subdivisions,
+            kind,
+            orders,
+        )
+        return workspace.evaluate(identity, self.frequency, build, group=identity[:5])
+
     def error(self, modes: int) -> float:
         if modes not in self.errors:
-            fine = _spectral(
-                self.model, self.port, self.frequency, self.bound, modes + 1, self.step
-            )
-            coarse = _spectral(
-                self.model, self.port, self.frequency, self.bound, modes, self.step
-            )
+            coarse, fine = self._physical("peak", (0, modes))
             self.errors[modes] = float(
                 np.sum(np.linalg.norm(fine - coarse, axis=(-2, -1)))
             )
@@ -136,9 +159,7 @@ class _SpectralFamily:
     ) -> tuple[NDArray[np.complex128], float, float]:
         if orders not in self.polynomials:
             nodes, _ = orders
-            coefficients = _coefficients(
-                self.model, self.port, self.frequency, self.bound, self.step, orders
-            )
+            coefficients = self._physical("polynomial", orders)
             last = float(
                 np.sum(np.linalg.norm(coefficients[:, nodes - 1], axis=(-2, -1)))
             )
@@ -166,7 +187,7 @@ class _Data:
 
 
 class ShapedSambeKernel:
-    """Finite-Fourier real-envelope propagation for low-reuse shaped keys.
+    """Finite-Fourier real-envelope propagation for shaped keys at any reuse.
 
     Keys contain level, port, signed GHz carrier, peak absolute gain,
     duration in ns and gain-weighted envelope slope. They fix subperiod resolution.
@@ -179,16 +200,71 @@ class ShapedSambeKernel:
     """
 
     declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("shaped_sambe", "spectral-reuse-v2"),
+        identity=AlgorithmIdentity("shaped_sambe", "carrier-physical-v3"),
         eligibility=Eligibility(1, 1, "shaped"),
         guard=GuardDeclaration(("model-build",), builds_model=True),
         accuracy="guarded-approximation",
-        reuse=ReuseDeclaration("shaped_sambe/spectral-reuse-v2/serial"),
+        reuse=ReuseDeclaration("shaped_sambe/carrier-physical-v3/serial"),
         fallback="legacy-order",
     )
 
     name = "shaped_sambe"
     guard_builds = True
+
+    def __init__(self, workspace: CarrierWorkspace | None = None) -> None:
+        """Use Engine's evolve-local physical-block workspace, or exact builds.
+
+        Standalone calls default to independent per-carrier preparation. A supplied
+        workspace must belong to one source/budget/evolve only. Its calibrated
+        carrier probes are not a rigorous interval bound; harmonic/amplitude
+        guards, cycle scaling, dissipation, tails and projection are unchanged.
+        """
+        self._workspace = workspace
+
+    def evolve_scope(
+        self, table: SegmentTable, source: ModelSource
+    ) -> tuple["ShapedSambeKernel", Prepared]:
+        """Return a fresh kernel/workspace for this scan, never retaining either.
+
+        Engine shares the returned kernel with prefix and timeline workers and
+        charges the workspace's current numeric bytes until this evolve ends.
+        """
+        workspace = self.carrier_workspace(table, source)
+        # Keep injected subclass hooks; only this clone receives the workspace.
+        scoped = copy(self)
+        scoped._workspace = workspace
+        return scoped, workspace
+
+    def carrier_workspace(
+        self, table: SegmentTable, source: ModelSource
+    ) -> CarrierWorkspace:
+        """Plan carrier reuse by fixed physical inputs before any spectral builds.
+
+        table contains this evolve's complete scan; source owns its models. Each
+        group fixes model identity/level, port, peak gain bound and subdivisions.
+        Harmonic cutoffs, amplitude nodes and peak/polynomial representation
+        partition evaluated families within those planned groups. Guards still
+        decide each row's eligibility, resolution and cycle-scaled acceptance.
+        """
+        rows = np.flatnonzero(table.tones == 1)
+        rows = rows[~table.constant_envelopes(rows)]
+        if not len(rows):
+            return CarrierWorkspace(np.empty(0))
+        keys = self.prepare_keys(table, rows)
+        subdivisions = self._subdivisions(table, rows, source)
+        groups = []
+        for key, count in zip(keys, subdivisions, strict=True):
+            model = source.model(tuple(int(v) for v in key["level"]))
+            groups.append(
+                (
+                    model.identity,
+                    model.level,
+                    int(key["port"]),
+                    float(key["bound"]),
+                    int(count),
+                )
+            )
+        return CarrierWorkspace(keys["frequency"], groups=groups)
 
     def prepare_keys(
         self,
@@ -244,25 +320,28 @@ class ShapedSambeKernel:
     ) -> NDArray[np.bool_]:
         """Check density-free bandwidth, motion and split bounds before building."""
         del budget
+        subdivisions = self._subdivisions(table, rows, source)
+        bounded = subdivisions <= 32
+        # Strong, unresolved ramps need no keys or remaining eligibility work.
+        if not np.any(bounded):
+            return bounded
         strength, _ = drive_bounds(table, rows, source)
         keys = self.prepare_keys(table, rows)
         frequency = np.abs(keys["frequency"])
         real = np.array([np.all(e.samples.imag == 0) for e in table.envelopes])
         peaks, slopes = envelope_bounds(table)
         envelope = table.tone_envelope[rows, 0]
-        resolved = slopes[envelope] <= 2 * np.maximum(
-            peaks[envelope], 1e-30
-        ) * frequency * self._subdivisions(table, rows, source)
+        resolved = (
+            slopes[envelope]
+            <= 2 * np.maximum(peaks[envelope], 1e-30) * frequency * subdivisions
+        )
         return (
             (frequency >= 0.03)
             & (keys["bound"] > 0)
             & resolved
             & real[table.tone_envelope[rows, 0]]
-            & (
-                keys["bound"] * strength
-                <= 0.5 * frequency * self._subdivisions(table, rows, source)
-            )
-            & (self._subdivisions(table, rows, source) <= 32)
+            & (keys["bound"] * strength <= 0.5 * frequency * subdivisions)
+            & bounded
         )
 
     def guard(
@@ -321,7 +400,7 @@ class ShapedSambeKernel:
             )
             family = families.get(family_key)
             if family is None:
-                family = _SpectralFamily(model, port, f, bound, step)
+                family = _SpectralFamily(model, port, f, bound, step, self._workspace)
                 families[family_key] = family
             error = family.error(modes)
             if error * cycles > budget / 4:

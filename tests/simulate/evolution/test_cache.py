@@ -225,3 +225,27 @@ def test_invalid_charges_and_conflicting_allocation_metadata_fail_before_evictio
         cache.add(OTHER_SPACE, whole)
     assert cache.inventory() == before
     assert cache.bytes == 10
+
+
+def test_evolve_workspace_charge_tracks_growth_and_releases_on_failure():
+    cache = PrepareCache(10)
+    counts = AllocationCounts()
+    workspace = CountedPrepared(counts, 0)
+    resident = payload(counts, 10, b"resident")
+    cache.add(SPACE, resident)
+
+    def cancelled_evolve():
+        with cache.track_workspace(workspace):
+            assert cache.live_bytes == 0
+            workspace.nbytes = 120
+            assert cache.live_bytes == 120
+            # Evolve-local arrays are live preparation, never persistent hits.
+            assert cache.bytes == 10
+            assert len(cache.inventory()) == 1
+            cache.clear()
+            assert cache.live_bytes == 120
+            raise RuntimeError("cancelled")
+
+    with pytest.raises(RuntimeError, match="cancelled"):
+        cancelled_evolve()
+    assert cache.live_bytes == 0

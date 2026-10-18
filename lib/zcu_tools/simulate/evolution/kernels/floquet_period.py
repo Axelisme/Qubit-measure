@@ -1,6 +1,8 @@
 """Constant-tone Hilbert propagators with compact secular Strang stepping."""
 
+from copy import copy
 from dataclasses import dataclass
+from threading import RLock
 from typing import NamedTuple
 
 import numpy as np
@@ -17,12 +19,15 @@ from ..declarations import (
 )
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
+from . import _period_sambe
+from ._cf4_grid import coarse_count, finer_count, spectral_width
 from ._dop853 import Tolerances, integrate_dense
 
 _MIN_FREQUENCY_GHZ = 0.03
 _MAX_SPLIT_ESTIMATE = 1.0
 _MAX_SUBDIVISIONS = 64
 _MAGNUS_FREQUENCY_GHZ = 1.0
+_GAIN_ANCHOR_SPACING = 24
 
 
 class _DensePeriod(NamedTuple):
@@ -36,7 +41,7 @@ class _DensePeriod(NamedTuple):
 
 @dataclass(frozen=True)
 class _Period:
-    # Dense DOP853 coefficients, or CF4 prefix unitaries plus Hamiltonian data.
+    # DOP853 coefficients, CF4 prefixes, or a constant-tone Sambe spectrum.
     times: NDArray[np.float64]
     coefficients: NDArray[np.complex128]
     unitary: NDArray[np.complex128]
@@ -55,20 +60,26 @@ class _Period:
         | None
     )
 
+    spectrum: _period_sambe.Spectrum | None = None
+
     @property
     def nbytes(self) -> int:
-        return sum(
-            array.nbytes
-            for array in (
-                self.times,
-                self.coefficients,
-                self.unitary,
-                self.generator,
-                self.decay,
-                self.population_half,
-                self.coherence_half,
+        return (
+            (self.spectrum.nbytes if self.spectrum is not None else 0)
+            + sum(
+                array.nbytes
+                for array in (
+                    self.times,
+                    self.coefficients,
+                    self.unitary,
+                    self.generator,
+                    self.decay,
+                    self.population_half,
+                    self.coherence_half,
+                )
             )
-        ) + (sum(a.nbytes for a in self.magnus[:3]) if self.magnus is not None else 0)
+            + (sum(a.nbytes for a in self.magnus[:3]) if self.magnus is not None else 0)
+        )
 
 
 @dataclass(frozen=True)
@@ -137,8 +148,314 @@ def _unitary(matrix: NDArray[np.complex128]) -> NDArray[np.complex128]:
     return 0.5 * (3 * matrix - matrix @ (matrix.conj().T @ matrix))
 
 
+class _Hamiltonian(NamedTuple):
+    """One key's lab-frame Hamiltonian in GHz, before multiplication by 2*pi.
+
+    h0 is the diagonal static matrix with common energy zero removed; x and y
+    are the gain-scaled Hermitian drive quadratures; frequency is signed GHz.
+    """
+
+    h0: NDArray[np.complex128]
+    x: NDArray[np.complex128]
+    y: NDArray[np.complex128]
+    frequency: float
+
+
+@dataclass(frozen=True)
+class _Neighbour:
+    gain: float
+    period: _Period
+
+
+class _GainAnchor:
+    """One lazily built independent table and its construction lock."""
+
+    def __init__(self, references: int) -> None:
+        self.remaining = references
+        self.period: _Period | None = None
+        self.lock = RLock()
+
+
+class _GainGroup:
+    """Fixed anchors for one model object, port, signed carrier and budget.
+
+    Each anchor has its own build lock. Inventory changes use the workspace
+    lock; byte readers never wait for numerical construction. A planned key
+    releases its references only after handing out its result, once per key.
+    Repeated keys deterministically rebuild any already released anchors.
+    """
+
+    def __init__(
+        self,
+        model: SecularModel,
+        port: int,
+        frequency: float,
+        budget: float,
+        plan: dict[float, tuple[float, ...]],
+        inventory_lock: RLock,
+    ) -> None:
+        self.model = model
+        self.port = port
+        self.frequency = frequency
+        self.budget = budget
+        self.plan = plan
+        coordinates = {a for dependencies in plan.values() for a in dependencies}
+        self.anchors = {
+            a: _GainAnchor(sum(a in dependencies for dependencies in plan.values()))
+            for a in coordinates
+        }
+        self.delivered: set[float] = set()
+        self.inventory_lock = inventory_lock
+        self.attempts = 0
+        self.hits = 0
+
+    @property
+    def nbytes(self) -> int:
+        # Caller holds inventory_lock. Active payloads charge their own arrays.
+        return sum(
+            a.period.nbytes for a in self.anchors.values() if a.period is not None
+        )
+
+    def anchor(self, gain: float) -> _Period:
+        """Build an independent anchor once while planned references remain."""
+        anchor = self.anchors[gain]
+        with anchor.lock:
+            with self.inventory_lock:
+                period = anchor.period
+            if period is None:
+                period = _build(
+                    self.model, self.port, self.frequency, gain, self.budget
+                )
+                with self.inventory_lock:
+                    anchor.period = period
+            return period
+
+    def build(self, gain: float) -> _Period:
+        """Return a key using only its fixed anchors, then release dependencies."""
+        if gain in self.anchors:
+            result = self.anchor(gain)
+        else:
+            result = _build(
+                self.model, self.port, self.frequency, gain, self.budget, self
+            )
+        with self.inventory_lock:
+            if gain not in self.delivered:
+                self.delivered.add(gain)
+                for coordinate in self.plan[gain]:
+                    self.anchors[coordinate].remaining -= 1
+            for coordinate in self.plan[gain]:
+                anchor = self.anchors[coordinate]
+                if anchor.remaining == 0:
+                    anchor.period = None
+        return result
+
+    def prefixes(
+        self, context: _Hamiltonian, gain: float
+    ) -> tuple[NDArray[np.float64], NDArray[np.complex128]]:
+        """Interpolate nearest planned anchors and independently check coarse CF4."""
+        neighbours = [_Neighbour(a, self.anchor(a)) for a in self.plan[gain]]
+        tolerance = min(1e-4, self.budget * 0.1)
+        continued = _continued_prefixes(neighbours, context, gain, tolerance)
+        if continued is not None:
+            times, coefficients, hit = continued
+            with self.inventory_lock:
+                self.attempts += 1
+                self.hits += int(hit)
+            return times, coefficients
+        return _magnus_build(*context, tolerance)
+
+
+class _GainWorkspace:
+    """One evolve's fixed gain-anchor plans and numeric-byte inventory.
+
+    Planning uses the complete table, never workers, chunks or request order.
+    Runtime groups isolate model object, port, signed carrier and budget.
+    attempts/hits count checked/accepted interpolants. Spectral candidates are
+    removed before constructing any anchor or reference count. sambe_builds and
+    sambe_fallbacks count accepted and declined spectral prepare requests,
+    including repeated keys, never unused candidates or LRU cache hits.
+    nbytes charges retained
+    anchors, conservatively including arrays held by active payloads too.
+    No numeric data survives the owning evolve.
+    """
+
+    def __init__(self, table: SegmentTable) -> None:
+        groups: dict[tuple[tuple[int, ...], int, float], set[float]] = {}
+        rows = np.flatnonzero(table.tones == 1)
+        rows = rows[table.constant_envelopes(rows)]
+        for row in rows:
+            frequency = float(table.tone_frequency_ghz[row, 0])
+            if not _MIN_FREQUENCY_GHZ <= abs(frequency) < _MAGNUS_FREQUENCY_GHZ:
+                continue
+            key = (
+                tuple(int(v) for v in table.level[row]),
+                int(table.tone_port[row, 0]),
+                frequency,
+            )
+            groups.setdefault(key, set()).add(float(table.tone_amplitude[row, 0]))
+        # Only collect coordinates here. The model-dependent spectral selection
+        # must run before creating an anchor plan or its reference inventory.
+        self._gains = {
+            key: tuple(sorted(gains))
+            for key, gains in groups.items()
+            if len(gains) >= 2
+        }
+        self._groups: dict[tuple[int, int, float, float], _GainGroup] = {}
+        self._lock = RLock()
+        self._sambe_builds = 0
+        self._sambe_fallbacks = 0
+
+    @property
+    def sambe_builds(self) -> int:
+        """Number of prepare keys accepted by Sambe in this evolve scope."""
+        with self._lock:
+            return self._sambe_builds
+
+    @property
+    def sambe_fallbacks(self) -> int:
+        """Attempted Sambe keys declined to independent CF4 after cutoff checks."""
+        with self._lock:
+            return self._sambe_fallbacks
+
+    @property
+    def attempts(self) -> int:
+        with self._lock:
+            return sum(group.attempts for group in self._groups.values())
+
+    @property
+    def hits(self) -> int:
+        with self._lock:
+            return sum(group.hits for group in self._groups.values())
+
+    @property
+    def nbytes(self) -> int:
+        """Current retained numeric bytes, excluding Python/model overhead."""
+        with self._lock:
+            return sum(group.nbytes for group in self._groups.values())
+
+    def build(
+        self,
+        model: SecularModel,
+        port: int,
+        frequency: float,
+        gain: float,
+        budget: float,
+    ) -> _Period:
+        """Use key-local Sambe or fixed CF4 anchors, independent of scheduling.
+
+        Rejected Sambe candidates use independent CF4 and never gain anchors.
+        Other keys retain the complete table's fixed non-spectral gain plan.
+        """
+        if _period_sambe.preferred(model, port, frequency, gain):
+            result = _build(model, port, frequency, gain, budget)
+            with self._lock:
+                self._sambe_builds += int(result.spectrum is not None)
+                self._sambe_fallbacks += int(result.spectrum is None)
+            return result
+        gains = self._gains.get((model.level, port, frequency))
+        if gains is None or gain not in gains:
+            return _build(model, port, frequency, gain, budget)
+        identity = (id(model), port, frequency, budget)
+        with self._lock:
+            group = self._groups.get(identity)
+            if group is None:
+                # Remove spectral candidates before fixing anchor references.
+                ordered = [
+                    g
+                    for g in gains
+                    if not _period_sambe.preferred(model, port, frequency, g)
+                ]
+                anchors = ordered[::_GAIN_ANCHOR_SPACING]
+                if anchors[-1] != ordered[-1]:
+                    anchors.append(ordered[-1])
+                filtered = {
+                    g: (g,)
+                    if g in anchors
+                    else tuple(
+                        sorted(sorted(anchors, key=lambda a: (abs(a - g), a))[:4])
+                    )
+                    for g in ordered
+                }
+                group = _GainGroup(model, port, frequency, budget, filtered, self._lock)
+                self._groups[identity] = group
+        return group.build(gain)
+
+
+def _continued_prefixes(
+    neighbours: list[_Neighbour],
+    context: _Hamiltonian,
+    gain: float,
+    tolerance: float,
+) -> tuple[NDArray[np.float64], NDArray[np.complex128], bool] | None:
+    # Interpolate only gain between fixed anchors in the interaction picture, then
+    # independently check the new key with the original coarse-grid probes.
+    h0, x, y, frequency = context
+    count = len(neighbours[-1].period.times) - 1
+    if any(
+        n.period.magnus is None or len(n.period.times) != count + 1 for n in neighbours
+    ):
+        return None
+    coordinates = [n.gain for n in neighbours]
+    target = gain
+    if len(set(coordinates)) != len(coordinates):
+        return None
+    period = 1 / abs(frequency)
+    width = spectral_width(h0, x, y)
+    coarse_size = coarse_count(1.5 * period * width)
+    if count < finer_count(coarse_size):
+        return None
+    times = np.linspace(0.0, period, count + 1)
+    # Identical model, carrier and uniform grid give every predecessor the
+    # same analytic H0 phase. The interaction-picture transform and inverse
+    # cancel algebraically in this linear combination; avoid repeated complex
+    # exponentials and their roundoff without changing the predictor.
+    weights = []
+    for index in range(len(neighbours)):
+        weight = 1.0
+        for other, coordinate in enumerate(coordinates):
+            if other != index:
+                weight *= (target - coordinate) / (coordinates[index] - coordinate)
+        weights.append(weight)
+    candidate = _interpolate_prefixes(
+        tuple(n.period.coefficients for n in neighbours), tuple(weights)
+    )
+    _, coarse = _magnus_prefixes(h0, x, y, frequency, coarse_size)
+    error = float(
+        np.max(
+            [
+                np.linalg.norm(candidate[j * count // 8] - coarse[j * coarse_size // 8])
+                for j in range(9)
+            ]
+        )
+    )
+    if not np.isfinite(error) or error > tolerance:
+        times, fine = _magnus_refine(context, tolerance, coarse_size, coarse)
+        return times, fine, False
+    return times, candidate, True
+
+
+@njit(nogil=True, cache=True)
+def _interpolate_prefixes(prefixes, weights):
+    # Fuse the weighted sum without a table-sized temporary for each anchor.
+    # Anchor order matches the scalar Lagrange sum; no fast-math reassociation.
+    candidate = np.zeros_like(prefixes[0])
+    for index in range(len(weights)):
+        for step in range(candidate.shape[0]):
+            for row in range(candidate.shape[1]):
+                for column in range(candidate.shape[2]):
+                    candidate[step, row, column] += (
+                        weights[index] * prefixes[index][step, row, column]
+                    )
+    return candidate
+
+
 def _build(
-    model: SecularModel, port: int, frequency: float, gain: float, budget: float
+    model: SecularModel,
+    port: int,
+    frequency: float,
+    gain: float,
+    budget: float,
+    group: _GainGroup | None = None,
 ) -> _Period:
     size = len(model.energies_ghz)
     period = 1 / abs(frequency)
@@ -147,11 +464,26 @@ def _build(
     h0 = np.diag(model.energies_ghz - model.energies_ghz[0]).astype(complex)
     x, y = gain * drive.in_phase_ghz, gain * drive.quadrature_ghz
     magnus = None
-    if abs(frequency) < _MAGNUS_FREQUENCY_GHZ:
+    spectrum = None
+    spectral = (
+        _period_sambe.build(model, port, frequency, gain, budget)
+        if _period_sambe.preferred(model, port, frequency, gain)
+        else None
+    )
+    if spectral is not None:
+        spectrum, final = spectral
+        times = np.array([0.0, period])
+        coefficients = np.empty((0, 0, size, size), dtype=complex)
+    elif abs(frequency) < _MAGNUS_FREQUENCY_GHZ:
         # Low carriers make Schrödinger DOP853 resolve many unobservable H0 turns.
         # CF4 exponentiates H0 exactly; only carrier motion needs approximation.
         tolerance = min(1e-4, budget * 0.1)
-        times, coefficients = _magnus_build(h0, x, y, frequency, tolerance)
+        if group is None:
+            times, coefficients = _magnus_build(h0, x, y, frequency, tolerance)
+        else:
+            times, coefficients = group.prefixes(
+                _Hamiltonian(h0, x, y, frequency), gain
+            )
         final = coefficients[-1]
         magnus = (h0, x, y, frequency)
         for array in (h0, x, y):
@@ -179,7 +511,7 @@ def _build(
         if not np.isfinite(array).all():
             raise RuntimeError("Floquet period preparation produced nonfinite data")
         array.setflags(write=False)
-    return _Period(*arrays, _split_rate(model, port, frequency, gain), magnus)
+    return _Period(*arrays, _split_rate(model, port, frequency, gain), magnus, spectrum)
 
 
 @njit(nogil=True, cache=True)
@@ -237,13 +569,18 @@ def _magnus_build(h0, x, y, frequency, tolerance):
     period = 1 / abs(frequency)
     # Keep both grids away from a full spectral turn, where sampled carrier
     # motion can alias. The retained grid stays below half a spectral turn.
-    width = (
-        np.max(h0.real) - np.min(h0.real) + 2 * (np.linalg.norm(x) + np.linalg.norm(y))
-    )
-    count = max(8, 8 * int(np.ceil(1.5 * period * width / 8)))
+    width = spectral_width(h0, x, y)
+    count = coarse_count(1.5 * period * width)
     _, coarse = _magnus_prefixes(h0, x, y, frequency, count)
+    return _magnus_refine(_Hamiltonian(h0, x, y, frequency), tolerance, count, coarse)
+
+
+@njit(nogil=True, cache=True)
+def _magnus_refine(context, tolerance, count, coarse):
+    h0, x, y, frequency = context
+    # A rejected continuation has already built the independent coarse grid.
     for _ in range(12):
-        finer = 8 * int(np.ceil(1.5 * count / 8))
+        finer = finer_count(count)
         times, fine = _magnus_prefixes(h0, x, y, frequency, finer)
         error = 0.0
         # Compare micromotion at eight phase intervals, not just U(T), where
@@ -333,7 +670,7 @@ def _dense_row(entry, origin, duration, rho, tail_bath):
 
 
 def _fundamental(entry: _Period, time: float) -> NDArray[np.complex128]:
-    if entry.magnus is None:
+    if entry.magnus is None and entry.spectrum is None:
         return _dense_fundamental(entry.times, entry.coefficients, entry.unitary, time)
     period = float(entry.times[-1])
     local = time % period
@@ -344,10 +681,14 @@ def _fundamental(entry: _Period, time: float) -> NDArray[np.complex128]:
             if time >= period
             else np.eye(len(entry.unitary), dtype=complex)
         )
+    if entry.spectrum is not None:
+        value = _unitary(_period_sambe.endpoint(entry.spectrum, local))
+        return value @ entry.unitary if time >= period else value
     index = min(
         int(np.searchsorted(entry.times, local, side="right")) - 1,
         len(entry.times) - 2,
     )
+    assert entry.magnus is not None
     h0, x, y, frequency = entry.magnus
     value = (
         _magnus_step(
@@ -413,7 +754,7 @@ def _row(
     subdivisions = _subdivisions(duration * entry.split_rate)
     if subdivisions > 1:
         return _subdivided_row(entry, origin, duration, rho, subdivisions)
-    if entry.magnus is None:
+    if entry.magnus is None and entry.spectrum is None:
         tail = duration - int(duration // period) * period
         tail_bath = (entry.population_half, entry.coherence_half)
         if tail > 0:
@@ -449,67 +790,74 @@ def _row(
 
 
 class FloquetPeriodKernel:
-    """One constant tone, independent of input density and absolute start.
+    """One constant-tone Hilbert channel for arbitrary, possibly coherent inputs.
 
-    Keys contain only level, port, signed frequency (GHz) and signed gain.
-    Preparation builds one Hilbert-space U(T), retaining U(T) and finite
-    endpoint data (CF4 prefixes or degree-seven DOP853 coefficients). No Liouville
-    channel is built. Theta translates the time origin by theta/(2*pi*f) mod T;
-    each subperiod and the separately evaluated fractional tail apply D/2, U, D/2.
-    Known and unknown densities, including coherent inputs, use the same channel.
+    Keys contain level, port, signed frequency in GHz and signed gain, never
+    density, duration or start. Immutable payloads retain U(T) and endpoint data.
+    Theta translates time by theta/(2*pi*f) mod T. Subperiods and fractional tails
+    use the same trajectory with secular D/2,U,D/2 steps; density is not normalized.
+    The density-free guard requires |f| >= 0.03 GHz and the smallest m in 1..64
+    satisfying duration*T**2*Gamma*V**2/m**2 <= 1.0. T=1/|f| is in ns,
+    V=2*pi*|gain|*(||X||_2+||Y||_2) in rad/ns, and Gamma is the larger population
+    generator norm/coherence decay in 1/ns. Rejected rows still try T6.
 
-    The density-free guard requires |f| >= 0.03 GHz and selects the smallest
-    m in 1..64 such that duration*T**2*Gamma*V**2/m**2 <= 1.0. Here T=1/|f|
-    is in ns, V=2*pi*|gain|*(||X||_2+||Y||_2) in rad/ns, and Gamma is the
-    larger of the population generator norm and coherence decay in 1/ns.
-    This retains the calibrated splitting allowance, not a rigorous total-error
-    bound or segment-budget guarantee. Each subperiod uses unitary Hilbert
-    endpoints from the same Hilbert trajectory. The tail uses the same step ceiling.
-    The subdivision count depends only on model and row, never density; it is
-    not part of the preparation key. Rows outside this domain still try T6.
+    Below 1 GHz, Sambe competes with CF4's original coarse count c and first
+    1.5x finer count d, both rounded to eight. Cutoffs 2/3 cost
+    0.5*(5**3+7**3)=234 units versus c+d. The common Hilbert dimension cubed
+    cancels. This single-threaded 16-level calibration never consults scheduling.
+    Adjacent cutoffs compare physical U(q*T), q=0,1/8,...,1, with Frobenius defect
+    <= min(1e-4,budget*0.1). The finer spectrum supplies arbitrary endpoints.
+    Nonfinite data or sampled unitarity defect above 1e-4 decline. Refinement
+    stops at cutoff 12 or before cumulative 0.5*(2*m+1)**3 cost exceeds c+d.
+    Rejection preserves independent CF4 bitwise, without gain-anchor sharing.
+    This calibrated check assumes cutoff convergence and representative samples,
+    not a rigorous all-time error bound. Polar correction and dissipation persist.
 
-    Below 1 GHz, preparation uses fourth-order commutator-free Magnus (CF4)
-    with scaling-and-squaring [7/7] Pade exponentials at double precision,
-    retaining unitary prefixes. The matrix one-norm selects scaling at the
-    0.9504178996162932 backward-error radius. Centering each exponential removes
-    its common energy during evaluation and restores its scalar phase afterward.
-    A fractional endpoint uses a CF4 step from its preceding prefix, not
-    interpolation. Uniform grids start below 2/3 of a spectral turn and compare prefix
-    trajectories with a 1.5x finer grid at eight phase intervals. The maximum
-    operator defect must be <= min(1e-4, budget*0.1); the finer trajectory is
-    retained. Its steps are below half a spectral turn. This is a calibrated
-    numerical estimate, not a rigorous bound. It depends only on model and key, and keeps
-    duration out of the payload and cache key.
+    Non-spectral low carriers retain CF4 and scoped gain anchors, as in the README.
 
-    Higher carriers use DOP853 tolerance min(1e-10, budget*1e-4), max_step=T/4.
-    Both builders run in single-threaded nogil code. The high-carrier payload
-    keeps the dense polynomial's native nested coefficients, without resampling
-    or a per-key basis conversion.
-    Only accepted steps are retained; no solver object is kept. One Newton polar
-    step restores unitarity of U(T) and fundamental solutions before phase
-    translation and tail composition. The tight integration controls and CF4's
-    Hermitian exponentials keep endpoints near unitary, so the correction squares
-    their norm defect without an SVD. Exact period boundaries reuse identity or
-    U(T). Unsubdivided high-carrier rows compose endpoints and step density in
-    one nogil call. Density is never normalized. Prototype high-carrier S3/S5 population
-    errors were 1.1e-7/2.3e-6.
-
-    Invalid budgets/representatives/payloads raise ValueError. Integration or
-    nonfinite numeric output raises RuntimeError, never retries or reroutes.
-    All prepared arrays are immutable; nbytes charges every retained array.
+    Higher carriers retain DOP853 with min(1e-10,budget*1e-4), max_step=T/4.
+    One Newton polar step corrects endpoints before translation and composition.
+    Invalid budgets/representatives/payloads raise ValueError; integration or
+    nonfinite output raises RuntimeError without rerouting. nbytes charges all
+    retained arrays, which remain immutable across reordered/split apply calls.
     """
 
     declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("floquet_period", "cf4-pade7-v3"),
+        identity=AlgorithmIdentity("floquet_period", "constant-sambe-v5"),
         eligibility=Eligibility(1, 1, "constant"),
         guard=GuardDeclaration(),
         accuracy="guarded-approximation",
-        reuse=ReuseDeclaration("floquet_period/cf4-pade7-v3/serial"),
+        reuse=ReuseDeclaration("floquet_period/constant-sambe-v5/serial"),
         fallback="legacy-order",
     )
 
     name = "floquet_period"
     guard_builds = False
+
+    def __init__(self, workspace: _GainWorkspace | None = None) -> None:
+        """Use an evolve-local scope, or independent builds for standalone calls."""
+        self._workspace = workspace
+
+    def evolve_scope(
+        self, table: SegmentTable, source: ModelSource
+    ) -> tuple["FloquetPeriodKernel", _GainWorkspace]:
+        """Plan fixed gain anchors in a fresh byte-counted workspace.
+
+        table is the complete segmented scan; source is this evolve's model
+        owner. Numeric tables are independent of worker count, chunking and
+        request order for this table/source/budget. No density is read.
+        Engine shares the scoped kernel with prefix
+        and timeline workers and drops both returned objects when evolve ends.
+        Standalone prepare uses the same cost-selected Sambe or independent CF4
+        builder, without scope counters or gain-anchor sharing.
+        """
+        del source
+        workspace = _GainWorkspace(table)
+        # Preserve injected subclass guards/apply hooks without mutating the
+        # registry instance shared by concurrent evolves.
+        scoped = copy(self)
+        scoped._workspace = workspace
+        return scoped, workspace
 
     def guard(
         self,
@@ -582,7 +930,7 @@ class FloquetPeriodKernel:
             raise ValueError("Floquet period representatives must pass guard")
         return _Periods(
             tuple(
-                _build(
+                (_build if self._workspace is None else self._workspace.build)(
                     source.model(tuple(int(v) for v in key["level"])),
                     int(key["port"]),
                     float(key["frequency"]),

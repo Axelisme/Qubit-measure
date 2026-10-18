@@ -52,16 +52,3 @@ def preference(
     )
     period_work[frequency == 0] = np.inf  # Direct DC has no table benefit.
     return np.argsort(np.column_stack((gate_work, period_work, direct)), axis=1)
-
-
-def spectral_candidates(
-    table: SegmentTable, rows: NDArray[np.int64], kernels: Mapping[str, Kernel]
-) -> NDArray[np.int64]:
-    """Keep spectral builds out of already amortized ordinary band tables.
-
-    A flattop frequency key normally occurs in its two ramps. Shared shaped
-    gates and amplitude bands keep the ordinary gate/period/direct cost order.
-    Only model-independent keys enter this filter; numerical guards follow.
-    """
-    period = kernels.get("period_table", PeriodTableKernel())
-    return rows[_usage(period, table, rows) <= 2]

@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves and spectral-family reuse
+**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves, spectral-family reuse, reuse-independent Sambe admission, calibrated physical-block carrier interpolation, interaction-picture independent densities, deterministic evolve-local period gain anchors, shared sideband certificate contributions and guarded constant-tone Sambe periods
 
 ## Segment engine contracts
 
@@ -174,7 +174,7 @@ legacy selection. It returns the existing `Dispatch` record with guard products,
 deferred rows, acquire-wide shaped ordering and rejected-family masks.
 
 For a deferred timeline, pass
-`Selection(timeline_rows, dispatch.shaped, dispatch.rejected)` back to
+`Selection(timeline_rows, dispatch.shaped, dispatch.rejected, dispatch.two_tone_direct)` back to
 `provider.classify(..., selection=selection)`. No local builder runs until that
 selection. Obtain the original kernel through `provider.entry(name).kernel`.
 Use accepted `dispatch.preparations[name]` payloads directly, with their
@@ -440,14 +440,68 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | One constant tone after an identical shared no-drive prefix, r and r₂ pass | Dyson with the actual prefix output. B2 does not apply; post-apply population changes only report. |
 | One constant tone not accepted above, known or unknown input, with abs(f) >= 0.03 GHz and duration*T²*Gamma*V²/m² <= 1.0 for some m in 1..64 | `floquet_period` builds one Hilbert-space U(T), translates the carrier phase in time, and steps each period with secular Strang dissipation. |
 | Same constant-tone branch, Hilbert period guard fails | T6 periodic propagation accepts every single constant-tone row. |
-| One real shaped tone with at most two uses of its ordinary period-band key and passing spectral guards | `shaped_sambe` builds finite-Hilbert-Fourier subperiods at four or eight amplitude nodes. |
+| One real shaped tone passing spectral guards, independent of ordinary period-band key reuse | `shaped_sambe` builds finite-Hilbert-Fourier subperiods at four or eight amplitude nodes. |
 | Other shaped tone, or rejected spectral key | Compute gate/period/DOP853 amortized cost order once over all shaped rows before any spectral guard. Try each numerical guard in that fixed order. There is no fixed gate-key reuse threshold. |
 | Shaped gate cache passes its split guard | Four Strang subsegments, closed-system U plus secular dissipation, and 16 carrier-phase Fourier modes with checked adaptive preparation. |
 | Shaped period table passes its envelope-motion, bandwidth and split guards | Midpoint-frozen envelopes, eight amplitude Chebyshev nodes and 16 phase Fourier samples for the actual drive port. Integrate the fractional-period tail directly. |
 | Shaped approximations rejected, or direct integration costs less | DOP853, with no input-state restriction. |
-| Two constant tones with a valid Floquet frame and passing harmonic omission and convergence bounds | Floquet k=0 preparation. Passing probe guards select modal second-order Dyson in H_F + D₀; other probes use periodic propagation in the same accepted frame. |
-| Other two-tone segments, including failed Floquet guards | Sum both drives in batched numba DOP853. |
+| Two constant tones | Estimate DOP853 and amortized Floquet cost before either guard. Try the cheaper family first; guard rejection tries the other family. Costs use duration, dimension, spectral width, carrier, gain-weighted drive norms, budget, frame-key reuse and probe-bin counts over the whole acquire. |
+| Two constant tones trying Floquet, with a valid frame and passing harmonic omission and convergence bounds | Floquet k=0 preparation. Passing probe guards select modal second-order Dyson in H_F + D₀; other probes use periodic propagation in the same accepted frame. |
+| Two constant tones rejected by the k=0 omission bound, with a valid frame and passing calibrated finite-Fourier bound | Retain near-resonant bath/probe modal edges in a sparse interaction-picture ODE. |
+| Shaped two-tone segments, or constant rows whose preferred Floquet guard rejects | Sum both drives in batched numba DOP853. A rejected preferred DOP853 guard instead tries Floquet. |
 | Three or more tones | Sum all drives in batched numba DOP853. |
+
+Constant two-tone ordering uses a **calibrated cost model**, not a numerical
+admission rule. Calibration covers the 16-level FTF S9 throughput (16 ns,
+Stark gain .02, .5 GHz), S9 qualitative (about 514 ns, gain .5, 7.29 GHz),
+and boundary rows at 16--512 ns and gains .02--.5. DOP853's estimated seconds
+scale as `8e-5*tau*(W + max(abs(f)) + 2*S)*(1 + 4*sqrt(S) + 4*S)*(d/16)^3`
+times `(1e-3/budget)^(1/8)`. Here W is the model spectral width in GHz and S
+is the sum of each tone's absolute gain times its port's two quadrature
+spectral norms. This estimates step work, not a step limit.
+
+Floquet charges `.07*(d/16)^6` per row for modal playback, plus frame and
+probe-bin certificate work divided by all candidate rows sharing its canonical
+level/Stark-port/frequency/gain key. Frame work is `1.4*(H/512)*(d/16)^5`,
+with H estimated from the frame's power-of-two phase-sample grid, capped at
+4096. Certificate work is `1.05*b*(d/16)^6*min(1, tau*S/.15)`, with b the
+number of distinct probe-port/2 MHz-bin pairs in that frame group. The smooth
+drive-action factor predicts certificate cost without evaluating omission or
+convergence. It need not predict whether a certificate will be needed.
+These coefficients estimate relative cost within the calibration domain;
+small dimensions, new ports and other spectra are extrapolations.
+
+The engine fixes this order across the complete candidate table before either
+guard. Timeline workers borrow it without recounting accepted rows or reuse.
+Neither worker count, chunking, prepare-cache warmth nor row execution order
+enters the estimate. Both numerical guards and their acceptance rules remain
+unchanged. Rejection tries the other family; prepare/apply exceptions still
+propagate without reclassification. Other tone counts and shaped rows retain
+their existing dispatch.
+
+The additional two-tone route is **calibrated finite-Fourier admission**, not a
+per-segment error guarantee. It only runs after the original Duhamel guard
+rejects. Among bath/probe harmonics with |k| <= 4, it retains modal edges whose
+divisor |i*nu-lambda_i+lambda_j| <= 0.1/ns, including exactly resonant edges.
+There is no larger retention window. The remaining candidates use an averaging
+bound; every sampled |k| > 4 coefficient contributes to the direct tail bound.
+A resolvent bound covers each complete 2 MHz probe bin, expanding the retained
+probe window by the bin half-width. Each certificate group computes the modal
+basis condition and bath-only retained, omitted, resolvent and tail contributions
+once, then combines them with each bin's unit-gain probe contributions. Bath
+terms have zero probe sign and bin width, so their divisors and norms do not
+change with probe frequency or port. This preserves the per-bin omission bound
+and all admission thresholds. Retained-channel norm growth is charged.
+Omission uses 95% of the budget, frame/convergence estimates use 2.5%, and the
+remaining 2.5% is a numerical allowance, not a certified global ODE bound.
+
+Four assumptions remain uncertified: aliasing beyond the Fourier sample grid,
+contractivity of the full finite-Fourier generator, the ODE's global error,
+and directed rounding of norm/eigensystem computations. The finite-Fourier
+omission argument assumes exact coefficients and contractive base/full
+propagators. Strict local ODE tolerances and regression comparisons calibrate
+this route but do not establish those assumptions. It never clips or
+renormalizes density, retries, or reclassifies after apply.
 
 T4 and T6 are terminal families for their dispatched rows. Their guards accept
 every row in those domains, so these branches have no DOP853 fallback. Custom
@@ -495,8 +549,11 @@ acceptance outcome. Same-band partial acceptance therefore cannot change the
 fallback cost order during an acquire. Workers skip families the caller already
 rejected for their rows. Every numerical guard still applies.
 
-Low-reuse spectral ramps use the same immutable polynomial playback as ordinary
-period tables. Playback skips zero Fourier modes and unused negative-amplitude
+All shaped rows may try the spectral guard, including repeated ordinary
+period-band keys. Shared spectral families amortize their build across ramps;
+ordinary key reuse does not predict that cost. Numerical guards alone admit
+spectral playback. Spectral ramps use the same immutable polynomial playback as
+ordinary period tables. Playback skips zero Fourier modes and unused negative-amplitude
 phases. Complex ordinary tables contract their varying phase only when needed. Their preparation keys contain level, port, signed carrier,
 peak absolute gain, gain-weighted envelope slope and duration. The slope and duration determine
 subperiod resolution, so different shapes cannot silently share a split chosen
@@ -517,13 +574,93 @@ needed. The cycle-scaled harmonic and amplitude estimates must fit budget/2.
 The guard never reads a density or evolves a trial input. Within one guard or
 prepare call, ramps share immutable spectral coefficients by model identity,
 level, port, signed carrier, peak gain, subperiod resolution, harmonic cutoff
-and amplitude node count. Budget and algorithm revision scope the call-local
-workspace. Each ramp selects cutoffs and evaluates admission with its own cycle
-count. Duration, slope and direct-tail preparations remain row-specific.
-The kernel retains no workspace after the call returns. Timeline workers batch
-their local ramps in one guard call, so live workspace follows concurrent
-timelines rather than the frequency grid. Accepted payloads retain coefficients
-until their timeline finishes, or in the prepare LRU for shared keys. Each
+and amplitude node count. Each ramp selects cutoffs and evaluates admission with its own cycle count.
+Duration, slope and direct-tail preparations remain row-specific.
+
+Kernels may implement the optional `EvolveScopedKernel.evolve_scope` factory.
+Engine invokes it once per evolve and uses the returned kernel for both prefix
+resolution and timeline workers. Engine does not recognize individual numeric
+families. It registers each returned workspace with `PrepareCache.track_workspace`
+and releases registration on success, cancellation or failure. Registry kernels
+and the persistent prepare LRU never retain these scopes. `shaped_sambe` uses
+this mechanism for physical-block carrier interpolation. `floquet_period` uses
+it for fixed gain anchors and key-local Sambe build counters. Concurrent evolves
+have separate workspaces.
+
+For constant-tone `floquet_period` keys below 1 GHz, a calibrated cost estimate
+chooses between Sambe and CF4 before building. If c is the original CF4 coarse
+step count and d its first 1.5x finer count, cutoffs 2/3 cost
+`0.5*(5**3+7**3)=234` units versus `c+d` CF4 units. The common Hilbert dimension
+cubed cancels. This calibration comes from single-threaded 16-level builds, not
+runtime timing. It does not consult workers, chunks, key order or densities.
+High-carrier keys keep DOP853, and cheaper low-carrier CF4 keys keep gain anchors.
+
+Sambe reconstructs physical U(t) from a central harmonic input to the Hermitian
+matrix with blocks H0+k*f and adjacent couplings gain*(X-iY)/2. Adjacent cutoffs
+must agree at q=0,1/8,...,1 within maximum Frobenius defect
+`min(1e-4,budget*0.1)`. The finer spectrum supplies both period and fractional
+endpoints. Sampled unitarity defect must not exceed 1e-4 before polar correction.
+All retained arrays are immutable and charged to prepared nbytes. Spectra are
+never interpolated or shared across keys.
+
+Refinement stops at cutoff 12 or before cumulative eigensolve work exceeds the
+original CF4 estimate. Rejection uses the original independent CF4 coarse/fine
+path, not gain interpolation. Spectral candidates do not hold anchor references;
+other keys use the fixed non-spectral gain plan. The evolve-local workspace
+reports accepted spectral prepare requests as `sambe_builds` and declined ones
+as `sambe_fallbacks`, including repeated requests but excluding LRU hits.
+These counters retain no numerical data. Phase translation, secular Strang
+splitting, subdivisions, polar correction and fractional tails do not change.
+The nine-point cutoff comparison is calibrated, not a rigorous error bound.
+It assumes adjacent-cutoff convergence and that the samples represent errors
+between their endpoints.
+
+The CF4 builder retains unitary prefixes from fourth-order commutator-free
+Magnus steps with scaling-and-squaring [7/7] Pade exponentials. It compares
+uniform grids at nine normalized-phase endpoints, refines by 1.5x and retains
+the finer trajectory under the same defect allowance. Fractional endpoints use
+one CF4 step from the preceding prefix, not time interpolation.
+For non-spectral keys, each level/port/signed-carrier group sorts its unique
+gains and uses every twenty-fourth gain plus both endpoints as independent
+anchors. Each other key interpolates its nearest at most four anchors, resolving
+ties toward the lower gain. Sharing also requires the identical model object
+and budget. Unequal retained grids disable interpolation. The candidate must
+pass an independent coarse-grid comparison; failure reuses that grid in the
+original refinement path. Fixed plans and reference-counted release keep tables
+bitwise independent of workers, chunks and request order. No anchor crosses
+evolves or enters the LRU. Workspace bytes charge retained anchors, with memory
+bounded by the planned count. Gain smoothness, well-conditioned interpolation
+and between-sample accuracy remain calibrated assumptions, not proven bounds.
+
+The physical-block carrier workspace belongs to one evolve. Prefix resolution
+and timeline workers share it, never with another evolve or budget. This is calibrated physical-block carrier interpolation,
+not eigenvector interpolation and not a rigorous interval bound. It treats peak
+coarse/fine Fourier blocks separately from amplitude-Chebyshev/Fourier coefficients.
+The original float64 signed carrier remains in each prepared key. Evaluation uses
+that exact carrier, not the nearest construction node.
+
+Before building, the kernel groups planned carriers by model identity/level,
+port, peak gain bound and subdivisions. Within each group the workspace admits
+only signed scans with more than nine unique carriers, one sign, and endpoint
+magnitude ratio at most 1.1. Nine is the
+cost of six Chebyshev-Gauss construction nodes plus three independent probes.
+Wider groups and groups with at most nine carriers keep exact per-carrier builds.
+A narrow scan whose carriers all have distinct bounds therefore builds each carrier
+once, without paying for unshared interpolation nodes.
+This conservative choice avoids the many short low-frequency tiles that can cost
+more to validate than independent construction. The admitted tile is clipped to
+the scan endpoints. Its degree-five polynomial must pass probes at normalized
+coordinates -0.83, 0 and 0.61. At each probe the sum of trailing-matrix Frobenius
+differences must be at most 1e-7. Failure bisects the tile up to sixteen levels.
+Children with at most nine planned carriers and depth-limited tiles use exact
+builds. Callback numerical failures still propagate. Harmonic/amplitude guards,
+cycle scaling, secular dissipation, direct tails and polar projection do not change.
+
+Workspace arrays count in PrepareCache.live_bytes while the evolve runs and
+release on success, cancellation or failure. They never enter the persistent LRU.
+Standalone kernel calls without an Engine workspace retain exact builds.
+Accepted payloads retain their evaluated coefficients until their timeline
+finishes, or in the prepare LRU for shared keys. Each
 payload conservatively charges the full coefficient allocation even when
 another payload shares it. Cross-timeline keys
 hand accepted, immutable model-only payloads to A-stage. For timeline-local keys,
@@ -645,12 +782,34 @@ using fixed-order approximations. They can conservatively reject low carriers;
 DOP853 then preserves accuracy at a higher apply cost. Neither shaped family
 performs a density-dependent retry or post-apply correction.
 
-DOP853 integrates the density in the lab frame. Its Hermitian Hamiltonian and
-density require only one dense product per RHS evaluation. With `P = H @ rho`,
-the commutator is `P - P.conj().T`. Real Runge--Kutta weights preserve this
-Hermitian structure through the intermediate stages. The RHS fuses the
-commutator and secular coherence loss into one elementwise loop, then adds
-population transfer. It does not normalize or clip the density.
+For independent single-tone rows, DOP853 integrates the exact H0 interaction
+frame: `sigma(t) = exp(+i*2*pi*H0*t) rho(t) exp(-i*2*pi*H0*t)`. It retains the
+full transformed drive and unchanged phase-invariant secular dissipator, then
+returns endpoints in the model eigenbasis. This removes the diagonal H0 phases
+from explicit integration without RWA, drive truncation or splitting. Each RHS
+computes one phase per energy level and forms pair phases by multiplication.
+
+Each row keeps its own adaptive step controller and deterministic seed. Rows do
+not share stages or a gain-group controller. The original DOP853 eighth-order
+tableau and fifth/third-order normalized RMS estimator apply to each row on its
+own. Weak rows cannot dilute a strong row through a pooled RMS. Tolerances,
+the 0.1 ns seed and the active-knot ceiling remain unchanged. This preserves the
+local control strength, not an end-to-end error bound. Independent rows keep
+the same numerical path under row reordering, apply partition or worker-width
+changes, including calls mixing IP-eligible and lab-frame rows.
+
+Zero-gain and non-single-tone rows retain the original lab-frame runner, as does
+every row in a touching chain. A chain is recognized only between adjacent,
+same-timeline rows within an apply call whose supports touch within 1e-9 ns.
+It is not inferred from the complete segment table. Chain endpoints within that
+call remain bitwise identical to the original runner. Splitting a chain across
+calls restarts integration and can change its frame, so that comparison retains
+the original within-budget contract rather than bitwise equality.
+`flux_dop853` also retains its original numerical path. Both frames use Hermitian Hamiltonians and densities, requiring only one
+dense product per row per RHS. With `P = H @ rho`, the commutator is
+`P - P.conj().T`. Real Runge--Kutta weights preserve Hermitian intermediate stages.
+The RHS fuses the commutator and secular coherence loss, then adds population
+transfer. It does not normalize or clip density.
 
 DOP853 uses rtol=min(1e-4, 0.03*budget) and
 atol=min(1e-6, 0.0003*budget). Both tolerances scale with the same calibrated
@@ -668,14 +827,17 @@ playback remain unchanged. The solver need not stop exactly at interior knots.
 
 Each row starts from a deterministic 0.1 ns seed, capped by its sample spacing.
 The seed is not an accepted-step ceiling. No adaptive history carries between
-rows, so splitting a chain across apply calls preserves its numerical path.
-Row boundaries still stop integration exactly and switch models or baths.
+rows. Splitting independent rows across apply calls preserves their numerical
+paths. Splitting a chain can change its frame as described above, with results
+agreeing within budget. Row boundaries still stop integration exactly and
+switch models or baths.
 
 Joint ceiling/tolerance measurements on 16-level FTF rows found that high-carrier
-work falls as tolerances relax. Low-carrier work can remain stability-limited
-even when population errors are far below budget. The H0 interaction picture
-with loose controls reduced short-row cost but exceeded the 1e-2 population
-allowance at 10 us, so the lab-frame representation is retained.
+work falls as tolerances relax. Low-carrier lab-frame work can remain
+stability-limited even when population errors are far below budget. The
+interaction-frame path retains the same budget-scaled local controls; it does
+not use the looser controls that previously exceeded the 1e-2 population
+allowance at 10 us.
 
 Flux-tail truncation uses an absolute flux bound, not elapsed multiples of a
 filter time constant. FTF sums absolute pulse-tail contributions and truncates
@@ -721,6 +883,48 @@ population-error bound. Prefix unitaries and the three Hamiltonian matrices
 are immutable and charged to the cache. Arbitrary phase, subperiod and tail
 endpoints use a fractional CF4 step from the preceding prefix, not interpolation.
 No density enters preparation or the step selection.
+
+For planned low-carrier groups with multiple gains, the evolve-local workspace
+can replace the fine CF4 grid with gain-anchor interpolation. It sorts the
+complete table's unique gains per level, port and signed carrier. Every
+twenty-fourth index and both endpoints become independent coarse/fine anchors.
+The spacing depends only on group size, never worker count, chunking, request
+order or thread identity. Each non-anchor uses its nearest at most four anchors;
+equal-distance ties select the lower gain first.
+
+The first requesting worker builds an anchor under that anchor's lock. Planned
+reference counts retain it until every dependent key has been handed out.
+Later requests rebuild released anchors deterministically. Each table depends
+only on its key and these independent anchors. Prepared tables and resulting
+populations are bitwise invariant to workers, chunks and request order for the
+same complete table, source and budget. There is no gain chain, intermediate-key
+replay or unclaimed-result memo. Anchor storage is bounded by the planned
+anchor count times table bytes, not by worker count.
+
+Sharing requires the same model object, port, signed carrier and budget.
+Carrier continuation stays disabled. Lagrange interpolation operates on
+interaction-picture uniform prefixes. Identical H0 and uniform grids make the
+analytic H0 phase and its inverse cancel in the weighted sum, so the
+implementation avoids redundant phase exponentials. The candidate retains the
+new key's Hamiltonian, frequency, bath and split rate. Standalone preparation
+keeps independent builds.
+
+The kernel independently constructs the new key's original coarse grid. The
+candidate must have at least the original first fine-grid count and match the
+coarse trajectory at eight phase intervals, including U(T). The maximum
+Frobenius defect must be <= min(1e-4, budget*0.1). Failure reuses the coarse grid
+in the original coarse/fine loop, with its unchanged twelve-refinement limit.
+Unequal anchor grid counts skip interpolation. Retained anchors count as live
+prepared data, conservatively including arrays also referenced by active
+payloads. No anchor enters the persistent LRU or crosses evolve calls.
+Concurrent evolves use separate workspaces.
+
+This is calibrated trajectory comparison, not a rigorous bound. The eight
+phase probes do not establish an error bound between probes. Interpolated
+prefixes are not products of unitary exponentials, and their closeness to
+unitary for the Newton polar step remains unproven. Smoothness across nearby
+gains and conditioning of the Lagrange weights remain assumptions for the
+planned gain gaps. Model/drive immutability is assumed.
 
 At higher carriers, preparation keeps tolerance min(1e-10, budget*1e-4) and
 max_step=T/4. The single-threaded nogil DOP853 core builds integration stages and the
@@ -870,7 +1074,8 @@ order; future planners must issue them in canonical order.
 
 `bytes` counts resident allocations against the cache budget. `live_bytes` counts
 whole allocations held by explicit reservation/consumer handles, once across all
-handles, including resident pins. It can exceed the resident budget. Neither
+handles, including resident pins. It also charges current numeric-array bytes of
+workspaces registered by Engine with `track_workspace()` for one evolve. It can exceed the resident budget. Neither
 counter measures process RSS or all live work. Ordinary active scheduler
 references returned by `find()` are not tracked handles. Oversized allocations
 can have tracked consumer references but never enter the resident LRU. Only
