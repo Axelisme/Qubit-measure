@@ -89,7 +89,8 @@ def test_restored_unlisted_selection_is_shown_without_rewriting_raw_input(
         assert driver.observe(object_name="form.input.key").text == "B"
         assert "current options" not in driver.observe(object_name="form.row.key").tooltip
         assert state.input.data == {"key": "B"}
-        assert state.input.selections == {("key",): "B"}
+        # Converted raw B needs no override; a plain switch keeps its explicit choice.
+        assert state.input.selections == ({} if with_converter else {("key",): "B"})
         assert publications == [True]
         assert conversions == (["B"] if with_converter else [])
     finally:
