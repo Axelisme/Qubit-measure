@@ -62,7 +62,8 @@ def test_native_model_list_defaults_are_projected_without_losing_values():
     state = core.FormState(definition.default_input(env))
     raw = element(state.input.data, 0)
     assert raw["sweep"] == {"kind": "linrange", "start": 3.0, "stop": 7.0, "n": 3}
-    assert raw["drive"]["kind"] == "inline"
+    drive = raw["drive"]
+    assert isinstance(drive, dict) and drive["kind"] == "inline"
     result = state.result(env)
     assert not isinstance(result, core.FormErrors), result
     cfg = definition.to_cfg(result, env)
@@ -92,17 +93,20 @@ def test_native_field_meta_exposes_readonly_names_and_picker_labels():
     assert name is not None and name.readonly
 
 
-@pytest.mark.parametrize("node", [
-    Locked(1), Hidden(),
-    Slot("Q.pulses.drive", lock={"ch": 0}), Template("pulse", lock={"ch": 0}),
-])
+@pytest.mark.parametrize(
+    "node",
+    [
+        Locked(1),
+        Hidden(),
+        Slot("Q.pulses.drive", lock={"ch": 0}),
+        Template("pulse", lock={"ch": 0}),
+    ],
+)
 def test_native_position_seeds_reject_declaration_changes_at_typed_position(node):
-    from tests.gui.form_adapter._indexed_models import NativeGroup, indexed_tree
+    from tests.gui.form_adapter._indexed_models import NativeGroup
 
-    tree = indexed_tree()
-    tree["tones"][1]["drive"] = node
     with pytest.raises(ValueError, match="position.*declaration") as caught:
-        adapter.Form(NativeGroup, tree)
+        adapter.Form(NativeGroup, {"tones": [{}, {"drive": node}]})
     assert "('tones', 1, 'drive')" in str(caught.value)
 
 

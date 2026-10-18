@@ -8,6 +8,7 @@ from zcu_tools.cfg_model import (
     ConstWaveformCfg,
     Expr,
     FieldMeta,
+    FormNode,
     PulseCfg,
     PulseSpec,
     Range,
@@ -60,14 +61,14 @@ def indexed_env() -> FormEnv:
     )
 
 
-def indexed_tree():
+def indexed_tree() -> dict[str, FormNode]:
     """Seed by original list position, never by participant order."""
     return {
         "tones": [
             {
                 "name": "A",
                 "drive": Slot("Q.pulses.drive"),
-                "sweep": Range.between(Expr("1 + 1"), 4, expts=3),
+                "sweep": Range(start=Expr("1 + 1"), stop=4, expts=3),
             },
             {
                 "name": "B",
