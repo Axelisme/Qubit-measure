@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves, spectral-family reuse, reuse-independent Sambe admission, calibrated physical-block carrier interpolation and deterministic evolve-local period gain blocks
+**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves, spectral-family reuse, reuse-independent Sambe admission, calibrated physical-block carrier interpolation and deterministic evolve-local period gain anchors
 
 ## Segment engine contracts
 
@@ -782,7 +782,7 @@ No density enters preparation or the step selection.
 For planned low-carrier groups with multiple gains, the evolve-local workspace
 can replace the fine CF4 grid with gain-anchor interpolation. It sorts the
 complete table's unique gains per level, port and signed carrier. Every
-sixteenth index and both endpoints become independent coarse/fine anchors.
+twenty-fourth index and both endpoints become independent coarse/fine anchors.
 The spacing depends only on group size, never worker count, chunking, request
 order or thread identity. Each non-anchor uses its nearest at most four anchors;
 equal-distance ties select the lower gain first.

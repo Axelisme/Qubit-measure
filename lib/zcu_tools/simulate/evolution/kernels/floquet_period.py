@@ -25,7 +25,7 @@ _MIN_FREQUENCY_GHZ = 0.03
 _MAX_SPLIT_ESTIMATE = 1.0
 _MAX_SUBDIVISIONS = 64
 _MAGNUS_FREQUENCY_GHZ = 1.0
-_GAIN_ANCHOR_SPACING = 16
+_GAIN_ANCHOR_SPACING = 24
 
 
 class _DensePeriod(NamedTuple):
@@ -369,13 +369,16 @@ def _continued_prefixes(
     # same analytic H0 phase. The interaction-picture transform and inverse
     # cancel algebraically in this linear combination; avoid repeated complex
     # exponentials and their roundoff without changing the predictor.
-    candidate = np.zeros_like(neighbours[-1].period.coefficients)
-    for index, neighbour in enumerate(neighbours):
+    weights = []
+    for index in range(len(neighbours)):
         weight = 1.0
         for other, coordinate in enumerate(coordinates):
             if other != index:
                 weight *= (target - coordinate) / (coordinates[index] - coordinate)
-        candidate += weight * neighbour.period.coefficients
+        weights.append(weight)
+    candidate = _interpolate_prefixes(
+        tuple(n.period.coefficients for n in neighbours), tuple(weights)
+    )
     _, coarse = _magnus_prefixes(h0, x, y, frequency, coarse_count)
     error = float(
         np.max(
@@ -391,6 +394,21 @@ def _continued_prefixes(
         times, fine = _magnus_refine(context, tolerance, coarse_count, coarse)
         return times, fine, False
     return times, candidate, True
+
+
+@njit(nogil=True, cache=True)
+def _interpolate_prefixes(prefixes, weights):
+    # Fuse the weighted sum without a table-sized temporary for each anchor.
+    # Anchor order matches the scalar Lagrange sum; no fast-math reassociation.
+    candidate = np.zeros_like(prefixes[0])
+    for index in range(len(weights)):
+        for step in range(candidate.shape[0]):
+            for row in range(candidate.shape[1]):
+                for column in range(candidate.shape[2]):
+                    candidate[step, row, column] += (
+                        weights[index] * prefixes[index][step, row, column]
+                    )
+    return candidate
 
 
 def _build(
@@ -754,7 +772,7 @@ class FloquetPeriodKernel:
 
     Within an Engine evolve, fixed-carrier groups with multiple gains may
     replace the fine grid with gain-anchor interpolation. The complete table's
-    unique gains are sorted per level, port and signed carrier. Every sixteenth
+    unique gains are sorted per level, port and signed carrier. Every twenty-fourth
     index and both endpoints are independent coarse/fine CF4 anchors. This rule
     depends only on the group's gain count, never workers, chunks or key order.
     Each non-anchor uses its nearest at most four anchors, with ties resolved
