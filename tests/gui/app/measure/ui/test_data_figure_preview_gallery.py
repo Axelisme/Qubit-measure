@@ -273,6 +273,22 @@ def test_gallery_capability_driven_cards(qapp):
     )
 
 
+def test_gallery_card_delegates_nullable_image_event(qapp):
+    caps = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)
+    gallery = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
+    try:
+        card = gallery.find_card("run")
+        assert card is not None
+        image_label = card.findChild(QLabel, "previewImage_run")
+        assert image_label is not None
+
+        assert card.eventFilter(image_label, None) is False
+    finally:
+        gallery.close()
+        gallery.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
 def test_gallery_supported_but_empty_shows_named_empty_state(qapp):
     caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
     g = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
