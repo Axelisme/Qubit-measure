@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Callable, Iterator
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
@@ -29,6 +30,9 @@ from zcu_tools.gui.control_identity import ControlIdentity
 from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.app.measure._form_fakes import configure_form_lookup
 from tests.gui.app.measure.artifacts._snapshots import ready_figures, with_artifacts
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 
 
 @pytest.fixture
@@ -135,6 +139,22 @@ def exp_tab_widget(qapp, make_ctrl):
         owned_tabs.clear()
 
 
+def _assert_action_button_stretches(
+    layout: QHBoxLayout,
+    tab: ExpTabWidget,
+    reset_stretch: int,
+    run_stretch: int,
+) -> None:
+    """Check the action row's button stretches at the current interaction phase."""
+    for i in range(layout.count()):
+        item = layout.itemAt(i)
+        assert item is not None
+        if item.widget() is tab.reset_btn:
+            assert layout.stretch(i) == reset_stretch
+        if item.widget() is tab.run_btn:
+            assert layout.stretch(i) == run_stretch
+
+
 def test_A5_Run_action_row_status_free_and_20_80_proportions(
     qapp, exp_tab_widget, make_ctrl
 ):
@@ -201,13 +221,7 @@ def test_A5_Run_action_row_status_free_and_20_80_proportions(
     # style should have changed (Stop vs Run)
     assert tab.run_btn.styleSheet() != idle_style
     assert tab.reset_btn.isHidden()
-    for i in range(layout.count()):
-        item = layout.itemAt(i)
-        assert item is not None
-        if item.widget() is tab.reset_btn:
-            assert layout.stretch(i) == 0
-        if item.widget() is tab.run_btn:
-            assert layout.stretch(i) == 100
+    _assert_action_button_stretches(layout, tab, 0, 100)
 
     # back to idle restores primary and 20/80 geometry
     tab.update_interaction_state(snap)
@@ -215,13 +229,7 @@ def test_A5_Run_action_row_status_free_and_20_80_proportions(
     assert not tab.reset_btn.isHidden()
     assert tab.run_btn.text() == "Run"
     assert tab.run_btn.objectName() == "primaryButton"
-    for i in range(layout.count()):
-        item = layout.itemAt(i)
-        assert item is not None
-        if item.widget() is tab.reset_btn:
-            assert layout.stretch(i) == 20
-        if item.widget() is tab.run_btn:
-            assert layout.stretch(i) == 80
+    _assert_action_button_stretches(layout, tab, 20, 80)
     tab.detach()
 
 
