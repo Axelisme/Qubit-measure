@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from math import isfinite
 from typing import Any, cast
@@ -31,6 +32,8 @@ from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputEr
 from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.plotting.plots import Plots
+
+logger = logging.getLogger(__name__)
 
 
 class FluxPickFrontend(InteractiveFrontend):
@@ -207,7 +210,8 @@ class FluxPickFrontend(InteractiveFrontend):
             self._preview_active = True
             self._repaint()
 
-    def _set_conjugate(self, enabled: bool) -> None:  # noqa: FBT001 - Qt toggled(bool)
+    # tolerated: Qt toggled(bool) delivers the checked state positionally.
+    def _set_conjugate(self, enabled: bool) -> None:  # noqa: FBT001
         if not self._read_only and not self._retired:
             self._plugin.actions.conjugate.execute(self._session, enabled)
 
@@ -215,7 +219,8 @@ class FluxPickFrontend(InteractiveFrontend):
         if not self._read_only and not self._retired:
             self._plugin.actions.swap.execute(self._session, None)
 
-    def _on_alignment(self, busy: bool, error: str | None) -> None:  # noqa: FBT001 - status subscription
+    # tolerated: Shared alignment subscriptions deliver positional busy/error values.
+    def _on_alignment(self, busy: bool, error: str | None) -> None:  # noqa: FBT001
         if self._retired:
             return
         self._alignment_busy = busy
@@ -230,7 +235,8 @@ class FluxPickFrontend(InteractiveFrontend):
             self._plugin.start_alignment(self._session)
         except FailedPreconditionError as exc:
             self._info.setText(str(exc))
-        except Exception as exc:  # noqa: BLE001 - failed pool submission
+        except Exception as exc:
+            logger.exception("Auto Align submission failed")
             self._info.setText(str(exc))
 
     def _finish(self) -> None:
