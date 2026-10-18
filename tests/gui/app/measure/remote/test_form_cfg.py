@@ -105,7 +105,8 @@ def test_aggregate_relative_fields_use_real_rpc_and_keep_owner_errors(form_rpc):
     library = indexed_env().library
     assert library is not None
     context.set_module(
-        context.read_context().target, "Q.pulses.drive",
+        context.read_context().target,
+        "Q.pulses.drive",
         library.module_spec("Q.pulses.drive"),
     )
     fixture.registry.register("indexed-fields", IndexedRpcAdapter)
@@ -116,16 +117,21 @@ def test_aggregate_relative_fields_use_real_rpc_and_keep_owner_errors(form_rpc):
         before = owner.input
         fixture.ctrl.control_identity.reclaim_local()
         fixture.state.set_tab_running(tab, running=True)
-        response = rpc.call("tab.read_elements", {
-            "tab_id": tab, "path": ["tones"],
-            "fields": [["drive", "gain"], ["phase"]],
-        })
+        response = rpc.call(
+            "tab.read_elements",
+            {
+                "tab_id": tab,
+                "path": ["tones"],
+                "fields": [["drive", "gain"], ["phase"]],
+            },
+        )
         assert response["ok"], response
         rows = response["result"]["elements"]
         assert [row["index"] for row in rows] == [0, 1]
         assert [row["fields"][0]["value"] for row in rows] == [0.2, 0.2]
         assert [row["fields"][0].get("element") for row in rows] == [
-            {"index": 0, "name": "A"}, {"index": 1, "name": "B"},
+            {"index": 0, "name": "A"},
+            {"index": 1, "name": "B"},
         ]
         assert rows[0]["fields"][1]["value_status"] != "available"
         assert rows[0]["fields"][1]["errors"]
@@ -133,9 +139,14 @@ def test_aggregate_relative_fields_use_real_rpc_and_keep_owner_errors(form_rpc):
         rows[1]["input"]["name"] = "detached"
         assert owner.input.same_as(before)
         for fields in ("bad", [[]], [["absent"]], [["drive", -1]]):
-            refused = rpc.call("tab.read_elements", {
-                "tab_id": tab, "path": ["tones"], "fields": fields,
-            })
+            refused = rpc.call(
+                "tab.read_elements",
+                {
+                    "tab_id": tab,
+                    "path": ["tones"],
+                    "fields": fields,
+                },
+            )
             assert not refused["ok"], refused
         assert owner.input.same_as(before)
     finally:
