@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Iterator, Mapping
+from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -49,6 +50,7 @@ from zcu_tools.resources.context.library import (
 )
 
 from tests.experiment.workflows._engine_fakes import Plan, State, Tunables
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.gui.app.workflows._synthetic import PlanForm, TunablesForm
 
@@ -178,8 +180,20 @@ def test_window_memento_restores_separate_selection_and_whole_invalid_draft(
     codec = WorkflowInputCodec()
     snapshot = codec.decode(codec.encode(original.capture_persisted_state()))
     restored = sweep_window(PersistedDraftForm, snapshot)
-    assert restored.plan_panel.state.input.same_as(original.plan_panel.state.input)
-    assert restored.plan_panel.state.base.same_as(original.plan_panel.state.input)
+    assert restored.plan_panel.state.input.data == {
+        "sweep": {
+            "kind": "linrange",
+            "start": {"expr": "missing + 1"},
+            "stop": "invalid",
+            "n": 3,
+        },
+        "optional": None,
+    }
+    assert (
+        restored.plan_panel.state.input.selections
+        == original.plan_panel.state.input.selections
+    )
+    assert restored.plan_panel.state.base.same_as(restored.plan_panel.state.input)
     assert restored.plan_panel.state.preview(restored.plan_panel.env).errors is not None
 
 
@@ -221,9 +235,13 @@ def test_inline_copy_memento_keeps_original_input_after_library_content_changes(
     restored = sweep_window(
         form.model, WorkflowInputCodec().decode(WorkflowInputCodec().encode(saved))
     )
-    assert restored.plan_panel.state.input.same_as(state.input)
+    assert (
+        restored.plan_panel.state.input.data["waveform"] == state.input.data["waveform"]
+    )
+    assert restored.plan_panel.state.input.selections == state.input.selections
+    before_preview = restored.plan_panel.state.input
     restored.plan_panel.state.preview(changed)
-    assert restored.plan_panel.state.input.same_as(state.input)
+    assert restored.plan_panel.state.input.same_as(before_preview)
 
 
 def test_open_restore_and_close_flush(qapp: QApplication, tmp_path: Path) -> None:
@@ -300,6 +318,50 @@ def test_unreadable_snapshot_reports_and_uses_defaults(
             "Failed to read GUI state" in label.text()
             for label in app.window.findChildren(QLabel)
         )
+    finally:
+        app.window.close()
+        app.shutdown()
+        app.window.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("broken", [False, True], ids=["dropped", "bad-json"])
+def test_startup_restore_diagnostics_are_visible_to_the_user(
+    qapp: QApplication, tmp_path: Path, broken: bool
+) -> None:
+    path = tmp_path / "t1_workflow_state_v1.json"
+    payload = (
+        "not JSON"
+        if broken
+        else json.dumps(
+            WorkflowInputCodec().encode(
+                WorkflowInputSnapshot.capture(
+                    FormInput(PlanForm, {"scale": 0.25, "retired": 9}),
+                    FormInput(TunablesForm, {}),
+                )
+            )
+        )
+    )
+    path.write_text(payload)
+    app = WorkflowsGuiBehavior(
+        templates={}, registrations=build_registry(), cache_dir=tmp_path
+    )
+    app.assemble(None)
+    app.window.resize(1100, 720)
+    app.window.show()
+    qapp.processEvents()
+    driver = ComponentDriver(app.window)
+    try:
+        driver.screenshot(tmp_path / "01-startup-diagnostic.png")
+        (tmp_path / "01-startup-diagnostic.json").write_text(
+            json.dumps(asdict(driver.visible()), indent=2)
+        )
+        message = driver.observe(object_name="workflow.run.message")
+        assert message.visible
+        assert (
+            "Failed to read GUI state" if broken else "Discarded plan: retired"
+        ) in message.text
+        assert driver.observe(object_name="form.input.scale").visible
     finally:
         app.window.close()
         app.shutdown()

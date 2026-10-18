@@ -11,7 +11,7 @@ from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
 )
-from zcu_tools.gui.form import FormEnv, FormErrors
+from zcu_tools.gui.form import FormEnv, FormErrors, FormInput
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
@@ -263,16 +263,20 @@ def test_compatible_restore_preserves_unfinished_input_and_reports_dropped_paths
         capture=lambda _aliases: resource_api.TabFormSources(captured_env(2.0)),
         mutation_allowed=lambda: True,
     )
-    assert hasattr(resource, "write_compatible"), (
-        "Missing public compatible input restoration"
-    )
-    dropped = resource.write_compatible(
-        {"amount": {"expr": "unfinished +"}, "removed": 9}
+    dropped = resource.restore_input(
+        FormInput(
+            resource.input.model, {"amount": {"expr": "unfinished +"}, "removed": 9}
+        )
     )
     assert dropped == (("removed",),)
     assert resource.input.data == {"amount": {"expr": "unfinished +"}}
     assert isinstance(resource.result(), FormErrors)
-    assert resource.write_compatible({"amount": "not a number"}) == ()
+    assert (
+        resource.restore_input(
+            FormInput(resource.input.model, {"amount": "not a number"})
+        )
+        == ()
+    )
     assert resource.input.data == {"amount": "not a number"}
     assert isinstance(resource.result(), FormErrors)
 
@@ -344,7 +348,7 @@ def test_pool_guards_peer_notification_busy_commands_and_revoked_handles() -> No
     allowed = False
     for command in (
         lambda: second.write({("amount",): 9.0}),
-        lambda: second.write_compatible({"amount": 9.0}),
+        lambda: second.restore_input(FormInput(second.input.model, {"amount": 9.0})),
         second.reset,
     ):
         with pytest.raises(CfgPreconditionError) as caught:

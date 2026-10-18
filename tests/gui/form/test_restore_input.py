@@ -64,7 +64,9 @@ def test_restore_list_keeps_saved_positions_and_length(saved_length: int) -> Non
 
 
 def test_restore_list_uses_captured_defaults_at_the_saved_position() -> None:
-    base = FormInput(RestoreForm, {"tones": [{"name": "fresh", "amount": 99, "phase": 123}]})
+    base = FormInput(
+        RestoreForm, {"tones": [{"name": "fresh", "amount": 99, "phase": 123}]}
+    )
     state = FormState(base)
     saved = FormInput(RestoreForm, {"tones": [{"name": "Q1", "amount": 17}]})
 

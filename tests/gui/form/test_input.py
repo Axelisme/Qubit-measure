@@ -15,6 +15,7 @@ from zcu_tools.gui.form import (
     FormInput,
     FormModel,
     FormState,
+    FormWritePath,
     InputConverter,
 )
 from zcu_tools.gui.form.commands import ReadonlyFormInput
@@ -101,7 +102,9 @@ def test_json_codec_keeps_raw_fields_and_typed_selection_paths(
         "selections": [1, 2],
         "tones": [{"shape": {"style": "ramp", "length": "unfinished"}}],
     }
-    selections = {("tones", 0, "shape"): {"style": "flat"}} if with_override else {}
+    selections: dict[FormWritePath, JsonValue] = (
+        {("tones", 0, "shape"): {"style": "flat"}} if with_override else {}
+    )
     original = FormInput(FormModel, raw, selections=selections)
 
     text = original.to_json()
