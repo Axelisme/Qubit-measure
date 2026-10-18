@@ -31,18 +31,29 @@ _BOOTSTRAP["bootstrap_standalone_server"](
     ),
 )
 
+# tolerated: Standalone lib-path setup and GUI dependency preflight must precede GUI imports.
 from zcu_tools.gui.app.measure.remote.wire_version import (  # noqa: E402
     WIRE_VERSION as MCP_WIRE_VERSION,
 )
+
+# tolerated: Standalone lib-path setup and GUI dependency preflight must precede bridge imports.
 from zcu_tools.mcp.core.bridge import (  # noqa: E402
     McpBridge,
     MCPBridgeConfig,
     port_is_open,
     resolve_connect_port,
 )
+
+# tolerated: Standalone lib-path setup and GUI dependency preflight must precede tool assembly.
 from zcu_tools.mcp.measure.assembly import build_measure_tools  # noqa: E402
+
+# tolerated: Standalone lib-path setup and GUI dependency preflight must precede recipe imports.
 from zcu_tools.mcp.measure.recipe import RecipeDefinition  # noqa: E402
+
+# tolerated: Standalone lib-path setup and GUI dependency preflight must precede session imports.
 from zcu_tools.mcp.measure.session import MeasureMcpSession  # noqa: E402
+
+# tolerated: Standalone lib-path setup and GUI dependency preflight must precede tool context imports.
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 
 # v89: forward GUI-owned guard requests once and expose observed operation state.
