@@ -125,6 +125,45 @@ def test_sweep_modes_and_expressions_roundtrip_through_window_memento(
     assert restored.plan_panel.state.base.data == saved.plan
 
 
+class PersistedDraftForm(FormModel):
+    sweep: SweepInput
+    optional: float | None
+    required: float
+
+
+def test_window_memento_restores_separate_selection_and_whole_invalid_draft(sweep_window) -> None:
+    original = sweep_window(PersistedDraftForm, None)
+    original.plan_panel.state.install_input(
+        FormInput(
+            PersistedDraftForm,
+            {
+                "sweep": {"kind": "range", "start": {"expr": "missing + 1"}, "stop": "invalid"},
+                "optional": None,
+            },
+        )
+    )
+    original.plan_panel.state.write({("sweep",): {"kind": "center"}}, original.plan_panel.env)
+    codec = WorkflowInputCodec()
+    snapshot = codec.decode(codec.encode(original.capture_persisted_state()))
+    restored = sweep_window(PersistedDraftForm, snapshot)
+    assert restored.plan_panel.state.input.same_as(original.plan_panel.state.input)
+    assert restored.plan_panel.state.base.same_as(original.plan_panel.state.input)
+    assert restored.plan_panel.state.preview(restored.plan_panel.env).errors is not None
+
+
+def test_incompatible_knobs_identity_preserves_both_window_drafts(window) -> None:
+    saved = window.capture_persisted_state()
+    window.plan_panel.state.write({("scale",): 7}, window.plan_panel.env)
+    window.tunables_panel.state.install_input(FormInput(TunablesForm, {}))
+    before = window.capture_persisted_state()
+    incompatible = FormInput(ValueKnobsForm, {"value": 6})
+    # Capture through the same public host seam, then replace just one form.
+    other = saved.model_copy(update={"knobs": json.loads(incompatible.to_json())})
+    with pytest.raises(ValueError, match="identity|incompatible"):
+        window.restore_persisted_state(other)
+    assert window.capture_persisted_state() == before
+
+
 def test_incompatible_fields_drop_without_losing_other_input(
     window: WorkflowWindow[Context],
 ) -> None:
