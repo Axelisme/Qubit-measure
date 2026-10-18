@@ -264,4 +264,6 @@ def test_touching_rows_at_large_absolute_start_match_lab_frame_chain() -> None:
     local = replace(case, table=replace(case.table, start_ns=np.zeros(len(starts))))
     first = reference(local, 0, case.states[0])
     second = reference(local, 1, first)
-    np.testing.assert_allclose(actual, np.stack([first, second]), atol=case.budget, rtol=0)
+    np.testing.assert_allclose(
+        actual, np.stack([first, second]), atol=case.budget, rtol=0
+    )
