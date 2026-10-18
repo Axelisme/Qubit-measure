@@ -90,7 +90,7 @@ def resident_inventory(
         domains = (
             (table.tones == 0, ("t4",)),
             (flux, ("flux_dop853",)),
-            (plateau, ("dyson", "floquet_period", "t6")),
+            (plateau, ("dyson", "single_tone_rwa", "floquet_period", "t6")),
             (
                 shaped,
                 (
@@ -618,9 +618,13 @@ class _Classifier:
         # Distinct inputs cannot share Dyson paths; period propagation is cheaper
         # within the 10 us FTF coverage. Keep Dyson when the period guard rejects.
         distinct_input = _unshared_driven_input(table) & (table.duration_ns <= 10000.0)
-        self.accept(plateau[distinct_input[plateau]], ("floquet_period", "dyson", "t6"))
+        prefix = ("single_tone_rwa",) if "single_tone_rwa" in self.kernels else ()
         self.accept(
-            plateau[~distinct_input[plateau]], ("dyson", "floquet_period", "t6")
+            plateau[distinct_input[plateau]], (*prefix, "floquet_period", "dyson", "t6")
+        )
+        self.accept(
+            plateau[~distinct_input[plateau]],
+            ("dyson", *prefix, "floquet_period", "t6"),
         )
         shaped = np.flatnonzero(single & ~constant & self.scope)
         if np.any(self.scope[shaped]):

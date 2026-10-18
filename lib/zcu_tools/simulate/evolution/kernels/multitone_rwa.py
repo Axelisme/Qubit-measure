@@ -26,21 +26,29 @@ _REVISION = "joint-rwa-v3"
 _EDGE_GHZ = 0.05
 _STEP_NS = 4.0
 _CONSTANT_STEP_NS = 16.0
-# 25 strict-lab points around +84/-52 MHz: error>0.1 first occurs at
-# P=0.0116496. Halve that empirical cutoff, rounded down for safety.
-_MAX_COMBINATION_TRANSFER = 5.8e-3
+# Half the strict-lab failing combination-channel boundary (0.0116496).
+# The extended 96-point single-constant scan had no failures below 0.045813;
+# the same-tone counterexample is 0.015629. Keep the stricter shared cap.
+_MAX_OMISSION_TRANSFER = 5.8e-3
 _MIN_BUDGET = 1e-3
 _MAX_RATIO = 0.25
 _MAX_SLOPE = 0.025
 _MAX_CURVATURE = 0.003
 # Integer 256 ns gain sweep exceeded 1e-2 at gain 0.4184, proxy 0.063 rad.
 _MAX_PHASE_RAD = 0.06
+# Distinct-port dual constants: strict-lab calibration, half the 0.338 rad boundary.
+_MAX_CONSTANT_PHASE_RAD = 0.16
+CONSTANT_RWA_POLICY = (
+    "constant-omission-v1",
+    _MAX_OMISSION_TRANSFER,
+    _MAX_CONSTANT_PHASE_RAD,
+)
 RWA_POLICY = (
     _REVISION,
     _EDGE_GHZ,
     _STEP_NS,
     _CONSTANT_STEP_NS,
-    _MAX_COMBINATION_TRANSFER,
+    _MAX_OMISSION_TRANSFER,
     _MIN_BUDGET,
     _MAX_RATIO,
     _MAX_SLOPE,
@@ -108,57 +116,117 @@ def _fourier_coefficient(x, y, sign):
 
 
 @njit(nogil=True, cache=True)
-def _combination_probability(energies, x, y, frequencies, amplitudes, duration):
-    """Maximum omitted-path two-carrier transfer proxy, in GHz and ns."""
+def _transfer_probability(coupling, detuning, duration):
+    strength = (2 * abs(coupling)) ** 2
+    if strength == 0:
+        return 0.0
+    return min(strength / (strength + detuning**2), strength * duration**2)
+
+
+@njit(nogil=True, cache=True)
+def _two_step_coupling(data, first, second, i, k):
+    # Sum intermediates for ONE ordered pair of signed Fourier carriers.
+    energies, operators, frequencies = data
+    a, sa = first
+    b, sb = second
+    sign_a, sign_b = 1 - 2 * sa, 1 - 2 * sb
+    coupling = 0j
+    for m in range(len(energies)):
+        d_first = energies[i] - energies[m] + sign_a * frequencies[a]
+        d_second = energies[m] - energies[k] + sign_b * frequencies[b]
+        if abs(d_first) >= _EDGE_GHZ:
+            denominator = d_first
+        elif abs(d_second) >= _EDGE_GHZ:
+            denominator = -d_second
+        else:
+            continue
+        coupling += operators[a, sa, i, m] * operators[b, sb, m, k] / denominator
+    return coupling
+
+
+@njit(nogil=True, cache=True)
+def _pair_probability(data, first, second, duration):
+    energies, _, frequencies = data
+    a, sa = first
+    b, sb = second
+    combination = (1 - 2 * sa) * frequencies[a] + (1 - 2 * sb) * frequencies[b]
     maximum = 0.0
-    size = len(energies)
-    for sign_a in (1, -1):
-        for sign_b in (1, -1):
-            signs = (sign_a, sign_b)
-            operators = np.empty_like(x)
-            for tone in range(2):
-                operators[tone] = _fourier_coefficient(x[tone], y[tone], signs[tone])
-                operators[tone] *= amplitudes[tone]
-            combination = sign_a * frequencies[0] + sign_b * frequencies[1]
+    for i in range(len(energies)):
+        for k in range(len(energies)):
+            if i == k and a == b and sa != sb:
+                continue  # The static single-tone diagonal already retains it.
+            coupling = _two_step_coupling(data, first, second, i, k)
+            if first != second:
+                coupling += _two_step_coupling(data, second, first, i, k)
+            maximum = max(
+                maximum,
+                _transfer_probability(
+                    coupling, energies[i] - energies[k] + combination, duration
+                ),
+            )
+    return maximum
+
+
+@njit(nogil=True, cache=True)
+def _omission_probability(energies, x, y, frequencies, amplitudes, duration):
+    """One rule for every removed first/second-order Fourier coupling.
+
+    C_s=(X-s*iY)/2, d=Ei-Ej+s*f. Removed one-photon edges use
+    g=C_s*amplitude. Two-step paths use g=sum(C_a*C_b/d_removed)
+    over intermediates and distinct time orders; paths with both edges retained
+    are excluded. A same-tone/same-sign path has one order, NOT a duplicated
+    carrier. Mixed signs and distinct carriers include both orders. Full dressed
+    gaps include conditional ZZ. Only zero-frequency same-tone diagonal
+    terms are excluded: they already live in RWACoefficients.diagonal.
+    Oscillating diagonal terms remain charged like every other omission.
+    Each effective edge uses P=min(4|g|²/(4|g|²+delta²),4|g|²*T²).
+    GHz/ns units and the finite-time cap follow the calibrated combination
+    proxy, not a rigorous Dyson error bound (no claim of a 2*pi certificate).
+    The maximum P is shared across window-excluded one-photon, same-tone and
+    cross-tone two-photon terms, including empty retained graphs. Only constant
+    rows use this rule; sampled/gate admission is unchanged.
+
+    Calibration: 96 once-only strict-lab points on the 16-level joint model,
+    four flux fractions 0,0.4,0.8,1 between integer and near-half, theta 0/0.7,
+    full-operator/carrier ratios 0.01/0.07/0.2, durations 128/1024 ns and carrier
+    offsets 0/51 MHz. Minimum failing P (population error>0.1) was 0.045813;
+    all 14 admitted points had error<=0.002947. The same-tone counterexample
+    fails at P=0.015629. The existing 25-point cross-tone scan fails first at
+    channel P=0.0116496. Its halved boundary, rounded down to 0.0058, is more
+    conservative than either new boundary. A recheck of the dual-constant
+    96-point calibration keeps 24/36 previously admitted points; twelve safe
+    intermediate-flux points now fall back due to the new omissions.
+    """
+    maximum = 0.0
+    size, count = len(energies), len(frequencies)
+    operators = np.empty((count, 2, size, size), dtype=np.complex128)
+    for a in range(count):
+        for sa in range(2):
+            sign_a = 1 if sa == 0 else -1
+            operators[a, sa] = _fourier_coefficient(x[a], y[a], sign_a) * amplitudes[a]
             for i in range(size):
-                for k in range(size):
-                    if i == k:
-                        continue
-                    coupling = 0j
-                    for first in range(2):
-                        second = 1 - first
-                        for m in range(size):
-                            d_first = (
-                                energies[i]
-                                - energies[m]
-                                + signs[first] * frequencies[first]
-                            )
-                            d_second = (
-                                energies[m]
-                                - energies[k]
-                                + signs[second] * frequencies[second]
-                            )
-                            if abs(d_first) >= _EDGE_GHZ:
-                                denominator = d_first
-                            elif abs(d_second) >= _EDGE_GHZ:
-                                # Reverse the second leg to the same endpoint
-                                # convention as the first-leg denominator.
-                                denominator = -d_second
-                            else:
-                                # The retained joint RHS already has this path.
-                                continue
-                            coupling += (
-                                operators[first, i, m]
-                                * operators[second, m, k]
-                                / denominator
-                            )
-                    strength = (2 * abs(coupling)) ** 2
-                    delta = energies[i] - energies[k] + combination
-                    if strength > 0:
-                        transfer = min(
-                            strength / (strength + delta**2), strength * duration**2
+                for j in range(size):
+                    d = energies[i] - energies[j] + sign_a * frequencies[a]
+                    if abs(d) >= _EDGE_GHZ:
+                        maximum = max(
+                            maximum,
+                            _transfer_probability(operators[a, sa, i, j], d, duration),
                         )
-                        maximum = max(maximum, transfer)
+    for a in range(count):
+        for b in range(a, count):
+            for sa in range(2):
+                for sb in range(2):
+                    if a == b and sa > sb:
+                        continue
+                    maximum = max(
+                        maximum,
+                        _pair_probability(
+                            (energies, operators, frequencies),
+                            (a, sa),
+                            (b, sb),
+                            duration,
+                        ),
+                    )
     return maximum
 
 
@@ -366,7 +434,9 @@ def admit_rows(
 ) -> NDArray[np.bool_]:
     """Admit simultaneous rows under the shared calibrated joint RWA policy.
 
-    Requires at least two tones. Reads model-only facts, never density;
+    Requires at least two tones. The unified omission rule applies only to
+    distinct-port dual constants; sampled/gate policies remain unchanged.
+    Reads model-only facts, never density;
     splitting rows preserves decisions. Invalid budgets raise ValueError.
     """
     return _admit_rows(table, rows, context, single_tone=False)
@@ -383,12 +453,24 @@ def admit_single_rows(
     return _admit_rows(table, rows, context, single_tone=True)
 
 
+def admit_constant_rows(
+    table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
+) -> NDArray[np.bool_]:
+    """Admit single constant rows under the same omission/strength/phase policy.
+
+    Fixed flux, |f|>=50 MHz and budget>=1e-3 are required. Graph pruning is a
+    separate consumer admission; this function never reads input density.
+    """
+    return _admit_rows(table, rows, context, single_tone=True, constant_single=True)
+
+
 def _admit_rows(
     table: SegmentTable,
     rows: NDArray[np.int64],
     context: KernelContext,
     *,
     single_tone: bool,
+    constant_single: bool = False,
 ) -> NDArray[np.bool_]:
     tolerances(context.budget)
     bounds = envelope_bounds(table, context.work_plan)
@@ -405,7 +487,10 @@ def _admit_rows(
         constant = all(table.envelopes[e].kind == "constant" for e in envs)
         # Same-port Stark/probe spectra retain their Floquet/direct route:
         # small population errors can still shift a narrow resonance peak.
-        if constant and (
+        if constant_single:
+            if not constant:
+                continue
+        elif constant and (
             count != 2 or table.tone_port[row, 0] == table.tone_port[row, 1]
         ):
             continue
@@ -419,7 +504,7 @@ def _admit_rows(
         model = context.source.model(tuple(int(v) for v in table.level[row]))
         if constant:
             ports = table.tone_port[row, :count]
-            probability = _combination_probability(
+            probability = _omission_probability(
                 model.energies_ghz,
                 np.array([model.drives[p].in_phase_ghz for p in ports]),
                 np.array([model.drives[p].quadrature_ghz for p in ports]),
@@ -427,7 +512,7 @@ def _admit_rows(
                 np.abs(table.tone_amplitude[row, :count]) * bounds.peaks[envs],
                 table.duration_ns[row],
             )
-            if probability > _MAX_COMBINATION_TRANSFER:
+            if probability > _MAX_OMISSION_TRANSFER:
                 continue
         ratio = 0.0
         phase = 0.0
@@ -449,9 +534,12 @@ def _admit_rows(
                 )
                 / frequencies[tone]
             )
+        phase_limit = (
+            _MAX_CONSTANT_PHASE_RAD if constant and count == 2 else _MAX_PHASE_RAD
+        )
         accepted[index] = (
             ratio <= _MAX_RATIO
-            and 2 * np.pi * table.duration_ns[row] * phase <= _MAX_PHASE_RAD
+            and 2 * np.pi * table.duration_ns[row] * phase <= phase_limit
         )
     return accepted
 
@@ -497,34 +585,26 @@ def rwa_coefficients(
 
 
 class MultitoneRWAKernel:
-    """Approximate C5 family, revision joint-rwa-v3; never a DOP853 frame flag.
+    """Joint RWA C5 family with unchanged sampled and covariant-gate admission.
 
-    Admission requires >=2 tones with a sampled envelope, or exactly two
-    constant envelopes on distinct ports, fixed flux,
-    real envelopes with peak-normalized slope <=0.025/ns and curvature
-    <=0.003/ns², each |f|>=0.05 GHz, pairwise ||f_i|-|f_j||>=0.1 GHz,
-    sum of peak |gain|*(||X||₂+||Y||₂)/|f| <=0.25, and cumulative
-    counter-rotating phase proxy 2π*duration*sum((peak*gain*||V_ret||₂)²/|f|)
-    <=0.06 rad. Budgets below
-    1e-3 decline: this calibrated approximation is not a tight-error solver.
-    Dual constant rows also require an omitted-path combination transfer proxy
-    <=5.8e-3 for every signed sum/difference and dressed level pair.
-    Calibration uses a 5x5 grid, each carrier within 10 MHz of the integer
-    +84/-52 MHz counterexample, against lab budget 1e-7. Among points with
-    population error >0.1, the smallest P was 0.0116496. The threshold is
-    half that value, rounded down. Original mux scans lose no extra rows. Full dressed
-    gaps include conditional ZZ. For each two-step path, both tone orders use
-    the shared Fourier coefficient builder with abs(gain)*envelope peak. Paths
-    with both edges retained already evolve in the joint RHS and are excluded.
-    Otherwise divide the coefficient product by the first omitted detuning
-    (or the reversed second detuning when only that edge is omitted), and sum
-    over intermediates and tone orders to obtain g2 in GHz. With dressed
-    detuning delta, P=min((2*abs(g2))²/((2*abs(g2))²+delta²),
-    (2*abs(g2)*duration_ns)²). The finite-time cap avoids spurious rejection
-    at zero detuning for vanishing coupling. An empty retained graph is NOT
-    evidence of safety. This calibrated estimate is not an error certificate.
-    Constant rows use a 16 ns adaptive ceiling; sampled rows retain 4 ns.
-    No density reduction, dissipator change, clipping or normalization occurs.
+    Requires fixed flux, real smooth envelopes, each |f|>=0.05 GHz and carrier
+    magnitudes separated by >=0.1 GHz, summed peak full-operator/carrier ratio
+    <=0.25 and budget>=1e-3. Sampled slope/curvature limits are 0.025/ns and
+    0.003/ns². The retained-edge phase proxy cap remains 0.06 rad for sampled
+    rows and gates; distinct-port dual constants use 0.16 rad. The latter was
+    calibrated on 96 strict-lab points (phase, gain, duration and four fluxes):
+    the smallest failing phase proxy was 0.338 rad, halved and rounded down.
+    Same-port constant spectra retain their full-drive route for peak accuracy.
+
+    Constant rows also use the unified omitted-edge transfer estimate documented
+    in _omission_probability: window-excluded one-photon edges, same-tone and
+    cross-tone two-step paths all share a 5.8e-3 cap. This extends the existing
+    combination calibration rather than layering separate resonance guards.
+    Sampled rows and covariant gates do NOT use this constant-only estimate.
+    The threshold uses half the smallest failing proxy in strict-lab calibration;
+    it is empirical, not a whole-sequence or arbitrary-input error certificate.
+    Constant rows use a 16 ns ceiling; sampled rows retain 4 ns. No density
+    reduction, dissipator change, clipping or normalization occurs.
     """
 
     name = "multitone_rwa"
@@ -545,6 +625,11 @@ class MultitoneRWAKernel:
         for index, row in enumerate(rows):
             count = table.tones[row]
             digest = sha256(repr((RWA_POLICY, context.budget)).encode("ascii"))
+            if all(
+                table.envelopes[e].kind == "constant"
+                for e in table.tone_envelope[row, :count]
+            ):
+                digest.update(repr(CONSTANT_RWA_POLICY).encode("ascii"))
             digest.update(table.level[row].astype("<i8").tobytes())
             digest.update(
                 np.array(

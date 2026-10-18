@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-19, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives, simultaneous and single-tone covariant gate reuse, unified resident/pending budget, long-period playback and guarded CF4 carrier anchors
+**Last updated:** 2026-10-19, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives, simultaneous and single-tone covariant gate reuse, unified resident/pending budget, long-period playback, guarded CF4 carrier anchors and constant-tone block RWA
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -56,8 +56,8 @@ tries the next candidate in the following graph.
 | --- | --- |
 | No drive, fixed or quantized varying flux | `t4`, analytic secular propagation with basis changes between flux levels. The varying-flux path is also called T5, not a separate kernel. |
 | Driven continuous flux | `flux_dop853`, continuous Hamiltonian evaluation from `FluxExpansion`, with baths switching at quantized segment boundaries. |
-| One constant tone, unshared driven input, duration at most 10 us | `floquet_period` → `dyson` → `t6`. |
-| Other single constant tone | `dyson` → `floquet_period` → `t6`. Dyson checks perturbative ratios and an analytic B2 bound, except that certified no-drive prefixes need no B2 check. Source and shared-prefix densities supply known inputs; other later rows use an arbitrary-input bound. |
+| One constant tone, unshared driven input, duration at most 10 us | `single_tone_rwa` → `floquet_period` → `dyson` → `t6`. |
+| Other single constant tone | `dyson` → `single_tone_rwa` → `floquet_period` → `t6`. Dyson checks perturbative ratios and an analytic B2 bound, except that certified no-drive prefixes need no B2 check. Source and shared-prefix densities supply known inputs; other later rows use an arbitrary-input bound. |
 | One shaped tone | Try `single_tone_gate` when complete-acquire cold build plus playback is at least 20% cheaper than Sambe. Rejected or unamortized rows try `shaped_sambe`, without a reuse threshold. Remaining rows try `gate_cache`, `period_table` and `dop853` in acquire-wide amortized-cost order. |
 | Two constant tones | Try `multitone_rwa` first for distinct ports. Same-port and rejected rows retain the acquire-wide DOP853/Floquet cost order, cheaper family first. |
 | Shaped two-tone or three-or-more-tone row | `multitone_gate` → `multitone_rwa` → `dop853`. RWA admits only fixed-flux, separated weak carriers with smooth real envelopes and at least one sampled envelope. Other rows retain the full-drive fallback. |
@@ -81,7 +81,8 @@ application and certificates that require their intermediate data.
 | `floquet` | The guard builds a Stark frame and returns row admissions. Passing k=0 omission/convergence bounds selects modal second-order Dyson when probe limits pass, otherwise periodic k=0 propagation. After k=0 omission rejection, a passing calibrated finite-Fourier certificate selects retained-sideband integration. A cached sideband frame extends to missing probe bins without rebuilding the frame or existing certificates. Dispatch merges current-row admissions into one family plan. Apply does not repeat admission or construct sparse equations. |
 | `single_tone_gate` | Dispatch compares summed canonical-key four-U builds, playback and guard/key work against carrier/shape-domain Sambe construction, period/envelope playback and fractional tails. Estimates use joint dimension, duration, retained drive strength, shape motion and carrier frequency. A 20% cold-cost margin selects this candidate before numerical admission. The kernel requires exactly one smooth real sampled tone and shares RWA, phase-graph pruning and secular split admission with simultaneous gates. Sliced support, nonzero envelope offsets and final sample hold are allowed. Rejection retains Sambe. |
 | `multitone_gate` | Complete-inventory canonical reuse of at least 20 rows, shared RWA admission, coextensive real sampled support, compatible dressed phase charges (or explicitly admitted weak-cycle pruning), and a four-way secular split proxy at most 0.01. Builds four joint Hilbert propagators using the same `RWACoefficients.diagonal` window-excluded shifts and `interaction_hamiltonian` as ordinary RWA, plays D-U-D, and restores the lab/DC endpoint frame. Rejection retains ordinary RWA. |
-| `multitone_rwa` | Revision `joint-rwa-v3` retains joint-basis Fourier edges with `abs(Ei-Ej±f) < 0.05 GHz`, obtains window-excluded single-tone second-order shifts from `RWACoefficients.diagonal` and assembles them through `interaction_hamiltonian`, and integrates every tone in a row-local interaction picture with a 16 ns adaptive ceiling for dual constant rows and 4 ns otherwise. Dual constant admission also checks omitted two-carrier sum/difference paths. It restores Schrödinger coordinates at every endpoint. It keeps joint rates, dephasing and state ordering. This calibrated approximation does not certify exact RB fidelity. |
+| `single_tone_rwa` | After Dyson, single constant rows try a constant rotating-frame Lindbladian built from the shared retained graph, coefficient diagonal and full secular bath. All populations and within-component coherences form a real block of dimension at most 64. Cross-component coherences use small complex exponentials or scalar closed forms. Apply skips only exact-zero cross-block RHS, preserves arbitrary complex residuals and restores both phase endpoints. Admission shares the constant-only omission rule below, the 0.06 rad phase cap and explicit graph-pruning bound. Rejection keeps the original period/Dyson/T6 order. |
+| `multitone_rwa` | Revision `joint-rwa-v3` retains joint-basis Fourier edges with `abs(Ei-Ej±f) < 0.05 GHz`, obtains window-excluded single-tone second-order shifts from `RWACoefficients.diagonal` and assembles them through `interaction_hamiltonian`, and integrates every tone in a row-local interaction picture with a 16 ns adaptive ceiling for dual constant rows and 4 ns otherwise. Dual constant admission shares the unified omitted one/two-photon estimate with single constant RWA. It restores Schrödinger coordinates at every endpoint. It keeps joint rates, dephasing and state ordering. This calibrated approximation does not certify exact RB fidelity. |
 | `dop853` and `flux_dop853` | Dispatch resolves complete chronological timeline routing, then assigns chain IDs to adjacent touching rows of the same direct family. Ordinary DOP853 uses the interaction picture only for independent, single-tone, nonzero-gain rows. Chains and other ordinary rows use the lab frame. Flux DOP853 has its own chain plan. |
 
 For the same whole source, budget and Stark key, moving a probe window reuses
@@ -124,7 +125,9 @@ ports. Same-port constant Stark/probe spectra retain Floquet/DOP853 because
 small population errors can still shift a narrow resonance peak. Continuous
 flux must be constant over the complete row.
 Budgets below 1e-3 decline this approximation. Admission also requires
-`2*pi*duration*sum((peak*gain*norm(V_ret,2))**2/abs(f)) <= 0.06 rad`, where
+`2*pi*duration*sum((peak*gain*norm(V_ret,2))**2/abs(f)) <= 0.06 rad` for
+sampled rows and single constant RWA, or <=0.16 rad for distinct-port dual
+constants, where
 `V_ret = (X-iY)/2` after the positive-frequency edge mask. This row-local
 counter-rotating phase proxy accounts for long pulses even at small
 strength/carrier ratios; it does not bound accumulated sequence error. In the integer 256 ns amplitude sweep, gain 0.4184
@@ -132,28 +135,33 @@ had proxy 0.063 rad and population error above 1e-2. The 0.06 rad limit
 returns those high-gain rows to lab DOP853. This proxy is calibrated, not a
 rigorous Stark-shift bound. Its limit enters the policy identity and keys.
 
-Dual constant rows also check every signed carrier sum and difference against
-all dressed energy gaps, which include conditional ZZ shifts. The shared Fourier
-coefficient builder supplies both tone orders of each two-step path. Admission
-excludes paths with both edges retained because the joint RHS already evolves
-them. Every remaining path divides its coefficient product by an omitted-edge
-detuning, then sums over intermediate states and tone orders to estimate `g2`.
-The first omitted detuning supplies the denominator. When only the second edge
-is omitted, its denominator uses the reversed endpoint convention.
-Coefficients include `abs(gain)*envelope_peak` for each tone. With dressed
-detuning `delta`, the transfer proxy is
-`P = min((2*abs(g2))**2 / ((2*abs(g2))**2 + delta**2), (2*abs(g2)*duration_ns)**2)`.
-Any `P > 5.8e-3` rejects the row. This threshold halves the smallest
-proxy with population error above 0.1 on a 25-point strict-lab calibration
-around the integer +84/-52 MHz combination resonance. Zero coupling contributes zero transfer. The
-finite-time cap handles vanishing detuning without dividing by it. This proxy
-is a calibrated omission estimate, not a certificate. An empty retained graph
-does not bypass it. Shaped rows do not use this additional check.
+Single and distinct-port dual constant rows share one omitted-coupling rule.
+It checks window-excluded one-photon terms and every same-tone/cross-tone
+two-step Fourier path, including signed sums and differences against full
+dressed gaps. Both-retained paths already evolve in the RHS. Static
+single-tone diagonal terms already live in `RWACoefficients.diagonal`.
+Every other two-step path divides its coefficient product by the first omitted
+detuning, or the reversed second detuning when only that edge is removed.
+Distinct orders and intermediate states are summed; identical carriers are not
+duplicated. With effective coupling `g` and detuning `delta`, every omission uses
+`P = min(4*abs(g)**2/(4*abs(g)**2+delta**2), 4*abs(g)**2*duration_ns**2)`.
+Zero coupling contributes zero. Any `P > 5.8e-3` rejects the row, including
+when no edges are retained. This calibrated proxy is not an error certificate.
+
+The cap halves the smallest failing combination-channel proxy (0.0116496) in
+the existing 25-point strict-lab scan. A 96-point single-constant scan covering
+four flux positions, phase, gain, duration and window-crossing carrier offsets
+has no failures below 0.045813; its 14 admitted points have population error
+at most 0.002947. The same-tone counterexample has proxy 0.015629. The stricter
+shared cap remains 0.0058. Rechecking the dual-constant calibration retains
+24 of its 36 previously admitted points; twelve intermediate-flux points now
+use the full-drive fallback. The 0.16 rad dual-constant phase cap is unchanged.
+Shaped RWA and covariant gate admission do not use this constant-only rule.
 
 Dual constant integration retains the adaptive solver and its error estimator,
 with a 16 ns ceiling. Constant envelopes have no sampled internal features.
 The larger ceiling reduces work after the fast carrier phase has been removed;
-it does not relax the 0.06 rad phase limit or drop the joint dissipator.
+it does not relax the calibrated phase limits or drop the joint dissipator.
 
 The 50 MHz edge window and 4 ns ceiling come from simultaneous 128–512 ns
 Gaussian gate measurements on a 16-level joint model. The prototype's maximum

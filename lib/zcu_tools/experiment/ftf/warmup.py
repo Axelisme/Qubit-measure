@@ -43,6 +43,7 @@ COVERAGE = (
     "multitone_direct",
     "multitone_gate",
     "single_tone_gate",
+    "single_tone_rwa",
     "floquet_probe_windows",
     "dyson_gain_batch",
     "floquet_period",
@@ -146,6 +147,9 @@ def _single_track(name: str) -> None:
         envelope = EnvelopeSpec(
             "sampled", np.array([0.0, 1.0], complex), np.array([0.0, duration])
         )
+    elif name == "single_tone_rwa":
+        duration = 200.0
+        gains = np.array([0.5])
     elif name == "single_tone_gate":
         duration = 128.0
         times = np.linspace(0.0, duration, 129)
@@ -193,7 +197,8 @@ def _single_track(name: str) -> None:
             source.model((0,)), energies_ghz=np.array([0.0, 0.05, spectator])
         )
         source = ModelSource(source.initial_density, lambda _: model)
-    _evolve(source, batch)
+    # Tight budgets keep the period workloads on their original exact families.
+    _evolve(source, batch, budget=1e-4 if name.startswith("floquet_") else 1e-3)
 
 
 def _multitone(name: str) -> None:
@@ -226,10 +231,10 @@ def _multitone(name: str) -> None:
     _evolve(source, batch)
 
 
-def _evolve(source: ModelSource, batch: TimelineBatch) -> None:
+def _evolve(source: ModelSource, batch: TimelineBatch, *, budget: float = 1e-3) -> None:
     engine = Engine(1, 0)
     try:
-        engine.evolve(source, (batch,), cancel=Event())
+        engine.evolve(source, (batch,), budget=budget, cancel=Event())
     finally:
         engine.close()
 
