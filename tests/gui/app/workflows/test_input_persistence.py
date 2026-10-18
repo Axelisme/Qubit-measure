@@ -319,11 +319,15 @@ def test_incompatible_identity_startup_preserves_file_and_opens_defaults(
     app = WorkflowsGuiBehavior(
         templates={}, registrations=build_registry(), cache_dir=tmp_path
     )
+    assembled = False
+    startup_error: ValueError | None = None
     try:
         try:
             app.assemble(None)
+            assembled = True
         except ValueError as exc:
-            pytest.fail(f"Identity mismatch should back up and open defaults: {exc}")
+            startup_error = exc
+        assert startup_error is None, "Identity mismatch must back up and open defaults"
         backups = list(tmp_path.glob(f"{path.name}.incompatible-*"))
         assert len(backups) == 1
         assert backups[0].read_text() == payload
@@ -343,7 +347,8 @@ def test_incompatible_identity_startup_preserves_file_and_opens_defaults(
         )
         assert backups[0].read_text() == payload
     finally:
-        app.shutdown()
+        if assembled:
+            app.shutdown()
         app.window.deleteLater()
         qapp.processEvents()
 
