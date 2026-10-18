@@ -69,26 +69,40 @@ Component 的 module slot 指向下游實驗要使用的模組，不用來為每
 ### Mux group 是實驗室的 component 定義
 
 `zcu_lab.components.MuxGroupSchema` 宣告 `group/mux`，沿既有 ComponentRegistry 註冊。
-它保存有序的 1 至 8 個 component 名稱及一般 module／ext。Members 不作去重或 resonator kind gate。
-Group 自己擁有 readout module，重排成員不改 owner。
+它保存必填的 `resonators`，含 1 至 8 個有序名稱，以及選填的 `qubits` 和一般 module／ext。
+Group 自己擁有 readout module，重排 resonators 不改 owner。
 使用者於 2026-10-16 對專屬 group component 方案裁定：「我選B」。
 
-Scalar alias `mux=MG12` 已足以讓 adapter 經固定 ParameterContext 讀取 `$mux.members`，
-Readout 初值使用 `$mux.module.readout`。Framework 不認得 group/mux 或 members，
+`resonators` 取代原 members，不提供舊欄位相容讀取。Tone i 對應完整 `resonators[i]`。
+選填 qubits 讓沒有 qubit 的 resonator bring-up 繼續使用同一種 group，不從 resonators 反推 qubit。
+使用者於 2026-10-18 裁定：「或是改寫mux_group這個原件的欄位吧，qubits分resonators」。
+對 resonators 必填、qubits 選填並逐項檢查，以及改名不留相容層的細節，裁定：「12都同意」。
+
+Model 驗證名稱、qubits 與 resonators 等長及重複 qubit。
+提供 qubits 時，lab Form 在 Open／Reset 以固定 ParameterContext 檢查兩邊 component 存在與 kind，
+並逐項要求 `qubits[i].resonator == resonators[i]`。缺失或 null 同樣拒絕。
+錯誤指名欄位、index 與實際值，在 Run 前拒絕來源。不排序、猜配對或自動修正，不額外拒絕重複 resonator。
+Framework resources、session 與 program 不擁有這些關係。既有表單不隨全域來源編輯刷新。
+
+Scalar alias `mux=MG12` 已足以讓 adapter 經固定 ParameterContext 讀取 `$mux.resonators`，
+Readout 初值使用 `$mux.module.readout`。Framework 不認得 group/mux 或 resonators，
 也不新增 list alias、group registry、RPC 或保存格式。
 使用者於 2026-10-16 對只用 scalar mux alias 的方案裁定：「B」。
 
-完整 readout 的 tones[i] 綁定 members[i]，cfg 不保存 writeback 目標或 group snapshot。
+完整 readout 的 tones[i] 綁定 resonators[i]，cfg 不保存 writeback 目標或 group snapshot。
 active_tones=None 量全部；指定非空、唯一且有效的原始 index list，則依輸入順序投影 subset
-給 program。Program 不知道 MG 或 members。RunRecord 保存完整 readout 與 selection，
+給 program。Program 不知道 MG 或 resonators。RunRecord 保存完整 readout 與 selection，
 資料軸保留原始序號，不重新編號。使用者於 2026-10-16 提議：「一個MG component類，內部屬性綁定到R1, R2，gui中預設指定MG，寫回目標也是從MG的綁定取」，並補充「為了能只讀特定幾個R，可以考慮MG外cfg另外提供mask之類的」。對 active_tones 方案裁定：「可以」。
 
 Core cfg 驗證錯誤沿既有宿主 result／Run 診斷定位 `active_tones` 並拒絕 Run，不保證欄位變紅。
 FormState 的 preview／describe 不執行 lowering，也不新增 FormEditor 外部錯誤投影。
 此分界沿用 [[0065]]。使用者於 2026-10-16 裁定：「報錯我選B」。
 
-Writeback 由 adapter 經 Run／Load 既有 capture 讀取 `$mux.members`，以完整原始序號對應成功 active tones。
-Members 數不等於完整 N 時只提 module，並顯示原因。
+Writeback 由 adapter 經 Run／Load 既有 capture 讀取 `$mux.resonators`，以完整原始序號對應成功 active tones。
+Onetone 沒有 qubits 時保留手填 readout。缺 capture 或 resonators 數不等於完整 N 時只提 module，並顯示原因。
+有 qubits 時仍須通過上述逐項檢查。新 qubit 實驗另要求 resonators 數等於完整 tone 數，驗證後才投影 active_tones。
+新 qubit 實驗的成功 tone i 寫回 `qubits[i]`，onetone 則仍寫回 `resonators[i]`。
+目的地只從該次 Run／Load capture 解析，沒有 capture 時不得猜目的地或讀目前 alias。
 固定 module target 是 `$mux.readout.readout_rf`，與 group 當前 slot 所指的 key 無關。
 使用者於 2026-10-16 裁定：「應該參考其他使用alias是怎麼寫回的」。
 這些 lab 定義沿第 4 層依賴下層的方向，C15、C16 保護 core 與 framework 邊界。
