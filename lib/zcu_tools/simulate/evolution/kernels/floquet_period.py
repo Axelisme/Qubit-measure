@@ -795,102 +795,36 @@ def _row(
 
 
 class FloquetPeriodKernel:
-    """One constant tone, independent of input density and absolute start.
+    """One constant-tone Hilbert channel for arbitrary, possibly coherent inputs.
 
-    Keys contain only level, port, signed frequency (GHz) and signed gain.
-    Preparation builds one Hilbert-space U(T), retaining U(T) and finite
-    endpoint data (Sambe spectra, CF4 prefixes or DOP853 coefficients). No Liouville
-    channel is built. Theta translates the time origin by theta/(2*pi*f) mod T;
-    each subperiod and the separately evaluated fractional tail apply D/2, U, D/2.
-    Known and unknown densities, including coherent inputs, use the same channel.
+    Keys contain level, port, signed frequency in GHz and signed gain, never
+    density, duration or start. Immutable payloads retain U(T) and endpoint data.
+    Theta translates time by theta/(2*pi*f) mod T. Subperiods and fractional tails
+    use the same trajectory with secular D/2,U,D/2 steps; density is not normalized.
+    The density-free guard requires |f| >= 0.03 GHz and the smallest m in 1..64
+    satisfying duration*T**2*Gamma*V**2/m**2 <= 1.0. T=1/|f| is in ns,
+    V=2*pi*|gain|*(||X||_2+||Y||_2) in rad/ns, and Gamma is the larger population
+    generator norm/coherence decay in 1/ns. Rejected rows still try T6.
 
-    The density-free guard requires |f| >= 0.03 GHz and selects the smallest
-    m in 1..64 such that duration*T**2*Gamma*V**2/m**2 <= 1.0. Here T=1/|f|
-    is in ns, V=2*pi*|gain|*(||X||_2+||Y||_2) in rad/ns, and Gamma is the
-    larger of the population generator norm and coherence decay in 1/ns.
-    This retains the calibrated splitting allowance, not a rigorous total-error
-    bound or segment-budget guarantee. Each subperiod uses unitary Hilbert
-    endpoints from the same Hilbert trajectory. The tail uses the same step ceiling.
-    The subdivision count depends only on model and row, never density; it is
-    not part of the preparation key. Rows outside this domain still try T6.
+    Below 1 GHz, Sambe competes with CF4's original coarse count c and first
+    1.5x finer count d, both rounded to eight. Cutoffs 2/3 cost
+    0.5*(5**3+7**3)=234 units versus c+d. The common Hilbert dimension cubed
+    cancels. This single-threaded 16-level calibration never consults scheduling.
+    Adjacent cutoffs compare physical U(q*T), q=0,1/8,...,1, with Frobenius defect
+    <= min(1e-4,budget*0.1). The finer spectrum supplies arbitrary endpoints.
+    Nonfinite data or sampled unitarity defect above 1e-4 decline. Refinement
+    stops at cutoff 12 or before cumulative 0.5*(2*m+1)**3 cost exceeds c+d.
+    Rejection preserves independent CF4 bitwise, without gain-anchor sharing.
+    This calibrated check assumes cutoff convergence and representative samples,
+    not a rigorous all-time error bound. Polar correction and dissipation persist.
 
-    Below 1 GHz, a key/model-only cost estimate first considers Sambe. Let c
-    be the original CF4 coarse count, rounded to eight, and d its first 1.5x
-    fine count. Sambe cutoffs 2/3 cost 0.5*(5**3+7**3)=234 units, compared
-    with c+d CF4 units. The common Hilbert dimension cubed cancels. This
-    single-threaded 16-level calibration is a cost estimate, not a timing probe.
-    Adjacent Sambe cutoffs compare physical U(q*T) at q=0,1/8,...,1 with maximum
-    Frobenius defect <= min(1e-4,budget*0.1). The finer spectrum supplies U(T)
-    and arbitrary fractional endpoints without another eigensolve or eigenvector
-    interpolation. Nonfinite data or sampled unitarity defect above 1e-4 decline.
-    Refinement stops before cumulative 0.5*(2*m+1)**3 cost exceeds c+d, or at
-    cutoff 12. Failure uses the original independent CF4 coarse/fine builder,
-    bitwise unchanged; these candidates never participate in gain anchors.
-    This calibrated check assumes adjacent cutoffs converge and nine samples
-    represent between-node error. Neither assumption is an all-time error bound.
-    Time-origin translation, polar correction, dissipation and tails are shared.
+    Non-spectral low carriers retain CF4 and scoped gain anchors, as in the README.
 
-    Other low-carrier keys use fourth-order commutator-free Magnus (CF4)
-    with scaling-and-squaring [7/7] Pade exponentials at double precision,
-    retaining unitary prefixes. The matrix one-norm selects scaling at the
-    0.9504178996162932 backward-error radius. Centering each exponential removes
-    its common energy during evaluation and restores its scalar phase afterward.
-    A fractional endpoint uses a CF4 step from its preceding prefix, not
-    interpolation. Uniform grids start below 2/3 of a spectral turn and compare prefix
-    trajectories with a 1.5x finer grid at eight phase intervals. The maximum
-    Frobenius defect must be <= min(1e-4, budget*0.1); the finer trajectory is
-    retained. Its steps are below half a spectral turn.
-
-    Within an Engine evolve, fixed-carrier groups with multiple gains may
-    replace the fine grid with gain-anchor interpolation. The complete table's
-    unique gains are sorted per level, port and signed carrier. Every twenty-fourth
-    index and both endpoints are independent coarse/fine CF4 anchors. This rule
-    depends only on the group's gain count, never workers, chunks or key order.
-    Each non-anchor uses its nearest at most four anchors, with ties resolved
-    toward the lower gain. Anchor construction is lazy under one lock per
-    anchor. Planned reference counts release an anchor after all dependent keys
-    have been handed out. Later requests deterministically rebuild it.
-    No trajectories, intermediate-gain replay or result memo are retained.
-    Tables are bitwise invariant to workers, chunks and request order for the
-    same complete table, source and budget. Workspace bytes charge anchors.
-
-    Sharing requires the identical model object, port, signed carrier and
-    budget. Lagrange interpolation acts on interaction-picture uniform prefixes.
-    Identical H0 and grids let the analytic H0 transform and inverse cancel in
-    the weighted sum, avoiding redundant phase exponentials. Unequal retained
-    grid counts or a count below this key's original first fine grid disable
-    interpolation. Carrier continuation is never attempted. The candidate must
-    pass an independent coarse-grid comparison at eight phase intervals,
-    including U(T), with Frobenius defect <= min(1e-4, budget*0.1). Failure reuses
-    that coarse grid in the original twelve-refinement path. Every candidate
-    keeps its own H0, X, Y, frequency, bath and split rate. Standalone calls
-    without a scope keep independent coarse/fine preparation.
-
-    This is calibrated trajectory comparison, not a rigorous bound. Eight-phase
-    defects may miss between-phase error. Interpolated prefixes are not products
-    of unitary exponentials; their closeness to unitary for one Newton polar
-    step is unproven. Gain smoothness and well-conditioned Lagrange weights are
-    also unproven for the planned gain gaps. Model immutability is assumed.
-    No anchor crosses evolve calls or enters the LRU. Memory is bounded by the
-    planned anchor count times table bytes, independent of worker count.
-    Duration remains outside the payload and cache key.
-
-    Higher carriers use DOP853 tolerance min(1e-10, budget*1e-4), max_step=T/4.
-    All numerical builders run in single-threaded nogil code. The high-carrier payload
-    keeps the dense polynomial's native nested coefficients, without resampling
-    or a per-key basis conversion.
-    Only accepted steps are retained; no solver object is kept. One Newton polar
-    step restores unitarity of U(T) and fundamental solutions before phase
-    translation and tail composition. The tight integration controls and CF4's
-    Hermitian exponentials keep endpoints near unitary, so the correction squares
-    their norm defect without an SVD. Exact period boundaries reuse identity or
-    U(T). Unsubdivided high-carrier rows compose endpoints and step density in
-    one nogil call. Density is never normalized. Prototype high-carrier S3/S5 population
-    errors were 1.1e-7/2.3e-6.
-
-    Invalid budgets/representatives/payloads raise ValueError. Integration or
-    nonfinite numeric output raises RuntimeError, never retries or reroutes.
-    All prepared arrays are immutable; nbytes charges every retained array.
+    Higher carriers retain DOP853 with min(1e-10,budget*1e-4), max_step=T/4.
+    One Newton polar step corrects endpoints before translation and composition.
+    Invalid budgets/representatives/payloads raise ValueError; integration or
+    nonfinite output raises RuntimeError without rerouting. nbytes charges all
+    retained arrays, which remain immutable across reordered/split apply calls.
     """
 
     declaration = KernelDeclaration(

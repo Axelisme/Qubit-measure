@@ -581,6 +581,23 @@ The nine-point cutoff comparison is calibrated, not a rigorous error bound.
 It assumes adjacent-cutoff convergence and that the samples represent errors
 between their endpoints.
 
+The CF4 builder retains unitary prefixes from fourth-order commutator-free
+Magnus steps with scaling-and-squaring [7/7] Pade exponentials. It compares
+uniform grids at nine normalized-phase endpoints, refines by 1.5x and retains
+the finer trajectory under the same defect allowance. Fractional endpoints use
+one CF4 step from the preceding prefix, not time interpolation.
+For non-spectral keys, each level/port/signed-carrier group sorts its unique
+gains and uses every twenty-fourth gain plus both endpoints as independent
+anchors. Each other key interpolates its nearest at most four anchors, resolving
+ties toward the lower gain. Sharing also requires the identical model object
+and budget. Unequal retained grids disable interpolation. The candidate must
+pass an independent coarse-grid comparison; failure reuses that grid in the
+original refinement path. Fixed plans and reference-counted release keep tables
+bitwise independent of workers, chunks and request order. No anchor crosses
+evolves or enters the LRU. Workspace bytes charge retained anchors, with memory
+bounded by the planned count. Gain smoothness, well-conditioned interpolation
+and between-sample accuracy remain calibrated assumptions, not proven bounds.
+
 The physical-block carrier workspace belongs to one evolve. Prefix resolution
 and timeline workers share it, never with another evolve or budget. This is calibrated physical-block carrier interpolation,
 not eigenvector interpolation and not a rigorous interval bound. It treats peak
