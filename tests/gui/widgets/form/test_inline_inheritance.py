@@ -114,7 +114,7 @@ def test_module_and_nested_waveform_switch_show_inherited_values(
     assert driver.observe(object_name=waveform + ".module.raise_waveform").text == ""
     driver.choose_option(object_name="form.input.selection", value="Inline: readout/pulse")
     snapshot(driver, tmp_path, "04-readout")
-    assert driver.observe(object_name="form.input.selection.module.freq").text == "103"
+    assert driver.observe(object_name="form.input.selection.module.freq").text == "103.0"
     assert driver.observe(object_name=length).text == "0.8"
     assert driver.observe(object_name="form.input.selection.module.gen_ch").text == ""
     driver.enter_text(object_name=length, value="-1")
