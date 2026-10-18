@@ -61,6 +61,7 @@ def test_read_missing_returns_none(session_root: Path) -> None:
     assert sd.read_session("measure") is None
 
 
+@pytest.mark.requires_subprocess
 def test_stale_dead_pid_is_swept(session_root: Path) -> None:
     """A live socket but a dead pid is stale: read returns None and deletes file."""
     listener, port = _open_listener()
