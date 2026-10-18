@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-19，Recipe 與 summary typed paths
+**Last updated:** 2026-10-19，Variable element reporting
 
 # `zcu_tools/mcp/measure/`
 
@@ -100,6 +100,101 @@ Load 只載既有結果及分析來源，不覆寫 Form input。RPC/MCP 的 Load
 Author Run 的 cfg、來源與 completion 由 `recipe.py` 的 opaque handles 擁有。Framework 讀 detached snapshots，不讀 handle 的 private backing。`raw_save.py` 捕捉原 Run 的當次同步 Save report，保留全部輸出與該 Run 的 run_id，全部輸出失敗亦保留這個 ID。Author handle 使用這份保存契約。沒有 SaveReport 時 steps.raw_save 為 null，不推論 not_started、unknown 或 Save 是否已送出。save_raw 的傳輸與 admission 失敗照常拋出，recipe 回覆的原因只在 error；不加 requested 旗標。
 
 Author analysis 綁定原 Run 與同一 Run 的 Primary。它重用 `AnalysisExecution`，在 recipe 的 worker 完成分析、圖像與候選 capture。Recipe-local close 和 session close 都能停止接續。寫回提問只篩選已捕捉的 stable names，不重讀 GUI 或寫入。`recipe_execution.py` 擁有 generator、單一 recipe admission、一次性取消、captured question 與 typed snapshot。它以同一 worker 完成 author handles；analysis 共用 driver 的本地 condition 交付進度。Session 與 tool table 使用必填的同一份注入 definitions。Guide 與 analysis-only scalar estimates 也讀 owning registry。單一 recipe 包含 interactive 與 awaiting_answer；terminal 之後才放行下一個呼叫。
+
+## Variable element reporting
+
+同一個 `RecipeDefinition` 可以處理每次 Reset 後不同長度的完整 list。
+`SummaryElements` 在 Run 前以一次 `tab.read_elements` 取得全部元素及指定 logical leaves。
+`field` 是完整 list 的 canonical path，`parameters` 的 paths 相對於每個元素。
+`source` 是作者明訂的 fallback 標籤，只用於尚未記錄 origin 的葉。
+`tab.set`、`set_fields`、`set_sweep` 或 `retain_source` 記錄的逐葉來源優先。
+缺值、invalid observation 或 owner 拒絕仍會失敗，不會變成 default 值。
+
+以下函式可放進作者的 recipe module，傳入既有 definition。
+它保留 run、inputs 與 adapter，只替換 reporting 宣告。
+Form 必須已有 `FixedElements(("tones",), "name", ("participants",))`。
+依實際 cfg 調整 relative leaves，不宣告另一條 name 來源 path。
+
+```python
+from dataclasses import replace
+
+from zcu_tools.mcp.measure.execution_reply import (
+    SummaryElements, SummaryEstimate, SummaryEstimateRows, SummaryParameter,
+)
+from zcu_tools.mcp.measure.recipe import RecipeDefinition
+
+def with_element_reporting(recipe: RecipeDefinition) -> RecipeDefinition:
+    return replace(
+        recipe,
+        summary_parameters=(SummaryElements(
+            "tones", ("tones",),
+            (SummaryParameter("gain", ("drive", "gain")),
+             SummaryParameter("start", ("sweep", "start"), "MHz")),
+            source="default",
+        ),),
+        summary_estimates=(SummaryEstimateRows(
+            "tones", ("tones",),
+            (SummaryEstimate("freq", ("freq",), ("stderr",), "MHz",
+                             element_key=("element",)),),
+        ),),
+    )
+```
+
+`SummaryEstimateRows` 依 captured native summary 的 row 順序展開，不依完整 Form list 排序。
+作者在自己的 summary producer 明確提供共用 `ElementIdentity`。
+以下函式只包裝作者已算好的事實，不計算估值。
+Framework 不會自動把既有 row 的 `position` 與 `name` 變成 identity。
+
+```python
+from collections.abc import Sequence
+from typing import TypedDict
+
+from zcu_tools.core.element import ElementIdentity
+
+class NativeToneRow(TypedDict):
+    position: int  # Original complete-list index supplied by the lab author.
+    name: str
+    freq: float
+    stderr: float | None
+
+class ReportedToneRow(TypedDict):
+    freq: float
+    stderr: float | None
+    element: ElementIdentity
+
+class ToneSummary(TypedDict):
+    tones: list[ReportedToneRow]
+
+def report_tones(rows: Sequence[NativeToneRow]) -> ToneSummary:
+    return {"tones": [
+        {"freq": row["freq"], "stderr": row["stderr"],
+         "element": ElementIdentity(index=row["position"], name=row["name"])}
+        for row in rows
+    ]}
+```
+
+完整 list 為 Q1、Q2、Q3，participants 為 Q3、Q1 時，actual 包含全部三個元素。
+例如 `actual["tones/2/gain"].element` 是 `{index: 2, name: "Q3"}`。
+若 native rows 依序為 Q3、Q1，estimates 的 `tones/0/freq` 帶 identity 2/Q3，
+`tones/1/freq` 帶 identity 0/Q1。`name/index/leaf` 是輸出 label，不是新的路徑 grammar。
+Estimate label 的 index 是 native row offset，只有 `element.index` 代表完整原始位置。
+
+`element_key` 缺席或指向缺值時，回覆不帶 identity。
+Value path 缺值時不產生 estimate，明確 null 則保留 null。
+Framework 不從 row offset、position/name、value path 或 participants 猜 identity。
+Static `SummaryParameter`、`SummaryEstimate` 可與動態宣告並用。
+Analysis-only 只使用注入 definitions，展開後同一 present value path 的宣告不一致會拒絕。
+
+Run actual、native summary 與作者 identity 都已 detached。
+Summary、wait 與 full 查詢不重讀 GUI。Full 保留 native analysis snapshot，
+不把 native rows 改成 summary estimates。Reporting 不更改 candidates 的 stable target、
+destination 或寫回授權。
+
+離線 synthetic 驗證入口：
+
+```bash
+uv run --directory <lane> --no-sync -- pytest -q -n0 tests/mcp/measure/test_recipe_dynamic_reporting.py
+```
 
 ## 分析、互動與寫回
 

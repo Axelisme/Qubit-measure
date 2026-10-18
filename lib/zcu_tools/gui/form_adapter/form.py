@@ -200,6 +200,8 @@ class Form[C: ConfigBase]:
         input: FormInput[FormModel],
         path: FormWritePath,
         env: FormEnv,
+        *,
+        fields: tuple[FormWritePath, ...] = (),
     ) -> ElementsObservation:
         """Read every model-list element once from one detached input and capture.
 
@@ -209,8 +211,14 @@ class Form[C: ConfigBase]:
         leaves and directed errors in original list order, even for invalid or
         nonparticipating elements. References are not materialized. No converter,
         source refresh, mutation, notification or focus occurs.
+        fields optionally requests nonempty relative logical paths per element.
+        Their observations (including refs and FixedElements identity) use this
+        same detached input/env and preserve request order. Invalid paths raise
+        FormPathError; unavailable values keep their ordinary directed errors.
         """
         self._check_logical_input(input)
+        if any(not field for field in fields):
+            raise FormPathError(path, "Element fields must be nonempty relative paths")
         state = FormState(input)
         target = state.describe(path, env).target
         if target is None or target.elements is None:
@@ -254,6 +262,10 @@ class Form[C: ConfigBase]:
                         if key[: len(item.path)] == item.path
                     },
                     FormErrors(messages) if messages else None,
+                    tuple(
+                        self.read_logical_field(input, (*item.path, *field), env)
+                        for field in fields
+                    ),
                 )
             )
         return ElementsObservation(path, tuple(elements), preview.errors)

@@ -6,9 +6,9 @@ WIRE_VERSION; it reports GUI_VERSION without comparing it.
 
 from __future__ import annotations
 
-# Indexed module operations and the owner aggregate share this wire revision.
-WIRE_VERSION = 109
+# Aggregate relative logical fields carry same-turn owner element identity.
+WIRE_VERSION = 110
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 142
+GUI_VERSION = 143

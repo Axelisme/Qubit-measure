@@ -1,6 +1,6 @@
 # gui/form_adapter — 從 core cfg 生成 Form
 
-**Last updated:** 2026-10-19，遞迴 section 生成與公開 Form 操作分工
+**Last updated:** 2026-10-19，完整元素 logical observations
 
 本 package 是 GUI 的 Qt-free 前端框架。它把 core cfg 宣告與作者寫的起始樹翻譯成 `gui.form` 的 `FormModel`，再把表單結果轉回驗證過的 core cfg。它供 measure、workflows、library 與 writeback 的表單定義共用。Measure 的註冊、protocol 與分頁 Form resource 使用 `Form`，workflows 的手寫 plan 表單使用 `ModuleInputField`。
 
@@ -53,7 +53,7 @@ Module、seed、Display 與 annotation 翻譯放在私有模組 `_modules.py`、
 
 宣告者另外提供 `Display(element_label=name_field)` 與名稱欄位的 `Display(readonly=True)`。這些是呈現提示，不執行固定政策。名稱若不接受 expression，可用既有 `InputPolicy(expression=False)` 明訂 literal input。
 
-`Form.read_elements(input, path, env)` 以一次 preview 回傳所有原始位置的 authored input、可用 canonical leaf values 與定向錯誤。名稱取自 FixedElements 宣告，普通 model list 則用 description label。未參與元素仍在結果中。Refs 保留欄位值，明確 materialization 使用支援 indexed path 的 `Form.read_module`。Tab resource 提供同名 `read_elements(path)`，不觸發 converter、capture 或 UI focus。
+`Form.read_elements(input, path, env)` 以一次 preview 回傳所有原始位置的 authored input、可用 canonical leaf values 與定向錯誤。名稱取自 FixedElements 宣告，普通 model list 則用 description label。未參與元素仍在結果中。Refs 保留欄位值，明確 materialization 使用支援 indexed path 的 `Form.read_module`。Tab resource 提供同名 `read_elements(path)`，不觸發 converter、capture 或 UI focus。可選的 `fields=(("drive", "gain"), ("sweep", "start"))` 指定元素相對 logical paths。Owner 在同一份 input/env 中回傳每個元素的 `fields` observations，順序與請求相同，並附 FixedElements identity。Refs 仍讀固定 captured Spec，不 materialize。Unknown path 直接拒絕，invalid leaf 保留 value_status 與定向 errors。
 
 ### Native model lists
 

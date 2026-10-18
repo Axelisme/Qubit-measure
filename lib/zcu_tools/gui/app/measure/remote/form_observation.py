@@ -1,7 +1,9 @@
 """Measure Form wire projection, using each Form owner's fixed capture."""
 
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from pydantic import JsonValue, TypeAdapter
 
@@ -15,6 +17,8 @@ from zcu_tools.gui.session.library_entry import (
     WaveformEntryForm,
 )
 
+from .form_description import RecipeFieldObservation, recipe_field_wire
+from .form_errors import FormError
 from .handlers._wire_values import context_wire_value
 
 
@@ -23,13 +27,6 @@ class FormWrite(TypedDict):
 
     path: list[str | int]
     value: JsonValue
-
-
-class FormError(TypedDict):
-    """One validation error; path may contain model fields and sequence indexes."""
-
-    path: list[str | int]
-    message: str
 
 
 class FormObservation(TypedDict):
@@ -55,7 +52,11 @@ def observe_form(resource: TabFormResource) -> FormObservation:
 
 
 class ElementObservationWire(TypedDict):
-    """One original element with canonical authored input, preview leaves/errors."""
+    """One original element with canonical input, preview and directed errors.
+
+    fields, when requested, contains same-turn logical observations in relative
+    path request order. Each observation carries the owner-captured identity.
+    """
 
     index: int
     name: str
@@ -64,6 +65,7 @@ class ElementObservationWire(TypedDict):
     selections: list[FormWrite]
     values: list[FormWrite]
     errors: list[FormError]
+    fields: NotRequired[list[RecipeFieldObservation]]
 
 
 class ElementsObservationWire(TypedDict):
@@ -75,15 +77,20 @@ class ElementsObservationWire(TypedDict):
 
 
 def observe_elements(
-    resource: TabFormResource, path: FormWritePath
+    resource: TabFormResource,
+    path: FormWritePath,
+    *,
+    fields: tuple[FormWritePath, ...] = (),
 ) -> ElementsObservationWire:
     """Serialize the owner's single aggregate; never assemble per-element reads.
 
     path is the canonical model-list path. All rows retain original indexes,
     authored input, available preview leaves and directed errors. Reads do not
-    lower cfg, capture sources, mutate state or focus a widget.
+    lower cfg, capture sources, mutate state or focus a widget. fields optionally
+    requests nonempty relative logical paths in each element, in request order.
+    Invalid paths propagate owner errors; refs use only fixed captured sources.
     """
-    observed = resource.read_elements(path)
+    observed = resource.read_elements(path, fields=fields)
     rows: list[ElementObservationWire] = [
         {
             "index": item.index,
@@ -102,6 +109,9 @@ def observe_elements(
         }
         for item in observed.elements
     ]
+    if fields:
+        for row, item in zip(rows, observed.elements, strict=True):
+            row["fields"] = [recipe_field_wire(field) for field in item.fields]
     return {
         "path": list(observed.path),
         "elements": rows,

@@ -15,7 +15,7 @@ from zcu_tools.gui.form import (
 from zcu_tools.gui.form_adapter import LogicalFieldObservation
 
 from ..services.tab_form import TabFormResource
-from .form_observation import FormError
+from .form_errors import FormError
 from .handlers._wire_values import context_wire_value
 
 
@@ -391,6 +391,27 @@ class RecipeSelectionResult(TypedDict):
 
     changed: bool
     field: RecipeFieldObservation
+
+
+class RecipeElementFieldsWire(TypedDict):
+    """Requested fields for one original element in a read_elements response.
+
+    index is the original complete-list index. fields contains detached logical
+    observations in the request's relative-path order, including owner identity.
+    """
+
+    index: int
+    fields: list[RecipeFieldObservation]
+
+
+class RecipeElementsWire(TypedDict):
+    """Logical subset of read_elements when relative fields were requested.
+
+    elements includes all original elements, never just participants.
+    Other aggregate input/preview/error fields remain on the full RPC response.
+    """
+
+    elements: list[RecipeElementFieldsWire]
 
 
 def recipe_field_wire(observation: LogicalFieldObservation) -> RecipeFieldObservation:

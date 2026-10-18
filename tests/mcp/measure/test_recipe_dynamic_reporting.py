@@ -176,7 +176,9 @@ def test_variable_elements_capture_all_leaves_and_project_native_row_identity(
             if detail == "full":
                 assert retained["analysis"]["result"]["summary"] == expected_summary
             else:
-                assert retained["analysis"]["primary"]["estimates"] == expected_estimates
+                assert (
+                    retained["analysis"]["primary"]["estimates"] == expected_estimates
+                )
         waited = client.call(
             "wait", {"execution": reply["execution"], "timeout": 0}
         ).data

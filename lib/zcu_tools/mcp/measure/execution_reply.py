@@ -64,6 +64,52 @@ class SummaryEstimate:
             field_path(self.element_key)
 
 
+@dataclass(frozen=True)
+class SummaryElements:
+    """Capture declared leaves for every original model-list element at each Run.
+
+    name prefixes opaque public keys "name/index/parameter.name"; these keys are
+    labels, not field paths. field is the nonempty canonical model-list path.
+    parameters declares nonempty relative logical leaf paths, units and labels,
+    shared by every element. source is a nonblank author-chosen fallback label
+    for leaves without a recorded origin (for example "default"). It never
+    replaces missing/invalid values or an explicit/derived recorded origin.
+    Names come only from the owner's FixedElements capture, never participants.
+    """
+
+    name: str
+    field: RecipeFieldPath
+    parameters: tuple[SummaryParameter, ...]
+    source: str
+
+    def __post_init__(self) -> None:
+        field_path(self.field)
+        if not self.parameters or not self.source.strip():
+            raise ValueError("Element summaries require leaves and a source label")
+
+
+@dataclass(frozen=True)
+class SummaryEstimateRows:
+    """Project relative scalar declarations for each captured native summary row.
+
+    name prefixes opaque keys "name/row/estimate.name"; row is the summary list
+    position, NOT an ElementIdentity. rows_key selects a native summary list;
+    missing/null lists contribute no estimates, non-list values raise ValueError.
+    estimates supplies relative value/error/element paths for each row in native
+    order. Only an explicit author-provided ElementIdentity at element_key is
+    projected. No position/name fields, participants or row indexes are inferred.
+    """
+
+    name: str
+    rows_key: RecipeFieldPath
+    estimates: tuple[SummaryEstimate, ...]
+
+    def __post_init__(self) -> None:
+        field_path(self.rows_key)
+        if not self.estimates:
+            raise ValueError("Row summaries require estimate declarations")
+
+
 class StepReply(TypedDict):
     status: str
     reason: NotRequired[str]
@@ -123,10 +169,16 @@ def _actual(
 ) -> dict[str, Any]:
     fields = captured["fields"] if captured is not None else {}
     parameters: dict[str, ParameterReply] = {}
-    for parameter in definition.summary_parameters if definition else ():
-        fact = fields.get(parameter.name)
-        if fact is None:
-            continue
+    static = (
+        {
+            parameter.name: parameter
+            for parameter in definition.summary_parameters
+            if isinstance(parameter, SummaryParameter)
+        }
+        if definition
+        else {}
+    )
+    for name, fact in fields.items():
         source = fact.get("source")
         projected: ParameterReply = {
             "value": deepcopy(fact["value"]),
@@ -134,10 +186,10 @@ def _actual(
         }
         if "element" in fact:
             projected["element"] = deepcopy(fact["element"])
-        unit = fact.get("unit", parameter.unit)
+        unit = fact.get("unit", static[name].unit if name in static else None)
         if unit is not None:
             projected["unit"] = unit
-        parameters[parameter.name] = projected
+        parameters[name] = projected
     return parameters
 
 
@@ -158,18 +210,51 @@ def _summary_value(summary: dict[str, Any], path: RecipeFieldPath) -> tuple[bool
     return True, value
 
 
+def _expand_estimates(
+    summary: dict[str, Any],
+    declarations: tuple[SummaryEstimate | SummaryEstimateRows, ...],
+) -> tuple[SummaryEstimate, ...]:
+    expanded: list[SummaryEstimate] = []
+    for declaration in declarations:
+        if isinstance(declaration, SummaryEstimate):
+            expanded.append(declaration)
+            continue
+        present, rows = _summary_value(summary, declaration.rows_key)
+        if not present or rows is None:
+            continue
+        if not isinstance(rows, list):
+            raise ValueError(f"Estimate rows {declaration.rows_key!r} must be a list")
+        for index in range(len(rows)):
+            prefix = (*declaration.rows_key, index)
+            for estimate in declaration.estimates:
+                expanded.append(
+                    SummaryEstimate(
+                        f"{declaration.name}/{index}/{estimate.name}",
+                        (*prefix, *estimate.value_key),
+                        (*prefix, *estimate.error_key)
+                        if estimate.error_key is not None
+                        else None,
+                        estimate.unit,
+                        (*prefix, *estimate.element_key)
+                        if estimate.element_key is not None
+                        else None,
+                    )
+                )
+    return tuple(expanded)
+
+
 def _summary_estimates(
     details: dict[str, Any],
     definition: RecipeDefinition | None,
     recipes: Sequence[RecipeDefinition],
 ) -> tuple[SummaryEstimate, ...]:
     if definition is not None:
-        return definition.summary_estimates
+        return _expand_estimates(details, definition.summary_estimates)
     # Analysis-only carries no recipe identity. Only unambiguous declarations
     # may project present scalar keys; never infer an experiment or read the GUI.
     by_key: dict[RecipeFieldPath, SummaryEstimate] = {}
     for recipe in recipes:
-        for estimate in recipe.summary_estimates:
+        for estimate in _expand_estimates(details, recipe.summary_estimates):
             if not _summary_value(details, estimate.value_key)[0]:
                 continue
             previous = by_key.setdefault(estimate.value_key, estimate)

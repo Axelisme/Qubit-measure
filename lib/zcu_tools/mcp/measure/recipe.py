@@ -20,8 +20,13 @@ from math import isfinite
 from threading import Condition, Event
 from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict, TypeGuard
 
+from pydantic import TypeAdapter
+
 from zcu_tools.format_version import YamlValue
-from zcu_tools.gui.app.measure.remote.form_description import RecipeFieldObservation
+from zcu_tools.gui.app.measure.remote.form_description import (
+    RecipeElementsWire,
+    RecipeFieldObservation,
+)
 from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
 from zcu_tools.mcp.measure.analysis_execution import (
@@ -29,7 +34,12 @@ from zcu_tools.mcp.measure.analysis_execution import (
     AnalysisWriteback,
     ExecutionSnapshot,
 )
-from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParameter
+from zcu_tools.mcp.measure.execution_reply import (
+    SummaryElements,
+    SummaryEstimate,
+    SummaryEstimateRows,
+    SummaryParameter,
+)
 from zcu_tools.mcp.measure.interaction import handoff_interaction
 from zcu_tools.mcp.measure.operation_wait import await_operation
 from zcu_tools.mcp.measure.raw_save import RawSaveRequest, SaveReport, save_raw_data
@@ -525,7 +535,7 @@ class _TabBinding:
     observe_analysis: Callable[[AnalyzeOperation], None]
     observe_writeback: Callable[[WritebackReceipt], None]
     origins: dict[RecipeFieldPath, str | SweepSources] = field(default_factory=dict)
-    summary_parameters: tuple[SummaryParameter, ...] = ()
+    summary_parameters: tuple[SummaryParameter | SummaryElements, ...] = ()
     closed: Event = field(default_factory=Event)
     condition: Condition = field(default_factory=Condition)
     consume_cancel: Callable[[], bool] | None = None
@@ -683,7 +693,7 @@ class RecipeSession:
         self,
         tools: MeasureToolContext,
         *,
-        summary_parameters: tuple[SummaryParameter, ...] = (),
+        summary_parameters: tuple[SummaryParameter | SummaryElements, ...] = (),
         closed: Event | None = None,
         condition: Condition | None = None,
         consume_cancel: Callable[[], bool] | None = None,
@@ -1384,7 +1394,12 @@ class RecipeTab:
     def _capture_cfg_field(
         self, name: RecipeFieldPath, source: str | SweepSources
     ) -> ActualField:
-        node = self._node(name)
+        return self._field_fact(name, self._node(name), source)
+
+    @staticmethod
+    def _field_fact(
+        name: RecipeFieldPath, node: RecipeFormField, source: str | SweepSources
+    ) -> ActualField:
         if node.value_status != "available" or node.errors:
             raise GuiRpcError(f"Unavailable {name} summary value", reason="invalid_cfg")
         value = node.value
@@ -1404,6 +1419,9 @@ class RecipeTab:
     def _actual_fields(self) -> dict[str, ActualField]:
         fields: dict[str, ActualField] = {}
         for parameter in self._binding.summary_parameters:
+            if isinstance(parameter, SummaryElements):
+                fields.update(self._element_facts(parameter))
+                continue
             if parameter.field not in self._binding.origins:
                 continue
             source = self._binding.origins[parameter.field]
@@ -1412,6 +1430,39 @@ class RecipeTab:
                 fact["unit"] = parameter.unit
             fields[parameter.name] = fact
         return fields
+
+    def _element_facts(self, declaration: SummaryElements) -> dict[str, ActualField]:
+        reply = self._binding.tools.send_gui_rpc(
+            "tab.read_elements",
+            {
+                "tab_id": self._binding.tab,
+                "path": list(declaration.field),
+                "fields": [
+                    list(parameter.field) for parameter in declaration.parameters
+                ],
+            },
+        )
+        try:
+            observed = TypeAdapter(RecipeElementsWire).validate_python(
+                reply, strict=True
+            )
+        except ValueError as error:
+            raise GuiRpcError(
+                "Invalid element observations", reason="incompatible_wire"
+            ) from error
+        facts: dict[str, ActualField] = {}
+        for row in observed["elements"]:
+            for parameter, raw in zip(
+                declaration.parameters, row["fields"], strict=True
+            ):
+                path = (*declaration.field, row["index"], *parameter.field)
+                node = read_form_field(raw, path)
+                source = self._binding.origins.get(path, declaration.source)
+                fact = self._field_fact(path, node, source)
+                if parameter.unit is not None:
+                    fact["unit"] = parameter.unit
+                facts[f"{declaration.name}/{row['index']}/{parameter.name}"] = fact
+        return facts
 
     def accept(self, items: Sequence[str] | None = None) -> WritebackReceipt:
         """Write current draft items by stable target_name, Primary then Post.
@@ -1673,8 +1724,10 @@ class RecipeDefinition:
     input_schema is its handwritten schema and must match run's typed keyword
     parameters. run receives RecipeSession first and returns RecipeGenerator.
     adapter_name is the public GUI adapter ID for guide lookup. summary_parameters
-    selects captured actual conditions; summary_estimates selects native scalar
-    estimates. Empty summary tuples are valid. The registry validates definitions
+    selects captured actual conditions: SummaryParameter selects a static field,
+    SummaryElements expands shared leaves over the current complete list at Run.
+    summary_estimates selects native scalar estimates, with SummaryEstimateRows
+    expanding over captured native row order. Empty summary tuples are valid. The registry validates definitions
     and schemas before any execution; this value does not register on import.
     """
 
@@ -1683,5 +1736,9 @@ class RecipeDefinition:
     input_schema: RecipeInputSchema
     run: Callable[..., RecipeGenerator]
     adapter_name: str = field(kw_only=True)
-    summary_parameters: tuple[SummaryParameter, ...] = field(kw_only=True)
-    summary_estimates: tuple[SummaryEstimate, ...] = field(kw_only=True)
+    summary_parameters: tuple[SummaryParameter | SummaryElements, ...] = field(
+        kw_only=True
+    )
+    summary_estimates: tuple[SummaryEstimate | SummaryEstimateRows, ...] = field(
+        kw_only=True
+    )
