@@ -23,6 +23,7 @@ from zcu_tools.simulate.evolution.kernel import (
     SegmentTable,
 )
 from zcu_tools.simulate.evolution.kernels import REGISTRY
+from zcu_tools.simulate.evolution.kernels._rwa_gate import GatePrepared
 from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 
@@ -203,6 +204,7 @@ def test_compiled_four_unitaries_match_scipy_at_sliced_absolute_intervals(
 
         monkeypatch.setattr(scipy.integrate, "solve_ivp", observed)
         prepared = kernel.prepare(keys, table, rows, context)
+        assert isinstance(prepared, GatePrepared)
         model = src.model((0,))
         coefficients = rwa_coefficients(model, (0,), (frequency,))
         energy = model.energies_ghz + prepared.charges[0, :, 0] * frequency

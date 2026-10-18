@@ -97,6 +97,14 @@ def populate_single_gate_plan(
     key pays a cold four-U build; a Sambe carrier/shape domain pays one spectral
     build. No numerical admission, experiment identity or cache warmth is read.
     Prefix and worker subsets borrow these decisions without recounting reuse.
+
+    The compiled four-U cold coefficient is 0.10 CPU-s at 16 levels/256 ns,
+    before shape-motion and retained-drive multipliers. Matched five-pair
+    Gaussian four-key prepares at integer/half flux measured SciPy/compiled
+    medians of 0.764/0.241 and 1.042/0.316 CPU-s (3.18/3.30x). Reducing the
+    previous 0.22 coefficient by only 2.2x leaves calibration headroom; the
+    separate 20 percent cold-choice margin and row guard/key costs remain.
+    These relative CPU estimates are not numerical admission certificates.
     """
 
     def build() -> tuple[SingleGateChoice, ...]:
@@ -136,9 +144,8 @@ def populate_single_gate_plan(
                 frequency = abs(float(table.tone_frequency_ghz[row, 0]))
                 env_index = table.tone_envelope[row, 0]
                 env = table.envelopes[env_index]
-                # Smooth real Gaussian calibration: ~0.20--0.28 CPU-s/key at
-                # 16 levels and 254--256 ns. Shape and drive enter explicitly;
-                # this is a cost model, not an RWA admission certificate.
+                # Shape motion and retained drive scale the measured cold
+                # coefficient; no warm resident discount enters this choice.
                 peak = bounds.peaks[env_index]
                 motion = 0.0
                 if len(env.samples) > 1 and peak > 0:
@@ -158,7 +165,7 @@ def populate_single_gate_plan(
                     * np.linalg.norm(retained, 2)
                 )
                 build = (
-                    0.22
+                    0.10
                     * duration
                     / 256
                     * (1 + 4 * motion + 0.1 * 2 * np.pi * duration * strength)
