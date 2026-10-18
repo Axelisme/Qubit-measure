@@ -102,7 +102,7 @@ def _pointer(
 
 def _qt_click(canvas: FigureCanvasQTAgg, x: float, y: float = 4.5) -> None:
     px, py = canvas.figure.axes[0].transData.transform((x, y))
-    # PyQt6 stubs model QTest's C++ namespace functions as instance methods.
+    # tolerated: PyQt6 stubs add self to the class-level QTest.mouseClick API.
     QTest.mouseClick(  # pyright: ignore[reportCallIssue]
         canvas,
         Qt.MouseButton.LeftButton,
@@ -217,6 +217,7 @@ def test_preview_cancels_on_escape_hide_and_finish_uses_committed_values(qapp):
     assert qapp.focusWidget() is canvas
     _pointer(canvas, "motion_notify_event", start.flux_half + 0.5)
     assert widget.preview_active
+    # tolerated: PyQt6 stubs add self to the class-level QTest.keyClick API.
     QTest.keyClick(canvas, Qt.Key.Key_Escape)  # pyright: ignore[reportCallIssue]
     qapp.processEvents()
     assert widget.preview_active is False
