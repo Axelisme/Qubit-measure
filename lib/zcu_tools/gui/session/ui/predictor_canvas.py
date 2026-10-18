@@ -13,7 +13,6 @@ disengages and locks the marker at its current position.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import cast
 
 import numpy as np
 from matplotlib.backend_bases import Event
@@ -352,10 +351,12 @@ class PredictorCurveCanvas(QWidget):
     def _on_xlim_changed_event(self, ax: object) -> None:
         if self._suppress_xlim_changed:
             return
-        get_xlim = getattr(ax, "get_xlim", None)
+        get_xlim: Callable[[], tuple[float, float]] | None = getattr(
+            ax, "get_xlim", None
+        )
         if not callable(get_xlim):
             return
-        x_lo, x_hi = cast(tuple[float, float], get_xlim())
+        x_lo, x_hi = get_xlim()
         self._on_xlim_changed(self, (float(x_lo), float(x_hi)))
 
     def _pick_marker(self, x_data: float) -> bool:
