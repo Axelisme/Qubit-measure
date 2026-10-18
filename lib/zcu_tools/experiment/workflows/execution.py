@@ -51,7 +51,6 @@ from .models import (
     RunPaths,
     RunStatus,
     Step,
-    TunableChange,
     TunablesSnapshot,
 )
 from .ports import EnginePorts
@@ -519,13 +518,13 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
             self.stop()
 
     def update_tunables(
-        self, changes: tuple[TunableChange, ...], expected_revision: int, actor: Actor
+        self, tunables: BaseModel, expected_revision: int, actor: Actor
     ) -> TunablesSnapshot:
         """Enforce lifecycle; TunableValues owns validation and atomic revision."""
         if self._lifecycle not in ("running", "pausing", "paused"):
             raise InvalidRunState("update_tunables", self._lifecycle)
         return self._tunables.update(
-            changes, expected_revision=expected_revision, actor=actor
+            tunables, expected_revision=expected_revision, actor=actor
         )
 
     def _append_tunables(self, event: TunablesChanged) -> None:

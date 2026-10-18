@@ -12,7 +12,6 @@ from zcu_tools.experiment.workflows import (
     RunIdentity,
     RunMismatch,
     Step,
-    TunableChange,
     WorkflowEnv,
     workflow,
 )
@@ -26,6 +25,9 @@ class ValueForm(FormModel):
     """Input counterpart of the native example's single positive tunable."""
 
     value: int = Field(default=1, ge=1)
+
+    def to_cfg(self) -> Tunables:
+        return Tunables(value=self.value)
 
 
 def finish(
@@ -42,74 +44,11 @@ def host(tmp_path: Path) -> tuple[TunablesHost[ValueForm, int], Rig]:
     rig.start(finish)
     env = FormEnv()
     state = FormState(ValueForm.default_input(env))
-    binding: TunablesHost[ValueForm, int] = TunablesHost(state, env, "run")
+    binding: TunablesHost[ValueForm, int] = TunablesHost(
+        state, env, "run", to_cfg=ValueForm.to_cfg
+    )
     binding.accept(rig.engine)
     return binding, rig
-
-
-def test_indexed_apply_returns_directed_errors_without_changing_native_or_draft(
-    tmp_path: Path,
-) -> None:
-    from tests.gui.form_adapter._fixed_models import named_form, named_input
-
-    rig = Rig(tmp_path)
-    model = named_form()
-
-    @workflow("indexed", plan=Plan, tunables=model, init=rig.init)
-    def indexed(
-        env: WorkflowEnv[int], plan: Plan, tun: FormModel, state: State
-    ) -> Step[State, int]:
-        del env, plan, tun, state
-        yield from ()
-        return Done()
-
-    rig.engine.start(
-        indexed,
-        plan=Plan(),
-        tunables=model.model_validate(named_input(model).data),
-        paths=rig.paths,
-        identity=RunIdentity(
-            "indexed",
-            SoftwareProvenance(
-                software_versions={},
-                git_commit=None,
-                git_dirty=None,
-                qick_version=None,
-                soc_fingerprint=None,
-                hostname="offline",
-            ),
-        ),
-    )
-    env = FormEnv()
-    state = FormState(named_input(model))
-    binding: TunablesHost[FormModel, int] = TunablesHost(state, env, "indexed")
-    binding.accept(rig.engine)
-    state.write({("tones", 1, "gain"): {"expr": "3 * 2"}}, env)
-    before_native = rig.engine.tunables("indexed")
-    before_draft, before_base, before_accepted = (
-        state.input,
-        state.base,
-        binding.accepted_input,
-    )
-    notifications: list[str] = []
-    state.subscribe(lambda: notifications.append("changed"))
-    try:
-        result = binding.apply(actor=Actor("user", "gui"))
-    except TypeError as exc:
-        # Observe the old boundary failure as an outcome, not a setup error.
-        result = exc
-    assert isinstance(result, FormErrors), (
-        "Indexed apply must return path-directed FormErrors"
-    )
-    path = ("tones", 1, "gain")
-    assert path in result.messages
-    assert "native" in result.messages[path].lower()
-    assert "list" in result.messages[path].lower()
-    assert rig.engine.tunables("indexed") == before_native
-    assert state.input.same_as(before_draft)
-    assert state.base.same_as(before_base)
-    assert binding.accepted_input.same_as(before_accepted)
-    assert notifications == []
 
 
 def test_apply_publishes_numeric_value_but_retains_expression_input(
@@ -185,7 +124,7 @@ def test_apply_submits_complete_defaults_even_when_input_has_no_changed_leaves(
     editor, rig = host
     rig.engine.update_tunables(
         "run",
-        (TunableChange("value", 4),),
+        Tunables.model_construct(value=4),
         expected_revision=0,
         actor=Actor("agent", "native"),
     )
@@ -217,7 +156,9 @@ def test_native_lifecycle_failure_retains_draft_and_accepted_input(
 def test_pending_binding_rejects_apply_before_draft_writes(external: bool) -> None:
     env = FormEnv()
     state = FormState(ValueForm.default_input(env))
-    binding: TunablesHost[ValueForm, int] = TunablesHost(state, env, "pending")
+    binding: TunablesHost[ValueForm, int] = TunablesHost(
+        state, env, "pending", to_cfg=ValueForm.to_cfg
+    )
     before = state.input
     base = state.base
     if external:
@@ -240,7 +181,9 @@ def test_native_acceptance_preserves_unique_draft_and_submitted_base(
     rig = Rig(tmp_path)
     env = FormEnv()
     state = FormState(ValueForm.default_input(env))
-    binding: TunablesHost[ValueForm, int] = TunablesHost(state, env, "run")
+    binding: TunablesHost[ValueForm, int] = TunablesHost(
+        state, env, "run", to_cfg=ValueForm.to_cfg
+    )
     submitted = binding.accepted_input
     state.write({("value",): {"expr": "2 + 3"}}, env)
     rig.start(finish)
@@ -262,13 +205,17 @@ def test_wrong_or_repeated_native_acceptance_does_not_replace_binding(
     rig.start(finish)
     env = FormEnv()
     state = FormState(ValueForm.default_input(env))
-    wrong: TunablesHost[ValueForm, int] = TunablesHost(state, env, "wrong")
+    wrong: TunablesHost[ValueForm, int] = TunablesHost(
+        state, env, "wrong", to_cfg=ValueForm.to_cfg
+    )
     with pytest.raises(RunMismatch) as caught:
         wrong.accept(rig.engine)
     assert caught.value.expected == "wrong"
     assert caught.value.actual == "run"
     assert wrong.engine is None
-    binding: TunablesHost[ValueForm, int] = TunablesHost(state, env, "run")
+    binding: TunablesHost[ValueForm, int] = TunablesHost(
+        state, env, "run", to_cfg=ValueForm.to_cfg
+    )
     binding.accept(rig.engine)
     with pytest.raises(RuntimeError, match="already has native acceptance"):
         binding.accept(rig.engine)
@@ -287,6 +234,9 @@ class ArrayForm(FormModel):
     """Tuple input counterpart, submitted as JSON array values."""
 
     values: tuple[int, ...] = (1, 2)
+
+    def to_cfg(self) -> ArrayTunables:
+        return ArrayTunables(values=self.values)
 
 
 def test_whole_tuple_leaf_is_submitted_as_json_array(tmp_path: Path) -> None:
@@ -327,7 +277,9 @@ def test_whole_tuple_leaf_is_submitted_as_json_array(tmp_path: Path) -> None:
     )
     env = FormEnv()
     state = FormState(ArrayForm.default_input(env))
-    editor: TunablesHost[ArrayForm, int] = TunablesHost(state, env, "arrays")
+    editor: TunablesHost[ArrayForm, int] = TunablesHost(
+        state, env, "arrays", to_cfg=ArrayForm.to_cfg
+    )
     editor.accept(rig.engine)
     state.write({("values",): [3, 4, 5]}, env)
     applied = editor.apply(actor=Actor("user", "gui"))

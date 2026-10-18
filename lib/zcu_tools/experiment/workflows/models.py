@@ -99,19 +99,6 @@ class Actor:
 
 
 @dataclass(frozen=True)
-class TunableChange:
-    """One leaf replacement in a tunables batch.
-
-    ``path`` is a model-field dot path, never an index or expression. ``value``
-    is a JSON leaf or a complete list/tuple replacement in JSON form.
-    Batch overlap, schema, and revision checks belong to Engine.update_tunables.
-    """
-
-    path: str
-    value: JsonValue
-
-
-@dataclass(frozen=True)
 class TunablesSnapshot:
     """Detached control view: ``revision`` is its version, ``values`` is JSON.
 

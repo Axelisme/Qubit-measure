@@ -19,7 +19,6 @@ from zcu_tools.experiment.workflows import (
     Next,
     Run,
     Step,
-    TunableChange,
     WorkflowEnv,
 )
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
@@ -689,7 +688,7 @@ def test_active_update_journal_failure_cancels_then_reports_original_cause(
         with pytest.raises(IsADirectoryError):
             rig.engine.update_tunables(
                 "run",
-                (TunableChange("value", 2),),
+                Tunables.model_construct(value=2),
                 expected_revision=0,
                 actor=Actor("user", "test"),
             )
