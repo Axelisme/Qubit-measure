@@ -31,6 +31,71 @@ class SelectionForm(FormModel):
     branch: First | Second = Field(discriminator="kind")
 
 
+@pytest.mark.parametrize("with_converter", [False, True], ids=["plain", "converter"])
+def test_restored_unlisted_selection_is_shown_without_rewriting_raw_input(
+    qapp: QApplication, tmp_path: Path, with_converter: bool
+) -> None:
+    conversions: list[JsonValue] = []
+
+    def convert(
+        _old: api.FormCommandSnapshot,
+        selection: JsonValue,
+        _context: api.FormCommandContext,
+    ) -> api.FormConversionResult:
+        conversions.append(selection)
+        return api.FormConversionResult(None, selection)
+
+    class ChoiceForm(FormModel):
+        key: str
+
+        @classmethod
+        def options(cls, _env: FormEnv) -> Mapping[api.FormPath, tuple[api.Option, ...]]:
+            return {("key",): (api.Option("A", "A"), api.Option("B", "B"))}
+
+        @classmethod
+        def converters(cls, _env: FormEnv) -> Mapping[api.FormPath, api.InputConverter]:
+            return {("key",): api.InputConverter(convert)} if with_converter else {}
+
+    authored = FormInput(ChoiceForm, {"key": "A"}, selections={("key",): "C"})
+    state = FormState(FormInput.from_json(ChoiceForm, authored.to_json()))
+    publications: list[bool] = []
+    state.subscribe(lambda: publications.append(True))
+    env = FormEnv()
+    editor = FormEditor(state, env)
+    editor.resize(640, 180)
+    editor.show()
+    qapp.processEvents()
+    driver = ComponentDriver(editor)
+
+    def snapshot(name: str) -> None:
+        driver.screenshot(tmp_path / f"{name}.png")
+        (tmp_path / f"{name}.json").write_text(
+            json.dumps(asdict(driver.visible()), indent=2), encoding="utf-8"
+        )
+
+    try:
+        snapshot("01-restored-selection")
+        assert driver.observe(object_name="form.input.key").text == "C (missing)"
+        assert "current options" in driver.observe(object_name="form.row.key").tooltip
+        editor.refresh(env)
+        snapshot("02-refreshed-selection")
+        assert driver.observe(object_name="form.input.key").text == "C (missing)"
+        assert state.input.same_as(authored)
+        assert publications == []
+        assert conversions == []
+
+        driver.choose_option(object_name="form.input.key", value="B")
+        snapshot("03-valid-selection")
+        assert driver.observe(object_name="form.input.key").text == "B"
+        assert "current options" not in driver.observe(object_name="form.row.key").tooltip
+        assert state.input.data == {"key": "B"}
+        assert state.input.selections == {("key",): "B"}
+        assert publications == [True]
+        assert conversions == (["B"] if with_converter else [])
+    finally:
+        editor.close()
+
+
 def test_selection_only_keeps_visible_child_and_local_parse_error(
     qapp: QApplication, tmp_path: Path
 ):
