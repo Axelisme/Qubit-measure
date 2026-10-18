@@ -4,17 +4,17 @@
 
 ## 目前可用與待交付能力
 
-既有單 qubit 實驗的入口與操作見下方連結。Catalog 的 `ftf/joint_readout` 已提供四分支 raw 保存、離線分類與熱 population matrix，操作見 [joint readout 指南](joint_readout/guide.md)。`ftf/idle_zz` 也已提供 target F1/F2、spectator I/Xπ 的 conditional Ramsey、可選具名 DC 掃描與單頻模型頻差分析，操作見 [idle ZZ 指南](idle_zz/guide.md)。這不代表實際 FTF mux 模擬已通過。
+既有單 qubit 實驗的入口與操作見下方連結。Catalog 的 `ftf/joint_readout` 已提供四分支 raw 保存、離線分類與熱 population matrix，操作見 [joint readout 指南](joint_readout/guide.md)。`ftf/idle_zz` 也已提供 target F1/F2、spectator I/Xπ 的 conditional Ramsey、可選具名 DC 掃描與單頻模型頻差分析，操作見 [idle ZZ 指南](idle_zz/guide.md)。`ftf/conditional_spectroscopy` 已提供四名目分支的雙線 weak probe、可選雙 Xπ 對比與 frequency／具名 DC 掃描，操作見 [conditional spectroscopy 指南](conditional_spectroscopy/guide.md)。這些離線驗證不代表實際 FTF 控制鏈 smoke 已通過。
 
-MuxGroup 綁定與 tone-ordered raw 已落地。雙線 drive 配置、FTF mux 模擬及其餘校準實驗仍待交付。先確認對應公開契約與驗證結果，再進行實際 FTF 控制鏈 smoke。
+MuxGroup 綁定、tone-ordered raw、雙線 drive 配置與 FTF mux acquire 能力已落地。其餘校準實驗及首批 FTF 控制鏈驗收仍待交付。實際 mux 模擬須顯式設定 readout kind 與 receiver list，不能直接使用預設 pulse readout。
 
 | 能力與交付狀態 | 操作前要確認的內容 |
 | --- | --- |
 | MuxGroup 綁定，已提供 | 有序 `resonators`／`qubits` 對應已可用。F1/F2 tone 取角色在 `qubits` 的位置。舊 `members` 不受支援。Form 以固定 capture 驗證 component 關係。 |
 | Tone-ordered raw shots，已提供 | `MuxReadout.collect_raw_iq` 回最後一輪、原 loop 與 tone 順序的 normalized raw IQ。每 completed round 收集，host rounds 串接，不重複 normalization。平均 mux 頻譜不能代替同 shot IQ。 |
-| 雙 charge line | simulation owner 提供 `f1_charge`／`f2_charge` 配置與 operator 語意，對應兩個獨立 generator。串擾係數不代表新增 coupler drive。 |
-| FTF mux acquire | simulation owner 提供同一次 joint 態抽樣的多 receiver 讀出，不能用兩路獨立抽樣冒充 joint shots。 |
-| FTF 實驗與前端，部分提供 | Joint readout 與 idle ZZ 已提供 Form、Run、native save/load 及分析。雙線校準、phase 分析及端到端 FTF smoke 仍待交付。本文的校準路線不是自動 workflow。 |
+| 雙 charge line，已提供 | `f1_charge`／`f2_charge` 預設為 gen2／gen3，省略 operator 表示 charge。Form 仍依固定 capture 綁定，不硬編 channel。串擾係數不代表新增 coupler drive。 |
+| FTF mux acquire，已提供 | Program 提供有序 tones。YAML 須顯式填 `readout.drive.kind: mux` 與 receiver list；預設仍是 pulse。所有 ADC 的同 shot 共享同一 joint 態，依 declaration／tone 順序輸出，不用兩路獨立抽樣冒充 joint shots。 |
+| FTF 實驗與前端，部分提供 | Joint readout、idle ZZ 與 conditional spectroscopy 已提供 Form、Run、native save/load 及分析。其餘雙線校準、phase 分析及端到端 FTF smoke 仍待交付。本文的校準路線不是自動 workflow。 |
 
 不要為了先跑通而另寫 raw parser、猜 ADC 排序，或從 simulator truth 補校準。本指南也不提供模擬器配置或啟動命令。
 
@@ -69,7 +69,7 @@ F1 的 tone 是 `$f1` component 在固定 capture 的 `$mux.qubits` 中的位置
 
 改角色後重新 Reset，核對 F1/F2 pulses、兩個 generator、mux readout 與 DC source。Core 使用具名 device 及 native 單位，不把 alias 語法送給 driver。F1/F2 bias 由操作員提供；掃 coupler source 不等於只改 coupler loop flux，也不會自動補償 F1/F2 的偏移。
 
-## 第一批 0b–6 的校準路線，0b／1 已提供離線驗證
+## 第一批 0b–6 的校準路線，0b／1／2 已提供離線驗證
 
 以下次序以 0a 的單 qubit pulses、readout 與人工記錄的 bias 為起點。各實驗分別 Run、分析、preview 與 Apply，不會自動啟動下一步。
 
@@ -79,7 +79,7 @@ F1 的 tone 是 `$f1` component 在固定 capture 的 `$mux.qubits` 中的位置
 | --- | --- | --- |
 | 0b. [Joint readout](joint_readout/guide.md) | 四個 `B(00)`／`B(01)`／`B(10)`／`B(11)` 分支各接一次 mux readout，收同 shot 兩 tone IQ。保存 raw IQ，顯示 acquired shots、counts 與 4×4 confusion matrix。 | 行是名目準備，列是同 shot 的 00／01／10／11 分類，兩軸都依 F1、F2 順序。逐 tone 使用有效 GE 中心做最近中心 G/E 分類，再直接 joint 計數，不能乘兩張 marginal matrices。 |
 | 1. [Idle ZZ](idle_zz/guide.md) | 選 F1 或 F2 為 target，spectator 做 I／Xπ 兩分支。人工填 detune，掃 Ramsey delay，看兩條曲線、fit 與 ζ；需要時外層掃具名 DC source。 | ζ 是兩名目分支在單頻模型假設下的擬合頻差。符號依人工 detune 的同側前提，近 0／2×detune 時拒絕 ζ。有限 fit 不排除熱混合；看 fit_quality 與曲線判斷模型，不稱 pure ZZ、不 writeback 或自動調偏。 |
-| 2. Conditional higher-level spectroscopy | 四個名目分支做雙線 weak probe，掃共同 frequency，可加 coupler DC 軸，並比較可選雙 Xπ 對比 pulse 的訊號。看四分支頻譜／熱圖。 | 人工從圖選目標 transition 與後續 probe 窗口。不自動把最深峰當 CZ frequency，不替峰命名 bare coupler 能級，也不擬合 EC/EJ/J。 |
+| 2. [Conditional higher-level spectroscopy](conditional_spectroscopy/guide.md) | 四個名目分支做雙線 weak probe，掃共同 frequency，可加 coupler DC 軸，並比較可選雙 Xπ 對比 pulse 的訊號。看四分支頻譜／熱圖。 | 人工從圖選目標 transition 與後續 probe 窗口。不自動把最深峰當 CZ frequency，不替峰命名 bare coupler 能級，也不擬合 EC/EJ/J。 |
 | 3a. Constructive phase | 在 `B(11)` 固定兩線 gain 比例，掃 relative phase × duration。看 Rabi 干涉圖與可辨識的 Rabi rate。 | 選目標 transition 的建設性 phase。有效結果可提出 F2 相對 F1 的 pulse phase 更新；不掃寄生線抵消，也不最佳化 relative gain ratio。 |
 | 3b. Rabi chevron | 固定 relative phase 與兩線 gain，掃 common frequency × duration。看 chevron 與回返曲線。 | 人工選 CZ width 與 frequency 窗口。單一 population 谷值不是高 fidelity gate 的證據。兩線同頻、同 duration、同時間原點，waveforms 由 cfg 明示；cosine 包絡只是起點。 |
 | 4. CZ amplitude | `B(11)` 後播雙線 CZ，再做雙 Xπ 對比與 mux readout。掃共同 gain scale，保持已選 gain 比例、relative phase 與 waveform。 | 看 joint 分類／IQ 回返與可辨識的完整週期。有效 amplitude 結果可提兩線 pulse proposals。回返只是 leakage proxy，不是完整高階態 population 量測。 |
