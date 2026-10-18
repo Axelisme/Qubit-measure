@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource, kernel
 
+from .._engine import RecordingKernel
 from ..contract.kernel_suite import (
     KernelCase,
     KernelContract,
@@ -68,6 +69,7 @@ class TestFloquetContract(KernelContract):
 def test_engine_reuses_guard_preparations_once_per_key(
     kernel_case: KernelCase, count: int
 ) -> None:
+    """DOP853 rejection falls back to Floquet without rebuilding guard products."""
     from contextlib import closing
     from threading import Event
 
@@ -109,7 +111,8 @@ def test_engine_reuses_guard_preparations_once_per_key(
         np.full(count, 1.1),
     )
     counted = CountingFloquet()
-    with closing(Engine(1, 0, kernels=(counted,))) as engine:
+    rejected_direct = RecordingKernel("dop853", accepts=False)
+    with closing(Engine(1, 0, kernels=(counted, rejected_direct))) as engine:
         actual = engine.evolve(case.source, (batch,), cancel=Event())
         assert actual.paths.segments_by_kernel == {"floquet": count}
         assert len(counted.prepared_keys) == len(set(counted.prepared_keys)) == 1
