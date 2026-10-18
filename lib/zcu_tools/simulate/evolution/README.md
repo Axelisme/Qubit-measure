@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves, spectral-family reuse, reuse-independent Sambe admission, calibrated physical-block carrier interpolation and interaction-picture independent densities
+**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves, spectral-family reuse, reuse-independent Sambe admission, calibrated physical-block carrier interpolation, interaction-picture independent densities and deterministic evolve-local period gain anchors
 
 ## Segment engine contracts
 
@@ -543,9 +543,17 @@ level, port, signed carrier, peak gain, subperiod resolution, harmonic cutoff
 and amplitude node count. Each ramp selects cutoffs and evaluates admission with its own cycle count.
 Duration, slope and direct-tail preparations remain row-specific.
 
-Engine owns a separate physical-block carrier workspace for one evolve. It
-shares that workspace with prefix resolution and timeline workers, never with
-another evolve or budget. This is calibrated physical-block carrier interpolation,
+Kernels may implement the optional `EvolveScopedKernel.evolve_scope` factory.
+Engine invokes it once per evolve and uses the returned kernel for both prefix
+resolution and timeline workers. Engine does not recognize individual numeric
+families. It registers each returned workspace with `PrepareCache.track_workspace`
+and releases registration on success, cancellation or failure. Registry kernels
+and the persistent prepare LRU never retain these scopes. `shaped_sambe` uses
+this mechanism for physical-block carrier interpolation. `floquet_period` uses
+it for fixed gain anchors. Concurrent evolves have separate workspaces.
+
+The physical-block carrier workspace belongs to one evolve. Prefix resolution
+and timeline workers share it, never with another evolve or budget. This is calibrated physical-block carrier interpolation,
 not eigenvector interpolation and not a rigorous interval bound. It treats peak
 coarse/fine Fourier blocks separately from amplitude-Chebyshev/Fourier coefficients.
 The original float64 signed carrier remains in each prepared key. Evaluation uses
@@ -795,6 +803,48 @@ population-error bound. Prefix unitaries and the three Hamiltonian matrices
 are immutable and charged to the cache. Arbitrary phase, subperiod and tail
 endpoints use a fractional CF4 step from the preceding prefix, not interpolation.
 No density enters preparation or the step selection.
+
+For planned low-carrier groups with multiple gains, the evolve-local workspace
+can replace the fine CF4 grid with gain-anchor interpolation. It sorts the
+complete table's unique gains per level, port and signed carrier. Every
+twenty-fourth index and both endpoints become independent coarse/fine anchors.
+The spacing depends only on group size, never worker count, chunking, request
+order or thread identity. Each non-anchor uses its nearest at most four anchors;
+equal-distance ties select the lower gain first.
+
+The first requesting worker builds an anchor under that anchor's lock. Planned
+reference counts retain it until every dependent key has been handed out.
+Later requests rebuild released anchors deterministically. Each table depends
+only on its key and these independent anchors. Prepared tables and resulting
+populations are bitwise invariant to workers, chunks and request order for the
+same complete table, source and budget. There is no gain chain, intermediate-key
+replay or unclaimed-result memo. Anchor storage is bounded by the planned
+anchor count times table bytes, not by worker count.
+
+Sharing requires the same model object, port, signed carrier and budget.
+Carrier continuation stays disabled. Lagrange interpolation operates on
+interaction-picture uniform prefixes. Identical H0 and uniform grids make the
+analytic H0 phase and its inverse cancel in the weighted sum, so the
+implementation avoids redundant phase exponentials. The candidate retains the
+new key's Hamiltonian, frequency, bath and split rate. Standalone preparation
+keeps independent builds.
+
+The kernel independently constructs the new key's original coarse grid. The
+candidate must have at least the original first fine-grid count and match the
+coarse trajectory at eight phase intervals, including U(T). The maximum
+Frobenius defect must be <= min(1e-4, budget*0.1). Failure reuses the coarse grid
+in the original coarse/fine loop, with its unchanged twelve-refinement limit.
+Unequal anchor grid counts skip interpolation. Retained anchors count as live
+prepared data, conservatively including arrays also referenced by active
+payloads. No anchor enters the persistent LRU or crosses evolve calls.
+Concurrent evolves use separate workspaces.
+
+This is calibrated trajectory comparison, not a rigorous bound. The eight
+phase probes do not establish an error bound between probes. Interpolated
+prefixes are not products of unitary exponentials, and their closeness to
+unitary for the Newton polar step remains unproven. Smoothness across nearby
+gains and conditioning of the Lagrange weights remain assumptions for the
+planned gain gaps. Model/drive immutability is assumed.
 
 At higher carriers, preparation keeps tolerance min(1e-10, budget*1e-4) and
 max_step=T/4. The single-threaded nogil DOP853 core builds integration stages and the

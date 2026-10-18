@@ -1,5 +1,6 @@
 """Real-envelope periods from shared finite Hilbert Fourier matrices."""
 
+from copy import copy
 from dataclasses import dataclass
 
 import numpy as np
@@ -227,6 +228,20 @@ class ShapedSambeKernel:
         guards, cycle scaling, dissipation, tails and projection are unchanged.
         """
         self._workspace = workspace
+
+    def evolve_scope(
+        self, table: SegmentTable, source: ModelSource
+    ) -> tuple["ShapedSambeKernel", Prepared]:
+        """Return a fresh kernel/workspace for this scan, never retaining either.
+
+        Engine shares the returned kernel with prefix and timeline workers and
+        charges the workspace's current numeric bytes until this evolve ends.
+        """
+        workspace = self.carrier_workspace(table, source)
+        # Keep injected subclass hooks; only this clone receives the workspace.
+        scoped = copy(self)
+        scoped._workspace = workspace
+        return scoped, workspace
 
     def carrier_workspace(
         self, table: SegmentTable, source: ModelSource
