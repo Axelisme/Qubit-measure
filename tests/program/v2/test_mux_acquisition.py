@@ -51,6 +51,8 @@ def test_raw_getter_uses_last_acquired_round_with_per_adc_length_normalization()
     )
     with pytest.raises(ValueError, match="mux.*raw"):
         module.collect_raw_iq(prog)
+    # Repeated trigger execution needs an explicit QICK runtime read count.
+    prog.set_reads_per_shot(2)
     averaged = prog.acquire(soc, progress=False)
     raw = prog.get_raw()
     iq = module.collect_raw_iq(prog)

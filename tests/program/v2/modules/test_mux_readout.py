@@ -284,6 +284,8 @@ def raw_buffer_program(preparations=4):
         [UnrelatedReadout(), repeated],
         sweep=[("preparation", preparations), ("point", 2)],
     )
+    # QICK counts a trigger macro once even when Repeat executes it twice.
+    prog.set_reads_per_shot(2)
     # Each loop/read has a distinct sentinel. The unrelated channel deliberately
     # has an irrelevant shape; it must not constrain the selected tones.
     sentinels = np.arange(3 * preparations * 2 * 2 * 2, dtype=np.int64).reshape(
@@ -321,13 +323,14 @@ def test_collect_raw_iq_preserves_loops_reads_and_tone_shot_pairing(preparations
 def test_collect_raw_iq_rejects_invalid_read_index(read_index):
     module, prog, _ = raw_buffer_program()
     # Include runtime-invalid index types without weakening the public signature.
-    collect = getattr(module, "collect_raw_iq")
+    public_method = "collect_raw_iq"
+    collect = getattr(module, public_method)
     with pytest.raises(ValueError, match="mux.*read_index"):
         collect(prog, read_index=read_index)
 
 
 @pytest.mark.parametrize("fault", ["missing", "count", "loop", "read", "iq", "dtype"])
-def test_collect_raw_iq_rejects_invalid_buffers(fault):
+def test_collect_raw_iq_rejects_invalid_buffers(fault, monkeypatch):
     module, prog, _ = raw_buffer_program()
     assert prog.raw is not None
     if fault == "missing":
@@ -341,8 +344,9 @@ def test_collect_raw_iq_rejects_invalid_buffers(fault):
     elif fault == "iq":
         prog.raw[-1] = np.zeros((3, 4, 2, 2, 3), dtype=np.int64)
     elif fault == "dtype":
-        # An external getter can violate its annotated dtype at runtime.
-        prog.raw[-1].dtype = np.dtype(np.float64)
+        # Only the external getter is replaced, not raw conversion/validation.
+        bad_raw = [array.astype(np.float64) for array in prog.raw]
+        monkeypatch.setattr(prog, "get_raw", lambda: bad_raw)
     with pytest.raises(ValueError, match="mux"):
         module.collect_raw_iq(prog)
 
