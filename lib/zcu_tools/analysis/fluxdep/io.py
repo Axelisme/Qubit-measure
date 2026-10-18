@@ -37,6 +37,13 @@ def dump_spectrums(
 
 
 def load_spectrums(path: str) -> dict[str, SpectrumResult]:
+    """Read a spectrum collection without changing stored values or dtypes.
+
+    The optional ``type`` group attribute is included only when present.
+    Missing fields raise KeyError; non-group entries raise AssertionError.
+    A calibration, spectrum, or points field that is not a Dataset raises
+    TypeError identifying its HDF5 path.
+    """
     spectrums = dict[str, SpectrumResult]()
     with h5.File(path, "r") as f:
         for name in f.keys():
@@ -46,22 +53,44 @@ def load_spectrums(path: str) -> dict[str, SpectrumResult]:
             points_grp = grp["points"]
             assert isinstance(spect_grp, h5.Group)
             assert isinstance(points_grp, h5.Group)
-            # h5py group lookup does not distinguish datasets from other objects.
-            # Keep the existing raw reads and their errors, without dtype coercion.
+            calibration_datasets: list[h5.Dataset] = []
+            for field in ("flux_half", "flux_int", "flux_period"):
+                dataset = grp[field]
+                if not isinstance(dataset, h5.Dataset):
+                    raise TypeError(f"Expected Dataset at {grp.name}/{field}")
+                calibration_datasets.append(dataset)
+            flux_half, flux_int, flux_period = calibration_datasets
+
+            spect_datasets: list[h5.Dataset] = []
+            for field in ("dev_values", "fluxs", "freqs", "signals"):
+                dataset = spect_grp[field]
+                if not isinstance(dataset, h5.Dataset):
+                    raise TypeError(f"Expected Dataset at {spect_grp.name}/{field}")
+                spect_datasets.append(dataset)
+            spect_dev_values, spect_fluxs, spect_freqs, spect_signals = spect_datasets
+
+            points_datasets: list[h5.Dataset] = []
+            for field in ("dev_values", "fluxs", "freqs"):
+                dataset = points_grp[field]
+                if not isinstance(dataset, h5.Dataset):
+                    raise TypeError(f"Expected Dataset at {points_grp.name}/{field}")
+                points_datasets.append(dataset)
+            points_dev_values, points_fluxs, points_freqs = points_datasets
+
             result = SpectrumResult(
-                flux_half=grp["flux_half"][()],  # pyright: ignore[reportIndexIssue, reportArgumentType]
-                flux_int=grp["flux_int"][()],  # pyright: ignore[reportIndexIssue, reportArgumentType]
-                flux_period=grp["flux_period"][()],  # pyright: ignore[reportIndexIssue, reportArgumentType]
+                flux_half=flux_half[()],
+                flux_int=flux_int[()],
+                flux_period=flux_period[()],
                 spectrum={
-                    "dev_values": spect_grp["dev_values"][()],  # pyright: ignore[reportIndexIssue, reportArgumentType]
-                    "fluxs": spect_grp["fluxs"][()],  # pyright: ignore[reportIndexIssue]
-                    "freqs": spect_grp["freqs"][()],  # pyright: ignore[reportIndexIssue]
-                    "signals": spect_grp["signals"][()],  # pyright: ignore[reportIndexIssue]
+                    "dev_values": spect_dev_values[()],
+                    "fluxs": spect_fluxs[()],
+                    "freqs": spect_freqs[()],
+                    "signals": spect_signals[()],
                 },
                 points={
-                    "dev_values": points_grp["dev_values"][()],  # pyright: ignore[reportIndexIssue, reportArgumentType]
-                    "fluxs": points_grp["fluxs"][()],  # pyright: ignore[reportIndexIssue]
-                    "freqs": points_grp["freqs"][()],  # pyright: ignore[reportIndexIssue]
+                    "dev_values": points_dev_values[()],
+                    "fluxs": points_fluxs[()],
+                    "freqs": points_freqs[()],
                 },
             )
             # ``type`` is optional for older spectrum files; current files store it
