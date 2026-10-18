@@ -1,4 +1,4 @@
-"""Calibrated joint-energy-basis RWA for simultaneous smooth shaped drives."""
+"""Calibrated joint-energy-basis RWA for simultaneous smooth or dual constant drives."""
 
 from dataclasses import dataclass
 from hashlib import sha256
@@ -22,9 +22,13 @@ from ._workload_facts import envelope_bounds, packed_segments
 # summed full-operator/carrier ratio 0.217, sampled normalized slope 0.0192/ns
 # and curvature 0.00231/ns² (including DAC quantization). Admission allows
 # margins up to 0.25, 0.025/ns and 0.003/ns². These are not rigorous bounds.
-_REVISION = "joint-rwa-v2"
+_REVISION = "joint-rwa-v3"
 _EDGE_GHZ = 0.05
 _STEP_NS = 4.0
+_CONSTANT_STEP_NS = 16.0
+# 25 strict-lab points around +84/-52 MHz: error>0.1 first occurs at
+# P=0.0116496. Halve that empirical cutoff, rounded down for safety.
+_MAX_COMBINATION_TRANSFER = 5.8e-3
 _MIN_BUDGET = 1e-3
 _MAX_RATIO = 0.25
 _MAX_SLOPE = 0.025
@@ -35,6 +39,8 @@ RWA_POLICY = (
     _REVISION,
     _EDGE_GHZ,
     _STEP_NS,
+    _CONSTANT_STEP_NS,
+    _MAX_COMBINATION_TRANSFER,
     _MIN_BUDGET,
     _MAX_RATIO,
     _MAX_SLOPE,
@@ -96,6 +102,67 @@ class RWAPrepared:
 
 
 @njit(nogil=True, cache=True)
+def _fourier_coefficient(x, y, sign):
+    """Single owner of full Fourier coefficients before the retained window."""
+    return (x - sign * 1j * y) / 2
+
+
+@njit(nogil=True, cache=True)
+def _combination_probability(energies, x, y, frequencies, amplitudes, duration):
+    """Maximum omitted-path two-carrier transfer proxy, in GHz and ns."""
+    maximum = 0.0
+    size = len(energies)
+    for sign_a in (1, -1):
+        for sign_b in (1, -1):
+            signs = (sign_a, sign_b)
+            operators = np.empty_like(x)
+            for tone in range(2):
+                operators[tone] = _fourier_coefficient(x[tone], y[tone], signs[tone])
+                operators[tone] *= amplitudes[tone]
+            combination = sign_a * frequencies[0] + sign_b * frequencies[1]
+            for i in range(size):
+                for k in range(size):
+                    if i == k:
+                        continue
+                    coupling = 0j
+                    for first in range(2):
+                        second = 1 - first
+                        for m in range(size):
+                            d_first = (
+                                energies[i]
+                                - energies[m]
+                                + signs[first] * frequencies[first]
+                            )
+                            d_second = (
+                                energies[m]
+                                - energies[k]
+                                + signs[second] * frequencies[second]
+                            )
+                            if abs(d_first) >= _EDGE_GHZ:
+                                denominator = d_first
+                            elif abs(d_second) >= _EDGE_GHZ:
+                                # Reverse the second leg to the same endpoint
+                                # convention as the first-leg denominator.
+                                denominator = -d_second
+                            else:
+                                # The retained joint RHS already has this path.
+                                continue
+                            coupling += (
+                                operators[first, i, m]
+                                * operators[second, m, k]
+                                / denominator
+                            )
+                    strength = (2 * abs(coupling)) ** 2
+                    delta = energies[i] - energies[k] + combination
+                    if strength > 0:
+                        transfer = min(
+                            strength / (strength + delta**2), strength * duration**2
+                        )
+                        maximum = max(maximum, transfer)
+    return maximum
+
+
+@njit(nogil=True, cache=True)
 def _coefficients(models, ports, frequencies, tones):
     """Build retained edges and compact per-tone diagonal from the same window."""
     size = models.energies.shape[1]
@@ -113,7 +180,7 @@ def _coefficients(models, ports, frequencies, tones):
                     gap = models.energies[key, i] - models.energies[key, j]
                     x, y = models.x[key, port, i, j], models.y[key, port, i, j]
                     for sign in (1, -1):
-                        coefficient = (x - sign * 1j * y) / 2
+                        coefficient = _fourier_coefficient(x, y, sign)
                         detuning = gap + sign * frequency
                         if abs(detuning) < _EDGE_GHZ:
                             if sign == 1:
@@ -203,12 +270,23 @@ def _run(data, row_models, states, controls):
     for index in range(len(rows)):
         row, model = rows[index], indices[index]
         context = _Context(models, segments, positive, negative, diagonal, row, model)
+        constant = segments.tones[row] == 2
+        for tone in range(segments.tones[row]):
+            env = segments.envelope[row, tone]
+            constant = (
+                constant
+                and segments.sample_offsets[env] == segments.sample_offsets[env + 1]
+            )
+        ceiling = _CONSTANT_STEP_NS if constant else _STEP_NS
+        row_controls = Tolerances(
+            controls.rtol, controls.atol, min(controls.max_step, ceiling)
+        )
         result = integrate(
             _rhs,
             context,
             states[index].copy().ravel(),
             float(segments.duration[row]),
-            controls,
+            row_controls,
             0.1,
         ).reshape(states.shape[1:])
         phases = np.exp(-2j * np.pi * models.energies[model] * segments.duration[row])
@@ -303,7 +381,8 @@ def admit_rows(
         ):
             continue
         envs = table.tone_envelope[row, :count]
-        if all(table.envelopes[e].kind == "constant" for e in envs) or not all(
+        constant = all(table.envelopes[e].kind == "constant" for e in envs)
+        if (constant and count != 2) or not all(
             _smooth(table, int(e), context) for e in envs
         ):
             continue
@@ -313,6 +392,18 @@ def admit_rows(
         ):
             continue
         model = context.source.model(tuple(int(v) for v in table.level[row]))
+        if constant:
+            ports = table.tone_port[row, :count]
+            probability = _combination_probability(
+                model.energies_ghz,
+                np.array([model.drives[p].in_phase_ghz for p in ports]),
+                np.array([model.drives[p].quadrature_ghz for p in ports]),
+                table.tone_frequency_ghz[row, :count],
+                np.abs(table.tone_amplitude[row, :count]) * bounds.peaks[envs],
+                table.duration_ns[row],
+            )
+            if probability > _MAX_COMBINATION_TRANSFER:
+                continue
         ratio = 0.0
         phase = 0.0
         for tone, env in enumerate(envs):
@@ -351,7 +442,7 @@ def retained_edges(
     """
     drive = model.drives[port]
     gaps = model.energies_ghz[:, None] - model.energies_ghz[None, :]
-    coupling = (drive.in_phase_ghz - 1j * drive.quadrature_ghz) / 2
+    coupling = _fourier_coefficient(drive.in_phase_ghz, drive.quadrature_ghz, 1)
     return coupling * (np.abs(gaps + frequency) < _EDGE_GHZ)
 
 
@@ -381,15 +472,33 @@ def rwa_coefficients(
 
 
 class MultitoneRWAKernel:
-    """Approximate C5 family, revision joint-rwa-v2; never a DOP853 frame flag.
+    """Approximate C5 family, revision joint-rwa-v3; never a DOP853 frame flag.
 
-    Admission requires >=2 tones, at least one sampled envelope, fixed flux,
+    Admission requires >=2 tones with a sampled envelope, or exactly two
+    constant envelopes, fixed flux,
     real envelopes with peak-normalized slope <=0.025/ns and curvature
     <=0.003/ns², each |f|>=0.05 GHz, pairwise ||f_i|-|f_j||>=0.1 GHz,
     sum of peak |gain|*(||X||₂+||Y||₂)/|f| <=0.25, and cumulative
     counter-rotating phase proxy 2π*duration*sum((peak*gain*||V_ret||₂)²/|f|)
     <=0.06 rad. Budgets below
     1e-3 decline: this calibrated approximation is not a tight-error solver.
+    Dual constant rows also require an omitted-path combination transfer proxy
+    <=5.8e-3 for every signed sum/difference and dressed level pair.
+    Calibration uses a 5x5 grid, each carrier within 10 MHz of the integer
+    +84/-52 MHz counterexample, against lab budget 1e-7. Among points with
+    population error >0.1, the smallest P was 0.0116496. The threshold is
+    half that value, rounded down. Original mux scans lose no extra rows. Full dressed
+    gaps include conditional ZZ. For each two-step path, both tone orders use
+    the shared Fourier coefficient builder with abs(gain)*envelope peak. Paths
+    with both edges retained already evolve in the joint RHS and are excluded.
+    Otherwise divide the coefficient product by the first omitted detuning
+    (or the reversed second detuning when only that edge is omitted), and sum
+    over intermediates and tone orders to obtain g2 in GHz. With dressed
+    detuning delta, P=min((2*abs(g2))²/((2*abs(g2))²+delta²),
+    (2*abs(g2)*duration_ns)²). The finite-time cap avoids spurious rejection
+    at zero detuning for vanishing coupling. An empty retained graph is NOT
+    evidence of safety. This calibrated estimate is not an error certificate.
+    Constant rows use a 16 ns adaptive ceiling; sampled rows retain 4 ns.
     No density reduction, dissipator change, clipping or normalization occurs.
     """
 
@@ -514,7 +623,8 @@ class MultitoneRWAKernel:
         in a row-local interaction picture, then restores Schrödinger coordinates.
         theta is the phase at row start; offsets preserve pulse-local envelopes.
         Adaptive integration uses the ordinary budget tolerance and 0.1 ns seed,
-        capped at 4 ns rather than sampled knots. This is not a certified bound
+        capped at 16 ns for dual constant envelopes and 4 ns otherwise,
+        rather than sampled knots. This is not a certified bound
         on omitted edges or accumulated RB fidelity. Engine owns inter-row basis
         changes and chronology. Invalid payload, plan or shapes raise ValueError;
         numerical integration failures propagate without a retry.
@@ -537,6 +647,6 @@ class MultitoneRWAKernel:
             ),
             (rows, key_index),
             states,
-            Tolerances(controls.rtol, controls.atol, min(controls.max_step, _STEP_NS)),
+            controls,
         )
         return np.zeros(len(rows), dtype=np.bool_)

@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-19, WorkPlan ownership, joint-basis multi-tone RWA, simultaneous gate reuse with shared virtual shifts, unified resident/pending budget, long-period playback and guarded CF4 carrier anchors
+**Last updated:** 2026-10-19, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives, simultaneous gate reuse, unified resident/pending budget, long-period playback and guarded CF4 carrier anchors
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -59,7 +59,7 @@ tries the next candidate in the following graph.
 | One constant tone, unshared driven input, duration at most 10 us | `floquet_period` → `dyson` → `t6`. |
 | Other single constant tone | `dyson` → `floquet_period` → `t6`. Dyson checks perturbative ratios and an analytic B2 bound, except that certified no-drive prefixes need no B2 check. Source and shared-prefix densities supply known inputs; other later rows use an arbitrary-input bound. |
 | One shaped tone | Try `shaped_sambe` on every eligible row, without a reuse threshold. Remaining rows try `gate_cache`, `period_table` and `dop853` in acquire-wide amortized-cost order. |
-| Two constant tones | Compare acquire-wide DOP853 and Floquet costs before either guard. Try the cheaper family first, then the other if rejected. |
+| Two constant tones | Try `multitone_rwa` first. Rejected rows retain the acquire-wide DOP853/Floquet cost order, cheaper family first. |
 | Shaped two-tone or three-or-more-tone row | `multitone_gate` → `multitone_rwa` → `dop853`. RWA admits only fixed-flux, separated weak carriers with smooth real envelopes and at least one sampled envelope. Other rows retain the full-drive fallback. |
 
 `t4` and `t6` are terminal in their domains. They must accept every dispatched
@@ -80,7 +80,7 @@ application and certificates that require their intermediate data.
 | `period_table` and `shaped_sambe` | Ordinary period tables integrate frozen-envelope Hilbert periods; shaped Sambe uses finite-Hilbert-Fourier subperiods for smooth real or complex envelopes. Complex playback interpolates magnitude and adds the envelope angle to the advancing carrier phase. It uses a tighter envelope-motion bound; unresolved ramps and failed certificates retain fallback. Each family owns its guards and build. They share period playback and direct fractional tails. |
 | `floquet` | The guard builds a Stark frame and returns row admissions. Passing k=0 omission/convergence bounds selects modal second-order Dyson when probe limits pass, otherwise periodic k=0 propagation. After k=0 omission rejection, a passing calibrated finite-Fourier certificate selects retained-sideband integration. A cached sideband frame extends to missing probe bins without rebuilding the frame or existing certificates. Dispatch merges current-row admissions into one family plan. Apply does not repeat admission or construct sparse equations. |
 | `multitone_gate` | Complete-inventory canonical reuse of at least 20 rows, shared RWA admission, coextensive real sampled support, compatible dressed phase charges (or explicitly admitted weak-cycle pruning), and a four-way secular split proxy at most 0.01. Builds four joint Hilbert propagators using the same `RWACoefficients.diagonal` window-excluded shifts and `interaction_hamiltonian` as ordinary RWA, plays D-U-D, and restores the lab/DC endpoint frame. Rejection retains ordinary RWA. |
-| `multitone_rwa` | Revision `joint-rwa-v2` retains joint-basis Fourier edges with `abs(Ei-Ej±f) < 0.05 GHz`, obtains window-excluded single-tone second-order shifts from `RWACoefficients.diagonal` and assembles them through `interaction_hamiltonian`, and integrates every tone in a row-local interaction picture with a 4 ns adaptive ceiling. It restores Schrödinger coordinates at every endpoint. It keeps joint rates, dephasing and state ordering. This calibrated approximation does not certify exact RB fidelity. |
+| `multitone_rwa` | Revision `joint-rwa-v3` retains joint-basis Fourier edges with `abs(Ei-Ej±f) < 0.05 GHz`, obtains window-excluded single-tone second-order shifts from `RWACoefficients.diagonal` and assembles them through `interaction_hamiltonian`, and integrates every tone in a row-local interaction picture with a 16 ns adaptive ceiling for dual constant rows and 4 ns otherwise. Dual constant admission also checks omitted two-carrier sum/difference paths. It restores Schrödinger coordinates at every endpoint. It keeps joint rates, dephasing and state ordering. This calibrated approximation does not certify exact RB fidelity. |
 | `dop853` and `flux_dop853` | Dispatch resolves complete chronological timeline routing, then assigns chain IDs to adjacent touching rows of the same direct family. Ordinary DOP853 uses the interaction picture only for independent, single-tone, nonzero-gain rows. Chains and other ordinary rows use the lab frame. Flux DOP853 has its own chain plan. |
 
 For the same whole source, budget and Stark key, moving a probe window reuses
@@ -117,8 +117,8 @@ Multi-tone RWA admission is explicit in
 Envelopes are real. Their piecewise-linear slopes divided by peak magnitude
 are at most 0.025/ns. Differences between adjacent slopes divided by their
 midpoint spacing and peak magnitude are at most 0.003/ns². Zero envelopes and
-constant companion envelopes pass the smoothness check. At least one envelope
-must be sampled. Continuous flux must be constant over the complete row.
+constant companion envelopes pass the smoothness check. Either at least one
+envelope is sampled, or the row has exactly two constant envelopes. Continuous flux must be constant over the complete row.
 Budgets below 1e-3 decline this approximation. Admission also requires
 `2*pi*duration*sum((peak*gain*norm(V_ret,2))**2/abs(f)) <= 0.06 rad`, where
 `V_ret = (X-iY)/2` after the positive-frequency edge mask. This row-local
@@ -127,6 +127,29 @@ strength/carrier ratios; it does not bound accumulated sequence error. In the in
 had proxy 0.063 rad and population error above 1e-2. The 0.06 rad limit
 returns those high-gain rows to lab DOP853. This proxy is calibrated, not a
 rigorous Stark-shift bound. Its limit enters the policy identity and keys.
+
+Dual constant rows also check every signed carrier sum and difference against
+all dressed energy gaps, which include conditional ZZ shifts. The shared Fourier
+coefficient builder supplies both tone orders of each two-step path. Admission
+excludes paths with both edges retained because the joint RHS already evolves
+them. Every remaining path divides its coefficient product by an omitted-edge
+detuning, then sums over intermediate states and tone orders to estimate `g2`.
+The first omitted detuning supplies the denominator. When only the second edge
+is omitted, its denominator uses the reversed endpoint convention.
+Coefficients include `abs(gain)*envelope_peak` for each tone. With dressed
+detuning `delta`, the transfer proxy is
+`P = min((2*abs(g2))**2 / ((2*abs(g2))**2 + delta**2), (2*abs(g2)*duration_ns)**2)`.
+Any `P > 5.8e-3` rejects the row. This threshold halves the smallest
+proxy with population error above 0.1 on a 25-point strict-lab calibration
+around the integer +84/-52 MHz combination resonance. Zero coupling contributes zero transfer. The
+finite-time cap handles vanishing detuning without dividing by it. This proxy
+is a calibrated omission estimate, not a certificate. An empty retained graph
+does not bypass it. Shaped rows do not use this additional check.
+
+Dual constant integration retains the adaptive solver and its error estimator,
+with a 16 ns ceiling. Constant envelopes have no sampled internal features.
+The larger ceiling reduces work after the fast carrier phase has been removed;
+it does not relax the 0.06 rad phase limit or drop the joint dissipator.
 
 The 50 MHz edge window and 4 ns ceiling come from simultaneous 128–512 ns
 Gaussian gate measurements on a 16-level joint model. The prototype's maximum
