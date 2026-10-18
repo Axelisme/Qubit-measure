@@ -1,6 +1,11 @@
 """Qt-free input editing for Pydantic forms; no host policy or hardware control."""
 
-from .commands import FormCommandContext, FormCommandResult, FormCommandSnapshot
+from .commands import (
+    FormCommandContext,
+    FormCommandResult,
+    FormCommandSnapshot,
+    FormConversionResult,
+)
 from .defaults import static_defaults
 from .description import (
     FormCommandDescription,
@@ -14,6 +19,7 @@ from .model import (
     Display,
     FormChange,
     FormCommandError,
+    FormConversionError,
     FormEnv,
     FormErrors,
     FormInput,
@@ -25,6 +31,7 @@ from .model import (
     FormValue,
     FormWritePath,
     InputCommand,
+    InputConverter,
     InputPolicy,
     WriteRejected,
     field_error,

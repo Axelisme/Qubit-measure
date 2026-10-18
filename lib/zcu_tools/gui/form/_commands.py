@@ -146,7 +146,7 @@ def prepare_command[F: FormModel](
 ) -> FormInput[F]:
     """Run a declared command without state access, then admit its local result."""
     data = input.data
-    target = resolve(input.model, data, path, env)
+    target = resolve(input.model, data, path, env, input.selections)
     option = (
         target.options[target.selected]
         if target.options is not None and target.selected is not None
@@ -159,6 +159,24 @@ def prepare_command[F: FormModel](
     command = next((item for item in commands if item.name == name), None)
     if command is None:
         raise FormCommandError(f"Unavailable field command {name!r} at {path!r}")
+    snapshot, context = observation(input, target, env)
+    output = command.run(snapshot, context)
+    return install_field(input, target, output, env)
+
+
+def observation(
+    input: FormInput[FormModel],
+    target: Field,
+    env: FormEnv,
+) -> tuple[FormCommandSnapshot, FormCommandContext]:
+    """Observe one field with narrow evaluation, without executing a callable."""
+    data = input.data
+    path = target.path
+    option = (
+        target.options[target.selected]
+        if target.options is not None and target.selected is not None
+        else None
+    )
     snapshot = FormCommandSnapshot(
         readonly_input(option.value if option is not None else None),
         selected(target.info, target.level.data.get(target.name)),
@@ -175,7 +193,18 @@ def prepare_command[F: FormModel](
                 f"Cannot convert participating input {relative!r}: {exc}"
             ) from exc
 
-    output = command.run(snapshot, FormCommandContext(evaluate))
+    return snapshot, FormCommandContext(evaluate)
+
+
+def install_field[F: FormModel](
+    input: FormInput[F],
+    target: Field,
+    output: FormCommandResult,
+    env: FormEnv,
+) -> FormInput[F]:
+    """Admit a complete command/converter replacement at its mounted path."""
+    data = input.data
+    path = target.path
     try:
         replacement = _replacement(target, output)
     except ValueError as exc:
@@ -188,4 +217,9 @@ def prepare_command[F: FormModel](
         parent = child
     parent[path[-1]] = replacement
     check_sources(input.model, data, env, validate_paths=True)
-    return FormInput(input.model, data)
+    selections = {
+        key: value
+        for key, value in input.selections.items()
+        if key[: len(path)] != path
+    }
+    return FormInput(input.model, data, selections=selections)

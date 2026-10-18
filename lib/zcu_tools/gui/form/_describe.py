@@ -209,6 +209,7 @@ def _metadata(
         fixed_value=copy_json(fixed_value),
         constraints=_constraints(target),
         selector=display.selector,
+        branch=target.branch_option.value if target.branch_option is not None else None,
         commands=tuple(
             FormCommandDescription(
                 item.name,
@@ -253,6 +254,7 @@ def describe(
     data: Mapping[str, JsonValue],
     path: FormWritePath,
     env: FormEnv,
+    selections: Mapping[FormWritePath, JsonValue] | None = None,
 ) -> FormDescription:
     """Return target and one layer, resolving only active model ancestry.
 
@@ -264,9 +266,9 @@ def describe(
     tags = _description_tags((model,))
     if not path:
         return FormDescription(
-            path, None, _children(root_level(model, data, env), tags)
+            path, None, _children(root_level(model, data, env, selections), tags)
         )
-    target = resolve(model, data, path, env)
+    target = resolve(model, data, path, env, selections)
     metadata = describe_field(target, roots=(model,))
     level = target.children(env)
     if level is None:

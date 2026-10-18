@@ -320,6 +320,7 @@ class FieldRow:
         self._local: LocalText | None = None
         self._error = ""
         self.widget = QWidget(parent)
+        self.widget.setObjectName(self._name("row"))
         # Installed on this row's dropdowns and checkboxes; display sets it.
         self._block = _UserInputBlock(self.widget)
         self.layout = QVBoxLayout(self.widget)

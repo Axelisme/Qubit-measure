@@ -15,6 +15,7 @@ from qtpy.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
 from zcu_tools.gui.form import (
     FormCommandError,
+    FormConversionError,
     FormEnv,
     FormErrors,
     FormFieldDescription,
@@ -535,7 +536,7 @@ class FormEditor[F: FormModel](QWidget):
                 row.widget.show()
             # The new-row branch always assigns row.
             assert row is not None
-            if row.field.selected != field.selected:
+            if row.field.branch != field.branch:
                 child = level.children.pop(field.path, None)
                 if child is not None:
                     self._clear_level(child)
@@ -588,15 +589,16 @@ class FormEditor[F: FormModel](QWidget):
         state = self._require_state()
         publication = self._publication_count
         self._local.pop(path, None)
-        if self._host_write is None:
-            state.write(batch, self._require_env())
-        else:
-            try:
+        try:
+            if self._host_write is None:
+                state.write(batch, self._require_env())
+            else:
                 self._host_write(batch)
-            except WriteRejected as exc:
-                # The host installed nothing: keep this input local, like
-                # unparseable text; the publish below redraws state around it.
-                self._local[path] = self._rows[path].rejected_input(exc.message)
+        except (WriteRejected, FormConversionError) as exc:
+            # Both routes installed nothing. Redraw the committed selector,
+            # retaining unrelated local text; never retry a refused conversion.
+            message = exc.message if isinstance(exc, WriteRejected) else str(exc)
+            self._local[path] = self._rows[path].rejected_input(message)
         # A changed write already rendered synchronously in the subscriber.
         # Unchanged/rejected writes still need to update view-local errors.
         if self._publication_count == publication:

@@ -81,6 +81,19 @@ class FormCommandContext:
 
 
 @dataclass(frozen=True)
+class FormConversionResult:
+    """Complete new child branch and raw input for the caller's selection.
+
+    structure is an annotation-admitted model (None for a leaf/null). input is
+    the complete authored subtree, including structural tags. No defaults are
+    supplied by Core; missing children stay missing and invalid values survive.
+    """
+
+    structure: type[BaseModel] | None
+    input: JsonValue
+
+
+@dataclass(frozen=True)
 class FormCommandResult:
     """Complete replacement for the mounted field, never a parent write batch.
 

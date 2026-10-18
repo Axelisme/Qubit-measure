@@ -3,6 +3,7 @@
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import replace
+from functools import partial
 from types import MappingProxyType, new_class
 from typing import Annotated, Literal
 
@@ -34,6 +35,7 @@ from zcu_tools.gui.form import (
     FormModel,
     FormState,
     FormWritePath,
+    InputConverter,
     Option,
     static_defaults,
 )
@@ -204,6 +206,14 @@ class _SpecSection:
         }
 
 
+def _module_converters(
+    fields: Mapping[str, ModuleField],
+    _cls: type[FormModel],
+    env: FormEnv,
+) -> Mapping[tuple[str | int, ...], InputConverter]:
+    return {(name,): field.converter(env) for name, field in fields.items()}
+
+
 class _Section:
     """A derived section owns shape conversion, defaults and field-path errors."""
 
@@ -278,6 +288,7 @@ class _Section:
             return result
 
         namespace.update(
+            converters=classmethod(partial(_module_converters, section.modules)),
             __annotations__=annotations,
             defaults=classmethod(defaults),
             choices=classmethod(choices),

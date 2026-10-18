@@ -41,6 +41,7 @@ from zcu_tools.gui.form import (
     FormInput,
     FormModel,
     FormState,
+    InputConverter,
     Option,
     OptionCommand,
     static_defaults,
@@ -48,6 +49,7 @@ from zcu_tools.gui.form import (
 from zcu_tools.program.v2.modules import AbsModuleCfg as NativeModuleBase
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleFactory
 
+from ._converters import module_converter
 from ._display import field_display
 from ._seeds import (
     complete_input,
@@ -445,6 +447,17 @@ def editable_spec(
         del env
         return supported_input(cls, complete_input(cls, {}))
 
+    def converters(
+        cls: type[FormModel],
+        env: FormEnv,
+    ) -> Mapping[tuple[str | int, ...], InputConverter]:
+        return {
+            (name,): module_converter(info.annotation, env)
+            for name, info in cls.model_fields.items()
+            if inline_wrapper(info.annotation) is not None
+        }
+
+    namespace["converters"] = classmethod(converters)
     namespace["options"] = classmethod(options)
     namespace["defaults"] = classmethod(defaults)
     bases = (model,) if issubclass(model, FormModel) else (FormModel, model)
@@ -646,11 +659,15 @@ class ModuleField:
             raise TypeError("Module value model must implement FormModel")
         self.value_model = value_model
 
+    def converter(self, env: FormEnv) -> InputConverter:
+        """Bind this field's single converter to a fixed host capture."""
+        return module_converter(self.annotation, env)
+
     def options(self, env: FormEnv) -> tuple[Option, ...]:
         """Declare nullable/key/kind selections in the existing module input shape.
 
         Keys are limited to this field's persistent families in the fixed env.
-        Inline values select only kind tags; core supplies fresh branch defaults.
+        Inline values select kind tags; this field's converter supplies input.
         Fields reuse a class per inline wrapper/kind for this field's lifetime,
         describe the selected inline wrapper and omit its structural tags.
         Empty kinds have no editable content and do not get an Inline selection.

@@ -20,6 +20,7 @@ from .model import (
     FormPathError,
     FormWritePath,
     InputCommand,
+    InputConverter,
 )
 from .options import Option
 
@@ -129,6 +130,8 @@ class Level:
     options: Mapping[FormPath, tuple[Option, ...]]
     pinned: Mapping[str, JsonValue] = field(default_factory=dict)
     variants: tuple[type[BaseModel], ...] = ()
+    selections: Mapping[FormWritePath, JsonValue] = field(default_factory=dict)
+    converters: Mapping[FormPath, InputConverter] = field(default_factory=dict)
 
     def field(self, name: str) -> Field:
         """Resolve a declared direct field; undeclared names raise KeyError."""
@@ -141,7 +144,10 @@ class Level:
             (
                 index
                 for index, option in enumerate(options or ())
-                if name in self.data and option.matches(self.data[name])
+                if (name in self.data or (*self.prefix, name) in self.selections)
+                and option.matches(
+                    self.selections.get((*self.prefix, name), self.data.get(name))
+                )
             ),
             None,
         )
@@ -163,6 +169,27 @@ class Field:
     def path(self) -> FormWritePath:
         """Full model-field path, never a display alias."""
         return (*self.level.prefix, self.name)
+
+    @property
+    def converter(self) -> InputConverter | None:
+        """One effective local converter; hooks override Annotated metadata."""
+        return self.level.converters.get((self.name,)) or next(
+            (item for item in self.info.metadata if isinstance(item, InputConverter)),
+            None,
+        )
+
+    @property
+    def branch_option(self) -> Option | None:
+        """Option describing raw children, independently of current selection."""
+        return next(
+            (
+                option
+                for option in self.options or ()
+                if self.name in self.level.data
+                and option.matches(self.level.data[self.name])
+            ),
+            None,
+        )
 
     @property
     def input_commands(self) -> tuple[InputCommand, ...]:
@@ -235,14 +262,15 @@ class Field:
         """Return the structurally reachable child model without running hooks.
 
         Ordinary missing/invalid models retain their declared shape. Nullable
-        models require an object; selectors require a matching option with
-        fields. A reachable model may have no displayed fields after expansion.
+        models require an object; selectors use the raw child branch's matching
+        option fields, independently of an overridden selection. A reachable model may have no displayed fields after expansion.
         """
         models = model_types(self.info.annotation)
         if not models:
             return None
         if self.options is not None:
-            return None if self.selected is None else self.options[self.selected].fields
+            option = self.branch_option
+            return None if option is None else option.fields
         if type(None) in alternatives(self.info.annotation) and not isinstance(
             self.level.data.get(self.name), dict
         ):
@@ -261,8 +289,8 @@ class Field:
             return None
         value = self.level.data.get(self.name)
         pinned = self.level.pinned.get(self.name)
-        if self.options is not None and self.selected is not None:
-            pinned = self.options[self.selected].value
+        if self.branch_option is not None:
+            pinned = self.branch_option.value
         choices = {
             path[1:]: values
             for path, values in self.level.choices.items()
@@ -281,6 +309,15 @@ class Field:
             {**options, **_local_options(model, env)},
             pinned if isinstance(pinned, dict) else {},
             model_types(self.info.annotation),
+            self.level.selections,
+            {
+                **{
+                    path[1:]: value
+                    for path, value in self.level.converters.items()
+                    if len(path) > 1 and path[0] == self.name
+                },
+                **_local_converters(model, env),
+            },
         )
 
 
@@ -290,8 +327,26 @@ def validate_path(path: object) -> None:
         raise ValueError(f"Expected a model-field tuple: {path!r}")
 
 
+def _local_converters(
+    model: type[BaseModel], env: FormEnv
+) -> Mapping[FormPath, InputConverter]:
+    metadata = {
+        (name,): item
+        for name, info in model.model_fields.items()
+        for item in info.metadata
+        if isinstance(item, InputConverter)
+    }
+    return {
+        **metadata,
+        **(model.converters(env) if issubclass(model, FormModel) else {}),
+    }
+
+
 def root_level(
-    model: type[FormModel], data: Mapping[str, JsonValue], env: FormEnv
+    model: type[FormModel],
+    data: Mapping[str, JsonValue],
+    env: FormEnv,
+    selections: Mapping[FormWritePath, JsonValue] | None = None,
 ) -> Level:
     """Read only root hooks; nested declarations are read when reached."""
     return Level(
@@ -301,6 +356,8 @@ def root_level(
         local_choices(model, env),
         _local_options(model, env),
         variants=(model,),
+        selections={} if selections is None else selections,
+        converters=_local_converters(model, env),
     )
 
 
@@ -309,6 +366,7 @@ def resolve(
     data: Mapping[str, JsonValue],
     path: FormWritePath,
     env: FormEnv,
+    selections: Mapping[FormWritePath, JsonValue] | None = None,
 ) -> Field:
     """Resolve one nonroot canonical path through active children only.
 
@@ -319,7 +377,7 @@ def resolve(
     validate_path(path)
     if not path:
         raise ValueError(f"Expected a nonroot model-field tuple: {path!r}")
-    level = root_level(model, data, env)
+    level = root_level(model, data, env, selections)
     for index, name in enumerate(path):
         if name not in level.model.model_fields:
             raise FormPathError(path, f"Unknown form field path: {path!r}")

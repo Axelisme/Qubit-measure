@@ -29,6 +29,7 @@ class FieldView:
     can_expand is the core's active child capability, controlling fold titles.
     expression permits explicit Expr input. options/selected are the core's
     detached selector list and matching index (None for no list/no match).
+    branch identifies the actual child structure independently of selection.
     raw/present describe authored input; a missing fixed leaf displays its
     fixed value without writing it. value/has_value identify a preview leaf.
     decimals rounds display only. fixed marks a declaration-fixed scalar or
@@ -49,6 +50,7 @@ class FieldView:
     expression: bool
     options: tuple[FormOptionDescription, ...] | None
     selected: int | None
+    branch: JsonValue
     raw: JsonValue
     present: bool
     value: FormValue
@@ -120,6 +122,7 @@ def project_field(
         expression=field.expression and not field.fixed,
         options=options,
         selected=field.selected,
+        branch=field.branch,
         raw=current if present or not field.fixed else field.fixed_value,
         present=present,
         value=preview.values.get(field.path),

@@ -226,7 +226,7 @@ def _resolve(
     validate_path(path)
     if not path:
         raise FormPathError(path, "Root is not an editable field")
-    level = root_level(input.model, input.data, env)
+    level = root_level(input.model, input.data, env, input.selections)
     source: LogicalSource | None = None
     for index, name in enumerate(path):
         if name not in level.model.model_fields:
@@ -428,7 +428,7 @@ def read(
     validate_path(path)
     root = input.model
     if not path:
-        level = root_level(input.model, input.data, env)
+        level = root_level(input.model, input.data, env, input.selections)
         value, errors = _ordinary_level(level, env)
         observed = LogicalFieldObservation(
             FormDescription((), None, _children(level, (), root)),
@@ -527,7 +527,10 @@ def _candidate(
         raise LogicalEditError(
             str(exc), reason_code="form_source", path=path, edit_index=index
         ) from exc
-    return LogicalEditCandidate(candidate, candidate.data != input.data)
+    return LogicalEditCandidate(
+        candidate,
+        candidate.data != input.data or candidate.selections != input.selections,
+    )
 
 
 def edits(
@@ -608,7 +611,9 @@ def select(
     description = _metadata(position, input.model)
     selector = _selector(position.target, marker, env)
     if action == "copy" and selector.mode == "inline":
-        return LogicalEditCandidate(FormInput(input.model, input.data), False)
+        return LogicalEditCandidate(
+            FormInput(input.model, input.data, selections=input.selections), False
+        )
     if description.fixed or (action == "library" and description.selection_fixed):
         raise LogicalEditError(
             "Declaration forbids this selection",
@@ -665,7 +670,7 @@ def logical_errors(
         return None
     result: dict[FormPath, str] = {}
     for canonical, message in errors.messages.items():
-        level = root_level(input.model, input.data, env)
+        level = root_level(input.model, input.data, env, input.selections)
         logical: list[str | int] = []
         index = 0
         while index < len(canonical):

@@ -1,6 +1,6 @@
 # gui/form — Qt-free Pydantic input editing
 
-**Last updated:** 2026-10-18，欄位 scoped command 與唯讀求值契約
+**Last updated:** 2026-10-18，單一欄位 converter 與 selection／branch 分離
 
 `FormState.describe(path, env)` 直接從 model 宣告與目前 input 回傳 `FormDescription`，不產生 JSON Schema。Root path 是 `()`，其他位置用 model-field tuple。`target` 是指定欄位的 metadata，root 則為 None；`children` 只列下一層 metadata。每個 child 保留完整 path，不攜帶 descendants。選中選項只有一個非 nullable、沒有 options 的普通 model wrapper 時，children 攤平一層，但 wrapper 的完整 path 仍可查詢。
 
@@ -10,17 +10,19 @@
 
 Description 的 options 只列 detached value、label 與 command name／label。`selected` 是依 JSON 型別與 value 葉匹配的第一項 index，missing／no-match 為 None，不猜第一項。`options=None` 表示沒有 selector，空 tuple 則保留顯式空清單。Describe 與 `run_command` 共用 active ancestry、最深 local 覆蓋與選項解析，不查 inactive branches 的 hooks。普通缺值 model 可按型別列欄位；停用 nullable model 與 no-match option 只回 target。Unknown、whole-leaf descendant 與 inactive descendant 的 path 立即 raise `FormPathError(ValueError)`，其 `path` 欄位保留完整請求路徑。作者宣告、nonfinite 與其他非 path 失敗維持原例外類別。Describe 不求值、不套 defaults、不寫 input/base，也不抓取來源；宣告 hooks 只讀呼叫端固定 env。有限的 leaf constraints 是顯示提示，驗證仍由 result／preview 負責。
 
-`static_defaults(model)` 接受普通 Pydantic BaseModel 或持久 Spec，產生 detached input JSON。必填欄位與 None 預設保持缺席，讓 before validator 能從其他欄位推導值。Default factory 每次呼叫重新執行。FormModel defaults 與普通 model 的分支切換共用這個入口。
+`static_defaults(model)` 接受普通 Pydantic BaseModel 或持久 Spec，產生 detached input JSON。必填欄位與 None 預設保持缺席，讓 before validator 能從其他欄位推導值。Default factory 每次呼叫重新執行。FormModel 初值與宣告者的 converter 可使用這個入口。
 
-FormModel 的實例只承載普通值。類別上的 defaults、choices 與 options 提供輸入契約。FormInput 保存未填、null、expression 與 complex tags；FormState 擁有 draft/base、batch write、branch switch、結果、差異與 compatible restore，不擁有 Engine revision 或提交 policy。
+FormModel 的實例只承載普通值。類別上的 defaults、choices、options 與 converters 提供輸入契約。FormInput 保存未填、null、expression 與 complex tags；FormState 擁有 draft/base、batch write、branch switch、結果、差異與 compatible restore，不擁有 Engine revision 或提交 policy。
 
 Expression 只用於 int、float、complex 與 str 文字欄位，只有顯式 `{"expr": str}` 求值。Literal、Enum、bool、宣告 choices 的 leaf 與 library key 沒有 expression 能力。Describe 回 `expression=False`，result 拒絕 envelope 且不求值，compatible restore 丟棄它。文字與選項混合的 union 沒有對應控制項，describe、求值與 restore 會 raise 帶欄位路徑的 ValueError。Editor 只看 description 的 expression flag。普通字串包含 `$` 前綴仍為 literal。求值共用 evaluate_scalar_expr，再遵守 Pydantic 約束；missing／unbound alias 指名失敗，不以預設值代替。Input 與 compatible restore 保留 expression 原文。
 
-Defaults hook 可以用 `{"expr": ...}` 宣告 scalar 初始值的來源，例如 `$flux_dev` 或 point path。`default_input` 與分支切換的 defaults 由 core 用同一個 env 當場求值，input 只存算好的 direct 值；來源之後改變，要重新建立 default input 才反映。Expression 算不出來，或值讓 result 在該欄位報錯時，欄位留空：required 欄位只顯示 `Field required`，有 Pydantic 靜態預設的欄位驗證時用那個預設。來源本身不可用的錯誤照常拋出。使用者或 MCP 寫入的 expression 保留原文。
+Defaults hook 可以用 `{"expr": ...}` 宣告 scalar 初始值的來源，例如 `$flux_dev` 或 point path。`default_input` 由 core 用同一個 env 當場求值，input 只存算好的 direct 值；來源之後改變，要重新建立 default input 才反映。Expression 算不出來，或值讓 result 在該欄位報錯時，欄位留空：required 欄位只顯示 `Field required`，有 Pydantic 靜態預設的欄位驗證時用那個預設。來源本身不可用的錯誤照常拋出。使用者或 MCP 寫入的 expression 保留原文。
 
 `Option` 宣告 label、部分 JSON input value、可選 BaseModel fields 與 commands。`options(env)` 是宣告 hook，consumer 讀 description 的 options 有效清單。Core 自動產生 Literal、Enum、choices 與 tagged union 選項。最深 local 宣告優先，包含表示無選項的空清單，非重疊 parent 宣告保留。Bool 與一般 nullable model 照舊用 checkbox 與 Enabled。Fields 只在 describe 該 active path 時列直接 children，不顯示 value 已決定的 tag。比對只看 value 的每個葉，JSON 型別與值相同即符合，第一項匹配優先。無匹配時 consumer 顯示目前值加 `(missing)`，不寫 state。
 
-Union 位置的 partial object 是選分支加寫入內容，與 tag 葉切換共用新分支 defaults。不繼承舊值，defaults 只收到固定 env。非換分支的 leaf write 與 compatible restore 規則不變。
+`InputConverter` 是一個欄位的單一 converter，處理全部目標選項。可在 Annotated metadata 或 `FormModel.converters(env)` 宣告。Local metadata 覆蓋祖先宣告，同一 model 的 hook 再覆蓋自身 metadata。Callable 接收 readonly snapshot、目標 selection 與局部 evaluate context，回 `FormConversionResult(structure, input)`。它與 command 共用原子 installer，Core 不補 defaults。
+
+沒有 converter 時，切換只改 selection，保留原有 branch 和 authored input。`FormInput.selections` 攜帶記憶體選項，`data` 保存實際 child input。`describe.selected` 顯示選項，`describe.branch` 標示實際子表單；兩者可以不同。Partial selector object 在轉換後套用明確提供的 children，tag 葉寫入也走同一個 converter。純讀不執行 converter。預期的缺來源、參與值求值及結構 admission 拒絕使用 `FormConversionError`，保留 cause。任意 callable ValueError 或 provider 故障不轉成正常拒絕。Compatible restore 的保存政策另由持久還原契約處理。
 
 明確指令用 `OptionCommand(name, label, run)` 或 `InputCommand` 宣告。前者只在目前第一個匹配選項提供指令，後者掛在欄位 metadata 或 active `FormModel.input_commands`。`FormState.run_command(path, name, env)` 只替換掛載欄位與 descendants，不允許葉命令修改 parent。Callable 接收 `FormCommandSnapshot` 和 `FormCommandContext`，回 `FormCommandResult(selection, structure, input)`。Snapshot 的 selection、結構與原始 input 深度唯讀。Context 的 evaluate 使用相對掛載欄位的 path，只求值已填寫的參與欄位，不補缺值。Core 檢查 annotation 允許的結構與作用範圍，再一次安裝與通知。普通值錯誤保存成 invalid draft。
 
@@ -34,7 +36,7 @@ Sweep 的四種數值 model、座標／採樣換算與 row command 宣告由 `gu
 
 Module／library 的 tagged input、literal key 與 family 政策由 `gui.form_adapter` 擁有。Core 只讀普通 annotation、`Option` 與 `InputPolicy`，不以領域 subclass 判定行為。`InputPolicy(expression=False)` 放在 field 的 Annotated metadata，關閉 describe、decode/result、defaults evaluation 與 compatible restore 的 expression 能力。True 不會替 Literal、enum、bool、choices 或混合 union 開啟原本不支援的能力。Write 仍保存普通 invalid draft，由 result 回報。
 
-Editor 與 MCP 讀同一份 description options，照 label 列選項，一次寫入 value，首次展開才 describe 選中項目的 children。它們不推論 union、ref 或 library 的呈現。普通 nullable model 仍用 Enabled，bool 仍用 checkbox。明確複製只經 `to_inline` 指令，使用 host 的 guarded command callback；一般選 Inline 只建立 fresh defaults。
+Editor 與 MCP 讀同一份 description options，照 label 列選項，一次寫入 value，首次展開才 describe 選中項目的 children。它們不推論 union、ref 或 library 的呈現。普通 nullable model 仍用 Enabled，bool 仍用 checkbox。明確複製只經 `to_inline` 指令，使用 host 的 guarded command callback；一般選 Inline 由 `form_adapter` 的集中 converter 決定繼承或新建 input。
 
 Scalar、整個 sequence 與整個 typed mapping 都是 leaf。普通 nested model 只編輯子欄位，一般可留空 model 區段仍用 Enabled 控制 object／null 啟停。Choices 使用 model-field leaf paths，驗證與 description 共用同一份當次選項。Parent 與 child 宣告同一 leaf 時，最深 nested FormModel 的 local choices 優先，包含空選項。非重疊的 parent 選項保持有效，重用同型 nested model 的欄位各自隔離。
 

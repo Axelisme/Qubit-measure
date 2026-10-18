@@ -15,7 +15,14 @@ from pydantic_core import PydanticCustomError
 
 from ._json import copy_json, copy_object, default_json, expr_text
 from .defaults import static_defaults
-from .model import FormEnv, FormModel, FormPath, FormWritePath, InputPolicy
+from .model import (
+    FormEnv,
+    FormModel,
+    FormPath,
+    FormWritePath,
+    InputConverter,
+    InputPolicy,
+)
 
 
 class StructureError(ValueError):
@@ -126,6 +133,15 @@ def check_form_shape(model: type[BaseModel]) -> None:
             if isinstance(member, type) and issubclass(member, BaseModel):
                 if member not in seen:
                     seen.add(member)
+                    for info in member.model_fields.values():
+                        if (
+                            sum(
+                                isinstance(item, InputConverter)
+                                for item in info.metadata
+                            )
+                            > 1
+                        ):
+                            raise ValueError("A field permits only one converter")
                     pending.extend(
                         (info.annotation, (*path, name))
                         for name, info in member.model_fields.items()
@@ -337,7 +353,7 @@ def _switch(
     data: dict[str, JsonValue],
     path: FormWritePath,
     value: JsonValue,
-    env: FormEnv,
+    _env: FormEnv,
 ) -> bool:
     if len(path) < 2:
         return False
@@ -360,13 +376,7 @@ def _switch(
         raise StructureError(
             f"Unknown discriminator at path {path!r}: {value!r}", path=path
         )
-    try:
-        new = _branch_defaults(branch, env)
-    except PydanticCustomError as exc:
-        from ._sources import prefix_error
-
-        raise prefix_error(exc, path[:-1]) from exc
-    new[tag_key] = value
+    new: dict[str, JsonValue] = {tag_key: value}
     parent[key] = new
     return True
 
@@ -378,7 +388,11 @@ def _select_object(
     value: JsonValue,
     env: FormEnv,
 ) -> bool:
-    """Apply a union-position partial object as fresh branch selection plus leaves."""
+    """Admit explicitly authored union content without generating defaults.
+
+    Declared option/tag selections are handled by _transitions first. This
+    structural fallback also admits invalid drafts outside dynamic option menus.
+    """
     if not isinstance(value, dict):
         return False
     parent, key, info = _field_at(model, data, path)
@@ -389,16 +403,12 @@ def _select_object(
     branch = selected(info, value if tag in value else old)
     if branch is None:
         raise StructureError(f"Missing or unknown discriminator at {path!r}", path=path)
-    try:
-        if not isinstance(old, dict) or selected(info, old) is not branch:
-            seed = _branch_defaults(branch, env)
-        else:
-            seed = copy_object(old)
-        parent[key] = _partial_model(branch, seed, value, env)
-    except PydanticCustomError as exc:
-        from ._sources import prefix_error
-
-        raise prefix_error(exc, path) from exc
+    seed = (
+        copy_object(old)
+        if isinstance(old, dict) and selected(info, old) is branch
+        else {}
+    )
+    parent[key] = _partial_model(branch, seed, value, env)
     return True
 
 
@@ -427,19 +437,12 @@ def _partial_model(
                     f"Ambiguous partial model field: {name!r}", path=(name,)
                 )
             prior = seed.get(name)
-            try:
-                seed[name] = _partial_model(
-                    child,
-                    copy_object(prior)
-                    if isinstance(prior, dict)
-                    else _branch_defaults(child, env),
-                    item,
-                    env,
-                )
-            except PydanticCustomError as exc:
-                from ._sources import prefix_error
-
-                raise prefix_error(exc, (name,)) from exc
+            seed[name] = _partial_model(
+                child,
+                copy_object(prior) if isinstance(prior, dict) else {},
+                item,
+                env,
+            )
         else:
             batch[(name,)] = item
     return build_candidate(model, seed, batch, env)

@@ -20,7 +20,13 @@ from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot
 
 if TYPE_CHECKING:
-    from .commands import FormCommandContext, FormCommandResult, FormCommandSnapshot
+    from .commands import (
+        FormCommandContext,
+        FormCommandResult,
+        FormCommandSnapshot,
+        FormConversionResult,
+        ReadonlyFormInput,
+    )
     from .description import FormDescription
     from .options import Option
 
@@ -47,6 +53,18 @@ type FormValue = (
 
 class FormCommandError(ValueError):
     """An unavailable action or unconvertible participating input; no write occurs."""
+
+
+class FormConversionError(FormCommandError):
+    """Expected selection refusal; the complete previous field stays installed.
+
+    Converters raise this for user-correctable missing sources or unsupported
+    selections. Core also translates failed participating evaluation and result
+    admission into this class, preserving the cause. Arbitrary callable
+    ValueError and unexpected provider/programming faults are not translated.
+    Editors may display this reason and restore the committed selector without
+    retrying a write, converter or notification.
+    """
 
 
 class FormPathError(ValueError):
@@ -83,6 +101,23 @@ class InputCommand:
     inputs: tuple[FormWritePath, ...]
     run: Callable[[FormCommandSnapshot, FormCommandContext], FormCommandResult]
     result_tag: tuple[str, str] | None = None
+
+
+@dataclass(frozen=True)
+class InputConverter:
+    """One field's selection conversion, declared in metadata or converters(env).
+
+    run receives the readonly old field, readonly requested selection and local
+    evaluation context. It returns the complete new structure/input, never a
+    different selection. Captured sources must be bound by the declaring host;
+    call synchronously within that capture's lifetime. Exceptions reject the
+    entire write; ordinary invalid values remain editable drafts.
+    """
+
+    run: Callable[
+        [FormCommandSnapshot, ReadonlyFormInput, FormCommandContext],
+        FormConversionResult,
+    ]
 
 
 @dataclass(frozen=True)
@@ -236,7 +271,7 @@ def field_error(path: FormPath, message: str) -> PydanticCustomError:
 class FormModel(BaseModel):
     """Ordinary values with typed class-level input hooks.
 
-    Override defaults for initial and branch defaults (an Expr default is
+    Override defaults for initial input (an Expr default is
     evaluated into its value), and choices for dynamic path-to-options
     mappings. default_input is final.
     No instances carry input, environment, revision or editing state. Ordinary
@@ -281,14 +316,14 @@ class FormModel(BaseModel):
 
     @classmethod
     def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
-        """Return initial or new-branch defaults before explicit field writes.
+        """Return initial input; converters may explicitly reuse this policy.
 
         Defaults depend only on the declaration and fixed env, never a prior
         draft. The fallback uses Pydantic static defaults and leaves required
         keys absent; it does not validate a partial model or replace missing
         keys with None. Source failures propagate at the consuming field path.
         A text-field leaf may be {"expr": text} to derive its initial value from
-        env, such as {"expr": "$flux_dev"}; default_input and branch switches
+        env, such as {"expr": "$flux_dev"}; default_input
         evaluate it into a direct value (see default_input), so it never stays
         in input as an expression.
         """
@@ -330,6 +365,17 @@ class FormModel(BaseModel):
         return {}
 
     @classmethod
+    def converters(cls, _env: FormEnv, /) -> Mapping[FormPath, InputConverter]:
+        """Declare converters at paths relative to this model occurrence.
+
+        Local metadata overrides inherited paths; this model's hook overrides
+        its metadata at the same path. Exactly one effective converter applies. Hooks only bind fixed
+        host capabilities; they must not convert, refresh or mutate sources.
+        A returned converter is used synchronously in the same host turn/env.
+        """
+        return {}
+
+    @classmethod
     def options(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[Option, ...]]:
         """Declare ordered named selections by relative model-field path.
 
@@ -352,10 +398,18 @@ class FormModel(BaseModel):
 class FormInput[F: FormModel]:
     """A form class paired with a detached, possibly invalid JSON input tree."""
 
-    def __init__(self, model: type[F], data: Mapping[str, JsonValue]) -> None:
+    def __init__(
+        self,
+        model: type[F],
+        data: Mapping[str, JsonValue],
+        *,
+        selections: Mapping[FormWritePath, JsonValue] | None = None,
+    ) -> None:
         """Copy JSON input for model; do not require model validity.
 
-        Missing keys remain missing and None remains explicit null. Text-field
+        selections carries detached in-memory option choices independently of
+        child data; omitted paths infer their selection from data. Missing keys
+        remain missing and None remains explicit null. Text-field
         expressions (int, float, complex and str leaves; see
         FormState.describe) use {"expr": text}; ordinary strings remain
         literal. Complex literals use {"__complex__": [re, im]}.
@@ -369,6 +423,22 @@ class FormInput[F: FormModel]:
         check_form_shape(model)
         self._model = model
         self._data = copy_object(data)
+        self._selections = {
+            path: copy_object({"value": value})["value"]
+            for path, value in (selections or {}).items()
+        }
+
+    @property
+    def selections(self) -> dict[FormWritePath, JsonValue]:
+        """Detached in-memory selections differing from the raw child branch.
+
+        Keys are canonical field paths. Values are declared option values.
+        Omitted paths infer selection from raw input. This memory state travels
+        with prepared inputs; persistence is a separate host-owned contract.
+        """
+        from ._json import copy_json
+
+        return {path: copy_json(value) for path, value in self._selections.items()}
 
     @property
     def model(self) -> type[F]:
@@ -412,29 +482,32 @@ class FormState[F: FormModel]:
         self._model = base.model
         self._data = base.data
         self._base = base.data
+        self._selections = base.selections
+        self._base_selections = base.selections
         self._callbacks: list[Callable[[], None]] = []
 
     @property
     def input(self) -> FormInput[F]:
         """Return a detached current input; no environment access occurs."""
-        return FormInput(self._model, self._data)
+        return FormInput(self._model, self._data, selections=self._selections)
 
     @property
     def base(self) -> FormInput[F]:
         """Return a detached comparison base supplied by the host."""
-        return FormInput(self._model, self._base)
+        return FormInput(self._model, self._base, selections=self._base_selections)
 
     def write(self, batch: Mapping[FormWritePath, JsonValue], env: FormEnv) -> None:
         """Install one input batch, keeping model-invalid drafts editable.
 
-        Discriminator changes apply first: use new-branch defaults(env),
-        with Expr defaults evaluated as in default_input. Never inherit old
-        same-name fields or copy sources. A partial object at a union position
-        selects its branch and writes its leaves in this same batch; it need
-        not be a declared option value. Same-branch edits retain unsupplied
-        fields. Unknown tags or object fields raise before installation.
-        Apply all remaining leaf writes afterwards, so explicitly supplied
-        content wins. Required fields without defaults stay absent. Writes use
+        Selector/tag changes apply before other leaves. A field's single
+        converter receives its readonly old draft, requested selection and local
+        evaluation context. Core admits the complete replacement with the same
+        installer used by commands, without supplying defaults. Without a
+        converter, changing a model selection preserves its raw child branch
+        and input; describe reports selection and branch separately. Scalar
+        selections remain ordinary leaf writes. Partial selector objects apply
+        explicitly supplied child edits after conversion. Unknown structures,
+        tags or child fields reject the entire batch. Writes use
         model-field leaf paths. Sequences and typed mappings are whole leaves;
         replace a mapping to delete, rename or clear its keys. Mapping-key and
         sequence-index patches raise ValueError. Ordinary model replacement is
@@ -465,12 +538,9 @@ class FormState[F: FormModel]:
         without crossing await, reset or guard boundaries; not an authorization
         or revision token. install_input does not repeat defaults/source checks.
         """
-        from ._sources import check_sources
-        from ._structure import build_candidate
+        from ._transitions import prepare_write
 
-        candidate = build_candidate(self._model, self._data, batch, env)
-        check_sources(self._model, candidate, env)
-        return FormInput(self._model, candidate)
+        return prepare_write(self.input, batch, env)
 
     def install_input(self, candidate: FormInput[F]) -> None:
         """Install a same-model prepared input, preserving base.
@@ -481,7 +551,7 @@ class FormState[F: FormModel]:
         """
         if candidate.model is not self._model:
             raise TypeError("Cannot install a different form model class")
-        self._install(candidate.data)
+        self._install(candidate.data, candidate.selections)
 
     def describe(self, path: FormWritePath, env: FormEnv) -> FormDescription:
         """Describe one canonical model-field path and its next layer.
@@ -503,7 +573,7 @@ class FormState[F: FormModel]:
         """
         from ._describe import describe
 
-        return describe(self._model, self._data, path, env)
+        return describe(self._model, self._data, path, env, self._selections)
 
     def run_command(self, path: FormWritePath, name: str, env: FormEnv) -> None:
         """Execute a declared field action or a selected option's named action.
@@ -528,10 +598,16 @@ class FormState[F: FormModel]:
 
         self.install_input(prepare_command(self.input, path, name, env))
 
-    def _install(self, candidate: dict[str, JsonValue]) -> None:
-        if candidate == self._data:
+    def _install(
+        self,
+        candidate: dict[str, JsonValue],
+        selections: dict[FormWritePath, JsonValue] | None = None,
+    ) -> None:
+        selections = {} if selections is None else selections
+        if candidate == self._data and selections == self._selections:
             return
         self._data = candidate
+        self._selections = selections
         for callback in tuple(self._callbacks):
             try:
                 callback()
@@ -605,9 +681,16 @@ class FormState[F: FormModel]:
         if base.model is not self._model:
             raise ValueError("Cannot reset to a different form model class")
         data = base.data
-        changed = data != self._data or data != self._base
+        changed = (
+            data != self._data
+            or data != self._base
+            or base.selections != self._selections
+            or base.selections != self._base_selections
+        )
         self._data = data
         self._base = base.data
+        self._selections = base.selections
+        self._base_selections = base.selections
         if changed:
             for callback in tuple(self._callbacks):
                 callback()
