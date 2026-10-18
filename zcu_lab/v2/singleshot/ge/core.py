@@ -22,7 +22,10 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.utils.single_shot.ge import singleshot_ge_analysis
+from zcu_tools.experiment.utils.single_shot.ge import (
+    GEFitOptions,
+    singleshot_ge_analysis,
+)
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.plotting.singleshot import plot_with_classified
@@ -77,10 +80,13 @@ class GEClassification(NamedTuple):
     other: float
 
 
+ISOLATED_OTHER_CLASSIFICATION = GEClassification(0.0, 0.0, 1.0)
+
+
 def make_result_matrix(
     ground: GEClassification,
     excited: GEClassification,
-    other: GEClassification = GEClassification(0.0, 0.0, 1.0),
+    other: GEClassification = ISOLATED_OTHER_CLASSIFICATION,
 ) -> NDArray[np.float64]:
     """Stack ground/excited/other preparation rows into a 3x3 result matrix.
 
@@ -370,9 +376,11 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
             signals,
             angle=options.angle,
             backend=options.backend,
-            logscale=options.logscale,
-            align_t1=options.align_t1,
-            length_ratio=options.length_ratio,
+            options=GEFitOptions(
+                logscale=options.logscale,
+                align_t1=options.align_t1,
+                length_ratio=options.length_ratio,
+            ),
             plots=plots,
         )
         analysis = GEAnalysis(
