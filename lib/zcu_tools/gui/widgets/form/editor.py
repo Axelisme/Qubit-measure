@@ -108,15 +108,16 @@ class FormEditor[F: FormModel](QWidget):
     tagged unions, and the module and waveform selections a Form generator
     declares) shows one dropdown, form.input.<path>, and nothing else
     decides its items: each option's label in declaration order, with the
-    option's value as item data. The first option matching the input by the
-    core's Option rule is selected. A present input no option matches is
-    kept: a last item shows it, a nonempty string as itself and other JSON
-    as its JSON text, plus " (missing)", with the input as data; it is
-    selected, the state is not changed and the field's errors still show.
+    option's value as item data. The core's selected index reflects an explicit
+    selection override, or raw input when there is no override. An unmatched
+    selection is kept: a last item shows it, a nonempty string as itself and
+    other JSON as its JSON text, plus " (missing)", with the selection as data.
+    This item is selected, state is unchanged and the field's errors still show.
     An unfilled field selects nothing. Choosing an option writes its value
-    at the field as one batch; the core starts a new branch from its own
-    defaults. While the selected option has fields, their rows show below
-    the dropdown (tags its value fixes have no rows); such a row has no
+    at the field as one batch; the core's converter, when declared, decides
+    the new child input. Rows follow the actual branch independently of the
+    selection and show below the dropdown (tags its value fixes have no rows).
+    Such a row has no
     Enabled box, since a nullable field lists None as an option. The
     dropdown's right-click menu lists the selected option's commands as
     QActions form.command.<path>.<name> with the declared label as text, also
@@ -512,8 +513,9 @@ class FormEditor[F: FormModel](QWidget):
                     self._clear_level(child)
                 self._local.pop(path, None)
                 self._retire(level.rows.pop(path).widget)
+        selections = self._require_state().input.selections
         for index, item in enumerate(metadata):
-            field = project_field(item, data, preview)
+            field = project_field(item, data, preview, selections)
             row = level.rows.get(field.path)
             fresh = row is None or _shape(row.field) != _shape(field)
             if fresh:
