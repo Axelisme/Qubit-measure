@@ -28,7 +28,6 @@ from .models import (
     RunPaths,
     RunStatus,
     Step,
-    TunableChange,
     TunablesSnapshot,
 )
 from .ports import (

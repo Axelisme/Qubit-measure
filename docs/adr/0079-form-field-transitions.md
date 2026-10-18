@@ -83,7 +83,7 @@ Core 對普通 `list[Model]` 提供中性描述、picker 與 indexed editing，�
 
 需要名稱定位的表單在建立時拒絕重複元素名，錯誤指名重複名稱與原始 indices。宣告 owner 只檢查名稱的唯一性，不解讀 resonator，不改 [[0072]] 的 group schema。元素名取法歸實驗定義者；若實驗需要重複 resonator，可以宣告 R1#0、R1#1 等不同名稱，framework 不自行加後綴。這項限制由顧問於 2026-10-18 確認，避免 participants 與 recipe overrides 無法唯一定位。
 
-Workflow 的 `TunablesHost.apply` 在 native update 邊界拒絕含 int index 的 Form leaf，回 `FormErrors` 並保留原 typed path，說明 native tunables 不支援 list 元素。Engine、draft、base 與 accepted input 都不變。Native `TunableChange.path` 只接受 model-field dotted path，雖可替換完整 list，但不接受元素 index。Host 不把 index 字串化、不擴 native grammar，也不將 indexed leaves 改成 whole-list 提交。目前 workflow tunables 沒有固定 list；通用 Form 的 indexed editing 不等於 native tunables 已有相同的提交能力。這個明確拒絕邊界由顧問於 2026-10-18 依使用者的代裁授權採用。
+Workflow 的 Apply 以宣告的 Form.to_cfg() 轉成完整 native tunables model，再由 Engine 依 workflow 型別驗證、整體替換並增加 revision。List 與固定 list 隨完整 model 提交，不攤平 preview leaves，也不建立 native index path grammar。每次 Apply 的 journal 記 actor、revision_before／after 與完整新 tunables JSON。Append 成功後才發布值與 revision，宿主才接受 input／base。使用者於 2026-10-18 確認完整 model 直接套用、不比對差異，並在日誌寫法中確認「甲乙都可以」。採完整快照，不維護逐葉差異或舊格式相容層。當前 step capture 與 iteration record.json 格式不變，見 [[0062]]。
 
 Mux 的 lab cfg 使用完整有序 `tones: list[ToneCfg]`。每個元素的 `name` 由 capture 產生且不可編輯。Drive 類實驗以 qubit 名稱識別，onetone 以 resonator 名稱識別。每個元素都有必填 drive，有掃描的實驗另有 sweep。未參與元素保留設定，適用同一驗證規則，無效時也擋 Run。
 
@@ -99,7 +99,11 @@ Model-field path 使用 typed segments：欄位名為 str，list index 為 int�
 
 一次讀全部元素由 owner 在單一 readonly 呼叫產生。MCP 不逐元素發出 N 次讀取再拼成假快照，不持有平行的名稱排序表。完整讀取保留每個元素的 authored input、可用值與定向錯誤，不因一個元素無效而隱藏其他元素。
 
-Recipe 輸入包含 participants，以及以元素 name 為 key 的逐元素 overrides。Owner 在 Run 前解析 name 到位置，沿相同 Form 操作套用，不在 MCP／recipe 重做 converter。每個葉欄位保留 explicit／default／derived 來源。Actual、estimates 與 writeback candidates 逐元素標示 name，取當次 Run／Load 的事實，不用後來的 Reset 或當前 alias 改寫已完成回報。顯示元素名不授權寫回，目的地與 Apply 仍歸既有 writeback owner。
+Recipe 輸入包含以元素 name 表示的 participants，以及與 MCP 相同的 typed path overrides。例如 `[{"path": ["tones", 0, "drive", "gain"], "value": 0.3}]` 直接定位完整原始 list 的第 0 個元素。Overrides 不以元素 name 為 key，owner 不做 name→位置轉換。Owner 在 Run 前沿相同 Form 操作套用 overrides，不在 MCP／recipe 重做 converter，也不另建排序表。
+
+每個葉欄位保留 explicit／default／derived 來源。Actual、estimates 與 writeback candidates 以完整原始 list 的位置標示，並附元素 name 供閱讀，不依 participants 順序重新編號。這些內容取當次 Run／Load 的事實，不用後來的 Reset 或當前 alias 改寫已完成回報。顯示位置與元素名不授權寫回，目的地與 Apply 仍歸既有 writeback owner。
+
+使用者於 2026-10-18 指出 recipe 名稱定位與核心 index 不一致，裁定：「既然核心是用index，那就用適合核心的方案，不要加一堆難維護的轉換邏輯」。因此 overrides 與 MCP 共用 typed paths；participants 仍以名稱表達此次參與順序。
 
 ### 模組分工與可執行依賴規則
 

@@ -190,6 +190,27 @@ def container_recipe_rpc(nested_recipe_rpc):
         fixture.ctrl.tab_control.close_tab(tab)
 
 
+@pytest.mark.parametrize(
+    "method",
+    ["tab.read_recipe_field", "tab.edit_recipe_fields", "tab.select_recipe_module"],
+)
+def test_typed_recipe_rpc_passes_original_index_to_owner_errors(form_rpc, method):
+    fixture, tab, rpc = form_rpc
+    owner = fixture.ctrl.cfg_resources.lookup(tab)
+    before = owner.input.data
+    path = ["tones", 1, "drive", "gain"]
+    params = {"tab_id": tab, "path": path}
+    if method == "tab.edit_recipe_fields":
+        params = {"tab_id": tab, "edits": [{"path": path, "value": 0.3}]}
+    elif method == "tab.select_recipe_module":
+        params["action"] = "use_inline"
+    rejected = rpc.call(method, params)
+    assert not rejected["ok"]
+    assert rejected["error"]["reason"] == "form_path"
+    assert rejected["error"]["data"]["form_path"] == path
+    assert owner.input.data == before
+
+
 @pytest.mark.parametrize("value", [4])
 def test_recipe_rpc_structure_rejection_identifies_first_edit_atomically(
     container_recipe_rpc, value
@@ -298,13 +319,13 @@ def assert_run_keeps_nested_length_after_updates(prepared, nested_recipe_rpc) ->
     assert result["tabs"][0]["result_state"]["available"] is True
     captured = operation.snapshot()
     assert captured is not None
-    assert captured.actual["fields"]["pulse.waveform.length"]["value"] == 0.08
+    assert captured.actual["fields"]["length"]["value"] == 0.08
     context.set_waveform(target, "Q1.waveforms.seed", ConstWaveformCfg(length=0.7))
-    prepared.set("pulse.waveform.length", 0.16)
-    assert prepared.read_field("pulse.waveform.length").value == 0.16
+    prepared.set(("pulse", "waveform", "length"), 0.16)
+    assert prepared.read_field(("pulse", "waveform", "length")).value == 0.16
     after_updates = operation.snapshot()
     assert after_updates is not None
-    assert after_updates.actual["fields"]["pulse.waveform.length"]["value"] == 0.08
+    assert after_updates.actual["fields"]["length"]["value"] == 0.08
 
 
 def test_recipe_tab_uses_real_rpc_for_nested_captured_refs_and_copy(
@@ -318,9 +339,11 @@ def test_recipe_tab_uses_real_rpc_for_nested_captured_refs_and_copy(
     fixture, tab, client, context, target = nested_recipe_rpc
     prepared = RecipeSession(
         client.context,
-        summary_parameters=(SummaryParameter("length", "pulse.waveform.length"),),
+        summary_parameters=(
+            SummaryParameter("length", ("pulse", "waveform", "length")),
+        ),
     ).open_tab("nested-recipe", reuse=tab)
-    prepared.use_library("pulse", "Q1.pulses.pi")
+    prepared.use_library(("pulse",), "Q1.pulses.pi")
     owner = fixture.ctrl.cfg_resources.lookup(tab)
     before = owner.input.data
     base = owner.editor_state.base.data
@@ -328,7 +351,7 @@ def test_recipe_tab_uses_real_rpc_for_nested_captured_refs_and_copy(
     notices: list[str] = []
     owner.subscribe(lambda: notices.append("changed"))
     context.set_waveform(target, "Q1.waveforms.seed", ConstWaveformCfg(length=0.9))
-    field = prepared.read_field("pulse.waveform.length")
+    field = prepared.read_field(("pulse", "waveform", "length"))
     assert field.value == 0.1 and field.readonly
     assert field.source is not None
     assert field.source["key"] == "Q1.waveforms.seed"
@@ -340,7 +363,7 @@ def test_recipe_tab_uses_real_rpc_for_nested_captured_refs_and_copy(
     assert notices == []
     with pytest.raises(GuiRpcError) as rejected:
         prepared.set_fields(
-            [RecipeFieldEdit("gain", 0.9), RecipeFieldEdit("pulse.freq", 125.0)]
+            [RecipeFieldEdit(("gain",), 0.9), RecipeFieldEdit(("pulse", "freq"), 125.0)]
         )
     assert rejected.value.reason == "ref_ancestor"
     data = rejected.value.data
@@ -349,13 +372,13 @@ def test_recipe_tab_uses_real_rpc_for_nested_captured_refs_and_copy(
     assert owner.input.data == before
     assert notices == []
     with pytest.raises(GuiRpcError) as ancestor:
-        prepared.use_inline("pulse.waveform")
+        prepared.use_inline(("pulse", "waveform"))
     assert ancestor.value.reason == "ref_ancestor"
-    prepared.use_inline("pulse")
-    prepared.use_inline("pulse.waveform")
-    prepared.set("pulse.waveform.length", 0.08)
-    prepared.retain_source("pulse.waveform.length", "explicit")
-    assert prepared.read_field("pulse.waveform.length").value == 0.08
+    prepared.use_inline(("pulse",))
+    prepared.use_inline(("pulse", "waveform"))
+    prepared.set(("pulse", "waveform", "length"), 0.08)
+    prepared.retain_source(("pulse", "waveform", "length"), "explicit")
+    assert prepared.read_field(("pulse", "waveform", "length")).value == 0.08
     assert_run_keeps_nested_length_after_updates(prepared, nested_recipe_rpc)
     assert field.value == 0.1
     fixture.ctrl.close()

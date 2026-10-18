@@ -4,7 +4,7 @@ status: accepted
 
 # ADR-0062 — 實驗執行與 workflow 編排
 
-**Last updated:** 2026-10-18，區分 acquisition capture 與 run 後 cache 讀回
+**Last updated:** 2026-10-19，tunables 完整 model 提交與快照日誌
 
 關聯 [[0066]]，operation 與取消。保存權威見 [[0063]]，表單與 cfg 的使用邊界見 [[0065]]。
 
@@ -24,11 +24,13 @@ Generator 協作、recipe 的取消結果與尚未落實的 workflow agent yield
 
 ## 表單 input 與 Engine 普通值
 
-FormInput 保存 expression 原文；宿主捕捉求值環境，決定 Start、Apply、Discard 與 input 保存時機。Engine 只接收已驗證的普通 plan／tunables 值，擁有 numeric validation、revision、step capture 與 journal publication，不求值或保存 expression。Journal append 成功後才發布新值；stale revision、model error 或 append failure 不發布候選。當前 step 的 capture 不隨新 revision 改變，後續 step 或 Resume 才取最新值。
+FormInput 保存 expression 原文；宿主捕捉求值環境，決定 Start、Apply、Discard 與 input 保存時機。Start 與 Apply 使用同一個宣告的 Form.to_cfg() 轉接。Apply 將完整 native tunables model 交給 Engine，不攤平表單路徑。Engine 依 workflow 宣告型別重新驗證完整 model，整體替換並增加一次 revision，不比對差異。相同值也建立新 revision。Engine 不求值或保存 expression。每次 Apply 的 journal 記一行 actor、revision_before／after 與完整新 tunables JSON，不記逐葉 old／new。Journal append 成功後才發布新值；stale revision、model error 或 append failure 不發布候選。當前 step 的 capture 不隨新 revision 改變，後續 step 或 Resume 才取最新值。
 
 持久 snapshot 的 plan 與 knobs 各存固定 FormInput data／selections JSON。啟動、source reload 與 RAM switching 共用 Core 的依名與形狀遞迴還原。新欄位用 defaults，無法還原的欄位或 selection 列 dropped 並顯示。還原不呼叫 converter 或 options hook。壞 JSON 或格式不符時顯錯並以 defaults 開啟，不備份。共用契約見 [[0079]]、[[0063]]。
 
 Workflow host 只有在 Engine 成功 publication 後才接受 input／base。失敗保留可修正的 draft，不以輸入已編輯推定 Engine 已接受。這避免 Engine 維護另一份 input 狀態，代價是 Engine journal 無法重建當時的 expression。Form／editor 的共用與宿主提交邊界見 [[0065]]，具體接線見 [workflows host](../../lib/zcu_tools/gui/app/workflows/README.md)。使用者於 2026-10-16 以「都採用建議」確認將表單草稿的這些穩定邊界併入現行 ADR。
+
+使用者於 2026-10-18 裁定：「基本正確，但我認為不同比較不同，直接用就行了，也不用記錄。」選擇日誌格式時確認「甲乙都可以」。採完整快照保留更新者與 revision，不增加遞迴比對。List 隨完整 model 提交，不需要 native index path。Iteration record.json 的完整 tunables 格式不變，不增加舊 journal reader 或格式遷移。Form 的 typed path 編輯入口仍由宿主擁有，見 [[0079]]。依賴方向沿用 C8、C9、C18 與 form-core-no-ui-policy。
 
 ## 一個 run 的 operation
 

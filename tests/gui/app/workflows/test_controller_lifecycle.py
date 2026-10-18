@@ -14,7 +14,6 @@ from zcu_tools.experiment.workflows import (
     RunMismatch,
     RunStatus,
     Step,
-    TunableChange,
     WorkflowEnv,
     workflow,
 )
@@ -284,7 +283,7 @@ def test_pause_resume_updates_the_same_bar(
     assert engine is not None
     engine.update_tunables(
         "run",
-        (TunableChange("value", 2),),
+        Tunables.model_construct(value=2),
         expected_revision=0,
         actor=Actor("user", "offline"),
     )

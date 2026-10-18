@@ -74,13 +74,13 @@ def onetone_spectrum_over_flux(  # noqa: PLR0913 - Preserve typed tool keywords.
         aliases=None if target is None else {"qubit": target},
         reuse=reuse_tab_id,
     )
-    tab.use_library("modules.readout", readout_ref)
+    tab.use_library(("modules", "readout"), readout_ref)
     # Report independent missing sources together before admitting a Run.
     missing: list[MissingParameter] = []
     missing.extend(
         set_frequency_sweep(
             tab,
-            "sweep.freq",
+            ("sweep", "freq"),
             calibration=FrequencySweepCalibration(
                 "$resonator.freq", "$resonator.kappa", 2.0
             ),
@@ -92,7 +92,7 @@ def onetone_spectrum_over_flux(  # noqa: PLR0913 - Preserve typed tool keywords.
     use_flux_device(tab, flux_device, unit=flux_unit)
     set_flux_sweep(
         tab,
-        "sweep.flux",
+        ("sweep", "flux"),
         start=flux_range[0],
         stop=flux_range[1],
         expts=flux_points,
@@ -100,12 +100,12 @@ def onetone_spectrum_over_flux(  # noqa: PLR0913 - Preserve typed tool keywords.
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
     if gain is not None:
-        tab.use_inline("modules.readout")
-        tab.set("modules.readout.gain", gain)
+        tab.use_inline(("modules", "readout"))
+        tab.set(("modules", "readout", "gain"), gain)
     else:
-        retain_scalar(tab, "modules.readout.gain")
-    tab.set("reps", reps)
-    tab.set("rounds", rounds)
+        retain_scalar(tab, ("modules", "readout", "gain"))
+    tab.set(("reps",), reps)
+    tab.set(("rounds",), rounds)
     result = yield from tab.run_step()
     run = result.run
     if result.status == "cancelled" or run is None:
@@ -159,14 +159,14 @@ DEFINITION = RecipeDefinition(
     run=onetone_spectrum_over_flux,
     adapter_name="onetone/flux_dep",
     summary_parameters=(
-        SummaryParameter("frequency_sweep", "sweep.freq", "MHz"),
-        SummaryParameter("gain", "modules.readout.gain"),
-        SummaryParameter("readout_ref", "modules.readout"),
-        SummaryParameter("reps", "reps"),
-        SummaryParameter("rounds", "rounds"),
-        SummaryParameter("flux_sweep", "sweep.flux"),
-        SummaryParameter("flux_device", "flux_dev"),
-        SummaryParameter("flux_unit", "flux_unit"),
+        SummaryParameter("frequency_sweep", ("sweep", "freq"), "MHz"),
+        SummaryParameter("gain", ("modules", "readout", "gain")),
+        SummaryParameter("readout_ref", ("modules", "readout")),
+        SummaryParameter("reps", ("reps",)),
+        SummaryParameter("rounds", ("rounds",)),
+        SummaryParameter("flux_sweep", ("sweep", "flux")),
+        SummaryParameter("flux_device", ("flux_dev",)),
+        SummaryParameter("flux_unit", ("flux_unit",)),
     ),
     summary_estimates=(),
 )

@@ -31,15 +31,15 @@ def test_retain_source_records_scalar_and_sweep_without_cfg_edits(
 
     def run(session: RecipeSession) -> RecipeGenerator:
         tab = session.open_tab("lookback")
-        tab.retain_source("rounds", "caller_rounds")
-        tab.retain_source("range", "caller_range")
+        tab.retain_source(("rounds",), "caller_rounds")
+        tab.retain_source(("range",), "caller_range")
         yield from tab.run_step()
 
     sample = replace(
         definition(run),
         summary_parameters=(
-            SummaryParameter("rounds", "rounds"),
-            SummaryParameter("range", "range", "native"),
+            SummaryParameter("rounds", ("rounds",)),
+            SummaryParameter("range", ("range",), "native"),
         ),
     )
     client = make_client(tmp_path, gui, recipes=(sample,))
@@ -61,10 +61,10 @@ def test_retain_source_records_scalar_and_sweep_without_cfg_edits(
 
 
 @pytest.mark.parametrize(
-    "field,source", [("missing", "caller"), ("rounds", ""), ("range", " ")]
+    "field,source", [(("missing",), "caller"), (("rounds",), ""), (("range",), " ")]
 )
 def test_retain_source_rejects_invalid_fields_and_labels_without_rpc(
-    tmp_path: Path, field: str, source: str
+    tmp_path: Path, field: tuple[str | int, ...], source: str
 ) -> None:
     gui = FieldGui()
     with recipe_client(tmp_path, gui) as client:
@@ -72,11 +72,11 @@ def test_retain_source_rejects_invalid_fields_and_labels_without_rpc(
         before = list(client.transport.sent)
         with pytest.raises((GuiRpcError, ValueError)) as caught:
             tab.retain_source(field, source)
-        if field == "missing":
+        if field == ("missing",):
             assert isinstance(caught.value, GuiRpcError)
             assert caught.value.reason == "form_path"
             assert caught.value.code == "invalid_params"
-            assert caught.value.data == {"form_path": [field]}
+            assert caught.value.data == {"form_path": list(field)}
         else:
             assert isinstance(caught.value, ValueError)
             assert "source must be" in str(caught.value)
@@ -92,7 +92,7 @@ def test_retain_source_rejects_ordinary_model_sections_without_rpc(
         tab = RecipeSession(client.context).open_tab("lookback")
         before = list(client.transport.sent)
         with pytest.raises(ValueError, match="scalar or sweep"):
-            tab.retain_source("modules", "caller")
+            tab.retain_source(("modules",), "caller")
         assert [
             call for call in client.transport.sent if call[0] != "tab.read_recipe_field"
         ] == [call for call in before if call[0] != "tab.read_recipe_field"]
@@ -106,20 +106,22 @@ def test_set_fields_writes_one_batch_and_keeps_none_default(
         tab = RecipeSession(
             client.context,
             summary_parameters=(
-                SummaryParameter("frequency", "modules.readout.freq"),
-                SummaryParameter("rounds", "rounds"),
+                SummaryParameter("frequency", ("modules", "readout", "freq")),
+                SummaryParameter("rounds", ("rounds",)),
             ),
         ).open_tab("lookback")
         before = len(client.transport.sent)
         tab.set_fields(
             [
-                recipe.RecipeFieldEdit("rounds", None, "ignored"),
+                recipe.RecipeFieldEdit(("rounds",), None, "ignored"),
                 recipe.RecipeFieldEdit(
-                    "modules.readout.freq",
+                    ("modules", "readout", "freq"),
                     recipe.RecipeExpression(expr="$custom.low"),
                     "caller_low",
                 ),
-                recipe.RecipeFieldEdit("modules.readout.gain", 22.0, "caller_high"),
+                recipe.RecipeFieldEdit(
+                    ("modules", "readout", "gain"), 22.0, "caller_high"
+                ),
             ]
         )
         assert [
@@ -160,19 +162,20 @@ def test_set_fields_writes_one_batch_and_keeps_none_default(
         assert cfg_value(gui.publication, "modules.readout.module.freq") == 10.0
         snapshot = tab.run().snapshot()
         assert snapshot is not None
-        assert (
-            snapshot.actual["fields"]["modules.readout.freq"].get("source")
-            == "caller_low"
-        )
+        assert snapshot.actual["fields"]["frequency"].get("source") == "caller_low"
         assert snapshot.actual["fields"]["rounds"].get("source") == "gui_default"
 
 
 @pytest.mark.parametrize(
     "bad_field,bad_source",
-    [("missing", "explicit"), ("modules.readout", "explicit"), ("rounds", " ")],
+    [
+        (("missing",), "explicit"),
+        (("modules", "readout"), "explicit"),
+        (("rounds",), " "),
+    ],
 )
 def test_batch_preflight_rejects_all_before_first_edit(
-    tmp_path: Path, bad_field: str, bad_source: str
+    tmp_path: Path, bad_field: tuple[str | int, ...], bad_source: str
 ) -> None:
     gui = FieldGui()
     with recipe_client(tmp_path, gui) as client:
@@ -181,20 +184,20 @@ def test_batch_preflight_rejects_all_before_first_edit(
         with pytest.raises((GuiRpcError, ValueError)) as caught:
             tab.set_fields(
                 [
-                    recipe.RecipeFieldEdit("rounds", 7, "valid"),
+                    recipe.RecipeFieldEdit(("rounds",), 7, "valid"),
                     recipe.RecipeFieldEdit(bad_field, 9, bad_source),
                 ]
             )
-        if bad_field == "missing":
+        if bad_field == ("missing",):
             assert isinstance(caught.value, GuiRpcError)
             assert caught.value.reason == "form_path"
             assert caught.value.code == "invalid_params"
             assert caught.value.data == {
-                "path": [bad_field],
-                "form_path": [bad_field],
+                "path": list(bad_field),
+                "form_path": list(bad_field),
                 "edit_index": 1,
             }
-        elif bad_field == "modules.readout":
+        elif bad_field == ("modules", "readout"):
             assert isinstance(caught.value, GuiRpcError)
             assert caught.value.reason == "module_selector"
         else:
@@ -210,7 +213,7 @@ def test_empty_batch_and_default_only_batch_do_not_edit(tmp_path: Path) -> None:
         tab = RecipeSession(client.context).open_tab("lookback")
         before = len(client.transport.sent)
         tab.set_fields([])
-        tab.set_fields([recipe.RecipeFieldEdit("rounds", None, "explicit")])
+        tab.set_fields([recipe.RecipeFieldEdit(("rounds",), None, "explicit")])
         assert not [
             call
             for call in client.transport.sent[before:]
@@ -224,9 +227,11 @@ def test_expression_set_and_sweep_are_forwarded_without_client_evaluation(
     gui = FieldGui()
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
-        tab.set("rounds", recipe.RecipeExpression(expr="$custom.low"), source="input")
+        tab.set(
+            ("rounds",), recipe.RecipeExpression(expr="$custom.low"), source="input"
+        )
         tab.set_sweep(
-            "range",
+            ("range",),
             start=recipe.RecipeExpression(expr="$custom.low"),
             stop=recipe.RecipeExpression(expr="$custom.high"),
         )
@@ -256,7 +261,7 @@ def test_batch_invalid_reply_retains_edit_without_rollback(tmp_path: Path) -> No
         }
         before = len(client.transport.sent)
         with pytest.raises(GuiRpcError) as failure:
-            tab.set_fields([recipe.RecipeFieldEdit("rounds", 7, "explicit")])
+            tab.set_fields([recipe.RecipeFieldEdit(("rounds",), 7, "explicit")])
         assert failure.value.reason == "invalid_cfg"
         assert [
             method
@@ -270,12 +275,12 @@ def test_actual_mixed_sweep_keeps_the_complete_parameter(tmp_path: Path) -> None
 
     def run(session: RecipeSession) -> RecipeGenerator:
         tab = session.open_tab("lookback")
-        tab.set_sweep("range", start=10.0, stop=20.0)
+        tab.set_sweep(("range",), start=10.0, stop=20.0)
         yield from tab.run_step()
 
     sample = replace(
         definition(run),
-        summary_parameters=(SummaryParameter("range", "range", "native"),),
+        summary_parameters=(SummaryParameter("range", ("range",), "native"),),
     )
     client = make_client(tmp_path, gui, recipes=(sample,))
     with closing(client.context.session):
@@ -320,7 +325,7 @@ def test_complete_set_sweep_replaces_invalid_step_draft(tmp_path: Path) -> None:
             next(command.name for command in coords if command.name == "to_center"),
         )
         gui.owner.write({("range", "step"): {"expr": "1 / 0"}})
-        tab.set_sweep("range", start=10.0, stop=4.0, expts=4)
+        tab.set_sweep(("range",), start=10.0, stop=4.0, expts=4)
         assert gui.owner.input.data["range"] == {
             "kind": "linrange",
             "start": 10.0,
@@ -342,7 +347,7 @@ def test_complete_set_sweep_replaces_invalid_center_draft(tmp_path: Path) -> Non
             next(command.name for command in commands if command.name == "to_center"),
         )
         gui.owner.write({("range", "center"): {"expr": "1 / 0"}})
-        tab.set_sweep("range", start=10.0, stop=4.0, expts=4)
+        tab.set_sweep(("range",), start=10.0, stop=4.0, expts=4)
         assert gui.owner.input.data["range"] == {
             "kind": "linrange",
             "start": 10.0,

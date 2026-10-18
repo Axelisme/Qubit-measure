@@ -417,16 +417,23 @@ def h_tab_edit_cfg(
 
 
 def module_path(raw: object) -> tuple[str, ...]:
-    """Validate a dotted core module field supplied to the module RPCs."""
+    """Decode typed str segments for the existing core materialization owner.
+
+    Integer indexes are not supported here. Numeric strings stay literal names;
+    never split dotted strings or convert positions into names.
+    """
     if (
-        not isinstance(raw, str)
+        not isinstance(raw, list)
         or not raw
-        or any(not part or part != part.strip() for part in raw.split("."))
+        or any(
+            not isinstance(part, str) or not part or part != part.strip()
+            for part in raw
+        )
     ):
         raise RemoteError(
-            ErrorCode.INVALID_PARAMS, "field must be a dotted module path"
+            ErrorCode.INVALID_PARAMS, "field must be a nonempty array of str names"
         )
-    return tuple(raw.split("."))
+    return tuple(raw)
 
 
 def h_tab_read_module(
@@ -452,7 +459,7 @@ def h_tab_use_inline(
 ) -> Mapping[str, object]:
     """Convert one module using the fixed capture and return its complete Form view.
 
-    params supplies tab_id and a dotted core module field. Resource admission
+    params supplies tab_id and a str-segment array for a core module field. Resource admission
     runs before reading the public input tag at an exact core module path.
     Ref invokes to_inline through the guarded command host; inline is a no-op
     even for partial input or invalid expressions. Mode detection does not
@@ -493,17 +500,17 @@ def h_tab_use_inline(
     return dict(observe_form(resource))
 
 
-def _recipe_path(raw: object, *, root: bool = False) -> tuple[str, ...]:
+def _recipe_path(raw: object, *, root: bool = False) -> tuple[str | int, ...]:
     if not isinstance(raw, list) or (not raw and not root):
         raise RemoteError(
             ErrorCode.INVALID_PARAMS, "path must be a field array", reason="form_errors"
         )
-    parts: list[str] = []
+    parts: list[str | int] = []
     for part in raw:
-        if not isinstance(part, str) or not part:
+        if (not isinstance(part, str) or not part) and type(part) is not int:
             raise RemoteError(
                 ErrorCode.INVALID_PARAMS,
-                "path requires nonempty strings",
+                "path requires nonempty names or integer indexes",
                 reason="form_errors",
             )
         parts.append(part)
@@ -515,7 +522,7 @@ def h_tab_read_recipe_field(
 ) -> Mapping[str, object]:
     """Read logical metadata/authored input/value/errors in one fixed-source turn.
 
-    path is a string array, [] for root. Readonly refs do not materialize drafts
+    path contains str field names and int original list indexes, [] for root. Readonly refs do not materialize drafts
     or grant write authority. Expected failures keep directed logical details.
     """
     from ..form_description import recipe_field_wire
