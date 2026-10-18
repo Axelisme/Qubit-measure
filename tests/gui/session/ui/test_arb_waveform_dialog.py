@@ -125,6 +125,30 @@ def _preview_axes(dialog: ArbWaveformDialog) -> Axes:
     return canvas.figure.axes[0]
 
 
+def _assert_formula_error_recovery(
+    dlg: ArbWaveformDialog, editor: _Editor, preview_clock: PreviewClock
+) -> None:
+    """Verify formula errors recover Save availability and the rendered preview."""
+    formula_item = editor.segments.item(0, 1)
+    assert formula_item is not None
+    # "unknown_symbol" has valid structure (non-empty string) but fails render.
+    # With the new debounce design, render error surfaces only after the timer fires.
+    formula_item.setText("unknown_symbol")
+    preview_clock.drain()
+    assert not editor.save.isEnabled()
+    assert not editor.warning.isHidden()
+    assert "unsupported" in editor.warning.text()
+
+    # Fixing the formula triggers cheap validation immediately (no qWait needed).
+    formula_item.setText("sin(2*pi*t)")
+    assert editor.save.isEnabled()
+    assert editor.warning.isHidden()
+    preview_clock.drain()
+    label = _preview_axes(dlg).lines[0].get_label()
+    assert isinstance(label, str)
+    assert label.startswith("I:")
+
+
 # ---------------------------------------------------------------------------
 # Existing tests (updated for debounce state machine)
 # ---------------------------------------------------------------------------
@@ -165,24 +189,7 @@ def test_dialog_validates_segments_and_saves_preview(
     editor.button("Delete Segment").click()
     assert editor.segments.rowCount() == 3
 
-    formula_item = editor.segments.item(0, 1)
-    assert formula_item is not None
-    # "unknown_symbol" has valid structure (non-empty string) but fails render.
-    # With the new debounce design, render error surfaces only after the timer fires.
-    formula_item.setText("unknown_symbol")
-    preview_clock.drain()
-    assert not editor.save.isEnabled()
-    assert not editor.warning.isHidden()
-    assert "unsupported" in editor.warning.text()
-
-    # Fixing the formula triggers cheap validation immediately (no qWait needed).
-    formula_item.setText("sin(2*pi*t)")
-    assert editor.save.isEnabled()
-    assert editor.warning.isHidden()
-    preview_clock.drain()
-    label = _preview_axes(dlg).lines[0].get_label()
-    assert isinstance(label, str)
-    assert label.startswith("I:")
+    _assert_formula_error_recovery(dlg, editor, preview_clock)
 
     editor.normalize.setChecked(False)
     editor.save.click()
