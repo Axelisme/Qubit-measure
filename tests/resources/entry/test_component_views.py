@@ -59,7 +59,8 @@ def test_set_creates_only_freeform_mapping_paths_atomically(tmp_path: Path) -> N
             assert document_value(snapshot(draft), "N1.ext.cal") == {"sigma": 5.0}
             assert draft.meta("N1.ext.cal.sigma") == {"comment": "keep"}
         assert document_value(snapshot(point), "N1.ext") == {
-            "cal": {"sigma": 5.0}, "blocked": 3
+            "cal": {"sigma": 5.0},
+            "blocked": 3,
         }
         assert document_value(snapshot(entry.setup), "N1.ext") == {}
 
