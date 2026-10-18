@@ -48,7 +48,9 @@ Standalone `apply_writeback(tab, items=None)` 按穩定 `target_name` 選擇當�
 
 Measure `tab.get_cfg` 回 Form authored input、ordinary leaf values 與 directed errors。`tab.edit_cfg`、`tab.reset_cfg` 與 `tab.run_start` 不收 cfg ref 或 expected revision。`tab.describe_cfg` 另回單層 metadata 與同次局部 input／value／Form preview errors，不附 lowered cfg errors。Workflows 的 `workflow.form` 不附 schema，`workflow.describe_form` 可描述同次 batch candidate，不提交 draft 或 Engine。
 
-`tab.run_cfg_command` 是 live catalog 的通用 Form 指令入口，由既有 rpc_call 使用，不另增 MCP tool。Path 沿 model-field 字串陣列契約，name 只選目前 active description 的公開 command，不提供任意方法執行。Remote 呼叫 resource.run_command，保留控制身份、busy、lifetime 與 mutation guard。成功回 Form input／values／errors；未知指令、inactive path 與換算失敗不留下部分寫入。Description 的數值欄位 commands 帶 target 與參與 inputs，remote 不求值、不重建座標或採樣。Step 的 input 保留 authored 原稿，values 使用共用 Form 的有效端點投影，read 不寫回原稿。to_inline 專用入口不變。
+`tab.run_cfg_command` 是 live catalog 的通用 Form 指令入口，由既有 rpc_call 使用，不另增 MCP tool。Path 依 [[0079]] 的目標契約使用 str 欄位名／int list index，name 只選目前 active description 的公開 command，不提供任意方法執行。Remote 呼叫 resource.run_command，保留控制身份、busy、lifetime 與 mutation guard。成功回 Form input／values／errors；未知指令、inactive path 與換算失敗不留下部分寫入。Command 只修改掛載欄位與 descendants，sweep 的指令掛在 sweep row。Remote 不求值、不重建座標或採樣。Step 的 input 保留 authored 原稿，values 使用共用 Form 的有效端點投影，read 不寫回原稿。to_inline 專用入口不變。
+
+[[0079]] 的 indexed editing 與逐元素 recipe 設計已採用，實作尚待完成。Describe 列出 list index 與元素 name，不增加名稱 path grammar。Owner 在單次 readonly 呼叫提供完整元素觀察，MCP 不以 N 次讀取拼接。Recipe 使用 participants 與 name-keyed overrides，由 owner 在 Run 前解析位置；逐葉保留 explicit／default／derived，actual、estimates 與 writeback candidates 以同次元素 name 標示。既有 Run facts capture 與 writeback owner 邊界不變。
 
 Edit 以 model-field paths 原子寫入目前 input。Reset 捕捉一次來源並取 adapter defaults，可接受單次 aliases，但不改全域列或 memento。Run 只接受畫面上目前有效的 Form result，在 focus 或 operation 效果前拒絕非空 aliases。直接 RPC 只轉送一次，不隱藏 refresh 或 retry。Recipe 在建立或重用 tab 後都先 Reset，再設定參數與 Run，只有 Reset 收單次 aliases。Fixed sources、source provenance 與 acceptance 見 [[0065]]。Holder、authentication、domain busy 與硬體 guards 分別檢查，不以 cfg 版本授權。
 
