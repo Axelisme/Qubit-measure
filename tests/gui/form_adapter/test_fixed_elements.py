@@ -34,7 +34,7 @@ def owner_model(*, duplicate: bool = False) -> type[core.FormModel]:
         participants: list[str]
 
         @classmethod
-        def defaults(cls, env: core.FormEnv) -> dict[str, JsonValue]:
+        def defaults(cls, _env: core.FormEnv) -> dict[str, JsonValue]:
             return {
                 "tones": [
                     {"label": "A", "gain": 1},
@@ -82,11 +82,12 @@ def test_owner_allows_invalid_values_but_checks_every_element_and_participant():
     assert isinstance(errors, core.FormErrors)
     assert ("tones", 0, "gain") in errors.messages
     state.write({("tones", 0, "gain"): 3}, env)
-    for value, error_path in [
+    cases: list[tuple[JsonValue, core.FormPath]] = [
         ([], ("participants",)),
         (["A", "A"], ("participants", 1)),
         (["Q4"], ("participants", 0)),
-    ]:
+    ]
+    for value, error_path in cases:
         state.write({("participants",): value}, env)
         assert state.input.data["participants"] == value
         errors = state.result(env)
@@ -179,7 +180,9 @@ def test_owner_checks_complete_command_converter_and_prepared_replacements(opera
             return {("tones",): (core.Option("Clear", []),)}
 
         @classmethod
-        def converters(cls, _env: core.FormEnv):
+        def converters(
+            cls, _env: core.FormEnv
+        ) -> Mapping[core.FormPath, core.InputConverter]:
             return {
                 ("tones",): core.InputConverter(
                     lambda *_args: core.FormConversionResult(None, [])
@@ -190,7 +193,8 @@ def test_owner_checks_complete_command_converter_and_prepared_replacements(opera
     before, base = state.input, state.base
     events = []
     state.subscribe(lambda: events.append(state.input))
-    with pytest.raises(core.FormInputRejected, match="identity"):
+
+    def mutate() -> None:
         if operation == "command":
             state.run_command(("tones",), "clear", core.FormEnv())
         elif operation == "converter":
@@ -199,6 +203,9 @@ def test_owner_checks_complete_command_converter_and_prepared_replacements(opera
             state.install_input(
                 core.FormInput(Commands, {"tones": [], "participants": ["B"]})
             )
+
+    with pytest.raises(core.FormInputRejected, match="identity"):
+        mutate()
     assert state.input.same_as(before)
     assert state.base.same_as(base)
     assert state.input.selections == before.selections
