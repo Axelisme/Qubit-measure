@@ -9,8 +9,9 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     kernel,
 )
-from zcu_tools.simulate.evolution.kernel import ApplyContext
+from zcu_tools.simulate.evolution.kernel import ApplyContext, KernelContext
 from zcu_tools.simulate.evolution.kernels.floquet import FloquetKernel
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 
 @pytest.mark.parametrize("duration", [512.0, 2000.0])
@@ -46,10 +47,15 @@ def test_long_periodic_frame_preserves_analytic_coherence(duration: float) -> No
     )
     floquet = FloquetKernel()
     rows = np.array([0])
-    guarded = floquet.guard_prepared(table, rows, source, 1e-3)
+    guarded = floquet.guard_prepared(
+        table, rows, KernelContext(source, 0.001, WorkPlan())
+    )
     assert guarded.accepted.all()
     prepared = floquet.prepare(
-        floquet.prepare_keys(table, rows), table, rows, source, 1e-3
+        floquet.prepare_keys(table, rows, KernelContext(source, 0.001, WorkPlan())),
+        table,
+        rows,
+        KernelContext(source, 0.001, WorkPlan()),
     )
     actual = initial[None].copy()
     try:

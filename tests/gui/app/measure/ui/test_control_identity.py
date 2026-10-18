@@ -454,27 +454,46 @@ def test_remote_device_stop_reclaims_and_cancels(control_ui, qapp):
         DialogName.DEVICE,
     ],
 )
-def test_local_named_modal_refuses_remote_owner_and_allows_retry(control_ui, name):
+def test_named_observation_window_allows_owner_and_reopen(control_ui, name):
     ui = control_ui
     ui.window.open_dialog(name)
-    dialog = QApplication.activeModalWidget()
-    assert isinstance(dialog, QDialog) and dialog.isModal()
-    reply = ui.rpc("control.connect", label="measure-agent")
-    assert reply["ok"] is False and reply["error"]["reason"] == "local_busy"
-    assert ui.controller.control_identity.status().holder == "gui"
-    assert (
-        ui.rpc("tab.new", adapter_name="stoppable")["error"]["reason"] == "not_holder"
-    )
-    ui.window.close_dialog(name)
-    assert not dialog.isVisible()
-    if name == DialogName.PREDICTOR:
-        ui.window.open_dialog(name)
-        assert QApplication.activeModalWidget() is dialog
-        reply = ui.rpc("control.connect", label="measure-agent")
-        assert reply["ok"] is False and reply["error"]["reason"] == "local_busy"
-        ui.window.close_dialog(name)
+    assert QApplication.activeModalWidget() is None
     ui.connect()
-    assert ui.controller.control_identity.status().holder == "rpc:measure-agent"
+    assert ui.rpc("tab.new", adapter_name="stoppable")["ok"]
+    assert name in ui.window.list_open_dialogs()
+    assert ui.window.take_dialog_screenshot(name).startswith(b"\x89PNG")
+    assert ui.rpc("control.release")["ok"]
+    ui.window.close_dialog(name)
+    assert name not in ui.window.list_open_dialogs()
+    ui.window.open_dialog(name)
+    assert QApplication.activeModalWidget() is None
+    assert name in ui.window.list_open_dialogs()
+    assert ui.rpc("control.acquire")["ok"]
+
+
+@pytest.mark.parametrize(
+    ("name", "action"),
+    [
+        (DialogName.SETUP, "New entry…"),
+        (DialogName.DEVICE, "Add Device"),
+        (DialogName.INSPECT, "New"),
+        (DialogName.ARB_WAVEFORM, "Save"),
+    ],
+)
+def test_open_dialog_follows_remote_release_and_reacquire(control_ui, name, action):
+    ui = control_ui
+    ui.connect()
+    ui.window.open_dialog(name)
+    dialogs = [d for d in ui.window.findChildren(QDialog) if d.isVisible()]
+    assert len(dialogs) == 1, "Remote must be able to open the observation window"
+    dialog = dialogs[0]
+    assert not button(dialog, action).isEnabled()
+    assert ui.rpc("control.release")["ok"]
+    assert button(dialog, action).isEnabled(), "open windows recover Local editing"
+    assert ui.rpc("control.acquire")["ok"]
+    assert not button(dialog, action).isEnabled()
+    assert dialog.isVisible()
+    ui.window.close_dialog(name)
 
 
 def test_remote_close_requires_holder_label_confirmation(control_ui):

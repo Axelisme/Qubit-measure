@@ -1,4 +1,4 @@
-"""Lifecycle helpers for non-modal Qt dialogs opened with ``open()``."""
+"""Retain Qt dialogs independently of the caller-selected presentation policy."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from qtpy.QtWidgets import QDialog
 
 
 class DialogRefStore:
-    """Retain non-modal dialogs until Qt signals that their lifetime ended."""
+    """Retain dialogs until Qt signals that their lifetime ended."""
 
     def __init__(self) -> None:
         self._refs: dict[Hashable, QDialog] = {}
@@ -21,8 +21,9 @@ class DialogRefStore:
         *,
         delete_on_close: bool = True,
         on_finished: Callable[[int], None] | None = None,
+        modal: bool = True,
     ) -> QDialog:
-        """Retain and open a dialog under a private one-shot key."""
+        """Retain a one-shot dialog; modal=False shows it truly non-modally."""
         key = ("transient", self._next_transient_key)
         self._next_transient_key += 1
         return self.open_named(
@@ -30,6 +31,7 @@ class DialogRefStore:
             dialog,
             delete_on_close=delete_on_close,
             on_finished=on_finished,
+            modal=modal,
         )
 
     def open_named(
@@ -40,8 +42,12 @@ class DialogRefStore:
         delete_on_close: bool = True,
         on_finished: Callable[[int], None] | None = None,
         on_released: Callable[[], None] | None = None,
+        modal: bool = True,
     ) -> QDialog:
         """Retain and open a dialog under a caller-owned key.
+
+        modal=True keeps QDialog.open() window modality; False explicitly uses
+        NonModal and show(). Lifetime and cleanup are identical in either mode.
 
         Existing-key policy stays with the caller: a duplicate key is a bug, not
         an implicit raise/show decision.
@@ -55,7 +61,11 @@ class DialogRefStore:
             on_finished=on_finished,
             on_released=on_released,
         )
-        dialog.open()
+        if modal:
+            dialog.open()
+        else:
+            dialog.setWindowModality(Qt.WindowModality.NonModal)
+            dialog.show()
         return dialog
 
     def retain_named(

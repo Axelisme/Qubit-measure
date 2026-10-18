@@ -8,8 +8,9 @@ from numba import njit
 from numpy.typing import NDArray
 
 from ..kernel import SegmentTable
+from ..workplan import WorkPlan
 from ._dop853_data import pack_segments
-from ._shaped import envelope_bounds
+from ._workload_facts import envelope_bounds
 from .dop853 import DOP853Plan, DOP853Prepared, advance_endpoints
 
 
@@ -243,13 +244,15 @@ def envelopes(
     return values * table.tone_amplitude[rows, 0, None]
 
 
-def band_keys(table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.void]:
+def band_keys(
+    table: SegmentTable, rows: NDArray[np.int64], work_plan: WorkPlan
+) -> NDArray[np.void]:
     """Encode level, port, signed carrier and power-of-two peak-gain band.
 
     Shape, duration and phase do not enter this ordinary preparation identity.
     Zero peak gain uses the DC key, independent of its requested carrier.
     """
-    peaks, _ = envelope_bounds(table)
+    peaks = envelope_bounds(table, work_plan).peaks
     maximum = (
         np.abs(table.tone_amplitude[rows, 0]) * peaks[table.tone_envelope[rows, 0]]
     )
