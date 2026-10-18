@@ -167,6 +167,25 @@ def test_owner_unregister_and_registration_close_are_scoped() -> None:
         registry.get_as("source.value", float)
 
 
+def test_registration_close_preserves_other_keys_and_new_generation() -> None:
+    registry = ValueRegistry()
+    old = registry.register(ValueKey("source.value", int), lambda: 1, owner="owner")
+    registry.register(ValueKey("source.other", int), lambda: 2, owner="owner")
+
+    old.close()
+
+    with pytest.raises(MissingValue):
+        registry.get_as("source.value", int)
+    assert registry.get_as("source.other", int) == 2
+
+    registry.register(ValueKey("source.value", int), lambda: 3, owner="owner")
+    old.close()
+    old.close()
+
+    assert registry.get_as("source.value", int) == 3
+    assert registry.get_as("source.other", int) == 2
+
+
 def test_value_ref_resolve() -> None:
     registry = ValueRegistry()
     registry.register(ValueKey("device.flux.value", float), lambda: 0.25, owner="dev")
