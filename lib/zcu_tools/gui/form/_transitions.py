@@ -53,9 +53,12 @@ def _select(
         else:
             selections[target.path] = option.value
         return FormInput(input.model, input.data, selections=selections)
-    return install_field(
+    candidate = install_field(
         input, target, FormCommandResult(None, None, option.value), env
     )
+    selections = candidate.selections
+    selections[target.path] = option.value
+    return FormInput(input.model, candidate.data, selections=selections)
 
 
 def prepare_selection[F: FormModel](

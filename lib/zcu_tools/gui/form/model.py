@@ -6,7 +6,6 @@ Form paths never interpret dots in a mapping key as separators.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from logging import getLogger
@@ -142,7 +141,7 @@ class InputPolicy:
     """Input capability restriction on an Annotated field.
 
     expression=False disables Expr envelopes in descriptions, evaluation,
-    defaults and compatible restore. True retains the annotation's capability;
+    and defaults. Restoration preserves raw for general validation. True retains the annotation's capability;
     it cannot enable expressions on categorical or container fields.
     """
 
@@ -453,7 +452,7 @@ class FormInput[F: FormModel]:
         literal. Complex literals use {"__complex__": [re, im]}.
         Structural selectors require ordinary typed tags, not Expr envelopes.
         Non-JSON/nonfinite data raises ValueError; unknown fields, malformed tags
-        and invalid values remain input for result/compatible restoration.
+        and invalid values remain input for result and recursive restoration.
         """
         from ._json import copy_object
         from ._structure import check_form_shape
@@ -471,8 +470,8 @@ class FormInput[F: FormModel]:
         """Detached in-memory selections differing from the raw child branch.
 
         Keys are canonical field paths. Values are declared option values.
-        Omitted paths infer selection from raw input. This memory state travels
-        with prepared inputs; persistence is a separate host-owned contract.
+        Omitted paths infer selection from raw input. Prepared inputs and saved
+        JSON retain these choices; hosts own persistence locations.
         """
         from ._json import copy_json
 
@@ -505,25 +504,31 @@ class FormInput[F: FormModel]:
         return copy_object(self._data)
 
     def to_json(self) -> str:
-        """Encode only input, losslessly retaining missing/null and scalar tags."""
-        return json.dumps(self._data, allow_nan=False)
+        """Encode exactly {data,selections}, with no declaration metadata.
+
+        Retain independent selections, raw branch tags, missing/null, expressions
+        and ordinary invalid values. No evaluation, converter, callable or model
+        class serialization occurs. Hosts own the destination and save timing.
+        """
+        from ._persistence import encode
+
+        return encode(self.data, self.selections)
 
     @staticmethod
     def from_json[Model: FormModel](model: type[Model], text: str) -> FormInput[Model]:
-        """Decode saved JSON for model; malformed/non-object/nonfinite JSON raises.
+        """Decode fixed {data,selections} JSON, paired with the target model.
 
-        This static factory's result type follows model, independently of the
-        wrapper's type parameter, keeping immutable FormInput covariant.
-        Model compatibility is deliberately deferred to write_compatible so old
-        field names or changed leaf types can be reported instead of hidden.
+        Malformed, non-object or nonfinite JSON and invalid selection paths raise
+        ValueError. Raw-only and versioned formats are not accepted. Raw invalid
+        input and typed selections remain untouched; restore_input applies the
+        current annotation's recursive restoration and reports dropped paths.
+        No converter, evaluation, hook or source access occurs. The result type
+        follows model independently of this wrapper's type parameter.
         """
-        from ._json import copy_object
+        from ._persistence import decode
 
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Invalid JSON input: {exc}") from exc
-        return FormInput(model, copy_object(data))
+        data, selections = decode(text)
+        return FormInput(model, data, selections=selections)
 
 
 class FormState[F: FormModel]:
@@ -601,7 +606,8 @@ class FormState[F: FormModel]:
 
         Only this operation runs the field converter. Without a converter,
         model selections preserve their branch and authored raw input. Scalar
-        selections write the listed value. Unavailable options or failed
+        selections write the listed value and retain an explicit override for
+        later options-membership validation. Unavailable options or failed
         conversion raise FormConversionError; owner refusal retains path in
         FormInputRejected. Source failures remain directed. Use the candidate
         in the same guarded turn/current input/env as prepare_write.
@@ -695,8 +701,9 @@ class FormState[F: FormModel]:
         Only text fields evaluate {"expr": text}. An envelope on a choice leaf
         is an error at that leaf; on a Literal, Enum, bool or library-key
         leaf it is ordinary input that Pydantic rejects there. Neither is
-        evaluated. Validate dynamic choices and Pydantic
-        types/ranges/cross-field rules.
+        evaluated. Validate dynamic choices, explicit selection overrides
+        against current options, and Pydantic types/ranges/cross-field rules.
+        Raw branches without an override do not acquire an options constraint.
         Return a model or path-directed errors, including a used missing source;
         ordinary model-wide errors use (). Each call uses the supplied env.
         Input at a field whose union mixes text and picked members raises
@@ -704,7 +711,7 @@ class FormState[F: FormModel]:
         """
         from ._evaluate import result
 
-        return result(self._model, self._data, env)
+        return result(self._model, self._data, env, self._selections)
 
     def preview(self, env: FormEnv) -> FormPreview:
         """Evaluate once for display, preserving partial values on model errors.
@@ -717,7 +724,7 @@ class FormState[F: FormModel]:
         """
         from ._evaluate import preview
 
-        return preview(self._model, self._data, env)
+        return preview(self._model, self._data, env, self._selections)
 
     def changes(self, env: FormEnv) -> tuple[FormChange, ...] | FormErrors:
         """Return changed input leaves and their evaluated values, or errors.
@@ -785,40 +792,36 @@ class FormState[F: FormModel]:
 
         return unsubscribe
 
-    def write_compatible(
-        self, saved: Mapping[str, JsonValue], env: FormEnv
+    def restore_input(
+        self, saved: FormInput[FormModel], env: FormEnv
     ) -> tuple[FormPath, ...]:
-        """Overlay surviving compatible saved leaves and return dropped paths.
+        """Restore saved raw input and overrides using current names and shapes.
 
-        Start with host-provided current default input. Keep valid Expr/complex
-        tags, missing-vs-null and whole sequence/typed-mapping leaves. Drop removed paths
-        and type-incompatible leaves, but keep range/cross-field-invalid values
-        so result can report them. Untagged model unions select a branch only
-        when saved field names and raw value types match exactly one member;
-        valid expression envelopes count as compatible for text fields without
-        evaluation; on a Literal, Enum, bool or library-key leaf an envelope
-        is incompatible and dropped. Choice leaves are not checked here. Zero or multiple matches discard that subtree,
-        never select the first branch. Tagged selection/defaults stay unchanged.
-        This is not legacy format support. Branch
-        writes use the same discriminator-first order as write. A saved object
-        without a discriminator overlays the current selected branch, retaining
-        its tag and unsaved defaults; an empty object makes no change. If neither
-        saved nor current input selects a branch, drop that object instead of
-        replacing the model section. A restored leaf whose captured source check
-        fails, such as a ref name absent from env.library or any ref without a
-        captured library, keeps the current input at that leaf (or stays unfilled
-        when current has none) and its leaf path is returned with the other
-        dropped paths. Source failures that no restored leaf causes, such as a
-        used static default or a model-wide error, raise PydanticCustomError
-        without installing. A changed restoration notifies once.
+        saved may use an older declaration. Start with current captured input as
+        defaults, recurse by current field names and list positions, and keep
+        leaf raw values for general validation. Return unique dropped paths for
+        removed fields, incompatible shapes and no-longer-allowed selections.
+        No converter, options hook, source check or expression evaluation runs.
+        Defaults/provider failures propagate before installation.
+
+        On success install once, preserve base and notify once only if the
+        complete draft changed. Restoration is not an ordinary mutation and
+        bypasses owner input-change checks. saved is never modified. Hosts
+        restore into fresh defaults for startup, reload and RAM switching.
         """
-        from ._json import copy_object
-        from ._sources import drop_unmatched_sources
-        from ._structure import restore
+        from ._restore import restore
 
-        restored, dropped = restore(self._model, self._data, copy_object(saved), env)
-        candidate, unmatched = drop_unmatched_sources(
-            self._model, restored, self._data, env
+        data, selections, dropped = restore(
+            self._model, self._data, saved.data, saved.selections, env
         )
-        self._install(FormInput(self._model, candidate))
-        return (*dropped, *unmatched)
+        candidate = FormInput(self._model, data, selections=selections)
+        # Restoration changes captured structure, not an ordinary user mutation.
+        if not self.input.same_as(candidate):
+            self._data = candidate.data
+            self._selections = candidate.selections
+            for callback in tuple(self._callbacks):
+                try:
+                    callback()
+                except Exception:
+                    _logger.exception("Form state subscriber failed")
+        return dropped

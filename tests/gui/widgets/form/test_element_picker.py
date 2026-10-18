@@ -12,6 +12,69 @@ from tests.gui._user_input import ComponentDriver
 from tests.gui.form_adapter._fixed_models import named_form, named_input
 
 
+def test_native_indexed_module_and_sweep_navigation_keeps_visible_drafts(
+    qapp: QApplication,
+    tmp_path: Path,
+):
+    from tests.gui.form_adapter._indexed_models import displayed_form, indexed_env
+
+    env = indexed_env()
+    definition = displayed_form()
+    editor = FormEditor(FormState(definition.default_input(env)), env)
+    editor.resize(850, 1100)
+    editor.show()
+    qapp.processEvents()
+    driver = ComponentDriver(editor)
+    try:
+        driver.screenshot(tmp_path / "01-native-open.png")
+        assert driver.observe(object_name="form.picker.tones").text == "0: A"
+        driver.choose_option(object_name="form.picker.tones", value="1: B")
+        driver.invoke_context_action(
+            object_name="form.input.tones.1.drive", action="Convert to inline"
+        )
+        driver.enter_text(
+            object_name="form.input.tones.1.drive.module.gain", value="broken"
+        )
+        driver.screenshot(tmp_path / "02-inline-invalid.png")
+        assert (
+            "could not convert"
+            in driver.observe(object_name="form.row.tones.1.drive.module.gain").tooltip
+        )
+        driver.choose_option(object_name="form.picker.tones", value="0: A")
+        driver.screenshot(tmp_path / "03-sibling-reference.png")
+        assert (
+            driver.observe(object_name="form.input.tones.0.drive").text
+            == "Q.pulses.drive"
+        )
+        assert (
+            driver.observe(object_name="form.input.participants").text == '["B", "A"]'
+        )
+        driver.choose_option(object_name="form.picker.tones", value="1: B")
+        assert (
+            driver.observe(object_name="form.input.tones.1.drive.module.gain").text
+            == "broken"
+        )
+        driver.enter_text(
+            object_name="form.input.tones.1.drive.module.gain", value="0.4"
+        )
+        driver.invoke_context_action(
+            object_name="form.fold.tones.1.sweep", action="Switch to Center / Span"
+        )
+        driver.screenshot(tmp_path / "04-corrected-center.png")
+        assert (
+            driver.observe(object_name="form.input.tones.1.sweep.center").text == "12.0"
+        )
+        assert (
+            driver.observe(object_name="form.input.tones.1.drive.module.gain").text
+            == "0.4"
+        )
+        driver.choose_option(object_name="form.picker.tones", value="0: A")
+        driver.screenshot(tmp_path / "05-sibling-range-preserved.png")
+        assert driver.observe(object_name="form.input.tones.0.sweep.start").text == "2"
+    finally:
+        editor.close()
+
+
 def test_picker_keeps_uncommitted_text_errors_and_participants(
     qapp: QApplication, tmp_path: Path
 ):

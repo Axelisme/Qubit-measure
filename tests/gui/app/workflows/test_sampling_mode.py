@@ -1,10 +1,12 @@
 """Registered synthetic workflow Step expressions, startup restore and Prepare."""
 
+import json
 from pathlib import Path
 
 import pytest
 from zcu_tools.cfg_model import ConfigBase, Range
 from zcu_tools.gui.app.workflows.persistence import WorkflowInputSnapshot
+from zcu_tools.gui.form import FormInput
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.program.v2.sweep import SweepCfg
 
@@ -25,14 +27,19 @@ def sampling_window(sweep_window):
 def restored_sampling_window(sweep_window):
     form = Form(SamplingPlanCfg, {"sweep": Range.between(0, 1, 5)})
     saved = WorkflowInputSnapshot(
-        plan={
-            "sweep": {
-                "kind": "center_step",
-                "center": 0.5,
-                "span": 1,
-                "step": {"expr": "0.1 * 3"},
-            }
-        }
+        plan=json.loads(
+            FormInput(
+                form.model,
+                {
+                    "sweep": {
+                        "kind": "center_step",
+                        "center": 0.5,
+                        "span": 1,
+                        "step": {"expr": "0.1 * 3"},
+                    }
+                },
+            ).to_json()
+        )
     )
     return ComponentDriver(sweep_window(form.model, saved))
 

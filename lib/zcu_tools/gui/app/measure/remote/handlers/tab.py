@@ -416,22 +416,19 @@ def h_tab_edit_cfg(
     return dict(observe_form(resource))
 
 
-def module_path(raw: object) -> tuple[str, ...]:
-    """Decode typed str segments for the existing core materialization owner.
-
-    Integer indexes are not supported here. Numeric strings stay literal names;
-    never split dotted strings or convert positions into names.
-    """
+def module_path(raw: object) -> tuple[str | int, ...]:
+    """Decode canonical typed fields/indexes without dotted or name fallbacks."""
     if (
         not isinstance(raw, list)
         or not raw
         or any(
-            not isinstance(part, str) or not part or part != part.strip()
+            (not isinstance(part, str) or not part or part != part.strip())
+            and type(part) is not int
             for part in raw
         )
     ):
         raise RemoteError(
-            ErrorCode.INVALID_PARAMS, "field must be a nonempty array of str names"
+            ErrorCode.INVALID_PARAMS, "field must be a nonempty array of names/indexes"
         )
     return tuple(raw)
 
@@ -445,6 +442,13 @@ def h_tab_read_module(
     path = module_path(params["field"])
     try:
         module = adapter.cfg_lookup(str(params["tab_id"])).read_module(path)
+    except FormPathError as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            str(exc),
+            reason="form_path",
+            data={"form_path": list(exc.path)},
+        ) from exc
     except CfgPreconditionError as exc:
         raise cfg_error_to_remote(exc) from exc
     except ValueError as exc:
@@ -459,7 +463,7 @@ def h_tab_use_inline(
 ) -> Mapping[str, object]:
     """Convert one module using the fixed capture and return its complete Form view.
 
-    params supplies tab_id and a str-segment array for a core module field. Resource admission
+    params supplies tab_id and a typed field/index array for a core module field. Resource admission
     runs before reading the public input tag at an exact core module path.
     Ref invokes to_inline through the guarded command host; inline is a no-op
     even for partial input or invalid expressions. Mode detection does not
@@ -475,17 +479,24 @@ def h_tab_use_inline(
     path = module_path(params["field"])
     try:
         resource = adapter.cfg_lookup(str(params["tab_id"]))
-        resource.require_mutation_allowed()
-        kind = resource.read_module_kind(path)
-        if kind == "ref":
-            resource.run_command(path, "to_inline")
-        # Inline is an explicit no-op after the same admission checks.
+        resource.use_inline(path)
+    except FormInputRejected as exc:
+        from ..form_errors import input_rejected_to_remote
+
+        raise input_rejected_to_remote(exc) from exc
+    except FormPathError as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            str(exc),
+            reason="form_path",
+            data={"form_path": list(exc.path)},
+        ) from exc
     except CfgPreconditionError as exc:
         if exc.reason is CfgPreconditionReason.NOT_VALID:
             raise cfg_error_to_remote(
                 CfgPreconditionError(
                     exc.reason,
-                    f"Cannot convert {'.'.join(path)!r}: {exc}. "
+                    f"Cannot convert {path!r}: {exc}. "
                     "Select an Inline option to edit this field.",
                 )
             ) from exc
@@ -493,11 +504,32 @@ def h_tab_use_inline(
     except ValueError as exc:
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
-            f"Cannot convert {'.'.join(path)!r}: {exc}. "
+            f"Cannot convert {path!r}: {exc}. "
             "Select an Inline option to edit this field.",
             reason="form_errors",
         ) from exc
     return dict(observe_form(resource))
+
+
+def h_tab_read_elements(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Forward one readonly aggregate to its owner; never focus or refresh."""
+    from ..form_errors import cfg_error_to_remote
+    from ..form_observation import observe_elements
+
+    path = module_path(params["path"])
+    try:
+        return dict(observe_elements(adapter.cfg_lookup(str(params["tab_id"])), path))
+    except CfgPreconditionError as exc:
+        raise cfg_error_to_remote(exc) from exc
+    except FormPathError as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            str(exc),
+            reason="form_path",
+            data={"form_path": list(exc.path)},
+        ) from exc
 
 
 def _recipe_path(raw: object, *, root: bool = False) -> tuple[str | int, ...]:

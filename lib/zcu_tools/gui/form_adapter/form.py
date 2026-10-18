@@ -5,7 +5,7 @@ from copy import deepcopy
 from dataclasses import replace
 from functools import partial
 from types import MappingProxyType, new_class
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args, get_origin
 
 from pydantic import BaseModel, Field, JsonValue, ValidationError
 from pydantic.fields import FieldInfo
@@ -33,6 +33,7 @@ from zcu_tools.gui.form import (
     FormErrors,
     FormInput,
     FormModel,
+    FormPathError,
     FormState,
     FormWritePath,
     InputConverter,
@@ -56,6 +57,7 @@ from ._seeds import persistent_input, supported_input, template_seed_tree
 from ._seeds import template_input as _template_input
 from ._types import literal_type, union_type
 from ._types import members as _members
+from .elements import ElementObservation, ElementsObservation
 from .fixed_elements import FixedElements, FixedElementsForm
 from .logical import LogicalEdit, LogicalEditCandidate, LogicalFieldObservation
 from .sweep import CenterSpan, LinRange, StepCenter, StepRange
@@ -130,6 +132,8 @@ def _section_type(annotation: object) -> type[BaseModel] | None:
 
 
 def _seed_json(seed: FormNode) -> JsonValue:
+    if isinstance(seed, list):
+        return [_seed_json(item) for item in seed]
     if isinstance(seed, Expr):
         return {"expr": seed.text}
     if isinstance(seed, complex):
@@ -137,6 +141,23 @@ def _seed_json(seed: FormNode) -> JsonValue:
     if seed is None or isinstance(seed, (str, int, float, bool)):
         return seed
     raise TypeError(f"Not a scalar form seed: {seed!r}")
+
+
+def _check_position_seed(node: FormNode, path: FormWritePath) -> None:
+    """Position trees supply values, never alter the shared element declaration."""
+    if isinstance(node, (Locked, Hidden)) or (
+        isinstance(node, (Slot, Template)) and node.lock
+    ):
+        raise ValueError(
+            f"{path!r}: position seed cannot change the shared element declaration "
+            f"with {type(node).__name__}; declare shared constraints on the element type"
+        )
+    if isinstance(node, Mapping):
+        for name, child in node.items():
+            _check_position_seed(child, (*path, name))
+    elif isinstance(node, list):
+        for index, child in enumerate(node):
+            _check_position_seed(child, (*path, index))
 
 
 def _alias_name(node: AliasName, env: FormEnv) -> str | None:
@@ -230,6 +251,8 @@ class _Section:
         self.tree = dict(tree)
         self.path = path
         self.children: dict[str, _Section] = {}
+        self.lists: dict[str, _Section] = {}
+        self.element_seeds: dict[str, tuple[_Section, ...]] = {}
         self.modules: dict[str, ModuleField] = {}
         namespace: dict[str, object] = {"__module__": __name__}
         annotations: dict[str, object] = {}
@@ -341,6 +364,26 @@ class _Section:
             )
         if SweepCfg in _members(info.annotation):
             return _sweep_model(node, info)
+        if get_origin(info.annotation) is list:
+            element_type = get_args(info.annotation)[0]
+            if isinstance(element_type, type) and issubclass(element_type, ConfigBase):
+                child = _Section(element_type, {}, (*self.path, name))
+                self.lists[name] = child
+                if node is not None:
+                    if not isinstance(node, list) or any(
+                        not isinstance(item, Mapping) for item in node
+                    ):
+                        raise TypeError(
+                            f"{(*self.path, name)!r}: expected a list of element trees"
+                        )
+                    for index, item in enumerate(node):
+                        _check_position_seed(item, (*self.path, name, index))
+                    self.element_seeds[name] = tuple(
+                        _Section(element_type, item, (*self.path, name))
+                        for item in node
+                        if isinstance(item, Mapping)
+                    )
+                return list[child.model]
         child_core = _section_type(info.annotation)
         if child_core is None:
             return info.annotation
@@ -361,12 +404,28 @@ class _Section:
             if name in self.model.model_fields and SweepCfg in _members(info.annotation)
         }
 
+    def _list_defaults(self, data: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+        result: dict[str, JsonValue] = {}
+        for name, child in self.lists.items():
+            native = data.get(name)
+            if isinstance(native, list):
+                result[name] = [
+                    child.native_data(item) if isinstance(item, dict) else item
+                    for item in native
+                ]
+        return result
+
     def default_data(self, env: FormEnv) -> dict[str, JsonValue]:
         data = {**self._sweep_defaults(), **static_defaults(self.model)}
+        data.update(self._list_defaults(data))
         for name, node in self.tree.items():
             if isinstance(node, Hidden):
                 continue
-            if name in self.children:
+            if name in self.element_seeds:
+                data[name] = [
+                    child.default_data(env) for child in self.element_seeds[name]
+                ]
+            elif name in self.children:
                 data[name] = self.children[name].default_data(env)
             elif name in self.modules:
                 data.pop(name, None)
@@ -394,10 +453,46 @@ class _Section:
             for name in self.modules
             if self.core.model_fields[name].default is None
         } | data
-        for name, child in self.children.items():
-            if name not in data and self.core.model_fields[name].is_required():
-                data[name] = child.default_data(env)
+        data.update(self._required_children(data, env))
         return data
+
+    def _required_children(
+        self, data: Mapping[str, JsonValue], env: FormEnv
+    ) -> dict[str, JsonValue]:
+        return {
+            name: child.default_data(env)
+            for name, child in self.children.items()
+            if name not in data and self.core.model_fields[name].is_required()
+        }
+
+    def native_data(self, data: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+        """Project a native element default recursively, without reading sources."""
+        result = dict(data)
+        for name, field in self.modules.items():
+            item = result.get(name)
+            if isinstance(item, dict):
+                result[name] = field.native_input(item)
+        for name, child in self.children.items():
+            item = result.get(name)
+            if isinstance(item, dict):
+                result[name] = child.native_data(item)
+        for name, child in self.lists.items():
+            items = result.get(name)
+            if isinstance(items, list):
+                result[name] = [
+                    child.native_data(item) if isinstance(item, dict) else item
+                    for item in items
+                ]
+        for name, info in self.core.model_fields.items():
+            item = result.get(name)
+            if SweepCfg in _members(info.annotation) and isinstance(item, dict):
+                result[name] = {
+                    "kind": "linrange",
+                    "start": item.get("start"),
+                    "stop": item.get("stop"),
+                    "n": item.get("expts"),
+                }
+        return result
 
     def bind_templates(self, catalog: Mapping[str, TemplateDef], adapter: str) -> None:
         for field in self.modules.values():
@@ -407,20 +502,51 @@ class _Section:
                 raise ValueError(
                     f"Adapter {adapter!r}, {'.'.join(field.path)}: {exc}"
                 ) from exc
-        for child in self.children.values():
+        for child in (*self.children.values(), *self.lists.values()):
             child.bind_templates(catalog, adapter)
+        for seeds in self.element_seeds.values():
+            for seed in seeds:
+                seed.bind_templates(catalog, adapter)
         for field in self.modules.values():
             field.catalog = catalog
         self.model.model_rebuild(force=True)
 
-    def to_raw(
-        self, value: BaseModel, env: FormEnv, errors: dict[tuple[str | int, ...], str]
+    def _list_raw(
+        self,
+        value: BaseModel,
+        env: FormEnv,
+        errors: dict[FormWritePath, str],
+        prefix: FormWritePath,
     ) -> dict[str, CfgInputValue]:
+        raw: dict[str, CfgInputValue] = {}
+        for name, child in self.lists.items():
+            items: object = getattr(value, name)
+            if not isinstance(items, list) or any(
+                not isinstance(item, BaseModel) for item in items
+            ):
+                raise TypeError(
+                    f"{(*prefix, name)!r}: expected validated model elements"
+                )
+            raw[name] = [
+                child.to_raw(item, env, errors, (*prefix, name, index))
+                for index, item in enumerate(items)
+            ]
+        return raw
+
+    def to_raw(
+        self,
+        value: BaseModel,
+        env: FormEnv,
+        errors: dict[tuple[str | int, ...], str],
+        path: FormWritePath | None = None,
+    ) -> dict[str, CfgInputValue]:
+        prefix = self.path if path is None else path
         raw: dict[str, CfgInputValue] = value.model_dump(mode="python")
+        raw.update(self._list_raw(value, env, errors, prefix))
         for name, child in self.children.items():
             item: object = getattr(value, name)
             if isinstance(item, BaseModel):
-                raw[name] = child.to_raw(item, env, errors)
+                raw[name] = child.to_raw(item, env, errors, (*prefix, name))
         for name, field in self.modules.items():
             item: object = getattr(value, name)
             if item is None:
@@ -429,7 +555,7 @@ class _Section:
                 try:
                     raw[name] = field.materialize(item, env)
                 except (ValueError, TypeError) as exc:
-                    errors[(*self.path, name)] = str(exc)
+                    errors[(*prefix, name)] = str(exc)
         for name in self.core.model_fields:
             if name not in value.__class__.model_fields:
                 continue
@@ -447,7 +573,7 @@ class _Section:
                         else 0,
                     )
                 except ValidationError as exc:
-                    errors[(*self.path, name)] = str(exc)
+                    errors[(*prefix, name)] = str(exc)
                 else:
                     raw[name] = sweep.model_dump(mode="json")
         return raw
@@ -595,6 +721,69 @@ class Form[C: ConfigBase]:
         self._check_logical_input(input)
         return _logical.read(input, path, env)
 
+    def read_elements(
+        self,
+        input: FormInput[FormModel],
+        path: FormWritePath,
+        env: FormEnv,
+    ) -> ElementsObservation:
+        """Read every model-list element once from one detached input and capture.
+
+        path is a nonempty canonical typed model-list path. Unknown, inactive
+        or non-list targets raise FormPathError preserving the request. Wrong
+        input model raises TypeError. Returns authored inputs, available preview
+        leaves and directed errors in original list order, even for invalid or
+        nonparticipating elements. References are not materialized. No converter,
+        source refresh, mutation, notification or focus occurs.
+        """
+        self._check_logical_input(input)
+        state = FormState(input)
+        target = state.describe(path, env).target
+        if target is None or target.elements is None:
+            raise FormPathError(path, "Aggregate requires a model-list field")
+        preview = state.preview(env)
+        names = None
+        if issubclass(input.model, FixedElementsForm):
+            declaration = next(
+                (item for item in input.model.fixed_elements if item.list_path == path),
+                None,
+            )
+            if declaration is not None:
+                names = declaration.names(input.data)
+        elements: list[ElementObservation] = []
+        for item in target.elements:
+            raw = self._input_at(input.data, item.path)
+            if not isinstance(raw, dict):
+                raise FormPathError(item.path, "Expected an authored model element")
+            name = names[item.index] if names is not None else item.name
+            messages = {
+                key: text
+                for key, text in (
+                    preview.errors.messages.items() if preview.errors else ()
+                )
+                if key[: len(item.path)] == item.path or item.path[: len(key)] == key
+            }
+            elements.append(
+                ElementObservation(
+                    item.index,
+                    name if isinstance(name, str) else item.name,
+                    item.path,
+                    raw,
+                    {
+                        key: value
+                        for key, value in input.selections.items()
+                        if key[: len(item.path)] == item.path
+                    },
+                    {
+                        key: value
+                        for key, value in preview.values.items()
+                        if key[: len(item.path)] == item.path
+                    },
+                    FormErrors(messages) if messages else None,
+                )
+            )
+        return ElementsObservation(path, tuple(elements), preview.errors)
+
     def prepare_logical_edits(
         self, input: FormInput[FormModel], edits: Sequence[LogicalEdit], env: FormEnv
     ) -> LogicalEditCandidate:
@@ -671,25 +860,67 @@ class Form[C: ConfigBase]:
         self._check_logical_input(input)
         return _logical.logical_errors(input, errors, env)
 
-    def _module_field(self, path: tuple[str, ...]) -> ModuleField:
+    def _module_field(
+        self, input: FormInput[FormModel], path: FormWritePath
+    ) -> ModuleField:
         section = self._section
-        if not path or any(not part for part in path):
-            raise ValueError("Module path must contain nonempty field names")
-        for part in path[:-1]:
-            if part not in section.children:
-                raise ValueError(f"Not a core module field: {'.'.join(path)}")
-            section = section.children[part]
-        if path[-1] not in section.modules:
-            raise ValueError(f"Not a core module field: {'.'.join(path)}")
-        return section.modules[path[-1]]
+        raw: JsonValue = input.data
+        remaining = list(path)
+        while remaining:
+            name = remaining.pop(0)
+            if not isinstance(name, str) or not name:
+                break
+            if not remaining:
+                if name in section.modules:
+                    return section.modules[name]
+                if name in section.model.model_fields:
+                    raise ValueError(f"Not a core module field: {path!r}")
+            raw = raw.get(name) if isinstance(raw, dict) else None
+            if name in section.children:
+                if raw is None and type(None) in _members(
+                    section.model.model_fields[name].annotation
+                ):
+                    break
+                section = section.children[name]
+            elif isinstance(section, _Section) and name in section.lists and remaining:
+                index = remaining.pop(0)
+                if (
+                    type(index) is not int
+                    or not isinstance(raw, list)
+                    or not 0 <= index < len(raw)
+                ):
+                    break
+                raw = raw[index]
+                section = section.lists[name]
+            else:
+                break
+        raise FormPathError(path, f"Not an active core module field: {path!r}")
+
+    @staticmethod
+    def _input_at(raw: JsonValue, path: FormWritePath) -> JsonValue:
+        for part in path:
+            current: JsonValue = raw
+            if isinstance(current, dict) and isinstance(part, str):
+                raw = current.get(part)
+            elif (
+                isinstance(current, list)
+                and isinstance(part, int)
+                and not isinstance(part, bool)
+                and 0 <= part < len(current)
+            ):
+                raw = current[part]
+            else:
+                return None
+        return raw
 
     def module_input_kind(
-        self, input: FormInput[FormModel], path: tuple[str, ...]
+        self, input: FormInput[FormModel], path: FormWritePath
     ) -> Literal["ref", "inline"]:
         """Read an authored core module's tag without evaluating its draft.
 
         input must belong to this Form; another model raises TypeError. path
-        contains nonempty core field names, not inline descendants or extras.
+        contains nonempty core field names and int original model-list indexes,
+        not inline descendants or extras.
         Unknown/nonmodule paths raise ValueError, even if their input has a
         kind tag. Return ref or inline from the public tagged input, including
         partial modules and invalid expressions. Disabled, missing or untagged
@@ -698,24 +929,24 @@ class Form[C: ConfigBase]:
         """
         if input.model is not self.model:
             raise TypeError("module_input_kind requires this Form's input")
-        self._module_field(path)
-        raw: JsonValue = input.data
-        for part in path:
-            raw = raw.get(part) if isinstance(raw, dict) else None
+        self._module_field(input, path)
+        raw = self._input_at(input.data, path)
         kind = raw.get("kind") if isinstance(raw, dict) else None
         if kind == "ref":
             return "ref"
         if kind == "inline":
             return "inline"
-        raise ValueError(f"Module input has no ref/inline tag: {'.'.join(path)}")
+        raise ValueError(f"Module input has no ref/inline tag: {path!r}")
 
     def read_module(
-        self, input: FormInput[FormModel], path: tuple[str, ...], env: FormEnv
+        self, input: FormInput[FormModel], path: FormWritePath, env: FormEnv
     ) -> ModuleValues | FormErrors:
         """Read this module field's evaluated value without mutation or refresh.
 
         input must belong to this Form; other models raise TypeError. path uses
-        nonempty core field names; unknown/nonmodule paths raise ValueError.
+        nonempty core field names and int original model-list indexes.
+        Unknown/inactive paths raise FormPathError with the request; a known
+        nonmodule field raises ValueError.
         env is the fixed capture used to evaluate input. Key mode materializes
         its captured library Spec; inline mode evaluates this field's input.
         Other invalid draft fields do not block this read. Only this module's
@@ -725,11 +956,8 @@ class Form[C: ConfigBase]:
         """
         if input.model is not self.model:
             raise TypeError("read_module requires this Form's input")
-        field = self._module_field(path)
-        raw: JsonValue = input.data
-        for part in path:
-            raw = raw.get(part) if isinstance(raw, dict) else None
-        return field.read(raw, env)
+        field = self._module_field(input, path)
+        return field.read(self._input_at(input.data, path), env, path=path)
 
     def template_input(
         self,
@@ -803,9 +1031,13 @@ class Form[C: ConfigBase]:
                 f"Expected {self.core_cfg.__name__}, got {type(spec).__name__}"
             )
         state = FormState(self.default_input(env))
-        dropped = state.write_compatible(
-            supported_input(
-                self._section.editable, spec.model_dump(mode="json", exclude_none=True)
+        dropped = state.restore_input(
+            FormInput(
+                state.input.model,
+                supported_input(
+                    self._section.editable,
+                    spec.model_dump(mode="json", exclude_none=True),
+                ),
             ),
             env,
         )

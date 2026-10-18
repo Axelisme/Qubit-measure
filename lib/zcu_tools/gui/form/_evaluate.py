@@ -12,12 +12,14 @@ from zcu_tools.core.complex_codec import decode_complex
 from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_expr
 
 from ._json import copy_object, default_json, expr_text
+from ._selection import option_errors
 from ._sources import check_sources, error_path
 from ._structure import (
     alternatives,
     discriminator,
     expression_allowed,
     leaves,
+    list_model,
     selected,
     unwrap,
 )
@@ -274,19 +276,25 @@ def _active_leaf(value: BaseModel, path: FormPath) -> bool:
 
 
 def result[F: FormModel](
-    model: type[F], data: dict[str, JsonValue], env: FormEnv
+    model: type[F],
+    data: dict[str, JsonValue],
+    env: FormEnv,
+    selections: Mapping[FormWritePath, JsonValue] | None = None,
 ) -> F | FormErrors:
     """Evaluate one detached input and return its model or canonical errors."""
-    decoding = _start(model, data, env)
+    decoding = _start(model, data, env, selections)
     ordinary = _decode_model(model, data, (), decoding)
     return _validate(model, ordinary, decoding)
 
 
 def preview(
-    model: type[FormModel], data: dict[str, JsonValue], env: FormEnv
+    model: type[FormModel],
+    data: dict[str, JsonValue],
+    env: FormEnv,
+    selections: Mapping[FormWritePath, JsonValue] | None = None,
 ) -> FormPreview:
     """Share decoding/validation while retaining non-failing leaves for display."""
-    decoding = _start(model, data, env)
+    decoding = _start(model, data, env, selections)
     ordinary = _decode_model(model, data, (), decoding)
     failed_decoding = tuple(decoding.errors)
     validated = _validate(model, ordinary, decoding)
@@ -342,7 +350,10 @@ def _project_valid_children(
 
 
 def _start(
-    model: type[FormModel], data: dict[str, JsonValue], env: FormEnv
+    model: type[FormModel],
+    data: dict[str, JsonValue],
+    env: FormEnv,
+    selections: Mapping[FormWritePath, JsonValue] | None = None,
 ) -> _Decoding:
     """Check data's captured sources and return a decoding of data in env.
 
@@ -351,7 +362,10 @@ def _start(
     choices. Invalid choice declarations raise ValueError.
     """
     try:
-        return _Decoding(env, check_sources(model, data, env, validate_paths=True))
+        choices = check_sources(model, data, env, validate_paths=True)
+        return _Decoding(
+            env, choices, errors=option_errors(model, data, env, selections or {})
+        )
     except PydanticCustomError as exc:
         return _Decoding(env, {}, (error_path(exc), exc.message()))
 
@@ -406,7 +420,7 @@ def evaluate_defaults(
 
     data is what model.defaults returned. Each text-field leaf (see
     expression_allowed; a choice leaf included, an explicitly restricted field not) holding
-    exactly {"expr": text}, in model or nested/selected-branch sections, is
+    exactly {"expr": text}, in model, model-list or nested/selected-branch sections, is
     evaluated once with env.parameters and replaced by its JSON value. A leaf
     is removed instead when its expression raises ExpressionError (a missing
     path, an unbound alias, a non-numeric value), when its value is not finite
@@ -447,6 +461,14 @@ def _evaluate_section(
         if info is None or name == tag_key:
             continue
         path = (*prefix, name)
+        element = list_model(info)
+        if element is not None and isinstance(value, list):
+            for index, item in enumerate(value):
+                if isinstance(item, dict):
+                    _evaluate_section(
+                        element, item, env, (*path, index), None, substituted
+                    )
+            continue
         child = selected(info, value)
         if child is not None and isinstance(value, dict):
             _evaluate_section(child, value, env, path, discriminator(info), substituted)

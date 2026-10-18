@@ -41,7 +41,9 @@ def test_restore_and_reset_do_not_run_input_change_admission():
             "Missing neutral admission seam"
         )
         state = api.FormState(api.FormInput(AdmissionForm, {"entries": [1]}))
-        state.write_compatible({"entries": [2, 3]}, api.FormEnv())
+        state.restore_input(
+            api.FormInput(AdmissionForm, {"entries": [2, 3]}), api.FormEnv()
+        )
         state.reset(api.FormInput(AdmissionForm, {"entries": [4]}))
         assert AdmissionForm.calls == []
         assert state.input.data == {"entries": [4]}

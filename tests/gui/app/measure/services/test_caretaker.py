@@ -37,7 +37,11 @@ def _sample_state() -> AppPersistedState:
     return AppPersistedState(
         startup=PersistedStartup(chip_name="chip", ip="host", port=1234),
         session=PersistedSession(
-            tabs=(PersistedTab(adapter_name="fake", form_input={"x": 1}),),
+            tabs=(
+                PersistedTab(
+                    adapter_name="fake", form_input={"data": {"x": 1}, "selections": []}
+                ),
+            ),
             active_tab_index=0,
         ),
     )
@@ -93,6 +97,22 @@ def test_restore_corrupt_file_falls_back_with_error(tmp_path: Path):
     outcome = caretaker.restore_all()
 
     assert outcome.load_error is not None
+    assert receiver.restored == AppPersistedState()
+
+
+def test_raw_only_form_snapshot_opens_defaults_with_visible_error(
+    tmp_path: Path,
+) -> None:
+    receiver = _FakeOriginator(AppPersistedState())
+    caretaker = PersistenceCaretaker(receiver, cache_dir=tmp_path)
+    caretaker.state_path.write_text(
+        f'{{"version": {APP_STATE_VERSION}, "session": {{"tabs": [{{"adapter_name": "fake", "form_input": {{"x": 1}}}}]}}}}'
+    )
+
+    outcome = caretaker.restore_all()
+
+    assert outcome.load_error is not None
+    assert "Failed to read GUI state" in str(outcome.load_error)
     assert receiver.restored == AppPersistedState()
 
 

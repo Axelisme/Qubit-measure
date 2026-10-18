@@ -58,6 +58,90 @@ class Picks(RebuildingForm):
         return {("device",): tuple(env.devices) or ("a", "b")}
 
 
+@pytest.mark.parametrize("dynamic", [False, True], ids=["static-C", "missing-old-key"])
+def test_saved_unlisted_selection_is_visible_invalid_input_not_a_restore_failure(
+    dynamic: bool,
+) -> None:
+    hooks_enabled = False
+
+    class HookSelection(FormModel):
+        key: str
+
+        @classmethod
+        def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[api.Option, ...]]:
+            assert hooks_enabled, "Restore must not execute declaration hooks"
+            keys = (
+                (() if env.library is None else env.library.module_keys())
+                if dynamic
+                else ("A", "B")
+            )
+            return {("key",): tuple(api.Option(key, key) for key in keys)}
+
+    selection = "old-key" if dynamic else "C"
+    authored = FormInput(HookSelection, {"key": "A"}, selections={("key",): selection})
+    restored = FormInput.from_json(HookSelection, authored.to_json())
+    hooks_enabled = True
+    state = FormState(restored)
+    errors = state.result(FormEnv())
+    assert isinstance(errors, FormErrors)
+    assert ("key",) in errors.messages
+    assert "option" in errors.messages[("key",)].lower()
+    assert state.preview(FormEnv()).errors == errors
+    assert state.input.same_as(authored)
+
+
+def test_hook_options_do_not_restrict_raw_value_without_selection_override() -> None:
+    class Ref(BaseModel):
+        kind: Literal["ref"] = "ref"
+        name: str
+
+    class RefForm(FormModel):
+        source: Ref
+
+        @classmethod
+        def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[api.Option, ...]]:
+            return {
+                ("source",): (api.Option("Listed", {"kind": "ref", "name": "listed"}),)
+            }
+
+    raw: dict[str, JsonValue] = {"source": {"kind": "ref", "name": "unlisted"}}
+    ordinary = FormState(FormInput(RefForm, raw))
+    assert isinstance(ordinary.result(FormEnv()), RefForm)
+    explicit = FormState(
+        FormInput(RefForm, raw, selections={("source",): raw["source"]})
+    )
+    errors = explicit.result(FormEnv())
+    assert isinstance(errors, FormErrors)
+    assert ("source",) in errors.messages
+    assert explicit.input.data == raw
+
+
+def test_reselecting_scalar_replaces_stale_override_and_tracks_new_choice() -> None:
+    listed = ["A", "B"]
+
+    class ChangingChoices(FormModel):
+        key: str
+
+        @classmethod
+        def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[api.Option, ...]]:
+            return {("key",): tuple(api.Option(key, key) for key in listed)}
+
+    env = FormEnv()
+    state = FormState(
+        FormInput(ChangingChoices, {"key": "A"}, selections={("key",): "C"})
+    )
+    assert isinstance(state.result(env), FormErrors)
+    state.select(("key",), "B", env)
+    assert isinstance(state.result(env), ChangingChoices)
+    assert state.input.data == {"key": "B"}
+    assert state.input.selections == {("key",): "B"}
+    listed.remove("B")
+    errors = state.result(env)
+    assert isinstance(errors, FormErrors)
+    assert ("key",) in errors.messages
+    assert state.input.data == {"key": "B"}
+
+
 def obj(value: JsonValue) -> dict[str, JsonValue]:
     assert isinstance(value, dict)
     return value

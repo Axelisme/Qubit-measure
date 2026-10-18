@@ -1,36 +1,63 @@
-"""App-owned workflow input memento; not a native run or journal snapshot."""
+"""App-owned plan/knobs memento, each using the shared FormInput JSON codec."""
 
+from __future__ import annotations
+
+import json
 from dataclasses import dataclass
-from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter
 
-from zcu_tools.gui.form import FormPath
+from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormPath
 
 
 class WorkflowInputSnapshot(BaseModel):
-    """Versioned parsed input, retaining expressions without evaluating them.
+    """Two independent parsed drafts; no run, hardware or declaration metadata.
 
-    version identifies this app memento format and must be 2. plan and knobs
-    contain detached FormInput JSON trees, including missing/null and expression
-    tags. Empty mappings mean fresh-default overlays. No run or hardware state
-    is saved. Unknown top-level fields and malformed trees are rejected.
+    plan and knobs contain FormInput {data,selections} JSON objects. None means
+    no saved draft, so the host uses fresh defaults for that form. Raw invalid
+    input, missing/null, expressions and explicit selections remain authored.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
-    version: Literal[2] = 2
-    plan: dict[str, JsonValue] = Field(default_factory=dict)
-    knobs: dict[str, JsonValue] = Field(default_factory=dict)
+    plan: dict[str, JsonValue] | None = None
+    knobs: dict[str, JsonValue] | None = None
+
+    @classmethod
+    def capture(
+        cls, plan: FormInput[FormModel], knobs: FormInput[FormModel]
+    ) -> WorkflowInputSnapshot:
+        """Capture both shared FormInput JSON objects without evaluating them."""
+        adapter = TypeAdapter(dict[str, JsonValue])
+        return cls(
+            plan=adapter.validate_json(plan.to_json()),
+            knobs=adapter.validate_json(knobs.to_json()),
+        )
+
+    def inputs(
+        self, plan: type[FormModel], knobs: type[FormModel], env: FormEnv
+    ) -> tuple[FormInput[FormModel], FormInput[FormModel]]:
+        """Decode both authored drafts before host mutation; absent drafts use defaults.
+
+        Invalid JSON wire shapes raise ValueError. The host applies the common
+        recursive restore_input mechanism to both results. Source/provider
+        failures from fresh defaults propagate unchanged.
+        """
+        return (
+            plan.default_input(env)
+            if self.plan is None
+            else FormInput.from_json(plan, json.dumps(self.plan)),
+            knobs.default_input(env)
+            if self.knobs is None
+            else FormInput.from_json(knobs, json.dumps(self.knobs)),
+        )
 
 
 @dataclass(frozen=True)
 class WorkflowInputRestoreReport:
-    """Paths discarded during restoration by the current forms and capture.
+    """Discarded raw/override paths from the same recursive restore on both forms.
 
-    plan_dropped and knobs_dropped are model-field tuple paths in the respective
-    form: removed or type-incompatible fields, and restored leaves whose captured
-    source check failed (for example a module ref without a captured library).
-    An empty tuple means every supplied field was compatible.
+    plan_dropped and knobs_dropped identify removed fields, incompatible shapes
+    or selections the current annotation no longer accepts. Hosts display them.
     """
 
     plan_dropped: tuple[FormPath, ...]
@@ -38,16 +65,20 @@ class WorkflowInputRestoreReport:
 
 
 class WorkflowInputCodec:
-    """Validate the app memento at the shared caretaker's JSON boundary."""
+    """Validate the app's two FormInput objects at the caretaker JSON boundary."""
 
     def default(self) -> WorkflowInputSnapshot:
-        """Return empty overlays so the Window supplies current form defaults."""
+        """Use current defaults when no persisted draft is available."""
         return WorkflowInputSnapshot()
 
     def decode(self, raw: object) -> WorkflowInputSnapshot:
-        """Decode parsed JSON; unknown versions/fields or invalid shapes raise."""
-        return WorkflowInputSnapshot.model_validate(raw)
+        """Decode only current FormInput wire shapes; format errors raise ValueError."""
+        snapshot = WorkflowInputSnapshot.model_validate(raw)
+        for draft in (snapshot.plan, snapshot.knobs):
+            if draft is not None:
+                FormInput.from_json(FormModel, json.dumps(draft))
+        return snapshot
 
     def encode(self, state: WorkflowInputSnapshot) -> object:
-        """Return a detached JSON snapshot, preserving expression envelopes."""
+        """Return detached plan/knobs JSON, preserving authored input and overrides."""
         return state.model_dump(mode="json")

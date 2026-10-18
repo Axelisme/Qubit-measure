@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from zcu_tools.resources.entry.ledger_models import JsonObject
 
     from ..writeback import WritebackDraft
-    from .persistence_types import AppPersistedState
+    from .persistence_types import AppPersistedState, PersistedTab
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,9 +105,9 @@ class SavePaneSnapshot:
 class TabSnapshot:
     """Immutable full-state snapshot of one tab (contract-layer DTO).
 
-    Render (``TabService.get_snapshot``) populates every field; persist/restore
-    uses only the serializable head (adapter_name + cfg_input). cfg_input is
-    detached authored Form JSON, never an accepted cfg or source snapshot. Pane-owned
+    Render (``TabService.get_snapshot``) populates every field. cfg_input is
+    detached raw input for live observation, not persistence wire JSON. Restore
+    uses PersistedTab with the shared FormInput codec instead. Pane-owned
     read models (run/analysis/post_analysis/save/artifacts) are the only
     runtime/read-model contract — no flat projections for legacy callers.
     """
@@ -198,7 +198,7 @@ class TabLifecyclePort(Protocol):
     def new_tab(
         self,
         adapter_name: str,
-        from_dict: TabSnapshot | None = None,
+        from_dict: PersistedTab | None = None,
     ) -> str:
         """Create or restore a tab using the current session sources."""
         ...
