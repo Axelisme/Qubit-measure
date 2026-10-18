@@ -107,13 +107,15 @@ def test_one_converter_receives_readonly_snapshot_target_and_local_evaluation():
     assert len(calls) == len(observed) == 1
     errors = state.result(env)
     assert isinstance(errors, api.FormErrors)
-    assert set(errors.messages) == {
-        ("value", "amount"),
-        ("value", "required"),
-        ("unrelated",),
-    }
-    state.write({("value", "amount"): 5, ("value", "required"): 8}, env)
+    assert ("unrelated",) in errors.messages
+    assert state.input.data["unrelated"] == {"expr": "1 / 0"}
+    state.write({("unrelated",): 1}, env)
+    errors = state.result(env)
+    assert isinstance(errors, api.FormErrors)
+    assert set(errors.messages) == {("value", "amount"), ("value", "required")}
+    assert state.input.data["value"] == {"kind": "second", "amount": -3}
     assert len(calls) == 1
+    assert len(observed) == 2
 
 
 @pytest.mark.parametrize("defect", ["structure", "scope", "evaluation", "exception"])
