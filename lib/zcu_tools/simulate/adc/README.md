@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-18, guarded direct discrete sums
+**Last updated:** 2026-10-18, carrier-wise mux discrete sums
 
 ADC consumes explicitly ordered classical populations, not densities. The
 probability tolerance is `POPULATION_TOLERANCE = 1e-6`. This is 1000 times below
@@ -47,10 +47,18 @@ scattering-phase model, not a full impedance network or a global signal rotation
 independent demodulation grids. Every grid observes the sum of all incident
 carriers through the same physical line; receiver offset is applied once, not
 once per tone. `ConditionalReadout` computes state-conditioned responses once
-per distinct content. Multi-pulse contents use the general field ODE. The direct,
-constant-interval and projected fast paths require exactly one pulse and never
-silently discard additional carriers. Integrated batches without traces use direct discrete sums for flat
-pulses (`envelope=None`) on uniform ADC grids. The constant moment solution
+per distinct content. Integrated flat (`envelope=None`), common-start mux
+contents sum each carrier's linear response through the same line. Different
+pulse end times retain their own ringdown. Each carrier first tries guarded
+direct discrete sums on uniform ADC grids. A rejected carrier uses the existing
+constant-field solution, including full block exponentials when the coupling
+guard rejects the projected solution. Guards are not relaxed and one rejection
+does not send other carriers to the ODE. Calibration includes receiver offset
+only once per sample after superposition. The workspace stays local to the
+`ConditionalReadout` instance, not shared globally or across receivers.
+Trace/decimated, shaped and different-start multi-pulse contents retain the
+general field ODE. Single-pulse numeric paths are unchanged.
+Integrated single flat pulses also use the guarded direct discrete sums. The constant moment solution
 comes from `(M+iω)X−XQ=B`. In the eigenbases of M and Q, its coefficients are
 `Y_ab=(Um⁻¹ B Uq)_ab/(μ_a+iω−λ_b)`. Each demodulated exponential sums to
 `exp(z*a)*expm1(N*z*h)/expm1(z*h)`; the sampled-alias limit is `N*exp(z*a)`.
@@ -68,9 +76,9 @@ adjacent differences, this accounts for quantization at large absolute starts.
 Single samples are uniform. Direct sums reuse the exact-content cache across
 contents and batches. Trace requests retain a separate field cache.
 
-Unsupported contents fall back individually, including shaped/nonuniform grids,
-defective generators and all trace/decimated requests. The field route is
-unchanged. Flat fields share frequency-independent Schur bases and sampled output
+Unsupported direct sums fall back individually, including nonuniform grids
+and defective generators. Shaped contents and all trace/decimated requests
+retain their original field route. Flat fields share frequency-independent Schur bases and sampled output
 projections when enough contents reuse the same relative grid to amortize their
 construction. These grids evaluate scattered fields directly without advancing
 a dense moment tensor at every sample. Other grids retain step propagation with

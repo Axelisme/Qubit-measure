@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-18, mux readout and charge/flux drive lines
+**Last updated:** 2026-10-18, carrier-wise mux integrated readout
 
 `ftf(path_or_settings, *, workers=1)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -84,8 +84,12 @@ mixmux8/PFBv4 compile profile only for mux. `plan_template` and
 `FTFSource` accept an explicit `readout=` override; private replay rejects an
 override that cannot be reconstructed from captured settings. Plans expose
 `readouts`, an ordered tuple of `FTFReadoutPlan(channel, batch)`, not a singleton.
-Each batch contains every incident tone and that ADC's grids. Mux batches use the
-general multi-carrier field solver; single-carrier fast paths remain unchanged.
+Each batch contains every incident tone and that ADC's grids. Integrated flat,
+common-start mux batches use ADC's carrier-wise linear sums. Each carrier keeps
+the guarded direct-sum or constant-field/full-exponential route. Delay, mismatch,
+ringdown and per-receiver offset remain part of ADC's response contract. Shaped
+and decimated mux batches retain the general multi-carrier field solver.
+Single-carrier fast paths and evolution are unchanged.
 
 The receiver noise PSD is two-sided, in ADC sample units squared times ns.
 Discrete sample covariance is PSD/dt_ns using the ADC output rate. Receiver gain
@@ -107,9 +111,11 @@ receiver noise and the integrated rounding term.
 `replay_round(round_path)` recomputes one round without drivers, earlier rounds,
 current YAML or numeric records. Backend, engine numeric version, RNG version and
 dependency versions must match. The stream policy is `PCG64/SeedSequence-v2`.
-The backend is `ftf-segment-v6`, which identifies microwave IQ, delay,
-mismatch and guarded direct discrete readout sums. Earlier numeric versions and old exact-record manifests
-fail explicitly. Archives contain model truth and
+The backend is `ftf-segment-v7`, which additionally identifies carrier-wise
+integrated mux sums. This readout change can alter the last bits relative to the
+multi-carrier ODE, so archives from `ftf-segment-v6` and earlier backends fail
+explicitly. Evolution's numeric version and single-carrier results are unchanged.
+Old exact-record manifests also fail explicitly. Archives contain model truth and
 must not appear in ordinary Run/native/RPC metadata. Normal provenance remains
 the opaque simulation identifier.
 
