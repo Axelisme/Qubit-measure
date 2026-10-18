@@ -7,19 +7,25 @@ import sys
 # stdlib import keeps the board free of a typing_extensions requirement.
 from typing import Any, Literal
 
-import IPython
 import psutil
 import Pyro4
 import Pyro4.naming
+import Pyro4.socketutil
+import Pyro4.util
+from IPython.core.getipython import get_ipython
 from qick import QickConfig
 
 
 def setup_pyro4() -> None:
     # use dill instead of pickle
+    # tolerated: Pyro4 infers SERIALIZER as Literal["serpent"] from its default.
     Pyro4.config.SERIALIZER = "pickle"  # pyright: ignore[reportAttributeAccessIssue]
+    # tolerated: Pyro4 infers set[LiteralString]; board Python 3.8 lacks LiteralString.
     Pyro4.config.SERIALIZERS_ACCEPTED = set(["pickle"])  # pyright: ignore[reportAttributeAccessIssue]
     Pyro4.config.DILL_PROTOCOL_VERSION = 5
+    # tolerated: Pyro4 infers the runtime highest protocol (5), not a writable int.
     Pyro4.config.PICKLE_PROTOCOL_VERSION = 4  # pyright: ignore[reportAttributeAccessIssue]
+    # tolerated: Pyro4 infers REQUIRE_EXPOSE as Literal[True] from its default.
     Pyro4.config.REQUIRE_EXPOSE = False  # pyright: ignore[reportAttributeAccessIssue]
     Pyro4.config.ONEWAY_THREADED = True
 
@@ -27,9 +33,10 @@ def setup_pyro4() -> None:
 setup_pyro4()
 
 
-def get_localhost_ip(ns: Pyro4.naming.NameServer, iface: str) -> str:
+def get_localhost_ip(ns: Pyro4.Proxy, iface: str) -> str:
     # if we have multiple network interfaces, we want to register the daemon using the IP address that faces the nameserver
-    host = Pyro4.socketutil.getInterfaceAddress(ns._pyroUri.host)  # pyright: ignore[reportAttributeAccessIssue]
+    # tolerated: Pyro4 Proxy exposes its target URI only through _pyroUri.
+    host = Pyro4.socketutil.getInterfaceAddress(ns._pyroUri.host)  # pyright: ignore[reportPrivateUsage]
     # if the nameserver is running on the QICK, the above will usually return the loopback address - not useful
     if host == "127.0.0.1":
         # if the eth0 interface has an IPv4 address, use that
@@ -121,11 +128,11 @@ def make_soc_proxy(
     # adapted from https://pyro4.readthedocs.io/en/stable/errors.html and https://stackoverflow.com/a/70433500
     if remote_traceback:
         try:
-            ip = IPython.get_ipython()  # pyright: ignore[reportPrivateImportUsage]
+            ip = get_ipython()
             if ip is not None:
 
                 def exception_handler(*_):
-                    sys.stderr.write("".join(Pyro4.util.getPyroTraceback()))  # pyright: ignore[reportAttributeAccessIssue]
+                    sys.stderr.write("".join(Pyro4.util.getPyroTraceback()))
 
                 ip.set_custom_exc(
                     (Exception,), exception_handler
