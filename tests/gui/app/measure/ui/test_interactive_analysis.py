@@ -28,7 +28,8 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 
 class _DeferredEnv:
-    def __init__(self) -> None:
+    def __init__(self, *, submission_error: Exception | None = None) -> None:
+        self.submission_error = submission_error
         self.pending: list[
             tuple[
                 Callable[[], object],
@@ -38,10 +39,12 @@ class _DeferredEnv:
         ] = []
 
     def run_background(self, compute, on_done, on_error) -> None:
+        if self.submission_error is not None:
+            raise self.submission_error
         self.pending.append((compute, on_done, on_error))
 
 
-def _frontend(qapp):
+def _frontend(qapp, *, env: _DeferredEnv | None = None):
     devs = np.linspace(-5.0, 5.0, 60)
     freqs = np.linspace(4.0, 5.0, 30)
     signals = np.exp(-(devs[:, None] ** 2)) * np.ones((1, 30))
@@ -51,7 +54,8 @@ def _frontend(qapp):
         inputs, force_magnitude=True, plots=plots, result_builder=render_flux_pick
     )
     session = plugin.open(ManualOwnerScheduler())
-    env = _DeferredEnv()
+    if env is None:
+        env = _DeferredEnv()
     plugin.bind_background(env.run_background)
     completed = []
     cancelled = []
@@ -345,6 +349,36 @@ def test_auto_align_failure_keeps_session_editable_and_cancel_ignores_late_resul
     on_done(compute())
     assert plugin.plugin_id == "flux_pick"
     widget.deleteLater()
+
+
+@pytest.mark.parametrize("error_type", [RuntimeError, LookupError])
+def test_auto_align_submission_failure_keeps_editing_and_logs_traceback(
+    qapp, caplog, error_type
+):
+    failure = error_type("pool admission refused")
+    widget, _plugin, session, _env, _done, _cancelled, _canvas = _frontend(
+        qapp, env=_DeferredEnv(submission_error=failure)
+    )
+    try:
+        start = session.snapshot()
+        _button(widget, "Auto Align").click()
+        assert any(
+            label.text() == str(failure) for label in widget.findChildren(QLabel)
+        )
+        assert _button(widget, "Auto Align").isEnabled()
+        conjugate = widget.findChild(QCheckBox)
+        assert conjugate is not None
+        conjugate.click()
+        assert session.snapshot().conjugate is not start.conjugate
+        assert any(
+            record.exc_info is not None and record.exc_info[1] is failure
+            for record in caplog.records
+        )
+    finally:
+        widget.teardown()
+        session.dispose()
+        widget.deleteLater()
+        qapp.processEvents()
 
 
 def test_terminal_buttons_remain_at_bottom_of_side_panel(qapp):
