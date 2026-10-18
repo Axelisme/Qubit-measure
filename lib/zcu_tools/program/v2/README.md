@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-11，native arb path、core conversion 與 typed mock interfaces
+**Last updated:** 2026-10-18，fixed mux profile 與 frontend lowering
 
 ## Testing & Type Checking Conventions
 
