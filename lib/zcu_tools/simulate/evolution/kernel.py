@@ -233,6 +233,11 @@ class ApplyContext:
         if not np.isfinite(self.budget) or self.budget <= 0:
             raise ValueError("apply budget must be finite and positive")
 
+    def require_no_plan(self) -> None:
+        """Raise ValueError if a plan is supplied to a family that accepts none."""
+        if self.plan is not None:
+            raise ValueError("this kernel does not accept a row plan")
+
 
 @dataclass(frozen=True)
 class GuardPreparation:

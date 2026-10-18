@@ -369,8 +369,7 @@ class T6Kernel:
 
         Return an all-False bool mask aligned with rows; no post-apply check.
         """
-        if context.plan is not None:
-            raise ValueError("this kernel does not accept a row plan")
+        context.require_no_plan()
         budget = context.budget
         _check_budget(budget)
         if not isinstance(prepared, _T6Prepared):

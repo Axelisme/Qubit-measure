@@ -976,8 +976,7 @@ class FloquetPeriodKernel:
         No refinement, normalization, retry or dispatch occurs here. Prepared
         data remain read-only across reordered/split calls and worker threads.
         """
-        if context.plan is not None:
-            raise ValueError("this kernel does not accept a row plan")
+        context.require_no_plan()
         budget = context.budget
         _check_budget(budget)
         if not isinstance(prepared, _Periods):

@@ -144,8 +144,7 @@ class T4:
 
         Return an all-False bool mask aligned with rows; no post-apply check.
         """
-        if context.plan is not None:
-            raise ValueError("this kernel does not accept a row plan")
+        context.require_no_plan()
         budget = context.budget
         del table, budget
         if not isinstance(prepared, _Static):

@@ -507,8 +507,7 @@ class ShapedSambeKernel:
         Incompatible payloads raise ValueError; nonfinite output raises
         RuntimeError. Return an all-False accuracy-exceedance mask.
         """
-        if context.plan is not None:
-            raise ValueError("this kernel does not accept a row plan")
+        context.require_no_plan()
         budget = context.budget
         del budget
         if not isinstance(prepared, _Data):

@@ -909,8 +909,7 @@ class DysonKernel:
         population block. Exceedance is not failure: retain the uncorrected
         output without retry. Numerical failure raises RuntimeError.
         """
-        if context.plan is not None:
-            raise ValueError("this kernel does not accept a row plan")
+        context.require_no_plan()
         budget = context.budget
         if not np.isfinite(budget) or budget <= 0:
             raise ValueError("Dyson requires positive budget")
