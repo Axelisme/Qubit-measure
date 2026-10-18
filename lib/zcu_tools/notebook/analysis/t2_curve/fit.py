@@ -103,7 +103,8 @@ def equivalent_n_th_from_t2(
     return float(gamma_phi / gamma_per_photon)
 
 
-def fit_t2_noise_params(
+# tolerated: Documented fit API preserves positional arrays and error/weight/solver keywords.
+def fit_t2_noise_params(  # noqa: PLR0913
     T1s: NDArray[np.float64],
     T2s: NDArray[np.float64],
     domega_dflux: NDArray[np.float64],
@@ -336,7 +337,8 @@ def _model_t2_noise(
     return _T2Model(gamma_flux, gamma_photon, gamma_model, model_T2s)
 
 
-def _validate_data(
+# tolerated: One T2 fit caller supplies raw arrays and policies; _T2FitData is validated output.
+def _validate_data(  # noqa: PLR0913
     T1s: NDArray[np.float64],
     T2s: NDArray[np.float64],
     domega_dflux: NDArray[np.float64],

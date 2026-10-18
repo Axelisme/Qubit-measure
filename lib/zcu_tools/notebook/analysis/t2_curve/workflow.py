@@ -519,7 +519,8 @@ def prepare_t2_dephasing_data(
     )
 
 
-def analyze_flux_noise_limit(
+# tolerated: Notebook documents probe controls and shared fit-policy keywords explicitly.
+def analyze_flux_noise_limit(  # noqa: PLR0913
     data: T2DephasingAnalysis,
     *,
     readout_kappa_over_2pi_mhz: float,
@@ -629,7 +630,8 @@ def analyze_flux_noise_limit(
     )
 
 
-def analyze_photon_shot_noise_limit(
+# tolerated: Notebook documents photon probe controls and shared fit-policy keywords.
+def analyze_photon_shot_noise_limit(  # noqa: PLR0913
     data: T2DephasingAnalysis,
     *,
     readout_kappa_over_2pi_mhz: float,
@@ -817,7 +819,8 @@ def make_t2_fit_bounds(
     return bounds
 
 
-def fit_t2_curve(
+# tolerated: Notebook/tests require explicit init/fixed and shared error/weight/solver keywords.
+def fit_t2_curve(  # noqa: PLR0913
     data: T2DephasingAnalysis,
     *,
     readout_kappa_over_2pi_mhz: float,
@@ -943,7 +946,8 @@ def build_t2_channel_curves(
     )
 
 
-def collect_t2_curve_result(
+# tolerated: Notebook explicitly collects each stage and figure paths as separate keywords.
+def collect_t2_curve_result(  # noqa: PLR0913
     *,
     context: T2CurveContext,
     calibration: T2FluxCalibration,
@@ -1197,7 +1201,8 @@ def plot_t2_channel_analysis(
     )
 
 
-def save_t2_curve_figure(
+# tolerated: Notebook save API separates destination, show/close lifecycle and render options.
+def save_t2_curve_figure(  # noqa: PLR0913
     fig: Figure,
     context: T2CurveContext,
     filename: str,
@@ -2124,7 +2129,8 @@ def _diagnostic_rows(
     ]
 
 
-def _dephasing_summary_table(
+# tolerated: One preparation caller supplies pre-result stages and selection diagnostics.
+def _dephasing_summary_table(  # noqa: PLR0913
     *,
     window: T2WindowData,
     sample: T2CurveData,
