@@ -8,7 +8,6 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Protocol,
-    cast,
     runtime_checkable,
 )
 
@@ -220,8 +219,8 @@ def _default_driver_factory(type_name: str, address: str) -> DeviceProtocol:
     if requires_address:
         import pyvisa
 
-        return cast(DeviceProtocol, cls(address, pyvisa.ResourceManager()))
-    return cast(DeviceProtocol, cls())
+        return cls(address, pyvisa.ResourceManager())
+    return cls()
 
 
 class DeviceService:
@@ -308,7 +307,7 @@ class DeviceService:
 
         def on_terminal(bg: BgResult, settle: SettleFn) -> None:
             if bg.ok:
-                _on_connect_succeeded(cast(BaseDeviceInfo, bg.result), settle)
+                _on_connect_succeeded(bg.result, settle)
             else:
                 assert bg.error is not None
                 _on_operation_failed(str(bg.error), settle)
@@ -498,7 +497,7 @@ class DeviceService:
 
     def start_setup_device(self, req: SetupDeviceRequest) -> int:
         current = self._require_connected_device(req.name)
-        driver = cast(DeviceProtocol, self._registry.get_device(req.name))
+        driver: DeviceProtocol = self._registry.get_device(req.name)
         # Single owner of the cancellation flag: passed to both the gate (set on
         # cancel) and the worker (polls it / self-judges 'cancelled').
         stop_event = threading.Event()
@@ -522,7 +521,7 @@ class DeviceService:
                 if stop_event.is_set():
                     _on_setup_cancelled(settle)
                 else:
-                    _on_setup_finished(cast(BaseDeviceInfo, bg.result), settle)
+                    _on_setup_finished(bg.result, settle)
             else:
                 assert bg.error is not None
                 _on_setup_failed(str(bg.error), settle)
@@ -854,7 +853,7 @@ class DeviceService:
         if dev is None or dev.is_memory_only():
             return None
         try:
-            info = cast(BaseDeviceInfo, self._registry.get_info(name))
+            info: BaseDeviceInfo = self._registry.get_info(name)
         except ValueError:
             return None
         # Read-time cache refresh: silent when unchanged (no bump), but if the
@@ -887,15 +886,15 @@ class DeviceService:
 
         def read_work() -> BaseDeviceInfo:
             # Worker thread: pure driver read, no State touch, no emit.
-            return cast(BaseDeviceInfo, self._registry.get_info(name))
+            return self._registry.get_info(name)
 
-        def on_read(info: object) -> None:
+        def on_read(info: BaseDeviceInfo) -> None:
             # Main thread: the device may have gone away or started a non-setup
             # mutation between submit and delivery; re-check before the cache
             # refresh so a late poll result never bumps that State.
             if not self._can_poll_device_info(name):
                 return
-            if self._state.refresh_device_info_cache(name, cast(BaseDeviceInfo, info)):
+            if self._state.refresh_device_info_cache(name, info):
                 self._emit_device_changed(name)
 
         def on_read_failed(exc: Exception) -> None:
@@ -973,7 +972,7 @@ class DeviceService:
 
     def _disconnect(self, name: str) -> object:
         # Was @staticmethod; now instance method so it can use self._registry.
-        device = cast(DeviceProtocol, self._registry.get_device(name))
+        device: DeviceProtocol = self._registry.get_device(name)
         device.close()
         self._registry.drop_device(name)
         return None
