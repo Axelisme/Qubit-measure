@@ -8,7 +8,7 @@ related:
   - docs/adr/draft/simulation-environments.md
 basis:
   - "repo main@f152eff67：研究整理的截止版本"
-  - "repo@b0cb487f3、c18d61010：discrete-sum study 的 baseline 與 prototype"
+  - "repo@b0cb487f3：discrete-sum study 可取得的 baseline；prototype 未進入 repo 歷史"
 ---
 
 # Readout 從 sampled fields 到 guarded discrete sums
@@ -53,7 +53,7 @@ exact-content sums cache 與 trace field cache 分開。include_traces、decimat
 
 ### Study 與正式速度證據分開
 
-`b0cb487f3` 對 `c18d61010` 的 study 用兩 workers、native threads=1、CPU 0/1，獨立 process 依案交錯。每版先 full-target warmup，再清 Engine prepare caches，之後量一次完整 acquire，沒有 repeated medians。
+study 比較 baseline 與 prototype。只有 baseline `b0cb487f3` 可取得，prototype 未進入 repo 歷史。正式機制見後來 land 的實作與 [ADC README](../../lib/zcu_tools/simulate/adc/README.md)。量測用兩 workers、native threads=1、CPU 0/1，獨立 process 依案交錯。每版先 full-target warmup，再清 Engine prepare caches，之後量一次完整 acquire，沒有 repeated medians。
 
 | 場景 | Points | Acquire wall，舊 → 原型 | Foreign，舊／新 | 判讀 |
 | --- | ---: | ---: | ---: | --- |
