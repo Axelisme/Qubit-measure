@@ -935,7 +935,12 @@ class FloquetKernel:
                 )
                 legacy[local] = selected_plan.bound <= budget * 0.95
                 if legacy[local]:
-                    for array in (selected_plan.values, selected_plan.exponents):
+                    for array in (
+                        selected_plan.rows,
+                        selected_plan.columns,
+                        selected_plan.values,
+                        selected_plan.exponents,
+                    ):
                         array.setflags(write=False)
                     admissions[int(selected[members[local]])] = FloquetAdmission(
                         "sidebands", selected_plan
