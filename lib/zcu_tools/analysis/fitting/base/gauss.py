@@ -75,7 +75,8 @@ def fit_gauss(
 
 
 # # Dual Gaussian function
-def dual_gauss_func(
+# tolerated: curve_fit fits six scalars aligned with fit_dual_gauss bounds and fixedparams.
+def dual_gauss_func(  # noqa: PLR0913
     x: NDArray[np.float64],
     yscale1: float,
     x_c1: float,
