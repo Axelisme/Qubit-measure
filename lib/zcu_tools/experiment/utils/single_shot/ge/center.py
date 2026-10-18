@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.plotting.plots import Plots
 
-from .base import GE_FitResult, fitting_ge_and_plot
+from .base import GE_FitResult, GEFitOptions, fitting_ge_and_plot
 
 
 def get_rotate_angle(
@@ -24,6 +24,9 @@ def get_rotate_angle(
 
 
 def fit_ge_by_center(
-    signals: NDArray[np.complex128], *, plots: Plots, **kwargs
+    signals: NDArray[np.complex128],
+    *,
+    plots: Plots,
+    options: GEFitOptions | None = None,
 ) -> tuple[float, NDArray[float64], GE_FitResult]:
-    return fitting_ge_and_plot(signals, get_rotate_angle, plots=plots, **kwargs)
+    return fitting_ge_and_plot(signals, get_rotate_angle, plots=plots, options=options)

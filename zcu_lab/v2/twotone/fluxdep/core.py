@@ -18,7 +18,11 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils import set_flux
-from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime.schedule import (
+    AcquireOptions,
+    Schedule,
+    SignalBuffer,
+)
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
@@ -142,7 +146,7 @@ class FreqFluxExp(PersistableExperiment[FreqFluxResult, FreqFluxCfg]):
                     .add_pulse("qubit_pulse", modules.qub_pulse)
                     .add_readout("readout", modules.readout)
                     .declare_sweep("freq", freq_sweep)
-                    .build_and_acquire(retry=cfg.fail_retry)
+                    .build_and_acquire(options=AcquireOptions(retry=cfg.fail_retry))
                 )
 
         return FreqFluxResult(

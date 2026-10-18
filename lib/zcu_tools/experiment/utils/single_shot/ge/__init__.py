@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.plotting.plots import Plots
 
-from .base import GE_FitResult, fidelity_func
+from .base import GE_FitResult, GEFitOptions, fidelity_func
 from .center import fit_ge_by_center
 from .manual import fit_ge_manual
 from .pca import fit_ge_by_pca
@@ -92,7 +92,7 @@ def singleshot_ge_analysis(
     backend: Literal["center", "pca"] = "pca",
     *,
     plots: Plots,
-    **kwargs,
+    options: GEFitOptions | None = None,
 ) -> tuple[float, NDArray[np.float64], GE_FitResult]:
     """
     Analyze ground and excited state signals to determine classification parameters.
@@ -111,6 +111,8 @@ def singleshot_ge_analysis(
         Method used for determining the rotation angle when angle is absent.
     plots : Plots
         Operation that owns the named fit figure.
+    options : GEFitOptions, optional
+        Paired-histogram fit and display controls; omitted uses the owner defaults.
 
     Returns
     -------
@@ -118,12 +120,12 @@ def singleshot_ge_analysis(
         Assignment fidelity, refined preparation populations and calibration.
     """
     if angle is not None:
-        return fit_ge_manual(signals, angle, plots=plots, **kwargs)
+        return fit_ge_manual(signals, angle, plots=plots, options=options)
 
     if backend == "center":
-        return fit_ge_by_center(signals, plots=plots, **kwargs)
+        return fit_ge_by_center(signals, plots=plots, options=options)
     if backend == "pca":
-        return fit_ge_by_pca(signals, plots=plots, **kwargs)
+        return fit_ge_by_pca(signals, plots=plots, options=options)
 
     raise ValueError(f"Unknown backend: {backend}")
 
@@ -131,6 +133,7 @@ def singleshot_ge_analysis(
 __all__ = [
     # base
     "GE_FitResult",
+    "GEFitOptions",
     "fidelity_func",
     # center
     "fit_ge_by_center",

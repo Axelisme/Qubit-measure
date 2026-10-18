@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 from pydantic import BaseModel
 from zcu_tools.device import FakeDeviceInfo, YOKOGS200Info
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
+from zcu_tools.experiment.v2.runtime.schedule import AcquireOptions
 from zcu_tools.experiment.workflows import (
     Aborted,
     Actor,
@@ -536,13 +537,13 @@ def test_program_error_beats_control(
             )
             if source == "build":
                 builder.add(SoftDelay("wait", 0.0)).build_and_acquire(
-                    raw2signal_fn=lambda raw: raw, retry=3
+                    raw2signal_fn=lambda raw: raw, options=AcquireOptions(retry=3)
                 )
             else:
                 builder.run_program(
                     FailingProgram(schedule_stop=schedule.set_stop),
                     raw2signal_fn=lambda raw: raw,
-                    retry=3,
+                    options=AcquireOptions(retry=3),
                 )
         return 99
 
