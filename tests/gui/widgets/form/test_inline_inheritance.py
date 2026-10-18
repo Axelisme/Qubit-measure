@@ -120,7 +120,7 @@ def test_module_and_nested_waveform_switch_show_inherited_values(
     driver.enter_text(object_name=length, value="-1")
     driver.choose_option(object_name=waveform, value="Inline: gauss")
     snapshot(driver, tmp_path, "05-invalid-inherited")
-    assert driver.observe(object_name=length).text == "-1"
+    assert driver.observe(object_name=length).text == "-1.0"
     assert driver.observe(object_name=length).tooltip
     driver.choose_option(object_name=waveform, value="Inline: arb")
     snapshot(driver, tmp_path, "06-arb-initial")
