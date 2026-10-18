@@ -255,3 +255,39 @@ def test_concurrent_extensions_share_complete_union_and_preserve_certificates():
         assert len(before.certificates) == 3, (
             "the original payload must remain immutable"
         )
+
+
+def test_discarded_frame_releases_arrays_while_work_plan_remains_open():
+    """A frame with no active binding must not survive as an evolve-long fact."""
+    import gc
+    import tracemalloc
+
+    # Warm numerical libraries and obtain a real table at the kernel seam before
+    # tracing. The warm payload is not part of the measured allocation interval.
+    observer = CountingFloquet()
+    src = source()
+    with closing(
+        Engine(1, 0, kernels=(observer, RecordingKernel("dop853", accepts=False)))
+    ) as engine:
+        acquire(engine, src, window([0.0]))
+    table, _, _ = observer.guards[-1]
+    solver = FloquetKernel()
+    with closing(WorkPlan()) as plan:
+        context = KernelContext(src, 1e-3, plan)
+        rows = np.array([0])
+        keys = solver.prepare_keys(table, rows, context)
+        gc.collect()
+        tracemalloc.start()
+        try:
+            before = tracemalloc.get_traced_memory()[0]
+            prepared = solver.prepare(keys, table, rows, context)
+            charged = prepared.nbytes
+            del prepared
+            gc.collect()
+            retained = tracemalloc.get_traced_memory()[0] - before
+        finally:
+            tracemalloc.stop()
+        assert retained < charged // 2, (
+            f"discarded {charged}-byte frame still retains {retained} bytes "
+            "outside resident admission"
+        )
