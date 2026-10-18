@@ -131,7 +131,7 @@ def test_reselecting_scalar_replaces_stale_override_and_tracks_new_choice() -> N
         FormInput(ChangingChoices, {"key": "A"}, selections={("key",): "C"})
     )
     assert isinstance(state.result(env), FormErrors)
-    state.write({("key",): "B"}, env)
+    state.select(("key",), "B", env)
     assert isinstance(state.result(env), ChangingChoices)
     assert state.input.data == {"key": "B"}
     assert state.input.selections == {("key",): "B"}

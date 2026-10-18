@@ -88,8 +88,10 @@ def test_reload_migrates_raw_branch_and_independent_selection_override(
 ) -> None:
     window = source.open(StartHarness())
     window.plan_panel.state.write(
-        {("scale",): {"expr": "1 / 4"}, ("samples",): {"kind": "linrange"}},
-        window.plan_panel.env,
+        {("scale",): {"expr": "1 / 4"}}, window.plan_panel.env
+    )
+    window.plan_panel.state.select(
+        ("samples",), {"kind": "linrange"}, window.plan_panel.env
     )
     before = window.plan_panel.state.input
     assert before.selections == {("samples",): {"kind": "linrange"}}

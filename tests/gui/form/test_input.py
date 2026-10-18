@@ -177,7 +177,7 @@ def test_saved_selection_and_branch_restore_the_authored_invalid_draft() -> None
             },
         )
     )
-    original.write({("shape",): {"style": "flat"}}, env)
+    original.select(("shape",), {"style": "flat"}, env)
     restored = FormState(FormInput.from_json(DraftForm, original.input.to_json()))
     assert restored.input.same_as(original.input)
     target = restored.describe(("shape",), env).target

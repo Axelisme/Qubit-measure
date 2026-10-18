@@ -174,8 +174,8 @@ def test_window_memento_restores_separate_selection_and_whole_invalid_draft(
             },
         )
     )
-    original.plan_panel.state.write(
-        {("sweep",): {"kind": "center"}}, original.plan_panel.env
+    original.plan_panel.state.select(
+        ("sweep",), {"kind": "center"}, original.plan_panel.env
     )
     codec = WorkflowInputCodec()
     snapshot = codec.decode(codec.encode(original.capture_persisted_state()))
@@ -220,7 +220,7 @@ def test_inline_copy_memento_keeps_original_input_after_library_content_changes(
             form.model, {"waveform": {"kind": "ref", "name": "Q.waveforms.shape"}}
         )
     )
-    state.write({("waveform",): {"kind": "inline", "module": {"style": "gauss"}}}, env)
+    state.select(("waveform",), {"kind": "inline", "module": {"style": "gauss"}}, env)
     assert state.input.data["waveform"] == {
         "kind": "inline",
         "module": {"style": "gauss", "length": 0.8, "sigma": 0.2},
