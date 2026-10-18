@@ -202,6 +202,21 @@ def test_saved_draft_rejects_changed_type_identity_before_installation() -> None
         FormInput.from_json(changed, saved.to_json())
 
 
+@pytest.mark.parametrize(
+    ("raw", "selections"),
+    [
+        ({"shape": {"style": "unknown"}}, {}),
+        ({"shape": {"style": "ramp"}}, {("shape",): {"style": "unknown"}}),
+        ({"shape": {"style": "ramp"}}, {("removed",): "flat"}),
+    ],
+    ids=["branch", "literal-selection", "selection-path"],
+)
+def test_restore_rejects_annotation_incompatible_branch_or_selection(raw, selections) -> None:
+    saved = FormInput(DraftForm, raw, selections=selections).to_json()
+    with pytest.raises(ValueError, match="identity|incompatible"):
+        FormInput.from_json(DraftForm, saved)
+
+
 def test_input_keeps_unknown_fields_and_invalid_values_for_restoration() -> None:
     data: dict[str, JsonValue] = {
         "required": {"expr": 42},

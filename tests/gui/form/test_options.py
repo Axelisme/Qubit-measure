@@ -58,6 +58,38 @@ class Picks(RebuildingForm):
         return {("device",): tuple(env.devices) or ("a", "b")}
 
 
+@pytest.mark.parametrize("dynamic", [False, True], ids=["static-C", "missing-old-key"])
+def test_saved_unlisted_selection_is_visible_invalid_input_not_a_restore_failure(
+    dynamic: bool,
+) -> None:
+    hooks_enabled = False
+
+    class HookSelection(FormModel):
+        key: str
+
+        @classmethod
+        def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[api.Option, ...]]:
+            assert hooks_enabled, "Restore must not execute declaration hooks"
+            keys = (
+                (() if env.library is None else env.library.module_keys())
+                if dynamic
+                else ("A", "B")
+            )
+            return {("key",): tuple(api.Option(key, key) for key in keys)}
+
+    selection = "old-key" if dynamic else "C"
+    authored = FormInput(HookSelection, {"key": "A"}, selections={("key",): selection})
+    restored = FormInput.from_json(HookSelection, authored.to_json())
+    hooks_enabled = True
+    state = FormState(restored)
+    errors = state.result(FormEnv())
+    assert isinstance(errors, FormErrors)
+    assert ("key",) in errors.messages
+    assert "option" in errors.messages[("key",)].lower()
+    assert state.preview(FormEnv()).errors == errors
+    assert state.input.same_as(authored)
+
+
 def obj(value: JsonValue) -> dict[str, JsonValue]:
     assert isinstance(value, dict)
     return value
