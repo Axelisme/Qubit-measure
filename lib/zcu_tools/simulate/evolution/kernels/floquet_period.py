@@ -10,13 +10,6 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
-from ..declarations import (
-    AlgorithmIdentity,
-    Eligibility,
-    GuardDeclaration,
-    KernelDeclaration,
-    ReuseDeclaration,
-)
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
 from . import _period_sambe
@@ -821,15 +814,6 @@ class FloquetPeriodKernel:
     nonfinite output raises RuntimeError without rerouting. nbytes charges all
     retained arrays, which remain immutable across reordered/split apply calls.
     """
-
-    declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("floquet_period", "constant-sambe-v5"),
-        eligibility=Eligibility(1, 1, "constant"),
-        guard=GuardDeclaration(),
-        accuracy="guarded-approximation",
-        reuse=ReuseDeclaration("floquet_period/constant-sambe-v5/serial"),
-        fallback="legacy-order",
-    )
 
     name = "floquet_period"
     guard_builds = False

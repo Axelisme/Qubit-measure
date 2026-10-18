@@ -44,13 +44,6 @@ from scipy.integrate import solve_ivp
 from scipy.linalg import eig, schur
 from scipy.optimize import linear_sum_assignment
 
-from ..declarations import (
-    AlgorithmIdentity,
-    Eligibility,
-    GuardDeclaration,
-    KernelDeclaration,
-    ReuseDeclaration,
-)
 from ..kernel import GuardPreparation, GuardResult, Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
 from . import _floquet_sidebands as sb
@@ -780,15 +773,6 @@ class FloquetKernel:
     prepare raises RuntimeError on failed numerical construction; apply
     requires this kernel's prepared payload and advances states in place.
     """
-
-    declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("floquet", "resonant-sidebands-v5"),
-        eligibility=Eligibility(2, 2, "constant"),
-        guard=GuardDeclaration(("model-build",), builds_model=True),
-        accuracy="guarded-approximation",
-        reuse=ReuseDeclaration("floquet/resonant-sidebands-v5/serial"),
-        fallback="legacy-order",
-    )
 
     name = "floquet"
     guard_builds = True

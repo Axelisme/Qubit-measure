@@ -128,35 +128,6 @@ class Schedule:
             source.initial_density if initial_density is None else initial_density
         )
 
-    @classmethod
-    def from_legacy_plan(
-        cls,
-        geometry: Geometry,
-        kernels: Mapping[str, Kernel],
-        source: ModelSource,
-        budget: float,
-        cancel: Event,
-        pool: Executor,
-    ) -> "Schedule":
-        """Build and consume one call-local legacy single-interval cover.
-
-        geometry must come from this Engine call's prefix resolution; source,
-        positive budget and kernels must be those used to resolve its prefixes.
-        pool is the call's borrowed executor, not a new parallel layer. Missing
-        registry entries, terminal rejection and guard exceptions propagate.
-
-        Dispatch is the typed execution plan: each pending interval has either
-        a selected family or a deferred contingent selection. Keep its accepted
-        guard products and acquire-wide shaped/rejected decisions intact. run
-        consumes that cover through ordinary shared preparation and timeline
-        waves, adopting computed prefixes and resolving deferred rows once.
-        No second shared classification, cost assignment or shadow graph admission
-        runs here. The returned scheduler is evolve-local and must use the same
-        registry and executor in run; it is not a portable replay plan.
-        """
-        dispatch = classify(geometry, kernels, source, budget, pool=pool)
-        return cls(geometry, dispatch, source, budget, cancel)
-
     def prepare_shared(
         self, entries: list[_Entries], cache: PrepareCache, pool: Executor, chunks: int
     ) -> list[_Binding]:
