@@ -2,11 +2,11 @@
 
 import math
 from collections.abc import Sequence
-from typing import Self
+from typing import Annotated, Self
 
 from pydantic import model_validator
 from qick.asm_v2 import QickParam
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.program.v2 import ProgramV2Cfg, PulseCfg, ResetCfg, SweepCfg
 from zcu_tools.program.v2.modules import (
     ConstWaveformCfg,
@@ -37,7 +37,7 @@ class MuxToneCfg(ConfigBase):
     Native pulse/waveform schemas own shape and clock conversion.
     """
 
-    name: str
+    name: Annotated[str, FieldMeta(readonly=True)]
     drive: PulseCfg
     sweep: SweepCfg
 

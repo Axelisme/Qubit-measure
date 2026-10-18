@@ -20,6 +20,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
@@ -31,6 +32,7 @@ from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyAnalyzeOptions
 from zcu_lab.v2.twotone.time_domain.t2ramsey.gui import T2RamseyAnalyzeParams
 
 from .core import MuxT2RamseyCfg, MuxT2RamseyExp
+from .form import make_form
 
 MuxT2RamseyRunResult: TypeAlias = RunRecord[MuxT2RamseyCfg, MuxCoherenceResult]
 
@@ -77,6 +79,11 @@ class MuxT2RamseyAdapter(
     experiment_tag: ClassVar[str | None] = MuxT2RamseyExp.persistence_tag()
     exp_cls = MuxT2RamseyExp
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[MuxT2RamseyCfg]:
+        """Build the native list Form using the fixed Open/Reset capture."""
+        return make_form(ctx)
 
     def run(
         self, req: RunRequest, cfg: MuxT2RamseyCfg, *, context: RunContext

@@ -4,10 +4,11 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import partial
+from typing import Annotated
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
@@ -24,6 +25,7 @@ from zcu_tools.program.v2.modules import Join, Module, MuxReadout
 
 from zcu_lab.v2.twotone.time_domain.detune import actual_detune
 
+from .mux_liveplot import draw_mux_magnitudes
 from .mux_sweep_cfg import (
     MuxDriveModuleCfg,
     MuxToneCfg,
@@ -40,7 +42,7 @@ class MuxCoherenceToneCfg(ConfigBase):
     including nonparticipants, and rejects duplicate names.
     """
 
-    name: str
+    name: Annotated[str, FieldMeta(readonly=True)]
     drive: PulseCfg
     detune: float = 0.0
 
@@ -176,7 +178,8 @@ def acquire_coherence(
     parameter. Public program/sweep owners quantize time, phase and pulses.
 
     Return requested delay, actual MHz detunes/source frequencies and average IQ
-    (K,P), retaining supplied original index order. Publish measurement_i figures.
+    (K,P), retaining supplied original index order. Publish measurement_i and
+    combined measurement with original index/source name legend.
     Completed-round averages survive cancellation, no-data slots stay NaN. Errors
     remain on context.cancel_signal; caller must raise_if_error before success.
     Build/conversion failures propagate. context owns hardware, fresh StopSignal
@@ -219,6 +222,13 @@ def acquire_coherence(
     def update(data: NDArray[np.complex128]) -> None:
         for row, viewer in enumerate(viewers):
             viewer.update(times, np.abs(data[row]))
+        draw_mux_magnitudes(
+            context.plots,
+            np.broadcast_to(times, data.shape),
+            data,
+            [f"{index}: {tones[index].name}" for index in indices],
+            "Requested delay (us)",
+        )
 
     signals = SignalBuffer((len(indices), times.size), on_update=update)
     with Schedule(cfg, signals, stop=context.cancel_signal) as sched:

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 from pydantic import model_validator
+from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import PersistableExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -43,7 +44,7 @@ class MuxT2RamseyCfg(ProgramV2Cfg, ExpCfgModel):
     """
 
     modules: MuxDriveModuleCfg
-    tones: list[MuxCoherenceToneCfg]
+    tones: Annotated[list[MuxCoherenceToneCfg], FieldMeta(element_label="name")]
     participants: list[str]
     delay: SweepCfg
 

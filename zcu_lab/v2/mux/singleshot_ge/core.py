@@ -7,13 +7,13 @@ import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import partial
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import StrictInt, model_validator
 from qick.asm_v2 import QickParam
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Axis, PersistableExperiment, RunRecord, ZSpec
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -29,6 +29,7 @@ from zcu_tools.program.v2.modules import (
 )
 
 from zcu_lab.v2._support.mux import MuxFitFailure
+from zcu_lab.v2._support.mux_liveplot import draw_mux_magnitudes
 from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg, participant_indices
 
 from .analysis import (
@@ -63,7 +64,7 @@ class MuxGEToneCfg(ConfigBase):
     validated even for nonparticipants. Nonparticipant settings do not run.
     """
 
-    name: str
+    name: Annotated[str, FieldMeta(readonly=True)]
     drive: PulseCfg
     init_pulse: PulseCfg | None = None
 
@@ -93,7 +94,7 @@ class MuxGECfg(ProgramV2Cfg, ExpCfgModel):
     """
 
     modules: MuxDriveModuleCfg
-    tones: list[MuxGEToneCfg]
+    tones: Annotated[list[MuxGEToneCfg], FieldMeta(element_label="name")]
     participants: list[str]
     shots: StrictInt
 
@@ -279,7 +280,8 @@ class MuxGEExp(PersistableExperiment[MuxGEResult, MuxGECfg]):
         shot without per-tone sorting/filtering. No QICK raw parser or averaging.
 
         context owns hardware, devices, fresh StopSignal and Plots. Publish
-        measurement_i (original index) magnitude traces. Completed preparations
+        measurement_i and combined measurement magnitude traces with original
+        index/source name and probe off/on labels. Completed preparations
         survive stop/error, missing rows remain NaN, no incomplete round is
         adopted. Errors stay on cancel_signal: call raise_if_error() before
         reporting success, then is_set() to distinguish cancellation. Build and
@@ -315,6 +317,18 @@ class MuxGEExp(PersistableExperiment[MuxGEResult, MuxGECfg]):
         def update(data: NDArray[np.complex128]) -> None:
             for row, viewer in enumerate(viewers):
                 viewer.update(shots.astype(np.float64), np.abs(data[:, :, row]))
+            traces = data.transpose(2, 0, 1).reshape(2 * len(indices), cfg.shots)
+            draw_mux_magnitudes(
+                context.plots,
+                np.broadcast_to(shots.astype(np.float64), traces.shape),
+                traces,
+                [
+                    f"{index}: {cfg.tones[index].name}, probe {preparation}"
+                    for index in indices
+                    for preparation in ("off", "on")
+                ],
+                "Shot Index",
+            )
 
         buffer = SignalBuffer((2, cfg.shots, len(indices)), on_update=update)
         with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:

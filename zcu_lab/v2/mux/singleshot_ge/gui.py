@@ -26,6 +26,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
@@ -41,6 +42,7 @@ from .analysis import (
     MuxGEPostOptions,
 )
 from .core import MuxGECfg, MuxGEExp, MuxGEResult
+from .form import make_form
 
 MuxGERunResult: TypeAlias = RunRecord[MuxGECfg, MuxGEResult]
 
@@ -109,6 +111,11 @@ class MuxGEAdapter(
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
     )
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[MuxGECfg]:
+        """Build the native list Form using the fixed Open/Reset capture."""
+        return make_form(ctx)
 
     def run(
         self, req: RunRequest, cfg: MuxGECfg, *, context: RunContext

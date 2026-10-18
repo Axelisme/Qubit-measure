@@ -19,6 +19,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
@@ -30,6 +31,7 @@ from zcu_lab.v2.twotone.rabi.amp_rabi.gui import AmpRabiAnalyzeParams
 
 from .analysis import MuxAmpRabiFit
 from .core import MuxAmpRabiCfg, MuxAmpRabiExp
+from .form import make_form
 
 MuxAmpRabiRunResult: TypeAlias = RunRecord[MuxAmpRabiCfg, MuxSweepResult]
 
@@ -75,6 +77,11 @@ class MuxAmpRabiAdapter(
     experiment_tag: ClassVar[str | None] = MuxAmpRabiExp.persistence_tag()
     exp_cls = MuxAmpRabiExp
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[MuxAmpRabiCfg]:
+        """Build the native list Form using the fixed Open/Reset capture."""
+        return make_form(ctx)
 
     def run(
         self, req: RunRequest, cfg: MuxAmpRabiCfg, *, context: RunContext

@@ -20,6 +20,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
@@ -31,6 +32,7 @@ from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoAnalyzeOptions
 from zcu_lab.v2.twotone.time_domain.t2echo.gui import T2EchoAnalyzeParams
 
 from .core import MuxT2EchoCfg, MuxT2EchoExp
+from .form import make_form
 
 MuxT2EchoRunResult: TypeAlias = RunRecord[MuxT2EchoCfg, MuxCoherenceResult]
 
@@ -74,6 +76,11 @@ class MuxT2EchoAdapter(
     experiment_tag: ClassVar[str | None] = MuxT2EchoExp.persistence_tag()
     exp_cls = MuxT2EchoExp
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[MuxT2EchoCfg]:
+        """Build the native list Form using the fixed Open/Reset capture."""
+        return make_form(ctx)
 
     def run(
         self, req: RunRequest, cfg: MuxT2EchoCfg, *, context: RunContext

@@ -20,6 +20,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
@@ -30,6 +31,7 @@ from zcu_lab.v2.twotone.freq.gui import FreqAnalyzeParams
 
 from .analysis import MuxFreqFit
 from .core import MuxFreqCfg, MuxFreqExp
+from .form import make_form
 
 MuxFreqRunResult: TypeAlias = RunRecord[MuxFreqCfg, MuxSweepResult]
 
@@ -70,6 +72,11 @@ class MuxFreqAdapter(
     experiment_tag: ClassVar[str | None] = MuxFreqExp.persistence_tag()
     exp_cls = MuxFreqExp
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
+        """Build the native list Form using the fixed Open/Reset capture."""
+        return make_form(ctx)
 
     def run(
         self, req: RunRequest, cfg: MuxFreqCfg, *, context: RunContext

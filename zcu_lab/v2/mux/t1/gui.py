@@ -20,6 +20,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
@@ -30,6 +31,7 @@ from zcu_lab.v2.twotone.time_domain.t1.gui import T1AnalyzeParams
 
 from .analysis import MuxT1Fit
 from .core import MuxT1Cfg, MuxT1Exp, MuxT1Result
+from .form import make_form
 
 MuxT1RunResult: TypeAlias = RunRecord[MuxT1Cfg, MuxT1Result]
 
@@ -70,6 +72,11 @@ class MuxT1Adapter(
     experiment_tag: ClassVar[str | None] = MuxT1Exp.persistence_tag()
     exp_cls = MuxT1Exp
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[MuxT1Cfg]:
+        """Build the native list Form using the fixed Open/Reset capture."""
+        return make_form(ctx)
 
     def run(
         self, req: RunRequest, cfg: MuxT1Cfg, *, context: RunContext

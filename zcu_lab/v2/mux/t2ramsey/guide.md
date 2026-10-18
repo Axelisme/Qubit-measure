@@ -1,4 +1,64 @@
-# Mux Ramsey core
+# Mux Ramsey
+
+## GUI setup
+
+Open `mux/t2ramsey` from **New Tab** after binding `$mux` to a MuxGroup.
+The capture must contain every qubit and its matching resonator in readout order.
+An existing readout slot must use the mux family with that full tone count.
+If no readout is stored, fill the blank mux readout before running.
+
+The Tones picker chooses which element to edit, not which qubit runs.
+Name is read-only. Ordinary edits cannot add, remove, rename or reorder tones.
+Set Participants to a JSON name list, for example `["Q3", "Q1"]`.
+That order becomes execution/data rows for original positions 2/0.
+The picker can show Q2 while Q3/Q1 run.
+Empty, duplicate and unknown participants remain editable invalid drafts and block Run.
+
+Every tone needs a valid drive, including nonparticipants.
+Errors in another picker element remain visible on the Tones row.
+Select that element to fix them; hiding it or removing its name from Participants
+does not bypass validation. Reps, rounds and recovery delay are common controls.
+Recovery initially uses five times the largest captured T1, with the existing
+missing-T1 default. A stored invalid T1 leaves recovery blank for correction.
+
+## GUI results and saved sources
+
+Run draws a combined `measurement` figure.
+All lines use the common requested-delay axis.
+The legend uses original index and source cfg name in participants order.
+Per-tone native `measurement_i` figures remain available.
+Analyze reads the selected Run/Load source, not the current Form.
+Use the Analysis figure picker to inspect `fit_i`.
+Here `i` is an original tone position, never a participants row number.
+
+Use Data to save measurement data and analysis artifacts.
+Load Data selects a native file or a saved run.
+Loading replaces the analysis source without changing current Form inputs.
+A later Form edit does not alter the historical pulse, binding or destination.
+Failed or partial rows do not produce calibration candidates.
+Read each Writeback preview destination, value and fit diagnostics.
+Deselect unwanted items before **Apply Selected**.
+Preview and Analyze do not write; applying one item does not apply other candidates.
+
+## Form drafts
+
+Form persistence contains exactly `data` and `selections`.
+Selections use typed paths with integer list positions.
+Invalid leaf text and participants drafts survive save/restore.
+Restoration reports dropped fields and does not run converters or refresh capture.
+If the saved input cannot be read, the host reports it and uses fresh defaults.
+Reset explicitly captures current parameters and rebuilds initial values.
+
+A raw `FormState.write` replaces the complete value at its path and clears selections
+at or below it. To change one leaf, use its complete path, for example
+`("tones", 0, "drive", "module", "gain")` for an inline drive.
+Do not send a partial tone or pulse dictionary expecting a merge.
+Writing does not run a converter; selecting another module kind does.
+Recipe/MCP logical field paths omit the inline wrapper, for example
+`("tones", 0, "drive", "gain")`. The integer is the full original tone position,
+not a row in Participants and not a name key.
+
+## Core reference
 
 `MuxT2RamseyExp.run(config, *, context)` measures selected qubits in one program
 with independent x90 drives and a common mux readout. It has no Form, recipe,
@@ -103,8 +163,8 @@ frequency correction. NaN detune does not meet that requirement.
 ## Adapter source and proposals
 
 `MuxT2RamseyAdapter` in `gui.py` uses the explicit Run/Load record and its capture.
-It is not registered in the catalog yet; this leaf has no generated Form or
-recipe entry. The adapter alone is not a GUI launch path.
+Its native generated Form is registered as `mux/t2ramsey`.
+A recipe entry is not available yet.
 
 Summary rows include original tone `position`, source `name`, selected fit model,
 quality and values, or a failure reason. Q3/Q1 retains indices 2/0 in that row

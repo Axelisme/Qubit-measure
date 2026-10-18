@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from pydantic import model_validator
 from qick import QickConfig
+from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import PersistableExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -43,7 +44,7 @@ class MuxFreqCfg(ProgramV2Cfg, ExpCfgModel):
     """
 
     modules: MuxDriveModuleCfg
-    tones: list[MuxToneCfg]
+    tones: Annotated[list[MuxToneCfg], FieldMeta(element_label="name")]
     participants: list[str]
 
     @model_validator(mode="after")
@@ -117,6 +118,7 @@ class MuxFreqExp(PersistableExperiment[MuxSweepResult, MuxFreqCfg]):
             scan,
             context=context,
             coordinate_label="Drive frequency (MHz)",
+            tone_names=[tone.name for tone in cfg.tones],
         )
 
     def analyze(

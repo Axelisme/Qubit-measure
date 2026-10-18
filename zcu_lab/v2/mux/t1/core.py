@@ -6,13 +6,13 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import partial
-from typing import ClassVar, Self
+from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import model_validator
 from qick.asm_v2 import QickParam
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import US_TO_S, AxesSpec, Axis, PersistableExperiment, ZSpec
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -36,6 +36,7 @@ from zcu_tools.program.v2.modules import (
 )
 
 from zcu_lab.v2._support.mux import MuxFitFailure
+from zcu_lab.v2._support.mux_liveplot import draw_mux_magnitudes
 from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg, participant_indices
 from zcu_lab.v2.twotone.time_domain.t1.core import T1AnalyzeOptions
 
@@ -51,7 +52,7 @@ class MuxT1ToneCfg(ConfigBase):
     Native waveform schemas own shape/clock conversion; length cannot be swept.
     """
 
-    name: str
+    name: Annotated[str, FieldMeta(readonly=True)]
     drive: PulseCfg
 
     @model_validator(mode="after")
@@ -85,7 +86,7 @@ class MuxT1Cfg(ProgramV2Cfg, ExpCfgModel):
     """
 
     modules: MuxDriveModuleCfg
-    tones: list[MuxT1ToneCfg]
+    tones: Annotated[list[MuxT1ToneCfg], FieldMeta(element_label="name")]
     participants: list[str]
     delays: SweepCfg | list[float]
 
@@ -179,7 +180,8 @@ class MuxT1Exp(PersistableExperiment[MuxT1Result, MuxT1Cfg]):
         waits for the longest pulse branch, including native pulse delays.
         Return requested times (P,), original indices (K,) and average IQ (K,P).
         context supplies compatible soc/soccfg and owns devices, a fresh stop
-        signal and Plots. Publish measurement_i by original index; caller finishes
+        signal and Plots. Publish measurement_i and combined measurement with
+        original index/source cfg name legend; caller finishes
         and releases plots and hardware resources. Cancellation preserves complete
         points/current completed rounds, leaving unwritten IQ NaN. Acquisition
         failures retain their cause on context.cancel_signal; call raise_if_error()
@@ -203,6 +205,13 @@ class MuxT1Exp(PersistableExperiment[MuxT1Result, MuxT1Cfg]):
         def update(data: NDArray[np.complex128]) -> None:
             for row, viewer in enumerate(viewers):
                 viewer.update(times, np.abs(data[:, row]))
+            draw_mux_magnitudes(
+                context.plots,
+                np.broadcast_to(times, data.T.shape),
+                data.T,
+                [f"{index}: {cfg.tones[index].name}" for index in indices],
+                "Requested delay (us)",
+            )
 
         signals = SignalBuffer((len(times), len(indices)), on_update=update)
         with Schedule(cfg, signals, stop=context.cancel_signal) as sched:

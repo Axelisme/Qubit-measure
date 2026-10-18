@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from pydantic import model_validator
 from qick import QickConfig
+from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import PersistableExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -43,7 +44,7 @@ class MuxAmpRabiCfg(ProgramV2Cfg, ExpCfgModel):
     """
 
     modules: MuxDriveModuleCfg
-    tones: list[MuxToneCfg]
+    tones: Annotated[list[MuxToneCfg], FieldMeta(element_label="name")]
     participants: list[str]
 
     @model_validator(mode="after")
@@ -115,7 +116,12 @@ class MuxAmpRabiExp(PersistableExperiment[MuxSweepResult, MuxAmpRabiCfg]):
         cfg = MuxAmpRabiCfg.model_validate(config.model_dump())
         scan = prepare_amplitude_scan(cfg, soccfg=context.soccfg)
         return acquire_mux_scan(
-            cfg, cfg.modules, scan, context=context, coordinate_label="Pulse gain"
+            cfg,
+            cfg.modules,
+            scan,
+            context=context,
+            coordinate_label="Pulse gain",
+            tone_names=[tone.name for tone in cfg.tones],
         )
 
     def analyze(
