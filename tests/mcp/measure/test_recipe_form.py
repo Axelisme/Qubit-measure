@@ -38,6 +38,8 @@ from zcu_tools.resources.context.library import (
     ModuleLibraryDocument,
 )
 
+from tests.gui._form_converters import RebuildingForm
+
 from ._recipe_support import LookbackGui, recipe_client
 
 
@@ -277,7 +279,9 @@ def test_read_field_projects_selected_typed_option_fields(
     assert observed.input == {"kind": tag}
 
 
-class OuterInline(FormModel):
+class OuterInline(RebuildingForm):
+    branch_models = {("module",): (NumericOption, StringOption)}
+
     kind: Literal["inline"] = "inline"
     module: NumericOption | StringOption = Field(discriminator="kind")
 

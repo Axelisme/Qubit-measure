@@ -159,6 +159,18 @@ def test_nullable_single_branch_keeps_inner_selector_editable(enabled: bool) -> 
         state.write(
             {("nullable_multi",): {"kind": "inline", "module": {"kind": "first"}}}, env
         )
+        assert state.describe(("nullable_multi",), env).children == ()
+        state.install_input(
+            FormInput(
+                SelectionForm,
+                {
+                    "nullable_multi": {
+                        "kind": "inline",
+                        "module": {"kind": "first", "value": 2},
+                    }
+                },
+            )
+        )
     inner = state.describe(("nullable_multi", "module"), env).target
     assert inner is not None
     assert inner.selection_fixed is False
@@ -180,5 +192,8 @@ def test_nullable_single_branch_keeps_inner_selector_editable(enabled: bool) -> 
     assert disabled.target.selection_fixed is True
     assert disabled.target.nullable is True
     assert disabled.target.fixed is False
-    assert disabled.children == ()
-    assert state.input.data["nullable_multi"] is None
+    assert disabled.children
+    assert state.input.data["nullable_multi"] == {
+        "kind": "inline",
+        "module": {"kind": "first", "value": 7.0},
+    }

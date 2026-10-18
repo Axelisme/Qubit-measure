@@ -1,5 +1,6 @@
 """Approved inline inheritance is shared by generated and handwritten forms."""
 
+from collections.abc import Mapping
 from itertools import permutations
 
 import pytest
@@ -9,7 +10,16 @@ from zcu_tools.cfg_model import (
     GaussWaveformCfg,
     PulseSpec,
 )
-from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormModel, FormState
+from zcu_tools.gui.form import (
+    FormEnv,
+    FormErrors,
+    FormInput,
+    FormModel,
+    FormPath,
+    FormState,
+    InputConverter,
+    Option,
+)
 from zcu_tools.gui.form_adapter import ModuleInputField, module_form
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
@@ -108,16 +118,58 @@ def test_ref_inline_copy_is_fixed_and_arb_flat_top_cross_pairs_do_not_inherit():
     }
 
 
+def test_two_fixed_captures_do_not_share_converter_sources():
+    form = module_form(PulseSpec)
+    first_env = FormEnv(
+        library=LibrarySnapshot(
+            ModuleLibraryDocument(
+                format="zcu.module-library",
+                format_version="2.0",
+                components={
+                    "Q": ComponentLibrary(
+                        waveforms={"shape": GaussWaveformCfg(length=0.8, sigma=0.2)}
+                    )
+                },
+            )
+        )
+    )
+    assert first_env.library is not None
+    second_env = FormEnv(
+        library=first_env.library.replaced_waveform(
+            "Q.waveforms.shape", GaussWaveformCfg(length=1.6, sigma=0.4)
+        )
+    )
+    raw = {"waveform": {"kind": "ref", "name": "Q.waveforms.shape"}}
+    first = FormState(FormInput(form.model, raw))
+    second = FormState(FormInput(form.model, raw))
+    choose(first, ("waveform",), "Inline: gauss", first_env)
+    choose(second, ("waveform",), "Inline: gauss", second_env)
+    assert first.input.data["waveform"] == {
+        "kind": "inline",
+        "module": {"style": "gauss", "length": 0.8, "sigma": 0.2},
+    }
+    assert second.input.data["waveform"] == {
+        "kind": "inline",
+        "module": {"style": "gauss", "length": 1.6, "sigma": 0.4},
+    }
+    first.describe(("waveform",), second_env)
+    first.preview(second_env)
+    assert first.input.data["waveform"] == {
+        "kind": "inline",
+        "module": {"style": "gauss", "length": 0.8, "sigma": 0.2},
+    }
+
+
 def test_handwritten_module_field_uses_same_converter_and_preserves_invalid_drafts():
     field = ModuleInputField(PulseSpec)
 
     class Handwritten(FormModel):
         @classmethod
-        def options(cls, env):
+        def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
             return {("pulse",): field.options(env)}
 
         @classmethod
-        def converters(cls, env):
+        def converters(cls, env: FormEnv) -> Mapping[FormPath, InputConverter]:
             return {("pulse",): field.converter(env)}
 
     model = create_model(

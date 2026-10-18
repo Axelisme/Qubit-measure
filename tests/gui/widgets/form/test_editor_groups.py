@@ -21,6 +21,7 @@ from qtpy.QtWidgets import (
 from zcu_tools.gui.form import Display, FormEnv, FormInput, FormModel, FormState
 from zcu_tools.gui.widgets.form import FormEditor
 
+from tests.gui._form_converters import RebuildingForm
 from tests.gui._user_input import key_click, mouse_click, type_text
 
 type View = tuple[FormEditor[FormModel], FormState[FormModel]]
@@ -246,8 +247,10 @@ class Beta(BaseModel):
     phase: Annotated[float, Display(group="Advanced")] = 0.0
 
 
-class FoldForm(FormModel):
+class FoldForm(RebuildingForm):
     """Root groups, a tagged branch with a group, and two model folds."""
+
+    branch_models = {("shape",): (Alpha, Beta)}
 
     gain: float = 1.0
     delay: Annotated[float, Display(group="Advanced")] = 0.0
@@ -454,8 +457,10 @@ class Tone(BaseModel):
     gain: float = 0.5
 
 
-class ShapeForm(FormModel):
+class ShapeForm(RebuildingForm):
     """A group declared first, then every kind of row that changes the shape."""
+
+    branch_models = {("shape",): (Alpha, Beta), ("tone",): (Muted, Tone)}
 
     delay: Annotated[float, Display(group="Advanced")] = 0.0
     shape: Annotated[Alpha | Beta, Field(discriminator="kind")] = Field(

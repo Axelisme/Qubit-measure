@@ -1,5 +1,6 @@
 """Field selection is independent of child drafts; conversions are atomic."""
 
+from collections.abc import Mapping
 from operator import setitem
 from typing import Annotated, Literal
 
@@ -148,6 +149,41 @@ def test_converter_failure_keeps_selection_structure_input_and_notifications(def
     assert state.input.data == raw
     assert state.describe(("value",), env) == before
     assert events == []
+
+
+def test_local_converter_hook_overrides_inherited_hook_and_field_metadata():
+    assert hasattr(api, "InputConverter"), "Fields need a single local converter"
+    events = []
+
+    def forbidden(old, selection, context):
+        raise AssertionError("An overridden converter must not run")
+
+    def local(old, selection, context):
+        events.append(selection)
+        return api.FormConversionResult(Second, {"kind": "second", "amount": 7})
+
+    class Child(api.FormModel):
+        value: Annotated[First | Second, api.InputConverter(forbidden)] = Field(
+            discriminator="kind"
+        )
+
+        @classmethod
+        def converters(cls, _env) -> Mapping[api.FormPath, api.InputConverter]:
+            return {("value",): api.InputConverter(local)}
+
+    class Parent(api.FormModel):
+        child: Child
+
+        @classmethod
+        def converters(cls, _env) -> Mapping[api.FormPath, api.InputConverter]:
+            return {("child", "value"): api.InputConverter(forbidden)}
+
+    state = api.FormState(
+        api.FormInput(Parent, {"child": {"value": {"kind": "first", "amount": 1}}})
+    )
+    state.write({("child", "value"): {"kind": "second"}}, api.FormEnv())
+    assert state.input.data == {"child": {"value": {"kind": "second", "amount": 7}}}
+    assert events == [{"kind": "second"}]
 
 
 def test_converter_handles_every_scalar_selection_and_rejects_duplicate_declarations():

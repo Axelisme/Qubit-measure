@@ -43,6 +43,7 @@ from zcu_tools.resources.context.library import (
     ModuleLibraryDocument,
 )
 
+from tests.gui._form_converters import RebuildingForm
 from tests.gui.widgets.form._field_errors import field_error
 
 type Editor = FormEditor[FormModel]
@@ -411,8 +412,10 @@ class Ramp(BaseModel):
     sigma: float = 0.1
 
 
-class ShapeForm(FormModel):
+class ShapeForm(RebuildingForm):
     """One tagged union field; the core lists one option per branch."""
+
+    branch_models = {("shape",): (Flat, Ramp)}
 
     shape: Annotated[Flat | Ramp, Field(discriminator="kind")]
 
@@ -456,8 +459,10 @@ class Three(BaseModel):
     b_only: float = 4.0
 
 
-class NumericForm(FormModel):
+class NumericForm(RebuildingForm):
     """Numeric tags are written as typed JSON numbers."""
+
+    branch_models = {("branch",): (One, Three)}
 
     branch: Annotated[One | Three, Field(discriminator="kind")]
 
@@ -487,8 +492,10 @@ class AliasFlat(BaseModel):
     length: float = 1.0
 
 
-class AliasShapeForm(FormModel):
+class AliasShapeForm(RebuildingForm):
     """A tagged union whose first branch accepts an alias tag."""
+
+    branch_models = {("shape",): (AliasFlat, Ramp)}
 
     shape: Annotated[AliasFlat | Ramp, Field(discriminator="kind")]
 
@@ -532,8 +539,10 @@ class AliasOne(BaseModel):
     a_only: float = 3.0
 
 
-class NumericAliasForm(FormModel):
+class NumericAliasForm(RebuildingForm):
     """A numeric tagged union whose first branch accepts an alias tag."""
+
+    branch_models = {("branch",): (AliasOne, Three)}
 
     branch: Annotated[AliasOne | Three, Field(discriminator="kind")]
 
@@ -808,7 +817,7 @@ def test_generated_nested_copy_and_fresh_selection_via_component_events(
     driver.choose_option(
         object_name="form.input.pulse.module.waveform", value="Inline: cosine"
     )
-    driver.screenshot(tmp_path / "05-fresh-kind.png")
+    driver.screenshot(tmp_path / "05-inherited-kind.png")
     assert (
         driver.observe(object_name="form.input.pulse.module.waveform").text
         == "Inline: cosine"
@@ -817,7 +826,7 @@ def test_generated_nested_copy_and_fresh_selection_via_component_events(
         driver.observe(
             object_name="form.input.pulse.module.waveform.module.length"
         ).text
-        == ""
+        == "0.25"
     )
     driver.enter_text(object_name="form.input.note", value="$still-literal")
     driver.screenshot(tmp_path / "06-literal-text.png")

@@ -775,12 +775,12 @@ def test_template_input_nested_kind_reselection_uses_authored_defaults(
     choose(other_kind)
     assert expect_object(state.input.data[child]) == {
         "kind": "inline",
-        "module": {"style": other_kind},
+        "module": {"style": other_kind, "length": 1.7},
     }
     choose(authored_kind)
     assert (
         expect_object(expect_object(state.input.data[child])["module"]).get("length")
-        == length
+        == 1.7
     )
 
 

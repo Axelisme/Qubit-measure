@@ -29,6 +29,7 @@ from zcu_tools.gui.form import (
     FormInput,
     FormModel,
     FormPath,
+    InputConverter,
     Option,
 )
 from zcu_tools.gui.form_adapter import (
@@ -112,7 +113,9 @@ def test_sweep_modes_and_expressions_roundtrip_through_window_memento(
     sweep_window, sweep: JsonValue
 ) -> None:
     original = sweep_window(PersistedSweepForm, None)
-    original.plan_panel.state.write({("sweep",): sweep}, original.plan_panel.env)
+    original.plan_panel.state.install_input(
+        FormInput(PersistedSweepForm, {"sweep": sweep})
+    )
     saved = original.capture_persisted_state()
     assert saved.plan["sweep"] == sweep
     codec = WorkflowInputCodec()
@@ -264,6 +267,10 @@ class DrivePlanForm(FormModel):
     def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
         """Supply the generated field's options through the public owner."""
         return {("drive",): DRIVE_FIELD.options(env)}
+
+    @classmethod
+    def converters(cls, env: FormEnv) -> Mapping[FormPath, InputConverter]:
+        return {("drive",): DRIVE_FIELD.converter(env)}
 
 
 class ValueKnobsForm(FormModel):

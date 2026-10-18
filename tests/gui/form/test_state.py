@@ -22,6 +22,8 @@ from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
+from tests.gui._form_converters import RebuildingForm
+
 
 class FrequencyBranch(BaseModel):
     """One untagged model shape, with a numeric expression-capable leaf."""
@@ -187,8 +189,10 @@ class RequiredBranch(FormModel):
     required: float
 
 
-class BranchForm(FormModel):
+class BranchForm(RebuildingForm):
     """Declare discriminator switching and the shared range submodels."""
+
+    branch_models = {("branch",): (StaticBranch, ContextBranch, RequiredBranch)}
 
     branch: Annotated[
         StaticBranch | ContextBranch | RequiredBranch, Field(discriminator="kind")
@@ -196,8 +200,10 @@ class BranchForm(FormModel):
     fluxes: LinRange = Field(default_factory=LinRange)
 
 
-class NullableBranchForm(FormModel):
+class NullableBranchForm(RebuildingForm):
     """Nullable tagged objects require activation before child editing."""
+
+    branch_models = {("branch",): (StaticBranch, ContextBranch)}
 
     branch: Annotated[
         StaticBranch | ContextBranch | None, Field(discriminator="kind")
