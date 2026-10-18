@@ -116,6 +116,10 @@ def test_handwritten_module_field_uses_same_converter_and_preserves_invalid_draf
         def options(cls, env):
             return {("pulse",): field.options(env)}
 
+        @classmethod
+        def converters(cls, env):
+            return {("pulse",): field.converter(env)}
+
     model = create_model(
         "HandwrittenPulse", __base__=Handwritten, pulse=(field.annotation, ...)
     )
