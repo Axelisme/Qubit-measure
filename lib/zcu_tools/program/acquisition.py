@@ -71,7 +71,10 @@ class TypedAcquireMixin(AcquireMixin):
         return super().get_raw()
 
     def get_time_axis(
-        self, ro_index: int, length_only: bool = False
+        self,
+        ro_index: int,
+        # tolerated: QICK's get_time_axis accepts the length-only selector positionally.
+        length_only: bool = False,  # noqa: FBT001, FBT002
     ) -> NDArray[np.float64] | int:
         return super().get_time_axis(ro_index, length_only)
 
@@ -89,8 +92,10 @@ class TypedAcquireMixin(AcquireMixin):
     def _average_buf(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         d_reps: Sequence[NDArray[np.float64] | NDArray[np.int64]],
-        length_norm: bool = True,
-        remove_offset: bool = True,
+        # tolerated: QICK's averaging override accepts positional readout-length normalization.
+        length_norm: bool = True,  # noqa: FBT001, FBT002
+        # tolerated: QICK's averaging override accepts positional IQ-offset subtraction.
+        remove_offset: bool = True,  # noqa: FBT001, FBT002
     ) -> list[NDArray[np.float64]]:
         return super()._average_buf(
             # tolerated: QICK annotates acquisition buffers as ndarray although its implementations consume and return per-channel lists.

@@ -69,8 +69,10 @@ class AdditionalMacroMixin(QickProgramV2):
     def delay_auto(
         self,
         t: float | QickParam = 0.0,
-        gens=True,
-        ros=True,
+        # tolerated: QickProgramV2.delay_auto accepts generator-end selection positionally.
+        gens=True,  # noqa: FBT002
+        # tolerated: QickProgramV2.delay_auto accepts readout-end selection positionally.
+        ros=True,  # noqa: FBT002
         tag: str | None = None,
     ):
         if self._delay_disabled:
@@ -272,10 +274,13 @@ class AdditionalMacroMixin(QickProgramV2):
     def wait_auto(
         self,
         t: float | QickParam = 0,
-        gens: bool = False,
-        ros: bool = True,
+        # tolerated: QickProgramV2.wait_auto accepts generator-end selection positionally.
+        gens: bool = False,  # noqa: FBT001, FBT002
+        # tolerated: QickProgramV2.wait_auto accepts readout-end selection positionally.
+        ros: bool = True,  # noqa: FBT001, FBT002
         tag: str | None = None,
-        no_warn: bool = False,
+        # tolerated: QickProgramV2.wait_auto accepts swept-wait warning control positionally.
+        no_warn: bool = False,  # noqa: FBT001, FBT002
     ) -> None:
         self.meta_macro("DISABLE_OPT_START", "")
         # tolerated: QICK infers t as int from its default; the timing macro accepts float and QickParam microseconds.
