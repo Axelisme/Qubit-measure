@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves, spectral-family reuse, reuse-independent Sambe admission, calibrated physical-block carrier interpolation, interaction-picture independent densities, deterministic evolve-local period gain anchors and shared sideband certificate contributions
+**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves, spectral-family reuse, reuse-independent Sambe admission, calibrated physical-block carrier interpolation, interaction-picture independent densities, deterministic evolve-local period gain anchors, shared sideband certificate contributions and guarded constant-tone Sambe periods
 
 ## Segment engine contracts
 
@@ -584,7 +584,53 @@ families. It registers each returned workspace with `PrepareCache.track_workspac
 and releases registration on success, cancellation or failure. Registry kernels
 and the persistent prepare LRU never retain these scopes. `shaped_sambe` uses
 this mechanism for physical-block carrier interpolation. `floquet_period` uses
-it for fixed gain anchors. Concurrent evolves have separate workspaces.
+it for fixed gain anchors and key-local Sambe build counters. Concurrent evolves
+have separate workspaces.
+
+For constant-tone `floquet_period` keys below 1 GHz, a calibrated cost estimate
+chooses between Sambe and CF4 before building. If c is the original CF4 coarse
+step count and d its first 1.5x finer count, cutoffs 2/3 cost
+`0.5*(5**3+7**3)=234` units versus `c+d` CF4 units. The common Hilbert dimension
+cubed cancels. This calibration comes from single-threaded 16-level builds, not
+runtime timing. It does not consult workers, chunks, key order or densities.
+High-carrier keys keep DOP853, and cheaper low-carrier CF4 keys keep gain anchors.
+
+Sambe reconstructs physical U(t) from a central harmonic input to the Hermitian
+matrix with blocks H0+k*f and adjacent couplings gain*(X-iY)/2. Adjacent cutoffs
+must agree at q=0,1/8,...,1 within maximum Frobenius defect
+`min(1e-4,budget*0.1)`. The finer spectrum supplies both period and fractional
+endpoints. Sampled unitarity defect must not exceed 1e-4 before polar correction.
+All retained arrays are immutable and charged to prepared nbytes. Spectra are
+never interpolated or shared across keys.
+
+Refinement stops at cutoff 12 or before cumulative eigensolve work exceeds the
+original CF4 estimate. Rejection uses the original independent CF4 coarse/fine
+path, not gain interpolation. Spectral candidates do not hold anchor references;
+other keys use the fixed non-spectral gain plan. The evolve-local workspace
+reports accepted spectral prepare requests as `sambe_builds` and declined ones
+as `sambe_fallbacks`, including repeated requests but excluding LRU hits.
+These counters retain no numerical data. Phase translation, secular Strang
+splitting, subdivisions, polar correction and fractional tails do not change.
+The nine-point cutoff comparison is calibrated, not a rigorous error bound.
+It assumes adjacent-cutoff convergence and that the samples represent errors
+between their endpoints.
+
+The CF4 builder retains unitary prefixes from fourth-order commutator-free
+Magnus steps with scaling-and-squaring [7/7] Pade exponentials. It compares
+uniform grids at nine normalized-phase endpoints, refines by 1.5x and retains
+the finer trajectory under the same defect allowance. Fractional endpoints use
+one CF4 step from the preceding prefix, not time interpolation.
+For non-spectral keys, each level/port/signed-carrier group sorts its unique
+gains and uses every twenty-fourth gain plus both endpoints as independent
+anchors. Each other key interpolates its nearest at most four anchors, resolving
+ties toward the lower gain. Sharing also requires the identical model object
+and budget. Unequal retained grids disable interpolation. The candidate must
+pass an independent coarse-grid comparison; failure reuses that grid in the
+original refinement path. Fixed plans and reference-counted release keep tables
+bitwise independent of workers, chunks and request order. No anchor crosses
+evolves or enters the LRU. Workspace bytes charge retained anchors, with memory
+bounded by the planned count. Gain smoothness, well-conditioned interpolation
+and between-sample accuracy remain calibrated assumptions, not proven bounds.
 
 The physical-block carrier workspace belongs to one evolve. Prefix resolution
 and timeline workers share it, never with another evolve or budget. This is calibrated physical-block carrier interpolation,

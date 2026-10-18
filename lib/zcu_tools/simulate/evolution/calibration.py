@@ -142,6 +142,7 @@ def constant_kernel_revision() -> str:
         "kernels/_dyson_paths.py",
         "kernels/_weak.py",
         "kernels/floquet_period.py",
+        "kernels/_period_sambe.py",
         "kernels/t4.py",
         "kernels/t6.py",
         "kernels/dop853.py",
