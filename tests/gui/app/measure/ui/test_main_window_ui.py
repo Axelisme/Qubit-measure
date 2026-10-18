@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
-from typing import Any, cast
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -2051,9 +2051,9 @@ def _add_tab(
 
 def _shutdown_callback(ctrl: MagicMock) -> Callable[[], None]:
     ctrl.begin_shutdown.assert_called_once()
-    callback = ctrl.begin_shutdown.call_args.args[0]
+    callback: Callable[[], None] = ctrl.begin_shutdown.call_args.args[0]
     assert callable(callback)
-    return cast(Callable[[], None], callback)
+    return callback
 
 
 class _DeferredClosePresenter(RecordingDialogPresenter):
