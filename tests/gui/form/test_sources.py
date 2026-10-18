@@ -53,11 +53,15 @@ def test_compatible_restore_reports_unmatched_sources_and_keeps_other_leaves(
 ) -> None:
     env = FormEnv(library=library() if capture != "absent" else None)
     name = "Q1.pulses.pi" if capture != "unmatched" else "Q1.pulses.removed"
-    saved = FormInput.from_json(
+    saved = FormInput(
         RestoreModuleForm,
-        '{"drive": {"kind": "ref", "name": "' + name + '"}, '
-        '"readout": {"kind": "ref", "name": "' + name + '"}, '
-        '"averages": 17, "delay": "wrong type", "removed": 4}',
+        {
+            "drive": {"kind": "ref", "name": name},
+            "readout": {"kind": "ref", "name": name},
+            "averages": 17,
+            "delay": "wrong type",
+            "removed": 4,
+        },
     )
     state = FormState(RestoreModuleForm.default_input(env))
     before_base = state.base.data

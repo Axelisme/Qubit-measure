@@ -214,12 +214,9 @@ def test_single_model_selector_restore_drops_expression_and_retains_ordinary_tag
         parameters=name_env.parameters.bind_aliases((AliasRow("device", "first"),), {})
     )
     state = FormState(SingleSelectorForm.default_input(env))
-    saved = FormInput.from_json(
+    saved = FormInput(
         SingleSelectorForm,
-        FormInput(
-            SingleSelectorForm,
-            {"branch": {"kind": {"expr": "$device"}, "name": {"expr": "$device"}}},
-        ).to_json(),
+        {"branch": {"kind": {"expr": "$device"}, "name": {"expr": "$device"}}},
     )
 
     assert state.write_compatible(saved.data, env) == (("branch", "kind"),)

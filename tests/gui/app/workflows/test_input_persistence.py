@@ -26,6 +26,7 @@ from zcu_tools.gui.app.workflows.persistence import (
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.form import (
     FormEnv,
+    FormErrors,
     FormInput,
     FormModel,
     FormPath,
@@ -45,7 +46,7 @@ from tests.experiment.workflows._engine_fakes import Plan, State, Tunables
 from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.gui.app.workflows._synthetic import PlanForm, TunablesForm
 
-from ._sample_input import sample_input
+from ._sample_input import draft_data, sample_input
 from ._synthetic import ALIAS_PRESET, Context, build_registry
 from ._window_support import WindowSession, bind_point, install_soc
 
@@ -84,8 +85,8 @@ def test_original_expressions_roundtrip_and_restore_base(
     )
     caretaker.flush()
     raw = json.loads(caretaker.state_path.read_text())
-    assert raw["plan"]["scale"] == {"expr": "0.1 + 0.2"}
-    assert sample_input(raw["knobs"])["value"] == {"expr": "7 * 3"}
+    assert raw["plan"]["data"]["scale"] == {"expr": "0.1 + 0.2"}
+    assert sample_input(raw["knobs"]["data"])["value"] == {"expr": "7 * 3"}
     window.plan_panel.state.reset(PlanForm.default_input(window.plan_panel.env))
     window.tunables_panel.state.reset(
         TunablesForm.default_input(window.tunables_panel.env)
@@ -93,8 +94,8 @@ def test_original_expressions_roundtrip_and_restore_base(
     outcome = caretaker.restore_all()
     assert outcome.load_error is None
     assert window.capture_persisted_state() == saved
-    assert window.plan_panel.state.base.data == saved.plan
-    assert window.tunables_panel.state.base.data == saved.knobs
+    assert window.plan_panel.state.base.data == draft_data(saved.plan)
+    assert window.tunables_panel.state.base.data == draft_data(saved.knobs)
 
 
 class PersistedSweepForm(FormModel):
@@ -117,12 +118,12 @@ def test_sweep_modes_and_expressions_roundtrip_through_window_memento(
         FormInput(PersistedSweepForm, {"sweep": sweep})
     )
     saved = original.capture_persisted_state()
-    assert saved.plan["sweep"] == sweep
+    assert draft_data(saved.plan)["sweep"] == sweep
     codec = WorkflowInputCodec()
     restored = sweep_window(PersistedSweepForm, codec.decode(codec.encode(saved)))
     assert restored.capture_persisted_state() == saved
-    assert restored.plan_panel.state.input.data == saved.plan
-    assert restored.plan_panel.state.base.data == saved.plan
+    assert restored.plan_panel.state.input.data == draft_data(saved.plan)
+    assert restored.plan_panel.state.base.data == draft_data(saved.plan)
 
 
 class PersistedDraftForm(FormModel):
@@ -164,32 +165,14 @@ def test_incompatible_knobs_identity_preserves_both_window_drafts(window) -> Non
     assert window.capture_persisted_state() == before
 
 
-def test_incompatible_fields_drop_without_losing_other_input(
-    window: WorkflowWindow[Context],
-) -> None:
-    defaults = window.capture_persisted_state()
-    report = window.restore_persisted_state(
-        WorkflowInputSnapshot(
-            plan={"scale": ["wrong shape"], "removed": 4},
-            knobs={"sample": {"value": {"expr": "8 * 4"}}, "removed_knob": True},
-        )
-    )
-    assert set(report.plan_dropped) == {("scale",), ("removed",)}
-    assert report.knobs_dropped == (("removed_knob",),)
-    restored = window.capture_persisted_state()
-    assert restored.plan == defaults.plan
-    assert sample_input(restored.knobs)["value"] == {"expr": "8 * 4"}
-
-
 def test_open_restore_and_close_flush(qapp: QApplication, tmp_path: Path) -> None:
     path = tmp_path / "t1_workflow_state_v1.json"
     path.write_text(
         json.dumps(
-            {
-                "version": 2,
-                "plan": {"scale": {"expr": "1 / 4"}},
-                "knobs": {"sample": {"value": 35.0}},
-            }
+            WorkflowInputCodec().encode(WorkflowInputSnapshot.capture(
+                FormInput(PlanForm, {"scale": {"expr": "1 / 4"}}),
+                FormInput(TunablesForm, {"sample": {"value": 35.0}}),
+            ))
         )
     )
     app = WorkflowsGuiBehavior(
@@ -200,15 +183,15 @@ def test_open_restore_and_close_flush(qapp: QApplication, tmp_path: Path) -> Non
     )
     app.assemble(None)
     try:
-        assert app.window.capture_persisted_state().plan["scale"] == {"expr": "1 / 4"}
-        assert sample_input(app.window.capture_persisted_state().knobs)["value"] == 35.0
+        assert draft_data(app.window.capture_persisted_state().plan)["scale"] == {"expr": "1 / 4"}
+        assert sample_input(draft_data(app.window.capture_persisted_state().knobs))["value"] == 35.0
         app.window.tunables_panel.state.write(
             {("sample", "value"): {"expr": "9 * 5"}}, app.window.tunables_panel.env
         )
         assert app.window.close()
         raw = json.loads(path.read_text())
-        assert sample_input(raw["knobs"])["value"] == {"expr": "9 * 5"}
-        assert raw["plan"]["scale"] == {"expr": "1 / 4"}
+        assert sample_input(raw["knobs"]["data"])["value"] == {"expr": "9 * 5"}
+        assert raw["plan"]["data"]["scale"] == {"expr": "1 / 4"}
     finally:
         app.shutdown()
         app.window.deleteLater()
@@ -282,7 +265,7 @@ def test_clean_skips_read_but_close_replaces_snapshot(
         )
         assert app.window.close()
         raw = json.loads(path.read_text())
-        assert raw["plan"]["scale"] == {"expr": "3 / 8"}
+        assert raw["plan"]["data"]["scale"] == {"expr": "3 / 8"}
     finally:
         app.shutdown()
         app.window.deleteLater()
@@ -349,35 +332,29 @@ def drive_registration() -> WorkflowAttachment[
     )
 
 
-def test_saved_reference_without_captured_library_is_discarded_on_open(
+def test_saved_reference_without_captured_library_survives_reopen_as_invalid_draft(
     qapp: QApplication, tmp_path: Path
 ) -> None:
-    (tmp_path / "t1_workflow_state_v1.json").write_text(
-        json.dumps(
-            {
-                "version": 2,
-                "plan": {"drive": {"kind": "ref", "name": "Q1.pulses.pi"}, "count": 5},
-                "knobs": {"value": 3},
-            }
+    raw: dict[str, JsonValue] = {
+        "drive": {"kind": "ref", "name": "Q1.pulses.pi"}, "count": 5
+    }
+    for opening in range(2):
+        app = WorkflowsGuiBehavior(
+            templates={}, registrations=[drive_registration()], cache_dir=tmp_path
         )
-    )
-    app = WorkflowsGuiBehavior(
-        templates={}, registrations=[drive_registration()], cache_dir=tmp_path
-    )
-    app.assemble(None)
-    try:
-        assert app.window.capture_persisted_state() == WorkflowInputSnapshot(
-            plan={"drive": {"kind": "ref"}, "count": 5}, knobs={"value": 3}
-        )
-        assert any(
-            label.text() == "Discarded plan: drive.name"
-            for label in app.window.findChildren(QLabel)
-        )
-    finally:
-        app.window.close()
-        app.shutdown()
-        app.window.deleteLater()
-        qapp.processEvents()
+        app.assemble(None)
+        try:
+            if opening == 0:
+                app.window.plan_panel.state.install_input(FormInput(DrivePlanForm, raw))
+            assert app.window.plan_panel.state.input.data == raw
+            result = app.window.plan_panel.state.result(app.window.plan_panel.env)
+            assert isinstance(result, FormErrors)
+            assert ("drive", "name") in result.messages
+        finally:
+            app.window.close()
+            app.shutdown()
+            app.window.deleteLater()
+            qapp.processEvents()
 
 
 def runnable(session: WindowSession) -> WorkflowWindow[None]:
@@ -411,7 +388,7 @@ def test_running_run_saves_its_live_tunables_draft(
     window_session.harness.complete_segment()
     qapp.processEvents()
 
-    assert [snapshot.knobs["value"] for snapshot in saved] == [9]
+    assert [draft_data(snapshot.knobs)["value"] for snapshot in saved] == [9]
     assert window.tunables_panel.state.input.data["value"] == 1
 
 
@@ -427,13 +404,13 @@ def test_paused_run_saves_its_live_draft_until_terminal_shows_start_knobs(
     assert tuning is not None and lifecycle(window) == "paused"
 
     tuning.panel.state.write({("value",): 9}, tuning.host.env)
-    assert window.capture_persisted_state().knobs["value"] == 9
+    assert draft_data(window.capture_persisted_state().knobs)["value"] == 9
     window.stop("paused")
     qapp.processEvents()
 
     assert lifecycle(window) == "stopped"
     assert window.tunables_panel.state.input.data["value"] == 1
-    assert window.capture_persisted_state().knobs["value"] == 1
+    assert draft_data(window.capture_persisted_state().knobs)["value"] == 1
 
 
 def test_start_tunables_edited_after_terminal_are_saved(
@@ -448,10 +425,10 @@ def test_start_tunables_edited_after_terminal_are_saved(
     window.tunables_panel.state.write(
         {("value",): {"expr": "2 + 3"}}, window.tunables_panel.env
     )
-    assert window.capture_persisted_state().knobs["value"] == {"expr": "2 + 3"}
+    assert draft_data(window.capture_persisted_state().knobs)["value"] == {"expr": "2 + 3"}
     caretaker = SingleFileCaretaker(
         window, codec=WorkflowInputCodec(), filename="input.json", cache_dir=tmp_path
     )
     caretaker.flush()
     raw = json.loads(caretaker.state_path.read_text())
-    assert raw["knobs"]["value"] == {"expr": "2 + 3"}
+    assert raw["knobs"]["data"]["value"] == {"expr": "2 + 3"}
