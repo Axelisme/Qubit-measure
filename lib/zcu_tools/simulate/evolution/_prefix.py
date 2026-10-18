@@ -185,7 +185,7 @@ class PrefixResolver:
             table = replace(table, prefix_inputs=inputs)
             geometry = replace(geometry, table=table, prefix_paths=paths)
             prefix = _representative(geometry, first, row)
-            dispatch = classify(prefix, kernels, context)
+            dispatch = classify(prefix, kernels, context, cache=cache)
             schedule = Schedule(prefix, dispatch, context, cancel, initial)
             result = schedule.run(kernels, cache, pool, chunks)
             inputs[group] = result.densities[0]

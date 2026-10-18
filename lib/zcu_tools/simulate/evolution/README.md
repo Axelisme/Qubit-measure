@@ -137,8 +137,10 @@ plan on success, cancellation or failure. Cache ownership remains separate.
 `admit_prepared` is the cache-first numerical admission hook. It returns current
 row decisions and a row plan without construction when the payload domain covers
 all required products. None means domain miss and retains the ordinary build
-path. Production families currently decline this hook; cache lookup and routing
-remain unchanged.
+path. Dispatch looks up resident guard products in the caller and passes strong
+references to deferred workers. Floquet reuses frames only when all needed probe
+bins are present. Shaped Sambe reuses key-covered convergence data. Neither hook
+builds numerical products; both recheck the current rows before accepting them.
 
 Guards are row-local: splitting or reordering a guard call must preserve its
 acceptance mask. A guard may read the source initial density or an

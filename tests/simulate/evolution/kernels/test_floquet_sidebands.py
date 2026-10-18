@@ -263,3 +263,23 @@ def test_exact_resonant_divisor_is_accepted_and_matches_lindblad() -> None:
     )
     case.kernel.apply(prepared, rows, case.table, rows, case.states, case.context(rows))
     np.testing.assert_allclose(case.states, expected, atol=1e-3, rtol=0)
+
+
+def test_cached_sideband_domain_requires_every_probe_bin() -> None:
+    case = _adversarial_case("exact-resonance")
+    solver = FloquetKernel()
+    rows = np.array([0])
+    context = KernelContext(case.source, case.budget, WorkPlan())
+    built = solver.guard_prepared(case.table, rows, context)
+    prepared = built.preparations[0].prepared
+    admitted = solver.admit_prepared(prepared, case.table, rows, context)
+    assert admitted is not None, "covered Floquet domain must admit without build"
+    np.testing.assert_array_equal(admitted.accepted, built.accepted)
+    # Phase and duration are current-row decisions, not part of the frame key.
+    changed = replace(case.table, duration_ns=np.array([8.0]))
+    admitted = solver.admit_prepared(prepared, changed, rows, context)
+    assert admitted is not None
+    expected = solver.guard_prepared(changed, rows, context)
+    np.testing.assert_array_equal(admitted.accepted, expected.accepted)
+    missing = replace(case.table, tone_frequency_ghz=np.array([[0.13, 0.023]]))
+    assert solver.admit_prepared(prepared, missing, rows, context) is None

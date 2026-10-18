@@ -16,7 +16,7 @@ from ..kernel import (
     Prepared,
     SegmentTable,
 )
-from ..secular import ModelSource, SecularModel
+from ..secular import SecularModel
 from ._carrier_reuse import CarrierWorkspace
 from ._period_table import (
     PeriodEntry,
@@ -31,7 +31,8 @@ from ._period_table import (
 )
 from ._sambe import eigensystem
 from ._secular import coherence_decay, population_generator
-from ._shaped import drive_bounds, envelope_bounds
+from ._shaped import drive_bounds
+from ._workload_facts import envelope_bounds
 from .dop853 import prepare_models
 
 
@@ -181,11 +182,13 @@ class _Data:
     periods: PeriodPrepared
     models: tuple[SecularModel, ...]
     ports: tuple[int, ...]
+    keys: NDArray[np.void]
+    errors: NDArray[np.float64]
 
     @property
     def nbytes(self) -> int:
         # Models belong to ModelSource; only newly owned arrays are charged.
-        return self.periods.nbytes
+        return self.periods.nbytes + self.keys.nbytes + self.errors.nbytes
 
 
 class ShapedSambeKernel:
@@ -245,7 +248,7 @@ class ShapedSambeKernel:
         if not len(rows):
             return CarrierWorkspace(np.empty(0))
         keys = self.prepare_keys(table, rows, context)
-        subdivisions = self._subdivisions(table, rows, context.source)
+        subdivisions = self._subdivisions(table, rows, context)
         groups = []
         for key, count in zip(keys, subdivisions, strict=True):
             model = context.source.model(tuple(int(v) for v in key["level"]))
@@ -267,8 +270,7 @@ class ShapedSambeKernel:
         context: KernelContext,
     ) -> NDArray[np.void]:
         """Key peak gain, weighted slope and duration to fix subperiod resolution."""
-        del context
-        base = band_keys(table, rows)
+        base = band_keys(table, rows, context.work_plan)
         keys = np.empty(
             len(rows),
             dtype=base.dtype.descr
@@ -276,7 +278,8 @@ class ShapedSambeKernel:
         )
         for name in base.dtype.names or ():
             keys[name] = base[name]
-        peaks, slopes = envelope_bounds(table)
+        bounds = envelope_bounds(table, context.work_plan)
+        peaks, slopes = bounds.peaks, bounds.slopes
         keys["slope"] = (
             np.abs(table.tone_amplitude[rows, 0]) * slopes[table.tone_envelope[rows, 0]]
         )
@@ -290,10 +293,11 @@ class ShapedSambeKernel:
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
+        context: KernelContext,
     ) -> NDArray[np.int64]:
-        strength, gamma = drive_bounds(table, rows, source)
-        peaks, slopes = envelope_bounds(table)
+        strength, gamma = drive_bounds(table, rows, context.source)
+        bounds = envelope_bounds(table, context.work_plan)
+        peaks, slopes = bounds.peaks, bounds.slopes
         envelope = table.tone_envelope[rows, 0]
         gain = np.abs(table.tone_amplitude[rows, 0])
         frequency = np.maximum(np.abs(table.tone_frequency_ghz[rows, 0]), 1e-20)
@@ -315,7 +319,7 @@ class ShapedSambeKernel:
     ) -> NDArray[np.bool_]:
         """Check density-free bandwidth, motion and split bounds before building."""
         source = context.source
-        subdivisions = self._subdivisions(table, rows, source)
+        subdivisions = self._subdivisions(table, rows, context)
         bounded = subdivisions <= 32
         # Strong, unresolved ramps need no keys or remaining eligibility work.
         if not np.any(bounded):
@@ -323,8 +327,9 @@ class ShapedSambeKernel:
         strength, _ = drive_bounds(table, rows, source)
         keys = self.prepare_keys(table, rows, context)
         frequency = np.abs(keys["frequency"])
-        real = np.array([np.all(e.samples.imag == 0) for e in table.envelopes])
-        peaks, slopes = envelope_bounds(table)
+        bounds = envelope_bounds(table, context.work_plan)
+        real = bounds.real
+        peaks, slopes = bounds.peaks, bounds.slopes
         envelope = table.tone_envelope[rows, 0]
         resolved = (
             slopes[envelope]
@@ -353,11 +358,11 @@ class ShapedSambeKernel:
         keys: NDArray[np.void],
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> tuple[_Data, NDArray[np.float64]]:
+        source, budget = context.source, context.budget
         entries, models, ports, errors = [], [], [], []
-        subdivisions = self._subdivisions(table, rows, source)
+        subdivisions = self._subdivisions(table, rows, context)
         # A timeline's rise/fall ramps arrive together. Only this call owns the
         # workspace; accepted payloads retain their immutable coefficients.
         families: dict[
@@ -440,9 +445,17 @@ class ShapedSambeKernel:
             )
             models.append(model)
             ports.append(port)
+        owned_keys = keys.copy()
+        convergence = np.asarray(errors)
+        owned_keys.setflags(write=False)
+        convergence.setflags(write=False)
         return _Data(
-            PeriodPrepared(tuple(entries)), tuple(models), tuple(ports)
-        ), np.asarray(errors)
+            PeriodPrepared(tuple(entries)),
+            tuple(models),
+            tuple(ports),
+            owned_keys,
+            convergence,
+        ), convergence
 
     def admit_prepared(
         self,
@@ -450,9 +463,23 @@ class ShapedSambeKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         context: KernelContext,
-    ) -> None:
-        """Decline cached-domain admission; use the ordinary guard build path."""
-        del prepared, table, rows, context
+    ) -> GuardResult | None:
+        """Reuse key-covered convergence data and recheck current row eligibility.
+
+        Keys include duration, envelope bound and slope, so their stored errors
+        cover the complete spectral domain. Missing keys return None; eligibility
+        rejection returns a decision without rebuilding periods.
+        """
+        if not isinstance(prepared, _Data):
+            raise TypeError("shaped_sambe requires its own prepared payload")
+        keys = self.prepare_keys(table, rows, context)
+        indices = {key.tobytes(): i for i, key in enumerate(prepared.keys)}
+        if any(key.tobytes() not in indices for key in keys):
+            return None
+        inverse = np.array([indices[key.tobytes()] for key in keys], dtype=np.int64)
+        accepted = self._eligible(table, rows, context)
+        accepted &= prepared.errors[inverse] <= context.budget / 2
+        return GuardResult(accepted, (GuardPreparation(prepared.keys, prepared),))
 
     def guard_prepared(
         self,
@@ -461,7 +488,7 @@ class ShapedSambeKernel:
         context: KernelContext,
     ) -> GuardResult:
         """Build eligible keys once, hand accepted model-only periods to Engine."""
-        source, budget = context.source, context.budget
+        budget = context.budget
         accepted = self._eligible(table, rows, context)
         selected = rows[accepted]
         preparations = []
@@ -472,7 +499,7 @@ class ShapedSambeKernel:
                 return_inverse=True,
             )
             prepared, errors = self._build(
-                keys, table, selected[representatives], source, budget
+                keys, table, selected[representatives], context
             )
             passed = errors[inverse] <= budget / 2
             accepted[np.flatnonzero(accepted)] = passed
@@ -487,8 +514,7 @@ class ShapedSambeKernel:
         context: KernelContext,
     ) -> Prepared:
         """Build immutable spectral periods from aligned representative rows."""
-        source, budget = context.source, context.budget
-        return self._build(keys, table, rows, source, budget)[0]
+        return self._build(keys, table, rows, context)[0]
 
     def cost(
         self,

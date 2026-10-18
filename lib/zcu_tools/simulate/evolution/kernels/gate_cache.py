@@ -11,7 +11,8 @@ from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from . import gate_phase
 from ._gate_endpoints import build_endpoints
 from ._secular import coherence_decay, population_generator
-from ._shaped import drive_bounds, envelope_bounds
+from ._shaped import drive_bounds
+from ._workload_facts import envelope_bounds
 
 _PHASE_COUNT = 16
 _SUBSEGMENTS = 4
@@ -112,7 +113,7 @@ class GateCacheKernel:
             return accepted
         selected = rows[accepted]
         strength, gamma = drive_bounds(table, selected, source)
-        peaks, _ = envelope_bounds(table)
+        peaks = envelope_bounds(table, context.work_plan).peaks
         peak = peaks[table.tone_envelope[selected, 0]]
         estimate = (
             table.duration_ns[selected] ** 3
