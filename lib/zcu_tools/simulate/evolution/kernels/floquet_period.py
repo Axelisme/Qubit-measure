@@ -25,8 +25,7 @@ _MIN_FREQUENCY_GHZ = 0.03
 _MAX_SPLIT_ESTIMATE = 1.0
 _MAX_SUBDIVISIONS = 64
 _MAGNUS_FREQUENCY_GHZ = 1.0
-_GAIN_BLOCK_SIZE = 32
-_GAIN_MAX_STRIPES = 12
+_GAIN_ANCHOR_SPACING = 16
 
 
 class _DensePeriod(NamedTuple):
@@ -160,12 +159,22 @@ class _Neighbour:
     period: _Period
 
 
-class _GainBlock:
-    """Serialize a fixed gain trajectory with four recent unclaimed memo keys.
+class _GainAnchor:
+    """One lazily built independent table and its construction lock."""
 
-    The block lock covers numerical construction. The separate inventory lock
-    protects byte snapshots; readers never acquire a block lock. Keys no longer
-    memoized replay the same trajectory from its start.
+    def __init__(self, references: int) -> None:
+        self.remaining = references
+        self.period: _Period | None = None
+        self.lock = RLock()
+
+
+class _GainGroup:
+    """Fixed anchors for one model object, port, signed carrier and budget.
+
+    Each anchor has its own build lock. Inventory changes use the workspace
+    lock; byte readers never wait for numerical construction. A planned key
+    releases its references only after handing out its result, once per key.
+    Repeated keys deterministically rebuild any already released anchors.
     """
 
     def __init__(
@@ -174,90 +183,88 @@ class _GainBlock:
         port: int,
         frequency: float,
         budget: float,
-        gains: tuple[float, ...],
+        plan: dict[float, tuple[float, ...]],
         inventory_lock: RLock,
     ) -> None:
         self.model = model
         self.port = port
         self.frequency = frequency
         self.budget = budget
-        self.gains = gains
-        self.history: list[_Neighbour] = []
-        self.memo: dict[float, _Period] = {}
+        self.plan = plan
+        coordinates = {a for dependencies in plan.values() for a in dependencies}
+        self.anchors = {
+            a: _GainAnchor(sum(a in dependencies for dependencies in plan.values()))
+            for a in coordinates
+        }
         self.delivered: set[float] = set()
-        self.next_index = 0
-        self.lock = RLock()
         self.inventory_lock = inventory_lock
         self.attempts = 0
         self.hits = 0
 
     @property
     def nbytes(self) -> int:
-        # Caller holds inventory_lock. Conservative if history also owns memo.
-        return sum(n.period.nbytes for n in self.history) + sum(
-            period.nbytes for period in self.memo.values()
+        # Caller holds inventory_lock. Active payloads charge their own arrays.
+        return sum(
+            a.period.nbytes for a in self.anchors.values() if a.period is not None
         )
 
-    def build(self, gain: float) -> _Period:
-        """Return this key's deterministic payload, then release its memo entry."""
-        with self.lock:
+    def anchor(self, gain: float) -> _Period:
+        """Build an independent anchor once while planned references remain."""
+        anchor = self.anchors[gain]
+        with anchor.lock:
             with self.inventory_lock:
-                if gain in self.memo:
-                    self.delivered.add(gain)
-                    return self.memo.pop(gain)
-                target = self.gains.index(gain)
-                if target < self.next_index:
-                    self.next_index = 0
-                    self.history.clear()
-            while self.next_index <= target:
-                coordinate = self.gains[self.next_index]
-                result = _build(
-                    self.model, self.port, self.frequency, coordinate, self.budget, self
+                period = anchor.period
+            if period is None:
+                period = _build(
+                    self.model, self.port, self.frequency, gain, self.budget
                 )
                 with self.inventory_lock:
-                    self.history = (self.history + [_Neighbour(coordinate, result)])[
-                        -4:
-                    ]
-                    recent = {neighbour.gain for neighbour in self.history}
-                    self.memo = {
-                        key: period
-                        for key, period in self.memo.items()
-                        if key in recent
-                    }
-                    if coordinate not in self.delivered or coordinate == gain:
-                        self.memo[coordinate] = result
-                    self.next_index += 1
-            with self.inventory_lock:
+                    anchor.period = period
+            return period
+
+    def build(self, gain: float) -> _Period:
+        """Return a key using only its fixed anchors, then release dependencies."""
+        if gain in self.anchors:
+            result = self.anchor(gain)
+        else:
+            result = _build(
+                self.model, self.port, self.frequency, gain, self.budget, self
+            )
+        with self.inventory_lock:
+            if gain not in self.delivered:
                 self.delivered.add(gain)
-                # No later key needs these prefixes once the block is built.
-                if self.next_index == len(self.gains):
-                    self.history.clear()
-                return self.memo.pop(gain)
+                for coordinate in self.plan[gain]:
+                    self.anchors[coordinate].remaining -= 1
+            for coordinate in self.plan[gain]:
+                anchor = self.anchors[coordinate]
+                if anchor.remaining == 0:
+                    anchor.period = None
+        return result
 
     def prefixes(
         self, context: _Hamiltonian, gain: float
     ) -> tuple[NDArray[np.float64], NDArray[np.complex128]]:
-        """Check the fixed predecessors, reusing coarse work on rejection."""
+        """Interpolate nearest planned anchors and independently check coarse CF4."""
+        neighbours = [_Neighbour(a, self.anchor(a)) for a in self.plan[gain]]
         tolerance = min(1e-4, self.budget * 0.1)
-        if len(self.history) >= 2:
-            continued = _continued_prefixes(self.history, context, gain, tolerance)
-            if continued is not None:
-                times, coefficients, hit = continued
-                with self.inventory_lock:
-                    self.attempts += 1
-                    self.hits += int(hit)
-                return times, coefficients
+        continued = _continued_prefixes(neighbours, context, gain, tolerance)
+        if continued is not None:
+            times, coefficients, hit = continued
+            with self.inventory_lock:
+                self.attempts += 1
+                self.hits += int(hit)
+            return times, coefficients
         return _magnus_build(*context, tolerance)
 
 
 class _GainWorkspace:
-    """One evolve's deterministic gain blocks and numeric-byte inventory.
+    """One evolve's fixed gain-anchor plans and numeric-byte inventory.
 
-    Planning uses the complete table, never worker identity or chunk size.
-    Runtime blocks isolate model object, port, signed carrier and budget.
-    attempts/hits count checked/accepted predictors, including replayed builds.
-    nbytes charges history and unclaimed memo arrays, conservatively including
-    arrays also held by active payloads. No data survives the owning evolve.
+    Planning uses the complete table, never workers, chunks or request order.
+    Runtime groups isolate model object, port, signed carrier and budget.
+    attempts/hits count checked/accepted interpolants. nbytes charges retained
+    anchors, conservatively including arrays held by active payloads too.
+    No numeric data survives the owning evolve.
     """
 
     def __init__(self, table: SegmentTable) -> None:
@@ -281,37 +288,35 @@ class _GainWorkspace:
             if len(gains) < 2:
                 continue
             ordered = sorted(gains)
-            # Fixed interleaved trajectories avoid holding a whole contiguous
-            # scan while strided timeline chunks wait for their turn. Small
-            # groups keep one trajectory so they still have useful neighbours.
-            stripes = min(_GAIN_MAX_STRIPES, max(1, len(ordered) // 16))
-            plan: dict[float, tuple[float, ...]] = {}
-            for stripe in range(stripes):
-                trajectory = ordered[stripe::stripes]
-                for start in range(0, len(trajectory), _GAIN_BLOCK_SIZE):
-                    block = tuple(trajectory[start : start + _GAIN_BLOCK_SIZE])
-                    plan.update((gain, block) for gain in block)
-            self._plans[key] = plan
-        self._blocks: dict[
-            tuple[int, int, float, float, tuple[float, ...]], _GainBlock
-        ] = {}
+            anchors = ordered[::_GAIN_ANCHOR_SPACING]
+            if anchors[-1] != ordered[-1]:
+                anchors.append(ordered[-1])
+            self._plans[key] = {
+                gain: (gain,)
+                if gain in anchors
+                else tuple(
+                    sorted(sorted(anchors, key=lambda a: (abs(a - gain), a))[:4])
+                )
+                for gain in ordered
+            }
+        self._groups: dict[tuple[int, int, float, float], _GainGroup] = {}
         self._lock = RLock()
 
     @property
     def attempts(self) -> int:
         with self._lock:
-            return sum(block.attempts for block in self._blocks.values())
+            return sum(group.attempts for group in self._groups.values())
 
     @property
     def hits(self) -> int:
         with self._lock:
-            return sum(block.hits for block in self._blocks.values())
+            return sum(group.hits for group in self._groups.values())
 
     @property
     def nbytes(self) -> int:
         """Current retained numeric bytes, excluding Python/model overhead."""
         with self._lock:
-            return sum(block.nbytes for block in self._blocks.values())
+            return sum(group.nbytes for group in self._groups.values())
 
     def build(
         self,
@@ -321,17 +326,17 @@ class _GainWorkspace:
         gain: float,
         budget: float,
     ) -> _Period:
-        """Build in fixed gain order, independent of caller or scheduling order."""
-        gains = self._plans.get((model.level, port, frequency), {}).get(gain)
-        if gains is None:
+        """Build with fixed independent anchors, regardless of scheduling order."""
+        plan = self._plans.get((model.level, port, frequency))
+        if plan is None or gain not in plan:
             return _build(model, port, frequency, gain, budget)
-        identity = (id(model), port, frequency, budget, gains)
+        identity = (id(model), port, frequency, budget)
         with self._lock:
-            block = self._blocks.get(identity)
-            if block is None:
-                block = _GainBlock(model, port, frequency, budget, gains, self._lock)
-                self._blocks[identity] = block
-        return block.build(gain)
+            group = self._groups.get(identity)
+            if group is None:
+                group = _GainGroup(model, port, frequency, budget, plan, self._lock)
+                self._groups[identity] = group
+        return group.build(gain)
 
 
 def _continued_prefixes(
@@ -340,7 +345,7 @@ def _continued_prefixes(
     gain: float,
     tolerance: float,
 ) -> tuple[NDArray[np.float64], NDArray[np.complex128], bool] | None:
-    # Extrapolate only gain in the interaction picture, then
+    # Interpolate only gain between fixed anchors in the interaction picture, then
     # independently check the new key with the original coarse-grid probes.
     h0, x, y, frequency = context
     count = len(neighbours[-1].period.times) - 1
@@ -351,9 +356,6 @@ def _continued_prefixes(
     coordinates = [n.gain for n in neighbours]
     target = gain
     if len(set(coordinates)) != len(coordinates):
-        return None
-    gap = coordinates[-1] - coordinates[-2]
-    if abs((target - coordinates[-1]) / gap) > 2:
         return None
     period = 1 / abs(frequency)
     width = float(
@@ -397,7 +399,7 @@ def _build(
     frequency: float,
     gain: float,
     budget: float,
-    block: _GainBlock | None = None,
+    group: _GainGroup | None = None,
 ) -> _Period:
     size = len(model.energies_ghz)
     period = 1 / abs(frequency)
@@ -410,10 +412,10 @@ def _build(
         # Low carriers make Schrödinger DOP853 resolve many unobservable H0 turns.
         # CF4 exponentiates H0 exactly; only carrier motion needs approximation.
         tolerance = min(1e-4, budget * 0.1)
-        if block is None:
+        if group is None:
             times, coefficients = _magnus_build(h0, x, y, frequency, tolerance)
         else:
-            times, coefficients = block.prefixes(
+            times, coefficients = group.prefixes(
                 _Hamiltonian(h0, x, y, frequency), gain
             )
         final = coefficients[-1]
@@ -751,39 +753,37 @@ class FloquetPeriodKernel:
     retained. Its steps are below half a spectral turn.
 
     Within an Engine evolve, fixed-carrier groups with multiple gains may
-    replace the fine grid with gain continuation. The complete table's sorted
-    unique gains form up to twelve interleaved trajectories, with at least
-    sixteen gains per trajectory before adding another. Each trajectory splits
-    into fixed blocks of at most 32 gains. This plan never reads worker count,
-    chunk size or execution order. Under one block lock, any caller builds the
-    fixed predecessors up to its requested key. The last four built coordinates
-    support prediction and memoize unclaimed results. Handoff removes a key's
-    memo; older unclaimed keys are evicted rather than retaining unused scan
-    prefixes. Completing a block releases its history. A key no longer memoized
-    replays the same fixed predecessors. A caller holds only one block lock.
+    replace the fine grid with gain-anchor interpolation. The complete table's
+    unique gains are sorted per level, port and signed carrier. Every sixteenth
+    index and both endpoints are independent coarse/fine CF4 anchors. This rule
+    depends only on the group's gain count, never workers, chunks or key order.
+    Each non-anchor uses its nearest at most four anchors, with ties resolved
+    toward the lower gain. Anchor construction is lazy under one lock per
+    anchor. Planned reference counts release an anchor after all dependent keys
+    have been handed out. Later requests deterministically rebuild it.
+    No trajectories, intermediate-gain replay or result memo are retained.
     Tables are bitwise invariant to workers, chunks and request order for the
-    same table, source and budget. Workspace bytes charge history and memo.
+    same complete table, source and budget. Workspace bytes charge anchors.
 
-    History requires the identical model object, port, signed carrier and
-    budget. Two tables give a linear predictor; three/four give quadratic/cubic
-    Lagrange extrapolation of interaction-picture uniform prefixes. Because H0
-    and the grid are identical, the analytic H0 transform and inverse cancel in
-    the weighted sum, avoiding redundant phase exponentials. Repeated gains,
-    unequal retained grid counts, a last gain-gap ratio above two, or a retained
-    count below this key's first fine
-    grid disable the predictor. Carrier continuation is never attempted.
-    The candidate must pass the same independent coarse-grid comparison at
-    eight phase intervals, including U(T), with min(1e-4, budget*0.1). Failure
-    reuses that coarse grid in the original twelve-refinement path. Every
-    candidate keeps the new key's H0, X, Y, frequency, bath and split rate.
-    Standalone calls without a scope keep independent coarse/fine preparation.
+    Sharing requires the identical model object, port, signed carrier and
+    budget. Lagrange interpolation acts on interaction-picture uniform prefixes.
+    Identical H0 and grids let the analytic H0 transform and inverse cancel in
+    the weighted sum, avoiding redundant phase exponentials. Unequal retained
+    grid counts or a count below this key's original first fine grid disable
+    interpolation. Carrier continuation is never attempted. The candidate must
+    pass an independent coarse-grid comparison at eight phase intervals,
+    including U(T), with Frobenius defect <= min(1e-4, budget*0.1). Failure reuses
+    that coarse grid in the original twelve-refinement path. Every candidate
+    keeps its own H0, X, Y, frequency, bath and split rate. Standalone calls
+    without a scope keep independent coarse/fine preparation.
 
     This is calibrated trajectory comparison, not a rigorous bound. Eight-phase
-    defects may miss between-phase error. Continued prefixes are not products
+    defects may miss between-phase error. Interpolated prefixes are not products
     of unitary exponentials; their closeness to unitary for one Newton polar
     step is unproven. Gain smoothness and well-conditioned Lagrange weights are
     also unproven for the planned gain gaps. Model immutability is assumed.
-    No history crosses evolve calls or enters the LRU.
+    No anchor crosses evolve calls or enters the LRU. Memory is bounded by the
+    planned anchor count times table bytes, independent of worker count.
     Duration remains outside the payload and cache key.
 
     Higher carriers use DOP853 tolerance min(1e-10, budget*1e-4), max_step=T/4.
@@ -823,7 +823,7 @@ class FloquetPeriodKernel:
     def evolve_scope(
         self, table: SegmentTable, source: ModelSource
     ) -> tuple["FloquetPeriodKernel", _GainWorkspace]:
-        """Plan deterministic gain blocks in a fresh byte-counted workspace.
+        """Plan fixed gain anchors in a fresh byte-counted workspace.
 
         table is the complete segmented scan; source is this evolve's model
         owner. Numeric tables are independent of worker count, chunking and

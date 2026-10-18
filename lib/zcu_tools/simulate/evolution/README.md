@@ -550,7 +550,7 @@ families. It registers each returned workspace with `PrepareCache.track_workspac
 and releases registration on success, cancellation or failure. Registry kernels
 and the persistent prepare LRU never retain these scopes. `shaped_sambe` uses
 this mechanism for physical-block carrier interpolation. `floquet_period` uses
-it for bounded gain history. Concurrent evolves have separate workspaces.
+it for fixed gain anchors. Concurrent evolves have separate workspaces.
 
 The physical-block carrier workspace belongs to one evolve. Prefix resolution
 and timeline workers share it, never with another evolve or budget. This is calibrated physical-block carrier interpolation,
@@ -780,28 +780,26 @@ endpoints use a fractional CF4 step from the preceding prefix, not interpolation
 No density enters preparation or the step selection.
 
 For planned low-carrier groups with multiple gains, the evolve-local workspace
-can replace the fine CF4 grid with a gain predictor. It sorts the complete
-table's unique gains per level, port and signed carrier. Up to twelve fixed
-interleaved trajectories keep strided timeline execution from retaining a
-whole contiguous scan. A group needs sixteen gains per trajectory before
-adding another. Each trajectory splits into blocks of at most 32 gains.
-Neither worker count nor chunking enters this plan.
+can replace the fine CF4 grid with gain-anchor interpolation. It sorts the
+complete table's unique gains per level, port and signed carrier. Every
+sixteenth index and both endpoints become independent coarse/fine anchors.
+The spacing depends only on group size, never worker count, chunking, request
+order or thread identity. Each non-anchor uses its nearest at most four anchors;
+equal-distance ties select the lower gain first.
 
-A block lock serializes construction in its fixed gain order up to the requested
-key. Different blocks can build concurrently. Each block retains at most four
-predecessors for prediction and memoizes their unclaimed results. Handoff removes
-a key from the memo. Older unclaimed keys are evicted, so unused scan prefixes
-do not accumulate. Finishing the block releases its predecessor history.
-A key no longer memoized replays its fixed predecessors and returns the same
-table. Each caller holds only one block lock. Prepared tables
-and resulting populations are bitwise invariant to worker count, chunking and
-request order for the same complete table, source and budget.
+The first requesting worker builds an anchor under that anchor's lock. Planned
+reference counts retain it until every dependent key has been handed out.
+Later requests rebuild released anchors deterministically. Each table depends
+only on its key and these independent anchors. Prepared tables and resulting
+populations are bitwise invariant to workers, chunks and request order for the
+same complete table, source and budget. There is no gain chain, intermediate-key
+replay or unclaimed-result memo. Anchor storage is bounded by the planned
+anchor count times table bytes, not by worker count.
 
-Only the same model object, port, signed carrier and budget can share history.
-Carrier continuation stays disabled. Two previous tables give linear Lagrange
-extrapolation; three or four give quadratic or cubic extrapolation. The predictor
-operates on interaction-picture uniform prefixes. Identical H0 and uniform grids
-make the analytic H0 phase and its inverse cancel in the weighted sum, so the
+Sharing requires the same model object, port, signed carrier and budget.
+Carrier continuation stays disabled. Lagrange interpolation operates on
+interaction-picture uniform prefixes. Identical H0 and uniform grids make the
+analytic H0 phase and its inverse cancel in the weighted sum, so the
 implementation avoids redundant phase exponentials. The candidate retains the
 new key's Hamiltonian, frequency, bath and split rate. Standalone preparation
 keeps independent builds.
@@ -811,21 +809,17 @@ candidate must have at least the original first fine-grid count and match the
 coarse trajectory at eight phase intervals, including U(T). The maximum
 Frobenius defect must be <= min(1e-4, budget*0.1). Failure reuses the coarse grid
 in the original coarse/fine loop, with its unchanged twelve-refinement limit.
-Grid-count mismatch, repeated gain coordinates or a last gain-gap ratio above
-two skip prediction. Retained history and unclaimed memo arrays count as live
+Unequal anchor grid counts skip interpolation. Retained anchors count as live
 prepared data, conservatively including arrays also referenced by active
-payloads. Memory depends on the fixed table plan and outstanding keys, not on
-per-worker histories. No block data enters the persistent LRU or crosses evolve
-calls. Concurrent evolves use separate workspaces.
+payloads. No anchor enters the persistent LRU or crosses evolve calls.
+Concurrent evolves use separate workspaces.
 
 This is calibrated trajectory comparison, not a rigorous bound. The eight
-phase probes do not establish an error bound between probes. Continued prefixes
-are not products of unitary exponentials, and their closeness to unitary for
-the Newton polar step remains unproven. Smoothness across nearby gains and
-conditioning of the Lagrange weights also remain assumptions for the planned
-gain gaps. Scheduler order can change memo occupancy and repeated-key work, but
-cannot change a key's predictor or numerical result. Model/drive immutability
-is assumed.
+phase probes do not establish an error bound between probes. Interpolated
+prefixes are not products of unitary exponentials, and their closeness to
+unitary for the Newton polar step remains unproven. Smoothness across nearby
+gains and conditioning of the Lagrange weights remain assumptions for the
+planned gain gaps. Model/drive immutability is assumed.
 
 At higher carriers, preparation keeps tolerance min(1e-10, budget*1e-4) and
 max_step=T/4. The single-threaded nogil DOP853 core builds integration stages and the
