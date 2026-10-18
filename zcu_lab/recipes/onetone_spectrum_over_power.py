@@ -52,10 +52,10 @@ def onetone_spectrum_over_power(  # noqa: PLR0913 - Preserve typed tool keywords
         aliases=None if target is None else {"qubit": target},
         reuse=reuse_tab_id,
     )
-    tab.use_library("modules.readout", readout_ref)
+    tab.use_library(("modules", "readout"), readout_ref)
     missing = set_frequency_sweep(
         tab,
-        "sweep.freq",
+        ("sweep", "freq"),
         calibration=FrequencySweepCalibration(
             "$resonator.freq", "$resonator.kappa", 3.0
         ),
@@ -66,14 +66,14 @@ def onetone_spectrum_over_power(  # noqa: PLR0913 - Preserve typed tool keywords
     if missing:
         raise RecipeNeedsParameters(missing)
     tab.set_sweep(
-        "sweep.gain",
+        ("sweep", "gain"),
         start=None if gain_range is None else gain_range[0],
         stop=None if gain_range is None else gain_range[1],
         expts=gain_points,
     )
-    retain_scalar(tab, "modules.readout.gain")
-    tab.set("reps", reps)
-    tab.set("rounds", rounds)
+    retain_scalar(tab, ("modules", "readout", "gain"))
+    tab.set(("reps",), reps)
+    tab.set(("rounds",), rounds)
     result = yield from tab.run_step()
     run = result.run
     if result.status == "cancelled" or run is None:
@@ -112,12 +112,12 @@ DEFINITION = RecipeDefinition(
     run=onetone_spectrum_over_power,
     adapter_name="onetone/power_dep",
     summary_parameters=(
-        SummaryParameter("frequency_sweep", "sweep.freq", "MHz"),
-        SummaryParameter("gain", "modules.readout.gain"),
-        SummaryParameter("readout_ref", "modules.readout"),
-        SummaryParameter("reps", "reps"),
-        SummaryParameter("rounds", "rounds"),
-        SummaryParameter("gain_sweep", "sweep.gain"),
+        SummaryParameter("frequency_sweep", ("sweep", "freq"), "MHz"),
+        SummaryParameter("gain", ("modules", "readout", "gain")),
+        SummaryParameter("readout_ref", ("modules", "readout")),
+        SummaryParameter("reps", ("reps",)),
+        SummaryParameter("rounds", ("rounds",)),
+        SummaryParameter("gain_sweep", ("sweep", "gain")),
     ),
     summary_estimates=(),
 )

@@ -23,11 +23,15 @@ from zcu_tools.resources.context.library import (
     ModuleLibraryDocument,
 )
 
+from tests.gui._form_converters import RebuildingForm
+
 from ._module_models import KeyPulseSpec, SyntheticModuleInline, SyntheticModuleInput
 
 
-class ModuleForm(FormModel):
+class ModuleForm(RebuildingForm):
     """A generic library reference, unrelated to a particular workflow role."""
+
+    branch_models = {("drive",): (ModuleRef, SyntheticModuleInline)}
 
     drive: SyntheticModuleInput = Field(
         default_factory=lambda: ModuleRef(name="Q1.pulses.pi")
@@ -49,29 +53,31 @@ def test_compatible_restore_reports_unmatched_sources_and_keeps_other_leaves(
 ) -> None:
     env = FormEnv(library=library() if capture != "absent" else None)
     name = "Q1.pulses.pi" if capture != "unmatched" else "Q1.pulses.removed"
-    saved = FormInput.from_json(
+    saved = FormInput(
         RestoreModuleForm,
-        '{"drive": {"kind": "ref", "name": "' + name + '"}, '
-        '"readout": {"kind": "ref", "name": "' + name + '"}, '
-        '"averages": 17, "delay": "wrong type", "removed": 4}',
+        {
+            "drive": {"kind": "ref", "name": name},
+            "readout": {"kind": "ref", "name": name},
+            "averages": 17,
+            "delay": "wrong type",
+            "removed": 4,
+        },
     )
     state = FormState(RestoreModuleForm.default_input(env))
     before_base = state.base.data
     notifications: list[dict[str, JsonValue]] = []
     state.subscribe(lambda: notifications.append(state.input.data))
 
-    dropped = state.write_compatible(saved.data, env)
+    dropped = state.restore_input(FormInput(state.input.model, saved.data), env)
 
-    expected_names = {"name": name} if capture == "matched" else {}
+    expected_names = {"name": name}
     assert state.input.data == {
         "drive": {"kind": "ref", **expected_names},
         "readout": {"kind": "ref", **expected_names},
         "averages": 17,
-        "delay": 0.0,
+        "delay": "wrong type",
     }
-    expected_dropped: set[FormPath] = {("delay",), ("removed",)}
-    if capture != "matched":
-        expected_dropped.update({("drive", "name"), ("readout", "name")})
+    expected_dropped: set[FormPath] = {("removed",)}
     assert set(dropped) == expected_dropped
     assert state.base.data == before_base
     assert notifications == [state.input.data]
@@ -84,13 +90,22 @@ def test_compatible_restore_keeps_current_reference_for_unmatched_saved_name() -
     notifications: list[dict[str, JsonValue]] = []
     state.subscribe(lambda: notifications.append(state.input.data))
 
-    dropped = state.write_compatible(
-        {"drive": {"kind": "ref", "name": "Q1.pulses.removed"}}, env
+    dropped = state.restore_input(
+        FormInput(
+            state.input.model, {"drive": {"kind": "ref", "name": "Q1.pulses.removed"}}
+        ),
+        env,
     )
 
-    assert dropped == (("drive", "name"),)
-    assert state.input.data == before
-    assert notifications == []
+    assert dropped == ()
+    assert state.input.data == {
+        **before,
+        "drive": {"kind": "ref", "name": "Q1.pulses.removed"},
+    }
+    assert notifications == [state.input.data]
+    errors = state.result(env)
+    assert isinstance(errors, FormErrors)
+    assert ("drive", "name") in errors.messages
 
 
 class DeviceChoiceForm(FormModel):
@@ -120,8 +135,10 @@ def library(gain: float = 0.25) -> LibrarySnapshot:
     )
 
 
-class NullableModuleForm(FormModel):
+class NullableModuleForm(RebuildingForm):
     """Keep the public alias metadata inside a nullable field annotation."""
+
+    branch_models = {("drive",): (ModuleRef, SyntheticModuleInline)}
 
     drive: SyntheticModuleInput | None = Field(
         default_factory=lambda: ModuleRef(name="Q1.pulses.pi")
@@ -187,13 +204,17 @@ def test_same_batch_explicit_inline_content_follows_branch_selection() -> None:
     state = FormState(ModuleForm.default_input(env))
     state.write(
         {
-            ("drive", "module", "gain"): 0.9,
-            ("drive", "module", "waveform"): "Q1.waveforms.not_materialized",
-            ("drive", "module", "type"): "pulse",
-            ("drive", "module", "ch"): 0,
-            ("drive", "module", "nqz"): 1,
-            ("drive", "module", "freq"): 100.0,
-            ("drive", "kind"): "inline",
+            ("drive",): {
+                "kind": "inline",
+                "module": {
+                    "gain": 0.9,
+                    "waveform": "Q1.waveforms.not_materialized",
+                    "type": "pulse",
+                    "ch": 0,
+                    "nqz": 1,
+                    "freq": 100.0,
+                },
+            },
         },
         env,
     )

@@ -1,79 +1,81 @@
 """Signed sweep coordinates, sampling and atomic representation changes."""
 
 import math
-from collections.abc import Mapping
 from functools import cached_property
-from typing import Annotated, Literal, Self
+from typing import Annotated, ClassVar, Literal, Self
 
 from pydantic import Field, JsonValue, model_validator
 
-from .model import (
+from zcu_tools.gui.form import (
     Display,
+    FormCommandContext,
     FormCommandError,
-    FormEnv,
-    FormErrors,
-    FormInput,
+    FormCommandResult,
+    FormCommandSnapshot,
     FormModel,
-    FormState,
     InputCommand,
     field_error,
 )
 
 
-class _RangeCoordinates(FormModel):
-    start: float
-    stop: float
+def _data(snapshot: FormCommandSnapshot) -> dict[str, JsonValue]:
+    data = snapshot.copy_input()
+    if not isinstance(data, dict):
+        raise FormCommandError("Cannot convert coordinates: expected a sweep object")
+    return data
 
 
-class _CenterCoordinates(FormModel):
-    center: float
-    span: float
+def _number(context: FormCommandContext, name: str) -> float:
+    try:
+        value = context.evaluate((name,))
+    except FormCommandError as exc:
+        raise FormCommandError(f"Cannot convert coordinates: {exc}") from exc
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise FormCommandError(f"Cannot convert coordinates: {name} is not numeric")
+    return float(value)
 
 
-class _Count(FormModel):
-    n: int = Field(ge=1)
+def _converted(data: dict[str, JsonValue]) -> FormCommandResult:
+    kinds = {
+        model.model_fields["kind"].default: model
+        for model in (LinRange, CenterSpan, StepRange, StepCenter)
+    }
+    kind = data["kind"]
+    if not isinstance(kind, str):
+        raise FormCommandError("Invalid sweep kind")
+    return FormCommandResult({"kind": kind}, kinds[kind], data)
 
 
-class _Step(FormModel):
-    step: float
-
-
-def _evaluated[F: FormModel](
-    model: type[F], data: Mapping[str, JsonValue], env: FormEnv, scope: str
-) -> F:
-    # Command participants must be authored, never supplied by branch defaults.
-    result = FormState(
-        FormInput(model, {key: data[key] for key in model.model_fields if key in data})
-    ).result(env)
-    if isinstance(result, FormErrors):
-        raise FormCommandError(f"Cannot convert {scope}: {result.messages}")
-    return result
-
-
-def _to_center(data: Mapping[str, JsonValue], env: FormEnv) -> dict[str, JsonValue]:
-    coords = _evaluated(_RangeCoordinates, data, env, "coordinates")
+def _to_center(
+    snapshot: FormCommandSnapshot, context: FormCommandContext
+) -> FormCommandResult:
+    data = _data(snapshot)
+    start, stop = _number(context, "start"), _number(context, "stop")
     sampling = "step" if data.get("kind") == "linrange_step" else "n"
     result: dict[str, JsonValue] = {
         "kind": "center_step" if sampling == "step" else "center",
-        "center": coords.start / 2 + coords.stop / 2,
-        "span": coords.stop - coords.start,
+        "center": start / 2 + stop / 2,
+        "span": stop - start,
     }
     if sampling in data:
         result[sampling] = data[sampling]
-    return result
+    return _converted(result)
 
 
-def _to_range(data: Mapping[str, JsonValue], env: FormEnv) -> dict[str, JsonValue]:
-    coords = _evaluated(_CenterCoordinates, data, env, "coordinates")
+def _to_range(
+    snapshot: FormCommandSnapshot, context: FormCommandContext
+) -> FormCommandResult:
+    data = _data(snapshot)
+    center, span = _number(context, "center"), _number(context, "span")
     sampling = "step" if data.get("kind") == "center_step" else "n"
     result: dict[str, JsonValue] = {
         "kind": "linrange_step" if sampling == "step" else "linrange",
-        "start": coords.center - coords.span / 2,
-        "stop": coords.center + coords.span / 2,
+        "start": center - span / 2,
+        "stop": center + span / 2,
     }
     if sampling in data:
         result[sampling] = data[sampling]
-    return result
+    return _converted(result)
 
 
 def _step_count(span: float, step: float) -> int:
@@ -107,22 +109,24 @@ def _expts_step(span: float, n: int) -> float:
 
 
 def _sampling_change(
-    data: Mapping[str, JsonValue], env: FormEnv, *, to_step: bool
+    snapshot: FormCommandSnapshot, context: FormCommandContext, *, to_step: bool
 ) -> dict[str, JsonValue]:
+    data = _data(snapshot)
     center_mode = data.get("kind") in ("center", "center_step")
     if center_mode:
-        coords = _evaluated(_CenterCoordinates, data, env, "sampling")
-        start, stop = coords.center - coords.span / 2, coords.center + coords.span / 2
+        center, span = _number(context, "center"), _number(context, "span")
+        start, stop = center - span / 2, center + span / 2
     else:
-        coords = _evaluated(_RangeCoordinates, data, env, "sampling")
-        start, stop = coords.start, coords.stop
+        start, stop = _number(context, "start"), _number(context, "stop")
     try:
         if to_step:
-            count = _evaluated(_Count, data, env, "sampling").n
+            count = context.evaluate(("n",))
+            if not isinstance(count, int) or isinstance(count, bool):
+                raise FormCommandError("Cannot convert sampling: n is not an integer")
             step = _expts_step(stop - start, count)
             sampling: dict[str, JsonValue] = {"step": step}
         else:
-            step = _evaluated(_Step, data, env, "sampling").step
+            step = _number(context, "step")
             count = _step_count(stop - start, step)
             stop = start + step * (count - 1)
             sampling = {"n": count}
@@ -143,67 +147,71 @@ def _sampling_change(
     }
 
 
-def _to_step(data: Mapping[str, JsonValue], env: FormEnv) -> dict[str, JsonValue]:
-    return _sampling_change(data, env, to_step=True)
+def _to_step(
+    snapshot: FormCommandSnapshot, context: FormCommandContext
+) -> FormCommandResult:
+    return _converted(_sampling_change(snapshot, context, to_step=True))
 
 
-def _to_expts(data: Mapping[str, JsonValue], env: FormEnv) -> dict[str, JsonValue]:
-    return _sampling_change(data, env, to_step=False)
+def _to_expts(
+    snapshot: FormCommandSnapshot, context: FormCommandContext
+) -> FormCommandResult:
+    return _converted(_sampling_change(snapshot, context, to_step=False))
 
 
 _CENTER = InputCommand(
     "to_center",
     "Switch to Center / Span",
-    ("start", "stop"),
+    (("start",), ("stop",)),
     _to_center,
     result_tag=("kind", "center"),
 )
 _STEP_CENTER = InputCommand(
     "to_center",
     "Switch to Center / Span",
-    ("start", "stop"),
+    (("start",), ("stop",)),
     _to_center,
     result_tag=("kind", "center_step"),
 )
 _RANGE = InputCommand(
     "to_range",
     "Switch to Range",
-    ("center", "span"),
+    (("center",), ("span",)),
     _to_range,
     result_tag=("kind", "linrange"),
 )
 _STEP_RANGE = InputCommand(
     "to_range",
     "Switch to Range",
-    ("center", "span"),
+    (("center",), ("span",)),
     _to_range,
     result_tag=("kind", "linrange_step"),
 )
 _RANGE_STEP = InputCommand(
     "to_step",
     "Switch to Step",
-    ("start", "stop", "n"),
+    (("start",), ("stop",), ("n",)),
     _to_step,
     result_tag=("kind", "linrange_step"),
 )
 _CENTER_STEP = InputCommand(
     "to_step",
     "Switch to Step",
-    ("center", "span", "n"),
+    (("center",), ("span",), ("n",)),
     _to_step,
     result_tag=("kind", "center_step"),
 )
 _RANGE_EXPTS = InputCommand(
     "to_expts",
     "Switch to Expts",
-    ("start", "stop", "step"),
+    (("start",), ("stop",), ("step",)),
     _to_expts,
     result_tag=("kind", "linrange"),
 )
 _CENTER_EXPTS = InputCommand(
     "to_expts",
     "Switch to Expts",
-    ("center", "span", "step"),
+    (("center",), ("span",), ("step",)),
     _to_expts,
     result_tag=("kind", "center"),
 )
@@ -217,10 +225,11 @@ class LinRange(FormModel):
     Commands require authored participants and replace them with direct values.
     """
 
-    kind: Literal["linrange"] = "linrange"
-    start: Annotated[float, _CENTER] = 0.0
-    stop: Annotated[float, _CENTER] = 1.0
-    n: Annotated[int, Display(label="Expts"), _RANGE_STEP] = Field(default=3, ge=1)
+    input_commands: ClassVar[tuple[InputCommand, ...]] = (_CENTER, _RANGE_STEP)
+    kind: Annotated[Literal["linrange"], Display(hidden=True)] = "linrange"
+    start: float = 0.0
+    stop: float = 1.0
+    n: Annotated[int, Display(label="Expts")] = Field(default=3, ge=1)
 
 
 class CenterSpan(FormModel):
@@ -230,10 +239,11 @@ class CenterSpan(FormModel):
     span is stop minus start; n is a positive count. No old-mode cache exists.
     """
 
-    kind: Literal["center"] = "center"
-    center: Annotated[float, _RANGE]
-    span: Annotated[float, _RANGE]
-    n: Annotated[int, Display(label="Expts"), _CENTER_STEP] = Field(default=3, ge=1)
+    input_commands: ClassVar[tuple[InputCommand, ...]] = (_RANGE, _CENTER_STEP)
+    kind: Annotated[Literal["center"], Display(hidden=True)] = "center"
+    center: float
+    span: float
+    n: Annotated[int, Display(label="Expts")] = Field(default=3, ge=1)
 
     @property
     def start(self) -> float:
@@ -255,10 +265,11 @@ class StepRange(FormModel):
     n uses floor(span/step)+1, repairing near integers with relative 1e-9 tolerance.
     """
 
-    kind: Literal["linrange_step"] = "linrange_step"
-    start: Annotated[float, _STEP_CENTER]
-    stop: Annotated[float, _STEP_CENTER]
-    step: Annotated[float, _RANGE_EXPTS]
+    input_commands: ClassVar[tuple[InputCommand, ...]] = (_STEP_CENTER, _RANGE_EXPTS)
+    kind: Annotated[Literal["linrange_step"], Display(hidden=True)] = "linrange_step"
+    start: float
+    stop: float
+    step: float
 
     @model_validator(mode="after")
     def _effective_stop(self) -> Self:
@@ -285,10 +296,11 @@ class StepCenter(FormModel):
     interval on the authored midpoint. FormInput still holds the authored fields.
     """
 
-    kind: Literal["center_step"] = "center_step"
-    center: Annotated[float, _STEP_RANGE]
-    span: Annotated[float, _STEP_RANGE]
-    step: Annotated[float, _CENTER_EXPTS]
+    input_commands: ClassVar[tuple[InputCommand, ...]] = (_STEP_RANGE, _CENTER_EXPTS)
+    kind: Annotated[Literal["center_step"], Display(hidden=True)] = "center_step"
+    center: float
+    span: float
+    step: float
 
     @model_validator(mode="after")
     def _effective_coordinates(self) -> Self:

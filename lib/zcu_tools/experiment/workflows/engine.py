@@ -16,7 +16,6 @@ from .models import (
     RunMismatch,
     RunPaths,
     RunStatus,
-    TunableChange,
     TunablesSnapshot,
 )
 from .ports import EnginePorts
@@ -39,7 +38,7 @@ class _RunView(Protocol):
     def resume(self) -> RunStatus: ...
     def stop(self) -> RunStatus: ...
     def update_tunables(
-        self, changes: tuple[TunableChange, ...], expected_revision: int, actor: Actor
+        self, tunables: BaseModel, expected_revision: int, actor: Actor
     ) -> TunablesSnapshot: ...
     def status(self) -> RunStatus: ...
     def tunables(self) -> TunablesSnapshot: ...
@@ -136,23 +135,26 @@ class Engine[C]:
     def update_tunables(
         self,
         run_id: str,
-        changes: tuple[TunableChange, ...],
+        tunables: BaseModel,
         *,
         expected_revision: int,
         actor: Actor,
     ) -> TunablesSnapshot:
-        """Validate/journal an atomic leaf batch, then publish one new revision.
+        """Validate/journal a complete native model, then replace all tunables.
 
-        Accepted only in running/pausing/paused. Dot paths use model field
-        names; replace lists/tuples as wholes. Empty/overlapping/unknown paths
-        raise ValueError, stale versions RevisionConflict, invalid models
-        ValidationError. The current step keeps its captured copy. Journal
-        failure publishes no values, requests run failure, and re-raises.
-        Every accepted batch creates a revision, including same-value edits.
+        tunables must be an instance of the workflow-declared model, not JSON
+        or expressions. Fields are revalidated, including nested models/lists.
+        Wrong model types raise TypeError, invalid values ValidationError.
+        expected_revision must be nonnegative; stale versions raise
+        RevisionConflict. actor attributes the full new JSON snapshot.
+        Accepted only in running/pausing/paused; other lifecycle states raise
+        InvalidRunState. The current step keeps its captured copy. Journal
+        failure publishes nothing, requests run failure, and re-raises.
+        Every accepted model creates a revision, including identical values.
         """
         with self._lock:
             return self._current(run_id).update_tunables(
-                changes, expected_revision, actor
+                tunables, expected_revision, actor
             )
 
     def status(self) -> RunStatus | None:

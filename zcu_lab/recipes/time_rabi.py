@@ -86,51 +86,51 @@ def time_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs
         reuse=reuse_tab_id,
     )
     if use_reset is None:
-        tab.disable_library("modules.reset")
+        tab.disable_library(("modules", "reset"))
     else:
-        tab.use_library("modules.reset", use_reset)
-    tab.use_library("modules.readout", readout_ref)
-    tab.use_library("modules.qub_pulse", drive_ref)
+        tab.use_library(("modules", "reset"), use_reset)
+    tab.use_library(("modules", "readout"), readout_ref)
+    tab.use_library(("modules", "qub_pulse"), drive_ref)
 
     # Preserve the complete missing-source list rather than failing on its first item.
     missing: list[MissingParameter] = []
     frequency = choose_frequency(
         tab,
-        "modules.qub_pulse.freq",
+        ("modules", "qub_pulse", "freq"),
         frequency_mhz,
         calibration="$qubit.freq",
         required="frequency_mhz",
     )
     missing.extend(frequency.missing)
     if frequency.edit is not None:
-        tab.use_inline("modules.qub_pulse")
+        tab.use_inline(("modules", "qub_pulse"))
         apply_frequency(tab, frequency.edit)
     frequency = choose_frequency(
         tab,
-        "modules.readout.freq",
+        ("modules", "readout", "freq"),
         calibration="$resonator.freq",
         required="readout_ref",
     )
     missing.extend(frequency.missing)
     if frequency.edit is not None:
-        tab.use_inline("modules.readout")
+        tab.use_inline(("modules", "readout"))
         apply_frequency(tab, frequency.edit)
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
 
     tab.set_sweep(
-        "sweep.length",
+        ("sweep", "length"),
         stop=max_length_us,
         expts=points,
         sources={"start": "explicit", "stop": "explicit", "expts": "explicit"},
     )
     if gain is not None:
-        tab.use_inline("modules.qub_pulse")
-        tab.set("modules.qub_pulse.gain", gain, source="explicit")
+        tab.use_inline(("modules", "qub_pulse"))
+        tab.set(("modules", "qub_pulse", "gain"), gain, source="explicit")
     else:
-        retain_scalar(tab, "modules.qub_pulse.gain")
-    tab.set("reps", reps, source="explicit")
-    tab.set("rounds", rounds, source="explicit")
+        retain_scalar(tab, ("modules", "qub_pulse", "gain"))
+    tab.set(("reps",), reps, source="explicit")
+    tab.set(("rounds",), rounds, source="explicit")
 
     result = yield from tab.run_step()
     run = result.run
@@ -174,21 +174,21 @@ DEFINITION = RecipeDefinition(
     summary_parameters=(
         SummaryParameter(
             "readout_frequency_mhz",
-            "modules.readout.freq",
+            ("modules", "readout", "freq"),
             "MHz",
         ),
-        SummaryParameter("readout_ref", "modules.readout"),
-        SummaryParameter("use_reset", "modules.reset"),
-        SummaryParameter("reps", "reps"),
-        SummaryParameter("rounds", "rounds"),
-        SummaryParameter("frequency_mhz", "modules.qub_pulse.freq", "MHz"),
-        SummaryParameter("drive_ref", "modules.qub_pulse"),
-        SummaryParameter("gain", "modules.qub_pulse.gain"),
-        SummaryParameter("length_sweep", "sweep.length", "us"),
+        SummaryParameter("readout_ref", ("modules", "readout")),
+        SummaryParameter("use_reset", ("modules", "reset")),
+        SummaryParameter("reps", ("reps",)),
+        SummaryParameter("rounds", ("rounds",)),
+        SummaryParameter("frequency_mhz", ("modules", "qub_pulse", "freq"), "MHz"),
+        SummaryParameter("drive_ref", ("modules", "qub_pulse")),
+        SummaryParameter("gain", ("modules", "qub_pulse", "gain")),
+        SummaryParameter("length_sweep", ("sweep", "length"), "us"),
     ),
     summary_estimates=(
-        SummaryEstimate("pi_len", "pi_len", "pi_len_err", "us"),
-        SummaryEstimate("pi2_len", "pi2_len", "pi2_len_err", "us"),
-        SummaryEstimate("rabi_f", "rabi_f", "rabi_f_err", "MHz"),
+        SummaryEstimate("pi_len", ("pi_len",), ("pi_len_err",), "us"),
+        SummaryEstimate("pi2_len", ("pi2_len",), ("pi2_len_err",), "us"),
+        SummaryEstimate("rabi_f", ("rabi_f",), ("rabi_f_err",), "MHz"),
     ),
 )

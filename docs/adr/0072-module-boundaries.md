@@ -94,7 +94,9 @@ active_tones=None 量全部；指定非空、唯一且有效的原始 index list
 給 program。Program 不知道 MG 或 resonators。RunRecord 保存完整 readout 與 selection，
 資料軸保留原始序號，不重新編號。使用者於 2026-10-16 提議：「一個MG component類，內部屬性綁定到R1, R2，gui中預設指定MG，寫回目標也是從MG的綁定取」，並補充「為了能只讀特定幾個R，可以考慮MG外cfg另外提供mask之類的」。對 active_tones 方案裁定：「可以」。
 
-Core cfg 驗證錯誤沿既有宿主 result／Run 診斷定位 `active_tones` 並拒絕 Run，不保證欄位變紅。
+[[0079]] 採用但尚待實作的 lab 表單契約使用完整具名 tones list 與獨立 participants。元素位置是原始 tone index，name 不可編輯；participants 的順序是執行順序，未參與元素同樣驗證。Lab runtime 邊界一次解析名稱到原始 index，再交給既有 program／raw active_tones 接口。這不把 group snapshot 或 writeback 目的地塞進 cfg，也不讓 framework 解讀 group。具體實驗 cfg 與 recipe 接線由 lab 交付。
+
+Program cfg 驗證錯誤沿既有宿主 result／Run 診斷定位 `active_tones` 並拒絕 Run，不保證欄位變紅。
 FormState 的 preview／describe 不執行 lowering，也不新增 FormEditor 外部錯誤投影。
 此分界沿用 [[0065]]。使用者於 2026-10-16 裁定：「報錯我選B」。
 

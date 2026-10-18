@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+from zcu_tools.gui.form import FormInput, FormModel
 from zcu_tools.gui.session.persistence import (
     RestoreOutcome,
     SingleFileCaretaker,
@@ -27,6 +29,8 @@ class AppSnapshotCodec:
                 f"Unsupported GUI state version {state.version!r} "
                 f"(expected {APP_STATE_VERSION})"
             )
+        for tab in state.session.tabs:
+            FormInput.from_json(FormModel, json.dumps(tab.form_input))
         return state
 
     def encode(self, state: AppPersistedState) -> object:

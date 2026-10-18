@@ -14,13 +14,15 @@ from zcu_tools.gui.form import (
     FormState,
     FormValue,
     FormWritePath,
-    LinRange,
     field_error,
 )
+from zcu_tools.gui.form_adapter import LinRange
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+
+from tests.gui._form_converters import RebuildingForm
 
 
 class FrequencyBranch(BaseModel):
@@ -56,20 +58,11 @@ class AmbiguousForm(FormModel):
 def test_compatible_restore_selects_only_unique_untagged_shape() -> None:
     env = FormEnv()
     state = FormState(UntaggedForm.default_input(env))
-    dropped = state.write_compatible({"payload": {"frequency": {"expr": "2 * 3"}}}, env)
+    dropped = state.restore_input(
+        FormInput(state.input.model, {"payload": {"frequency": {"expr": "2 * 3"}}}), env
+    )
     assert dropped == ()
     assert state.input.data == {"payload": {"frequency": {"expr": "2 * 3"}}}
-
-
-@pytest.mark.parametrize("saved", [{"frequency": {"expr": "2 * 3"}}, {"unknown": 3}])
-def test_compatible_restore_drops_ambiguous_or_unmatched_untagged_shape(
-    saved: dict[str, JsonValue],
-) -> None:
-    env = FormEnv()
-    state = FormState(AmbiguousForm.default_input(env))
-    dropped = state.write_compatible({"payload": saved}, env)
-    assert dropped == (("payload",),)
-    assert state.input.data == {}
 
 
 class PlainSection(BaseModel):
@@ -187,8 +180,10 @@ class RequiredBranch(FormModel):
     required: float
 
 
-class BranchForm(FormModel):
+class BranchForm(RebuildingForm):
     """Declare discriminator switching and the shared range submodels."""
+
+    branch_models = {("branch",): (StaticBranch, ContextBranch, RequiredBranch)}
 
     branch: Annotated[
         StaticBranch | ContextBranch | RequiredBranch, Field(discriminator="kind")
@@ -196,8 +191,10 @@ class BranchForm(FormModel):
     fluxes: LinRange = Field(default_factory=LinRange)
 
 
-class NullableBranchForm(FormModel):
+class NullableBranchForm(RebuildingForm):
     """Nullable tagged objects require activation before child editing."""
+
+    branch_models = {("branch",): (StaticBranch, ContextBranch)}
 
     branch: Annotated[
         StaticBranch | ContextBranch | None, Field(discriminator="kind")
@@ -292,7 +289,7 @@ def test_absent_non_nullable_nested_model_accepts_child_leaf_writes() -> None:
 
     defaults = FormState(PlainForm.default_input(env))
     defaults.write({("section", "required"): 3.0}, env)
-    assert defaults.input.data == {"section": {"level": 2.0, "required": 3.0}}
+    assert defaults.input.data == {"section": {"required": 3.0}}
     result = defaults.result(env)
     assert isinstance(result, PlainForm)
     assert result.section == PlainSection(level=2.0, required=3.0)
@@ -482,7 +479,7 @@ def test_structural_write_failure_does_not_publish_a_partial_batch(
     assert notifications == []
 
 
-def test_mapping_replacement_is_a_leaf_but_key_and_model_patches_are_rejected() -> None:
+def test_mapping_replacement_is_a_leaf_but_key_patches_are_rejected() -> None:
     env = environment()
     mapping = FormState(
         FormInput(DraftForm, {"offsets": {"rack.left": 3.0, "remove": 1.0}})
@@ -514,17 +511,11 @@ def test_mapping_replacement_is_a_leaf_but_key_and_model_patches_are_rejected() 
     assert changes[0].input == {}
     assert changes[0].value == {}
 
-    model = FormState(BoundsForm.default_input(env))
-    before_model = model.input.data
-    with pytest.raises(ValueError, match="leaf|model|replacement|path"):
-        model.write({("bounds",): {"start": 2.0, "stop": 4.0}}, env)
-    assert model.input.data == before_model
-
 
 def test_changes_describe_active_branch_leaves_and_nullable_null() -> None:
     env = environment()
     branch = FormState(BranchForm.default_input(env))
-    branch.write({("branch", "kind"): "context"}, env)
+    branch.select(("branch",), {"kind": "context"}, env)
     changes = branch.changes(env)
     assert not isinstance(changes, FormErrors)
     by_path = {change.path: change for change in changes}
@@ -548,29 +539,36 @@ def test_changes_describe_active_branch_leaves_and_nullable_null() -> None:
     assert changes[0].value is None
 
 
-def test_discriminator_first_factory_and_explicit_content_order() -> None:
+def test_selection_and_leaf_write_are_separate_initial_active_operations() -> None:
     env = environment(8.0)
     state = FormState(BranchForm.default_input(env))
     state.write({("branch", "shared"): 5.0}, env)
     notifications: list[dict[str, JsonValue]] = []
     state.subscribe(lambda: notifications.append(state.input.data))
-    # Non-discriminator content deliberately precedes kind in the batch.
-    state.write({("branch", "context_only"): 12.0, ("branch", "kind"): "context"}, env)
+    before = state.input
+    with pytest.raises(ValueError, match="path"):
+        state.write(
+            {("branch", "context_only"): 12.0, ("branch", "kind"): "context"}, env
+        )
+    assert state.input.same_as(before)
+    assert notifications == []
+    state.select(("branch",), {"kind": "context"}, env)
+    state.write({("branch", "context_only"): 12.0}, env)
     result = state.result(env)
     assert isinstance(result, BranchForm)
     assert isinstance(result.branch, ContextBranch)
     assert result.branch.context_only == 12.0
-    assert len(notifications) == 1
+    assert len(notifications) == 2
 
-    state.write({("branch", "kind"): "static"}, env)
-    state.write({("branch", "kind"): "context"}, env)
+    state.select(("branch",), {"kind": "static"}, env)
+    state.select(("branch",), {"kind": "context"}, env)
     result = state.result(env)
     assert isinstance(result, BranchForm)
     assert isinstance(result.branch, ContextBranch)
     assert result.branch.context_only == 8.0
 
-    state.write({("branch", "kind"): "static"}, env)
-    state.write({("branch", "kind"): "required"}, env)
+    state.select(("branch",), {"kind": "static"}, env)
+    state.select(("branch",), {"kind": "required"}, env)
     result = state.result(env)
     assert isinstance(result, FormErrors)
     assert ("branch", "required") in result.messages
@@ -614,46 +612,19 @@ def test_empty_dynamic_choices_reject_every_present_value() -> None:
 def test_compatible_restore_applies_branch_discriminator_before_saved_leaves() -> None:
     env = environment()
     state = FormState(BranchForm.default_input(env))
-    dropped = state.write_compatible(
-        {
-            "branch": {"shared": 6.0, "required": 12.0, "kind": "context"},
-        },
+    dropped = state.restore_input(
+        FormInput(
+            state.input.model,
+            {
+                "branch": {"shared": 6.0, "required": 12.0, "kind": "context"},
+            },
+        ),
         env,
     )
     assert dropped == ()
     result = state.result(env)
     assert isinstance(result, BranchForm)
     assert result.branch == ContextBranch(shared=6.0, required=12.0, context_only=4.0)
-
-
-@pytest.mark.parametrize("kind", ["static", "context"])
-def test_compatible_restore_without_tag_overlays_current_branch_once(kind: str) -> None:
-    env = environment()
-    state = FormState(BranchForm.default_input(env))
-    state.write({("branch", "kind"): kind}, env)
-    before = state.input.data
-    current = before["branch"]
-    assert isinstance(current, dict)
-    notifications: list[dict[str, JsonValue]] = []
-    state.subscribe(lambda: notifications.append(state.input.data))
-    assert state.write_compatible({"branch": {}}, env) == ()
-    assert state.input.data == before
-    assert notifications == []
-    branch_only = "static_only" if kind == "static" else "context_only"
-    saved: dict[str, JsonValue] = {
-        "shared": 3.0,
-        branch_only: "bad",
-        "removed": 9,
-    }
-    dropped = state.write_compatible({"branch": saved}, env)
-    assert set(dropped) == {("branch", branch_only), ("branch", "removed")}
-    restored = state.input.data
-    assert restored == {**before, "branch": {**current, "shared": 3.0}}
-    assert notifications == [restored]
-    result = state.result(env)
-    assert isinstance(result, BranchForm)
-    assert result.branch.kind == kind
-    assert result.branch.shared == 3.0
 
 
 @pytest.mark.parametrize("current", [{}, {"kind": "unknown"}])
@@ -666,7 +637,9 @@ def test_compatible_restore_cannot_replace_an_unselected_model_object(
     before = state.input.data
     notifications: list[dict[str, JsonValue]] = []
     state.subscribe(lambda: notifications.append(state.input.data))
-    assert state.write_compatible({"branch": saved}, env) == (("branch",),)
+    assert state.restore_input(
+        FormInput(state.input.model, {"branch": saved}), env
+    ) == (("branch",),)
     assert state.input.data == before
     assert notifications == []
     result = state.result(env)
@@ -718,7 +691,10 @@ def test_nullable_range_alias_edits_and_restores_the_current_branch() -> None:
     )
     prior = state.input.data["fluxes"]
     assert isinstance(prior, dict)
-    assert state.write_compatible({"fluxes": {"n": 3}}, env) == ()
+    assert (
+        state.restore_input(FormInput(state.input.model, {"fluxes": {"n": 3}}), env)
+        == ()
+    )
     assert state.input.data["fluxes"] == {**prior, "n": 3}
     result = state.result(env)
     assert isinstance(result, NullableRangeAliasForm)
@@ -737,13 +713,13 @@ def test_null_tagged_section_rejects_discriminator_child_write_until_activation(
     base = state.base.data
     notifications: list[dict[str, JsonValue]] = []
     state.subscribe(lambda: notifications.append(state.input.data))
-    with pytest.raises(ValueError, match="null|activat"):
+    with pytest.raises(ValueError, match="null|activat|[Ii]nactive"):
         state.write({("branch", "kind"): "context"}, env)
     assert state.input.data == before
     assert state.base.data == base
     assert notifications == []
     state.write({("branch",): {"kind": "static"}}, env)
-    state.write({("branch", "kind"): "context"}, env)
+    state.select(("branch",), {"kind": "context"}, env)
     result = state.result(env)
     assert isinstance(result, NullableBranchForm)
     assert isinstance(result.branch, ContextBranch)
@@ -756,12 +732,16 @@ def test_compatible_restore_preserves_nullable_branch_deactivation() -> None:
     state = FormState(NullableBranchForm.default_input(env))
     notifications: list[dict[str, JsonValue]] = []
     state.subscribe(lambda: notifications.append(state.input.data))
-    assert state.write_compatible({"branch": None}, env) == ()
+    assert (
+        state.restore_input(FormInput(state.input.model, {"branch": None}), env) == ()
+    )
     assert notifications == [{"branch": None}]
     result = state.result(env)
     assert isinstance(result, NullableBranchForm)
     assert result.branch is None
-    assert state.write_compatible({"branch": {}}, env) == (("branch",),)
+    assert state.restore_input(FormInput(state.input.model, {"branch": {}}), env) == (
+        ("branch",),
+    )
     assert state.input.data == {"branch": None}
     assert notifications == [{"branch": None}]
 
@@ -769,7 +749,9 @@ def test_compatible_restore_preserves_nullable_branch_deactivation() -> None:
 def test_compatible_restore_keeps_well_formed_unresolved_expressions() -> None:
     env = environment()
     state = FormState(DraftForm.default_input(env))
-    dropped = state.write_compatible({"amount": {"expr": "missing"}}, env)
+    dropped = state.restore_input(
+        FormInput(state.input.model, {"amount": {"expr": "missing"}}), env
+    )
     assert dropped == ()
     assert state.input.data["amount"] == {"expr": "missing"}
     result = state.result(env)
@@ -780,8 +762,12 @@ def test_compatible_restore_keeps_well_formed_unresolved_expressions() -> None:
 def test_compatible_restore_drops_types_not_range_or_cross_field_errors() -> None:
     env = environment()
     state = FormState(BoundsForm.default_input(env))
-    dropped = state.write_compatible(
-        {"bounds": {"start": 3.0, "stop": 2.0, "removed": 9}, "old_root": 1}, env
+    dropped = state.restore_input(
+        FormInput(
+            state.input.model,
+            {"bounds": {"start": 3.0, "stop": 2.0, "removed": 9}, "old_root": 1},
+        ),
+        env,
     )
     assert set(dropped) == {("bounds", "removed"), ("old_root",)}
     result = state.result(env)
@@ -789,24 +775,28 @@ def test_compatible_restore_drops_types_not_range_or_cross_field_errors() -> Non
     assert ("bounds", "stop") in result.messages
 
     scalar = FormState(DraftForm.default_input(env))
-    dropped = scalar.write_compatible(
-        {
-            "amount": -1.0,
-            "samples": [1.0, "bad"],
-            "optional": None,
-            "amplitude": {"__complex__": [2.0, 3.0]},
-            "offsets": {"rack.left": {"expr": "general.ext.seed"}},
-        },
+    dropped = scalar.restore_input(
+        FormInput(
+            scalar.input.model,
+            {
+                "amount": -1.0,
+                "samples": [1.0, "bad"],
+                "optional": None,
+                "amplitude": {"__complex__": [2.0, 3.0]},
+                "offsets": {"rack.left": {"expr": "general.ext.seed"}},
+            },
+        ),
         env,
     )
-    assert set(dropped) == {("samples",)}
-    assert scalar.input.data["samples"] == DraftForm.default_input(env).data["samples"]
+    assert dropped == ()
+    assert scalar.input.data["samples"] == [1.0, "bad"]
     assert scalar.input.data["amount"] == -1.0
     assert scalar.input.data["optional"] is None
     assert scalar.input.data["amplitude"] == {"__complex__": [2.0, 3.0]}
     errors = scalar.result(env)
     assert isinstance(errors, FormErrors)
     assert ("amount",) in errors.messages
+    assert ("samples", 1) in errors.messages
 
 
 def test_reset_rejects_a_different_model_without_changing_state() -> None:

@@ -8,6 +8,7 @@ from zcu_tools.mcp.measure.recipe import (
     MissingParameter,
     RecipeExpression,
     RecipeFieldEdit,
+    RecipeFieldPath,
     RecipeTab,
 )
 from zcu_tools.mcp.measure.recipe_capture import SweepSources
@@ -29,10 +30,11 @@ def _points(expts: object) -> None:
         raise ValueError("expts must be an integer of at least two")
 
 
-def retain_scalar(tab: RecipeTab, field: str) -> None:
+def retain_scalar(tab: RecipeTab, field: RecipeFieldPath) -> None:
     """Retain one available logical scalar and its captured source label.
 
     tab is an opened recipe tab; field is a complete logical scalar path.
+    Field segments are str names or int original list indexes.
     A captured source records library:<actual-key> from the owner observation.
     Otherwise set(None) retains authored input and records gui_default.
     Missing/unavailable values or directed errors raise GuiRpcError(invalid_cfg).
@@ -64,7 +66,7 @@ class FrequencyChoice:
 
 def choose_frequency(
     tab: RecipeTab,
-    field: str,
+    field: RecipeFieldPath,
     frequency_mhz: float | None = None,
     *,
     calibration: str,
@@ -74,8 +76,9 @@ def choose_frequency(
     """Choose an explicit, captured-library, or calibrated scalar frequency in MHz.
 
     tab is opened; field is a complete logical scalar path, for example
-    modules.readout.freq. calibration is a caller-owned logical scalar path
-    such as $resonator.freq, not a formula. required names the missing tool input.
+    ("modules", "readout", "freq"). Segments are str names or int original list
+    indexes. calibration is a caller-owned logical scalar path such as
+    $resonator.freq, not a formula. required names the missing tool input.
     Explicit finite nonboolean frequency_mhz wins and produces an explicit edit.
     Otherwise prefer_library retains an available finite error-free captured
     scalar, records library:<actual-key>, and returns a choice without an edit.
@@ -183,7 +186,7 @@ def _frequency_endpoints(center: object, span: object) -> tuple[float, float]:
 
 def set_frequency_sweep(
     tab: RecipeTab,
-    field: str,
+    field: RecipeFieldPath,
     *,
     calibration: FrequencySweepCalibration,
     center_mhz: float | None = None,
@@ -192,8 +195,9 @@ def set_frequency_sweep(
 ) -> tuple[MissingParameter, ...]:
     """Write numeric MHz endpoints using explicit values or current calibration.
 
-    tab is an opened recipe tab; field names its dotted sweep path. calibration
-    is the caller-owned path/full-width policy described by FrequencySweepCalibration.
+    tab is an opened recipe tab; field is its typed sweep path, with str names
+    or int original list indexes. calibration is the caller-owned path/full-width
+    policy described by FrequencySweepCalibration.
     Missing center/span reads these paths now, then computes center +/- span/2.
     expts must be an integer >=2; None retains the GUI count. Explicit values
     carry explicit provenance; derived edges retain calibration/linewidth labels.
@@ -252,7 +256,7 @@ def set_frequency_sweep(
 
 def set_flux_sweep(
     tab: RecipeTab,
-    field: str,
+    field: RecipeFieldPath,
     *,
     start: float | None,
     stop: float | None,
@@ -260,8 +264,9 @@ def set_flux_sweep(
 ) -> None:
     """Write explicit distinct native flux endpoints, without unit conversion.
 
-    tab is opened; field is a dotted sweep path. start/stop are finite nonboolean
-    native coordinates in either direction. expts is integer >=2 or None to
+    tab is opened; field is a typed sweep path with str names or int original
+    list indexes. start/stop are finite nonboolean native coordinates in either
+    direction. expts is integer >=2 or None to
     retain GUI count. Invalid endpoints/count raise ValueError before any edit.
     Native cfg/connection errors propagate without retry. Sources are explicit
     for supplied values and gui_default for omitted count.
@@ -291,7 +296,7 @@ def use_flux_device(tab: RecipeTab, name: str, *, unit: str) -> None:
         raise ValueError("flux device name must be non-empty")
     if not unit or not unit.strip():
         raise ValueError("flux unit must be non-empty")
-    tab.read_field("flux_dev")
+    tab.read_field(("flux_dev",))
     observed = tab.read_device(name).unit
     if not isinstance(observed, str) or not observed.strip() or observed == "none":
         raise GuiRpcError(
@@ -301,5 +306,5 @@ def use_flux_device(tab: RecipeTab, name: str, *, unit: str) -> None:
         raise GuiRpcError(
             "Flux unit does not match the device coordinate", reason="invalid_device"
         )
-    tab.set("flux_dev", name)
-    tab.set("flux_unit", observed)
+    tab.set(("flux_dev",), name)
+    tab.set(("flux_unit",), observed)

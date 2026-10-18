@@ -21,8 +21,8 @@ from zcu_tools.gui.form import (
     FormInput,
     FormModel,
     FormState,
-    LinRange,
 )
+from zcu_tools.gui.form_adapter import LinRange
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._user_input import mouse_click
@@ -66,6 +66,7 @@ def row_names(view: QWidget, path: str) -> list[str]:
         widget.objectName()
         for widget in view.findChildren(QWidget)
         if widget.objectName().endswith(f".{path}")
+        and widget.objectName() != f"form.row.{path}"
     )
 
 
@@ -244,7 +245,7 @@ def test_sections_and_selectors_are_titled_by_field_name(build: Build) -> None:
     assert row_names(view, "drive.module") == []
     assert row_label(view, "drive.module.level") == "Level"
     assert row_label(view, "choice") == "Choice"
-    state.write({("choice", "kind"): "alpha"}, FormEnv())
+    state.select(("choice",), {"kind": "alpha"}, FormEnv())
     assert row_label(view, "choice") == "Choice"
 
 

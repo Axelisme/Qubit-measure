@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pydantic import BaseModel, JsonValue
 
 from ._json import copy_json
-from .model import FormEnv
+from .commands import FormCommandContext, FormCommandResult, FormCommandSnapshot
 
 
 @dataclass(frozen=True)
@@ -14,8 +14,8 @@ class OptionCommand:
     """An explicit action available only while its option matches current input.
 
     name is a nonempty identifier unique within the option; label is nonempty
-    display text. run receives the caller's fixed FormEnv and returns detached
-    partial JSON input to write at the option's field, not a whole form batch.
+    display text. run receives a readonly field snapshot and narrow evaluate
+    context, and returns a complete FormCommandResult for the mounted field.
     It must not mutate state or captured sources. Source failures propagate
     before any write; ordinary invalid returned values remain editable drafts.
     The description exposes only name and label, never the callable.
@@ -23,7 +23,7 @@ class OptionCommand:
 
     name: str
     label: str
-    run: Callable[[FormEnv], JsonValue]
+    run: Callable[[FormCommandSnapshot, FormCommandContext], FormCommandResult]
 
     def __post_init__(self) -> None:
         """Reject empty names/labels or a non-callable implementation."""

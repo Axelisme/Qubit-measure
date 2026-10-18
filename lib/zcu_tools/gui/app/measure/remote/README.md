@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-17，通用 Form command RPC
+**Last updated:** 2026-10-19，完整元素 logical fields wire
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -40,15 +40,21 @@ router scaffolding. Typed envelopes live in [`gui.remote.wire`](../../../remote/
 - One connection has at most one in-flight RPC.
 - Request and response roots are JSON objects.
 
+## Fixed element paths
+
+`tab.describe_cfg` 與 `tab.edit_cfg` 接受 str 欄位名與 FixedList 的 int index，例如 `["tones", 1, "gain"]`。Description 的 elements 列出原始 index、captured name 與 typed path，非固定 list 時為 null。數字字串不當成 index。Unknown、inactive、越界與 bool index 由 Form 拒絕，describe 的 form_path 保留完整請求路徑。Read 不改 input，也不抓取來源。Wire 的 values、errors、command target／inputs 都保留 typed paths，不把 index 轉成字串。
+
 ## Form commands
 
-`tab.run_cfg_command(tab_id, path, name)` 呼叫目前 active path 公開的 Form command。Path 是既有 canonical model-field 字串陣列。Description 的數值欄位 commands 帶 name、label、target 與 inputs；remote 只投影，不求值或換算。成功回 input／values／errors，失敗不改 input。Unknown command 回 invalid_params/form_errors，inactive path 回 invalid_params/form_path。控制身份、busy、lifetime 與 mutation guard 沿既有 resource.run_command。任意 provider/declaration ValueError 不被重分類為 command rejection。
+`tab.run_cfg_command(tab_id, path, name)` 呼叫目前 active path 公開的 Form command。Path 是既有 canonical model-field 字串陣列。Description 的掛載欄位 commands 帶 name、label、target 與 inputs，sweep 指令掛在 sweep row 而非座標或採樣葉欄位；remote 只投影，不求值或換算。成功回 input／values／errors，失敗不改 input。Unknown command 回 invalid_params/form_errors，inactive path 回 invalid_params/form_path。控制身份、busy、lifetime 與 mutation guard 沿既有 resource.run_command。任意 provider/declaration ValueError 不被重分類為 command rejection。
 
 方法列在 live catalog，由既有 rpc_call 呼叫，不增加 MCP tool。to_inline 專用入口保持原契約。
 
 ## Recipe 欄位
 
-`tab.read_recipe_field`、`tab.edit_recipe_fields` 與 `tab.select_recipe_module` 明確使用 logical paths。`form_description.py` 擁有 RecipeFieldObservation、RecipeEditResult 與 RecipeSelectionResult。所有 description、errors 與 source paths 都是 logical。通用 describe_cfg/edit_cfg/get_cfg/reset_cfg 保持 canonical 契約，read_module 保留明確 materialization。
+`tab.read_recipe_field`、`tab.edit_recipe_fields` 與 `tab.select_recipe_module` 明確使用 typed logical path arrays，str 保留欄位名，int 保留完整 list 的原始位置。數字字串不轉 index，名稱不作位置查找。Handler 只解碼 carrier，由 owner 決定路徑是否可達。`form_description.py` 擁有 RecipeFieldObservation、RecipeEditResult 與 RecipeSelectionResult。所有 description、errors 與 source paths 都是 logical。通用 describe_cfg/edit_cfg/get_cfg/reset_cfg 保持 canonical 契約。`tab.read_module` 保留明確 materialization，與專用 `tab.use_inline` 的 field 都使用非空 typed array，str 是欄位名，int 是原始 model-list 位置。兩者經共同 Form owner 操作，不保留 dotted-string reader。Unknown、越界或非 index 的數字字串保留完整請求路徑，回 form_path。
+
+`tab.read_elements(path)` 在一次 readonly owner turn 回傳全部元素的 index、name、canonical path、authored input、可用 preview values 與定向 errors。Values 使用完整 canonical typed paths，不是 lowered native cfg。完整 Form errors 另列在最外層，包含 participants 錯誤。某個元素 invalid 不會隱藏其他元素。RPC 只序列化 owner 的 aggregate，不逐元素 describe/read 拼接，不改 picker、focus、capture 或草稿。Busy 與 observer reads 仍可用。可選 `fields` 是元素相對 logical typed paths，例如 `[["drive", "gain"], ["sweep", "start"]]`。每個 row 的 `fields` 按請求順序回同一 owner turn 的 RecipeFieldObservation，包含 FixedElements identity、ref source、value_status 與 errors。省略 fields 保留原 aggregate。錯誤 carrier/path 沿既有 Form 錯誤投影。
 
 Read 使用一次 owner turn 的目前 input 與固定 capture。Value_status 區分 available、missing 與 unavailable，input_present/input 只觀察 authored draft。Selector 描述目標本身，source 識別最近 captured ref；readonly 表示穿過 ref 祖先，不代表 declaration lock。讀取不改 input、base、cfg version 或通知，也不授權寫入。
 

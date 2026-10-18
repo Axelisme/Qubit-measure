@@ -52,10 +52,10 @@ def onetone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool
         aliases=None if target is None else {"qubit": target},
         reuse=reuse_tab_id,
     )
-    tab.use_library("modules.readout", readout_ref)
+    tab.use_library(("modules", "readout"), readout_ref)
     missing = set_frequency_sweep(
         tab,
-        "sweep.freq",
+        ("sweep", "freq"),
         calibration=FrequencySweepCalibration(
             "$resonator.freq", "$resonator.kappa", 3.0
         ),
@@ -66,12 +66,12 @@ def onetone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool
     if missing:
         raise RecipeNeedsParameters(missing)
     if gain is not None:
-        tab.use_inline("modules.readout")
-        tab.set("modules.readout.gain", gain)
+        tab.use_inline(("modules", "readout"))
+        tab.set(("modules", "readout", "gain"), gain)
     else:
-        retain_scalar(tab, "modules.readout.gain")
-    tab.set("reps", reps)
-    tab.set("rounds", rounds)
+        retain_scalar(tab, ("modules", "readout", "gain"))
+    tab.set(("reps",), reps)
+    tab.set(("rounds",), rounds)
     result = yield from tab.run_step()
     run = result.run
     if result.status == "cancelled" or run is None:
@@ -111,14 +111,14 @@ DEFINITION = RecipeDefinition(
     run=onetone_spectrum,
     adapter_name="onetone/freq",
     summary_parameters=(
-        SummaryParameter("frequency_sweep", "sweep.freq", "MHz"),
-        SummaryParameter("gain", "modules.readout.gain"),
-        SummaryParameter("readout_ref", "modules.readout"),
-        SummaryParameter("reps", "reps"),
-        SummaryParameter("rounds", "rounds"),
+        SummaryParameter("frequency_sweep", ("sweep", "freq"), "MHz"),
+        SummaryParameter("gain", ("modules", "readout", "gain")),
+        SummaryParameter("readout_ref", ("modules", "readout")),
+        SummaryParameter("reps", ("reps",)),
+        SummaryParameter("rounds", ("rounds",)),
     ),
     summary_estimates=(
-        SummaryEstimate("freq", "freq", unit="MHz"),
-        SummaryEstimate("fwhm", "fwhm", unit="MHz"),
+        SummaryEstimate("freq", ("freq",), unit="MHz"),
+        SummaryEstimate("fwhm", ("fwhm",), unit="MHz"),
     ),
 )

@@ -32,25 +32,25 @@ def pipeline(
 ) -> RecipeGenerator:
     tab = session.open_tab("lookback", reuse=reuse_tab_id)
     for path, reference in (
-        ("modules.reset", use_reset),
-        ("modules.init_pulse", init_pulse_ref),
+        (("modules", "reset"), use_reset),
+        (("modules", "init_pulse"), init_pulse_ref),
     ):
         if reference is None:
             tab.disable_library(path)
         else:
             tab.use_library(path, reference)
     if readout_ref is not None:
-        tab.use_library("modules.readout", readout_ref)
+        tab.use_library(("modules", "readout"), readout_ref)
     if frequency_mhz is None:
         raise RecipeNeedsParameters(
             (MissingParameter("frequency_mhz", "Supply a value"),)
         )
     tab.set_fields(
         (
-            RecipeFieldEdit("modules.readout.freq", frequency_mhz),
-            RecipeFieldEdit("modules.readout.ro_length", readout_length_us),
-            RecipeFieldEdit("modules.readout.trig_offset", trigger_offset_us),
-            RecipeFieldEdit("rounds", rounds),
+            RecipeFieldEdit(("modules", "readout", "freq"), frequency_mhz),
+            RecipeFieldEdit(("modules", "readout", "ro_length"), readout_length_us),
+            RecipeFieldEdit(("modules", "readout", "trig_offset"), trigger_offset_us),
+            RecipeFieldEdit(("rounds",), rounds),
         )
     )
     result = yield from tab.run_step()
@@ -102,13 +102,17 @@ PIPELINE = RecipeDefinition(
     pipeline,
     adapter_name="lookback",
     summary_parameters=(
-        SummaryParameter("frequency_mhz", "modules.readout.freq", "MHz"),
-        SummaryParameter("readout_length_us", "modules.readout.ro_length", "us"),
-        SummaryParameter("trigger_offset_us", "modules.readout.trig_offset", "us"),
-        SummaryParameter("rounds", "rounds"),
-        SummaryParameter("readout_ref", "modules.readout"),
-        SummaryParameter("use_reset", "modules.reset"),
-        SummaryParameter("init_pulse_ref", "modules.init_pulse"),
+        SummaryParameter("frequency_mhz", ("modules", "readout", "freq"), "MHz"),
+        SummaryParameter(
+            "readout_length_us", ("modules", "readout", "ro_length"), "us"
+        ),
+        SummaryParameter(
+            "trigger_offset_us", ("modules", "readout", "trig_offset"), "us"
+        ),
+        SummaryParameter("rounds", ("rounds",)),
+        SummaryParameter("readout_ref", ("modules", "readout")),
+        SummaryParameter("use_reset", ("modules", "reset")),
+        SummaryParameter("init_pulse_ref", ("modules", "init_pulse")),
     ),
     summary_estimates=(),
 )

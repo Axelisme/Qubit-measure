@@ -63,7 +63,7 @@ def test_generated_module_options_offer_typed_keys_and_single_inline(
     inline = options[-1]
     assert inline.value == {"kind": "inline", "module": {"type": "pulse"}}
     state = FormState(form.default_input(env))
-    state.write({("probe",): inline.value}, env)
+    state.select(("probe",), inline.value, env)
     children = state.describe(("probe",), env).children
     assert {field.path[-1] for field in children} >= {"ch", "freq", "gain", "waveform"}
     assert all(field.path[:2] == ("probe", "module") for field in children)
@@ -90,7 +90,7 @@ def test_generated_multi_kind_options_keep_editable_kinds_and_filter_keys() -> N
         {"cavity_tone_cfg", "qubit_tone_cfg", "pi2_cfg"},
     ]
     for option, names in zip(options[("reset",)], expected_fields, strict=True):
-        state.write({("reset",): option.value}, env)
+        state.select(("reset",), option.value, env)
         assert {
             field.path[-1] for field in state.describe(("reset",), env).children
         } == names
@@ -132,7 +132,7 @@ def test_module_key_command_copies_captured_content_in_one_write() -> None:
     assert observed.value["desc"] is None
 
 
-def test_generated_inline_selection_uses_fresh_template_not_the_key_or_previous_draft() -> (
+def test_generated_inline_selection_preserves_same_type_draft_and_copies_fixed_ref() -> (
     None
 ):
     from zcu_tools.cfg_model import Template, TemplateDef
@@ -164,25 +164,22 @@ def test_generated_inline_selection_uses_fresh_template_not_the_key_or_previous_
     defaults = inline.fields.defaults(env)
     assert expect_object(defaults["module"])["freq"] == 90.0
 
-    state.write({("probe",): inline.value}, env)
+    state.select(("probe",), inline.value, env)
     copied = expect_object(expect_object(state.input.data["probe"])["module"])
     assert (copied["freq"], copied["gain"]) == (90.0, 0.2)
     state.write({("probe", "module", "freq"): 250.0}, env)
-    state.write({("probe",): options[0].value}, env)
-    state.write({("probe",): inline.value}, env)
+    state.select(("probe",), options[0].value, env)
+    state.select(("probe",), inline.value, env)
     assert (
         expect_object(expect_object(state.input.data["probe"])["module"])["freq"]
-        == 90.0
+        == 100.0
     )
 
 
 @pytest.mark.parametrize(
     "depth", [0, 1, 2], ids=["module", "waveform", "nested-waveform"]
 )
-@pytest.mark.parametrize("selection", ["option", "tag"])
-def test_template_kind_reselection_at_each_depth_is_fresh(
-    depth: int, selection: str
-) -> None:
+def test_template_kind_reselection_at_each_depth_is_fresh(depth: int) -> None:
     from zcu_tools.cfg_model import (
         Expr,
         PulseResetSpec,
@@ -234,24 +231,23 @@ def test_template_kind_reselection_at_each_depth_is_fresh(
 
     def choose(label: str) -> None:
         option = next(item for item in options if item.label == label)
-        value = expect_object(option.value)
-        value = expect_object(value["module"])
-        tag = "style" if depth else "type"
-        state.write(
-            {(*path, tag): value[tag]} if selection == "tag" else {path: value}, env
-        )
+        state.select(selection_path, option.value, env)
 
     leaf = "length" if depth else "pulse_cfg"
     expected: JsonValue = 0.4 if depth else {"kind": "ref", "name": "Q.pulses.probe"}
     assert current()[leaf] == expected
     state.write({(*path, leaf): 1.7 if depth else {"kind": "inline"}}, env)
     choose("Inline: cosine" if depth else "Inline: reset/two_pulse")
-    assert current() == ({"style": "cosine"} if depth else {"type": "reset/two_pulse"})
+    assert current() == (
+        {"style": "cosine", "length": 1.7} if depth else {"type": "reset/two_pulse"}
+    )
     # Another non-template kind also starts at type defaults, never the old draft.
     choose("Inline: gauss" if depth else "Inline: reset/bath")
-    assert current() == ({"style": "gauss"} if depth else {"type": "reset/bath"})
+    assert current() == (
+        {"style": "gauss", "length": 1.7} if depth else {"type": "reset/bath"}
+    )
     choose("Inline: const" if depth else root_label)
-    assert current().get(leaf) == expected
+    assert current().get(leaf) == (1.7 if depth else expected)
 
 
 def module_env() -> FormEnv:
@@ -432,9 +428,12 @@ def test_inline_module_rejects_unsupported_field_writes(name: str) -> None:
             {"modules": {"probe": {"kind": "ref", "name": "Q.pulses.probe"}}},
         )
     )
-    state.write({("modules", "probe", "kind"): "inline"}, env)
+    target = state.describe(("modules", "probe"), env).target
+    assert target is not None and target.options is not None
+    inline = next(option.value for option in target.options if option.label == "Inline")
+    state.select(("modules", "probe"), inline, env)
 
-    with pytest.raises(ValueError, match="Unknown field path"):
+    with pytest.raises(ValueError, match="Unknown.*field path"):
         state.write({("modules", "probe", "module", name): 1}, env)
 
 
@@ -528,14 +527,13 @@ def test_required_module_branch_switch_uses_blank_defaults(missing: str) -> None
     state = FormState(input)
     notifications: list[str] = []
     state.subscribe(lambda: notifications.append("changed"))
-    state.write({("modules", "probe", "kind"): "inline"}, env)
-    assert notifications == ["changed"]
-    assert input.data == before
-    module = expect_object(expect_object(state.input.data["modules"])["probe"])
-    assert module["kind"] == "inline"
-    assert expect_object(module["module"])["type"] == "pulse"
-    state.write({("modules", "probe", "module", "freq"): 125.0}, env)
-    assert state.preview(env).values[("modules", "probe", "module", "freq")] == 125.0
+    target = state.describe(("modules", "probe"), env).target
+    assert target is not None and target.options is not None
+    inline = next(option.value for option in target.options if option.label == "Inline")
+    with pytest.raises(ValueError, match="library|Missing|missing|Unknown"):
+        state.select(("modules", "probe"), inline, env)
+    assert notifications == []
+    assert state.input.data == input.data == before
 
 
 class MuxCore(ConfigBase):

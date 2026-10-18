@@ -12,7 +12,8 @@ class FieldMeta:
     """Describe a cfg field without changing its validation or serialized value.
 
     Attach with ``Annotated[T, FieldMeta(...)]``. All attributes are optional;
-    None leaves the hint unspecified, except group where it means no group.
+    None leaves a hint unspecified, except group where it means no group.
+    readonly defaults to False and never enforces a write restriction.
 
     Attributes
     ----------
@@ -28,6 +29,11 @@ class FieldMeta:
     group:
         Presentation group name, such as "Advanced", or None for no group.
         An empty string raises ValueError at construction.
+    readonly:
+        Request non-editable presentation; does not restrict writes or validation.
+    element_label:
+        Name of a string field used to label model-list elements, or None to
+        display their original indexes. Does not change identity or ordering.
     """
 
     label: str | None = None
@@ -35,6 +41,8 @@ class FieldMeta:
     decimals: int | None = None
     description: str | None = None
     group: str | None = None
+    readonly: bool = False
+    element_label: str | None = None
 
     def __post_init__(self) -> None:
         """Reject an empty presentation group with ValueError."""

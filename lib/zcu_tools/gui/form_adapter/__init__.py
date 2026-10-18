@@ -2,6 +2,8 @@
 
 from ._modules import ModuleValues
 from .context import FormContext
+from .elements import ElementObservation, ElementsObservation
+from .fixed_elements import FixedElements, FixedElementsForm
 from .form import Form, module_form
 from .input_types import KeyRef, ModuleInline, ModuleInput, ModuleRef
 from .logical import (
@@ -15,3 +17,4 @@ from .logical import (
     ModuleSelector,
 )
 from .module_input import ModuleInputField
+from .sweep import CenterSpan, LinRange, StepCenter, StepRange, SweepInput

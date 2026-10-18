@@ -23,7 +23,7 @@ from tests.gui.app._owner_waits import owner_result
 from tests.gui.app.workflows._start_fakes import StartHarness
 
 from ._reload_source import ReloadSource
-from ._sample_input import sample_input
+from ._sample_input import draft_data, sample_input
 from ._synthetic import ALIAS_PRESET, Context, inline_input
 
 
@@ -59,11 +59,14 @@ def test_reload_replaces_declarations_and_preserves_compatible_drafts(
     assert window.controller is controller
     assert window.plan_panel is not old_plan and window.tunables_panel is not old_knobs
     saved = window.capture_persisted_state()
-    assert saved.plan["scale"] == {"expr": "1 / 4"}
-    assert sample_input(saved.knobs)["value"] == {"expr": "8 * 4"}
-    assert saved.plan["new_field"] == 9 and saved.knobs["new_knob"] == 10
-    assert window.plan_panel.state.base.data == saved.plan
-    assert window.tunables_panel.state.base.data == saved.knobs
+    assert draft_data(saved.plan)["scale"] == {"expr": "1 / 4"}
+    assert sample_input(draft_data(saved.knobs))["value"] == {"expr": "8 * 4"}
+    assert (
+        draft_data(saved.plan)["new_field"] == 9
+        and draft_data(saved.knobs)["new_knob"] == 10
+    )
+    assert window.plan_panel.state.base.data == draft_data(saved.plan)
+    assert window.tunables_panel.state.base.data == draft_data(saved.knobs)
     inspected = window.describe_form("plan", ())
     assert not isinstance(inspected, FormErrors)
     assert ["new_field"] in [
@@ -78,6 +81,34 @@ def test_reload_replaces_declarations_and_preserves_compatible_drafts(
     assert any(
         item == {"path": ["sample", "value"], "value": 32.0} for item in knobs["values"]
     )
+
+
+def test_reload_migrates_raw_branch_and_independent_selection_override(
+    source: ReloadSource,
+) -> None:
+    window = source.open(StartHarness())
+    window.plan_panel.state.write(
+        {("scale",): {"expr": "1 / 4"}}, window.plan_panel.env
+    )
+    window.plan_panel.state.select(
+        ("samples",), {"kind": "linrange"}, window.plan_panel.env
+    )
+    before = window.plan_panel.state.input
+    assert before.selections == {("samples",): {"kind": "linrange"}}
+    source.write(2)
+    error: CatalogReloadError | None = None
+    report = None
+    try:
+        report = window.reload_source()
+    except CatalogReloadError as exc:
+        error = exc
+    assert error is None, "Source reload must migrate, not require strict identity"
+    assert report is not None
+    assert report.plan_dropped == (("legacy",),)
+    assert window.plan_panel.state.input.data["samples"] == before.data["samples"]
+    assert window.plan_panel.state.input.selections == before.selections
+    assert window.plan_panel.state.input.data["new_field"] == 9
+    assert window.plan_panel.state.base.same_as(window.plan_panel.state.input)
 
 
 @pytest.mark.parametrize("version", [1, 2])
@@ -99,7 +130,9 @@ def test_reload_removed_selection_uses_new_default_and_reports_both_names(
     message = window.findChild(QLabel, "workflow.run.message")
     assert message is not None
     assert old_name in message.text() and new_name in message.text()
-    assert window.capture_persisted_state().plan["scale"] == {"expr": "1 / 4"}
+    assert draft_data(window.capture_persisted_state().plan)["scale"] == {
+        "expr": "1 / 4"
+    }
     with pytest.raises(InvalidInputError, match="Unknown workflow"):
         window.select_workflow(old_name)
     with pytest.raises(InvalidInputError, match="Unknown workflow"):
@@ -138,7 +171,9 @@ def test_failed_import_retains_draft_blocks_start_and_recovers_after_retry(
     source.write(2)
     report = window.reload_source()
     assert report.plan_dropped == (("legacy",),)
-    assert window.capture_persisted_state().plan["scale"] == {"expr": "1 / 4"}
+    assert draft_data(window.capture_persisted_state().plan)["scale"] == {
+        "expr": "1 / 4"
+    }
     assert window.plan_panel is not plan
     # Successful retry clears reload admission; ordinary EMPTY-source admission
     # is now the only reason Start cannot run this source-free view.
@@ -260,7 +295,7 @@ def test_reload_requires_owner_thread_before_reading_source(
         with pytest.raises(CatalogReloadError, match="owner thread"):
             # The scheduled foreign-thread reload rejects before touching source files.
             request.result(timeout=30)
-    assert window.capture_persisted_state().plan["legacy"] == 4
+    assert draft_data(window.capture_persisted_state().plan)["legacy"] == 4
 
 
 def test_existing_form_rpc_observes_current_catalog(source: ReloadSource) -> None:
@@ -311,7 +346,12 @@ def test_app_injects_bounded_loader_and_reloads_without_rebuilding_session(
         assert app.state is state and app.services is services
         assert app.window.controller is controller
         assert app.window.workflow_name == "reload-v2"
-        assert sample_input(app.window.capture_persisted_state().knobs)["value"] == 20.0
+        assert (
+            sample_input(draft_data(app.window.capture_persisted_state().knobs))[
+                "value"
+            ]
+            == 20.0
+        )
     finally:
         app.window.close()
         app.shutdown()

@@ -130,6 +130,12 @@ class WritebackEditDialogs:
                 item.session_id, lambda form: form.state.write(batch, form.env)
             )
 
+        def select(path: FormWritePath, selection: JsonValue) -> None:
+            self._edit_module_form(
+                item.session_id,
+                lambda form: form.state.select(path, selection, form.env),
+            )
+
         def run_command(path: FormWritePath, name: str) -> None:
             self._edit_module_form(
                 item.session_id,
@@ -148,7 +154,9 @@ class WritebackEditDialogs:
                 self._tab_id, self._pane, session_id=item.session_id
             )[item.session_id]
 
-        editor = FormEditor(form.state, form.env, write=write, run_command=run_command)
+        editor = FormEditor(
+            form.state, form.env, write=write, select=select, run_command=run_command
+        )
         dialog = _ModuleDialog(self._parent, item, editor, retarget)
 
         def refresh_preview(*_: object) -> None:

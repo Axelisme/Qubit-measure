@@ -19,9 +19,12 @@ from zcu_tools.gui.form import (
     FormErrors,
     FormInput,
     FormModel,
+    FormPath,
     FormPathError,
     FormState,
     FormValue,
+    InputConverter,
+    Option,
 )
 from zcu_tools.program.v2.modules import PulseCfg
 from zcu_tools.resources.context.library import (
@@ -29,6 +32,20 @@ from zcu_tools.resources.context.library import (
     LibrarySnapshot,
     ModuleLibraryDocument,
 )
+
+from tests.gui._form_converters import RebuildingForm
+
+
+def test_logical_container_edit_replaces_exact_raw_value_without_merging_defaults():
+    definition = adapter.Form(LogicalCfg, {"real": {"module": {"value": 7}}})
+    env = FormEnv()
+    input = definition.default_input(env)
+    candidate = definition.prepare_logical_edits(
+        input, (adapter.LogicalEdit(("real", "module"), {}),), env
+    )
+    assert candidate.input.data["real"] == {"module": {}}
+    assert input.data["real"] == {"module": {"value": 7}}
+    assert candidate.changed
 
 
 class RealLeaf(ConfigBase):
@@ -185,7 +202,7 @@ def test_batch_rejection_has_original_index_and_no_success_prefix(
     assert input.to_json() == before
 
 
-@pytest.mark.parametrize("value", [{}, 4])
+@pytest.mark.parametrize("value", [4])
 def test_structure_rejection_reports_first_edit_without_changing_input(value) -> None:
     form = adapter.Form(LogicalCfg, {})
     env = FormEnv()
@@ -252,8 +269,17 @@ def test_spec_template_locks_and_handwritten_generated_fields_use_same_mapper() 
     field = adapter.ModuleInputField(PulseSpec)
     from pydantic import create_model
 
+    class CapturedExtras(FormModel):
+        @classmethod
+        def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+            return {("reference",): field.options(env)}
+
+        @classmethod
+        def converters(cls, env: FormEnv) -> Mapping[FormPath, InputConverter]:
+            return {("reference",): field.converter(env)}
+
     extras = create_model(
-        "Extras", __base__=FormModel, reference=(field.annotation, ...)
+        "Extras", __base__=CapturedExtras, reference=(field.annotation, ...)
     )
     form = adapter.Form(LogicalCfg, {}, extras=extras, lower=lambda extras, cfg: cfg)
     env = captured()
@@ -503,7 +529,7 @@ def test_locked_selector_rejects_library_and_preserves_inline_noop() -> None:
     assert input.to_json() == before
 
 
-def test_ordinary_union_partial_write_keeps_core_defaults_and_initial_active_structure() -> (
+def test_ordinary_union_write_keeps_only_authored_raw_and_initial_active_structure() -> (
     None
 ):
     from typing import Annotated, Literal
@@ -517,12 +543,17 @@ def test_ordinary_union_partial_write_keeps_core_defaults_and_initial_active_str
         start: float = 0.0
         stop: float = 1.0
 
-    class Extras(FormModel):
+    class Extras(RebuildingForm):
+        branch_models = {("shape",): (Flat, Ramp)}
         shape: Annotated[Flat | Ramp, Field(discriminator="kind")]
 
     form = adapter.Form(LogicalCfg, {}, extras=Extras, lower=lambda extras, cfg: cfg)
     input = FormInput(
-        form.model, {"extras": {"shape": {"kind": "flat", "length": 9.0}}}
+        form.model,
+        {
+            "real": {"module": {"value": 2}},
+            "extras": {"shape": {"kind": "flat", "length": 9.0}},
+        },
     )
     env = FormEnv()
     candidate = form.prepare_logical_edits(
@@ -533,8 +564,10 @@ def test_ordinary_union_partial_write_keeps_core_defaults_and_initial_active_str
     assert object_at(candidate.input.data, ("extras", "shape")) == {
         "kind": "ramp",
         "start": 3.0,
-        "stop": 1.0,
     }
+    result = FormState(candidate.input).result(env)
+    assert isinstance(result, FormModel)
+    assert result.model_dump()["extras"]["shape"]["stop"] == 1.0
     with pytest.raises(adapter.LogicalEditError) as failure:
         form.prepare_logical_edits(
             input,

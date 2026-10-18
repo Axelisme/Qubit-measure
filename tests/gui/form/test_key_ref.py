@@ -31,7 +31,12 @@ def test_key_ref_defaults_description_result_and_restore_do_not_evaluate_names(
         restored = form.FormState(
             form.FormInput(model, {"kind": "ref", "name": "other"})
         )
-        assert restored.write_compatible(state.input.data, env) == ()
+        assert (
+            restored.restore_input(
+                form.FormInput(restored.input.model, state.input.data), env
+            )
+            == ()
+        )
         assert restored.input.data["name"] == name
     else:
         assert isinstance(result, form.FormErrors)
@@ -39,5 +44,11 @@ def test_key_ref_defaults_description_result_and_restore_do_not_evaluate_names(
         restored = form.FormState(
             form.FormInput(model, {"kind": "ref", "name": "other"})
         )
-        assert restored.write_compatible(state.input.data, env) == (("name",),)
-        assert restored.input.data["name"] == "other"
+        assert (
+            restored.restore_input(
+                form.FormInput(restored.input.model, state.input.data), env
+            )
+            == ()
+        )
+        assert restored.input.data["name"] == name
+        assert isinstance(restored.result(env), form.FormErrors)

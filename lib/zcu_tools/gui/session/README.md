@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-18，device 活動觀察與 run 後讀回
+**Last updated:** 2026-10-18，共用 codec 格式錯誤與 defaults 啟動
 
 # gui/session/ — 量測 session core
 
@@ -34,6 +34,10 @@ DeviceState.info 與 ValueSourceBinder 的 device sources 是已發布 cache，�
 
 `persistence.py` 是 app-neutral、強型別的 single-file caretaker；app 注入 codec 並保留
 schema/version/trigger policy，shared 層不依賴 Pydantic、Qt、cfg 或 app module。
+JSON／UTF-8 或 codec 格式錯誤時，caretaker 以 defaults 開啟，透過
+`RestoreOutcome.load_error` 交給 host 顯示。載入不改寫或備份原檔，正常保存時機不變。
+Provider 和其他 restore 故障仍傳播。FormInput 的啟動、RAM 與 source reload
+使用同一遞迴還原，見 ADR-0063、ADR-0079。
 
 ```
 session/
@@ -84,7 +88,7 @@ session/
     ├── device_dialog.py  — 設備管理；吃 `DeviceControlPort` + 獨立 parameter provider，eval mode apply-time resolve 不污染 device facet；per-device panel lazy-import zcu_tools.device.*；host 可切 `set_read_only(read_only=True)` 進 inspection mode：Add/Drop/Apply/Reconnect/Stop 與 panel edit controls 禁用，Refresh、selection、poll、Close 保持可用；dialog-scoped + selection-scoped QTimer（1s）對當前選取 device 呼 `try_poll_device_info`，結果經 DEVICE_CHANGED 流回並保留目前選取；timer 僅可見+有選取時跑，hide/close/無選取即停（不常駐、不全 device 輪詢）
     ├── predictor_dialog.py — Independent fluxonium or SQUID transmon trials, frequency curves (matrix curves only for models that provide them) and local Calibrate. Calibration displays actual MHz and clamped from the shared model result; it changes only dialog bias/cache, never a component. No Apply or session model. Device values and frequency expressions remain optional inputs.
     ├── predictor_canvas.py — PredictorCurveCanvas：f_ij 曲線 over device value（雙 x 軸 flux/value）+ 可拖動 flux 垂線（方案 B：marker 不折、出窗平移）；支援多條 transition 同時 highlight；host 可關閉 marker interaction 讓 live view 只由外部 value 驅動；主線程同步繪圖不需 marshal
-    ├── inspect_dialog.py — InspectDialog：各 host 共用的唯一 Inspect。必填協作者為 ContextControlPort、event bus、範本目錄、arb 名稱來源、host 的 ARB 開啟入口、DialogPresenter 與具名 alias preset catalog（None 表示無 catalog），沒有可選能力或依 host 隱藏的按鈕。Parameters 是元件樹；Modules 選取條目時以 library entry 表單在固定 capture 開啟，右側 Name、Saved／Unsaved、Revert、Apply 與 FormEditor（包在 scroll area）。Unsaved 由 Name 與 FormState input／base 的差異及 editor 未解析文字決定；切換、刪除或關閉時以 presenter 的 Save／Discard／Cancel 詢問。Aliases 頁是 AliasPanel，開啟時讀一次已安裝的表，關閉時未存 draft 同樣三選一，Save 被拒時留在 Aliases 頁。唯讀只鎖輸入，表單與 alias 表仍可讀、捲動與折疊
+    ├── inspect_dialog.py — InspectDialog：各 host 共用的唯一 Inspect。必填協作者為 ContextControlPort、event bus、範本目錄、arb 名稱來源、host 的 ARB 開啟入口、DialogPresenter 與具名 alias preset catalog（None 表示無 catalog），沒有可選能力或依 host 隱藏的按鈕。Parameters 是元件樹；Modules 選取條目時以 library entry 表單在固定 capture 開啟，右側 Name、Saved／Unsaved、Revert、Apply 與 FormEditor（包在 scroll area）。Unsaved 由 Name、FormState.is_dirty 與 editor 未解析文字決定。is_dirty 包含 selection-only 差異，不只比較 raw data；切換、刪除或關閉時以 presenter 的 Save／Discard／Cancel 詢問。Aliases 頁是 AliasPanel，開啟時讀一次已安裝的表，關閉時未存 draft 同樣三選一，Save 被拒時留在 Aliases 頁。唯讀只鎖輸入，表單與 alias 表仍可讀、捲動與折疊
     ├── new_entry_dialog.py — NewEntryDialog：Inspect 的 New。每次選範本讀一次 capture，以 new_library_entry 建新 State 與 FormEditor，欄位、折疊與捲動回範本初始；只保留使用者打過的 Name，未打時建議 default_name 並在同 family 內加 _2、_3 去重。Create 經 apply_library_change put，被拒時經 presenter 報錯並留在對話框
     └── arb_waveform_dialog.py — ArbWaveformDialog：arb 資產管理對話框，只收 ArbWaveformPort。Measure 經具名 `arb_waveform` dialog 開，workflows 直接開同一類別
 ```

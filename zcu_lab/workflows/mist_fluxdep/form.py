@@ -14,10 +14,11 @@ from zcu_tools.gui.form import (
     FormErrors,
     FormModel,
     FormPath,
+    InputConverter,
     Option,
-    SweepInput,
     field_error,
 )
+from zcu_tools.gui.form_adapter import SweepInput
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory
 from zcu_tools.program.v2.modules import PulseCfg
 from zcu_tools.program.v2.modules.reset import (
@@ -107,6 +108,16 @@ class MISTPlanForm(FormModel):
     def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
         """Offer shared captured calibration roots without materialization/live I/O."""
         return calibration_choices(env)
+
+    @classmethod
+    def converters(cls, env: FormEnv) -> Mapping[FormPath, InputConverter]:
+        """Bind each generated field's converter to the host's fixed capture."""
+        return {
+            ("qub_pulse",): DRIVE_MODULE_FIELD.converter(env),
+            ("readout",): READOUT_MODULE_FIELD.converter(env),
+            ("reset",): RESET_MODULE_FIELD.converter(env),
+            ("mist_pulse",): MIST_MODULE_FIELD.converter(env),
+        }
 
     @classmethod
     def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:

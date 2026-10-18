@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
+from pydantic import JsonValue, TypeAdapter
+
 from zcu_tools.gui.app.measure.events.tab import (
     TabActivatedPayload,
     TabAddedPayload,
@@ -12,7 +14,7 @@ from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
 from .persistence_types import PersistedSession, PersistedTab
-from .ports import RestoreDroppedInputs, RestoreIssue, RestoreReport, TabSnapshot
+from .ports import RestoreDroppedInputs, RestoreIssue, RestoreReport
 
 if TYPE_CHECKING:
     from .ports import TabLifecyclePort
@@ -21,8 +23,8 @@ if TYPE_CHECKING:
 class WorkspaceService:
     """Own tab lifecycle and tab-session capture/apply workflow.
 
-    Capture preserves authored Form input JSON. Tab resources own compatible
-    restoration against a new source capture; the PersistenceCaretaker only
+    Capture preserves the shared FormInput JSON including explicit selections.
+    Tab resources own recursive restoration against a new source capture; the PersistenceCaretaker only
     reads/writes the resulting versioned PersistedSession memento.
     """
 
@@ -78,17 +80,19 @@ class WorkspaceService:
         payload_tabs = tuple(
             PersistedTab(
                 adapter_name=tab.adapter_name,
-                form_input=tab.cfg.input.data,
+                form_input=TypeAdapter(dict[str, JsonValue]).validate_json(
+                    tab.cfg.input.to_json()
+                ),
             )
             for _, tab in tabs
         )
         return PersistedSession(tabs=payload_tabs, active_tab_index=active_tab_index)
 
     def apply_session(self, session: PersistedSession) -> RestoreReport:
-        """Create fresh resources and overlay saved compatible Form input JSON.
+        """Create fresh resources and recursively restore shared FormInput JSON.
 
         Per-tab preparation failures are rejected_tabs; other tabs still restore.
-        Successfully restored tabs report incompatible leaves through dropped_inputs.
+        Successfully restored tabs report discarded raw/selection paths through dropped_inputs.
         Ordinary unfinished/invalid input remains editable. Old memento versions
         are rejected by the caretaker codec, not migrated here.
         """
@@ -96,13 +100,9 @@ class WorkspaceService:
         rejected: list[RestoreIssue] = []
         dropped: list[RestoreDroppedInputs] = []
         for index, persisted_tab in enumerate(session.tabs):
-            snapshot = TabSnapshot(
-                adapter_name=persisted_tab.adapter_name,
-                cfg_input=persisted_tab.form_input,
-            )
             try:
                 tab_id = self._tabs.new_tab(
-                    persisted_tab.adapter_name, from_dict=snapshot
+                    persisted_tab.adapter_name, from_dict=persisted_tab
                 )
             except (KeyError, ValueError, TypeError) as exc:
                 rejected.append(
