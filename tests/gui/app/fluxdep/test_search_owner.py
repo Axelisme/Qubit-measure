@@ -101,7 +101,11 @@ def test_changed_input_rejects_success(search_case, mutation):
     elif mutation == "fit":
         fit = ctrl.state.fit
         ctrl.set_fit_params(
-            fit.search_db, ParamBounds(EJ=fit.EJb, EC=fit.ECb, EL=fit.ELb), fit.transitions, None, None
+            fit.search_db,
+            ParamBounds(EJ=fit.EJb, EC=fit.ECb, EL=fit.ELb),
+            fit.transitions,
+            None,
+            None,
         )
     elif mutation == "project":
         ctrl.setup_project(ctrl.state.project)

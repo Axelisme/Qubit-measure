@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.fluxdep` flux-dependence analysis GUI
 
-**Last updated:** 2026-10-16
+**Last updated:** 2026-10-19
 
 MCP server entry 位於 `zcu_tools.mcp.fluxdep.server`；本 package 只包含 GUI app、
 state/services/UI 與和 `ui/` 平級的 GUI-process remote driving adapter。Import path 固定為
@@ -99,7 +99,7 @@ Fluxdep 沒有硬體緊急 Stop，使用者必須先點燈收回再取消。
 
 `Controller.search` 的 `FluxDepSearchOwner` 集中 single-flight、版本依賴與 terminal policy。
 State 集中定義 alignment → points → Filter → fit 依賴圖，另納入 spectrum 集合。
-上游發布保留結果並標過期，`set_fit_params` 的完整 replacement 則清掉結果。過期 params 匯出在 I/O 前拒絕。
+上游發布保留結果並標過期，`set_fit_params(search_db, bounds, transitions, r_f, sample_f)` 的完整 replacement 則清掉結果。`bounds` 重用 analysis owner 的 `ParamBounds(EJ, EC, EL)`，三組上下限以 GHz 表示。Controller、FitService 與 State 轉交同一組 bounds，不改 RPC 欄位或 UI 控制項。過期 params 匯出在 I/O 前拒絕。
 Hide 或 detach 不取消，重新 activate 讀 owner snapshot。
 關窗先拒絕新 search 並提出 cancel，search runner 未 drain 就拒絕關窗，保留 Qt owners 與圖。
 

@@ -467,7 +467,7 @@ def render_fit_figure(  # noqa: PLR0913
     flux_half: float | None = None,
     flux_period: float | None = None,
     title: str = "",
-    display: FitDisplay = FitDisplay(),
+    display: FitDisplay | None = None,
     attribution: DatabaseSearchResult | None = None,
 ) -> None:
     """Render the full fit visualisation onto ``figure`` (cleared first).
@@ -477,7 +477,8 @@ def render_fit_figure(  # noqa: PLR0913
     fit points. ``flux_half`` / ``flux_period`` drive the dev-value secondary axis
     (omit to skip it).
 
-    display holds the Show-tab controls (defaults preserve all fit lines):
+    display holds the Show-tab controls; None uses the default FitDisplay,
+    preserving all fit lines:
     - ``xlim`` / ``ylim`` set the axis limits; ``None`` (default) derives them via
       :func:`derive_auto_limits` (matching the notebook's ``auto_derive_limits``).
     - ``show_const_freq`` toggles the r_f / sample_f reference lines.
@@ -487,6 +488,8 @@ def render_fit_figure(  # noqa: PLR0913
       transition_indices supply compiled-slot colors; outlier_mask supplies
       hollow markers. None draws plain points, never synthetic residual marks.
     """
+    if display is None:
+        display = FitDisplay()
     figure.clear()
     ax = figure.add_subplot(1, 1, 1)
 
@@ -494,7 +497,9 @@ def render_fit_figure(  # noqa: PLR0913
     # that use them; inject the provided ones so a 'mirror' / 'red side' display
     # subset never raises a missing-key error.
     sim_transitions = transitions_with_freqs(
-        display.plot_transitions if display.plot_transitions is not None else transitions,
+        display.plot_transitions
+        if display.plot_transitions is not None
+        else transitions,
         r_f,
         sample_f,
     )

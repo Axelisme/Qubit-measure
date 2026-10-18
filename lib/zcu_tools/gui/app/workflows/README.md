@@ -1,12 +1,12 @@
 # gui/app/workflows — Workflow host
 
-**Last updated:** 2026-10-18，run 終局後 device cache 讀回
+**Last updated:** 2026-10-19，組裝來源共用具名參數
 
 ## 註冊與組裝
 
 `WorkflowAttachment` 配對已宣告的 native step、plan/tunables FormModel、converter 與 context seed。每個附件保留 native plan、tunables、state、record 與 form 的型別配對。同一宿主的附件共享 context 型別參數，宿主不解讀 context，也不依 workflow 名稱分支。註冊項目沒有 export 或 presentation callback。
 
-`WorkflowsGuiBehavior(registrations=..., templates=..., loader=..., alias_presets=...)` 建立一份 EMPTY session。Behavior 的公開 `alias_presets` 欄位保留完整名稱與有序表，session 只使用 default rows。省略或 None 建立空表，顯式 mapping 必須含 default，default 的空 tuple 合法。`WorkflowWindow` 也可接收既有 state/services/owner 與註冊清單，嵌入 caller 的 Qt parent。清單必須非空且名稱唯一，第一項是預設。GUI、RPC 與 MCP 使用同一 Window 與 Controller。公開參數、欄位、錯誤與 lifetime 契約見各型別 docstring。
+`WorkflowComposition(registrations=..., templates=..., loader=..., alias_presets=...)` 保存 caller 的 workflow/form 與呈現來源，不建立 live session。`WorkflowsGuiBehavior(composition=...)` 建立一份 EMPTY session。Behavior 的公開 `alias_presets` 欄位保留完整名稱與有序表，session 只使用 default rows。省略或 None 建立空表，顯式 mapping 必須含 default，default 的空 tuple 合法。`WorkflowWindow` 也可接收既有 state/services/owner 與同型別的 `composition`，嵌入 caller 的 Qt parent。清單必須非空且名稱唯一，第一項是預設。GUI、RPC 與 MCP 使用同一 Window 與 Controller。公開參數、欄位、錯誤與 lifetime 契約見各型別 docstring。
 
 `scripts/run_workflows_gui.py` 是組合根。它讀 `zcu_lab.workflows.registry`，注入註冊清單、alias preset 與 `SourceCatalogLoader`。它也把 `zcu_lab.templates.TEMPLATES` 傳給 Behavior，與 measure 使用同一份範本目錄。Builder 每次重新 import 當前清單。Framework 和 component sources 固定，workflow/form/registry sources 一起 bounded reload。Framework 不 import 使用者套件，依賴方向由 C16 保護。
 

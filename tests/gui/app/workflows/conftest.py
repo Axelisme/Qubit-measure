@@ -19,6 +19,7 @@ from zcu_tools.experiment.workflows import (
     workflow,
 )
 from zcu_tools.gui.app.workflows.attachment import WorkflowAttachment
+from zcu_tools.gui.app.workflows.composition import WorkflowComposition
 from zcu_tools.gui.app.workflows.persistence import WorkflowInputSnapshot
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.form import FormModel
@@ -109,10 +110,12 @@ def attachment(
             harness.state,
             harness.services,
             harness.owner,
-            templates={},
-            alias_presets=None,
-            registrations=catalog_source.catalog.attachments,
-            loader=catalog_source.loader,
+            composition=WorkflowComposition(
+                templates={},
+                alias_presets=None,
+                registrations=catalog_source.catalog.attachments,
+                loader=catalog_source.loader,
+            ),
         )
         window.plan_panel.state.reset(inline_input())
         yield window, harness, entry
@@ -165,9 +168,9 @@ def sweep_window(
             harness.state,
             harness.services,
             harness.owner,
-            templates={},
-            alias_presets=None,
-            registrations=(registration,),
+            composition=WorkflowComposition(
+                templates={}, alias_presets=None, registrations=(registration,)
+            ),
         )
         windows.append(window)
         if snapshot is not None:

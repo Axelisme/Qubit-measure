@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from zcu_tools.analysis.fluxdep.search import ParamBounds
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pytest
 from zcu_tools.analysis.fluxdep.models import PointsData
+from zcu_tools.analysis.fluxdep.search import ParamBounds
 from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.fluxdep.state import (
     PROJECT_VERSION_KEY,

@@ -19,6 +19,7 @@ from zcu_tools.experiment.workflows import (
 )
 from zcu_tools.gui.app.workflows.app import WorkflowsGuiBehavior
 from zcu_tools.gui.app.workflows.attachment import WorkflowAttachment
+from zcu_tools.gui.app.workflows.composition import WorkflowComposition
 from zcu_tools.gui.app.workflows.persistence import (
     WorkflowInputCodec,
     WorkflowInputSnapshot,
@@ -52,9 +53,9 @@ def window(qapp: QApplication) -> Iterator[WorkflowWindow[Context]]:
         harness.state,
         harness.services,
         harness.owner,
-        templates={},
-        alias_presets=None,
-        registrations=build_registry(),
+        composition=WorkflowComposition(
+            templates={}, alias_presets=None, registrations=build_registry()
+        ),
     )
     try:
         yield view
@@ -147,9 +148,11 @@ def test_open_restore_and_close_flush(qapp: QApplication, tmp_path: Path) -> Non
         )
     )
     app = WorkflowsGuiBehavior(
-        templates={},
-        registrations=build_registry(),
-        alias_presets={"default": ALIAS_PRESET},
+        composition=WorkflowComposition(
+            templates={},
+            registrations=build_registry(),
+            alias_presets={"default": ALIAS_PRESET},
+        ),
         cache_dir=tmp_path,
     )
     app.assemble(None)
@@ -182,9 +185,11 @@ def test_unreadable_snapshot_reports_and_uses_defaults(
 ) -> None:
     (tmp_path / "t1_workflow_state_v1.json").write_text(payload)
     app = WorkflowsGuiBehavior(
-        templates={},
-        registrations=build_registry(),
-        alias_presets={"default": ALIAS_PRESET},
+        composition=WorkflowComposition(
+            templates={},
+            registrations=build_registry(),
+            alias_presets={"default": ALIAS_PRESET},
+        ),
         cache_dir=tmp_path,
     )
     app.assemble(None)
@@ -214,9 +219,11 @@ def test_clean_skips_read_but_close_replaces_snapshot(
     path = tmp_path / "t1_workflow_state_v1.json"
     path.write_text("deliberately invalid JSON")
     app = WorkflowsGuiBehavior(
-        templates={},
-        registrations=build_registry(),
-        alias_presets={"default": ALIAS_PRESET},
+        composition=WorkflowComposition(
+            templates={},
+            registrations=build_registry(),
+            alias_presets={"default": ALIAS_PRESET},
+        ),
         clean=True,
         cache_dir=tmp_path,
     )
@@ -312,7 +319,10 @@ def test_saved_reference_without_captured_library_is_discarded_on_open(
         )
     )
     app = WorkflowsGuiBehavior(
-        templates={}, registrations=[drive_registration()], cache_dir=tmp_path
+        composition=WorkflowComposition(
+            templates={}, registrations=[drive_registration()]
+        ),
+        cache_dir=tmp_path,
     )
     app.assemble(None)
     try:

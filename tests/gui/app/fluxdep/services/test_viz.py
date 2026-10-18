@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from zcu_tools.analysis.fluxdep.search import ParamBounds
 import matplotlib
+from zcu_tools.analysis.fluxdep.search import ParamBounds
 
 matplotlib.use("Agg")
 

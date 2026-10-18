@@ -11,13 +11,13 @@ or the socket server.
 
 from __future__ import annotations
 
-from zcu_tools.analysis.fluxdep.search import ParamBounds
 import os
 from collections.abc import Mapping
 from typing import Literal, overload
 
 import numpy as np
 from zcu_tools.analysis.fluxdep.models import TransitionDict
+from zcu_tools.analysis.fluxdep.search import ParamBounds
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.fluxdep.remote.dto import PointcloudReply, SpectrumListReply

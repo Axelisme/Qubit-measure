@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from zcu_tools.analysis.fluxdep.search import ParamBounds
 from dataclasses import replace
 
 import numpy as np
 import pytest
+from zcu_tools.analysis.fluxdep.search import ParamBounds
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,

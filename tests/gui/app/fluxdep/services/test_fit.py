@@ -257,7 +257,11 @@ def test_headless_publication_keeps_captured_unwrapped_coordinates_and_attributi
     state = FluxDepState()
     state.put_spectrum(_aligned_entry_with_points("source", source_fluxs, source_freqs))
     state.set_fit_params(
-        "synthetic.h5", ParamBounds(*_WIDE), {"transitions": [(0, 1), (0, 2)]}, None, None
+        "synthetic.h5",
+        ParamBounds(*_WIDE),
+        {"transitions": [(0, 1), (0, 2)]},
+        None,
+        None,
     )
     numerical = DatabaseSearchResult(
         params=(3.0, 0.8, 0.5),
@@ -422,7 +426,9 @@ def test_show_keeps_search_capture_frame_after_alignment_and_source_publication(
 
     try:
         ctrl.set_alignment(entry.name, 0.6, -0.4)
-        state.set_fit_params("synthetic", ParamBounds(*_WIDE), {"transitions": [(0, 1)]}, None, None)
+        state.set_fit_params(
+            "synthetic", ParamBounds(*_WIDE), {"transitions": [(0, 1)]}, None, None
+        )
         record()
         assert "Outdated" not in expect_frame([0.2, 0.3], 0.25, [0.0, 0.2], [3.0, 4.0])
         ctrl.set_alignment(entry.name, 0.6 + shift, -0.4 + shift)
