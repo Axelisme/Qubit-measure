@@ -17,7 +17,7 @@ fluxdep's InteractiveMplWidget (which carries a Finish button + controls column)
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from matplotlib.backend_bases import Event, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -100,22 +100,20 @@ class TuneCanvasWidget(QWidget):
                 best = sample
         return best
 
-    def _on_press(self, event: Event) -> None:
-        mouse = cast(MouseEvent, event)
-        if mouse.inaxes is None or mouse.xdata is None:
+    def _on_press(self, event: MouseEvent) -> None:
+        if event.inaxes is None or event.xdata is None:
             return
-        sample = self._pick_sample(float(mouse.xdata))
+        sample = self._pick_sample(float(event.xdata))
         if sample is not None:
             self._dragging = sample
             self._dragged = False
 
-    def _on_move(self, event: Event) -> None:
-        mouse = cast(MouseEvent, event)
-        if self._dragging is None or mouse.inaxes is None or mouse.xdata is None:
+    def _on_move(self, event: MouseEvent) -> None:
+        if self._dragging is None or event.inaxes is None or event.xdata is None:
             return
         self._dragged = True
         if self._on_drag is not None:
-            self._on_drag(self._dragging, float(mouse.xdata))
+            self._on_drag(self._dragging, float(event.xdata))
 
     def _on_release(self, event: Event) -> None:
         del event
