@@ -218,12 +218,21 @@ def test_restore_rejects_annotation_incompatible_branch_or_selection(raw, select
 
 
 def test_untagged_model_union_draft_restores_without_guessing_a_branch() -> None:
-    model = create_model("UnionDraft", __base__=FormModel, branch=(InlineTone | InlineRamp, ...))
-    original = FormInput(model, {"branch": {"frequency": "unfinished"}})
+    class Left(BaseModel):
+        left: float
+
+    class Right(BaseModel):
+        right: float
+
+    class Other(BaseModel):
+        other: float
+
+    model = create_model("UnionDraft", __base__=FormModel, branch=(Left | Right, ...))
+    original = FormInput(model, {"branch": {"left": "unfinished"}})
     restored = FormInput.from_json(model, original.to_json())
     assert restored.same_as(original)
     assert FormState(restored).preview(FormEnv()).errors is not None
-    changed = create_model("UnionDraft", __base__=FormModel, branch=(InlineTone | InlineFlat, ...))
+    changed = create_model("UnionDraft", __base__=FormModel, branch=(Left | Other, ...))
     with pytest.raises(ValueError, match="identity|incompatible"):
         FormInput.from_json(changed, original.to_json())
 
