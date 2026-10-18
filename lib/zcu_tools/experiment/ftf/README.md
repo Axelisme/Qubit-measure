@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-19, source-scoped ADC solver reuse, unified resident/pending budget, startup numeric preparation, closed-form flat mux decimated readout, sampled readout, integrated carrier tiles and shared model facts
+**Last updated:** 2026-10-19, source-scoped noiseless preparation and ADC solver reuse, unified resident/pending budget, startup numeric preparation, closed-form flat mux decimated readout, sampled readout, integrated carrier tiles and shared model facts
 
 `ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -85,9 +85,21 @@ real acquire compile events with an empty scratch `NUMBA_CACHE_DIR`.
 `open_acquire(request)` starts a session for a fixed request. Its
 `sample_round(snapshot, index)` reuses the preceding round's density and
 conditional response when the snapshot is equal. Every round draws a new stream.
-Opening another acquire invalidates the old session and drops its densities and
-assembled channel arrays. Bounded ADC solvers and exact contents remain source-owned.
-The binding serializes calls; direct author callers must do the same.
+Opening another acquire invalidates the old session and drops its references.
+A source-owned 4 MiB LRU retains owned, read-only probabilities, conditional sums,
+content mappings, path diagnostics and integrated sampling plans across acquires.
+Its key reads full current C1 content, layout, mode, reps and readout values,
+including absolute phase origins. Physical settings/snapshot/numeric changes,
+engine replacement, failed preparation and close clear the preparations. It never
+retains request seeds, acquire sequences, noisy IQ or round results. Hits update
+numeric-use identity and repeat report-only accuracy warnings. The public
+`source.preparation_cache` reports cumulative `builds`, `hits` and `resident_bytes`.
+Its `max_bytes` can be adjusted between calls; zero disables residency. The budget
+counts Python containers/keys and whole ndarray allocations, including bases of
+views. Active/caller references are separate from resident budgets. Bounded ADC
+solvers and exact contents also remain source-owned. Every round still captures a
+live snapshot and samples the original stream. The binding serializes calls;
+direct author callers must do the same.
 
 `plan_template` accepts optional matching `FTFModelFacts` for shared physical
 inputs; standalone calls build their own facts. `FTFSource.model_facts` supplies

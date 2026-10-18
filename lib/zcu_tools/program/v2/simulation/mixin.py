@@ -66,9 +66,12 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         self._simulation_raw = None
         self.rounds_buf = []
         self.stats = []
-        self._program().config_all(
-            soc, load_envelopes=options.get("load_envelopes", True), load_mem=False
-        )
+        program = self._program()
+        # QICK compiles before loading envelopes. Simulation consumes the same
+        # compiled buffers directly and has no DAC/weight transport to upload.
+        program.config_all(soc, load_envelopes=False, load_mem=False)
+        if options.get("load_envelopes", True):
+            self._validate_simulation_uploads()
         self.rounds_pbar = make_pbar(
             total=rounds, disable=not options.get("progress", True), leave=False
         )
@@ -82,6 +85,21 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
             return result
         finally:
             self._close_rounds_pbar()
+
+    def _validate_simulation_uploads(self) -> None:
+        program = self._program()
+        for envelopes in program.envelopes:
+            contents = envelopes["envs"]
+            if not isinstance(contents, dict):
+                raise ValueError("compiled generator envelope table is missing")
+            for pulse in contents.values():
+                if pulse["data"].dtype != np.int16:
+                    raise AssertionError("envelope data must have dtype int16")
+        for channel, config in program.ro_chs.items():
+            if program.soccfg["readouts"][channel]["has_weights"]:
+                weights = config["weights"]
+                if weights is not None and weights.dtype != np.int16:
+                    raise AssertionError("readout weights must have dtype int16")
 
     def prepare_round(self) -> None:
         """Prepare simulated integrated rounds without QICK's raw-buffer clearing.
