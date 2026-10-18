@@ -99,20 +99,19 @@ class _Restorer:
         if not self.selection(info, path):
             return current
         members = alternatives(info.annotation)
+        non_null = tuple(member for member in members if member is not type(None))
         models = model_types(info.annotation)
         tag = discriminator(info)
-        if (
-            len(tuple(member for member in members if member is not type(None))) > 1
-            and tag is None
-        ):
+        if len(non_null) > 1 and tag is None:
             # A union without a discriminator is opaque: never infer a branch.
             return copy_json(saved)
         if saved is None and type(None) in members:
             return None
         if models:
             return self.model_value(info, current, saved, path)
-        if get_origin(unwrap(info.annotation)) in (list, tuple):
-            return self.sequence(info, current, saved, path)
+        annotation = non_null[0] if len(non_null) == 1 else info.annotation
+        if get_origin(annotation) in (list, tuple):
+            return self.sequence(annotation, current, saved, path)
         return self.leaf(info, current, saved, path)
 
     def model_value(
@@ -138,9 +137,8 @@ class _Restorer:
         return self.model(child, seed, saved, path)
 
     def sequence(
-        self, info: FieldInfo, current: JsonValue, saved: JsonValue, path: FormPath
+        self, annotation: object, current: JsonValue, saved: JsonValue, path: FormPath
     ) -> JsonValue:
-        annotation = unwrap(info.annotation)
         if not isinstance(saved, list):
             self.dropped.append(path)
             return current
