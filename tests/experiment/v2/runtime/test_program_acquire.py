@@ -97,7 +97,8 @@ def test_run_program_reuses_caller_owned_program_cache():
 
     with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
         for value, step in sched.scan("value", [1.0, 1.0, 2.0]):
-            setattr(step.cfg, "value", value)
+            # tolerated: FlowCfg.value is a dynamic Pydantic extra, not a typed field.
+            setattr(step.cfg, "value", value)  # noqa: B010
             builder = step.prog_builder(
                 "soc",
                 "soccfg",
