@@ -5,7 +5,7 @@ from dataclasses import replace
 from typing import Any
 
 import pytest
-from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, project_execution
+from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParameter, project_execution
 
 from ._recipe_execution_support import definition
 
@@ -25,6 +25,12 @@ def analysis_snapshot() -> dict[str, Any]:
             "invalid": [{"path": ["tones", 1, "err"], "reason": "non_finite"}],
         },
     }
+
+
+@pytest.mark.parametrize("declaration", [SummaryParameter, SummaryEstimate])
+def test_summary_declarations_reject_string_path_carriers(declaration):
+    with pytest.raises(ValueError, match="typed path"):
+        declaration("name", "leaf")
 
 
 def test_summary_looks_up_indexed_and_literal_numeric_name_without_reordering():
