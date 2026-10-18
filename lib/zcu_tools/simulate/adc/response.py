@@ -9,7 +9,12 @@ from scipy.integrate import solve_ivp
 from ._constant import ConstantLine
 from .model import ReadoutModel, RealArray, readonly_array
 from .readout_batch import ConditionalSums, ReadoutBatch
-from .request import ConditionalResponse, ReadoutPulse, SampleGrid
+from .request import (
+    ConditionalResponse,
+    PiecewiseLinearEnvelope,
+    ReadoutPulse,
+    SampleGrid,
+)
 
 
 class ConditionalReadout:
@@ -75,8 +80,13 @@ class ConditionalReadout:
         scattering projections are shared across contents; ill-conditioned
         driven blocks use the full matrix exponential.
         Common-start flat mux traces superpose vacuum-start carrier fields
-        through the same ConstantLine before calibrating once. Other envelopes
-        and different-start multi-pulse contents use the DOP853 moment ODE.
+        through the same ConstantLine before calibrating once. Content-defined
+        PiecewiseLinearEnvelope carriers use affine convolution blocks with a
+        bounded step cache and no dense knot history. Numeric envelope copies
+        share content keys. Opaque callbacks, different-start multi-pulse contents
+        and rejected nonfinite affine blocks use the DOP853 moment ODE.
+        Flat single-carrier contents sharing exact start/end and per-read sample
+        coordinates use tiles of at most 64 carriers, with individual guards.
         ConditionalSums.sums has shape (contents, reads, states, 2), after
         physical delay/demodulation/conjugation/gain/phase/offset. Traces have shape
         (contents, reads, states, samples, 2) only if batch.include_traces;
@@ -101,6 +111,7 @@ class ConditionalReadout:
             if batch.model is self.model
             else ConditionalReadout(batch.model, rtol=self.rtol, atol=self.atol)
         )
+        self._batch_integrated(solver, batch, model_key)
         times_by_content = [
             np.unique(np.concatenate([g.times_ns for g in grids]))
             for grids in batch.grids
@@ -152,12 +163,9 @@ class ConditionalReadout:
                 # Building a sampled exponential for every time only pays off
                 # when enough contents reuse that exact relative grid.
                 projected = grid_uses[relative_key] >= len(times)
-                if flat_mux:
-                    outgoing = solver._mux_fields(pulses, times)
-                else:
-                    outgoing, _ = solver._fields(
-                        pulses, times, constant=constant, projected=projected
-                    )
+                outgoing = solver._content_fields(
+                    pulses, times, flat_mux, constant, projected
+                )
                 traces = tuple(
                     readonly_array(
                         solver._calibrate(
@@ -178,6 +186,89 @@ class ConditionalReadout:
             else None
         )
         return ConditionalSums(sums, counts, dense)
+
+    def _content_fields(self, pulses, times, flat_mux, constant, projected):
+        """Choose known affine/common-start superposition or the general field solve."""
+        sampled = (
+            any(isinstance(p.envelope, PiecewiseLinearEnvelope) for p in pulses)
+            and all(
+                p.envelope is None or isinstance(p.envelope, PiecewiseLinearEnvelope)
+                for p in pulses
+            )
+            and all(p.start_ns == pulses[0].start_ns for p in pulses)
+        )
+        if sampled:
+            return self._sampled_fields(pulses, times)
+        if flat_mux:
+            return self._mux_fields(pulses, times)
+        return self._fields(pulses, times, constant=constant, projected=projected)[0]
+
+    def _batch_integrated(self, solver, batch: ReadoutBatch, model_key):
+        """Populate only cache misses sharing exact physical timing in small tiles."""
+        if batch.include_traces:
+            return
+        groups: dict[tuple[object, ...], list[int]] = {}
+        keys = []
+        for index, (pulses, grids) in enumerate(
+            zip(batch.pulses, batch.grids, strict=True)
+        ):
+            key = (model_key, _pulse_key(pulses), _grid_key(grids))
+            keys.append(key)
+            if (
+                key in self._sums
+                or key in self._responses
+                or len(pulses) != 1
+                or pulses[0].envelope is not None
+            ):
+                continue
+            pulse = pulses[0]
+            timing = (
+                pulse.start_ns,
+                pulse.end_ns,
+                tuple(g.times_ns.tobytes() for g in grids),
+            )
+            groups.setdefault(timing, []).append(index)
+        for indices in groups.values():
+            if len(indices) < 2:
+                continue
+            for left in range(0, len(indices), 64):
+                tile = indices[left : left + 64]
+                results = solver._constant_line.integrated_batch_sums(
+                    batch.model,
+                    tuple(batch.pulses[i][0] for i in tile),
+                    tuple(batch.grids[i] for i in tile),
+                )
+                for index, result in zip(tile, results, strict=True):
+                    if result is not None:
+                        sums, populations = result
+                        solver._validate_solution(populations[:, None, :])
+                        self._sums[keys[index]] = (batch.pulses[index], sums)
+
+    def _sampled_fields(self, pulses: tuple[ReadoutPulse, ...], times: RealArray):
+        """Superpose known common-start envelopes, retaining ODE on guard failure."""
+        outgoing = np.zeros(
+            (len(times), len(self.model.state_labels)), dtype=np.complex128
+        )
+        delay = self.model.receiver.time_of_flight_ns
+        for pulse in pulses:
+            if pulse.envelope is None:
+                part, _ = self._fields((pulse,), times, constant=True, projected=True)
+            else:
+                omega = (
+                    2
+                    * np.pi
+                    * (pulse.frequency_ghz - self.model.reference_frequency_ghz)
+                )
+                solution = self._constant_line.sampled_trajectory(
+                    pulse, times - delay, omega
+                )
+                if solution is None:
+                    return self._fields(pulses, times, constant=False)[0]
+                part, state = solution
+                self._validate_solution(state)
+                part *= np.exp(2j * np.pi * self.model.reference_frequency_ghz * delay)
+            outgoing += part
+        return outgoing
 
     def _mux_fields(
         self, pulses: tuple[ReadoutPulse, ...], times: RealArray
@@ -291,7 +382,16 @@ class ConditionalReadout:
             | {
                 t
                 for p in pulses
-                for t in (p.start_ns, p.end_ns, *p.breakpoints_ns)
+                for t in (
+                    p.start_ns,
+                    p.end_ns,
+                    *p.breakpoints_ns,
+                    *(
+                        p.start_ns + p.envelope.knots_ns
+                        if isinstance(p.envelope, PiecewiseLinearEnvelope)
+                        else ()
+                    ),
+                )
                 if start < t < end
             }
         )
@@ -484,7 +584,9 @@ def _pulse_key(pulses: tuple[ReadoutPulse, ...]) -> tuple[object, ...]:
             p.amplitude,
             p.frequency_ghz,
             p.phase_rad,
-            id(p.envelope),
+            p.envelope.content_key
+            if isinstance(p.envelope, PiecewiseLinearEnvelope)
+            else id(p.envelope),
             p.breakpoints_ns,
         )
         for p in pulses

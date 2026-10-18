@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-18, carrier-wise mux traces and discrete sums
+**Last updated:** 2026-10-18, sampled-envelope propagation and tiled integrated sums
 
 ADC consumes explicitly ordered classical populations, not densities. The
 probability tolerance is `POPULATION_TOLERANCE = 1e-6`. This is 1000 times below
@@ -60,8 +60,25 @@ Flat common-start trace/decimated contents also superpose vacuum-start carrier
 fields through the same `ConstantLine`. Homogeneous propagators and sampled
 scattering projections are shared across carriers, with the existing full block
 exponential fallback for ill-conditioned coupling. Calibration adds receiver
-offset once after field superposition. Shaped and different-start multi-pulse
-contents retain the general field ODE. Single-pulse numeric paths are unchanged.
+offset once after field superposition. Different-start multi-pulse contents and opaque envelope callbacks retain the
+field ODE. `PiecewiseLinearEnvelope(knots_ns, values)` owns read-only copies of
+finite complex values and increasing pulse-local ns starting at zero. It linearly
+interpolates and holds the final value through pulse end. Its lossless content
+key allows independently constructed copies to reuse responses. Common-start
+contents containing these envelopes superpose carrier-frame affine-input
+solutions. An augmented exponential supplies population/moment propagators and
+constant/linear forcing convolutions, including singular/defective generators.
+The workspace retains only the current knot state, ADC outputs, and at most 128
+step blocks per carrier. Nonfinite blocks retain the ODE fallback. Flat carriers
+in mixed sampled/flat contents still use ConstantLine. Calibration occurs once
+after superposition. The public single-grid `response` remains an ODE reference.
+
+Integrated flat single-carrier contents sharing exact start/end and per-read
+time coordinates use tiles of at most 64 carriers. Amplitude, carrier phase and
+demodulation may differ. Uniform-grid validation and population evolution are
+shared; separation, cancellation and residual guards remain per carrier. Rejected
+contents retain their scalar sum/field fallback. No content-by-sample dense
+moment tensor is constructed.
 Integrated single flat pulses also use the guarded direct discrete sums. The constant moment solution
 comes from `(M+iω)X−XQ=B`. In the eigenbases of M and Q, its coefficients are
 `Y_ab=(Um⁻¹ B Uq)_ab/(μ_a+iω−λ_b)`. Each demodulated exponential sums to
@@ -82,7 +99,7 @@ contents and batches. Trace requests retain a separate field cache.
 
 Unsupported direct sums fall back individually, including nonuniform grids
 and defective generators. Single-pulse trace requests retain their original
-field route. Shaped contents retain the ODE. Flat fields share frequency-independent Schur bases and sampled output
+field route. Opaque callbacks retain the ODE. Flat fields share frequency-independent Schur bases and sampled output
 projections when enough contents reuse the same relative grid to amortize their
 construction. These grids evaluate scattered fields directly without advancing
 a dense moment tensor at every sample. Other grids retain step propagation with

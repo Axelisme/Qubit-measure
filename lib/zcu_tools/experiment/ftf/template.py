@@ -1,7 +1,6 @@
 """Array QICK-to-engine conversion and distinct DC readout contents."""
 
 from dataclasses import dataclass, replace
-from functools import partial
 
 import numpy as np
 from numpy.typing import NDArray
@@ -13,7 +12,13 @@ from zcu_tools.core.simulation import (
     TimelineTemplate,
 )
 from zcu_tools.resources.ftf import FTFSettings
-from zcu_tools.simulate.adc import ReadoutBatch, ReadoutPulse, Receiver, SampleGrid
+from zcu_tools.simulate.adc import (
+    PiecewiseLinearEnvelope,
+    ReadoutBatch,
+    ReadoutPulse,
+    Receiver,
+    SampleGrid,
+)
 from zcu_tools.simulate.evolution import (
     DriveTrack,
     EnvelopeSpec,
@@ -210,7 +215,7 @@ def _readout_pulse(
         if np.all(envelope.samples == envelope.samples[0]):
             amplitude *= envelope.samples[0]
         else:
-            callback = partial(_envelope_value, envelope)
+            callback = PiecewiseLinearEnvelope(envelope.sample_ns, envelope.samples)
             corners = tuple(
                 start * 1000 + t for t in envelope.sample_ns if 0 < t < duration * 1000
             )
@@ -248,10 +253,6 @@ def _local_readout_pulses(
             local_pulses.append(pulse)
         local_contents.append(tuple(local_pulses))
     return tuple(local_contents)
-
-
-def _envelope_value(envelope: EnvelopeSpec, local_ns: float) -> complex:
-    return complex(envelope.values(np.array(local_ns)))
 
 
 def plan_template(

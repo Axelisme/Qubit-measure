@@ -121,6 +121,152 @@ class IntegratedLine:
         populations = (self._uq * np.exp(self._lq * elapsed)) @ self._iq
         return np.stack(results), np.asarray(populations, dtype=np.complex128)
 
+    def batch_sums(
+        self,
+        model: ReadoutModel,
+        pulses: tuple[ReadoutPulse, ...],
+        grids: tuple[tuple[SampleGrid, ...], ...],
+    ) -> list[tuple[RealArray, ComplexArray] | None]:
+        """Sum a tile sharing exact start/end and per-read time coordinates.
+
+        Carrier, amplitude, phase and demodulation may vary. Return None for
+        each rejected content, retaining the scalar spectral/field fallback.
+        Caller limits the tile to 64 contents. Guards are evaluated per carrier;
+        population evolution and uniform-grid checks are shared, not relaxed.
+        """
+        results: list[tuple[RealArray, ComplexArray] | None] = [None] * len(pulses)
+        if not self._valid:
+            return results
+        omega = (
+            2
+            * np.pi
+            * (
+                np.array([p.frequency_ghz for p in pulses])
+                - model.reference_frequency_ghz
+            )
+        )
+        gap = (
+            self._lm[None, :, None]
+            + 1j * omega[:, None, None]
+            - self._lq[None, None, :]
+        )
+        separated = np.min(abs(gap), axis=(1, 2)) >= 1e-10
+        # Rejected gaps never enter a division or contaminate other contents.
+        indices = np.flatnonzero(separated)
+        if not len(indices):
+            return results
+        y = self._drive[None, :, :] / gap[indices]
+        x = (self._um[None, :, :] @ y) @ self._iq
+        residual = (
+            (
+                self._m[None, :, :]
+                + 1j * omega[indices, None, None] * np.eye(len(self._m))
+            )
+            @ x
+            - x @ self._q
+            - self._b
+        )
+        accepted = (
+            np.isfinite(x).all(axis=(1, 2))
+            & (np.finfo(float).eps * np.linalg.norm(x, np.inf, axis=(1, 2)) <= 1e-13)
+            & (np.linalg.norm(residual, np.inf, axis=(1, 2)) <= 1e-13)
+        )
+        indices, y = indices[accepted], y[accepted]
+        if not len(indices):
+            return results
+        output_x = np.einsum("m,fmn->fn", self._output, y)
+        reads = []
+        for read in range(len(grids[0])):
+            selected_grids = tuple(grids[i][read] for i in indices)
+            value = self._batch_grid_sum(
+                model, pulses[0], selected_grids, omega[indices], y, output_x
+            )
+            if value is None:
+                return results
+            reads.append(value)
+        values = np.stack(reads, axis=1)
+        amplitude = np.array([p.amplitude * np.exp(1j * p.phase_rad) for p in pulses])[
+            indices
+        ]
+        values *= amplitude[:, None, None]
+        receiver = model.receiver
+        values *= np.exp(
+            2j * np.pi * model.reference_frequency_ghz * receiver.time_of_flight_ns
+        )
+        calibrated = np.conj(values) * receiver.gain * np.exp(1j * receiver.phase_rad)
+        iq = np.stack((calibrated.real, calibrated.imag), axis=-1)
+        counts = np.array([len(g.times_ns) for g in grids[0]])
+        iq += counts[None, :, None, None] * receiver.offset
+        elapsed = max(
+            0.0,
+            max(float(g.times_ns[-1]) for g in grids[0])
+            - receiver.time_of_flight_ns
+            - pulses[0].start_ns,
+        )
+        populations = np.asarray(
+            (self._uq * np.exp(self._lq * elapsed)) @ self._iq, dtype=np.complex128
+        )
+        for row, index in enumerate(indices):
+            results[index] = (iq[row], populations)
+        return results
+
+    def _batch_grid_sum(self, model, pulse, grids, omega, y, output_x):
+        times = grids[0].times_ns
+        step = (
+            float((times[-1] - times[0]) / (len(times) - 1)) if len(times) > 1 else 1.0
+        )
+        tolerance = 4 * abs(np.spacing(np.max(abs(times)))) + 8 * np.finfo(
+            float
+        ).eps * abs(times[-1] - times[0])
+        if np.any(abs(times - (times[0] + np.arange(len(times)) * step)) > tolerance):
+            return None
+        delay = model.receiver.time_of_flight_ns
+        elapsed = times - delay - pulse.start_ns
+        duration = pulse.end_ns - pulse.start_ns
+        nu = (
+            2
+            * np.pi
+            * (
+                np.array([g.demodulation_frequency_ghz for g in grids])
+                - model.reference_frequency_ghz
+            )
+        )
+        result = np.zeros((len(omega), len(self._q)), dtype=np.complex128)
+        active = elapsed[(elapsed >= 0) & (elapsed < duration)]
+        if len(active):
+            result += _geometric(
+                1j * (nu - omega)[:, None], float(active[0]), step, len(active)
+            )
+
+        def scatter(ts):
+            gm = _geometric(
+                self._lm[None, :] + 1j * nu[:, None], float(ts[0]), step, len(ts)
+            )
+            gq = _geometric(
+                self._lq[None, :] + 1j * (nu - omega)[:, None],
+                float(ts[0]),
+                step,
+                len(ts),
+            )
+            return (
+                np.einsum("fm,fmn->fn", self._output[None, :] * gm, y) - output_x * gq
+            ) @ self._iq
+
+        causal = elapsed[elapsed >= 0]
+        if len(causal):
+            result -= scatter(causal)
+        after = elapsed[elapsed > duration] - duration
+        if len(after):
+            ep = (self._uq * np.exp(self._lq * duration)) @ self._iq
+            result += np.exp(1j * (nu - omega) * duration)[:, None] * (
+                scatter(after) @ ep
+            )
+        phase = np.exp(
+            1j * nu * (delay + pulse.start_ns)
+            - 1j * np.array([g.phase_rad for g in grids])
+        )
+        return result * phase[:, None]
+
     def _scattered_sum(
         self,
         times: RealArray,
