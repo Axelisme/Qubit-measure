@@ -57,8 +57,9 @@ def test_indexed_apply_returns_directed_errors_without_changing_native_or_draft(
 
     @workflow("indexed", plan=Plan, tunables=model, init=rig.init)
     def indexed(
-        _env: WorkflowEnv[int], _plan: Plan, _tun: FormModel, _state: State
+        env: WorkflowEnv[int], plan: Plan, tun: FormModel, state: State
     ) -> Step[State, int]:
+        del env, plan, tun, state
         yield from ()
         return Done()
 
