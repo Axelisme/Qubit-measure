@@ -146,6 +146,8 @@ def _analyze_service(
     runner = OperationRunner(
         MagicMock(), handles, ProgressService(DirectProgressTransport()), bg, bus
     )
+    # tolerated(cast): The minimal fake returns _Draft, not the port's WritebackDraft.
+    # Its create_draft also takes list items rather than the port's Iterable.
     return AnalyzeService(state, runner, bus, cast(Any, writeback), handles), bg
 
 
