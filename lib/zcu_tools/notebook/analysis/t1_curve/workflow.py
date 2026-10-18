@@ -5,7 +5,7 @@ import warnings
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Literal, cast
+from typing import Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -435,8 +435,8 @@ def calibrate_t1_flux(
     t1_mask = np.isfinite(t1_values)
     freq_values = _float_column(samples_df, "freq_mhz")
     freq_mask = np.isfinite(freq_values)
-    t1_df = cast(pd.DataFrame, samples_df.loc[t1_mask].copy())
-    freq_rows = cast(pd.DataFrame, samples_df.loc[freq_mask].copy())
+    t1_df = samples_df.loc[t1_mask].copy()
+    freq_rows = samples_df.loc[freq_mask].copy()
     source_counts = {
         source: sum(1 for item in resolution.sources if item == source)
         for source in ("explicit", "row-frame", "fallback-frame")
@@ -1779,7 +1779,7 @@ def _validate_required_columns(samples_df: pd.DataFrame) -> None:
 def _float_column(frame: pd.DataFrame, column: str) -> NDArray[np.float64]:
     if column not in frame.columns:
         return np.full(len(frame), np.nan, dtype=np.float64)
-    values = pd.to_numeric(cast(pd.Series, frame[column]), errors="coerce")
+    values = pd.to_numeric(frame[column], errors="coerce")
     return np.asarray(values, dtype=np.float64)
 
 
