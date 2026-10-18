@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-18, WorkPlan and cache ownership
+**Last updated:** 2026-10-18, joint-basis multi-tone RWA
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -60,11 +60,11 @@ tries the next candidate in the following graph.
 | Other single constant tone | `dyson` → `floquet_period` → `t6`. Dyson checks perturbative ratios and an analytic B2 bound, except that certified no-drive prefixes need no B2 check. Source and shared-prefix densities supply known inputs; other later rows use an arbitrary-input bound. |
 | One shaped tone | Try `shaped_sambe` on every eligible row, without a reuse threshold. Remaining rows try `gate_cache`, `period_table` and `dop853` in acquire-wide amortized-cost order. |
 | Two constant tones | Compare acquire-wide DOP853 and Floquet costs before either guard. Try the cheaper family first, then the other if rejected. |
-| Shaped two-tone or three-or-more-tone row | `dop853`, summing all drives. |
+| Shaped two-tone or three-or-more-tone row | `multitone_rwa` → `dop853`. RWA admits only fixed-flux, separated weak carriers with smooth real envelopes and at least one sampled envelope. Other rows retain the full-drive fallback. |
 
 `t4` and `t6` are terminal in their domains. They must accept every dispatched
 no-tone or single constant-tone row respectively. They have no DOP853 fallback.
-The internal [registry](kernels/__init__.py) contains ten families. T7 is the
+The internal [registry](kernels/__init__.py) contains eleven families. T7 is the
 single-tone `dyson` family; the two-tone `floquet` family has its own modal
 second-order Dyson implementation.
 
@@ -79,6 +79,7 @@ application and certificates that require their intermediate data.
 | `gate_cache` | Dispatch sends a key-aligned builder mask. Positive durations up to 30 ns first try six phase nodes with two independent probes; failed convergence uses sixteen nodes. Other keys directly use sixteen nodes. Both builders produce four closed-system subsegments with secular Strang dissipation and the same phase-Fourier representation. |
 | `period_table` and `shaped_sambe` | Ordinary period tables integrate frozen-envelope Hilbert periods; shaped Sambe uses finite-Hilbert-Fourier subperiods for real envelopes. Each family owns its guards and build. They share period playback and direct fractional tails. |
 | `floquet` | The guard builds a Stark frame and returns row admissions. Passing k=0 omission/convergence bounds selects modal second-order Dyson when probe limits pass, otherwise periodic k=0 propagation. After k=0 omission rejection, a passing calibrated finite-Fourier certificate selects retained-sideband integration. Dispatch merges these admissions into one family plan. Apply does not repeat admission or construct sparse equations. |
+| `multitone_rwa` | Revision `joint-rwa-v1` retains joint-basis Fourier edges with `abs(Ei-Ej±f) < 0.05 GHz`, sums every tone, and integrates in a row-local interaction picture with a 4 ns adaptive ceiling. It restores Schrödinger coordinates at every endpoint. It keeps joint rates, dephasing and state ordering. This calibrated approximation does not certify exact RB fidelity. |
 | `dop853` and `flux_dop853` | Dispatch resolves complete chronological timeline routing, then assigns chain IDs to adjacent touching rows of the same direct family. Ordinary DOP853 uses the interaction picture only for independent, single-tone, nonzero-gain rows. Chains and other ordinary rows use the lab frame. Flux DOP853 has its own chain plan. |
 
 The shaped and two-tone cost estimates are fixed before numerical guards.
@@ -87,6 +88,39 @@ worker width, chunking and apply-call composition do not change these choices.
 Cost coefficients and numerical thresholds live in
 [_shaped_dispatch.py](_shaped_dispatch.py),
 [_two_tone_dispatch.py](_two_tone_dispatch.py) and the family modules.
+
+Multi-tone RWA admission is explicit in
+[kernels/multitone_rwa.py](kernels/multitone_rwa.py). Every active carrier has
+`abs(f) >= 0.05 GHz`, and pairwise carrier magnitudes differ by at least
+0.1 GHz. The sum over tones of
+`peak(abs(envelope))*abs(gain)*(norm(X,2)+norm(Y,2))/abs(f)` is at most 0.25.
+Envelopes are real. Their piecewise-linear slopes divided by peak magnitude
+are at most 0.025/ns. Differences between adjacent slopes divided by their
+midpoint spacing and peak magnitude are at most 0.003/ns². Zero envelopes and
+constant companion envelopes pass the smoothness check. At least one envelope
+must be sampled. Continuous flux must be constant over the complete row.
+Budgets below 1e-3 decline this approximation. Admission also requires
+`2*pi*duration*sum((peak*gain*norm(V_ret,2))**2/abs(f)) <= 0.06 rad`, where
+`V_ret = (X-iY)/2` after the positive-frequency edge mask. This cumulative
+counter-rotating phase proxy accounts for long pulses even at small
+strength/carrier ratios. In the integer 256 ns amplitude sweep, gain 0.4184
+had proxy 0.063 rad and population error above 1e-2. The 0.06 rad limit
+returns those high-gain rows to lab DOP853. This proxy is calibrated, not a
+rigorous Stark-shift bound. Its limit enters the policy identity and keys.
+
+The 50 MHz edge window and 4 ns ceiling come from simultaneous 128–512 ns
+Gaussian gate measurements on a 16-level joint model. The prototype's maximum
+population difference against lab DOP853 was 1.76e-3 through depth 16.
+The calibrated half-flux pair has summed full-operator/carrier ratio 0.217.
+The sampled 128 ns Gaussian with sigma 32 ns has normalized slope 0.0192/ns
+and curvature 0.00231/ns², including DAC quantization. Admission uses 0.25,
+0.025/ns and 0.003/ns² to leave margin around those measured pulses, rather
+than treating arbitrary samples as smooth. The strength and carrier-separation
+limits restrict use to weak, spectrally separated drives. They are admission limits, not rigorous omission-error
+bounds. Stark and Bloch–Siegert shifts can still change Ramsey phase and gate
+fidelity. Full policy revision, budget, level, timing, every active carrier,
+port, gain, phase and envelope content enter RWA prepare keys. Tone phase
+origins retain the ordinary SegmentTable contract.
 
 [DOP853 planning](_dop853_dispatch.py) operates across prepared-payload
 boundaries. The scheduler groups chain members by ID in chronological order;
@@ -113,7 +147,7 @@ additional package integration entry points.
   calls with one evolve owner. `ApplyContext(budget, plan, work_plan)` supplies the finite positive per-segment allowance
   and the family's plan. Floquet and both direct solvers require their own plan;
   a missing plan raises `ValueError`, and a wrong family type raises `TypeError`.
-  Families without plans reject a non-`None` plan with `ValueError`.
+  Families without plans, including multi-tone RWA, reject a non-`None` plan with `ValueError`.
 
 Dispatch returns at most one plan per family and a separate global-row chain
 array. [Scheduling](_schedule.py) keeps the originating plan through preparation
@@ -267,7 +301,7 @@ process-level reference count and the last call restores the original limits;
 external threadpoolctl users must not change them during active evolves.
 `close()` waits for active work, clears the prepare cache and is idempotent.
 
-`SEGMENT_NUMERIC_VERSION` is `segment-engine-v3`. `experiment.ftf` owns private
+`SEGMENT_NUMERIC_VERSION` is `segment-engine-v4`. `experiment.ftf` owns private
 replay and checks backend, model, numerical, RNG and dependency versions before
 recomputing a round. Evolution does not persist densities or offline tables.
 

@@ -471,14 +471,15 @@ class _Classifier:
         two_tone = np.flatnonzero(ordinary & (table.tones == 2) & constant)
         if len(two_tone):
             self.classify_two_tone(two_tone)
-        self.accept(
-            rows[
-                (ordinary & (((table.tones == 2) & ~constant) | (table.tones >= 3)))[
-                    rows
-                ]
-            ],
-            ("dop853",),
-        )
+        multiple = rows[
+            (ordinary & (((table.tones == 2) & ~constant) | (table.tones >= 3)))[rows]
+        ]
+        # A calibrated approximation has its own visible family. Custom
+        # registries can omit this optional fast path, like shaped_sambe.
+        if "multitone_rwa" in self.kernels:
+            self.accept(multiple, ("multitone_rwa", "dop853"))
+        else:
+            self.accept(multiple, ("dop853",))
         return self._result()
 
     def classify_two_tone(self, rows: NDArray[np.int64]) -> None:
