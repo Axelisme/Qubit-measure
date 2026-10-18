@@ -36,6 +36,19 @@ from zcu_tools.resources.context.library import (
 from tests.gui._form_converters import RebuildingForm
 
 
+def test_logical_container_edit_replaces_exact_raw_value_without_merging_defaults():
+    definition = adapter.Form(LogicalCfg, {"real": {"module": {"value": 7}}})
+    env = FormEnv()
+    input = definition.default_input(env)
+    assert hasattr(FormState, "prepare_replace"), "Missing explicit exact replacement"
+    candidate = definition.prepare_logical_edits(
+        input, (adapter.LogicalEdit(("real", "module"), {}),), env
+    )
+    assert candidate.input.data["real"] == {"module": {}}
+    assert input.data["real"] == {"module": {"value": 7}}
+    assert candidate.changed
+
+
 class RealLeaf(ConfigBase):
     value: int = 2
 
