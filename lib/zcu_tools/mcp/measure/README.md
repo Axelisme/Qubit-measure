@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-19，Recipe 與 summary typed paths
+**Last updated:** 2026-10-19，Variable element reporting
 
 # `zcu_tools/mcp/measure/`
 
@@ -101,6 +101,101 @@ Author Run 的 cfg、來源與 completion 由 `recipe.py` 的 opaque handles 擁
 
 Author analysis 綁定原 Run 與同一 Run 的 Primary。它重用 `AnalysisExecution`，在 recipe 的 worker 完成分析、圖像與候選 capture。Recipe-local close 和 session close 都能停止接續。寫回提問只篩選已捕捉的 stable names，不重讀 GUI 或寫入。`recipe_execution.py` 擁有 generator、單一 recipe admission、一次性取消、captured question 與 typed snapshot。它以同一 worker 完成 author handles；analysis 共用 driver 的本地 condition 交付進度。Session 與 tool table 使用必填的同一份注入 definitions。Guide 與 analysis-only scalar estimates 也讀 owning registry。單一 recipe 包含 interactive 與 awaiting_answer；terminal 之後才放行下一個呼叫。
 
+## Variable element reporting
+
+同一個 `RecipeDefinition` 可以處理每次 Reset 後不同長度的完整 list。
+`SummaryElements` 在 Run 前以一次 `tab.read_elements` 取得全部元素及指定 logical leaves。
+`field` 是完整 list 的 canonical path，`parameters` 的 paths 相對於每個元素。
+`source` 是作者明訂的 fallback 標籤，只用於尚未記錄 origin 的葉。
+`tab.set`、`set_fields`、`set_sweep` 或 `retain_source` 記錄的逐葉來源優先。
+缺值、invalid observation 或 owner 拒絕仍會失敗，不會變成 default 值。
+
+以下函式可放進作者的 recipe module，傳入既有 definition。
+它保留 run、inputs 與 adapter，只替換 reporting 宣告。
+Form 必須已有 `FixedElements(("tones",), "name", ("participants",))`。
+依實際 cfg 調整 relative leaves，不宣告另一條 name 來源 path。
+
+```python
+from dataclasses import replace
+
+from zcu_tools.mcp.measure.execution_reply import (
+    SummaryElements, SummaryEstimate, SummaryEstimateRows, SummaryParameter,
+)
+from zcu_tools.mcp.measure.recipe import RecipeDefinition
+
+def with_element_reporting(recipe: RecipeDefinition) -> RecipeDefinition:
+    return replace(
+        recipe,
+        summary_parameters=(SummaryElements(
+            "tones", ("tones",),
+            (SummaryParameter("gain", ("drive", "gain")),
+             SummaryParameter("start", ("sweep", "start"), "MHz")),
+            source="default",
+        ),),
+        summary_estimates=(SummaryEstimateRows(
+            "tones", ("tones",),
+            (SummaryEstimate("freq", ("freq",), ("stderr",), "MHz",
+                             element_key=("element",)),),
+        ),),
+    )
+```
+
+`SummaryEstimateRows` 依 captured native summary 的 row 順序展開，不依完整 Form list 排序。
+作者在自己的 summary producer 明確提供共用 `ElementIdentity`。
+以下函式只包裝作者已算好的事實，不計算估值。
+Framework 不會自動把既有 row 的 `position` 與 `name` 變成 identity。
+
+```python
+from collections.abc import Sequence
+from typing import TypedDict
+
+from zcu_tools.core.element import ElementIdentity
+
+class NativeToneRow(TypedDict):
+    position: int  # Original complete-list index supplied by the lab author.
+    name: str
+    freq: float
+    stderr: float | None
+
+class ReportedToneRow(TypedDict):
+    freq: float
+    stderr: float | None
+    element: ElementIdentity
+
+class ToneSummary(TypedDict):
+    tones: list[ReportedToneRow]
+
+def report_tones(rows: Sequence[NativeToneRow]) -> ToneSummary:
+    return {"tones": [
+        {"freq": row["freq"], "stderr": row["stderr"],
+         "element": ElementIdentity(index=row["position"], name=row["name"])}
+        for row in rows
+    ]}
+```
+
+完整 list 為 Q1、Q2、Q3，participants 為 Q3、Q1 時，actual 包含全部三個元素。
+例如 `actual["tones/2/gain"].element` 是 `{index: 2, name: "Q3"}`。
+若 native rows 依序為 Q3、Q1，estimates 的 `tones/0/freq` 帶 identity 2/Q3，
+`tones/1/freq` 帶 identity 0/Q1。`name/index/leaf` 是輸出 label，不是新的路徑 grammar。
+Estimate label 的 index 是 native row offset，只有 `element.index` 代表完整原始位置。
+
+`element_key` 缺席或指向缺值時，回覆不帶 identity。
+Value path 缺值時不產生 estimate，明確 null 則保留 null。
+Framework 不從 row offset、position/name、value path 或 participants 猜 identity。
+Static `SummaryParameter`、`SummaryEstimate` 可與動態宣告並用。
+Analysis-only 只使用注入 definitions，展開後同一 present value path 的宣告不一致會拒絕。
+
+Run actual、native summary 與作者 identity 都已 detached。
+Summary、wait 與 full 查詢不重讀 GUI。Full 保留 native analysis snapshot，
+不把 native rows 改成 summary estimates。Reporting 不更改 candidates 的 stable target、
+destination 或寫回授權。
+
+離線 synthetic 驗證入口：
+
+```bash
+uv run --directory <lane> --no-sync -- pytest -q -n0 tests/mcp/measure/test_recipe_dynamic_reporting.py
+```
+
 ## 分析、互動與寫回
 
 Recipe 以 `yield from ask(run.propose_writeback())` 提出 completed capture 的寫回候選，交還控制權並等待回答。`answer(recipe, decision)` 的 recipe 是 execution ID，decision 為 accepted 或 skipped；它只回答，不寫入也不授權。普通 `tab.accept(items)` 寫 GUI 當前 draft。摘要的 `question_items`／`question_preview` 是 active question，`writeback.receipts` 則列出實際寫入與失敗前綴；兩者不能互相冒充。Query 只讀 local capture。Session close 喚醒並收束 generator finally。
@@ -116,7 +211,7 @@ Execution 保存同一份投影，recipe、`status(execution)` 與 `wait(executi
 
 Framework 原樣傳遞 native analysis summary 與 invalid 路徑，不特別解讀 fit_quality、不重算品質或設定寫回門檻。有擬合的 summary 附 fit_quality 是實驗定義者的約定，見 zcu_lab README。
 
-`SummaryParameter.field`、`SummaryEstimate.value_key` 與 `error_key` 使用同一 typed tuple，公開 name 只作回報 key。Estimate lookup 沿 native dict 的 str key 與 list 的 int 原始位置讀值，不把數字字串當 index。Missing path 不產生 estimate，present null 與 invalid 原樣保留，error_key=None 表示未宣告 uncertainty。
+`SummaryParameter.field`、`SummaryEstimate.value_key` 與 `error_key` 使用同一 typed tuple，公開 name 只作回報 key。Estimate lookup 沿 native dict 的 str key 與 list 的 int 原始位置讀值，不把數字字串當 index。Missing path 不產生 estimate，present null 與 invalid 原樣保留，error_key=None 表示未宣告 uncertainty。`SummaryEstimate.element_key` 可指向 native summary 中作者提供的 `ElementIdentity`；缺少該 fact 時省略 identity，不從 value_key 或公開 name 推導。
 
 Analysis-only 沒有 recipe 身分。摘要使用注入 definitions 已宣告的 value_key typed path，完全相同的 name/error_key/unit 宣告可合併。Present path 的宣告衝突直接 ValueError，不猜實驗身分，不新增 tab.snapshot 讀取。每個 pane 保留完整原生 summary 與 invalid；scalar estimates 不抽掉 summary 的欄位，framework 不投影 quality。
 
@@ -124,7 +219,7 @@ Analysis-only 沒有 recipe 身分。摘要使用注入 definitions 已宣告的
 
 Recipe、`tab_analyze`、`wait(execution)` 與 `tab_interact(done)` 使用同一 execution 摘要。摘要列出 Run 前捕捉的 resolved 條件與來源、Primary/Post scalar estimates、原生 summary 與 invalid、全部候選及 destination 身分。Run 或分析已送出而 receipt 未確認時保留 unknown，不從缺少 handle 推斷未啟動。`run_id` 取已捕捉 Save report 的原 Run 身分，全部輸出失敗也保留同一 ID。沒有捕捉到 report 時才為 null。各 output 的 status/error 表示保存結果。這與 readonly tab snapshot 的 confirmed run_id 不同，後者在尚無持久輸出成功時仍為 null。Execution ID 仍是 session-local。
 
-Recipe 的 actual 是平面 mapping，key 沿 summary_parameters.name，每項保 value／source／unit。Scalar source=explicit 或 sweep 三個 component 全為 explicit 時省略，mixed sweep 整項保留；全部明填時回 {}。Recipe/helper 把 agent 明填值標 explicit，通用 API 仍接受 custom label。Summary 與 `status(execution, detail="full")` 使用同一份固定 actual。Run 內部只保宣告摘要 facts，不保存 publication、input 或 source_basis 副本。Cfg commands 不使用 ref，actual 與 candidate 也不顯示它。Full 仍保 captured analysis results 與 writeback proposals。查詢不新增 RPC 或授權。Artifact 沿用 producer 的 section、名稱與完整 members，每個 member 保留全部路徑、format、status 與 error。Reserved 不代表已保存。Partial 保留當次成功與失敗輸出；resave 以當次 report 取代選中 artifact 的輸出，不累積跨次成功路徑。
+Recipe 的 actual 是平面 mapping，key 沿 summary_parameters.name，每項保 value／source／unit。逐元素 actual 另保共同 `ElementIdentity` 的 index／name，來自同次 logical read 的 FixedElements 宣告，不另宣告名稱 path。Explicit、default 與 derived 等來源均保留，sweep 保留每個 component 的來源，明填值不從回報省略。Recipe/helper 把 agent 明填值標 explicit，通用 API 仍接受 custom label。Summary 與 `status(execution, detail="full")` 使用同一份固定 actual。Run 內部只保宣告摘要 facts，不保存 publication、input 或 source_basis 副本。Cfg commands 不使用 ref，actual 與 candidate 也不顯示它。Full 仍保 captured analysis results 與 writeback proposals。查詢不新增 RPC 或授權。Artifact 沿用 producer 的 section、名稱與完整 members，每個 member 保留全部路徑、format、status 與 error。Reserved 不代表已保存。Partial 保留當次成功與失敗輸出；resave 以當次 report 取代選中 artifact 的輸出，不累積跨次成功路徑。
 
 當次工具回覆可附記憶體中的 MCP image content，不落地 session 暫存 PNG。之後要看圖，用 `tab.get_figure` 取得 GUI 當下圖像，不保證是先前回覆的圖。`status` 不附圖片，也不重新擷取圖像。
 
@@ -132,7 +227,7 @@ Recipe 的 actual 是平面 mapping，key 沿 summary_parameters.name，每項�
 
 `apply_writeback(tab, items=None)` 按 preview 的穩定 `target_name` 選擇當前候選。省略 items 或傳 null 寫全部，空陣列寫零項。它不看 GUI 勾選，也不回答 recipe。工具先讀 Primary 與既有 Post 的當前 preview，再檢查未知、重複及跨 stage 同名；全部檢查通過後才用當前 session ID 寫入。寫入順序是 Primary 再 Post，首錯停止，不 retry 或 rollback。收據只列 GUI-confirmed completed，並保留 skipped、failed stage、not_started 及失敗 stage 的不確定性。
 
-摘要列出每個候選的 target、proposal 與 current，full 保留勾選旗標。Destination 摘要只列 context/project 身分，native context readiness 保留在 full。Preview 與摘要不授權寫入。Caller 寫入前核對提案與當前目的地，GUI 仍在 dispatch 檢查 holder。候選內容的調整使用 `tab.writeback_*` RPC。Module edits 使用與 tab Form 相同的 path 陣列，回 input／values／errors，只有有效 Spec 可提交。Library 使用 `context.ml_edit`，child key 保持 key，不用 editor handle。`editor.*` 與舊 eval／value_ref wire 已退休，`value.list`／`value.read` 保留。
+摘要列出每個候選的 target、proposal 與 current，full 保留勾選旗標。`WritebackItem.element` 由作者選填同次 Run／Load 的 `ElementIdentity`，draft 建立時複製，remote 與 MCP 只投影，不改 stable target 或目的地。Destination 摘要只列 context/project 身分，native context readiness 保留在 full。Preview 與摘要不授權寫入。Caller 寫入前核對提案與當前目的地，GUI 仍在 dispatch 檢查 holder。候選內容的調整使用 `tab.writeback_*` RPC。Module edits 使用與 tab Form 相同的 path 陣列，回 input／values／errors，只有有效 Spec 可提交。Library 使用 `context.ml_edit`，child key 保持 key，不用 editor handle。`editor.*` 與舊 eval／value_ref wire 已退休，`value.list`／`value.read` 保留。
 
 MCP 以 `context.aliases_set` 整表套用 authored rows，以 `context.set_parameter` 寫目前 point 的具體路徑。兩者直接走 owner，不開 Inspect、不切頁或焦點，也不改既有 Form／Run 的固定 capture。Aliases 在 Inspect 第三頁，`dialog.screenshot` 只拍目前頁，不接受 tab selector。
 

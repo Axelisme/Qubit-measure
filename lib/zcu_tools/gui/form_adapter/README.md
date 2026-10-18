@@ -1,6 +1,6 @@
 # gui/form_adapter — 從 core cfg 生成 Form
 
-**Last updated:** 2026-10-18，宣告 owner 的固定元素政策與同名同型別 raw 繼承
+**Last updated:** 2026-10-19，完整元素 logical observations
 
 本 package 是 GUI 的 Qt-free 前端框架。它把 core cfg 宣告與作者寫的起始樹翻譯成 `gui.form` 的 `FormModel`，再把表單結果轉回驗證過的 core cfg。它供 measure、workflows、library 與 writeback 的表單定義共用。Measure 的註冊、protocol 與分頁 Form resource 使用 `Form`，workflows 的手寫 plan 表單使用 `ModuleInputField`。
 
@@ -41,17 +41,19 @@ Spec Form 的 `template_input(Template(id), catalog, env)` 直接建立範本的
 
 回傳的 `input.model` 可以是 `Form.model` 的專用 subclass，讓不同範本的 required 欄位與 lock 互不影響。用回傳 input 建新 `FormState`。同一範本重算初值用 `input.model.default_input(env)`，換範本則建新 state。原 Form.model、範本目錄與 captured sources 不變。
 
-Module、seed、Display 與 annotation 翻譯放在私有模組 `_modules.py`、`_seeds.py`、`_display.py`、`_types.py`，由 `form.py` 與公開欄位入口 `module_input.py` 組合。
+Module、seed、Display 與 annotation 翻譯放在私有模組 `_modules.py`、`_seeds.py`、`_display.py`、`_types.py`。`_sections.py` 集中遞迴 model 生成、defaults 與 native 值投影；`form.py` 提供公開 Form 操作，`module_input.py` 提供手寫欄位入口。
 
 ## 固定元素宣告
 
 `FixedElements(list_path, name_field, participants_path)` 指定 root-relative typed paths 與元素的 str 名稱欄位。手寫表單繼承 `FixedElementsForm`，以 `fixed_elements` tuple 列出宣告；生成器接受 `Form(..., fixed_elements=(... ,))`。Fresh `default_input` 先呼叫 Core，再檢查宣告與捕捉名稱唯一性。重名錯誤列出名稱及原始 indices。這個共用能力集中名稱與 participants 政策，Core、widgets 和各 host 不再各自維護。
 
+`FixedElements.identify(data, path)` 依同份 input 的完整原始 index 回傳 `ElementIdentity`，不讀 participants。Logical field observation 同時攜帶該 identity，供 Run capture 保留當次名稱；巢狀固定 list 使用最深的宣告。
+
 普通 mutation 比較目前與候選的有序 raw 名稱，增刪、重排或改名以 `FormInputRejected` 原子拒絕。元素的一般 invalid 值仍可保存。Participants 在一般 Pydantic 驗證檢查非空、無重複且名稱存在，錯誤保留欄位與 index，輸入順序不變。未參與元素照常驗證。還原不比新 capture，存檔 list 成為普通 mutation 的邊界；Reset 才建 fresh input。
 
 宣告者另外提供 `Display(element_label=name_field)` 與名稱欄位的 `Display(readonly=True)`。這些是呈現提示，不執行固定政策。名稱若不接受 expression，可用既有 `InputPolicy(expression=False)` 明訂 literal input。
 
-`Form.read_elements(input, path, env)` 以一次 preview 回傳所有原始位置的 authored input、可用 canonical leaf values 與定向錯誤。名稱取自 FixedElements 宣告，普通 model list 則用 description label。未參與元素仍在結果中。Refs 保留欄位值，明確 materialization 使用支援 indexed path 的 `Form.read_module`。Tab resource 提供同名 `read_elements(path)`，不觸發 converter、capture 或 UI focus。
+`Form.read_elements(input, path, env)` 以一次 preview 回傳所有原始位置的 authored input、可用 canonical leaf values 與定向錯誤。名稱取自 FixedElements 宣告，普通 model list 則用 description label。未參與元素仍在結果中。Refs 保留欄位值，明確 materialization 使用支援 indexed path 的 `Form.read_module`。Tab resource 提供同名 `read_elements(path)`，不觸發 converter、capture 或 UI focus。可選的 `fields=(("drive", "gain"), ("sweep", "start"))` 指定元素相對 logical paths。Owner 在同一份 input/env 中回傳每個元素的 `fields` observations，順序與請求相同，並附 FixedElements identity。Refs 仍讀固定 captured Spec，不 materialize。Unknown path 直接拒絕，invalid leaf 保留 value_status 與定向 errors。
 
 ### Native model lists
 

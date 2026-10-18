@@ -312,7 +312,9 @@ class TabFormResource:
             self._notify()
         return candidate.changed
 
-    def read_elements(self, path: FormWritePath) -> ElementsObservation:
+    def read_elements(
+        self, path: FormWritePath, *, fields: tuple[FormWritePath, ...] = ()
+    ) -> ElementsObservation:
         """Return all original elements in one readonly turn using fixed sources.
 
         path is a canonical model-list field. The Form owner returns detached
@@ -320,9 +322,14 @@ class TabFormResource:
         independent of picker/participants. Busy and notification reads are
         allowed; revoked handles raise RESOURCE_GONE. Does not capture, convert,
         lower native cfg, install input, notify or change UI focus.
+        fields requests nonempty relative logical paths, returned per element
+        in request order from this same input and capture. Invalid paths raise
+        FormPathError; unavailable fields retain directed errors and identity.
         """
         self._require_open()
-        return self._form.read_elements(self._state.input, path, self._sources.env)
+        return self._form.read_elements(
+            self._state.input, path, self._sources.env, fields=fields
+        )
 
     def use_inline(self, path: FormWritePath) -> None:
         """Copy one canonical core module from its capture under mutation guards.

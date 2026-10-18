@@ -7,6 +7,8 @@ from pydantic import JsonValue
 
 from zcu_tools.gui.form import FormErrors, FormValue, FormWritePath
 
+from .logical import LogicalFieldObservation
+
 
 @dataclass(frozen=True)
 class ElementObservation:
@@ -20,6 +22,8 @@ class ElementObservation:
     values maps absolute canonical leaf paths
     to available ordinary preview values, not lowered native cfg. References
     remain authored ref fields; use read_module for explicit materialization.
+    fields holds requested relative logical observations in request order, with
+    same-input FixedElements identity; empty when none were requested.
     errors contains directed element/ancestor errors, or None. Invalid leaves
     do not remove other values or elements. No container aliases live state.
     """
@@ -31,6 +35,7 @@ class ElementObservation:
     selections: Mapping[FormWritePath, JsonValue]
     values: Mapping[FormWritePath, FormValue]
     errors: FormErrors | None
+    fields: tuple[LogicalFieldObservation, ...] = ()
 
 
 @dataclass(frozen=True)

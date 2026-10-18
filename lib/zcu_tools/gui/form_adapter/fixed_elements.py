@@ -10,6 +10,7 @@ from typing import ClassVar, Self, get_args, get_origin
 from pydantic import BaseModel, JsonValue, model_validator
 from pydantic.fields import FieldInfo
 
+from zcu_tools.core.element import ElementIdentity
 from zcu_tools.gui.form import (
     FormEnv,
     FormInput,
@@ -109,6 +110,28 @@ class FixedElements:
             item.get(self.name_field) if isinstance(item, dict) else None
             for item in elements
         )
+
+    def identify(
+        self, data: dict[str, JsonValue], path: FormWritePath
+    ) -> ElementIdentity | None:
+        """Read a declared element identity at path from the same input capture.
+
+        path is a root-relative field path through this declaration's list and
+        its original integer index. Descendants share that element identity.
+        Return None for paths outside this list. Missing/nonliteral names and
+        invalid indexes inside the list raise ValueError; never use participants.
+        """
+        prefix = len(self.list_path)
+        if path[:prefix] != self.list_path or len(path) <= prefix:
+            return None
+        index = path[prefix]
+        names = self.names(data)
+        if type(index) is not int or names is None or not 0 <= index < len(names):
+            raise ValueError(f"Invalid fixed element path: {path!r}")
+        name = names[index]
+        if not isinstance(name, str):
+            raise ValueError(f"Missing literal element name at {path!r}")
+        return ElementIdentity(index=index, name=name)
 
     def check_unique_names(self, data: dict[str, JsonValue]) -> None:
         """Reject duplicate capture names, naming the first and repeated indices."""

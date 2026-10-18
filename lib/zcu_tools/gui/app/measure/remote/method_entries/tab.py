@@ -269,6 +269,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             (
                 required_string("tab_id"),
                 required_json("path", "Nonempty typed model-list path"),
+                ParamSpec(
+                    "fields",
+                    JsonType.JSON,
+                    required=False,
+                    default=[],
+                    description="Optional nonempty relative logical paths; each element returns fields in this order from the same owner turn, including FixedElements identity",
+                ),
             ),
             readonly=True,
         ),

@@ -10,6 +10,7 @@ from typing import Literal
 
 from pydantic import TypeAdapter
 
+from zcu_tools.core.element import ElementIdentity
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.remote.form_description import (
     RecipeFieldObservation,
@@ -75,7 +76,8 @@ class RecipeFormField:
     the nearest captured ref identity or None. readonly means a ref ancestor was
     crossed, not declaration-fixed. errors contains relevant logical directed
     failures, including root and affecting ancestors. Reading grants no writes.
-    All containers are detached from the current reply.
+    element is the declaring owner's same-read original index/name, or None
+    outside declared fixed elements. All containers are detached from the reply.
     """
 
     input: YamlValue
@@ -90,6 +92,7 @@ class RecipeFormField:
     selector: RecipeSelectorWire | None
     source: RecipeSourceWire | None
     readonly: bool
+    element: ElementIdentity | None = None
 
 
 @dataclass(frozen=True)
@@ -234,4 +237,5 @@ def read_form_field(
         selector=selector,
         source=observation["source"],
         readonly=observation["readonly"],
+        element=observation.get("element"),
     )
