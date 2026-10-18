@@ -77,8 +77,8 @@ class GateCacheKernel:
     envelope-local offset, frequency, signed amplitude and duration. Absolute
     segment start and carrier theta do not affect preparation. Four closed U
     subsegments retain 16 phase modes each, with half-step secular D on both
-    sides. Short gates first try six nodes checked at two independent phases;
-    failed phase convergence uses the original sixteen-node builder.
+    sides. Dispatch selects which keys first try six nodes checked at two
+    independent phases; failed convergence uses the sixteen-node builder.
     A model-only secular split guard rejects long dissipative gates before
     preparation. Numerical build failures raise RuntimeError; invalid budgets,
     unsupported rows or mismatched representative keys raise ValueError. This
@@ -169,11 +169,17 @@ class GateCacheKernel:
         rows: NDArray[np.int64],
         source: ModelSource,
         budget: float,
+        *,
+        phase_adaptive: NDArray[np.bool_] | None = None,
     ) -> Prepared:
         """Build immutable U Fourier coefficients and compact D from representatives.
 
         rows aligns one representative per key; equal keys give equal payloads.
-        No initial density is accessed. nbytes counts all retained table arrays.
+        phase_adaptive is a key-aligned bool vector selected by dispatch. True
+        tries six phase nodes with two probes, falling back to sixteen nodes
+        on failed convergence. None uses sixteen nodes for every key. A
+        misaligned mask raises ValueError. No duration-based selection occurs
+        here. No density is accessed; nbytes counts all retained table arrays.
         """
         _check_budget(budget)
         if len(keys) != len(rows) or not np.array_equal(
@@ -182,8 +188,14 @@ class GateCacheKernel:
             raise ValueError("gate cache representative rows must match keys")
         if not self.guard(table, rows, source, budget).all():
             raise ValueError("gate cache requires shaped single-tone rows")
+        if phase_adaptive is None:
+            phase_adaptive = np.zeros(len(keys), dtype=bool)
+        if phase_adaptive.shape != (len(keys),) or phase_adaptive.dtype != np.bool_:
+            raise ValueError(
+                "gate phase builder mask must be a key-aligned bool vector"
+            )
         coefficients, populations, coherences = [], [], []
-        for row in rows:
+        for row, adaptive in zip(rows, phase_adaptive, strict=True):
             model = source.model(tuple(int(v) for v in table.level[row]))
             half_step = float(table.duration_ns[row]) / (2 * _SUBSEGMENTS)
             outgoing = model.rates_per_ns.sum(axis=0)
@@ -192,10 +204,8 @@ class GateCacheKernel:
                 -half_step
                 * ((outgoing[:, None] + outgoing[None, :]) / 2 + model.dephasing_per_ns)
             )
-            # Keep zero/long-duration keys on the original builder. Routing and
-            # its split guard are deliberately independent of this optimization.
             coefficient = None
-            if 0 < table.duration_ns[row] <= gate_phase.MAX_DURATION_NS:
+            if adaptive:
                 coefficient = gate_phase.build(model, table, int(row), budget)
             if coefficient is None:
                 phases = np.asarray(
