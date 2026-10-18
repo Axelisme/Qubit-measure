@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-17，完整 sweep 設定與 logical recipe fields
+**Last updated:** 2026-10-18，隔離資料 project 啟動
 
 # `zcu_tools/mcp/measure/`
 
@@ -13,6 +13,17 @@ already-connected early return or `if_missing` finding an existing GUI, fail wit
 `environment_requires_new_gui`. The existing GUI is unchanged. Close it and use
 `launch="new"` to select another environment. Attach without a path is unchanged.
 There is no dynamic simulation tool or initialization RPC.
+
+`connect(launch="new", project_root="/absolute/existing/directory", simulate="...")`
+starts an offline GUI with a separate data root. Omit `project_root` to use the
+repo root. MCP checks only the supplied type and forwards the string unchanged.
+The launcher requires an absolute path to an existing directory before assembling
+the GUI. Entry owners create `result/` and `Database/` when needed. Code, lab
+catalogs, logs and simulation-path resolution keep their existing roots.
+An explicit data root on attach fails with `project_root_requires_new_gui`,
+including repeated connect and `if_missing` finding an existing GUI. No rebind or
+silent ignore occurs. Use `entry.open(name=...)` for a prebuilt entry under that
+root, then explicitly select a point; entry names remain single path segments.
 
 ## 固定工具與 RPC
 
