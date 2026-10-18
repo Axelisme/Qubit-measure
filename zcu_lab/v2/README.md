@@ -1,6 +1,6 @@
 # v2 experiments
 
-**Last updated:** 2026-10-18，FTF conditional spectroscopy 與共用雙線編排
+**Last updated:** 2026-10-18，FTF CZ common-amplitude 校準
 
 ZigZag 的 Run 與離線編譯共用 `build_zigzag_modules`，使用 register loop。
 `reset_phase_cycle` 可在偶數 averaging sweeps 間交替最後 reset qubit pulse 的 0/180°
@@ -48,7 +48,7 @@ zcu_lab/
 
 ## Reading routes
 
-- [FTF bring-up 與 CZ 校準](ftf/guide.md) 說明既有 F1/F2 單 qubit 校準、角色與保存方式。另列已交付的四分支 conditional spectroscopy 與其餘待交付的 two-qubit 校準。
+- [FTF bring-up 與 CZ 校準](ftf/guide.md) 說明既有 F1/F2 單 qubit 校準、角色與保存方式。已提供四分支 conditional spectroscopy 與 [CZ common-amplitude](ftf/cz_amplitude/guide.md)，後者保留 same-shot raw、擬合零相位完整回返週期，並由操作員逐列接受 coupler 的雙 pulse／雙 slot proposals。
 - [Experiment authoring](experiment-authoring.md) 說明核心 records、資料形狀與 run 慣例。
 - [Measure authoring](measure-authoring.md) 說明 cfg defaults、operator guides、writeback 與 reload。
 - [GUI contracts](gui-contracts.md) 說明 concrete adapter hooks 與 capability。

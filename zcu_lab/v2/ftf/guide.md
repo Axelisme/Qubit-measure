@@ -69,7 +69,7 @@ F1 的 tone 是 `$f1` component 在固定 capture 的 `$mux.qubits` 中的位置
 
 改角色後重新 Reset，核對 F1/F2 pulses、兩個 generator、mux readout 與 DC source。Core 使用具名 device 及 native 單位，不把 alias 語法送給 driver。F1/F2 bias 由操作員提供；掃 coupler source 不等於只改 coupler loop flux，也不會自動補償 F1/F2 的偏移。
 
-## 第一批 0b–6 的校準路線，0b／1／2 已提供離線驗證
+## 第一批 0b–6 的校準路線，0b／1／2／4 已提供離線驗證
 
 以下次序以 0a 的單 qubit pulses、readout 與人工記錄的 bias 為起點。各實驗分別 Run、分析、preview 與 Apply，不會自動啟動下一步。
 
@@ -82,7 +82,7 @@ F1 的 tone 是 `$f1` component 在固定 capture 的 `$mux.qubits` 中的位置
 | 2. [Conditional higher-level spectroscopy](conditional_spectroscopy/guide.md) | 四個名目分支做雙線 weak probe，掃共同 frequency，可加 coupler DC 軸，並比較可選雙 Xπ 對比 pulse 的訊號。看四分支頻譜／熱圖。 | 人工從圖選目標 transition 與後續 probe 窗口。不自動把最深峰當 CZ frequency，不替峰命名 bare coupler 能級，也不擬合 EC/EJ/J。 |
 | 3a. Constructive phase | 在 `B(11)` 固定兩線 gain 比例，掃 relative phase × duration。看 Rabi 干涉圖與可辨識的 Rabi rate。 | 選目標 transition 的建設性 phase。有效結果可提出 F2 相對 F1 的 pulse phase 更新；不掃寄生線抵消，也不最佳化 relative gain ratio。 |
 | 3b. Rabi chevron | 固定 relative phase 與兩線 gain，掃 common frequency × duration。看 chevron 與回返曲線。 | 人工選 CZ width 與 frequency 窗口。單一 population 谷值不是高 fidelity gate 的證據。兩線同頻、同 duration、同時間原點，waveforms 由 cfg 明示；cosine 包絡只是起點。 |
-| 4. CZ amplitude | `B(11)` 後播雙線 CZ，再做雙 Xπ 對比與 mux readout。掃共同 gain scale，保持已選 gain 比例、relative phase 與 waveform。 | 看 joint 分類／IQ 回返與可辨識的完整週期。有效 amplitude 結果可提兩線 pulse proposals。回返只是 leakage proxy，不是完整高階態 population 量測。 |
+| 4. [CZ amplitude](cz_amplitude/guide.md) | `B(11)` 後播雙線 CZ，再做雙 Xπ 對比與 mux readout。掃共同 gain scale，保持原 signed gain 比例、relative phase、frequency 與 waveform。 | 用零相位 cosine 擬合 joint 00 的第一正回返週期。實測須從0覆蓋完整週期，否則不提案、不外插。Preview 後逐列接受兩線 pulse 與獨立 slots。回返只是 thermal leakage proxy；看 fit_quality 與大振幅 AC Stark 偏離，不當 gate fidelity。 |
 | 5. Conditional phase／frequency | Spectator 做 I／Xπ，target 做 π/2，接 n 次 CZ 與 X/Y projection。掃共同 frequency 與 n，起點可用 n=1、3、5。 | 看 quadratures、contrast、conditional phase 與奇數 n 交點。X/Y 是獨立 acquisitions，不是同 shot 連續測量。核對 phase wrapping 與 branch 標記；有效 frequency 可提兩線 pulse 更新。 |
 | 6. Local Z | 幅度與頻率選定後，從 `B(00)` 分別量 F1/F2 的 π/2、n 次 CZ、X/Y projection，另一 qubit 不做準備翻轉。掃 n，看兩個 phase slopes。 | 兩個分量都可辨識時才提 local-Z pair。熱態成分仍在數據內，不能把 slope 稱為已純化分支真值，也不能把缺失 correction 填 0。 |
 

@@ -13,14 +13,17 @@ from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import IDENTITY, AxesSpec, Axis, PersistableExperiment, ZSpec
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import ProgramV2Cfg, SweepCfg
 from zcu_tools.program.v2.modules import MuxReadout
 
 from .._drive import DualLineCfg, dual_line_drive
 from .._readout import JointRoles, collect_joint_shots
 from ..joint_readout.core import GECenters, JointReadoutModules
+from .analysis import CZAmplitudeAnalysis, analyze_return
 
 
 class CZAmplitudeCfg(ProgramV2Cfg, ExpCfgModel):
@@ -148,3 +151,21 @@ class CZAmplitudeExp(PersistableExperiment[CZAmplitudeResult, CZAmplitudeCfg]):
             np.arange(ntones, dtype=np.int64),
             buffer.array.reshape(len(scales), config.rounds * cfg.reps, ntones),
         )
+
+    def analyze(
+        self,
+        source: RunRecord[CZAmplitudeCfg, CZAmplitudeResult],
+        options: None,
+        *,
+        plots: Plots,
+    ) -> CZAmplitudeAnalysis:
+        """Fit the saved-source zero-phase P00 first-return model, never current cfg.
+
+        Native cfg/raw validation failures raise ValueError. Incomplete coverage,
+        numerical failure, degeneracy or nonfinite uncertainty instead retain
+        diagnostics with a reason and no calibration scale. Only measured 0 through
+        a full first positive period can supply a scale. Uncertainty is reported
+        using fit_quality, not a new statistical or fidelity acceptance gate.
+        """
+        del options
+        return analyze_return(source, plots=plots)

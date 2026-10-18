@@ -1,5 +1,6 @@
-"""Fixed-capture measure attachment for common-amplitude CZ return scans."""
+"""Fixed-capture CZ amplitude calibration and operator-selected pulse writeback."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
@@ -11,13 +12,18 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
     AnalyzeRequest,
     NoAnalyzeParams,
+    ParameterWriteback,
     RunRequest,
+    WritebackItem,
+    WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from .analysis import CZReturnData, classify_return, plot_return
+from zcu_lab.v2._support.measure.writeback_helpers import module_writeback
+
+from .analysis import CZAmplitudeAnalysis
 from .core import CZAmplitudeCfg, CZAmplitudeExp, CZAmplitudeResult
 from .form import make_form
 
@@ -26,18 +32,35 @@ CZAmplitudeRun: TypeAlias = RunRecord[CZAmplitudeCfg, CZAmplitudeResult]
 
 @dataclass(frozen=True)
 class CZAmplitudeAnalyzeResult:
-    """JSON-safe complete-scale shot counts and joint-return diagnostics."""
+    """JSON-safe projection of saved-source classification and first-cycle fitting."""
 
-    data: CZReturnData
+    analysis: CZAmplitudeAnalysis
 
     def to_summary_dict(self) -> dict[str, object]:
-        """Report incomplete scales without substituting zero probabilities."""
+        """Report finite diagnostics, coverage failures and uncertainty without NaN JSON."""
+        data, fit = self.analysis.data, self.analysis.fit
         return {
-            "analysis_kind": "classification_only",
-            "complete_scales": int(self.data.complete.sum()),
-            "acquired_shots": self.data.acquired_shots.tolist(),
-            "analyzed_shots": self.data.analyzed_shots.tolist(),
-            "interpretation": "Thermal nominal B11; same-shot return is a leakage proxy, not physical gate fidelity. No heralding, radius cuts or confusion inversion.",
+            "scale": fit.scale,
+            "period": fit.period,
+            "period_error": fit.error,
+            "offset": fit.offset,
+            "contrast": fit.contrast,
+            "reason": fit.reason,
+            "fit_quality": fit.fit_quality.to_summary_dict()
+            if fit.fit_quality
+            else None,
+            "complete_scales": int(data.complete.sum()),
+            "acquired_shots": data.acquired_shots.tolist(),
+            "analyzed_shots": data.analyzed_shots.tolist(),
+            "joint_counts": [
+                row.astype(int).tolist() if complete else None
+                for row, complete in zip(data.counts, data.complete, strict=True)
+            ],
+            "joint_probabilities": [
+                row.tolist() if complete else None
+                for row, complete in zip(data.probabilities, data.complete, strict=True)
+            ],
+            "interpretation": "Zero-phase single-frequency model; first positive return requires measured 0 through the full period. Thermal nominal B11; same-shot return is a leakage proxy, not physical gate fidelity. Large-amplitude AC Stark shifts can violate the model. No heralding, radius cuts, confusion inversion or automatic statistical threshold.",
         }
 
 
@@ -46,10 +69,10 @@ class CZAmplitudeAdapter(
         CZAmplitudeCfg, CZAmplitudeRun, CZAmplitudeAnalyzeResult, NoAnalyzeParams
     ]
 ):
-    """Acquisition checkpoint with classification diagnostics, no amplitude estimator.
+    """Acquire full-tone raw, restore native source and propose first-cycle pulses.
 
-    FIT invokes saved-source nearest-center classification and IQ plots only.
-    No fitted scale, calibration proposal or writeback is supplied by this adapter.
+    FIT never applies changes. Four independent module/slot rows go through the
+    host's preview and selected Apply; no cross-file transaction is provided.
     """
 
     exp_cls = CZAmplitudeExp
@@ -74,7 +97,55 @@ class CZAmplitudeAdapter(
     def analyze(
         self, req: AnalyzeRequest[CZAmplitudeRun, NoAnalyzeParams], *, plots: Plots
     ) -> CZAmplitudeAnalyzeResult:
-        """Classify only complete scales using saved cfg, never current Form/library."""
-        answer = classify_return(req.run_result)
-        plot_return(req.run_result, answer, plots=plots)
-        return CZAmplitudeAnalyzeResult(answer)
+        """Use only saved cfg/raw for joint return, fixed-phase fit and named plots."""
+        return CZAmplitudeAnalyzeResult(
+            CZAmplitudeExp().analyze(req.run_result, None, plots=plots)
+        )
+
+    def get_writeback_items(
+        self, req: WritebackRequest[CZAmplitudeRun, CZAmplitudeAnalyzeResult]
+    ) -> Sequence[WritebackItem]:
+        """Propose two ordinary coupler pulses and two separate resolved slot keys.
+
+        Only source pulse gains change, multiplied by the same valid fitted scale.
+        Preserve generator, waveform, frequency, timing, phases and signed ratio.
+        Missing cfg or an invalid fit returns no items. Nonempty proposals require
+        the Run/Load's capture with matching role identities; absent/mismatched
+        capture raises ValueError. Read no current library calibration, perform
+        no hardware or persistent writes, and leave source cfg untouched.
+        """
+        cfg, fit = req.run_result.cfg, req.analyze_result.analysis.fit
+        if cfg is None or fit.scale is None:
+            return []
+        parameters = req.ctx.parameters
+        if parameters is None:
+            raise ValueError("CZ amplitude writeback requires captured parameters")
+        for role, identity in (
+            ("f1", cfg.roles.f1),
+            ("f2", cfg.roles.f2),
+            ("coupler", cfg.roles.coupler),
+            ("mux", cfg.roles.mux),
+        ):
+            if parameters.resolve_path(f"${role}") != identity:
+                raise ValueError(
+                    "CZ amplitude writeback capture must match saved source roles"
+                )
+        items: list[WritebackItem] = []
+        for role, pulse in (("f1", cfg.drive.f1), ("f2", cfg.drive.f2)):
+            target = f"$coupler.pulses.cz_{role}"
+            items.append(
+                module_writeback(
+                    pulse,
+                    target=target,
+                    description=f"CZ {role.upper()} first-cycle amplitude",
+                    field_updates=(("gain", float(pulse.gain) * fit.scale),),
+                )
+            )
+            items.append(
+                ParameterWriteback(
+                    target_name=f"$coupler.module.cz_{role}",
+                    description=f"CZ {role.upper()} pulse slot",
+                    proposed_value=parameters.library_key(target),
+                )
+            )
+        return items

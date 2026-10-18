@@ -11,6 +11,8 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 
+from .fit import CZReturnFit, fit_return
+
 if TYPE_CHECKING:
     from .core import CZAmplitudeCfg, CZAmplitudeResult
 
@@ -95,9 +97,34 @@ def classify_return(
     )
 
 
-def plot_return(
+@dataclass(frozen=True)
+class CZAmplitudeAnalysis:
+    """Saved-source joint/IQ diagnostics and the zero-phase first-cycle fit."""
+
+    data: CZReturnData
+    fit: CZReturnFit
+
+
+def analyze_return(
+    source: RunRecord[CZAmplitudeCfg, CZAmplitudeResult], *, plots: Plots
+) -> CZAmplitudeAnalysis:
+    """Classify complete scales and fit their contiguous measured prefix only.
+
+    Missing saved cfg or invalid raw raises ValueError. Numeric/coverage failures
+    retain diagnostic data, curve and an explicit fit.reason with no fit.scale.
+    Register joint_return with fit diagnostics and all original-tone I/Q figures.
+    No current Form/library, hardware, saving or writeback is used.
+    """
+    data = classify_return(source)
+    fit = fit_return(source.result.scales, data.probabilities[:, 0], data.complete)
+    _plot_return(source, data, fit, plots=plots)
+    return CZAmplitudeAnalysis(data, fit)
+
+
+def _plot_return(
     source: RunRecord[CZAmplitudeCfg, CZAmplitudeResult],
     answer: CZReturnData,
+    fit: CZReturnFit,
     *,
     plots: Plots,
 ) -> None:
@@ -118,6 +145,19 @@ def plot_return(
         xlabel="Common gain scale",
         ylabel="Same-shot joint probability",
         title="B11 → CZ → Xπ⊗Xπ · thermal nominal preparation · leakage proxy",
+    )
+    if np.any(np.isfinite(fit.curve)):
+        ax.plot(scales, fit.curve, "k--", label="Zero-phase P00 fit")
+    diagnostic = (
+        fit.reason or f"First positive return scale = {fit.scale:.6g} ± {fit.error:.2g}"
+    )
+    ax.text(
+        0.02,
+        0.02,
+        diagnostic,
+        transform=ax.transAxes,
+        fontsize="small",
+        bbox={"facecolor": "white", "alpha": 0.85},
     )
     ax.legend()
     for tone, readout in enumerate(cfg.modules.readout.tones):
