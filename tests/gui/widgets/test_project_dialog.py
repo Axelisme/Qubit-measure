@@ -13,6 +13,17 @@ from zcu_tools.gui.result_scope import write_params_identity
 from zcu_tools.gui.widgets.project_dialog import ProjectDialog
 
 
+def _discovery_controls(widget: ProjectDialog) -> tuple[QComboBox, QPushButton]:
+    picker = widget.findChild(QComboBox)
+    assert picker is not None
+    refresh = next(
+        button
+        for button in widget.findChildren(QPushButton)
+        if button.toolTip() == "Refresh result scopes"
+    )
+    return picker, refresh
+
+
 @pytest.mark.parametrize("error_type", [OSError, RuntimeError])
 @pytest.mark.parametrize("named", [True, False], ids=["named", "unnamed"])
 def test_discovery_failures_keep_tracebacks_and_recover_without_changing_paths(
@@ -32,8 +43,10 @@ def test_discovery_failures_keep_tracebacks_and_recover_without_changing_paths(
         data_root=str(tmp_path / "custom-database"),
         root_dir=str(tmp_path),
     )
-    initial_error = error_type("initial directory enumeration failed")
-    manual_error = error_type("manual directory enumeration failed")
+    initial_error, manual_error = (
+        error_type("initial directory enumeration failed"),
+        error_type("manual directory enumeration failed"),
+    )
 
     def fail_initial_scan(path: Path, pattern: str) -> Iterator[Path]:
         raise initial_error
@@ -48,13 +61,7 @@ def test_discovery_failures_keep_tracebacks_and_recover_without_changing_paths(
             fault.setattr(Path, "rglob", fail_initial_scan)
             widget = ProjectDialog(project)
         try:
-            picker = widget.findChild(QComboBox)
-            assert picker is not None
-            refresh = next(
-                button
-                for button in widget.findChildren(QPushButton)
-                if button.toolTip() == "Refresh result scopes"
-            )
+            picker, refresh = _discovery_controls(widget)
             fallback = "(new generated scope)" if named else "(no result scopes found)"
             assert picker.count() == 1
             assert picker.currentText() == fallback
