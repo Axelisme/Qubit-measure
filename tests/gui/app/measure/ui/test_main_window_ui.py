@@ -844,6 +844,7 @@ def blocked_writeback_window(
     window = MainWindow(ctrl, templates=lambda: {})
     ctrl.add_view(window)
     window.add_tab_widget(tab_id, "blocked-writeback")
+    window.refresh_context_panel()
     window.show()
     try:
         yield window, tab_id
