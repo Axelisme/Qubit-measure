@@ -5,12 +5,11 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import cast
 
 from .factory import IRLexer, IRParser
 from .instructions import BaseInst, Instruction, MetaInst, RegWriteInst
 from .labels import Label
-from .node import BasicBlockNode, BlockNode, IRNode
+from .node import BasicBlockNode, IRNode
 
 logger = logging.getLogger(__name__)
 
@@ -506,7 +505,7 @@ class IRPipeLine:
         ir = _optimize_tree(ir, self.tree_passes, ctx)
 
         # --- unparse → ChunkList, then strip structural MetaInst ---
-        unparsed = parser.unparse(cast(BlockNode, ir))
+        unparsed = parser.unparse(ir)
         flat_chunks: ChunkList = list(_strip_structural_meta(unparsed))
 
         # --- ChunkList optimization (post-unparse) ---

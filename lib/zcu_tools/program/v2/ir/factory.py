@@ -416,7 +416,7 @@ class IRParser:
             and branch.addr == Register("s15")
         )
 
-    def unparse(self, root: BlockNode) -> list[BasicBlockNode | MetaInst]:
+    def unparse(self, root: IRNode) -> list[BasicBlockNode | MetaInst]:
         """Lower an IR tree to a chunk list with structural MetaInst markers.
 
         This is the single lowering entry point. ``parse(unparse(tree))``
@@ -425,7 +425,7 @@ class IRParser:
         """
         label_names, struct_names = collect_subtree_names(root)
         self.allocated.update(label_names | struct_names)
-        return self._unparse_block_node(root)
+        return self._unparse_node(root)
 
     def _unparse_node(self, node: IRNode) -> list[BasicBlockNode | MetaInst]:
         """Recursively lower a single IRNode to a chunk list (with MetaInst markers)."""
@@ -549,12 +549,6 @@ class IRParser:
         )
         return result_branch
 
-    def _unparse_block_node(self, block: BlockNode) -> list[BasicBlockNode | MetaInst]:
-        result: list[BasicBlockNode | MetaInst] = []
-        for child in block.insts:
-            result.extend(self._unparse_node(child))
-        return result
-
     def _loop_prologue(
         self, node: IRLoop, start: Label, end: Label
     ) -> list[BasicBlockNode]:
@@ -582,7 +576,7 @@ class IRParser:
                     TestInst(op=AluExpr(node.n, AluOp.SUB, Immediate(0)), uf=True),
                     JumpInst(label=LabelRef(end), if_cond="Z"),
                 ]
-        elif isinstance(node.n, int) and node.n <= 0:
+        elif node.n <= 0:
             if needs_big_jump(self.pmem_size):
                 pre += [
                     RegWriteInst(

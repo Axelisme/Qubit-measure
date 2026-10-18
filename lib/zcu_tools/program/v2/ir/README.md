@@ -1,6 +1,6 @@
 # IR architecture guide
 
-**Last updated:** 2026-10-18
+**Last updated:** 2026-10-19
 
 本模塊負責把 QICK ASM V2 程式表示成可分析、可優化、可再降階回 assembler 輸入的 IR。
 
@@ -13,8 +13,8 @@
    - 負責 `list[Instruction] ↔ list[BasicBlockNode | MetaInst]`。
    - `MetaInst` 永遠作為 chunked stream 的獨立元素存在，不屬於任何 `BasicBlockNode`。
 3. `IRParser` ([factory.py](factory.py))
-   - 負責 `list[BasicBlockNode | MetaInst] ↔ BlockNode`。
-   - `unparse()` 是唯一的降階入口：把 IR tree 降階回 chunked stream（含結構 MetaInst），與 `parse()` 形成 round-trip 反函數（`IRDispatch` 例外，它是 pass 才生成的葉節點，不會被 `parse` 重建）。
+   - `parse()` 把 `list[BasicBlockNode | MetaInst]` 建構為 `BlockNode` 根節點。
+   - `unparse(root: IRNode)` 是唯一的降階入口，接受 tree pass 替換後的任意合法 IR 根節點，輸出含結構 MetaInst 的 chunked stream。原有 `BlockNode` tree 與 `parse()` 保持 round-trip（`IRDispatch` 例外，它是 pass 才生成的葉節點，不會被 `parse` 重建）。
 4. [dispatch.py](dispatch.py)
    - 提供 loop / branch 共用的 dispatch-table lowering 原語。
 
