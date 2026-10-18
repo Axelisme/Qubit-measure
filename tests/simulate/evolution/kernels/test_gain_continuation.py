@@ -48,15 +48,17 @@ def scoped(table, source):
     return FloquetPeriodKernel().evolve_scope(table, source)
 
 
-def prepare(kernel, table, source, budget=1e-3):
-    rows = np.arange(len(table.timeline), dtype=np.int64)
+def prepare(kernel, table, source, budget=1e-3, *, rows=None):
+    if rows is None:
+        rows = np.arange(len(table.timeline), dtype=np.int64)
     return kernel.prepare(kernel.prepare_keys(table, rows), table, rows, source, budget)
 
 
-def playback(kernel, prepared, table, source, budget=1e-3):
-    rows = np.arange(len(table.timeline), dtype=np.int64)
+def playback(kernel, prepared, table, source, budget=1e-3, *, rows=None):
+    if rows is None:
+        rows = np.arange(len(table.timeline), dtype=np.int64)
     states = np.repeat(source.initial_density[None], len(rows), axis=0)
-    kernel.apply(prepared, rows, table, rows, states, budget)
+    kernel.apply(prepared, np.arange(len(rows)), table, rows, states, budget)
     return states
 
 
@@ -66,16 +68,24 @@ def test_gain_predictor_is_checked_and_matches_independent_playback(source):
     cache = PrepareCache(0)
     with cache.track_workspace(workspace):
         assert cache.live_bytes == 0
-        prepared = prepare(kernel, table, source)
+        first_rows, last_rows = np.arange(3), np.arange(3, 6)
+        first = prepare(kernel, table, source, rows=first_rows)
         assert cache.live_bytes == workspace.nbytes > 0
+        last = prepare(kernel, table, source, rows=last_rows)
+        assert cache.live_bytes == workspace.nbytes == 0
     assert cache.live_bytes == 0
     assert workspace.attempts >= 1
     assert workspace.hits >= 1
-    assert workspace.nbytes > 0
     independent = prepare(FloquetPeriodKernel(), table, source)
     # Include translated phase, a cross-period tail, and coherent input.
+    actual = np.concatenate(
+        [
+            playback(kernel, first, table, source, rows=first_rows),
+            playback(kernel, last, table, source, rows=last_rows),
+        ]
+    )
     np.testing.assert_allclose(
-        playback(kernel, prepared, table, source),
+        actual,
         playback(FloquetPeriodKernel(), independent, table, source),
         atol=1e-4,
         rtol=0,

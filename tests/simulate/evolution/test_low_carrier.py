@@ -8,7 +8,7 @@ from zcu_tools.simulate.evolution import Engine, EnvelopeSpec, ModelSource
 from zcu_tools.simulate.evolution.kernel import SegmentTable
 from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
 
-from ._engine import batch, run, track
+from ._engine import RecordingKernel, batch, run, track
 from .contract.kernel_suite import KernelCase, reference, synthetic_model
 
 
@@ -60,6 +60,46 @@ def test_low_carrier_strong_tones_match_reference(frequency: float, coherent: bo
     expected = reference(case, 1, reference(case, 0, initial.astype(complex)))
     np.testing.assert_allclose(result.densities[0], expected, atol=1e-2, rtol=0)
     assert result.paths.max_trace_error < 1e-8
+
+
+@pytest.mark.parametrize("workers,chunks", [(1, 3), (2, 1), (2, 3)])
+def test_gain_scan_is_bitwise_invariant_to_workers_and_chunks(workers, chunks):
+    model = synthetic_model(3)
+    model = replace(
+        model,
+        energies_ghz=np.array([0.0, 0.8, 1.6]),
+        rates_per_ns=model.rates_per_ns * 1e-3,
+        dephasing_per_ns=model.dephasing_per_ns * 1e-3,
+    )
+    src = ModelSource(np.ones((3, 3), dtype=np.complex128) / 3, lambda level: model)
+    count = 40
+    pulse = replace(
+        track(count, EnvelopeSpec("constant"), duration=23.7),
+        frequency_ghz=np.full(count, 0.05),
+        amplitude=0.003 + np.arange(count) * 1e-5,
+        phase_rad=np.full(count, 1.73),
+    )
+    timeline = replace(batch(count, duration=23.7), tracks=(pulse,))
+
+    def evolve(worker_count, chunk_count):
+        return run(
+            Engine(
+                worker_count,
+                0,
+                chunks_per_worker=chunk_count,
+                kernels=(
+                    RecordingKernel("dyson", accepts=False),
+                    FloquetPeriodKernel(),
+                ),
+            ),
+            src,
+            (timeline,),
+        )
+
+    reference = evolve(1, 1)
+    actual = evolve(workers, chunks)
+    assert actual.paths.segments_by_kernel == {"floquet_period": count}
+    np.testing.assert_array_equal(actual.densities, reference.densities)
 
 
 def test_many_low_carrier_keys_do_not_all_stay_live():

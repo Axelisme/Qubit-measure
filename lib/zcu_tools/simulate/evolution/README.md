@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves, spectral-family reuse, reuse-independent Sambe admission, calibrated physical-block carrier interpolation and evolve-local period gain continuation
+**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves, spectral-family reuse, reuse-independent Sambe admission, calibrated physical-block carrier interpolation and deterministic evolve-local period gain blocks
 
 ## Segment engine contracts
 
@@ -780,14 +780,30 @@ endpoints use a fractional CF4 step from the preceding prefix, not interpolation
 No density enters preparation or the step selection.
 
 For planned low-carrier groups with multiple gains, the evolve-local workspace
-can replace the fine CF4 grid with a gain predictor. It retains at most four
-recent tables per worker, without serializing numerical builds. Only the same
-model object, port, signed carrier and budget can share history. Carrier
-continuation stays disabled. Two previous tables give linear Lagrange
-extrapolation; three or four give quadratic or cubic extrapolation. The
-predictor operates on interaction-picture uniform prefixes, then restores the
-new key's analytic H0 phase. The candidate retains the new key's Hamiltonian,
-frequency, bath and split rate. Standalone preparation keeps independent builds.
+can replace the fine CF4 grid with a gain predictor. It sorts the complete
+table's unique gains per level, port and signed carrier. Up to twelve fixed
+interleaved trajectories keep strided timeline execution from retaining a
+whole contiguous scan. A group needs sixteen gains per trajectory before
+adding another. Each trajectory splits into blocks of at most 32 gains.
+Neither worker count nor chunking enters this plan.
+
+A block lock serializes construction in its fixed gain order up to the requested
+key. Different blocks can build concurrently. Each block retains at most four
+predecessors for prediction and memoizes unclaimed results. Handoff removes a
+key from the memo. Finishing the block releases its predecessor history.
+An already-delivered key can be requested again; replaying its fixed predecessors
+returns the same table. Each caller holds only one block lock. Prepared tables
+and resulting populations are bitwise invariant to worker count, chunking and
+request order for the same complete table, source and budget.
+
+Only the same model object, port, signed carrier and budget can share history.
+Carrier continuation stays disabled. Two previous tables give linear Lagrange
+extrapolation; three or four give quadratic or cubic extrapolation. The predictor
+operates on interaction-picture uniform prefixes. Identical H0 and uniform grids
+make the analytic H0 phase and its inverse cancel in the weighted sum, so the
+implementation avoids redundant phase exponentials. The candidate retains the
+new key's Hamiltonian, frequency, bath and split rate. Standalone preparation
+keeps independent builds.
 
 The kernel independently constructs the new key's original coarse grid. The
 candidate must have at least the original first fine-grid count and match the
@@ -795,16 +811,20 @@ coarse trajectory at eight phase intervals, including U(T). The maximum
 Frobenius defect must be <= min(1e-4, budget*0.1). Failure reuses the coarse grid
 in the original coarse/fine loop, with its unchanged twelve-refinement limit.
 Grid-count mismatch, repeated gain coordinates or a last gain-gap ratio above
-two skip prediction. Retained history arrays count as live prepared data until
-evolve ends, conservatively including arrays also referenced by active payloads.
-They do not enter the persistent LRU.
+two skip prediction. Retained history and unclaimed memo arrays count as live
+prepared data, conservatively including arrays also referenced by active
+payloads. Memory depends on the fixed table plan and outstanding keys, not on
+per-worker histories. No block data enters the persistent LRU or crosses evolve
+calls. Concurrent evolves use separate workspaces.
 
 This is calibrated trajectory comparison, not a rigorous bound. The eight
 phase probes do not establish an error bound between probes. Continued prefixes
 are not products of unitary exponentials, and their closeness to unitary for
 the Newton polar step remains unproven. Smoothness across nearby gains and
-conditioning of the Lagrange weights also remain assumptions. Nonadjacent
-scheduler order can lower hit rates. Model/drive immutability is assumed.
+conditioning of the Lagrange weights also remain assumptions for the planned
+gain gaps. Scheduler order can change memo occupancy and repeated-key work, but
+cannot change a key's predictor or numerical result. Model/drive immutability
+is assumed.
 
 At higher carriers, preparation keeps tolerance min(1e-10, budget*1e-4) and
 max_step=T/4. The single-threaded nogil DOP853 core builds integration stages and the
