@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Literal, cast
+from typing import Literal
 from unittest.mock import MagicMock
 
 import pytest
@@ -49,6 +49,7 @@ def _make_state(
     run_result: object = object(),
     analyze_result: object = object(),
     load_data: bool = True,
+    adapter: MagicMock | None = None,
 ) -> tuple[State, str]:
     soc = MagicMock() if soc_attached else None
     soccfg = MagicMock() if soc_attached else None
@@ -63,7 +64,8 @@ def _make_state(
         )
     )
     tab_id = "tab-1"
-    adapter = MagicMock()
+    if adapter is None:
+        adapter = MagicMock()
     adapter.experiment_tag = None
     adapter.capabilities = AdapterCapabilities(
         requires_soc=requires_soc, load_data=load_data
@@ -88,7 +90,8 @@ def _make_state(
 
 
 def test_run_inputs_issued_for_active_valid_cfg():
-    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
+    adapter = MagicMock()
+    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, adapter=adapter)
     guard = _make_guard(state)
 
     inputs = guard.capture_run_inputs(tab_id)
@@ -101,7 +104,6 @@ def test_run_inputs_issued_for_active_valid_cfg():
     assert parameters is not None
     assert inputs.request.cfg_context == parameters.library.validation_context()
     assert inputs.adapter is state.get_tab(tab_id).adapter
-    adapter = cast(MagicMock, inputs.adapter)
     adapter.validate_run_request.assert_called_once_with(
         inputs.request, inputs.accepted_cfg.cfg
     )
@@ -127,16 +129,15 @@ def test_run_inputs_freezes_published_expression_and_provenance() -> None:
 
 
 def test_run_inputs_rejects_invalid_expression_without_preflight() -> None:
-    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
+    adapter = MagicMock()
+    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, adapter=adapter)
     cfg = make_form(
         Form(GainCfg, {"gain": Expr("general.ext.missing_gain")}), state=state
     )
     state.get_tab(tab_id).cfg = cfg
     with pytest.raises(CfgPreconditionError):
         _make_guard(state).capture_run_inputs(tab_id)
-    cast(
-        MagicMock, state.get_tab(tab_id).adapter
-    ).validate_run_request.assert_not_called()
+    adapter.validate_run_request.assert_not_called()
 
 
 def test_run_inputs_detaches_reference_shape_and_values() -> None:
@@ -208,8 +209,8 @@ def test_run_inputs_admits_live_devices_without_valid_cached_settings(
 
 
 def test_run_inputs_translates_adapter_preflight_error() -> None:
-    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
-    adapter = cast(MagicMock, state.get_tab(tab_id).adapter)
+    adapter = MagicMock()
+    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, adapter=adapter)
     preflight_error = ValueError("bad preflight")
     adapter.validate_run_request.side_effect = preflight_error
     guard = _make_guard(state)
@@ -241,8 +242,10 @@ def test_check_save_reason_code_no_run_result():
 
 
 def test_run_inputs_rejected_on_invalid_cfg():
-    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, lowering_raises=True)
-    adapter = cast(MagicMock, state.get_tab(tab_id).adapter)
+    adapter = MagicMock()
+    state, tab_id = _make_state(
+        readiness=ContextReadiness.ACTIVE, lowering_raises=True, adapter=adapter
+    )
     guard = _make_guard(state)
 
     with pytest.raises(CfgPreconditionError, match="valid"):
@@ -251,10 +254,13 @@ def test_run_inputs_rejected_on_invalid_cfg():
 
 
 def test_run_inputs_rejected_when_soc_required_but_missing():
+    adapter = MagicMock()
     state, tab_id = _make_state(
-        readiness=ContextReadiness.ACTIVE, soc_attached=False, requires_soc=True
+        readiness=ContextReadiness.ACTIVE,
+        soc_attached=False,
+        requires_soc=True,
+        adapter=adapter,
     )
-    adapter = cast(MagicMock, state.get_tab(tab_id).adapter)
     guard = _make_guard(state)
 
     with pytest.raises(GuardError, match="soc"):
