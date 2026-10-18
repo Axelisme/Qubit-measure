@@ -382,9 +382,13 @@ def admit_rows(
             continue
         envs = table.tone_envelope[row, :count]
         constant = all(table.envelopes[e].kind == "constant" for e in envs)
-        if (constant and count != 2) or not all(
-            _smooth(table, int(e), context) for e in envs
+        # Same-port Stark/probe spectra retain their Floquet/direct route:
+        # small population errors can still shift a narrow resonance peak.
+        if constant and (
+            count != 2 or table.tone_port[row, 0] == table.tone_port[row, 1]
         ):
+            continue
+        if not all(_smooth(table, int(e), context) for e in envs):
             continue
         frequencies = np.abs(table.tone_frequency_ghz[row, :count])
         if np.min(frequencies) < _EDGE_GHZ or np.any(
@@ -475,7 +479,7 @@ class MultitoneRWAKernel:
     """Approximate C5 family, revision joint-rwa-v3; never a DOP853 frame flag.
 
     Admission requires >=2 tones with a sampled envelope, or exactly two
-    constant envelopes, fixed flux,
+    constant envelopes on distinct ports, fixed flux,
     real envelopes with peak-normalized slope <=0.025/ns and curvature
     <=0.003/ns², each |f|>=0.05 GHz, pairwise ||f_i|-|f_j||>=0.1 GHz,
     sum of peak |gain|*(||X||₂+||Y||₂)/|f| <=0.25, and cumulative

@@ -59,7 +59,7 @@ tries the next candidate in the following graph.
 | One constant tone, unshared driven input, duration at most 10 us | `floquet_period` → `dyson` → `t6`. |
 | Other single constant tone | `dyson` → `floquet_period` → `t6`. Dyson checks perturbative ratios and an analytic B2 bound, except that certified no-drive prefixes need no B2 check. Source and shared-prefix densities supply known inputs; other later rows use an arbitrary-input bound. |
 | One shaped tone | Try `shaped_sambe` on every eligible row, without a reuse threshold. Remaining rows try `gate_cache`, `period_table` and `dop853` in acquire-wide amortized-cost order. |
-| Two constant tones | Try `multitone_rwa` first. Rejected rows retain the acquire-wide DOP853/Floquet cost order, cheaper family first. |
+| Two constant tones | Try `multitone_rwa` first for distinct ports. Same-port and rejected rows retain the acquire-wide DOP853/Floquet cost order, cheaper family first. |
 | Shaped two-tone or three-or-more-tone row | `multitone_gate` → `multitone_rwa` → `dop853`. RWA admits only fixed-flux, separated weak carriers with smooth real envelopes and at least one sampled envelope. Other rows retain the full-drive fallback. |
 
 `t4` and `t6` are terminal in their domains. They must accept every dispatched
@@ -110,7 +110,10 @@ Envelopes are real. Their piecewise-linear slopes divided by peak magnitude
 are at most 0.025/ns. Differences between adjacent slopes divided by their
 midpoint spacing and peak magnitude are at most 0.003/ns². Zero envelopes and
 constant companion envelopes pass the smoothness check. Either at least one
-envelope is sampled, or the row has exactly two constant envelopes. Continuous flux must be constant over the complete row.
+envelope is sampled, or the row has exactly two constant envelopes on distinct
+ports. Same-port constant Stark/probe spectra retain Floquet/DOP853 because
+small population errors can still shift a narrow resonance peak. Continuous
+flux must be constant over the complete row.
 Budgets below 1e-3 decline this approximation. Admission also requires
 `2*pi*duration*sum((peak*gain*norm(V_ret,2))**2/abs(f)) <= 0.06 rad`, where
 `V_ret = (X-iY)/2` after the positive-frequency edge mask. This row-local
