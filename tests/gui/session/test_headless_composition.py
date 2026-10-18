@@ -7,20 +7,78 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+from zcu_tools.device import DeviceActivity
+from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
+from zcu_tools.gui.session.ports import ProgressEvent
 
 from tests.gui._lifecycle_waits import manual_until
 
 
-def test_session_core_connects_and_cancels_on_owner_thread(
+class OwnerProgressTransport:
+    """Post progress to the supplied owner, rejecting missing or repeated receivers."""
+
+    def __init__(self, owner: ManualOwnerScheduler) -> None:
+        self._owner = owner
+        self._receiver: Callable[[ProgressEvent], None] | None = None
+
+    def emit(self, event: ProgressEvent) -> None:
+        receiver = self._receiver
+        if receiver is None:
+            raise RuntimeError("progress receiver is not installed")
+        self._owner.post(lambda: receiver(event))
+
+    def set_receiver(self, receiver: Callable[[ProgressEvent], None]) -> None:
+        if self._receiver is not None:
+            raise RuntimeError("progress receiver is already installed")
+        self._receiver = receiver
+
+
+class InMemoryDeviceRegistry:
+    """Store named devices, delegating info/activity reads to the registered devices.
+
+    Missing lookups raise KeyError; drop raises ValueError unless ignore_error is set.
+    """
+
+    def __init__(self) -> None:
+        self._devices: dict[str, Any] = {}
+
+    def register_device(self, name: str, device: Any) -> None:
+        self._devices[name] = device
+
+    def drop_device(self, name: str, *, ignore_error: bool = False) -> None:
+        if name not in self._devices:
+            if ignore_error:
+                return
+            raise ValueError(f"unknown device: {name}")
+        del self._devices[name]
+
+    def get_device(self, name: str) -> Any:
+        return self._devices[name]
+
+    def get_all_devices(self) -> dict[str, Any]:
+        return dict(self._devices)
+
+    def get_info(self, name: str) -> Any:
+        return self.get_device(name).get_info()
+
+    def activity_snapshot(self) -> dict[str, DeviceActivity]:
+        return {name: device.activity for name, device in self._devices.items()}
+
+
+def unexpected_driver_factory(type_name: str, address: str) -> Any:
+    """Reject any real driver request with its type and address in the failure."""
+    raise AssertionError(
+        f"headless smoke unexpectedly requested {type_name} at {address}"
+    )
+
+
+# tolerated: Keep same-session success/cancel assertions and release/quiesce together.
+def test_session_core_connects_and_cancels_on_owner_thread(  # noqa: PLR0915
     request: pytest.FixtureRequest,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from zcu_tools.device import DeviceActivity
     from zcu_tools.device.fake import FakeDevice
     from zcu_tools.gui.event_bus import BaseEventBus, EventOrigin
-    from zcu_tools.gui.session.adapters.manual_owner_scheduler import (
-        ManualOwnerScheduler,
-    )
     from zcu_tools.gui.session.adapters.thread_pool_background import (
         ThreadPoolBackgroundExecutor,
     )
@@ -40,7 +98,6 @@ def test_session_core_connects_and_cancels_on_owner_thread(
         OperationSpec,
         SettleFn,
     )
-    from zcu_tools.gui.session.ports import ProgressEvent
     from zcu_tools.gui.session.services.build import build_session_services
     from zcu_tools.gui.session.services.connection import ConnectRemoteRequest
     from zcu_tools.gui.session.services.progress import ProgressService
@@ -56,52 +113,6 @@ def test_session_core_connects_and_cancels_on_owner_thread(
     owner_id = threading.get_ident()
     owner = ManualOwnerScheduler()
 
-    class OwnerProgressTransport:
-        def __init__(self) -> None:
-            self._receiver: Callable[[ProgressEvent], None] | None = None
-
-        def emit(self, event: ProgressEvent) -> None:
-            receiver = self._receiver
-            if receiver is None:
-                raise RuntimeError("progress receiver is not installed")
-            owner.post(lambda: receiver(event))
-
-        def set_receiver(self, receiver: Callable[[ProgressEvent], None]) -> None:
-            if self._receiver is not None:
-                raise RuntimeError("progress receiver is already installed")
-            self._receiver = receiver
-
-    class InMemoryDeviceRegistry:
-        def __init__(self) -> None:
-            self._devices: dict[str, Any] = {}
-
-        def register_device(self, name: str, device: Any) -> None:
-            self._devices[name] = device
-
-        def drop_device(self, name: str, *, ignore_error: bool = False) -> None:
-            if name not in self._devices:
-                if ignore_error:
-                    return
-                raise ValueError(f"unknown device: {name}")
-            del self._devices[name]
-
-        def get_device(self, name: str) -> Any:
-            return self._devices[name]
-
-        def get_all_devices(self) -> dict[str, Any]:
-            return dict(self._devices)
-
-        def get_info(self, name: str) -> Any:
-            return self.get_device(name).get_info()
-
-        def activity_snapshot(self) -> dict[str, DeviceActivity]:
-            return {name: device.activity for name, device in self._devices.items()}
-
-    def unexpected_driver_factory(type_name: str, address: str) -> Any:
-        raise AssertionError(
-            f"headless smoke unexpectedly requested {type_name} at {address}"
-        )
-
     def pump_until(predicate: Callable[[], bool]) -> None:
         manual_until(owner, predicate)
 
@@ -115,7 +126,7 @@ def test_session_core_connects_and_cancels_on_owner_thread(
     bus = BaseEventBus()
     gate = RunBlocksHardwareGate(run_kind="run", bus=bus)
     handles = OperationHandles()
-    progress = ProgressService(OwnerProgressTransport())
+    progress = ProgressService(OwnerProgressTransport(owner))
     background = ThreadPoolBackgroundExecutor(owner, max_pool_workers=2)
 
     releases: list[threading.Event] = []
