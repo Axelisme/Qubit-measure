@@ -137,7 +137,7 @@ def test_window_memento_restores_separate_selection_and_whole_invalid_draft(swee
         FormInput(
             PersistedDraftForm,
             {
-                "sweep": {"kind": "range", "start": {"expr": "missing + 1"}, "stop": "invalid"},
+                "sweep": {"kind": "linrange", "start": {"expr": "missing + 1"}, "stop": "invalid"},
                 "optional": None,
             },
         )
