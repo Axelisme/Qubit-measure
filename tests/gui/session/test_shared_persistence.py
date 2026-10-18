@@ -103,6 +103,80 @@ def test_incompatible_snapshot_is_backed_up_before_defaults_and_normal_save(
     assert backup.read_bytes() == payload
 
 
+def test_backup_move_failure_aborts_startup_and_preserves_original(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    originator = _Originator()
+    caretaker = _caretaker(originator, tmp_path)
+    payload = b'{"value": "bad"}'
+    caretaker.state_path.write_bytes(payload)
+    original_replace = Path.replace
+
+    def fail_move(path: Path, target: Path) -> Path:
+        if path == caretaker.state_path:
+            raise OSError("backup move denied")
+        return original_replace(path, target)
+
+    monkeypatch.setattr(Path, "replace", fail_move)
+    with pytest.raises(PersistenceError, match="backup move denied") as raised:
+        caretaker.restore_all()
+
+    assert str(caretaker.state_path) in str(raised.value)
+    assert originator.restored is None
+    assert caretaker.state_path.read_bytes() == payload
+
+
+def test_repeated_incompatible_startups_never_overwrite_old_backups(
+    tmp_path: Path,
+) -> None:
+    caretaker = _caretaker(_Originator(), tmp_path)
+    caretaker.state_path.write_bytes(b"first incompatible snapshot")
+    first = caretaker.restore_all()
+    first_backup = next(tmp_path.glob("state.json.incompatible-*"))
+    caretaker.state_path.write_bytes(b"second incompatible snapshot")
+
+    second = caretaker.restore_all()
+
+    assert first_backup.read_bytes() == b"first incompatible snapshot"
+    backups = set(tmp_path.glob("state.json.incompatible-*"))
+    assert len(backups) == 2
+    second_backup = (backups - {first_backup}).pop()
+    assert second_backup.read_bytes() == b"second incompatible snapshot"
+    assert str(first_backup) in str(first.load_error)
+    assert str(second_backup) in str(second.load_error)
+
+
+@pytest.mark.parametrize("stage", ["decode", "restore"])
+def test_unexpected_provider_failures_propagate_without_backup_or_defaults(
+    tmp_path: Path, stage: str
+) -> None:
+    expected = RuntimeError("provider unavailable")
+
+    class ProviderCodec(_Codec):
+        def decode(self, raw: object) -> _State:
+            if stage == "decode":
+                raise expected
+            return super().decode(raw)
+
+    class ProviderOriginator(_Originator):
+        def restore_persisted_state(self, state: _State) -> str:
+            raise expected
+
+    originator = ProviderOriginator()
+    caretaker = SingleFileCaretaker(
+        originator, codec=ProviderCodec(), filename="state.json", cache_dir=tmp_path
+    )
+    payload = b'{"value": 9}'
+    caretaker.state_path.write_bytes(payload)
+
+    with pytest.raises(RuntimeError) as raised:
+        caretaker.restore_all()
+
+    assert raised.value is expected
+    assert originator.restored is None
+    assert caretaker.state_path.read_bytes() == payload
+
+
 def test_missing_file_restores_default_without_error(tmp_path: Path) -> None:
     originator = _Originator(_State(9))
 
