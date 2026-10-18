@@ -34,8 +34,8 @@ class FormCommandReply(TypedDict):
 class FormInputCommandReply(FormCommandReply):
     """target is the replaced model; inputs are participating canonical paths."""
 
-    target: list[str]
-    inputs: list[list[str]]
+    target: list[str | int]
+    inputs: list[list[str | int]]
 
 
 class FormOptionReply(TypedDict):
@@ -50,11 +50,21 @@ class FormOptionReply(TypedDict):
     commands: list[FormCommandReply]
 
 
+class FormElementReply(TypedDict):
+    """One fixed element: original index, captured name and canonical typed path."""
+
+    index: int
+    name: str
+    path: list[str | int]
+
+
 class FormFieldReply(TypedDict):
     """One field's metadata, without descendants or child-name hints.
 
-    path is the full canonical model-field path; name is its final segment.
-    kind is the core control category (model, integer, number, complex, string,
+    path is the full typed field/index path. name is the field name, or a
+    FixedList element's captured name. elements lists original indexes, names
+    and paths for kind="elements", otherwise None.
+    kind is the core control category (model, elements, integer, number, complex, string,
     boolean, sequence, mapping, literal, enum, union or unknown). title is display
     text. description/unit/placeholder are optional explanatory strings.
     decimals is float display precision or null. hidden hides the row, not
@@ -76,7 +86,7 @@ class FormFieldReply(TypedDict):
     changing options or active structure.
     """
 
-    path: list[str]
+    path: list[str | int]
     name: str
     kind: str
     title: str
@@ -99,6 +109,7 @@ class FormFieldReply(TypedDict):
     constraints: FormConstraintsReply
     commands: list[FormInputCommandReply]
     selector: bool
+    elements: list[FormElementReply] | None
 
 
 class FormDescriptionReply(TypedDict):
@@ -110,7 +121,7 @@ class FormDescriptionReply(TypedDict):
     Leaves, disabled nullable models and unmatched selectors have no children.
     """
 
-    path: list[str]
+    path: list[str | int]
     target: FormFieldReply | None
     children: list[FormFieldReply]
 
@@ -121,6 +132,12 @@ def _project_field(field: FormFieldDescription) -> FormFieldReply:
         "path": list(field.path),
         "name": field.name,
         "kind": field.kind,
+        "elements": None
+        if field.elements is None
+        else [
+            {"index": item.index, "name": item.name, "path": list(item.path)}
+            for item in field.elements
+        ],
         "title": field.title,
         "description": field.description,
         "unit": field.unit,

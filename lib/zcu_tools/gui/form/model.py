@@ -34,8 +34,11 @@ _logger = getLogger(__name__)
 
 type FormPath = tuple[str | int, ...]
 """Relative model-field/mapping-key error path; integers are sequence indexes."""
-type FormWritePath = tuple[str, ...]
-"""Model-field leaf path; sequence indexes and mapping-key writes are rejected."""
+type FormWritePath = tuple[str | int, ...]
+"""Model-field path; only a FixedList field may be followed by an element index.
+
+Other sequence indexes and mapping-key writes are rejected.
+"""
 type FormValue = (
     str
     | int
@@ -129,6 +132,34 @@ class InputPolicy:
     """
 
     expression: bool = True
+
+
+@dataclass(frozen=True)
+class FixedList:
+    """Annotated metadata for a list[Model] whose element identities are fixed.
+
+    The captured input names each element with its name_field, a str field of
+    the element model. The names and their order stay fixed for the life of one
+    capture: writes, whole-list replacement and installed inputs may edit
+    element values but cannot add, remove, rename or reorder elements. A
+    duplicate name is rejected. Names must be literal strings. The core knows no domain
+    meaning of a name; editors address an element by its original index.
+    """
+
+    name_field: str
+
+
+@dataclass(frozen=True)
+class Participants:
+    """Annotated metadata for a list[str] naming FixedList elements.
+
+    list_path is the model-field path, from the model holding this field, to
+    the FixedList. Entries must name existing elements, be unique and the list
+    must not be empty. Its order is independent of element order. Participation
+    never filters validation: every element is validated.
+    """
+
+    list_path: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -415,13 +446,17 @@ class FormInput[F: FormModel]:
         Structural selectors require ordinary typed tags, not Expr envelopes.
         Non-JSON/nonfinite data raises ValueError; unknown fields, malformed tags
         and invalid values remain input for result/compatible restoration.
+        A FixedList with two elements of one name raises ValueError naming the
+        original indices.
         """
+        from ._fixed import check_unique_names
         from ._json import copy_object
         from ._structure import check_form_shape
 
         check_form_shape(model)
         self._model = model
         self._data = copy_object(data)
+        check_unique_names(model, self._data)
         self._selections = {
             path: copy_object({"value": value})["value"]
             for path, value in (selections or {}).items()
@@ -538,9 +573,9 @@ class FormState[F: FormModel]:
         selections remain ordinary leaf writes. Partial selector objects apply
         explicitly supplied child edits after conversion. Unknown structures,
         tags or child fields reject the entire batch. Writes use
-        model-field leaf paths. Sequences and typed mappings are whole leaves;
-        replace a mapping to delete, rename or clear its keys. Mapping-key and
-        sequence-index patches raise ValueError. Ordinary model replacement is
+        model-field leaf paths. Sequences other than FixedList and typed
+        mappings are whole leaves; replace a mapping to delete, rename or clear
+        its keys. Other sequence-index and mapping-key patches raise ValueError. Ordinary model replacement is
         rejected. A first child-leaf write into an absent non-nullable nested
         model creates its static defaults object before applying the leaf.
         Nullable model sections accept None or an object to deactivate/activate;
@@ -552,6 +587,9 @@ class FormState[F: FormModel]:
         installing a partial batch.
         Ordinary invalid values/Expr are retained for result to report. Missing
         used library/devices raises field_error naming its consuming path.
+        FixedList elements are edited as ("list", index, field) paths. A write
+        that changes their names, count or order, even by whole-list
+        replacement, raises ValueError and installs nothing.
         Notify subscribers once after a changed batch is installed, not for
         intermediate branches. No Engine update, revision check or I/O occurs.
         """
@@ -575,7 +613,8 @@ class FormState[F: FormModel]:
     def install_input(self, candidate: FormInput[F]) -> None:
         """Install a same-model prepared input, preserving base.
 
-        A different model raises TypeError. Changed content notifies subscribers
+        A different model raises TypeError, and a candidate that changes the
+        FixedList element names, count or order raises ValueError. Changed content notifies subscribers
         once after installation; equal content is a no-op. Hosts guard the whole
         prepare/install turn. This does not repeat validation or source checks.
         """
@@ -586,7 +625,7 @@ class FormState[F: FormModel]:
     def describe(self, path: FormWritePath, env: FormEnv) -> FormDescription:
         """Describe one canonical model-field path and its next layer.
 
-        path is a tuple of field names, () for root. env is the host's fixed
+        path is a tuple of field names and FixedList element indexes, () for root. env is the host's fixed
         capture for choices/options hooks. Return detached named metadata, not
         JSON Schema or evaluated values. Children have full paths and no
         descendants. Each field's can_expand reports structural reachability
@@ -595,8 +634,8 @@ class FormState[F: FormModel]:
         layer without introducing a path alias. Ordinary missing
         models retain declared fields. Disabled nullable models and unmatched
         options expose metadata only, never guessed defaults. Unknown paths,
-        inactive descendants and traversal into whole leaves raise FormPathError
-        with the full requested path. Unsupported declarations and other
+        inactive descendants, invalid or out-of-range FixedList indexes and
+        traversal into whole leaves raise FormPathError with the full requested path. Unsupported declarations and other
         non-path failures keep their original exception types.
         Does not validate, evaluate expressions, call defaults, read sources
         outside declaration hooks, mutate input/base or notify subscribers.
@@ -629,6 +668,9 @@ class FormState[F: FormModel]:
         self.install_input(prepare_command(self.input, path, name, env))
 
     def _install(self, candidate: FormInput[F]) -> None:
+        from ._fixed import require_same_identity
+
+        require_same_identity(self._model, self._data, candidate.data)
         if self.input.same_as(candidate):
             return
         self._data = candidate.data

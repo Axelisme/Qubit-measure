@@ -11,12 +11,14 @@ from .description import (
     FormCommandDescription,
     FormConstraints,
     FormDescription,
+    FormElementDescription,
     FormFieldDescription,
     FormFieldKind,
     FormOptionDescription,
 )
 from .model import (
     Display,
+    FixedList,
     FormChange,
     FormCommandError,
     FormConversionError,
@@ -33,6 +35,7 @@ from .model import (
     InputCommand,
     InputConverter,
     InputPolicy,
+    Participants,
     WriteRejected,
     field_error,
 )

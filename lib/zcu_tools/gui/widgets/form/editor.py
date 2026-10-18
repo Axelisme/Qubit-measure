@@ -76,7 +76,7 @@ class FormEditor[F: FormModel](QWidget):
     defaults and model validation belong to state.
     No Engine update, revision check, source capture, persistence or I/O occurs.
 
-    Public child object names use model-field paths joined by dots:
+    Public child object names use model-field paths and indexes joined by dots:
     form.input.<path> is a QLineEdit for text, numeric, complex, expression or
     whole-container input; a QCheckBox for bool; or a non-editable QComboBox
     for a field whose core description lists options.
@@ -160,14 +160,20 @@ class FormEditor[F: FormModel](QWidget):
     tint and gets a red border. The coloured widget has formError=True while
     invalid, False otherwise. Errors add no row height. form.error displays
     model-wide errors and is hidden while empty.
-    Mapping-key/index errors appear at their container field.
+    Mapping-key/index errors appear at their container field, except within a
+    FixedList where the original index addresses each model element.
     Only current active, instantiated fields have input controls. Model and
     group descendants are described and built on first expansion, or during
     initial construction when expanded. Collapsing retains the same widgets
     and their uncommitted text without writing state. Changing an option or
     nullable activation replaces only that subtree, not unrelated rows.
-    Sequences and typed mappings
-    use JSON text for the whole leaf; they do not expose key/index write paths.
+    A FixedList has form.picker.<path>, a navigation-only QComboBox listing
+    "index: name". It draws the picked element below the list row and keeps
+    other elements mounted but hidden. Switching never writes state or commits
+    hidden text, and preserves drafts and parse errors. The list row marks
+    hidden errors with their element name in its tooltip. Participants remain
+    a separate JSON list input. Other sequences and typed mappings use JSON
+    text for the whole leaf; they do not expose key/index write paths.
     Complex direct text uses Python complex-number notation, not an expression.
 
     set_editing_enabled(enabled=False) makes the form read-only but readable;
@@ -180,7 +186,7 @@ class FormEditor[F: FormModel](QWidget):
     a wheel turn over them scrolls an enclosing scroll area instead. Option
     command actions stay listed but disabled. Fold titles still take Tab
     focus and fold and unfold on a click, Space, Return or Enter, without
-    writing state.
+    writing state. FixedList pickers also remain usable for navigation.
 
     Build finishes before subscribing. detach or close removes the subscription,
     disables this view and drops local text without changing caller state.
@@ -533,6 +539,7 @@ class FormEditor[F: FormModel](QWidget):
                     self._run_command,
                 )
                 row.connect_fold(self._fold_changed)
+                row.connect_pick(self._pick_changed)
                 level.rows[field.path] = row
                 level.layout.insertWidget(index, row.widget)
                 row.widget.show()
@@ -575,6 +582,16 @@ class FormEditor[F: FormModel](QWidget):
         fields = self._require_state().describe(path, self._require_env()).children
         row.set_children_available(available=any(not field.hidden for field in fields))
         self._sync_level(child, fields, data, preview, redraw=redraw)
+        if row.picker is not None:
+            _show_picked(row, child.rows)
+
+    def _pick_changed(self) -> None:
+        # Navigation only: hidden element rows keep their widgets, so local
+        # text and errors survive, and nothing is written or committed.
+        for row in self._rows.values():
+            if row.picker is not None:
+                _show_picked(row, self._rows)
+        self._show_errors()
 
     def _index_level(self, level: _Level) -> None:
         self._rows.update(level.rows)
@@ -660,6 +677,10 @@ class FormEditor[F: FormModel](QWidget):
         for path, message in messages.items():
             target = self._error_target(path)
             if target is not None:
+                row = self._rows[target]
+                if row.picker is not None and len(path) > len(target):
+                    # The picked element is not drawn: name it in this row.
+                    message = f"{_element_text(row, path)}: {message}"
                 by_row.setdefault(target, []).append(message)
             else:
                 root = self._root_error.text()
@@ -694,6 +715,24 @@ class FormEditor[F: FormModel](QWidget):
                 ):
                     return candidate
         return None
+
+
+def _show_picked(row: FieldRow, rows: Mapping[FormWritePath, FieldRow]) -> None:
+    """Draw only the element row the picker selects."""
+    picked = row.picked()
+    for path, element in rows.items():
+        if len(path) == len(row.field.path) + 1 and path[:-1] == row.field.path:
+            element.widget.setVisible(path[-1] == picked)
+
+
+def _element_text(row: FieldRow, path: FormPath) -> str:
+    """Name the element and field a path below a picker row addresses."""
+    index = path[len(row.field.path)]
+    name = next(
+        (item.name for item in row.field.elements or () if item.index == index),
+        str(index),
+    )
+    return ".".join((name, *(str(part) for part in path[len(row.field.path) + 1 :])))
 
 
 def _align_labels(labels: list[QLabel]) -> None:

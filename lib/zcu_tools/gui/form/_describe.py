@@ -15,6 +15,7 @@ from ._structure import (
     alternatives,
     branch_tags,
     expression_allowed,
+    fixed_list,
     fixed_tag,
     model_types,
 )
@@ -22,6 +23,7 @@ from .description import (
     FormCommandDescription,
     FormConstraints,
     FormDescription,
+    FormElementDescription,
     FormFieldDescription,
     FormFieldKind,
     FormOptionDescription,
@@ -34,8 +36,8 @@ def _kind(target: Field) -> FormFieldKind:
     members = tuple(
         item for item in alternatives(target.info.annotation) if item is not type(None)
     )
-    if model_types(target.info.annotation):
-        return "model"
+    if model_types(target.info.annotation) or fixed_list(target.info) is not None:
+        return "elements" if fixed_list(target.info) is not None else "model"
     if literal_values(target.info.annotation) is not None:
         return (
             "enum"
@@ -158,7 +160,12 @@ def _fixed_value(target: Field) -> tuple[bool, JsonValue]:
     and declaration-fixed complete option values. An unfixed field returns
     (False, None); a fixed null returns (True, None).
     """
-    if target.pinned:
+    if target.level.items is None and target.name == target.level.name_field:
+        # A FixedList element's identity is fixed by its captured input.
+        name = target.level.value(target.name)
+        if isinstance(name, str):
+            return True, name
+    if target.pinned and isinstance(target.name, str):
         return True, target.level.pinned[target.name]
     values = literal_values(target.info.annotation)
     if values is not None and len(values) == 1:
@@ -181,12 +188,15 @@ def _metadata(
         raise ValueError(f"{target.path!r}: Display decimals requires a float field")
     fixed, fixed_value = _fixed_value(target)
     hidden_tag = fixed_tag(target.level.model, tags) == target.name
-    text = target.name.replace("_", " ")
+    name = target.name if isinstance(target.name, str) else target.element_name
+    text = name.replace("_", " ")
     return FormFieldDescription(
         path=target.path,
-        name=target.name,
+        name=name,
         kind=_kind(target),
-        title=display.label or info.title or text[:1].upper() + text[1:],
+        title=display.label
+        or info.title
+        or (name if isinstance(target.name, int) else text[:1].upper() + text[1:]),
         description=display.description
         if display.description is not None
         else info.description,
@@ -219,6 +229,27 @@ def _metadata(
             )
             for item in target.input_commands
         ),
+        elements=_elements(target),
+    )
+
+
+def _elements(target: Field) -> tuple[FormElementDescription, ...] | None:
+    """List a FixedList field's raw elements by original index and name."""
+    fixed = fixed_list(target.info)
+    if fixed is None:
+        return None
+    raw = target.level.value(target.name)
+    items = raw if isinstance(raw, list) else []
+    return tuple(
+        FormElementDescription(
+            index,
+            name
+            if isinstance(item, dict)
+            and isinstance(name := item.get(fixed.name_field), str)
+            else "",
+            (*target.path, index),
+        )
+        for index, item in enumerate(items)
     )
 
 
@@ -227,7 +258,7 @@ def _children(
 ) -> tuple[FormFieldDescription, ...]:
     return tuple(
         _metadata(target, tags)
-        for name in level.model.model_fields
+        for name in level.names
         if not (target := level.field(name)).pinned
     )
 

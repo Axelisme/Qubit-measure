@@ -287,7 +287,7 @@ def h_tab_describe_cfg(
 ) -> Mapping[str, object]:
     """Read one current layer and local observation in the same owner turn.
 
-    params supplies tab_id and path (string array, [] for root). Malformed
+    params supplies tab_id and path (field-name/index array, [] for root). Malformed
     arrays become invalid_params/form_errors. Core FormPathError becomes
     invalid_params/form_path with data.form_path preserving the requested path.
     Other declaration failures retain the controller_error boundary; resource
@@ -299,15 +299,20 @@ def h_tab_describe_cfg(
     from ..form_errors import cfg_error_to_remote
 
     raw = params["path"]
-    if not isinstance(raw, list) or any(
-        not isinstance(part, str) or not part for part in raw
-    ):
+    if not isinstance(raw, list):
         raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            "path must contain nonempty strings",
-            reason="form_errors",
+            ErrorCode.INVALID_PARAMS, "path must be an array", reason="form_errors"
         )
-    path = tuple(str(part) for part in raw)
+    segments: list[str | int] = []
+    for part in raw:
+        if not isinstance(part, (str, int)) or (isinstance(part, str) and not part):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                "path must contain field names or integer indexes",
+                reason="form_errors",
+            )
+        segments.append(part)
+    path = tuple(segments)
     try:
         return dict(describe_form(adapter.cfg_lookup(str(params["tab_id"])), path))
     except CfgPreconditionError as exc:

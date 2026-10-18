@@ -56,7 +56,7 @@ def _evaluate(target: Field, path: FormWritePath, env: FormEnv) -> FormValue:
         __base__=LocalField,
         value=(target.info.annotation, deepcopy(target.info)),
     )
-    evaluated = result(shell, {"value": target.level.data[target.name]}, env)
+    evaluated = result(shell, {"value": target.level.value(target.name)}, env)
     if isinstance(evaluated, FormErrors):
         raise FormCommandError(
             f"Cannot convert participating input {path!r}: {evaluated.messages}"
@@ -179,8 +179,8 @@ def observation(
     )
     snapshot = FormCommandSnapshot(
         readonly_input(option.value if option is not None else None),
-        selected(target.info, target.level.data.get(target.name)),
-        readonly_input(target.level.data.get(target.name)),
+        selected(target.info, target.level.value(target.name)),
+        readonly_input(target.level.value(target.name)),
         target.name in target.level.data,
     )
 
@@ -211,11 +211,16 @@ def install_field[F: FormModel](
         raise FormCommandError(str(exc)) from exc
     parent = data
     for part in path[:-1]:
+        if not isinstance(part, str):
+            raise FormCommandError("Command target is not an active object")
         child = parent[part]
         if not isinstance(child, dict):
             raise FormCommandError("Command target is not an active object")
         parent = child
-    parent[path[-1]] = replacement
+    name = path[-1]
+    if not isinstance(name, str):
+        raise FormCommandError("Command target is not an active object field")
+    parent[name] = replacement
     check_sources(input.model, data, env, validate_paths=True)
     selections = {
         key: value

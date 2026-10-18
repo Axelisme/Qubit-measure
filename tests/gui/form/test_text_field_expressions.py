@@ -254,5 +254,6 @@ def test_result_rejects_a_union_of_text_and_picked_values(
 def _read(data: Mapping[str, JsonValue], path: FormWritePath) -> JsonValue:
     current: JsonValue = dict(data)
     for part in path:
+        assert isinstance(part, str)
         current = _object(current)[part]
     return current

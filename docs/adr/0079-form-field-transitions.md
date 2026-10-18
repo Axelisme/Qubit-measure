@@ -71,6 +71,8 @@ Form 提供固定 model list 的共用描述、picker 與 indexed editing。元�
 
 需要名稱定位的表單在建立時拒絕重複元素名，錯誤指名重複名稱與原始 indices。Framework 只檢查宣告名稱的唯一性，不解讀 resonator，不改 [[0072]] 的 group schema。元素名取法歸實驗定義者；若實驗需要重複 resonator，可以宣告 R1#0、R1#1 等不同名稱，framework 不自行加後綴。這項限制由顧問於 2026-10-18 確認，避免 participants 與 recipe overrides 無法唯一定位。
 
+Workflow 的 `TunablesHost.apply` 在 native update 邊界拒絕含 int index 的 Form leaf，回 `FormErrors` 並保留原 typed path，說明 native tunables 不支援 list 元素。Engine、draft、base 與 accepted input 都不變。Native `TunableChange.path` 只接受 model-field dotted path，雖可替換完整 list，但不接受元素 index。Host 不把 index 字串化、不擴 native grammar，也不將 indexed leaves 改成 whole-list 提交。目前 workflow tunables 沒有固定 list；通用 Form 的 indexed editing 不等於 native tunables 已有相同的提交能力。這個明確拒絕邊界由顧問於 2026-10-18 依使用者的代裁授權採用。
+
 Mux 的 lab cfg 使用完整有序 `tones: list[ToneCfg]`。每個元素的 `name` 由 capture 產生且不可編輯。Drive 類實驗以 qubit 名稱識別，onetone 以 resonator 名稱識別。每個元素都有必填 drive，有掃描的實驗另有 sweep。未參與元素保留設定，適用同一驗證規則，無效時也擋 Run。
 
 `participants: list[str]` 必須非空、無重複且每個名稱都存在。順序就是執行與資料 column 順序。Lab runtime 邊界只轉換一次名稱到原始位置。例如完整元素為 Q1、Q2、Q3，participants 為 Q3、Q1，既有 program 接收的 active_tones 為 2、0。只選 Q2 時仍是 1，不重新編號。Program／raw 接口不改，framework 不解讀 mux group。
