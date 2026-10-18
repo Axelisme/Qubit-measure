@@ -79,8 +79,8 @@ def test_read_or_decode_failure_restores_default_with_error(
     assert isinstance(outcome.load_error, PersistenceError)
 
 
-@pytest.mark.parametrize("payload", [b"{", b'{"value": "bad"}', b"\xff"])
-def test_incompatible_snapshot_is_backed_up_before_defaults_and_normal_save(
+@pytest.mark.parametrize("payload", [b"{", b'{"value": "bad"}', b"\\xff"])
+def test_bad_snapshot_opens_defaults_and_leaves_file_until_normal_save(
     tmp_path: Path, payload: bytes
 ) -> None:
     originator = _Originator(_State(7))
@@ -89,61 +89,13 @@ def test_incompatible_snapshot_is_backed_up_before_defaults_and_normal_save(
 
     outcome = caretaker.restore_all()
 
-    backups = list(tmp_path.glob("state.json.incompatible-*"))
-    assert len(backups) == 1
-    backup = backups[0]
-    assert backup.read_bytes() == payload
-    assert not caretaker.state_path.exists()
-    assert str(backup) in str(outcome.load_error)
-    assert "using defaults" in str(outcome.load_error)
     assert outcome.report == "restored:0"
     assert originator.restored == _State()
+    assert "using defaults" in str(outcome.load_error)
+    assert caretaker.state_path.is_file()
+    assert caretaker.state_path.read_bytes() == payload
     caretaker.flush()
     assert json.loads(caretaker.state_path.read_text()) == {"value": 7}
-    assert backup.read_bytes() == payload
-
-
-def test_backup_move_failure_aborts_startup_and_preserves_original(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    originator = _Originator()
-    caretaker = _caretaker(originator, tmp_path)
-    payload = b'{"value": "bad"}'
-    caretaker.state_path.write_bytes(payload)
-    original_replace = Path.replace
-
-    def fail_move(path: Path, target: Path) -> Path:
-        if path == caretaker.state_path:
-            raise OSError("backup move denied")
-        return original_replace(path, target)
-
-    monkeypatch.setattr(Path, "replace", fail_move)
-    with pytest.raises(PersistenceError, match="backup move denied") as raised:
-        caretaker.restore_all()
-
-    assert str(caretaker.state_path) in str(raised.value)
-    assert originator.restored is None
-    assert caretaker.state_path.read_bytes() == payload
-
-
-def test_repeated_incompatible_startups_never_overwrite_old_backups(
-    tmp_path: Path,
-) -> None:
-    caretaker = _caretaker(_Originator(), tmp_path)
-    caretaker.state_path.write_bytes(b"first incompatible snapshot")
-    first = caretaker.restore_all()
-    first_backup = next(tmp_path.glob("state.json.incompatible-*"))
-    caretaker.state_path.write_bytes(b"second incompatible snapshot")
-
-    second = caretaker.restore_all()
-
-    assert first_backup.read_bytes() == b"first incompatible snapshot"
-    backups = set(tmp_path.glob("state.json.incompatible-*"))
-    assert len(backups) == 2
-    second_backup = (backups - {first_backup}).pop()
-    assert second_backup.read_bytes() == b"second incompatible snapshot"
-    assert str(first_backup) in str(first.load_error)
-    assert str(second_backup) in str(second.load_error)
 
 
 @pytest.mark.parametrize("stage", ["decode", "restore"])
