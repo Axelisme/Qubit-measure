@@ -1149,7 +1149,8 @@ class ExpTabWidget(QWidget):
             # Viewport-driven mosaic must reflow by gallery's own width (S1);
             # QStackedWidget hides inactive pages so width changes while hidden
             # would otherwise defer resize/show until next event.
-            try:
+            # tolerated: suppress(Exception) splits mixed BaseExceptionGroup; preserve the original group.
+            try:  # noqa: SIM105
                 self._data_gallery.refresh_layout()
             # tolerated: Data activation must survive arbitrary public reflow/presentation failures.
             except Exception:  # noqa: BLE001
