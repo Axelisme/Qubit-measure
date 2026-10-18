@@ -117,6 +117,55 @@ class _Prepared:
 
 
 @dataclass(frozen=True)
+class _Certificates:
+    values: tuple[tuple[int, sb.Certificate], ...]
+
+
+def _extend_entry(
+    entry: _Entry, parameters: NDArray[np.float64], context: KernelContext
+) -> _Entry:
+    """Union missing complete-bin certificates without copying the cached frame."""
+    frame = entry.sidebands
+    if frame is None:
+        # Legacy-only frames did not retain Fourier candidates. Reconstructing
+        # them from rotations would change rounding, so retain the normal miss.
+        return entry
+    _, eligible = _admission(entry, parameters, context.budget)
+    bins = {(port, certificate.center) for port, certificate in frame.certificates}
+    missing = np.array(
+        [
+            use and (int(p[-1]), float(np.round(p[3] / 0.002) * 0.002)) not in bins
+            for p, use in zip(parameters, eligible, strict=True)
+        ],
+        dtype=bool,
+    )
+    if not missing.any():
+        return entry
+    parameters = parameters[missing]
+    # Every caller uses the complete table inventory, not its worker subset.
+    # Publish only small new certificates: WorkPlan copies facts on publication.
+    fact = FactKey(
+        ("floquet-certificates", id(entry), context.budget, parameters.tobytes()),
+        _Certificates,
+    )
+    extra = context.work_plan.fact(
+        fact,
+        lambda: _Certificates(
+            sb.prepare(
+                frame, entry.lam, entry.modes, entry.inverse, parameters
+            ).certificates
+        ),
+    )
+    certificates = tuple(
+        sorted(
+            frame.certificates + extra.values,
+            key=lambda pair: (pair[0], pair[1].center),
+        )
+    )
+    return replace(entry, sidebands=replace(frame, certificates=certificates))
+
+
+@dataclass(frozen=True)
 class FloquetAdmission:
     """One accepted row's numerical route and optional retained-sideband plan.
 
@@ -905,6 +954,38 @@ class FloquetKernel:
     ) -> NDArray[np.bool_]:
         """Return validity for two constant tones, never reading initial density."""
         return self.guard_prepared(table, rows, context).accepted
+
+    def extend_prepared(
+        self,
+        prepared: Prepared,
+        table: SegmentTable,
+        context: KernelContext,
+    ) -> _Prepared:
+        """Extend cached frames to this complete table's missing probe bins exactly.
+
+        The caller must supply a payload from the same whole source, budget and
+        kernel revision. Only keys already in the payload participate. Existing
+        certificates and large frame arrays are borrowed unchanged; new immutable
+        certificates use the original calculation. Concurrent calls single-flight
+        new certificates through this evolve's WorkPlan and use the same full-table
+        union, independent of worker completion order. No row admission is retained.
+        A fully covered payload is returned unchanged. Legacy-only frames lacking
+        Fourier candidates remain unchanged and use the ordinary domain miss.
+        A different family's payload raises TypeError.
+        """
+        if not isinstance(prepared, _Prepared):
+            raise TypeError("Floquet requires its own prepared payload")
+        rows = np.arange(len(table.timeline), dtype=np.int64)
+        rows = rows[_candidate_positions(table, rows)]
+        keys = self.prepare_keys(table, rows, context)
+        parameters = _parameters(table, rows)
+        entries = tuple(
+            _extend_entry(entry, parameters[keys == key], context)
+            for key, entry in zip(prepared.keys, prepared.entries, strict=True)
+        )
+        if all(a is b for a, b in zip(entries, prepared.entries, strict=True)):
+            return prepared
+        return _Prepared(entries, prepared.keys)
 
     def admit_prepared(
         self,

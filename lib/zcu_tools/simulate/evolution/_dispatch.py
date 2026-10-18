@@ -26,7 +26,7 @@ from .kernel import (
     RowPlan,
     SegmentTable,
 )
-from .kernels.floquet import FloquetPlan
+from .kernels.floquet import FloquetKernel, FloquetPlan
 from .kernels.gate_cache import GateCacheKernel
 from .secular import ModelSource
 from .workplan import WorkPlan
@@ -386,6 +386,9 @@ class _Classifier:
                 )
             )
         hits = self.cached.get(kernel.name, _EMPTY_GUARD_HITS)
+        if isinstance(kernel, FloquetKernel) and self.cache is not None and hits:
+            hits = self.extend_floquet_hits(kernel, hits)
+            self.cached[kernel.name] = hits
         # Bound rejected handoffs even while pooled shared guards are returning.
         # Equal per-key quotas deliberately decline large non-revisiting scans.
         rejected_limit = (
@@ -421,6 +424,32 @@ class _Classifier:
                 kernel, self.table, self.context, selected, hits, rejected_limit
             )
         )
+
+    def extend_floquet_hits(
+        self, kernel: FloquetKernel, hits: _GuardCacheHits
+    ) -> _GuardCacheHits:
+        """Extend complete cached domains in the caller before workers borrow them.
+
+        Cache ownership is replaced, not added alongside the shared frame. The
+        full-table inventory makes later shared/deferred guards read-only, so
+        worker completion order cannot lose a concurrent bin extension.
+        """
+        if self.cache is None:
+            raise RuntimeError("Floquet extension requires caller cache ownership")
+        dc = self.source.model(tuple(0 for _ in range(self.table.level.shape[1])))
+        namespace = kernel.name, dc.identity, self.budget
+        extended: list[PreparedPayload] = []
+        for payload in hits:
+            prepared = kernel.extend_prepared(
+                payload.prepared, self.table, self.context
+            )
+            if prepared is payload.prepared:
+                extended.append(payload)
+                continue
+            replacement = PreparedPayload(prepared, payload.keys)
+            self.cache.replace(namespace, payload, replacement)
+            extended.append(replacement)
+        return _GuardCacheHits(extended)
 
     def try_kernel(self, kernel: Kernel, rows: NDArray[np.int64]) -> NDArray[np.int64]:
         """Batch cheap guards in the caller and never retry its rejected rows."""
