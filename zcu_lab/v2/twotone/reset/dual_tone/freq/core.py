@@ -35,6 +35,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules import TwoPulseResetCfg
 from zcu_tools.utils.process import (
+    SmoothingOptions,
     SmoothMethod,
     minus_background,
     rotate2real,
@@ -225,11 +226,13 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         # Apply smoothing for peak finding
         signals_smooth = smooth_signal_nd(
             signals,
-            method=options.smooth_method,
-            sigma=options.smooth,
+            options=SmoothingOptions(
+                method=options.smooth_method,
+                sigma=options.smooth,
+                wavelet=options.wavelet,
+                wavelet_level=options.wavelet_level,
+            ),
             axes=(0, 1),
-            wavelet=options.wavelet,
-            wavelet_level=options.wavelet_level,
         )
 
         # Find peak in amplitude

@@ -13,7 +13,7 @@ Everything is described by ``(name, unit, values)`` triples.  Axes are listed
 **inner axis first** (the inner axis is the last axis of the data array)::
 
     import numpy as np
-    from zcu_tools.datafile import save_labber_data, load_labber_data
+    from zcu_tools.datafile import LabberMetadata, save_labber_data, load_labber_data
 
     freq  = np.linspace(4e9, 5e9, 201)
     power = np.linspace(-30, 0, 11)
@@ -22,7 +22,7 @@ Everything is described by ``(name, unit, values)`` triples.  Axes are listed
     save_labber_data("scan_1d",
         z=("S21", "", s21),
         axes=[("Frequency", "Hz", freq)],
-        comment="resonator dip", tags=["cooldown7"])
+        metadata=LabberMetadata(comment="resonator dip", tags=["cooldown7"]))
 
     # 2-D: one trace per power, data shape (Ny, Nx)  (inner axis last)
     save_labber_data("scan_2d",
@@ -306,10 +306,7 @@ def save_labber_data(
     z: tuple[str, str, ArrayLike],
     axes: Sequence[tuple[str, str, ArrayLike]],
     *,
-    comment: str = "",
-    tags: str | Sequence[str] | None = None,
-    project: str = "",
-    user: str = "",
+    metadata: LabberMetadata | None = None,
     timestamps: ArrayLike | None = None,
 ) -> str:
     """Save complex measurement data to a Labber-compatible HDF5 log file.
@@ -338,12 +335,9 @@ def save_labber_data(
         One triple per axis, **inner axis first** (``axes[0]`` is x).
         ``len(axes)`` must equal ``values.ndim`` and each ``len(axes[k][2])``
         must match the corresponding data dimension.
-    comment : str
-        Free-text comment.
-    tags : str or sequence of str, optional
-        Tag(s) to store.
-    project, user : str
-        Project / user metadata.
+    metadata : LabberMetadata, optional
+        Comment, tags, project, user and optional creation epoch. Omission uses
+        default metadata. The supplied object is passed through without copying.
     timestamps : array_like, optional
         Per-entry absolute timestamps (epoch s), one per stored entry.  If
         omitted, the current time is used for all entries.
@@ -356,10 +350,7 @@ def save_labber_data(
     return LabberData(
         z,
         axes,
-        comment=comment,
-        tags=tags,
-        project=project,
-        user=user,
+        metadata=metadata,
         timestamps=timestamps,
     ).save(path)
 
@@ -433,7 +424,6 @@ def _write_uniform_log_group(
                 f"axis '{nm}' length {val.shape[0]} != z dim {inner_to_outer_dims[k]}"
             )
 
-    n_x = z_arr.shape[-1]
     # Step dimensions are inner-first: [Nx, Ny, Nw, ...].
     step_dims = np.array([a[2].shape[0] for a in axis_list], dtype=np.int64)
     # number of stored entries = product of all outer dims
@@ -451,7 +441,7 @@ def _write_uniform_log_group(
     if write_tags:
         _write_tags(target, as_tag_list(ld.tags), ld.project, ld.user)
     _write_multi_channel_data_group(
-        target, axis_list, log_channels, step_dims, [z_arr], n_entry, n_x, ts_rel
+        target, axis_list, log_channels, step_dims, [z_arr], ts_rel
     )
 
 
@@ -474,7 +464,6 @@ def _write_uniform_multi_channel_log_group(
     ]
     z_arrays = [np.asarray(payload.z, dtype=complex) for payload in payloads]
     step_dims = np.array([axis[2].shape[0] for axis in axis_list], dtype=np.int64)
-    n_x = z_arrays[0].shape[-1]
     n_entry = int(np.prod(step_dims[1:])) if len(step_dims) > 1 else 1
     log_channels = [(payload.data.name, payload.data.unit) for payload in payloads]
     t0, ts_rel = _resolve_timestamps(reference.timestamps, n_entry, creation_time)
@@ -488,8 +477,6 @@ def _write_uniform_multi_channel_log_group(
         log_channels,
         step_dims,
         z_arrays,
-        n_entry,
-        n_x,
         ts_rel,
     )
 
@@ -520,10 +507,7 @@ def save_labber_trace_data(
     x: tuple[str, str, ArrayLike | Sequence[ArrayLike]],
     y: tuple[str, str, ArrayLike] | None = None,
     *,
-    comment: str = "",
-    tags: str | Sequence[str] | None = None,
-    project: str = "",
-    user: str = "",
+    metadata: LabberMetadata | None = None,
     timestamps: ArrayLike | None = None,
 ) -> str:
     """Save **variable-length** complex traces (Labber ``vector=True`` mode).
@@ -554,7 +538,8 @@ def save_labber_trace_data(
     y : (name, unit, values), optional
         Outer step axis, one value per trace (e.g. Power).  ``len(values)`` must
         equal ``len(traces)``.  If omitted, the traces are an unstructured list.
-    comment, tags, project, user : metadata (see :func:`save_labber_data`).
+    metadata : LabberMetadata, optional
+        File metadata (see :func:`save_labber_data`); passed without copying.
     timestamps : array_like, optional
         Per-entry absolute timestamps (epoch s), one per trace.  If omitted,
         the current time is used for all entries.
@@ -571,10 +556,7 @@ def save_labber_trace_data(
     return LabberData(
         (z_name, z_unit, list(traces)),
         axes,
-        comment=comment,
-        tags=tags,
-        project=project,
-        user=user,
+        metadata=metadata,
         timestamps=timestamps,
     ).save(path)
 
@@ -883,8 +865,6 @@ def _write_multi_channel_data_group(
     log_channels,
     step_dims,
     z_arrays,
-    n_entry,
-    n_x,
     ts_rel,
 ):
     """Write scalar log channels sharing one inner-first step grid."""
@@ -899,10 +879,12 @@ def _write_multi_channel_data_group(
         "Channel names", data=np.array(names_info, dtype=_DT_CHANNEL_NAMES)
     )
 
+    reference = z_arrays[0]
+    n_x = reference.shape[-1]
+    n_entry = int(np.prod(step_dims[1:])) if len(step_dims) > 1 else 1
     data = np.zeros((n_x, len(names_info), n_entry), dtype=float)
     data[:, 0, :] = axis_list[0][2][:, None]
 
-    reference = z_arrays[0]
     z_outer_shape = reference.shape[:-1]
     if z_outer_shape:
         multi = np.unravel_index(np.arange(n_entry), z_outer_shape)
@@ -955,7 +937,10 @@ def _write_trace_data_stub(f, step_channels, step_dims, y_vals, n_entry, ts_rel)
         g.attrs["Entries, last trace"] = 1
 
 
-def _write_traces_group(f, z_name, trace_list, x_list, x_name, x_unit, n_entry, ts_rel):
+# tolerated: One trace-layout caller supplies ragged values, x labels and entry timestamps.
+def _write_traces_group(  # noqa: PLR0913
+    f, z_name, trace_list, x_list, x_name, x_unit, n_entry, ts_rel
+):
     """Write the Traces/ group: <name> (maxN, 3, Nentry), <name>_N, <name>_t0dt.
 
     Column layout per entry: 0=real, 1=imag, 2=x (explicit axis).  ``_t0dt`` is
@@ -1050,12 +1035,14 @@ def _load_labber_data(path: str) -> LabberData:
     return LabberData(
         data=Axis(z_name, z_unit, z),
         axes=[Axis(n, u, v) for n, u, v in axes0],
-        comment=comment,
-        tags=tags,
-        project=project,
-        user=user,
+        metadata=LabberMetadata(
+            comment=comment,
+            tags=tags,
+            project=project,
+            user=user,
+            creation_time=creation_time,
+        ),
         timestamps=timestamps,
-        creation_time=creation_time,
     )
 
 

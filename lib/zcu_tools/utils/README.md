@@ -1,6 +1,6 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-10-13 — QICK serialization import isolation
+**Last updated:** 2026-10-19 — shared smoothing options
 
 `utils` 放可被 experiment / GUI 共用、且不反向依賴上層 domain 的 helper。
 資料檔格式、讀寫與 streaming 見 `zcu_tools.datafile`。
@@ -28,6 +28,9 @@ exception；若 exception 來自 Pyro 且包含 `_pyroTraceback`，會把 remote
 文字併入同一筆 log record，不直接 print 到 stdout / stderr。
 
 ## process helpers
+
+`smooth_signal1d` 與 `smooth_signal_nd` 共用 `SmoothingOptions`，集中 method、sigma 與
+wavelet threshold 設定。作用的 axis／axes 由各 caller 獨立指定，省略 options 使用原預設。
 
 `utils.process` 保留 ndarray dtype 形狀的 helper 會優先使用 numpy ufunc
 （例如 `np.subtract`）來表達泛型 array 運算。這比在 `NDArray[T]` 上直接使用

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any, Literal, TypeAlias, TypeVar, cast
 
 import numpy as np
@@ -11,6 +12,25 @@ from scipy.ndimage import gaussian_filter, gaussian_filter1d
 T_dtype = TypeVar("T_dtype", bound=np.number)
 SmoothMethod: TypeAlias = Literal["wavelet", "gaussian"]
 WaveletThresholdMode: TypeAlias = Literal["soft", "hard"]
+
+
+@dataclass(frozen=True)
+class SmoothingOptions:
+    """Shared settings for one-axis and separable N-D smoothing.
+
+    method selects wavelet thresholding or a Gaussian filter. sigma is the
+    Gaussian standard deviation in samples, or the wavelet threshold scale.
+    wavelet names the PyWavelets family; wavelet_level=0 selects its maximum
+    valid level. wavelet_threshold overrides sigma only for wavelet smoothing;
+    None uses sigma. threshold_mode selects soft or hard coefficient thresholding.
+    """
+
+    method: SmoothMethod = "wavelet"
+    sigma: float = 1.0
+    wavelet: str = "sym4"
+    wavelet_level: int = 0
+    wavelet_threshold: float | None = None
+    threshold_mode: WaveletThresholdMode = "soft"
 
 
 def find_rotate_angle(signals: NDArray[np.complex128]) -> float:
@@ -391,60 +411,63 @@ def wavelet_denoise1d(
 def smooth_signal1d(
     signals: NDArray[Any],
     *,
-    method: SmoothMethod = "wavelet",
-    sigma: float = 1.0,
+    options: SmoothingOptions | None = None,
     axis: int = -1,
-    wavelet: str = "sym4",
-    wavelet_level: int = 0,
-    wavelet_threshold: float | None = None,
-    threshold_mode: WaveletThresholdMode = "soft",
 ) -> NDArray[Any]:
-    """Smooth traces along one axis with a shared method knob."""
-    if method == "gaussian":
-        return gaussian_filter1d(signals, sigma=sigma, axis=axis)
-    if method == "wavelet":
+    """Smooth signals along axis, using default settings when options is None.
+
+    Preserve shape and wavelet NaN positions. Unsupported methods raise ValueError.
+    """
+    if options is None:
+        options = SmoothingOptions()
+    if options.method == "gaussian":
+        return gaussian_filter1d(signals, sigma=options.sigma, axis=axis)
+    if options.method == "wavelet":
         return wavelet_denoise1d(
             signals,
             axis=axis,
-            wavelet=wavelet,
-            level=wavelet_level,
-            threshold_scale=sigma if wavelet_threshold is None else wavelet_threshold,
-            threshold_mode=threshold_mode,
+            wavelet=options.wavelet,
+            level=options.wavelet_level,
+            threshold_scale=options.sigma
+            if options.wavelet_threshold is None
+            else options.wavelet_threshold,
+            threshold_mode=options.threshold_mode,
         )
-    raise ValueError(f"Invalid smoothing method: {method}")
+    raise ValueError(f"Invalid smoothing method: {options.method}")
 
 
 def smooth_signal_nd(
     signals: NDArray[Any],
     *,
-    method: SmoothMethod = "wavelet",
-    sigma: float = 1.0,
+    options: SmoothingOptions | None = None,
     axes: Sequence[int] | None = None,
-    wavelet: str = "sym4",
-    wavelet_level: int = 0,
-    wavelet_threshold: float | None = None,
-    threshold_mode: WaveletThresholdMode = "soft",
 ) -> NDArray[Any]:
-    """Smooth an N-D signal; wavelet mode applies separable 1D denoise per axis."""
-    if method == "gaussian":
+    """Smooth signals over axes (all if None), using default options if None.
+
+    Wavelet mode applies separable 1D denoise in axis order and preserves NaNs.
+    Unsupported methods raise ValueError.
+    """
+    if options is None:
+        options = SmoothingOptions()
+    if options.method == "gaussian":
         if axes is None:
-            return gaussian_filter(signals, sigma=sigma)
-        return gaussian_filter(signals, sigma=sigma, axes=tuple(axes))
-    if method == "wavelet":
+            return gaussian_filter(signals, sigma=options.sigma)
+        return gaussian_filter(signals, sigma=options.sigma, axes=tuple(axes))
+    if options.method == "wavelet":
         out = np.asarray(signals)
         for axis in _normalize_axes(axes, out.ndim):
             out = wavelet_denoise1d(
                 out,
                 axis=axis,
-                wavelet=wavelet,
-                level=wavelet_level,
-                threshold_scale=sigma
-                if wavelet_threshold is None
-                else wavelet_threshold,
-                threshold_mode=threshold_mode,
+                wavelet=options.wavelet,
+                level=options.wavelet_level,
+                threshold_scale=options.sigma
+                if options.wavelet_threshold is None
+                else options.wavelet_threshold,
+                threshold_mode=options.threshold_mode,
             )
         return out
-    raise ValueError(f"Invalid smoothing method: {method}")
+    raise ValueError(f"Invalid smoothing method: {options.method}")
 
 
 def calculate_noise(signals: NDArray[T_dtype]) -> tuple[float, NDArray[T_dtype]]:

@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-13，Fluxdep database metadata contract
+**Last updated:** 2026-10-19，shared Labber metadata
 
 
 `zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
@@ -65,6 +65,9 @@ facade。caller 優先從 package root import model 與 function。Facade 在 ca
   inner-first axes 的 Labber dataset。
 - `DataVariable`、`GroupedLabberData` 描述 grouped Labber 衍生輸出：同一 Labber file 內含多個 variable payload，metadata 共用。正規 Experiment Data File 的 variable 分組由 native payload 表示。
 - `save_labber_data` / `load_labber_data` 處理 single-variable file。
+  `save_labber_data`、`save_labber_trace_data` 與 `LabberData` 接受既有
+  `LabberMetadata` 的 `metadata=`，統一傳入 comment、tags、project、user 與 creation_time；
+  timestamps 仍屬於 payload。傳入的 metadata 保持同一物件，省略時建立預設值。
 - `save_grouped_labber_data` / `load_grouped_labber_data` 處理 canonical one-shot
   grouped v2。所有 variables 必須共享完全相同的 inner-first axes、shape 與
   timestamps。saver 在建立目的檔前驗證 common-grid contract，並把 variables 寫成

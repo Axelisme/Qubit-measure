@@ -45,7 +45,8 @@ class StreamingLabberVariableSpec:
     fill_value: complex | float = np.nan
     attrs: Mapping[str, Any] = field(default_factory=dict)
 
-    def __init__(
+    # tolerated: Full-shape streaming schema has no data values to reuse LabberPayload.
+    def __init__(  # noqa: PLR0913
         self,
         variable: str | DataVariable,
         data_name: str,

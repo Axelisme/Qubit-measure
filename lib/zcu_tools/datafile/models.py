@@ -149,7 +149,10 @@ class LabberData:
     """Single-file Labber dataset with payload plus metadata.
 
     The constructor accepts either the compact ``LabberData(data, axes, ...)`` form
-    or explicit ``payload=`` and ``metadata=`` values.
+    or explicit ``payload=`` and ``metadata=`` values. Metadata is retained
+    by identity; omitting it creates default LabberMetadata. Pass timestamps
+    with compact data/axes, or through LabberPayload when supplying payload.
+    Mixing payload with data/axes or timestamps raises TypeError.
     """
 
     __slots__ = ("payload", "metadata")
@@ -161,12 +164,7 @@ class LabberData:
         *,
         payload: LabberPayload | None = None,
         metadata: LabberMetadata | None = None,
-        comment: str = "",
-        tags: str | Sequence[str] | None = None,
-        project: str = "",
-        user: str = "",
         timestamps: Any = None,
-        creation_time: float | None = None,
     ) -> None:
         if payload is None:
             if data is None or axes is None:
@@ -178,23 +176,7 @@ class LabberData:
             raise TypeError("Pass timestamps through LabberPayload when using payload")
 
         if metadata is None:
-            metadata = LabberMetadata(
-                comment=comment,
-                tags=tags,
-                project=project,
-                user=user,
-                creation_time=creation_time,
-            )
-        elif any(
-            (
-                comment,
-                tags is not None,
-                project,
-                user,
-                creation_time is not None,
-            )
-        ):
-            raise TypeError("Pass either metadata or metadata fields, not both")
+            metadata = LabberMetadata()
 
         self.payload = payload
         self.metadata = metadata

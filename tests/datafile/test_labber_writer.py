@@ -75,9 +75,11 @@ def test_single_export_matches_existing_reader_at_exact_path(
         str(tmp_path / "baseline.hdf5"),
         z=signal.data,
         axes=signal.axes,
-        tags=metadata.tags,
-        project=metadata.project,
-        user=metadata.user,
+        metadata=LabberMetadata(
+            tags=metadata.tags,
+            project=metadata.project,
+            user=metadata.user,
+        ),
         timestamps=signal.timestamps,
     )
     exact = tmp_path / "opaque.export"
