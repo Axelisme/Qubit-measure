@@ -110,6 +110,32 @@ def test_native_position_seeds_reject_declaration_changes_at_typed_position(node
     assert "('tones', 1, 'drive')" in str(caught.value)
 
 
+def test_indexed_module_read_rejects_inactive_ancestry_with_original_path():
+    from zcu_tools.cfg_model import PulseCfg
+
+    class Section(ConfigBase):
+        drive: PulseCfg | None = None
+
+    class Tone(ConfigBase):
+        name: str
+        section: Section | None = None
+
+    class Group(ConfigBase):
+        tones: list[Tone]
+
+    definition = adapter.Form(Group, {"tones": [{"name": "A"}]})
+    env = core.FormEnv()
+    state = core.FormState(definition.default_input(env))
+    state.write({("tones", 0, "section"): None}, env)
+    path = ("tones", 0, "section", "drive")
+    with pytest.raises(core.FormPathError) as caught:
+        definition.read_module(state.input, path, env)
+    assert caught.value.path == path
+    with pytest.raises(core.FormPathError) as caught:
+        definition.module_input_kind(state.input, path)
+    assert caught.value.path == path
+
+
 def owner_model(*, duplicate: bool = False) -> type[core.FormModel]:
     """Build a synthetic declaration only after checking its new public API."""
     assert hasattr(adapter, "FixedElementsForm"), "Missing declaring-owner model"
