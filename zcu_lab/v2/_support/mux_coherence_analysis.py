@@ -115,19 +115,14 @@ def analyze_coherence(
                 {name: float(value) for name, value in zip(names, params, strict=True)},
                 covariance,
             )
-            ax.plot(times, real, "o", label="measured")
-            ax.plot(times, fitted, label="fit")
-            ax.set_title(f"T2 = {t2:.4g} ± {error:.2g} us; fringe = {detune:.4g} MHz")
-            outcomes.append(
-                MuxCoherenceFit(
-                    index,
-                    float(t2),
-                    float(error),
-                    float(detune),
-                    float(detune_error),
-                    quality,
-                    fit_fringe,
-                )
+            outcome = MuxCoherenceFit(
+                index,
+                float(t2),
+                float(error),
+                float(detune),
+                float(detune_error),
+                quality,
+                fit_fringe,
             )
         except (
             ValueError,
@@ -138,6 +133,11 @@ def analyze_coherence(
             ax.plot(times, np.abs(signal), "o", label="acquired magnitude")
             ax.text(0.02, 0.98, str(exc), transform=ax.transAxes, va="top", wrap=True)
             outcomes.append(MuxFitFailure(index, str(exc)))
+        else:
+            ax.plot(times, real, "o", label="measured")
+            ax.plot(times, fitted, label="fit")
+            ax.set_title(f"T2 = {t2:.4g} ± {error:.2g} us; fringe = {detune:.4g} MHz")
+            outcomes.append(outcome)
         ax.legend()
         ax.grid(True)
         fig.tight_layout()
