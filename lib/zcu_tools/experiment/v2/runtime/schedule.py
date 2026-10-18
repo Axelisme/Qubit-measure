@@ -529,7 +529,8 @@ class Schedule(Generic[T_Cfg, T_Env]):
                     self._clear_local_buffers(step.path)
                     self._mark_interrupted(exc)
                     break
-                except Exception as exc:
+                # tolerated: Child callables may fail arbitrarily; retain prior results and the cause.
+                except Exception as exc:  # noqa: BLE001
                     self._clear_local_buffers(step.path)
                     self._mark_failed(exc)
                     break
@@ -960,7 +961,8 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
             except KeyboardInterrupt as exc:
                 self._schedule._mark_interrupted(exc)
                 return slot.view
-            except Exception as exc:
+            # tolerated: Program factories may fail arbitrarily; preserve stop, retry and partial data.
+            except Exception as exc:  # noqa: BLE001
                 if self._schedule._check_stop_requested(exception=exc):
                     return slot.view
                 if attempt == retry:
@@ -1030,7 +1032,8 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
                 except KeyboardInterrupt as exc:
                     self._schedule._mark_interrupted(exc)
                     break
-                except Exception as exc:
+                # tolerated: Acquire and round hooks may fail arbitrarily; preserve stop/retry and data.
+                except Exception as exc:  # noqa: BLE001
                     # The producer reports first-round cancellation with an exception.
                     cause = None if isinstance(exc, StoppedPartialAcquireError) else exc
                     if self._schedule._check_stop_requested(exception=cause):
@@ -1048,7 +1051,8 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
                     slot.set(signal_fn(raw))
                 except KeyboardInterrupt as exc:
                     self._schedule._mark_interrupted(exc)
-                except Exception as exc:
+                # tolerated: Conversion/update callbacks may fail arbitrarily; retain data and the cause.
+                except Exception as exc:  # noqa: BLE001
                     self._schedule._mark_failed(exc)
                 break
         except KeyboardInterrupt as exc:
