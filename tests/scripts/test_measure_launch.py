@@ -11,7 +11,7 @@ from scripts.run_measure_gui import main
 def test_invalid_project_root_exits_before_gui_assembly(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], kind: str
 ) -> None:
-    file_path = tmp_path / "not-a-directory"
+    file_path = tmp_path / "plain-file"
     file_path.write_text("data", encoding="utf-8")
     paths = {
         "relative": "relative-root",
@@ -20,8 +20,9 @@ def test_invalid_project_root_exits_before_gui_assembly(
         "empty": "",
         "nul": str(tmp_path) + "\0",
     }
-    reason = "absolute" if kind in {"relative", "empty"} else "directory"
+    reason = "absolute path" if kind in {"relative", "empty"} else "existing directory"
     with pytest.raises(SystemExit) as failure:
         main(["--project-root", paths[kind]])
     assert failure.value.code != 0
-    assert reason in capsys.readouterr().err.lower()
+    error = capsys.readouterr().err.split("error:")[-1].lower()
+    assert reason in error

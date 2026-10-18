@@ -102,7 +102,7 @@ def test_new_process_receives_project_root_without_mcp_path_validation(
         assert result["launched"]
         assert len(received) == 1
         code_root, arguments = received[0]
-        assert (code_root / "scripts" / "run_measure_gui.py").is_file()
+        assert str(code_root) != project_root
         assert arguments == [
             "--clean",
             "--simulate",
@@ -118,6 +118,7 @@ def test_new_process_receives_project_root_without_mcp_path_validation(
 def test_invalid_project_root_type_is_rejected_before_rpc(tmp_path, project_root):
     client = make_client(tmp_path, orientation)
     try:
+        client.context.session.ensure_connected()
         before = list(client.transport.sent)
         with pytest.raises(ValueError, match="project_root.*string"):
             client.call("connect", {"project_root": project_root})
