@@ -14,7 +14,9 @@ from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from matplotlib.backends.backend_qt import NavigationToolbar2QT
-from qtpy.QtCore import QTimer, Signal  # type: ignore[attr-defined]
+
+# tolerated: qtpy exposes Signal at runtime but its QtCore stub does not export it.
+from qtpy.QtCore import QTimer, Signal  # pyright: ignore[reportPrivateImportUsage]
 from qtpy.QtGui import QCloseEvent, QShowEvent
 from qtpy.QtWidgets import (
     QAbstractItemView,

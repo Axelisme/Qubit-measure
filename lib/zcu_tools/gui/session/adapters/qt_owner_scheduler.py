@@ -6,7 +6,8 @@ import threading
 from collections.abc import Callable
 from typing import TypeVar, cast
 
-from qtpy.QtCore import QObject, Qt, Signal  # type: ignore[attr-defined]
+# tolerated: qtpy exposes Signal at runtime but its QtCore stub does not export it.
+from qtpy.QtCore import QObject, Qt, Signal  # pyright: ignore[reportPrivateImportUsage]
 
 _T = TypeVar("_T")
 
@@ -19,7 +20,8 @@ class QtOwnerScheduler(QObject):
     def __init__(self) -> None:
         super().__init__()
         self._owner_thread_id = threading.get_ident()
-        self._invoke.connect(self._run, type=Qt.ConnectionType.QueuedConnection)  # type: ignore[call-arg]
+        # tolerated: PyQt6 connect stub omits the connection type needed for owner-thread delivery.
+        self._invoke.connect(self._run, type=Qt.ConnectionType.QueuedConnection)  # pyright: ignore[reportCallIssue]
 
     def is_owner_thread(self) -> bool:
         return threading.get_ident() == self._owner_thread_id

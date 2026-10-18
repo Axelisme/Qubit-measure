@@ -161,7 +161,9 @@ def test_device_service_emits_started_and_finished_events(qapp):
 # ---------------------------------------------------------------------------
 
 
-def _make_real_svc(driver: object | None = None) -> tuple[DeviceService, object]:
+def _make_real_svc(
+    driver: FakeDevice | None = None,
+) -> tuple[DeviceService, FakeDevice]:
     fake_device = driver if driver is not None else FakeDevice(fast_mode=True)
     gate = OperationGate(EventBus())
     bg = _bg()
@@ -177,7 +179,7 @@ def _make_real_svc(driver: object | None = None) -> tuple[DeviceService, object]
         bg,
         runner,
         handles,
-        driver_factory=lambda _type, _address: fake_device,  # type: ignore[arg-type]
+        driver_factory=lambda type_name, address: fake_device,
     )
     return svc, fake_device
 

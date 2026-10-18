@@ -35,7 +35,8 @@ from qtpy.QtCore import (
     QRunnable,
     QThread,
     QThreadPool,
-    Signal,  # type: ignore[reportPrivateImportUsage]
+    # tolerated: qtpy exposes Signal at runtime but its QtCore stub does not export it.
+    Signal,  # pyright: ignore[reportPrivateImportUsage]
 )
 
 # Sentinel distinguishing "the thunk never produced a value" from "the thunk

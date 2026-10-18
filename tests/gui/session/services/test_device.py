@@ -122,13 +122,17 @@ def test_device_connect_returns_operation_handle(qapp):
     assert not errors
     # connect now returns an operation token (parity with setup) for awaiting.
     assert isinstance(token, int)
-    assert svc.get_device_snapshot("dev1").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
+    snapshot = svc.get_device_snapshot("dev1")
+    assert snapshot is not None
+    assert snapshot.status is DeviceStatus.CONNECTED
 
 
 def test_device_setup_updates_value_and_disconnect_updates_snapshot(qapp):
     svc, device = _make_svc()
     _connect(svc, _req())
-    assert svc.get_device_snapshot("dev1").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
+    snapshot = svc.get_device_snapshot("dev1")
+    assert snapshot is not None
+    assert snapshot.status is DeviceStatus.CONNECTED
 
     # Setting an output value goes through setup (ramped/cancellable), not a
     # separate set_value: the post-setup get_info reflects the new value.
@@ -140,7 +144,10 @@ def test_device_setup_updates_value_and_disconnect_updates_snapshot(qapp):
     )
     setup_loop.exec()
     device.setup.assert_called_once()
-    assert svc.get_device_snapshot("dev1").info.value == 1.0  # type: ignore[union-attr]
+    snapshot = svc.get_device_snapshot("dev1")
+    assert snapshot is not None
+    assert isinstance(snapshot.info, FakeDeviceInfo)
+    assert snapshot.info.value == 1.0
 
     drop_loop = _workers.completion()
     on_device_disconnected(svc, lambda _request: drop_loop.quit())
@@ -148,7 +155,9 @@ def test_device_setup_updates_value_and_disconnect_updates_snapshot(qapp):
     assert isinstance(disc_token, int)  # disconnect also returns a handle
     drop_loop.exec()
     device.close.assert_called_once_with()
-    assert svc.get_device_snapshot("dev1").status is DeviceStatus.MEMORY_ONLY  # type: ignore[union-attr]
+    snapshot = svc.get_device_snapshot("dev1")
+    assert snapshot is not None
+    assert snapshot.status is DeviceStatus.MEMORY_ONLY
 
 
 def test_device_setup_started_and_finished_keep_operation_origin(qapp) -> None:
@@ -255,7 +264,9 @@ def test_setup_uses_gate_and_returns_to_connected_snapshot(qapp):
 
     device.setup.assert_called_once()
     assert svc.get_active_device_setups() == ()
-    assert svc.get_device_snapshot("dev1").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
+    snapshot = svc.get_device_snapshot("dev1")
+    assert snapshot is not None
+    assert snapshot.status is DeviceStatus.CONNECTED
 
 
 def test_active_device_setups_enumerates_concurrent_setups(qapp):
@@ -365,7 +376,9 @@ def test_disconnect_close_failure_retains_connected_device_and_releases_gate(qap
 
     assert "close failed" in errors[0]
     assert "dev1" in svc.get_connected_devices()
-    assert svc.get_device_snapshot("dev1").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
+    snapshot = svc.get_device_snapshot("dev1")
+    assert snapshot is not None
+    assert snapshot.status is DeviceStatus.CONNECTED
     device.close.side_effect = None
     retry_loop = _workers.completion()
     on_device_disconnected(svc, lambda _request: retry_loop.quit())
@@ -390,7 +403,7 @@ def test_failing_device_changed_subscriber_does_not_abort_connect(qapp):
         bg_svc,
         runner,
         handles,
-        driver_factory=lambda _type, _address: MagicMock(),  # type: ignore[arg-type]
+        driver_factory=lambda type_name, address: MagicMock(),
         device_registry=FakeDeviceRegistry(),
     )
     # A DEVICE_CHANGED subscriber raising (e.g. a View redraw bug) is swallowed +
@@ -597,7 +610,9 @@ def test_poll_device_info_polls_setting_up_device(qapp):
     )
     try:
         qt_until(block.entered.is_set, label="setup worker entered")
-        assert svc.get_device_snapshot("dev1").status is DeviceStatus.SETTING_UP  # type: ignore[union-attr]
+        snapshot = svc.get_device_snapshot("dev1")
+        assert snapshot is not None
+        assert snapshot.status is DeviceStatus.SETTING_UP
 
         device.get_info.reset_mock()
         before = state.version.get("device:dev1")
@@ -722,7 +737,7 @@ def _make_multi_svc(
 
     drivers: dict[str, MagicMock] = {}
 
-    def factory(_type: str, address: str) -> MagicMock:
+    def factory(type_name: str, address: str) -> MagicMock:
         # The address carries the device name in these tests (one driver each).
         device = MagicMock()
         device.get_info.return_value = FakeDeviceInfo(address=address, value=0.0)
@@ -744,7 +759,7 @@ def _make_multi_svc(
         bg,
         runner,
         handles,
-        driver_factory=factory,  # type: ignore[arg-type]
+        driver_factory=factory,
         device_registry=registry,
     )
     return svc, drivers
@@ -788,22 +803,32 @@ def test_gate_allows_concurrent_setup_of_different_devices(qapp):
     assert isinstance(token_b, int)
 
     # Both devices are mid-setup at the same instant.
-    assert svc.get_device_snapshot("devA").status is DeviceStatus.SETTING_UP  # type: ignore[union-attr]
-    assert svc.get_device_snapshot("devB").status is DeviceStatus.SETTING_UP  # type: ignore[union-attr]
+    snapshot = svc.get_device_snapshot("devA")
+    assert snapshot is not None
+    assert snapshot.status is DeviceStatus.SETTING_UP
+    snapshot = svc.get_device_snapshot("devB")
+    assert snapshot is not None
+    assert snapshot.status is DeviceStatus.SETTING_UP
     assert gate.is_device_mutating("devA")
     assert gate.is_device_mutating("devB")
 
     finished_b.exec()  # devB finishes while devA is still ramping
-    assert svc.get_device_snapshot("devB").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
+    snapshot = svc.get_device_snapshot("devB")
+    assert snapshot is not None
+    assert snapshot.status is DeviceStatus.CONNECTED
     # devA is independent: still mid-setup.
-    assert svc.get_device_snapshot("devA").status is DeviceStatus.SETTING_UP  # type: ignore[union-attr]
+    snapshot = svc.get_device_snapshot("devA")
+    assert snapshot is not None
+    assert snapshot.status is DeviceStatus.SETTING_UP
 
     # Let devA finish too.
     finished_a = _workers.completion()
     on_setup_finished(svc, lambda n: finished_a.quit() if n == "devA" else None)
     block_a.release.set()
     finished_a.exec()
-    assert svc.get_device_snapshot("devA").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
+    snapshot = svc.get_device_snapshot("devA")
+    assert snapshot is not None
+    assert snapshot.status is DeviceStatus.CONNECTED
 
 
 def test_same_device_setup_still_blocked_while_in_flight(qapp):
@@ -875,9 +900,13 @@ def test_concurrent_setups_cancel_independently(qapp):
     cancel_loop.exec()
 
     assert cancelled == ["devA"]
-    assert svc.get_device_snapshot("devA").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
+    snapshot = svc.get_device_snapshot("devA")
+    assert snapshot is not None
+    assert snapshot.status is DeviceStatus.CONNECTED
     # devB is untouched: still mid-setup, then finishes on its own.
-    assert svc.get_device_snapshot("devB").status is DeviceStatus.SETTING_UP  # type: ignore[union-attr]
+    snapshot = svc.get_device_snapshot("devB")
+    assert snapshot is not None
+    assert snapshot.status is DeviceStatus.SETTING_UP
     assert "devB" not in cancelled
 
     finish_loop = _workers.completion()
@@ -885,7 +914,9 @@ def test_concurrent_setups_cancel_independently(qapp):
     block_b.release.set()
     finish_loop.exec()
     assert "devB" in finished
-    assert svc.get_device_snapshot("devB").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
+    snapshot = svc.get_device_snapshot("devB")
+    assert snapshot is not None
+    assert snapshot.status is DeviceStatus.CONNECTED
 
 
 # ---------------------------------------------------------------------------
@@ -919,7 +950,7 @@ def _make_svc_with_fake_registry(
         bg,
         runner,
         handles,
-        driver_factory=lambda _type, _address: device,  # type: ignore[arg-type]
+        driver_factory=lambda type_name, address: device,
         device_registry=registry,
     )
     return svc, device, registry
@@ -932,7 +963,9 @@ def test_registry_port_connect_registers_in_fake_not_global(qapp):
 
     # Device registered in the fake registry.
     assert "dev1" in registry.get_all_devices()
-    assert svc.get_device_snapshot("dev1").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
+    snapshot = svc.get_device_snapshot("dev1")
+    assert snapshot is not None
+    assert snapshot.status is DeviceStatus.CONNECTED
 
 
 def test_registry_port_disconnect_drops_from_fake(qapp):
@@ -948,7 +981,9 @@ def test_registry_port_disconnect_drops_from_fake(qapp):
 
     device.close.assert_called_once_with()
     assert "dev1" not in registry.get_all_devices()
-    assert svc.get_device_snapshot("dev1").status is DeviceStatus.MEMORY_ONLY  # type: ignore[union-attr]
+    snapshot = svc.get_device_snapshot("dev1")
+    assert snapshot is not None
+    assert snapshot.status is DeviceStatus.MEMORY_ONLY
 
 
 def test_registry_port_get_info_reads_from_fake(qapp):
@@ -997,7 +1032,10 @@ def test_registry_port_setup_reads_driver_from_fake(qapp):
     setup_loop.exec()
 
     device.setup.assert_called_once()
-    assert svc.get_device_snapshot("dev1").info.value == 5.0  # type: ignore[union-attr]
+    snapshot = svc.get_device_snapshot("dev1")
+    assert snapshot is not None
+    assert isinstance(snapshot.info, FakeDeviceInfo)
+    assert snapshot.info.value == 5.0
     # The driver in the registry is still the mock (not replaced by setup).
     assert registry.get_device("dev1") is device
 
@@ -1032,14 +1070,20 @@ def test_concurrent_setup_failure_does_not_affect_other(qapp):
 
     assert failed and failed[0][0] == "devA" and "devA boom" in failed[0][1]
     # devA rolled back to CONNECTED (prior state), its lease released.
-    assert svc.get_device_snapshot("devA").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
+    snapshot = svc.get_device_snapshot("devA")
+    assert snapshot is not None
+    assert snapshot.status is DeviceStatus.CONNECTED
     assert not gate.is_device_mutating("devA")
     # devB still mid-setup, lease intact.
-    assert svc.get_device_snapshot("devB").status is DeviceStatus.SETTING_UP  # type: ignore[union-attr]
+    snapshot = svc.get_device_snapshot("devB")
+    assert snapshot is not None
+    assert snapshot.status is DeviceStatus.SETTING_UP
     assert gate.is_device_mutating("devB")
 
     finish_loop = _workers.completion()
     on_setup_finished(svc, lambda n: finish_loop.quit() if n == "devB" else None)
     block_b.release.set()
     finish_loop.exec()
-    assert svc.get_device_snapshot("devB").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
+    snapshot = svc.get_device_snapshot("devB")
+    assert snapshot is not None
+    assert snapshot.status is DeviceStatus.CONNECTED

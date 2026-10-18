@@ -10,7 +10,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from qtpy.QtCore import Qt, Signal  # type: ignore[attr-defined]
+# tolerated: qtpy exposes Signal at runtime but its QtCore stub does not export it.
+from qtpy.QtCore import Qt, Signal  # pyright: ignore[reportPrivateImportUsage]
 from qtpy.QtWidgets import (
     QDoubleSpinBox,
     QHBoxLayout,
@@ -261,10 +262,12 @@ class EvalNumericField(QWidget):
             menu.addSeparator()
         if self._mode == "eval":
             action = menu.addAction("Use direct value")
-            action.triggered.connect(self._switch_to_direct)  # type: ignore[attr-defined]
+            assert action is not None
+            action.triggered.connect(self._switch_to_direct)
         else:
             action = menu.addAction("Use expression")
-            action.triggered.connect(self._switch_to_eval)  # type: ignore[attr-defined]
+            assert action is not None
+            action.triggered.connect(self._switch_to_eval)
         return menu
 
     def _show_context_menu(self, widget: QWidget, global_pos: Any) -> None:

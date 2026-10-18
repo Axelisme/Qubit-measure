@@ -23,6 +23,7 @@ from qtpy.QtWidgets import (
     QStackedWidget,
     QWidget,
 )
+from zcu_tools.device import BaseDeviceInfo
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
@@ -176,17 +177,17 @@ def _make_dialog(ctrl: MagicMock) -> DeviceDialog:
     return DeviceDialog(ctrl, parameter_provider=ctrl.read_context)
 
 
-def _connected_snapshot(name: str, info: object) -> DeviceSnapshot:
+def _connected_snapshot(name: str, info: BaseDeviceInfo) -> DeviceSnapshot:
     return DeviceSnapshot(
         name=name,
         type_name=getattr(info, "type", "FakeDevice"),
         address=getattr(info, "address", ""),
         status=DeviceStatus.CONNECTED,
-        info=info,  # type: ignore[arg-type]
+        info=info,
     )
 
 
-def _setting_up_snapshot(name: str, info: object) -> DeviceSnapshot:
+def _setting_up_snapshot(name: str, info: BaseDeviceInfo) -> DeviceSnapshot:
     """A snapshot whose status is SETTING_UP — Phase C's SSOT for 'this device
     is mid-setup' (the dialog derives the live-setup set from snapshot status,
     not from the device service's active-op enumerators)."""
@@ -195,7 +196,7 @@ def _setting_up_snapshot(name: str, info: object) -> DeviceSnapshot:
         type_name=getattr(info, "type", "FakeDevice"),
         address=getattr(info, "address", ""),
         status=DeviceStatus.SETTING_UP,
-        info=info,  # type: ignore[arg-type]
+        info=info,
     )
 
 

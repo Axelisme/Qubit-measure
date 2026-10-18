@@ -30,7 +30,8 @@ def test_name_from_type(type_, name) -> None:
 
 def test_name_from_type_rejects_unsupported_type() -> None:
     with pytest.raises(AssertionError, match="Unsupported type"):
-        name_from_type(bytes)  # type: ignore[arg-type]
+        # tolerated: bytes is deliberately outside the supported scalar types to verify rejection.
+        name_from_type(bytes)  # pyright: ignore[reportArgumentType]
 
 
 def test_register_get_and_describe_value_source() -> None:

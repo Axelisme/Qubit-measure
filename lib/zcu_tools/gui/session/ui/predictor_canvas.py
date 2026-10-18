@@ -225,12 +225,11 @@ class PredictorCurveCanvas(QWidget):
 
         # Secondary top x-axis: flux Φ/Φ₀ (monotone affine, so both callables
         # are safe for secondary_xaxis which expects a pair of inverse functions).
-        # The matplotlib stubs type functions as (ArrayLike)->ArrayLike, but our
-        # scalar callables also satisfy that at runtime (numpy passes floats and
-        # numpy arrays alike). Suppress the stub mismatch here.
         ax.secondary_xaxis(
             "top",
-            functions=(value_to_flux, flux_to_value),  # type: ignore[arg-type]
+            # These affine maps broadcast over NumPy numeric arrays passed by Matplotlib.
+            # tolerated: the scalar API does not promise all ArrayLike inputs (e.g. lists/strings).
+            functions=(value_to_flux, flux_to_value),  # pyright: ignore[reportArgumentType]
         ).set_xlabel("Flux (Φ/Φ₀)")
 
         # Set x display window (shift if marker is outside).
