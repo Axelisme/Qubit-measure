@@ -1,43 +1,39 @@
-"""Typed author paths retain original list positions through the owner wire."""
+"""Typed author carriers at the recording GUI wire, not indexed owner traversal.
 
+Real indexed logical installation is owned by the later owner integration. The
+original owner scenario remains in commit 393b89c71 for that acceptance seam.
+"""
+
+from copy import deepcopy
 from pathlib import Path
-from typing import Annotated
 
 import pytest
-from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.gui.form import FixedList
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.app.measure.remote.form_description import recipe_field_wire
 from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import RecipeFieldEdit, RecipeSession
 
 from ._recipe_support import LookbackGui, recipe_client
 
 
-class Drive(ConfigBase):
-    gain: float
-    samples: list[int]
+class CarrierGui(LookbackGui):
+    """Return prescribed wire facts; never claim to install indexed Form input."""
 
-
-class Tone(ConfigBase):
-    name: str
-    drive: Drive
-
-
-class IndexedControls(ConfigBase):
-    tones: Annotated[list[Tone], FixedList(name_field="name")] = [
-        Tone(name="Q1", drive=Drive(gain=0.1, samples=[1, 2])),
-        Tone(name="Q2", drive=Drive(gain=0.2, samples=[3, 4])),
-    ]
-
-
-class IndexedGui(LookbackGui):
-    def make_form(self):
-        return Form(IndexedControls, {})
+    def __call__(self, method, params):
+        if method == "tab.edit_recipe_fields":
+            return {"changed": True, "errors": []}
+        if method == "tab.read_recipe_field":
+            reply = deepcopy(recipe_field_wire(self.owner.read_recipe_field(("rounds",))))
+            path = params["path"]
+            reply["description"]["path"] = path
+            reply["description"]["target"]["path"] = path
+            value = [3, 4] if path[-1] == "samples" else 0.75
+            reply.update(input=value, value=value)
+            return reply
+        return super().__call__(method, params)
 
 
 def test_indexed_batch_read_and_run_capture_keep_original_position(tmp_path: Path) -> None:
-    gui = IndexedGui()
-    with recipe_client(tmp_path, gui) as client:
+    with recipe_client(tmp_path, CarrierGui()) as client:
         tab = RecipeSession(
             client.context,
             summary_parameters=(SummaryParameter("q2_gain", ("tones", 1, "drive", "gain")),),
@@ -53,14 +49,14 @@ def test_indexed_batch_read_and_run_capture_keep_original_position(tmp_path: Pat
             previous = tab.read_field(("tones", 1, "drive", "samples"))
             tab.set(("tones", 1, "drive", "samples"), [7, 8])
         except (AttributeError, TypeError, ValueError) as error:
-            pytest.fail(f"Typed str/int author paths must reach the owner unchanged: {error}")
-        assert client.transport.sent[before] == (
-            "tab.edit_recipe_fields",
-            {"tab_id": "t", "edits": [{"path": ["tones", 1, "drive", "gain"], "value": {"expr": "0.75"}}]},
-        )
-        assert previous.value == [3, 4]
-        assert tab.read_field(("tones", 1, "drive", "samples")).value == [7, 8]
-        assert tab.read_field(("tones", 0, "drive", "gain")).value == 0.1
+            pytest.fail(f"Typed str/int author paths must reach the wire unchanged: {error}")
+        assert client.transport.sent[before:] == [
+            ("tab.edit_recipe_fields", {"tab_id": "t", "edits": [{"path": ["tones", 1, "drive", "gain"], "value": {"expr": "0.75"}}]}),
+            ("tab.read_recipe_field", {"tab_id": "t", "path": ["tones", 1, "drive", "samples"]}),
+            ("tab.edit_recipe_fields", {"tab_id": "t", "edits": [{"path": ["tones", 1, "drive", "samples"], "value": [7, 8]}]}),
+        ]
+        previous.value.append(99)
+        assert tab.read_field(("tones", 1, "drive", "samples")).value == [3, 4]
         captured = tab.run().snapshot()
         assert captured is not None
         assert captured.actual["fields"] == {"q2_gain": {"value": 0.75, "source": "derived"}}
