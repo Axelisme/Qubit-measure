@@ -393,7 +393,9 @@ class Engine:
                 geometry = PrefixResolver(geometry, kernels, context, cancel).resolve(
                     self._cache, pool, self._chunks
                 )
-                dispatch = classify(geometry, kernels, context, pool=pool)
+                dispatch = classify(
+                    geometry, kernels, context, pool=pool, cache=self._cache
+                )
                 schedule = Schedule(geometry, dispatch, context, cancel)
                 result = schedule.run(kernels, self._cache, pool, self._chunks)
             if cancel.is_set():

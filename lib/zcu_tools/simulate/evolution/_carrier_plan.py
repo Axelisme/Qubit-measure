@@ -40,7 +40,7 @@ def populate_carrier_plan(
     those later rejected. The immutable row index is scoped to table identity;
     renumbered prefix tables cannot use its global rows.
     """
-    ramps = plan_ramp_families(table, source)
+    ramps = plan_ramp_families(table, source, plan)
     plan.publish_ramp_families(ramps)
     plan.publish_carrier_families(plan_carrier_families(ramps))
     if ramps:
@@ -54,14 +54,19 @@ def populate_carrier_plan(
 
 
 def subdivisions(
-    table: SegmentTable, rows: NDArray[np.int64], source: ModelSource
+    table: SegmentTable,
+    rows: NDArray[np.int64],
+    source: ModelSource,
+    work_plan: WorkPlan,
 ) -> NDArray[np.int64]:
     """Return the existing motion/split subperiod count for each selected row."""
     # Kernel registration imports this planner; defer numerical helper imports.
-    from .kernels._shaped import drive_bounds, envelope_bounds
+    from .kernels._shaped import drive_bounds
+    from .kernels._workload_facts import envelope_bounds
 
     strength, gamma = drive_bounds(table, rows, source)
-    peaks, slopes = envelope_bounds(table)
+    bounds = envelope_bounds(table, work_plan)
+    peaks, slopes = bounds.peaks, bounds.slopes
     envelope = table.tone_envelope[rows, 0]
     gain = np.abs(table.tone_amplitude[rows, 0])
     frequency = np.maximum(np.abs(table.tone_frequency_ghz[rows, 0]), 1e-20)
@@ -77,13 +82,16 @@ def subdivisions(
 
 
 def _coordinates(
-    table: SegmentTable, rows: NDArray[np.int64], source: ModelSource
+    table: SegmentTable,
+    rows: NDArray[np.int64],
+    source: ModelSource,
+    work_plan: WorkPlan,
 ) -> Iterator[_RampCoordinate]:
-    from .kernels._shaped import envelope_bounds
+    from .kernels._workload_facts import envelope_bounds
 
-    peaks, _ = envelope_bounds(table)
+    peaks = envelope_bounds(table, work_plan).peaks
     bounds = np.abs(table.tone_amplitude[rows, 0]) * peaks[table.tone_envelope[rows, 0]]
-    counts = subdivisions(table, rows, source)
+    counts = subdivisions(table, rows, source, work_plan)
     for row, bound, count in zip(rows, bounds, counts, strict=True):
         model = source.model(tuple(int(v) for v in table.level[row]))
         # Match band_keys' zero-gain DC identity, including ineligible candidates.
@@ -99,7 +107,7 @@ def _coordinates(
 
 
 def plan_ramp_families(
-    table: SegmentTable, source: ModelSource
+    table: SegmentTable, source: ModelSource, work_plan: WorkPlan
 ) -> tuple[RampFamilyPlan, ...]:
     """Group all single-tone shaped candidates, before numerical admission.
 
@@ -112,7 +120,9 @@ def plan_ramp_families(
     if not len(rows):
         return ()
     groups: dict[tuple[str, tuple[int, ...], int, float, float, int], list[int]] = {}
-    for row, identity in zip(rows, _coordinates(table, rows, source), strict=True):
+    for row, identity in zip(
+        rows, _coordinates(table, rows, source, work_plan), strict=True
+    ):
         groups.setdefault(identity, []).append(int(row))
     return tuple(
         RampFamilyPlan(*identity, tuple(members))
@@ -182,7 +192,7 @@ def ramp_families_for_rows(
 def _reindex_ramps(table: SegmentTable, context: KernelContext) -> _RampRows:
     families = context.work_plan.ramp_families
     if not families:
-        families = plan_ramp_families(table, context.source)
+        families = plan_ramp_families(table, context.source, context.work_plan)
         return _row_index(
             families,
             [(row, index) for index, ramp in enumerate(families) for row in ramp.rows],
@@ -205,7 +215,9 @@ def _reindex_ramps(table: SegmentTable, context: KernelContext) -> _RampRows:
     pairs = [
         (int(row), coordinates[key])
         for row, key in zip(
-            rows, _coordinates(table, rows, context.source), strict=True
+            rows,
+            _coordinates(table, rows, context.source, context.work_plan),
+            strict=True,
         )
     ]
     return _row_index(families, pairs)

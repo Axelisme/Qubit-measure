@@ -19,7 +19,8 @@ from ._period_table import (
     periods,
 )
 from ._secular import coherence_decay, population_generator
-from ._shaped import drive_bounds, envelope_bounds
+from ._shaped import drive_bounds
+from ._workload_facts import envelope_bounds
 from .dop853 import prepare_models
 
 
@@ -107,7 +108,8 @@ class PeriodTableKernel:
         frequencies = np.abs(keys["frequency"])
         period = 1 / np.where(frequencies > 0, frequencies, 1)
         strength, gamma = drive_bounds(table, rows, source)
-        peaks, slopes = envelope_bounds(table)
+        bounds = envelope_bounds(table, context.work_plan)
+        peaks, slopes = bounds.peaks, bounds.slopes
         envelopes = table.tone_envelope[rows, 0]
         gain = np.abs(table.tone_amplitude[rows, 0])
         motion = 2 * np.pi * gain * strength * slopes[envelopes] * period**2
@@ -127,8 +129,7 @@ class PeriodTableKernel:
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.void]:
         """Share a port's band table across shape, duration and phase changes."""
-        del context
-        return band_keys(table, rows)
+        return band_keys(table, rows, context.work_plan)
 
     def cost(self, table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.float64]:
         """Estimate period count, using direct-solver steps for DC rows."""

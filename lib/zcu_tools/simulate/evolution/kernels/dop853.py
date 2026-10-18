@@ -18,8 +18,8 @@ from ._dop853_data import (
     Segments,
     hamiltonian,
     pack_models,
-    pack_segments,
 )
+from ._workload_facts import packed_segments
 
 
 @dataclass(frozen=True)
@@ -297,7 +297,7 @@ class DOP853Kernel:
             raise ValueError("DOP853 tone port absent from model")
         advance_endpoints(
             prepared.models,
-            pack_segments(table),
+            packed_segments(table, context.work_plan),
             (rows, key_index),
             states,
             budget,

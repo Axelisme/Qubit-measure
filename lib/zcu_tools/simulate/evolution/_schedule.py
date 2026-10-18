@@ -11,6 +11,7 @@ from numpy.typing import NDArray
 
 from ._dispatch import Dispatch, Selection, classify, prepare
 from ._dispatch import diagnostics as dispatch_diagnostics
+from ._gain_plan import admit_shared_builds
 from ._parallel import Executor
 from ._planning import Geometry
 from ._prepare_keys import group_keys
@@ -187,6 +188,29 @@ class Schedule:
                     (entry, selected, namespace)
                     for selected in np.array_split(missing, min(chunks, len(missing)))
                 )
+        if self.context.work_plan.gain_groups:
+            pending_gain_rows = [
+                entry.representative[selected]
+                for entry, selected, _ in jobs
+                if entry.kernel.name == "floquet_period"
+            ]
+            open_gain_rows = [
+                entry.rows[~entry.shared[entry.inverse]]
+                for entry in entries
+                if entry.kernel.name == "floquet_period"
+            ]
+            if self.dispatch.deferred is not None:
+                open_gain_rows.append(np.flatnonzero(self.dispatch.deferred))
+            admit_shared_builds(
+                self.context,
+                self.table,
+                np.concatenate(pending_gain_rows)
+                if pending_gain_rows
+                else np.empty(0, dtype=np.int64),
+                np.concatenate(open_gain_rows)
+                if open_gain_rows
+                else np.empty(0, dtype=np.int64),
+            )
         # Coarse key chunks, grouped by kernel; prepare never receives density.
         built = pool(
             delayed(_build)(entry, selected, self.table, self.context, self.cancel)
@@ -350,6 +374,7 @@ class Schedule:
                 self.dispatch.two_tone_direct,
                 self.dispatch.names,
                 self.dispatch.plans,
+                self.dispatch.cached,
             ),
         )
         bindings: list[_Binding] = []

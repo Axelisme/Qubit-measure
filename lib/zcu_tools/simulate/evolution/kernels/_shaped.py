@@ -7,22 +7,6 @@ from ..kernel import SegmentTable
 from ..secular import ModelSource
 
 
-def envelope_bounds(
-    table: SegmentTable,
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Return peak magnitude and maximum piecewise-linear slope per envelope."""
-    peaks = np.ones(len(table.envelopes))
-    slopes = np.zeros(len(table.envelopes))
-    for index, envelope in enumerate(table.envelopes):
-        if envelope.kind == "sampled":
-            peaks[index] = np.max(np.abs(envelope.samples))
-            if len(envelope.samples) > 1:
-                slopes[index] = np.max(
-                    np.abs(np.diff(envelope.samples)) / np.diff(envelope.sample_ns)
-                )
-    return peaks, slopes
-
-
 def drive_bounds(
     table: SegmentTable, rows: NDArray[np.int64], source: ModelSource
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:

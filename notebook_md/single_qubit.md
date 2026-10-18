@@ -13,7 +13,7 @@ jupyter:
 
 # FTF acquisition with a shared environment
 
-This notebook replaces the former two-level single-qubit simulation. It uses the F1-SQUID-F2 environment, including finite microwave control, a coupler-flux excursion and live bias changes between software rounds. It does not connect to hardware or save into a real result directory.
+This notebook uses the F1-SQUID-F2 environment with a finite charge-drive pulse, terminal readout and live DC bias changes between software rounds. It does not connect to hardware or save into a result directory. FTF supports static DC bias, charge drive and linearized small-signal flux drive. It does not implement large-amplitude fast-flux pulses.
 
 ## Load the environment
 
@@ -47,31 +47,27 @@ Program lengths and delays are us, frequencies MHz and phases degrees. Program g
 
 ```python
 microwave = PulseCfg(
-    ch=2, nqz=1, freq=500.0, phase=90.0, gain=-0.1,
-    waveform=ConstWaveformCfg(length=0.016),
-)
-flux = PulseCfg(
-    ch=1, nqz=1, freq=0.0, gain=0.2,
-    waveform=ConstWaveformCfg(length=0.016), post_delay=0.016,
+    ch=2, nqz=1, freq=597.3, phase=90.0, gain=-0.1,
+    waveform=ConstWaveformCfg(length=0.08),
 )
 readout = PulseReadoutCfg(
-    gen_ch=0, ro_ch=0, nqz=1, freq=6000.0, gain=0.1,
-    waveform=ConstWaveformCfg(length=0.08), ro_length=0.1,
-    trig_offset=-0.01,
+    gen_ch=0, ro_ch=0, nqz=2, freq=7190.0, gain=0.005,
+    waveform=ConstWaveformCfg(length=1.0), ro_length=0.9,
+    trig_offset=0.05,
 )
 program = ModularProgramV2(
     env.soccfg, ProgramV2Cfg(reps=8, rounds=2),
-    modules=[microwave.build("microwave"), flux.build("flux"), readout.build("readout")],
+    modules=[microwave.build("microwave"), readout.build("readout")],
 )
 ```
 
-One readout generator and one ADC serve both resonators on the shared reciprocal line. The negative trigger offset includes lookback. The two conditional resonator fields include relaxation and thermal transitions, then the receiver samples one joint initial state and adds I/Q noise for each shot. They are not quantum jump trajectories.
+These channels match `default.yaml`: gen2 drives F1 charge, and gen0 with ADC0 reads the shared resonator line. Gen1 is unbound. The illustrative frequencies target the default initial bias and R1; changing the model or working point requires a new spectroscopy calibration.
 
-The lowpass tail evolves through the idle time before readout. At the common readout pulse start the model freezes the actual flux, including its residual tail, and uses that Hro, basis, rates and pulls throughout the readout window. It ignores further tail changes in that window. A long tau can therefore change physical accuracy; the model does not claim the tail has vanished or reject it using a settling threshold. Active gate or bias pulses during/after readout are unsupported.
+The charge pulse evolves the joint state until readout starts. Readout uses the round's fixed DC model and energy-basis populations. Both conditional resonator fields include relaxation and thermal transitions. The receiver samples one joint initial state and adds I/Q noise for each shot. These are not quantum jump trajectories. Controls during or after readout do not contribute to this acquisition.
 
 ## Change the live DC value between rounds
 
-The initial device value is applied only at startup. The next round reads the current value from the same manager. It does not restore YAML's initial value. The final average mixes the two conditions; this is not automatically a bias sweep.
+The initial device value is applied only at startup. The next round reads the current value from the same manager. It does not restore YAML's initial value. The default coupler source uses A and allows -0.01 to 0.01 A. The example changes it to 0.0001 A, or 0.1 mA. The final average mixes the two conditions; this is not automatically a bias sweep.
 
 ```python
 bias = env.devices.get_device("coupler_bias")
@@ -81,12 +77,12 @@ if not isinstance(bias, FakeDevice):
 
 def next_bias(round_count, raw, cancel_flag):
     if round_count == 1:
-        set_flux(bias, 0.12, unit="V", stop=StopSignal())
+        set_flux(bias, 0.0001, unit="A", stop=StopSignal())
 
 
 averaged_iq = program.acquire(env.soc, progress=False, round_hook=next_bias)
 last_round_raw = program.get_raw()
-lookback_iq = program.acquire_decimated(env.soc, progress=False)
+decimated_iq = program.acquire_decimated(env.soc, progress=False)
 ```
 
 Use I/Q and ordinary analysis to find working points. Normal GUI/MCP metadata exposes only the environment's public capabilities and opaque provenance ID. It does not expose populations, state labels or a calibrated working point. Environment authors may separately call `experiment.ftf.plan_template`, `Engine.evolve` and `populations` to inspect numeric states, outside the operator calibration path.

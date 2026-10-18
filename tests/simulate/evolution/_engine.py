@@ -98,7 +98,7 @@ class RecordingKernel:
         self.preparations += len(keys)
         return Payload(len(keys))
 
-    def admit_prepared(self, prepared, table, rows, context) -> None:
+    def admit_prepared(self, prepared, table, rows, context) -> GuardResult | None:
         """Decline cached-domain admission in this synthetic collaborator."""
         del prepared, table, rows, context
 
