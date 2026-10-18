@@ -125,17 +125,45 @@ def test_scoped_preparation_is_bitwise_invariant_to_worker_and_key_order(source,
     np.testing.assert_array_equal(actual, reference)
 
 
-def test_rejected_predictor_preserves_independent_result_bitwise(source):
-    table = scan([0.003, 0.006, 0.009, 0.012])
+@pytest.mark.parametrize(
+    ("gains", "checked"),
+    [
+        ([0.003, 0.0031, 0.0032, 0.0033], True),
+        ([0.003, 0.006, 0.009, 0.012], False),
+    ],
+    ids=["coarse-defect-rejection", "unequal-anchor-grids"],
+)
+def test_rejected_predictor_preserves_independent_result_bitwise(
+    source, gains, checked
+):
+    table = scan(gains)
     kernel, workspace = scoped(table, source)
     actual = prepare(kernel, table, source, 1e-10)
-    assert workspace.attempts > 0
+    assert (workspace.attempts > 0) == checked
     assert workspace.hits == 0
     independent = prepare(FloquetPeriodKernel(), table, source, 1e-10)
     np.testing.assert_array_equal(
         playback(kernel, actual, table, source, 1e-10),
         playback(FloquetPeriodKernel(), independent, table, source, 1e-10),
     )
+
+
+def test_reverse_handoff_releases_workspace_and_repeated_keys_rebuild_bitwise(source):
+    table = scan(np.arange(8) * 1e-5 + 0.003)
+    kernel, workspace = scoped(table, source)
+    cache = PrepareCache(0)
+    with cache.track_workspace(workspace):
+        last_row = np.array([7])
+        first = prepare(kernel, table, source, rows=last_row)
+        expected = playback(kernel, first, table, source, rows=last_row)
+        for row in range(6, -1, -1):
+            prepare(kernel, table, source, rows=np.array([row]))
+        assert cache.live_bytes == workspace.nbytes == 0
+        repeated = prepare(kernel, table, source, rows=last_row)
+        np.testing.assert_array_equal(
+            playback(kernel, repeated, table, source, rows=last_row), expected
+        )
+        assert cache.live_bytes == workspace.nbytes == 0
 
 
 @pytest.mark.parametrize("changed", ["carrier", "budget", "model", "port"])
