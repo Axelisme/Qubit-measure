@@ -674,7 +674,8 @@ class SetupDialog(QDialog):
                     ip=self._ip_edit.text().strip(), port=self._port_spin.value()
                 )
             )
-        except Exception as exc:  # noqa: BLE001 — restore the button on admission rejection
+        # tolerated: Admission may re-raise gate/submit failures; restore Connect and status.
+        except Exception as exc:  # noqa: BLE001
             self._on_connect_failed(str(exc))
 
     def _on_connect_finished(self) -> None:
