@@ -796,19 +796,22 @@ class FormState[F: FormModel]:
         propagate before mutation. On success install once, preserve base and
         notify only if the complete draft changed. saved is never modified.
         """
-        from ._migration import migrate_selections
-        from ._sources import drop_unmatched_sources
-        from ._structure import restore
+        from ._restore import restore
 
-        restored, dropped = restore(self._model, self._data, saved.data, env)
-        candidate, unmatched = drop_unmatched_sources(
-            self._model, restored, self._data, env
+        data, selections, dropped = restore(
+            self._model, self._data, saved.data, saved.selections, env
         )
-        selections, discarded = migrate_selections(
-            self._model, candidate, saved.selections
-        )
-        self._install(FormInput(self._model, candidate, selections=selections))
-        return tuple(dict.fromkeys((*dropped, *unmatched, *discarded)))
+        candidate = FormInput(self._model, data, selections=selections)
+        # Restoration changes captured structure, not an ordinary user mutation.
+        if not self.input.same_as(candidate):
+            self._data = candidate.data
+            self._selections = candidate.selections
+            for callback in tuple(self._callbacks):
+                try:
+                    callback()
+                except Exception:
+                    _logger.exception("Form state subscriber failed")
+        return dropped
 
     def write_compatible(
         self, saved: Mapping[str, JsonValue], env: FormEnv
