@@ -41,7 +41,8 @@ class ManualOwnerScheduler:
         def invoke() -> None:
             try:
                 results.append(callback())
-            except BaseException as exc:  # propagate the exact callback failure
+            # tolerated: Return every callback failure, including interrupts, to the waiting caller.
+            except BaseException as exc:  # noqa: BLE001
                 errors.append(exc)
             finally:
                 done.set()

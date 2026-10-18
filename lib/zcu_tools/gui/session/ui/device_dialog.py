@@ -881,7 +881,8 @@ class DeviceDialog(QDialog):
         if any(isinstance(v, EvalRef) for v in updates.values()):
             try:
                 parameters = self._parameter_provider()
-            except Exception as exc:
+            # tolerated: Injected capture failures must reject Apply and display their original message.
+            except Exception as exc:  # noqa: BLE001
                 self._show_error(f"{name}: {exc}")
                 return None
             resolved_updates: dict[str, object] = {}
@@ -891,7 +892,8 @@ class DeviceDialog(QDialog):
                         coerced = coerce_eval_result(
                             evaluate_numeric_expr(val.expr, parameters), val.type_
                         )
-                    except Exception as exc:
+                    # tolerated: Captured sources can raise arbitrary errors; reject Apply without submitting.
+                    except Exception as exc:  # noqa: BLE001
                         self._show_error(f"{name}: field '{key}': {exc}")
                         return None
                     # Bounds check: eval must respect the same inclusive range as

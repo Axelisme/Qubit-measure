@@ -516,7 +516,8 @@ class _DeferredPollBackground:
         self.submitted = True
         try:
             result = work()
-        except Exception as exc:
+        # tolerated: Match BackgroundExecutor's open work-failure contract and defer the original error.
+        except Exception as exc:  # noqa: BLE001
             self._delivery = lambda exc=exc: on_error(exc)
         else:
             self._delivery = lambda result=result: on_done(result)

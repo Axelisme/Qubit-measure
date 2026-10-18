@@ -53,7 +53,8 @@ def test_manual_scheduler_call_propagates_callback_error() -> None:
     def invoke() -> None:
         try:
             scheduler.call(callback)
-        except BaseException as exc:
+        # tolerated: Transfer the exact scheduler callback failure to the test thread for its assertions.
+        except BaseException as exc:  # noqa: BLE001
             errors.append(exc)
 
     with running(invoke):
@@ -75,7 +76,8 @@ def test_manual_scheduler_rejects_owner_thread_call_and_foreign_pump() -> None:
     def pump() -> None:
         try:
             scheduler.pump_all()
-        except BaseException as exc:
+        # tolerated: Unexpected pump failures must reach the test assertions instead of dying in the worker.
+        except BaseException as exc:  # noqa: BLE001
             errors.append(exc)
 
     with running(pump):

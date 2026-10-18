@@ -46,7 +46,8 @@ class RestoreOutcome(Generic[ReportT]):
 def _safe_cache_root() -> Path:
     try:
         return Path(user_cache_dir("zcu_tools", "zcu_tools")) / "gui"
-    except Exception:
+    # tolerated: Platform cache lookup has no closed failure set; retain the temporary-root fallback.
+    except Exception:  # noqa: BLE001
         return Path(gettempdir()) / ".zcu_tools_gui"
 
 
@@ -113,7 +114,8 @@ class SingleFileCaretaker(Generic[StateT, ReportT]):
                 return self._codec.default(), None
             raw = json.loads(self._path.read_text(encoding="utf-8"))
             return self._codec.decode(raw), None
-        except Exception as exc:
+        # tolerated: App-owned codecs can raise arbitrary errors; restore defaults and report the load failure.
+        except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "persistence load failed (%s); using defaults",
                 self._path,

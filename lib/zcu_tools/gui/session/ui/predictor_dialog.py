@@ -1004,7 +1004,8 @@ class PredictorDialog(QDialog):
                     f"{entry.name}  [{entry.type_name}]{unit_suffix}",
                     userData=entry.name,
                 )
-        except Exception as exc:
+        # tolerated: Device query ports have open failure sets; show status and restore combo signal delivery.
+        except Exception as exc:  # noqa: BLE001
             self._set_status(f"Failed to refresh device list: {exc}", error=True)
         finally:
             idx = combo.findData(current_name) if current_name is not None else 0
@@ -1042,7 +1043,8 @@ class PredictorDialog(QDialog):
                     f"Skipped refresh for {name!r}: a run is active.",
                     error=False,
                 )
-        except Exception as exc:
+        # tolerated: Refresh admission/provider failures must become status text, not escape the Qt callback.
+        except Exception as exc:  # noqa: BLE001
             self._set_status(f"Failed to refresh {name!r}: {exc}", error=True)
 
     def _on_refresh_devices_clicked(self) -> None:
@@ -1071,7 +1073,8 @@ class PredictorDialog(QDialog):
             return
         try:
             info = self._dev.get_device_info(selected)
-        except Exception as exc:
+        # tolerated: Driver read failures have no closed exception set; report status without replacing the value.
+        except Exception as exc:  # noqa: BLE001
             self._set_status(f"Failed to read {selected!r}: {exc}", error=True)
             return
         value = self._extract_numeric_info_value(info)
@@ -1175,7 +1178,8 @@ class PredictorDialog(QDialog):
             resolved = coerce_eval_result(
                 evaluate_numeric_expr(raw.expr, parameters), raw.type_
             )
-        except Exception as exc:
+        # tolerated: Arbitrary capture/source failures must block calibration and retain the diagnostic message.
+        except Exception as exc:  # noqa: BLE001
             if update_status:
                 self._set_status(f"Calibration frequency: {exc}", error=True)
             return None
