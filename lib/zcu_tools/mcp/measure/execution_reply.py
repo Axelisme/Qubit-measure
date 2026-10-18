@@ -123,12 +123,15 @@ def _actual(
 def _summary_value(summary: dict[str, Any], path: RecipeFieldPath) -> tuple[bool, Any]:
     value: Any = summary
     for segment in path:
-        if isinstance(segment, str) and isinstance(value, dict) and segment in value:
-            value = value[segment]
-        elif (
-            type(segment) is int
-            and isinstance(value, list)
-            and 0 <= segment < len(value)
+        if (
+            isinstance(segment, str)
+            and isinstance(value, dict)
+            and segment in value
+            or (
+                type(segment) is int
+                and isinstance(value, list)
+                and 0 <= segment < len(value)
+            )
         ):
             value = value[segment]
         else:
