@@ -19,7 +19,7 @@ from ..kernel import (
     prepared_key_indices,
 )
 from ..secular import SecularModel
-from ..workplan import RampFamilyPlan
+from ..workplan import FactKey, RampFamilyPlan, WorkPlan
 from ._carrier_reuse import CarrierWorkspace
 from ._period_table import (
     CompactPolynomial,
@@ -193,6 +193,59 @@ class _Data:
     def nbytes(self) -> int:
         # Models belong to ModelSource; only newly owned arrays are charged.
         return self.periods.nbytes + self.keys.nbytes + self.errors.nbytes
+
+
+@dataclass(frozen=True)
+class _TailMaps:
+    # Half-tail secular maps; population casting preserves the original playback.
+    populations: NDArray[np.complex128]
+    coherences: NDArray[np.float64]
+
+
+def _tail_maps(
+    model: SecularModel, entry: PeriodEntry, tail: float, work_plan: WorkPlan
+) -> _TailMaps:
+    """Share exact half-tail maps, retaining the original subperiod power."""
+    step = 1 / (abs(entry.frequency) * entry.subdivisions)
+    key = FactKey(
+        ("shaped-tail-maps", model.identity, model.level, tail, step), _TailMaps
+    )
+
+    def build() -> _TailMaps:
+        population = np.asarray(
+            expm(tail / 2 * population_generator(model.rates_per_ns)), dtype=complex
+        )
+        # The power, rather than exp(-tail/2 * decay), preserves rounding.
+        coherence = entry.coherences ** (tail / step)
+        return _TailMaps(population, coherence)
+
+    return work_plan.fact(key, build)
+
+
+def _tail_blocks(
+    model: SecularModel,
+    port: int,
+    frequency: float,
+    amplitude: float,
+    tail: float,
+    work_plan: WorkPlan,
+) -> NDArray[np.complex128]:
+    """Share all-phase Fourier blocks by their exact physical build inputs."""
+    key = FactKey[NDArray[np.complex128]](
+        (
+            "shaped-tail-blocks",
+            model.identity,
+            model.level,
+            port,
+            frequency,
+            amplitude,
+            tail,
+        ),
+        np.ndarray,
+    )
+    return work_plan.fact(
+        key, lambda: _spectral(model, port, frequency, amplitude, 3, tail)
+    )
 
 
 class ShapedSambeKernel:
@@ -530,7 +583,9 @@ class ShapedSambeKernel:
                         0, 0
                     ].real
                 )
-                blocks = _spectral(model, port, entry.frequency, amp, 3, tail)
+                blocks = _tail_blocks(
+                    model, port, entry.frequency, amp, tail, context.work_plan
+                )
                 theta = (
                     table.tone_theta_rad[row, 0] + 2 * np.pi * entry.frequency * start
                 )
@@ -539,12 +594,8 @@ class ShapedSambeKernel:
                 # Polar projection changes U, not density or populations.
                 left, _, right = np.linalg.svd(u)
                 u = left @ right
-                ratio = tail / step
-                population = np.asarray(
-                    expm(tail / 2 * population_generator(model.rates_per_ns)),
-                    dtype=complex,
-                )
-                coherence = entry.coherences**ratio
+                maps = _tail_maps(model, entry, tail, context.work_plan)
+                population, coherence = maps.populations, maps.coherences
                 rho = chunk[j]
                 for half in range(2):
                     diagonal = population @ np.diag(rho)
