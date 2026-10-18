@@ -303,6 +303,9 @@ class DataFigurePreviewGallery(QWidget):
     (scroll viewport when available) decides narrow vs wide at threshold
     2*MIN_CARD_WIDTH + spacing. Aspect-fit scaling (S3) keeps the displayed
     pixmap within the image viewport with KeepAspectRatio.
+
+    Viewport setup tolerates Qt RuntimeError lifetime failures; other setup
+    failures propagate from construction.
     """
 
     def __init__(
@@ -371,7 +374,8 @@ class DataFigurePreviewGallery(QWidget):
             vp = self._scroll.viewport()
             if vp is not None:
                 vp.installEventFilter(self)
-        except Exception:
+        except RuntimeError:
+            # A deleted Qt viewport must not prevent gallery construction.
             pass
 
         # Initial layout arrangement
@@ -435,7 +439,8 @@ class DataFigurePreviewGallery(QWidget):
             vp = self._scroll.viewport()
             if vp is not None and vp.width() > 0:
                 return int(vp.width())
-        except Exception:
+        except RuntimeError:
+            # A deleted Qt viewport falls back to the gallery's own width.
             pass
         # Fallback to gallery width minus outer margins.
         w = int(self.width())
@@ -452,7 +457,11 @@ class DataFigurePreviewGallery(QWidget):
         return avail >= WIDE_THRESHOLD
 
     def is_wide_mode(self) -> bool:
-        """Public inspector for tests: current responsive mode."""
+        """Return the responsive mode, tolerating only Qt viewport lifetime errors.
+
+        A RuntimeError from viewport access uses the gallery width instead;
+        other viewport failures propagate to the caller.
+        """
         return self._is_wide()
 
     def refresh_layout(self) -> None:
@@ -532,7 +541,8 @@ class DataFigurePreviewGallery(QWidget):
         try:
             if a0 is self._scroll.viewport() and a1.type() == QEvent.Type.Resize:
                 self.refresh_layout()
-        except Exception:
+        # tolerated: Public reflow overrides can raise arbitrary errors; isolate Qt resize delivery.
+        except Exception:  # noqa: BLE001
             pass
         return super().eventFilter(a0, a1)
 
@@ -626,7 +636,8 @@ class DataFigurePreviewGallery(QWidget):
         # Render via injected adapter (S3) — per-card isolated.
         try:
             png_bytes = self._renderer(fig)
-        except Exception as exc:  # pragma: no cover - exercised via injected failure
+        # tolerated: The injected renderer is an open callback; preserve per-card failure isolation.
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover - exercised via injected failure
             logger.warning("preview render failed for %r: %s", key, exc, exc_info=True)
             card.show_unavailable(type(exc).__name__)
             return
@@ -640,7 +651,8 @@ class DataFigurePreviewGallery(QWidget):
             if not pixmap.loadFromData(png_bytes, "PNG"):
                 raise RuntimeError("pixmap loadFromData failed")
             card.show_image(pixmap)
-        except Exception as exc:  # pragma: no cover - defensive
+        # tolerated: PNG decode/allocation and Qt presentation failures must stay local to this card.
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive
             logger.warning("preview pixmap failed for %r: %s", key, exc, exc_info=True)
             card.show_unavailable(type(exc).__name__)
 

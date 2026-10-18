@@ -229,7 +229,8 @@ class _LedgerSection(QWidget):
                 self._toggle()
                 a0.accept()
                 return
-        except Exception:
+        # tolerated: Event accessors/presentation may fail arbitrarily; delegate default mouse handling.
+        except Exception:  # noqa: BLE001
             pass
         # Fallback to default
         QWidget.mouseReleaseEvent(self._header, a0)
@@ -1102,19 +1103,22 @@ class ExpTabWidget(QWidget):
             return
         try:
             run_fig = self.get_current_figure_for_pane("run")
-        except Exception:
+        # tolerated: The pane reader is overridable; a failed run lookup leaves only its preview empty.
+        except Exception:  # noqa: BLE001
             run_fig = None
         if self._has_analysis:
             try:
                 ana_fig = self.get_current_figure_for_pane("analysis")
-            except Exception:
+            # tolerated: An arbitrary analysis pane-reader failure must not block the other previews.
+            except Exception:  # noqa: BLE001
                 ana_fig = None
         else:
             ana_fig = None
         if self._has_post:
             try:
                 post_fig = self.get_current_figure_for_pane("post_analysis")
-            except Exception:
+            # tolerated: An arbitrary post pane-reader failure must not block the other previews.
+            except Exception:  # noqa: BLE001
                 post_fig = None
         else:
             post_fig = None
@@ -1147,7 +1151,8 @@ class ExpTabWidget(QWidget):
             # would otherwise defer resize/show until next event.
             try:
                 self._data_gallery.refresh_layout()
-            except Exception:
+            # tolerated: Data activation must survive arbitrary public reflow/presentation failures.
+            except Exception:  # noqa: BLE001
                 pass
             return
         # Guide
