@@ -213,3 +213,50 @@ def test_smooth_complex_envelopes_use_sambe_and_match_dop(
     np.testing.assert_allclose(actual.densities[0], actual.densities[1], atol=1e-10)
     assert np.isfinite(actual.densities).all()
     assert actual.paths.max_trace_error < 1e-6
+
+
+@pytest.mark.parametrize("frequency", [0.3, -0.3])
+def test_complex_fractional_tail_preserves_quadrature(frequency: float) -> None:
+    """A row shorter than one period still applies the complex drive in its tail."""
+    x = np.array([[0, 0.04], [0.04, 0]], dtype=complex)
+    model = SecularModel(
+        (0,),
+        "complex-tail",
+        np.array([0.0, abs(frequency)]),
+        np.eye(2, dtype=complex),
+        (SecularDrive("drive", x, np.zeros_like(x)),),
+        np.zeros((2, 2)),
+        np.zeros((2, 2)),
+    )
+    source = ModelSource(np.diag([1.0, 0.0]).astype(complex), lambda _: model)
+    duration = 2.7
+    envelope = EnvelopeSpec(
+        "sampled", np.array([1j, 0.999j]), np.array([0.0, duration])
+    )
+    track = DriveTrack(
+        "drive",
+        np.zeros(1),
+        np.full(1, duration),
+        np.full(1, frequency),
+        np.full(1, 0.73),
+        np.full(1, 0.6),
+        (envelope,),
+        np.zeros(1, dtype=np.int64),
+        np.ones(1, dtype=bool),
+    )
+    batch = TimelineBatch(
+        np.arange(1),
+        (track,),
+        FluxSchedule(np.arange(2), np.zeros(1), np.zeros((1, 1), dtype=np.int64)),
+        np.full(1, duration),
+    )
+    engine = Engine(1, 0)
+    direct = Engine(1, 0, kernels=(DOP853Kernel(),))
+    try:
+        actual = engine.evolve(source, (batch,), cancel=Event())
+        expected = direct.evolve(source, (batch,), budget=1e-7, cancel=Event())
+    finally:
+        engine.close()
+        direct.close()
+    assert actual.paths.segments_by_kernel == {"shaped_sambe": 1}
+    np.testing.assert_allclose(actual.densities, expected.densities, atol=1e-3, rtol=0)
