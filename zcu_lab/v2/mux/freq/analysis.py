@@ -35,7 +35,8 @@ def analyze_frequency(
     plots receives one fit_i figure per original index, even on numerical
     failure. Shape/options errors raise before fitting; numerical failures are
     isolated per tone and reported with a reason. Partial rows use only finite
-    acquired IQ. Bindings, current forms and devices are never accessed.
+    acquired IQ. Plotting errors propagate unchanged. Bindings, current forms
+    and devices are never accessed.
     """
     validate_mux_result(result)
     if options.model_type not in ("lor", "sinc"):
@@ -65,11 +66,7 @@ def analyze_frequency(
                 {name: float(value) for name, value in zip(names, params, strict=True)},
                 covariance,
             )
-            ax.plot(xs, real, "o", label="measured")
-            if options.plot_fit:
-                ax.plot(xs, fitted, label=f"FWHM={width:.4g} ± {werr:.2g} MHz")
-                ax.axvline(freq, ls="--", label=f"freq={freq:.7g} ± {ferr:.2g} MHz")
-            outcomes.append(MuxFreqFit(index, freq, ferr, width, werr, quality))
+            outcome = MuxFreqFit(index, freq, ferr, width, werr, quality)
         except (
             ValueError,
             RuntimeError,
@@ -79,6 +76,12 @@ def analyze_frequency(
             ax.plot(xs, np.abs(signal), "o", label="acquired magnitude")
             ax.text(0.02, 0.98, str(exc), transform=ax.transAxes, va="top", wrap=True)
             outcomes.append(MuxFitFailure(index, str(exc)))
+        else:
+            ax.plot(xs, real, "o", label="measured")
+            if options.plot_fit:
+                ax.plot(xs, fitted, label=f"FWHM={width:.4g} ± {werr:.2g} MHz")
+                ax.axvline(freq, ls="--", label=f"freq={freq:.7g} ± {ferr:.2g} MHz")
+            outcomes.append(outcome)
         ax.legend()
         ax.grid(True)
         fig.tight_layout()
