@@ -110,7 +110,7 @@ def test_estimates_and_candidates_keep_author_identity_after_source_reset(
             },
         }
         candidate = reply["writeback"]["stages"]["primary"][0]
-        assert candidate["element"] == {"index": 2, "name": "Q3"}
+        assert candidate.get("element") == {"index": 2, "name": "Q3"}
         assert candidate["target"] == "trigger_offset"
         assert candidate["proposed"] == 0.24 and candidate["current"] == 0.1
         assert reply["writeback"]["destination"] == {

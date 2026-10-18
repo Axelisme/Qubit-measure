@@ -116,7 +116,7 @@ class FixedElements:
     ) -> ElementIdentity | None:
         """Read a declared element identity at path from the same input capture.
 
-        path is a root-relative field path through this declaration\'s list and
+        path is a root-relative field path through this declaration's list and
         its original integer index. Descendants share that element identity.
         Return None for paths outside this list. Missing/nonliteral names and
         invalid indexes inside the list raise ValueError; never use participants.

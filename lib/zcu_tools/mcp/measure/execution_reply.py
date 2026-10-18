@@ -7,6 +7,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
+from pydantic import TypeAdapter
+
 from zcu_tools.core.element import ElementIdentity
 from zcu_tools.mcp.measure.recipe_capture import RecipeActual
 from zcu_tools.mcp.measure.recipe_form import RecipeFieldPath, field_path
@@ -68,6 +70,13 @@ class StepReply(TypedDict):
 
 
 class ParameterReply(TypedDict):
+    """One captured condition, including explicitly supplied values.
+
+    value is the resolved native value. source preserves the author\'s label or
+    per-component sweep labels. unit, when present, is a native display label.
+    element, when present, is the declaring owner\'s captured original identity.
+    """
+
     value: Any
     source: Any
     unit: NotRequired[str]
@@ -75,9 +84,17 @@ class ParameterReply(TypedDict):
 
 
 class EstimateReply(TypedDict):
+    """One author-provided scalar estimate from the captured native summary.
+
+    value is the estimate, including an author-provided null. stderr is the
+    declared uncertainty or None. unit is a native label or None. element is
+    optional author-supplied identity; absence never triggers identity lookup.
+    """
+
     value: Any
     stderr: Any
     unit: str | None
+    element: NotRequired[ElementIdentity]
 
 
 def project_control(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -186,6 +203,12 @@ def _pane(
                 else None,
                 "unit": estimate.unit,
             }
+            if estimate.element_key is not None:
+                present, element = _summary_value(summary, estimate.element_key)
+                if present and element is not None:
+                    estimates[estimate.name]["element"] = TypeAdapter(
+                        ElementIdentity
+                    ).validate_python(element, strict=True)
     return {
         "params": result.get("params", execution.get("params")),
         "estimates": estimates,
@@ -248,6 +271,10 @@ def _candidate(item: dict[str, Any]) -> dict[str, Any]:
         "proposed": deepcopy(item.get("proposed", item.get("proposed_value"))),
         "current": deepcopy(item.get("current")),
     }
+    if item.get("element") is not None:
+        candidate["element"] = TypeAdapter(ElementIdentity).validate_python(
+            item["element"], strict=True
+        )
     if item.get("kind") == "module":
         proposed = candidate["proposed"]
         current = candidate["current"]

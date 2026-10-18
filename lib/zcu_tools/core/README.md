@@ -1,6 +1,6 @@
 # zcu_tools.core — shared stateless contracts
 
-**Last updated:** 2026-10-12，共用 numpy numeric scalar 投影
+**Last updated:** 2026-10-19，共用 captured element identity
 
 `core` 提供 resources 與 program 共用的無狀態契約。Repo 內只依賴 utils，不持有 GUI、資源 scope 或硬體。
 

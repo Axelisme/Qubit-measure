@@ -116,7 +116,7 @@ Execution 保存同一份投影，recipe、`status(execution)` 與 `wait(executi
 
 Framework 原樣傳遞 native analysis summary 與 invalid 路徑，不特別解讀 fit_quality、不重算品質或設定寫回門檻。有擬合的 summary 附 fit_quality 是實驗定義者的約定，見 zcu_lab README。
 
-`SummaryParameter.field`、`SummaryEstimate.value_key` 與 `error_key` 使用同一 typed tuple，公開 name 只作回報 key。Estimate lookup 沿 native dict 的 str key 與 list 的 int 原始位置讀值，不把數字字串當 index。Missing path 不產生 estimate，present null 與 invalid 原樣保留，error_key=None 表示未宣告 uncertainty。
+`SummaryParameter.field`、`SummaryEstimate.value_key` 與 `error_key` 使用同一 typed tuple，公開 name 只作回報 key。Estimate lookup 沿 native dict 的 str key 與 list 的 int 原始位置讀值，不把數字字串當 index。Missing path 不產生 estimate，present null 與 invalid 原樣保留，error_key=None 表示未宣告 uncertainty。`SummaryEstimate.element_key` 可指向 native summary 中作者提供的 `ElementIdentity`；缺少該 fact 時省略 identity，不從 value_key 或公開 name 推導。
 
 Analysis-only 沒有 recipe 身分。摘要使用注入 definitions 已宣告的 value_key typed path，完全相同的 name/error_key/unit 宣告可合併。Present path 的宣告衝突直接 ValueError，不猜實驗身分，不新增 tab.snapshot 讀取。每個 pane 保留完整原生 summary 與 invalid；scalar estimates 不抽掉 summary 的欄位，framework 不投影 quality。
 
@@ -124,7 +124,7 @@ Analysis-only 沒有 recipe 身分。摘要使用注入 definitions 已宣告的
 
 Recipe、`tab_analyze`、`wait(execution)` 與 `tab_interact(done)` 使用同一 execution 摘要。摘要列出 Run 前捕捉的 resolved 條件與來源、Primary/Post scalar estimates、原生 summary 與 invalid、全部候選及 destination 身分。Run 或分析已送出而 receipt 未確認時保留 unknown，不從缺少 handle 推斷未啟動。`run_id` 取已捕捉 Save report 的原 Run 身分，全部輸出失敗也保留同一 ID。沒有捕捉到 report 時才為 null。各 output 的 status/error 表示保存結果。這與 readonly tab snapshot 的 confirmed run_id 不同，後者在尚無持久輸出成功時仍為 null。Execution ID 仍是 session-local。
 
-Recipe 的 actual 是平面 mapping，key 沿 summary_parameters.name，每項保 value／source／unit。Explicit、default 與 derived 等來源均保留，sweep 保留每個 component 的來源，明填值不從回報省略。Recipe/helper 把 agent 明填值標 explicit，通用 API 仍接受 custom label。Summary 與 `status(execution, detail="full")` 使用同一份固定 actual。Run 內部只保宣告摘要 facts，不保存 publication、input 或 source_basis 副本。Cfg commands 不使用 ref，actual 與 candidate 也不顯示它。Full 仍保 captured analysis results 與 writeback proposals。查詢不新增 RPC 或授權。Artifact 沿用 producer 的 section、名稱與完整 members，每個 member 保留全部路徑、format、status 與 error。Reserved 不代表已保存。Partial 保留當次成功與失敗輸出；resave 以當次 report 取代選中 artifact 的輸出，不累積跨次成功路徑。
+Recipe 的 actual 是平面 mapping，key 沿 summary_parameters.name，每項保 value／source／unit。逐元素 actual 另保共同 `ElementIdentity` 的 index／name，來自同次 logical read 的 FixedElements 宣告，不另宣告名稱 path。Explicit、default 與 derived 等來源均保留，sweep 保留每個 component 的來源，明填值不從回報省略。Recipe/helper 把 agent 明填值標 explicit，通用 API 仍接受 custom label。Summary 與 `status(execution, detail="full")` 使用同一份固定 actual。Run 內部只保宣告摘要 facts，不保存 publication、input 或 source_basis 副本。Cfg commands 不使用 ref，actual 與 candidate 也不顯示它。Full 仍保 captured analysis results 與 writeback proposals。查詢不新增 RPC 或授權。Artifact 沿用 producer 的 section、名稱與完整 members，每個 member 保留全部路徑、format、status 與 error。Reserved 不代表已保存。Partial 保留當次成功與失敗輸出；resave 以當次 report 取代選中 artifact 的輸出，不累積跨次成功路徑。
 
 當次工具回覆可附記憶體中的 MCP image content，不落地 session 暫存 PNG。之後要看圖，用 `tab.get_figure` 取得 GUI 當下圖像，不保證是先前回覆的圖。`status` 不附圖片，也不重新擷取圖像。
 
@@ -132,7 +132,7 @@ Recipe 的 actual 是平面 mapping，key 沿 summary_parameters.name，每項�
 
 `apply_writeback(tab, items=None)` 按 preview 的穩定 `target_name` 選擇當前候選。省略 items 或傳 null 寫全部，空陣列寫零項。它不看 GUI 勾選，也不回答 recipe。工具先讀 Primary 與既有 Post 的當前 preview，再檢查未知、重複及跨 stage 同名；全部檢查通過後才用當前 session ID 寫入。寫入順序是 Primary 再 Post，首錯停止，不 retry 或 rollback。收據只列 GUI-confirmed completed，並保留 skipped、failed stage、not_started 及失敗 stage 的不確定性。
 
-摘要列出每個候選的 target、proposal 與 current，full 保留勾選旗標。Destination 摘要只列 context/project 身分，native context readiness 保留在 full。Preview 與摘要不授權寫入。Caller 寫入前核對提案與當前目的地，GUI 仍在 dispatch 檢查 holder。候選內容的調整使用 `tab.writeback_*` RPC。Module edits 使用與 tab Form 相同的 path 陣列，回 input／values／errors，只有有效 Spec 可提交。Library 使用 `context.ml_edit`，child key 保持 key，不用 editor handle。`editor.*` 與舊 eval／value_ref wire 已退休，`value.list`／`value.read` 保留。
+摘要列出每個候選的 target、proposal 與 current，full 保留勾選旗標。`WritebackItem.element` 由作者選填同次 Run／Load 的 `ElementIdentity`，draft 建立時複製，remote 與 MCP 只投影，不改 stable target 或目的地。Destination 摘要只列 context/project 身分，native context readiness 保留在 full。Preview 與摘要不授權寫入。Caller 寫入前核對提案與當前目的地，GUI 仍在 dispatch 檢查 holder。候選內容的調整使用 `tab.writeback_*` RPC。Module edits 使用與 tab Form 相同的 path 陣列，回 input／values／errors，只有有效 Spec 可提交。Library 使用 `context.ml_edit`，child key 保持 key，不用 editor handle。`editor.*` 與舊 eval／value_ref wire 已退休，`value.list`／`value.read` 保留。
 
 MCP 以 `context.aliases_set` 整表套用 authored rows，以 `context.set_parameter` 寫目前 point 的具體路徑。兩者直接走 owner，不開 Inspect、不切頁或焦點，也不改既有 Form／Run 的固定 capture。Aliases 在 Inspect 第三頁，`dialog.screenshot` 只拍目前頁，不接受 tab selector。
 

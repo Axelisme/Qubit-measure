@@ -30,7 +30,7 @@ class ActualField(TypedDict):
     or SweepSources for individually labeled sweep inputs. None or omission
     means no source was declared. unit is an asserted native unit,
     never a request to convert value. element, when present, is the declaring
-    owner\'s original index/name captured with this value, not a destination.
+    owner's original index/name captured with this value, not a destination.
     """
 
     value: object

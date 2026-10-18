@@ -195,7 +195,11 @@ def test_indexed_batch_read_and_run_capture_keep_original_position(
         captured = tab.run().snapshot()
         assert captured is not None
         assert captured.actual["fields"] == {
-            "q2_gain": {"value": 0.75, "source": "derived"}
+            "q2_gain": {
+                "value": 0.75,
+                "source": "derived",
+                "element": {"index": 1, "name": "Q2"},
+            }
         }
         tab.set(("tones", 1, "drive", "gain"), 0.9)
         assert captured.actual["fields"]["q2_gain"]["value"] == 0.75

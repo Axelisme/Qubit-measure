@@ -102,14 +102,21 @@ def saved_session(session: WritebackSession) -> WritebackSession:
 
 def test_draft_detaches_author_element_identity(session: WritebackSession) -> None:
     identity = ElementIdentity(index=2, name="Q3")
-    proposal = ParameterWriteback("Q1.ext.gain", "Gain", proposed_value=0.4, element=identity)
+    proposal = ParameterWriteback(
+        "Q1.ext.gain", "Gain", proposed_value=0.4, element=identity
+    )
     draft = session.service.create_draft(
-        [proposal], parameters=session.control.read_context(), experiment_name="synthetic"
+        [proposal],
+        parameters=session.control.read_context(),
+        experiment_name="synthetic",
     )
     try:
         identity["name"] = "later"
         identity["index"] = 0
-        assert session.service.preview_draft(draft)[0].element == {"index": 2, "name": "Q3"}
+        assert session.service.preview_draft(draft)[0].element == {
+            "index": 2,
+            "name": "Q3",
+        }
     finally:
         session.service.teardown_draft(draft)
 

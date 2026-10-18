@@ -360,7 +360,7 @@ class RecipeFieldObservation(FormFieldObservation):
     selectors, source identifies the nearest supplying ref or None. readonly
     means a ref ancestor was traversed, not declaration-fixed or write authority.
     Root has target/selector/source=None and an ordinary logical subtree value.
-    element, when present, is the FixedElements owner\'s same-read original
+    element, when present, is the FixedElements owner's same-read original
     index/name. Fields outside declared elements omit it.
     """
 

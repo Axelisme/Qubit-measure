@@ -62,6 +62,8 @@ def _writeback_item_wire(item: WritebackItem) -> dict[str, object]:
         "description": item.description,
         "selected": bool(item.selected),
     }
+    if item.element is not None:
+        base["element"] = item.element.copy()
     if isinstance(item, ParameterWriteback):
         base["kind"] = "parameter"
         base["proposed_value"] = _writeback_wire_value(item.proposed_value)

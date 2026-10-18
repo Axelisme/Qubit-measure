@@ -19,7 +19,7 @@ class WritebackItem(ABC):
 
     The destination is a direct container path or captured role path. Selection
     and session identity belong to the service, not the proposing adapter.
-    element optionally carries the author\'s original index/name from the same
+    element optionally carries the author's original index/name from the same
     Run/Load result; None means no element identity was supplied. It is display
     metadata only and never changes target_name, destination or write permission.
     """

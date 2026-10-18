@@ -76,7 +76,7 @@ class RecipeFormField:
     the nearest captured ref identity or None. readonly means a ref ancestor was
     crossed, not declaration-fixed. errors contains relevant logical directed
     failures, including root and affecting ancestors. Reading grants no writes.
-    element is the declaring owner\'s same-read original index/name, or None
+    element is the declaring owner's same-read original index/name, or None
     outside declared fixed elements. All containers are detached from the reply.
     """
 
