@@ -2,14 +2,24 @@
 
 from dataclasses import replace
 from threading import Event
+from typing import Protocol, runtime_checkable
 
 import numpy as np
+from numpy.typing import NDArray
 from zcu_tools.simulate.evolution import Engine, EnvelopeSpec, FluxSchedule
 from zcu_tools.simulate.evolution.kernel import ApplyContext
 from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Kernel
 from zcu_tools.simulate.evolution.kernels.t4 import T4
 
 from ._engine import batch, source, track
+
+
+@runtime_checkable
+class RecordedDirectPlan(Protocol):
+    """The frame/chain decisions observed at the injected kernel boundary."""
+
+    frame: NDArray[np.str_]
+    chain: NDArray[np.int64]
 
 
 class ObservedDOP853(DOP853Kernel):
@@ -21,6 +31,8 @@ class ObservedDOP853(DOP853Kernel):
     def apply(self, prepared, key_index, table, rows, states, context: ApplyContext):
         plan = context.plan
         assert plan is not None, "dispatch must supply timeline-owned DOP853 decisions"
+        if not isinstance(plan, RecordedDirectPlan):
+            raise TypeError("direct solver plan must expose frame and chain decisions")
         self.decisions.extend(
             (
                 int(table.timeline[row]),
