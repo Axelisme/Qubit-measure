@@ -212,9 +212,10 @@ class AdditionalMacroMixin(AsmV2):
         """Insert a meta macro that emits a meta instruction for the IR builder.
 
         info maps string keys to arbitrary metadata values passed to MetaMacro.
-        regs maps info keys to register names resolved via prog._get_reg() at
-        translate time.  Use this when the register is known only by a logical
-        name (e.g. a loop name) rather than a bare ASM address.
+        regs maps info keys to register names resolved by the compiler at
+        translate time. Use it for logical names (e.g. a loop name), ASM
+        addresses or QICK aliases; resolved addresses overwrite matching info
+        keys without mutating the inputs.
         """
         self.append_macro(MetaMacro(type=type, name=name, info=info, regs=regs))
 

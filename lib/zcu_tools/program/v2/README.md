@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-11，native arb path、core conversion 與 typed mock interfaces
+**Last updated:** 2026-10-18，compiler-owned metadata emission and register resolution
 
 ## Testing & Type Checking Conventions
 
@@ -91,7 +91,7 @@ lands after the shot timing and before the loop test/jump, matching native
 
 ### `MetaMacro.regs` — Register Name Resolution
 
-`MetaMacro` accepts an optional `regs: dict[str, str]` field.  Each entry maps an `info` key to a logical register name (e.g. a QICK loop name like `"reset_sel"`).  At `translate()` time, each name is resolved to its hardware ASM address via `prog._get_reg()` and written into `resolved_info` before `_add_meta()` is called.
+`MetaMacro` accepts an optional `regs: dict[str, str]` field. Each entry maps an `info` key to a logical register name (e.g. a QICK loop name like `"reset_sel"`), an ASM address or a QICK alias. At `translate()` time, the macro passes its declaration to `IRCompileMixin.record_meta()`. The compiler copies `info`, resolves the register references through QICK and records the metadata at the current instruction address without emitting ASM. Resolved addresses overwrite matching `info` keys without mutating the inputs. Resolution errors propagate without recording a marker.
 
 **Design constraint:** `MetaMacro.translate()` does not go through QICK's normal macro `expand()` path, so loop names stored in `info` are never resolved automatically.  Any caller that passes a loop name (or other logical register alias) as a register reference in `info` must use `regs` to trigger resolution — otherwise the IR layer receives an unrecognisable string and the assembler raises `Source Data not Recognized`.
 

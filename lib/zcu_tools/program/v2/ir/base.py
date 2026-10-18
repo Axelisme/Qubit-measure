@@ -20,11 +20,36 @@ class IRCompileMixin(QickProgramV2):
         self.meta_infos.append(dict(kind="label", name=label, p_addr=self.p_addr))
         super()._add_label(label)
 
-    def _add_meta(
-        self, type: str, name: str, info: dict[str, Any] | None = None
+    def record_meta(
+        self,
+        type: str,
+        name: str,
+        info: dict[str, Any] | None = None,
+        regs: dict[str, str] | None = None,
     ) -> None:
+        """Record an IR marker of the given type and name without emitting ASM.
+
+        Shallow-copy info (or use an empty dict) without mutating either input.
+        Resolve regs' info-key/register-name pairs in insertion order using
+        QICK's logical names, ASM addresses and aliases. Resolved addresses
+        overwrite matching info keys. Resolution happens when this method is
+        called; QICK errors, including KeyError for an unknown logical name,
+        propagate without appending metadata.
+
+        Append a kind="meta" entry with type, name, resolved info and the current
+        p_addr to meta_infos. Neither the ASM stream nor p_addr changes.
+        """
+        resolved_info = dict(info or {})
+        for key, reg_name in (regs or {}).items():
+            resolved_info[key] = self._get_reg(reg_name)
         self.meta_infos.append(
-            dict(kind="meta", type=type, name=name, info=info or {}, p_addr=self.p_addr)
+            dict(
+                kind="meta",
+                type=type,
+                name=name,
+                info=resolved_info,
+                p_addr=self.p_addr,
+            )
         )
 
     def compile(self) -> None:
