@@ -1,6 +1,5 @@
 """Real-envelope periods from shared finite Hilbert Fourier matrices."""
 
-from copy import copy
 from dataclasses import dataclass
 
 import numpy as np
@@ -211,41 +210,6 @@ class ShapedSambeKernel:
     name = "shaped_sambe"
     guard_builds = True
 
-    def __init__(self, workspace: CarrierWorkspace | None = None) -> None:
-        """Use Engine's evolve-local physical-block workspace, or exact builds.
-
-        Standalone calls default to independent per-carrier preparation. A supplied
-        workspace must belong to one source/budget/evolve only. Its calibrated
-        carrier probes are not a rigorous interval bound; harmonic/amplitude
-        guards, cycle scaling, dissipation, tails and projection are unchanged.
-        """
-        self._workspace = workspace
-
-    def evolve_scope(
-        self, table: SegmentTable, context: KernelContext
-    ) -> tuple["ShapedSambeKernel", Prepared]:
-        """Return a fresh kernel/workspace for this scan, never retaining either.
-
-        Engine shares the returned kernel with prefix and timeline workers and
-        charges the workspace's current numeric bytes until this evolve ends.
-        """
-        workspace = self.carrier_workspace(table, context)
-        # Keep injected subclass hooks; only this clone receives the workspace.
-        scoped = copy(self)
-        scoped._workspace = workspace
-        return scoped, workspace
-
-    def carrier_workspace(
-        self, table: SegmentTable, context: KernelContext
-    ) -> CarrierWorkspace:
-        """Build a workspace from the complete planner-owned carrier inventory.
-
-        No grouping or profitability decision belongs to this kernel. The full
-        records are shared with prefix and timeline consumers for this evolve.
-        """
-        del table
-        return CarrierWorkspace(context.work_plan.carrier_families)
-
     def prepare_keys(
         self,
         table: SegmentTable,
@@ -347,7 +311,9 @@ class ShapedSambeKernel:
             # accompany this calibrated (not rigorous) convergence estimate.
             family = families.get(family_plan)
             if family is None:
-                family = _SpectralFamily(model, port, f, bound, step, self._workspace)
+                family = _SpectralFamily(
+                    model, port, f, bound, step, context.work_plan.carrier_workspace()
+                )
                 families[family_plan] = family
             error = family.error(modes)
             if error * cycles > budget / 4:

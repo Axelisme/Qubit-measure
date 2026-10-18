@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-18, evolve-local work ownership
+**Last updated:** 2026-10-18, WorkPlan and cache ownership
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -122,26 +122,6 @@ It neither slices nor interprets plans. A timeline worker resolves deferred
 neighbors before building its local plan and chains. It does not mutate the
 caller dispatch's shared decisions.
 
-[WorkPlan](workplan.py) owns one evolve's lazy immutable facts, typed gain/carrier/
-ramp group records, and single-flight resource handles. Prefix representatives
-and timeline workers share the same plan. Table-indexed fact identities must
-separate representative tables from the complete table. Builders publish owned
-read-only copies and never retain densities or adaptive solver history.
-
-Resource handles distinguish planned inventory from incrementally admitted
-actual consumers. Open resources allow deferred timeline admission. Sealing
-closes admission; the last actual handoff then releases the resource. Deferred
-groups stay open until evolve exit. Engine drains its pool before closing the
-plan on success, cancellation or failure. Cache ownership remains separate.
-
-`admit_prepared` is the cache-first numerical admission hook. It returns current
-row decisions and a row plan without construction when the payload domain covers
-all required products. None means domain miss and retains the ordinary build
-path. Dispatch looks up resident guard products in the caller and passes strong
-references to deferred workers. Floquet reuses frames only when all needed probe
-bins are present. Shaped Sambe reuses key-covered convergence data. Neither hook
-builds numerical products; both recheck the current rows before accepting them.
-
 Guards are row-local: splitting or reordering a guard call must preserve its
 acceptance mask. A guard may read the source initial density or an
 engine-computed certified prefix input, never a worker's evolving density.
@@ -157,21 +137,60 @@ nested and driven prefixes. Bound payloads never enter the prepare cache.
 Returning `None` retains ordinary per-batch apply. Apply advances worker
 densities in place and returns a row-aligned boolean exceedance mask.
 
-## Algorithm ownership and reuse
+## WorkPlan and cache ownership
 
-Each family owns its build, apply and numerical certificates. Shared numerical
-operations have one owner, rather than one kernel calling another kernel
-class's methods.
+[Dispatch](_dispatch.py) creates one [WorkPlan](workplan.py) from the complete
+evolve table before workers start. Prefix representatives, caller classification
+and timeline workers share it through `KernelContext` and `ApplyContext`. Engine
+drains its pool before closing the plan on success, cancellation or failure.
+The registry kernels retain no evolve-local data.
 
-| Shared operation | Owner and users |
-| --- | --- |
-| Rates → population generator Q and coherence decay | [kernels/_secular.py](kernels/_secular.py), used by static, split, modal and direct propagators. |
-| Adaptive DOP853 tableau, tolerances and integration | [kernels/_dop853.py](kernels/_dop853.py), used by density solvers and Hilbert endpoint builders. Packing and chain traversal live in [kernels/_dop853_data.py](kernels/_dop853_data.py) and [kernels/_dop853_chain.py](kernels/_dop853_chain.py). |
-| Ordinary density endpoint advancement | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py), used by ordinary DOP853 apply and period fractional tails with an explicitly supplied frame. |
-| Period interpolation, secular playback and fractional tails | [kernels/_period_table.py](kernels/_period_table.py), shared by [period_table](kernels/period_table.py) and [shaped_sambe](kernels/shaped_sambe.py). |
-| Gate Hilbert endpoint integration | [kernels/_gate_endpoints.py](kernels/_gate_endpoints.py), shared by sixteen-node and [adaptive phase](kernels/gate_phase.py) builders. |
-| Constant-tone Hilbert period build and playback | [kernels/floquet_period.py](kernels/floquet_period.py), with [CF4 grid](kernels/_cf4_grid.py) and [Sambe](kernels/_period_sambe.py) helpers. Separate from two-tone Floquet frames. |
-| Two-tone retained-sideband certificates and equations | [kernels/_floquet_sidebands.py](kernels/_floquet_sidebands.py), used by [floquet](kernels/floquet.py) guard admission and apply. |
+### Facts and algorithm groups
+
+WorkPlan publishes each lazy fact once, including concurrent requests for the
+same key. WorkPlan copies builder results and publishes read-only arrays. The
+shared facts are envelope peak/slope/real flags, period split rates and packed
+DOP853 samples. Model facts
+include the full physical coordinates in their identity. Table-indexed facts
+also include table identity, so renumbered prefix representatives cannot alias
+the complete table. DOP853 packing also distinguishes flux-inclusive samples.
+Densities and adaptive solver history are not facts.
+
+The planner publishes immutable algorithm-named records from the complete
+candidate inventory, before numerical admission:
+
+- `GainGroupPlan` and `GainBuildPlan` fix period builders, work limits and gain
+  anchors. Cache warmth and rejected rows do not change anchor coordinates.
+- `CarrierFamilyPlan` fixes physical carrier groups. More than nine unique,
+  nonzero, same-sign carriers qualify when the largest magnitude is at most
+  1.1 times the smallest.
+- `RampFamilyPlan` groups rise/fall candidates by physical spectral inputs.
+  Duration, slope and prepare key can differ within a group. Kernels still own
+  harmonic cutoffs, amplitude nodes, spectral products and convergence tests.
+
+Resource handles distinguish planned inventory from incrementally admitted
+actual key builds. Gain anchors use single-flight immutable resources. Cache
+hits and rejected rows are not actual consumers. Caller-only groups seal before
+building; the last actual handoff then releases the product. Groups with deferred
+consumers stay open until WorkPlan closes. Prefix preparation cannot seal a
+group needed by later timeline work.
+
+Carrier interpolation uses a mutable `CarrierWorkspace`, separate from immutable
+facts and resource products. WorkPlan creates it lazily from published carrier
+records under its inventory lock. Prefix and timeline consumers share that one
+workspace; its own lock serializes tile construction. WorkPlan drops ownership
+at close, after workers drain. A closed plan rejects further workspace requests.
+Neither the kernel registry nor the resident cache retains this workspace.
+
+### Cache-first and singleton admission
+
+`admit_prepared` returns current row decisions and a row plan without construction
+when the cached payload domain covers all required products. `None` means domain
+miss and retains the ordinary build path. Dispatch looks up resident guard
+products in the caller and passes strong references to deferred workers.
+Floquet reuses frames only when all needed probe bins are present. Shaped Sambe
+reuses key-covered convergence data. Both hooks recheck current rows without
+building numerical products. Rejection of every row is not a domain miss.
 
 The engine deduplicates prepare keys across an evolve. Keys used by distinct
 timelines enter shared preparation. Local builders and repeated local keys stream
@@ -193,12 +212,27 @@ entire source, including absolute DC flux and model parameters; row keys also
 include quantized levels. A cache hit never replaces the row's guard. Eviction
 releases cache ownership, not references already held by active work.
 
-The resident-byte limit is not a process RAM cap. `live_bytes` counts only
-registered evolve-scoped workspaces at their current size, not active payload
-references or total live memory. Models, output densities, solver workspaces
-and ADC preparations are separate allocations. Carrier
-interpolation and gain-anchor workspaces belong to one evolve and are released
-when it ends. Numba's compilation cache is independent of this prepare LRU.
+FTF production uses a 1.5 GiB resident budget. The resident-byte limit is not a
+process RAM cap. Models, output densities, solver scratch, WorkPlan products,
+active payload references and ADC preparations are separate allocations. The
+process peak acceptance limit is 3.8 billion bytes, leaving 5% below the decimal
+4 GB ceiling. Numba's compilation cache is independent of the prepare LRU.
+
+## Algorithm ownership and reuse
+
+Each family owns its build, apply and numerical certificates. Shared numerical
+operations have one owner, rather than one kernel calling another kernel
+class's methods.
+
+| Shared operation | Owner and users |
+| --- | --- |
+| Rates → population generator Q and coherence decay | [kernels/_secular.py](kernels/_secular.py), used by static, split, modal and direct propagators. |
+| Adaptive DOP853 tableau, tolerances and integration | [kernels/_dop853.py](kernels/_dop853.py), used by density solvers and Hilbert endpoint builders. Packing and chain traversal live in [kernels/_dop853_data.py](kernels/_dop853_data.py) and [kernels/_dop853_chain.py](kernels/_dop853_chain.py). |
+| Ordinary density endpoint advancement | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py), used by ordinary DOP853 apply and period fractional tails with an explicitly supplied frame. |
+| Period interpolation, secular playback and fractional tails | [kernels/_period_table.py](kernels/_period_table.py), shared by [period_table](kernels/period_table.py) and [shaped_sambe](kernels/shaped_sambe.py). |
+| Gate Hilbert endpoint integration | [kernels/_gate_endpoints.py](kernels/_gate_endpoints.py), shared by sixteen-node and [adaptive phase](kernels/gate_phase.py) builders. |
+| Constant-tone Hilbert period build and playback | [kernels/floquet_period.py](kernels/floquet_period.py), with [CF4 grid](kernels/_cf4_grid.py) and [Sambe](kernels/_period_sambe.py) helpers. Separate from two-tone Floquet frames. |
+| Two-tone retained-sideband certificates and equations | [kernels/_floquet_sidebands.py](kernels/_floquet_sidebands.py), used by [floquet](kernels/floquet.py) guard admission and apply. |
 
 ## Accuracy, failures and lifecycle
 

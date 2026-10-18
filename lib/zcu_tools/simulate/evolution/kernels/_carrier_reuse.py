@@ -35,8 +35,8 @@ class CarrierWorkspace:
     where >9 planned carriers remain; other children and depth-limited tiles
     use exact builds. This is calibrated, not a rigorous interval bound.
     Callback errors propagate. No density, eigenvector gauge, or global state
-    enters the workspace. The Engine owns it only until this evolve finishes.
-    nbytes charges all retained numeric arrays as live prepared data.
+    enters the workspace. WorkPlan owns it only until this evolve finishes.
+    nbytes reports retained numeric arrays, independently of the resident cache.
     """
 
     def __init__(self, families: tuple[CarrierFamilyPlan, ...]) -> None:

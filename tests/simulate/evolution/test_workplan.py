@@ -163,3 +163,29 @@ def test_declined_cached_admission_keeps_guard_build_handoff():
         result = engine.evolve(source(), (batch(1),), cancel=kernel.event)
     assert result.paths.segments_by_kernel == {"t4": 1}
     assert kernel.preparations == 1
+
+
+def test_carrier_workspace_is_shared_until_close_and_isolated_between_evolves():
+    import gc
+    import weakref
+    from concurrent.futures import ThreadPoolExecutor
+
+    from zcu_tools.simulate.evolution.workplan import WorkPlan
+
+    plan = WorkPlan()
+    plan.publish_carrier_families(())
+    assert hasattr(plan, "carrier_workspace"), "WorkPlan must own carrier reuse"
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        workspaces = list(pool.map(lambda _: plan.carrier_workspace(), range(2)))
+    assert workspaces[0] is workspaces[1]
+    other = WorkPlan()
+    other.publish_carrier_families(())
+    assert other.carrier_workspace() is not workspaces[0]
+    reference = weakref.ref(workspaces[0])
+    del workspaces
+    plan.close()
+    gc.collect()
+    assert reference() is None
+    with pytest.raises(RuntimeError, match="closed"):
+        plan.carrier_workspace()
+    other.close()
