@@ -172,16 +172,9 @@ class Schedule:
             available = set(key_positions)
             key_set = {key.tobytes() for key in entry.keys[shared]}
             namespace = entry.kernel.name, dc.identity, self.budget
-            hits = cache.find(namespace, available)
-            for payload in hits:
+            for payload in cache.find(namespace, available):
                 self.resident.protect(payload)
-                eligible = np.zeros(len(entry.keys), dtype=bool)
-                for key in payload.keys:
-                    if key in key_positions:
-                        eligible[key_positions[key]] = True
-                bindings.append(
-                    _bind(entry, payload, eligible[entry.inverse], self.dispatch)
-                )
+                bindings.append(self._bind_hit(entry, payload, key_positions))
                 key_set.difference_update(payload.keys)
                 available.difference_update(payload.keys)
             shared_keys = {key.tobytes() for key in entry.keys[shared]}
@@ -216,28 +209,7 @@ class Schedule:
                     for selected in np.array_split(missing, min(chunks, len(missing)))
                 )
         if self.context.work_plan.gain_groups:
-            pending_gain_rows = [
-                entry.representative[selected]
-                for entry, selected, _ in jobs
-                if entry.kernel.name == "floquet_period"
-            ]
-            open_gain_rows = [
-                entry.rows[~entry.shared[entry.inverse]]
-                for entry in entries
-                if entry.kernel.name == "floquet_period"
-            ]
-            if self.dispatch.deferred is not None:
-                open_gain_rows.append(np.flatnonzero(self.dispatch.deferred))
-            admit_shared_builds(
-                self.context,
-                self.table,
-                np.concatenate(pending_gain_rows)
-                if pending_gain_rows
-                else np.empty(0, dtype=np.int64),
-                np.concatenate(open_gain_rows)
-                if open_gain_rows
-                else np.empty(0, dtype=np.int64),
-            )
+            self._admit_gain_builds(entries, jobs)
         # Coarse key chunks, grouped by kernel; prepare never receives density.
         built = pool(
             delayed(_build)(entry, selected, self.table, self.context, self.cancel)
@@ -254,6 +226,45 @@ class Schedule:
         for namespace, payload in local_products:
             self.resident.offer(namespace, payload)
         return self.bind_inputs(bindings)
+
+    def _bind_hit(
+        self, entry: _Entries, payload: PreparedPayload, key_positions: dict[bytes, int]
+    ) -> _Binding:
+        """Bind a resident hit to the rows whose keys it covers."""
+        eligible = np.zeros(len(entry.keys), dtype=bool)
+        for key in payload.keys:
+            if key in key_positions:
+                eligible[key_positions[key]] = True
+        return _bind(entry, payload, eligible[entry.inverse], self.dispatch)
+
+    def _admit_gain_builds(
+        self,
+        entries: list[_Entries],
+        jobs: list[tuple[_Entries, NDArray[np.int64], tuple[str, str, float]]],
+    ) -> None:
+        """Admit caller-built gain rows; local and deferred rows keep groups open."""
+        pending_gain_rows = [
+            entry.representative[selected]
+            for entry, selected, _ in jobs
+            if entry.kernel.name == "floquet_period"
+        ]
+        open_gain_rows = [
+            entry.rows[~entry.shared[entry.inverse]]
+            for entry in entries
+            if entry.kernel.name == "floquet_period"
+        ]
+        if self.dispatch.deferred is not None:
+            open_gain_rows.append(np.flatnonzero(self.dispatch.deferred))
+        admit_shared_builds(
+            self.context,
+            self.table,
+            np.concatenate(pending_gain_rows)
+            if pending_gain_rows
+            else np.empty(0, dtype=np.int64),
+            np.concatenate(open_gain_rows)
+            if open_gain_rows
+            else np.empty(0, dtype=np.int64),
+        )
 
     def retain_local(self, kernel: Kernel, payload: PreparedPayload) -> None:
         """Submit model-only worker products without touching the caller's LRU."""
