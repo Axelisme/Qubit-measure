@@ -199,3 +199,38 @@ def test_round_draws_accept_engine_trace_tolerance_without_mutation(sampler):
     else:
         np.testing.assert_array_equal(result.channels[0].iq[0, 0, 0], [1, 2])
     np.testing.assert_array_equal(populations, original)
+
+
+def test_prepared_statistics_own_inputs_and_factor_once_but_draw_fresh(monkeypatch):
+    assert hasattr(adc, "PreparedStatistics"), (
+        "ADC must separate invariant preparation from draws"
+    )
+    populations = np.array([[[0.25, 0.75], [1.0, 0.0]]])
+    inputs = channels(covariance=np.array([[2.0, 0.5], [0.5, 1.0]]))
+    kwargs = dict(seed=73, acquire_sequence=2, round_index=3)
+    expected = adc.round_statistics(populations, inputs, reps=17, **kwargs)
+    factor = np.linalg.eigh
+    calls = []
+
+    def observed(covariance):
+        calls.append(1)
+        return factor(covariance)
+
+    monkeypatch.setattr(np.linalg, "eigh", observed)
+    prepared = adc.PreparedStatistics(populations, inputs, reps=17)
+    assert len(calls) == len(inputs)
+    populations[:] = 0  # Plan must not borrow the mutable input probabilities.
+    first = prepared.draw(**kwargs)
+    second = prepared.draw(**kwargs)
+    assert len(calls) == len(inputs), "round draws must not refactor covariance"
+    assert first.state_counts.tobytes() == expected.state_counts.tobytes()
+    for actual, repeated, original in zip(
+        first.channels, second.channels, expected.channels, strict=True
+    ):
+        assert (
+            actual.sums.tobytes() == original.sums.tobytes() == repeated.sums.tobytes()
+        )
+    assert first.raw_identity == expected.raw_identity
+    assert not prepared.populations.flags.writeable
+    with pytest.raises(ValueError, match="identity"):
+        prepared.draw(seed=-1, acquire_sequence=2, round_index=3)
