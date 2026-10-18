@@ -147,6 +147,7 @@ def _coordinator(
     ctrl = RecordingCtrl(log, snapshot=snapshot)
     host = RecordingHost(log)
     return (
+        # tolerated(cast): RecordingCtrl logs calls with object snapshot tokens, not the concrete Controller.
         MainWindowEventCoordinator(cast(Any, ctrl), host),
         log,
         ctrl,
@@ -168,6 +169,7 @@ def test_reaction_matrix_validator_rejects_missing_and_extra_keys() -> None:
     ):
         _validate_reaction_matrix("test", TabInteractionFact, missing)
 
+    # tolerated(cast): This negative fixture inserts a string key outside the validator's enum-key mapping contract.
     extra = cast(Any, dict(_CONTENT_REACTIONS))
     extra["unexpected"] = ()
     with pytest.raises(
