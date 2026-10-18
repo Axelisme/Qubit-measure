@@ -442,7 +442,9 @@ class DocumentStore[T: BaseModel]:
     state after unlock and cannot roll back a completed write.
     """
 
-    def __init__(  # noqa: PLR0913 -- The accepted Interface fixes these arguments.
+    # tolerated: Public kwargs/defaults independently select schema/version,
+    # validation/read-cleanup and sidecar lock policies.
+    def __init__(  # noqa: PLR0913
         self,
         path: Path,
         model: type[T],
