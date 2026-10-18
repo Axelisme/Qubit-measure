@@ -153,3 +153,62 @@ def test_readout_uses_dc_joint_state_order_and_baths(joint, resonators):
     np.testing.assert_array_equal(model.kappa_external_per_ns, [0.002, 0.003])
     np.testing.assert_array_equal(model.kappa_internal_per_ns, [0.001, 0.001])
     assert model.state_labels == joint.basis.labels
+
+
+@pytest.mark.parametrize("subsystem", [0, 1, 2])
+@pytest.mark.parametrize("symmetric", [False, True])
+def test_flux_operator_is_dc_derivative_in_retained_basis(joint, subsystem, symmetric):
+    if symmetric:
+        parameters = replace(
+            joint.parameters, coupler=replace(joint.parameters.coupler, asymmetry=0.0)
+        )
+        joint = ftf.JointModel(parameters, np.zeros(3), temperature_k=0.0)
+    operator = getattr(joint, "flux_operator", None)
+    assert callable(operator), "JointModel must provide the fixed-DC flux derivative"
+    actual = operator(subsystem)
+    delta = np.eye(3)[subsystem] * 1e-5
+    expected = (
+        joint.hamiltonian(joint.dc_flux + delta)
+        - joint.hamiltonian(joint.dc_flux - delta)
+    ) / 2e-5
+    np.testing.assert_allclose(actual, expected, rtol=2e-8, atol=2e-9)
+    np.testing.assert_allclose(actual, actual.conj().T, rtol=0, atol=1e-12)
+
+    # Independent native potential, contracted through the public embedding.
+    # No displaced eigensystem is used: both differences keep the DC basis.
+    from scipy.linalg import cosm
+
+    p = (joint.parameters.f1, joint.parameters.coupler, joint.parameters.f2)[subsystem]
+    f = joint.dc_flux[subsystem]
+    if isinstance(p, ftf.FluxoniumCircuit):
+        a = np.diag(np.sqrt(np.arange(1, p.native_cutoff)), 1)
+        phi = (2 * p.ec_ghz / p.el_ghz) ** 0.25 * (a + a.T)
+
+        def potential(flux):
+            return -p.ej_ghz * cosm(phi + 2 * np.pi * flux * np.eye(len(phi)))
+    else:
+        shift = np.eye(2 * p.charge_cutoff + 1, k=1)
+        cosine, sine = (shift + shift.T) / 2, (shift - shift.T) / (2j)
+
+        def potential(flux):
+            return p.ejmax_ghz * (
+                -np.cos(np.pi * flux) * cosine
+                + p.asymmetry * np.sin(np.pi * flux) * sine
+            )
+
+    derivative = (potential(f + 1e-5) - potential(f - 1e-5)) / 2e-5
+    embedded = np.moveaxis(joint.native_embedding(), subsystem, 0)
+    expected_native = np.einsum(
+        "aijm,ab,bijn->mn", embedded.conj(), derivative, embedded
+    )
+    np.testing.assert_allclose(actual, expected_native, rtol=2e-8, atol=2e-9)
+    if not symmetric:
+        assert np.max(np.abs(actual - np.diag(np.diag(actual)))) > 1e-3
+
+
+@pytest.mark.parametrize("subsystem", [-1, 3])
+def test_flux_operator_rejects_unknown_subsystem(joint, subsystem):
+    operator = getattr(joint, "flux_operator", None)
+    assert callable(operator), "JointModel must provide the fixed-DC flux derivative"
+    with pytest.raises(ValueError, match="subsystem"):
+        operator(subsystem)
