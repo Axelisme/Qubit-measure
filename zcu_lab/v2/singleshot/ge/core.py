@@ -354,8 +354,15 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         options: GEAnalyzeOptions,
         *,
         plots: Plots,
+        figure_name: str = "fit",
     ) -> GEAnalysis:
-        """Fit probe-off/on shots, recording a named fit figure in this operation."""
+        """Fit source probe-off/on IQ (2,N), in normalized ADC units.
+
+        options maps rows to physical g/e and controls the existing fit policy.
+        Publish figure_name (default fit) to caller-owned plots; caller finishes
+        and releases it. Empty/conflicting names and numerical errors propagate.
+        cfg=None is supported. No hardware, ambient source or GUI is accessed.
+        """
         # Acquisition order is always probe off/on; fit in physical g/e order.
         signals = ge_signals_by_state(source.result.signals, options.initial_state)
         if options.backend not in ("pca", "center"):
@@ -368,6 +375,7 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
             align_t1=options.align_t1,
             length_ratio=options.length_ratio,
             plots=plots,
+            figure_name=figure_name,
         )
         analysis = GEAnalysis(
             initial_state=options.initial_state,
@@ -390,15 +398,23 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         options: GEPostAnalyzeOptions,
         *,
         plots: Plots,
+        figure_name: str = "post",
     ) -> GEPostAnalysis:
-        """Classify shots with the adopted primary calibration; do not refit."""
+        """Classify source IQ (2,N) with adopted primary; do not refit.
+
+        Source IQ and radius use normalized ADC units. primary supplies the
+        physical g/e mapping and calibration; options selects radius policy.
+        Publish figure_name (default post) to caller-owned plots; caller finishes
+        and releases it. Invalid calibration, numerical and name conflicts raise.
+        Accept cfg=None; no hardware, ambient source or GUI is accessed.
+        """
         primary.validate_calibration()
         g_signals, e_signals = ge_signals_by_state(
             source.result.signals, primary.initial_state
         )
         signals = (g_signals, e_signals)
         confusion = self._calc_confusion_matrix(signals, primary, options)
-        self._plot_confusion_matrix(confusion, signals, primary, plots)
+        self._plot_confusion_matrix(confusion, signals, primary, plots, figure_name)
         return GEPostAnalysis(confusion=confusion)
 
     def _calc_confusion_matrix(
@@ -460,10 +476,11 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         signals: tuple[NDArray[np.complex128], NDArray[np.complex128]],
         primary: GEAnalysis,
         plots: Plots,
+        figure_name: str,
     ) -> None:
         g_signals, e_signals = signals
         g_center, e_center = primary.g_center, primary.e_center
-        fig, raw_axes = plots.subplots("post", nrows=2, ncols=2, figsize=(8, 8))
+        fig, raw_axes = plots.subplots(figure_name, nrows=2, ncols=2, figsize=(8, 8))
         ((ax1, ax4), (ax2, ax3)) = cast(
             "tuple[tuple[Axes, Axes], tuple[Axes, Axes]]", raw_axes
         )

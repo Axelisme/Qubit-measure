@@ -92,6 +92,7 @@ def singleshot_ge_analysis(
     backend: Literal["center", "pca"] = "pca",
     *,
     plots: Plots,
+    figure_name: str = "fit",
     **kwargs,
 ) -> tuple[float, NDArray[np.float64], GE_FitResult]:
     """
@@ -110,7 +111,10 @@ def singleshot_ge_analysis(
     backend : Literal["center", "pca"], default="pca"
         Method used for determining the rotation angle when angle is absent.
     plots : Plots
-        Operation that owns the named fit figure.
+        Caller-owned operation; caller finishes/releases it after analysis.
+    figure_name : str, default="fit"
+        Unique diagnostic figure name within plots. Empty or conflicting names
+        raise from Plots. Naming does not change fitting or quality results.
 
     Returns
     -------
@@ -118,12 +122,14 @@ def singleshot_ge_analysis(
         Assignment fidelity, refined preparation populations and calibration.
     """
     if angle is not None:
-        return fit_ge_manual(signals, angle, plots=plots, **kwargs)
+        return fit_ge_manual(
+            signals, angle, plots=plots, figure_name=figure_name, **kwargs
+        )
 
     if backend == "center":
-        return fit_ge_by_center(signals, plots=plots, **kwargs)
+        return fit_ge_by_center(signals, plots=plots, figure_name=figure_name, **kwargs)
     if backend == "pca":
-        return fit_ge_by_pca(signals, plots=plots, **kwargs)
+        return fit_ge_by_pca(signals, plots=plots, figure_name=figure_name, **kwargs)
 
     raise ValueError(f"Unknown backend: {backend}")
 

@@ -187,9 +187,16 @@ def fitting_ge_and_plot(
     logscale: bool = False,
     align_t1: bool = True,
     plots: Plots,
+    figure_name: str = "fit",
 ) -> tuple[float, NDArray[np.float64], GE_FitResult]:
-    Ig, Ie = signals.real
-    Qg, Qe = signals.imag
+    """Fit paired raw IQ (2,N) and publish diagnostics under figure_name.
+
+    IQ uses ADC units per sample. Existing histogram/population and quality
+    policy is unchanged by the name, which defaults to fit. plots owns the
+    figure; caller finishes/releases the operation. Empty or conflicting names
+    raise from Plots, and numeric fitting errors propagate.
+    """
+    (Ig, Ie), (Qg, Qe) = signals.real, signals.imag
 
     # Calculate the angle of rotation
     out_dict = classify_func(Ig, Qg, Ie, Qe)
@@ -275,7 +282,7 @@ def fitting_ge_and_plot(
         raise ValueError(
             "GE fit returned invalid centers or width; calibration is unavailable"
         )
-    fig, raw_axes = plots.subplots("fit", nrows=2, ncols=2, figsize=(8, 8))
+    fig, raw_axes = plots.subplots(figure_name, nrows=2, ncols=2, figsize=(8, 8))
     axs = cast("tuple[tuple[Axes, Axes], tuple[Axes, Axes]]", raw_axes)
     scatter_ge_plot(axs[0][0], (Ig, Ie), (Qg, Qe), "Rotated")
     hist(Ig, Ie, numbins, axs[1][0])
