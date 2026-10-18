@@ -3,7 +3,7 @@
 from copy import copy
 from dataclasses import dataclass
 from threading import RLock
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 import numpy as np
 from numba import njit
@@ -20,8 +20,29 @@ from ._secular import secular_operators
 _MIN_FREQUENCY_GHZ = 0.03
 _MAX_SPLIT_ESTIMATE = 1.0
 _MAX_SUBDIVISIONS = 64
-_MAGNUS_FREQUENCY_GHZ = 1.0
-_GAIN_ANCHOR_SPACING = 24
+
+
+@dataclass(frozen=True)
+class PeriodBuilder:
+    """Dispatch-owned instructions for one constant-tone period key.
+
+    kind selects Sambe, CF4 or dense DOP853. work_limit is the original CF4
+    coarse/first-fine N-cubed estimate, passed unchanged to the Sambe guard.
+    anchors lists fixed CF4 dependencies, including self for an independent
+    anchor; empty means standalone, with no gain sharing. Sambe rejection
+    always falls back to standalone CF4 regardless of these dependencies.
+    """
+
+    kind: Literal["sambe", "cf4", "dop853"]
+    work_limit: float = 0.0
+    anchors: tuple[float, ...] = ()
+
+
+class _Tone(NamedTuple):
+    # Model-local drive coordinates shared by independent and anchored builds.
+    port: int
+    frequency: float
+    gain: float
 
 
 class _DensePeriod(NamedTuple):
@@ -177,13 +198,15 @@ class _GainGroup:
         port: int,
         frequency: float,
         budget: float,
-        plan: dict[float, tuple[float, ...]],
+        builders: dict[float, PeriodBuilder],
         inventory_lock: RLock,
     ) -> None:
         self.model = model
         self.port = port
         self.frequency = frequency
         self.budget = budget
+        self.builders = {g: b for g, b in builders.items() if b.anchors}
+        plan = {g: b.anchors for g, b in self.builders.items()}
         self.plan = plan
         coordinates = {a for dependencies in plan.values() for a in dependencies}
         self.anchors = {
@@ -210,7 +233,10 @@ class _GainGroup:
                 period = anchor.period
             if period is None:
                 period = _build(
-                    self.model, self.port, self.frequency, gain, self.budget
+                    self.model,
+                    _Tone(self.port, self.frequency, gain),
+                    self.budget,
+                    self.builders[gain],
                 )
                 with self.inventory_lock:
                     anchor.period = period
@@ -222,7 +248,11 @@ class _GainGroup:
             result = self.anchor(gain)
         else:
             result = _build(
-                self.model, self.port, self.frequency, gain, self.budget, self
+                self.model,
+                _Tone(self.port, self.frequency, gain),
+                self.budget,
+                self.builders[gain],
+                group=self,
             )
         with self.inventory_lock:
             if gain not in self.delivered:
@@ -266,26 +296,12 @@ class _GainWorkspace:
     """
 
     def __init__(self, table: SegmentTable) -> None:
-        groups: dict[tuple[tuple[int, ...], int, float], set[float]] = {}
-        rows = np.flatnonzero(table.tones == 1)
-        rows = rows[table.constant_envelopes(rows)]
-        for row in rows:
-            frequency = float(table.tone_frequency_ghz[row, 0])
-            if not _MIN_FREQUENCY_GHZ <= abs(frequency) < _MAGNUS_FREQUENCY_GHZ:
-                continue
-            key = (
-                tuple(int(v) for v in table.level[row]),
-                int(table.tone_port[row, 0]),
-                frequency,
-            )
-            groups.setdefault(key, set()).add(float(table.tone_amplitude[row, 0]))
-        # Only collect coordinates here. The model-dependent spectral selection
-        # must run before creating an anchor plan or its reference inventory.
-        self._gains = {
-            key: tuple(sorted(gains))
-            for key, gains in groups.items()
-            if len(gains) >= 2
-        }
+        # Import lazily: dispatch knows the numerical builder types, while
+        # standalone kernel calls still use that same decision authority.
+        from .._dispatch import period_gain_coordinates
+
+        self._gains = period_gain_coordinates(table)
+        self._builders: dict[tuple[int, int, float], dict[float, PeriodBuilder]] = {}
         self._groups: dict[tuple[int, int, float, float], _GainGroup] = {}
         self._lock = RLock()
         self._sambe_builds = 0
@@ -332,37 +348,31 @@ class _GainWorkspace:
         Rejected Sambe candidates use independent CF4 and never gain anchors.
         Other keys retain the complete table's fixed non-spectral gain plan.
         """
-        if _period_sambe.preferred(model, port, frequency, gain):
-            result = _build(model, port, frequency, gain, budget)
+        from .._dispatch import period_builders
+
+        builder_identity = (id(model), port, frequency)
+        with self._lock:
+            builders = self._builders.get(builder_identity)
+            if builders is None:
+                gains = self._gains.get((model.level, port, frequency), (gain,))
+                builders = period_builders(model, port, frequency, gains)
+                self._builders[builder_identity] = builders
+            if gain not in builders:
+                builders.update(period_builders(model, port, frequency, (gain,)))
+            builder = builders[gain]
+        if builder.kind == "sambe":
+            result = _build(model, _Tone(port, frequency, gain), budget, builder)
             with self._lock:
                 self._sambe_builds += int(result.spectrum is not None)
                 self._sambe_fallbacks += int(result.spectrum is None)
             return result
-        gains = self._gains.get((model.level, port, frequency))
-        if gains is None or gain not in gains:
-            return _build(model, port, frequency, gain, budget)
+        if not builder.anchors:
+            return _build(model, _Tone(port, frequency, gain), budget, builder)
         identity = (id(model), port, frequency, budget)
         with self._lock:
             group = self._groups.get(identity)
             if group is None:
-                # Remove spectral candidates before fixing anchor references.
-                ordered = [
-                    g
-                    for g in gains
-                    if not _period_sambe.preferred(model, port, frequency, g)
-                ]
-                anchors = ordered[::_GAIN_ANCHOR_SPACING]
-                if anchors[-1] != ordered[-1]:
-                    anchors.append(ordered[-1])
-                filtered = {
-                    g: (g,)
-                    if g in anchors
-                    else tuple(
-                        sorted(sorted(anchors, key=lambda a: (abs(a - g), a))[:4])
-                    )
-                    for g in ordered
-                }
-                group = _GainGroup(model, port, frequency, budget, filtered, self._lock)
+                group = _GainGroup(model, port, frequency, budget, builders, self._lock)
                 self._groups[identity] = group
         return group.build(gain)
 
@@ -437,12 +447,13 @@ def _interpolate_prefixes(prefixes, weights):
 
 def _build(
     model: SecularModel,
-    port: int,
-    frequency: float,
-    gain: float,
+    tone: _Tone,
     budget: float,
+    builder: PeriodBuilder,
+    *,
     group: _GainGroup | None = None,
 ) -> _Period:
+    port, frequency, gain = tone
     size = len(model.energies_ghz)
     period = 1 / abs(frequency)
     drive = model.drives[port]
@@ -452,15 +463,15 @@ def _build(
     magnus = None
     spectrum = None
     spectral = (
-        _period_sambe.build(model, port, frequency, gain, budget)
-        if _period_sambe.preferred(model, port, frequency, gain)
+        _period_sambe.build(model, port, frequency, gain, budget, builder.work_limit)
+        if builder.kind == "sambe"
         else None
     )
     if spectral is not None:
         spectrum, final = spectral
         times = np.array([0.0, period])
         coefficients = np.empty((0, 0, size, size), dtype=complex)
-    elif abs(frequency) < _MAGNUS_FREQUENCY_GHZ:
+    elif builder.kind != "dop853":
         # Low carriers make Schrödinger DOP853 resolve many unobservable H0 turns.
         # CF4 exponentiates H0 exactly; only carrier motion needs approximation.
         tolerance = min(1e-4, budget * 0.1)
@@ -787,7 +798,7 @@ class FloquetPeriodKernel:
     V=2*pi*|gain|*(||X||_2+||Y||_2) in rad/ns, and Gamma is the larger population
     generator norm/coherence decay in 1/ns. Rejected rows still try T6.
 
-    Below 1 GHz, Sambe competes with CF4's original coarse count c and first
+    Dispatch selects the builder and fixed gain dependencies. Below 1 GHz, Sambe competes with CF4's original coarse count c and first
     1.5x finer count d, both rounded to eight. Cutoffs 2/3 cost
     0.5*(5**3+7**3)=234 units versus c+d. The common Hilbert dimension cubed
     cancels. This single-threaded 16-level calibration never consults scheduling.
@@ -897,7 +908,12 @@ class FloquetPeriodKernel:
         source: ModelSource,
         budget: float,
     ) -> Prepared:
-        """Build immutable one-period Hilbert data per aligned representative key."""
+        """Build immutable periods with dispatch-selected builders/work ceilings.
+
+        keys and rows are aligned representatives that must pass the scalar
+        guard. Scoped calls reuse the complete gain plan; standalone calls ask
+        dispatch for independent builders without gain-anchor participation.
+        """
         _check_budget(budget)
         if len(keys) != len(rows) or not np.array_equal(
             keys, self.prepare_keys(table, rows)
@@ -905,18 +921,23 @@ class FloquetPeriodKernel:
             raise ValueError("Floquet period representatives must match keys")
         if not self.guard(table, rows, source, budget).all():
             raise ValueError("Floquet period representatives must pass guard")
-        return _Periods(
-            tuple(
-                (_build if self._workspace is None else self._workspace.build)(
-                    source.model(tuple(int(v) for v in key["level"])),
-                    int(key["port"]),
-                    float(key["frequency"]),
-                    float(key["gain"]),
-                    budget,
-                )
-                for key in keys
+        from .._dispatch import period_builder
+
+        entries = []
+        for key in keys:
+            model = source.model(tuple(int(v) for v in key["level"]))
+            port, frequency, gain = (
+                int(key["port"]),
+                float(key["frequency"]),
+                float(key["gain"]),
             )
-        )
+            if self._workspace is None:
+                builder = period_builder(model, port, frequency, gain)
+                entry = _build(model, _Tone(port, frequency, gain), budget, builder)
+            else:
+                entry = self._workspace.build(model, port, frequency, gain, budget)
+            entries.append(entry)
+        return _Periods(tuple(entries))
 
     def guard_prepared(
         self,
