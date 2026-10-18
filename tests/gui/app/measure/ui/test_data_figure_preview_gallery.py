@@ -245,6 +245,54 @@ def exp_tab_widget(qapp, monkeypatch, make_ctrl):
 # ---------------------------------------------------------------------------
 
 
+class _ViewportAccessError(Exception):
+    """An unexpected Qt collaborator failure, not a deleted-wrapper error."""
+
+
+@pytest.mark.parametrize("entry", ["constructor", "is_wide_mode"])
+@pytest.mark.parametrize("failure_type", [RuntimeError, _ViewportAccessError])
+def test_gallery_only_recovers_viewport_lifetime_errors(
+    qapp, monkeypatch, entry: str, failure_type: type[Exception]
+):
+    caps = AdapterCapabilities(analysis=AnalysisMode.NONE)
+    gallery = DataFigurePreviewGallery(caps) if entry == "is_wide_mode" else None
+    if gallery is not None:
+        gallery.setFixedWidth(360)
+    original_viewport = QScrollArea.viewport
+    failure = failure_type("viewport unavailable")
+    pending = True
+
+    def viewport(scroll: QScrollArea):
+        nonlocal pending
+        if pending:
+            pending = False
+            raise failure
+        return original_viewport(scroll)
+
+    def invoke_entry() -> bool:
+        if gallery is not None:
+            return not gallery.is_wide_mode()
+        created = DataFigurePreviewGallery(caps)
+        try:
+            return created.card_count() == 1
+        finally:
+            created.deleteLater()
+
+    try:
+        # Restore the Qt collaborator before any owner-loop delivery.
+        with monkeypatch.context() as patch:
+            patch.setattr(QScrollArea, "viewport", viewport)
+            if failure_type is RuntimeError:
+                assert invoke_entry()
+            else:
+                with pytest.raises(_ViewportAccessError) as caught:
+                    invoke_entry()
+                assert caught.value is failure
+    finally:
+        if gallery is not None:
+            gallery.deleteLater()
+
+
 def test_gallery_capability_driven_cards(qapp):
     caps_none = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)
     g_none = DataFigurePreviewGallery(caps_none, renderer=_fake_renderer)
