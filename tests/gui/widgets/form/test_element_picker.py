@@ -38,19 +38,19 @@ def test_picker_keeps_uncommitted_text_errors_and_participants(qapp: QApplicatio
         assert driver.observe(object_name="form.input.tones.0.gain").text == "uncommitted"
         driver.enter_text(object_name="form.input.tones.0.gain", value="broken")
         snapshot("05-parse-error")
-        assert "Expected" in driver.observe(object_name="form.input.tones.0.gain").tooltip
+        assert "could not convert" in driver.observe(object_name="form.row.tones.0.gain").tooltip
         driver.choose_option(object_name="form.picker.tones", value="1: B")
         snapshot("06-hidden-error")
-        assert "A" in driver.observe(object_name="form.picker.tones").tooltip
+        assert "A" in driver.observe(object_name="form.row.tones").tooltip
         driver.choose_option(object_name="form.picker.tones", value="0: A")
         snapshot("07-error-restored")
         assert driver.observe(object_name="form.input.tones.0.gain").text == "broken"
-        assert "Expected" in driver.observe(object_name="form.input.tones.0.gain").tooltip
+        assert "could not convert" in driver.observe(object_name="form.row.tones.0.gain").tooltip
         driver.enter_text(object_name="form.input.tones.0.gain", value="3")
         driver.enter_text(object_name="form.input.participants", value='["B", "A"]')
         snapshot("08-corrected-and-ordered")
         assert driver.observe(object_name="form.input.participants").text == '["B", "A"]'
-        assert "Expected" not in driver.observe(object_name="form.input.tones.0.gain").tooltip
+        assert "could not convert" not in driver.observe(object_name="form.row.tones.0.gain").tooltip
         editor.set_editing_enabled(enabled=False)
         driver.enter_text(object_name="form.input.tones.0.gain", value="8")
         driver.choose_option(object_name="form.picker.tones", value="1: B")
@@ -58,6 +58,6 @@ def test_picker_keeps_uncommitted_text_errors_and_participants(qapp: QApplicatio
         assert driver.observe(object_name="form.input.tones.1.gain").text == "2"
         driver.choose_option(object_name="form.picker.tones", value="0: A")
         snapshot("10-readonly-unchanged")
-        assert driver.observe(object_name="form.input.tones.0.gain").text == "3"
+        assert driver.observe(object_name="form.input.tones.0.gain").text == "3.0"
     finally:
         editor.close()
