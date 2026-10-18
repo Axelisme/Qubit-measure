@@ -245,10 +245,8 @@ def dispatch_handler(
     minimal adapter stub so unit tests can drive a single handler without a live
     socket. The lightweight adapter delegates nominal ``ExpectedError`` mapping
     to the production translator; unexpected exceptions escape unchanged.
-    Cast keeps the typed ``Handler`` signature satisfied.
     """
     from types import SimpleNamespace
-    from typing import cast
 
     from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
 
@@ -257,21 +255,18 @@ def dispatch_handler(
             return ctrl
         return getattr(ctrl, name, ctrl)
 
-    adapter = cast(
-        RemoteControlAdapter,
-        SimpleNamespace(
-            ctrl=ctrl,
-            tab_control=_facet_or_self("tab_control"),
-            run_analyze_control=_facet_or_self("run_analyze_control"),
-            operation_control=_facet_or_self("operation_control"),
-            save_control=_facet_or_self("save_control"),
-            writeback_control=_facet_or_self("writeback_control"),
-            context_control=_facet_or_self("context_control"),
-            device_control=_facet_or_self("device_control"),
-            predictor_control=_facet_or_self("predictor_control"),
-            cfg_lookup=lambda tab_id: _facet_or_self("cfg_resources").lookup(tab_id),
-            render_view=_facet_or_self("render_view"),
-        ),
+    adapter = SimpleNamespace(
+        ctrl=ctrl,
+        tab_control=_facet_or_self("tab_control"),
+        run_analyze_control=_facet_or_self("run_analyze_control"),
+        operation_control=_facet_or_self("operation_control"),
+        save_control=_facet_or_self("save_control"),
+        writeback_control=_facet_or_self("writeback_control"),
+        context_control=_facet_or_self("context_control"),
+        device_control=_facet_or_self("device_control"),
+        predictor_control=_facet_or_self("predictor_control"),
+        cfg_lookup=lambda tab_id: _facet_or_self("cfg_resources").lookup(tab_id),
+        render_view=_facet_or_self("render_view"),
     )
     try:
         return METHOD_REGISTRY[method].handler(adapter, params)

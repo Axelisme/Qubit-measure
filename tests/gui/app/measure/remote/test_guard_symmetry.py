@@ -52,21 +52,15 @@ def _dispatch(ctrl: Controller, method: str, params: Mapping[str, object]) -> ob
     before invoking the handler. Handlers receive the adapter (ADR-0068), so
     wrap ctrl in a minimal adapter stub."""
     from types import SimpleNamespace
-    from typing import cast
-
-    from zcu_tools.gui.app.measure.remote.service import RemoteControlAdapter
 
     spec = METHOD_REGISTRY[method]
     handler_params = validate_params(spec.params, params) if spec.params else params
-    adapter = cast(
-        RemoteControlAdapter,
-        SimpleNamespace(
-            ctrl=ctrl,
-            run_analyze_control=ctrl.run_analyze_control,
-            render_view=None,
-            operation_control=ctrl,
-            save_control=ctrl.save_control,
-        ),
+    adapter = SimpleNamespace(
+        ctrl=ctrl,
+        run_analyze_control=ctrl.run_analyze_control,
+        render_view=None,
+        operation_control=ctrl,
+        save_control=ctrl.save_control,
     )
     try:
         return spec.handler(adapter, handler_params)
