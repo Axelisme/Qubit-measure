@@ -5,6 +5,11 @@
 `SimulationAcquireMixin` enters once through `MyProgramV2`. With a
 `SimulationSoc`, it admits a synchronous call, builds one `AcquireRequest`,
 and supplies numeric round data to the existing QICK acquisition pipeline.
+`SimulationBinding` optionally accepts a `wait_ready` callback. Admission calls
+it before consuming the acquire sequence or constructing a request. Failure
+releases admission and propagates; the environment callback owns any optional
+startup-compilation fallback. External timers must wait at the environment's
+ready interface before starting if startup time should be excluded.
 Other SoC objects use the original path. Classification, hooks, tracker,
 normalization, averaging and Stop still belong to that pipeline.
 

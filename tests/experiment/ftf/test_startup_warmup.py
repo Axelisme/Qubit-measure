@@ -15,16 +15,25 @@ from tests.resources._ftf_data import ftf_document
 
 
 def warmup_type():
-    assert hasattr(simulation, "EnvironmentWarmup"), "environment needs observable startup warmup"
+    assert hasattr(simulation, "EnvironmentWarmup"), (
+        "environment needs observable startup warmup"
+    )
     return simulation.EnvironmentWarmup
 
 
 def program(env):
     readout = PulseReadoutCfg(
-        gen_ch=0, ro_ch=0, nqz=1, freq=6000.0, gain=0.1,
-        waveform=ConstWaveformCfg(length=0.02), ro_length=0.02,
+        gen_ch=0,
+        ro_ch=0,
+        nqz=1,
+        freq=6000.0,
+        gain=0.1,
+        waveform=ConstWaveformCfg(length=0.02),
+        ro_length=0.02,
     )
-    return ModularProgramV2(env.soccfg, ProgramV2Cfg(reps=3), modules=[readout.build("ro")])
+    return ModularProgramV2(
+        env.soccfg, ProgramV2Cfg(reps=3), modules=[readout.build("ro")]
+    )
 
 
 def test_start_is_single_flight_and_progress_is_observable():
@@ -61,13 +70,18 @@ def test_start_is_single_flight_and_progress_is_observable():
 
 def test_acquire_waits_for_startup_future_before_consuming_sequence():
     cls = warmup_type()
-    entered, release, attempted = Event(), Event(), Event()
+    entered, release, attempted, waiting = Event(), Event(), Event(), Event()
+
+    class ObservedWarmup(cls):
+        def wait_ready(self, timeout=None):
+            waiting.set()
+            return super().wait_ready(timeout)
 
     def prepare():
         entered.set()
         assert release.wait(30), "test watchdog: main thread must release warmup"
 
-    warmup = cls((("synthetic", prepare),))
+    warmup = ObservedWarmup((("synthetic", prepare),))
     env = ftf(parse_ftf(ftf_document()), warmup=warmup)
     prog = program(env)
     with ThreadPoolExecutor(max_workers=1) as executor:
@@ -77,6 +91,7 @@ def test_acquire_waits_for_startup_future_before_consuming_sequence():
             shared = warmup.start()
             with pytest.raises(TimeoutError):
                 env.wait_ready(timeout=0)
+            waiting.clear()
 
             def acquire():
                 attempted.set()
@@ -84,14 +99,16 @@ def test_acquire_waits_for_startup_future_before_consuming_sequence():
 
             acquisition = executor.submit(acquire)
             assert attempted.wait(30), "test watchdog: acquire caller must start"
-            # No public queue-arrival hook exists. This short negative window only
-            # detects a bypass; final sequence/output assertions are deterministic.
+            assert waiting.wait(30), (
+                "test watchdog: acquire must reach readiness boundary"
+            )
             assert not acquisition.done()
             assert env.soc.binding.last_request is None
         finally:
             release.set()
         acquisition.result(timeout=30)
         assert shared is warmup.start()
+        assert env.soc.binding.last_request is not None
         assert env.soc.binding.last_request.sequence == 0
         assert warmup.status.state == "ready"
     env.devices.close_all_devices()
@@ -107,10 +124,13 @@ def test_failed_warmup_reports_error_but_allows_acquisition():
     env = ftf(parse_ftf(ftf_document()), warmup=warmup)
     try:
         status = env.wait_ready()
+        assert status is not None
         assert status.state == "failed"
         assert status.current is None
+        assert status.error is not None
         assert "synthetic compilation failure" in status.error
         program(env).acquire(env.soc, progress=False)
+        assert env.soc.binding.last_request is not None
         assert env.soc.binding.last_request.sequence == 0
     finally:
         env.devices.close_all_devices()
@@ -129,9 +149,17 @@ def test_warmup_does_not_change_rng_or_live_bias():
         b.acquire(plain.soc, progress=False)
         import numpy as np
 
-        for x, y in zip(a.get_raw(), b.get_raw(), strict=True):
+        raw_a, raw_b = a.get_raw(), b.get_raw()
+        assert raw_a is not None and raw_b is not None
+        for x, y in zip(raw_a, raw_b, strict=True):
             np.testing.assert_array_equal(x, y)
-        assert prepared.soc.binding.last_request.sequence == plain.soc.binding.last_request.sequence == 0
+        assert prepared.soc.binding.last_request is not None
+        assert plain.soc.binding.last_request is not None
+        assert (
+            prepared.soc.binding.last_request.sequence
+            == plain.soc.binding.last_request.sequence
+            == 0
+        )
     finally:
         prepared.devices.close_all_devices()
         plain.devices.close_all_devices()

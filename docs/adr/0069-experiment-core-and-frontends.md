@@ -125,6 +125,8 @@ CfgEnv 與 RunContext 分工不同。前者可跨次組裝重用；後者只有�
 
 模擬環境由啟動時明確選用的 Python `build_environment()` 組裝，回傳已綁定 soc、匹配 soccfg、同一 DeviceManager 與公開描述。GUI 與 Notebook 共用此 bundle；一般 soc_changed 不建立 device，不保留動態切換入口。成功回傳時清理責任交給宿主，部分清理失敗保留資源與原錯誤，不假裝 ready。
 
+FTF 共用 production environment entry 在組裝完成後啟動背景數值預編譯。`experiment.ftf` 擁有代表性數值工作與 process-wide single-flight；`SimulationEnvironment` 暴露進度、future 與 ready 等待。直接呼叫 `ftf()` 預設不預編譯，production entry 明確傳 `warmup=True`，作者可用 `warmup=False` 關閉。背景工作不接觸正式 devices、RNG stream 或 resident Engine。Program binding 只知道通用 ready callback，在 acquire admission 後、消耗 sequence 前等待。失敗由 environment 回報並退回 on-demand 編譯。外部計時 owner 先等 ready 再開始計時；GUI 狀態顯示由前端接線，不由數值層更新。依賴沿用 C8、C9、C10、C12，沒有新增反向依賴。
+
 FTF 的 YAML 由 resources 驗證；experiment.ftf 擁有接線、裝置與逐 round snapshot，simulate 只收數值並提供 joint model、evolution、population conversion 與 ADC。初值只在 startup 套用，每 round 讀當下 device 值；讀取失敗不降級。正常 metadata 只保留 I/Q 與公開 provenance，不含模型真值。舊 TLS 執行機制不留相容層。依賴由 .importlinter C8、C9、C10、C12 約束；完整物理限制與 readout 起點凍結近似見 [模擬環境契約](draft/simulation-environments.md)。
 
 可信 Python 不是硬體 sandbox。使用者自行隔離主機資源，不新增模擬專用裝置黑名單或自動斷線政策，也不預建 plugin registry 或空 backend。

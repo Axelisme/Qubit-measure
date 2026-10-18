@@ -19,7 +19,7 @@ from zcu_tools.core.simulation import (
 )
 from zcu_tools.device import DeviceManager
 from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
-from zcu_tools.experiment.simulation import SimulationEnvironment
+from zcu_tools.experiment.simulation import EnvironmentWarmup, SimulationEnvironment
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg, make_mux_mock_soccfg
 from zcu_tools.program.v2.simulation import SimulationBinding, SimulationSoc
 from zcu_tools.resources.ftf import FTFSettings, load_ftf, parse_ftf
@@ -319,6 +319,7 @@ def ftf(
     *,
     private_replay: Path | None = None,
     workers: int = 1,
+    warmup: bool | EnvironmentWarmup = False,
 ) -> SimulationEnvironment:
     """Build a fixed-profile FTF environment from named values or a YAML path.
 
@@ -332,6 +333,12 @@ def ftf(
     acquires, using workers (default 1) as its sole parallel width.
     Worker threads live only during multi-timeline evolve; dropping the environment
     releases its in-memory engine cache. FTFSource.close explicitly clears it.
+    warmup=False keeps direct callers/tests free of background CPU work. True
+    starts process-wide single-flight numeric preparation; the shared production
+    GUI/Notebook entry opts in while setting production workers. An explicit
+    EnvironmentWarmup supplies named preparation items instead. It must not
+    sample or mutate live devices. env.wait_ready() waits before caller timing;
+    acquire also waits automatically. Failure status permits on-demand compiling.
     """
     settings = (
         parse_ftf(configuration)
@@ -374,23 +381,35 @@ def ftf(
             )
         else:
             soccfg = make_mock_soccfg(max(gens) + 1, max(receivers) + 1)
+        from .warmup import startup_warmup
+
+        preparation = (
+            startup_warmup()
+            if warmup is True
+            else (warmup if isinstance(warmup, EnvironmentWarmup) else None)
+        )
         binding = SimulationBinding(
             coordinator.snapshot,
             coordinator.execute,
             backend_version=BACKEND_VERSION,
             seed=settings.numerics.seed,
+            wait_ready=None if preparation is None else preparation.wait_ready,
         )
         soc = SimulationSoc(
             soccfg,
             binding,
             routes=tuple((gen, ch) for gen in gens for ch in receivers),
         )
-        return SimulationEnvironment(
+        environment = SimulationEnvironment(
             soc,
             soccfg,
             devices,
             "FTF: independent shots, terminal shared-line readout, synchronous acquire/decimated",
+            preparation,
         )
+        if preparation is not None:
+            preparation.start()
+        return environment
     except Exception as error:
         try:
             devices.close_all_devices()
