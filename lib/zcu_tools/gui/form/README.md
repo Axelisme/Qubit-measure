@@ -1,6 +1,6 @@
 # gui/form — Qt-free Pydantic input editing
 
-**Last updated:** 2026-10-18，完整草稿還原、固定具名元素與 indexed editing
+**Last updated:** 2026-10-18，依名與形狀遞迴還原及完整 JSON 草稿
 
 `FormState.describe(path, env)` 直接從 model 宣告與目前 input 回傳 `FormDescription`，不產生 JSON Schema。Root path 是 `()`，其他位置用 model-field tuple。`target` 是指定欄位的 metadata，root 則為 None；`children` 只列下一層 metadata。每個 child 保留完整 path，不攜帶 descendants。選中選項只有一個非 nullable、沒有 options 的普通 model wrapper 時，children 攤平一層，但 wrapper 的完整 path 仍可查詢。
 
@@ -12,9 +12,9 @@ Description 的 options 只列 detached value、label 與 command name／label�
 
 `static_defaults(model)` 接受普通 Pydantic BaseModel 或持久 Spec，產生 detached input JSON。必填欄位與 None 預設保持缺席，讓 before validator 能從其他欄位推導值。Default factory 每次呼叫重新執行。FormModel 初值與宣告者的 converter 可使用這個入口。
 
-FormModel 的實例只承載普通值。類別上的 defaults、choices、options 與 converters 提供輸入契約。FormInput 保存未填、null、expression 與 complex tags；FormState 擁有 draft/base、batch write、branch switch、結果、差異與 compatible restore，不擁有 Engine revision 或提交 policy。
+FormModel 的實例只承載普通值。類別上的 defaults、choices、options 與 converters 提供輸入契約。FormInput 保存未填、null、expression 與 complex tags；FormState 擁有 draft/base、batch write、branch switch、結果、差異與 recursive restore，不擁有 Engine revision 或提交 policy。
 
-Expression 只用於 int、float、complex 與 str 文字欄位，只有顯式 `{"expr": str}` 求值。Literal、Enum、bool、宣告 choices 的 leaf 與 library key 沒有 expression 能力。Describe 回 `expression=False`，result 拒絕 envelope 且不求值，compatible restore 丟棄它。文字與選項混合的 union 沒有對應控制項，describe、求值與 restore 會 raise 帶欄位路徑的 ValueError。Editor 只看 description 的 expression flag。普通字串包含 `$` 前綴仍為 literal。求值共用 evaluate_scalar_expr，再遵守 Pydantic 約束；missing／unbound alias 指名失敗，不以預設值代替。Input 與 compatible restore 保留 expression 原文。
+Expression 只用於 int、float、complex 與 str 文字欄位，只有顯式 `{"expr": str}` 求值。Literal、Enum、bool、宣告 choices 的 leaf 與 library key 沒有 expression 能力。Describe 回 `expression=False`，result 拒絕 envelope 且不求值，restore 保留 raw 交一般驗證。文字與選項混合的 union 沒有對應控制項，describe、求值與 restore 會 raise 帶欄位路徑的 ValueError。Editor 只看 description 的 expression flag。普通字串包含 `$` 前綴仍為 literal。求值共用 evaluate_scalar_expr，再遵守 Pydantic 約束；missing／unbound alias 指名失敗，不以預設值代替。Input 與 restore 保留 expression 原文。
 
 Defaults hook 可以用 `{"expr": ...}` 宣告 scalar 初始值的來源，例如 `$flux_dev` 或 point path。`default_input` 由 core 用同一個 env 當場求值，input 只存算好的 direct 值；來源之後改變，要重新建立 default input 才反映。Expression 算不出來，或值讓 result 在該欄位報錯時，欄位留空：required 欄位只顯示 `Field required`，有 Pydantic 靜態預設的欄位驗證時用那個預設。來源本身不可用的錯誤照常拋出。使用者或 MCP 寫入的 expression 保留原文。
 
@@ -24,9 +24,9 @@ Defaults hook 可以用 `{"expr": ...}` 宣告 scalar 初始值的來源，例�
 
 `InputConverter` 是一個欄位的單一 converter，處理全部目標選項。可在 Annotated metadata 或 `FormModel.converters(env)` 宣告。Local metadata 覆蓋祖先宣告，同一 model 的 hook 再覆蓋自身 metadata。Callable 接收 readonly snapshot、目標 selection 與局部 evaluate context，回 `FormConversionResult(structure, input)`。它與 command 共用原子 installer，Core 不補 defaults。
 
-沒有 converter 時，切換只改 selection，保留原有 branch 和 authored input。`FormInput.selections` 攜帶記憶體選項，`data` 保存實際 child input。`describe.selected` 顯示選項，`describe.branch` 標示實際子表單；兩者可以不同。Partial selector object 在轉換後套用明確提供的 children，tag 葉寫入也走同一個 converter。純讀不執行 converter。預期的缺來源、參與值求值及結構 admission 拒絕使用 `FormConversionError`，保留 cause。任意 callable ValueError 或 provider 故障不轉成正常拒絕。`FormInput.to_json/from_json` 使用完整草稿 envelope，不走 compatible restore。Envelope 保留明確 selections、raw branch、expression、缺席、null 與普通 invalid 值。還原以可信 annotation 的型別 identity 比對，不執行 converter 或宣告 hooks，不補 defaults、不讀 library。具 discriminator 的 branch 與 selection Literal 不符 annotation 時拒絕。未標 tag 的 model-only union 保留原稿，不猜 branch。`write_compatible` 仍是明確的 raw 葉投影工具，不是 envelope decoder。
+沒有 converter 時，切換只改 selection，保留原有 branch 和 authored input。`FormInput.selections` 攜帶記憶體選項，`data` 保存實際 child input。`describe.selected` 顯示選項，`describe.branch` 標示實際子表單；兩者可以不同。Partial selector object 在轉換後套用明確提供的 children，tag 葉寫入也走同一個 converter。純讀不執行 converter。預期的缺來源、參與值求值及結構 admission 拒絕使用 `FormConversionError`，保留 cause。任意 callable ValueError 或 provider 故障不轉成正常拒絕。`FormInput.to_json/from_json` 固定編解碼 `{data,selections}`，保留 raw branch 與明確選項的差異。沒有 override 時 selections 為空 list。不存版本、型別 identity 或 callable，也不雙讀舊格式。
 
-`FormState.migrate_input(saved, env)` 用於 RAM/source 宣告變更，不用於持久還原。它把舊 FormInput 的 raw 逐葉遷移到 host 提供的現行 defaults，再保留新 annotation 及已遷移 ancestry 仍接受的明確 selection overrides。新欄位保留 defaults。已移除、不相容或來源拒絕的 restored 葉，以及不再適用的 override，列入同一份去重 dropped paths。它不呼叫 converter 或 options hook，不以 strict restore 成功跳過逐葉規則。成功時只安裝和通知一次，base 不變，非 leaf-local 的來源故障在安裝前傳播。
+`FormState.restore_input(saved, env)` 接受具名 FormInput。啟動、source reload 與 RAM switching 共用這個入口。Model 按現行欄位名遞迴，缺值用 host 提供的 defaults，多出欄位列 dropped。List 照存檔位置與長度還原，逐元素補新欄位 defaults。合法 selection 保留，不合法則 default+dropped。無 discriminator 的 union 不猜 branch，raw 照搬。葉欄位保留 expression 與 invalid raw，由一般驗證處理。形狀不符列 dropped。還原不跑 converter、options hook、來源檢查或求值。成功時一次安裝，base 不變，完整草稿有變才通知一次。Provider/defaults 故障在安裝前傳播。還原與 Reset 不經普通 mutation 的 owner 檢查。
 
 有 env 的一般驗證只對 `FormInput.selections` 明確 overrides 檢查目前 options membership。不在選項中時，result／preview 回該欄位錯誤，保留原稿。沒有 override 的 raw branch 仍使用原有值契約，不把選單當作完整值域。Ref 的存在性與 family 由 adapter 的一般來源／choices 驗證處理，不參與還原 identity。
 
@@ -40,7 +40,7 @@ Defaults hook 可以用 `{"expr": ...}` 宣告 scalar 初始值的來源，例�
 
 Sweep 的四種數值 model、座標／採樣換算與 row command 宣告由 `gui.form_adapter.sweep` 擁有。Core 不辨識 sweep 型別或其 tag。
 
-Module／library 的 tagged input、literal key 與 family 政策由 `gui.form_adapter` 擁有。Core 只讀普通 annotation、`Option` 與 `InputPolicy`，不以領域 subclass 判定行為。`InputPolicy(expression=False)` 放在 field 的 Annotated metadata，關閉 describe、decode/result、defaults evaluation 與 compatible restore 的 expression 能力。True 不會替 Literal、enum、bool、choices 或混合 union 開啟原本不支援的能力。Write 仍保存普通 invalid draft，由 result 回報。
+Module／library 的 tagged input、literal key 與 family 政策由 `gui.form_adapter` 擁有。Core 只讀普通 annotation、`Option` 與 `InputPolicy`，不以領域 subclass 判定行為。`InputPolicy(expression=False)` 放在 field 的 Annotated metadata，關閉 describe、decode/result 與 defaults evaluation 的 expression 能力。Restore 仍保留這些 invalid raw。True 不會替 Literal、enum、bool、choices 或混合 union 開啟原本不支援的能力。Write 仍保存普通 invalid draft，由 result 回報。
 
 Editor 與 MCP 讀同一份 description options，照 label 列選項，一次寫入 value，首次展開才 describe 選中項目的 children。它們不推論 union、ref 或 library 的呈現。普通 nullable model 仍用 Enabled，bool 仍用 checkbox。明確複製只經 `to_inline` 指令，使用 host 的 guarded command callback；一般選 Inline 由 `form_adapter` 的集中 converter 決定繼承或新建 input。
 
@@ -52,9 +52,9 @@ Editor 與 MCP 讀同一份 description options，照 label 列選項，一次�
 
 Scalar、FixedList 以外的整個 sequence 與整個 typed mapping 都是 leaf。普通 nested model 只編輯子欄位，一般可留空 model 區段仍用 Enabled 控制 object／null 啟停。Choices 使用 model-field leaf paths，驗證與 description 共用同一份當次選項。Parent 與 child 宣告同一 leaf 時，最深 nested FormModel 的 local choices 優先，包含空選項。非重疊的 parent 選項保持有效，重用同型 nested model 的欄位各自隔離。
 
-Compatible restore 以原文欄位集合與型別選擇未標 tag 的 model-only union。恰好一個 member 相容才保留 subtree，合法 expression envelope 依欄位能力參與比對，不求值。零個或多個 member 相容就丟棄，不猜第一個 branch。Tagged branch 的 selector 與 defaults 契約不變。還原後 captured source 檢查失敗的 leaf（例如 library 沒有的 ref 名稱，或沒有 captured library 時的任何 ref）保留目前 input，目前沒有就留空，路徑和其他 dropped paths 一起回傳。不是由還原 leaf 造成的 source 失敗仍然 raise；一般 write、default_input 與 result 的 source 語意不變。
+還原不檢查 library 或一般 leaf 值是否合法。Missing ref、family 與 hook membership 走既有 result／preview 欄位錯誤，保留 invalid draft 並擋 Run。已 inline 的原稿不從 library 重建。
 
-`FormModel.check_sources(data, env)` 檢查本層 raw input 真正消費的來源。Hook 不遞迴、不補 defaults、不驗證普通值，也不改 capture。Core 沿 active children 與被消費的靜態 defaults 呼叫同一 hook，供 defaults、write、preview/result 與 compatible restore 共用。`field_error` 的相對路徑由 core 加上 consuming ancestry。Compatible restore 只回退造成來源失敗的 restored leaf；其他來源故障保留原例外。
+`FormModel.check_sources(data, env)` 檢查本層 raw input 真正消費的來源。Hook 不遞迴、不補 defaults、不驗證普通值，也不改 capture。Core 沿 active children 與被消費的靜態 defaults 呼叫同一 hook，供 defaults、write 與 preview/result 共用。`field_error` 的相對路徑由 core 加上 consuming ancestry。還原不執行這項檢查。
 
 `FormState.prepare_write(batch, env)` 回 detached `FormInput`，完成與 write 相同的結構及來源 admission，不安裝、不通知。`install_input(candidate)` 只接受同 model 與相同固定元素 identity，保留 base，內容改變才通知一次。Host 先 guard，再 prepare，再 install。候選只限同一 owner turn、current input 與 env 使用，不能跨 await、Reset 或 guard 邊界保存，也不是授權或 revision token。普通 `write` 使用同一流程。
 

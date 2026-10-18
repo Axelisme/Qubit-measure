@@ -1,6 +1,6 @@
 # gui/app/workflows — Workflow host
 
-**Last updated:** 2026-10-18，完整草稿還原、固定元素與 native tunables 提交邊界
+**Last updated:** 2026-10-18，共用遞迴還原與 FormInput JSON
 
 ## 註冊與組裝
 
@@ -36,9 +36,9 @@ Description 的 options 只帶 value／label／commands，selected index 由 cor
 
 FixedList 的 description 直接投影 elements，包含原始 index、captured name 與 typed path。Form 可編輯及預覽 indexed leaves，但 `TunablesHost.apply` 不將它們交給 native Engine。Native tunables 的 dotted path 不支援 list 元素，host 回保留原 typed path 的 `FormErrors`，Engine、draft、base 與 accepted input 都不變。Host 不轉成 whole-list 提交，也不把 index 字串化。見 ADR-0079。
 
-Memento 3 為 plan 與 knobs 各存完整 FormInput envelope，包含 selection、raw branch、型別 identity 與未完成原稿。Restore 先準備兩個候選，再重設兩個 input/base。任一 annotation identity 不相容都不改兩個表單，不逐葉 overlay，也不做舊版雙讀。持久 strict restore 不以 defaults overlay 原稿。`defaults(env)` 沒有 previous；RAM/source migration 另以現行 defaults 為起點。
+Memento 只保留 plan 與 knobs，各欄直接使用固定 FormInput `{data,selections}` JSON。Restore 先依現行 defaults 建立兩個候選，再以 Core 的 `restore_input` 遞迴還原。兩個候選都成功後才重設 input/base。沒有版本或型別 identity，不雙讀舊格式。新欄位用 defaults，移除欄位、形狀不符與非法 selection 列 dropped 並顯示。壞 JSON 或格式不符時，共用 caretaker 顯錯並以 defaults 開啟，不備份。Provider／restore 故障仍傳播。
 
-`WorkflowForms` 用 `WorkflowDraft` 保留各名稱的 parsed RAM FormInputs，與持久 envelope 分離。Switch/reload 以 Core 的 `migrate_input` 逐葉遷移 raw，保留現行 annotation 仍接受的明確 selection overrides。新欄位用 defaults，不適用的葉和 overrides 列入 dropped 並顯示。Migration 不呼叫 converter 或 options hook，不走 strict-success shortcut。兩個候選 panels 建好後才發布。Prepare 用新 capture 重建 defaults。`SingleFileCaretaker` 保存 parsed FormInput，包括 expression，不保存 renderer-local 未解析文字、native run 或硬體。從 Start 到 terminal delivery，保存的 knobs 來自 run 的 binding，包括還沒 Apply 的 parsed 編輯；terminal 之後來自 Start knobs。`--clean` 只略過啟動讀取，正常 close 仍保存。啟動時 session 是 EMPTY，還原不查 library。存檔裡的 ref 名稱保留，缺 library 或來源錯誤由一般表單驗證呈現，invalid draft 擋 Run。已複製成 inline 的原稿不因 library 更新或原 key 消失而重建。啟動遇 decode 或 annotation identity 不相容時，共用 caretaker 先將原檔移到同目錄的 `.incompatible-<UTC 時間戳>-<唯一尾碼>` 備份。成功後顯示明確錯誤與備份路徑，以 defaults 開啟，正常 close 仍保存。移檔失敗則啟動失敗、保留原檔，不覆蓋備份或自動清理。其他 provider／restore 故障不當作不相容。持久 strict restore 與 RAM/source migration 分開，見 ADR-0079。
+`WorkflowForms` 用 `WorkflowDraft` 保留各名稱的 parsed RAM FormInputs。Switch/reload 與啟動共用 Core 還原，不呼叫 converter 或 options hook。兩個 candidate panels 建好後才發布。Prepare 用新 capture 重建 defaults。Caretaker 不保存 renderer-local 未解析文字、native run 或硬體。從 Start 到 terminal delivery，保存的 knobs 來自 run binding，包括尚未 Apply 的 parsed 編輯；terminal 之後來自 Start knobs。`--clean` 只略過啟動讀取，正常 close 仍保存。啟動 session 是 EMPTY，還原不查 library。Ref 名稱保留，缺 library 或來源錯誤由一般驗證呈現並擋 Run。已 inline 的原稿不從改過的 library 重建。
 
 Reload 只允許 idle/terminal，保留 session/services/controller、run binding 與既有 captures。相容 input 保留，removed selection 改選清單第一項。Import/panel 失敗保留舊 panels/drafts，但阻擋 Start 直到 retry 成功；fixed-source 改動要求 restart。
 

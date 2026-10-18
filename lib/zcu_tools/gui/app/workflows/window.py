@@ -482,11 +482,11 @@ class WorkflowWindow[C](QWidget):
 
         Call on the owner thread after construction, before starting a run.
         Pending/running/paused ownership raises InvalidRunState before edits.
-        FormInput checks trusted annotation identity without reading sources or
-        executing converters. Incompatible envelopes raise ValueError before
-        either panel changes. Missing refs and ordinary invalid values remain
-        draft input for general validation. Successful restoration refreshes
-        both editors and clears renderer-local text. No leaves are discarded.
+        Core restores both drafts recursively against current defaults without
+        reading sources or executing converters. Format/provider failures leave
+        both panels untouched. Missing refs and ordinary invalid values remain
+        draft input for general validation. Return dropped paths for display.
+        Success refreshes both editors and clears renderer-local text.
         """
         self._ensure_can_start()
         return self._forms.restore(state)

@@ -55,19 +55,15 @@ Gauss→FlatTop 不把來源 waveform 放進 raise_waveform。FlatTop 沒有直�
 
 ### 保存與還原
 
-保存內容包括每個欄位的 selection／branch 與原始 input，含 expression、缺席、null 和普通值錯誤。宿主為兩個 FormInput 各存一份 versioned envelope，包含原稿、明確 selection overrides 與可信 annotation 的型別 identity。還原整份草稿，不逐葉 overlay、不做 legacy 雙讀。任一表單不相容，兩個表單都保持原狀。還原不執行 converter，不序列化 callable、動態 class 或完整 runtime schema。
+FormInput 的 JSON 固定為 `{data, selections}`。data 保存 raw input，selections 是 `[{path, value}]`，path 保留字串與整數。沒有 override 時仍寫空 list。真實表單欄位在 data 內，不與兩個外層名稱衝突。不保存版本、型別 identity、domain metadata、callable 或動態 class。Host 只保留必要的表單容器，不再包一層版本。舊 raw-only 或 versioned 格式不雙讀。
 
-還原只檢查不需 env 的 annotation 結構。型別、selection 結構或 Literal、具 discriminator 的 branch tag，以及固定元素名稱、數量或順序不相容時，明確報錯，不丟葉或錯配元素。Annotation 沒有 discriminator 的 model-only union 不猜 branch、不補 tag，原稿保留為該 union 的輸入。這類草稿仍可帶普通值錯誤；union annotation 改變則拒絕還原。
+啟動讀檔、source reload 與 RAM switching 共用 `FormState.restore_input`。Model 按現行同名欄位遞迴，缺值用 defaults，多出欄位列 dropped。List 按位置遞迴，長度照存檔。Union／Literal 的 selection 仍為 annotation 接受的選項就保留，否則用 defaults 並列 dropped。沒有 discriminator 的 union 不猜 branch，raw 照搬。葉欄位保留 expression、缺席與 invalid raw，交一般驗證處理。形狀不符的內容丟棄並列 dropped，host 將清單顯示給使用者。還原與 Reset 不走普通 mutation 的 owner input-change 檢查。
 
-還原不呼叫 options(env)，也不檢查任何 hook 的 membership，完全靜態的 hook 也相同。有 env 時，一般驗證只檢查 FormInput.selections 中的明確 override 是否仍在 options(env) 中。不在選項中的 override 顯示為該欄位的值錯誤，保留草稿並擋 Run。沒有 override 的 raw branch 只遵守 annotation 與原有值契約。Options 描述可選項，不代表完整值域，因此合法的持久 child key 不因選單沒有列出它而失效。
+還原不執行 converter 或 options hook，也不讀 library。一般驗證檢查明確 selection override 的當前 hook membership。沒有 override 的 raw branch 不因選單未列出它而失效。Ref 不存在或 family 不符時，adapter 的一般驗證在欄位顯示錯誤，保留草稿並擋 Run。已 inline 的原稿不要求原 ref 仍存在，也不從改過的 library 重新複製。
 
-Ref family、ref 是否存在及 library 內容都不參與還原 identity，也不新增宣告 token。Library 可用後，ref 不存在或指向項目的 family 不符現行宣告時，一般驗證在消費欄位顯示錯誤，保留草稿並擋 Run。宣告的 ref_family 改變與 library 項目改變使用同一規則。Library 內容版本改變不等於元素 identity 改變。已 inline 的草稿不要求原 ref 仍存在，還原保留當時原稿，不從新 library 重新複製。
+JSON 損壞或不符固定 FormInput 格式時，共用 caretaker 顯示錯誤並以 defaults 開啟，不備份。之後依原有時機正常保存。Provider 與其他 restore 故障仍傳播，read I/O 故障沿既有 error outcome，不轉譯成 JSON 格式錯誤。見 [[0063]]。
 
-啟動遇 decode 或 identity 不相容時，共用 caretaker 先將原檔移到同目錄的 `<原檔名>.incompatible-<UTC 時間戳>-<唯一尾碼>`，不覆寫既有備份。成功後顯示錯誤及備份路徑，再以 defaults 開啟，之後照常保存。移檔失敗則啟動失敗並保留原檔，不安裝 defaults。所有 caretaker hosts 共用此政策，不新增保護狀態，不自動清理備份。Provider 與其他 restore 故障仍傳播。這避免正常 close 的保存覆蓋唯一的不相容原稿，細節見 [[0063]]。
-
-顧問於 2026-10-18 依使用者「可以，之後就交給advisor，我就不直接對話」的代裁授權採用啟動備份政策。持久 strict restore 不等於 source reload 或 RAM switching 的逐葉 migration，兩者使用分開命名的操作。
-
-Source reload 與 RAM switching 透過 Core 公開的 selection-aware migration 逐葉遷移 raw。相容欄位保留，新欄位用現行 defaults。新 annotation 和遷移後 ancestry 仍接受的明確 selection override 也保留。不適用的葉與 override 丟棄，列入既有 dropped 回報，host 顯示給使用者。Migration 不呼叫 converter 或 options hook，不因 strict restore 成功就跳過逐葉規則。這保留既有宣告更新的 defaults／dropped 行為，同時避免沒有 converter 的 branch A／selection B 在切換後無聲變回 A。顧問於 2026-10-18 依同一代裁授權確認此分工。
+使用者於 2026-10-18 要求簡化保存還原：「還有版本？太複雜了。我需要更簡單的機制」。看過依名與形狀的遞迴規則後回覆「好，可以」，並選擇固定 data／selections 兩欄的 JSON 方案。
 
 ### 固定具名元素與參與清單
 

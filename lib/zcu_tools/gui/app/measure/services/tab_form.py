@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
@@ -95,8 +96,9 @@ class TabFormResource:
         capture accepts one-shot named alias overrides, or None for global rows.
         mutation_allowed is the app busy/control policy; notification_active
         reports notifications in other tab resources. Neither callback may do
-        hardware I/O. initial optionally overlays saved compatible input on fresh
-        defaults; dropped_paths reports discarded leaves. Source captures are not
+        hardware I/O. initial optionally supplies fixed FormInput {data,selections}
+        JSON for recursive restore on fresh defaults; dropped_paths reports
+        discarded input paths. Source captures are not
         restored. Capture/default failures propagate without a resource.
         """
         self._capture = capture
@@ -107,7 +109,10 @@ class TabFormResource:
         self._form = make_form(FormContext(self._sources.env.parameters))
         self._state = FormState(self._form.default_input(self._sources.env))
         self._dropped_paths = (
-            self._state.write_compatible(initial, self._sources.env)
+            self._state.restore_input(
+                FormInput.from_json(self._state.input.model, json.dumps(initial)),
+                self._sources.env,
+            )
             if initial is not None
             else ()
         )
@@ -351,15 +356,15 @@ class TabFormResource:
             self._state.run_command(path, name, self._sources.env)
             self._notify()
 
-    def write_compatible(self, saved: Mapping[str, JsonValue]) -> tuple[FormPath, ...]:
-        """Overlay compatible saved leaves and report discarded input paths.
+    def restore_input(self, saved: FormInput[FormModel]) -> tuple[FormPath, ...]:
+        """Restore saved authored input and report dropped paths using Core rules.
 
-        Preserve expression text and unfinished input. FormState owns branch/type
-        and source compatibility. Mutation guards match write; failures preserve
-        the entire input. No source is recaptured.
+        Preserve expression text, invalid leaf values and accepted explicit
+        selections. Busy/lifetime guards match write, but restoration does not
+        run owner input-change checks. No source is recaptured.
         """
         with self._mutation():
-            dropped = self._state.write_compatible(saved, self._sources.env)
+            dropped = self._state.restore_input(saved, self._sources.env)
             self._notify()
             return dropped
 

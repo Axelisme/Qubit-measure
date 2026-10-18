@@ -24,7 +24,7 @@ from .catalog import WorkflowCatalog
 
 @dataclass(frozen=True)
 class WorkflowDraft:
-    """Detached parsed RAM drafts, separate from persistent strict envelopes.
+    """Detached parsed drafts restored by the same rules as persistent input.
 
     plan and knobs are authored FormInputs with their original declarations and
     independent selection overrides. Reload/switching may migrate their leaves
@@ -86,8 +86,8 @@ class WorkflowForms[C]:
             report = WorkflowInputRestoreReport((), ())
             if snapshot is not None:
                 report = WorkflowInputRestoreReport(
-                    plan.state.migrate_input(snapshot.plan, env),
-                    knobs.state.migrate_input(snapshot.knobs, env),
+                    plan.state.restore_input(snapshot.plan, env),
+                    knobs.state.restore_input(snapshot.knobs, env),
                 )
             for panel in (plan, knobs):
                 panel.state.reset(panel.state.input)
@@ -155,19 +155,25 @@ class WorkflowForms[C]:
         return report
 
     def restore(self, snapshot: WorkflowInputSnapshot) -> WorkflowInputRestoreReport:
-        """Restore both complete drafts after validating both trusted identities.
+        """Restore both drafts recursively against fresh current defaults.
 
-        Window checks idle admission. Raw expressions, missing/null and invalid
-        ordinary values remain authored input. A malformed or incompatible
-        envelope raises ValueError before either draft changes. No catalog
-        selection, converter, evaluation or source capture occurs.
+        Window checks idle admission. Build both candidates and dropped reports
+        before publishing either. Wire/defaults/provider failures leave both
+        panels untouched. No converter or source capture runs here.
         """
         plan, knobs = snapshot.inputs(
             self.attachment.plan_model, self.attachment.knobs_model, self.plan.env
         )
-        report = WorkflowInputRestoreReport((), ())
-        self.plan.state.reset(plan)
-        self.knobs.state.reset(knobs)
+        plan_state = FormState(self.attachment.plan_model.default_input(self.plan.env))
+        knobs_state = FormState(
+            self.attachment.knobs_model.default_input(self.knobs.env)
+        )
+        report = WorkflowInputRestoreReport(
+            plan_state.restore_input(plan, self.plan.env),
+            knobs_state.restore_input(knobs, self.knobs.env),
+        )
+        self.plan.state.reset(plan_state.input)
+        self.knobs.state.reset(knobs_state.input)
         for panel in (self.plan, self.knobs):
             panel.editor.refresh(panel.env)
             panel.editor.discard_local_text()

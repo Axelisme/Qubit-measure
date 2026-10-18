@@ -793,9 +793,13 @@ class Form[C: ConfigBase]:
                 f"Expected {self.core_cfg.__name__}, got {type(spec).__name__}"
             )
         state = FormState(self.default_input(env))
-        dropped = state.write_compatible(
-            supported_input(
-                self._section.editable, spec.model_dump(mode="json", exclude_none=True)
+        dropped = state.restore_input(
+            FormInput(
+                state.input.model,
+                supported_input(
+                    self._section.editable,
+                    spec.model_dump(mode="json", exclude_none=True),
+                ),
             ),
             env,
         )

@@ -127,7 +127,7 @@ class InputPolicy:
     """Input capability restriction on an Annotated field.
 
     expression=False disables Expr envelopes in descriptions, evaluation,
-    defaults and compatible restore. True retains the annotation's capability;
+    and defaults. Restoration preserves raw for general validation. True retains the annotation's capability;
     it cannot enable expressions on categorical or container fields.
     """
 
@@ -445,7 +445,7 @@ class FormInput[F: FormModel]:
         literal. Complex literals use {"__complex__": [re, im]}.
         Structural selectors require ordinary typed tags, not Expr envelopes.
         Non-JSON/nonfinite data raises ValueError; unknown fields, malformed tags
-        and invalid values remain input for result/compatible restoration.
+        and invalid values remain input for result and recursive restoration.
         A FixedList with two elements of one name raises ValueError naming the
         original indices.
         """
@@ -468,7 +468,7 @@ class FormInput[F: FormModel]:
 
         Keys are canonical field paths. Values are declared option values.
         Omitted paths infer selection from raw input. Prepared inputs and saved
-        envelopes retain these choices; hosts own persistence locations.
+        JSON retain these choices; hosts own persistence locations.
         """
         from ._json import copy_json
 
@@ -501,7 +501,7 @@ class FormInput[F: FormModel]:
         return copy_object(self._data)
 
     def to_json(self) -> str:
-        """Encode the full draft with a trusted declaration identity digest.
+        """Encode exactly {data,selections}, with no declaration metadata.
 
         Retain independent selections, raw branch tags, missing/null, expressions
         and ordinary invalid values. No evaluation, converter, callable or model
@@ -509,23 +509,22 @@ class FormInput[F: FormModel]:
         """
         from ._persistence import encode
 
-        return encode(self._model, self.data, self.selections)
+        return encode(self.data, self.selections)
 
     @staticmethod
     def from_json[Model: FormModel](model: type[Model], text: str) -> FormInput[Model]:
-        """Restore a full draft against the caller's trusted model declaration.
+        """Decode fixed {data,selections} JSON, paired with the target model.
 
-        Malformed/nonfinite envelopes and incompatible type identities raise
-        ValueError. Raw invalid input remains invalid input, never an overlay on
-        defaults. Branches come from model annotations and authored tags, not
-        saved classes. No converter, evaluation, hook or source access occurs.
-        Source availability/family remain ordinary result errors. There is no
-        legacy raw-tree decoder. The result type follows model independently
-        of the wrapper's type parameter, keeping FormInput covariant.
+        Malformed, non-object or nonfinite JSON and invalid selection paths raise
+        ValueError. Raw-only and versioned formats are not accepted. Raw invalid
+        input and typed selections remain untouched; restore_input applies the
+        current annotation's recursive restoration and reports dropped paths.
+        No converter, evaluation, hook or source access occurs. The result type
+        follows model independently of this wrapper's type parameter.
         """
         from ._persistence import decode
 
-        data, selections = decode(model, text)
+        data, selections = decode(text)
         return FormInput(model, data, selections=selections)
 
 
@@ -779,22 +778,22 @@ class FormState[F: FormModel]:
 
         return unsubscribe
 
-    def migrate_input(
+    def restore_input(
         self, saved: FormInput[FormModel], env: FormEnv
     ) -> tuple[FormPath, ...]:
-        """Overlay an old RAM draft onto this state's current captured defaults.
+        """Restore saved raw input and overrides using current names and shapes.
 
-        saved may use an older declaration. Migrate its raw data leaf by leaf,
-        retaining expressions and ordinary invalid values; new fields keep this
-        state's defaults. Keep explicit selection overrides accepted by the new
-        annotation and migrated ancestry. Removed/incompatible leaves, source-
-        rejected restored leaves and inapplicable overrides are discarded and
-        returned as unique paths. No converter or options hook is called.
+        saved may use an older declaration. Start with current captured input as
+        defaults, recurse by current field names and list positions, and keep
+        leaf raw values for general validation. Return unique dropped paths for
+        removed fields, incompatible shapes and no-longer-allowed selections.
+        No converter, options hook, source check or expression evaluation runs.
+        Defaults/provider failures propagate before installation.
 
-        This is intentionally lossy declaration migration, not strict persistent
-        restore. Source/declaration failures not isolated to restored leaves
-        propagate before mutation. On success install once, preserve base and
-        notify only if the complete draft changed. saved is never modified.
+        On success install once, preserve base and notify once only if the
+        complete draft changed. Restoration is not an ordinary mutation and
+        bypasses owner input-change checks. saved is never modified. Hosts
+        restore into fresh defaults for startup, reload and RAM switching.
         """
         from ._restore import restore
 
@@ -812,41 +811,3 @@ class FormState[F: FormModel]:
                 except Exception:
                     _logger.exception("Form state subscriber failed")
         return dropped
-
-    def write_compatible(
-        self, saved: Mapping[str, JsonValue], env: FormEnv
-    ) -> tuple[FormPath, ...]:
-        """Overlay surviving compatible saved leaves and return dropped paths.
-
-        Start with host-provided current default input. Keep valid Expr/complex
-        tags, missing-vs-null and whole sequence/typed-mapping leaves. Drop removed paths
-        and type-incompatible leaves, but keep range/cross-field-invalid values
-        so result can report them. Untagged model unions select a branch only
-        when saved field names and raw value types match exactly one member;
-        valid expression envelopes count as compatible for text fields without
-        evaluation; on a Literal, Enum, bool or library-key leaf an envelope
-        is incompatible and dropped. Choice leaves are not checked here. Zero or multiple matches discard that subtree,
-        never select the first branch. Tagged selection/defaults stay unchanged.
-        This is not legacy format support. Branch
-        writes use the same discriminator-first order as write. A saved object
-        without a discriminator overlays the current selected branch, retaining
-        its tag and unsaved defaults; an empty object makes no change. If neither
-        saved nor current input selects a branch, drop that object instead of
-        replacing the model section. A restored leaf whose captured source check
-        fails, such as a ref name absent from env.library or any ref without a
-        captured library, keeps the current input at that leaf (or stays unfilled
-        when current has none) and its leaf path is returned with the other
-        dropped paths. Source failures that no restored leaf causes, such as a
-        used static default or a model-wide error, raise PydanticCustomError
-        without installing. A changed restoration notifies once.
-        """
-        from ._json import copy_object
-        from ._sources import drop_unmatched_sources
-        from ._structure import restore
-
-        restored, dropped = restore(self._model, self._data, copy_object(saved), env)
-        candidate, unmatched = drop_unmatched_sources(
-            self._model, restored, self._data, env
-        )
-        self._install(FormInput(self._model, candidate))
-        return (*dropped, *unmatched)

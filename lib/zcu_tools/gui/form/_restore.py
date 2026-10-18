@@ -1,4 +1,7 @@
-"""Restore authored drafts by current names and shapes, without value validation."""
+"""Restore authored drafts by current names and shapes, without value validation.
+
+Model fields and sequence elements alternate recursively in a JSON input tree.
+"""
 
 from dataclasses import dataclass, field
 from typing import get_args, get_origin
@@ -98,7 +101,10 @@ class _Restorer:
         members = alternatives(info.annotation)
         models = model_types(info.annotation)
         tag = discriminator(info)
-        if len(members) > 1 and tag is None:
+        if (
+            len(tuple(member for member in members if member is not type(None))) > 1
+            and tag is None
+        ):
             # A union without a discriminator is opaque: never infer a branch.
             return copy_json(saved)
         if saved is None and type(None) in members:
@@ -153,6 +159,13 @@ class _Restorer:
             seed: JsonValue = (
                 self.defaults(item_models[0]) if len(item_models) == 1 else None
             )
+            if isinstance(current, list) and index < len(current):
+                prior = current[index]
+                seed = (
+                    {**seed, **prior}
+                    if isinstance(seed, dict) and isinstance(prior, dict)
+                    else prior
+                )
             result.append(self.value(item_info, seed, item, (*path, index)))
         return result
 
@@ -180,7 +193,7 @@ def restore(
     selections: dict[FormWritePath, JsonValue],
     env: FormEnv,
 ) -> tuple[dict[str, JsonValue], dict[FormWritePath, JsonValue], tuple[FormPath, ...]]:
-    """Return restored raw/overrides and unique dropped paths; no hooks run.
+    """Return restored raw/overrides and dropped paths; no options/converter runs.
 
     defaults is the host's current captured input. Only defaults for newly
     selected model branches/list elements may be requested from their model.

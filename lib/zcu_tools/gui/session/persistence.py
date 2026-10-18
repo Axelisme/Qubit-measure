@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile, gettempdir
 from typing import Generic, Protocol, TypeVar
@@ -21,15 +20,6 @@ logger = logging.getLogger(__name__)
 
 class PersistenceError(RuntimeError):
     """Expected failure while loading or saving a GUI snapshot."""
-
-
-class SnapshotIdentityError(ValueError):
-    """Saved identity is incompatible; originator has not changed any state.
-
-    Originators raise this only for trusted snapshot identity checks, never for
-    provider, validation or rendering failures. The caretaker backs up the file
-    before restoring defaults. Other restore exceptions propagate unchanged.
-    """
 
 
 class SnapshotCodec(Protocol[StateT]):
@@ -57,7 +47,7 @@ class RestoreOutcome(Generic[ReportT]):
 
     report is the app-owned result of the installed state. load_error is None on
     clean/missing/successful reads, otherwise the error the host must display;
-    incompatible data errors include the preserved sibling backup path.
+    invalid persisted data opens defaults without changing the original file.
     """
 
     report: ReportT
@@ -74,11 +64,10 @@ def _safe_cache_root() -> Path:
 class SingleFileCaretaker(Generic[StateT, ReportT]):
     """Load and atomically replace one JSON snapshot file.
 
-    Invalid JSON/UTF-8, codec ValueError and SnapshotIdentityError from restore
-    move the original to a unique timestamped sibling before default startup.
-    Backup failure raises PersistenceError, without installing defaults. Other
-    provider/restore failures propagate. Hosts display RestoreOutcome.load_error
-    and own save timing; recovered startup does not disable later flush.
+    Invalid JSON/UTF-8 and codec ValueError open defaults with a visible error.
+    Loading never renames or rewrites the original file. Other provider/restore
+    failures propagate. Hosts display RestoreOutcome.load_error and own save
+    timing; recovered startup does not disable later flush.
     """
 
     def __init__(
@@ -103,9 +92,9 @@ class SingleFileCaretaker(Generic[StateT, ReportT]):
     def restore_all(self, *, load: bool = True) -> RestoreOutcome[ReportT]:
         """Restore persisted state or defaults and return the host display report.
 
-        load=False skips reading/backing up an existing file. Incompatibility
-        backs up the original before restoring defaults; failed backup aborts
-        startup. Read I/O errors retain the existing default/error policy.
+        load=False skips reading an existing file. Invalid persisted data opens
+        defaults without writing. Read I/O errors retain the existing
+        default/error policy.
         Unclassified provider or originator failures propagate unchanged.
         """
         logger.info("persistence restore: load=%s path=%s", load, self._path)
@@ -113,13 +102,7 @@ class SingleFileCaretaker(Generic[StateT, ReportT]):
             state, load_error = self._load()
         else:
             state, load_error = self._codec.default(), None
-        try:
-            report = self._originator.restore_persisted_state(state)
-        except SnapshotIdentityError as exc:
-            if not load or load_error is not None:
-                raise
-            load_error = self._backup_incompatible(exc)
-            report = self._originator.restore_persisted_state(self._codec.default())
+        report = self._originator.restore_persisted_state(state)
         return RestoreOutcome(report=report, load_error=load_error)
 
     def flush(self) -> None:
@@ -154,7 +137,7 @@ class SingleFileCaretaker(Generic[StateT, ReportT]):
                 return self._codec.default(), None
             text = self._path.read_text(encoding="utf-8")
         except UnicodeDecodeError as exc:
-            return self._codec.default(), self._backup_incompatible(exc)
+            return self._codec.default(), self._load_error(exc)
         except OSError as exc:
             logger.warning("persistence read failed: %s", self._path, exc_info=exc)
             return self._codec.default(), PersistenceError(
@@ -163,29 +146,10 @@ class SingleFileCaretaker(Generic[StateT, ReportT]):
         try:
             return self._codec.decode(json.loads(text)), None
         except ValueError as exc:
-            return self._codec.default(), self._backup_incompatible(exc)
+            return self._codec.default(), self._load_error(exc)
 
-    def _backup_incompatible(self, cause: Exception) -> PersistenceError:
-        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
-        backup: Path | None = None
-        try:
-            # Reserve a unique sibling before rename; never overwrite an old backup.
-            with NamedTemporaryFile(
-                dir=self._path.parent,
-                prefix=f"{self._path.name}.incompatible-{timestamp}-",
-                delete=False,
-            ) as file:
-                backup = Path(file.name)
-            self._path.replace(backup)
-        except OSError as exc:
-            if backup is not None:
-                backup.unlink(missing_ok=True)
-            raise PersistenceError(
-                f"Failed to back up incompatible GUI state {self._path}: {exc}"
-            ) from exc
-        error = PersistenceError(
-            f"Failed to read GUI state ({cause}); backed up to {backup}; using defaults"
-        )
+    def _load_error(self, cause: Exception) -> PersistenceError:
+        error = PersistenceError(f"Failed to read GUI state ({cause}); using defaults")
         logger.warning("%s", error)
         return error
 
@@ -195,6 +159,5 @@ __all__ = [
     "RestoreOutcome",
     "SingleFileCaretaker",
     "SnapshotCodec",
-    "SnapshotIdentityError",
     "SnapshotOriginator",
 ]

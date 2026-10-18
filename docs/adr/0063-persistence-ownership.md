@@ -12,7 +12,7 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 
 ### 保存目的與 owner
 
-- App memento 保存偏好和工作狀態，不是量測備份。各 app 擁有 schema、version、capture／restore 和觸發時機；`gui.session.persistence.SingleFileCaretaker` 提供單檔 I/O、不相容快照備份、default degradation 與 replace。measure GUI 目前在 lifecycle close 保存，autofluxdep GUI 另有 debounce 與 terminal 保存；shared caretaker 不規定 close-only，也不訂閱高頻事件代替 app 決策。
+- App memento 保存偏好和工作狀態，不是量測備份。各 app 擁有 schema、version、capture／restore 和觸發時機；`gui.session.persistence.SingleFileCaretaker` 提供單檔 I/O、格式錯誤的 default degradation 與 atomic replace。measure GUI 目前在 lifecycle close 保存，autofluxdep GUI 另有 debounce 與 terminal 保存；shared caretaker 不規定 close-only，也不訂閱高頻事件代替 app 決策。
 - Experiment Data File 是正規的 `data.h5`，保存一個 Experiment Result 的全部 Data Variables。Labber 是供 Log Browser 使用的衍生輸出，不是原始資料權威。`experiment.axes_spec` 定義 typed Result／cfg 與 persisted axes、units、variables 和 metadata 的 mapping；`datafile` 擁有通用檔案格式與讀寫，不反向依賴 experiment。正常載入在 experiment 邊界還原 typed Result，不把 generic variable mapping 洩漏給分析端。
 - Workflow run 保存跨步驟的提交與 audit。Engine 擁有 manifest、journal 與 best-effort iteration record.json；workflow 擁有 native 量測檔及圖形，並在 point record 記錄用途與檔名。Engine 每輪提供唯讀 absolute iteration_dir，不保存、追蹤或保證 workflow 檔案。單次量測 Completed 與保存分開，責任與失敗規則見 [[0062]]。
 - `params.json` 是跨 workflow 的 typed parameter handoff。`QubitParams` 擁有 section 更新與 project identity；不把 sample arrays 或 dense curves 塞進參數檔。generic table storage 不負責這類語意。
@@ -111,9 +111,9 @@ Experiment persistence 使用 inner-first axes；disk payload 由 Result-native 
 
 Run accept 先追加一筆 accepted，再逐項提交參數、library 或樣本。項目失敗以 `WritebackApplyError` 公開 accepted event_id、成功前綴 applied 與原始 cause，保留前項與事件，停止後項。Notebook 直接看到此錯誤；GUI context owner 發布實際成功前綴，GUI service 標記前綴後原樣拋 cause，wire 不改原 producer 分類。GUI writeback 只接受 SavedPoint，未選點時在 append 前拒絕，提示先選或建立點，不自動建點或寫 point=null 樣本。一般 sample append 的 point 選填契約不受影響。
 
-Memento 的 decode 失敗或 host 明確回報的 identity 不相容，由共用 caretaker 先將原檔移至同目錄的 `<原檔名>.incompatible-<UTC 時間戳>-<唯一尾碼>`。備份名先以 exclusive create 保留，不覆寫既有備份。成功後回 fresh default，restore outcome 帶明確錯誤和備份路徑，host 顯示後照常保存。移檔失敗則啟動失敗，保留原檔，不安裝 defaults。Caretaker 不新增保護狀態，也不清理備份。這項政策適用所有 caretaker hosts，避免預設啟動後的正常保存毀掉唯一的原稿。
+Memento JSON 損壞或不符 codec 格式時，共用 caretaker 回 fresh defaults，restore outcome 帶明確錯誤供 host 顯示。載入不移檔、不備份，也不新增保存保護狀態。Host 之後照原有時機保存。FormInput 的固定 data／selections 格式與遞迴還原見 [[0079]]，所有 caretaker hosts 共用格式失敗的處理。
 
-Host 只在尚未改動狀態的 identity 檢查失敗時回報 `SnapshotIdentityError`。Provider、其他 restore／apply 故障仍傳播，不當作不相容。一般 read I/O 失敗沿用錯誤 outcome 與 defaults，不冒充 decode 失敗。Caretaker 不懂 cfg，也不自行決定何時保存。量測資料、參數和未知格式版本不能沿用 memento 的 whole-file default degradation：必要 variable、shape 或 unit 不符時，回報可定位的錯誤而非偽造空結果。
+Provider、其他 restore／apply 故障仍傳播。一般 read I/O 失敗沿用錯誤 outcome 與 defaults，不冒充 decode 失敗。Caretaker 不懂 cfg，也不自行決定何時保存。量測資料、參數和未知 artifact 格式版本不能沿用 memento 的 whole-file default degradation，必要 variable、shape 或 unit 不符時仍須回報可定位的錯誤。
 
 Autofluxdep artifact 建立失敗不啟動 run；canonical row write／flush／journal 失敗會使 run 失敗，並保留此前已 flush 的證據。Terminal export／report 失敗要顯示，但不把成功量測 row 改標為 measurement failure。Stop 仍嘗試 finalize；取消請求不保證 finalize 成功，也不表示 rollback。單檔 replace、HDF5 flush 和 journal append 不是跨檔交易或掉電持久保證；不可從 manifest 的 accepted 標記推導任意 crash 後可安全 resume。跨檔失敗窗口的讀取、修復和 resume 規則尚未驗證。
 
