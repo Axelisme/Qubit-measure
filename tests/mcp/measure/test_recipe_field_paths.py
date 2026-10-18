@@ -22,20 +22,15 @@ class Tone(ConfigBase):
 
 
 class IndexedControls(ConfigBase):
-    tones: list[Tone]
+    tones: list[Tone] = [
+        Tone(name="Q1", drive=Drive(gain=0.1, samples=[1, 2])),
+        Tone(name="Q2", drive=Drive(gain=0.2, samples=[3, 4])),
+    ]
 
 
 class IndexedGui(LookbackGui):
     def make_form(self):
-        return Form(
-            IndexedControls,
-            {
-                "tones": [
-                    {"name": "Q1", "drive": {"gain": 0.1, "samples": [1, 2]}},
-                    {"name": "Q2", "drive": {"gain": 0.2, "samples": [3, 4]}},
-                ]
-            },
-        )
+        return Form(IndexedControls, {})
 
 
 def test_indexed_batch_read_and_run_capture_keep_original_position(tmp_path: Path) -> None:
