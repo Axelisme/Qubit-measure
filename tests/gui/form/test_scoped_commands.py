@@ -7,7 +7,7 @@ from operator import setitem
 from typing import Literal
 
 import pytest
-from pydantic import BaseModel, Field, JsonValue
+from pydantic import BaseModel, Field
 from zcu_tools.gui import form as api
 
 
@@ -49,7 +49,7 @@ class CommandForm(api.FormModel):
     other: float
 
     @classmethod
-    def options(cls, env: api.FormEnv) -> Mapping[api.FormPath, tuple[api.Option, ...]]:
+    def options(cls, _env: api.FormEnv) -> Mapping[api.FormPath, tuple[api.Option, ...]]:
         return {
             ("value",): (
                 api.Option(
@@ -123,7 +123,9 @@ def test_command_rejects_bad_structure_scope_and_required_evaluation_atomically(
         other: float = 7
 
         @classmethod
-        def options(cls, env: api.FormEnv) -> Mapping[api.FormPath, tuple[api.Option, ...]]:
+        def options(
+            cls, _env: api.FormEnv
+        ) -> Mapping[api.FormPath, tuple[api.Option, ...]]:
             return {
                 ("value",): (
                     api.Option(

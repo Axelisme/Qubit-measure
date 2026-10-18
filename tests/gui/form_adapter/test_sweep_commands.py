@@ -3,7 +3,7 @@
 import pytest
 from pydantic import JsonValue
 from zcu_tools.cfg_model import ConfigBase, Range
-from zcu_tools.gui.form import FormEnv, FormInput, FormState
+from zcu_tools.gui.form import FormCommandError, FormEnv, FormInput, FormState
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.program.v2.sweep import SweepCfg
 
@@ -41,6 +41,6 @@ def test_sweep_leaf_cannot_replace_parent():
     form = Form(SweepPlan, {"sweep": Range.between(10, 4, 4)})
     state = FormState(form.default_input(env))
     before = state.input.to_json()
-    with pytest.raises(ValueError):
+    with pytest.raises(FormCommandError):
         state.run_command(("sweep", "start"), "to_center", env)
     assert state.input.to_json() == before
