@@ -1,10 +1,13 @@
 # `zcu_tools.gui.remote` — shared remote adapter
 
-**Last updated:** 2026-10-16，optional parameter omission
+**Last updated:** 2026-10-19，app dispatch declarations
 
 This package owns NDJSON framing, typed envelopes, authentication, socket queues,
 owner-scheduler dispatch and lazy event delivery. Apps supply methods, serializers
 and application authority; transport does not own experiment policy.
+`RemoteAppSpec` groups each app's handshake metadata, method registry and event
+projection declarations. Socket options, owner scheduler and optional control
+authority remain separate constructor inputs.
 
 Measure and Fluxdep inject the same `ControlIdentity` used by their Qt frontend.
 Business methods require holder by default; explicit readonly declarations allow

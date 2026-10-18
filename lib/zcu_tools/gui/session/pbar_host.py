@@ -116,7 +116,8 @@ class ProgressBar(BaseProgressBar):
     container/bar.
     """
 
-    def __init__(
+    # tolerated: BoundProgressFactory is the sole caller; transport/operation/bar identity and tqdm display options have no reused input group.
+    def __init__(  # noqa: PLR0913
         self,
         transport: ProgressTransport,
         operation_id: int,

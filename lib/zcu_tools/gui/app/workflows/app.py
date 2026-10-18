@@ -21,7 +21,10 @@ from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTrans
 from zcu_tools.gui.session.alias_presets import AliasPresets, validate_alias_presets
 from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
 from zcu_tools.gui.session.operation_handles import OperationHandles
-from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.operation_runner import (
+    OperationInfrastructure,
+    OperationRunner,
+)
 from zcu_tools.gui.session.persistence import SingleFileCaretaker
 from zcu_tools.gui.session.services.build import SessionServices, build_session_services
 from zcu_tools.gui.session.services.progress import ProgressService
@@ -130,11 +133,13 @@ class WorkflowsGuiBehavior[C](GuiRuntimeBehavior):
         self.services = build_session_services(
             state=self.state,
             bus=self._bus,
-            gate=self._gate,
-            handles=self._handles,
-            background=self._background,
+            operations=OperationInfrastructure(
+                gate=self._gate,
+                background=self._background,
+                runner=self._runner,
+                handles=self._handles,
+            ),
             progress=self._progress,
-            runner=self._runner,
             bind_assets=ArbWaveformDatabase.info_at,
             project_root=self._project_root,
             device_registry=self._devices,

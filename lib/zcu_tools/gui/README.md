@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-15，單層 Form description 與舊 cfg 系統退休
+**Last updated:** 2026-10-19，destructive confirmation inputs
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -197,8 +197,11 @@ confirmations, or explicit destructive confirmations receive the shared
 non-blocking and retained through the shared lifecycle helper. Close paths or
 operation-running prompts use callback-style `confirm_async` /
 `destructive_confirm`, so the Qt event loop keeps pumping while the decision is
-pending. Tests inject a recording presenter instead of monkeypatching
-`QMessageBox`, so dialog decisions are scripted at the object boundary.
+pending. `destructive_confirm` takes a `DestructiveConfirmation` with the title,
+message, action label, safe-alternative label and default choice; the parent and
+decision callback remain explicit inputs. Tests inject a recording presenter
+instead of monkeypatching `QMessageBox`, so dialog decisions are scripted at the
+object boundary.
 
 Non-modal dialogs opened with `open()` use the shared dialog lifecycle helper,
 or an equivalent named registry when remote screenshot/list semantics require

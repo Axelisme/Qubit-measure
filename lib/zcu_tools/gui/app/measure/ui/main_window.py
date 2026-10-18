@@ -44,6 +44,7 @@ from zcu_tools.gui.widgets import (
     warning_colour,
 )
 from zcu_tools.gui.widgets.control_indicator import ControlIndicator
+from zcu_tools.gui.widgets.dialog_presenter import DestructiveConfirmation
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.entry import RoleResolutionError
 
@@ -718,11 +719,13 @@ class MainWindow(QMainWindow):
 
         self._dialog_presenter.destructive_confirm(
             self,
-            "Reload experiments",
-            message,
-            action_text="Discard Results and Reload",
+            DestructiveConfirmation(
+                title="Reload experiments",
+                message=message,
+                action_text="Discard Results and Reload",
+                default=False,
+            ),
             on_decision=on_decision,
-            default=False,
         )
 
     def retry_skipped_experiment_tabs(self) -> None:
@@ -797,11 +800,13 @@ class MainWindow(QMainWindow):
 
         self._dialog_presenter.destructive_confirm(
             self,
-            "Unsaved measurement data",
-            "Measurement data in this tab has not been saved. Discard unsaved data and close tab?",
-            action_text="Discard and Close",
+            DestructiveConfirmation(
+                title="Unsaved measurement data",
+                message="Measurement data in this tab has not been saved. Discard unsaved data and close tab?",
+                action_text="Discard and Close",
+                default=False,
+            ),
             on_decision=_on_decision,
-            default=False,
         )
 
     def _on_tab_moved(self, from_index: int, to_index: int) -> None:
@@ -1195,12 +1200,14 @@ class MainWindow(QMainWindow):
 
         self._dialog_presenter.destructive_confirm(
             self,
-            "Unsaved measurement data",
-            "An operation completed with unsaved measurement data while the app "
-            "was closing. Discard unsaved data and close?",
-            action_text="Discard and Close",
+            DestructiveConfirmation(
+                title="Unsaved measurement data",
+                message="An operation completed with unsaved measurement data while the app "
+                "was closing. Discard unsaved data and close?",
+                action_text="Discard and Close",
+                default=False,
+            ),
             on_decision=_on_decision,
-            default=False,
         )
 
     def _present_app_close_confirmation(
@@ -1231,22 +1238,26 @@ class MainWindow(QMainWindow):
         if has_unsaved and active > 0:
             self._dialog_presenter.destructive_confirm(
                 self,
-                "Unsaved data and operations in progress",
-                f"There is unsaved measurement data and {active} operation(s) "
-                "in progress. Discard unsaved data, cancel active operation(s), "
-                "and close?",
-                action_text="Discard and Close",
+                DestructiveConfirmation(
+                    title="Unsaved data and operations in progress",
+                    message=f"There is unsaved measurement data and {active} operation(s) "
+                    "in progress. Discard unsaved data, cancel active operation(s), "
+                    "and close?",
+                    action_text="Discard and Close",
+                    default=False,
+                ),
                 on_decision=_on_decision,
-                default=False,
             )
         elif has_unsaved:
             self._dialog_presenter.destructive_confirm(
                 self,
-                "Unsaved measurement data",
-                "There is unsaved measurement data. Discard unsaved data and close?",
-                action_text="Discard and Close",
+                DestructiveConfirmation(
+                    title="Unsaved measurement data",
+                    message="There is unsaved measurement data. Discard unsaved data and close?",
+                    action_text="Discard and Close",
+                    default=False,
+                ),
                 on_decision=_on_decision,
-                default=False,
             )
         else:
             self._dialog_presenter.confirm_async(
@@ -1277,11 +1288,13 @@ class MainWindow(QMainWindow):
 
         self._dialog_presenter.destructive_confirm(
             self,
-            "背景工作仍在執行",
-            "背景工作仍在執行。再等一下會重試收尾；強制關閉可能讓晚到的 callback "
-            "觸及已釋放的視窗，並不代表儀器已斷線或 RF 已關閉。",
-            action_text="強制關閉",
-            cancel_text="再等一下",
+            DestructiveConfirmation(
+                title="背景工作仍在執行",
+                message="背景工作仍在執行。再等一下會重試收尾；強制關閉可能讓晚到的 callback "
+                "觸及已釋放的視窗，並不代表儀器已斷線或 RF 已關閉。",
+                action_text="強制關閉",
+                cancel_text="再等一下",
+            ),
             on_decision=lambda force: self._on_drain_decision(force=force),
         )
 

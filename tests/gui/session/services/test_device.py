@@ -25,6 +25,7 @@ from zcu_tools.gui.session.events import (
     DeviceSetupStartedPayload,
 )
 from zcu_tools.gui.session.operation_handles import OperationHandles
+from zcu_tools.gui.session.operation_runner import OperationInfrastructure
 from zcu_tools.gui.session.ports import (
     BackgroundExecutor,
     OperationConflictError,
@@ -86,10 +87,12 @@ def _make_svc(
         DeviceService(
             bus,
             state or State(MagicMock()),
-            resolved_gate,
-            bg,
-            runner,
-            handles,
+            OperationInfrastructure(
+                gate=resolved_gate,
+                background=bg,
+                runner=runner,
+                handles=handles,
+            ),
             driver_factory=lambda type_name, address: device,
             device_registry=FakeDeviceRegistry(),
         ),
@@ -399,10 +402,12 @@ def test_failing_device_changed_subscriber_does_not_abort_connect(qapp):
     svc = DeviceService(
         bus,
         State(MagicMock()),
-        resolved_gate,
-        bg_svc,
-        runner,
-        handles,
+        OperationInfrastructure(
+            gate=resolved_gate,
+            background=bg_svc,
+            runner=runner,
+            handles=handles,
+        ),
         driver_factory=lambda type_name, address: MagicMock(),
         device_registry=FakeDeviceRegistry(),
     )
@@ -756,10 +761,12 @@ def _make_multi_svc(
     svc = DeviceService(
         bus,
         State(MagicMock()),
-        resolved_gate,
-        bg,
-        runner,
-        handles,
+        OperationInfrastructure(
+            gate=resolved_gate,
+            background=bg,
+            runner=runner,
+            handles=handles,
+        ),
         driver_factory=factory,
         device_registry=registry,
     )
@@ -947,10 +954,12 @@ def _make_svc_with_fake_registry(
     svc = DeviceService(
         bus,
         State(MagicMock()),
-        resolved_gate,
-        bg,
-        runner,
-        handles,
+        OperationInfrastructure(
+            gate=resolved_gate,
+            background=bg,
+            runner=runner,
+            handles=handles,
+        ),
         driver_factory=lambda type_name, address: device,
         device_registry=registry,
     )

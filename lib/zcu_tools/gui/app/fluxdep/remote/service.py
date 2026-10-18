@@ -14,6 +14,7 @@ from qtpy.QtWidgets import QApplication
 
 from zcu_tools.gui.remote.control_service import (
     ControlOptions,
+    RemoteAppSpec,
     RemoteControlServiceBase,
 )
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
@@ -67,14 +68,16 @@ class RemoteControlAdapter(RemoteControlServiceBase):
         super().__init__(
             controller,
             opts,
+            app=RemoteAppSpec(
+                wire_version=WIRE_VERSION,
+                gui_version=GUI_VERSION,
+                server_name="FluxDepRemoteServer",
+                method_registry=METHOD_REGISTRY,
+                event_serializers=EVENT_SERIALIZERS,
+                wire_event_name=wire_event_name,
+            ),
             owner_scheduler=owner_scheduler,
-            wire_version=WIRE_VERSION,
-            gui_version=GUI_VERSION,
-            server_name="FluxDepRemoteServer",
-            method_registry=METHOD_REGISTRY,
             control_identity=controller.control_identity,
-            event_serializers=EVENT_SERIALIZERS,
-            wire_event_name=wire_event_name,
         )
 
 

@@ -11,7 +11,10 @@ from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.alias_presets import AliasPresets, validate_alias_presets
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.operation_handles import OperationHandles
-from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.operation_runner import (
+    OperationInfrastructure,
+    OperationRunner,
+)
 from zcu_tools.gui.session.services.arb_waveform import ArbWaveformService
 from zcu_tools.gui.session.services.build import build_session_services
 from zcu_tools.gui.session.services.connection import SoCConnectionService
@@ -110,7 +113,8 @@ class AppServices:
     arb_waveform: ArbWaveformService
 
 
-def build_app_services(
+# tolerated: State/registry, rendering ports and storage/reload/predictor/device injections have no reusable common input record.
+def build_app_services(  # noqa: PLR0913
     *,
     state: State,
     bus: EventBus,
@@ -152,11 +156,13 @@ def build_app_services(
         state=state,
         bus=bus,
         device_registry=device_registry,
-        gate=operation_gate,
-        handles=handles,
-        background=background,
+        operations=OperationInfrastructure(
+            gate=operation_gate,
+            background=background,
+            runner=runner,
+            handles=handles,
+        ),
         progress=progress,
-        runner=runner,
         bind_assets=ArbWaveformDatabase.info_at,
         project_root=project_root,
         alias_rows=() if alias_presets is None else alias_presets["default"],

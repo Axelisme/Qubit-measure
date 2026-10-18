@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from dataclasses import replace
 from typing import TypedDict
 
 import numpy as np
@@ -10,6 +10,7 @@ import pytest
 from matplotlib.backend_bases import Event, MouseButton, MouseEvent
 from matplotlib.backends.backend_qt import NavigationToolbar2QT
 from numpy.typing import NDArray
+from zcu_tools.gui.session.ui.predictor_canvas import CurveView
 
 
 class _RenderKwargs(TypedDict):
@@ -23,16 +24,8 @@ class _RenderKwargs(TypedDict):
     """Transition frequencies in MHz, shape (n_transitions, n_values)."""
     ylabel: str
     """Frequency-axis label, including its MHz unit."""
-    highlights: tuple[tuple[int, int], ...]
-    """From/to level-index pairs to highlight; an empty tuple highlights none."""
-    marker_value: float
-    """Marker position on the device-value axis, in device units."""
-    flux_window: tuple[float, float]
-    """Displayed reduced-flux interval (lower, upper), in units of Phi/Phi0."""
-    value_to_flux: Callable[[float], float]
-    """Affine map from device units to reduced flux Phi/Phi0."""
-    flux_to_value: Callable[[float], float]
-    """Inverse affine map from reduced flux Phi/Phi0 to device units."""
+    view: CurveView
+    """Shared affine coordinates, initial marker/window and highlighted pairs."""
 
 
 def _value_to_flux(v: float) -> float:
@@ -67,11 +60,13 @@ def _make_render_kwargs(n_transitions: int = 4, n: int = 20) -> _RenderKwargs:
         "labels": labels,
         "series": series,
         "ylabel": "Frequency (MHz)",
-        "highlights": ((0, 1),),
-        "marker_value": 0.5,
-        "flux_window": (0.4, 1.1),
-        "value_to_flux": _value_to_flux,
-        "flux_to_value": _flux_to_value,
+        "view": CurveView(
+            highlights=((0, 1),),
+            marker_value=0.5,
+            flux_window=(0.4, 1.1),
+            value_to_flux=_value_to_flux,
+            flux_to_value=_flux_to_value,
+        ),
     }
 
 
@@ -327,7 +322,7 @@ def test_canvas_leave_event_when_not_following_is_noop(canvas):
 def test_canvas_render_curves_highlights_empty_no_error(canvas):
     """render_curves with highlights=() must not raise."""
     kwargs = _make_render_kwargs()
-    kwargs["highlights"] = ()
+    kwargs["view"] = replace(kwargs["view"], highlights=())
     canvas.render_curves(**kwargs)
     assert len(canvas.figure.get_axes()) > 0
 
@@ -337,7 +332,7 @@ def test_canvas_render_curves_highlights_empty_all_normal_lw(canvas):
     kwargs = _make_render_kwargs()
     canvas.render_curves(**kwargs)
     normal_width = canvas.figure.axes[0].lines[1].get_linewidth()
-    kwargs["highlights"] = ()
+    kwargs["view"] = replace(kwargs["view"], highlights=())
     canvas.render_curves(**kwargs)
     assert [line.get_linewidth() for line in canvas.figure.axes[0].lines[:4]] == [
         normal_width
@@ -371,15 +366,17 @@ def test_canvas_render_curves_dynamic_count(canvas):
         labels = tuple(f"0→{i}" for i in range(1, n_tr + 1))
         series = np.ones((n_tr, 20), dtype=np.float64) * 1000.0
         canvas.render_curves(
+            view=CurveView(
+                highlights=(),
+                marker_value=0.5,
+                flux_window=(0.4, 1.1),
+                value_to_flux=_value_to_flux,
+                flux_to_value=_flux_to_value,
+            ),
             values=values,
             labels=labels,
             series=series,
             ylabel="Frequency (MHz)",
-            highlights=(),
-            marker_value=0.5,
-            flux_window=(0.4, 1.1),
-            value_to_flux=_value_to_flux,
-            flux_to_value=_flux_to_value,
         )
         ax = canvas.figure.axes[0]
         data_lines = [ln for ln in ax.lines if not ln.get_label().startswith("_")]
@@ -392,15 +389,17 @@ def test_canvas_render_curves_custom_ylabel(canvas):
     labels = ("0→1",)
     series = np.ones((1, 20), dtype=np.float64)
     canvas.render_curves(
+        view=CurveView(
+            highlights=(),
+            marker_value=0.5,
+            flux_window=(0.4, 1.1),
+            value_to_flux=_value_to_flux,
+            flux_to_value=_flux_to_value,
+        ),
         values=values,
         labels=labels,
         series=series,
         ylabel="|<i|n|j>|",
-        highlights=(),
-        marker_value=0.5,
-        flux_window=(0.4, 1.1),
-        value_to_flux=_value_to_flux,
-        flux_to_value=_flux_to_value,
     )
     ax = canvas.figure.axes[0]
     assert ax.get_ylabel() == "|<i|n|j>|"

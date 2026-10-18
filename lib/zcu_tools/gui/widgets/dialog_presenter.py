@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Literal, Protocol
 
 from qtpy.QtWidgets import (
@@ -16,6 +17,22 @@ from zcu_tools.gui.widgets.dialog_lifecycle import DialogRefStore
 # The answer to an unsaved-changes question: apply the changes first, drop
 # them, or abandon the action that asked.
 type SaveDiscardCancel = Literal["save", "discard", "cancel"]
+
+
+@dataclass(frozen=True, kw_only=True)
+class DestructiveConfirmation:
+    """Content and labelled alternatives for an explicit destructive decision."""
+
+    title: str
+    """Window title of the confirmation prompt."""
+    message: str
+    """Explanation of the action and its consequences shown in the prompt."""
+    action_text: str
+    """Label of the only button that accepts the destructive action."""
+    default: bool = False
+    """True defaults to the action; False defaults to the safe alternative."""
+    cancel_text: str = "Cancel"
+    """Label for the non-destructive alternative; dismissal also declines."""
 
 
 class DialogPresenter(Protocol):
@@ -59,18 +76,15 @@ class DialogPresenter(Protocol):
     def destructive_confirm(
         self,
         parent: QWidget,
-        title: str,
-        message: str,
+        confirmation: DestructiveConfirmation,
         *,
-        action_text: str,
         on_decision: Callable[[bool], None],
-        default: bool = False,
-        cancel_text: str = "Cancel",
     ) -> None:
         """Present a destructive action and a labelled non-destructive alternative.
 
         Deliver True only for the explicit action; alternative or dismissal delivers
-        False. ``default`` selects the action instead of the alternative as default.
+        False. ``confirmation.default`` selects the action instead of the
+        alternative as default.
         """
         ...
 
@@ -164,24 +178,25 @@ class QtDialogPresenter:
     def destructive_confirm(
         self,
         parent: QWidget,
-        title: str,
-        message: str,
+        confirmation: DestructiveConfirmation,
         *,
-        action_text: str,
         on_decision: Callable[[bool], None],
-        default: bool = False,
-        cancel_text: str = "Cancel",
     ) -> None:
         """Open the labelled action/alternative choice; dismissal delivers False."""
-        box = self._message_box(parent, QMessageBox.Icon.Warning, title, message)
+        box = self._message_box(
+            parent, QMessageBox.Icon.Warning, confirmation.title, confirmation.message
+        )
         action_button = self._require_button(
-            box.addButton(action_text, QMessageBox.ButtonRole.DestructiveRole),
-            action_text,
+            box.addButton(
+                confirmation.action_text, QMessageBox.ButtonRole.DestructiveRole
+            ),
+            confirmation.action_text,
         )
         cancel_button = self._require_button(
-            box.addButton(cancel_text, QMessageBox.ButtonRole.RejectRole), cancel_text
+            box.addButton(confirmation.cancel_text, QMessageBox.ButtonRole.RejectRole),
+            confirmation.cancel_text,
         )
-        if default:
+        if confirmation.default:
             box.setDefaultButton(action_button)
         else:
             box.setDefaultButton(cancel_button)

@@ -13,6 +13,7 @@ disengages and locks the marker at its current position.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 
 import numpy as np
 from matplotlib.backend_bases import Event
@@ -30,6 +31,22 @@ _HIGHLIGHT_LW = 2.5
 _NORMAL_LW = 1.0
 _HIGHLIGHT_ALPHA = 1.0
 _NORMAL_ALPHA = 0.6
+
+
+@dataclass(frozen=True, kw_only=True)
+class CurveView:
+    """Shared presentation coordinates for frequency and matrix-element curves."""
+
+    marker_value: float
+    """Marker x coordinate in device-value units; need not be inside flux_window."""
+    value_to_flux: Callable[[float], float]
+    """Monotone affine map from device values to reduced flux Phi/Phi0."""
+    flux_to_value: Callable[[float], float]
+    """Inverse affine map to device values; preserves NumPy broadcasting."""
+    highlights: tuple[tuple[int, int], ...] = ()
+    """From/to level-index pairs; empty means no highlighted transition."""
+    flux_window: tuple[float, float] = (0.4, 1.1)
+    """Initial reduced-flux interval (lower, upper); pans to include the marker."""
 
 
 def _compute_xlim(
@@ -171,11 +188,7 @@ class PredictorCurveCanvas(QWidget):
         labels: tuple[str, ...],
         series: NDArray[np.float64],
         ylabel: str,
-        highlights: tuple[tuple[int, int], ...] = (),
-        marker_value: float,
-        flux_window: tuple[float, float] = (0.4, 1.1),
-        value_to_flux: Callable[[float], float],
-        flux_to_value: Callable[[float], float],
+        view: CurveView,
     ) -> None:
         """Redraw all transition curves onto the figure.
 
@@ -185,8 +198,13 @@ class PredictorCurveCanvas(QWidget):
 
         The primary x-axis is device value (no unit).  A secondary top x-axis shows
         flux (Φ/Φ₀) using the affine callables ``value_to_flux`` / ``flux_to_value``.
-        ``highlights=()`` renders all curves in normal style.
+        ``view.highlights=()`` renders all curves in normal style.
         """
+        flux_window = view.flux_window
+        value_to_flux = view.value_to_flux
+        flux_to_value = view.flux_to_value
+        marker_value = view.marker_value
+        highlights = view.highlights
         self._flux_window = flux_window
         self._value_to_flux = value_to_flux
         self._flux_to_value = flux_to_value

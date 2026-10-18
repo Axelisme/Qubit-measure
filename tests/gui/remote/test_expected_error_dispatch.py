@@ -15,6 +15,7 @@ from zcu_tools.gui.expected_error import (
     InvalidInputError,
 )
 from zcu_tools.gui.remote.control_service import (
+    RemoteAppSpec,
     RemoteControlServiceBase,
     SubscriptionCtx,
 )
@@ -57,13 +58,15 @@ def _service(
     return RemoteControlServiceBase(
         SimpleNamespace(bus=bus if bus is not None else BaseEventBus()),
         ControlOptions(port=0),
+        app=RemoteAppSpec(
+            wire_version=1,
+            gui_version=1,
+            server_name="DispatchTest",
+            method_registry=registry,
+            event_serializers={},
+            wire_event_name=str,
+        ),
         owner_scheduler=_ImmediateOwnerScheduler(),
-        wire_version=1,
-        gui_version=1,
-        server_name="DispatchTest",
-        method_registry=registry,
-        event_serializers={},
-        wire_event_name=str,
     )
 
 
