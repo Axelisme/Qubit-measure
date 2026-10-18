@@ -78,30 +78,44 @@ class DialogPresenter(Protocol):
 class QtDialogPresenter:
     """Production DialogPresenter backed by QMessageBox."""
 
-    def __init__(self, dialog_refs: DialogRefStore | None = None) -> None:
+    def __init__(
+        self,
+        dialog_refs: DialogRefStore | None = None,
+        *,
+        non_modal_notifications: bool = False,
+    ) -> None:
+        """Select notification policy without changing modal decision prompts.
+
+        non_modal_notifications retains and shows information/warning/critical
+        boxes non-modally, even without a caller-owned ref store. The default
+        preserves existing presentation for other applications.
+        """
+        self._non_modal_notifications = non_modal_notifications
         self._dialog_refs = dialog_refs
         self._owned_dialog_refs = DialogRefStore()
 
     def information(self, parent: QWidget, title: str, message: str) -> None:
-        if self._dialog_refs is None:
-            QMessageBox.information(parent, title, message)
-            return
-        box = self._message_box(parent, QMessageBox.Icon.Information, title, message)
-        self._dialog_refs.open_transient(box)
+        self._notify(parent, QMessageBox.Icon.Information, title, message)
 
     def warning(self, parent: QWidget, title: str, message: str) -> None:
-        if self._dialog_refs is None:
-            QMessageBox.warning(parent, title, message)
-            return
-        box = self._message_box(parent, QMessageBox.Icon.Warning, title, message)
-        self._dialog_refs.open_transient(box)
+        self._notify(parent, QMessageBox.Icon.Warning, title, message)
 
     def critical(self, parent: QWidget, title: str, message: str) -> None:
-        if self._dialog_refs is None:
-            QMessageBox.critical(parent, title, message)
+        self._notify(parent, QMessageBox.Icon.Critical, title, message)
+
+    def _notify(
+        self, parent: QWidget, icon: QMessageBox.Icon, title: str, message: str
+    ) -> None:
+        box = self._message_box(parent, icon, title, message)
+        if self._dialog_refs is None and not self._non_modal_notifications:
+            box.exec()
             return
-        box = self._message_box(parent, QMessageBox.Icon.Critical, title, message)
-        self._dialog_refs.open_transient(box)
+        refs = (
+            self._dialog_refs
+            if self._dialog_refs is not None
+            else self._owned_dialog_refs
+        )
+        refs.open_transient(box, modal=not self._non_modal_notifications)
 
     def confirm(
         self,

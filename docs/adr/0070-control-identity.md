@@ -6,7 +6,7 @@ status: accepted
 
 ## 問題與選擇
 
-2026-10-12，使用者「採用」主視窗推送可寫狀態與 modal 期間拒絕接管的方案。使用者指出「過度設計，監控幹嘛」，並說「而且method可以只標記只讀的方法嗎？這個方案我比較認同」。這個方案只在 RPC admission、主視窗投影與 modal 取得入口處理控制權，省去子元件的 authority callbacks 與解除時序。代價是 Local dialog 開著時 agent 要等。
+2026-10-12，使用者「採用」主視窗推送可寫狀態與 modal 期間拒絕接管的方案。使用者指出「過度設計，監控幹嘛」，並說「而且method可以只標記只讀的方法嗎？這個方案我比較認同」。這個方案只在 RPC admission、主視窗投影與 modal 取得入口處理控制權，省去子元件的 authority callbacks 與解除時序。真正的 Local modal dialog 開著時，agent 仍須等待。Measure 的具名觀察窗採下述 non-modal 與宿主同步唯讀規則。
 
 GUI 使用者與 agent 寫入同一份 application state。若每條連線維護 seen map、宣告 resource dependencies、比對 cfg revision，caller 就得在每次寫入前建立完整觀察。這仍沒有告訴使用者現在誰在控制。
 
@@ -50,13 +50,17 @@ RPC 預設要求 holder。Method 明確宣告 `readonly=True` 才允許 observer
 
 Remote 時，GUI 停用欄位與寫入容器，不改變子元件原本的 busy／valid／input-open gate。純檢視、縮放、捲動、截圖、Log Browser 及 Inspect 只讀照常可用。Fluxdep spectrum 清單與 readonly 的 `spectrum.set_active` 只切換顯示，非 holder 也能使用。切換不建立、提交或取消 context，也不改業務輸入版本。已有草稿顯示同一份 context，非 holder 只能讀；沒有草稿則顯示已發布資料。本機 holder 點譜的開 picker 意圖是另一步寫入，經既有 holder gate 執行。Observer RPC 即使發生在 Local 持有控制權時，也不能藉重建 view 開 picker。開 picker、Filter 切換、search cancel 與 interactive cancel 仍屬寫入，Remote 時須先收回。
 
-主視窗是唯一的 Qt 控制狀態訂閱者。`set_writable(bool)` 設定主窗的寫入按鈕與選單，並推送給開著的 tab／view。新 view 建立時套用當下狀態。Tab、interactive frontend、component tree 與 dialog 不訂閱 authority，也不為 authority 管理解除綁定或覆寫 `deleteLater`。
+主視窗是唯一的 Qt 控制狀態訂閱者。`set_writable(bool)` 設定主窗的寫入按鈕與選單，並推送給開著的 tab／view。Measure 同時推送給仍開著的 Setup、Devices、Inspect 與 ARB Waveforms。新 view 建立時套用當下狀態。Tab、interactive frontend、component tree 與 dialog 不訂閱 authority，也不為 authority 管理解除綁定或覆寫 `deleteLater`。
 
 Local 有任何 modal dialog 時，owner connect 自動取得與 acquire 回 `local_busy`，訊息為「Local 使用中」。Qt app remote adapter 在 owner turn 查詢 `QApplication.activeModalWidget()`；共用 ControlIdentity 不依賴 Qt。相關 file chooser 使用非 native option，讓 Qt 能查到。Readonly 連線、既有冪等 connect 與 Remote 同 label 重連不因純檢視 modal 而拒絕。拒絕不轉移 holder、不寫入 domain。
 
-Dialog 不接控制狀態，也不在 chooser／confirmation 返回後重查 holder。Local 的合法輸入、取消、path、busy 與 validation 沿各 owner 契約。Finished 仍可退休單次輸入，防止關閉後的晚到提交。Inspect、Devices 與 ARB Waveforms 的 Remote 查看入口提供靜態 read-only mode；Inspect 不開放 Add 與 library mutation；Arb Waveforms 入口仍可開，ARB 依宿主規則以唯讀開啟，不提供寫入。
+Dialog 不接控制狀態，也不在 chooser／confirmation 返回後重查 holder。Local 的合法輸入、取消、path、busy 與 validation 沿各 owner 契約。Finished 仍可退休單次輸入，防止關閉後的晚到提交。Inspect、Devices 與 ARB Waveforms 的 Remote 查看入口提供 read-only mode；Inspect 不開放 Add 與 library mutation；Arb Waveforms 入口仍可開，ARB 依宿主規則以唯讀開啟，不提供寫入。
 
-2026-10-15，使用者裁決「要不要唯讀應該是dialog提供一個方法」「讓gui根據需要控制是否唯讀吧」。共用 session 對話框 Inspect、Devices 與 ARB Waveforms 只提供 `set_read_only(...)`，不讀控制權或 run 狀態。宿主決定何時唯讀，並對自己的共用對話框套用同一條規則。Measure 依開啟時的控制權設定，不追蹤已開啟對話框的控制權變化。Workflows 依 run lock，從 Start 到 terminal delivery 維持唯讀，並同步更新已開啟的對話框。新增的共用對話框也提供 `set_read_only`，接上宿主的同一條規則。
+2026-10-15，使用者裁決「要不要唯讀應該是dialog提供一個方法」「讓gui根據需要控制是否唯讀吧」。共用 session 對話框 Setup、Inspect、Devices 與 ARB Waveforms 只提供 `set_read_only(...)`，不讀控制權或 run 狀態。宿主決定何時唯讀，並對自己的共用對話框套用同一條規則。Workflows 依 run lock，從 Start 到 terminal delivery 維持唯讀，並同步更新已開啟的對話框。新增的共用對話框也提供 `set_read_only`，接上宿主的同一條規則。
+
+2026-10-18，使用者裁決「1A，可以」，確認 Measure 由主視窗同步唯讀。Measure 的所有具名主選單對話框真正 non-modal，包含啟動時的 Setup。Remote 時使用者可開 Setup、Devices、Inspect 唯讀觀察。控制權變更時，主視窗同步更新仍開著的 Setup、Devices、Inspect 與 ARB Waveforms；交回 Local 即恢復可寫，既有 busy／valid gate 繼續生效。Inspect 的 ARB 入口使用當下的宿主狀態，不保留開窗時的舊值。Dialog 不自行訂閱 authority。
+
+Measure 的無需回答錯誤通知採 non-modal，保留 lifetime、訊息與 traceback，讓 agent 在通知可見時繼續操作。需要選擇的 confirmation、file chooser 與 writeback 編輯保持 modal 保護。Shared dialog lifetime helper 的預設政策與其他 app 不變。
 
 Measure 量測 Stop 與 device operation Stop 在 Remote 仍可按。按下先收回成 Local 鎖定，再請求取消。Stop 是僅有的自動收回入口，取消不代表硬體已停止。Remote 關主窗先確認，拒絕不開始 teardown，接受沿既有 shutdown／cancel／cleanup 契約，不另加 reclaim。Fluxdep 沒有硬體緊急 Stop。
 
