@@ -104,12 +104,29 @@ def _aggregate_rough_edelays(
     return float(np.angle(resultant) * alias_period / (2.0 * np.pi))
 
 
-def _align_uniform_edelay_aliases(
+def align_uniform_edelay_aliases(
     freq_steps: NDArray[np.float64],
     edelays: NDArray[np.float64],
     reference: float,
 ) -> NDArray[np.float64]:
-    """Align equivalent uniform-grid delays to the alias nearest ``reference``."""
+    """Align refined delays to the shared seed's uniform-grid alias.
+
+    ``freq_steps`` is a float64 1D array of finite, nonzero adjacent differences
+    from an already-validated frequency axis, not the axis itself. ``edelays``
+    is a float64 1D array of refined delays; ``reference`` is their common
+    branch seed. Delays and reference use inverse-frequency units.
+
+    A grid is uniform when absolute steps are close to their median with
+    ``rtol=1e-8`` and ``atol=0``. Its alias period is
+    ``period = 1 / median(abs(freq_steps))``. Return a new array with delays in
+    ``[reference - period / 2, reference + period / 2)``. These equivalent
+    aliases do not identify a unique physical cable delay.
+    For nonuniform grids, return the original ``edelays`` array unchanged.
+    Neither input array is mutated.
+
+    This shared analysis operation does not convert or validate inputs.
+    Errors propagate unchanged, including NumPy failures; no fallback is supplied.
+    """
     if not _is_uniform_frequency_grid(freq_steps):
         return edelays
 
@@ -409,7 +426,7 @@ def fit_edelay(
     edelays = np.linspace(-fit_range, fit_range, 1000)
     loss_values = [loss_func(edelay) for edelay in edelays]
     edelay = edelays[np.argmin(loss_values)] + branch_edelay
-    edelay = _align_uniform_edelay_aliases(
+    edelay = align_uniform_edelay_aliases(
         np.diff(freqs), np.asarray([edelay]), branch_edelay
     )[0]
 

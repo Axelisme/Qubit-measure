@@ -6,6 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .base import (
+    align_uniform_edelay_aliases,
     calc_phase,
     find_edelay_branch,
     fit_circle_params,

@@ -23,8 +23,8 @@ import numpy as np
 from numba import njit, prange
 from numpy.typing import NDArray
 
-from zcu_tools.analysis.fitting.resonance.base import (
-    _align_uniform_edelay_aliases,
+from zcu_tools.analysis.fitting.resonance import (
+    align_uniform_edelay_aliases,
     find_edelay_branch,
 )
 
@@ -120,4 +120,4 @@ def fast_edelays(
     seeds = np.full(signals.shape[0], branch_seed, dtype=np.float64)
     fit_range = 5.0 / float(np.ptp(freqs))
     edelays = _edelay_kernel(freqs, signals, seeds, fit_range)
-    return _align_uniform_edelay_aliases(np.diff(freqs), edelays, branch_seed)
+    return align_uniform_edelay_aliases(np.diff(freqs), edelays, branch_seed)
