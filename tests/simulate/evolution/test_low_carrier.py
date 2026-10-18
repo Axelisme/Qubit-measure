@@ -5,7 +5,11 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import Engine, EnvelopeSpec, ModelSource
-from zcu_tools.simulate.evolution.kernel import ApplyContext, SegmentTable
+from zcu_tools.simulate.evolution.kernel import (
+    ApplyContext,
+    KernelContext,
+    SegmentTable,
+)
 from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
 
 from ._engine import RecordingKernel, batch, run, track
@@ -120,10 +124,10 @@ def test_many_low_carrier_keys_do_not_all_stay_live():
         nbytes: int
 
     class ObservedPeriod(FloquetPeriodKernel):
-        def guard(self, table, rows, source, budget):
+        def guard(self, table, rows, context: KernelContext):
             return np.ones(len(rows), dtype=bool)
 
-        def prepare(self, keys, table, rows, source, budget):
+        def prepare(self, keys, table, rows, context: KernelContext):
             nonlocal live, peak
             live += len(keys)
             peak = max(peak, live)
@@ -190,9 +194,9 @@ def test_long_plateau_reuses_period_across_durations():
     prepared_keys = []
 
     class ObservedPeriod(FloquetPeriodKernel):
-        def prepare(self, keys, table, rows, source, budget):
+        def prepare(self, keys, table, rows, context: KernelContext):
             prepared_keys.extend(keys)
-            return super().prepare(keys, table, rows, source, budget)
+            return super().prepare(keys, table, rows, context)
 
     result = run(
         Engine(

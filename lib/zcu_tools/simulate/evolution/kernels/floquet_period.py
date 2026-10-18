@@ -1,8 +1,7 @@
 """Constant-tone Hilbert propagators with compact secular Strang stepping."""
 
-from copy import copy
 from dataclasses import dataclass
-from threading import RLock
+from functools import partial
 from typing import Literal, NamedTuple
 
 import numpy as np
@@ -10,12 +9,14 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
-from ..kernel import ApplyContext, Prepared, SegmentTable
-from ..secular import ModelSource, SecularModel
+from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
+from ..secular import SecularModel
+from ..workplan import WorkPlan
 from . import _period_sambe
 from ._cf4_grid import coarse_count, finer_count, spectral_width
 from ._dop853 import Tolerances, integrate_dense
 from ._secular import secular_operators
+from ._workload_facts import split_rate
 
 _MIN_FREQUENCY_GHZ = 0.03
 _MAX_SPLIT_ESTIMATE = 1.0
@@ -55,8 +56,17 @@ class _DensePeriod(NamedTuple):
 
 
 @dataclass(frozen=True)
-class _Period:
-    # DOP853 coefficients, CF4 prefixes, or a constant-tone Sambe spectrum.
+class PeriodData:
+    """Immutable constant-tone trajectory and secular playback arrays.
+
+    times/coefficients encode DOP853 dense output or CF4 prefixes; unitary is
+    U(T). generator/decay and their half-period maps implement secular steps.
+    split_rate bounds the required subdivisions. magnus stores the CF4
+    Hamiltonian (h0, x, y, signed frequency), or None for other builders.
+    spectrum holds a Sambe trajectory instead of dense coefficients when used.
+    nbytes charges every retained numeric array, excluding Python overhead.
+    """
+
     times: NDArray[np.float64]
     coefficients: NDArray[np.complex128]
     unitary: NDArray[np.complex128]
@@ -99,7 +109,7 @@ class _Period:
 
 @dataclass(frozen=True)
 class _Periods:
-    entries: tuple[_Period, ...]
+    entries: tuple[PeriodData, ...]
 
     @property
     def nbytes(self) -> int:
@@ -109,22 +119,6 @@ class _Periods:
 def _check_budget(budget: float) -> None:
     if not np.isfinite(budget) or budget <= 0:
         raise ValueError("Floquet period budget must be finite and positive")
-
-
-def _split_rate(model: SecularModel, port: int, frequency: float, gain: float) -> float:
-    generator, decay = secular_operators(model)
-    gamma = max(float(np.linalg.norm(generator, 2)), float(np.max(decay)))
-    drive = model.drives[port]
-    strength = (
-        2
-        * np.pi
-        * abs(gain)
-        * (
-            np.linalg.norm(drive.in_phase_ghz, 2)
-            + np.linalg.norm(drive.quadrature_ghz, 2)
-        )
-    )
-    return float(gamma * (strength / frequency) ** 2)
 
 
 def _subdivisions(estimate: float) -> int:
@@ -171,210 +165,7 @@ class _Hamiltonian(NamedTuple):
 @dataclass(frozen=True)
 class _Neighbour:
     gain: float
-    period: _Period
-
-
-class _GainAnchor:
-    """One lazily built independent table and its construction lock."""
-
-    def __init__(self, references: int) -> None:
-        self.remaining = references
-        self.period: _Period | None = None
-        self.lock = RLock()
-
-
-class _GainGroup:
-    """Fixed anchors for one model object, port, signed carrier and budget.
-
-    Each anchor has its own build lock. Inventory changes use the workspace
-    lock; byte readers never wait for numerical construction. A planned key
-    releases its references only after handing out its result, once per key.
-    Repeated keys deterministically rebuild any already released anchors.
-    """
-
-    def __init__(
-        self,
-        model: SecularModel,
-        port: int,
-        frequency: float,
-        budget: float,
-        builders: dict[float, PeriodBuilder],
-        inventory_lock: RLock,
-    ) -> None:
-        self.model = model
-        self.port = port
-        self.frequency = frequency
-        self.budget = budget
-        self.builders = {g: b for g, b in builders.items() if b.anchors}
-        plan = {g: b.anchors for g, b in self.builders.items()}
-        self.plan = plan
-        coordinates = {a for dependencies in plan.values() for a in dependencies}
-        self.anchors = {
-            a: _GainAnchor(sum(a in dependencies for dependencies in plan.values()))
-            for a in coordinates
-        }
-        self.delivered: set[float] = set()
-        self.inventory_lock = inventory_lock
-        self.attempts = 0
-        self.hits = 0
-
-    @property
-    def nbytes(self) -> int:
-        # Caller holds inventory_lock. Active payloads charge their own arrays.
-        return sum(
-            a.period.nbytes for a in self.anchors.values() if a.period is not None
-        )
-
-    def anchor(self, gain: float) -> _Period:
-        """Build an independent anchor once while planned references remain."""
-        anchor = self.anchors[gain]
-        with anchor.lock:
-            with self.inventory_lock:
-                period = anchor.period
-            if period is None:
-                period = _build(
-                    self.model,
-                    _Tone(self.port, self.frequency, gain),
-                    self.budget,
-                    self.builders[gain],
-                )
-                with self.inventory_lock:
-                    anchor.period = period
-            return period
-
-    def build(self, gain: float) -> _Period:
-        """Return a key using only its fixed anchors, then release dependencies."""
-        if gain in self.anchors:
-            result = self.anchor(gain)
-        else:
-            result = _build(
-                self.model,
-                _Tone(self.port, self.frequency, gain),
-                self.budget,
-                self.builders[gain],
-                group=self,
-            )
-        with self.inventory_lock:
-            if gain not in self.delivered:
-                self.delivered.add(gain)
-                for coordinate in self.plan[gain]:
-                    self.anchors[coordinate].remaining -= 1
-            for coordinate in self.plan[gain]:
-                anchor = self.anchors[coordinate]
-                if anchor.remaining == 0:
-                    anchor.period = None
-        return result
-
-    def prefixes(
-        self, context: _Hamiltonian, gain: float
-    ) -> tuple[NDArray[np.float64], NDArray[np.complex128]]:
-        """Interpolate nearest planned anchors and independently check coarse CF4."""
-        neighbours = [_Neighbour(a, self.anchor(a)) for a in self.plan[gain]]
-        tolerance = min(1e-4, self.budget * 0.1)
-        continued = _continued_prefixes(neighbours, context, gain, tolerance)
-        if continued is not None:
-            times, coefficients, hit = continued
-            with self.inventory_lock:
-                self.attempts += 1
-                self.hits += int(hit)
-            return times, coefficients
-        return _magnus_build(*context, tolerance)
-
-
-class _GainWorkspace:
-    """One evolve's fixed gain-anchor plans and numeric-byte inventory.
-
-    Planning uses the complete table, never workers, chunks or request order.
-    Runtime groups isolate model object, port, signed carrier and budget.
-    attempts/hits count checked/accepted interpolants. Spectral candidates are
-    removed before constructing any anchor or reference count. sambe_builds and
-    sambe_fallbacks count accepted and declined spectral prepare requests,
-    including repeated keys, never unused candidates or LRU cache hits.
-    nbytes charges retained
-    anchors, conservatively including arrays held by active payloads too.
-    No numeric data survives the owning evolve.
-    """
-
-    def __init__(self, table: SegmentTable) -> None:
-        # Import lazily: dispatch knows the numerical builder types, while
-        # standalone kernel calls still use that same decision authority.
-        from .._dispatch import period_gain_coordinates
-
-        self._gains = period_gain_coordinates(table)
-        self._builders: dict[tuple[int, int, float], dict[float, PeriodBuilder]] = {}
-        self._groups: dict[tuple[int, int, float, float], _GainGroup] = {}
-        self._lock = RLock()
-        self._sambe_builds = 0
-        self._sambe_fallbacks = 0
-
-    @property
-    def sambe_builds(self) -> int:
-        """Number of prepare keys accepted by Sambe in this evolve scope."""
-        with self._lock:
-            return self._sambe_builds
-
-    @property
-    def sambe_fallbacks(self) -> int:
-        """Attempted Sambe keys declined to independent CF4 after cutoff checks."""
-        with self._lock:
-            return self._sambe_fallbacks
-
-    @property
-    def attempts(self) -> int:
-        with self._lock:
-            return sum(group.attempts for group in self._groups.values())
-
-    @property
-    def hits(self) -> int:
-        with self._lock:
-            return sum(group.hits for group in self._groups.values())
-
-    @property
-    def nbytes(self) -> int:
-        """Current retained numeric bytes, excluding Python/model overhead."""
-        with self._lock:
-            return sum(group.nbytes for group in self._groups.values())
-
-    def build(
-        self,
-        model: SecularModel,
-        port: int,
-        frequency: float,
-        gain: float,
-        budget: float,
-    ) -> _Period:
-        """Use key-local Sambe or fixed CF4 anchors, independent of scheduling.
-
-        Rejected Sambe candidates use independent CF4 and never gain anchors.
-        Other keys retain the complete table's fixed non-spectral gain plan.
-        """
-        from .._dispatch import period_builders
-
-        builder_identity = (id(model), port, frequency)
-        with self._lock:
-            builders = self._builders.get(builder_identity)
-            if builders is None:
-                gains = self._gains.get((model.level, port, frequency), (gain,))
-                builders = period_builders(model, port, frequency, gains)
-                self._builders[builder_identity] = builders
-            if gain not in builders:
-                builders.update(period_builders(model, port, frequency, (gain,)))
-            builder = builders[gain]
-        if builder.kind == "sambe":
-            result = _build(model, _Tone(port, frequency, gain), budget, builder)
-            with self._lock:
-                self._sambe_builds += int(result.spectrum is not None)
-                self._sambe_fallbacks += int(result.spectrum is None)
-            return result
-        if not builder.anchors:
-            return _build(model, _Tone(port, frequency, gain), budget, builder)
-        identity = (id(model), port, frequency, budget)
-        with self._lock:
-            group = self._groups.get(identity)
-            if group is None:
-                group = _GainGroup(model, port, frequency, budget, builders, self._lock)
-                self._groups[identity] = group
-        return group.build(gain)
+    period: PeriodData
 
 
 def _continued_prefixes(
@@ -382,7 +173,7 @@ def _continued_prefixes(
     context: _Hamiltonian,
     gain: float,
     tolerance: float,
-) -> tuple[NDArray[np.float64], NDArray[np.complex128], bool] | None:
+) -> tuple[NDArray[np.float64], NDArray[np.complex128]] | None:
     # Interpolate only gain between fixed anchors in the interaction picture, then
     # independently check the new key with the original coarse-grid probes.
     h0, x, y, frequency = context
@@ -426,8 +217,8 @@ def _continued_prefixes(
     )
     if not np.isfinite(error) or error > tolerance:
         times, fine = _magnus_refine(context, tolerance, coarse_size, coarse)
-        return times, fine, False
-    return times, candidate, True
+        return times, fine
+    return times, candidate
 
 
 @njit(nogil=True, cache=True)
@@ -451,8 +242,9 @@ def _build(
     budget: float,
     builder: PeriodBuilder,
     *,
-    group: _GainGroup | None = None,
-) -> _Period:
+    work_plan: WorkPlan,
+    neighbours: list[_Neighbour] | None = None,
+) -> PeriodData:
     port, frequency, gain = tone
     size = len(model.energies_ghz)
     period = 1 / abs(frequency)
@@ -475,12 +267,17 @@ def _build(
         # Low carriers make Schrödinger DOP853 resolve many unobservable H0 turns.
         # CF4 exponentiates H0 exactly; only carrier motion needs approximation.
         tolerance = min(1e-4, budget * 0.1)
-        if group is None:
+        continued = (
+            _continued_prefixes(
+                neighbours, _Hamiltonian(h0, x, y, frequency), gain, tolerance
+            )
+            if neighbours is not None
+            else None
+        )
+        if continued is None:
             times, coefficients = _magnus_build(h0, x, y, frequency, tolerance)
         else:
-            times, coefficients = group.prefixes(
-                _Hamiltonian(h0, x, y, frequency), gain
-            )
+            times, coefficients = continued
         final = coefficients[-1]
         magnus = (h0, x, y, frequency)
         for array in (h0, x, y):
@@ -508,7 +305,9 @@ def _build(
         if not np.isfinite(array).all():
             raise RuntimeError("Floquet period preparation produced nonfinite data")
         array.setflags(write=False)
-    return _Period(*arrays, _split_rate(model, port, frequency, gain), magnus, spectrum)
+    return PeriodData(
+        *arrays, split_rate(model, port, frequency, gain, work_plan), magnus, spectrum
+    )
 
 
 @njit(nogil=True, cache=True)
@@ -666,7 +465,7 @@ def _dense_row(entry, origin, duration, rho, tail_bath):
     return result
 
 
-def _fundamental(entry: _Period, time: float) -> NDArray[np.complex128]:
+def _fundamental(entry: PeriodData, time: float) -> NDArray[np.complex128]:
     if entry.magnus is None and entry.spectrum is None:
         return _dense_fundamental(entry.times, entry.coefficients, entry.unitary, time)
     period = float(entry.times[-1])
@@ -700,7 +499,7 @@ def _fundamental(entry: _Period, time: float) -> NDArray[np.complex128]:
 
 
 def _subdivided_row(
-    entry: _Period,
+    entry: PeriodData,
     origin: float,
     duration: float,
     rho: NDArray[np.complex128],
@@ -738,7 +537,7 @@ def _subdivided_row(
 
 
 def _row(
-    entry: _Period,
+    entry: PeriodData,
     frequency: float,
     theta: float,
     duration: float,
@@ -822,62 +621,39 @@ class FloquetPeriodKernel:
     name = "floquet_period"
     guard_builds = False
 
-    def __init__(self, workspace: _GainWorkspace | None = None) -> None:
-        """Use an evolve-local scope, or independent builds for standalone calls."""
-        self._workspace = workspace
-
-    def evolve_scope(
-        self, table: SegmentTable, source: ModelSource
-    ) -> tuple["FloquetPeriodKernel", _GainWorkspace]:
-        """Plan fixed gain anchors in a fresh byte-counted workspace.
-
-        table is the complete segmented scan; source is this evolve's model
-        owner. Numeric tables are independent of worker count, chunking and
-        request order for this table/source/budget. No density is read.
-        Engine shares the scoped kernel with prefix
-        and timeline workers and drops both returned objects when evolve ends.
-        Standalone prepare uses the same cost-selected Sambe or independent CF4
-        builder, without scope counters or gain-anchor sharing.
-        """
-        del source
-        workspace = _GainWorkspace(table)
-        # Preserve injected subclass guards/apply hooks without mutating the
-        # registry instance shared by concurrent evolves.
-        scoped = copy(self)
-        scoped._workspace = workspace
-        return scoped, workspace
-
     def guard(
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> NDArray[np.bool_]:
         """Return row-local constant-tone, carrier and splitting-estimate validity."""
+        source, budget = context.source, context.budget
         _check_budget(budget)
         accepted = np.zeros(len(rows), dtype=np.bool_)
         for index, row in enumerate(rows):
             if table.tones[row] != 1:
                 continue
             envelope = table.envelopes[int(table.tone_envelope[row, 0])]
-            frequency = abs(float(table.tone_frequency_ghz[row, 0]))
-            if envelope.kind != "constant" or frequency < _MIN_FREQUENCY_GHZ:
+            frequency = float(table.tone_frequency_ghz[row, 0])
+            if envelope.kind != "constant" or abs(frequency) < _MIN_FREQUENCY_GHZ:
                 continue
             model = source.model(tuple(int(v) for v in table.level[row]))
-            estimate = table.duration_ns[row] * _split_rate(
+            estimate = table.duration_ns[row] * split_rate(
                 model,
                 int(table.tone_port[row, 0]),
                 frequency,
                 float(table.tone_amplitude[row, 0]),
+                context.work_plan,
             )
             accepted[index] = estimate <= _MAX_SPLIT_ESTIMATE * _MAX_SUBDIVISIONS**2
         return accepted
 
     def prepare_keys(
-        self, table: SegmentTable, rows: NDArray[np.int64]
+        self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.void]:
         """Encode level/port/frequency/gain, excluding duration, start and theta."""
+        del context
         keys = np.empty(
             len(rows),
             dtype=[
@@ -905,23 +681,23 @@ class FloquetPeriodKernel:
         keys: NDArray[np.void],
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> Prepared:
         """Build immutable periods with dispatch-selected builders/work ceilings.
 
         keys and rows are aligned representatives that must pass the scalar
-        guard. Scoped calls reuse the complete gain plan; standalone calls ask
-        dispatch for independent builders without gain-anchor participation.
+        guard. Contexts carrying planner records reuse fixed gain dependencies;
+        standalone WorkPlans use independent builders without gain sharing.
         """
+        source, budget = context.source, context.budget
         _check_budget(budget)
         if len(keys) != len(rows) or not np.array_equal(
-            keys, self.prepare_keys(table, rows)
+            keys, self.prepare_keys(table, rows, context)
         ):
             raise ValueError("Floquet period representatives must match keys")
-        if not self.guard(table, rows, source, budget).all():
+        if not self.guard(table, rows, context).all():
             raise ValueError("Floquet period representatives must pass guard")
-        from .._dispatch import period_builder
+        from .._gain_plan import build_plan, gain_anchor_resource, period_builder
 
         entries = []
         for key in keys:
@@ -931,22 +707,92 @@ class FloquetPeriodKernel:
                 float(key["frequency"]),
                 float(key["gain"]),
             )
-            if self._workspace is None:
-                builder = period_builder(model, port, frequency, gain)
-                entry = _build(model, _Tone(port, frequency, gain), budget, builder)
+            planned = build_plan(context, model, port, frequency, gain)
+            builder = (
+                period_builder(model, port, frequency, gain)
+                if planned is None
+                else planned[1]
+            )
+            dependencies = (
+                [
+                    (a, gain_anchor_resource(context, planned[0], a))
+                    for a in builder.anchors
+                ]
+                if planned is not None
+                else []
+            )
+            # Repeated keys never reopen a handed-off or released dependency.
+            reusable = dependencies and all(
+                not handle.released
+                and (
+                    gain in handle.remaining_consumers
+                    or (not handle.sealed and gain not in handle.actual_consumers)
+                )
+                for _, handle in dependencies
+            )
+            if not reusable:
+                entry = _build(
+                    model,
+                    _Tone(port, frequency, gain),
+                    budget,
+                    builder,
+                    work_plan=context.work_plan,
+                )
             else:
-                entry = self._workspace.build(model, port, frequency, gain, budget)
+                for _, handle in dependencies:
+                    if not handle.sealed:
+                        handle.admit(gain)
+                neighbours = [
+                    _Neighbour(
+                        a,
+                        handle.get(
+                            partial(
+                                _build,
+                                model,
+                                _Tone(port, frequency, a),
+                                budget,
+                                PeriodBuilder("cf4"),
+                                work_plan=context.work_plan,
+                            )
+                        ),
+                    )
+                    for a, handle in dependencies
+                ]
+                entry = (
+                    neighbours[0].period
+                    if builder.anchors == (gain,)
+                    else _build(
+                        model,
+                        _Tone(port, frequency, gain),
+                        budget,
+                        builder,
+                        work_plan=context.work_plan,
+                        neighbours=neighbours,
+                    )
+                )
+                for _, handle in dependencies:
+                    handle.handoff(gain)
             entries.append(entry)
         return _Periods(tuple(entries))
+
+    def admit_prepared(
+        self,
+        prepared: Prepared,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        context: KernelContext,
+    ) -> None:
+        """Decline cached-domain admission; use the ordinary guard build path."""
+        del prepared, table, rows, context
 
     def guard_prepared(
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline handoff: the scalar guard builds no propagator."""
+        source, budget = context.source, context.budget
         del table, rows, source, budget
 
     def bind_input(
@@ -956,9 +802,10 @@ class FloquetPeriodKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         source_initial: NDArray[np.complex128],
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline input binding: this channel applies to arbitrary densities."""
+        budget = context.budget
         del prepared, key_index, table, rows, source_initial, budget
 
     def apply(

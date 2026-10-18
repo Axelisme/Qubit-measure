@@ -1,10 +1,16 @@
-"""Cost-selected constant-tone preparation through the scoped C5 interface."""
+"""Cost-selected constant-tone preparation through the planner/kernel seam."""
 
 from dataclasses import replace
 
 import numpy as np
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource
-from zcu_tools.simulate.evolution.kernel import ApplyContext, SegmentTable
+from zcu_tools.simulate.evolution._dispatch import create_work_plan
+from zcu_tools.simulate.evolution._gain_plan import period_builder
+from zcu_tools.simulate.evolution.kernel import (
+    ApplyContext,
+    KernelContext,
+    SegmentTable,
+)
 from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
 
 from ..contract.kernel_suite import KernelCase, reference, synthetic_model
@@ -39,17 +45,27 @@ def sambe_case():
 
 def test_low_carrier_uses_sambe_and_preserves_translated_coherent_tail():
     case = sambe_case()
-    kernel, workspace = FloquetPeriodKernel().evolve_scope(case.table, case.source)
+    kernel = FloquetPeriodKernel()
+    context = KernelContext(
+        case.source, case.budget, create_work_plan(case.table, case.source)
+    )
     rows = np.arange(2)
+    for row in rows:
+        assert (
+            period_builder(
+                case.source.model((0,)),
+                0,
+                float(case.table.tone_frequency_ghz[row, 0]),
+                float(case.table.tone_amplitude[row, 0]),
+            ).kind
+            == "sambe"
+        )
     prepared = kernel.prepare(
-        kernel.prepare_keys(case.table, rows),
+        kernel.prepare_keys(case.table, rows, context),
         case.table,
         rows,
-        case.source,
-        case.budget,
+        context,
     )
-    assert workspace.sambe_builds == 2
-    assert workspace.attempts == workspace.hits == workspace.nbytes == 0
     actual = case.states.copy()
     kernel.apply(prepared, rows, case.table, rows, actual, ApplyContext(case.budget))
     for row in rows:
@@ -72,13 +88,15 @@ def test_unresolved_cutoff_falls_back_to_independent_cf4():
     source = ModelSource(case.source.initial_density, lambda level: model)
     table = replace(case.table, tone_amplitude=np.ones((2, 1)))
     rows = np.array([0])
-    kernel, workspace = FloquetPeriodKernel().evolve_scope(table, source)
+    kernel = FloquetPeriodKernel()
+    context = KernelContext(source, 0.001, create_work_plan(table, source))
+    assert period_builder(model, 0, 0.05, 1.0).kind == "sambe"
     prepared = kernel.prepare(
-        kernel.prepare_keys(table, rows), table, rows, source, 1e-3
+        kernel.prepare_keys(table, rows, context),
+        table,
+        rows,
+        context,
     )
-    assert workspace.sambe_builds == 0
-    assert workspace.sambe_fallbacks == 1
-    assert workspace.attempts == workspace.hits == workspace.nbytes == 0
     actual = case.states[:1].copy()
     kernel.apply(prepared, np.array([0]), table, rows, actual, ApplyContext(1e-3))
     # Independent exact solution for commuting diagonal H(t), tighter than a
@@ -97,14 +115,20 @@ def test_unresolved_cutoff_falls_back_to_independent_cf4():
 
 def test_high_carrier_keeps_existing_builder():
     case = sambe_case()
-    for frequency in (0.582, 8.0):
+    for frequency, kind in ((0.582, "cf4"), (8.0, "dop853")):
+        assert period_builder(case.source.model((0,)), 0, frequency, 0.01).kind == kind
         table = replace(case.table, tone_frequency_ghz=np.full((2, 1), frequency))
-        kernel, workspace = FloquetPeriodKernel().evolve_scope(table, case.source)
+        kernel = FloquetPeriodKernel()
+        context = KernelContext(
+            case.source, case.budget, create_work_plan(table, case.source)
+        )
         rows = np.arange(2)
         prepared = kernel.prepare(
-            kernel.prepare_keys(table, rows), table, rows, case.source, case.budget
+            kernel.prepare_keys(table, rows, context),
+            table,
+            rows,
+            context,
         )
-        assert workspace.sambe_builds == workspace.sambe_fallbacks == 0
         actual = case.states.copy()
         kernel.apply(prepared, rows, table, rows, actual, ApplyContext(case.budget))
         high = replace(case, table=table)
@@ -118,27 +142,31 @@ def test_sambe_selection_and_playback_ignore_worker_and_key_order():
 
     case = sambe_case()
     rows = np.arange(2)
-    kernel, workspace = FloquetPeriodKernel().evolve_scope(case.table, case.source)
+    kernel = FloquetPeriodKernel()
+    context = KernelContext(
+        case.source, case.budget, create_work_plan(case.table, case.source)
+    )
     prepared = kernel.prepare(
-        kernel.prepare_keys(case.table, rows),
+        kernel.prepare_keys(case.table, rows, context),
         case.table,
         rows,
-        case.source,
-        case.budget,
+        context,
     )
     expected = case.states.copy()
     kernel.apply(prepared, rows, case.table, rows, expected, ApplyContext(case.budget))
-    other, other_workspace = FloquetPeriodKernel().evolve_scope(case.table, case.source)
+    other = FloquetPeriodKernel()
+    other_context = KernelContext(
+        case.source, case.budget, create_work_plan(case.table, case.source)
+    )
     actual = case.states.copy()
 
     def play(row):
         subset = np.array([row])
         payload = other.prepare(
-            other.prepare_keys(case.table, subset),
+            other.prepare_keys(case.table, subset, other_context),
             case.table,
             subset,
-            case.source,
-            case.budget,
+            other_context,
         )
         state = case.states[subset].copy()
         other.apply(
@@ -151,9 +179,6 @@ def test_sambe_selection_and_playback_ignore_worker_and_key_order():
         pool.submit(play, 1).result(timeout=25)
     play(0)
     np.testing.assert_array_equal(actual, expected)
-    assert workspace.sambe_builds == other_workspace.sambe_builds == 2
-    assert workspace.sambe_fallbacks == other_workspace.sambe_fallbacks == 0
-    assert workspace.nbytes == other_workspace.nbytes == 0
 
 
 def test_sambe_subperiods_preserve_secular_dissipation():
@@ -167,12 +192,15 @@ def test_sambe_subperiods_preserve_secular_dissipation():
     source = ModelSource(case.source.initial_density, lambda level: model)
     table = replace(case.table, tone_amplitude=np.full((2, 1), 0.1))
     case = replace(case, source=source, table=table)
-    kernel, workspace = FloquetPeriodKernel().evolve_scope(table, source)
+    kernel = FloquetPeriodKernel()
+    context = KernelContext(source, 0.001, create_work_plan(table, source))
     rows = np.arange(2)
     prepared = kernel.prepare(
-        kernel.prepare_keys(table, rows), table, rows, source, case.budget
+        kernel.prepare_keys(table, rows, context),
+        table,
+        rows,
+        context,
     )
-    assert workspace.sambe_builds == 2
     actual = case.states.copy()
     kernel.apply(prepared, rows, table, rows, actual, ApplyContext(case.budget))
     np.testing.assert_allclose(

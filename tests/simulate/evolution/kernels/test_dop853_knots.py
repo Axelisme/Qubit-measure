@@ -13,8 +13,9 @@ from zcu_tools.simulate.evolution import (
     SecularDrive,
     SecularModel,
 )
-from zcu_tools.simulate.evolution.kernel import SegmentTable
+from zcu_tools.simulate.evolution.kernel import KernelContext, SegmentTable
 from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Kernel
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from tests.simulate.evolution.contract.kernel_suite import kernel_context
 
@@ -57,7 +58,10 @@ def test_isolated_complex_sampled_feature_preserves_pulse_area(
     kernel = DOP853Kernel()
     rows = np.array([0], dtype=np.int64)
     prepared = kernel.prepare(
-        kernel.prepare_keys(table, rows), table, rows, source, budget
+        kernel.prepare_keys(table, rows, KernelContext(source, budget, WorkPlan())),
+        table,
+        rows,
+        KernelContext(source, budget, WorkPlan()),
     )
     actual = initial[None].copy()
     kernel.apply(
@@ -108,7 +112,10 @@ def test_dense_smooth_envelope_matches_uncompressed_reference(budget: float) -> 
     kernel = DOP853Kernel()
     rows = np.array([0], dtype=np.int64)
     prepared = kernel.prepare(
-        kernel.prepare_keys(table, rows), table, rows, source, budget
+        kernel.prepare_keys(table, rows, KernelContext(source, budget, WorkPlan())),
+        table,
+        rows,
+        KernelContext(source, budget, WorkPlan()),
     )
     actual = initial[None].copy()
     kernel.apply(
