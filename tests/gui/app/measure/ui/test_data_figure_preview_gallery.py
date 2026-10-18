@@ -878,6 +878,55 @@ def test_gallery_wide_single_full_width(qapp):
     g_w.hide()
 
 
+def _assert_narrow_gallery_geometries(
+    geoms: dict[str, QRect], expected_count: int
+) -> None:
+    """Assert narrow layout geometry for the expected gallery card count."""
+    if expected_count == 1:
+        r = geoms["run"]
+        assert r.x() <= 4
+    elif expected_count == 2:
+        r = geoms["run"]
+        a = geoms["analysis"]
+        assert abs(r.x() - a.x()) <= 2, (
+            f"2-card narrow x not aligned {r.x()} vs {a.x()}"
+        )
+        assert r.y() < a.y(), f"2-card narrow y not monotonic {r.y()} vs {a.y()}"
+    else:  # 3
+        r = geoms["run"]
+        a = geoms["analysis"]
+        p = geoms["post_analysis"]
+        assert abs(r.x() - a.x()) <= 2 and abs(a.x() - p.x()) <= 2, (
+            "3-card narrow x not aligned"
+        )
+        assert r.y() < a.y() < p.y(), "3-card narrow y not monotonic"
+
+
+def _assert_wide_gallery_geometries(
+    geoms: dict[str, QRect], expected_count: int
+) -> None:
+    """Assert wide layout geometry for the expected gallery card count."""
+    if expected_count == 1:
+        r = geoms["run"]
+        assert r.x() <= 4
+        assert r.width() > 400  # wide single card expands
+    elif expected_count == 2:
+        r = geoms["run"]
+        a = geoms["analysis"]
+        assert abs(r.y() - a.y()) <= 4, f"2-card wide y not aligned {r.y()} vs {a.y()}"
+        assert a.x() > r.x() + r.width() - 4, "2-card wide not side-by-side"
+        assert abs(r.width() - a.width()) <= 20
+    else:
+        r = geoms["run"]
+        a = geoms["analysis"]
+        p = geoms["post_analysis"]
+        assert r.x() < a.x() - 2, f"Run not left of Analysis {r.x()} vs {a.x()}"
+        assert abs(a.x() - p.x()) <= 2
+        assert abs(r.y() - a.y()) <= 4
+        assert p.y() > a.y() + 2
+        assert r.height() > a.height() + 2
+
+
 def test_gallery_narrow_vs_wide_via_exp_tab_shipped_path(
     qapp, exp_tab_widget, make_ctrl
 ):
@@ -914,24 +963,7 @@ def test_gallery_narrow_vs_wide_via_exp_tab_shipped_path(
             f"expected narrow at 650 for {expected_count} cards"
         )
         geoms = _gallery_geometry_cards(g)
-        if expected_count == 1:
-            r = geoms["run"]
-            assert r.x() <= 4
-        elif expected_count == 2:
-            r = geoms["run"]
-            a = geoms["analysis"]
-            assert abs(r.x() - a.x()) <= 2, (
-                f"2-card narrow x not aligned {r.x()} vs {a.x()}"
-            )
-            assert r.y() < a.y(), f"2-card narrow y not monotonic {r.y()} vs {a.y()}"
-        else:  # 3
-            r = geoms["run"]
-            a = geoms["analysis"]
-            p = geoms["post_analysis"]
-            assert abs(r.x() - a.x()) <= 2 and abs(a.x() - p.x()) <= 2, (
-                "3-card narrow x not aligned"
-            )
-            assert r.y() < a.y() < p.y(), "3-card narrow y not monotonic"
+        _assert_narrow_gallery_geometries(geoms, expected_count)
 
         # Wide via ExpTabWidget resize — automatic.
         tab.resize(1200, 600)
@@ -940,27 +972,7 @@ def test_gallery_narrow_vs_wide_via_exp_tab_shipped_path(
         QApplication.processEvents()
         assert g.is_wide_mode(), f"expected wide at 1200 for {expected_count} cards"
         geoms = _gallery_geometry_cards(g)
-        if expected_count == 1:
-            r = geoms["run"]
-            assert r.x() <= 4
-            assert r.width() > 400  # wide single card expands
-        elif expected_count == 2:
-            r = geoms["run"]
-            a = geoms["analysis"]
-            assert abs(r.y() - a.y()) <= 4, (
-                f"2-card wide y not aligned {r.y()} vs {a.y()}"
-            )
-            assert a.x() > r.x() + r.width() - 4, "2-card wide not side-by-side"
-            assert abs(r.width() - a.width()) <= 20
-        else:
-            r = geoms["run"]
-            a = geoms["analysis"]
-            p = geoms["post_analysis"]
-            assert r.x() < a.x() - 2, f"Run not left of Analysis {r.x()} vs {a.x()}"
-            assert abs(a.x() - p.x()) <= 2
-            assert abs(r.y() - a.y()) <= 4
-            assert p.y() > a.y() + 2
-            assert r.height() > a.height() + 2
+        _assert_wide_gallery_geometries(geoms, expected_count)
         tab.detach()
         g.hide()
         QApplication.processEvents()
