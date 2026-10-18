@@ -1,5 +1,6 @@
 """Name-and-shape restoration through the public FormState input boundary."""
 
+from enum import StrEnum
 from typing import Annotated, Literal
 
 import pytest
@@ -116,6 +117,22 @@ def test_restore_invalid_selection_uses_current_default_and_reports_once() -> No
     assert state.input.data["mode"] == "new"
     assert state.input.selections == {}
     assert set(dropped) == {("shape",), ("mode",)}
+
+
+def test_saved_enum_selection_is_accepted_by_its_current_annotation() -> None:
+    class Speed(StrEnum):
+        slow = "slow"
+        fast = "fast"
+
+    class EnumForm(FormModel):
+        speed: Speed = Speed.slow
+
+    authored = FormInput(EnumForm, {"speed": "slow"}, selections={("speed",): "fast"})
+    saved = FormInput.from_json(EnumForm, authored.to_json())
+    state = FormState(EnumForm.default_input(FormEnv()))
+
+    assert state.restore_input(saved, FormEnv()) == ()
+    assert state.input.same_as(authored)
 
 
 def test_restore_untagged_union_keeps_raw_without_guessing_or_filling_branch() -> None:
