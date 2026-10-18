@@ -497,9 +497,9 @@ class IRPipeLine:
 
         # --- parse → IR tree ---
         ir = parser.parse(chunks)
-        from .node import _collect_subtree_names
+        from .node import collect_subtree_names
 
-        label_names, struct_names = _collect_subtree_names(ir)
+        label_names, struct_names = collect_subtree_names(ir)
         ctx.allocated_names = label_names | struct_names
 
         # --- IR-tree optimization (post-order, pipeline-driven recursion) ---

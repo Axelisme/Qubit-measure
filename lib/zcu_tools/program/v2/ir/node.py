@@ -250,13 +250,24 @@ class IRDispatch(IRNode):
 # ---------------------------------------------------------------------------
 
 
-def _collect_subtree_names(node: IRNode) -> tuple[set[str], set[str]]:
-    """Return (defined label names, structure node names) in a subtree.
+def collect_subtree_names(node: IRNode) -> tuple[set[str], set[str]]:
+    """Read ``node`` as a finite, acyclic IR subtree and collect its names.
 
-    Defined label names: every ``LabelInst.name`` inside any BasicBlockNode.
-    Structure names: ``name`` of every IRLoop / IRBranch / IRDispatch — these
-    drive the labels that unparse() will synthesise (``{name}_start`` etc.),
-    so they must also be uniquified when a subtree is duplicated.
+    Return two fresh, deduplicated sets, in order: defined label names and
+    structure names. BasicBlockNode labels contribute ``str(label.name)``.
+    BlockNode children, IRLoop bodies and IRBranch cases are read recursively;
+    each IRLoop, IRBranch and IRDispatch contributes its own ``name`` to the
+    structure set. These structure names drive labels synthesised by unparse.
+    Dispatch targets and instruction references are not definitions and do
+    not contribute names. Unknown IRNode subclasses contribute no names.
+
+    This operation does not allocate names or mutate the tree or allocated
+    state. It adds no tree validation or coercion beyond stringifying defined
+    label names; errors from reading or traversing the input propagate to the
+    caller. Cyclic trees are not supported.
+
+    For example, ``collect_subtree_names(BlockNode(insts=[]))`` returns
+    ``(set(), set())``.
     """
     labels: set[str] = set()
     structs: set[str] = set()
@@ -265,18 +276,18 @@ def _collect_subtree_names(node: IRNode) -> tuple[set[str], set[str]]:
             labels.add(str(lbl.name))
     elif isinstance(node, BlockNode):
         for child in node.insts:
-            sub_l, sub_s = _collect_subtree_names(child)
+            sub_l, sub_s = collect_subtree_names(child)
             labels |= sub_l
             structs |= sub_s
     elif isinstance(node, IRLoop):
         structs.add(node.name)
-        sub_l, sub_s = _collect_subtree_names(node.body)
+        sub_l, sub_s = collect_subtree_names(node.body)
         labels |= sub_l
         structs |= sub_s
     elif isinstance(node, IRBranch):
         structs.add(node.name)
         for case in node.cases:
-            sub_l, sub_s = _collect_subtree_names(case)
+            sub_l, sub_s = collect_subtree_names(case)
             labels |= sub_l
             structs |= sub_s
     elif isinstance(node, IRDispatch):
@@ -349,7 +360,7 @@ def clone_renamed(node: IRNode, allocated: set[str]) -> IRNode:
     """
     from .labels import make_label
 
-    label_names, struct_names = _collect_subtree_names(node)
+    label_names, struct_names = collect_subtree_names(node)
     label_remap = {n: make_label(n, allocated) for n in label_names}
     name_remap = {n: make_label(n, allocated).name for n in struct_names}
     return _clone_node(node, label_remap, name_remap)

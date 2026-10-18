@@ -22,7 +22,7 @@ from .node import (
     IRDispatch,
     IRLoop,
     IRNode,
-    _collect_subtree_names,
+    collect_subtree_names,
 )
 from .operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
 
@@ -423,7 +423,7 @@ class IRParser:
         round-trips for ``IRLoop`` / ``IRBranch`` structures (``IRDispatch``
         is a leaf emitted only by passes, never re-parsed).
         """
-        label_names, struct_names = _collect_subtree_names(root)
+        label_names, struct_names = collect_subtree_names(root)
         self.allocated.update(label_names | struct_names)
         return self._unparse_block_node(root)
 
