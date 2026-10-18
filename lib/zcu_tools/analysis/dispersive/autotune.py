@@ -66,7 +66,8 @@ def _interp_norm_phase(
     return np.asarray(interp(pts), dtype=np.float64)
 
 
-def sample_score(
+# tolerated: Coarse/refine callers vary g/rf; retain the public positional score API.
+def sample_score(  # noqa: PLR0913
     params: tuple[float, float, float],
     sp_fluxs: NDArray[np.float64],
     sp_freqs: NDArray[np.float64],
@@ -83,7 +84,8 @@ def sample_score(
     return float(np.mean(np.maximum(v0, v1)))
 
 
-def _coarse_seed(
+# tolerated: Only auto_tune supplies the grid, samples, initial g/rf and their bounds.
+def _coarse_seed(  # noqa: PLR0913
     params: tuple[float, float, float],
     sp_fluxs: NDArray[np.float64],
     sp_freqs: NDArray[np.float64],
@@ -129,7 +131,8 @@ def _coarse_seed(
     return best
 
 
-def auto_tune(
+# tolerated: Controller passes fit/grid inputs and independent public seed/bound knobs.
+def auto_tune(  # noqa: PLR0913
     params: tuple[float, float, float],
     sp_fluxs: NDArray[np.float64],
     sp_freqs: NDArray[np.float64],
