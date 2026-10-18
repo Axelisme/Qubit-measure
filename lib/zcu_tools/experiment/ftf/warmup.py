@@ -15,6 +15,7 @@ from numpy.typing import NDArray
 from zcu_tools.experiment.warmup import EnvironmentWarmup
 from zcu_tools.simulate.adc import (
     ConditionalReadout,
+    PiecewiseLinearEnvelope,
     ReadoutBatch,
     ReadoutModel,
     ReadoutPulse,
@@ -37,13 +38,21 @@ from zcu_tools.simulate.evolution import (
 COVERAGE = (
     "shaped_carrier_family",
     "shaped_direct",
+    "shaped_complex",
+    "multitone_rwa",
+    "multitone_direct",
     "multitone_gate",
+    "floquet_probe_windows",
     "dyson_gain_batch",
     "floquet_period",
+    "floquet_low_carrier",
+    "floquet_cf4",
     "t4",
     "readout_integrated",
+    "readout_flat_batch",
     "readout_decimated",
     "readout_mux",
+    "readout_sampled",
 )
 
 _lock = Lock()
@@ -112,8 +121,15 @@ def _prepare(name: str) -> None:
     if name.startswith("readout_"):
         _readout(name)
         return
+    if name == "floquet_probe_windows":
+        _floquet_probe_windows()
+        return
+    # Checked before the generic multitone prefix, which would also match it.
     if name == "multitone_gate":
         _joint_gate()
+        return
+    if name.startswith("multitone_"):
+        _multitone(name)
         return
     duration = 20.3
     envelope = EnvelopeSpec("constant")
@@ -131,6 +147,15 @@ def _prepare(name: str) -> None:
             np.array([0.0, 1.0j, 0.01], complex),
             np.array([0.0, 0.02, duration]),
         )
+    elif name == "shaped_complex":
+        envelope = EnvelopeSpec(
+            "sampled",
+            np.array([0.0, 1.0 + 0.1j], complex),
+            np.array([0.0, duration]),
+        )
+    elif name in ("floquet_low_carrier", "floquet_cf4"):
+        frequencies = np.array([0.05])
+        duration = 100.3
     elif name == "dyson_gain_batch":
         frequencies = np.full(12, 0.01)
         gains = np.linspace(0.00001, 0.0001, 12)
@@ -146,9 +171,96 @@ def _prepare(name: str) -> None:
         batch = replace(
             batch, tracks=(prefix, probe), end_ns=np.full(len(gains), duration + 6)
         )
+    source = _source()
+    if name in ("floquet_low_carrier", "floquet_cf4"):
+        # A remote spectator makes spectral construction cheaper than CF4;
+        # the narrow spectrum independently exercises the CF4 builder.
+        spectator = 0.13 if name == "floquet_cf4" else 7.0
+        model = replace(
+            source.model((0,)), energies_ghz=np.array([0.0, 0.05, spectator])
+        )
+        source = ModelSource(source.initial_density, lambda _: model)
+    _evolve(source, batch)
+
+
+def _multitone(name: str) -> None:
+    duration = 128.0
+    times = np.linspace(0.0, duration, 129)
+    envelope = EnvelopeSpec(
+        "sampled", np.exp(-(((times - 64) / 32) ** 2) / 2).astype(complex), times
+    )
+    if name == "multitone_direct":
+        envelope = EnvelopeSpec(
+            "sampled",
+            np.array([0.0, 1.0j, 0.01], complex),
+            np.array([0.0, 0.02, duration]),
+        )
+    source = _source()
+    model = source.model((0,))
+    auxiliary = SecularDrive(
+        "aux", model.drives[0].in_phase_ghz, model.drives[0].quadrature_ghz
+    )
+    model = replace(model, drives=(*model.drives, auxiliary))
+    source = ModelSource(source.initial_density, lambda _: model)
+    batch = _batch(np.array([5.0]), np.array([0.2]), envelope, duration)
+    batch = replace(
+        batch,
+        tracks=(
+            batch.tracks[0],
+            replace(batch.tracks[0], port="aux", frequency_ghz=np.array([7.0])),
+        ),
+    )
+    _evolve(source, batch)
+
+
+def _evolve(source: ModelSource, batch: TimelineBatch) -> None:
     engine = Engine(1, 0)
     try:
-        engine.evolve(_source(), (batch,), cancel=Event())
+        engine.evolve(source, (batch,), cancel=Event())
+    finally:
+        engine.close()
+
+
+def _floquet_probe_windows() -> None:
+    # A small Stark/probe scan exercises Fourier certificates, including new
+    # probe bins on a retained frame. Rejected guard products stay disposable.
+    x = np.array([[0.0, 0.02], [0.02, 0.0]], complex)
+    model = SecularModel(
+        (0,),
+        "ftf-startup-floquet",
+        np.array([0.0, 0.13]),
+        np.eye(2, dtype=complex),
+        (
+            SecularDrive("drive", x, np.zeros_like(x)),
+            SecularDrive("probe", x, np.zeros_like(x)),
+        ),
+        np.array([[0.0, 0.001], [0.0, 0.0]]),
+        np.zeros((2, 2)),
+    )
+    source = ModelSource(np.diag([0.8, 0.2]).astype(complex), lambda _: model)
+    engine = Engine(1, 8_000_000)
+    try:
+        for shift in (0.0, 0.004):
+            batch = _batch(
+                np.linspace(0.106, 0.114, 65) + shift,
+                np.full(65, 0.0001),
+                EnvelopeSpec("constant"),
+                16.0,
+            )
+            stark = replace(
+                batch.tracks[0],
+                frequency_ghz=np.full(65, 0.13),
+                amplitude=np.full(65, 0.2),
+            )
+            engine.evolve(
+                source,
+                (
+                    replace(
+                        batch, tracks=(stark, replace(batch.tracks[0], port="probe"))
+                    ),
+                ),
+                cancel=Event(),
+            )
     finally:
         engine.close()
 
@@ -167,16 +279,35 @@ def _readout(name: str) -> None:
     pulses = (ReadoutPulse(0, 20, 0.1 + 0.02j, 6.0),)
     if name == "readout_mux":
         pulses += (ReadoutPulse(0, 20, 0.05j, 6.01),)
+    elif name == "readout_sampled":
+        pulses = (
+            ReadoutPulse(
+                0,
+                20,
+                0.1 + 0.02j,
+                6.0,
+                envelope=PiecewiseLinearEnvelope(
+                    np.array([0.0, 5.0, 15.0, 20.0]),
+                    np.array([0.0, 1.0, 1.0, 0.0], complex),
+                ),
+            ),
+        )
+    contents = (pulses,)
+    if name == "readout_flat_batch":
+        contents += ((replace(pulses[0], frequency_ghz=6.01),),)
+    grids = ((SampleGrid(np.arange(8, dtype=float) * 4, 6.0),),) * len(contents)
     response = ConditionalReadout(model)
     for traces in (
-        (False, True) if name == "readout_mux" else (name == "readout_decimated",)
+        (False, True)
+        if name in ("readout_mux", "readout_sampled")
+        else (name == "readout_decimated",)
     ):
         response.responses(
             ReadoutBatch(
                 model,
-                (pulses,),
-                ((SampleGrid(np.arange(8, dtype=float) * 4, 6.0),),),
-                np.zeros(1, dtype=np.int64),
+                contents,
+                grids,
+                np.arange(len(contents), dtype=np.int64),
                 include_traces=traces,
             )
         )
