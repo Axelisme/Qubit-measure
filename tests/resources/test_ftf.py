@@ -31,7 +31,7 @@ def test_ftf_loads_detached_named_settings(tmp_path: Path) -> None:
     assert config.chip.coupler.ng == 0
     assert config.dc_bias.sources["bias"].flux_per_unit.coupler == 0.1
     assert config.dc_bias.offset_phi0.f2 == 0.4
-    assert config.drive_lines["mw"].charge_drive_ghz_per_gain.f2.imag == 0.02
+    assert config.drive_lines["mw"].coefficients().f2.imag == 0.02
     assert config.readout.resonators.r2.frequency_ghz == 6.2
     assert config.numerics.truncation.f1.native_cutoff == 8
     assert config.numerics.truncation.retained_levels == 8

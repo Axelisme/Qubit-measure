@@ -156,7 +156,7 @@ class DCBias(Values):
     """offset_phi0: reduced-flux offsets. sources: named fixed-unit DC devices.
 
     Each source contributes its live value times its flux_per_unit loop map.
-    Names are nonempty and unique across DC sources and charge drive lines.
+    Names are nonempty and unique across DC sources and drive lines.
     """
 
     offset_phi0: LoopMap[Finite]
@@ -164,21 +164,58 @@ class DCBias(Values):
 
 
 class ComplexCoefficient(Values):
-    """Finite signed real/imag GHz per gain multiplying full charge n."""
+    """Finite signed real/imag coefficient; the containing map defines units."""
 
     real: Finite
     imag: Finite
 
 
 class DriveLine(Values):
-    """gen_ch: unique nonnegative generator; charge_drive_ghz_per_gain: loop map.
+    """One generator with charge or fixed-DC small-signal flux calibration.
 
-    Uses Re[c*g*w*exp(i carrier)]*n, no hidden n01 normalization or input RWA
-    factor. Every loop requires real and imag; explicit zeros disable coupling.
+    gen_ch: unique nonnegative generator. operator: charge (default) or flux.
+    charge_drive_ghz_per_gain: required only for charge, multiplies full n.
+    flux_drive_phi0_per_gain: required only for flux, multiplies d(H/h)/df at DC
+    in GHz/Phi0, where f = Phi/Phi0. The unused map must be absent, even if null.
+    Both maps require real/imag for F1/C/F2; explicit zeros disable coupling.
+    Uses Re[c*g*w*exp(i carrier)]*operator, without hidden n01 or RWA factors.
+    Flux is a linearized drive, not a time-dependent large-amplitude H(Phi(t)).
     """
 
     gen_ch: Index
-    charge_drive_ghz_per_gain: LoopMap[ComplexCoefficient]
+    operator: Literal["charge", "flux"] = "charge"
+    charge_drive_ghz_per_gain: LoopMap[ComplexCoefficient] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    flux_drive_phi0_per_gain: LoopMap[ComplexCoefficient] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    def coefficients(self) -> LoopMap[ComplexCoefficient]:
+        """Return the selected calibration, in GHz/gain or Phi0/gain.
+
+        Reject a missing/null active map or any supplied inactive map with
+        ValueError naming the field. This is also the schema pairing invariant.
+        """
+        if self.operator == "charge":
+            selected = self.charge_drive_ghz_per_gain
+            required = "charge_drive_ghz_per_gain"
+            forbidden = "flux_drive_phi0_per_gain"
+        else:
+            selected = self.flux_drive_phi0_per_gain
+            required = "flux_drive_phi0_per_gain"
+            forbidden = "charge_drive_ghz_per_gain"
+        if selected is None:
+            raise ValueError(f"{required}: required for operator {self.operator}")
+        if forbidden in self.model_fields_set:
+            raise ValueError(f"{forbidden}: forbidden for operator {self.operator}")
+        return selected
+
+    @model_validator(mode="after")
+    def calibration(self) -> Self:
+        """Validate operator/calibration pairing and return this frozen line."""
+        self.coefficients()
+        return self
 
 
 class ReadoutSource(Values):
@@ -381,10 +418,11 @@ class FTFSettings(Values):
 
     format='zcu.ftf', version=2 (integer only). chip supplies physical values;
     dc_bias supplies startup/live DC calibration; drive_lines binds charge
-    microwave generators (omitted/empty disables). readout serves exactly two
-    resonators with one drive and one or more ADCs. numerics supplies truncations/solver/seed.
+    or small-signal flux generators (omitted/empty disables). readout serves two
+    resonators with one drive and one or more ADCs. numerics supplies
+    truncations/solver/seed.
     Channel counts derive from maximum configured indices plus one. Unknown
-    fields, including flux-pulse configuration and v1 aliases, are rejected.
+    fields, including large-amplitude flux controls and v1 aliases, are rejected.
     No model truth enters ordinary GUI/MCP metadata.
     """
 

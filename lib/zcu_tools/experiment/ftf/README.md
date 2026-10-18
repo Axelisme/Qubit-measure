@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-18, receiver delay/mismatch wiring and numeric replay identity
+**Last updated:** 2026-10-18, mux readout and charge/flux drive lines
 
 `ftf(path_or_settings, *, workers=1)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -37,10 +37,17 @@ The binding serializes calls; direct author callers must do the same.
 arrays. It preserves signed gains, complex sampled envelopes and the common
 carrier origin. Pulse supports use absolute nearest-2-ns rounding, ties even.
 The model owner supplies a fixed-DC `ModelSource` and static schedule for each
-round. Charge microwave controls evolve every template to readout start. FTF
-constructs no flux lines or flux controls; shared simulation-engine flux support
-is unchanged. Version 2 settings group physical values, named DC/charge lines,
-readout and numerics. Version 1 is not accepted.
+round. Charge and small-signal flux controls evolve every template to readout
+start. Each drive line selects full charge n or the derivative of the existing
+fixed-coordinate Hamiltonian at that round's DC point. Omitted operator means
+charge. Charge calibration uses GHz/gain; flux calibration uses Phi0/gain and
+multiplies the derivative in GHz/Phi0. Signed complex crosstalk uses
+Re[c*z] = Re(c)*Re(z) - Im(c)*Im(z) for either operator.
+Flux drives keep that linearized DC operator throughout the round, including
+secular energy-basis rotations. They do not activate the shared engine's
+large-amplitude flux controls, filtering or flux-tail paths. Version 2 settings
+group physical values, named DC/drive lines, readout and numerics. Version 1 is
+not accepted.
 
 Readout uses the DC model and populations in its energy basis. FTF explicitly
 calls ADC's `normalize_populations` once after `batch_populations`, before
@@ -52,13 +59,14 @@ reported validation rule. FTF catches only that type, retains its count in
 preparations retain zero rejected rows. The source retains the latest
 evolve diagnostics even when this preparation fails, including the engine's
 report-only maximum trace error. Raw evolution densities remain unchanged.
-It ignores charge controls during or after readout. Earlier control portions still evolve
+It ignores drive-line controls during or after readout. Earlier control portions still evolve
 normally. Pulse readout requires exactly one active incident pulse per point, including
 mutually exclusive slots. Mux readout permits 1..8 coherent incident tones with
 a common pulse start. Every ADC observes the total shared-line field through its
 own demodulation, calibration, delay and sample grid. The physical resonator pair
 is unchanged; tones are not assigned to individual resonators. Controls evolve
-to the common readout start only. Separate readout blocks are not supported. Constant readout envelope values
+to the common readout start only. Separate readout blocks are not supported.
+Constant readout envelope values
 fold into amplitude with `envelope=None`, enabling the exact field solution.
 Conditional responses are solved once per distinct content, not per shot.
 

@@ -1,6 +1,6 @@
 # FTF YAML v2 欄位指南
 
-**Last updated:** 2026-10-18，mux receiver 設定
+**Last updated:** 2026-10-18，mux receiver 與 charge/flux drive 設定
 
 本指南對照 [default.yaml](default.yaml) 與 [entry-template.yaml](entry-template.yaml)。啟動方式見 [環境 README](README.md)。所有可接受的 YAML 欄位都列在下文；欄位驗證由 [resources.ftf](../../../lib/zcu_tools/resources/ftf/README.md) 負責，實際組裝與演化限制見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md)。
 
@@ -9,10 +9,10 @@
 ## 先分清楚三種設定
 
 - `chip` 描述 F1、coupler、F2 的物理參數。Flux noise 與耗散也是物理模型的一部分。
-- `dc_bias`、`drive_lines`、`readout` 描述 live DC 電源、charge microwave 接線與讀出訊號路徑。DC 電源設定靜態磁通工作點，微波線透過 charge operator 驅動迴路。
+- `dc_bias`、`drive_lines`、`readout` 描述 live DC 電源、charge/flux 接線與讀出訊號路徑。DC 電源設定靜態磁通工作點，drive line 透過所選 operator 驅動迴路。
 - `numerics` 決定基底維度、系統保留維度、solver 精度與亂數種子。它不描述晶片性質。
 
-FTF 支援 DC bias、不同 round 間的靜態磁通掃描、charge drive 與 readout。它不建構 flux line 或 flux controls，沒有 gate 內快速 flux-pulse 路徑。V2 沒有 `flux_lines`，即使填 `{}` 也會按未知欄位拒絕。這不是額外的 flux-pulse 偵測機制；未綁定 generator 沿用既有拒絕行為，沒有 flux-pulse 專用報錯。
+FTF 支援 DC bias、不同 round 間的靜態磁通掃描、charge drive、小訊號 flux drive 與 readout。Flux drive 使用固定 DC 工作點的一階線性算符，不是 gate 內逐時重算 H(Phi(t)) 的大振幅 fast-flux 路徑。V2 沒有 `flux_lines`，即使填 `{}` 也會按未知欄位拒絕。未綁定 generator 沿用既有拒絕行為。
 
 共享 `simulate` 引擎仍保留 flux schedule、source-line filter 與 flux-tail Dyson 能力，FTF 不使用這些控制。不要把 `chip` 的 flux-noise 或 flux-line loss 參數當成 flux-pulse 接線。
 
@@ -25,7 +25,7 @@ chip: # Physical circuits and couplings.
   # ...
 dc_bias: # Static offsets and live DC devices.
   # ...
-drive_lines: # Named charge microwave lines; may be omitted or empty.
+drive_lines: # Named charge/flux drive lines; may be omitted or empty.
   # ...
 readout: # Shared drive, two physical resonators and bound ADC receivers.
   # ...
@@ -41,11 +41,11 @@ numerics: # Basis sizes, solver accuracy and root RNG seed.
 | `version` | 格式版本，只接受整數 `2`，無單位 | 必填；v1 不相容，字串 `"2"` 也不接受 |
 | `chip` | 物理電路 record，見下一節 | 必填 |
 | `dc_bias` | 靜態磁通 offset 與具名電源 record | 必填 |
-| `drive_lines` | 名稱到 charge drive line 的 map | 可省略或填 `{}`，都停用 charge 控制；不可填 `null` |
+| `drive_lines` | 名稱到 charge/flux drive line 的 map | 可省略或填 `{}`，都停用 drive 控制；不可填 `null` |
 | `readout` | `drive`、`resonators`、`adc` | 必填，一個 drive、兩個 resonator；pulse 使用一個 ADC object，mux 使用 receiver list |
 | `numerics` | `truncation`、`solver` 與可選 `seed` | 必填 |
 
-`dc_bias.sources` 與 `drive_lines` 的 map key 是非空字串名稱。前者成為 live device 名稱，後者識別微波線，兩類名稱不可重複。`f1_bias`、`coupler_bias`、`f2_bias`、`microwave` 是樣板選用的名稱，不是新增的 YAML 欄位。
+`dc_bias.sources` 與 `drive_lines` 的 map key 是非空字串名稱。前者成為 live device 名稱，後者識別微波線，兩類名稱不可重複。`f1_bias`、`coupler_bias`、`f2_bias`、`f1_charge`、`f2_charge` 是樣板選用的名稱，不是新增的 YAML 欄位。
 
 所有三迴路 map 都必須含 `f1`、`coupler`、`f2`，沒有作用也要明寫零。這三個 key 指受影響的迴路，不是另外三條線。各 map 的單位由外層欄位決定：
 
@@ -53,7 +53,8 @@ numerics: # Basis sizes, solver accuracy and root RNG seed.
 | --- | --- | --- |
 | `dc_bias.offset_phi0` | 有限數，Phi/Phi0 | 三個值皆必填 |
 | `dc_bias.sources.<name>.flux_per_unit` | 有限 signed Phi0/A 或 Phi0/V | 三個值皆必填 |
-| `drive_lines.<name>.charge_drive_ghz_per_gain` | 每個迴路一筆 `{real: ..., imag: ...}`，GHz/gain | 三筆 record 皆必填，每筆兩個分量也必填 |
+| `drive_lines.<name>.charge_drive_ghz_per_gain` | 每個迴路一筆 `{real: ..., imag: ...}`，GHz/gain | charge line 必填三筆 record 與所有分量 |
+| `drive_lines.<name>.flux_drive_phi0_per_gain` | 每個迴路一筆 `{real: ..., imag: ...}`，Phi0/gain | flux line 必填三筆 record 與所有分量 |
 | `readout.resonators.r1.charge_coefficients_ghz`、`r2` 的同名欄位 | 有限 signed GHz | 每個 resonator 的三個值皆必填 |
 
 ## Chip：物理電路與耦合
@@ -128,20 +129,26 @@ loop_flux_phi0 = offset_phi0 + sum(live_source_value * flux_per_unit)
 
 樣板三個電源的 limits 都是 `[-0.01, 0.01]` A，等於 ±10 mA。`ramp_step: 0.000001` A 等於 0.001 mA。一般靜態掃描改的是 live source 值，不必為每個點重寫 `initial`。同一 round 內的快速磁通波形不在這個介面內。
 
-## Drive lines：charge microwave 校準
+## Drive lines：charge 與小訊號 flux 校準
 
-每一筆 `drive_lines.<name>` 代表一條 charge microwave line。樣板只有 `microwave` 一條，共用 generator 2，並同時作用於三個迴路。若要多條獨立線，每條都要有不同名稱與不同 `gen_ch`，且不得占用 readout generator。
+每一筆 `drive_lines.<name>` 代表一條獨立 generator 線。樣板有 `f1_charge` gen2 與 `f2_charge` gen3，均為 charge。每條線都要有不同名稱與不同 `gen_ch`，且不得占用 readout generator。
 
 | 欄位 | 用途 | 單位與合法範圍 | 必填／省略語意 |
 | --- | --- | --- | --- |
 | `gen_ch` | 綁定的 generator index | 無單位，整數 ≥ 0，整份文件中不得重複綁定 | 每條線必填 |
-| `charge_drive_ghz_per_gain` | 三迴路的複數 charge-drive 校準 map | 含 `f1`、`coupler`、`f2` 三筆 record | 每條線必填，不接受位置 list 或 amplitude/phase |
-| `charge_drive_ghz_per_gain.<loop>.real` | 複數係數的實部 | 有限 signed GHz/gain | 每個迴路必填 |
-| `charge_drive_ghz_per_gain.<loop>.imag` | 複數係數的虛部 | 有限 signed GHz/gain | 每個迴路必填 |
+| `operator` | 選擇驅動算符 | `charge` 或 `flux` | 省略為 `charge`，不接受 null |
+| `charge_drive_ghz_per_gain` | 三迴路的複數 charge 校準 map | 每筆含有限 signed `real`、`imag`，GHz/gain | charge line 必填，flux line 不可提供 |
+| `flux_drive_phi0_per_gain` | 三迴路的複數 flux 校準 map | 每筆含有限 signed `real`、`imag`，Phi0/gain | flux line 必填，charge line 不可提供 |
 
-對一個迴路，令 `c = real + i*imag`，程式的 signed gain 為 `g`、complex envelope 為 `w`。驅動項採 `Re[c*g*w*exp(i carrier)] * n`，carrier 包含程式指定的頻率與 phase。它乘完整 charge operator `n`，不隱藏 `n01` 正規化，也不另藏輸入 RWA 振幅因子。`imag` 的符號會影響 quadrature，不要把 `real`、`imag` 改成絕對值。
+校準 map 必含 `f1`、`coupler`、`f2`，不接受位置 list 或 amplitude/phase，也不接受 null。每條線只填所選 operator 的校準欄位，不可同時提供兩個。各迴路的獨立係數照舊表達串擾。
 
-只要不重做微波校準，一般使用者可保留樣板係數。樣板的三個迴路都是 `real: 0.1`、`imag: 0.0` GHz/gain，不是 F2 僅有小串擾。把某迴路兩個分量都填 0，才表示該線不驅動那個迴路。頻率、phase、signed gain 與 waveform 由 program 提供，不在這裡新增 YAML 欄位。
+對一個迴路，令 `c = real + i*imag`，程式的 signed gain 為 `g`、complex envelope 為 `w`。驅動項是 `Re[c*g*w*exp(i carrier)] * O`，carrier 含程式的 frequency 與 phase。Charge 的 O 是完整電荷 n，不隱藏 n01 正規化或輸入 RWA 振幅因子。Flux 的 O 是 FTF 現用 Hamiltonian 的 ∂(H/h)/∂f，f = Phi/Phi0，單位 GHz/Phi0。Phi0/gain 係數乘此算符後仍為 GHz/gain。兩種 operator 都保留 `imag` 的符號，Y quadrature 使用負虛部。
+
+Flux operator 在每 round 的 live DC 工作點用解析導數求值，經固定 local basis 與 retained joint basis 投影。Fluxonium 使用固定 oscillator 座標，H/h 的 Josephson 項是 `-EJ*cos(phi+2*pi*f)`，導數為 `2*pi*EJ*sin(phi+2*pi*f)`。非對稱 SQUID 使用 fixed theta，導數為 `pi*EJmax*[sin(pi*f)*cos(theta)+d*cos(pi*f)*sin(theta)]`。它不是單純相位算符，也不能在 asymmetry 非零時省略 SQUID 的 sin(theta) 項。
+
+這是 DC 附近的小訊號線性近似，drive 期間不隨振幅重算 H(Phi(t)) 或 basis。大振幅 fast-flux 不在此契約內。DC 校準仍由 `dc_bias.sources` 提供，樣板沒有交流 flux line。
+
+樣板的兩條 charge line 各對主迴路填 real 0.1、對 coupler 填 real 0.01、對另一 fluxonium 填 0，imag 全為 0，單位 GHz/gain。這些是模擬假設，不是實測校準。把某迴路兩個分量都填 0 才表示不驅動該迴路。Frequency、phase、signed gain 與 waveform 由 program 提供。
 
 ## Readout：drive → 物理 resonators → ADC
 
@@ -149,7 +156,7 @@ loop_flux_phi0 = offset_phi0 + sum(live_source_value * flux_per_unit)
 
 Resonator 的頻率、full-charge coupling 與 linewidth 決定物理響應。ADC 的 gain、phase、offset 與 noise 決定接收模型。把 ADC gain 調大不會改變 resonator photon number、物理 linewidth 或另外設定的 ADC noise PSD。
 
-FTF 在 readout 使用該 DC 工作點的模型與 energy-basis populations。Readout 開始前的 charge controls 會演化狀態；readout 期間及之後的 charge controls 不納入讀出計算。Pulse 模式每個 point 必須有恰好一個 active readout pulse。Mux 模式允許 1 至 8 個共用起點的 tone，每個 tone 有自己的 ADC。各 ADC 可有自己的 trigger windows，同一 shot index 的全部 ADC 共用一次 joint-state 抽樣，receiver noise 各自獨立。所有 tone 都進入同一條 line，每個 ADC 解調總場，不把 tone 固定對應到 r1 或 r2。模型假設 weak dispersive readout，強驅動下的適用性要另行確認。
+FTF 在 readout 使用該 DC 工作點的模型與 energy-basis populations。Readout 開始前的 charge/flux drive controls 會演化狀態；readout 期間及之後的 drive controls 不納入讀出計算。Pulse 模式每個 point 必須有恰好一個 active readout pulse。Mux 模式允許 1 至 8 個共用起點的 tone，每個 tone 有自己的 ADC。各 ADC 可有自己的 trigger windows，同一 shot index 的全部 ADC 共用一次 joint-state 抽樣，receiver noise 各自獨立。所有 tone 都進入同一條 line，每個 ADC 解調總場，不把 tone 固定對應到 r1 或 r2。模型假設 weak dispersive readout，強驅動下的適用性要另行確認。
 
 ### Drive
 
@@ -159,7 +166,7 @@ FTF 在 readout 使用該 DC 工作點的模型與 energy-basis populations。Re
 
 | 欄位 | 用途 | 單位與合法範圍 | 必填／省略語意 |
 | --- | --- | --- | --- |
-| `gen_ch` | 共用 readout generator | 無單位，整數 ≥ 0，不可與任一 charge drive 重複 | 必填 |
+| `gen_ch` | 共用 readout generator | 無單位，整數 ≥ 0，不可與任一 drive line 重複 | 必填 |
 | `input_per_gain` | Program gain 到 incident amplitude 的轉換 | sqrt(photons/ns)/gain，有限 signed 數，可為 0 | 必填，沒有猜測值 |
 
 Carrier、envelope 與 phase 由 program 提供。`input_per_gain` 是物理入射場的刻度，不是 ADC gain。
@@ -263,9 +270,9 @@ generator_count = max(readout.drive.gen_ch, all drive_lines.gen_ch) + 1
 readout_count = readout.adc.ro_ch + 1
 ```
 
-`gen_ch` 與 `ro_ch` 屬於不同索引空間，可以同為 0。每個 generator 只能綁一條 charge 或 readout line；共用線上的兩個元件共用同一個綁定，不是再綁兩次。Clock、DDS、firmware channel type 與 memory limits 使用固定 mock QICK capability profile，YAML 不提供 `channels` 或改 profile 的欄位。索引通過 schema 不代表任意 pulse 都符合該 profile。
+`gen_ch` 與 `ro_ch` 屬於不同索引空間，可以同為 0。每個 generator 只能綁一條 charge、flux 或 readout line；共用線上的兩個元件共用同一個綁定，不是再綁兩次。Clock、DDS、firmware channel type 與 memory limits 使用固定 mock QICK capability profile，YAML 不提供 `channels` 或改 profile 的欄位。索引通過 schema 不代表任意 pulse 都符合該 profile。
 
-樣板保留 readout gen0、microwave gen2，所以推導出 3 個 generator 與 1 個 readout。Gen1 是未綁定空洞，不能拿來播放另一條控制線，也不表示保留了 flux-pulse 能力。使用未綁定 generator 仍按既有行為拒絕。
+樣板保留 readout gen0、f1_charge gen2、f2_charge gen3，所以推導出 4 個 generator 與 1 個 readout。Gen1 是未綁定空洞，不能拿來播放另一條控制線，也不表示保留了 flux-pulse 能力。使用未綁定 generator 仍按既有行為拒絕。
 
 [Entry 範本](entry-template.yaml) 的具體對照如下，entry 路徑以 `components` 下的元件為起點。
 
@@ -274,12 +281,13 @@ readout_count = readout.adc.ro_ch + 1
 | F1 live DC | `dc_bias.sources.f1_bias`，`unit: A` | `Q1.flux_source: f1_bias`，`Q1.flux_unit: A` |
 | Coupler live DC | `dc_bias.sources.coupler_bias`，`unit: A` | `coupler.flux_source: coupler_bias`，`coupler.flux_unit: A` |
 | F2 live DC | `dc_bias.sources.f2_bias`，`unit: A` | `Q2.flux_source: f2_bias`，`Q2.flux_unit: A` |
-| Shared charge microwave | `drive_lines.microwave.gen_ch: 2` | `Q1.wiring.ch: 2`、`Q2.wiring.ch: 2` |
+| F1 charge line | `drive_lines.f1_charge.gen_ch: 2` | `Q1.wiring.ch: 2` |
+| F2 charge line | `drive_lines.f2_charge.gen_ch: 3` | `Q2.wiring.ch: 3` |
 | Shared readout drive | `readout.drive.gen_ch: 0` | `R1.wiring.ch: 0`、`R2.wiring.ch: 0` |
 | Shared ADC | `readout.adc.ro_ch: 0` | `R1.wiring.ro_ch: 0`、`R2.wiring.ro_ch: 0` |
 | Resonator 身分 | `readout.resonators.r1`、`.r2` | `R1`、`R2`；`Q1.resonator: R1`、`Q2.resonator: R2` |
 
-Coupler 有靜態 DC source，但沒有 `lo_flux_ch` 綁定。不要因為看到 `coupler.flux_source` 就替它填快速 flux channel。Shared microwave 的 coupler 係數仍會作用於模型中的 coupler，與 entry 是否有獨立 coupler pulse channel 是不同的事。
+Coupler 有靜態 DC source，但沒有 `lo_flux_ch` 綁定。不要因為看到 `coupler.flux_source` 就替它填快速 flux channel。兩條 charge line 的 coupler 串擾係數仍會作用於模型中的 coupler，與 entry 是否有獨立 coupler pulse channel 是不同的事。
 
 FTF YAML 和 entry 是兩份獨立文件，loader 不自動互改或互相比對。修改 source 名稱、unit、gen_ch 或 ro_ch 時，必須同步修改使用中的 entry 引用與 wiring。修改 energies 時也要同步 entry 的 EJ/EC/EL 或 EJmax/EC/d。樣板 `r1/r2.frequency_ghz` 是 7.19/7.08 GHz，entry 的 R1/R2.freq 是 7190/7080 MHz。Qubit frequency 隨 bias 改變，entry 保留 `null`，不能直接拿 EJ 當 transition frequency。
 
@@ -288,6 +296,6 @@ FTF YAML 和 entry 是兩份獨立文件，loader 不自動互改或互相比對
 1. 保留自己的工作副本，再以 [default.yaml](default.yaml) 的 v2 結構整理設定。V1 文件不能載入，沒有自動轉換或舊 key aliases。舊預覽若仍含 `flux_lines`，必須自行移除，空 map 也不合法。不要直接覆蓋還沒保存的本機調整。
 2. 先核對物理模型、DC source 名稱、A/V 單位、limits 與 offset。用 live DC 值選靜態工作點，只有校準改變時才調 `flux_per_unit`。
 3. 對照上表核對 YAML 與 entry 的 source 引用及 channel。環境只建立 live device，entry 不保存 driver；套用新範本不會自動更新既有 entry。
-4. 一般量測調整 program 的 frequency、phase、gain 與 waveform。只有重做微波或接收校準時，才修改 `charge_drive_ghz_per_gain`、`input_per_gain`、ADC gain/noise 等刻度。
+4. 一般量測調整 program 的 frequency、phase、gain 與 waveform。只有重做 drive 或接收校準時，才修改 `charge_drive_ghz_per_gain`、`flux_drive_phi0_per_gain`、`input_per_gain`、ADC gain/noise 等刻度。
 5. 分別檢查截斷與 solver 收斂。Schema 驗證只檢查格式、數值與接線限制，不會替你判斷物理適用性或精度。
 6. 修改 YAML 或環境後重啟 GUI／重建環境。`load_ftf` 只讀一次，不會 hot reload，也不會覆寫本機 `ftf.yaml` 或既有 entry。

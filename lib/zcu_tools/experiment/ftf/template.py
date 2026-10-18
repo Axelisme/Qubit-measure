@@ -48,7 +48,7 @@ class FTFTemplatePlan:
     """Detached numeric inputs for all points of one structural template.
 
     source: round-DC secular model source, including the Gibbs initial density.
-    batch: ns/GHz/rad charge drives at fixed DC flux, ending at readout start.
+    batch: ns/GHz/rad charge/flux drives at fixed DC, ending at readout start.
     readouts: per-ADC distinct pulse/grid contents at DC, in declaration order.
     No propagation, conditional field solve or random draws happen in planning.
     These inputs are author diagnostics, not public measurement metadata.
@@ -97,7 +97,7 @@ def _timeline_batch(
     template: TimelineTemplate,
     end_ns: NDArray[np.float64],
 ) -> TimelineBatch:
-    """Map charge controls onto the engine's fixed-DC schedule."""
+    """Map charge/flux drive tracks onto the engine's fixed-DC schedule."""
     microwave = {s.gen_ch: name for name, s in settings.drive_lines.items()}
     drives = []
     for event in template.events:
@@ -241,7 +241,7 @@ def plan_template(
     values, and template has point arrays in us/MHz/degrees. Support rounds to
     nearest 2 ns, ties even, without changing the common carrier origin. The
     first common-start readout block per point ends evolution; overlapping/later
-    charge controls do not affect the DC readout model. Constant complex
+    drive-line controls do not affect the DC readout model. Constant complex
     readout envelopes fold into amplitude, enabling the exact field solution.
     readout supplies detached author capabilities; None adapts current settings.
     Mux permits simultaneous coherent tones with independent ADC grids.
