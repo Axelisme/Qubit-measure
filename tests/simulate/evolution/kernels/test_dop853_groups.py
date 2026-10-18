@@ -243,3 +243,25 @@ def test_zero_tone_table_without_drive_slots_matches_lab_reference() -> None:
         [reference(case, row, state) for row, state in enumerate(case.states)]
     )
     np.testing.assert_allclose(actual, expected, atol=case.budget, rtol=0)
+
+
+def test_touching_rows_at_large_absolute_start_match_lab_frame_chain() -> None:
+    case = common_controls()
+    starts = case.table.start_ns.copy()
+    starts[:2] = [1e8, np.float64(1e8 + 0.1)]
+    case = replace(
+        case,
+        budget=1e-8,
+        table=replace(
+            case.table,
+            timeline=np.zeros(len(case.states), dtype=np.int64),
+            start_ns=starts,
+            duration_ns=np.full(len(case.states), 0.1),
+        ),
+    )
+    actual = evolve_rows(case, np.array([0, 1]))
+    # Integrate in local time to avoid rounding the oracle's absolute endpoint.
+    local = replace(case, table=replace(case.table, start_ns=np.zeros(len(starts))))
+    first = reference(local, 0, case.states[0])
+    second = reference(local, 1, first)
+    np.testing.assert_allclose(actual, np.stack([first, second]), atol=case.budget, rtol=0)
