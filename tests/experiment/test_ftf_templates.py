@@ -33,13 +33,15 @@ def test_template_units_common_phase_flat_readout_and_dc_model() -> None:
     np.testing.assert_allclose(track.phase_rad, [0.0, 0.0], atol=1e-14)
     np.testing.assert_array_equal(track.amplitude, [-0.2, -0.2])
     np.testing.assert_array_equal(plan.batch.end_ns, [8.0, 10.0])
-    pulse = plan.readout.pulses[0][0]
+    pulse = plan.readouts[0].batch.pulses[0][0]
     assert pulse.envelope is None
     assert pulse.amplitude == pytest.approx(0.2j)
     assert pulse.phase_rad == pytest.approx(np.pi / 6 - 12 * np.pi)
-    np.testing.assert_array_equal(plan.readout.grids[0][0].times_ns, [8, 9, 10, 11])
     np.testing.assert_array_equal(
-        plan.readout.model.receiver.noise_covariance, np.zeros((2, 2))
+        plan.readouts[0].batch.grids[0][0].times_ns, [8, 9, 10, 11]
+    )
+    np.testing.assert_array_equal(
+        plan.readouts[0].batch.model.receiver.noise_covariance, np.zeros((2, 2))
     )
 
 
@@ -132,7 +134,8 @@ def test_readout_ignores_controls_after_start_and_rejects_multiple_pulses() -> N
         engine.close()
     np.testing.assert_array_equal(results[0].densities, results[1].densities)
     np.testing.assert_array_equal(
-        plans[0].readout.model.frequencies_ghz, plans[1].readout.model.frequencies_ghz
+        plans[0].readouts[0].batch.model.frequencies_ghz,
+        plans[1].readouts[0].batch.model.frequencies_ghz,
     )
     with pytest.raises(ValueError, match="one.*readout"):
         ftf.plan_template(
@@ -263,10 +266,15 @@ def test_template_wires_receiver_delay_and_mismatch_without_delaying_evolution()
         }
     )
     plan = plan_template(configured, snapshot(), template())
-    assert getattr(plan.readout.model.receiver, "time_of_flight_ns", None) == 400.0
+    assert (
+        getattr(plan.readouts[0].batch.model.receiver, "time_of_flight_ns", None)
+        == 400.0
+    )
     np.testing.assert_array_equal(
-        getattr(plan.readout.model, "mismatch_phase_rad", None), [0.6, -0.4]
+        getattr(plan.readouts[0].batch.model, "mismatch_phase_rad", None), [0.6, -0.4]
     )
     np.testing.assert_array_equal(plan.batch.end_ns, [8.0, 10.0])
-    assert plan.readout.pulses[0][0].start_ns == 8.0
-    np.testing.assert_array_equal(plan.readout.grids[0][0].times_ns, [8, 9, 10, 11])
+    assert plan.readouts[0].batch.pulses[0][0].start_ns == 8.0
+    np.testing.assert_array_equal(
+        plan.readouts[0].batch.grids[0][0].times_ns, [8, 9, 10, 11]
+    )

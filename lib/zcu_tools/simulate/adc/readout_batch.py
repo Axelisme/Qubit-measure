@@ -41,7 +41,7 @@ class ReadoutBatch:
     model: DC ReadoutModel; its state order defines the conditional-state axis.
         Frequencies are GHz, times ns and phases radians. No flux tail or
         overlapping pulse/flux correction is applied.
-    pulses: one tuple per distinct content, each containing exactly one finite
+    pulses: one tuple per distinct content, each containing one or more finite
         ReadoutPulse. Pulses are shared by all reads of that content.
     grids: one tuple of SampleGrid per content, in read order. Every content
         has the same positive number of reads. Grids retain physical timing
@@ -64,8 +64,8 @@ class ReadoutBatch:
     def __post_init__(self) -> None:
         if not self.pulses or len(self.grids) != len(self.pulses):
             raise ValueError("pulse and grid content counts must match and be nonempty")
-        if any(len(pulses) != 1 for pulses in self.pulses):
-            raise ValueError("each readout content must contain exactly one pulse")
+        if any(not pulses for pulses in self.pulses):
+            raise ValueError("each readout content must contain at least one pulse")
         reads = len(self.grids[0])
         if not reads or any(len(grids) != reads for grids in self.grids):
             raise ValueError("grid contents must have the same positive read count")

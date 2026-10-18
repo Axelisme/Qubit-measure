@@ -53,9 +53,12 @@ preparations retain zero rejected rows. The source retains the latest
 evolve diagnostics even when this preparation fails, including the engine's
 report-only maximum trace error. Raw evolution densities remain unchanged.
 It ignores charge controls during or after readout. Earlier control portions still evolve
-normally. Each point must have exactly one active readout pulse, including when
-several mutually exclusive slots represent that pulse. The environment supports
-one bound ADC with multiple trigger windows. Constant readout envelope values
+normally. Pulse readout requires exactly one active incident pulse per point, including
+mutually exclusive slots. Mux readout permits 1..8 coherent incident tones with
+a common pulse start. Every ADC observes the total shared-line field through its
+own demodulation, calibration, delay and sample grid. The physical resonator pair
+is unchanged; tones are not assigned to individual resonators. Controls evolve
+to the common readout start only. Separate readout blocks are not supported. Constant readout envelope values
 fold into amplitude with `envelope=None`, enabling the exact field solution.
 Conditional responses are solved once per distinct content, not per shot.
 
@@ -65,12 +68,23 @@ to zero. Delay does not move evolution's endpoint, pulse support or ADC grids.
 ADC owns the causal output shift, absolute carrier delay phase, per-resonator
 scattering phase and conjugation to microwave I+iQ before calibration/noise.
 
+`FTFReadoutConfig(kind, receivers)` is the detached author configuration below
+settings. `readout_configuration` is its settings adapter. `plan_template` and
+`FTFSource` accept an explicit `readout=` override; private replay rejects an
+override that cannot be reconstructed from captured settings. Plans expose
+`readouts`, an ordered tuple of `FTFReadoutPlan(channel, batch)`, not a singleton.
+Each batch contains every incident tone and that ADC's grids. Mux batches use the
+general multi-carrier field solver; single-carrier fast paths remain unchanged.
+
 The receiver noise PSD is two-sided, in ADC sample units squared times ns.
 Discrete sample covariance is PSD/dt_ns using the ADC output rate. Receiver gain
 does not scale noise. Integrated acquisition returns `RoundStatistics` with joint
-state counts and channel totals. Decimated acquisition returns `RoundSignals`,
+state counts shared across all ADCs/reads, and separate channel totals. Decimated acquisition returns `RoundSignals`,
 reordering point-major samples into QICK loop order. The adapter owns packing,
-rounding, deferred raw generation and averaging.
+rounding, deferred raw generation and averaging. All channels at the same shot
+index share one sampled joint state; receiver noise is independent. There is no
+extra tone axis: each declared ADC has its own raw-shot array. Output follows
+program ADC declaration order, which is mux tone order, not sorted channel index.
 
 The model assumes weak dispersive readout, independent weak-coupling Markov
 secular baths and exponential echo-characteristic dephasing. Truncations and
