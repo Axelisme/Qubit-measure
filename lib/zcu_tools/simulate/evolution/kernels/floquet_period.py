@@ -108,6 +108,20 @@ class PeriodData:
 
 
 @dataclass(frozen=True)
+class PeriodAnchor:
+    """Evolve-local anchor product, never stored as a resident payload.
+
+    period is the independently built CF4 trajectory and its playback data.
+    interaction holds exp(+2*pi*i*H0*t) U(t) only for carrier interpolation;
+    gain anchors omit it because their identical H0 phases cancel algebraically.
+    WorkPlan resources own and release this product after consumer handoff.
+    """
+
+    period: PeriodData
+    interaction: NDArray[np.complex128] | None = None
+
+
+@dataclass(frozen=True)
 class _Periods:
     entries: tuple[PeriodData, ...]
 
@@ -164,8 +178,9 @@ class _Hamiltonian(NamedTuple):
 
 @dataclass(frozen=True)
 class _Neighbour:
-    gain: float
+    coordinate: float
     period: PeriodData
+    interaction: NDArray[np.complex128] | None = None
 
 
 def _continued_prefixes(
@@ -174,7 +189,7 @@ def _continued_prefixes(
     gain: float,
     tolerance: float,
 ) -> tuple[NDArray[np.float64], NDArray[np.complex128]] | None:
-    # Interpolate only gain between fixed anchors in the interaction picture, then
+    # Interpolate gain or carrier between fixed anchors in the interaction picture, then
     # independently check the new key with the original coarse-grid probes.
     h0, x, y, frequency = context
     count = len(neighbours[-1].period.times) - 1
@@ -182,8 +197,9 @@ def _continued_prefixes(
         n.period.magnus is None or len(n.period.times) != count + 1 for n in neighbours
     ):
         return None
-    coordinates = [n.gain for n in neighbours]
-    target = gain
+    coordinates = [n.coordinate for n in neighbours]
+    carrier_axis = neighbours[0].interaction is not None
+    target = frequency if carrier_axis else gain
     if len(set(coordinates)) != len(coordinates):
         return None
     period = 1 / abs(frequency)
@@ -192,10 +208,9 @@ def _continued_prefixes(
     if count < finer_count(coarse_size):
         return None
     times = np.linspace(0.0, period, count + 1)
-    # Identical model, carrier and uniform grid give every predecessor the
-    # same analytic H0 phase. The interaction-picture transform and inverse
-    # cancel algebraically in this linear combination; avoid repeated complex
-    # exponentials and their roundoff without changing the predictor.
+    # Gain anchors have identical model, carrier and uniform grid. Their H0
+    # phases cancel algebraically, avoiding repeated exponentials and roundoff.
+    # Carrier anchors instead require the explicit IP transform below.
     weights = []
     for index in range(len(neighbours)):
         weight = 1.0
@@ -203,9 +218,22 @@ def _continued_prefixes(
             if other != index:
                 weight *= (target - coordinate) / (coordinates[index] - coordinate)
         weights.append(weight)
-    candidate = _interpolate_prefixes(
-        tuple(n.period.coefficients for n in neighbours), tuple(weights)
-    )
+    if carrier_axis:
+        interactions = tuple(
+            n.interaction for n in neighbours if n.interaction is not None
+        )
+        if len(interactions) != len(neighbours):
+            return None
+        candidate = _interpolate_prefixes(interactions, tuple(weights))
+        # Equal phase q means different physical times at different carriers.
+        # Restore this key's lab frame only after interpolating IP trajectories.
+        candidate *= np.exp(
+            -2j * np.pi * times[:, None, None] * np.diag(h0)[None, :, None]
+        )
+    else:
+        candidate = _interpolate_prefixes(
+            tuple(n.period.coefficients for n in neighbours), tuple(weights)
+        )
     _, coarse = _magnus_prefixes(h0, x, y, frequency, coarse_size)
     error = float(
         np.max(
@@ -269,7 +297,10 @@ def _build(
         tolerance = min(1e-4, budget * 0.1)
         continued = (
             _continued_prefixes(
-                neighbours, _Hamiltonian(h0, x, y, frequency), gain, tolerance
+                neighbours,
+                _Hamiltonian(h0, x, y, frequency),
+                gain,
+                tolerance,
             )
             if neighbours is not None
             else None
@@ -310,6 +341,107 @@ def _build(
     return PeriodData(
         *arrays, split_rate(model, port, frequency, gain, work_plan), magnus, spectrum
     )
+
+
+def _build_anchor(
+    model: SecularModel, tone: _Tone, context: KernelContext, *, carrier_axis: bool
+) -> PeriodAnchor:
+    period = _build(
+        model, tone, context.budget, PeriodBuilder("cf4"), work_plan=context.work_plan
+    )
+    if not carrier_axis:
+        return PeriodAnchor(period)
+    energies = model.energies_ghz - model.energies_ghz[0]
+    interaction = (
+        np.exp(2j * np.pi * period.times[:, None, None] * energies[None, :, None])
+        * period.coefficients
+    )
+    return PeriodAnchor(period, interaction)
+
+
+def _prepare_entry(
+    model: SecularModel, tone: _Tone, context: KernelContext
+) -> PeriodData:
+    # Both interpolation axes share admission, single-flight construction and
+    # release. Only their physical coordinates and IP transform differ.
+    from .._gain_plan import (
+        build_plan,
+        carrier_anchor_resource,
+        carrier_build_plan,
+        gain_anchor_resource,
+        period_builder,
+    )
+
+    port, frequency, gain = tone
+    planned = build_plan(context, model, port, frequency, gain)
+    carrier = (
+        carrier_build_plan(context, model, port, frequency, gain)
+        if planned is None
+        else None
+    )
+    builder = (
+        period_builder(model, port, frequency, gain) if planned is None else planned[1]
+    )
+    consumer = frequency if carrier is not None else gain
+    if carrier is not None:
+        coordinates = (
+            (frequency,) if frequency in carrier.anchors_ghz else carrier.anchors_ghz
+        )
+        dependencies = [
+            (a, carrier_anchor_resource(context, carrier, a)) for a in coordinates
+        ]
+    elif planned is not None:
+        dependencies = [
+            (a, gain_anchor_resource(context, planned[0], a)) for a in builder.anchors
+        ]
+    else:
+        dependencies = []
+    # Repeated keys never reopen a handed-off or released dependency.
+    reusable = dependencies and all(
+        not handle.released
+        and (
+            consumer in handle.remaining_consumers
+            or (not handle.sealed and consumer not in handle.actual_consumers)
+        )
+        for _, handle in dependencies
+    )
+    if not reusable:
+        return _build(model, tone, context.budget, builder, work_plan=context.work_plan)
+    for _, handle in dependencies:
+        if not handle.sealed:
+            handle.admit(consumer)
+    neighbours = []
+    for coordinate, handle in dependencies:
+        anchor_tone = (
+            _Tone(port, coordinate, gain)
+            if carrier is not None
+            else _Tone(port, frequency, coordinate)
+        )
+        anchor = handle.get(
+            partial(
+                _build_anchor,
+                model,
+                anchor_tone,
+                context,
+                carrier_axis=carrier is not None,
+            )
+        )
+        neighbours.append(_Neighbour(coordinate, anchor.period, anchor.interaction))
+    entry = (
+        neighbours[0].period
+        if len(dependencies) == 1 and dependencies[0][0] == consumer
+        else _build(
+            model,
+            tone,
+            context.budget,
+            builder,
+            work_plan=context.work_plan,
+            neighbours=neighbours,
+        )
+    )
+    for _, handle in dependencies:
+        handle.handoff(consumer)
+    return entry
 
 
 @njit(nogil=True, cache=True)
@@ -700,8 +832,6 @@ class FloquetPeriodKernel:
             raise ValueError("Floquet period representatives must match keys")
         if not self.guard(table, rows, context).all():
             raise ValueError("Floquet period representatives must pass guard")
-        from .._gain_plan import build_plan, gain_anchor_resource, period_builder
-
         entries = []
         for key in keys:
             model = source.model(tuple(int(v) for v in key["level"]))
@@ -710,72 +840,7 @@ class FloquetPeriodKernel:
                 float(key["frequency"]),
                 float(key["gain"]),
             )
-            planned = build_plan(context, model, port, frequency, gain)
-            builder = (
-                period_builder(model, port, frequency, gain)
-                if planned is None
-                else planned[1]
-            )
-            dependencies = (
-                [
-                    (a, gain_anchor_resource(context, planned[0], a))
-                    for a in builder.anchors
-                ]
-                if planned is not None
-                else []
-            )
-            # Repeated keys never reopen a handed-off or released dependency.
-            reusable = dependencies and all(
-                not handle.released
-                and (
-                    gain in handle.remaining_consumers
-                    or (not handle.sealed and gain not in handle.actual_consumers)
-                )
-                for _, handle in dependencies
-            )
-            if not reusable:
-                entry = _build(
-                    model,
-                    _Tone(port, frequency, gain),
-                    budget,
-                    builder,
-                    work_plan=context.work_plan,
-                )
-            else:
-                for _, handle in dependencies:
-                    if not handle.sealed:
-                        handle.admit(gain)
-                neighbours = [
-                    _Neighbour(
-                        a,
-                        handle.get(
-                            partial(
-                                _build,
-                                model,
-                                _Tone(port, frequency, a),
-                                budget,
-                                PeriodBuilder("cf4"),
-                                work_plan=context.work_plan,
-                            )
-                        ),
-                    )
-                    for a, handle in dependencies
-                ]
-                entry = (
-                    neighbours[0].period
-                    if builder.anchors == (gain,)
-                    else _build(
-                        model,
-                        _Tone(port, frequency, gain),
-                        budget,
-                        builder,
-                        work_plan=context.work_plan,
-                        neighbours=neighbours,
-                    )
-                )
-                for _, handle in dependencies:
-                    handle.handoff(gain)
-            entries.append(entry)
+            entries.append(_prepare_entry(model, _Tone(port, frequency, gain), context))
         return _Periods(tuple(entries))
 
     def admit_prepared(
