@@ -397,3 +397,81 @@ def test_gate_cache_and_row_rwa_share_window_excluded_shifts():
         )
         results.append(actual)
     np.testing.assert_allclose(results[0], results[1], atol=2e-7, rtol=0)
+
+
+def constant_pair(offsets=(0.0, 0.0)):
+    """Small coupled pair with a 32.049 MHz conditional double excitation."""
+    energies = np.array([0.0, 6.7, 7.5, 14.232049])
+    drives = []
+    for name, edges in (("a", ((0, 1), (2, 3))), ("b", ((0, 2), (1, 3)))):
+        positive = np.zeros((4, 4), dtype=np.complex128)
+        for i, j in edges:
+            positive[i, j] = 0.01
+        drives.append(
+            SecularDrive(name, positive + positive.T, 1j * (positive - positive.T))
+        )
+    model = SecularModel(
+        (0,),
+        "conditional-pair",
+        energies,
+        np.eye(4, dtype=np.complex128),
+        tuple(drives),
+        np.zeros((4, 4)),
+        np.zeros((4, 4)),
+    )
+    vector = np.array([1, 1j, -1, 1], dtype=np.complex128) / 2
+    source = ModelSource(
+        np.outer(vector, vector.conj()), lambda level: replace(model, level=level)
+    )
+    tracks = tuple(
+        DriveTrack(
+            name,
+            np.array([0.0]),
+            np.array([128.0]),
+            np.array([frequency + offset]),
+            np.array([0.3]),
+            np.array([1.0]),
+            (EnvelopeSpec("constant"),),
+            np.array([0]),
+            np.array([True]),
+        )
+        for name, frequency, offset in zip(("a", "b"), (6.7, 7.5), offsets, strict=True)
+    )
+    batch = TimelineBatch(
+        np.array([0]),
+        tracks,
+        FluxSchedule(np.array([0, 1]), np.array([0.0]), np.array([[0]])),
+        np.array([128.0]),
+    )
+    return source, batch
+
+
+def test_constant_pair_uses_joint_rwa_and_preserves_coherent_joint_input():
+    source, batch = constant_pair()
+    with closing(Engine(1, 1000000)) as engine:
+        result = engine.evolve(source, (batch,), cancel=Event())
+    assert result.paths.segments_by_kernel == {"multitone_rwa": 1}
+    # A tight-budget Engine must retain full-drive dynamics as the reference.
+    with closing(Engine(1, 1000000)) as engine:
+        reference_result = engine.evolve(source, (batch,), budget=1e-7, cancel=Event())
+    np.testing.assert_allclose(
+        result.densities, reference_result.densities, atol=0.01, rtol=0
+    )
+    assert np.max(np.abs(result.densities[0] - source.initial_density)) > 0.01
+
+
+@pytest.mark.parametrize("offsets", [(0.084, -0.052), (0.084, 0.084)])
+def test_constant_combination_resonance_returns_to_lab_even_without_retained_edges(
+    offsets,
+):
+    source, safe = constant_pair()
+    _, risky = constant_pair(offsets)
+    # First prove the domain is enabled; rejecting every constant row is not
+    # combination admission. Sum and difference resonances both need fallback.
+    with closing(Engine(1, 1000000)) as engine:
+        admitted = engine.evolve(source, (safe,), cancel=Event())
+        rejected = engine.evolve(source, (risky,), cancel=Event())
+    assert (admitted.paths.segments_by_kernel, rejected.paths.segments_by_kernel) == (
+        {"multitone_rwa": 1},
+        {"dop853": 1},
+    )
