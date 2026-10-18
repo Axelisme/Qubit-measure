@@ -40,3 +40,27 @@ RunContext 提供相容的 soc/soccfg、caller-owned Plots 與每次新建的 St
 Options 沿用單 qubit Len Rabi。`decay=True` 預設擬合衰減 cosine，可關閉。`fit_phase=False` 預設固定 0°，由 signed amplitude 涵蓋兩個方向；啟用後擬合自由 phase。Fitter 擁有 π/π/2 length 與 covariance 誤差傳播，不另外實作模型。Length 及其 one-sigma errors 是 us，Rabi frequency 及其 error 是 MHz。Fit quality 使用本次有限觀測、模型與 covariance，不更動校準政策。數值 fit 成功不表示小截斷模擬或低品質曲線足以校準。
 
 `save_run(source, path, metadata=...)` 保存同次完整 cfg、原始 indices、每條 length 軸與 complex IQ。Native 的 length 座標使用 seconds。`load_run(path)` 還原同次來源，不讀目前表單、library 或 waveform bytes。Cfg 保留原 drive pulse/ramp 供後續 proposal 使用，但 arb path 不會把 asset bytes 封存進 native 檔案。Caller 根據停止狀態填寫 complete、partial 或 stopped，不能把 NaN partial 報為完整成功。
+
+## Adapter source and proposals
+
+`MuxLenRabiAdapter` in `gui.py` uses the explicit Run/Load record and its capture.
+It is not registered in the catalog yet; this leaf has no generated Form or
+recipe entry. The adapter alone is not a GUI launch path.
+
+Summary rows retain original tone `position`, source `name` and each fit or failure
+reason. Q3/Q1 produces rows for indices 2/0, not renumbered 0/1. Fit-quality
+errors identify the corresponding summary row. Current Form edits do not change
+these results or repair missing source names.
+
+A successful, fully finite tone proposes `<qubit>.ext.rabi_freq` in MHz. With
+source cfg, it also copies the measured const/flat_top pulse and proposes fitted
+pi/pi2 lengths to `<qubit>.pulses.pi_amp` and `<qubit>.pulses.pi2_amp`.
+Separate candidates point `module.x180` and `module.x90` to those library keys.
+The `ext.pi_product` candidate uses the source gain times fitted pi length.
+No proposal stretches or crops an arb asset, or replaces the source pulse with
+current library contents. Missing capture yields no proposals; inconsistent
+captured bindings raise. Failed or partial rows yield none.
+
+Review the source shape and flat_top ramp, destinations, quality and uncertainty.
+Analyze and proposal creation do not write. Apply each intended candidate
+explicitly, including a slot update when wanted.

@@ -107,3 +107,22 @@ complete/partial/stopped from the run outcome.
 This core makes no calibration proposal. A later caller can use a usable Echo
 fit for T2E, independently of unavailable detune. NaN actual detune must never be
 replaced by a guessed frequency correction.
+
+## Adapter source and proposals
+
+`MuxT2EchoAdapter` in `gui.py` uses the explicit Run/Load record and its capture.
+It is not registered in the catalog yet; this leaf has no generated Form or
+recipe entry. The adapter alone is not a GUI launch path.
+
+Summary rows include original tone `position`, source `name`, fit model, quality
+and values, or a failure reason. Q3/Q1 gives indices 2/0 in that row order.
+Quality errors identify the summary row. Missing source cfg leaves the name
+unavailable; the adapter does not read current settings to reconstruct it.
+
+A successful, fully finite tone proposes its captured qubit's `t2e` in us and
+a T2E sample at captured bias. Echo does not propose a frequency correction.
+Unavailable actual detune does not suppress an otherwise usable T2E fit.
+Missing capture produces no proposals; inconsistent captured bindings raise.
+Failed and partial rows produce none. Inspect the model, quality, uncertainty
+and captured destination before explicitly applying individual items.
+Analyze and proposal creation do not write.

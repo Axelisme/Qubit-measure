@@ -99,3 +99,27 @@ from the run outcome, not from the existence of IQ.
 This core produces no proposal. A later calibration caller must require a usable
 fringe fit, source frequency and actual detune before considering a Ramsey
 frequency correction. NaN detune does not meet that requirement.
+
+## Adapter source and proposals
+
+`MuxT2RamseyAdapter` in `gui.py` uses the explicit Run/Load record and its capture.
+It is not registered in the catalog yet; this leaf has no generated Form or
+recipe entry. The adapter alone is not a GUI launch path.
+
+Summary rows include original tone `position`, source `name`, selected fit model,
+quality and values, or a failure reason. Q3/Q1 retains indices 2/0 in that row
+order. Missing source cfg leaves the name unavailable; current settings do not
+supply it. Quality errors point to the corresponding summary row.
+
+Each successful, fully finite tone proposes `<qubit>.t2r` in us and a T2R sample
+at captured bias. A frequency candidate additionally requires source cfg, a
+fringe fit, finite source carrier, finite actual detune and finite fitted fringe
+rate. It proposes source carrier + actual detune - fitted fringe rate in MHz.
+NaN actual detune suppresses only this correction; it is never replaced by zero
+or nominal detune. The usable coherence result remains available.
+
+Destinations come only from the same Run/Load capture. Missing capture produces
+no proposals; inconsistent captured bindings raise. Failed or partial rows
+produce none. Inspect phase/rate conventions, quality, uncertainty and destination
+before explicitly applying individual items. Analysis and proposal creation do
+not write.

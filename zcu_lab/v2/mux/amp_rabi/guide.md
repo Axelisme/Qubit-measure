@@ -36,3 +36,27 @@ Program 平均 reps/rounds，completed-round hook 保留目前點已完成 round
 分析沿用單 qubit undamped Rabi fitter 與 zero-gain phase 政策。Options.skip 先移除前幾個 zip 點，每條曲線再保留有限 IQ，至少需要六點。每個原始 index 回傳 `MuxAmpRabiFit` 或帶原因的 `MuxFitFailure`。Fit 圖命名 `fit_i`。π/π/2 gain 與誤差都是 normalized gain。Fit quality 不改 fitter 或校準政策，數值 fit 成功不代表資料足以校準。
 
 `save_run(source, path, metadata=...)` 保存同次完整 cfg、原始 indices、獨立 gain 座標與 complex IQ。`load_run(path)` 還原 explicit source，不以目前 cfg 補歷史資料。Caller 根據 StopSignal 填寫 complete、partial 或 stopped，不把未取得的 NaN 報為完整成功。
+
+## Adapter source and proposals
+
+`MuxAmpRabiAdapter` in `gui.py` uses the explicit Run/Load record and its capture.
+It is not registered in the catalog yet; this leaf has no generated Form or
+recipe entry. The adapter alone is not a GUI launch path.
+
+Summary rows retain the original tone `position` and source `name`, including failed
+fits and their reasons. Rows follow participants order, so Q3/Q1 gives indices
+2/0. Fit-quality errors identify the corresponding summary row. Current Form
+edits do not alter these results or supply missing source names.
+
+For each successful, fully finite tone, the adapter copies that source cfg's
+pulse and proposes pi/pi2 gain updates to `<qubit>.pulses.pi_amp` and
+`<qubit>.pulses.pi2_amp`. Separate candidates point `module.x180` and
+`module.x90` at those library keys. It also proposes `ext.pi_product` from the
+fitted pi gain times the source pulse's scalar length. It does not fetch a
+replacement pulse from the current library. Without source cfg it cannot build
+these pulse proposals. Missing capture yields no proposals; inconsistent captured
+bindings raise. Failed or partial rows yield none.
+
+Inspect pulse shape, destination, fit quality and uncertainty in the proposed
+items. Analyze and proposal creation do not write; applying one item does not
+implicitly apply the module-slot or other candidates.

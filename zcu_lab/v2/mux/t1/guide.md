@@ -119,6 +119,23 @@ the captured `RunRecord`; changing a current cfg does not change the saved sourc
 Canonical saving requires cfg. `save_run`/`load_run` use native HDF5; inherited
 `save` is a Labber export, not the inverse of native `load`.
 
-This leaf has no Form, recipe, catalog registration, component proposal or UI
-writeback. Those callers must use their captured binding and completion evidence;
-the numerical core does not infer component identity from readout labels.
+The numerical core does not infer component identity from readout labels.
+The adapter below owns component proposals using the captured binding.
+
+## Adapter source and proposals
+
+`MuxT1Adapter` in `gui.py` connects the core to explicit Run/Load sources.
+It is not registered in the catalog yet; this leaf has no generated Form or
+recipe entry. The adapter alone is not a GUI launch path.
+
+Summary rows retain each original tone `position`, source `name`, fitted values and
+quality, or a failure reason. Q3/Q1 gives indices 2/0 in that row order. Quality
+errors identify the summary row. Missing source cfg leaves the name unavailable;
+the adapter does not reconstruct it from current settings.
+
+Each successful, fully finite row proposes its captured qubit's `t1` in us with
+its fitted error, plus a T1 sample at captured bias. The destination comes only
+from the same Run/Load capture's full binding. Missing capture produces no
+proposals; inconsistent captured bindings raise. Failed and partial rows produce
+none. Inspect the decay model, quality, uncertainty and destination before Apply.
+Analyze and proposal creation do not write or apply candidates.

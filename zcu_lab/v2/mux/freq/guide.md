@@ -38,3 +38,23 @@ outcomes = core.analyze(source, core.Options(), plots=analysis_plots)
 分析沿用單 qubit lor/sinc fitter，每條曲線至少要有六個有效點。每個原始 index 回傳 `MuxFreqFit` 或帶原因的 `MuxFitFailure`，並建立 `fit_i`。Frequency、FWHM 及誤差單位都是 MHz。Fit quality 只描述該次模型，不保證可校準。
 
 `save_run(source, path, metadata=...)` 保存同次完整 cfg、原始 indices、獨立座標與 complex IQ。Native 的 frequency 座標使用 Hz。`load_run(path)` 還原 explicit source，不讀目前表單。保存時由 caller 根據 StopSignal 填寫 complete、partial 或 stopped，不把 NaN partial 報為完整。
+
+## Adapter source and proposals
+
+`MuxFreqAdapter` in `gui.py` connects the core to explicit Run/Load sources.
+It is not registered in the catalog yet; this leaf has no generated Form or
+recipe entry. The adapter alone is not a GUI launch path.
+
+Its summary lists each acquired tone's original `position`, source `name`, fit
+values and fit-quality diagnostics, or a failure reason. Rows follow
+participants order. With Q3/Q1, row 0 describes index 2, not index 0.
+The name is unavailable when source cfg is absent; the current Form does not
+supply a replacement.
+
+A successful, fully finite tone proposes that captured qubit's `freq` and
+`kappa` in MHz, plus a frequency sample at the captured bias. The destination
+comes only from the same Run/Load capture's complete qubit binding, never from
+readout labels or current aliases. Missing capture produces no proposal;
+inconsistent captured bindings raise. Failed or partially acquired rows produce
+no proposals. Analyze and proposal creation do not write. Review the destination,
+fit quality and uncertainty before explicitly applying individual candidates.

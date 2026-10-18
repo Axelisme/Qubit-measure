@@ -164,3 +164,29 @@ Small truncations and short smoke programs do not establish model convergence,
 calibrated probe pulses or reliable readout fits. A poor or failed fit remains
 visible as quality evidence or a per-tone failure, not a reason to change the
 fitter or splice separately simulated shots.
+
+## Adapter source and proposals
+
+`MuxGEAdapter` in `gui.py` uses explicit Run/Load sources. Its primary and post
+operations publish `fit_i` and `post_i` through the existing GE plot owner,
+where i is the original tone index. It is not registered in the catalog yet;
+this leaf has no generated Form or recipe entry. The adapter alone is not a GUI
+launch path.
+
+Both summaries retain original `position`, source `name` and per-tone results or
+failure reasons. Q3/Q1 gives indices 2/0 in that row order. Quality diagnostics
+identify the corresponding summary row. Missing source cfg leaves the name
+unavailable; the current Form does not supply it. Post-analysis must use the
+primary from the same Run/Load source, not a later Run's primary.
+
+A successful, fully finite primary row passes the GE calibration validity check
+before proposing `ext.readout_cal.fidelity`, `sigma`, `g_center` and
+`e_center` on the captured qubit. Post proposals contain `radius` and the
+existing 3x3 `confusion_matrix`, including the isolated-other diagnostic.
+These are per-qubit GE calibrations, not a four-state joint assignment matrix.
+
+Destinations come only from the same Run/Load capture's full binding. Missing
+capture yields no proposals; inconsistent captured bindings raise. Failed or
+partial rows yield none. Review cluster separation, quality, confusion diagnostics
+and destination before explicitly applying individual items. Analysis, post and
+proposal creation do not write or apply candidates.
