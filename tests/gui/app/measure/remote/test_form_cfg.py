@@ -19,6 +19,69 @@ from ._form_rpc import FormRpc, ModuleRpcAdapter, ModuleRpcCfg
 from ._helpers import Fixture
 
 
+def test_indexed_module_rpc_and_single_read_elements_keep_sibling_drafts(form_rpc):
+    from tests.gui.form_adapter._indexed_models import indexed_env
+
+    from ._form_rpc import IndexedRpcAdapter
+
+    fixture, _, rpc = form_rpc
+    context = fixture.ctrl.context_control
+    library = indexed_env().library
+    assert library is not None
+    context.set_module(
+        context.read_context().target,
+        "Q.pulses.drive",
+        library.module_spec("Q.pulses.drive"),
+    )
+    fixture.registry.register("indexed-rpc", IndexedRpcAdapter)
+    tab = fixture.ctrl.new_tab("indexed-rpc")
+    try:
+        owner = fixture.ctrl.cfg_resources.lookup(tab)
+        owner.write(
+            {("tones", 0, "phase"): {"expr": "1 / 0"}, ("participants",): ["B"]}
+        )
+        sibling = owner.input.data["tones"][0]
+        read = rpc.call(
+            "tab.read_module", {"tab_id": tab, "field": ["tones", 1, "drive"]}
+        )
+        assert read["ok"], read
+        assert read["result"]["value"]["gain"] == 0.2
+        copied = rpc.call(
+            "tab.use_inline", {"tab_id": tab, "field": ["tones", 1, "drive"]}
+        )
+        assert copied["ok"], copied
+        assert owner.input.data["tones"][0] == sibling
+        edited = rpc.call(
+            "tab.edit_recipe_fields",
+            {
+                "tab_id": tab,
+                "edits": [
+                    {
+                        "path": ["tones", 1, "drive", "gain"],
+                        "value": {"expr": "3 / 10"},
+                    },
+                ],
+            },
+        )
+        assert edited["ok"], edited
+        before = owner.input
+        fixture.ctrl.control_identity.reclaim_local()
+        observed = rpc.call("tab.read_elements", {"tab_id": tab, "path": ["tones"]})
+        assert observed["ok"], observed
+        rows = observed["result"]["elements"]
+        assert [(row["index"], row["name"]) for row in rows] == [(0, "A"), (1, "B")]
+        assert rows[0]["input"]["phase"] == {"expr": "1 / 0"}
+        assert any(
+            error["path"] == ["tones", 0, "phase"] for error in rows[0]["errors"]
+        )
+        assert {"path": ["tones", 1, "drive", "module", "gain"], "value": 0.3} in rows[
+            1
+        ]["values"]
+        assert owner.input.same_as(before)
+    finally:
+        fixture.ctrl.tab_control.close_tab(tab)
+
+
 class TupleCfg(SampleCfg):
     samples: tuple[complex, ...] = (1 + 2j, 3 - 4j)
 

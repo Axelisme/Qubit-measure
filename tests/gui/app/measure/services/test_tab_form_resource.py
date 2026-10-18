@@ -28,6 +28,101 @@ from zcu_tools.resources.entry.schema import (
 )
 
 
+def test_elements_aggregate_keeps_partial_values_and_errors_without_recapture():
+    from tests.gui.form_adapter._indexed_models import indexed_env, indexed_form
+
+    captures = []
+
+    def capture(_aliases):
+        captures.append("capture")
+        return resource_api.TabFormSources(indexed_env())
+
+    resource = resource_api.TabFormResource(
+        lambda _ctx: indexed_form(),
+        capture=capture,
+        mutation_allowed=lambda: True,
+    )
+    assert hasattr(resource, "read_elements"), "Missing single owner aggregate read"
+    events = []
+    resource.subscribe(lambda: events.append("changed"))
+    try:
+        resource.write(
+            {("tones", 0, "phase"): {"expr": "1 / 0"}, ("participants",): ["B"]}
+        )
+        before, base = resource.input, resource.editor_state.base
+        observed = resource.read_elements(("tones",))
+        assert [(item.index, item.name, item.path) for item in observed.elements] == [
+            (0, "A", ("tones", 0)),
+            (1, "B", ("tones", 1)),
+        ]
+        first, second = observed.elements
+        assert first.input["phase"] == {"expr": "1 / 0"}
+        assert (
+            first.errors is not None and ("tones", 0, "phase") in first.errors.messages
+        )
+        assert first.values[("tones", 0, "sweep", "start")] == 2
+        assert second.values[("tones", 1, "sweep", "start")] == 10
+        assert second.errors is None
+        first.input["name"] = "detached"
+        assert resource.input.same_as(before)
+        assert resource.editor_state.base.same_as(base)
+        assert captures == ["capture"] and events == ["changed"]
+        with pytest.raises(CfgPreconditionError, match="not valid"):
+            resource.accept()
+    finally:
+        resource.revoke()
+    with pytest.raises(CfgPreconditionError):
+        resource.read_elements(("tones",))
+
+
+def test_indexed_restore_uses_saved_positions_selections_and_reports_dropped():
+    from tests.gui.form_adapter._indexed_models import (
+        element,
+        indexed_env,
+        indexed_form,
+    )
+
+    resource = resource_api.TabFormResource(
+        lambda _ctx: indexed_form(),
+        capture=lambda _aliases: resource_api.TabFormSources(indexed_env()),
+        mutation_allowed=lambda: True,
+    )
+    try:
+        resource.run_command(("tones", 1, "drive"), "to_inline")
+        resource.write({("tones", 1, "drive", "module", "gain"): {"expr": "2 / 5"}})
+        saved = resource.input
+        raw = saved.data
+        retained = element(raw, 1)
+        retained.pop("phase")
+        retained["old_gain"] = 99
+        raw["tones"] = [retained]
+        raw["participants"] = ["B"]
+        saved = FormInput.from_json(
+            saved.model,
+            FormInput(
+                saved.model,
+                raw,
+                selections={("tones", 0, "sweep"): {"kind": "center"}},
+            ).to_json(),
+        )
+        dropped = resource.restore_input(saved)
+        assert ("tones", 0, "old_gain") in dropped
+        assert len(resource.input.data["tones"]) == 1
+        assert element(resource.input.data, 0)["phase"] == 0
+        assert resource.input.selections[("tones", 0, "sweep")] == {"kind": "center"}
+        sweep = element(resource.input.data, 0)["sweep"]
+        assert isinstance(sweep, dict) and sweep["kind"] == "linrange"
+        assert resource.read_module(("tones", 0, "drive")).value["gain"] == 0.4
+        before = resource.input
+        with pytest.raises(ValueError, match="identity"):
+            resource.write({("tones", 0, "name"): "A"})
+        assert resource.input.same_as(before)
+        resource.reset()
+        assert len(resource.input.data["tones"]) == 2
+    finally:
+        resource.revoke()
+
+
 class ScalarCore(ConfigBase):
     """A concrete experiment cfg accepts one positive measurement setting."""
 
