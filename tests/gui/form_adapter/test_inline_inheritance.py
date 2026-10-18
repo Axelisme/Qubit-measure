@@ -1,5 +1,7 @@
 """Approved inline inheritance is shared by generated and handwritten forms."""
 
+from __future__ import annotations
+
 from collections.abc import Mapping
 from itertools import permutations
 
@@ -10,6 +12,7 @@ from zcu_tools.cfg_model import (
     GaussWaveformCfg,
     PulseSpec,
 )
+from zcu_tools.gui import form as api
 from zcu_tools.gui.form import (
     FormEnv,
     FormErrors,
@@ -17,7 +20,6 @@ from zcu_tools.gui.form import (
     FormModel,
     FormPath,
     FormState,
-    InputConverter,
     Option,
 )
 from zcu_tools.gui.form_adapter import ModuleInputField, module_form
@@ -33,7 +35,7 @@ def obj(value: JsonValue) -> dict[str, JsonValue]:
     return value
 
 
-def choose(state: FormState, path: tuple[str, ...], label: str, env: FormEnv) -> None:
+def choose(state: FormState[FormModel], path: tuple[str, ...], label: str, env: FormEnv) -> None:
     target = state.describe(path, env).target
     assert target is not None and target.options is not None
     state.write(
@@ -169,7 +171,7 @@ def test_handwritten_module_field_uses_same_converter_and_preserves_invalid_draf
             return {("pulse",): field.options(env)}
 
         @classmethod
-        def converters(cls, env: FormEnv) -> Mapping[FormPath, InputConverter]:
+        def converters(cls, env: FormEnv) -> Mapping[FormPath, api.InputConverter]:
             return {("pulse",): field.converter(env)}
 
     model = create_model(
