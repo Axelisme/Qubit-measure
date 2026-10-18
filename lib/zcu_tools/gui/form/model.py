@@ -440,6 +440,20 @@ class FormInput[F: FormModel]:
 
         return {path: copy_json(value) for path, value in self._selections.items()}
 
+    def same_as(self, other: FormInput[FormModel]) -> bool:
+        """Compare complete authored drafts without evaluating or converting.
+
+        Model classes compare by identity. Raw data and detached selections
+        compare by content, including selection-only differences and the actual
+        branch tags held in data. This is not lowered cfg or persistent Spec
+        equivalence. No source access, mutation or notification occurs.
+        """
+        return (
+            self._model is other._model
+            and self._data == other._data
+            and self._selections == other._selections
+        )
+
     @property
     def model(self) -> type[F]:
         """Return the ordinary form class paired with this input."""
@@ -496,6 +510,16 @@ class FormState[F: FormModel]:
         """Return a detached comparison base supplied by the host."""
         return FormInput(self._model, self._base, selections=self._base_selections)
 
+    @property
+    def is_dirty(self) -> bool:
+        """Whether the complete authored draft differs from the accepted base.
+
+        Include selection-only differences and invalid/missing raw input.
+        This pure observation uses FormInput.same_as, without evaluating input,
+        executing converters, reading sources or publishing notifications.
+        """
+        return not self.input.same_as(self.base)
+
     def write(self, batch: Mapping[FormWritePath, JsonValue], env: FormEnv) -> None:
         """Install one input batch, keeping model-invalid drafts editable.
 
@@ -551,7 +575,7 @@ class FormState[F: FormModel]:
         """
         if candidate.model is not self._model:
             raise TypeError("Cannot install a different form model class")
-        self._install(candidate.data, candidate.selections)
+        self._install(candidate)
 
     def describe(self, path: FormWritePath, env: FormEnv) -> FormDescription:
         """Describe one canonical model-field path and its next layer.
@@ -598,16 +622,11 @@ class FormState[F: FormModel]:
 
         self.install_input(prepare_command(self.input, path, name, env))
 
-    def _install(
-        self,
-        candidate: dict[str, JsonValue],
-        selections: dict[FormWritePath, JsonValue] | None = None,
-    ) -> None:
-        selections = {} if selections is None else selections
-        if candidate == self._data and selections == self._selections:
+    def _install(self, candidate: FormInput[F]) -> None:
+        if self.input.same_as(candidate):
             return
-        self._data = candidate
-        self._selections = selections
+        self._data = candidate.data
+        self._selections = candidate.selections
         for callback in tuple(self._callbacks):
             try:
                 callback()
@@ -654,7 +673,9 @@ class FormState[F: FormModel]:
         the current active input, including discriminator changes and nullable
         null; removed branch fields have no tombstones. Ordinary models are not
         leaves. Invalid input returns FormErrors, never partial changes.
-        This does not reset base or commit to an owner. Uses env on every call.
+        This is a data/evaluated-leaf report, not a dirty predicate: selection-only
+        differences are not data leaves. Use is_dirty for complete authored
+        identity. This does not reset base or commit to an owner. Uses env on every call.
         """
         from ._evaluate import value_at
         from ._json import copy_json
@@ -681,12 +702,7 @@ class FormState[F: FormModel]:
         if base.model is not self._model:
             raise ValueError("Cannot reset to a different form model class")
         data = base.data
-        changed = (
-            data != self._data
-            or data != self._base
-            or base.selections != self._selections
-            or base.selections != self._base_selections
-        )
+        changed = not self.input.same_as(base) or not self.base.same_as(base)
         self._data = data
         self._base = base.data
         self._selections = base.selections
@@ -749,5 +765,5 @@ class FormState[F: FormModel]:
         candidate, unmatched = drop_unmatched_sources(
             self._model, restored, self._data, env
         )
-        self._install(candidate)
+        self._install(FormInput(self._model, candidate))
         return (*dropped, *unmatched)

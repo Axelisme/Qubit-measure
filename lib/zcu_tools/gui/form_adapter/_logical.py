@@ -527,10 +527,7 @@ def _candidate(
         raise LogicalEditError(
             str(exc), reason_code="form_source", path=path, edit_index=index
         ) from exc
-    return LogicalEditCandidate(
-        candidate,
-        candidate.data != input.data or candidate.selections != input.selections,
-    )
+    return LogicalEditCandidate(candidate, not candidate.same_as(input))
 
 
 def edits(

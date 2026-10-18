@@ -20,6 +20,8 @@ Defaults hook 可以用 `{"expr": ...}` 宣告 scalar 初始值的來源，例�
 
 `Option` 宣告 label、部分 JSON input value、可選 BaseModel fields 與 commands。`options(env)` 是宣告 hook，consumer 讀 description 的 options 有效清單。Core 自動產生 Literal、Enum、choices 與 tagged union 選項。最深 local 宣告優先，包含表示無選項的空清單，非重疊 parent 宣告保留。Bool 與一般 nullable model 照舊用 checkbox 與 Enabled。Fields 只在 describe 該 active path 時列直接 children，不顯示 value 已決定的 tag。比對只看 value 的每個葉，JSON 型別與值相同即符合，第一項匹配優先。無匹配時 consumer 顯示目前值加 `(missing)`，不寫 state。
 
+`FormInput.same_as(other)` 比較 model identity、raw data 與 selections 的完整草稿。實際 branch tags 在 data 中，一併參與比較。它不比較 lowered cfg 或持久 Spec，不求值、不執行 converter。`FormState.is_dirty` 使用同一比較入口判斷 current／base，包含 selection-only 差異。Install、reset 與 logical edit 的 no-op 判斷也共用它。`changes(env)` 仍只回有效 input 的 data／evaluated leaves，不是 dirty predicate。
+
 `InputConverter` 是一個欄位的單一 converter，處理全部目標選項。可在 Annotated metadata 或 `FormModel.converters(env)` 宣告。Local metadata 覆蓋祖先宣告，同一 model 的 hook 再覆蓋自身 metadata。Callable 接收 readonly snapshot、目標 selection 與局部 evaluate context，回 `FormConversionResult(structure, input)`。它與 command 共用原子 installer，Core 不補 defaults。
 
 沒有 converter 時，切換只改 selection，保留原有 branch 和 authored input。`FormInput.selections` 攜帶記憶體選項，`data` 保存實際 child input。`describe.selected` 顯示選項，`describe.branch` 標示實際子表單；兩者可以不同。Partial selector object 在轉換後套用明確提供的 children，tag 葉寫入也走同一個 converter。純讀不執行 converter。預期的缺來源、參與值求值及結構 admission 拒絕使用 `FormConversionError`，保留 cause。任意 callable ValueError 或 provider 故障不轉成正常拒絕。Compatible restore 的保存政策另由持久還原契約處理。
