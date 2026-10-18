@@ -20,6 +20,78 @@ class Element(core.FormModel):
     gain: float = Field(gt=0)
 
 
+def test_native_model_list_generates_indexed_modules_sweeps_and_lowers():
+    from tests.gui.form_adapter._indexed_models import (
+        element,
+        indexed_env,
+        indexed_form,
+    )
+
+    env = indexed_env()
+    definition = indexed_form()
+    try:
+        state = core.FormState(definition.default_input(env))
+    except TypeError as exc:
+        pytest.fail(f"Native model-list seeds must generate editable inputs: {exc}")
+    assert element(state.input.data, 0)["drive"] == {
+        "kind": "ref",
+        "name": "Q.pulses.drive",
+    }
+    sweep = state.describe(("tones", 1, "sweep"), env)
+    assert sweep.target is not None and sweep.target.commands
+    sibling = element(state.input.data, 0)
+    state.run_command(("tones", 1, "drive"), "to_inline", env)
+    state.write({("tones", 1, "drive", "module", "gain"): {"expr": "3 / 10"}}, env)
+    state.run_command(("tones", 1, "sweep"), "to_center", env)
+    assert element(state.input.data, 0) == sibling
+    result = state.result(env)
+    assert not isinstance(result, core.FormErrors), result
+    cfg = definition.to_cfg(result, env)
+    assert not isinstance(cfg, core.FormErrors), cfg
+    assert cfg.tones[1].drive.gain == 0.3
+    assert cfg.tones[1].sweep.start == 10
+    assert cfg.tones[1].sweep.stop == 14
+    assert cfg.participants == ["B", "A"]
+
+
+def test_native_model_list_defaults_are_projected_without_losing_values():
+    from tests.gui.form_adapter._indexed_models import element, native_defaults_form
+
+    definition = native_defaults_form()
+    env = core.FormEnv()
+    state = core.FormState(definition.default_input(env))
+    raw = element(state.input.data, 0)
+    assert raw["sweep"] == {"kind": "linrange", "start": 3.0, "stop": 7.0, "n": 3}
+    assert raw["drive"]["kind"] == "inline"
+    result = state.result(env)
+    assert not isinstance(result, core.FormErrors), result
+    cfg = definition.to_cfg(result, env)
+    assert not isinstance(cfg, core.FormErrors), cfg
+    assert cfg.tones[0].drive.freq == 42
+    assert cfg.tones[0].sweep.step == 2
+
+
+def test_native_field_meta_exposes_readonly_names_and_picker_labels():
+    from inspect import signature
+
+    from zcu_tools.cfg_model import FieldMeta
+
+    from tests.gui.form_adapter._indexed_models import displayed_form, indexed_env
+
+    assert "readonly" in signature(FieldMeta).parameters, "Missing native readonly hint"
+    assert "element_label" in signature(FieldMeta).parameters, (
+        "Missing native picker hint"
+    )
+    env = indexed_env()
+    definition = displayed_form()
+    state = core.FormState(definition.default_input(env))
+    target = state.describe(("tones",), env).target
+    assert target is not None and target.elements is not None
+    assert [(item.index, item.name) for item in target.elements] == [(0, "A"), (1, "B")]
+    name = state.describe(("tones", 0, "name"), env).target
+    assert name is not None and name.readonly
+
+
 def owner_model(*, duplicate: bool = False) -> type[core.FormModel]:
     """Build a synthetic declaration only after checking its new public API."""
     assert hasattr(adapter, "FixedElementsForm"), "Missing declaring-owner model"
