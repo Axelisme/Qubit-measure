@@ -12,6 +12,7 @@ from pydantic import Field, JsonValue, create_model
 from qtpy.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget
 from zcu_tools.gui import form as api
 from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormState
+from zcu_tools.gui.form.commands import ReadonlyFormInput
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._user_input import ComponentDriver
@@ -39,9 +40,10 @@ def test_restored_unlisted_selection_is_shown_without_rewriting_raw_input(
 
     def convert(
         _old: api.FormCommandSnapshot,
-        selection: JsonValue,
+        selection: ReadonlyFormInput,
         _context: api.FormCommandContext,
     ) -> api.FormConversionResult:
+        assert isinstance(selection, str)
         conversions.append(selection)
         return api.FormConversionResult(None, selection)
 
