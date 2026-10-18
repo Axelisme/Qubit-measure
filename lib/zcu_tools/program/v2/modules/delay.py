@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 from qick.asm_v2 import QickParam
 
@@ -75,6 +75,7 @@ class DelayAuto(Module):
 
     def init(self, prog: ModularProgramV2) -> None: ...
 
+    @override
     def run(
         self, prog: ModularProgramV2, t: float | QickParam = 0.0
     ) -> float | QickParam:

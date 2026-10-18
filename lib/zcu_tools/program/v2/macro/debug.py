@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import override
 
 from qick.asm_v2 import AsmInst, Macro, QickParam
 
@@ -22,6 +23,7 @@ class PrintTimeStamp(Macro):
     ) -> None:
         super().__init__(name=name, t=t, prefix=prefix, gen_chs=gen_chs, ro_chs=ro_chs)
 
+    @override
     def expand(self, prog) -> list[AsmInst]:  # pyright: ignore[reportIncompatibleMethodOverride]
         return []
 

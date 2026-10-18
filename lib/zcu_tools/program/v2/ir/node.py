@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from typing import override
 
 from .hw_semantics import ADDR_REG
 from .instructions import BaseInst, JumpInst, LabelInst, MetaInst
@@ -80,6 +81,7 @@ class BasicBlockNode(IRNode):
     def children(self) -> list[IRNode]:
         return []
 
+    @override
     def replace_child(self, old: IRNode, new: IRNode) -> None:
         raise TypeError("BasicBlockNode is a leaf node and has no children")
 
@@ -233,6 +235,7 @@ class IRDispatch(IRNode):
     def children(self) -> list[IRNode]:
         return []
 
+    @override
     def replace_child(self, old: IRNode, new: IRNode) -> None:
         raise TypeError("IRDispatch is a leaf node and has no children")
 

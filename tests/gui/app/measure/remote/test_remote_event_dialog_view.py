@@ -12,7 +12,8 @@ Each test spins up a real TCP socket on an ephemeral loopback port via
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from collections.abc import Generator
+from unittest.mock import MagicMock, patch
 
 import pytest
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
@@ -24,14 +25,10 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
-from zcu_tools.gui.app.measure.remote.events import (
-    _ser_run_finished,
-    _ser_run_started,
-    _ser_soc_changed,
-    _ser_tab_content_changed,
-    _ser_tab_interaction_changed,
-)
-from zcu_tools.gui.event_bus import EventMeta
+from zcu_tools.gui.app.measure.remote import service as app_service_module
+from zcu_tools.gui.app.measure.remote.events import EVENT_SERIALIZERS
+from zcu_tools.gui.event_bus import BaseEventBus, EventMeta, EventSubscriptions
+from zcu_tools.gui.remote import control_service as control_service_module
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.events import (
     AliasesChangedPayload,
@@ -56,6 +53,30 @@ from ._helpers import (
 # ---------------------------------------------------------------------------
 # Fixture
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def event_serializers_guard(request: pytest.FixtureRequest) -> Generator[None]:
+    """Use pytest request to identify the polluter without changing the registry.
+
+    Yield without modifying the binding or entries. On teardown, raise
+    AssertionError if the test leaves either unrestored; request.node.nodeid
+    identifies the polluting test.
+    """
+    original_binding = app_service_module.EVENT_SERIALIZERS
+    original_entries = dict(original_binding)
+    assert original_binding is EVENT_SERIALIZERS, (
+        f"EVENT_SERIALIZERS binding polluter: {request.node.nodeid}"
+    )
+    try:
+        yield
+    finally:
+        assert app_service_module.EVENT_SERIALIZERS is original_binding, (
+            f"EVENT_SERIALIZERS binding polluter: {request.node.nodeid}"
+        )
+        assert original_binding == original_entries, (
+            f"EVENT_SERIALIZERS entries polluter: {request.node.nodeid}"
+        )
 
 
 @pytest.fixture()
@@ -97,10 +118,7 @@ def test_event_serializers_wire_names_locked():
     """All measure-gui EVENT_SERIALIZERS wire names are byte-identical to the
     documented set.  Any payload rename or accidental removal fails here first,
     before a connected agent notices silent breakage."""
-    from zcu_tools.gui.app.measure.remote.events import (
-        EVENT_SERIALIZERS,
-        wire_event_name,
-    )
+    from zcu_tools.gui.app.measure.remote.events import wire_event_name
 
     actual = frozenset(wire_event_name(pt) for pt in EVENT_SERIALIZERS)
     assert actual == _EXPECTED_WIRE_NAMES, (
@@ -111,8 +129,6 @@ def test_event_serializers_wire_names_locked():
 
 
 def test_all_event_serializer_payload_shapes_are_locked() -> None:
-    from zcu_tools.gui.app.measure.remote.events import EVENT_SERIALIZERS
-
     cases = [
         (
             TabAddedPayload(tab_id="tab-x", adapter_name="fake"),
@@ -180,14 +196,16 @@ def test_all_event_serializer_payload_shapes_are_locked() -> None:
 def test_interaction_fact_does_not_change_wire_payload(
     fact: TabInteractionFact,
 ) -> None:
-    assert _ser_tab_interaction_changed(
+    assert EVENT_SERIALIZERS[TabInteractionChangedPayload](
         TabInteractionChangedPayload("tab-x", fact)
     ) == {"tab_id": "tab-x", "requery": ["tab.snapshot"]}
 
 
 @pytest.mark.parametrize("fact", list(TabContentFact))
 def test_content_fact_does_not_change_wire_payload(fact: TabContentFact) -> None:
-    assert _ser_tab_content_changed(TabContentChangedPayload("tab-x", fact)) == {
+    assert EVENT_SERIALIZERS[TabContentChangedPayload](
+        TabContentChangedPayload("tab-x", fact)
+    ) == {
         "tab_id": "tab-x",
         "requery": ["tab.snapshot"],
     }
@@ -242,12 +260,13 @@ def test_subscribe_then_run_started_arrives(fx):
 def test_no_matching_subscription_skips_serializer_and_encode(qapp, monkeypatch):
     from zcu_tools.gui.remote import control_service as service_module
 
-    f = Fixture()
     serializer = MagicMock(return_value={"tab_id": "tab-x"})
-    f.service._event_serializers = {
-        **f.service._event_serializers,
-        RunStartedPayload: serializer,
-    }
+    with patch.object(
+        app_service_module,
+        "EVENT_SERIALIZERS",
+        {**EVENT_SERIALIZERS, RunStartedPayload: serializer},
+    ):
+        f = Fixture()
     encode = MagicMock(wraps=service_module.encode_line)
     monkeypatch.setattr(service_module, "encode_line", encode)
     f.start()
@@ -268,12 +287,13 @@ def test_no_matching_subscription_skips_serializer_and_encode(qapp, monkeypatch)
 def test_multiple_subscribers_serialize_and_encode_once(qapp, monkeypatch):
     from zcu_tools.gui.remote import control_service as service_module
 
-    f = Fixture()
     serializer = MagicMock(return_value={"tab_id": "tab-x"})
-    f.service._event_serializers = {
-        **f.service._event_serializers,
-        RunStartedPayload: serializer,
-    }
+    with patch.object(
+        app_service_module,
+        "EVENT_SERIALIZERS",
+        {**EVENT_SERIALIZERS, RunStartedPayload: serializer},
+    ):
+        f = Fixture()
     encode = MagicMock(wraps=service_module.encode_line)
     monkeypatch.setattr(service_module, "encode_line", encode)
     f.start()
@@ -303,12 +323,13 @@ def test_multiple_subscribers_serialize_and_encode_once(qapp, monkeypatch):
 
 
 def test_serializer_failure_is_lazy_logged_and_isolated(qapp, caplog):
-    f = Fixture()
     serializer = MagicMock(side_effect=RuntimeError("broken serializer"))
-    f.service._event_serializers = {
-        **f.service._event_serializers,
-        RunStartedPayload: serializer,
-    }
+    with patch.object(
+        app_service_module,
+        "EVENT_SERIALIZERS",
+        {**EVENT_SERIALIZERS, RunStartedPayload: serializer},
+    ):
+        f = Fixture()
     later_subscriber = MagicMock()
     f.bus.subscribe(RunStartedPayload, later_subscriber)
     f.start()
@@ -329,12 +350,13 @@ def test_serializer_failure_is_lazy_logged_and_isolated(qapp, caplog):
 
 
 def test_serializer_returning_none_only_runs_for_subscriber(qapp):
-    f = Fixture()
     serializer = MagicMock(return_value=None)
-    f.service._event_serializers = {
-        **f.service._event_serializers,
-        RunStartedPayload: serializer,
-    }
+    with patch.object(
+        app_service_module,
+        "EVENT_SERIALIZERS",
+        {**EVENT_SERIALIZERS, RunStartedPayload: serializer},
+    ):
+        f = Fixture()
     f.start()
     sock = open_client(f.service.port)
     try:
@@ -481,28 +503,73 @@ def test_writer_queue_overflow_eventually_closes_wedged_client(fx, caplog):
 
 
 def test_stop_unsubscribes_event_bus(qapp):
-    from zcu_tools.gui.app.measure.remote.events import EVENT_SERIALIZERS
+    bus_subs = EventSubscriptions()
+    with (
+        patch.object(
+            BaseEventBus,
+            "subscribe",
+            autospec=True,
+            side_effect=BaseEventBus.subscribe,
+        ) as subscribe,
+        patch.object(
+            BaseEventBus,
+            "unsubscribe",
+            autospec=True,
+            side_effect=BaseEventBus.unsubscribe,
+        ) as unsubscribe,
+        patch.object(
+            BaseEventBus,
+            "subscribe_with_meta",
+            autospec=True,
+            side_effect=BaseEventBus.subscribe_with_meta,
+        ) as subscribe_meta,
+        patch.object(
+            BaseEventBus,
+            "unsubscribe_with_meta",
+            autospec=True,
+            side_effect=BaseEventBus.unsubscribe_with_meta,
+        ) as unsubscribe_meta,
+    ):
+        with patch.object(
+            control_service_module, "EventSubscriptions", return_value=bus_subs
+        ) as factory:
+            f = Fixture()
+        try:
+            factory.assert_called_once_with()
+            controller_subs = [
+                fullcall
+                for fullcall in subscribe.call_args_list
+                if fullcall.args[0] is f.bus and fullcall.args[1] is RunFinishedPayload
+            ]
+            assert controller_subs, "Controller consumes the run completion fact"
+            # Observe only the service's start-to-stop meta subscriptions.
+            subscribe_meta.reset_mock()
+            unsubscribe_meta.reset_mock()
+            f.start()
+            service_subs = [
+                fullcall
+                for fullcall in subscribe_meta.call_args_list
+                if fullcall.args[0] is f.bus
+            ]
+            assert {fullcall.args[1] for fullcall in service_subs} == set(
+                EVENT_SERIALIZERS
+            )
+            assert len(service_subs) == len(EVENT_SERIALIZERS)
+            assert any(
+                fullcall.args[1] is RunFinishedPayload for fullcall in service_subs
+            ), "service should have subscribed"
+            assert len(bus_subs) == len(EVENT_SERIALIZERS)
+        finally:
+            f.stop()
 
-    f = Fixture()
-    f.start()
-    # Confirm at least one subscription is installed.
-    subs = f.bus._meta_subs  # type: ignore[attr-defined]
-    assert subs.get(RunFinishedPayload), "service should have subscribed"
-    controller_subs = tuple(  # type: ignore[attr-defined]
-        f.bus._subs.get(RunFinishedPayload, [])
-    )
-    assert controller_subs, "Controller consumes the run completion fact"
-    assert len(f.service._bus_subs) == len(EVENT_SERIALIZERS)
-    f.stop()
-    subs_after = f.bus._meta_subs  # type: ignore[attr-defined]
-    # The RemoteEventService's subscriptions are gone after stop. RUN_FINISHED
-    # has a permanent Controller subscriber, but the remote meta subscriber must
-    # be empty. (MD_CHANGED is *also* held
-    # permanently by CfgEditorService for owned-model refresh — ADR-0008 — so it
-    # is not a clean proxy for the remote view's teardown.)
-    assert len(f.service._bus_subs) == 0
-    assert not subs_after.get(RunFinishedPayload)
-    assert tuple(f.bus._subs.get(RunFinishedPayload, [])) == controller_subs  # type: ignore[attr-defined]
+        assert len(bus_subs) == 0
+        # Match self, payload, callback and kwargs with multiplicity, not order.
+        meta_unsubs = unsubscribe_meta.call_args_list
+        assert len(meta_unsubs) == len(service_subs)
+        for fullcall in service_subs:
+            assert meta_unsubs.count(fullcall) == service_subs.count(fullcall)
+        for fullcall in controller_subs:
+            assert fullcall not in unsubscribe.call_args_list
 
 
 # ---------------------------------------------------------------------------
@@ -666,14 +733,14 @@ def test_unauthenticated_subscribe_rejected(qapp):
 
 
 def test_ser_run_started():
-    wire = _ser_run_started(RunStartedPayload(tab_id="tab1"))
+    wire = EVENT_SERIALIZERS[RunStartedPayload](RunStartedPayload(tab_id="tab1"))
     assert wire is not None
     assert wire["tab_id"] == "tab1"
     assert "outcome" not in wire
 
 
 def test_ser_run_finished_includes_outcome():
-    wire = _ser_run_finished(
+    wire = EVENT_SERIALIZERS[RunFinishedPayload](
         RunFinishedPayload(tab_id="tab1", outcome="finished", error_message=None)
     )
     assert wire is not None
@@ -684,7 +751,7 @@ def test_ser_run_finished_includes_outcome():
 
 
 def test_ser_run_finished_failed_includes_error_message():
-    wire = _ser_run_finished(
+    wire = EVENT_SERIALIZERS[RunFinishedPayload](
         RunFinishedPayload(tab_id="tab1", outcome="failed", error_message="timeout")
     )
     assert wire is not None
@@ -693,7 +760,7 @@ def test_ser_run_finished_failed_includes_error_message():
 
 
 def test_ser_run_finished_cancelled():
-    wire = _ser_run_finished(
+    wire = EVENT_SERIALIZERS[RunFinishedPayload](
         RunFinishedPayload(tab_id="tab1", outcome="cancelled", error_message=None)
     )
     assert wire is not None
@@ -703,13 +770,13 @@ def test_ser_run_finished_cancelled():
 
 def test_ser_soc_changed_connected():
     payload = SocChangedPayload(soc=MagicMock(), soccfg=MagicMock())
-    wire = _ser_soc_changed(payload)
+    wire = EVENT_SERIALIZERS[SocChangedPayload](payload)
     assert wire is not None
     assert wire["connected"] is True
 
 
 def test_ser_soc_changed_disconnected():
     payload = SocChangedPayload(soc=None, soccfg=None)
-    wire = _ser_soc_changed(payload)
+    wire = EVENT_SERIALIZERS[SocChangedPayload](payload)
     assert wire is not None
     assert wire["connected"] is False

@@ -31,8 +31,9 @@ from tests.gui._qt_waits import qt_until
 _LIVE_BG: list[BackgroundRunner] = []
 
 
-@pytest.fixture(autouse=True)
-def _quiesce_bg():
+@pytest.fixture(autouse=True, name="_quiesce_bg")
+def fixture_quiesce_bg():
+    """Quiesce tracked background runners after each test."""
     yield
     for bg in _LIVE_BG:
         # Submitted Qt work has no remaining blocker; drain its worker and delivery.

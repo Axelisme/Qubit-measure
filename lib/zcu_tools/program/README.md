@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-09-27 — acquisition module placement
+**Last updated:** 2026-10-18, acquisition drift review
 
 這份筆記整理 `lib/zcu_tools/program` 對 QICK 的實際依賴，目的是讓後續開發能快速定位「應該看哪個 QICK 類別/方法」，而不用每次從頭追。
 
@@ -81,5 +81,5 @@
   - `acquire_params` 欄位名稱
   - `finish_round()` 回傳語意（是否仍為「還有下一 round」）
   - `_average_buf()` 的輸入 shape 假設
-- `EarlyStopMixin._finish_accumulated_round` 是 qick `finish_round` accumulated branch 的鏡射複製（qick 該 loop 沒有提前退出的 seam，複製是刻意的）；`tests/program/test_acquire_qick_drift.py` 以 source snapshot 釘住上游版本，qick 升版改到該函式時測試會失敗，須人工 re-port 後刷新 snapshot（流程見該測試 docstring）。
+- `EarlyStopMixin._finish_accumulated_round` 鏡射 QICK `AcquireMixin.finish_round` 的 accumulated branch，因為上游 loop 沒有提前退出的 seam。QICK 升版時，維護者須人工對照上游 `AcquireMixin.finish_round` 並移植相關變更。維護者也須透過現有公開介面的測試驗證 acquisition 與 early-stop 行為。
 - mixin 疊加順序有語意（`RoundHookMixin, TrackerMixin, SingleShotMixin, EarlyStopMixin`）；`tests/program/test_acquire_mro.py` 鎖住 `ImproveAcquireMixin` 與 `MyProgramV2` 的關鍵 MRO / `finish_round()` 解析鏈，改順序前先更新測試與行為判斷。

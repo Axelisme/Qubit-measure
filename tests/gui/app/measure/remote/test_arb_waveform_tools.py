@@ -11,8 +11,9 @@ from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 from ._helpers import Fixture, dispatch_handler
 
 
-@pytest.fixture(autouse=True)
-def _qt(qapp):
+@pytest.fixture(autouse=True, name="_qt")
+def fixture_qt(qapp):
+    """Keep the QApplication available throughout each test."""
     yield
 
 

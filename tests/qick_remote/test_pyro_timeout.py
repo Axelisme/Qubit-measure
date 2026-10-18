@@ -74,7 +74,8 @@ def test_make_soc_proxy_restores_timeout_after_success(monkeypatch):
         return FakeNS()
 
     class FakeQickConfig:
-        def __init__(self, cfg: dict) -> None:
+        def __init__(self, cfg: object) -> None:
+            """Accept and ignore config to isolate the timeout contract."""
             pass
 
     monkeypatch.setattr(Pyro4, "locateNS", fake_locate_ns)

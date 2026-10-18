@@ -33,7 +33,7 @@ def _adapter(state: DispersiveState | None = None) -> _StubAdapter:
     return _StubAdapter(Controller(state if state is not None else DispersiveState()))
 
 
-def _call(adapter: _StubAdapter, method: str) -> dict:
+def _call(adapter: _StubAdapter, method: str) -> dict[str, object]:
     """Run a read handler through the registry (stub adapter — no Qt/socket)."""
     return dict(METHOD_REGISTRY[method].handler(adapter, {}))  # type: ignore[arg-type]
 

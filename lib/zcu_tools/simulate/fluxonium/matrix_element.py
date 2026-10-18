@@ -19,6 +19,11 @@ _SYSTEM_QUB_DIM = 20
 _SYSTEM_RES_DIM = 10
 
 
+def _matrixelem_table(spectrum_data: SpectrumData) -> np.ndarray | None:
+    """Return the table unchanged; scqubits omits Optional although it can be None."""
+    return spectrum_data.matrixelem_table
+
+
 def calculate_n_oper(
     params: tuple[float, float, float],
     flux: float,
@@ -52,7 +57,7 @@ def calculate_n_oper_vs_flux(
     Calculate the matrix elements of the fluxonium vs. a parameter
     """
 
-    if spectrum_data is None or spectrum_data.matrixelem_table is None:
+    if spectrum_data is None or _matrixelem_table(spectrum_data) is None:
         from scqubits.core.fluxonium import Fluxonium
 
         fluxonium = Fluxonium(
@@ -72,9 +77,7 @@ def calculate_n_oper_vs_flux(
                 param_vals=fluxs,
                 evals_count=return_dim,
             )
-    if spectrum_data is None:
-        raise RuntimeError("scqubits did not produce n_operator spectrum data")
-    matrix_elements = spectrum_data.matrixelem_table
+    matrix_elements = _matrixelem_table(spectrum_data)
     if matrix_elements is None:
         raise RuntimeError("scqubits did not produce n_operator matrix elements")
 
@@ -126,8 +129,6 @@ def calculate_system_n_oper_vs_flux(
                 labeling_scheme="LX",
             )
 
-    if sweep is None:
-        raise RuntimeError("scqubits did not produce a system parameter sweep")
     from scqubits.core.fluxonium import Fluxonium
 
     def get_n_oper(
@@ -209,7 +210,7 @@ def calculate_phi_oper_vs_flux(
     )
     phi_oper = fluxonium.phi_operator(energy_esys=False)
 
-    if spectrum_data is None or spectrum_data.matrixelem_table is None:
+    if spectrum_data is None or _matrixelem_table(spectrum_data) is None:
         # See calculate_n_oper_vs_flux: pin BLAS to one thread for the sweep
         # (OpenBLAS multithreading is a ~150x net loss on these tiny matrices).
         from threadpoolctl import threadpool_limits
@@ -221,9 +222,7 @@ def calculate_phi_oper_vs_flux(
                 param_vals=fluxs,
                 evals_count=return_dim,
             )
-    if spectrum_data is None:
-        raise RuntimeError("scqubits did not produce phi_operator spectrum data")
-    matrix_elements = spectrum_data.matrixelem_table
+    matrix_elements = _matrixelem_table(spectrum_data)
     if matrix_elements is None:
         raise RuntimeError("scqubits did not produce phi_operator matrix elements")
 
@@ -276,7 +275,7 @@ def calculate_sin_phi_oper_vs_flux(
     )
     sin_phi_oper = fluxonium.sin_phi_operator(alpha=alpha, beta=beta, energy_esys=False)
 
-    if spectrum_data is None or spectrum_data.matrixelem_table is None:
+    if spectrum_data is None or _matrixelem_table(spectrum_data) is None:
         # See calculate_n_oper_vs_flux: pin BLAS to one thread for the sweep
         # (OpenBLAS multithreading is a ~150x net loss on these tiny matrices).
         from threadpoolctl import threadpool_limits
@@ -288,9 +287,7 @@ def calculate_sin_phi_oper_vs_flux(
                 param_vals=fluxs,
                 evals_count=return_dim,
             )
-    if spectrum_data is None:
-        raise RuntimeError("scqubits did not produce sin_phi_operator spectrum data")
-    matrix_elements = spectrum_data.matrixelem_table
+    matrix_elements = _matrixelem_table(spectrum_data)
     if matrix_elements is None:
         raise RuntimeError("scqubits did not produce sin_phi_operator matrix elements")
 

@@ -39,7 +39,7 @@ from zcu_tools.gui.remote.errors import (
 
 from ._point_application import PointApplication
 
-WireTuple = tuple[ErrorCode, str, str, dict | None]
+WireTuple = tuple[ErrorCode, str, str, dict[str, object] | None]
 
 
 @pytest.mark.parametrize(

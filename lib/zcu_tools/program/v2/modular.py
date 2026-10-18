@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from typing import override
 
 import numpy as np
 from numpy.typing import NDArray
@@ -44,6 +45,7 @@ class ModularProgramV2(MyProgramV2):
 
         super().__init__(soccfg, cfg, **kwargs)
 
+    @override
     def _initialize(self, cfg: ProgramV2Cfg) -> None:
         # add v2 sweep loops
         if self.sweep_dict is not None:
@@ -60,6 +62,7 @@ class ModularProgramV2(MyProgramV2):
             self.pulse_registry.count,
         )
 
+    @override
     def _body(self, cfg: ProgramV2Cfg) -> None:
         t = 0.0
         for module in self.modules:

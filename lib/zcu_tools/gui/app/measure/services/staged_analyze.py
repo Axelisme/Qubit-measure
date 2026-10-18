@@ -133,7 +133,7 @@ class _StagedAnalyzeService:
         work: Callable[[Any], Any],
         record: Callable[[str, Any], None],
         on_failure: Callable[[], None],
-        start_fail_message: str,
+        _start_fail_message: str,
     ) -> int:
         """Submit ``work`` via OperationRunner (FIT/post analyze path).
 

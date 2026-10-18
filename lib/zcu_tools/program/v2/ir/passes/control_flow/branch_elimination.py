@@ -41,6 +41,8 @@ QICK Hardware Notes
 
 from __future__ import annotations
 
+from typing import override
+
 from ...instructions import JumpInst
 from ...labels import LabelRef
 from ...node import BasicBlockNode
@@ -57,6 +59,7 @@ class BranchEliminationPass(AbsChunkListPass):
     plain Label (not a register address) are considered for elimination.
     """
 
+    @override
     def process(
         self, chunks: ChunkList, ctx: PipeLineContext
     ) -> tuple[ChunkList, bool]:

@@ -340,11 +340,12 @@ def test_post_run_click_starts_post_analyze(qapp, make_ctrl):
 
     ctrl = make_ctrl()
     ctrl.get_bus.return_value = EventBus()
+    ctrl.get_tab_snapshot.return_value = _snapshot(
+        "tab-1", post_params=_PostParams(backend="center")
+    )
     window = MainWindow(ctrl, templates=lambda: {})
     try:
-        tab_w = MagicMock()
-        tab_w.read_post_analyze_params.return_value = _PostParams(backend="center")
-        window._tab_widgets["tab-1"] = tab_w
+        window.add_tab_widget("tab-1", "ge")
 
         window.post_analyze_tab("tab-1")
 
@@ -353,12 +354,16 @@ def test_post_run_click_starts_post_analyze(qapp, make_ctrl):
         assert args[0] == "tab-1"
         assert args[1] == _PostParams(backend="center")
     finally:
-        window.deleteLater()
+        try:
+            window.remove_tab_widget("tab-1")
+        finally:
+            try:
+                window.deleteLater()
+            finally:
+                qapp.processEvents()
 
 
-def test_post_content_refresh_populates_form_and_figure(
-    qapp, monkeypatch, make_ctrl, exp_tab_widget
-):
+def test_post_content_refresh_populates_form_and_figure(qapp, monkeypatch, make_ctrl):
     """A content event with a post result populates the post form and renders the
     post figure into its independent post pane container."""
     from matplotlib.figure import Figure
@@ -381,14 +386,10 @@ def test_post_content_refresh_populates_form_and_figure(
 
     window = MainWindow(ctrl, templates=lambda: {})
     try:
-        tab_w = exp_tab_widget(
-            "tab-1",
-            ctrl,
-            AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+        window.add_tab_widget("tab-1", "ge")
+        tab_w = next(
+            tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == "tab-1"
         )
-        # Seed the post form so populate_values has a matching cls.
-        tab_w.populate_post_analyze_params(_PostParams(backend="pca"))
-        window._tab_widgets["tab-1"] = tab_w
 
         captured: dict[str, object] = {}
         monkeypatch.setattr(
@@ -404,14 +405,18 @@ def test_post_content_refresh_populates_form_and_figure(
 
         assert tab_w.has_post_analyze_params() is True
         # The post figure was attached to its independent post container.
-        assert captured.get("container") is tab_w._post_container
+        assert captured.get("container") is tab_w.get_post_container()
     finally:
-        window.deleteLater()
+        try:
+            window.remove_tab_widget("tab-1")
+        finally:
+            try:
+                window.deleteLater()
+            finally:
+                qapp.processEvents()
 
 
-def test_post_figure_refresh_clears_invalidated_presentation(
-    qapp, make_ctrl, exp_tab_widget
-):
+def test_post_figure_refresh_clears_invalidated_presentation(qapp, make_ctrl):
     """A primary commit invalidates the canonical and displayed Post figure."""
     from matplotlib.figure import Figure
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
@@ -428,12 +433,10 @@ def test_post_figure_refresh_clears_invalidated_presentation(
 
     window = MainWindow(ctrl, templates=lambda: {})
     try:
-        tab_w = exp_tab_widget(
-            "tab-1",
-            ctrl,
-            AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+        window.add_tab_widget("tab-1", "ge")
+        tab_w = next(
+            tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == "tab-1"
         )
-        window._tab_widgets["tab-1"] = tab_w
         stale_figure = Figure()
         tab_w.show_post_analysis_figures(ready_figures(stale_figure))
         assert tab_w.get_current_figure_for_pane("post_analysis") is stale_figure
@@ -442,65 +445,73 @@ def test_post_figure_refresh_clears_invalidated_presentation(
 
         assert tab_w.get_current_figure_for_pane("post_analysis") is None
     finally:
-        window.deleteLater()
+        try:
+            window.remove_tab_widget("tab-1")
+        finally:
+            try:
+                window.deleteLater()
+            finally:
+                qapp.processEvents()
 
 
-def test_pane_containers_are_independent_for_post(qapp, make_ctrl, exp_tab_widget):
+def test_pane_containers_are_independent_for_post(qapp, make_ctrl):
     """Each pane has an independent FigureContainer with stable identity."""
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = make_ctrl()
     ctrl.get_bus.return_value = EventBus()
+    ctrl.get_tab_snapshot.return_value = _snapshot("tab-1")
     window = MainWindow(ctrl, templates=lambda: {})
     try:
-        tab_w = exp_tab_widget(
-            "tab-1",
-            ctrl,
-            AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+        window.add_tab_widget("tab-1", "ge")
+        tab_w = next(
+            tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == "tab-1"
         )
-        window._tab_widgets["tab-1"] = tab_w
 
         run_c = window.make_run_container("tab-1")
         ana_c = window.make_analysis_container("tab-1")
         post_c = window.make_post_analysis_container("tab-1")
 
-        assert run_c is tab_w._run_container
-        assert ana_c is tab_w._analysis_container
-        assert post_c is tab_w._post_container
+        assert run_c is tab_w.get_run_container()
+        assert ana_c is tab_w.get_analysis_container()
+        assert post_c is tab_w.get_post_container()
         # Containers are distinct and stable.
         assert run_c is not ana_c
         assert ana_c is not post_c
         assert run_c is not post_c
     finally:
-        window.deleteLater()
+        try:
+            window.remove_tab_widget("tab-1")
+        finally:
+            try:
+                window.deleteLater()
+            finally:
+                qapp.processEvents()
 
 
-def test_take_figure_screenshot_captures_post_figure(qapp, make_ctrl, exp_tab_widget):
+def test_take_figure_screenshot_captures_post_figure(qapp, make_ctrl):
     """The tab's pane-qualified screenshot boundary exposes a post figure."""
     from matplotlib.figure import Figure
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = make_ctrl()
     ctrl.get_bus.return_value = EventBus()
+    post_fig = Figure()
+    post_fig.add_subplot(111).plot([0, 1], [0, 1])
+    # Present the same canonical collection used by the pane snapshot.
+    snapshot = _snapshot(
+        "tab-1",
+        has_post_analyze_result=True,
+        post_analysis_figure=post_fig,
+        analysis_figure=Figure(),
+    )
+    ctrl.get_tab_snapshot.return_value = snapshot
     window = MainWindow(ctrl, templates=lambda: {})
     try:
-        tab_w = exp_tab_widget(
-            "tab-1",
-            ctrl,
-            AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+        window.add_tab_widget("tab-1", "ge")
+        tab_w = next(
+            tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == "tab-1"
         )
-        window._tab_widgets["tab-1"] = tab_w
-
-        post_fig = Figure()
-        post_fig.add_subplot(111).plot([0, 1], [0, 1])
-        # Present the same canonical collection used by the pane snapshot.
-        snapshot = _snapshot(
-            "tab-1",
-            has_post_analyze_result=True,
-            post_analysis_figure=post_fig,
-            analysis_figure=Figure(),
-        )
-        ctrl.get_tab_snapshot.return_value = snapshot
         assert snapshot.post_analysis is not None
         tab_w.show_post_analysis_figures(snapshot.post_analysis.figures)
 
@@ -509,7 +520,13 @@ def test_take_figure_screenshot_captures_post_figure(qapp, make_ctrl, exp_tab_wi
         assert isinstance(png, bytes)
         assert png[:8] == b"\x89PNG\r\n\x1a\n"
     finally:
-        window.deleteLater()
+        try:
+            window.remove_tab_widget("tab-1")
+        finally:
+            try:
+                window.deleteLater()
+            finally:
+                qapp.processEvents()
 
 
 def test_post_artifact_save_requires_post_result(qapp, make_ctrl, exp_tab_widget):

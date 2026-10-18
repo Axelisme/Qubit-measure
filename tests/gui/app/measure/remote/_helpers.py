@@ -234,45 +234,12 @@ class Fixture:
         self.ctrl.close()
 
 
-class FakeTransport:
-    """Synchronous in-memory Transport for McpBridge tests (no socket/thread).
-
-    Implements the ``zcu_tools.mcp.core.bridge.Transport`` protocol. On
-    ``send_line`` it records the outgoing ``(method, params)`` in ``sent`` and
-    immediately delivers a reply (from ``replies[method]``, defaulting to
-    ``{ok: True, result: {}}``) via the bridge's ``deliver_reply`` callback — so
-    a synchronous ``send_rpc_raw`` round-trip completes without a real GUI. Inject
-    via ``bridge.set_transport(FakeTransport())``; populate ``replies`` per test.
-    """
-
-    def __init__(self) -> None:
-        self.replies: dict[str, dict] = {}
-        self.sent: list[tuple[str, dict]] = []
-        self._deliver_reply: Callable[[dict], None] | None = None
-
-    def attach(self, deliver_reply, deliver_event, on_closed) -> None:
-        # Reply-only fake: the event / on_closed callbacks are unused.
-        del deliver_event, on_closed
-        self._deliver_reply = deliver_reply
-
-    @property
-    def is_open(self) -> bool:
-        return True
-
-    def send_line(self, payload: dict) -> None:
-        self.sent.append((payload["method"], payload["params"]))
-        resp = dict(self.replies.get(payload["method"], {"ok": True, "result": {}}))
-        resp["id"] = payload["id"]
-        assert self._deliver_reply is not None, "FakeTransport used before attach()"
-        self._deliver_reply(resp)
-
-    def close(self) -> None:
-        pass
-
-
-def dispatch_handler(ctrl: Any, method: str, params: dict) -> Mapping[str, object]:
+def dispatch_handler(
+    ctrl: Any, method: str, params: Mapping[str, object]
+) -> Mapping[str, object]:
     """Invoke a handler plus the shared expected-error projection boundary.
 
+    Pass ``params`` unchanged to the handler without copying or validating it.
     Handlers now receive the ``RemoteControlAdapter`` (not the bare ctrl) and
     reach the façade via ``adapter.ctrl`` (ADR-0068). This wraps ``ctrl`` in a
     minimal adapter stub so unit tests can drive a single handler without a live
@@ -312,7 +279,12 @@ def dispatch_handler(ctrl: Any, method: str, params: dict) -> Mapping[str, objec
         raise remote_error_from_expected(exc) from exc
 
 
-def send(sock: socket.socket, obj: dict) -> None:
+def send[K, V](sock: socket.socket, obj: dict[K, V]) -> None:
+    """Send obj as one UTF-8 NDJSON frame on a connected stream socket.
+
+    obj must be serializable by json.dumps. Serialization, encoding and socket
+    exceptions propagate unchanged.
+    """
     sock.sendall((json.dumps(obj) + "\n").encode("utf-8"))
 
 
@@ -320,11 +292,11 @@ def send(sock: socket.socket, obj: dict) -> None:
 # match get parked here so a subsequent ``recv_*`` call can still observe
 # them. Keyed by socket fileno (sockets are not hashable across all qtpy
 # backends but their fileno is stable).
-_INBOX: dict[int, list[dict]] = {}
+_INBOX: dict[int, list[dict[str, object]]] = {}
 _INBOX_BUF: dict[int, bytearray] = {}
 
 
-def _inbox(sock: socket.socket) -> list[dict]:
+def _inbox(sock: socket.socket) -> list[dict[str, object]]:
     return _INBOX.setdefault(sock.fileno(), [])
 
 
@@ -362,9 +334,9 @@ def _read_matching_frame(
 
 def recv_until(
     sock: socket.socket,
-    accept: Callable[[dict], bool],
+    accept: Callable[[dict[str, object]], bool],
     timeout_s: float = 30.0,
-) -> dict:
+) -> dict[str, Any]:
     """Wait for the first NDJSON line where ``accept(msg)`` is True.
 
     Lines that ``accept`` rejects are **parked** in a per-socket inbox so a
@@ -427,7 +399,9 @@ def reset_inbox(sock: socket.socket) -> None:
     _INBOX_BUF.pop(sock.fileno(), None)
 
 
-def recv_response(sock: socket.socket, rid: str, timeout_s: float = 30.0) -> dict:
+def recv_response(
+    sock: socket.socket, rid: str, timeout_s: float = 30.0
+) -> dict[str, Any]:
     """Wait for a NDJSON response with ``id == rid``; drops pushes."""
     return recv_until(
         sock,
@@ -436,7 +410,9 @@ def recv_response(sock: socket.socket, rid: str, timeout_s: float = 30.0) -> dic
     )
 
 
-def recv_push(sock: socket.socket, event: str, timeout_s: float = 30.0) -> dict:
+def recv_push(
+    sock: socket.socket, event: str, timeout_s: float = 30.0
+) -> dict[str, Any]:
     """Wait for a push line whose ``event`` matches; drops replies."""
     return recv_until(
         sock,
@@ -459,12 +435,17 @@ def open_client(port: int) -> socket.socket:
 def call(
     sock: socket.socket,
     method: str,
-    params: dict | None = None,
+    params: Mapping[str, object] | None = None,
     *,
     rid: str = "1",
     timeout_s: float = 30.0,
-) -> dict:
-    """Send a single RPC and wait for its matching reply."""
+) -> dict[str, Any]:
+    """Send a single RPC and wait for its matching reply.
+
+    params must be a JSON-serializable dictionary with string keys. None or an
+    empty dictionary sends {}; a nonempty dictionary is passed through without
+    copying. Serialization, socket and receiver errors propagate unchanged.
+    """
     send(sock, {"id": rid, "method": method, "params": params or {}})
     return recv_response(sock, rid, timeout_s)
 

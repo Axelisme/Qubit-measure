@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from collections.abc import Callable
 
 # Pin the BLAS backend to a single thread BEFORE numpy is imported (numpy locks
 # the BLAS thread count at import time). On these tiny 40x40 Hamiltonians,
@@ -50,8 +51,6 @@ import os
 # effective here. Respect any value the caller already exported.
 for _blas_var in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
     os.environ.setdefault(_blas_var, "1")
-
-from collections.abc import Callable
 
 import h5py as h5
 import numpy as np
@@ -93,17 +92,18 @@ def fibonacci_lattice(K: int) -> NDArray[np.float64]:
 def fibonacci_lattice_positive(K: int) -> NDArray[np.float64]:
     """At least ``K`` Fibonacci-lattice directions with all components > 0.
 
-    Oversamples (8·K) and filters to the positive octant; grows K if too few
-    survive (parameter bounds are all positive, so only this octant matters).
+    Oversamples (8·K) and filters to the positive octant; grows the candidate count
+    if too few survive (parameter bounds are all positive, so only this octant matters).
     """
+    candidate_count = K
     while True:
-        directions = fibonacci_lattice(8 * K)
+        directions = fibonacci_lattice(8 * candidate_count)
         x, y, z = directions.T
         mask = (x > 0) & (y > 0) & (z > 0)
         valid = directions[mask]
-        if valid.shape[0] >= K:
+        if valid.shape[0] >= candidate_count:
             return valid
-        K = int(K * 1.1)
+        candidate_count = int(candidate_count * 1.1)
 
 
 def ray_intersects_box(
@@ -143,10 +143,10 @@ def sample_intersecting_rays(
     if it cannot reach ``n_samples`` within ``max_attempts``. With ``plot=True``
     shows a 3D debug scatter of the accepted directions vs the box corners.
     """
-    K = n_samples
+    candidate_count = n_samples
     intersecting: list[NDArray[np.float64]] = []
     for attempt in range(max_attempts):
-        directions = fibonacci_lattice_positive(K)
+        directions = fibonacci_lattice_positive(candidate_count)
         directions[:, 0] *= x_range[1]
         directions[:, 1] *= y_range[1]
         directions[:, 2] *= z_range[1]
@@ -160,11 +160,13 @@ def sample_intersecting_rays(
                 _plot_directions(params, x_range, y_range, z_range)
             return params
 
-        orig_K = K
-        K = int(K * min(max(n_samples / max(len(intersecting), 1), 1.01), 100))
+        previous_count = candidate_count
+        candidate_count = int(
+            candidate_count * min(max(n_samples / max(len(intersecting), 1), 1.01), 100)
+        )
         print(
             f"Attempt {attempt + 1}: {len(intersecting)} intersecting rays "
-            f"< {n_samples}; increasing candidates {orig_K} -> {K}."
+            f"< {n_samples}; increasing candidates {previous_count} -> {candidate_count}."
         )
 
     raise ValueError(

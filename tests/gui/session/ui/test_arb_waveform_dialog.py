@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 from typing import Any, Literal, Never
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -11,10 +12,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from zcu_tools.gui.session.services import arb_waveform
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
-from zcu_tools.gui.session.ui.arb_waveform_dialog import (
-    ArbWaveformDialog,
-    _PreviewCanvas,
-)
+from zcu_tools.gui.session.ui.arb_waveform_dialog import ArbWaveformDialog
 from zcu_tools.gui.widgets import error_colour
 from zcu_tools.resources.waveform_assets import (
     ArbWaveformData,
@@ -74,8 +72,9 @@ class _FakeController:
         del self.assets[data_key]
 
 
-@pytest.fixture(autouse=True)
-def _qt(qapp):
+@pytest.fixture(autouse=True, name="_qt")
+def fixture_qt(qapp):
+    """Keep the QApplication available throughout each test."""
     yield
 
 
@@ -126,6 +125,30 @@ def _preview_axes(dialog: ArbWaveformDialog) -> Axes:
     return canvas.figure.axes[0]
 
 
+def _assert_formula_error_recovery(
+    dlg: ArbWaveformDialog, editor: _Editor, preview_clock: PreviewClock
+) -> None:
+    """Verify formula errors recover Save availability and the rendered preview."""
+    formula_item = editor.segments.item(0, 1)
+    assert formula_item is not None
+    # "unknown_symbol" has valid structure (non-empty string) but fails render.
+    # With the new debounce design, render error surfaces only after the timer fires.
+    formula_item.setText("unknown_symbol")
+    preview_clock.drain()
+    assert not editor.save.isEnabled()
+    assert not editor.warning.isHidden()
+    assert "unsupported" in editor.warning.text()
+
+    # Fixing the formula triggers cheap validation immediately (no qWait needed).
+    formula_item.setText("sin(2*pi*t)")
+    assert editor.save.isEnabled()
+    assert editor.warning.isHidden()
+    preview_clock.drain()
+    label = _preview_axes(dlg).lines[0].get_label()
+    assert isinstance(label, str)
+    assert label.startswith("I:")
+
+
 # ---------------------------------------------------------------------------
 # Existing tests (updated for debounce state machine)
 # ---------------------------------------------------------------------------
@@ -166,24 +189,7 @@ def test_dialog_validates_segments_and_saves_preview(
     editor.button("Delete Segment").click()
     assert editor.segments.rowCount() == 3
 
-    formula_item = editor.segments.item(0, 1)
-    assert formula_item is not None
-    # "unknown_symbol" has valid structure (non-empty string) but fails render.
-    # With the new debounce design, render error surfaces only after the timer fires.
-    formula_item.setText("unknown_symbol")
-    preview_clock.drain()
-    assert not editor.save.isEnabled()
-    assert not editor.warning.isHidden()
-    assert "unsupported" in editor.warning.text()
-
-    # Fixing the formula triggers cheap validation immediately (no qWait needed).
-    formula_item.setText("sin(2*pi*t)")
-    assert editor.save.isEnabled()
-    assert editor.warning.isHidden()
-    preview_clock.drain()
-    label = _preview_axes(dlg).lines[0].get_label()
-    assert isinstance(label, str)
-    assert label.startswith("I:")
+    _assert_formula_error_recovery(dlg, editor, preview_clock)
 
     editor.normalize.setChecked(False)
     editor.save.click()
@@ -220,41 +226,86 @@ def test_dialog_validates_segments_and_saves_preview(
     assert "arb_data1" not in ctrl.assets
 
 
-def test_preview_canvas_autoscales_y_axis_for_normalized_and_raw(qapp) -> None:
+def test_preview_canvas_autoscales_y_axis_for_normalized_and_raw(
+    qapp, preview_clock: PreviewClock
+) -> None:
     data = render_formula_recipe(
         {
             "segments": [{"duration": 0.002, "formula": "0.25 + 0.5*I"}],
             "normalize": "none",
         }
     )
-    canvas = _PreviewCanvas()
+    ctrl = _FakeController()
+    ctrl.assets["subunit"] = data
+    dlg = ArbWaveformDialog(ctrl)
+    try:
+        editor = _Editor(dlg)
+        editor.assets.selectRow(0)
+        editor.normalize.setChecked(True)
+        preview_clock.drain()
 
-    canvas.plot("subunit", data, normalize=True)
+        axes = _preview_axes(dlg)
+        i_line = next(
+            (
+                line
+                for line in axes.lines
+                if isinstance(label := line.get_label(), str) and label.startswith("I:")
+            ),
+            None,
+        )
+        q_line = next(
+            (
+                line
+                for line in axes.lines
+                if isinstance(label := line.get_label(), str) and label.startswith("Q:")
+            ),
+            None,
+        )
+        assert i_line is not None
+        assert q_line is not None
+        assert axes.get_ylabel() == "Normalized amplitude"
+        assert np.asarray(i_line.get_ydata(), dtype=float)[0] == pytest.approx(
+            0.25 / data.peak_abs
+        )
+        assert np.asarray(q_line.get_ydata(), dtype=float)[0] == pytest.approx(
+            0.5 / data.peak_abs
+        )
+        normalized_y_min, normalized_y_max = axes.get_ylim()
+        assert -0.1 < normalized_y_min < 0.0
+        assert 1.0 < normalized_y_max < 1.1
 
-    assert canvas._i_line is not None
-    assert canvas._q_line is not None
-    assert canvas._ax.get_ylabel() == "Normalized amplitude"
-    assert np.asarray(canvas._i_line.get_ydata(), dtype=float)[0] == pytest.approx(
-        0.25 / data.peak_abs
-    )
-    assert np.asarray(canvas._q_line.get_ydata(), dtype=float)[0] == pytest.approx(
-        0.5 / data.peak_abs
-    )
-    normalized_y_min, normalized_y_max = canvas._ax.get_ylim()
-    assert -0.1 < normalized_y_min < 0.0
-    assert 1.0 < normalized_y_max < 1.1
+        editor.normalize.setChecked(False)
+        preview_clock.drain()
 
-    canvas.plot("subunit", data, normalize=False)
-
-    assert canvas._i_line is not None
-    assert canvas._q_line is not None
-    assert canvas._ax.get_ylabel() == "Amplitude"
-    assert np.asarray(canvas._i_line.get_ydata(), dtype=float)[0] == pytest.approx(0.25)
-    assert np.asarray(canvas._q_line.get_ydata(), dtype=float)[0] == pytest.approx(0.5)
-    raw_y_min, raw_y_max = canvas._ax.get_ylim()
-    assert -0.1 < raw_y_min < 0.0
-    assert 0.5 < raw_y_max < 1.0
-    assert raw_y_max < normalized_y_max
+        axes = _preview_axes(dlg)
+        i_line = next(
+            (
+                line
+                for line in axes.lines
+                if isinstance(label := line.get_label(), str) and label.startswith("I:")
+            ),
+            None,
+        )
+        q_line = next(
+            (
+                line
+                for line in axes.lines
+                if isinstance(label := line.get_label(), str) and label.startswith("Q:")
+            ),
+            None,
+        )
+        assert i_line is not None
+        assert q_line is not None
+        assert axes.get_ylabel() == "Amplitude"
+        assert np.asarray(i_line.get_ydata(), dtype=float)[0] == pytest.approx(0.25)
+        assert np.asarray(q_line.get_ydata(), dtype=float)[0] == pytest.approx(0.5)
+        raw_y_min, raw_y_max = axes.get_ylim()
+        assert -0.1 < raw_y_min < 0.0
+        assert 0.5 < raw_y_max < 1.0
+        assert raw_y_max < normalized_y_max
+    finally:
+        dlg.close()
+        dlg.deleteLater()
 
 
 # ---------------------------------------------------------------------------
@@ -502,34 +553,64 @@ def test_B7_reload_failure_reports_reload_failed_not_save_failed(
     assert critical_calls[0][0] == "Reload failed"
 
 
-def test_asset_load_failure_keeps_editor_state(qapp, monkeypatch) -> None:
-    """Selecting an asset whose load fails must not mutate editor state.
-
-    The load runs before _current_data_key / the data_key field are updated, so
-    a failed selection leaves the draft intact — its recipe cannot be saved
-    under the unloadable key (item-3 fail-fast / consistency fix).
-    """
+def test_asset_load_failure_keeps_editor_state(
+    qapp, monkeypatch, preview_clock: PreviewClock
+) -> None:
+    """Failed selection keeps the draft and cannot silently authorize overwrite."""
+    from qtpy.QtWidgets import QMessageBox
     from zcu_tools.resources.waveform_assets import ArbWaveformError
 
     ctrl = _FakeController()
+    ctrl.set_formula(
+        "broken",
+        {"segments": [{"duration": 0.002, "formula": "0.25"}], "normalize": "none"},
+    )
+    original_data = ctrl.assets["broken"]
+    save_observer = MagicMock(wraps=ctrl.set_formula)
+    monkeypatch.setattr(ctrl, "set_formula", save_observer)
+    questions = MagicMock(return_value=QMessageBox.StandardButton.No)
+    errors = MagicMock()
+    monkeypatch.setattr(QMessageBox, "question", questions)
+    monkeypatch.setattr(QMessageBox, "critical", errors)
     dlg = ArbWaveformDialog(ctrl)
-    draft_key = dlg._data_key_edit.text()
+    editor = _Editor(dlg)
+    preview_clock.drain()
+    draft_key = editor.key.text()
 
-    # Simulate selecting an asset that lists fine but fails to load.
-    monkeypatch.setattr(dlg, "_selected_data_key", lambda: "broken")
+    # The real table lists the asset, but the public load boundary fails.
+    load_calls: list[str] = []
 
     def _raise_load(data_key: str) -> ArbWaveformData:
+        load_calls.append(data_key)
         raise ArbWaveformError("corrupt asset", reason="load_failed")
 
     monkeypatch.setattr(ctrl, "load_data", _raise_load)
+    assert editor.assets.rowCount() == 1
+    asset_item = editor.assets.item(0, 0)
+    assert asset_item is not None
+    assert asset_item.text() == "broken"
+    editor.assets.selectRow(0)
 
-    dlg._on_asset_selection_changed()
-
-    assert dlg._data_key_edit.text() == draft_key
-    assert dlg._current_data_key is None
+    assert load_calls == ["broken"]
+    assert editor.key.text() == draft_key
     # Warning is shown (the dialog is never .show()n in tests, so check the
     # explicit hidden flag rather than isVisible(), which needs a shown ancestry).
-    assert not dlg._warning.isHidden()
+    assert not editor.warning.isHidden()
+    assert "corrupt asset" in editor.warning.text()
+
+    # Remembering the failed selection as the current asset would skip this
+    # confirmation. Check the warning first: editing the key revalidates it.
+    editor.key.setText("broken")
+    editor.save.click()
+    questions.assert_called_once_with(
+        dlg,
+        "Overwrite waveform",
+        "Overwrite existing arbitrary waveform 'broken'?",
+    )
+    save_observer.assert_not_called()
+    assert ctrl.assets["broken"] is original_data
+    assert load_calls == ["broken"]
+    errors.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -537,12 +618,21 @@ def test_asset_load_failure_keeps_editor_state(qapp, monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_E12_recipe_from_ui_returns_formula_recipe(qapp) -> None:
-    """_recipe_from_ui always returns a typed FormulaRecipe, never a plain dict."""
+def test_E12_recipe_from_ui_returns_formula_recipe(
+    qapp, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Save delivers a typed FormulaRecipe, never a plain dict."""
     ctrl = _FakeController()
+    observer = MagicMock(wraps=ctrl.set_formula)
+    monkeypatch.setattr(ctrl, "set_formula", observer)
     dlg = ArbWaveformDialog(ctrl)
+    editor = _Editor(dlg)
 
-    result = dlg._recipe_from_ui()
+    assert editor.save.isEnabled()
+    editor.save.click()
+    observer.assert_called_once()
+    assert observer.call_args is not None
+    result = observer.call_args.args[1]
     assert isinstance(result, FormulaRecipe)
     assert len(result.segments) == 3
     assert result.normalize in ("peak", "none")

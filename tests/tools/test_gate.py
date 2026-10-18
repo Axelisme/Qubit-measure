@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 from unittest.mock import Mock
 
+import _support
 import gate
 import pytest
 
@@ -63,7 +64,7 @@ class _StubRatchet:
 def _run_gate_with_ratchet_outcome(
     monkeypatch: pytest.MonkeyPatch, ratchet: gate.Outcome
 ) -> tuple[int, list[str]]:
-    monkeypatch.setattr(gate._support, "load_tool", lambda _name: _StubRatchet)
+    monkeypatch.setattr(_support, "load_tool", lambda _name: _StubRatchet)
 
     def fake_run_step(step: gate.Step, _root: Path) -> gate.Outcome:
         if step.name == "ratchet":

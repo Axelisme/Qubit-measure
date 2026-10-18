@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from copy import deepcopy
-from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias
+from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, override
 
 from pydantic import BeforeValidator, Field
 from qick.asm_v2 import QickParam
@@ -29,6 +29,7 @@ class NoneResetCfg(AbsResetCfg):
     def build(self, name: str) -> NoneReset:
         return NoneReset(name, self)
 
+    @override
     def set_param(self, name: str, value: float | QickParam) -> None:
         raise ValueError("NoneReset does not support set_param")
 
@@ -116,9 +117,11 @@ class NoneReset(AbsReset):
 
     def init(self, prog: ModularProgramV2) -> None: ...
 
+    @override
     def total_length(self, prog: ModularProgramV2) -> float | QickParam:
         return 0.0
 
+    @override
     def run(
         self, prog: ModularProgramV2, t: float | QickParam = 0.0
     ) -> float | QickParam:

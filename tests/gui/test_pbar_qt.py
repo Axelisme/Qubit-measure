@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.session.ui.progress_bar import LightweightProgressBar
+    from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 
 pytest.importorskip("qtpy")
 
 
 # ---------------------------------------------------------------------------
-# _ProgressStack helpers
+# ProgressStack helpers
 # ---------------------------------------------------------------------------
 
 
@@ -18,6 +22,21 @@ def _make_stack(qapp):
     from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 
     return ProgressStack()
+
+
+def _layout_bars(stack: ProgressStack) -> tuple[LightweightProgressBar, ...]:
+    from zcu_tools.gui.session.ui.progress_bar import LightweightProgressBar
+
+    layout = stack.layout()
+    assert layout is not None
+    bars: list[LightweightProgressBar] = []
+    for index in range(layout.count()):
+        item = layout.itemAt(index)
+        assert item is not None
+        widget = item.widget()
+        assert isinstance(widget, LightweightProgressBar)
+        bars.append(widget)
+    return tuple(bars)
 
 
 def _make_factory(stack, *, operation_id: int = 1, owner_id: str = "owner"):
@@ -45,21 +64,45 @@ def _make_factory(stack, *, operation_id: int = 1, owner_id: str = "owner"):
 # ---------------------------------------------------------------------------
 
 
-def test_lightweight_progress_bar_format_and_value(qapp):
+def test_lightweight_progress_bar_format_and_value(
+    qapp, monkeypatch: pytest.MonkeyPatch
+):
+    from PyQt6.QtCore import QRect
+    from PyQt6.QtGui import QPainter, QPixmap
     from zcu_tools.gui.session.ui.progress_bar import LightweightProgressBar
 
     bar = LightweightProgressBar()
-    bar.setMaximum(10)
-    bar.setValue(3)
-    bar.setFormat("rounds %v/%m %p%")
+    try:
+        bar.setMaximum(10)
+        bar.setValue(3)
+        bar.setFormat("rounds %v/%m %p%")
 
-    assert bar.maximum() == 10
-    assert bar.value() == 3
-    assert bar.format() == "rounds %v/%m %p%"
-    assert bar._text() == "rounds 3/10 30%"
+        assert bar.maximum() == 10
+        assert bar.value() == 3
+        assert bar.format() == "rounds %v/%m %p%"
 
-    bar.setValue(99)
-    assert bar.value() == 10
+        bar.resize(bar.fontMetrics().horizontalAdvance("rounds 3/10 30%") + 100, 30)
+        pixmap = QPixmap(bar.size())
+        captured_texts: list[str | None] = []
+        real_draw_text = QPainter.drawText
+
+        def observe_draw_text(
+            painter: QPainter, rectangle: QRect, flags: int, text: str | None
+        ) -> QRect | None:
+            """Record Qt's text while preserving the real drawing call and result."""
+            captured_texts.append(text)
+            return real_draw_text(painter, rectangle, flags, text)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(QPainter, "drawText", observe_draw_text)
+            bar.render(pixmap)
+        assert captured_texts == ["rounds 3/10 30%"]
+
+        bar.setValue(99)
+        assert bar.value() == 10
+    finally:
+        bar.deleteLater()
+        qapp.processEvents()
 
 
 def test_factory_push_and_pop_leave_false(qapp):
@@ -71,7 +114,7 @@ def test_factory_push_and_pop_leave_false(qapp):
 
     pbar = factory(desc="test", total=10, leave=False)
     QApplication.processEvents()
-    assert len(stack._active) == 1  # bar was pushed
+    assert len(_layout_bars(stack)) == 1  # bar was pushed
 
     pbar.update(3)
     QApplication.processEvents()
@@ -83,7 +126,7 @@ def test_factory_push_and_pop_leave_false(qapp):
 
     pbar.close()
     QApplication.processEvents()
-    assert len(stack._active) == 0  # bar was popped
+    assert len(_layout_bars(stack)) == 0  # bar was popped
 
 
 def test_reset_all_keeps_removed_bar_as_hidden_child(qapp):
@@ -95,7 +138,7 @@ def test_reset_all_keeps_removed_bar_as_hidden_child(qapp):
     factory = _make_factory(stack)
     factory(desc="test", total=10, leave=True)
     QApplication.processEvents()
-    bar = stack._active[0]
+    bar = _layout_bars(stack)[0]
     assert bar.isVisible() is True
 
     stack.reset_all()
@@ -115,14 +158,14 @@ def test_factory_push_and_pop_leave_true(qapp):
 
     pbar = factory(desc="test", total=10, leave=True)
     QApplication.processEvents()
-    assert len(stack._active) == 1
+    assert len(_layout_bars(stack)) == 1
 
     pbar.close()
     QApplication.processEvents()
-    assert len(stack._active) == 1  # still active (leave=True)
+    assert len(_layout_bars(stack)) == 1  # still active (leave=True)
 
     stack.reset_all()
-    assert len(stack._active) == 0
+    assert len(_layout_bars(stack)) == 0
 
 
 def test_factory_two_layers(qapp):
@@ -136,18 +179,18 @@ def test_factory_two_layers(qapp):
     QApplication.processEvents()
     inner = factory(desc="inner", total=10, leave=False)
     QApplication.processEvents()
-    assert len(stack._active) == 2
+    assert len(_layout_bars(stack)) == 2
 
     inner.close()
     QApplication.processEvents()
-    assert len(stack._active) == 1  # inner popped (leave=False)
+    assert len(_layout_bars(stack)) == 1  # inner popped (leave=False)
 
     outer.close()
     QApplication.processEvents()
-    assert len(stack._active) == 1  # outer stays (leave=True)
+    assert len(_layout_bars(stack)) == 1  # outer stays (leave=True)
 
     stack.reset_all()
-    assert len(stack._active) == 0
+    assert len(_layout_bars(stack)) == 0
 
 
 def test_total_setter(qapp):
@@ -162,18 +205,18 @@ def test_total_setter(qapp):
     # integer total → max == raw value
     pbar = factory(desc="t", total=5, leave=False)
     QApplication.processEvents()
-    assert stack._active[0].maximum() == 5
+    assert _layout_bars(stack)[0].maximum() == 5
 
     # changing to another integer → max updates
     pbar.total = 20
     QApplication.processEvents()
-    assert stack._active[0].maximum() == 20
+    assert _layout_bars(stack)[0].maximum() == 20
     assert pbar.total == 20
 
     # changing to float → scaled max, bar can fill proportionally
     pbar.total = 3.14
     QApplication.processEvents()
-    assert stack._active[0].maximum() == _FLOAT_SCALE
+    assert _layout_bars(stack)[0].maximum() == _FLOAT_SCALE
 
     pbar.close()
     QApplication.processEvents()
@@ -193,7 +236,7 @@ def test_total_change_updates_widget_in_place_no_flicker(qapp):
 
     pbar = factory(desc="rounds", total=10, leave=True)
     QApplication.processEvents()
-    widget = stack._active[0]  # the specific progress widget instance shown
+    widget = _layout_bars(stack)[0]  # the specific progress widget instance shown
 
     # Mutating total many times (simulating per-sweep-point set_pbar_n) keeps the
     # *same* widget object in place — it is never popped back to the pool.
@@ -201,15 +244,19 @@ def test_total_change_updates_widget_in_place_no_flicker(qapp):
         pbar.total = new_total
         pbar.refresh()
         QApplication.processEvents()
-        assert len(stack._active) == 1
-        assert stack._active[0] is widget  # same widget, not rebuilt
+        assert len(_layout_bars(stack)) == 1
+        assert _layout_bars(stack)[0] is widget  # same widget, not rebuilt
         assert widget.maximum() == new_total
 
     pbar.close()
     QApplication.processEvents()
 
 
-def test_progress_stack_skips_unchanged_bar_properties(qapp):
+def test_progress_stack_skips_unchanged_bar_properties(
+    qapp, monkeypatch: pytest.MonkeyPatch
+):
+    from zcu_tools.gui.session.pbar_host import ProgressBarModel
+
     stack = _make_stack(qapp)
     profile_calls: list[tuple[str, float, str]] = []
     stack.set_profile_callback(
@@ -218,40 +265,67 @@ def test_progress_stack_skips_unchanged_bar_properties(qapp):
         )
     )
 
-    class FakeBar:
-        def __init__(self) -> None:
-            self.calls: list[tuple[str, int | str]] = []
+    class _FixedFormatModel(ProgressBarModel):
+        """Isolate live clock formatting across the four property-cache cases.
 
-        def setMaximum(self, value: int) -> None:
-            self.calls.append(("maximum", value))
+        ``display_format`` is the exact Qt format string returned by ``format``;
+        all numeric state and Qt value/maximum derivation use the real model.
+        """
 
-        def setFormat(self, value: str) -> None:
-            self.calls.append(("format", value))
+        display_format: str = "rounds %v/%m"
 
-        def setValue(self, value: int) -> None:
-            self.calls.append(("value", value))
+        def format(self) -> str:
+            """Return the controlled display string without reading the clock."""
+            return self.display_format
 
-    bar = FakeBar()
-    bar_arg = cast(Any, bar)
+    model = _FixedFormatModel(label="rounds", total=10, start_time=0.0)
+    model.set_n(2)
+    bar = stack.push()
+    calls: list[tuple[str, int | str]] = []
+    set_maximum = bar.setMaximum
+    set_format = bar.setFormat
+    set_value = bar.setValue
 
-    stack._apply_bar_snapshot(bar_arg, (10, "rounds %v/%m", 2))
-    assert bar.calls == [
+    def observe_maximum(value: int) -> None:
+        """Record the maximum write, delegating its value, result and errors."""
+        calls.append(("maximum", value))
+        return set_maximum(value)
+
+    def observe_format(value: str) -> None:
+        """Record the format write, delegating its value, result and errors."""
+        calls.append(("format", value))
+        return set_format(value)
+
+    def observe_value(value: int) -> None:
+        """Record the value write, delegating its value, result and errors."""
+        calls.append(("value", value))
+        return set_value(value)
+
+    monkeypatch.setattr(bar, "setMaximum", observe_maximum)
+    monkeypatch.setattr(bar, "setFormat", observe_format)
+    monkeypatch.setattr(bar, "setValue", observe_value)
+
+    stack.render_models((model,))
+    assert calls == [
         ("maximum", 10),
         ("format", "rounds %v/%m"),
         ("value", 2),
     ]
 
-    bar.calls.clear()
-    stack._apply_bar_snapshot(bar_arg, (10, "rounds %v/%m", 2))
-    assert bar.calls == []
+    calls.clear()
+    stack.render_models((model,))
+    assert calls == []
     assert profile_calls[-1][0] == "snapshot_noop"
 
-    stack._apply_bar_snapshot(bar_arg, (10, "rounds %v/%m", 3))
-    assert bar.calls == [("value", 3)]
+    model.set_n(3)
+    stack.render_models((model,))
+    assert calls == [("value", 3)]
 
-    bar.calls.clear()
-    stack._apply_bar_snapshot(bar_arg, (20, "rounds %v/%m [0:01]", 3))
-    assert bar.calls == [
+    calls.clear()
+    model.set_total(20)
+    model.display_format = "rounds %v/%m [0:01]"
+    stack.render_models((model,))
+    assert calls == [
         ("maximum", 20),
         ("format", "rounds %v/%m [0:01]"),
     ]
@@ -306,7 +380,7 @@ def test_context_local_factory_routes_nested_progress(qapp):
 
 
 def test_disabled_pbar_does_not_push_to_stack(qapp):
-    """factory(disable=True) must not add any bar to stack._active."""
+    """factory(disable=True) must not add any bar to the stack layout."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 
     stack = _make_stack(qapp)
@@ -314,7 +388,7 @@ def test_disabled_pbar_does_not_push_to_stack(qapp):
 
     factory(desc="hidden", total=10, leave=False, disable=True)
     QApplication.processEvents()
-    assert len(stack._active) == 0
+    assert len(_layout_bars(stack)) == 0
 
 
 def test_disabled_pbar_methods_are_noop_no_exception(qapp):
@@ -331,7 +405,7 @@ def test_disabled_pbar_methods_are_noop_no_exception(qapp):
     pbar.total = 20
     pbar.close()
 
-    assert len(stack._active) == 0
+    assert len(_layout_bars(stack)) == 0
 
 
 def test_disabled_pbar_internal_state_updates(qapp):
@@ -353,7 +427,7 @@ def test_disabled_pbar_internal_state_updates(qapp):
     pbar.set_description("updated")
     assert pbar.desc == "updated"
 
-    assert len(stack._active) == 0
+    assert len(_layout_bars(stack)) == 0
 
 
 def test_disabled_pbar_close_does_not_pop_stack(qapp):
@@ -366,7 +440,7 @@ def test_disabled_pbar_close_does_not_pop_stack(qapp):
     pbar = factory(desc="hidden", total=5, leave=False, disable=True)
     pbar.close()
     QApplication.processEvents()
-    assert len(stack._active) == 0
+    assert len(_layout_bars(stack)) == 0
 
 
 def test_explicit_disable_false_behaves_normally(qapp):
@@ -378,14 +452,14 @@ def test_explicit_disable_false_behaves_normally(qapp):
 
     pbar = factory(desc="normal", total=5, leave=False, disable=False)
     QApplication.processEvents()
-    assert len(stack._active) == 1
+    assert len(_layout_bars(stack)) == 1
 
     pbar.update(2)
     assert pbar.n == 2
 
     pbar.close()
     QApplication.processEvents()
-    assert len(stack._active) == 0
+    assert len(_layout_bars(stack)) == 0
 
 
 def test_disabled_and_enabled_pbars_coexist(qapp):
@@ -400,13 +474,15 @@ def test_disabled_and_enabled_pbars_coexist(qapp):
     disabled = factory(desc="hidden", total=10, leave=False, disable=True)
     QApplication.processEvents()
 
-    assert len(stack._active) == 1
+    assert len(_layout_bars(stack)) == 1
 
     disabled.update(5)
     disabled.close()
     QApplication.processEvents()
-    assert len(stack._active) == 1  # enabled still in stack; disabled close is no-op
+    assert (
+        len(_layout_bars(stack)) == 1
+    )  # enabled still in stack; disabled close is no-op
 
     stack.reset_all()
-    assert len(stack._active) == 0
+    assert len(_layout_bars(stack)) == 0
     del enabled

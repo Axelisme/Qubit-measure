@@ -7,6 +7,8 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from zcu_tools.gui.event_bus import EventSubscriptions
+from zcu_tools.gui.remote import control_service as control_service_module
 
 
 def test_remote_control_adapter_start_rolls_back_bind_error(qapp) -> None:
@@ -21,7 +23,7 @@ def test_remote_control_adapter_start_rolls_back_bind_error(qapp) -> None:
     from zcu_tools.gui.app.measure.remote import RemoteControlAdapter
     from zcu_tools.gui.app.measure.remote.events import EVENT_SERIALIZERS
     from zcu_tools.gui.event_bus import BaseEventBus
-    from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
+    from zcu_tools.gui.remote.rpc_endpoint import ControlOptions, NdjsonRpcEndpoint
     from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 
     bus = BaseEventBus()
@@ -31,28 +33,57 @@ def test_remote_control_adapter_start_rolls_back_bind_error(qapp) -> None:
 
     opts = ControlOptions(port=0)  # valid opts; we'll patch the underlying endpoint
 
-    adapter = RemoteControlAdapter(
-        controller=ctrl_mock,
-        opts=opts,
-        owner_scheduler=QtOwnerScheduler(),
-        render_view=render_view_mock,
-    )
+    bus_subs = EventSubscriptions()
+    with patch.object(
+        control_service_module, "EventSubscriptions", return_value=bus_subs
+    ) as factory:
+        adapter = RemoteControlAdapter(
+            controller=ctrl_mock,
+            opts=opts,
+            owner_scheduler=QtOwnerScheduler(),
+            render_view=render_view_mock,
+        )
+    factory.assert_called_once_with()
 
     bind_error = RuntimeError(
         "NdjsonRpcEndpoint bind 127.0.0.1:0 failed: [Errno 98] Address already in use"
     )
 
     with (
-        patch.object(adapter._endpoint, "start", side_effect=bind_error),
-        patch.object(adapter._endpoint, "stop") as endpoint_stop,
+        patch.object(
+            bus_subs, "subscribe_with_meta", wraps=bus_subs.subscribe_with_meta
+        ) as group_subscribe,
+        patch.object(
+            bus, "subscribe_with_meta", wraps=bus.subscribe_with_meta
+        ) as meta_subscribe,
+        patch.object(
+            bus, "unsubscribe_with_meta", wraps=bus.unsubscribe_with_meta
+        ) as meta_unsubscribe,
+        patch.object(bus, "subscribe", wraps=bus.subscribe) as legacy_subscribe,
+        patch.object(bus, "unsubscribe", wraps=bus.unsubscribe) as legacy_unsubscribe,
+        patch.object(NdjsonRpcEndpoint, "start", side_effect=bind_error),
+        patch.object(NdjsonRpcEndpoint, "stop") as endpoint_stop,
         pytest.raises(RuntimeError, match="bind"),
     ):
         adapter.start()
 
     endpoint_stop.assert_not_called()
-    assert len(adapter._bus_subs) == 0
-    assert all(not bus._meta_subs.get(event_key) for event_key in EVENT_SERIALIZERS)
-    assert all(not bus._subs.get(event_key) for event_key in EVENT_SERIALIZERS)
+    assert len(bus_subs) == 0
+    assert group_subscribe.call_count == meta_subscribe.call_count
+    assert meta_subscribe.call_count == len(EVENT_SERIALIZERS)
+    assert {call.args[0] for call in meta_subscribe.call_args_list} == set(
+        EVENT_SERIALIZERS
+    )
+    assert meta_unsubscribe.call_count == meta_subscribe.call_count
+    for subscribe_call in meta_subscribe.call_args_list:
+        assert meta_unsubscribe.call_args_list.count(
+            subscribe_call
+        ) == meta_subscribe.call_args_list.count(subscribe_call)
+    assert legacy_unsubscribe.call_count == legacy_subscribe.call_count
+    for subscribe_call in legacy_subscribe.call_args_list:
+        assert legacy_unsubscribe.call_args_list.count(
+            subscribe_call
+        ) == legacy_subscribe.call_args_list.count(subscribe_call)
     ctrl_mock.add_diagnostic_sink.assert_called_once_with(adapter)
     ctrl_mock.remove_diagnostic_sink.assert_called_once_with(adapter)
 
@@ -63,7 +94,7 @@ def test_remote_control_adapter_start_fails_fast_and_rolls_back_event_subscripti
     from zcu_tools.gui.app.measure.remote import RemoteControlAdapter
     from zcu_tools.gui.app.measure.remote.events import EVENT_SERIALIZERS
     from zcu_tools.gui.event_bus import BaseEventBus, EventMeta
-    from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
+    from zcu_tools.gui.remote.rpc_endpoint import ControlOptions, NdjsonRpcEndpoint
     from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 
     class FailingEventBus(BaseEventBus):
@@ -84,23 +115,49 @@ def test_remote_control_adapter_start_fails_fast_and_rolls_back_event_subscripti
     bus = FailingEventBus()
     ctrl_mock = MagicMock()
     ctrl_mock.get_bus.return_value = bus
-    adapter = RemoteControlAdapter(
-        controller=ctrl_mock,
-        opts=ControlOptions(port=0),
-        owner_scheduler=QtOwnerScheduler(),
-        render_view=MagicMock(),
-    )
+    bus_subs = EventSubscriptions()
+    with patch.object(
+        control_service_module, "EventSubscriptions", return_value=bus_subs
+    ) as factory:
+        adapter = RemoteControlAdapter(
+            controller=ctrl_mock,
+            opts=ControlOptions(port=0),
+            owner_scheduler=QtOwnerScheduler(),
+            render_view=MagicMock(),
+        )
+    factory.assert_called_once_with()
 
     with (
-        patch.object(adapter._endpoint, "start") as endpoint_start,
+        patch.object(
+            bus_subs, "subscribe_with_meta", wraps=bus_subs.subscribe_with_meta
+        ) as group_subscribe,
+        patch.object(
+            bus, "subscribe_with_meta", wraps=bus.subscribe_with_meta
+        ) as meta_subscribe,
+        patch.object(
+            bus, "unsubscribe_with_meta", wraps=bus.unsubscribe_with_meta
+        ) as meta_unsubscribe,
+        patch.object(bus, "subscribe", wraps=bus.subscribe) as legacy_subscribe,
+        patch.object(bus, "unsubscribe", wraps=bus.unsubscribe) as legacy_unsubscribe,
+        patch.object(NdjsonRpcEndpoint, "start") as endpoint_start,
         pytest.raises(RuntimeError, match="subscribe failed"),
     ):
         adapter.start()
 
     endpoint_start.assert_not_called()
-    assert len(adapter._bus_subs) == 0
-    assert all(not bus._meta_subs.get(event_key) for event_key in EVENT_SERIALIZERS)
-    assert all(not bus._subs.get(event_key) for event_key in EVENT_SERIALIZERS)
+    assert len(bus_subs) == 0
+    assert group_subscribe.call_count == meta_subscribe.call_count
+    assert meta_subscribe.call_count == 2
+    assert all(
+        call.args[0] in EVENT_SERIALIZERS for call in meta_subscribe.call_args_list
+    )
+    # The second attempt raises before registration; only the first needs cleanup.
+    assert meta_unsubscribe.call_args_list == [meta_subscribe.call_args_list[0]]
+    assert legacy_unsubscribe.call_count == legacy_subscribe.call_count
+    for subscribe_call in legacy_subscribe.call_args_list:
+        assert legacy_unsubscribe.call_args_list.count(
+            subscribe_call
+        ) == legacy_subscribe.call_args_list.count(subscribe_call)
 
 
 def test_remote_control_adapter_start_rolls_back_advertise_error(qapp) -> None:
@@ -109,31 +166,63 @@ def test_remote_control_adapter_start_rolls_back_advertise_error(qapp) -> None:
     from zcu_tools.gui.app.measure.remote import RemoteControlAdapter
     from zcu_tools.gui.app.measure.remote.events import EVENT_SERIALIZERS
     from zcu_tools.gui.event_bus import BaseEventBus
-    from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
+    from zcu_tools.gui.remote.rpc_endpoint import ControlOptions, NdjsonRpcEndpoint
     from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 
     bus = BaseEventBus()
     ctrl_mock = MagicMock()
     ctrl_mock.get_bus.return_value = bus
-    adapter = RemoteControlAdapter(
-        controller=ctrl_mock,
-        opts=ControlOptions(port=0, app_slug="measure"),
-        owner_scheduler=QtOwnerScheduler(),
-        render_view=MagicMock(),
-    )
+    bus_subs = EventSubscriptions()
+    with patch.object(
+        control_service_module, "EventSubscriptions", return_value=bus_subs
+    ) as factory:
+        adapter = RemoteControlAdapter(
+            controller=ctrl_mock,
+            opts=ControlOptions(port=0, app_slug="measure"),
+            owner_scheduler=QtOwnerScheduler(),
+            render_view=MagicMock(),
+        )
+    factory.assert_called_once_with()
     advertise_error = RuntimeError("discovery write failed")
 
     with (
-        patch.object(adapter._endpoint, "start", return_value=12345),
-        patch.object(adapter._endpoint, "stop") as endpoint_stop,
-        patch.object(adapter, "_advertise_session", side_effect=advertise_error),
+        patch.object(
+            bus_subs, "subscribe_with_meta", wraps=bus_subs.subscribe_with_meta
+        ) as group_subscribe,
+        patch.object(
+            bus, "subscribe_with_meta", wraps=bus.subscribe_with_meta
+        ) as meta_subscribe,
+        patch.object(
+            bus, "unsubscribe_with_meta", wraps=bus.unsubscribe_with_meta
+        ) as meta_unsubscribe,
+        patch.object(bus, "subscribe", wraps=bus.subscribe) as legacy_subscribe,
+        patch.object(bus, "unsubscribe", wraps=bus.unsubscribe) as legacy_unsubscribe,
+        patch.object(NdjsonRpcEndpoint, "start", return_value=12345),
+        patch.object(NdjsonRpcEndpoint, "stop") as endpoint_stop,
+        patch(
+            "zcu_tools.gui.remote.control_service.write_session",
+            side_effect=advertise_error,
+        ),
         pytest.raises(RuntimeError, match="discovery write failed"),
     ):
         adapter.start()
 
     endpoint_stop.assert_called_once_with()
-    assert len(adapter._bus_subs) == 0
-    assert all(not bus._meta_subs.get(event_key) for event_key in EVENT_SERIALIZERS)
-    assert all(not bus._subs.get(event_key) for event_key in EVENT_SERIALIZERS)
+    assert len(bus_subs) == 0
+    assert group_subscribe.call_count == meta_subscribe.call_count
+    assert meta_subscribe.call_count == len(EVENT_SERIALIZERS)
+    assert {call.args[0] for call in meta_subscribe.call_args_list} == set(
+        EVENT_SERIALIZERS
+    )
+    assert meta_unsubscribe.call_count == meta_subscribe.call_count
+    for subscribe_call in meta_subscribe.call_args_list:
+        assert meta_unsubscribe.call_args_list.count(
+            subscribe_call
+        ) == meta_subscribe.call_args_list.count(subscribe_call)
+    assert legacy_unsubscribe.call_count == legacy_subscribe.call_count
+    for subscribe_call in legacy_subscribe.call_args_list:
+        assert legacy_unsubscribe.call_args_list.count(
+            subscribe_call
+        ) == legacy_subscribe.call_args_list.count(subscribe_call)
     ctrl_mock.add_diagnostic_sink.assert_called_once_with(adapter)
     ctrl_mock.remove_diagnostic_sink.assert_called_once_with(adapter)

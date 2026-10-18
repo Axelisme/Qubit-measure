@@ -26,8 +26,8 @@ def qapp():
     return app
 
 
-@pytest.fixture(autouse=True)
-def _drain_qt_events(qapp):
+@pytest.fixture(autouse=True, name="_drain_qt_events")
+def fixture_drain_qt_events(qapp):
     """Drain pending Qt events before and after every test (xdist segfault prevention).
 
     See tests/gui/conftest.py for the full rationale.

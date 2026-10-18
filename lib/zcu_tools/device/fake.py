@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Literal
+from typing import Literal, override
 
 from pydantic import Field, field_validator
 
@@ -64,6 +64,7 @@ class FakeDevice(BaseDevice[FakeDeviceInfo]):
         self._rampstep = DEFAULT_RAMPSTEP
         self._fast_mode = fast_mode
 
+    @override
     def _open_session(self, rm: object | None) -> None:
         return None
 
