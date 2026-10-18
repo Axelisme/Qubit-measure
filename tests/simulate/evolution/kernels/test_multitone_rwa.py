@@ -329,3 +329,71 @@ def test_window_excluded_edges_accumulate_envelope_squared_phase(frequency, scal
     phases = np.exp(-2j * np.pi * (energies * 128 + integrated_shift))
     expected = initial * phases[:, None] * phases.conj()[None, :]
     np.testing.assert_allclose(actual[0], expected, atol=2e-7, rtol=0)
+
+
+def test_gate_cache_and_row_rwa_share_window_excluded_shifts():
+    from zcu_tools.simulate.evolution.kernel import ApplyContext
+
+    # No retained Fourier edges: the analytic answer is entirely the virtual
+    # shift. Agreement alone would miss both paths silently omitting it.
+    energies = np.array([0.0, 0.7, 1.2])
+    drives = []
+    for port, target, coupling in (("a", 1, 0.01), ("b", 2, 0.008)):
+        positive = np.zeros((3, 3), dtype=np.complex128)
+        positive[0, target] = coupling
+        drives.append(
+            SecularDrive(port, positive + positive.T, 1j * (positive - positive.T))
+        )
+    model = SecularModel(
+        (0,),
+        "cached-virtual-phase",
+        energies,
+        np.eye(3, dtype=np.complex128),
+        tuple(drives),
+        np.zeros((3, 3)),
+        np.zeros((3, 3)),
+    )
+    initial = np.full((3, 3), 1 / 3, dtype=np.complex128)
+    source = ModelSource(initial, lambda level: replace(model, level=level))
+    count, duration = 24, 128.0
+    times = np.array([0.0, duration / 2, duration])
+    env = EnvelopeSpec("sampled", (0.5 + times / (2 * duration)).astype(complex), times)
+    table = SegmentTable(
+        timeline=np.arange(count),
+        start_ns=np.arange(count, dtype=np.float64) * 3.125,
+        duration_ns=np.full(count, duration),
+        level=np.zeros((count, 1), dtype=np.int64),
+        tones=np.full(count, 2),
+        tone_port=np.tile([0, 1], (count, 1)),
+        tone_frequency_ghz=np.tile([0.6, 0.3], (count, 1)),
+        tone_amplitude=np.tile([-0.4, 0.3], (count, 1)),
+        tone_theta_rad=np.arange(count * 2, dtype=np.float64).reshape(count, 2) * 0.13,
+        tone_envelope=np.zeros((count, 2), dtype=np.int64),
+        tone_envelope_offset_ns=np.zeros((count, 2)),
+        envelopes=(env,),
+    )
+    integral = duration * (0.5**2 + 0.5 * 1.0 + 1.0**2) / 3
+    shift_a = (-0.4 * 0.01) ** 2 / (0.6 - 0.7) * integral
+    shift_b = (0.3 * 0.008) ** 2 / (0.3 - 1.2) * integral
+    shifts = np.array([shift_a + shift_b, -shift_a, -shift_b])
+    phase = np.exp(-2j * np.pi * (energies * duration + shifts))
+    expected = initial * phase[:, None] * phase.conj()[None, :]
+    results = []
+    rows = np.arange(count)
+    for name in ("multitone_gate", "multitone_rwa"):
+        kernel = next(k for k in REGISTRY if k.name == name)
+        with closing(WorkPlan()) as plan:
+            context = KernelContext(source, 1e-3, plan)
+            assert kernel.guard(table, rows, context).all()
+            keys = kernel.prepare_keys(table, rows, context)
+            _, indices, inverse = np.unique(
+                keys, return_index=True, return_inverse=True
+            )
+            prepared = kernel.prepare(keys[indices], table, rows[indices], context)
+            actual = np.repeat(initial[None], count, axis=0)
+            kernel.apply(prepared, inverse, table, rows, actual, ApplyContext(1e-3))
+        np.testing.assert_allclose(
+            actual, np.repeat(expected[None], count, axis=0), atol=2e-7, rtol=0
+        )
+        results.append(actual)
+    np.testing.assert_allclose(results[0], results[1], atol=2e-7, rtol=0)
