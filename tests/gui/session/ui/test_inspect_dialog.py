@@ -254,7 +254,7 @@ def test_selection_only_is_unsaved_through_apply_revert_and_close(
     dialog = _open(session, presenter)
     driver = ComponentDriver(dialog)
     driver.select_tab("Modules")
-    driver.expand_tree(("Modules", PULSE), object_name="inspect.library")
+    driver.expand_tree(("modules", PULSE), object_name="inspect.library")
 
     def snapshot(name: str) -> None:
         driver.screenshot(tmp_path / f"{name}.png")
