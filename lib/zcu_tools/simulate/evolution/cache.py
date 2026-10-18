@@ -7,6 +7,7 @@ one evolve call. A matching key never replaces the current row's guard.
 """
 
 from collections import OrderedDict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -36,6 +37,19 @@ class PreparedPayload:
 
 
 @dataclass(frozen=True)
+class ResidentPayload:
+    """Detached whole resident, preserving namespace and failed-guard priority.
+
+    namespace identifies the kernel/model/budget. payload owns the read-only
+    model-only allocation. rejected means no accepted consumer has promoted it.
+    """
+
+    namespace: CacheNamespace
+    payload: PreparedPayload
+    rejected: bool
+
+
+@dataclass(frozen=True)
 class _Allocation:
     namespace: CacheNamespace
     payload: PreparedPayload
@@ -47,7 +61,8 @@ class PrepareCache:
 
     limit is a nonnegative integer resident byte budget (not bool); zero
     disables admission. Invalid limits raise ValueError. bytes counts resident
-    allocations once, not active scheduler references or RSS. Reusing one
+    allocations owned by this LRU once, not detached stale ownership, pending
+    products, active scheduler references or RSS. Reusing one
     prepared object requires identical namespace and whole-batch metadata.
     Eviction and clear release only cache ownership, not caller references.
     """
@@ -62,6 +77,62 @@ class PrepareCache:
     def bytes(self) -> int:
         """Resident whole-allocation array bytes, bounded by limit."""
         return self._bytes
+
+    @property
+    def namespaces(self) -> frozenset[CacheNamespace]:
+        """Namespaces currently owning resident allocations, without LRU touches."""
+        return frozenset(item.namespace for item in self._resident.values())
+
+    @property
+    def payloads(self) -> tuple[PreparedPayload, ...]:
+        """Whole resident references in LRU order, including rejected products."""
+        return tuple(item.payload for item in self._resident.values())
+
+    def detach_unused(
+        self, inventory: Mapping[CacheNamespace, set[CacheKey]]
+    ) -> list[ResidentPayload]:
+        """Transfer nonborrowed residents, in LRU order, to caller ownership.
+
+        Call once before prefix/guard/build workers start, under the Engine
+        lock. Whole batches intersecting any complete-inventory key stay here.
+        Detached allocations remain resident until their new owner releases or
+        restores them. bytes then counts only this cache's remaining ownership.
+        """
+        stale: list[ResidentPayload] = []
+        for identity, allocation in list(self._resident.items()):
+            keys = inventory.get(allocation.namespace)
+            if keys is None or keys.isdisjoint(allocation.payload.keys):
+                stale.append(
+                    ResidentPayload(
+                        allocation.namespace,
+                        allocation.payload,
+                        identity in self._rejected,
+                    )
+                )
+                del self._resident[identity]
+                self._rejected.pop(identity, None)
+                self._bytes -= allocation.nbytes
+        return stale
+
+    def restore(self, stale: list[ResidentPayload]) -> None:
+        """Restore fitting detached residents as older than current work.
+
+        Caller-only, after workers drain. The admission owner guarantees all
+        restored arrays plus current cache ownership fit within limit. Invalid
+        capacity raises ValueError before any change. Rejected priority stays
+        unchanged; restoration does not count as a current accepted use.
+        """
+        if (
+            self._bytes + sum(item.payload.prepared.nbytes for item in stale)
+            > self.limit
+        ):
+            raise ValueError("restored residents exceed cache budget")
+        for item in reversed(stale):
+            self.add(item.namespace, item.payload, rejected=item.rejected)
+            identity = id(item.payload.prepared)
+            self._resident.move_to_end(identity, last=False)
+            if item.rejected:
+                self._rejected.move_to_end(identity, last=False)
 
     def find(
         self, namespace: CacheNamespace, keys: set[CacheKey]

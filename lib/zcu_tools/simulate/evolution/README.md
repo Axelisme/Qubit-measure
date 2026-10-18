@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-19, WorkPlan ownership, smooth complex envelopes, joint-basis multi-tone RWA and simultaneous gate reuse
+**Last updated:** 2026-10-19, WorkPlan ownership, joint-basis multi-tone RWA, simultaneous gate reuse and unified resident/pending budget
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -286,22 +286,30 @@ one timeline at a time; single-use ordinary keys prepare at their apply wave.
 All classified keys, including singletons, can reuse the persistent LRU.
 Accepted guard products are reused even when only a subset of timelines accepts.
 
-The caller protects current cache hits and new shared payloads by their whole
-allocation sizes. Workers submit model-only local products to a thread-safe
-collector bounded by the remaining resident budget. After workers join, the
-caller admits these products through the LRU. This can evict old workloads, but
-streaming singletons cannot displace this evolve's protected allocations.
-Oversize products stream without admission. Fully rejected guard handoffs stay
-separate from apply bindings. Shared guards cap their retained handoffs by spare
-resident capacity divided across candidate keys, declining large scans. Workers
-offer rejected products below accepted local work. Caller admission commits
-accepted work first, then fills only unused resident bytes with rejected products.
-Rejected admission never evicts any resident. A rejected hit keeps its low priority
-until a current guard accepts it; ordinary admission evicts rejected residents
-before the normal LRU, even when the rejected item was recently hit. Current row,
-probe-bin, domain and budget checks still run on every evolve.
-Pending products and old residents
-can coexist until the join; the resident limit is not a bound on that peak.
+Before prefix evaluation or numerical guards, dispatch inventories every
+candidate family's prepare keys in the complete WorkPlan geometry. The caller
+keeps intersecting whole resident batches protected, including hits used only
+by a later prefix or suffix. It transfers other residents to an LRU stale queue
+without dropping their ownership. Resident and pending allocations share one
+byte account across all prefix and timeline schedules.
+
+Workers offer model-only products through a locked collector, never through the
+caller LRU. An accepted offer reclaims pending failed guards and stale residents
+only when capacity is needed. Failed stale residents yield before ordinary LRU
+residents. An impossible or oversize offer leaves existing ownership unchanged
+and streams without retention. Current whole-batch hits cannot be evicted by
+worker offers. Capacity left idle preserves products for alternating experiments.
+Caller shared builds and exact domain extensions use the same account. Exact
+extensions replace their predecessor's whole charge; rejected extensions grow
+only into idle capacity and retain their low priority.
+
+After each schedule joins, the caller publishes pending products for later
+prefix/suffix lookups. After the evolve pool drains, it restores surviving stale
+residents as older than current work, even on failure or cancellation. Fully
+rejected guard handoffs stay separate from apply bindings and fill only idle
+capacity. Current row, probe-bin, domain and budget checks still run on every
+evolve. The unified account bounds retained arrays, not transient builders,
+active nonretained/oversize bindings, input-bound data or process RSS.
 
 [PrepareCache](cache.py) namespaces whole model-only payload batches by family,
 whole-source model identity and budget. The zero-level identity must describe the
@@ -321,7 +329,7 @@ raises without a partial result, and cached exceedances still warn per call.
 
 The result LRU charges arrays and metadata up to `min(64 MiB, cache_bytes)` in
 addition to the prepare budget; zero disables both caches. `close()` clears both.
-FTF production uses a 1.5 GiB prepare-resident budget, plus at most 64 MiB for
+FTF production uses a 2 GiB unified resident/pending budget, plus at most 64 MiB for
 results. The resident-byte limit is not a process RAM cap. Models, output densities, solver scratch, WorkPlan products,
 active payload references and ADC preparations are separate allocations. The
 process peak acceptance limit is 3.8 billion bytes, leaving 5% below the decimal
