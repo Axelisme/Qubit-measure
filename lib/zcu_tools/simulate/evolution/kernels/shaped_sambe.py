@@ -35,7 +35,7 @@ from ._period_table import (
 from ._sambe import eigensystem
 from ._secular import coherence_decay, population_generator
 from ._shaped import drive_bounds
-from ._workload_facts import envelope_bounds
+from ._workload_facts import drive_bound, envelope_bounds
 from .dop853 import prepare_models
 
 
@@ -250,7 +250,7 @@ class ShapedSambeKernel:
         # Strong, unresolved ramps need no keys or remaining eligibility work.
         if not np.any(bounded):
             return bounded
-        strength, _ = drive_bounds(table, rows, source)
+        strength, _ = drive_bounds(table, rows, source, context.work_plan)
         keys = self.prepare_keys(table, rows, context)
         frequency = np.abs(keys["frequency"])
         bounds = envelope_bounds(table, context.work_plan)
@@ -334,11 +334,7 @@ class ShapedSambeKernel:
             direct = prepare_models([model])
             # Integer-period blocks avoid thousands of tiny matrix products on
             # long high-carrier ramps. Subperiod playback retains every phase.
-            drive = model.drives[port]
-            strength = max(
-                np.linalg.norm(drive.in_phase_ghz, 2),
-                np.linalg.norm(drive.quadrature_ghz, 2),
-            )
+            strength = drive_bound(model, port, context.work_plan).strength
             frozen_ns = min(
                 20.0,
                 np.sqrt(0.05 / max(2 * np.pi * strength * float(key["slope"]), 1e-30)),
@@ -357,6 +353,7 @@ class ShapedSambeKernel:
                     block,
                     True,
                     modes,
+                    nodes,
                 )
             )
             models.append(model)
@@ -494,7 +491,7 @@ class ShapedSambeKernel:
                 ),
                 UnitaryTable(
                     entry.bound,
-                    entry.coefficients,
+                    entry.coefficients[:, : entry.degrees],
                     entry.subdivisions,
                     entry.block_cycles,
                     entry.project_unitary,
