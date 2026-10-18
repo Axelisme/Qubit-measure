@@ -64,6 +64,9 @@ class ConditionalReadout:
         keep them deterministic. Equivalent separately constructed numeric inputs
         reuse the cache. Integrated flat pulses on uniform grids use guarded
         eigenbasis geometric sums, cached once per content without traces.
+        Common-start flat mux contents sum independent carrier responses, with
+        offset added once. Each rejected carrier retains the constant-field
+        route, including full block exponentials for ill-conditioned coupling.
         Unsupported contents fall back individually to the field route. Trace
         requests always use the field route and retain their own cache, so an
         integrated-only result does not avoid a later trace solve. Constant
@@ -120,6 +123,16 @@ class ConditionalReadout:
                     continue
                 if (
                     key not in self._responses
+                    and len(pulses) > 1
+                    and all(p.envelope is None for p in pulses)
+                    and all(p.start_ns == pulses[0].start_ns for p in pulses)
+                ):
+                    sums = solver._mux_integrated_sums(pulses, grids, times, counts)
+                    self._sums[key] = (pulses, sums)
+                    summed.append(sums)
+                    continue
+                if (
+                    key not in self._responses
                     and len(pulses) == 1
                     and pulses[0].envelope is None
                 ):
@@ -160,6 +173,45 @@ class ConditionalReadout:
             else None
         )
         return ConditionalSums(sums, counts, dense)
+
+    def _mux_integrated_sums(
+        self,
+        pulses: tuple[ReadoutPulse, ...],
+        grids: tuple[SampleGrid, ...],
+        times: RealArray,
+        counts: NDArray[np.int64],
+    ) -> RealArray:
+        """Sum flat common-origin carriers without duplicating receiver offset.
+
+        Populations obey the same field-independent generator for each carrier.
+        Common starts therefore give identical initial populations and make the
+        moment equations linear in incident field, including unequal end times.
+        Direct-sum guards remain per carrier; rejection never sends the entire
+        mux content back to the ODE or relaxes the constant-line guards.
+        """
+        parts = []
+        for pulse in pulses:
+            direct = self._constant_line.integrated_sums(self.model, pulse, grids)
+            if direct is not None:
+                value, populations = direct
+                self._validate_solution(populations[:, None, :])
+            else:
+                outgoing, _ = self._fields(
+                    (pulse,), times, constant=True, projected=True
+                )
+                value = np.stack(
+                    [
+                        self._calibrate(
+                            outgoing[np.searchsorted(times, g.times_ns)], g
+                        ).sum(axis=-2)
+                        for g in grids
+                    ]
+                )
+            parts.append(value)
+        # Every calibrated component already includes offset at every sample.
+        return np.sum(parts, axis=0) - (
+            (len(pulses) - 1) * counts[:, None, None] * self.model.receiver.offset
+        )
 
     def response(
         self, pulses: tuple[ReadoutPulse, ...], grid: SampleGrid

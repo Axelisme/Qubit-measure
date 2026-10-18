@@ -184,31 +184,46 @@ def _certify(
     basis: tuple[Complex, Complex, float],
     center: float,
     port: int,
+    probe_transforms: dict[int, tuple[Complex, float]] | None = None,
 ) -> Certificate:
     """Certify bath only for port=-1, otherwise one unit-gain probe port.
 
     basis contains right modes, inverse modes and their spectral-norm product.
     The bath has zero probe sign and bin width, so its divisors, retained edges
     and q/r/e contributions are identical for every probe bin and port.
+    probe_transforms maps each probe term index to its full physical-basis
+    matrix and norm, shared across bins. None keeps the direct bath transforms.
     """
     modes, inverse, condition = basis
     size = int(round(np.sqrt(len(lam))))
     q, r, e = np.zeros(2), np.zeros(2), np.zeros(2)
     rows, columns, values, frequencies, signs = [], [], [], [], []
-    for nu, coefficient, term_port, sign in zip(
-        frame.frequencies, frame.coefficients, frame.ports, frame.signs, strict=True
-    ):
-        if term_port != port:
-            continue
-        slot = int(term_port >= 0)
+    for index in np.flatnonzero(frame.ports == port):
+        nu = frame.frequencies[index]
+        coefficient = frame.coefficients[index]
+        sign = frame.signs[index]
+        slot = int(port >= 0)
         width = 2 * np.pi * 0.001 if slot else 0.0
         divisor = 1j * (nu + sign * 2 * np.pi * center) - lam[:, None] + lam[None, :]
         keep = np.abs(divisor) <= 0.1 + width
         retained = np.where(keep, coefficient, 0.0)
         omitted = np.where(keep, 0.0, coefficient)
         safe = np.where(keep, 1.0, divisor)
-        r[slot] += np.sqrt(size) * _upper(modes @ retained @ inverse)
-        e[slot] += np.sqrt(size) * _upper(modes @ omitted @ inverse)
+        ri, ci = np.nonzero(retained)
+        if probe_transforms is None:
+            r[slot] += np.sqrt(size) * _upper(modes @ retained @ inverse)
+            e[slot] += np.sqrt(size) * _upper(modes @ omitted @ inverse)
+        else:
+            full, full_norm = probe_transforms[int(index)]
+            if len(ri):
+                # Only exactly nonzero modal rows contribute to the contraction.
+                active = np.unique(ri)
+                physical = modes[:, active] @ (retained[active] @ inverse)
+                r[slot] += np.sqrt(size) * _upper(physical)
+                e[slot] += np.sqrt(size) * _upper(full - physical)
+            else:
+                # With no retained edges, omitted is the complete coefficient.
+                e[slot] += np.sqrt(size) * full_norm
         q[slot] += np.sqrt(size) * _upper(modes @ (omitted / safe) @ inverse)
         # Resolvent identity encloses Q across the entire bin, not just samples.
         delta = (
@@ -217,7 +232,6 @@ def _certify(
             / (np.abs(safe) * np.maximum(np.abs(safe) - width, 1e-300))
         )
         q[slot] += np.sqrt(size) * condition * float(np.linalg.norm(delta))
-        ri, ci = np.nonzero(retained)
         rows.extend(ri)
         columns.extend(ci)
         values.extend(retained[ri, ci])
@@ -289,6 +303,9 @@ def prepare(
     omitted, resolvent and tail contributions are computed once per call. Bath
     divisors have zero probe sign and bin width, so combining those contributions
     with each bin's probe terms gives the same bounds as per-bin recomputation.
+    Full physical-basis probe transforms and norms are shared across bins of
+    each port, only for this call. Omitted transforms use full minus retained;
+    this changes rounding, not the norm or omission formula.
     Return a new Frame; never mutate the input.
     """
     if not len(parameters):
@@ -300,8 +317,12 @@ def prepare(
     centers = np.round(parameters[:, 3] / 0.002) * 0.002
     for port_value in np.unique(parameters[:, -1]):
         port = int(port_value)
+        probe_transforms: dict[int, tuple[Complex, float]] = {}
+        for index in np.flatnonzero(frame.ports == port):
+            full = modes @ frame.coefficients[index] @ inverse
+            probe_transforms[int(index)] = (full, _upper(full))
         for center in np.unique(centers[parameters[:, -1] == port]):
-            probe = _certify(frame, lam, basis, float(center), port)
+            probe = _certify(frame, lam, basis, float(center), port, probe_transforms)
             certificates.append((port, _with_bath(bath, probe)))
     return replace(frame, certificates=tuple(certificates))
 
