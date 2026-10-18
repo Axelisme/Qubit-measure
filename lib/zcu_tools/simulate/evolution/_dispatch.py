@@ -87,7 +87,7 @@ def resident_inventory(
             (flux, ("flux_dop853",)),
             (plateau, ("dyson", "floquet_period", "t6")),
             (shaped, ("shaped_sambe", "gate_cache", "period_table", "dop853")),
-            (two, ("floquet", "dop853")),
+            (two, ("multitone_rwa", "floquet", "dop853")),
             (multiple, ("multitone_gate", "multitone_rwa", "dop853")),
         )
         for mask, families in domains:
@@ -629,8 +629,9 @@ class _Classifier:
             )
         selected = rows[self.scope[rows]]
         direct = self.two_tone_direct[selected]
-        self.accept(selected[direct], ("dop853", "floquet"))
-        self.accept(selected[~direct], ("floquet", "dop853"))
+        prefix = ("multitone_rwa",) if "multitone_rwa" in self.kernels else ()
+        self.accept(selected[direct], (*prefix, "dop853", "floquet"))
+        self.accept(selected[~direct], (*prefix, "floquet", "dop853"))
         self.retain_floquet_plan()
 
     def retain_floquet_plan(self) -> None:
