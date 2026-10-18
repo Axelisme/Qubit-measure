@@ -111,7 +111,7 @@ def test_restored_identity_becomes_the_boundary_until_reset():
     assert state.input.data["tones"] == [{"label": "saved", "gain": 7}]
     with pytest.raises(core.FormInputRejected, match="identity"):
         state.write({("tones", 0, "label"): "A"}, env)
-    state.reset(owner_model().default_input(env))
+    state.reset(state.input.model.default_input(env))
     assert state.input.data["participants"] == ["B"]
 
 
