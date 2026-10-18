@@ -63,3 +63,30 @@ def validate_mux_bindings(parameters: ParameterContext | None) -> None:
                 f"{actual.value!r} (present={actual.present}); "
                 f"expected $mux.resonators[{index}]={resonator!r}"
             )
+
+
+def require_mux_qubits(
+    parameters: ParameterContext | None, tone_count: int | None = None
+) -> tuple[str, ...]:
+    """Return full qubit names after validating the fixed mux binding.
+
+    parameters must be a fixed Open/Reset or Run/Load capture with a bound mux
+    group, complete qubits and matching resonators. tone_count, when supplied,
+    is the full (not active) numeric readout size and must equal the binding
+    size. Missing capture/group/qubits or mismatches raise ValueError; alias
+    and source faults propagate. Never reads live files or guesses identity.
+    """
+    if parameters is None:
+        raise ValueError("Mux qubit experiments require a parameter capture")
+    name = parameters.resolve_path("$mux")
+    group = parameters.document().components.get(name)
+    if not isinstance(group, MuxGroupSchema):
+        raise ValueError(f"$mux={name!r}: expected group/mux")
+    if group.qubits is None:
+        raise ValueError(f"$mux.qubits is missing in {name!r}")
+    validate_mux_bindings(parameters)
+    if tone_count is not None and len(group.resonators) != tone_count:
+        raise ValueError(
+            f"$mux.resonators length={len(group.resonators)}; full readout tone count={tone_count}"
+        )
+    return tuple(group.qubits)

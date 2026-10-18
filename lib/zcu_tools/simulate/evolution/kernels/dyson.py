@@ -7,8 +7,8 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
-from ..kernel import ApplyContext, Prepared, SegmentTable
-from ..secular import ModelSource, SecularModel
+from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
+from ..secular import SecularModel
 from ._dyson_bound import accepts_population_bound
 from ._dyson_model import (
     commutator,
@@ -733,8 +733,7 @@ class DysonKernel:
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> NDArray[np.bool_]:
         """Classify rows using r, r2 and B2+budget/8, without path evaluation.
 
@@ -747,6 +746,7 @@ class DysonKernel:
         not rigorous multilevel error guarantees. Returns a row-aligned mask;
         invalid budgets raise ValueError.
         """
+        source, budget = context.source, context.budget
         if not np.isfinite(budget) or budget <= 0:
             raise ValueError("Dyson requires positive budget")
         accepted = constant_mask(table, rows)
@@ -773,9 +773,10 @@ class DysonKernel:
         return accepted
 
     def prepare_keys(
-        self, table: SegmentTable, rows: NDArray[np.int64]
+        self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.void]:
         """Model-level lookup keys, namespaced by the engine's DC model identity."""
+        del context
         return model_keys(table, rows)
 
     def cost(self, table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.float64]:
@@ -787,10 +788,10 @@ class DysonKernel:
         keys: NDArray[np.void],
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> _Prepared:
         """Factor one secular free generator per representative model row."""
+        source, budget = context.source, context.budget
         if len(keys) != len(rows) or not np.isfinite(budget) or budget <= 0:
             raise ValueError(
                 "Dyson requires aligned representative rows and positive budget"
@@ -802,14 +803,24 @@ class DysonKernel:
             )
         )
 
+    def admit_prepared(
+        self,
+        prepared: Prepared,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        context: KernelContext,
+    ) -> None:
+        """Decline cached-domain admission; use the ordinary guard build path."""
+        del prepared, table, rows, context
+
     def guard_prepared(
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline guard preparation handoff; the engine calls guard normally."""
+        source, budget = context.source, context.budget
         del table, rows, source, budget
 
     def bind_input(
@@ -819,7 +830,7 @@ class DysonKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         source_initial: NDArray[np.complex128],
-        budget: float,
+        context: KernelContext,
     ) -> _BoundInput | None:
         """Contract one key/port's common source or prefix input in its row basis.
 
@@ -830,6 +841,7 @@ class DysonKernel:
         reserved margin. Workers retain all remaining paths in original order;
         they do not spend any further per-row pruning allowance.
         """
+        budget = context.budget
         if not isinstance(prepared, _Prepared):
             raise ValueError("Dyson requires model-only prepared data for binding")
         if not np.isfinite(budget) or budget <= 0:

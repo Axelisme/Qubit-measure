@@ -9,7 +9,7 @@ import pytest
 from joblib.parallel import ThreadingBackend
 from threadpoolctl import threadpool_info, threadpool_limits
 from zcu_tools.simulate.evolution import Engine
-from zcu_tools.simulate.evolution.kernel import ApplyContext
+from zcu_tools.simulate.evolution.kernel import ApplyContext, KernelContext
 
 from ._engine import RecordingKernel, batch, source
 
@@ -33,13 +33,13 @@ def test_overlapping_evolves_hold_blas_one_until_last_exit(failure):
             super().__init__("t4")
             self.index = index
 
-        def guard(self, table, rows, source, budget):
+        def guard(self, table, rows, context: KernelContext):
             observations.append(blas_widths())
-            return super().guard(table, rows, source, budget)
+            return super().guard(table, rows, context)
 
-        def prepare(self, keys, table, rows, source, budget):
+        def prepare(self, keys, table, rows, context: KernelContext):
             observations.append(blas_widths())
-            return super().prepare(keys, table, rows, source, budget)
+            return super().prepare(keys, table, rows, context)
 
         def apply(
             self, prepared, key_index, table, rows, states, context: ApplyContext

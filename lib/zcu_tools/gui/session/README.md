@@ -89,7 +89,7 @@ session/
     └── arb_waveform_dialog.py — ArbWaveformDialog：arb 資產管理對話框，只收 ArbWaveformPort。Measure 經具名 `arb_waveform` dialog 開，workflows 直接開同一類別
 ```
 
-共用 Inspect、Devices 與 ARB 對話框由宿主呼叫 `set_read_only` 決定是否可編輯，不讀控制權或 run 狀態。ARB 唯讀時停用編輯與 Save，保留鎖前草稿；asset 選取、Refresh、預覽與 Close 照常可用。解鎖後 Save 仍受驗證結果限制。Inspect 唯讀時「Arb Waveforms…」入口仍可按，ARB 依宿主規則以唯讀開啟。
+共用 Setup、Inspect、Devices 與 ARB 對話框由宿主呼叫 `set_read_only` 決定是否可編輯，不讀控制權或 run 狀態。Setup 唯讀時保留 point 選取、description、paths、查詢刷新與 Close，停用 entry／point 提交及 Connect。連線完成與事件刷新不會解除宿主的唯讀狀態。ARB 唯讀時停用編輯與 Save，保留鎖前草稿；asset 選取、Refresh、預覽與 Close 照常可用。解鎖後 Save 仍受驗證結果限制。Inspect 唯讀時「Arb Waveforms…」入口仍可按，ARB 依宿主規則以唯讀開啟。
 
 Simulation is selected at measure startup with `--simulate <environment.py>`.
 Composition injects the returned manager and calls `DeviceService.publish_initial_devices`

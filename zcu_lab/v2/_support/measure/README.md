@@ -18,6 +18,10 @@ helper 留在群組內 `_shared.py`。
 `zcu_tools.gui.form_adapter`。持久範本表由 `zcu_lab.templates.TEMPLATES` 擁有，
 組合根注入 Registry 與 Library 新建選單。不再維護 builder、Seed wrapper 或角色 default 表。
 
+`mux_bindings` 擁有固定 ParameterContext 的 qubit／resonator 對應驗證。
+Onetone 的缺 qubits bring-up 政策與 qubit 實驗的完整綁定要求分開，兩者不讀 live 來源。
+Group model 仍擁有長度與重複 qubit 的結構規則。
+
 `ctx_helpers.t1_initial_time` 集中 T1 衍生初值的選源。它從固定 capture 讀普通 T1，tone 掃描先讀歷史 tone T1，只有缺值才下探普通 T1。無 capture 或所有候選 leaf 缺失／null 時使用 30 µs 時間尺度；已存無效值回 None，讓衍生必填欄位留空。來源與 alias／path 錯誤仍傳遞，不寫回校準。各 Form 明確指定等待或掃描所需倍率，自然等待不使用 tone T1。
 
 `rabi_initial_values.len_rabi_initial_values` 為兩種 Length Rabi 選擇相同的 pulse 來源與掃描上限。
@@ -80,3 +84,5 @@ Reset Form 從 Open／Reset 的固定 capture 讀 qubit ext 初值。Expr 與 Ra
 SingleToneFreq、DualTonePower 與 BathPhase 各自擁有 finisher。它們直接 materialize 該 Run
 的完整 tested_reset，只換本次分析欄位，不重讀 ext 或方案 slot。三個 length adapter
 不擬合參數，返回空 proposal collection。框架與本 support package 不檢查 reset 校準是否齊全。
+
+`require_mux_qubits(parameters, tone_count)` 是 qubit caller 的嚴格 admission：要求 capture、MuxGroup 及完整 qubits，呼叫公開 validate 契約，再比對完整 numeric tone 數。回傳完整有序 qubit 名稱，不投影 active subset。
