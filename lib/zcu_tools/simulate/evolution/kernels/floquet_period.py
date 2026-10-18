@@ -12,10 +12,12 @@ from scipy.linalg import expm
 
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..secular import SecularModel
+from ..workplan import WorkPlan
 from . import _period_sambe
 from ._cf4_grid import coarse_count, finer_count, spectral_width
 from ._dop853 import Tolerances, integrate_dense
 from ._secular import secular_operators
+from ._workload_facts import split_rate
 
 _MIN_FREQUENCY_GHZ = 0.03
 _MAX_SPLIT_ESTIMATE = 1.0
@@ -111,22 +113,6 @@ def _check_budget(budget: float) -> None:
         raise ValueError("Floquet period budget must be finite and positive")
 
 
-def _split_rate(model: SecularModel, port: int, frequency: float, gain: float) -> float:
-    generator, decay = secular_operators(model)
-    gamma = max(float(np.linalg.norm(generator, 2)), float(np.max(decay)))
-    drive = model.drives[port]
-    strength = (
-        2
-        * np.pi
-        * abs(gain)
-        * (
-            np.linalg.norm(drive.in_phase_ghz, 2)
-            + np.linalg.norm(drive.quadrature_ghz, 2)
-        )
-    )
-    return float(gamma * (strength / frequency) ** 2)
-
-
 def _subdivisions(estimate: float) -> int:
     return max(1, int(np.ceil(np.sqrt(estimate / _MAX_SPLIT_ESTIMATE))))
 
@@ -197,14 +183,15 @@ class _GainGroup:
         model: SecularModel,
         port: int,
         frequency: float,
-        budget: float,
+        context: KernelContext,
         builders: dict[float, PeriodBuilder],
         inventory_lock: RLock,
     ) -> None:
+        self.work_plan = context.work_plan
         self.model = model
         self.port = port
         self.frequency = frequency
-        self.budget = budget
+        self.budget = context.budget
         self.builders = {g: b for g, b in builders.items() if b.anchors}
         plan = {g: b.anchors for g, b in self.builders.items()}
         self.plan = plan
@@ -237,6 +224,7 @@ class _GainGroup:
                     _Tone(self.port, self.frequency, gain),
                     self.budget,
                     self.builders[gain],
+                    work_plan=self.work_plan,
                 )
                 with self.inventory_lock:
                     anchor.period = period
@@ -253,6 +241,7 @@ class _GainGroup:
                 self.budget,
                 self.builders[gain],
                 group=self,
+                work_plan=self.work_plan,
             )
         with self.inventory_lock:
             if gain not in self.delivered:
@@ -341,7 +330,7 @@ class _GainWorkspace:
         port: int,
         frequency: float,
         gain: float,
-        budget: float,
+        context: KernelContext,
     ) -> _Period:
         """Use key-local Sambe or fixed CF4 anchors, independent of scheduling.
 
@@ -350,6 +339,7 @@ class _GainWorkspace:
         """
         from .._dispatch import period_builders
 
+        budget = context.budget
         builder_identity = (id(model), port, frequency)
         with self._lock:
             builders = self._builders.get(builder_identity)
@@ -361,18 +351,32 @@ class _GainWorkspace:
                 builders.update(period_builders(model, port, frequency, (gain,)))
             builder = builders[gain]
         if builder.kind == "sambe":
-            result = _build(model, _Tone(port, frequency, gain), budget, builder)
+            result = _build(
+                model,
+                _Tone(port, frequency, gain),
+                budget,
+                builder,
+                work_plan=context.work_plan,
+            )
             with self._lock:
                 self._sambe_builds += int(result.spectrum is not None)
                 self._sambe_fallbacks += int(result.spectrum is None)
             return result
         if not builder.anchors:
-            return _build(model, _Tone(port, frequency, gain), budget, builder)
+            return _build(
+                model,
+                _Tone(port, frequency, gain),
+                budget,
+                builder,
+                work_plan=context.work_plan,
+            )
         identity = (id(model), port, frequency, budget)
         with self._lock:
             group = self._groups.get(identity)
             if group is None:
-                group = _GainGroup(model, port, frequency, budget, builders, self._lock)
+                group = _GainGroup(
+                    model, port, frequency, context, builders, self._lock
+                )
                 self._groups[identity] = group
         return group.build(gain)
 
@@ -451,6 +455,7 @@ def _build(
     budget: float,
     builder: PeriodBuilder,
     *,
+    work_plan: WorkPlan,
     group: _GainGroup | None = None,
 ) -> _Period:
     port, frequency, gain = tone
@@ -508,7 +513,9 @@ def _build(
         if not np.isfinite(array).all():
             raise RuntimeError("Floquet period preparation produced nonfinite data")
         array.setflags(write=False)
-    return _Period(*arrays, _split_rate(model, port, frequency, gain), magnus, spectrum)
+    return _Period(
+        *arrays, split_rate(model, port, frequency, gain, work_plan), magnus, spectrum
+    )
 
 
 @njit(nogil=True, cache=True)
@@ -861,15 +868,16 @@ class FloquetPeriodKernel:
             if table.tones[row] != 1:
                 continue
             envelope = table.envelopes[int(table.tone_envelope[row, 0])]
-            frequency = abs(float(table.tone_frequency_ghz[row, 0]))
-            if envelope.kind != "constant" or frequency < _MIN_FREQUENCY_GHZ:
+            frequency = float(table.tone_frequency_ghz[row, 0])
+            if envelope.kind != "constant" or abs(frequency) < _MIN_FREQUENCY_GHZ:
                 continue
             model = source.model(tuple(int(v) for v in table.level[row]))
-            estimate = table.duration_ns[row] * _split_rate(
+            estimate = table.duration_ns[row] * split_rate(
                 model,
                 int(table.tone_port[row, 0]),
                 frequency,
                 float(table.tone_amplitude[row, 0]),
+                context.work_plan,
             )
             accepted[index] = estimate <= _MAX_SPLIT_ESTIMATE * _MAX_SUBDIVISIONS**2
         return accepted
@@ -934,9 +942,15 @@ class FloquetPeriodKernel:
             )
             if self._workspace is None:
                 builder = period_builder(model, port, frequency, gain)
-                entry = _build(model, _Tone(port, frequency, gain), budget, builder)
+                entry = _build(
+                    model,
+                    _Tone(port, frequency, gain),
+                    budget,
+                    builder,
+                    work_plan=context.work_plan,
+                )
             else:
-                entry = self._workspace.build(model, port, frequency, gain, budget)
+                entry = self._workspace.build(model, port, frequency, gain, context)
             entries.append(entry)
         return _Periods(tuple(entries))
 

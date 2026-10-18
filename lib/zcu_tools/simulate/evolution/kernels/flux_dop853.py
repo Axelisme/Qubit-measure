@@ -17,8 +17,8 @@ from ._dop853_data import (
     Segments,
     hamiltonian,
     pack_models,
-    pack_segments,
 )
+from ._workload_facts import packed_segments
 
 
 @dataclass(frozen=True)
@@ -283,7 +283,7 @@ class FluxDOP853Kernel:
         playing = np.arange(table.tone_port.shape[1])[None, :] < table.tones[rows, None]
         if np.any(playing & (table.tone_port[rows] >= models.ports[inverse, None])):
             raise ValueError("flux DOP853 tone port absent from model")
-        segments = pack_segments(table, include_flux=True)
+        segments = packed_segments(table, context.work_plan, include_flux=True)
         data = _FluxData(
             models,
             segments,
