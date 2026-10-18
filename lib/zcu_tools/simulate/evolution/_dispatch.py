@@ -14,7 +14,83 @@ from ._shaped_dispatch import preference
 from ._two_tone_dispatch import direct_preferred
 from .engine import PathDiagnostics
 from .kernel import GuardPreparation, Kernel, SegmentTable
-from .secular import ModelSource
+from .kernels._cf4_grid import coarse_count, finer_count, spectral_width
+from .kernels.floquet_period import PeriodBuilder
+from .secular import ModelSource, SecularModel
+
+
+def period_builder(
+    model: SecularModel, port: int, frequency: float, gain: float
+) -> PeriodBuilder:
+    """Select one constant-tone builder and retain its CF4 work ceiling.
+
+    Carriers at or above 1 GHz use dense DOP853. Below that, calibrated
+    cutoff-2/3 Sambe eigensolves cost 234 N-cubed units and must beat CF4's
+    coarse plus first-fine estimate. A declined Sambe numerical certificate
+    uses independent CF4, never gain anchors. No density or scheduling enters.
+    """
+    if abs(frequency) >= 1.0:
+        return PeriodBuilder("dop853")
+    drive = model.drives[port]
+    width = spectral_width(
+        model.energies_ghz, drive.in_phase_ghz, drive.quadrature_ghz, gain
+    )
+    coarse = coarse_count(1.5 * width / abs(frequency))
+    work = float(coarse + finer_count(coarse))
+    return PeriodBuilder("sambe" if work > 234.0 else "cf4", work)
+
+
+def period_gain_coordinates(
+    table: SegmentTable,
+) -> dict[tuple[tuple[int, ...], int, float], tuple[float, ...]]:
+    """Collect complete-table low-carrier gain groups, before model selection.
+
+    Only constant single tones with .03 <= |f| < 1 GHz participate; groups
+    need at least two distinct gains before removing spectral candidates.
+    """
+    groups: dict[tuple[tuple[int, ...], int, float], set[float]] = {}
+    rows = np.flatnonzero(table.tones == 1)
+    rows = rows[table.constant_envelopes(rows)]
+    for row in rows:
+        frequency = float(table.tone_frequency_ghz[row, 0])
+        if not 0.03 <= abs(frequency) < 1.0:
+            continue
+        key = (
+            tuple(int(v) for v in table.level[row]),
+            int(table.tone_port[row, 0]),
+            frequency,
+        )
+        groups.setdefault(key, set()).add(float(table.tone_amplitude[row, 0]))
+    return {
+        key: tuple(sorted(gains)) for key, gains in groups.items() if len(gains) >= 2
+    }
+
+
+def period_builders(
+    model: SecularModel, port: int, frequency: float, gains: tuple[float, ...]
+) -> dict[float, PeriodBuilder]:
+    """Select each group key once and fix its non-spectral CF4 dependencies.
+
+    gains is the complete sorted gain group, or a single standalone key.
+    Every 24th CF4 gain and both endpoints are independent anchors. Other CF4
+    keys use at most four nearest anchors, with lower gain winning distance
+    ties. Sambe candidates never participate, even if their certificate fails.
+    """
+    builders = {gain: period_builder(model, port, frequency, gain) for gain in gains}
+    ordered = [gain for gain in gains if builders[gain].kind == "cf4"]
+    if len(gains) < 2 or not ordered:
+        return builders
+    anchors = ordered[::24]
+    if anchors[-1] != ordered[-1]:
+        anchors.append(ordered[-1])
+    for gain in ordered:
+        dependencies = (
+            (gain,)
+            if gain in anchors
+            else tuple(sorted(sorted(anchors, key=lambda a: (abs(a - gain), a))[:4]))
+        )
+        builders[gain] = PeriodBuilder("cf4", builders[gain].work_limit, dependencies)
+    return builders
 
 
 @dataclass(frozen=True)
