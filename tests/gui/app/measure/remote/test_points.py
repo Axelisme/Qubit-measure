@@ -42,7 +42,7 @@ def test_list_empty_and_refresh_persisted_metadata(
     opened_resource(info).new_point("base", description="original")
     # A separate resource writer changes disk state after the GUI's cached list.
     with opened_resource(info).use_point("base").edit() as draft:
-        draft.set(('general', 'description'), "external edit")
+        draft.set("general.description", "external edit")
     assert application.result("point.list", {}) == {
         "entry": {
             "entry_id": info.entry_id,
