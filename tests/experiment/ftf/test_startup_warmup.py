@@ -1,7 +1,7 @@
 """Startup preparation is observable and does not consume acquisition identity."""
 
 from concurrent.futures import ThreadPoolExecutor
-from threading import Event
+from threading import Event, Thread
 
 import pytest
 from zcu_tools.experiment import simulation
@@ -129,6 +129,37 @@ def test_failed_warmup_reports_error_but_allows_acquisition():
         assert status.current is None
         assert status.error is not None
         assert "synthetic compilation failure" in status.error
+        program(env).acquire(env.soc, progress=False)
+        assert env.soc.binding.last_request is not None
+        assert env.soc.binding.last_request.sequence == 0
+    finally:
+        env.devices.close_all_devices()
+
+
+def test_worker_start_failure_is_terminal_and_allows_on_demand(monkeypatch):
+    cls = warmup_type()
+    warmup = cls((("synthetic", lambda: None),))
+
+    def unavailable_thread(self):
+        raise RuntimeError("cannot start synthetic thread")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Thread, "start", unavailable_thread)
+        try:
+            env = ftf(parse_ftf(ftf_document()), warmup=warmup)
+        except RuntimeError as error:
+            pytest.fail(
+                f"worker startup failure must allow on-demand acquisition: {error}"
+            )
+    try:
+        status = env.wait_ready(timeout=0)
+        assert status is not None
+        assert status.state == "failed"
+        assert status.error is not None
+        assert "cannot start synthetic thread" in status.error
+        future = warmup.start()
+        assert future.done()
+        assert future.result().state == "failed"
         program(env).acquire(env.soc, progress=False)
         assert env.soc.binding.last_request is not None
         assert env.soc.binding.last_request.sequence == 0
