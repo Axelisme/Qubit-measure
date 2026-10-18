@@ -104,6 +104,18 @@ def test_fixed_element_rpc_describes_names_and_edits_typed_positions(form_rpc) -
         assert local["result"]["input_present"] is True
         assert local["result"]["input"] == {"expr": "3 * 2"}
         assert local["result"]["value"] == 6
+        refused = rpc.call(
+            "tab.edit_cfg",
+            {"tab_id": tab, "edits": [{"path": ["tones", 0, "label"], "value": "C"}]},
+        )
+        assert not refused["ok"], refused
+        assert refused["error"]["reason"] == "form_input_rejected"
+        assert refused["error"]["data"]["form_path"] == ["tones", 0, "label"]
+        unchanged = rpc.call(
+            "tab.describe_cfg", {"tab_id": tab, "path": ["tones", 0, "label"]}
+        )
+        assert unchanged["ok"], unchanged
+        assert unchanged["result"]["input"] == "A"
         for path in [
             ["tones", "1", "gain"],
             ["tones", -1],
