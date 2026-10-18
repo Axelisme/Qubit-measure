@@ -120,6 +120,23 @@ def test_bool_is_not_accepted_as_numeric_value() -> None:
         registry.get_as("source.float", float)
 
 
+def test_float_lookup_rejects_subclass_with_scalar_type_equality() -> None:
+    class ScalarEqualMeta(type):
+        def __eq__(cls, other: object) -> bool:
+            return other is int
+
+    class NotExactFloat(float, metaclass=ScalarEqualMeta):
+        pass
+
+    registry = ValueRegistry()
+    registry.register(
+        ValueKey("source.float", float), lambda: NotExactFloat(1.5), owner="source"
+    )
+
+    with pytest.raises(ValueTypeError, match="did not return a float"):
+        registry.get_as("source.float", float)
+
+
 def test_register_rejects_duplicate_keys() -> None:
     registry = ValueRegistry()
     registry.register(ValueKey("source.value", float), lambda: 1.0, owner="a")
