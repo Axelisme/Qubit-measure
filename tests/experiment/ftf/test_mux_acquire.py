@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from zcu_tools.cfg_model import MuxReadoutTone
 from zcu_tools.experiment.ftf import ftf
 from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg
@@ -20,10 +21,13 @@ def test_yaml_mux_program_produces_each_tones_raw_shots(channels, mode):
     env = ftf(settings)
     try:
         module = MuxReadoutCfg(
-            gen_ch=0, nqz=1, mixer_freq=6000.0,
-            length=0.020, ro_length=0.026,
+            gen_ch=0,
+            nqz=1,
+            mixer_freq=6000.0,
+            length=0.020,
+            ro_length=0.026,
             tones=[
-                {"ro_ch": ch, "freq": 6000.0 + 80 * i, "gain": 0.1, "phase": 45 * i}
+                MuxReadoutTone(ro_ch=ch, freq=6000.0 + 80 * i, gain=0.1, phase=45 * i)
                 for i, ch in enumerate(channels)
             ],
         )
