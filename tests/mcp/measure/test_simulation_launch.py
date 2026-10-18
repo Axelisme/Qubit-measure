@@ -1,4 +1,4 @@
-"""A simulation path configures a new process, never an attached GUI."""
+"""Environment and data-root options configure new processes, never attached GUIs."""
 
 import pytest
 from zcu_tools.mcp.measure.session import GuiRpcError
@@ -18,13 +18,14 @@ def orientation(method, params):
 
 
 @pytest.mark.parametrize("launch", ["never", "if_missing"])
-def test_connected_attach_rejects_path_without_altering_gui(tmp_path, launch):
+@pytest.mark.parametrize("option", ["simulate", "project_root"])
+def test_connected_attach_rejects_path_without_altering_gui(tmp_path, launch, option):
     client = make_client(tmp_path, orientation)
     try:
         client.context.session.ensure_connected()
         before = list(client.transport.sent)
         with pytest.raises((ValueError, GuiRpcError), match='unchanged.*launch="new"'):
-            client.call("connect", {"launch": launch, "simulate": "/tmp/env.py"})
+            client.call("connect", {"launch": launch, option: "/tmp/isolated"})
         assert client.transport.sent == before
         assert client.context.bridge.is_connected
     finally:
@@ -32,7 +33,10 @@ def test_connected_attach_rejects_path_without_altering_gui(tmp_path, launch):
 
 
 @pytest.mark.parametrize("launch", ["never", "if_missing"])
-def test_existing_gui_attach_rejects_path_before_connect(tmp_path, launch, monkeypatch):
+@pytest.mark.parametrize("option", ["simulate", "project_root"])
+def test_existing_gui_attach_rejects_path_before_connect(
+    tmp_path, launch, option, monkeypatch
+):
     client = make_client(tmp_path, orientation, port_is_open=lambda port: True)
     client.context.bridge.set_transport(None)
     monkeypatch.setattr(
@@ -42,7 +46,7 @@ def test_existing_gui_attach_rejects_path_before_connect(tmp_path, launch, monke
     )
     try:
         with pytest.raises((ValueError, GuiRpcError), match='unchanged.*launch="new"'):
-            client.call("connect", {"launch": launch, "simulate": "/tmp/env.py"})
+            client.call("connect", {"launch": launch, option: "/tmp/isolated"})
         assert not client.context.bridge.is_connected
     finally:
         client.context.session.close()
@@ -67,5 +71,56 @@ def test_new_process_receives_simulate_path_only_on_launch(
         )
         assert result["launched"]
         assert received == [["--clean", "--simulate", "/tmp/env.py"]]
+    finally:
+        client.context.session.close()
+
+
+@pytest.mark.parametrize("launch", ["new", "if_missing"])
+@pytest.mark.parametrize("project_root", ["/isolated project", "relative", "", "\0"])
+def test_new_process_receives_project_root_without_mcp_path_validation(
+    tmp_path, launch, project_root, monkeypatch
+):
+    client = make_client(tmp_path, orientation)
+    client.context.bridge.set_transport(None)
+    received = []
+
+    def launch_gui(root, port, *, token=None, auto_connect=True, extra_args=None):
+        received.append((root, extra_args))
+        client.context.bridge.set_transport(client.transport)
+
+    monkeypatch.setattr(client.context.bridge, "launch", launch_gui)
+    try:
+        result = client.call(
+            "connect",
+            {
+                "launch": launch,
+                "project_root": project_root,
+                "simulate": "relative/environment.py",
+                "clean": True,
+            },
+        )
+        assert result["launched"]
+        assert len(received) == 1
+        code_root, arguments = received[0]
+        assert (code_root / "scripts" / "run_measure_gui.py").is_file()
+        assert arguments == [
+            "--clean",
+            "--simulate",
+            "relative/environment.py",
+            "--project-root",
+            project_root,
+        ]
+    finally:
+        client.context.session.close()
+
+
+@pytest.mark.parametrize("project_root", [False, 12, [], {}])
+def test_invalid_project_root_type_is_rejected_before_rpc(tmp_path, project_root):
+    client = make_client(tmp_path, orientation)
+    try:
+        before = list(client.transport.sent)
+        with pytest.raises(ValueError, match="project_root.*string"):
+            client.call("connect", {"project_root": project_root})
+        assert client.transport.sent == before
     finally:
         client.context.session.close()
