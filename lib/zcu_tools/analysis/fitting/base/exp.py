@@ -41,6 +41,7 @@ def fitexp(
         decay_time = (x_2 / np.log(2) + x_4 / np.log(4)) / 2
 
         assign_init_p(fitparams, [y0, yscale, decay_time])
+    # tolerated(cast): Baseline/amplitude/decay guesses fill unset slots and preserve supplied values; mutation cannot narrow the list type.
     fitparams = cast(list[float], fitparams)
 
     # bounds
@@ -100,6 +101,7 @@ def fit_dualexp(
         yscale2 /= 2
 
         assign_init_p(fitparams, [y0, yscale1, decay1, yscale2, decay2])
+    # tolerated(cast): Baseline/two-decay guesses fill unset slots and preserve supplied values; mutation cannot narrow the list type.
     fitparams = cast(list[float], fitparams)
 
     # bounds

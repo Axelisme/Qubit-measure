@@ -51,6 +51,7 @@ def fit_gauss(
             * np.sum(norm_ydata > 0.5 * np.abs(yscale))
         )
         assign_init_p(fitparams, [y0, yscale, x_c, sigma])
+    # tolerated(cast): Baseline/amplitude/center/width guesses fill unset slots and preserve supplied values; mutation cannot narrow the list type.
     fitparams = cast(list[float], fitparams)
 
     # bounds
