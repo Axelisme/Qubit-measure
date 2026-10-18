@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-18，固定來源的 mux 綁定驗證 owner
+**Last updated:** 2026-10-18，共用 mux 固定來源綁定驗證
 
 # Measure domain support
 
@@ -40,6 +40,37 @@ pi_len 須為有限正數，pi_gain 須為有限數且在 (0, 1]。無效來源�
 有限的無效 gain 保留原值。沒有 x180 時使用 qub_probe Template，明確設定 gain=1 與 length=1 µs。
 Nested waveform key 的複製由 Form adapter 負責。來源與其他欄位不變，不寫回校準。
 
+## Mux 綁定驗證
+
+`mux_bindings.validate_mux_bindings(parameters: ParameterContext | None) -> None`
+集中 onetone、mux qubit 與 FTF two-qubit Forms 共用的跨 component 驗證。
+它只讀借用的固定 capture，不刷新來源、不讀 live 檔案或裝置，也不 materialize library assets。
+有 qubits 時，它驗證完整有序清單的 component 存在、kind 與逐項 qubit.resonator 對應。
+錯誤保留欄位、原始 index 及實際值。MuxGroup model 仍擁有名稱、等長及重複 qubit 的結構驗證。
+
+None、未綁 mux、不存在或非 MuxGroup 的 target、沒有 qubits 都不增加 bring-up 門檻。
+其他 alias 錯誤與來源故障照常傳遞。FTF caller 自行要求 group、qubits 及 F1/F2；
+新 mux qubit caller 自行要求完整 tone 數對齊與 active drive。共用函式不選 tone、不猜角色、不寫回。
+
+在 concrete `form.py` 使用下列 import，並在自己的 `make_form(ctx)` 建立 Form 前呼叫。
+`TwoQubitCfg` 是該 caller 的既有 core cfg；範例省略 caller 自己的角色要求與 tree 內容。
+
+```python
+from zcu_tools.gui.form_adapter import Form, FormContext
+
+from zcu_lab.v2._support.measure.mux_bindings import validate_mux_bindings
+
+from .core import TwoQubitCfg
+
+
+def make_form(ctx: FormContext) -> Form[TwoQubitCfg]:
+    validate_mux_bindings(ctx.parameters)
+    # Enforce this caller's required group, qubits and F1/F2 here.
+    return Form(TwoQubitCfg, tree={})
+```
+
+## 其他 measure helpers
+
 `singleshot_shared.py` 從 AnalyzeRequest 的固定 Run ParameterContext 讀取分類、chi/kappa
 與可選分析校準。缺 capture 明示失敗；可選 leaf 缺少或 null 時交給 core 的既有預設。
 
@@ -53,3 +84,5 @@ Reset Form 從 Open／Reset 的固定 capture 讀 qubit ext 初值。Expr 與 Ra
 SingleToneFreq、DualTonePower 與 BathPhase 各自擁有 finisher。它們直接 materialize 該 Run
 的完整 tested_reset，只換本次分析欄位，不重讀 ext 或方案 slot。三個 length adapter
 不擬合參數，返回空 proposal collection。框架與本 support package 不檢查 reset 校準是否齊全。
+
+`require_mux_qubits(parameters, tone_count)` 是 qubit caller 的嚴格 admission：要求 capture、MuxGroup 及完整 qubits，呼叫公開 validate 契約，再比對完整 numeric tone 數。回傳完整有序 qubit 名稱，不投影 active subset。
