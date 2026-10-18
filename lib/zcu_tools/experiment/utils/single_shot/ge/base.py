@@ -315,6 +315,7 @@ def fitting_ge_and_plot(
             "GE fit returned invalid centers or width; calibration is unavailable"
         )
     fig, raw_axes = plots.subplots("fit", nrows=2, ncols=2, figsize=(8, 8))
+    # tolerated(cast): Plots keeps a native 2x2 object array, not typed Axes rows.
     axs = cast("tuple[tuple[Axes, Axes], tuple[Axes, Axes]]", raw_axes)
     scatter_ge_plot(axs[0][0], (Ig, Ie), (Qg, Qe), "Rotated")
     hist(Ig, Ie, options.numbins, axs[1][0])

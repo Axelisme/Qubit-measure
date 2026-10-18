@@ -189,6 +189,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
     ) -> None:
         self._ensure_single_root_buffer_count(len(buffers))
         self.cfg = deepcopy(init_cfg)
+        # tolerated(cast): T_Env cannot express the required {} fallback for env=None.
         self._env = cast(T_Env, {} if env is None else env)
         self._buffers = list(buffers)
         self._local_buffers: dict[tuple[Hashable, ...], SignalBuffer] = {}
