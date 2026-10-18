@@ -81,7 +81,11 @@ Model-field path 使用 typed segments：欄位名為 str，list index 為 int�
 
 一次讀全部元素由 owner 在單一 readonly 呼叫產生。MCP 不逐元素發出 N 次讀取再拼成假快照，不持有平行的名稱排序表。完整讀取保留每個元素的 authored input、可用值與定向錯誤，不因一個元素無效而隱藏其他元素。
 
-Recipe 輸入包含 participants，以及以元素 name 為 key 的逐元素 overrides。Owner 在 Run 前解析 name 到位置，沿相同 Form 操作套用，不在 MCP／recipe 重做 converter。每個葉欄位保留 explicit／default／derived 來源。Actual、estimates 與 writeback candidates 逐元素標示 name，取當次 Run／Load 的事實，不用後來的 Reset 或當前 alias 改寫已完成回報。顯示元素名不授權寫回，目的地與 Apply 仍歸既有 writeback owner。
+Recipe 輸入包含以元素 name 表示的 participants，以及與 MCP 相同的 typed path overrides。例如 `[{"path": ["tones", 0, "drive", "gain"], "value": 0.3}]` 直接定位完整原始 list 的第 0 個元素。Overrides 不以元素 name 為 key，owner 不做 name→位置轉換。Owner 在 Run 前沿相同 Form 操作套用 overrides，不在 MCP／recipe 重做 converter，也不另建排序表。
+
+每個葉欄位保留 explicit／default／derived 來源。Actual、estimates 與 writeback candidates 以完整原始 list 的位置標示，並附元素 name 供閱讀，不依 participants 順序重新編號。這些內容取當次 Run／Load 的事實，不用後來的 Reset 或當前 alias 改寫已完成回報。顯示位置與元素名不授權寫回，目的地與 Apply 仍歸既有 writeback owner。
+
+使用者於 2026-10-18 指出 recipe 名稱定位與核心 index 不一致，裁定：「既然核心是用index，那就用適合核心的方案，不要加一堆難維護的轉換邏輯」。因此 overrides 與 MCP 共用 typed paths；participants 仍以名稱表達此次參與順序。
 
 ### 模組分工與可執行依賴規則
 
