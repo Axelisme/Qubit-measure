@@ -42,7 +42,9 @@ I/Q. ADC owns its probability tolerance and readout sums; see the
 ## Decision graph
 
 [Geometry construction](_planning.py) combines pulse, flux and readout events.
-Pulse support uses half-open absolute intervals. Flat-top plateaus of at least
+Pulse support uses half-open absolute intervals. Tone columns hold only the
+maximum simultaneously active count, packed in original track order, not the
+number of historical pulses. Flat-top plateaus of at least
 10 ns become constant rows; shorter plateaus stay shaped. Evolution stops at
 readout start. FTF readout then uses the DC model, ignoring residual flux tails
 and overlapping controls.
@@ -288,7 +290,10 @@ The registry kernels retain no evolve-local data.
 WorkPlan publishes each lazy fact once, including concurrent requests for the
 same key. WorkPlan copies builder results and publishes read-only arrays. The
 shared facts include envelope peak/slope/real flags, period split rates, packed
-DOP853 samples and compact two-tone Floquet frames. Floquet consumes full Fourier
+DOP853 samples, covariant gate admissions and compact two-tone Floquet frames.
+Gate admission facts use full canonical physics, budget and numerical policies.
+Each row still checks its own continuous flux support before borrowing an
+admission; only absolute start and covariant phase are omitted from the fact. Floquet consumes full Fourier
 averages during frame construction; facts and residents retain only compact
 frame data and optional sideband candidates. Model facts include the full
 physical coordinates in their identity. Table-indexed facts

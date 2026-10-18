@@ -14,7 +14,7 @@ from ..secular import SecularModel
 from ..workplan import FactKey
 from ._dop853 import Tolerances, integrate, tolerances
 from ._dop853_data import Models, Segments, pack_models
-from ._workload_facts import envelope_bounds, packed_segments
+from ._workload_facts import envelope_bounds, fixed_flux, packed_segments
 
 # Calibrated on 128--512 ns Gaussian simultaneous gates in the 16-level
 # joint model: 50 MHz edges + 4 ns ceiling gave <= 1.76e-3 population change
@@ -319,26 +319,6 @@ def _smooth(table: SegmentTable, envelope: int, context: KernelContext) -> bool:
     )
 
 
-def _fixed_flux(table: SegmentTable, row: int) -> bool:
-    waveform = table.flux_waveform
-    point = table.timeline[row]
-    if waveform is None or (
-        table.flux_waveform_available is not None
-        and not table.flux_waveform_available[point]
-    ):
-        return True
-    first, last = waveform.offsets[point : point + 2]
-    times = waveform.time_ns[first:last]
-    flux = waveform.flux[first:last]
-    start = table.start_ns[row]
-    end = start + table.duration_ns[row]
-    active = np.r_[start, times[(times > start) & (times < end)], end]
-    return all(
-        np.ptp(np.interp(active, times, flux[:, loop])) == 0
-        for loop in range(flux.shape[1])
-    )
-
-
 def _retained_norm(
     model: SecularModel, port: int, frequency: float, context: KernelContext
 ) -> float:
@@ -398,7 +378,7 @@ def _admit_rows(
         if (
             context.budget < _MIN_BUDGET
             or (count != 1 if single_tone else count < 2)
-            or not _fixed_flux(table, int(row))
+            or not fixed_flux(table, int(row))
         ):
             continue
         envs = table.tone_envelope[row, :count]

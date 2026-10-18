@@ -143,43 +143,53 @@ def _boundaries(batch: TimelineBatch, tracks: Sequence[_TrackGeometry]):
 
 
 def _tone_columns(batch, tracks, table, source, flux_point):
-    """Populate per-slot columns, fold plateau phase, and detect flux overlap."""
+    """Write only playing tones, in track order, folding phase and flux flags."""
     point, start, end, level = table
-    width, rows = len(batch.tracks), len(point)
-    playing = np.zeros((rows, width), dtype=bool)
+    rows = len(point)
+    counts = np.zeros(rows, dtype=np.int64)
+    for geometry in tracks:
+        counts += geometry.pulse.contains(point, start, end)
+    width = int(counts.max(initial=0))
     port = np.full((rows, width), -1, dtype=np.int64)
     frequency, amplitude, theta, offset = (np.zeros((rows, width)) for _ in range(4))
     env_index = np.full((rows, width), -1, dtype=np.int64)
-    envelopes: list[EnvelopeSpec] = [EnvelopeSpec("constant")]
+    used = np.zeros(rows, dtype=np.int64)
+    envelopes = [EnvelopeSpec("constant")]
     flux_drive = np.zeros(rows, dtype=bool)
-    # Lattice events also route varying drives when continuous samples are absent.
     change = np.ones(len(flux_point), dtype=bool)
     change[1:] = (flux_point[1:] == flux_point[:-1]) & np.any(
         batch.flux.level[1:] != batch.flux.level[:-1], axis=1
     )
     change[batch.flux.offsets[:-1]] = False
-    for slot, (track, geometry) in enumerate(zip(batch.tracks, tracks, strict=True)):
-        local = start - track.start_ns[point]
+    for track, geometry in zip(batch.tracks, tracks, strict=True):
         active = geometry.pulse.contains(point, start, end)
-        playing[:, slot] = active
-        frequency[:, slot] = track.frequency_ghz[point]
-        amplitude[:, slot] = track.amplitude[point]
-        theta[:, slot] = 2 * np.pi * frequency[:, slot] * start + track.phase_rad[point]
-        offset[:, slot] = np.maximum(local, 0)
+        chosen = np.flatnonzero(active)
+        slot = used[chosen]
+        used[chosen] += 1
+        frequency[chosen, slot] = track.frequency_ghz[point[chosen]]
+        amplitude[chosen, slot] = track.amplitude[point[chosen]]
+        theta[chosen, slot] = (
+            2 * np.pi * frequency[chosen, slot] * start[chosen]
+            + track.phase_rad[point[chosen]]
+        )
+        offset[chosen, slot] = np.maximum(
+            start[chosen] - track.start_ns[point[chosen]], 0
+        )
         base = len(envelopes)
         envelopes.extend(track.envelopes)
-        env_index[active, slot] = base + track.envelope_index[point[active]]
+        env_index[chosen, slot] = base + track.envelope_index[point[chosen]]
         for support, value in geometry.plateaus:
-            flat = active & support.contains(point, start, end)
-            env_index[flat, slot] = 0
-            amplitude[flat, slot] *= abs(value)
-            theta[flat, slot] += np.angle(value)
-            offset[flat, slot] = 0
-        for lev in np.unique(level[active], axis=0):
-            mask = active & np.all(level == lev, axis=1)
+            flat = support.contains(point[chosen], start[chosen], end[chosen])
+            rr, cc = chosen[flat], slot[flat]
+            env_index[rr, cc] = 0
+            amplitude[rr, cc] *= abs(value)
+            theta[rr, cc] += np.angle(value)
+            offset[rr, cc] = 0
+        for lev in np.unique(level[chosen], axis=0):
+            same = np.all(level[chosen] == lev, axis=1)
             model = source.model(tuple(int(v) for v in lev))
             names = [drive.name for drive in model.drives]
-            port[mask, slot] = names.index(track.port)
+            port[chosen[same], slot[same]] = names.index(track.port)
         changed_points = np.zeros(len(batch.points), dtype=bool)
         times = batch.flux.start_ns
         inside = (
@@ -190,17 +200,12 @@ def _tone_columns(batch, tracks, table, source, flux_point):
         )
         np.logical_or.at(changed_points, flux_point, inside)
         flux_drive |= active & changed_points[point]
-    # Pack active slots to the left; padding has finite ignored values.
-    order = np.argsort(~playing, axis=1, kind="stable")
-    packed = (
-        np.take_along_axis(port, order, axis=1),
-        np.take_along_axis(frequency, order, axis=1),
-        np.take_along_axis(amplitude, order, axis=1),
-        np.take_along_axis(theta, order, axis=1),
-        np.take_along_axis(env_index, order, axis=1),
-        np.take_along_axis(offset, order, axis=1),
+    return (
+        counts,
+        (port, frequency, amplitude, theta, env_index, offset),
+        tuple(envelopes),
+        flux_drive,
     )
-    return playing.sum(axis=1).astype(np.int64), packed, tuple(envelopes), flux_drive
 
 
 def _waveform_varies(batch: TimelineBatch, point, start, end):
