@@ -7,6 +7,8 @@ only after both candidate panels build, and delegates compatibility to FormState
 The memento stays a single current plan/knobs snapshot, not a run. Local unparsed renderer text is not an inactive draft.
 """
 
+from dataclasses import dataclass
+
 from qtpy.QtWidgets import QWidget
 
 from zcu_tools.gui.app.workflows.panel import WorkflowFormPanel, WorkflowPlanPanel
@@ -14,10 +16,23 @@ from zcu_tools.gui.app.workflows.persistence import (
     WorkflowInputRestoreReport,
     WorkflowInputSnapshot,
 )
-from zcu_tools.gui.form import FormEnv, FormModel, FormState
+from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormState
 
 from .attachment import Attachment
 from .catalog import WorkflowCatalog
+
+
+@dataclass(frozen=True)
+class WorkflowDraft:
+    """Detached parsed RAM drafts, separate from persistent strict envelopes.
+
+    plan and knobs are authored FormInputs with their original declarations and
+    independent selection overrides. Reload/switching may migrate their leaves
+    to new declarations and report discarded paths. No renderer text is saved.
+    """
+
+    plan: FormInput[FormModel]
+    knobs: FormInput[FormModel]
 
 
 class WorkflowForms[C]:
@@ -41,7 +56,7 @@ class WorkflowForms[C]:
         """
         self.catalog = catalog
         self.attachment = catalog.select()
-        self._drafts: dict[str, WorkflowInputSnapshot] = {}
+        self._drafts: dict[str, WorkflowDraft] = {}
         self.plan, self.knobs, _ = self.build_panels(self.attachment, env, parent)
 
     def build_panels(
@@ -49,11 +64,14 @@ class WorkflowForms[C]:
         attachment: Attachment[C],
         env: FormEnv,
         parent: QWidget,
-        snapshot: WorkflowInputSnapshot | None = None,
+        snapshot: WorkflowDraft | None = None,
     ) -> tuple[
         WorkflowPlanPanel, WorkflowFormPanel[FormModel], WorkflowInputRestoreReport
     ]:
-        """Construct a complete candidate pair from defaults or whole saved drafts.
+        """Construct candidate defaults and migrate compatible RAM draft leaves.
+
+        Declaration changes may discard raw leaves or selection overrides;
+        return all discarded paths without running converters or options hooks.
 
         env is fixed by Window. snapshot None means fresh defaults. Defaults,
         source and compatibility errors propagate; unpublished panels are closed
@@ -67,11 +85,10 @@ class WorkflowForms[C]:
             knobs = attachment.knobs_panel(state, env, parent)
             report = WorkflowInputRestoreReport((), ())
             if snapshot is not None:
-                plan_input, knobs_input = snapshot.inputs(
-                    attachment.plan_model, attachment.knobs_model, env
+                report = WorkflowInputRestoreReport(
+                    plan.state.migrate_input(snapshot.plan, env),
+                    knobs.state.migrate_input(snapshot.knobs, env),
                 )
-                plan.state.reset(plan_input)
-                knobs.state.reset(knobs_input)
             for panel in (plan, knobs):
                 panel.state.reset(panel.state.input)
                 panel.editor.refresh(env)
@@ -85,22 +102,24 @@ class WorkflowForms[C]:
             raise
 
     def select(
-        self, name: str, snapshot: WorkflowInputSnapshot, parent: QWidget
-    ) -> None:
+        self, name: str, snapshot: WorkflowDraft, parent: QWidget
+    ) -> WorkflowInputRestoreReport:
         """Save current parsed drafts and select name with the same fixed capture.
 
         Window checks idle admission and supplies its authoritative current knobs
         input in snapshot. Unknown names raise before mutation. Inactive drafts
-        restore by current models; candidate errors leave current panels intact.
+        migrate by current models, returning discarded leaves/overrides for
+        display. Candidate errors leave current panels intact.
         Window owns removal/close of the old views after this succeeds.
         """
         attachment = self.catalog.select(name)
-        plan, knobs, _ = self.build_panels(
+        plan, knobs, report = self.build_panels(
             attachment, self.plan.env, parent, self._drafts.get(name)
         )
         self._drafts[self.attachment.name] = snapshot
         self.attachment = attachment
         self.plan, self.knobs = plan, knobs
+        return report
 
     def prepare(self, env: FormEnv, parent: QWidget) -> None:
         """Replace selected drafts with fresh defaults in Window's explicit capture.
@@ -114,7 +133,7 @@ class WorkflowForms[C]:
     def reload(
         self,
         catalog: WorkflowCatalog[C],
-        snapshot: WorkflowInputSnapshot,
+        snapshot: WorkflowDraft,
         parent: QWidget,
     ) -> WorkflowInputRestoreReport:
         """Replace current models with compatible drafts, retaining fixed capture.
@@ -122,7 +141,9 @@ class WorkflowForms[C]:
         Window owns source loading, admission and failed-reload Start blocking.
         Retain a still-declared name; otherwise select the new catalog's default.
         Build both panels before publication; candidate failures keep old drafts.
-        Inactive RAM drafts restore lazily against new models when selected.
+        Removed/incompatible leaves and overrides may be discarded and are
+        returned for display. Inactive RAM drafts migrate lazily against new
+        models when selected. No converter or options hook runs in migration.
         """
         name = self.attachment.name if self.attachment.name in catalog.names else None
         attachment = catalog.select(name)

@@ -71,8 +71,9 @@ def _restore_envelope(
 class WorkflowInputRestoreReport:
     """Successful restoration report retained for the host message seam.
 
-    plan_dropped and knobs_dropped are empty: whole-draft restoration never
-    discards paths. Identity failures raise before either form is installed.
+    plan_dropped and knobs_dropped list discarded raw leaves or overrides after
+    RAM/source migration. Strict persistent restoration never discards paths,
+    so both are empty; identity failures raise before either form is installed.
     """
 
     plan_dropped: tuple[FormPath, ...]

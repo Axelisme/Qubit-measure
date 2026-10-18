@@ -73,7 +73,7 @@ from zcu_tools.resources.entry.save_layout import workflow_roots
 from .attachment import Attachment
 from .catalog import WorkflowCatalog
 from .figures import WorkflowFigureViews
-from .forms import WorkflowForms
+from .forms import WorkflowDraft, WorkflowForms
 from .run_view import WorkflowRunView
 
 if TYPE_CHECKING:
@@ -355,9 +355,10 @@ class WorkflowWindow[C](QWidget):
         if name == self.workflow_name:
             return
         old = self.plan_panel, self.tunables_panel
-        self._forms.select(name, self.capture_persisted_state(), self)
+        report = self._forms.select(name, self._capture_draft(), self)
         self._publish_panels(*old)
         self._sync_selector()
+        self.show_input_restore_message(report)
 
     def _sync_selector(self) -> None:
         with QSignalBlocker(self._controls.selector):
@@ -410,7 +411,7 @@ class WorkflowWindow[C](QWidget):
             raise CatalogReloadError("Source reload is not configured")
         if self._catalog_error is not None and self._catalog_error.restart_required:
             raise self._catalog_error
-        snapshot = self.capture_persisted_state()
+        snapshot = self._capture_draft()
         old_name = self.workflow_name
         old = self.plan_panel, self.tunables_panel
         try:
@@ -457,6 +458,10 @@ class WorkflowWindow[C](QWidget):
         Start knobs panel. Renderer-local incomplete text, native values and
         journal/hardware state are excluded.
         """
+        draft = self._capture_draft()
+        return WorkflowInputSnapshot.capture(draft.plan, draft.knobs)
+
+    def _capture_draft(self) -> WorkflowDraft:
         binding = self.controller.binding
         # start_locked, not knobs_from_run: save the knobs the user edits and
         # would Start next. After terminal delivery those are the Start knobs,
@@ -467,7 +472,7 @@ class WorkflowWindow[C](QWidget):
             if binding is not None and self._run_view.start_locked
             else self.tunables_panel.state.input
         )
-        return WorkflowInputSnapshot.capture(self.plan_panel.state.input, knobs)
+        return WorkflowDraft(self.plan_panel.state.input, knobs)
 
     def restore_persisted_state(
         self, state: WorkflowInputSnapshot
