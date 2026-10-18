@@ -10,6 +10,7 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting.resonance import (
+    HangerModel,
     find_edelay_branch,
     fit_edelay,
     get_proper_model,
@@ -205,25 +206,40 @@ class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
         edelay = 0.5 * (g_edelay + e_edelay)
 
         model = get_proper_model(freqs, g_signals)
-        g_params = model.fit(
-            freqs,
-            g_signals,
-            edelay=edelay,
-            fit_bg_amp_slope=options.fit_bg_amp_slope,
-        )
-        e_params = model.fit(
-            freqs,
-            e_signals,
-            edelay=edelay,
-            fit_bg_amp_slope=options.fit_bg_amp_slope,
-        )
+        # Keep each concrete model and its fitted parameter types in the same branch.
+        if isinstance(model, HangerModel):
+            g_params = model.fit(
+                freqs,
+                g_signals,
+                edelay=edelay,
+                fit_bg_amp_slope=options.fit_bg_amp_slope,
+            )
+            e_params = model.fit(
+                freqs,
+                e_signals,
+                edelay=edelay,
+                fit_bg_amp_slope=options.fit_bg_amp_slope,
+            )
+            g_fit = np.abs(model.calc_signals(freqs, **g_params))
+            e_fit = np.abs(model.calc_signals(freqs, **e_params))
+        else:
+            g_params = model.fit(
+                freqs,
+                g_signals,
+                edelay=edelay,
+                fit_bg_amp_slope=options.fit_bg_amp_slope,
+            )
+            e_params = model.fit(
+                freqs,
+                e_signals,
+                edelay=edelay,
+                fit_bg_amp_slope=options.fit_bg_amp_slope,
+            )
+            g_fit = np.abs(model.calc_signals(freqs, **g_params))
+            e_fit = np.abs(model.calc_signals(freqs, **e_params))
 
         g_freq, g_fwhm = g_params["freq"], g_params["fwhm"]
         e_freq, e_fwhm = e_params["freq"], e_params["fwhm"]
-
-        # Each fitted parameter mapping belongs to the selected resonance model.
-        g_fit = np.abs(model.calc_signals(freqs, **g_params))  # pyright: ignore[reportArgumentType]
-        e_fit = np.abs(model.calc_signals(freqs, **e_params))  # pyright: ignore[reportArgumentType]
 
         # Calculate dispersive shift and average linewidth
         chi = abs(g_freq - e_freq) / 2  # dispersive shift χ/2π
