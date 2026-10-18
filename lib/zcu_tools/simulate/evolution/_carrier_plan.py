@@ -76,9 +76,12 @@ def subdivisions(
         * gamma
         * (gain * peaks[envelope] * strength / frequency) ** 2
     )
-    return np.maximum(
-        1, np.ceil(np.sqrt(np.maximum(motion / 0.01, split / 0.01)))
-    ).astype(np.int64)
+    counts = np.maximum(1, np.ceil(np.sqrt(np.maximum(motion / 0.01, split / 0.01))))
+    # Unrepresentable counts saturate above the guard's 32-subperiod limit.
+    result = np.full(len(rows), np.iinfo(np.int64).max, dtype=np.int64)
+    representable = counts < 2.0**63
+    result[representable] = counts[representable].astype(np.int64)
+    return result
 
 
 def _coordinates(
