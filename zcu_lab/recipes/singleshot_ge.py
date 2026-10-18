@@ -24,7 +24,8 @@ def _validate_inputs(
         raise ValueError("shots must be a positive integer or null")
 
 
-def singleshot_ge(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
+# tolerated: Public GE single-shot keywords must match the handwritten input_schema.
+def singleshot_ge(  # noqa: PLR0913
     session: RecipeSession,
     *,
     target: str | None = None,

@@ -30,7 +30,8 @@ def _set_readout_timing(
             retain_scalar(tab, field)
 
 
-def lookback(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
+# tolerated: Public lookback keywords must match the handwritten input_schema.
+def lookback(  # noqa: PLR0913
     session: RecipeSession,
     *,
     target: str | None = None,
