@@ -105,7 +105,7 @@ def test_plain_model_list_rejects_bad_index_with_original_write_path(index):
     assert target is not None and target.can_expand
     path = ("section", "items", index, "gain")
     before = state.input
-    with pytest.raises(ValueError) as caught:
+    with pytest.raises(ValueError, match="path") as caught:
         state.write({path: 9}, env)
     assert getattr(caught.value, "path", None) == path
     assert state.input.same_as(before)
