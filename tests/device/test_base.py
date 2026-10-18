@@ -145,6 +145,7 @@ def test_connect_and_close_log_without_printing(
     rm = DummyResourceManager(session)
 
     with caplog.at_level(logging.INFO, logger=DummyDevice.__module__):
+        # tolerated(cast): Wire the recording session double through the VISA-typed constructor.
         dev = DummyDevice("DUMMY::INSTR", cast(Any, rm))
         dev.close()
 

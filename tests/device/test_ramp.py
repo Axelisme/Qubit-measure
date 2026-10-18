@@ -45,10 +45,10 @@ class DummyYokoSession:
     def write(self, cmd: str) -> object:
         self.writes.append(cmd)
         if cmd.startswith(":OUTPut "):
-            self.output = cast(Literal["0", "1"], cmd.rsplit(" ", 1)[1])
+            self.output = cmd.rsplit(" ", 1)[1]
             return None
         if cmd.startswith(":SOURce:FUNCtion "):
-            self.mode = cast(Literal["VOLT", "CURR"], cmd.rsplit(" ", 1)[1])
+            self.mode = cmd.rsplit(" ", 1)[1]
             return None
         if cmd.startswith(":SOURce:LEVel:AUTO "):
             self.level = float(cmd.rsplit(" ", 1)[1])
@@ -80,6 +80,7 @@ def _make_yoko(
         level=level,
     )
     rm = DummyYokoResourceManager(session)
+    # tolerated(cast): Wire the SCPI session double through the VISA-typed constructor.
     dev = YOKOGS200("YOKO::INSTR", cast(Any, rm))
     return dev, session
 

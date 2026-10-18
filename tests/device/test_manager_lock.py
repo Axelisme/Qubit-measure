@@ -142,6 +142,7 @@ def test_get_info_not_blocked_by_concurrent_setup_on_other_device(
 def test_register_device_rejects_non_base_device_without_mutating_registry(
     manager: DeviceManager,
 ) -> None:
+    # tolerated(cast): Test registry rejection of a non-BaseDevice through its typed entry.
     bad_device = cast(Any, object())
 
     with pytest.raises(TypeError, match="register_device expected BaseDevice"):
