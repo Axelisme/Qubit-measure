@@ -5,8 +5,18 @@ from collections.abc import Callable
 from typing import Annotated, Literal
 
 import pytest
-from pydantic import BaseModel, Field, JsonValue
-from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormState
+from pydantic import BaseModel, Field, JsonValue, create_model
+from zcu_tools.gui.form import (
+    FormCommandContext,
+    FormCommandSnapshot,
+    FormConversionResult,
+    FormEnv,
+    FormInput,
+    FormModel,
+    FormState,
+    InputConverter,
+)
+from zcu_tools.gui.form.commands import ReadonlyFormInput
 
 
 class InlineTone(BaseModel):
@@ -121,6 +131,75 @@ def test_saved_input_rejects_invalid_json_envelopes(text: str) -> None:
 def test_input_rejects_nonfinite_json_numbers(value: float) -> None:
     with pytest.raises(ValueError, match="finite|JSON|json"):
         FormInput(InputForm, {"required": value})
+
+
+class DraftForm(FormModel):
+    shape: InlineShape
+    optional: float | None = None
+    required: float
+
+
+def test_saved_selection_and_branch_restore_the_authored_invalid_draft() -> None:
+    env = FormEnv()
+    original = FormState(
+        FormInput(
+            DraftForm,
+            {"shape": {"style": "ramp", "length": {"expr": "unbound + 2"}}, "optional": None},
+        )
+    )
+    original.write({("shape",): {"style": "flat"}}, env)
+    restored = FormState(FormInput.from_json(DraftForm, original.input.to_json()))
+    assert restored.input.same_as(original.input)
+    target = restored.describe(("shape",), env).target
+    assert target is not None
+    assert target.selected == 1
+    assert target.branch == {"style": "ramp"}
+    assert restored.input.data["optional"] is None
+    assert "required" not in restored.input.data
+    restored.write({("shape", "length"): "not a number"}, env)
+    invalid = FormInput.from_json(DraftForm, restored.input.to_json())
+    assert invalid.same_as(restored.input)
+
+
+def test_restore_uses_current_trusted_declaration_without_running_converter() -> None:
+    def forbidden(
+        old: FormCommandSnapshot,
+        selection: ReadonlyFormInput,
+        context: FormCommandContext,
+    ) -> FormConversionResult:
+        raise AssertionError("Restore must not execute a converter")
+
+    def declaration() -> type[FormModel]:
+        return create_model(
+            "RegeneratedDraft",
+            __base__=DraftForm,
+            shape=(
+                Annotated[InlineShape, InputConverter(forbidden)],
+                Field(discriminator="style"),
+            ),
+        )
+
+    previous = declaration()
+    trusted = declaration()
+    original = FormInput(
+        previous,
+        {"shape": {"style": "ramp", "length": -3}},
+        selections={("shape",): {"style": "flat"}},
+    )
+    restored = FormInput.from_json(trusted, original.to_json())
+    assert restored.model is trusted
+    assert restored.data == original.data
+    assert restored.selections == original.selections
+    target = FormState(restored).describe(("shape",), FormEnv()).target
+    assert target is not None and target.selected == 1
+
+
+def test_saved_draft_rejects_changed_type_identity_before_installation() -> None:
+    previous = create_model("TypedDraft", __base__=FormModel, value=(float, ...))
+    changed = create_model("TypedDraft", __base__=FormModel, value=(str, ...))
+    saved = FormInput(previous, {"value": "invalid even for the original type"})
+    with pytest.raises(ValueError, match="identity|incompatible"):
+        FormInput.from_json(changed, saved.to_json())
 
 
 def test_input_keeps_unknown_fields_and_invalid_values_for_restoration() -> None:
